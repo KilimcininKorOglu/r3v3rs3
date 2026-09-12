@@ -65,10 +65,12 @@ async fn wss_proxy() -> anyhow::Result<()> {
                             url: listen_port.https_url("/").try_into().unwrap(),
                         }],
                         ip_filter: None,
+                        rate_limit: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
                     ip_filter: Default::default(),
+                    rate_limit: Default::default(),
                 }),
                 ..Default::default()
             },

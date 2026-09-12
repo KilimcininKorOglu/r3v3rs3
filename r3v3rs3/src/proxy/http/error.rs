@@ -1,5 +1,6 @@
 use hyper::StatusCode;
 use sailfish::TemplateOnce;
+use std::time::Duration;
 use thiserror::Error;
 use tokio_rustls::rustls;
 
@@ -13,6 +14,9 @@ pub enum ProxyError {
 
     #[error("client IP address is not allowed")]
     IpNotAllowed,
+
+    #[error("too many requests")]
+    TooManyRequests { retry_after: Duration },
 }
 
 impl ProxyError {
@@ -21,7 +25,16 @@ impl ProxyError {
             Self::DomainFrontingDetected => StatusCode::MISDIRECTED_REQUEST,
             Self::NoRouteFound => StatusCode::BAD_GATEWAY,
             Self::IpNotAllowed => StatusCode::FORBIDDEN,
+            Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
         }
+    }
+}
+
+/// Returns the time a rate limited client must wait before the next request.
+pub fn retry_after(err: &anyhow::Error) -> Option<Duration> {
+    match err.downcast_ref::<ProxyError>() {
+        Some(ProxyError::TooManyRequests { retry_after }) => Some(*retry_after),
+        _ => None,
     }
 }
 

@@ -56,6 +56,7 @@ mod error;
 mod filter;
 pub(crate) mod hyper_tls;
 mod pool;
+mod rate_limit;
 mod rewriter;
 mod route;
 
@@ -588,12 +589,9 @@ fn route_request<B>(
         .resolve(info.remote.ip(), req.headers(), &crate::cdn::table());
     let action = format!("{} {}", req.method().as_str(), req.uri());
 
-    if !route.ip_filter.allows(client.ip) {
-        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, "client IP address is not allowed");
-        return (
-            ProxiedRequest::Err(ProxyError::IpNotAllowed),
-            response_rewriter,
-        );
+    if let Err(err) = check_policies(route, client.ip) {
+        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %err);
+        return (ProxiedRequest::Err(err), response_rewriter);
     }
 
     if let Some(redirect) = upgrade_redirect(route, &req, header_host.as_deref(), info.proto) {
@@ -618,6 +616,21 @@ fn route_request<B>(
         .pre_process(req.headers_mut(), &client, header_host, info.proto);
     shared.header_rewriter.post_process(req.headers_mut());
     (ProxiedRequest::Ok(req, span), response_rewriter)
+}
+
+/// Applies the client IP filter and the rate limit of the route.
+fn check_policies(route: &FilteredRoute, client: std::net::IpAddr) -> Result<(), ProxyError> {
+    if !route.ip_filter.allows(client) {
+        return Err(ProxyError::IpNotAllowed);
+    }
+    if let Some(retry_after) = route
+        .rate_limiter
+        .as_ref()
+        .and_then(|limiter| limiter.check(client).err())
+    {
+        return Err(ProxyError::TooManyRequests { retry_after });
+    }
+    Ok(())
 }
 
 /// Builds the HTTPS redirect for a plain HTTP request when the route upgrades insecure requests.

@@ -27,6 +27,7 @@ fn proxy(routes: Vec<Route>, ip_filter: IpFilter, client_ip: ClientIpConfig) -> 
         upgrade_insecure: false,
         client_ip,
         ip_filter,
+        rate_limit: Default::default(),
     }
 }
 

@@ -1,5 +1,6 @@
 use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, RequestFilter};
+use super::rate_limit::{self, ClientRateLimiter};
 use hyper::Request;
 use r3v3rs3_api::{
     id::ShortId,
@@ -25,12 +26,17 @@ impl Router {
         {
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
-            for route in http.routes {
+            let proxy_rate_limiter = rate_limit::limiter((id, None), http.rate_limit);
+            for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 let ip_filter = route
                     .ip_filter
                     .map(Arc::new)
                     .unwrap_or_else(|| proxy_ip_filter.clone());
+                let rate_limiter = match route.rate_limit {
+                    Some(config) => rate_limit::limiter((id, Some(index)), config),
+                    None => proxy_rate_limiter.clone(),
+                };
                 routes.push(FilteredRoute {
                     resource_id: id,
                     filter,
@@ -42,6 +48,7 @@ impl Router {
                     upgrade_insecure: http.upgrade_insecure,
                     client_ip: client_ip.clone(),
                     ip_filter,
+                    rate_limiter,
                 });
             }
         }
@@ -72,6 +79,7 @@ pub struct FilteredRoute {
     pub upgrade_insecure: bool,
     pub client_ip: Arc<ClientIpResolver>,
     pub ip_filter: Arc<IpFilter>,
+    pub rate_limiter: Option<Arc<ClientRateLimiter>>,
 }
 
 #[derive(Debug)]

@@ -71,6 +71,31 @@ routes = [
 ]
 ```
 
+## Rate Limit
+
+You can limit the request rate of each client IP address for each HTTP / HTTPS proxy. r3v3rs3 counts requests by the client IP that the "Client IP" section resolves.
+
+- **Requests**: Requests allowed in each period. `0` disables the limit.
+- **Per**: The period: second, minute or hour.
+- **Burst**: Requests that a client can send at once before the limit applies. `0` uses the "Requests" value.
+
+A client over the limit receives `429 Too Many Requests` with a `Retry-After` header.
+
+A route can replace the proxy limit with "Override Rate Limit for This Route". Routes without an override share one counter for each client. A route override with `0` requests disables the limit for that route.
+
+r3v3rs3 keeps the counters in memory. A configuration change keeps the counters unless the limit itself changes. A restart resets the counters.
+
+```toml
+[my-proxy]
+protocol = "http"
+vhosts = ["example.com"]
+rate_limit = { requests = 10, per = "second", burst = 20 }
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] },
+  { path = "/login", servers = [{ url = "http://127.0.0.1:8080/login" }], rate_limit = { requests = 5, per = "minute" } },
+]
+```
+
 ## HTTP/2
 
 r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).

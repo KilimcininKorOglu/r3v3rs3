@@ -238,6 +238,7 @@ pub fn http_route(path: &str, upstream: &str, ip_filter: Option<IpFilter>) -> Ro
             url: upstream.parse().unwrap(),
         }],
         ip_filter,
+        rate_limit: None,
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::client_ip::ClientIpConfig;
 use crate::error::Error;
-use crate::policy::IpFilter;
+use crate::policy::{IpFilter, RateLimit};
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
 use serde_default::DefaultFromSerde;
@@ -65,6 +65,9 @@ pub struct HttpProxy {
     /// Default client IP filter for every route of this proxy.
     #[serde(default, skip_serializing_if = "IpFilter::is_empty")]
     pub ip_filter: IpFilter,
+    /// Default request rate limit of each client for every route of this proxy.
+    #[serde(default, skip_serializing_if = "RateLimit::is_disabled")]
+    pub rate_limit: RateLimit,
 }
 
 fn upgrade_insecure_default() -> bool {
@@ -118,6 +121,9 @@ pub struct Route {
     /// Replaces the proxy client IP filter for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ip_filter: Option<IpFilter>,
+    /// Replaces the proxy rate limit for this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<RateLimit>,
 }
 
 fn default_route_path() -> String {

@@ -2987,6 +2987,7 @@ dependencies = [
  "fnv",
  "futures",
  "globwalk",
+ "governor",
  "h3",
  "h3-quinn",
  "hex",

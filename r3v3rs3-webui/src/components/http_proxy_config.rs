@@ -1,16 +1,17 @@
 use r3v3rs3_api::cidr::{format_cidr_list, parse_cidr_list};
 use r3v3rs3_api::client_ip::ClientIpConfig;
-use r3v3rs3_api::policy::IpFilter;
+use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
 use r3v3rs3_api::vhost::VirtualHost;
 use std::collections::HashMap;
 use std::str::FromStr;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
 const LABEL_CLASS: &str =
     "block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200";
+const SECTION_CLASS: &str = "block mt-6 text-sm font-medium text-neutral-900 dark:text-neutral-200";
 const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
 const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500";
 const ERROR_CLASS: &str = "mt-2 text-sm text-red-600 dark:text-red-500";
@@ -32,6 +33,7 @@ struct ProxyForm {
     trusted_proxies: String,
     allow: String,
     deny: String,
+    rate_limit: RateLimitForm,
 }
 
 impl ProxyForm {
@@ -48,6 +50,7 @@ impl ProxyForm {
             trusted_proxies: format_cidr_list(&proxy.client_ip.trusted_proxies),
             allow: format_cidr_list(&proxy.ip_filter.allow),
             deny: format_cidr_list(&proxy.ip_filter.deny),
+            rate_limit: RateLimitForm::new(&proxy.rate_limit),
         }
     }
 }
@@ -59,6 +62,8 @@ struct RouteForm {
     override_ip_filter: bool,
     allow: String,
     deny: String,
+    override_rate_limit: bool,
+    rate_limit: RateLimitForm,
 }
 
 impl RouteForm {
@@ -74,6 +79,8 @@ impl RouteForm {
             override_ip_filter: route.ip_filter.is_some(),
             allow: format_cidr_list(&ip_filter.allow),
             deny: format_cidr_list(&ip_filter.deny),
+            override_rate_limit: route.rate_limit.is_some(),
+            rate_limit: RateLimitForm::new(&route.rate_limit.unwrap_or_default()),
         }
     }
 
@@ -84,6 +91,25 @@ impl RouteForm {
             override_ip_filter: false,
             allow: String::new(),
             deny: String::new(),
+            override_rate_limit: false,
+            rate_limit: RateLimitForm::new(&RateLimit::default()),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct RateLimitForm {
+    requests: String,
+    per: RatePeriod,
+    burst: String,
+}
+
+impl RateLimitForm {
+    fn new(limit: &RateLimit) -> Self {
+        Self {
+            requests: limit.requests.to_string(),
+            per: limit.per,
+            burst: limit.burst.to_string(),
         }
     }
 }
@@ -141,7 +167,17 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { error_view(errors.get("deny")) }
             <p class={HINT_CLASS}>{"Clients in these IP addresses or CIDR blocks receive 403 Forbidden. Denied addresses take precedence over allowed addresses."}</p>
 
-            <label class="block mt-4 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Routes"}</label>
+            <label class={SECTION_CLASS}>{"Rate Limit"}</label>
+            { rate_limit_view(
+                &form.rate_limit,
+                state_input(&form, text, |form, value| form.rate_limit.requests = value),
+                state_input(&form, period, |form, value| form.rate_limit.per = value),
+                state_input(&form, text, |form, value| form.rate_limit.burst = value),
+            ) }
+            { error_view(errors.get("rate_limit")) }
+            <p class={HINT_CLASS}>{"Requests allowed for each client IP address. Clients over the limit receive 429 Too Many Requests. Set Requests to 0 to disable the limit. Set Burst to 0 to use the Requests value."}</p>
+
+            <label class={SECTION_CLASS}>{"Routes"}</label>
 
             { routes.iter().enumerate().map(|(i, route)| {
                 route_view(&routes, i, route, errors.get(&format!("routes_{i}")))
@@ -184,15 +220,8 @@ fn route_view(
             <label class={LABEL_CLASS}>{"Target"}</label>
             <input type="url" placeholder="https://example.com/backend" value={route.servers.join("\n")} onchange={route_input(routes, index, text, |route, value| route.servers = value.split('\n').map(str::to_string).collect())} class={INPUT_CLASS} />
 
-            { toggle(route_input(routes, index, checked, |route, value| route.override_ip_filter = value), route.override_ip_filter, "Override IP Filter for This Route", "mt-6") }
-            if route.override_ip_filter {
-                <label class={LABEL_CLASS}>{"Allowed IP Addresses"}</label>
-                <input type="text" autocapitalize="off" placeholder="192.168.0.0/16" value={route.allow.clone()} onchange={route_input(routes, index, text, |route, value| route.allow = value)} class={INPUT_CLASS} />
-
-                <label class={LABEL_CLASS}>{"Denied IP Addresses"}</label>
-                <input type="text" autocapitalize="off" placeholder="203.0.113.0/24" value={route.deny.clone()} onchange={route_input(routes, index, text, |route, value| route.deny = value)} class={INPUT_CLASS} />
-                <p class={HINT_CLASS}>{"This route uses these lists instead of the proxy lists. Leave both lists empty to allow every client."}</p>
-            }
+            { route_ip_filter_view(routes, index, route) }
+            { route_rate_limit_view(routes, index, route) }
             { error_view(error) }
 
             <div class="flex justify-end rounded-md mt-4 sm:ml-auto px-4 lg:px-0" role="group">
@@ -202,6 +231,79 @@ fn route_view(
                 <button type="button" onclick={remove_onclick} disabled={routes.len() <= 1} class={classes!(BUTTON_CLASS, "border-l-0", "rounded-r-lg")}>
                     <img src="/assets/icons/remove.svg" class="w-4 h-4" />
                 </button>
+            </div>
+        </div>
+    }
+}
+
+fn route_ip_filter_view(
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    html! {
+        <>
+            <div>
+                { toggle(route_input(routes, index, checked, |route, value| route.override_ip_filter = value), route.override_ip_filter, "Override IP Filter for This Route", "mt-6") }
+            </div>
+            if route.override_ip_filter {
+                <label class={LABEL_CLASS}>{"Allowed IP Addresses"}</label>
+                <input type="text" autocapitalize="off" placeholder="192.168.0.0/16" value={route.allow.clone()} onchange={route_input(routes, index, text, |route, value| route.allow = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{"Denied IP Addresses"}</label>
+                <input type="text" autocapitalize="off" placeholder="203.0.113.0/24" value={route.deny.clone()} onchange={route_input(routes, index, text, |route, value| route.deny = value)} class={INPUT_CLASS} />
+                <p class={HINT_CLASS}>{"This route uses these lists instead of the proxy lists. Leave both lists empty to allow every client."}</p>
+            }
+        </>
+    }
+}
+
+fn route_rate_limit_view(
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    html! {
+        <>
+            <div>
+                { toggle(route_input(routes, index, checked, |route, value| route.override_rate_limit = value), route.override_rate_limit, "Override Rate Limit for This Route", "mt-6") }
+            </div>
+            if route.override_rate_limit {
+                { rate_limit_view(
+                    &route.rate_limit,
+                    route_input(routes, index, text, |route, value| route.rate_limit.requests = value),
+                    route_input(routes, index, period, |route, value| route.rate_limit.per = value),
+                    route_input(routes, index, text, |route, value| route.rate_limit.burst = value),
+                ) }
+                <p class={HINT_CLASS}>{"This route uses its own counter instead of the proxy counter. Set Requests to 0 to disable the limit for this route."}</p>
+            }
+        </>
+    }
+}
+
+fn rate_limit_view(
+    limit: &RateLimitForm,
+    on_requests: Callback<Event>,
+    on_per: Callback<Event>,
+    on_burst: Callback<Event>,
+) -> Html {
+    html! {
+        <div class="grid grid-cols-3 gap-4">
+            <div>
+                <label class={LABEL_CLASS}>{"Requests"}</label>
+                <input type="number" min="0" value={limit.requests.clone()} onchange={on_requests} class={INPUT_CLASS} />
+            </div>
+            <div>
+                <label class={LABEL_CLASS}>{"Per"}</label>
+                <select onchange={on_per} class={INPUT_CLASS}>
+                    { for RatePeriod::ALL.iter().map(|value| html! {
+                        <option value={value.as_str()} selected={*value == limit.per}>{value.as_str()}</option>
+                    }) }
+                </select>
+            </div>
+            <div>
+                <label class={LABEL_CLASS}>{"Burst"}</label>
+                <input type="number" min="0" value={limit.burst.clone()} onchange={on_burst} class={INPUT_CLASS} />
             </div>
         </div>
     }
@@ -229,21 +331,30 @@ fn error_view(error: Option<&String>) -> Html {
     }
 }
 
-fn input_target(event: &Event) -> HtmlInputElement {
+fn input_element(event: &Event) -> HtmlInputElement {
     event.target().unwrap_throw().dyn_into().unwrap_throw()
 }
 
-fn text(input: &HtmlInputElement) -> String {
-    input.value()
+fn text(event: &Event) -> String {
+    input_element(event).value()
 }
 
-fn checked(input: &HtmlInputElement) -> bool {
-    input.checked()
+fn checked(event: &Event) -> bool {
+    input_element(event).checked()
+}
+
+fn period(event: &Event) -> RatePeriod {
+    let select: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+    let value = select.value();
+    RatePeriod::ALL
+        .into_iter()
+        .find(|period| period.as_str() == value)
+        .unwrap_or_default()
 }
 
 fn state_input<T, V>(
     state: &UseStateHandle<T>,
-    read: fn(&HtmlInputElement) -> V,
+    read: fn(&Event) -> V,
     update: fn(&mut T, V),
 ) -> Callback<Event>
 where
@@ -253,7 +364,7 @@ where
     let state = state.clone();
     Callback::from(move |event: Event| {
         let mut value = (*state).clone();
-        update(&mut value, read(&input_target(&event)));
+        update(&mut value, read(&event));
         state.set(value);
     })
 }
@@ -261,14 +372,14 @@ where
 fn route_input<V: 'static>(
     routes: &UseStateHandle<Vec<RouteForm>>,
     index: usize,
-    read: fn(&HtmlInputElement) -> V,
+    read: fn(&Event) -> V,
     update: fn(&mut RouteForm, V),
 ) -> Callback<Event> {
     let routes = routes.clone();
     Callback::from(move |event: Event| {
         let mut list = (*routes).clone();
         if let Some(route) = list.get_mut(index) {
-            update(route, read(&input_target(&event)));
+            update(route, read(&event));
             routes.set(list);
         }
     })
@@ -287,6 +398,7 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
         allow: or_error(parse_cidr_list(&form.allow), "allow", &mut errors),
         deny: or_error(parse_cidr_list(&form.deny), "deny", &mut errors),
     };
+    let rate_limit = parse_rate_limit(&form.rate_limit, "rate_limit", &mut errors);
 
     if !errors.is_empty() {
         return Err(errors);
@@ -300,6 +412,7 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
             trusted_proxies,
         },
         ip_filter,
+        rate_limit,
     })
 }
 
@@ -313,6 +426,28 @@ fn or_error<T: Default, E: ToString>(
         errors.insert(key.to_string(), err.to_string());
         T::default()
     })
+}
+
+fn parse_rate_limit(
+    form: &RateLimitForm,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> RateLimit {
+    RateLimit {
+        requests: or_error(parse_count(&form.requests, "Requests"), key, errors),
+        per: form.per,
+        burst: or_error(parse_count(&form.burst, "Burst"), key, errors),
+    }
+}
+
+fn parse_count(value: &str, name: &str) -> Result<u32, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(0);
+    }
+    value
+        .parse()
+        .map_err(|_| format!("{name} must be a whole number from 0 to {}", u32::MAX))
 }
 
 fn parse_vhosts(vhosts: &str, errors: &mut HashMap<String, String>) -> Vec<VirtualHost> {
@@ -364,9 +499,13 @@ fn parse_route(
         allow: or_error(parse_cidr_list(&route.allow), key, errors),
         deny: or_error(parse_cidr_list(&route.deny), key, errors),
     });
+    let rate_limit = route
+        .override_rate_limit
+        .then(|| parse_rate_limit(&route.rate_limit, key, errors));
     (!servers.is_empty()).then(|| Route {
         path: route.path.clone(),
         servers,
         ip_filter,
+        rate_limit,
     })
 }

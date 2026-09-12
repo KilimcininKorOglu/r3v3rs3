@@ -1,6 +1,6 @@
 use ipnet::IpNet;
 use serde_derive::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::{net::IpAddr, time::Duration};
 use utoipa::ToSchema;
 
 /// Allows or denies requests by the resolved client IP address.
@@ -29,6 +29,73 @@ impl IpFilter {
         }
         self.allow.is_empty() || self.allow.iter().any(|net| net.contains(&ip))
     }
+}
+
+/// Limits the request rate of each client IP address.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RateLimit {
+    /// Requests allowed in each period. Zero disables the limit.
+    #[serde(default)]
+    pub requests: u32,
+
+    #[serde(default)]
+    pub per: RatePeriod,
+
+    /// Requests a client can send at once before the limit applies. Zero uses `requests`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub burst: u32,
+}
+
+impl RateLimit {
+    pub fn is_disabled(&self) -> bool {
+        self.requests == 0
+    }
+
+    /// Time until a client can send one more request after it reaches the limit.
+    pub fn replenish_interval(&self) -> Option<Duration> {
+        (self.requests > 0).then(|| self.per.duration() / self.requests)
+    }
+
+    pub fn burst_size(&self) -> u32 {
+        if self.burst == 0 {
+            self.requests
+        } else {
+            self.burst
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RatePeriod {
+    #[default]
+    Second,
+    Minute,
+    Hour,
+}
+
+impl RatePeriod {
+    pub const ALL: [RatePeriod; 3] = [RatePeriod::Second, RatePeriod::Minute, RatePeriod::Hour];
+
+    pub fn duration(self) -> Duration {
+        match self {
+            Self::Second => Duration::from_secs(1),
+            Self::Minute => Duration::from_secs(60),
+            Self::Hour => Duration::from_secs(3600),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Second => "second",
+            Self::Minute => "minute",
+            Self::Hour => "hour",
+        }
+    }
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 #[cfg(test)]
@@ -80,5 +147,31 @@ mod tests {
     fn ipv4_mapped_address_matches_ipv4_block() {
         let filter = filter(&[], &["203.0.113.0/24"]);
         assert!(!filter.allows(ip("::ffff:203.0.113.9")));
+    }
+
+    #[test]
+    fn rate_limit_is_disabled_by_default() {
+        let limit = RateLimit::default();
+        assert!(limit.is_disabled());
+        assert_eq!(limit.replenish_interval(), None);
+    }
+
+    #[test]
+    fn rate_limit_interval_and_burst() {
+        let limit = RateLimit {
+            requests: 30,
+            per: RatePeriod::Minute,
+            burst: 0,
+        };
+        assert_eq!(limit.replenish_interval(), Some(Duration::from_secs(2)));
+        assert_eq!(limit.burst_size(), 30);
+        assert_eq!(RateLimit { burst: 5, ..limit }.burst_size(), 5);
+    }
+
+    #[test]
+    fn rate_limit_serde_uses_period_names() {
+        let limit: RateLimit = serde_json::from_str(r#"{"requests":10,"per":"minute"}"#).unwrap();
+        assert_eq!(limit.per, RatePeriod::Minute);
+        assert_eq!(limit.burst, 0);
     }
 }

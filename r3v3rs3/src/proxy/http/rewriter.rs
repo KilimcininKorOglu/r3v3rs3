@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
-use hyper::header::ALT_SVC;
+use hyper::header::{ALT_SVC, RETRY_AFTER};
 use hyper::{body::Body, Response};
 use hyper::{
     header::{FORWARDED, VIA},
@@ -11,7 +11,7 @@ use sailfish::TemplateOnce;
 use std::{iter, net::IpAddr};
 
 use super::client_ip::{ClientAddr, CLIENT_IP_HEADERS};
-use super::error::{map_error, ErrorTemplate};
+use super::error::{map_error, retry_after, ErrorTemplate};
 
 #[derive(Default, Debug)]
 pub struct RequestRewriter {
@@ -193,34 +193,48 @@ impl ResponseRewriter {
         match res {
             Ok(mut res) => {
                 res.headers_mut().remove(ALT_SVC);
-                let alt_svc = match (self.https_port, self.quic_port) {
-                    (Some(https), Some(quic)) => Some(format!(
-                        "h2=\":{}\", h3=\":{}\", h3-25=\":{}\"",
-                        https, quic, quic
-                    )),
-                    (Some(https), None) => Some(format!("h2=\":{}\"", https)),
-                    (None, Some(quic)) => Some(format!("h3=\":{}\", h3-25=\":{}\"", quic, quic)),
-                    _ => None,
-                };
-                if let Some(alt_svc) = alt_svc {
+                if let Some(alt_svc) = self.alt_svc() {
                     res.headers_mut()
-                        .insert(ALT_SVC, HeaderValue::from_str(&alt_svc).unwrap());
+                        .insert(ALT_SVC, HeaderValue::from_str(&alt_svc)?);
                 }
                 Ok(res.map(|body| BoxBody::new(body)))
             }
-            Err(err) => {
-                let code = map_error(err);
-                let ctx = ErrorTemplate {
-                    code: code.as_u16(),
-                };
-                let mut res = Response::new(BoxBody::new(
-                    Full::new(Bytes::from(ctx.render_once().unwrap())).map_err(Into::into),
-                ));
-                *res.status_mut() = code;
-                Ok(res)
-            }
+            Err(err) => error_response(err),
         }
     }
+
+    fn alt_svc(&self) -> Option<String> {
+        match (self.https_port, self.quic_port) {
+            (Some(https), Some(quic)) => Some(format!(
+                "h2=\":{}\", h3=\":{}\", h3-25=\":{}\"",
+                https, quic, quic
+            )),
+            (Some(https), None) => Some(format!("h2=\":{}\"", https)),
+            (None, Some(quic)) => Some(format!("h3=\":{}\", h3-25=\":{}\"", quic, quic)),
+            _ => None,
+        }
+    }
+}
+
+fn error_response(
+    err: anyhow::Error,
+) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
+    let retry_after = retry_after(&err);
+    let code = map_error(err);
+    let body = ErrorTemplate {
+        code: code.as_u16(),
+    }
+    .render_once()?;
+    let mut res = Response::new(BoxBody::new(
+        Full::new(Bytes::from(body)).map_err(Into::into),
+    ));
+    *res.status_mut() = code;
+    if let Some(wait) = retry_after {
+        let seconds = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
+        res.headers_mut()
+            .insert(RETRY_AFTER, HeaderValue::from(seconds.max(1)));
+    }
+    Ok(res)
 }
 
 #[derive(Default)]
