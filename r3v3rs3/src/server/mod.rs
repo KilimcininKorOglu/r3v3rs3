@@ -120,7 +120,7 @@ async fn start_server(
                         server.handle_udp_packet(index, config_index, addr, data).await;
                     }
                     Some(Received::Quic(index, conn)) => {
-                        server.handle_quic_connection(index, conn).await;
+                        server.handle_quic_connection(index, *conn).await;
                     }
                     None => (),
                 }

@@ -57,7 +57,7 @@ pub struct ServerState {
 pub enum Received {
     Tcp(usize, TcpStream),
     Udp(usize, usize, SocketAddr, Vec<u8>),
-    Quic(usize, Incoming),
+    Quic(usize, Box<Incoming>),
 }
 
 impl ServerState {
@@ -153,7 +153,7 @@ impl ServerState {
                 Some(Received::Udp(index, config_index, addr, data))
             }
             Some((index, stream)) = self.quic_pool.select() => {
-                Some(Received::Quic(index, stream))
+                Some(Received::Quic(index, Box::new(stream)))
             }
             else => None
         }
