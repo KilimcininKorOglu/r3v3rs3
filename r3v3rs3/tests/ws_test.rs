@@ -47,11 +47,13 @@ async fn ws_proxy() -> anyhow::Result<()> {
                         }],
                         ip_filter: None,
                         rate_limit: None,
+                        auth: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
                     ip_filter: Default::default(),
                     rate_limit: Default::default(),
+                    auth: Default::default(),
                 }),
                 ..Default::default()
             },

@@ -1,0 +1,148 @@
+use argon2::{
+    password_hash::{PasswordHash, SaltString},
+    Argon2, PasswordHasher,
+};
+use r3v3rs3_api::{
+    error::Error,
+    policy::{AuthPolicy, BasicAuth, BasicAuthUser},
+    proxy::{Proxy, ProxyKind},
+};
+use std::collections::HashSet;
+
+/// Replaces the plain text passwords of an HTTP proxy with argon2 hashes and validates the users.
+pub fn seal_proxy(proxy: &mut Proxy) -> Result<(), Error> {
+    let ProxyKind::Http(http) = &mut proxy.kind else {
+        return Ok(());
+    };
+    let route_policies = http
+        .routes
+        .iter_mut()
+        .filter_map(|route| route.auth.as_mut());
+    for policy in std::iter::once(&mut http.auth).chain(route_policies) {
+        if let AuthPolicy::Basic(basic) = policy {
+            seal_basic_auth(basic)?;
+        }
+    }
+    Ok(())
+}
+
+/// Runs [`seal_proxy`] on a blocking thread, because hashing a password takes CPU time.
+pub async fn seal(mut proxy: Proxy) -> Result<Proxy, Error> {
+    tokio::task::spawn_blocking(move || seal_proxy(&mut proxy).map(|()| proxy))
+        .await
+        .map_err(|_| Error::FailedToHashPassword)?
+}
+
+fn seal_basic_auth(basic: &mut BasicAuth) -> Result<(), Error> {
+    let mut usernames = HashSet::new();
+    for user in &mut basic.users {
+        if user.username_error().is_some() || !usernames.insert(user.username.clone()) {
+            return Err(Error::InvalidUsername {
+                username: user.username.clone(),
+            });
+        }
+        seal_user(user)?;
+    }
+    Ok(())
+}
+
+fn seal_user(user: &mut BasicAuthUser) -> Result<(), Error> {
+    if !user.password.is_empty() {
+        user.password_hash = hash_password(&user.password)?;
+        user.password.clear();
+    }
+    if PasswordHash::new(&user.password_hash).is_err() {
+        return Err(Error::PasswordRequired {
+            username: user.username.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn hash_password(password: &str) -> Result<String, Error> {
+    let salt = SaltString::generate(rand::thread_rng());
+    Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map(|hash| hash.to_string())
+        .map_err(|_| Error::FailedToHashPassword)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use argon2::PasswordVerifier;
+    use r3v3rs3_api::proxy::HttpProxy;
+
+    fn user(username: &str, password: &str, password_hash: &str) -> BasicAuthUser {
+        BasicAuthUser {
+            username: username.into(),
+            password: password.into(),
+            password_hash: password_hash.into(),
+        }
+    }
+
+    fn proxy(users: Vec<BasicAuthUser>) -> Proxy {
+        Proxy {
+            kind: ProxyKind::Http(HttpProxy {
+                auth: AuthPolicy::Basic(BasicAuth {
+                    realm: String::new(),
+                    users,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn users(proxy: &Proxy) -> &[BasicAuthUser] {
+        match &proxy.kind {
+            ProxyKind::Http(HttpProxy {
+                auth: AuthPolicy::Basic(basic),
+                ..
+            }) => &basic.users,
+            _ => panic!("expected basic auth"),
+        }
+    }
+
+    #[test]
+    fn plain_password_is_replaced_with_hash() {
+        let mut proxy = proxy(vec![user("alice", "secret", "")]);
+        seal_proxy(&mut proxy).unwrap();
+        let alice = &users(&proxy)[0];
+        assert!(alice.password.is_empty());
+        let hash = PasswordHash::new(&alice.password_hash).unwrap();
+        assert!(Argon2::default().verify_password(b"secret", &hash).is_ok());
+
+        let sealed = proxy.clone();
+        seal_proxy(&mut proxy).unwrap();
+        assert_eq!(proxy, sealed);
+    }
+
+    #[test]
+    fn user_without_password_is_rejected() {
+        let mut missing = proxy(vec![user("alice", "", "")]);
+        assert!(matches!(
+            seal_proxy(&mut missing),
+            Err(Error::PasswordRequired { .. })
+        ));
+        let mut invalid_hash = proxy(vec![user("alice", "", "not-a-hash")]);
+        assert!(matches!(
+            seal_proxy(&mut invalid_hash),
+            Err(Error::PasswordRequired { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_or_duplicate_username_is_rejected() {
+        let mut colon = proxy(vec![user("al:ice", "secret", "")]);
+        assert!(matches!(
+            seal_proxy(&mut colon),
+            Err(Error::InvalidUsername { .. })
+        ));
+        let mut duplicate = proxy(vec![user("bob", "a", ""), user("bob", "b", "")]);
+        assert!(matches!(
+            seal_proxy(&mut duplicate),
+            Err(Error::InvalidUsername { .. })
+        ));
+    }
+}

@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
-use hyper::header::{ALT_SVC, RETRY_AFTER};
+use hyper::header::ALT_SVC;
 use hyper::{body::Body, Response};
 use hyper::{
     header::{FORWARDED, VIA},
@@ -11,7 +11,7 @@ use sailfish::TemplateOnce;
 use std::{iter, net::IpAddr};
 
 use super::client_ip::{ClientAddr, CLIENT_IP_HEADERS};
-use super::error::{map_error, retry_after, ErrorTemplate};
+use super::error::{error_headers, map_error, ErrorTemplate};
 
 #[derive(Default, Debug)]
 pub struct RequestRewriter {
@@ -219,7 +219,7 @@ impl ResponseRewriter {
 fn error_response(
     err: anyhow::Error,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
-    let retry_after = retry_after(&err);
+    let headers = error_headers(&err);
     let code = map_error(err);
     let body = ErrorTemplate {
         code: code.as_u16(),
@@ -229,11 +229,7 @@ fn error_response(
         Full::new(Bytes::from(body)).map_err(Into::into),
     ));
     *res.status_mut() = code;
-    if let Some(wait) = retry_after {
-        let seconds = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
-        res.headers_mut()
-            .insert(RETRY_AFTER, HeaderValue::from(seconds.max(1)));
-    }
+    res.headers_mut().extend(headers);
     Ok(res)
 }
 

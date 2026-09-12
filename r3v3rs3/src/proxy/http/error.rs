@@ -1,3 +1,4 @@
+use hyper::header::{HeaderMap, HeaderValue, RETRY_AFTER, WWW_AUTHENTICATE};
 use hyper::StatusCode;
 use sailfish::TemplateOnce;
 use std::time::Duration;
@@ -17,6 +18,9 @@ pub enum ProxyError {
 
     #[error("too many requests")]
     TooManyRequests { retry_after: Duration },
+
+    #[error("authentication required")]
+    Unauthorized { challenge: HeaderValue },
 }
 
 impl ProxyError {
@@ -26,16 +30,26 @@ impl ProxyError {
             Self::NoRouteFound => StatusCode::BAD_GATEWAY,
             Self::IpNotAllowed => StatusCode::FORBIDDEN,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
         }
     }
 }
 
-/// Returns the time a rate limited client must wait before the next request.
-pub fn retry_after(err: &anyhow::Error) -> Option<Duration> {
+/// Returns the headers that the error response must carry: `Retry-After` for a rate limited
+/// client and `WWW-Authenticate` for an unauthenticated client.
+pub fn error_headers(err: &anyhow::Error) -> HeaderMap {
+    let mut headers = HeaderMap::new();
     match err.downcast_ref::<ProxyError>() {
-        Some(ProxyError::TooManyRequests { retry_after }) => Some(*retry_after),
-        _ => None,
+        Some(ProxyError::TooManyRequests { retry_after }) => {
+            let seconds = retry_after.as_secs() + u64::from(retry_after.subsec_nanos() > 0);
+            headers.insert(RETRY_AFTER, HeaderValue::from(seconds.max(1)));
+        }
+        Some(ProxyError::Unauthorized { challenge }) => {
+            headers.insert(WWW_AUTHENTICATE, challenge.clone());
+        }
+        _ => {}
     }
+    headers
 }
 
 pub fn map_error(err: anyhow::Error) -> StatusCode {

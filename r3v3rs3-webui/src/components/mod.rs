@@ -1,4 +1,5 @@
 pub mod acme_provider;
+pub mod auth_config;
 pub mod custom_acme;
 pub mod http_proxy_config;
 pub mod navbar;

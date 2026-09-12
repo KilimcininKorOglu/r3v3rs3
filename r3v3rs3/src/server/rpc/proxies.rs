@@ -1,4 +1,5 @@
 use super::RpcMethod;
+use crate::server::credentials::seal;
 use crate::server::state::ServerState;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
@@ -78,7 +79,8 @@ impl RpcMethod for AddProxy {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        if state.proxies.set((state.generate_id(), self.entry).into()) {
+        let proxy = seal(self.entry).await?;
+        if state.proxies.set((state.generate_id(), proxy).into()) {
             state.update_proxies().await;
             state.reload_proxies().await;
         }
@@ -95,7 +97,8 @@ impl RpcMethod for UpdateProxy {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        if state.proxies.set(self.entry) {
+        let proxy = seal(self.entry.proxy).await?;
+        if state.proxies.set((self.entry.id, proxy).into()) {
             state.update_proxies().await;
             state.reload_proxies().await;
         }

@@ -78,7 +78,12 @@ impl ServerState {
 
         let certs = storage.load_certs().await;
         let acmes = storage.load_acmes().await;
-        let proxies = storage.load_proxies().await;
+        let mut proxies = storage.load_proxies().await;
+        for entry in &mut proxies {
+            if let Err(err) = super::credentials::seal_proxy(&mut entry.proxy) {
+                error!(id = %entry.id, %err, "invalid proxy credentials");
+            }
+        }
 
         let mut ports = PortList::default();
         for entry in storage.load_ports().await {

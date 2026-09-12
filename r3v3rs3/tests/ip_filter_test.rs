@@ -28,6 +28,7 @@ fn proxy(routes: Vec<Route>, ip_filter: IpFilter, client_ip: ClientIpConfig) -> 
         client_ip,
         ip_filter,
         rate_limit: Default::default(),
+        auth: Default::default(),
     }
 }
 

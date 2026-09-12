@@ -96,6 +96,36 @@ routes = [
 ]
 ```
 
+## Authentication
+
+You can require authentication for each HTTP / HTTPS proxy in the "Authentication" section. A route can replace the proxy authentication with "Override Authentication for This Route". Select "None" in the override to allow every client on that route.
+
+r3v3rs3 checks authentication after the IP filter, the rate limit and the HTTPS redirect. So a browser sends the credentials on the secure connection when "Automatically Redirect HTTP to HTTPS" is on.
+
+### Basic Auth
+
+Clients without a valid username and password receive `401 Unauthorized` with a `WWW-Authenticate: Basic realm="..."` header. The browser then shows a login dialog.
+
+- **Realm**: The name that the browser shows in the login dialog. Empty uses `r3v3rs3`.
+- **Users**: Usernames and passwords. A username must not contain a colon.
+
+r3v3rs3 stores each password as an argon2 hash and never saves the plain text password. Leave the password field empty to keep the current password. r3v3rs3 removes the `Authorization` header before it sends the request to the upstream server.
+
+Argon2 takes CPU time on purpose. r3v3rs3 verifies each credential once and keeps the result in memory until the configuration changes. Use a rate limit to limit password guessing.
+
+In `proxies.toml`, you can write a `password` instead of a `password_hash`. r3v3rs3 replaces it with a hash at startup.
+
+```toml
+[my-proxy]
+protocol = "http"
+vhosts = ["example.com"]
+auth = { type = "basic", realm = "Staff", users = [{ username = "alice", password_hash = "$argon2id$v=19$m=19456,t=2,p=1$..." }] }
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] },
+  { path = "/health", servers = [{ url = "http://127.0.0.1:8080/health" }], auth = { type = "none" } },
+]
+```
+
 ## HTTP/2
 
 r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).

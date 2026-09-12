@@ -11,6 +11,7 @@ use tracing::{info, warn};
 
 mod acme_list;
 pub mod cert_list;
+mod credentials;
 mod port_list;
 mod proxy_list;
 mod quic;

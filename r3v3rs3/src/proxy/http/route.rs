@@ -1,3 +1,4 @@
+use super::auth::Authenticator;
 use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, RequestFilter};
 use super::rate_limit::{self, ClientRateLimiter};
@@ -27,6 +28,7 @@ impl Router {
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
             let proxy_rate_limiter = rate_limit::limiter((id, None), http.rate_limit);
+            let proxy_auth = Authenticator::new(http.auth);
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 let ip_filter = route
@@ -37,6 +39,9 @@ impl Router {
                     Some(config) => rate_limit::limiter((id, Some(index)), config),
                     None => proxy_rate_limiter.clone(),
                 };
+                let auth = route
+                    .auth
+                    .map_or_else(|| proxy_auth.clone(), Authenticator::new);
                 routes.push(FilteredRoute {
                     resource_id: id,
                     filter,
@@ -49,6 +54,7 @@ impl Router {
                     client_ip: client_ip.clone(),
                     ip_filter,
                     rate_limiter,
+                    auth,
                 });
             }
         }
@@ -80,6 +86,7 @@ pub struct FilteredRoute {
     pub client_ip: Arc<ClientIpResolver>,
     pub ip_filter: Arc<IpFilter>,
     pub rate_limiter: Option<Arc<ClientRateLimiter>>,
+    pub auth: Option<Arc<Authenticator>>,
 }
 
 #[derive(Debug)]

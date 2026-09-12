@@ -80,6 +80,15 @@ pub enum Error {
     #[error("too many login attempts")]
     TooManyLoginAttempts,
 
+    #[error("invalid username: {username}")]
+    InvalidUsername { username: String },
+
+    #[error("password is required for user: {username}")]
+    PasswordRequired { username: String },
+
+    #[error("failed to hash password")]
+    FailedToHashPassword,
+
     #[error("failed to fetch log")]
     FailedToFetchLog,
 
@@ -96,7 +105,7 @@ impl Error {
             Self::IdNotFound { .. } => 404,
             Self::Unauthorized => 401,
             Self::TooManyLoginAttempts => 429,
-            Self::FailedToFetchLog | Self::FailedToInvokeRpc => 500,
+            Self::FailedToFetchLog | Self::FailedToInvokeRpc | Self::FailedToHashPassword => 500,
             _ => 400,
         }
     }

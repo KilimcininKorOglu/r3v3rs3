@@ -98,6 +98,60 @@ fn is_zero(value: &u32) -> bool {
     *value == 0
 }
 
+/// Requires clients to authenticate before a request reaches the upstream server.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AuthPolicy {
+    #[default]
+    None,
+    Basic(BasicAuth),
+}
+
+impl AuthPolicy {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
+/// HTTP Basic authentication (RFC 7617).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BasicAuth {
+    /// Protection space shown by the browser. Empty uses `r3v3rs3`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub realm: String,
+
+    #[serde(default)]
+    pub users: Vec<BasicAuthUser>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BasicAuthUser {
+    pub username: String,
+
+    /// New plain text password. The server replaces it with `password_hash` and never stores it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub password: String,
+
+    /// Argon2 PHC string of the password.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub password_hash: String,
+}
+
+impl BasicAuthUser {
+    /// Returns an error message when the username cannot be sent in a Basic credential.
+    pub fn username_error(&self) -> Option<&'static str> {
+        if self.username.is_empty() {
+            Some("Username is required")
+        } else if self.username.contains(':') {
+            Some("Username must not contain a colon")
+        } else if self.username.chars().any(char::is_control) {
+            Some("Username must not contain control characters")
+        } else {
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,6 +220,39 @@ mod tests {
         assert_eq!(limit.replenish_interval(), Some(Duration::from_secs(2)));
         assert_eq!(limit.burst_size(), 30);
         assert_eq!(RateLimit { burst: 5, ..limit }.burst_size(), 5);
+    }
+
+    #[test]
+    fn auth_policy_serde_uses_type_tag() {
+        let policy: AuthPolicy = serde_json::from_str(
+            r#"{"type":"basic","realm":"Staff","users":[{"username":"alice","password_hash":"$argon2id$x"}]}"#,
+        )
+        .unwrap();
+        let AuthPolicy::Basic(basic) = &policy else {
+            panic!("expected basic auth");
+        };
+        assert_eq!(basic.realm, "Staff");
+        assert_eq!(basic.users[0].username, "alice");
+        assert!(basic.users[0].password.is_empty());
+
+        let none: AuthPolicy = serde_json::from_str(r#"{"type":"none"}"#).unwrap();
+        assert!(none.is_none());
+        assert_eq!(
+            serde_json::to_string(&policy).unwrap(),
+            r#"{"type":"basic","realm":"Staff","users":[{"username":"alice","password_hash":"$argon2id$x"}]}"#
+        );
+    }
+
+    #[test]
+    fn basic_auth_username_rules() {
+        let user = |username: &str| BasicAuthUser {
+            username: username.into(),
+            ..Default::default()
+        };
+        assert_eq!(user("alice").username_error(), None);
+        assert!(user("").username_error().is_some());
+        assert!(user("al:ice").username_error().is_some());
+        assert!(user("al\nice").username_error().is_some());
     }
 
     #[test]

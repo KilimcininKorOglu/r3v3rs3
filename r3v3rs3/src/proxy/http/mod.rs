@@ -51,6 +51,7 @@ use tokio_rustls::{
 };
 use tracing::{debug, error, info, span, Instrument, Level, Span};
 
+mod auth;
 pub(crate) mod client_ip;
 mod error;
 mod filter;
@@ -434,24 +435,24 @@ async fn start(
         let _enter = enter.enter();
 
         let pool = pool.clone();
-        let shared = shared_cache.load();
-
-        let (req, response_rewriter) = if is_domain_fronting(&req, sni.as_deref()) {
-            (
-                ProxiedRequest::Err(ProxyError::DomainFrontingDetected),
-                ResponseRewriter::builder(),
-            )
-        } else {
-            let info = RequestInfo {
-                remote,
-                local: local.to_string(),
-                sni: sni.as_deref(),
-                proto: forwarded_proto,
-            };
-            route_request(shared, req, &info)
-        };
+        let shared = shared_cache.load().clone();
+        let sni = sni.clone();
 
         async move {
+            let (req, response_rewriter) = if is_domain_fronting(&req, sni.as_deref()) {
+                (
+                    ProxiedRequest::Err(ProxyError::DomainFrontingDetected),
+                    ResponseRewriter::builder(),
+                )
+            } else {
+                let info = RequestInfo {
+                    remote,
+                    local: local.to_string(),
+                    sni: sni.as_deref(),
+                    proto: forwarded_proto,
+                };
+                route_request(&shared, req, &info).await
+            };
             response_rewriter.build().map_response(match req {
                 ProxiedRequest::Ok(req, span) => {
                     pool.request(req.map(|b| BoxBody::new(b.map_err(Into::into))))
@@ -562,10 +563,10 @@ fn is_domain_fronting<B>(req: &Request<B>, sni: Option<&str>) -> bool {
 
 /// Matches the request to a route, applies the route policies and prepares
 /// the request for the upstream server.
-fn route_request<B>(
+async fn route_request<B>(
     shared: &SharedContext,
     mut req: Request<B>,
-    info: &RequestInfo,
+    info: &RequestInfo<'_>,
 ) -> (ProxiedRequest<Request<B>>, ResponseRewriterBuilder) {
     let response_rewriter = ResponseRewriter::builder();
     let header_host = header_host(&req).map(str::to_string);
@@ -596,6 +597,11 @@ fn route_request<B>(
 
     if let Some(redirect) = upgrade_redirect(route, &req, header_host.as_deref(), info.proto) {
         return (ProxiedRequest::Redirect(redirect), response_rewriter);
+    }
+
+    if let Err(err) = authorize(route, &mut req).await {
+        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %err);
+        return (ProxiedRequest::Err(err), response_rewriter);
     }
 
     set_upstream_uri(&mut req, parsed, res);
@@ -631,6 +637,15 @@ fn check_policies(route: &FilteredRoute, client: std::net::IpAddr) -> Result<(),
         return Err(ProxyError::TooManyRequests { retry_after });
     }
     Ok(())
+}
+
+/// Authenticates the request when the route requires authentication. The HTTPS redirect runs
+/// first, so a browser asks for the credentials on the secure connection.
+async fn authorize<B>(route: &FilteredRoute, req: &mut Request<B>) -> Result<(), ProxyError> {
+    match &route.auth {
+        Some(auth) => auth.authorize(req.headers_mut()).await,
+        None => Ok(()),
+    }
 }
 
 /// Builds the HTTPS redirect for a plain HTTP request when the route upgrades insecure requests.
@@ -696,7 +711,7 @@ where
         sni: None,
         proto: "h3",
     };
-    let (req, response_rewriter) = route_request(shared, req, &info);
+    let (req, response_rewriter) = route_request(shared, req, &info).await;
 
     let (mut send, recv) = stream.split();
     let res = match req {

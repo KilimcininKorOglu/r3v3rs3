@@ -1,3 +1,4 @@
+use super::auth_config::{AuthConfig, AuthForm};
 use r3v3rs3_api::cidr::{format_cidr_list, parse_cidr_list};
 use r3v3rs3_api::client_ip::ClientIpConfig;
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
@@ -9,14 +10,14 @@ use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
-const LABEL_CLASS: &str =
+pub(super) const LABEL_CLASS: &str =
     "block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200";
 const SECTION_CLASS: &str = "block mt-6 text-sm font-medium text-neutral-900 dark:text-neutral-200";
-const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
-const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500";
+pub(super) const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
+pub(super) const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500";
 const ERROR_CLASS: &str = "mt-2 text-sm text-red-600 dark:text-red-500";
 const TOGGLE_CLASS: &str = "w-9 h-5 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600";
-const BUTTON_CLASS: &str = "inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600";
+pub(super) const BUTTON_CLASS: &str = "inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600";
 
 #[derive(Properties, PartialEq)]
 pub struct Props {
@@ -34,6 +35,7 @@ struct ProxyForm {
     allow: String,
     deny: String,
     rate_limit: RateLimitForm,
+    auth: AuthForm,
 }
 
 impl ProxyForm {
@@ -51,6 +53,7 @@ impl ProxyForm {
             allow: format_cidr_list(&proxy.ip_filter.allow),
             deny: format_cidr_list(&proxy.ip_filter.deny),
             rate_limit: RateLimitForm::new(&proxy.rate_limit),
+            auth: AuthForm::new(&proxy.auth),
         }
     }
 }
@@ -64,6 +67,8 @@ struct RouteForm {
     deny: String,
     override_rate_limit: bool,
     rate_limit: RateLimitForm,
+    override_auth: bool,
+    auth: AuthForm,
 }
 
 impl RouteForm {
@@ -81,6 +86,8 @@ impl RouteForm {
             deny: format_cidr_list(&ip_filter.deny),
             override_rate_limit: route.rate_limit.is_some(),
             rate_limit: RateLimitForm::new(&route.rate_limit.unwrap_or_default()),
+            override_auth: route.auth.is_some(),
+            auth: AuthForm::new(&route.auth.clone().unwrap_or_default()),
         }
     }
 
@@ -93,6 +100,8 @@ impl RouteForm {
             deny: String::new(),
             override_rate_limit: false,
             rate_limit: RateLimitForm::new(&RateLimit::default()),
+            override_auth: false,
+            auth: AuthForm::new(&Default::default()),
         }
     }
 }
@@ -177,6 +186,10 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { error_view(errors.get("rate_limit")) }
             <p class={HINT_CLASS}>{"Requests allowed for each client IP address. Clients over the limit receive 429 Too Many Requests. Set Requests to 0 to disable the limit. Set Burst to 0 to use the Requests value."}</p>
 
+            <label class={SECTION_CLASS}>{"Authentication"}</label>
+            <AuthConfig form={form.auth.clone()} onchange={state_update(&form, |form, value| form.auth = value)} />
+            { error_view(errors.get("auth")) }
+
             <label class={SECTION_CLASS}>{"Routes"}</label>
 
             { routes.iter().enumerate().map(|(i, route)| {
@@ -222,6 +235,7 @@ fn route_view(
 
             { route_ip_filter_view(routes, index, route) }
             { route_rate_limit_view(routes, index, route) }
+            { route_auth_view(routes, index, route) }
             { error_view(error) }
 
             <div class="flex justify-end rounded-md mt-4 sm:ml-auto px-4 lg:px-0" role="group">
@@ -276,6 +290,24 @@ fn route_rate_limit_view(
                     route_input(routes, index, text, |route, value| route.rate_limit.burst = value),
                 ) }
                 <p class={HINT_CLASS}>{"This route uses its own counter instead of the proxy counter. Set Requests to 0 to disable the limit for this route."}</p>
+            }
+        </>
+    }
+}
+
+fn route_auth_view(
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    html! {
+        <>
+            <div>
+                { toggle(route_input(routes, index, checked, |route, value| route.override_auth = value), route.override_auth, "Override Authentication for This Route", "mt-6") }
+            </div>
+            if route.override_auth {
+                <AuthConfig form={route.auth.clone()} onchange={route_update(routes, index, |route, value| route.auth = value)} />
+                <p class={HINT_CLASS}>{"This route uses this authentication instead of the proxy authentication. Select None to allow every client."}</p>
             }
         </>
     }
@@ -352,6 +384,19 @@ fn period(event: &Event) -> RatePeriod {
         .unwrap_or_default()
 }
 
+fn state_update<T, V>(state: &UseStateHandle<T>, update: fn(&mut T, V)) -> Callback<V>
+where
+    T: Clone + 'static,
+    V: 'static,
+{
+    let state = state.clone();
+    Callback::from(move |value: V| {
+        let mut next = (*state).clone();
+        update(&mut next, value);
+        state.set(next);
+    })
+}
+
 fn state_input<T, V>(
     state: &UseStateHandle<T>,
     read: fn(&Event) -> V,
@@ -361,11 +406,21 @@ where
     T: Clone + 'static,
     V: 'static,
 {
-    let state = state.clone();
-    Callback::from(move |event: Event| {
-        let mut value = (*state).clone();
-        update(&mut value, read(&event));
-        state.set(value);
+    state_update(state, update).reform(move |event: Event| read(&event))
+}
+
+fn route_update<V: 'static>(
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    update: fn(&mut RouteForm, V),
+) -> Callback<V> {
+    let routes = routes.clone();
+    Callback::from(move |value: V| {
+        let mut list = (*routes).clone();
+        if let Some(route) = list.get_mut(index) {
+            update(route, value);
+            routes.set(list);
+        }
     })
 }
 
@@ -375,14 +430,7 @@ fn route_input<V: 'static>(
     read: fn(&Event) -> V,
     update: fn(&mut RouteForm, V),
 ) -> Callback<Event> {
-    let routes = routes.clone();
-    Callback::from(move |event: Event| {
-        let mut list = (*routes).clone();
-        if let Some(route) = list.get_mut(index) {
-            update(route, read(&event));
-            routes.set(list);
-        }
-    })
+    route_update(routes, index, update).reform(move |event: Event| read(&event))
 }
 
 fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMap<String, String>> {
@@ -399,6 +447,7 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
         deny: or_error(parse_cidr_list(&form.deny), "deny", &mut errors),
     };
     let rate_limit = parse_rate_limit(&form.rate_limit, "rate_limit", &mut errors);
+    let auth = or_error(form.auth.parse(), "auth", &mut errors);
 
     if !errors.is_empty() {
         return Err(errors);
@@ -413,6 +462,7 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
         },
         ip_filter,
         rate_limit,
+        auth,
     })
 }
 
@@ -502,10 +552,14 @@ fn parse_route(
     let rate_limit = route
         .override_rate_limit
         .then(|| parse_rate_limit(&route.rate_limit, key, errors));
+    let auth = route
+        .override_auth
+        .then(|| or_error(route.auth.parse(), key, errors));
     (!servers.is_empty()).then(|| Route {
         path: route.path.clone(),
         servers,
         ip_filter,
         rate_limit,
+        auth,
     })
 }
