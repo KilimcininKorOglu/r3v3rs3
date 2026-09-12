@@ -115,15 +115,8 @@ where
 
             let maybe = if is_https {
                 let stream = TokioIo::new(tcp);
-
-                let tls = TokioIo::new(
-                    tls_connector
-                        .connect(
-                            ServerName::try_from(host.as_str()).unwrap().to_owned(),
-                            stream,
-                        )
-                        .await?,
-                );
+                let server_name = ServerName::try_from(host.as_str())?.to_owned();
+                let tls = TokioIo::new(tls_connector.connect(server_name, stream).await?);
                 MaybeHttpsStream::Https(tls)
             } else {
                 MaybeHttpsStream::Http(tcp)
@@ -169,3 +162,27 @@ impl fmt::Display for ForceHttpsButUriNotHttps {
 }
 
 impl std::error::Error for ForceHttpsButUriNotHttps {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio_rustls::rustls::RootCertStore;
+
+    #[tokio::test]
+    async fn invalid_server_name_returns_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let config = ClientConfig::builder()
+            .with_root_certificates(RootCertStore::empty())
+            .with_no_client_auth();
+        let mut connector = HttpsConnector::new(Arc::new(config));
+
+        // "127.1" resolves to 127.0.0.1 but is neither a valid DNS name nor an IP literal.
+        let uri: Uri = format!("https://127.1:{port}/").parse().unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(5), connector.call(uri))
+            .await
+            .unwrap();
+        assert!(result.is_err());
+    }
+}
