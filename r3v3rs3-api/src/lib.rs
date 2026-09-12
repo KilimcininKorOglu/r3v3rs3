@@ -10,6 +10,7 @@ pub mod event;
 pub mod id;
 pub mod log;
 pub mod multiaddr;
+pub mod policy;
 pub mod port;
 pub mod proxy;
 pub mod subject_name;

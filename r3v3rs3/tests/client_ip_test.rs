@@ -1,43 +1,18 @@
 use mockito::Matcher;
-use r3v3rs3_api::{
-    client_ip::ClientIpConfig,
-    port::{Port, PortEntry},
-    proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route},
-};
+use r3v3rs3_api::{client_ip::ClientIpConfig, proxy::HttpProxy};
 
 mod common;
-use common::{alloc_tcp_port, with_server, TestPort, TestStorage};
+use common::{
+    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+};
 
-fn port_entry(id: &str, port: &TestPort) -> PortEntry {
-    PortEntry {
-        id: id.parse().unwrap(),
-        port: Port {
-            active: true,
-            name: String::new(),
-            listen: port.multiaddr_http(),
-            opts: Default::default(),
-        },
-    }
-}
-
-fn proxy_entry(id: &str, port_id: &str, upstream: &str, client_ip: ClientIpConfig) -> ProxyEntry {
-    ProxyEntry {
-        id: id.parse().unwrap(),
-        proxy: Proxy {
-            ports: vec![port_id.parse().unwrap()],
-            kind: ProxyKind::Http(HttpProxy {
-                vhosts: vec!["localhost".parse().unwrap()],
-                routes: vec![Route {
-                    path: "/".into(),
-                    servers: vec![r3v3rs3_api::proxy::Server {
-                        url: upstream.parse().unwrap(),
-                    }],
-                }],
-                upgrade_insecure: false,
-                client_ip,
-            }),
-            ..Default::default()
-        },
+fn proxy(upstream: &str, client_ip: ClientIpConfig) -> HttpProxy {
+    HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![http_route("/", upstream, None)],
+        upgrade_insecure: false,
+        client_ip,
+        ..Default::default()
     }
 }
 
@@ -74,12 +49,16 @@ async fn client_ip_from_trusted_proxy() -> anyhow::Result<()> {
 
     let config = TestStorage::builder()
         .ports(vec![
-            port_entry("trusted", &trusted_port),
-            port_entry("direct", &direct_port),
+            http_port_entry("trusted", &trusted_port),
+            http_port_entry("direct", &direct_port),
         ])
         .proxies(vec![
-            proxy_entry("proxy1", "trusted", &server.url(), trusted),
-            proxy_entry("proxy2", "direct", &server.url(), ClientIpConfig::default()),
+            http_proxy_entry("proxy1", "trusted", proxy(&server.url(), trusted)),
+            http_proxy_entry(
+                "proxy2",
+                "direct",
+                proxy(&server.url(), ClientIpConfig::default()),
+            ),
         ])
         .build();
 

@@ -49,6 +49,28 @@ The CDN IP ranges are compiled into the binary and downloaded again every day. T
 
 Akamai does not publish its edge IP ranges. Add your Akamai Site Shield ranges to "Trusted Proxies" instead.
 
+## IP Filter
+
+You can allow or deny clients by IP address for each HTTP / HTTPS proxy. r3v3rs3 checks the client IP that the "Client IP" section resolves, so the filter also works behind a CDN or a trusted proxy.
+
+- **Denied IP Addresses**: Clients in these IP addresses or CIDR blocks receive `403 Forbidden`.
+- **Allowed IP Addresses**: When the list is not empty, only clients in these IP addresses or CIDR blocks can access the proxy. Other clients receive `403 Forbidden`.
+
+A denied address takes precedence over an allowed address.
+
+A route can replace the proxy lists with "Override IP Filter for This Route". The route then uses only its own lists. If both route lists are empty, the route allows every client.
+
+```toml
+[my-proxy]
+protocol = "http"
+vhosts = ["example.com"]
+ip_filter = { allow = ["192.168.0.0/16"], deny = ["192.168.10.0/24"] }
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] },
+  { path = "/public", servers = [{ url = "http://127.0.0.1:8080/public" }], ip_filter = {} },
+]
+```
+
 ## HTTP/2
 
 r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).

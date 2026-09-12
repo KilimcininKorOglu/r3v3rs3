@@ -45,9 +45,11 @@ async fn ws_proxy() -> anyhow::Result<()> {
                         servers: vec![r3v3rs3_api::proxy::Server {
                             url: listen_port.http_url("/").try_into().unwrap(),
                         }],
+                        ip_filter: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
+                    ip_filter: Default::default(),
                 }),
                 ..Default::default()
             },

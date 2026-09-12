@@ -1,4 +1,9 @@
-use self::{error::ProxyError, pool::ConnectionPool, route::Router};
+use self::{
+    error::ProxyError,
+    filter::FilterResult,
+    pool::ConnectionPool,
+    route::{FilteredRoute, ParsedRoute, Router},
+};
 use super::{
     tls::{CertResolver, TlsTermination},
     PortContextEvent,
@@ -30,7 +35,7 @@ use quinn::{
 use r3v3rs3_api::port::{PortStatus, SocketState};
 use r3v3rs3_api::{cert::CertKind, error::Error};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
-use rewriter::{RequestRewriter, ResponseRewriter};
+use rewriter::{RequestRewriter, ResponseRewriter, ResponseRewriterBuilder};
 use std::{net::SocketAddr, str::FromStr, sync::Arc, time::SystemTime};
 use tokio::{
     io::{AsyncRead, AsyncWrite, BufStream},
@@ -421,104 +426,28 @@ async fn start(
 
     let pool = Arc::new(ConnectionPool::new(tls_client_config));
     let span_cloned = span.clone();
-    let service = hyper::service::service_fn(move |mut req: Request<Incoming>| {
+    let service = hyper::service::service_fn(move |req: Request<Incoming>| {
         let mut shared_cache = shared_cache.clone();
         let span = span_cloned.clone();
         let enter = span.clone();
         let _enter = enter.enter();
 
-        let header_host = req
-            .headers()
-            .get(HOST)
-            .and_then(|h| h.to_str().ok().and_then(|host| host.split(':').next()));
-
-        let domain_fronting = match (&sni, header_host) {
-            (Some(sni), Some(header)) => !sni.eq_ignore_ascii_case(header),
-            _ => false,
-        };
-
-        let host = header_host
-            .or(sni.as_deref())
-            .or(req.uri().host())
-            .or(header_host);
-
-        let header_host = header_host.map(|h| h.to_string());
-        let action = format!("{} {}", req.method().as_str(), req.uri());
         let pool = pool.clone();
         let shared = shared_cache.load();
 
-        let mut response_rewriter = ResponseRewriter::builder();
-        let req = if domain_fronting {
-            ProxiedRequest::Err(ProxyError::DomainFrontingDetected)
-        } else if let Some((parsed, res, route)) = shared.router.get_route(&req, host) {
-            let resource_id = route.resource_id;
-            let client = route
-                .client_ip
-                .resolve(remote.ip(), req.headers(), &crate::cdn::table());
-
-            let mut redirect = None;
-            response_rewriter = response_rewriter
-                .https_port(route.https_port)
-                .quic_port(route.quic_port);
-            if forwarded_proto == "http" && route.upgrade_insecure {
-                if let Some(port) = route.https_port {
-                    if let Some(uri) = header_host
-                        .as_ref()
-                        .and_then(|host| host.parse::<Uri>().ok())
-                    {
-                        let mut parts = Parts::from(uri);
-                        parts.scheme = Some(Scheme::HTTPS);
-                        if let Some(authority) = parts.authority {
-                            parts.authority = format!("{}:{}", authority.host(), port).parse().ok();
-                        }
-                        parts.path_and_query = req.uri().path_and_query().cloned();
-                        if let Ok(uri) = Uri::from_parts(parts) {
-                            redirect = Response::builder()
-                                .status(301)
-                                .header(LOCATION, uri.to_string())
-                                .body(String::new())
-                                .ok();
-                        }
-                    }
-                }
-            }
-
-            if let Some(redirect) = redirect {
-                ProxiedRequest::Redirect(redirect)
-            } else {
-                if let Some(server) = parsed.servers.first() {
-                    let mut url = server.url.0.clone();
-                    if let Ok(mut segments) = url.path_segments_mut() {
-                        segments.extend(res.path_segments);
-                    }
-                    url.set_query(req.uri().query());
-                    if let Ok(uri) = Uri::from_str(url.as_str()) {
-                        *req.uri_mut() = uri;
-                    }
-                }
-
-                info!(target: "r3v3rs3::access_log", remote = %remote, client = %client.ip, %local, action, target = %req.uri());
-                let span: Span = span!(Level::INFO, "http", %resource_id, remote = %remote, client = %client.ip, %local, action, target = %req.uri());
-
-                if let Some(host) = req
-                    .uri()
-                    .authority()
-                    .and_then(|host| HeaderValue::from_str(host.as_str()).ok())
-                {
-                    req.headers_mut().insert(HOST, host);
-                }
-
-                shared.header_rewriter.pre_process(
-                    req.headers_mut(),
-                    &client,
-                    header_host.map(|h| h.to_string()),
-                    forwarded_proto,
-                );
-                shared.header_rewriter.post_process(req.headers_mut());
-                ProxiedRequest::Ok(req, span)
-            }
+        let (req, response_rewriter) = if is_domain_fronting(&req, sni.as_deref()) {
+            (
+                ProxiedRequest::Err(ProxyError::DomainFrontingDetected),
+                ResponseRewriter::builder(),
+            )
         } else {
-            ProxiedRequest::Err(ProxyError::NoRouteFound)
+            let info = RequestInfo {
+                remote,
+                local: local.to_string(),
+                sni: sni.as_deref(),
+                proto: forwarded_proto,
+            };
+            route_request(shared, req, &info)
         };
 
         async move {
@@ -608,8 +537,130 @@ struct QuickContext {
     remote: SocketAddr,
 }
 
+/// Connection details that the TCP and QUIC paths pass to [`route_request`].
+struct RequestInfo<'a> {
+    remote: SocketAddr,
+    local: String,
+    sni: Option<&'a str>,
+    proto: &'static str,
+}
+
+fn header_host<B>(req: &Request<B>) -> Option<&str> {
+    req.headers()
+        .get(HOST)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|host| host.split(':').next())
+}
+
+fn is_domain_fronting<B>(req: &Request<B>, sni: Option<&str>) -> bool {
+    match (sni, header_host(req)) {
+        (Some(sni), Some(header)) => !sni.eq_ignore_ascii_case(header),
+        _ => false,
+    }
+}
+
+/// Matches the request to a route, applies the route policies and prepares
+/// the request for the upstream server.
+fn route_request<B>(
+    shared: &SharedContext,
+    mut req: Request<B>,
+    info: &RequestInfo,
+) -> (ProxiedRequest<Request<B>>, ResponseRewriterBuilder) {
+    let response_rewriter = ResponseRewriter::builder();
+    let header_host = header_host(&req).map(str::to_string);
+    let matched = {
+        let host = header_host.as_deref().or(info.sni).or(req.uri().host());
+        shared.router.get_route(&req, host)
+    };
+    let Some((parsed, res, route)) = matched else {
+        return (
+            ProxiedRequest::Err(ProxyError::NoRouteFound),
+            response_rewriter,
+        );
+    };
+    let response_rewriter = response_rewriter
+        .https_port(route.https_port)
+        .quic_port(route.quic_port);
+
+    let resource_id = route.resource_id;
+    let client = route
+        .client_ip
+        .resolve(info.remote.ip(), req.headers(), &crate::cdn::table());
+    let action = format!("{} {}", req.method().as_str(), req.uri());
+
+    if !route.ip_filter.allows(client.ip) {
+        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, "client IP address is not allowed");
+        return (
+            ProxiedRequest::Err(ProxyError::IpNotAllowed),
+            response_rewriter,
+        );
+    }
+
+    if let Some(redirect) = upgrade_redirect(route, &req, header_host.as_deref(), info.proto) {
+        return (ProxiedRequest::Redirect(redirect), response_rewriter);
+    }
+
+    set_upstream_uri(&mut req, parsed, res);
+
+    info!(target: "r3v3rs3::access_log", remote = %info.remote, client = %client.ip, local = %info.local, action, target = %req.uri());
+    let span: Span = span!(Level::INFO, "http", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, target = %req.uri());
+
+    if let Some(host) = req
+        .uri()
+        .authority()
+        .and_then(|host| HeaderValue::from_str(host.as_str()).ok())
+    {
+        req.headers_mut().insert(HOST, host);
+    }
+
+    shared
+        .header_rewriter
+        .pre_process(req.headers_mut(), &client, header_host, info.proto);
+    shared.header_rewriter.post_process(req.headers_mut());
+    (ProxiedRequest::Ok(req, span), response_rewriter)
+}
+
+/// Builds the HTTPS redirect for a plain HTTP request when the route upgrades insecure requests.
+fn upgrade_redirect<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    header_host: Option<&str>,
+    proto: &str,
+) -> Option<Response<String>> {
+    if proto != "http" || !route.upgrade_insecure {
+        return None;
+    }
+    let port = route.https_port?;
+    let mut parts = Parts::from(header_host?.parse::<Uri>().ok()?);
+    parts.scheme = Some(Scheme::HTTPS);
+    if let Some(authority) = parts.authority {
+        parts.authority = format!("{}:{}", authority.host(), port).parse().ok();
+    }
+    parts.path_and_query = req.uri().path_and_query().cloned();
+    let uri = Uri::from_parts(parts).ok()?;
+    Response::builder()
+        .status(301)
+        .header(LOCATION, uri.to_string())
+        .body(String::new())
+        .ok()
+}
+
+fn set_upstream_uri<B>(req: &mut Request<B>, parsed: &ParsedRoute, res: FilterResult) {
+    let Some(server) = parsed.servers.first() else {
+        return;
+    };
+    let mut url = server.url.0.clone();
+    if let Ok(mut segments) = url.path_segments_mut() {
+        segments.extend(res.path_segments);
+    }
+    url.set_query(req.uri().query());
+    if let Ok(uri) = Uri::from_str(url.as_str()) {
+        *req.uri_mut() = uri;
+    }
+}
+
 async fn start_quic<T>(
-    mut req: Request<()>,
+    req: Request<()>,
     stream: RequestStream<T, Bytes>,
     mut shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
     ctx: QuickContext,
@@ -625,100 +676,54 @@ where
     let enter = span.clone();
     let _enter = enter.enter();
 
-    let header_host = req
-        .headers()
-        .get(HOST)
-        .and_then(|h| h.to_str().ok().and_then(|host| host.split(':').next()));
-
-    let host = header_host.or(req.uri().host()).or(header_host);
-
-    let header_host = header_host.map(|h| h.to_string());
-    let action = format!("{} {}", req.method().as_str(), req.uri());
-    let pool = pool.clone();
     let shared = shared_cache.load();
-
-    let mut response_rewriter = ResponseRewriter::builder();
-    let req = if let Some((parsed, res, route)) = shared.router.get_route(&req, host) {
-        let resource_id = route.resource_id;
-        let client = route
-            .client_ip
-            .resolve(ctx.remote.ip(), req.headers(), &crate::cdn::table());
-
-        response_rewriter = response_rewriter
-            .https_port(route.https_port)
-            .quic_port(route.quic_port);
-        if let Some(server) = parsed.servers.first() {
-            let mut url = server.url.0.clone();
-            if let Ok(mut segments) = url.path_segments_mut() {
-                segments.extend(res.path_segments);
-            }
-            url.set_query(req.uri().query());
-            if let Ok(uri) = Uri::from_str(url.as_str()) {
-                *req.uri_mut() = uri;
-            }
-        }
-
-        info!(target: "r3v3rs3::access_log", remote = %ctx.remote, client = %client.ip, local = ?ctx.local, action, target = %req.uri());
-        let span: Span = span!(Level::INFO, "http", %resource_id, remote = %ctx.remote, client = %client.ip, local = ?ctx.local, action, target = %req.uri());
-
-        if let Some(host) = req
-            .uri()
-            .authority()
-            .and_then(|host| HeaderValue::from_str(host.as_str()).ok())
-        {
-            req.headers_mut().insert(HOST, host);
-        }
-
-        shared.header_rewriter.pre_process(
-            req.headers_mut(),
-            &client,
-            header_host.map(|h| h.to_string()),
-            "h3",
-        );
-        shared.header_rewriter.post_process(req.headers_mut());
-        ProxiedRequest::Ok(req, span)
-    } else {
-        ProxiedRequest::Err(ProxyError::NoRouteFound)
+    let info = RequestInfo {
+        remote: ctx.remote,
+        local: ctx.local.map(|ip| ip.to_string()).unwrap_or_default(),
+        sni: None,
+        proto: "h3",
     };
+    let (req, response_rewriter) = route_request(shared, req, &info);
 
     let (mut send, recv) = stream.split();
-    if let ProxiedRequest::Ok(req, span) = req {
-        let body = StreamBody::new(StreamWrapper::<T> { stream: recv });
-        let req = req.map(|_| BoxBody::new(body));
-        let res = pool.request(req).instrument(span).await;
-        if let Ok(res) = response_rewriter.build().map_response(res) {
-            let mut res_stream = None;
-            let mut res = res.map(|body| {
-                res_stream = Some(body);
-            });
-            res.headers_mut().remove("transfer-encoding");
-            let mut res_stream = BodyStream::new(res_stream.unwrap());
+    let res = match req {
+        ProxiedRequest::Ok(req, span) => {
+            let body = StreamBody::new(StreamWrapper::<T> { stream: recv });
+            pool.request(req.map(|_| BoxBody::new(body)))
+                .instrument(span)
+                .await
+        }
+        ProxiedRequest::Redirect(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
+        ProxiedRequest::Err(err) => Err(err.into()),
+    };
+    let (parts, body) = response_rewriter.build().map_response(res)?.into_parts();
+    let mut res = Response::from_parts(parts, ());
+    res.headers_mut().remove("transfer-encoding");
+    let mut res_stream = BodyStream::new(body);
 
-            send.send_response(res).await?;
+    send.send_response(res).await?;
 
-            loop {
-                tokio::select! {
-                    frame = res_stream.next() => {
-                        if let Some(Ok(frame)) = frame {
-                            match frame.into_data() {
-                                Ok(data) => {
-                                    send.send_data(data).await?;
-                                }
-                                Err(frame) => {
-                                    if let Ok(trailers) = frame.into_trailers() {
-                                        send.send_trailers(trailers).await?;
-                                    }
-                                }
-                            }
-                        } else {
-                            break;
+    loop {
+        tokio::select! {
+            frame = res_stream.next() => {
+                if let Some(Ok(frame)) = frame {
+                    match frame.into_data() {
+                        Ok(data) => {
+                            send.send_data(data).await?;
                         }
-                    },
-                    _ = stop_notifier.notified() => {
-                        debug!("stop");
-                    },
+                        Err(frame) => {
+                            if let Ok(trailers) = frame.into_trailers() {
+                                send.send_trailers(trailers).await?;
+                            }
+                        }
+                    }
+                } else {
+                    break;
                 }
-            }
+            },
+            _ = stop_notifier.notified() => {
+                debug!("stop");
+            },
         }
     }
 

@@ -15,8 +15,9 @@ use r3v3rs3_api::{
     error::Error,
     id::ShortId,
     multiaddr::Multiaddr,
-    port::PortEntry,
-    proxy::ProxyEntry,
+    policy::IpFilter,
+    port::{Port, PortEntry},
+    proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route, Server as UpstreamUrl},
 };
 use std::{
     collections::HashMap,
@@ -204,6 +205,39 @@ impl TestStorageBuilder {
         TestStorage {
             inner: Arc::new(Mutex::new(self.inner)),
         }
+    }
+}
+
+pub fn http_port_entry(id: &str, port: &TestPort) -> PortEntry {
+    PortEntry {
+        id: id.parse().unwrap(),
+        port: Port {
+            active: true,
+            name: String::new(),
+            listen: port.multiaddr_http(),
+            opts: Default::default(),
+        },
+    }
+}
+
+pub fn http_proxy_entry(id: &str, port_id: &str, http: HttpProxy) -> ProxyEntry {
+    ProxyEntry {
+        id: id.parse().unwrap(),
+        proxy: Proxy {
+            ports: vec![port_id.parse().unwrap()],
+            kind: ProxyKind::Http(http),
+            ..Default::default()
+        },
+    }
+}
+
+pub fn http_route(path: &str, upstream: &str, ip_filter: Option<IpFilter>) -> Route {
+    Route {
+        path: path.into(),
+        servers: vec![UpstreamUrl {
+            url: upstream.parse().unwrap(),
+        }],
+        ip_filter,
     }
 }
 

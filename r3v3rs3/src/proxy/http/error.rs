@@ -10,6 +10,9 @@ pub enum ProxyError {
 
     #[error("no route found")]
     NoRouteFound,
+
+    #[error("client IP address is not allowed")]
+    IpNotAllowed,
 }
 
 impl ProxyError {
@@ -17,6 +20,7 @@ impl ProxyError {
         match self {
             Self::DomainFrontingDetected => StatusCode::MISDIRECTED_REQUEST,
             Self::NoRouteFound => StatusCode::BAD_GATEWAY,
+            Self::IpNotAllowed => StatusCode::FORBIDDEN,
         }
     }
 }
@@ -27,19 +31,24 @@ pub fn map_error(err: anyhow::Error) -> StatusCode {
     }
     if let Some(err) = err.downcast_ref::<rustls::Error>() {
         if matches!(err, rustls::Error::InvalidCertificate(_)) {
-            return StatusCode::from_u16(526).unwrap();
+            return status_code(526);
         } else {
-            return StatusCode::from_u16(525).unwrap();
+            return status_code(525);
         }
     }
     if let Ok(err) = err.downcast::<hyper::Error>() {
         if err.is_timeout() {
             return StatusCode::GATEWAY_TIMEOUT;
         } else {
-            return StatusCode::from_u16(523).unwrap();
+            return status_code(523);
         }
     }
     StatusCode::BAD_GATEWAY
+}
+
+/// Builds a non-standard status code. Every value passed here is in the valid 100..=999 range.
+fn status_code(code: u16) -> StatusCode {
+    StatusCode::from_u16(code).unwrap_or(StatusCode::BAD_GATEWAY)
 }
 
 #[derive(TemplateOnce)]

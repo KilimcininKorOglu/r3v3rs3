@@ -60,9 +60,11 @@ async fn https_proxy() -> anyhow::Result<()> {
                         servers: vec![r3v3rs3_api::proxy::Server {
                             url: listen_port.https_url("/").try_into().unwrap(),
                         }],
+                        ip_filter: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
+                    ip_filter: Default::default(),
                 }),
                 ..Default::default()
             },
@@ -164,9 +166,11 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                         servers: vec![r3v3rs3_api::proxy::Server {
                             url: listen_port.https_url("/").try_into().unwrap(),
                         }],
+                        ip_filter: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
+                    ip_filter: Default::default(),
                 }),
                 ..Default::default()
             },
@@ -249,9 +253,11 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                         servers: vec![r3v3rs3_api::proxy::Server {
                             url: listen_port.https_url("/").try_into().unwrap(),
                         }],
+                        ip_filter: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
+                    ip_filter: Default::default(),
                 }),
                 ..Default::default()
             },
@@ -349,9 +355,11 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                         servers: vec![r3v3rs3_api::proxy::Server {
                             url: listen_port.https_url("/").try_into().unwrap(),
                         }],
+                        ip_filter: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
+                    ip_filter: Default::default(),
                 }),
                 ..Default::default()
             },

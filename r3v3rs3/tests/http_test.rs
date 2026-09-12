@@ -112,16 +112,19 @@ async fn http_proxy() -> anyhow::Result<()> {
                             servers: vec![r3v3rs3_api::proxy::Server {
                                 url: format!("{}/bye", server.url()).parse().unwrap(),
                             }],
+                            ip_filter: None,
                         },
                         Route {
                             path: "/".into(),
                             servers: vec![r3v3rs3_api::proxy::Server {
                                 url: server.url().parse().unwrap(),
                             }],
+                            ip_filter: None,
                         },
                     ],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
+                    ip_filter: Default::default(),
                 }),
                 ..Default::default()
             },
@@ -263,9 +266,11 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                         servers: vec![r3v3rs3_api::proxy::Server {
                             url: "https://httpbin.org/".parse().unwrap(),
                         }],
+                        ip_filter: None,
                     }],
                     upgrade_insecure: true,
                     client_ip: Default::default(),
+                    ip_filter: Default::default(),
                 }),
                 ..Default::default()
             },
@@ -333,9 +338,11 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                         servers: vec![r3v3rs3_api::proxy::Server {
                             url: "https://example.nodomain/".parse().unwrap(),
                         }],
+                        ip_filter: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
+                    ip_filter: Default::default(),
                 }),
                 ..Default::default()
             },
