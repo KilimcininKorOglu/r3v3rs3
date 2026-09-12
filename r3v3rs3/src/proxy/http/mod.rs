@@ -1,5 +1,6 @@
 use self::{
     auth::{AuthContext, AuthRejection},
+    compression::ResponseCompression,
     error::ProxyError,
     filter::FilterResult,
     header_rules::{new_request_id, HeaderVariables},
@@ -55,6 +56,7 @@ use tracing::{debug, error, info, span, Instrument, Level, Span};
 
 mod auth;
 pub(crate) mod client_ip;
+mod compression;
 mod error;
 mod filter;
 mod header_rules;
@@ -599,7 +601,13 @@ where
     };
     let response_rewriter = response_rewriter
         .https_port(route.https_port)
-        .quic_port(route.quic_port);
+        .quic_port(route.quic_port)
+        .compression(
+            route
+                .compression
+                .clone()
+                .map(|config| ResponseCompression::new(config, req.method(), req.headers())),
+        );
 
     let resource_id = route.resource_id;
     let client = route

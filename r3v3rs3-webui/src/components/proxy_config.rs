@@ -100,7 +100,7 @@ pub fn proxy_config(props: &Props) -> Html {
     let http_proxy_cloned = http_proxy.clone();
     let http_proxy_onchanged: Callback<Result<HttpProxy, HashMap<String, String>>> =
         Callback::from(move |updated: Result<HttpProxy, HashMap<String, String>>| {
-            http_proxy_cloned.set(updated.map(ProxyKind::Http));
+            http_proxy_cloned.set(updated.map(|http| ProxyKind::Http(Box::new(http))));
         });
 
     let tcp_proxy = use_state::<Result<ProxyKind, HashMap<String, String>>, _>(|| {
@@ -152,7 +152,7 @@ pub fn proxy_config(props: &Props) -> Html {
     }
 
     let http_proxy = if let ProxyKind::Http(http_proxy) = &props.proxy.kind {
-        http_proxy.clone()
+        HttpProxy::clone(http_proxy)
     } else {
         Default::default()
     };

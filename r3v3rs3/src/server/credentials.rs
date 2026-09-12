@@ -31,11 +31,12 @@ pub fn seal_proxy(proxy: &mut Proxy) -> Result<(), Error> {
             AuthPolicy::Forward(forward) => validate_forward_auth(forward)?,
         }
     }
+    http.compression.validate()?;
     let route_rules = http
         .routes
         .iter()
         .filter_map(|route| route.headers.as_ref());
-    std::iter::once(&*http.headers)
+    std::iter::once(&http.headers)
         .chain(route_rules)
         .try_for_each(HeaderRules::validate)
 }
@@ -141,27 +142,35 @@ mod tests {
         }
     }
 
-    fn proxy(users: Vec<BasicAuthUser>) -> Proxy {
+    fn http_proxy(http: HttpProxy) -> Proxy {
         Proxy {
-            kind: ProxyKind::Http(HttpProxy {
-                auth: AuthPolicy::Basic(BasicAuth {
-                    realm: String::new(),
-                    users,
-                }),
-                ..Default::default()
-            }),
+            kind: ProxyKind::Http(Box::new(http)),
             ..Default::default()
         }
     }
 
+    fn proxy(users: Vec<BasicAuthUser>) -> Proxy {
+        http_proxy(HttpProxy {
+            auth: AuthPolicy::Basic(BasicAuth {
+                realm: String::new(),
+                users,
+            }),
+            ..Default::default()
+        })
+    }
+
+    fn auth(proxy: &Proxy) -> &AuthPolicy {
+        let ProxyKind::Http(http) = &proxy.kind else {
+            panic!("expected an HTTP proxy");
+        };
+        &http.auth
+    }
+
     fn users(proxy: &Proxy) -> &[BasicAuthUser] {
-        match &proxy.kind {
-            ProxyKind::Http(HttpProxy {
-                auth: AuthPolicy::Basic(basic),
-                ..
-            }) => &basic.users,
-            _ => panic!("expected basic auth"),
-        }
+        let AuthPolicy::Basic(basic) = auth(proxy) else {
+            panic!("expected basic auth");
+        };
+        &basic.users
     }
 
     #[test]
@@ -194,12 +203,11 @@ mod tests {
 
     #[test]
     fn bearer_token_is_replaced_with_digest() {
-        let bearer = |tokens: Vec<BearerToken>| Proxy {
-            kind: ProxyKind::Http(HttpProxy {
+        let bearer = |tokens: Vec<BearerToken>| {
+            http_proxy(HttpProxy {
                 auth: AuthPolicy::Bearer(BearerAuth { tokens }),
                 ..Default::default()
-            }),
-            ..Default::default()
+            })
         };
         let token = |name: &str, token: &str| BearerToken {
             name: name.into(),
@@ -209,11 +217,7 @@ mod tests {
 
         let mut proxy = bearer(vec![token("ci", "0123456789abcdef")]);
         seal_proxy(&mut proxy).unwrap();
-        let ProxyKind::Http(HttpProxy {
-            auth: AuthPolicy::Bearer(sealed),
-            ..
-        }) = &proxy.kind
-        else {
+        let AuthPolicy::Bearer(sealed) = auth(&proxy) else {
             panic!("expected bearer auth");
         };
         assert!(sealed.tokens[0].token.is_empty());
@@ -237,16 +241,15 @@ mod tests {
 
     #[test]
     fn forward_auth_headers_and_timeout_are_validated() {
-        let forward = |response_headers: Vec<String>, timeout: u64| Proxy {
-            kind: ProxyKind::Http(HttpProxy {
+        let forward = |response_headers: Vec<String>, timeout: u64| {
+            http_proxy(HttpProxy {
                 auth: AuthPolicy::Forward(Box::new(ForwardAuth {
                     url: "http://127.0.0.1:4180/auth".parse().unwrap(),
                     response_headers,
                     timeout: std::time::Duration::from_secs(timeout),
                 })),
                 ..Default::default()
-            }),
-            ..Default::default()
+            })
         };
         assert!(seal_proxy(&mut forward(vec!["X-Auth-User".into()], 10)).is_ok());
         assert!(matches!(
@@ -262,15 +265,14 @@ mod tests {
     #[test]
     fn header_rules_are_validated() {
         use r3v3rs3_api::header_rules::HeaderRule;
-        let remove = |name: &str| Proxy {
-            kind: ProxyKind::Http(HttpProxy {
-                headers: Box::new(HeaderRules {
+        let remove = |name: &str| {
+            http_proxy(HttpProxy {
+                headers: HeaderRules {
                     request: vec![HeaderRule::Remove { name: name.into() }],
                     response: vec![],
-                }),
+                },
                 ..Default::default()
-            }),
-            ..Default::default()
+            })
         };
         assert!(seal_proxy(&mut remove("X-Secret")).is_ok());
         assert!(matches!(

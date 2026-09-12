@@ -22,6 +22,12 @@ default-run = "r3v3rs3"
 anyhow = "1.0.71"
 arc-swap = "1.6.0"
 argon2 = "0.5.0"
+async-compression = { version = "0.4.22", features = [
+    "tokio",
+    "gzip",
+    "brotli",
+    "zstd",
+] }
 async-trait = "0.1.71"
 axum = { version = "0.8.1", features = ["ws", "multipart"] }
 axum-extra = { version = "0.10.0", features = ["cookie"] }
@@ -106,6 +112,7 @@ tokio-rustls = { version = "0.26.0", default-features = false, features = [
     "ring",
 ] }
 tokio-stream = { version = "0.1.14", features = ["sync", "net"] }
+tokio-util = { version = "0.7.14", features = ["io"] }
 toml = "0.8.8"
 toml_edit = { version = "0.22.9", features = ["serde"] }
 totp-rs = { version = "5.1.0", features = ["gen_secret", "zeroize"] }

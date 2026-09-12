@@ -5,6 +5,7 @@ use super::header_rules::CompiledHeaderRules;
 use super::rate_limit::{self, ClientRateLimiter};
 use hyper::Request;
 use r3v3rs3_api::{
+    compression::Compression,
     id::ShortId,
     policy::IpFilter,
     proxy::{ProxyEntry, ProxyKind, Server},
@@ -29,7 +30,7 @@ impl Router {
         for (id, http) in proxies
             .into_iter()
             .filter_map(|entry| match entry.proxy.kind {
-                ProxyKind::Http(http) => Some((entry.id, http)),
+                ProxyKind::Http(http) => Some((entry.id, *http)),
                 _ => None,
             })
         {
@@ -38,6 +39,7 @@ impl Router {
             let proxy_rate_limiter = rate_limit::limiter((id, None), http.rate_limit);
             let proxy_auth = Authenticator::new(http.auth, tls_client_config, sessions);
             let proxy_header_rules = Arc::new(CompiledHeaderRules::new(&http.headers));
+            let compression = (!http.compression.is_disabled()).then(|| Arc::new(http.compression));
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 let base_path = filter
@@ -76,6 +78,7 @@ impl Router {
                     rate_limiter,
                     auth,
                     header_rules,
+                    compression: compression.clone(),
                 });
             }
         }
@@ -111,6 +114,8 @@ pub struct FilteredRoute {
     pub rate_limiter: Option<Arc<ClientRateLimiter>>,
     pub auth: Option<Arc<Authenticator>>,
     pub header_rules: Arc<CompiledHeaderRules>,
+    /// `None` when the proxy has no compression algorithm.
+    pub compression: Option<Arc<Compression>>,
 }
 
 #[derive(Debug)]

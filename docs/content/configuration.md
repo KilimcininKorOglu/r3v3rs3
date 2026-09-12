@@ -246,6 +246,42 @@ headers = { request = [{ action = "set", name = "X-Request-Id", value = "{reques
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+## Compression
+
+You can compress proxied responses in the "Compression" section. Select one or more encodings to enable compression. Select no encoding to disable compression.
+
+| Encoding | `Content-Encoding` | Level |
+|---|---|---|
+| Brotli | `br` | Quality 4 |
+| Zstandard | `zstd` | Level 3 |
+| Gzip | `gzip` | Level 6 |
+
+r3v3rs3 reads the `Accept-Encoding` header of the request and uses the accepted encoding with the highest `q` value. When the client accepts several encodings with the same `q` value, r3v3rs3 uses the order of `algorithms`. In the panel, the order in which you select the encodings sets this order.
+
+r3v3rs3 compresses a response only when all of these conditions are true:
+
+- The status is not `1xx`, `204 No Content`, `206 Partial Content` or `304 Not Modified`.
+- The upstream server did not encode the response, and the response has no `Content-Range` header.
+- `Cache-Control` does not contain `no-transform`.
+- The media type of `Content-Type` is in `mime_types`. `text/*` matches every text type. r3v3rs3 never compresses `text/event-stream`, because compression holds server-sent events back.
+- `Content-Length` is equal to or larger than `min_size`. r3v3rs3 compresses a streamed response without `Content-Length`.
+
+When a response meets these conditions, r3v3rs3 adds `Accept-Encoding` to `Vary`. When r3v3rs3 compresses the response, it also removes `Content-Length` and `Accept-Ranges`, and changes a strong `ETag` to a weak `ETag`. The response header rules run before compression, so a rule can set `Cache-Control: no-transform` to stop compression.
+
+| Setting | Default |
+|---|---|
+| `algorithms` | Empty. Compression is disabled. |
+| `min_size` | `1024` bytes |
+| `mime_types` | `text/*`, `application/javascript`, `application/json`, `application/manifest+json`, `application/wasm`, `application/xml`, `application/xhtml+xml`, `application/rss+xml`, `application/atom+xml`, `image/svg+xml`, `font/otf`, `font/ttf` |
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+compression = { algorithms = ["br", "zstd", "gzip"], min_size = 1024, mime_types = ["text/*", "application/json"] }
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
+```
+
 ## HTTP/2
 
 r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).

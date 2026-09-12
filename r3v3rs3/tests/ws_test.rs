@@ -38,7 +38,7 @@ async fn ws_proxy() -> anyhow::Result<()> {
             id: "test2".parse().unwrap(),
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
-                kind: ProxyKind::Http(HttpProxy {
+                kind: ProxyKind::Http(Box::new(HttpProxy {
                     vhosts: vec!["localhost".parse().unwrap()],
                     routes: vec![Route {
                         path: "/".into(),
@@ -56,7 +56,8 @@ async fn ws_proxy() -> anyhow::Result<()> {
                     rate_limit: Default::default(),
                     auth: Default::default(),
                     headers: Default::default(),
-                }),
+                    compression: Default::default(),
+                })),
                 ..Default::default()
             },
         }])

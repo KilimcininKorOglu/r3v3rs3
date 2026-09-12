@@ -1,6 +1,9 @@
 use super::auth_config::{AuthConfig, AuthForm};
 use r3v3rs3_api::cidr::{format_cidr_list, parse_cidr_list};
 use r3v3rs3_api::client_ip::ClientIpConfig;
+use r3v3rs3_api::compression::{
+    format_mime_list, parse_mime_list, Compression, CompressionAlgorithm,
+};
 use r3v3rs3_api::header_rules::{format_header_rules, parse_header_rules, HeaderRules};
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
@@ -39,6 +42,7 @@ struct ProxyForm {
     auth: AuthForm,
     request_headers: String,
     response_headers: String,
+    compression: CompressionForm,
 }
 
 impl ProxyForm {
@@ -59,6 +63,25 @@ impl ProxyForm {
             auth: AuthForm::new(&proxy.auth),
             request_headers: format_header_rules(&proxy.headers.request),
             response_headers: format_header_rules(&proxy.headers.response),
+            compression: CompressionForm::new(&proxy.compression),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct CompressionForm {
+    /// Selected algorithms in the order of preference.
+    algorithms: Vec<CompressionAlgorithm>,
+    min_size: String,
+    mime_types: String,
+}
+
+impl CompressionForm {
+    fn new(compression: &Compression) -> Self {
+        Self {
+            algorithms: compression.algorithms.clone(),
+            min_size: compression.min_size.to_string(),
+            mime_types: format_mime_list(&compression.mime_types),
         }
     }
 }
@@ -221,6 +244,11 @@ pub fn http_proxy_config(props: &Props) -> Html {
             ) }
             { error_view(errors.get("headers")) }
             <p class={HINT_CLASS}>{"One rule per line: set Name: value, append Name: value or remove Name. Values can use {client_ip}, {host}, {scheme}, {request_id} and {route}. Write {{ and }} for a literal brace. Request rules change the request to the upstream server. Response rules change the upstream response."}</p>
+
+            <label class={SECTION_CLASS}>{"Compression"}</label>
+            { compression_view(&form) }
+            { error_view(errors.get("compression")) }
+            <p class={HINT_CLASS}>{"Compresses upstream responses for clients that accept a selected encoding. When a client accepts several encodings equally, the first selected encoding wins. Responses that are already encoded, partial, smaller than the minimum size, not in the media types or marked Cache-Control: no-transform are not compressed. Select no encoding to disable compression."}</p>
 
             <label class={SECTION_CLASS}>{"Routes"}</label>
 
@@ -389,6 +417,48 @@ fn header_rules_view(
     }
 }
 
+fn compression_view(form: &UseStateHandle<ProxyForm>) -> Html {
+    html! {
+        <>
+            <div class="flex flex-wrap gap-x-6">
+                { for CompressionAlgorithm::ALL.into_iter().map(|algorithm| toggle(
+                    algorithm_input(form, algorithm),
+                    form.compression.algorithms.contains(&algorithm),
+                    algorithm.label(),
+                    "mt-4",
+                )) }
+            </div>
+            <div class="grid grid-cols-3 gap-4">
+                <div>
+                    <label class={LABEL_CLASS}>{"Minimum Size (Bytes)"}</label>
+                    <input type="number" min="0" value={form.compression.min_size.clone()} onchange={state_input(form, text, |form, value| form.compression.min_size = value)} class={INPUT_CLASS} />
+                </div>
+                <div class="col-span-2">
+                    <label class={LABEL_CLASS}>{"Media Types"}</label>
+                    <input type="text" autocapitalize="off" placeholder="text/*, application/json" value={form.compression.mime_types.clone()} onchange={state_input(form, text, |form, value| form.compression.mime_types = value)} class={INPUT_CLASS} />
+                </div>
+            </div>
+        </>
+    }
+}
+
+/// Adds the algorithm to the end of the preference order, or removes it.
+fn algorithm_input(
+    form: &UseStateHandle<ProxyForm>,
+    algorithm: CompressionAlgorithm,
+) -> Callback<Event> {
+    let form = form.clone();
+    Callback::from(move |event: Event| {
+        let mut next = (*form).clone();
+        let algorithms = &mut next.compression.algorithms;
+        algorithms.retain(|value| *value != algorithm);
+        if checked(&event) {
+            algorithms.push(algorithm);
+        }
+        form.set(next);
+    })
+}
+
 fn rate_limit_view(
     limit: &RateLimitForm,
     on_requests: Callback<Event>,
@@ -535,6 +605,7 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
         "headers",
         &mut errors,
     );
+    let compression = parse_compression(&form.compression, "compression", &mut errors);
 
     if !errors.is_empty() {
         return Err(errors);
@@ -550,8 +621,31 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
         ip_filter,
         rate_limit,
         auth,
-        headers: Box::new(headers),
+        headers,
+        compression,
     })
+}
+
+fn parse_compression(
+    form: &CompressionForm,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> Compression {
+    Compression {
+        algorithms: form.algorithms.clone(),
+        min_size: or_error(parse_size(&form.min_size), key, errors),
+        mime_types: or_error(parse_mime_list(&form.mime_types), key, errors),
+    }
+}
+
+fn parse_size(value: &str) -> Result<u64, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(0);
+    }
+    value
+        .parse()
+        .map_err(|_| "Minimum size must be a whole number of bytes".to_string())
 }
 
 /// Returns the parsed value, or records the error under `key` and returns the default value.

@@ -56,7 +56,7 @@ async fn header_rules_change_requests_and_responses() -> anyhow::Result<()> {
             http_route("/", &upstream.url(), None),
         ],
         upgrade_insecure: false,
-        headers: Box::new(HeaderRules {
+        headers: HeaderRules {
             request: rules(&[
                 "set X-Client: {client_ip}",
                 "set X-Info: {scheme} {route} {{literal}}",
@@ -68,7 +68,7 @@ async fn header_rules_change_requests_and_responses() -> anyhow::Result<()> {
                 "remove Server",
                 "append Vary: Accept",
             ]),
-        }),
+        },
         ..Default::default()
     };
     let config = TestStorage::builder()

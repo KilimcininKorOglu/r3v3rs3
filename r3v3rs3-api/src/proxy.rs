@@ -1,4 +1,5 @@
 use crate::client_ip::ClientIpConfig;
+use crate::compression::Compression;
 use crate::error::Error;
 use crate::header_rules::HeaderRules;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
@@ -30,14 +31,15 @@ fn default_active() -> bool {
 }
 
 fn default_kind() -> ProxyKind {
-    ProxyKind::Http(HttpProxy::default())
+    ProxyKind::Http(Box::default())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "protocol", rename_all = "snake_case")]
 pub enum ProxyKind {
     Tcp(TcpProxy),
-    Http(HttpProxy),
+    /// Boxed, because the HTTP policies make this variant much larger than the others.
+    Http(Box<HttpProxy>),
     Udp(UdpProxy),
 }
 
@@ -72,9 +74,12 @@ pub struct HttpProxy {
     /// Default authentication for every route of this proxy.
     #[serde(default, skip_serializing_if = "AuthPolicy::is_none")]
     pub auth: AuthPolicy,
-    /// Default header rules for every route of this proxy. Boxed, so that `ProxyKind` stays small.
+    /// Default header rules for every route of this proxy.
     #[serde(default, skip_serializing_if = "HeaderRules::is_empty")]
-    pub headers: Box<HeaderRules>,
+    pub headers: HeaderRules,
+    /// Response compression for every route of this proxy.
+    #[serde(default, skip_serializing_if = "Compression::is_disabled")]
+    pub compression: Compression,
 }
 
 fn upgrade_insecure_default() -> bool {

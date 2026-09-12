@@ -225,7 +225,7 @@ pub fn http_proxy_entry(id: &str, port_id: &str, http: HttpProxy) -> ProxyEntry 
         id: id.parse().unwrap(),
         proxy: Proxy {
             ports: vec![port_id.parse().unwrap()],
-            kind: ProxyKind::Http(http),
+            kind: ProxyKind::Http(Box::new(http)),
             ..Default::default()
         },
     }

@@ -101,7 +101,7 @@ async fn http_proxy() -> anyhow::Result<()> {
             id: "test2".parse().unwrap(),
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
-                kind: ProxyKind::Http(HttpProxy {
+                kind: ProxyKind::Http(Box::new(HttpProxy {
                     vhosts: vec![
                         "localhost".parse().unwrap(),
                         "^([a-z]+\\.)+my\\.vow$".parse().unwrap(),
@@ -134,7 +134,8 @@ async fn http_proxy() -> anyhow::Result<()> {
                     rate_limit: Default::default(),
                     auth: Default::default(),
                     headers: Default::default(),
-                }),
+                    compression: Default::default(),
+                })),
                 ..Default::default()
             },
         }])
@@ -268,7 +269,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
             id: "test2".parse().unwrap(),
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap(), "secure".parse().unwrap()],
-                kind: ProxyKind::Http(HttpProxy {
+                kind: ProxyKind::Http(Box::new(HttpProxy {
                     vhosts: vec!["localhost".parse().unwrap()],
                     routes: vec![Route {
                         path: "/".into(),
@@ -286,7 +287,8 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     rate_limit: Default::default(),
                     auth: Default::default(),
                     headers: Default::default(),
-                }),
+                    compression: Default::default(),
+                })),
                 ..Default::default()
             },
         }])
@@ -346,7 +348,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
             id: "test2".parse().unwrap(),
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
-                kind: ProxyKind::Http(HttpProxy {
+                kind: ProxyKind::Http(Box::new(HttpProxy {
                     vhosts: vec!["localhost".parse().unwrap()],
                     routes: vec![Route {
                         path: "/".into(),
@@ -364,7 +366,8 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     rate_limit: Default::default(),
                     auth: Default::default(),
                     headers: Default::default(),
-                }),
+                    compression: Default::default(),
+                })),
                 ..Default::default()
             },
         }])

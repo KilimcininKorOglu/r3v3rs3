@@ -11,6 +11,7 @@ use sailfish::TemplateOnce;
 use std::{iter, net::IpAddr, sync::Arc};
 
 use super::client_ip::{ClientAddr, CLIENT_IP_HEADERS};
+use super::compression::ResponseCompression;
 use super::error::{error_headers, map_error, ErrorTemplate};
 use super::header_rules::{CompiledHeaderRules, HeaderVariables};
 
@@ -179,6 +180,7 @@ pub struct ResponseRewriter {
     quic_port: Option<u16>,
     /// Response header rules of the route and the variable values of the request.
     header_rules: Option<(Arc<CompiledHeaderRules>, HeaderVariables)>,
+    compression: Option<ResponseCompression>,
 }
 
 impl ResponseRewriter {
@@ -203,7 +205,12 @@ impl ResponseRewriter {
                 if let Some((rules, variables)) = &self.header_rules {
                     rules.apply_response(res.headers_mut(), variables);
                 }
-                Ok(res.map(|body| BoxBody::new(body)))
+                // Compression runs after the header rules, so a rule can add `no-transform`.
+                let res = res.map(|body| BoxBody::new(body));
+                Ok(match &self.compression {
+                    Some(compression) => compression.apply(res),
+                    None => res,
+                })
             }
             Err(err) => error_response(err),
         }
@@ -261,6 +268,11 @@ impl ResponseRewriterBuilder {
         variables: HeaderVariables,
     ) -> Self {
         self.inner.header_rules = Some((rules, variables));
+        self
+    }
+
+    pub fn compression(mut self, compression: Option<ResponseCompression>) -> Self {
+        self.inner.compression = compression;
         self
     }
 

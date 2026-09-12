@@ -104,6 +104,12 @@ pub enum Error {
     #[error("invalid header rule: {rule}")]
     InvalidHeaderRule { rule: String },
 
+    #[error("invalid media type: {mime}")]
+    InvalidMimeType { mime: String },
+
+    #[error("compression algorithm is listed more than once: {algorithm}")]
+    DuplicateCompressionAlgorithm { algorithm: String },
+
     #[error("timeout must be greater than zero")]
     InvalidTimeout,
 
