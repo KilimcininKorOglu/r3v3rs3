@@ -1,0 +1,110 @@
+use crate::{
+    auth::use_ensure_auth, components::proxy_config::ProxyConfig, pages::Route, store::ProxyStore,
+    API_ENDPOINT,
+};
+use gloo_net::http::Request;
+use std::collections::HashMap;
+use r3v3rs3_api::{
+    id::ShortId,
+    proxy::{Proxy, ProxyEntry},
+};
+use yew::prelude::*;
+use yew_router::prelude::*;
+use yewdux::prelude::*;
+
+#[derive(Properties, PartialEq)]
+pub struct Props {
+    pub id: ShortId,
+}
+
+#[function_component(ProxyView)]
+pub fn proxy_view(props: &Props) -> Html {
+    use_ensure_auth();
+
+    let (proxies, _) = use_store::<ProxyStore>();
+    let site = use_state(|| proxies.entries.iter().find(|e| e.id == props.id).cloned());
+    let id = props.id;
+    let proxy_cloned = site.clone();
+    use_effect_with((),move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Ok(entry) = get_site(id).await {
+                proxy_cloned.set(Some(entry));
+            }
+        });
+    });
+
+    let navigator = use_navigator().unwrap();
+
+    let navigator_cloned = navigator.clone();
+    let cancel_onclick = Callback::from(move |_| {
+        navigator_cloned.push(&Route::Proxies);
+    });
+
+    let entry = use_state::<Result<Proxy, HashMap<String, String>>, _>(|| Err(Default::default()));
+    let entry_cloned = entry.clone();
+    let onchanged: Callback<Result<Proxy, HashMap<String, String>>> =
+        Callback::from(move |updated| {
+            entry_cloned.set(updated);
+        });
+
+    let is_loading = use_state(|| false);
+
+    let id = props.id;
+    let entry_cloned = entry.clone();
+    let is_loading_cloned = is_loading;
+    let onsubmit = Callback::from(move |event: SubmitEvent| {
+        event.prevent_default();
+        if *is_loading_cloned {
+            return;
+        }
+        let navigator = navigator.clone();
+        let is_loading_cloned = is_loading_cloned.clone();
+        if let Ok(entry) = (*entry_cloned).clone() {
+            is_loading_cloned.set(true);
+            wasm_bindgen_futures::spawn_local(async move {
+                if update_site(id, &entry).await.is_ok() {
+                    navigator.push(&Route::Proxies);
+                }
+                is_loading_cloned.set(false);
+            });
+        }
+    });
+
+    html! {
+        <>
+            if let Some(proxy_entry) = &*site {
+                <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 lg:rounded-md">
+                    <ProxyConfig proxy={proxy_entry.proxy.clone()} {onchanged} />
+
+                    <div class="flex mt-4 items-center justify-end">
+                        <button type="button" onclick={cancel_onclick} class="mr-2 inline-flex items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                            {"Cancel"}
+                        </button>
+                        <button type="submit" disabled={entry.is_err()} class="inline-flex items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                            {"Update"}
+                        </button>
+                    </div>
+                </form>
+            } else {
+                <Redirect<Route> to={Route::Proxies}/>
+            }
+        </>
+    }
+}
+
+async fn get_site(id: ShortId) -> Result<ProxyEntry, gloo_net::Error> {
+    Request::get(&format!("{API_ENDPOINT}/proxies/{id}"))
+        .send()
+        .await?
+        .json()
+        .await
+}
+
+async fn update_site(id: ShortId, entry: &Proxy) -> Result<(), gloo_net::Error> {
+    Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
+        .json(entry)?
+        .send()
+        .await?
+        .json()
+        .await
+}

@@ -1,0 +1,136 @@
+[package]
+name = "r3v3rs3"
+version = "0.3.40"
+edition = "2021"
+include = ["/src", "/templates", "/build.rs", "/LICENSE", "/dist/webui"]
+build = "build.rs"
+description = "A reverse proxy server with built-in WebUI, supporting TCP/UDP/HTTP/TLS/WebSocket."
+authors = ["picoHz <picoHz@outlook.com>", "KilimcininKorOglu"]
+keywords = ["tcp", "http", "tls", "proxy", "reverse-proxy"]
+categories = [
+    "network-programming",
+    "web-programming",
+    "web-programming::websocket",
+]
+license = "MIT"
+repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
+homepage = "https://kilimcininkoroglu.github.io/r3v3rs3/"
+readme = "../README.md"
+default-run = "r3v3rs3"
+
+[dependencies]
+anyhow = "1.0.71"
+arc-swap = "1.6.0"
+argon2 = "0.5.0"
+async-trait = "0.1.71"
+axum = { version = "0.8.1", features = ["ws", "multipart"] }
+axum-extra = { version = "0.10.0", features = ["cookie"] }
+axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
+backoff = { version = "0.4.0", features = ["tokio"] }
+base64 = "0.22.1"
+bytes = "1.8.0"
+clap = { version = "4.3.11", features = ["derive", "env"] }
+dashmap = "6.0.1"
+directories = "6.0.0"
+flate2 = "1.0.26"
+fnv = "1.0.7"
+futures = "0.3.28"
+globwalk = "0.9.1"
+h3 = "0.0.7"
+h3-quinn = "0.0.9"
+hex = "0.4.3"
+hickory-resolver = { version = "0.24.1", features = [
+    "tokio-runtime",
+    "system-config",
+] }
+http-body-util = "0.1.2"
+humantime-serde = "1.1.1"
+hyper = { version = "1.4.1", features = ["full"] }
+hyper-util = { version = "0.1.10", features = [
+    "full",
+    "http1",
+    "http2",
+    "server",
+] }
+include_dir = "0.7.3"
+indexmap = { version = "2.0.0", features = ["serde"] }
+instant-acme = "0.7.1"
+log = "0.4.19"
+mime_guess = "2.0.4"
+network-interface = "2.0.0"
+once_cell = "1.18.0"
+percent-encoding = "2.3.0"
+phf = { version = "0.11.2", features = ["macros"] }
+pin-project-lite = "0.2.10"
+pkcs8 = { version = "0.10.2", features = ["pem"] }
+quinn = { version = "0.11.6", default-features = false, features = [
+    "runtime-tokio",
+    "rustls",
+    "ring",
+] }
+rand = "0.8.5"
+rcgen = { version = "0.13.0", features = ["pem", "x509-parser"] }
+rpassword = "7.2.0"
+rustls-native-certs = "0.8.0"
+rustls-pemfile = "2.0.0"
+sailfish = "0.9.0"
+serde = { version = "1.0.171", features = ["rc"] }
+serde_default = "0.2.0"
+serde_derive = "1.0.171"
+serde_json = "1.0.102"
+serde_qs = "0.14.0"
+sha2 = "0.10.7"
+shellexpand = "3.1.0"
+socket2 = "0.5.9"
+sqlx = { version = "0.8.2", features = [
+    "runtime-tokio-rustls",
+    "sqlite",
+    "time",
+] }
+tar = "0.4.38"
+r3v3rs3-api = { version = "0.2.2" }
+thiserror = "2.0.0"
+time = { version = "0.3.36", features = ["serde"] }
+tokio = { version = "1.29.1", features = [
+    "macros",
+    "rt-multi-thread",
+    "net",
+    "signal",
+    "io-util",
+] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = [
+    "tls12",
+    "ring",
+] }
+tokio-stream = { version = "0.1.14", features = ["sync", "net"] }
+toml = "0.8.8"
+toml_edit = { version = "0.22.9", features = ["serde"] }
+totp-rs = { version = "5.1.0", features = ["gen_secret", "zeroize"] }
+tower-service = "0.3.3"
+tower_governor = "0.6.0"
+tracing = { version = "0.1.37", features = ["release_max_level_info"] }
+tracing-appender = "0.2.2"
+tracing-subscriber = { version = "0.3.17", features = ["json"] }
+url = { version = "2.4.0", features = ["serde"] }
+utoipa = "5.2.0"
+webpki = "0.22.4"
+x509-parser = "0.17.0"
+
+[build-dependencies]
+built = "0.6.1"
+
+[dev-dependencies]
+mockito = "1.6.1"
+net2 = "0.2.39"
+reqwest = { version = "0.12.1", default-features = false, features = [
+    "rustls-tls",
+    "gzip",
+    "brotli",
+    "json",
+    "stream",
+    "http2",
+    "hickory-dns",
+] }
+tokio-tungstenite = { version = "0.26.0", features = [
+    "rustls-tls-native-roots",
+] }

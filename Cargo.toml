@@ -1,0 +1,21 @@
+[workspace]
+members = ["r3v3rs3", "r3v3rs3-api", "r3v3rs3-webui"]
+resolver = "2"
+
+[patch.crates-io]
+r3v3rs3-api = { path = "./r3v3rs3-api" }
+
+[profile.release]
+strip = true
+lto = true
+
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.web-release]
+inherits = "release"
+opt-level = 'z'
+panic = 'abort'
+strip = true
+lto = true
+codegen-units = 1

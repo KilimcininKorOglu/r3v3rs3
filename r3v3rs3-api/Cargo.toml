@@ -1,0 +1,30 @@
+[package]
+name = "r3v3rs3-api"
+description = "Type definitions and API for r3v3rs3"
+version = "0.2.2"
+edition = "2021"
+authors = ["picoHz <picoHz@outlook.com>", "KilimcininKorOglu"]
+keywords = ["tcp", "http", "tls", "proxy", "reverse-proxy"]
+categories = [
+    "network-programming",
+    "web-programming",
+    "web-programming::websocket",
+]
+license = "MIT"
+repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
+homepage = "https://kilimcininkoroglu.github.io/r3v3rs3/"
+
+[dependencies]
+base64 = "0.22.1"
+hex = "0.4.3"
+humantime-serde = "1.1.1"
+regex = "1.11.1"
+rustls-pki-types = "1.10.0"
+serde = { version = "1.0.171", features = ["rc"] }
+serde_default = "0.2.0"
+serde_derive = "1.0.171"
+serde_json = "1.0.102"
+thiserror = "2.0.0"
+time = "0.3.36"
+url = { version = "2.4.0", features = ["serde"] }
+utoipa = "5.2.0"

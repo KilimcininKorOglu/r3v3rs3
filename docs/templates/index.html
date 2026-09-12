@@ -1,0 +1,81 @@
+{% extends "juice/templates/index.html" %}
+{% block hero %}
+<section class="text-center">
+    <h1 class="heading-text">
+        <span class="r3v3rs3-name">r3v3rs3:</span> Every Protocol, One Binary
+    </h1>
+    <h3 class="title-text">
+        A reverse proxy server with built-in WebUI.
+    </h3>
+    <img class="hero-image" style="width: 70%" src="{{ get_url(path="screenshot.png") }}">
+</section>
+
+<div class="explore-more text" onclick="document.getElementById('features').scrollIntoView({behavior: 'smooth'})">
+    Getting Started ⤵︎
+</div>
+<style>
+    .heading-text {
+        font-size: 50px;
+        line-height: 65px;
+    }
+
+    .hero section {
+        padding: 0 5rem;
+    }
+
+    .r3v3rs3-name {
+        color: var(--primary-color);
+        background-color: var(--primary-text-color);
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.5rem;
+    }
+
+    @media screen and (max-width: 640px) {
+        .hero section {
+            padding: 0;
+        }
+
+        .hero-image {
+            display: none
+        }
+    }
+
+    .hero-image {
+        border: 1px solid var(--primary-text-color);
+        border-radius: 12px;
+    }
+</style>
+{% endblock hero %}
+
+{% block favicon %}
+<link rel="apple-touch-icon" sizes="180x180" href="{{ get_url(path=" apple-touch-icon.png") }}">
+<link rel="icon" type="image/png" sizes="32x32" href="{{ get_url(path=" favicon-32x32.png") }}">
+<link rel="icon" type="image/png" sizes="16x16" href="{{ get_url(path=" favicon-16x16.png") }}">
+<meta name="msapplication-TileColor" content="#ffc40d">
+<meta name="theme-color" content="#ffffff">
+<meta name="description"
+    content="A reverse proxy server with built-in WebUI, supporting TCP/UDP/HTTP/TLS/WebSocket, written in Rust.">
+<meta property="og:url" content="https://kilimcininkoroglu.github.io/r3v3rs3/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="r3v3rs3: Every Protocol, One Binary">
+<meta property="og:description"
+    content="A reverse proxy server with built-in WebUI, supporting TCP/UDP/HTTP/TLS/WebSocket, written in Rust.">
+<meta property="og:image"
+    content="https://repository-images.githubusercontent.com/619484425/70ac8b2b-6a44-4bb6-bb0c-f80ca00987d8">
+{% endblock favicon %}
+
+{% block fonts %}
+<link href="https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@400;800&display=swap" rel="stylesheet">
+{% endblock fonts %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ get_url(path=" r3v3rs3.css") }}">
+{% endblock head %}
+
+{% block footer %}
+<footer>
+    <small class="subtext">
+        Zola theme by <a href="https://huhu.io">Huhu.io</a> © 2021
+    </small>
+</footer>
+{% endblock footer %}

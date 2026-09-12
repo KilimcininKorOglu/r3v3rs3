@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gateway Error</title>
+    <style>
+        :root {
+            --background-color: #f6f6f6;
+            --text-color: #303030;
+            --link-color: #808080;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --background-color: #121212;
+                --text-color: #e0e0e0;
+                --link-color: #bbbbbb;
+            }
+        }
+
+        html {
+            background-color: var(--background-color);
+            height: 100%;
+        }
+        
+        body {
+            height: 100%;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: Arial, sans-serif;
+        }
+
+        .error-container {
+            text-align: center;
+        }
+
+        .error-code, .error-text {
+            color: var(--text-color);
+        }
+
+        .error-code {
+            font-size: 48px;
+        }
+
+        .error-text {
+            font-size: 24px;
+        }
+
+        .powered-by {
+            margin-top: 20px;
+        }
+
+        .powered-by a {
+            font-size: 14px;
+            color: var(--link-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-code"><%= self.code %></div>
+        <% if self.code == 523 { %>
+            <div class="error-text">Origin Is Unreachable</div>
+        <% } else if self.code == 525 { %>
+            <div class="error-text">SSL Handshake Failed</div>
+        <% } else if self.code == 526 { %>
+            <div class="error-text">Invalid SSL Certificate</div>
+        <% } else if self.code == 421 { %>
+            <div class="error-text">Misdirected Request</div>
+        <% } else { %>
+            <div class="error-text">Bad Gateway</div>
+        <% } %>
+        <div class="powered-by">
+            <a href="https://github.com/KilimcininKorOglu/r3v3rs3" target="_blank" rel="noopener noreferrer">Powered by r3v3rs3</a>
+        </div>
+    </div>
+</body>
+</html>
