@@ -31,6 +31,24 @@ r3v3rs3 supports three types of proxies:
 
 Multiple ports can be bound to a proxy. However, it's not possible to bind TCP / TCP over TLS ports to an HTTP / HTTPS proxy and vice versa.
 
+## Client IP
+
+Behind a CDN or a load balancer, the TCP peer of r3v3rs3 is the edge server, not the visitor. r3v3rs3 resolves the real client IP only when the peer is trusted:
+
+- **Known CDNs**: Cloudflare, Fastly, Amazon CloudFront, Bunny CDN, Gcore, KeyCDN, Imperva and Google Cloud Load Balancing. This is enabled by default. Turn off "Trust Client IP Headers from Known CDNs" in the proxy settings to disable it.
+- **Trusted Proxies**: IP addresses or CIDR blocks that you add to the proxy, for example a local load balancer.
+
+For a trusted peer, r3v3rs3 reads the client IP in this order:
+
+1. The provider header: `CF-Connecting-IP` for Cloudflare, `X-Real-IP` for Bunny CDN, `CloudFront-Viewer-Address` for Amazon CloudFront.
+2. The rightmost address in `X-Forwarded-For` that is not a trusted proxy or a known CDN edge.
+
+r3v3rs3 then sends the resolved address to the upstream server in `X-Real-IP` and keeps the incoming `X-Forwarded-For` and `Forwarded` chains. For an untrusted peer, r3v3rs3 removes `Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP`, `CloudFront-Viewer-Address`, `Fastly-Client-IP` and `Incap-Client-IP`, because the client can forge them.
+
+The CDN IP ranges are compiled into the binary and downloaded again every day. The last downloaded list is saved to `cdn-ranges.json` in the configuration directory. If a download fails, r3v3rs3 keeps the last known list. The "Settings" section shows the list status and has a "Refresh Now" button.
+
+Akamai does not publish its edge IP ranges. Add your Akamai Site Shield ranges to "Trusted Proxies" instead.
+
 ## HTTP/2
 
 r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).

@@ -1,4 +1,4 @@
-.PHONY: all build release webui webui-release test test-api test-server lint fmt fmt-check check run clean
+.PHONY: all build release webui webui-release test test-api test-server lint fmt fmt-check check run clean cdn-snapshot
 
 CARGO ?= cargo
 TRUNK ?= trunk
@@ -40,6 +40,10 @@ check: fmt-check lint test webui
 
 run:
 	$(CARGO) run --bin r3v3rs3 -- start
+
+# Downloads the CDN IP ranges into r3v3rs3/data/cdn-ranges.json.
+cdn-snapshot:
+	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --lib cdn::fetch::tests::update_embedded_snapshot -- --ignored --exact
 
 clean:
 	$(CARGO) clean

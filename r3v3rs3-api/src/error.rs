@@ -35,6 +35,12 @@ pub enum Error {
     #[error("invalid server url: {url}")]
     InvalidServerUrl { url: String },
 
+    #[error("invalid CIDR block: {cidr}")]
+    InvalidCidr { cidr: String },
+
+    #[error("failed to refresh CDN IP ranges")]
+    FailedToRefreshCdnRanges,
+
     #[error("invalid multiaddr: {addr}")]
     InvalidMultiaddr { addr: String },
 

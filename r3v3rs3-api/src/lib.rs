@@ -1,7 +1,10 @@
 pub mod acme;
 pub mod app;
 pub mod auth;
+pub mod cdn;
 pub mod cert;
+pub mod cidr;
+pub mod client_ip;
 pub mod error;
 pub mod event;
 pub mod id;

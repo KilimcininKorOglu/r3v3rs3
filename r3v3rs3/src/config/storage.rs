@@ -1,3 +1,4 @@
+use crate::cdn::CdnRanges;
 use crate::certs::{acme::AcmeEntry, Cert};
 use r3v3rs3_api::{
     app::AppConfig,
@@ -25,4 +26,6 @@ pub trait Storage: Send + Sync + 'static {
     async fn load_certs(&self) -> Vec<Arc<Cert>>;
     async fn add_account(&self, name: &str, password: &str, totp: bool) -> Result<Account, Error>;
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error>;
+    async fn save_cdn_ranges(&self, ranges: &CdnRanges);
+    async fn load_cdn_ranges(&self) -> Option<CdnRanges>;
 }

@@ -1,4 +1,5 @@
 use super::{build_info, storage::Storage};
+use crate::cdn::CdnRanges;
 use crate::certs::{
     acme::{AcmeAccount, AcmeEntry},
     Cert,
@@ -53,6 +54,18 @@ impl FileStorage {
         Self {
             dir: dir.to_owned(),
         }
+    }
+
+    async fn save_cdn_ranges_impl(&self, path: &Path, ranges: &CdnRanges) -> anyhow::Result<()> {
+        fs::create_dir_all(&self.dir).await?;
+        info!(?path, "save CDN IP ranges");
+        fs::write(path, serde_json::to_vec(ranges)?).await?;
+        Ok(())
+    }
+
+    async fn load_cdn_ranges_impl(&self, path: &Path) -> anyhow::Result<CdnRanges> {
+        info!(?path, "load CDN IP ranges");
+        Ok(serde_json::from_slice(&fs::read(path).await?)?)
     }
 
     async fn save_app_config_impl(&self, path: &Path, config: &AppConfig) -> anyhow::Result<()> {
@@ -527,6 +540,24 @@ impl Storage for FileStorage {
                 self.verify_password(&request.username, &password).await
             }
             LoginMethod::Totp { token } => self.verify_totp(&request.username, &token).await,
+        }
+    }
+
+    async fn save_cdn_ranges(&self, ranges: &CdnRanges) {
+        let path = self.dir.join("cdn-ranges.json");
+        if let Err(err) = self.save_cdn_ranges_impl(&path, ranges).await {
+            error!(?path, "failed to save: {err}");
+        }
+    }
+
+    async fn load_cdn_ranges(&self) -> Option<CdnRanges> {
+        let path = self.dir.join("cdn-ranges.json");
+        match self.load_cdn_ranges_impl(&path).await {
+            Ok(ranges) => Some(ranges),
+            Err(err) => {
+                warn!(?path, "failed to load: {err}");
+                None
+            }
         }
     }
 }

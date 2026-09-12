@@ -1,4 +1,5 @@
 use crate::{
+    cdn::CdnRanges,
     certs::{acme::AcmeOrder, Cert},
     server::rpc::ErasedRpcMethod,
 };
@@ -18,6 +19,9 @@ pub enum ServerCommand {
         id: usize,
         arg: Box<dyn ErasedRpcMethod>,
     },
+    SetCdnRanges {
+        ranges: CdnRanges,
+    },
 }
 
 impl std::fmt::Debug for ServerCommand {
@@ -33,6 +37,10 @@ impl std::fmt::Debug for ServerCommand {
                 .field("orders", &orders.len())
                 .finish(),
             Self::CallMethod { id, .. } => f.debug_struct("CallMethod").field("id", id).finish(),
+            Self::SetCdnRanges { ranges } => f
+                .debug_struct("SetCdnRanges")
+                .field("updated_at", &ranges.updated_at)
+                .finish(),
         }
     }
 }

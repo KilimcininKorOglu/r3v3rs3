@@ -72,6 +72,10 @@ impl ServerState {
             config: config.clone(),
         });
 
+        if let Some(ranges) = storage.load_cdn_ranges().await {
+            crate::cdn::install(ranges);
+        }
+
         let certs = storage.load_certs().await;
         let acmes = storage.load_acmes().await;
         let proxies = storage.load_proxies().await;
@@ -134,6 +138,11 @@ impl ServerState {
             ServerCommand::CallMethod { id, mut arg } => {
                 let result = arg.call(self).await;
                 let _ = self.callback_sender.send(RpcCallback { id, result }).await;
+            }
+            ServerCommand::SetCdnRanges { ranges } => {
+                if crate::cdn::install(ranges.clone()) {
+                    self.storage.save_cdn_ranges(&ranges).await;
+                }
             }
         }
     }

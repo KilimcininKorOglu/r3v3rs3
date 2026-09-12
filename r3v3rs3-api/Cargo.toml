@@ -18,6 +18,7 @@ homepage = "https://kilimcininkoroglu.github.io/r3v3rs3/"
 base64 = "0.22.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
+ipnet = { version = "2.11.0", features = ["serde"] }
 regex = "1.11.1"
 rustls-pki-types = "1.10.0"
 serde = { version = "1.0.171", features = ["rc"] }

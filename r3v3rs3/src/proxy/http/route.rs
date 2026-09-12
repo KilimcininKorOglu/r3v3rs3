@@ -1,9 +1,11 @@
+use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, RequestFilter};
 use hyper::Request;
 use r3v3rs3_api::{
     id::ShortId,
     proxy::{ProxyEntry, ProxyKind, Server},
 };
+use std::sync::Arc;
 
 #[derive(Default, Debug)]
 pub struct Router {
@@ -20,6 +22,7 @@ impl Router {
                 _ => None,
             })
         {
+            let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             for route in http.routes {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 routes.push(FilteredRoute {
@@ -31,6 +34,7 @@ impl Router {
                     https_port,
                     quic_port,
                     upgrade_insecure: http.upgrade_insecure,
+                    client_ip: client_ip.clone(),
                 });
             }
         }
@@ -59,6 +63,7 @@ pub struct FilteredRoute {
     pub https_port: Option<u16>,
     pub quic_port: Option<u16>,
     pub upgrade_insecure: bool,
+    pub client_ip: Arc<ClientIpResolver>,
 }
 
 #[derive(Debug)]

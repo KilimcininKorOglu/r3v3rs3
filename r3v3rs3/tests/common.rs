@@ -4,6 +4,7 @@ use futures::Future;
 use hickory_resolver::{config::LookupIpStrategy, system_conf::read_system_conf, AsyncResolver};
 use net2::{TcpBuilder, UdpBuilder};
 use r3v3rs3::{
+    cdn::CdnRanges,
     certs::{acme::AcmeEntry, Cert},
     config::{new_appinfo, storage::Storage},
     server::{Server, ServerChannels},
@@ -55,6 +56,7 @@ struct Inner {
     pub certs: HashMap<ShortId, Arc<Cert>>,
     pub acems: HashMap<ShortId, AcmeEntry>,
     pub accounts: HashMap<String, String>,
+    pub cdn_ranges: Option<CdnRanges>,
 }
 
 impl TestStorage {
@@ -145,6 +147,14 @@ impl Storage for TestStorage {
             }
         }
         Err(Error::InvalidLoginCredentials)
+    }
+
+    async fn save_cdn_ranges(&self, ranges: &CdnRanges) {
+        self.inner.lock().await.cdn_ranges = Some(ranges.clone());
+    }
+
+    async fn load_cdn_ranges(&self) -> Option<CdnRanges> {
+        self.inner.lock().await.cdn_ranges.clone()
     }
 }
 

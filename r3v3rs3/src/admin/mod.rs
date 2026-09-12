@@ -41,6 +41,7 @@ use tracing::{trace, warn};
 mod acme;
 mod app_info;
 mod auth;
+mod cdn;
 mod certs;
 mod config;
 mod logs;
@@ -181,6 +182,10 @@ pub async fn start_admin(
 
     let app_info_routes = Router::new().route("/", get(app_info::get));
 
+    let cdn_routes = Router::new()
+        .route("/", get(cdn::get))
+        .route("/refresh", post(cdn::refresh));
+
     let api_routes = Router::new()
         .nest("/events", event_routes)
         .nest("/config", config_routes)
@@ -190,6 +195,7 @@ pub async fn start_admin(
         .nest("/acme", acme_routes)
         .nest("/logs", logs_routes)
         .nest("/app_info", app_info_routes)
+        .nest("/cdn", cdn_routes)
         .route_layer(middleware::from_fn_with_state(
             app_state.clone(),
             auth::verify,

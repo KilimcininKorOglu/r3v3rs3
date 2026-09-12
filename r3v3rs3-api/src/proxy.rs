@@ -1,3 +1,4 @@
+use crate::client_ip::ClientIpConfig;
 use crate::error::Error;
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
@@ -58,6 +59,8 @@ pub struct HttpProxy {
     pub routes: Vec<Route>,
     #[serde(default = "upgrade_insecure_default", skip_serializing_if = "is_true")]
     pub upgrade_insecure: bool,
+    #[serde(default, skip_serializing_if = "ClientIpConfig::is_default")]
+    pub client_ip: ClientIpConfig,
 }
 
 fn upgrade_insecure_default() -> bool {

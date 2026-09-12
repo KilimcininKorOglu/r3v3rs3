@@ -1,12 +1,14 @@
 use crate::{auth::use_ensure_auth, API_ENDPOINT};
-use gloo_net::http::Request;
+use gloo_net::http::{Request, Response};
 use r3v3rs3_api::{
     app::{AdminConfig, AppConfig, LogConfig},
+    cdn::{CdnRangesSource, CdnStatus},
     error::ErrorMessage,
 };
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::{collections::HashMap, net::SocketAddr};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
@@ -50,7 +52,7 @@ impl Fields {
 
 #[derive(Clone, PartialEq)]
 enum Notice {
-    Saved,
+    Success(&'static str),
     Failed(String),
 }
 
@@ -93,7 +95,7 @@ pub fn settings() -> Html {
             let is_loading = is_loading.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 notice.set(Some(match update_config(&config).await {
-                    Ok(()) => Notice::Saved,
+                    Ok(()) => Notice::Success("Settings saved."),
                     Err(message) => Notice::Failed(message),
                 }));
                 is_loading.set(false);
@@ -104,6 +106,7 @@ pub fn settings() -> Html {
     let errors = parsed.clone().err().unwrap_or_default();
 
     html! {
+        <>
         <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 lg:rounded-md">
             { notice_view(&notice) }
 
@@ -126,14 +129,16 @@ pub fn settings() -> Html {
                 </button>
             </div>
         </form>
+        <CdnStatusCard />
+        </>
     }
 }
 
 fn notice_view(notice: &UseStateHandle<Option<Notice>>) -> Html {
     match &**notice {
-        Some(Notice::Saved) => html! {
+        Some(Notice::Success(message)) => html! {
             <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4" role="status">
-                <span class="block sm:inline">{"Settings saved."}</span>
+                <span class="block sm:inline">{*message}</span>
             </div>
         },
         Some(Notice::Failed(message)) => html! {
@@ -220,16 +225,18 @@ fn parse_fields(fields: &Fields) -> Result<AppConfig, HashMap<String, String>> {
         );
     }
     match (admin, log, interval, addr) {
-        (Some(admin), Some(log), Some(interval), Some(addr)) if errors.is_empty() => Ok(AppConfig {
-            background_task_interval: interval.background_task_interval,
-            admin: AdminConfig {
-                session_expiry: admin[0].session_expiry,
-                max_login_attempts,
-                login_attempts_reset: admin[1].login_attempts_reset,
-            },
-            log,
-            http_challenge_addr: addr,
-        }),
+        (Some(admin), Some(log), Some(interval), Some(addr)) if errors.is_empty() => {
+            Ok(AppConfig {
+                background_task_interval: interval.background_task_interval,
+                admin: AdminConfig {
+                    session_expiry: admin[0].session_expiry,
+                    max_login_attempts,
+                    login_attempts_reset: admin[1].login_attempts_reset,
+                },
+                log,
+                http_challenge_addr: addr,
+            })
+        }
         _ => Err(errors),
     }
 }
@@ -250,8 +257,120 @@ async fn update_config(config: &AppConfig) -> Result<(), String> {
     if response.ok() {
         return Ok(());
     }
+    Err(error_message(response).await)
+}
+
+async fn error_message(response: Response) -> String {
     match response.json::<ErrorMessage>().await {
-        Ok(err) => Err(err.message),
-        Err(err) => Err(err.to_string()),
+        Ok(err) => err.message,
+        Err(err) => err.to_string(),
     }
+}
+
+#[function_component(CdnStatusCard)]
+fn cdn_status_card() -> Html {
+    let status = use_state(|| Option::<CdnStatus>::None);
+    let notice = use_state(|| Option::<Notice>::None);
+    let is_loading = use_state(|| false);
+
+    let status_cloned = status.clone();
+    use_effect_with((), move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Ok(value) = get_cdn_status().await {
+                status_cloned.set(Some(value));
+            }
+        });
+    });
+
+    let onclick = {
+        let status = status.clone();
+        let notice = notice.clone();
+        let is_loading = is_loading.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *is_loading {
+                return;
+            }
+            is_loading.set(true);
+            let status = status.clone();
+            let notice = notice.clone();
+            let is_loading = is_loading.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match refresh_cdn_ranges().await {
+                    Ok(value) => {
+                        status.set(Some(value));
+                        notice.set(Some(Notice::Success("CDN IP ranges refreshed.")));
+                    }
+                    Err(message) => notice.set(Some(Notice::Failed(message))),
+                }
+                is_loading.set(false);
+            });
+        })
+    };
+
+    html! {
+        <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 lg:rounded-md">
+            { notice_view(&notice) }
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"CDN IP Ranges"}</h2>
+            <p class="mt-2 text-sm text-neutral-500">{"Edge server addresses of known CDNs. The list is refreshed every day."}</p>
+            if let Some(status) = &*status {
+                { cdn_status_view(status) }
+            }
+            <div class="flex mt-4 items-center justify-end">
+                <button type="button" {onclick} disabled={*is_loading} class="inline-flex items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                    {"Refresh Now"}
+                </button>
+            </div>
+        </div>
+    }
+}
+
+fn cdn_status_view(status: &CdnStatus) -> Html {
+    let source = match status.source {
+        CdnRangesSource::Embedded => "built-in snapshot",
+        CdnRangesSource::Downloaded => "downloaded",
+    };
+    html! {
+        <>
+            <p class="mt-4 text-sm text-neutral-900 dark:text-neutral-200">
+                {format!("Updated: {} ({source})", format_unix_time(status.updated_at))}
+            </p>
+            <ul class="mt-2 text-sm text-neutral-700 dark:text-neutral-300">
+                { status.providers.iter().map(|provider| html! {
+                    <li>{format!("{}: {} ranges", provider.provider, provider.ranges)}</li>
+                }).collect::<Html>() }
+            </ul>
+            { status.errors.iter().map(|err| html! {
+                <p class="mt-2 text-sm text-red-600 dark:text-red-500">{err}</p>
+            }).collect::<Html>() }
+        </>
+    }
+}
+
+fn format_unix_time(unix_time: i64) -> String {
+    if unix_time <= 0 {
+        return "never".to_string();
+    }
+    OffsetDateTime::from_unix_timestamp(unix_time)
+        .ok()
+        .and_then(|time| time.format(&Rfc3339).ok())
+        .unwrap_or_else(|| unix_time.to_string())
+}
+
+async fn get_cdn_status() -> Result<CdnStatus, gloo_net::Error> {
+    Request::get(&format!("{API_ENDPOINT}/cdn"))
+        .send()
+        .await?
+        .json()
+        .await
+}
+
+async fn refresh_cdn_ranges() -> Result<CdnStatus, String> {
+    let response = Request::post(&format!("{API_ENDPOINT}/cdn/refresh"))
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if response.ok() {
+        return response.json().await.map_err(|err| err.to_string());
+    }
+    Err(error_message(response).await)
 }

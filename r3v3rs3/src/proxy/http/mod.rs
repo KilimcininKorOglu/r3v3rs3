@@ -46,9 +46,10 @@ use tokio_rustls::{
 };
 use tracing::{debug, error, info, span, Instrument, Level, Span};
 
+pub(crate) mod client_ip;
 mod error;
 mod filter;
-mod hyper_tls;
+pub(crate) mod hyper_tls;
 mod pool;
 mod rewriter;
 mod route;
@@ -182,7 +183,6 @@ impl HttpPortContext {
         self.shared.store(Arc::new(SharedContext {
             router: Router::new(proxies, https_port, quic_port),
             header_rewriter: RequestRewriter::builder()
-                .trust_upstream_headers(false)
                 .set_via(HeaderValue::from_static("r3v3rs3"))
                 .build(),
         }));
@@ -452,6 +452,9 @@ async fn start(
             ProxiedRequest::Err(ProxyError::DomainFrontingDetected)
         } else if let Some((parsed, res, route)) = shared.router.get_route(&req, host) {
             let resource_id = route.resource_id;
+            let client = route
+                .client_ip
+                .resolve(remote.ip(), req.headers(), &crate::cdn::table());
 
             let mut redirect = None;
             response_rewriter = response_rewriter
@@ -494,8 +497,8 @@ async fn start(
                     }
                 }
 
-                info!(target: "r3v3rs3::access_log", remote = %remote, %local, action, target = %req.uri());
-                let span: Span = span!(Level::INFO, "http", %resource_id, remote = %remote, %local, action, target = %req.uri());
+                info!(target: "r3v3rs3::access_log", remote = %remote, client = %client.ip, %local, action, target = %req.uri());
+                let span: Span = span!(Level::INFO, "http", %resource_id, remote = %remote, client = %client.ip, %local, action, target = %req.uri());
 
                 if let Some(host) = req
                     .uri()
@@ -507,7 +510,7 @@ async fn start(
 
                 shared.header_rewriter.pre_process(
                     req.headers_mut(),
-                    remote.ip(),
+                    &client,
                     header_host.map(|h| h.to_string()),
                     forwarded_proto,
                 );
@@ -637,6 +640,9 @@ where
     let mut response_rewriter = ResponseRewriter::builder();
     let req = if let Some((parsed, res, route)) = shared.router.get_route(&req, host) {
         let resource_id = route.resource_id;
+        let client = route
+            .client_ip
+            .resolve(ctx.remote.ip(), req.headers(), &crate::cdn::table());
 
         response_rewriter = response_rewriter
             .https_port(route.https_port)
@@ -652,8 +658,8 @@ where
             }
         }
 
-        info!(target: "r3v3rs3::access_log", remote = %ctx.remote, local = ?ctx.local, action, target = %req.uri());
-        let span: Span = span!(Level::INFO, "http", %resource_id, remote = %ctx.remote, local = ?ctx.local, action, target = %req.uri());
+        info!(target: "r3v3rs3::access_log", remote = %ctx.remote, client = %client.ip, local = ?ctx.local, action, target = %req.uri());
+        let span: Span = span!(Level::INFO, "http", %resource_id, remote = %ctx.remote, client = %client.ip, local = ?ctx.local, action, target = %req.uri());
 
         if let Some(host) = req
             .uri()
@@ -665,7 +671,7 @@ where
 
         shared.header_rewriter.pre_process(
             req.headers_mut(),
-            ctx.remote.ip(),
+            &client,
             header_host.map(|h| h.to_string()),
             "h3",
         );

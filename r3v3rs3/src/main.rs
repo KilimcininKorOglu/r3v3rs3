@@ -63,6 +63,7 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
     let app_info = new_appinfo(&config_dir, &log_dir);
 
     let (server, channels) = Server::new(app_info.clone(), config).await;
+    r3v3rs3::cdn::fetch::spawn_refresh_task(channels.command.clone());
     let server_task = tokio::spawn(server.start());
     let event_send = channels.event.clone();
 

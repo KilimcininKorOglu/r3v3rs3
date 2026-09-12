@@ -10,11 +10,11 @@ use hyper::{
 use sailfish::TemplateOnce;
 use std::{iter, net::IpAddr};
 
+use super::client_ip::{ClientAddr, CLIENT_IP_HEADERS};
 use super::error::{map_error, ErrorTemplate};
 
 #[derive(Default, Debug)]
 pub struct RequestRewriter {
-    trust_upstream_headers: bool,
     set_via: Option<HeaderValue>,
 }
 
@@ -24,8 +24,7 @@ impl RequestRewriter {
     }
 
     fn remove_untrusted_headers(&self, headers: &mut HeaderMap) {
-        let header_keys = &[FORWARDED.as_str(), "x-forwarded-for", "x-real-ip"];
-        for key in header_keys {
+        for key in CLIENT_IP_HEADERS {
             if let Entry::Occupied(entry) = headers.entry(*key) {
                 entry.remove_entry_mult();
             }
@@ -71,16 +70,20 @@ impl RequestRewriter {
     pub fn pre_process(
         &self,
         headers: &mut HeaderMap,
-        remote_addr: IpAddr,
+        client: &ClientAddr,
         header_host: Option<String>,
         forwarded_proto: &'static str,
     ) {
         let mut x_forwarded_for = Vec::new();
         let mut forwarded = Vec::new();
+        let remote_addr = client.peer;
 
-        if self.trust_upstream_headers {
+        if client.trusted_peer {
             x_forwarded_for = self.parse_x_forwarded_for(headers);
             forwarded = self.parse_forwarded(headers);
+            if let Ok(real_ip) = HeaderValue::from_str(&client.ip.to_string()) {
+                headers.insert("x-real-ip", real_ip);
+            }
         } else {
             self.remove_untrusted_headers(headers);
         }
@@ -143,11 +146,6 @@ pub struct RequestRewriterBuilder {
 }
 
 impl RequestRewriterBuilder {
-    pub fn trust_upstream_headers(mut self, trust: bool) -> Self {
-        self.inner.trust_upstream_headers = trust;
-        self
-    }
-
     pub fn set_via(mut self, via: HeaderValue) -> Self {
         self.inner.set_via = Some(via);
         self
@@ -251,33 +249,44 @@ mod test {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
 
+    fn trusted(peer: IpAddr, ip: &str) -> ClientAddr {
+        ClientAddr {
+            peer,
+            ip: ip.parse().unwrap(),
+            trusted_peer: true,
+        }
+    }
+
     #[test]
     fn test_header_rewriter_pre_process() {
         let forwarded_proto = "http";
+        let localhost = Ipv4Addr::new(127, 0, 0, 1).into();
 
         let mut headers = HeaderMap::new();
         headers.append("x-forwarded-for", "192.168.0.1".parse().unwrap());
+        headers.append("x-real-ip", "192.168.0.1".parse().unwrap());
+        headers.append("cf-connecting-ip", "192.168.0.1".parse().unwrap());
 
         let rewriter = RequestRewriter::builder().build();
         rewriter.pre_process(
             &mut headers,
-            Ipv4Addr::new(127, 0, 0, 1).into(),
+            &ClientAddr::direct(localhost),
             Some("example.com".into()),
             forwarded_proto,
         );
         assert_eq!(headers.get("x-forwarded-for").unwrap(), "127.0.0.1");
+        assert_eq!(headers.get("x-real-ip"), None);
+        assert_eq!(headers.get("cf-connecting-ip"), None);
         assert_eq!(headers.get("x-forwarded-proto").unwrap(), "http");
         assert_eq!(headers.get("x-forwarded-host").unwrap(), "example.com");
 
         let mut headers = HeaderMap::new();
         headers.append(FORWARDED, "for=192.168.0.1".parse().unwrap());
 
-        let rewriter = RequestRewriter::builder()
-            .trust_upstream_headers(true)
-            .build();
+        let rewriter = RequestRewriter::builder().build();
         rewriter.pre_process(
             &mut headers,
-            Ipv4Addr::new(127, 0, 0, 1).into(),
+            &trusted(localhost, "192.168.0.1"),
             Some("example.com".into()),
             forwarded_proto,
         );
@@ -286,18 +295,17 @@ mod test {
             "for=192.168.0.1, for=127.0.0.1, host=example.com, proto=http"
         );
         assert_eq!(headers.get("x-forwarded-for").unwrap(), "127.0.0.1");
+        assert_eq!(headers.get("x-real-ip").unwrap(), "192.168.0.1");
         assert_eq!(headers.get("x-forwarded-proto").unwrap(), "http");
         assert_eq!(headers.get("x-forwarded-host").unwrap(), "example.com");
 
         let mut headers = HeaderMap::new();
         headers.append("x-forwarded-for", "192.168.0.1".parse().unwrap());
 
-        let rewriter = RequestRewriter::builder()
-            .trust_upstream_headers(true)
-            .build();
+        let rewriter = RequestRewriter::builder().build();
         rewriter.pre_process(
             &mut headers,
-            Ipv4Addr::new(127, 0, 0, 1).into(),
+            &trusted(localhost, "192.168.0.1"),
             Some("example.com".into()),
             forwarded_proto,
         );
@@ -311,12 +319,10 @@ mod test {
         let mut headers = HeaderMap::new();
         headers.append("x-forwarded-for", "192.168.0.1".parse().unwrap());
 
-        let rewriter = RequestRewriter::builder()
-            .trust_upstream_headers(true)
-            .build();
+        let rewriter = RequestRewriter::builder().build();
         rewriter.pre_process(
             &mut headers,
-            Ipv6Addr::LOCALHOST.into(),
+            &trusted(Ipv6Addr::LOCALHOST.into(), "192.168.0.1"),
             Some("example.com".into()),
             forwarded_proto,
         );
