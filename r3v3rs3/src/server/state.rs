@@ -7,6 +7,7 @@ use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
 use crate::certs::acme::AcmeOrder;
 use crate::config::storage::Storage;
 use crate::log::DatabaseLayer;
+use crate::proxy::http::SessionService;
 use crate::{
     command::ServerCommand,
     proxy::{PortContext, PortContextKind},
@@ -42,7 +43,8 @@ pub struct ServerState {
     pub certs: CertList,
     pub acmes: AcmeList,
     pub ports: PortList,
-    pub storage: Box<dyn Storage>,
+    pub storage: Arc<dyn Storage>,
+    sessions: Arc<SessionService>,
     config: AppConfig,
     tcp_pool: TcpListenerPool,
     udp_pool: UdpListenerPool,
@@ -97,12 +99,15 @@ impl ServerState {
             };
         }
 
+        let storage: Arc<dyn Storage> = Arc::new(storage);
+        let sessions = Arc::new(SessionService::new(storage.clone(), config.admin));
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
             certs: CertList::new(certs).await,
             acmes: acmes.into_iter().collect(),
             ports,
-            storage: Box::new(storage),
+            storage,
+            sessions,
             config,
             tcp_pool: TcpListenerPool::new(),
             udp_pool: UdpListenerPool::new(),
@@ -337,7 +342,7 @@ impl ServerState {
                 .collect();
             let span = span!(Level::INFO, "port", resource_id = ctx.entry.id.to_string());
             if let Err(err) = ctx
-                .setup(&ports, &self.certs, proxies)
+                .setup(&ports, &self.certs, proxies, &self.sessions)
                 .instrument(span.clone())
                 .await
             {
@@ -486,6 +491,7 @@ impl ServerState {
 
     pub async fn set_config(&mut self, config: AppConfig) -> Result<(), Error> {
         self.config.clone_from(&config);
+        self.sessions.set_config(config.admin);
         self.storage.save_app_config(&config).await;
         let _ = self
             .br_sender

@@ -40,7 +40,7 @@ use tracing::{trace, warn};
 
 mod acme;
 mod app_info;
-mod auth;
+pub(crate) mod auth;
 mod cdn;
 mod certs;
 mod config;

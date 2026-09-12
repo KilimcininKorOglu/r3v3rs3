@@ -19,14 +19,16 @@ pub enum AuthKind {
     Basic,
     Bearer,
     Forward,
+    Session,
 }
 
 impl AuthKind {
-    const ALL: [AuthKind; 4] = [
+    const ALL: [AuthKind; 5] = [
         AuthKind::None,
         AuthKind::Basic,
         AuthKind::Bearer,
         AuthKind::Forward,
+        AuthKind::Session,
     ];
 
     fn value(self) -> &'static str {
@@ -35,6 +37,7 @@ impl AuthKind {
             Self::Basic => "basic",
             Self::Bearer => "bearer",
             Self::Forward => "forward",
+            Self::Session => "session",
         }
     }
 
@@ -44,6 +47,7 @@ impl AuthKind {
             Self::Basic => "Basic Auth",
             Self::Bearer => "Bearer Token",
             Self::Forward => "Forward Auth",
+            Self::Session => "Admin Session",
         }
     }
 }
@@ -101,6 +105,7 @@ impl AuthForm {
                 form.forward_headers = forward.response_headers.join(", ");
                 form.forward_timeout = forward.timeout.as_secs().max(1).to_string();
             }
+            AuthPolicy::Session => form.kind = AuthKind::Session,
         }
         form
     }
@@ -113,6 +118,7 @@ impl AuthForm {
             AuthKind::Forward => self
                 .parse_forward()
                 .map(|forward| AuthPolicy::Forward(Box::new(forward))),
+            AuthKind::Session => Ok(AuthPolicy::Session),
         }
     }
 
@@ -283,6 +289,9 @@ pub fn auth_config(props: &Props) -> Html {
                 <label class={LABEL_CLASS}>{"Timeout (Seconds)"}</label>
                 <input type="number" min="1" max="300" value={form.forward_timeout.clone()} onchange={form_input(props, |form, value| form.forward_timeout = value)} class={INPUT_CLASS} />
                 <p class={HINT_CLASS}>{"r3v3rs3 sends a GET request with the client headers and X-Forwarded-Method, X-Forwarded-Proto, X-Forwarded-Host, X-Forwarded-Uri and X-Forwarded-For to this URL. A 2xx response lets the request through and copies the listed headers to the upstream request. Any other response, for example a login redirect, is sent to the client."}</p>
+            }
+            if form.kind == AuthKind::Session {
+                <p class={HINT_CLASS}>{"Clients sign in with an r3v3rs3 panel account at /.r3v3rs3/auth/login below the route path. Browsers without a session are redirected to the sign-in page. Other requests without a session receive 401 Unauthorized. The HttpOnly session cookie is valid only for the host where the client signed in. A POST request to /.r3v3rs3/auth/logout ends the session."}</p>
             }
         </>
     }
@@ -458,6 +467,13 @@ mod tests {
         assert!(form(vec![token("ci", "", "a"), token("ci", "", "b")])
             .parse()
             .is_err());
+    }
+
+    #[test]
+    fn session_form_round_trips() {
+        let form = AuthForm::new(&AuthPolicy::Session);
+        assert!(form.kind == AuthKind::Session);
+        assert_eq!(form.parse().unwrap(), AuthPolicy::Session);
     }
 
     fn user(username: &str, password: &str, password_hash: &str) -> UserForm {

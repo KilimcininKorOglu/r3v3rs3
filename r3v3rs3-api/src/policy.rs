@@ -109,6 +109,8 @@ pub enum AuthPolicy {
     Bearer(BearerAuth),
     /// Boxed, because the URL makes this variant much larger than the others.
     Forward(Box<ForwardAuth>),
+    /// Requires a sign-in with a panel account on the proxied host.
+    Session,
 }
 
 impl AuthPolicy {
@@ -297,6 +299,12 @@ mod tests {
 
         let none: AuthPolicy = serde_json::from_str(r#"{"type":"none"}"#).unwrap();
         assert!(none.is_none());
+        let session: AuthPolicy = serde_json::from_str(r#"{"type":"session"}"#).unwrap();
+        assert_eq!(session, AuthPolicy::Session);
+        assert_eq!(
+            serde_json::to_string(&session).unwrap(),
+            r#"{"type":"session"}"#
+        );
         assert_eq!(
             serde_json::to_string(&policy).unwrap(),
             r#"{"type":"basic","realm":"Staff","users":[{"username":"alice","password_hash":"$argon2id$x"}]}"#

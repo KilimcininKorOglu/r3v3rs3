@@ -105,7 +105,7 @@ impl ForwardAuthenticator {
                 self.copy_headers(&headers, req.headers_mut());
                 Ok(())
             }
-            Verdict::Deny(res) => Err(AuthRejection::Response(res)),
+            Verdict::Deny(res) => Err(AuthRejection::Response(Box::new(res))),
         }
     }
 
@@ -218,6 +218,8 @@ mod tests {
             client: "198.51.100.7".parse().unwrap(),
             host: Some("example.com"),
             proto: "h3",
+            base_path: "",
+            path_segments: &[],
         };
         let auth_req = auth.auth_request(&req, &ctx).unwrap();
         let headers = auth_req.headers();

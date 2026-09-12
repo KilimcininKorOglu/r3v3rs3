@@ -1,4 +1,4 @@
-use super::auth::Authenticator;
+use super::auth::{Authenticator, SessionService};
 use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, RequestFilter};
 use super::rate_limit::{self, ClientRateLimiter};
@@ -22,6 +22,7 @@ impl Router {
         https_port: Option<u16>,
         quic_port: Option<u16>,
         tls_client_config: &Arc<ClientConfig>,
+        sessions: &Arc<SessionService>,
     ) -> Self {
         let mut routes = vec![];
         for (id, http) in proxies
@@ -34,9 +35,14 @@ impl Router {
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
             let proxy_rate_limiter = rate_limit::limiter((id, None), http.rate_limit);
-            let proxy_auth = Authenticator::new(http.auth, tls_client_config);
+            let proxy_auth = Authenticator::new(http.auth, tls_client_config, sessions);
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
+                let base_path = filter
+                    .path
+                    .iter()
+                    .map(|segment| format!("/{segment}"))
+                    .collect();
                 let ip_filter = route
                     .ip_filter
                     .map(Arc::new)
@@ -47,11 +53,12 @@ impl Router {
                 };
                 let auth = route.auth.map_or_else(
                     || proxy_auth.clone(),
-                    |policy| Authenticator::new(policy, tls_client_config),
+                    |policy| Authenticator::new(policy, tls_client_config, sessions),
                 );
                 routes.push(FilteredRoute {
                     resource_id: id,
                     filter,
+                    base_path,
                     route: ParsedRoute {
                         servers: route.servers,
                     },
@@ -86,6 +93,8 @@ impl Router {
 pub struct FilteredRoute {
     pub resource_id: ShortId,
     pub filter: RequestFilter,
+    /// Path of the route without a trailing slash, e.g. `/admin`. Empty for `/`.
+    pub base_path: String,
     pub route: ParsedRoute,
     pub https_port: Option<u16>,
     pub quic_port: Option<u16>,

@@ -16,7 +16,7 @@ use futures::{Stream, StreamExt};
 use h3::{quic::BidiStream, server::RequestStream};
 use http_body_util::{combinators::BoxBody, BodyExt, BodyStream, Full, StreamBody};
 use hyper::{
-    body::{Frame, Incoming},
+    body::{Body, Frame, Incoming},
     header::{HOST, LOCATION},
     http::{
         uri::{Parts, Scheme},
@@ -37,7 +37,7 @@ use r3v3rs3_api::port::{PortStatus, SocketState};
 use r3v3rs3_api::{cert::CertKind, error::Error};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
 use rewriter::{RequestRewriter, ResponseRewriter, ResponseRewriterBuilder};
-use std::{net::SocketAddr, str::FromStr, sync::Arc, time::SystemTime};
+use std::{net::SocketAddr, ops::ControlFlow, str::FromStr, sync::Arc, time::SystemTime};
 use tokio::{
     io::{AsyncRead, AsyncWrite, BufStream},
     sync::Notify,
@@ -61,6 +61,8 @@ mod pool;
 mod rate_limit;
 mod rewriter;
 mod route;
+
+pub use auth::SessionService;
 
 const MAX_BUFFER_SIZE: usize = 4096;
 const HTTP2_MAX_FRAME_SIZE: usize = 16384;
@@ -124,6 +126,7 @@ impl HttpPortContext {
         ports: &[PortEntry],
         certs: &CertList,
         proxies: Vec<ProxyEntry>,
+        sessions: &Arc<SessionService>,
     ) -> Result<(), Error> {
         let https_ports = ports
             .iter()
@@ -194,7 +197,13 @@ impl HttpPortContext {
         self.tls_client_config = Arc::new(config);
 
         self.shared.store(Arc::new(SharedContext {
-            router: Router::new(proxies, https_port, quic_port, &self.tls_client_config),
+            router: Router::new(
+                proxies,
+                https_port,
+                quic_port,
+                &self.tls_client_config,
+                sessions,
+            ),
             header_rewriter: RequestRewriter::builder()
                 .set_via(HeaderValue::from_static("r3v3rs3"))
                 .build(),
@@ -567,16 +576,20 @@ fn is_domain_fronting<B>(req: &Request<B>, sni: Option<&str>) -> bool {
 /// the request for the upstream server.
 async fn route_request<B>(
     shared: &SharedContext,
-    mut req: Request<B>,
+    req: Request<B>,
     info: &RequestInfo<'_>,
-) -> (ProxiedRequest<Request<B>>, ResponseRewriterBuilder) {
+) -> (ProxiedRequest<Request<B>>, ResponseRewriterBuilder)
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     let response_rewriter = ResponseRewriter::builder();
     let header_host = header_host(&req).map(str::to_string);
-    let matched = {
-        let host = header_host.as_deref().or(info.sni).or(req.uri().host());
-        shared.router.get_route(&req, host)
-    };
-    let Some((parsed, res, route)) = matched else {
+    let request_host = header_host
+        .clone()
+        .or_else(|| info.sni.map(str::to_string))
+        .or_else(|| req.uri().host().map(str::to_string));
+    let Some((parsed, res, route)) = shared.router.get_route(&req, request_host.as_deref()) else {
         return (
             ProxiedRequest::Err(ProxyError::NoRouteFound),
             response_rewriter,
@@ -603,13 +616,21 @@ async fn route_request<B>(
 
     let auth_ctx = AuthContext {
         client: client.ip,
-        host: header_host.as_deref(),
+        host: request_host.as_deref(),
         proto: info.proto,
+        base_path: &route.base_path,
+        path_segments: &res.path_segments,
     };
-    if let Err(rejection) = authorize(route, &mut req, &auth_ctx).await {
-        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %rejection);
-        return (rejected(rejection), response_rewriter);
-    }
+    let mut req = match authenticate(route, req, &auth_ctx).await {
+        Authenticated::Pass(req) => req,
+        Authenticated::Respond(response) => {
+            return (ProxiedRequest::Respond(response), response_rewriter)
+        }
+        Authenticated::Rejected(rejection) => {
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %rejection);
+            return (rejected(rejection), response_rewriter);
+        }
+    };
 
     set_upstream_uri(&mut req, parsed, res);
 
@@ -646,16 +667,34 @@ fn check_policies(route: &FilteredRoute, client: std::net::IpAddr) -> Result<(),
     Ok(())
 }
 
+enum Authenticated<B> {
+    Pass(Request<B>),
+    /// A response of the authenticator itself, like the sign-in page.
+    Respond(Response<Full<Bytes>>),
+    Rejected(AuthRejection),
+}
+
 /// Authenticates the request when the route requires authentication. The HTTPS redirect runs
-/// first, so a browser asks for the credentials on the secure connection.
-async fn authorize<B>(
+/// first, so a browser sends the credentials on the secure connection.
+async fn authenticate<B>(
     route: &FilteredRoute,
-    req: &mut Request<B>,
+    req: Request<B>,
     ctx: &AuthContext<'_>,
-) -> Result<(), AuthRejection> {
-    match &route.auth {
-        Some(auth) => auth.authorize(req, ctx).await,
-        None => Ok(()),
+) -> Authenticated<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    let Some(auth) = &route.auth else {
+        return Authenticated::Pass(req);
+    };
+    let mut req = match auth.serve(req, ctx).await {
+        ControlFlow::Continue(req) => req,
+        ControlFlow::Break(response) => return Authenticated::Respond(response),
+    };
+    match auth.authorize(&mut req, ctx).await {
+        Ok(()) => Authenticated::Pass(req),
+        Err(rejection) => Authenticated::Rejected(rejection),
     }
 }
 
@@ -663,7 +702,7 @@ async fn authorize<B>(
 fn rejected<R>(rejection: AuthRejection) -> ProxiedRequest<R> {
     match rejection {
         AuthRejection::Error(err) => ProxiedRequest::Err(err),
-        AuthRejection::Response(res) => ProxiedRequest::Respond(res),
+        AuthRejection::Response(res) => ProxiedRequest::Respond(*res),
     }
 }
 
@@ -730,16 +769,13 @@ where
         sni: None,
         proto: "h3",
     };
-    let (req, response_rewriter) = route_request(shared, req, &info).await;
-
+    // The body is attached before routing, so an authenticator can read a form submission.
     let (mut send, recv) = stream.split();
+    let body = BoxBody::new(StreamBody::new(StreamWrapper::<T> { stream: recv }));
+    let (req, response_rewriter) = route_request(shared, req.map(|()| body), &info).await;
+
     let res = match req {
-        ProxiedRequest::Ok(req, span) => {
-            let body = StreamBody::new(StreamWrapper::<T> { stream: recv });
-            pool.request(req.map(|_| BoxBody::new(body)))
-                .instrument(span)
-                .await
-        }
+        ProxiedRequest::Ok(req, span) => pool.request(req).instrument(span).await,
         ProxiedRequest::Respond(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
         ProxiedRequest::Err(err) => Err(err.into()),
     };

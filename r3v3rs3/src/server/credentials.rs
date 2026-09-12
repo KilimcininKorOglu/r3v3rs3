@@ -24,7 +24,7 @@ pub fn seal_proxy(proxy: &mut Proxy) -> Result<(), Error> {
         .filter_map(|route| route.auth.as_mut());
     for policy in std::iter::once(&mut http.auth).chain(route_policies) {
         match policy {
-            AuthPolicy::None => {}
+            AuthPolicy::None | AuthPolicy::Session => {}
             AuthPolicy::Basic(basic) => seal_basic_auth(basic)?,
             AuthPolicy::Bearer(bearer) => seal_bearer_auth(bearer)?,
             AuthPolicy::Forward(forward) => validate_forward_auth(forward)?,

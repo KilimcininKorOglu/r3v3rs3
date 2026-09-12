@@ -173,6 +173,42 @@ auth = { type = "forward", url = "http://127.0.0.1:4180/oauth2/auth", response_h
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+### Admin Session
+
+Clients sign in with an r3v3rs3 panel account, the same account that you use for the admin panel. Use it to protect a web application that has no authentication of its own.
+
+- A `GET` or `HEAD` request without a session receives `302 Found` to the sign-in page. After the sign-in, r3v3rs3 redirects the browser back to the requested path.
+- Other requests without a session receive `401 Unauthorized`.
+
+Each route with this authentication serves these endpoints below its path. For the route `/`, the sign-in page is `/.r3v3rs3/auth/login`. For the route `/admin`, it is `/admin/.r3v3rs3/auth/login`.
+
+| Endpoint | Method | Action |
+|---|---|---|
+| `.r3v3rs3/auth/login` | `GET` | Shows the sign-in form. |
+| `.r3v3rs3/auth/login` | `POST` | Checks the username, the password and the TOTP code, then sets the session cookie. |
+| `.r3v3rs3/auth/logout` | `POST` | Ends the session and removes the session cookie. |
+
+The TOTP code is required only for accounts with TOTP. The session cookie `r3v3rs3_session` has the `HttpOnly` and `SameSite=Lax` attributes, and the `Secure` attribute on HTTPS and HTTP/3. It has no `Domain` attribute, and r3v3rs3 accepts a session only on the host where the client signed in. r3v3rs3 removes the session cookie before it sends the request to the upstream server.
+
+The `[admin]` settings in `config.toml` apply to these sessions too:
+
+- `session_expiry`: The lifetime of a session. The minimum is 5 minutes.
+- `max_login_attempts` and `login_attempts_reset`: The limit of failed sign-ins for each client IP address and username. A blocked client receives `429 Too Many Requests` until the reset time passes.
+
+r3v3rs3 keeps the sessions in memory, so a restart signs every client out. To add a sign-out button to your application:
+
+```html
+<form method="post" action="/.r3v3rs3/auth/logout"><button>Sign Out</button></form>
+```
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+auth = { type = "session" }
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
+```
+
 ## HTTP/2
 
 r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).

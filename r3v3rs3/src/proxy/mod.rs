@@ -1,4 +1,8 @@
-use self::{http::HttpPortContext, tcp::TcpPortContext, udp::UdpPortContext};
+use self::{
+    http::{HttpPortContext, SessionService},
+    tcp::TcpPortContext,
+    udp::UdpPortContext,
+};
 use crate::server::cert_list::CertList;
 use once_cell::sync::OnceCell;
 use r3v3rs3_api::error::Error;
@@ -71,12 +75,13 @@ impl PortContext {
         ports: &[PortEntry],
         certs: &CertList,
         proxies: Vec<ProxyEntry>,
+        sessions: &std::sync::Arc<SessionService>,
     ) -> Result<(), Error> {
         match &mut self.kind {
             PortContextKind::Tcp(ctx) => ctx.setup(certs, proxies).await,
-            PortContextKind::Http(ctx) => ctx.setup(ports, certs, proxies).await,
+            PortContextKind::Http(ctx) => ctx.setup(ports, certs, proxies, sessions).await,
             PortContextKind::Udp(ctx) => ctx.setup(proxies).await,
-            PortContextKind::Http3(ctx) => ctx.setup(ports, certs, proxies).await,
+            PortContextKind::Http3(ctx) => ctx.setup(ports, certs, proxies, sessions).await,
             PortContextKind::Reserved => Ok(()),
         }
     }

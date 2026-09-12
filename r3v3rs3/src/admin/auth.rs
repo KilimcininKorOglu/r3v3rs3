@@ -21,7 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const MINIMUM_SESSION_EXPIRY: Duration = Duration::from_secs(60 * 5); // 5 minutes
+pub const MINIMUM_SESSION_EXPIRY: Duration = Duration::from_secs(60 * 5); // 5 minutes
 const SESSION_TOKEN_LENGTH: usize = 32;
 
 pub async fn login(

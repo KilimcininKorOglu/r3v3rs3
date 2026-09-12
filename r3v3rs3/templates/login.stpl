@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>Sign In</title>
+    <style>
+        :root {
+            --background-color: #f6f6f6;
+            --panel-color: #ffffff;
+            --border-color: #d0d0d0;
+            --text-color: #303030;
+            --link-color: #808080;
+            --error-color: #b00020;
+            --button-color: #303030;
+            --button-text-color: #ffffff;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --background-color: #121212;
+                --panel-color: #1e1e1e;
+                --border-color: #444444;
+                --text-color: #e0e0e0;
+                --link-color: #bbbbbb;
+                --error-color: #ff6b81;
+                --button-color: #e0e0e0;
+                --button-text-color: #121212;
+            }
+        }
+
+        html {
+            background-color: var(--background-color);
+            height: 100%;
+        }
+
+        body {
+            height: 100%;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: Arial, sans-serif;
+            color: var(--text-color);
+        }
+
+        form {
+            width: 100%;
+            max-width: 320px;
+            padding: 24px;
+            background-color: var(--panel-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+
+        h1 {
+            margin: 0 0 16px;
+            font-size: 24px;
+        }
+
+        label {
+            display: block;
+            margin-top: 12px;
+            font-size: 14px;
+        }
+
+        input {
+            box-sizing: border-box;
+            width: 100%;
+            margin-top: 4px;
+            padding: 8px;
+            font-size: 16px;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 20px;
+            padding: 10px;
+            font-size: 16px;
+            color: var(--button-text-color);
+            background-color: var(--button-color);
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .error {
+            margin: 0 0 8px;
+            color: var(--error-color);
+            font-size: 14px;
+        }
+
+        .powered-by {
+            margin-top: 16px;
+            text-align: center;
+        }
+
+        .powered-by a {
+            font-size: 12px;
+            color: var(--link-color);
+        }
+    </style>
+</head>
+<body>
+    <form method="post">
+        <h1>Sign In</h1>
+        <% if let Some(error) = self.error { %>
+            <p class="error" role="alert"><%= error %></p>
+        <% } %>
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" autocapitalize="off" value="<%= self.username %>" required<% if self.username.is_empty() { %> autofocus<% } %>>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required<% if !self.username.is_empty() { %> autofocus<% } %>>
+        <label for="totp">TOTP Code<% if !self.totp { %> (if enabled)<% } %></label>
+        <input id="totp" name="totp" type="text" inputmode="numeric" autocomplete="one-time-code"<% if self.totp { %> required<% } %>>
+        <input name="redirect" type="hidden" value="<%= self.redirect %>">
+        <button type="submit">Sign In</button>
+        <div class="powered-by">
+            <a href="https://github.com/KilimcininKorOglu/r3v3rs3" target="_blank" rel="noopener noreferrer">Powered by r3v3rs3</a>
+        </div>
+    </form>
+</body>
+</html>
