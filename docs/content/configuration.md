@@ -126,6 +126,25 @@ routes = [
 ]
 ```
 
+### Bearer Token
+
+Clients must send `Authorization: Bearer <token>` with one of the tokens of the proxy. Clients without a token receive `401 Unauthorized` with `WWW-Authenticate: Bearer realm="r3v3rs3"`. Clients with a wrong token receive the same response with `error="invalid_token"`.
+
+- **Name**: A label that identifies the token.
+- **Token**: A random value of at least 16 characters. For example, create one with `openssl rand -hex 32`.
+
+r3v3rs3 stores the SHA-256 digest of each token and never saves the plain text token. It compares the digests in constant time. Leave the token field empty to keep the current token. r3v3rs3 removes the `Authorization` header before it sends the request to the upstream server, so the upstream server cannot receive its own bearer token on a route with bearer authentication.
+
+In `proxies.toml`, you can write a `token` instead of a `token_hash`. r3v3rs3 replaces it with a digest at startup.
+
+```toml
+[my-api]
+protocol = "http"
+vhosts = ["api.example.com"]
+auth = { type = "bearer", tokens = [{ name = "ci", token_hash = "<sha-256 hex digest>" }] }
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
+```
+
 ## HTTP/2
 
 r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).

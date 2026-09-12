@@ -86,6 +86,12 @@ pub enum Error {
     #[error("password is required for user: {username}")]
     PasswordRequired { username: String },
 
+    #[error("invalid token name: {name}")]
+    InvalidTokenName { name: String },
+
+    #[error("token is missing or shorter than 16 characters: {name}")]
+    InvalidToken { name: String },
+
     #[error("failed to hash password")]
     FailedToHashPassword,
 

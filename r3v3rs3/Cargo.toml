@@ -84,6 +84,7 @@ serde_qs = "0.14.0"
 sha2 = "0.10.7"
 shellexpand = "3.1.0"
 socket2 = "0.5.9"
+subtle = "2.6.1"
 sqlx = { version = "0.8.2", features = [
     "runtime-tokio-rustls",
     "sqlite",

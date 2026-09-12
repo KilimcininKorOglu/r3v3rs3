@@ -4,12 +4,14 @@ use argon2::{
 };
 use r3v3rs3_api::{
     error::Error,
-    policy::{AuthPolicy, BasicAuth, BasicAuthUser},
+    policy::{AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken},
     proxy::{Proxy, ProxyKind},
 };
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
-/// Replaces the plain text passwords of an HTTP proxy with argon2 hashes and validates the users.
+/// Replaces the plain text passwords and tokens of an HTTP proxy with hashes and validates them.
+/// Passwords use argon2. Tokens use SHA-256, because they are long random values.
 pub fn seal_proxy(proxy: &mut Proxy) -> Result<(), Error> {
     let ProxyKind::Http(http) = &mut proxy.kind else {
         return Ok(());
@@ -19,8 +21,10 @@ pub fn seal_proxy(proxy: &mut Proxy) -> Result<(), Error> {
         .iter_mut()
         .filter_map(|route| route.auth.as_mut());
     for policy in std::iter::once(&mut http.auth).chain(route_policies) {
-        if let AuthPolicy::Basic(basic) = policy {
-            seal_basic_auth(basic)?;
+        match policy {
+            AuthPolicy::None => {}
+            AuthPolicy::Basic(basic) => seal_basic_auth(basic)?,
+            AuthPolicy::Bearer(bearer) => seal_bearer_auth(bearer)?,
         }
     }
     Ok(())
@@ -55,6 +59,38 @@ fn seal_user(user: &mut BasicAuthUser) -> Result<(), Error> {
         return Err(Error::PasswordRequired {
             username: user.username.clone(),
         });
+    }
+    Ok(())
+}
+
+fn seal_bearer_auth(bearer: &mut BearerAuth) -> Result<(), Error> {
+    let mut names = HashSet::new();
+    for token in &mut bearer.tokens {
+        if token.name.trim().is_empty() || !names.insert(token.name.clone()) {
+            return Err(Error::InvalidTokenName {
+                name: token.name.clone(),
+            });
+        }
+        seal_token(token)?;
+    }
+    Ok(())
+}
+
+fn seal_token(token: &mut BearerToken) -> Result<(), Error> {
+    let invalid = || Error::InvalidToken {
+        name: token.name.clone(),
+    };
+    if !token.token.is_empty() {
+        if token.token.len() < BearerToken::MIN_LENGTH {
+            return Err(invalid());
+        }
+        token.token_hash = hex::encode(Sha256::digest(token.token.as_bytes()));
+        token.token.clear();
+    }
+    let valid_hash =
+        token.token_hash.len() == 64 && token.token_hash.bytes().all(|b| b.is_ascii_hexdigit());
+    if !valid_hash {
+        return Err(invalid());
     }
     Ok(())
 }
@@ -130,6 +166,49 @@ mod tests {
             seal_proxy(&mut invalid_hash),
             Err(Error::PasswordRequired { .. })
         ));
+    }
+
+    #[test]
+    fn bearer_token_is_replaced_with_digest() {
+        let bearer = |tokens: Vec<BearerToken>| Proxy {
+            kind: ProxyKind::Http(HttpProxy {
+                auth: AuthPolicy::Bearer(BearerAuth { tokens }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let token = |name: &str, token: &str| BearerToken {
+            name: name.into(),
+            token: token.into(),
+            token_hash: String::new(),
+        };
+
+        let mut proxy = bearer(vec![token("ci", "0123456789abcdef")]);
+        seal_proxy(&mut proxy).unwrap();
+        let ProxyKind::Http(HttpProxy {
+            auth: AuthPolicy::Bearer(sealed),
+            ..
+        }) = &proxy.kind
+        else {
+            panic!("expected bearer auth");
+        };
+        assert!(sealed.tokens[0].token.is_empty());
+        assert_eq!(
+            sealed.tokens[0].token_hash,
+            hex::encode(Sha256::digest("0123456789abcdef"))
+        );
+
+        for tokens in [
+            vec![token("ci", "short")],
+            vec![token("ci", "")],
+            vec![token("", "0123456789abcdef")],
+            vec![
+                token("ci", "0123456789abcdef"),
+                token("ci", "0123456789abcdef"),
+            ],
+        ] {
+            assert!(seal_proxy(&mut bearer(tokens)).is_err());
+        }
     }
 
     #[test]

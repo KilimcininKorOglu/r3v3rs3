@@ -3028,6 +3028,7 @@ dependencies = [
  "shellexpand",
  "socket2",
  "sqlx",
+ "subtle",
  "tar",
  "thiserror 2.0.12",
  "time",

@@ -1,5 +1,5 @@
 use super::http_proxy_config::{BUTTON_CLASS, HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
-use r3v3rs3_api::policy::{AuthPolicy, BasicAuth, BasicAuthUser};
+use r3v3rs3_api::policy::{AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken};
 use std::collections::HashSet;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement};
@@ -9,15 +9,17 @@ use yew::prelude::*;
 pub enum AuthKind {
     None,
     Basic,
+    Bearer,
 }
 
 impl AuthKind {
-    const ALL: [AuthKind; 2] = [AuthKind::None, AuthKind::Basic];
+    const ALL: [AuthKind; 3] = [AuthKind::None, AuthKind::Basic, AuthKind::Bearer];
 
     fn value(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Basic => "basic",
+            Self::Bearer => "bearer",
         }
     }
 
@@ -25,6 +27,7 @@ impl AuthKind {
         match self {
             Self::None => "None",
             Self::Basic => "Basic Auth",
+            Self::Bearer => "Bearer Token",
         }
     }
 }
@@ -34,6 +37,7 @@ pub struct AuthForm {
     kind: AuthKind,
     realm: String,
     users: Vec<UserForm>,
+    tokens: Vec<TokenForm>,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -43,27 +47,57 @@ struct UserForm {
     password_hash: String,
 }
 
+#[derive(Clone, Default, PartialEq)]
+struct TokenForm {
+    name: String,
+    token: String,
+    token_hash: String,
+}
+
 impl AuthForm {
     pub fn new(policy: &AuthPolicy) -> Self {
+        let mut form = Self {
+            kind: AuthKind::None,
+            realm: String::new(),
+            users: vec![UserForm::default()],
+            tokens: vec![TokenForm::default()],
+        };
         match policy {
-            AuthPolicy::None => Self {
-                kind: AuthKind::None,
-                realm: String::new(),
-                users: vec![UserForm::default()],
-            },
-            AuthPolicy::Basic(basic) => Self {
-                kind: AuthKind::Basic,
-                realm: basic.realm.clone(),
-                users: basic.users.iter().map(UserForm::new).collect(),
-            },
+            AuthPolicy::None => {}
+            AuthPolicy::Basic(basic) => {
+                form.kind = AuthKind::Basic;
+                form.realm = basic.realm.clone();
+                form.users = basic.users.iter().map(UserForm::new).collect();
+            }
+            AuthPolicy::Bearer(bearer) => {
+                form.kind = AuthKind::Bearer;
+                form.tokens = bearer.tokens.iter().map(TokenForm::new).collect();
+            }
         }
+        form
     }
 
     pub fn parse(&self) -> Result<AuthPolicy, String> {
         match self.kind {
             AuthKind::None => Ok(AuthPolicy::None),
             AuthKind::Basic => self.parse_basic().map(AuthPolicy::Basic),
+            AuthKind::Bearer => self.parse_bearer().map(AuthPolicy::Bearer),
         }
+    }
+
+    fn parse_bearer(&self) -> Result<BearerAuth, String> {
+        let tokens = self
+            .tokens
+            .iter()
+            .map(TokenForm::parse)
+            .collect::<Result<Vec<_>, _>>()?;
+        if tokens.is_empty() {
+            return Err("Add at least one token".into());
+        }
+        if let Some(name) = duplicate(tokens.iter().map(|token| &token.name)) {
+            return Err(format!("Token name {name} is used more than once"));
+        }
+        Ok(BearerAuth { tokens })
     }
 
     fn parse_basic(&self) -> Result<BasicAuth, String> {
@@ -75,14 +109,50 @@ impl AuthForm {
         if users.is_empty() {
             return Err("Add at least one user".into());
         }
-        let mut usernames = HashSet::new();
-        if let Some(user) = users.iter().find(|user| !usernames.insert(&user.username)) {
-            return Err(format!("Username {} is used more than once", user.username));
+        if let Some(username) = duplicate(users.iter().map(|user| &user.username)) {
+            return Err(format!("Username {username} is used more than once"));
         }
         Ok(BasicAuth {
             realm: self.realm.trim().into(),
             users,
         })
+    }
+}
+
+fn duplicate<'a>(names: impl Iterator<Item = &'a String>) -> Option<&'a String> {
+    let mut seen = HashSet::new();
+    names.into_iter().find(|name| !seen.insert(*name))
+}
+
+impl TokenForm {
+    fn new(token: &BearerToken) -> Self {
+        Self {
+            name: token.name.clone(),
+            token: String::new(),
+            token_hash: token.token_hash.clone(),
+        }
+    }
+
+    fn parse(&self) -> Result<BearerToken, String> {
+        let token = BearerToken {
+            name: self.name.trim().into(),
+            token: self.token.trim().into(),
+            token_hash: self.token_hash.clone(),
+        };
+        if token.name.is_empty() {
+            return Err("Token name is required".into());
+        }
+        if token.token.is_empty() && token.token_hash.is_empty() {
+            return Err(format!("Token is required for {}", token.name));
+        }
+        if !token.token.is_empty() && token.token.len() < BearerToken::MIN_LENGTH {
+            return Err(format!(
+                "Token for {} must be at least {} characters",
+                token.name,
+                BearerToken::MIN_LENGTH
+            ));
+        }
+        Ok(token)
     }
 }
 
@@ -136,29 +206,59 @@ pub fn auth_config(props: &Props) -> Html {
                 <button type="button" onclick={add_user(props)} class={classes!(BUTTON_CLASS, "mt-2", "rounded-lg")}>{"Add User"}</button>
                 <p class={HINT_CLASS}>{"Clients receive 401 Unauthorized until they send a valid username and password. Passwords are stored as argon2 hashes. Leave the password empty to keep the current password."}</p>
             }
+            if form.kind == AuthKind::Bearer {
+                <label class={LABEL_CLASS}>{"Tokens"}</label>
+                { for form.tokens.iter().enumerate().map(|(index, token)| token_view(props, index, token)) }
+                <button type="button" onclick={form_update(props, |form, _: MouseEvent| form.tokens.push(TokenForm::default()))} class={classes!(BUTTON_CLASS, "mt-2", "rounded-lg")}>{"Add Token"}</button>
+                <p class={HINT_CLASS}>{"Clients receive 401 Unauthorized until they send Authorization: Bearer with a valid token. Use a random value of at least 16 characters, e.g. openssl rand -hex 32. Tokens are stored as SHA-256 digests. Leave the token empty to keep the current token."}</p>
+            }
         </>
     }
 }
 
 fn user_view(props: &Props, index: usize, user: &UserForm) -> Html {
-    let placeholder = if user.password_hash.is_empty() {
-        "Password"
-    } else {
-        "Unchanged"
+    let name = html! {
+        <input type="text" autocapitalize="off" autocomplete="off" placeholder="Username" value={user.username.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.users, index, |user| user.username = value))} class={INPUT_CLASS} />
+    };
+    let secret = html! {
+        <input type="password" autocomplete="new-password" placeholder={secret_placeholder(&user.password_hash, "Password")} value={user.password.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.users, index, |user| user.password = value))} class={INPUT_CLASS} />
     };
     let remove = form_update(props, move |form, _: MouseEvent| {
-        if form.users.len() > 1 {
-            form.users.remove(index);
-        }
+        remove_item(&mut form.users, index)
     });
+    credential_row(name, secret, remove, props.form.users.len())
+}
+
+fn token_view(props: &Props, index: usize, token: &TokenForm) -> Html {
+    let name = html! {
+        <input type="text" autocapitalize="off" autocomplete="off" placeholder="Name" value={token.name.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.tokens, index, |token| token.name = value))} class={INPUT_CLASS} />
+    };
+    let secret = html! {
+        <input type="password" autocomplete="off" placeholder={secret_placeholder(&token.token_hash, "Token")} value={token.token.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.tokens, index, |token| token.token = value))} class={INPUT_CLASS} />
+    };
+    let remove = form_update(props, move |form, _: MouseEvent| {
+        remove_item(&mut form.tokens, index)
+    });
+    credential_row(name, secret, remove, props.form.tokens.len())
+}
+
+fn credential_row(name: Html, secret: Html, remove: Callback<MouseEvent>, rows: usize) -> Html {
     html! {
         <div class="grid grid-cols-[1fr_1fr_auto] gap-2 mt-2">
-            <input type="text" autocapitalize="off" autocomplete="off" placeholder="Username" value={user.username.clone()} onchange={form_input(props, move |form, value| update_user(form, index, |user| user.username = value))} class={INPUT_CLASS} />
-            <input type="password" autocomplete="new-password" {placeholder} value={user.password.clone()} onchange={form_input(props, move |form, value| update_user(form, index, |user| user.password = value))} class={INPUT_CLASS} />
-            <button type="button" onclick={remove} disabled={props.form.users.len() <= 1} class={classes!(BUTTON_CLASS, "rounded-lg")}>
+            { name }
+            { secret }
+            <button type="button" onclick={remove} disabled={rows <= 1} class={classes!(BUTTON_CLASS, "rounded-lg")}>
                 <img src="/assets/icons/remove.svg" class="w-4 h-4" />
             </button>
         </div>
+    }
+}
+
+fn secret_placeholder(hash: &str, label: &'static str) -> &'static str {
+    if hash.is_empty() {
+        label
+    } else {
+        "Unchanged"
     }
 }
 
@@ -166,9 +266,15 @@ fn add_user(props: &Props) -> Callback<MouseEvent> {
     form_update(props, |form, _| form.users.push(UserForm::default()))
 }
 
-fn update_user(form: &mut AuthForm, index: usize, update: impl FnOnce(&mut UserForm)) {
-    if let Some(user) = form.users.get_mut(index) {
-        update(user);
+fn update_item<T>(items: &mut [T], index: usize, update: impl FnOnce(&mut T)) {
+    if let Some(item) = items.get_mut(index) {
+        update(item);
+    }
+}
+
+fn remove_item<T>(items: &mut Vec<T>, index: usize) {
+    if items.len() > 1 && index < items.len() {
+        items.remove(index);
     }
 }
 
@@ -209,7 +315,43 @@ mod tests {
             kind: AuthKind::Basic,
             realm: " Staff ".into(),
             users,
+            tokens: vec![],
         }
+    }
+
+    #[test]
+    fn bearer_form_validates_tokens() {
+        let form = |tokens: Vec<TokenForm>| AuthForm {
+            kind: AuthKind::Bearer,
+            realm: String::new(),
+            users: vec![],
+            tokens,
+        };
+        let token = |name: &str, token: &str, token_hash: &str| TokenForm {
+            name: name.into(),
+            token: token.into(),
+            token_hash: token_hash.into(),
+        };
+
+        let AuthPolicy::Bearer(bearer) = form(vec![token(" ci ", "0123456789abcdef", "")])
+            .parse()
+            .unwrap()
+        else {
+            panic!("expected bearer auth");
+        };
+        assert_eq!(bearer.tokens[0].name, "ci");
+        assert_eq!(bearer.tokens[0].token, "0123456789abcdef");
+        assert!(form(vec![token("ci", "", "abc")]).parse().is_ok());
+
+        assert!(form(vec![]).parse().is_err());
+        assert!(form(vec![token("", "0123456789abcdef", "")])
+            .parse()
+            .is_err());
+        assert!(form(vec![token("ci", "", "")]).parse().is_err());
+        assert!(form(vec![token("ci", "short", "")]).parse().is_err());
+        assert!(form(vec![token("ci", "", "a"), token("ci", "", "b")])
+            .parse()
+            .is_err());
     }
 
     fn user(username: &str, password: &str, password_hash: &str) -> UserForm {

@@ -105,6 +105,7 @@ pub enum AuthPolicy {
     #[default]
     None,
     Basic(BasicAuth),
+    Bearer(BearerAuth),
 }
 
 impl AuthPolicy {
@@ -150,6 +151,32 @@ impl BasicAuthUser {
             None
         }
     }
+}
+
+/// Bearer token authentication (RFC 6750).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BearerAuth {
+    #[serde(default)]
+    pub tokens: Vec<BearerToken>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BearerToken {
+    /// Label that identifies the token.
+    pub name: String,
+
+    /// New plain text token. The server replaces it with `token_hash` and never stores it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub token: String,
+
+    /// Lowercase hex SHA-256 digest of the token.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub token_hash: String,
+}
+
+impl BearerToken {
+    /// Tokens are hashed without a salt, so they must be long random values.
+    pub const MIN_LENGTH: usize = 16;
 }
 
 #[cfg(test)]
@@ -241,6 +268,20 @@ mod tests {
             serde_json::to_string(&policy).unwrap(),
             r#"{"type":"basic","realm":"Staff","users":[{"username":"alice","password_hash":"$argon2id$x"}]}"#
         );
+    }
+
+    #[test]
+    fn bearer_auth_serde_uses_type_tag() {
+        let policy: AuthPolicy = serde_json::from_str(
+            r#"{"type":"bearer","tokens":[{"name":"ci","token_hash":"abc"}]}"#,
+        )
+        .unwrap();
+        let AuthPolicy::Bearer(bearer) = policy else {
+            panic!("expected bearer auth");
+        };
+        assert_eq!(bearer.tokens[0].name, "ci");
+        assert_eq!(bearer.tokens[0].token_hash, "abc");
+        assert!(bearer.tokens[0].token.is_empty());
     }
 
     #[test]
