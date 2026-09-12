@@ -472,6 +472,7 @@ impl ServerState {
 
     pub async fn set_config(&mut self, config: AppConfig) -> Result<(), Error> {
         self.config.clone_from(&config);
+        self.storage.save_app_config(&config).await;
         let _ = self
             .br_sender
             .send(ServerEvent::AppConfigUpdated { config });

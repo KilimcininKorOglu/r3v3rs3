@@ -42,9 +42,9 @@ where
     Ok(())
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TestStorage {
-    inner: Mutex<Inner>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 #[derive(Debug, Default)]
@@ -192,7 +192,7 @@ impl TestStorageBuilder {
 
     pub fn build(self) -> TestStorage {
         TestStorage {
-            inner: Mutex::new(self.inner),
+            inner: Arc::new(Mutex::new(self.inner)),
         }
     }
 }
