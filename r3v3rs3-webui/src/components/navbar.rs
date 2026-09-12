@@ -25,6 +25,11 @@ const ITEMS: &[MenuItem] = {
             icon: "/assets/icons/ribbon.svg",
             route: Route::Certs,
         },
+        MenuItem {
+            name: "Settings",
+            icon: "/assets/icons/settings.svg",
+            route: Route::Settings,
+        },
     ]
 };
 

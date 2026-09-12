@@ -1,0 +1,257 @@
+use crate::{auth::use_ensure_auth, API_ENDPOINT};
+use gloo_net::http::Request;
+use r3v3rs3_api::{
+    app::{AdminConfig, AppConfig, LogConfig},
+    error::ErrorMessage,
+};
+use serde::de::DeserializeOwned;
+use serde_json::json;
+use std::{collections::HashMap, net::SocketAddr};
+use wasm_bindgen::{JsCast, UnwrapThrowExt};
+use web_sys::HtmlInputElement;
+use yew::prelude::*;
+
+const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
+const LABEL_CLASS: &str =
+    "block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200";
+
+#[derive(Clone, PartialEq, Default)]
+struct Fields {
+    background_task_interval: String,
+    session_expiry: String,
+    max_login_attempts: String,
+    login_attempts_reset: String,
+    database_log_retention: String,
+    http_challenge_addr: String,
+}
+
+impl Fields {
+    fn from_config(config: &AppConfig) -> Self {
+        let value = serde_json::to_value(config).unwrap_or_default();
+        let text = |ptr: &str| {
+            value
+                .pointer(ptr)
+                .map(|v| match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .unwrap_or_default()
+        };
+        Self {
+            background_task_interval: text("/background_task_interval"),
+            session_expiry: text("/admin/session_expiry"),
+            max_login_attempts: text("/admin/max_login_attempts"),
+            login_attempts_reset: text("/admin/login_attempts_reset"),
+            database_log_retention: text("/log/database_log_retention"),
+            http_challenge_addr: text("/http_challenge_addr"),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+enum Notice {
+    Saved,
+    Failed(String),
+}
+
+#[function_component(Settings)]
+pub fn settings() -> Html {
+    use_ensure_auth();
+
+    let fields = use_state(|| Option::<Fields>::None);
+    let notice = use_state(|| Option::<Notice>::None);
+    let is_loading = use_state(|| false);
+
+    let fields_cloned = fields.clone();
+    use_effect_with((), move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Ok(config) = get_config().await {
+                fields_cloned.set(Some(Fields::from_config(&config)));
+            }
+        });
+    });
+
+    let Some(current) = (*fields).clone() else {
+        return html! {};
+    };
+    let parsed = parse_fields(&current);
+
+    let onsubmit = {
+        let parsed = parsed.clone();
+        let notice = notice.clone();
+        let is_loading = is_loading.clone();
+        Callback::from(move |event: SubmitEvent| {
+            event.prevent_default();
+            let Ok(config) = parsed.clone() else {
+                return;
+            };
+            if *is_loading {
+                return;
+            }
+            is_loading.set(true);
+            let notice = notice.clone();
+            let is_loading = is_loading.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                notice.set(Some(match update_config(&config).await {
+                    Ok(()) => Notice::Saved,
+                    Err(message) => Notice::Failed(message),
+                }));
+                is_loading.set(false);
+            });
+        })
+    };
+
+    let errors = parsed.clone().err().unwrap_or_default();
+
+    html! {
+        <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 lg:rounded-md">
+            { notice_view(&notice) }
+
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"Admin"}</h2>
+            { text_field(&fields, &errors, "Session Expiry", "session_expiry", "1h", |f| &mut f.session_expiry) }
+            { text_field(&fields, &errors, "Max Login Attempts", "max_login_attempts", "10", |f| &mut f.max_login_attempts) }
+            <p class="mt-2 text-sm text-neutral-500">{"Failed logins allowed per client IP and username before the login is blocked."}</p>
+            { text_field(&fields, &errors, "Login Attempts Reset", "login_attempts_reset", "15m", |f| &mut f.login_attempts_reset) }
+            <p class="mt-2 text-sm text-neutral-500">{"How long a blocked client IP and username must wait before the next login attempt."}</p>
+
+            <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"Server"}</h2>
+            { text_field(&fields, &errors, "Background Task Interval", "background_task_interval", "1h", |f| &mut f.background_task_interval) }
+            { text_field(&fields, &errors, "HTTP Challenge Address", "http_challenge_addr", "0.0.0.0:80", |f| &mut f.http_challenge_addr) }
+            { text_field(&fields, &errors, "Database Log Retention", "database_log_retention", "3months", |f| &mut f.database_log_retention) }
+            <p class="mt-2 text-sm text-neutral-500">{"Durations use a human-readable format, e.g, 30s, 15m, 1h, 7days."}</p>
+
+            <div class="flex mt-4 items-center justify-end">
+                <button type="submit" disabled={parsed.is_err() || *is_loading} class="inline-flex items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                    {"Save"}
+                </button>
+            </div>
+        </form>
+    }
+}
+
+fn notice_view(notice: &UseStateHandle<Option<Notice>>) -> Html {
+    match &**notice {
+        Some(Notice::Saved) => html! {
+            <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4" role="status">
+                <span class="block sm:inline">{"Settings saved."}</span>
+            </div>
+        },
+        Some(Notice::Failed(message)) => html! {
+            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                <span class="block sm:inline">{message}</span>
+            </div>
+        },
+        None => html! {},
+    }
+}
+
+fn text_field(
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+    label: &'static str,
+    key: &'static str,
+    placeholder: &'static str,
+    select: fn(&mut Fields) -> &mut String,
+) -> Html {
+    let mut current = (**fields).clone().unwrap_or_default();
+    let value = select(&mut current).clone();
+    let fields = fields.clone();
+    let onchange = Callback::from(move |event: Event| {
+        let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        let mut updated = (*fields).clone().unwrap_or_default();
+        *select(&mut updated) = target.value();
+        fields.set(Some(updated));
+    });
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{label}</label>
+            <input type="text" autocapitalize="off" {value} {onchange} class={INPUT_CLASS} placeholder={placeholder} />
+            if let Some(err) = errors.get(key) {
+                <p class="mt-2 text-sm text-red-600 dark:text-red-500">{err}</p>
+            }
+        </>
+    }
+}
+
+fn parse_part<T: DeserializeOwned>(
+    errors: &mut HashMap<String, String>,
+    key: &str,
+    value: serde_json::Value,
+) -> Option<T> {
+    serde_json::from_value::<T>(value)
+        .map_err(|err| errors.insert(key.to_string(), err.to_string()))
+        .ok()
+}
+
+fn parse_fields(fields: &Fields) -> Result<AppConfig, HashMap<String, String>> {
+    let mut errors = HashMap::new();
+    let max_login_attempts = match fields.max_login_attempts.trim().parse::<u32>() {
+        Ok(0) | Err(_) => {
+            errors.insert(
+                "max_login_attempts".into(),
+                "Must be a positive integer".into(),
+            );
+            0
+        }
+        Ok(n) => n,
+    };
+    let admin = [
+        ("session_expiry", &fields.session_expiry),
+        ("login_attempts_reset", &fields.login_attempts_reset),
+    ]
+    .into_iter()
+    .map(|(key, value)| parse_part::<AdminConfig>(&mut errors, key, json!({ key: value.trim() })))
+    .collect::<Option<Vec<_>>>();
+    let log = parse_part::<LogConfig>(
+        &mut errors,
+        "database_log_retention",
+        json!({ "database_log_retention": fields.database_log_retention.trim() }),
+    );
+    let interval = parse_part::<AppConfig>(
+        &mut errors,
+        "background_task_interval",
+        json!({ "background_task_interval": fields.background_task_interval.trim() }),
+    );
+    let addr = fields.http_challenge_addr.trim().parse::<SocketAddr>().ok();
+    if addr.is_none() {
+        errors.insert(
+            "http_challenge_addr".into(),
+            "Must be an IP address and port, e.g, 0.0.0.0:80".into(),
+        );
+    }
+    match (admin, log, interval, addr) {
+        (Some(admin), Some(log), Some(interval), Some(addr)) if errors.is_empty() => Ok(AppConfig {
+            background_task_interval: interval.background_task_interval,
+            admin: AdminConfig {
+                session_expiry: admin[0].session_expiry,
+                max_login_attempts,
+                login_attempts_reset: admin[1].login_attempts_reset,
+            },
+            log,
+            http_challenge_addr: addr,
+        }),
+        _ => Err(errors),
+    }
+}
+
+async fn get_config() -> Result<AppConfig, gloo_net::Error> {
+    Request::get(&format!("{API_ENDPOINT}/config"))
+        .send()
+        .await?
+        .json()
+        .await
+}
+
+async fn update_config(config: &AppConfig) -> Result<(), String> {
+    let request = Request::put(&format!("{API_ENDPOINT}/config"))
+        .json(config)
+        .map_err(|err| err.to_string())?;
+    let response = request.send().await.map_err(|err| err.to_string())?;
+    if response.ok() {
+        return Ok(());
+    }
+    match response.json::<ErrorMessage>().await {
+        Ok(err) => Err(err.message),
+        Err(err) => Err(err.to_string()),
+    }
+}

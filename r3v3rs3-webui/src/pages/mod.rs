@@ -15,6 +15,7 @@ mod port_view;
 mod proxy_list;
 mod proxy_view;
 mod self_sign;
+mod settings;
 mod upload;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Routable)]
@@ -52,6 +53,8 @@ pub enum Route {
     NewProxy,
     #[at("/proxies/:id")]
     ProxyView { id: ShortId },
+    #[at("/settings")]
+    Settings,
     #[not_found]
     #[at("/404")]
     NotFound,
@@ -73,6 +76,7 @@ impl Route {
             | Route::NewProxy
             | Route::ProxyView { .. }
             | Route::ProxyLogView { .. } => Some(Route::Proxies),
+            Route::Settings => Some(Route::Settings),
             _ => None,
         }
     }
@@ -96,6 +100,7 @@ pub fn switch(routes: Route) -> Html {
         Route::NewAcme => html! { <new_acme::NewAcme /> },
         Route::CertLogView { id } => html! { <log_view::LogView {id} /> },
         Route::Upload => html! { <upload::Upload /> },
+        Route::Settings => html! { <settings::Settings /> },
         Route::NotFound => html! { <Redirect<Route> to={Route::Home}/> },
     }
 }

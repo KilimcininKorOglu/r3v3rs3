@@ -69,6 +69,21 @@ r3v3rs3 supports automatic certificate provisioning using [ACME](https://letsenc
 
 r3v3rs3 supports ACME v2 with HTTP challenge only. Make sure that TCP port 80 is open and accessible from the internet.
 
+# Settings
+
+The "Settings" section of the WebUI edits the server-wide options stored in `config.toml`. Changes take effect immediately and are saved to the file.
+
+| Setting | Default | Description |
+|---|---|---|
+| Session Expiry | `1h` | Lifetime of an admin session. The minimum is 5 minutes. |
+| Max Login Attempts | `10` | Failed logins allowed per client IP and username. |
+| Login Attempts Reset | `15m` | Wait time after the limit is reached. |
+| Background Task Interval | `1h` | Interval of certificate renewal and log cleanup tasks. |
+| HTTP Challenge Address | `0.0.0.0:80` | Listening address for ACME HTTP challenges. |
+| Database Log Retention | `3months` | How long logs are kept in the log database. |
+
+Durations use a human-readable format, for example `30s`, `15m`, `1h`, or `7days`.
+
 # Configuration Files
 
 r3v3rs3 uses TOML files for storing its configuration. The location of these files varies according to the operating system:
