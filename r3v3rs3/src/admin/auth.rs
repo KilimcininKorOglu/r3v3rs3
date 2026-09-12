@@ -199,7 +199,8 @@ pub struct LoginAttempts {
 impl LoginAttempts {
     /// Returns true while the key is blocked. Expired entries are dropped.
     pub fn is_blocked(&mut self, key: &LoginAttemptKey, reset: Duration, now: Instant) -> bool {
-        self.entries.retain(|_, attempt| attempt.is_active(reset, now));
+        self.entries
+            .retain(|_, attempt| attempt.is_active(reset, now));
         self.entries
             .get(key)
             .and_then(|attempt| attempt.blocked_until)

@@ -176,8 +176,8 @@ fn create_quic_endpoint(
     socket.set_reuse_address(true)?;
     socket.set_nonblocking(true)?;
     socket.bind(&addr.into())?;
-    let runtime = quinn::default_runtime()
-        .ok_or_else(|| io::Error::other("quinn runtime not available"))?;
+    let runtime =
+        quinn::default_runtime().ok_or_else(|| io::Error::other("quinn runtime not available"))?;
     quinn::Endpoint::new_with_abstract_socket(
         quinn::EndpointConfig::default(),
         Some(server_config),
