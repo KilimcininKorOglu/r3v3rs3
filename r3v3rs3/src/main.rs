@@ -2,8 +2,6 @@
 
 use clap::Parser;
 use directories::ProjectDirs;
-use std::fs;
-use std::path::PathBuf;
 use r3v3rs3::args::Command;
 use r3v3rs3::args::StartArgs;
 use r3v3rs3::config::file::FileStorage;
@@ -11,6 +9,8 @@ use r3v3rs3::config::new_appinfo;
 use r3v3rs3::config::storage::Storage;
 use r3v3rs3::log::DatabaseLayer;
 use r3v3rs3::server::Server;
+use std::fs;
+use std::path::PathBuf;
 use tracing::{error, info};
 use tracing_subscriber::filter::{self, FilterExt};
 use tracing_subscriber::prelude::*;

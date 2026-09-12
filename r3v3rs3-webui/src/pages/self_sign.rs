@@ -7,12 +7,12 @@ use crate::{
     API_ENDPOINT,
 };
 use gloo_net::http::Request;
-use std::{collections::HashMap, str::FromStr};
 use r3v3rs3_api::{
     cert::{CertInfo, CertKind, SelfSignedCertRequest},
     id::ShortId,
     subject_name::SubjectName,
 };
+use std::{collections::HashMap, str::FromStr};
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
@@ -54,7 +54,7 @@ pub fn self_sign() -> Html {
     let ca_cert_list = use_state(Vec::<CertInfo>::new);
     let ca_cert_list_cloned = ca_cert_list.clone();
     let ca_cert_cloned = ca_cert.clone();
-    use_effect_with((),move |_| {
+    use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
             if let Ok(res) = get_cert_list().await {
                 let list = res

@@ -10,14 +10,14 @@ use axum_extra::extract::{
     cookie::{Cookie, SameSite},
     CookieJar,
 };
+use r3v3rs3_api::{
+    auth::{LoginMethod, LoginRequest, LoginResponse},
+    error::Error,
+};
 use rand::distributions::{Alphanumeric, DistString};
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
-};
-use r3v3rs3_api::{
-    auth::{LoginMethod, LoginRequest, LoginResponse},
-    error::Error,
 };
 
 const MINIMUM_SESSION_EXPIRY: Duration = Duration::from_secs(60 * 5); // 5 minutes

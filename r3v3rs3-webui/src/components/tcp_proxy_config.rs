@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::net::{Ipv4Addr, Ipv6Addr};
 use r3v3rs3_api::port::UpstreamServer;
 use r3v3rs3_api::proxy::TcpProxy;
+use std::collections::HashMap;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;

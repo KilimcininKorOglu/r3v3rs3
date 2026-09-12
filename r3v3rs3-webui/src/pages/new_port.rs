@@ -2,8 +2,8 @@ use crate::{
     auth::use_ensure_auth, components::port_config::PortConfig, pages::Route, API_ENDPOINT,
 };
 use gloo_net::http::Request;
-use std::collections::HashMap;
 use r3v3rs3_api::port::Port;
+use std::collections::HashMap;
 use yew::prelude::*;
 use yew_router::prelude::*;
 

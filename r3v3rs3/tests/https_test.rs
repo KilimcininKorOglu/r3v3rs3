@@ -1,13 +1,13 @@
 use axum::{routing::get, Router};
 use axum_server::tls_rustls::RustlsConfig;
-use reqwest::redirect::Policy;
-use std::sync::Arc;
 use r3v3rs3::certs::Cert;
 use r3v3rs3_api::{
     port::{Port, PortEntry, PortOptions},
     proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route},
     tls::TlsTermination,
 };
+use reqwest::redirect::Policy;
+use std::sync::Arc;
 
 mod common;
 use common::{alloc_tcp_port, with_server, TestStorage};

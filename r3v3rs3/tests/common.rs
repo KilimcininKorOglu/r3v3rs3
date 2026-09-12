@@ -3,12 +3,6 @@
 use futures::Future;
 use hickory_resolver::{config::LookupIpStrategy, system_conf::read_system_conf, AsyncResolver};
 use net2::{TcpBuilder, UdpBuilder};
-use std::{
-    collections::HashMap,
-    net::{SocketAddr, ToSocketAddrs},
-    path::Path,
-    sync::Arc,
-};
 use r3v3rs3::{
     certs::{acme::AcmeEntry, Cert},
     config::{new_appinfo, storage::Storage},
@@ -22,6 +16,12 @@ use r3v3rs3_api::{
     multiaddr::Multiaddr,
     port::PortEntry,
     proxy::ProxyEntry,
+};
+use std::{
+    collections::HashMap,
+    net::{SocketAddr, ToSocketAddrs},
+    path::Path,
+    sync::Arc,
 };
 use tokio::sync::Mutex;
 use url::Url;

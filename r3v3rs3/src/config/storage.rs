@@ -1,5 +1,4 @@
 use crate::certs::{acme::AcmeEntry, Cert};
-use std::sync::Arc;
 use r3v3rs3_api::{
     app::AppConfig,
     auth::{Account, LoginRequest, LoginResponse},
@@ -8,6 +7,7 @@ use r3v3rs3_api::{
     port::PortEntry,
     proxy::ProxyEntry,
 };
+use std::sync::Arc;
 
 #[async_trait::async_trait]
 pub trait Storage: Send + Sync + 'static {

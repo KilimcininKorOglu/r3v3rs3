@@ -19,7 +19,7 @@ pub fn proxy_list() -> Html {
     let (ports, ports_dispatcher) = use_store::<PortStore>();
     let (proxies, proxies_dispatcher) = use_store::<ProxyStore>();
 
-    use_effect_with((),move |_| {
+    use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
             if let Ok(res) = get_list().await {
                 let mut statuses = HashMap::new();
@@ -38,7 +38,7 @@ pub fn proxy_list() -> Html {
     });
 
     let ports_cloned = ports.clone();
-    use_effect_with((),move |_| {
+    use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
             if let Ok(res) = get_ports().await {
                 ports_dispatcher.set(PortStore {

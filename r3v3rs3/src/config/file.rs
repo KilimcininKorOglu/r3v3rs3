@@ -5,12 +5,6 @@ use crate::certs::{
 };
 use argon2::{password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use indexmap::map::IndexMap;
-use serde_derive::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
-    sync::Arc,
-};
 use r3v3rs3_api::{
     app::AppConfig,
     auth::{Account, LoginMethod, LoginRequest, LoginResponse},
@@ -21,6 +15,12 @@ use r3v3rs3_api::{
     error::Error,
     port::{Port, PortEntry},
     proxy::{Proxy, ProxyEntry},
+};
+use serde_derive::{Deserialize, Serialize};
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 use tokio::fs;
 use tokio::io::AsyncReadExt;

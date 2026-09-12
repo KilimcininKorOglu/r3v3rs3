@@ -15,6 +15,9 @@ use axum::{
 };
 use futures::{Stream, TryStreamExt};
 use logs::LogReader;
+use r3v3rs3_api::app::{AppConfig, AppInfo};
+use r3v3rs3_api::error::{Error, ErrorMessage};
+use r3v3rs3_api::event::ServerEvent;
 use std::any::Any;
 use std::collections::HashMap;
 use std::{
@@ -26,9 +29,6 @@ use std::{
     },
     task::{Context, Poll},
 };
-use r3v3rs3_api::app::{AppConfig, AppInfo};
-use r3v3rs3_api::error::{Error, ErrorMessage};
-use r3v3rs3_api::event::ServerEvent;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};

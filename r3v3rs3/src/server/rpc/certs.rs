@@ -2,9 +2,9 @@ use super::RpcMethod;
 use crate::{certs::Cert, server::state::ServerState};
 use flate2::{write::GzEncoder, Compression};
 use hyper::body::Bytes;
+use r3v3rs3_api::{cert::CertInfo, error::Error, id::ShortId};
 use std::{sync::Arc, time::SystemTime};
 use tar::Header;
-use r3v3rs3_api::{cert::CertInfo, error::Error, id::ShortId};
 
 pub struct GetCertList;
 

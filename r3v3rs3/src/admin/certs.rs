@@ -9,11 +9,11 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use std::{ops::Deref, sync::Arc};
 use r3v3rs3_api::{
     cert::{CertInfo, SelfSignedCertRequest, UploadQuery},
     id::ShortId,
 };
+use std::{ops::Deref, sync::Arc};
 
 pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<CertInfo>>>, AppError> {
     Ok(Json(state.call(GetCertList).await?))

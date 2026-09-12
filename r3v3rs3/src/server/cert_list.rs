@@ -1,8 +1,8 @@
 use crate::certs::Cert;
 use indexmap::IndexMap;
 use log::warn;
-use std::sync::Arc;
 use r3v3rs3_api::{cert::CertKind, error::Error, id::ShortId};
+use std::sync::Arc;
 use tokio_rustls::rustls::RootCertStore;
 
 #[derive(Debug)]

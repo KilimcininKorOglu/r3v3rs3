@@ -5,11 +5,11 @@ use crate::{
 };
 use gloo_events::EventListener;
 use gloo_net::http::Request;
-use serde_derive::Deserialize;
 use r3v3rs3_api::{
     auth::{LoginMethod, LoginRequest, LoginResponse},
     error::ErrorMessage,
 };
+use serde_derive::Deserialize;
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, UnwrapThrowExt};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;

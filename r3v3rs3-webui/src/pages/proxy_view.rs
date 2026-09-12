@@ -3,11 +3,11 @@ use crate::{
     API_ENDPOINT,
 };
 use gloo_net::http::Request;
-use std::collections::HashMap;
 use r3v3rs3_api::{
     id::ShortId,
     proxy::{Proxy, ProxyEntry},
 };
+use std::collections::HashMap;
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
@@ -25,7 +25,7 @@ pub fn proxy_view(props: &Props) -> Html {
     let site = use_state(|| proxies.entries.iter().find(|e| e.id == props.id).cloned());
     let id = props.id;
     let proxy_cloned = site.clone();
-    use_effect_with((),move |_| {
+    use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
             if let Ok(entry) = get_site(id).await {
                 proxy_cloned.set(Some(entry));

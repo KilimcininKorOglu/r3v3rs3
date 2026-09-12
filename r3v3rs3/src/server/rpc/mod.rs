@@ -1,6 +1,6 @@
 use super::state::ServerState;
-use std::any::Any;
 use r3v3rs3_api::error::Error;
+use std::any::Any;
 
 pub mod acme;
 pub mod auth;

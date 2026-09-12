@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::str::FromStr;
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
 use r3v3rs3_api::vhost::VirtualHost;
+use std::collections::HashMap;
+use std::str::FromStr;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;

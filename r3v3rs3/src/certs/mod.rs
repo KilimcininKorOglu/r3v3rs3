@@ -1,4 +1,8 @@
 use pkcs8::{PrivateKeyInfo, SecretDocument};
+use r3v3rs3_api::cert::{CertInfo, CertKind, CertMetadata};
+use r3v3rs3_api::error::Error;
+use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::subject_name::SubjectName;
 use rcgen::{
     BasicConstraints, CertificateParams, DistinguishedName, DnType, Ia5String, IsCa, KeyPair,
     SanType,
@@ -8,10 +12,6 @@ use std::fmt;
 use std::io::{BufRead, BufReader};
 use std::net::IpAddr;
 use std::str::FromStr;
-use r3v3rs3_api::cert::{CertInfo, CertKind, CertMetadata};
-use r3v3rs3_api::error::Error;
-use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::subject_name::SubjectName;
 use tokio_rustls::rustls::crypto::ring::sign;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::rustls::sign::CertifiedKey;

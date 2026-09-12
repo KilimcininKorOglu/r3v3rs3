@@ -3,10 +3,10 @@ use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::name_server::{GenericConnector, TokioRuntimeProvider};
 use hickory_resolver::system_conf::read_system_conf;
 use hickory_resolver::AsyncResolver;
-use std::time::{Duration, Instant};
-use std::{net::SocketAddr, time::SystemTime};
 use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
+use std::time::{Duration, Instant};
+use std::{net::SocketAddr, time::SystemTime};
 use tokio_rustls::rustls::pki_types::ServerName;
 use tracing::{info, span, Level, Span};
 

@@ -22,7 +22,7 @@ pub fn log_view(props: &Props) -> Html {
     let id = props.id.clone();
     let log_cloned = log.clone();
     let ul_ref_cloned = ul_ref.clone();
-    use_effect_with((),move |_| {
+    use_effect_with((), move |_| {
         poll_log(id.clone(), ul_ref_cloned.clone(), log_cloned, vec![], None);
     });
 

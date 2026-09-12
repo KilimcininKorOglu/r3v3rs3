@@ -3,13 +3,13 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use sqlx::ConnectOptions;
-use sqlx::{sqlite::SqliteConnectOptions, Row, SqlitePool};
-use std::time::Duration;
 use r3v3rs3_api::{
     error::Error,
     log::{LogLevel, LogQuery, SystemLogRow},
 };
+use sqlx::ConnectOptions;
+use sqlx::{sqlite::SqliteConnectOptions, Row, SqlitePool};
+use std::time::Duration;
 use time::OffsetDateTime;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);

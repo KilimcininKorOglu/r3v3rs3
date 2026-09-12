@@ -1,12 +1,12 @@
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
-use std::{
-    collections::HashMap,
-    net::{Ipv4Addr, Ipv6Addr},
-};
 use r3v3rs3_api::{
     port::{NetworkInterface, Port, PortOptions},
     tls::TlsTermination,
+};
+use std::{
+    collections::HashMap,
+    net::{Ipv4Addr, Ipv6Addr},
 };
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement};

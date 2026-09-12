@@ -1,11 +1,11 @@
 use hyper::header::ALT_SVC;
-use reqwest::{header::HOST, redirect::Policy, Body};
-use serde_json::json;
 use r3v3rs3_api::{
     port::{Port, PortEntry, PortOptions},
     proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route},
     tls::TlsTermination,
 };
+use reqwest::{header::HOST, redirect::Policy, Body};
+use serde_json::json;
 
 mod common;
 use common::{alloc_tcp_port, with_server, TestStorage};

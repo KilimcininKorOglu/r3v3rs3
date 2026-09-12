@@ -1,14 +1,14 @@
 use crate::certs::Cert;
 use crate::server::cert_list::CertList;
 use dashmap::DashMap;
-use std::fmt;
-use std::str::FromStr;
-use std::sync::Arc;
 use r3v3rs3_api::cert::CertKind;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::subject_name::SubjectName;
 use r3v3rs3_api::tls::TlsState;
+use std::fmt;
+use std::str::FromStr;
+use std::sync::Arc;
 use tokio_rustls::rustls::server::{ClientHello, ResolvesServerCert};
 use tokio_rustls::rustls::sign::CertifiedKey;
 use tokio_rustls::rustls::ServerConfig;

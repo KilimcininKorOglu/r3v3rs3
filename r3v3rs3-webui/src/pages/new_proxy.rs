@@ -2,8 +2,8 @@ use crate::{
     auth::use_ensure_auth, components::proxy_config::ProxyConfig, pages::Route, API_ENDPOINT,
 };
 use gloo_net::http::Request;
-use std::collections::HashMap;
 use r3v3rs3_api::proxy::Proxy;
+use std::collections::HashMap;
 use yew::prelude::*;
 use yew_router::prelude::*;
 

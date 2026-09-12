@@ -5,6 +5,13 @@ use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, ChallengeType, ExternalAccountKey,
     Identifier, NewAccount, NewOrder, Order, OrderStatus,
 };
+use r3v3rs3_api::{
+    acme::Acme,
+    cert::{CertKind, CertMetadata},
+    id::ShortId,
+};
+use r3v3rs3_api::{acme::AcmeInfo, subject_name::SubjectName};
+use r3v3rs3_api::{acme::AcmeRequest, error::Error};
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use serde_derive::{Deserialize, Serialize};
 use std::{
@@ -13,13 +20,6 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
-use r3v3rs3_api::{
-    acme::Acme,
-    cert::{CertKind, CertMetadata},
-    id::ShortId,
-};
-use r3v3rs3_api::{acme::AcmeInfo, subject_name::SubjectName};
-use r3v3rs3_api::{acme::AcmeRequest, error::Error};
 use tracing::{error, info};
 
 const HTTP_CHALLENGE_TIMEOUT: Duration = Duration::from_secs(180);

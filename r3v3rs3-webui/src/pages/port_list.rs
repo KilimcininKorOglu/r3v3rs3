@@ -3,11 +3,11 @@ use crate::pages::Route;
 use crate::store::PortStore;
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
-use std::collections::HashMap;
 use r3v3rs3_api::{
     id::ShortId,
     port::{PortEntry, PortStatus, SocketState},
 };
+use std::collections::HashMap;
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
@@ -18,7 +18,7 @@ pub fn post_list() -> Html {
 
     let (ports, dispatcher) = use_store::<PortStore>();
 
-    use_effect_with((),move |_| {
+    use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
             if let Ok(res) = get_list().await {
                 let mut statuses = HashMap::new();

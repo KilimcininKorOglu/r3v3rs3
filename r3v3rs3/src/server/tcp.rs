@@ -1,11 +1,11 @@
 use crate::proxy::{PortContext, PortContextEvent, PortContextKind};
 use futures::{Stream, StreamExt};
+use r3v3rs3_api::port::SocketState;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use r3v3rs3_api::port::SocketState;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info, span, Level};
 

@@ -1,5 +1,5 @@
-use serde_derive::{Deserialize, Serialize};
 use r3v3rs3_api::id::ShortId;
+use serde_derive::{Deserialize, Serialize};
 use yew::prelude::*;
 use yew_router::prelude::*;
 

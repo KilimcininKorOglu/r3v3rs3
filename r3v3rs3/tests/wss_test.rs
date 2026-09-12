@@ -8,13 +8,13 @@ use axum_server::tls_rustls::RustlsConfig;
 use core::panic;
 use futures::{SinkExt, StreamExt};
 use hyper::Uri;
-use std::sync::Arc;
 use r3v3rs3::certs::Cert;
 use r3v3rs3_api::{
     port::{Port, PortEntry, PortOptions},
     proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route},
     tls::TlsTermination,
 };
+use std::sync::Arc;
 use tokio_rustls::rustls::{client::ClientConfig, RootCertStore};
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Connector};
 
