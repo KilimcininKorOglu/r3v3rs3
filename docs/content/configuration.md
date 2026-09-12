@@ -145,6 +145,34 @@ auth = { type = "bearer", tokens = [{ name = "ci", token_hash = "<sha-256 hex di
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+### Forward Auth
+
+r3v3rs3 asks an external service, for example oauth2-proxy or Authelia, whether to allow each request. This works like `auth_request` in nginx.
+
+For each client request, r3v3rs3 sends a `GET` request to the auth URL. The auth request carries the client request headers without the connection headers and `Host`, and these headers:
+
+| Header | Value |
+|---|---|
+| `X-Forwarded-Method` | The client request method. |
+| `X-Forwarded-Proto` | `http` or `https`. |
+| `X-Forwarded-Host` | The client request host. |
+| `X-Forwarded-Uri` | The client request path and query. |
+| `X-Forwarded-For` | The client IP address that the "Client IP" section resolves. |
+
+- **2xx response**: r3v3rs3 sends the request to the upstream server. It copies the headers in "Copy Response Headers" from the auth response to the upstream request. It removes these headers from the client request first, so a client cannot send them itself.
+- **Other responses**: r3v3rs3 sends the auth response (status, headers and a body up to 64 KiB) to the client. So a redirect to a login page works.
+- **No response within the timeout, or a connection error**: The client receives `502 Bad Gateway`.
+
+The auth request trusts the same root certificates as the upstream requests.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+auth = { type = "forward", url = "http://127.0.0.1:4180/oauth2/auth", response_headers = ["X-Auth-Request-User"], timeout = "10s" }
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
+```
+
 ## HTTP/2
 
 r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).

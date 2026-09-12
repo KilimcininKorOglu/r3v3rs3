@@ -9,6 +9,7 @@ use r3v3rs3_api::{
     proxy::{ProxyEntry, ProxyKind, Server},
 };
 use std::sync::Arc;
+use tokio_rustls::rustls::ClientConfig;
 
 #[derive(Default, Debug)]
 pub struct Router {
@@ -16,7 +17,12 @@ pub struct Router {
 }
 
 impl Router {
-    pub fn new(proxies: Vec<ProxyEntry>, https_port: Option<u16>, quic_port: Option<u16>) -> Self {
+    pub fn new(
+        proxies: Vec<ProxyEntry>,
+        https_port: Option<u16>,
+        quic_port: Option<u16>,
+        tls_client_config: &Arc<ClientConfig>,
+    ) -> Self {
         let mut routes = vec![];
         for (id, http) in proxies
             .into_iter()
@@ -28,7 +34,7 @@ impl Router {
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
             let proxy_rate_limiter = rate_limit::limiter((id, None), http.rate_limit);
-            let proxy_auth = Authenticator::new(http.auth);
+            let proxy_auth = Authenticator::new(http.auth, tls_client_config);
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 let ip_filter = route
@@ -39,9 +45,10 @@ impl Router {
                     Some(config) => rate_limit::limiter((id, Some(index)), config),
                     None => proxy_rate_limiter.clone(),
                 };
-                let auth = route
-                    .auth
-                    .map_or_else(|| proxy_auth.clone(), Authenticator::new);
+                let auth = route.auth.map_or_else(
+                    || proxy_auth.clone(),
+                    |policy| Authenticator::new(policy, tls_client_config),
+                );
                 routes.push(FilteredRoute {
                     resource_id: id,
                     filter,

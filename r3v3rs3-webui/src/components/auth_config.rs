@@ -1,6 +1,14 @@
 use super::http_proxy_config::{BUTTON_CLASS, HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
-use r3v3rs3_api::policy::{AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken};
+use r3v3rs3_api::policy::{
+    is_header_name, AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, ForwardAuth,
+    DEFAULT_FORWARD_AUTH_TIMEOUT,
+};
+use r3v3rs3_api::proxy::ServerUrl;
 use std::collections::HashSet;
+use std::str::FromStr;
+use std::time::Duration;
+
+const MAX_FORWARD_AUTH_TIMEOUT_SECS: u64 = 300;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
@@ -10,16 +18,23 @@ pub enum AuthKind {
     None,
     Basic,
     Bearer,
+    Forward,
 }
 
 impl AuthKind {
-    const ALL: [AuthKind; 3] = [AuthKind::None, AuthKind::Basic, AuthKind::Bearer];
+    const ALL: [AuthKind; 4] = [
+        AuthKind::None,
+        AuthKind::Basic,
+        AuthKind::Bearer,
+        AuthKind::Forward,
+    ];
 
     fn value(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Basic => "basic",
             Self::Bearer => "bearer",
+            Self::Forward => "forward",
         }
     }
 
@@ -28,6 +43,7 @@ impl AuthKind {
             Self::None => "None",
             Self::Basic => "Basic Auth",
             Self::Bearer => "Bearer Token",
+            Self::Forward => "Forward Auth",
         }
     }
 }
@@ -38,6 +54,9 @@ pub struct AuthForm {
     realm: String,
     users: Vec<UserForm>,
     tokens: Vec<TokenForm>,
+    forward_url: String,
+    forward_headers: String,
+    forward_timeout: String,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -61,6 +80,9 @@ impl AuthForm {
             realm: String::new(),
             users: vec![UserForm::default()],
             tokens: vec![TokenForm::default()],
+            forward_url: String::new(),
+            forward_headers: String::new(),
+            forward_timeout: DEFAULT_FORWARD_AUTH_TIMEOUT.as_secs().to_string(),
         };
         match policy {
             AuthPolicy::None => {}
@@ -73,6 +95,12 @@ impl AuthForm {
                 form.kind = AuthKind::Bearer;
                 form.tokens = bearer.tokens.iter().map(TokenForm::new).collect();
             }
+            AuthPolicy::Forward(forward) => {
+                form.kind = AuthKind::Forward;
+                form.forward_url = forward.url.to_string();
+                form.forward_headers = forward.response_headers.join(", ");
+                form.forward_timeout = forward.timeout.as_secs().max(1).to_string();
+            }
         }
         form
     }
@@ -82,7 +110,40 @@ impl AuthForm {
             AuthKind::None => Ok(AuthPolicy::None),
             AuthKind::Basic => self.parse_basic().map(AuthPolicy::Basic),
             AuthKind::Bearer => self.parse_bearer().map(AuthPolicy::Bearer),
+            AuthKind::Forward => self
+                .parse_forward()
+                .map(|forward| AuthPolicy::Forward(Box::new(forward))),
         }
+    }
+
+    fn parse_forward(&self) -> Result<ForwardAuth, String> {
+        let url = ServerUrl::from_str(self.forward_url.trim()).map_err(|err| err.to_string())?;
+        let response_headers = self
+            .forward_headers
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if let Some(name) = response_headers.iter().find(|name| !is_header_name(name)) {
+            return Err(format!("Invalid header name: {name}"));
+        }
+        let timeout = self
+            .forward_timeout
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .filter(|secs| (1..=MAX_FORWARD_AUTH_TIMEOUT_SECS).contains(secs))
+            .ok_or_else(|| {
+                format!(
+                    "Timeout must be a whole number of seconds from 1 to {MAX_FORWARD_AUTH_TIMEOUT_SECS}"
+                )
+            })?;
+        Ok(ForwardAuth {
+            url,
+            response_headers,
+            timeout: Duration::from_secs(timeout),
+        })
     }
 
     fn parse_bearer(&self) -> Result<BearerAuth, String> {
@@ -212,6 +273,17 @@ pub fn auth_config(props: &Props) -> Html {
                 <button type="button" onclick={form_update(props, |form, _: MouseEvent| form.tokens.push(TokenForm::default()))} class={classes!(BUTTON_CLASS, "mt-2", "rounded-lg")}>{"Add Token"}</button>
                 <p class={HINT_CLASS}>{"Clients receive 401 Unauthorized until they send Authorization: Bearer with a valid token. Use a random value of at least 16 characters, e.g. openssl rand -hex 32. Tokens are stored as SHA-256 digests. Leave the token empty to keep the current token."}</p>
             }
+            if form.kind == AuthKind::Forward {
+                <label class={LABEL_CLASS}>{"Auth URL"}</label>
+                <input type="url" placeholder="http://127.0.0.1:4180/oauth2/auth" value={form.forward_url.clone()} onchange={form_input(props, |form, value| form.forward_url = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{"Copy Response Headers"}</label>
+                <input type="text" autocapitalize="off" placeholder="X-Auth-Request-User, X-Auth-Request-Email" value={form.forward_headers.clone()} onchange={form_input(props, |form, value| form.forward_headers = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{"Timeout (Seconds)"}</label>
+                <input type="number" min="1" max="300" value={form.forward_timeout.clone()} onchange={form_input(props, |form, value| form.forward_timeout = value)} class={INPUT_CLASS} />
+                <p class={HINT_CLASS}>{"r3v3rs3 sends a GET request with the client headers and X-Forwarded-Method, X-Forwarded-Proto, X-Forwarded-Host, X-Forwarded-Uri and X-Forwarded-For to this URL. A 2xx response lets the request through and copies the listed headers to the upstream request. Any other response, for example a login redirect, is sent to the client."}</p>
+            }
         </>
     }
 }
@@ -315,17 +387,51 @@ mod tests {
             kind: AuthKind::Basic,
             realm: " Staff ".into(),
             users,
-            tokens: vec![],
+            ..AuthForm::new(&AuthPolicy::None)
         }
+    }
+
+    #[test]
+    fn forward_form_validates_fields() {
+        let form = |url: &str, headers: &str, timeout: &str| AuthForm {
+            kind: AuthKind::Forward,
+            forward_url: url.into(),
+            forward_headers: headers.into(),
+            forward_timeout: timeout.into(),
+            ..AuthForm::new(&AuthPolicy::None)
+        };
+
+        let policy = form(
+            "http://127.0.0.1:4180/auth",
+            " X-Auth-User , ,X-Auth-Email",
+            "5",
+        )
+        .parse()
+        .unwrap();
+        let AuthPolicy::Forward(forward) = &policy else {
+            panic!("expected forward auth");
+        };
+        assert_eq!(
+            forward.response_headers,
+            vec!["X-Auth-User", "X-Auth-Email"]
+        );
+        assert_eq!(forward.timeout, Duration::from_secs(5));
+        assert_eq!(AuthForm::new(&policy).parse().unwrap(), policy);
+
+        assert!(form("not a url", "", "5").parse().is_err());
+        assert!(form("http://127.0.0.1/auth", "X Auth", "5")
+            .parse()
+            .is_err());
+        assert!(form("http://127.0.0.1/auth", "", "0").parse().is_err());
+        assert!(form("http://127.0.0.1/auth", "", "301").parse().is_err());
     }
 
     #[test]
     fn bearer_form_validates_tokens() {
         let form = |tokens: Vec<TokenForm>| AuthForm {
             kind: AuthKind::Bearer,
-            realm: String::new(),
-            users: vec![],
             tokens,
+            ..AuthForm::new(&AuthPolicy::None)
         };
         let token = |name: &str, token: &str, token_hash: &str| TokenForm {
             name: name.into(),

@@ -92,6 +92,12 @@ pub enum Error {
     #[error("token is missing or shorter than 16 characters: {name}")]
     InvalidToken { name: String },
 
+    #[error("invalid header name: {name}")]
+    InvalidHeaderName { name: String },
+
+    #[error("timeout must be greater than zero")]
+    InvalidTimeout,
+
     #[error("failed to hash password")]
     FailedToHashPassword,
 

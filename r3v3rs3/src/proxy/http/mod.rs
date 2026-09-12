@@ -1,4 +1,5 @@
 use self::{
+    auth::{AuthContext, AuthRejection},
     error::ProxyError,
     filter::FilterResult,
     pool::ConnectionPool,
@@ -13,7 +14,7 @@ use arc_swap::{ArcSwap, Cache};
 use bytes::{Buf, Bytes};
 use futures::{Stream, StreamExt};
 use h3::{quic::BidiStream, server::RequestStream};
-use http_body_util::{combinators::BoxBody, BodyExt, BodyStream, StreamBody};
+use http_body_util::{combinators::BoxBody, BodyExt, BodyStream, Full, StreamBody};
 use hyper::{
     body::{Frame, Incoming},
     header::{HOST, LOCATION},
@@ -187,17 +188,17 @@ impl HttpPortContext {
         .or(quic_ports.first())
         .and_then(|entry| entry.port.listen.port().ok());
 
-        self.shared.store(Arc::new(SharedContext {
-            router: Router::new(proxies, https_port, quic_port),
-            header_rewriter: RequestRewriter::builder()
-                .set_via(HeaderValue::from_static("r3v3rs3"))
-                .build(),
-        }));
-
         let config = ClientConfig::builder()
             .with_root_certificates(certs.root_certs().clone())
             .with_no_client_auth();
         self.tls_client_config = Arc::new(config);
+
+        self.shared.store(Arc::new(SharedContext {
+            router: Router::new(proxies, https_port, quic_port, &self.tls_client_config),
+            header_rewriter: RequestRewriter::builder()
+                .set_via(HeaderValue::from_static("r3v3rs3"))
+                .build(),
+        }));
 
         if let Some(tls) = &mut self.tls_termination {
             self.status.state.tls = Some(tls.setup(certs).await);
@@ -459,7 +460,7 @@ async fn start(
                         .instrument(span)
                         .await
                 }
-                ProxiedRequest::Redirect(resp) => {
+                ProxiedRequest::Respond(resp) => {
                     Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into))))
                 }
                 ProxiedRequest::Err(err) => Err(err.into()),
@@ -490,7 +491,8 @@ async fn start(
 
 enum ProxiedRequest<R> {
     Ok(R, Span),
-    Redirect(Response<String>),
+    /// A response that r3v3rs3 sends without contacting the upstream server.
+    Respond(Response<Full<Bytes>>),
     Err(ProxyError),
 }
 
@@ -596,12 +598,17 @@ async fn route_request<B>(
     }
 
     if let Some(redirect) = upgrade_redirect(route, &req, header_host.as_deref(), info.proto) {
-        return (ProxiedRequest::Redirect(redirect), response_rewriter);
+        return (ProxiedRequest::Respond(redirect), response_rewriter);
     }
 
-    if let Err(err) = authorize(route, &mut req).await {
-        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %err);
-        return (ProxiedRequest::Err(err), response_rewriter);
+    let auth_ctx = AuthContext {
+        client: client.ip,
+        host: header_host.as_deref(),
+        proto: info.proto,
+    };
+    if let Err(rejection) = authorize(route, &mut req, &auth_ctx).await {
+        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %rejection);
+        return (rejected(rejection), response_rewriter);
     }
 
     set_upstream_uri(&mut req, parsed, res);
@@ -641,10 +648,22 @@ fn check_policies(route: &FilteredRoute, client: std::net::IpAddr) -> Result<(),
 
 /// Authenticates the request when the route requires authentication. The HTTPS redirect runs
 /// first, so a browser asks for the credentials on the secure connection.
-async fn authorize<B>(route: &FilteredRoute, req: &mut Request<B>) -> Result<(), ProxyError> {
+async fn authorize<B>(
+    route: &FilteredRoute,
+    req: &mut Request<B>,
+    ctx: &AuthContext<'_>,
+) -> Result<(), AuthRejection> {
     match &route.auth {
-        Some(auth) => auth.authorize(req.headers_mut()).await,
+        Some(auth) => auth.authorize(req, ctx).await,
         None => Ok(()),
+    }
+}
+
+/// Converts a failed authentication into the response for the client.
+fn rejected<R>(rejection: AuthRejection) -> ProxiedRequest<R> {
+    match rejection {
+        AuthRejection::Error(err) => ProxiedRequest::Err(err),
+        AuthRejection::Response(res) => ProxiedRequest::Respond(res),
     }
 }
 
@@ -654,7 +673,7 @@ fn upgrade_redirect<B>(
     req: &Request<B>,
     header_host: Option<&str>,
     proto: &str,
-) -> Option<Response<String>> {
+) -> Option<Response<Full<Bytes>>> {
     if proto != "http" || !route.upgrade_insecure {
         return None;
     }
@@ -669,7 +688,7 @@ fn upgrade_redirect<B>(
     Response::builder()
         .status(301)
         .header(LOCATION, uri.to_string())
-        .body(String::new())
+        .body(Full::new(Bytes::new()))
         .ok()
 }
 
@@ -721,7 +740,7 @@ where
                 .instrument(span)
                 .await
         }
-        ProxiedRequest::Redirect(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
+        ProxiedRequest::Respond(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
         ProxiedRequest::Err(err) => Err(err.into()),
     };
     let (parts, body) = response_rewriter.build().map_response(res)?.into_parts();

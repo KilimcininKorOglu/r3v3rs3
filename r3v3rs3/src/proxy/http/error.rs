@@ -21,6 +21,9 @@ pub enum ProxyError {
 
     #[error("authentication required")]
     Unauthorized { challenge: HeaderValue },
+
+    #[error("authentication service is unavailable")]
+    AuthServiceUnavailable,
 }
 
 impl ProxyError {
@@ -31,6 +34,7 @@ impl ProxyError {
             Self::IpNotAllowed => StatusCode::FORBIDDEN,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
+            Self::AuthServiceUnavailable => StatusCode::BAD_GATEWAY,
         }
     }
 }

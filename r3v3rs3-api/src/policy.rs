@@ -1,3 +1,4 @@
+use crate::proxy::ServerUrl;
 use ipnet::IpNet;
 use serde_derive::{Deserialize, Serialize};
 use std::{net::IpAddr, time::Duration};
@@ -106,6 +107,8 @@ pub enum AuthPolicy {
     None,
     Basic(BasicAuth),
     Bearer(BearerAuth),
+    /// Boxed, because the URL makes this variant much larger than the others.
+    Forward(Box<ForwardAuth>),
 }
 
 impl AuthPolicy {
@@ -177,6 +180,36 @@ pub struct BearerToken {
 impl BearerToken {
     /// Tokens are hashed without a salt, so they must be long random values.
     pub const MIN_LENGTH: usize = 16;
+}
+
+/// Delegates authentication to an external HTTP service, like nginx `auth_request`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ForwardAuth {
+    /// The service that receives a GET request for each client request.
+    #[schema(value_type = String, example = "http://127.0.0.1:4180/oauth2/auth")]
+    pub url: ServerUrl,
+
+    /// Headers of a successful auth response that are copied to the upstream request.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_headers: Vec<String>,
+
+    #[serde(default = "default_forward_auth_timeout", with = "humantime_serde")]
+    #[schema(value_type = String, example = "10s")]
+    pub timeout: Duration,
+}
+
+pub const DEFAULT_FORWARD_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn default_forward_auth_timeout() -> Duration {
+    DEFAULT_FORWARD_AUTH_TIMEOUT
+}
+
+/// Returns true when `name` is a valid HTTP header name (an RFC 9110 token).
+pub fn is_header_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
 }
 
 #[cfg(test)]
@@ -282,6 +315,35 @@ mod tests {
         assert_eq!(bearer.tokens[0].name, "ci");
         assert_eq!(bearer.tokens[0].token_hash, "abc");
         assert!(bearer.tokens[0].token.is_empty());
+    }
+
+    #[test]
+    fn forward_auth_serde_uses_humantime_timeout() {
+        let policy: AuthPolicy = serde_json::from_str(
+            r#"{"type":"forward","url":"http://127.0.0.1:4180/auth","response_headers":["X-Auth-User"]}"#,
+        )
+        .unwrap();
+        let AuthPolicy::Forward(forward) = policy else {
+            panic!("expected forward auth");
+        };
+        assert_eq!(forward.url.to_string(), "http://127.0.0.1:4180/auth");
+        assert_eq!(forward.response_headers, vec!["X-Auth-User"]);
+        assert_eq!(forward.timeout, DEFAULT_FORWARD_AUTH_TIMEOUT);
+
+        let json = serde_json::to_string(&AuthPolicy::Forward(Box::new(ForwardAuth {
+            timeout: Duration::from_secs(3),
+            ..*forward
+        })))
+        .unwrap();
+        assert!(json.contains(r#""timeout":"3s""#));
+    }
+
+    #[test]
+    fn header_name_rules() {
+        assert!(is_header_name("X-Auth-User"));
+        assert!(!is_header_name(""));
+        assert!(!is_header_name("X Auth"));
+        assert!(!is_header_name("X-Auth:"));
     }
 
     #[test]

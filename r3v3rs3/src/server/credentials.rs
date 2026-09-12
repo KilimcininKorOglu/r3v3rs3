@@ -4,7 +4,9 @@ use argon2::{
 };
 use r3v3rs3_api::{
     error::Error,
-    policy::{AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken},
+    policy::{
+        is_header_name, AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, ForwardAuth,
+    },
     proxy::{Proxy, ProxyKind},
 };
 use sha2::{Digest, Sha256};
@@ -25,6 +27,7 @@ pub fn seal_proxy(proxy: &mut Proxy) -> Result<(), Error> {
             AuthPolicy::None => {}
             AuthPolicy::Basic(basic) => seal_basic_auth(basic)?,
             AuthPolicy::Bearer(bearer) => seal_bearer_auth(bearer)?,
+            AuthPolicy::Forward(forward) => validate_forward_auth(forward)?,
         }
     }
     Ok(())
@@ -93,6 +96,20 @@ fn seal_token(token: &mut BearerToken) -> Result<(), Error> {
         return Err(invalid());
     }
     Ok(())
+}
+
+fn validate_forward_auth(forward: &ForwardAuth) -> Result<(), Error> {
+    if forward.timeout.is_zero() {
+        return Err(Error::InvalidTimeout);
+    }
+    match forward
+        .response_headers
+        .iter()
+        .find(|name| !is_header_name(name))
+    {
+        Some(name) => Err(Error::InvalidHeaderName { name: name.clone() }),
+        None => Ok(()),
+    }
 }
 
 fn hash_password(password: &str) -> Result<String, Error> {
@@ -209,6 +226,30 @@ mod tests {
         ] {
             assert!(seal_proxy(&mut bearer(tokens)).is_err());
         }
+    }
+
+    #[test]
+    fn forward_auth_headers_and_timeout_are_validated() {
+        let forward = |response_headers: Vec<String>, timeout: u64| Proxy {
+            kind: ProxyKind::Http(HttpProxy {
+                auth: AuthPolicy::Forward(Box::new(ForwardAuth {
+                    url: "http://127.0.0.1:4180/auth".parse().unwrap(),
+                    response_headers,
+                    timeout: std::time::Duration::from_secs(timeout),
+                })),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(seal_proxy(&mut forward(vec!["X-Auth-User".into()], 10)).is_ok());
+        assert!(matches!(
+            seal_proxy(&mut forward(vec!["X Auth".into()], 10)),
+            Err(Error::InvalidHeaderName { .. })
+        ));
+        assert!(matches!(
+            seal_proxy(&mut forward(vec![], 0)),
+            Err(Error::InvalidTimeout)
+        ));
     }
 
     #[test]
