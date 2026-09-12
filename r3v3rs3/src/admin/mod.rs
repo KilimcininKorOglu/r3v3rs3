@@ -1,7 +1,7 @@
 use crate::command::ServerCommand;
 use crate::server::rpc::config::GetConfig;
 use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
-use auth::SessionStore;
+use auth::{LoginAttempts, SessionStore};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, post, put};
@@ -373,6 +373,7 @@ pub struct Data {
     pub app_info: AppInfo,
     pub config: AppConfig,
     pub sessions: SessionStore,
+    pub login_attempts: LoginAttempts,
     pub log: Arc<LogReader>,
 
     pub rpc_counter: usize,
@@ -386,6 +387,7 @@ impl Data {
             app_info,
             config: AppConfig::default(),
             sessions: Default::default(),
+            login_attempts: Default::default(),
             log: Arc::new(LogReader::new(&log).await?),
             rpc_counter: 0,
             rpc_callbacks: HashMap::new(),
