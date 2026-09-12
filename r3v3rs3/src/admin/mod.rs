@@ -1,4 +1,5 @@
 use crate::command::ServerCommand;
+use crate::server::rpc::config::GetConfig;
 use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
 use auth::SessionStore;
 use axum::http::StatusCode;
@@ -71,6 +72,14 @@ pub async fn start_admin(
             }
         }
     });
+
+    // The server broadcasts its initial config before this listener subscribes,
+    // so fetch it explicitly.
+    let config = app_state
+        .call(GetConfig)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to load app config: {err}"))?;
+    data.lock().await.config = *config;
 
     let mut event_recv = event.subscribe();
     tokio::spawn(async move {
