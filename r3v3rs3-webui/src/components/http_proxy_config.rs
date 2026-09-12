@@ -1,13 +1,14 @@
 use super::auth_config::{AuthConfig, AuthForm};
 use r3v3rs3_api::cidr::{format_cidr_list, parse_cidr_list};
 use r3v3rs3_api::client_ip::ClientIpConfig;
+use r3v3rs3_api::header_rules::{format_header_rules, parse_header_rules, HeaderRules};
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
 use r3v3rs3_api::vhost::VirtualHost;
 use std::collections::HashMap;
 use std::str::FromStr;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
-use web_sys::{HtmlInputElement, HtmlSelectElement};
+use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
 pub(super) const LABEL_CLASS: &str =
@@ -36,6 +37,8 @@ struct ProxyForm {
     deny: String,
     rate_limit: RateLimitForm,
     auth: AuthForm,
+    request_headers: String,
+    response_headers: String,
 }
 
 impl ProxyForm {
@@ -54,6 +57,8 @@ impl ProxyForm {
             deny: format_cidr_list(&proxy.ip_filter.deny),
             rate_limit: RateLimitForm::new(&proxy.rate_limit),
             auth: AuthForm::new(&proxy.auth),
+            request_headers: format_header_rules(&proxy.headers.request),
+            response_headers: format_header_rules(&proxy.headers.response),
         }
     }
 }
@@ -69,6 +74,9 @@ struct RouteForm {
     rate_limit: RateLimitForm,
     override_auth: bool,
     auth: AuthForm,
+    override_headers: bool,
+    request_headers: String,
+    response_headers: String,
 }
 
 impl RouteForm {
@@ -88,6 +96,17 @@ impl RouteForm {
             rate_limit: RateLimitForm::new(&route.rate_limit.unwrap_or_default()),
             override_auth: route.auth.is_some(),
             auth: AuthForm::new(&route.auth.clone().unwrap_or_default()),
+            override_headers: route.headers.is_some(),
+            request_headers: route
+                .headers
+                .as_ref()
+                .map(|rules| format_header_rules(&rules.request))
+                .unwrap_or_default(),
+            response_headers: route
+                .headers
+                .as_ref()
+                .map(|rules| format_header_rules(&rules.response))
+                .unwrap_or_default(),
         }
     }
 
@@ -102,6 +121,9 @@ impl RouteForm {
             rate_limit: RateLimitForm::new(&RateLimit::default()),
             override_auth: false,
             auth: AuthForm::new(&Default::default()),
+            override_headers: false,
+            request_headers: String::new(),
+            response_headers: String::new(),
         }
     }
 }
@@ -190,6 +212,16 @@ pub fn http_proxy_config(props: &Props) -> Html {
             <AuthConfig form={form.auth.clone()} onchange={state_update(&form, |form, value| form.auth = value)} />
             { error_view(errors.get("auth")) }
 
+            <label class={SECTION_CLASS}>{"Header Rules"}</label>
+            { header_rules_view(
+                &form.request_headers,
+                &form.response_headers,
+                state_input(&form, text_area, |form, value| form.request_headers = value),
+                state_input(&form, text_area, |form, value| form.response_headers = value),
+            ) }
+            { error_view(errors.get("headers")) }
+            <p class={HINT_CLASS}>{"One rule per line: set Name: value, append Name: value or remove Name. Values can use {client_ip}, {host}, {scheme}, {request_id} and {route}. Write {{ and }} for a literal brace. Request rules change the request to the upstream server. Response rules change the upstream response."}</p>
+
             <label class={SECTION_CLASS}>{"Routes"}</label>
 
             { routes.iter().enumerate().map(|(i, route)| {
@@ -236,6 +268,7 @@ fn route_view(
             { route_ip_filter_view(routes, index, route) }
             { route_rate_limit_view(routes, index, route) }
             { route_auth_view(routes, index, route) }
+            { route_headers_view(routes, index, route) }
             { error_view(error) }
 
             <div class="flex justify-end rounded-md mt-4 sm:ml-auto px-4 lg:px-0" role="group">
@@ -313,6 +346,49 @@ fn route_auth_view(
     }
 }
 
+fn route_headers_view(
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    html! {
+        <>
+            <div>
+                { toggle(route_input(routes, index, checked, |route, value| route.override_headers = value), route.override_headers, "Override Header Rules for This Route", "mt-6") }
+            </div>
+            if route.override_headers {
+                { header_rules_view(
+                    &route.request_headers,
+                    &route.response_headers,
+                    route_input(routes, index, text_area, |route, value| route.request_headers = value),
+                    route_input(routes, index, text_area, |route, value| route.response_headers = value),
+                ) }
+                <p class={HINT_CLASS}>{"This route uses these rules instead of the proxy rules. Leave both lists empty to change no headers on this route."}</p>
+            }
+        </>
+    }
+}
+
+fn header_rules_view(
+    request: &str,
+    response: &str,
+    on_request: Callback<Event>,
+    on_response: Callback<Event>,
+) -> Html {
+    html! {
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class={LABEL_CLASS}>{"Request Headers"}</label>
+                <textarea rows="4" autocapitalize="off" spellcheck="false" placeholder={"set X-Request-Id: {request_id}\nremove X-Debug"} value={request.to_string()} onchange={on_request} class={classes!(INPUT_CLASS, "font-mono")} />
+            </div>
+            <div>
+                <label class={LABEL_CLASS}>{"Response Headers"}</label>
+                <textarea rows="4" autocapitalize="off" spellcheck="false" placeholder={"set X-Frame-Options: DENY\nremove Server"} value={response.to_string()} onchange={on_response} class={classes!(INPUT_CLASS, "font-mono")} />
+            </div>
+        </div>
+    }
+}
+
 fn rate_limit_view(
     limit: &RateLimitForm,
     on_requests: Callback<Event>,
@@ -369,6 +445,11 @@ fn input_element(event: &Event) -> HtmlInputElement {
 
 fn text(event: &Event) -> String {
     input_element(event).value()
+}
+
+fn text_area(event: &Event) -> String {
+    let area: HtmlTextAreaElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+    area.value()
 }
 
 fn checked(event: &Event) -> bool {
@@ -448,6 +529,12 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
     };
     let rate_limit = parse_rate_limit(&form.rate_limit, "rate_limit", &mut errors);
     let auth = or_error(form.auth.parse(), "auth", &mut errors);
+    let headers = parse_header_rules_form(
+        &form.request_headers,
+        &form.response_headers,
+        "headers",
+        &mut errors,
+    );
 
     if !errors.is_empty() {
         return Err(errors);
@@ -463,6 +550,7 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
         ip_filter,
         rate_limit,
         auth,
+        headers: Box::new(headers),
     })
 }
 
@@ -476,6 +564,26 @@ fn or_error<T: Default, E: ToString>(
         errors.insert(key.to_string(), err.to_string());
         T::default()
     })
+}
+
+fn parse_header_rules_form(
+    request: &str,
+    response: &str,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> HeaderRules {
+    HeaderRules {
+        request: or_error(
+            parse_header_rules(request).map_err(|err| format!("Request headers: {err}")),
+            key,
+            errors,
+        ),
+        response: or_error(
+            parse_header_rules(response).map_err(|err| format!("Response headers: {err}")),
+            key,
+            errors,
+        ),
+    }
 }
 
 fn parse_rate_limit(
@@ -555,11 +663,15 @@ fn parse_route(
     let auth = route
         .override_auth
         .then(|| or_error(route.auth.parse(), key, errors));
+    let headers = route.override_headers.then(|| {
+        parse_header_rules_form(&route.request_headers, &route.response_headers, key, errors)
+    });
     (!servers.is_empty()).then(|| Route {
         path: route.path.clone(),
         servers,
         ip_filter,
         rate_limit,
         auth,
+        headers,
     })
 }

@@ -4,6 +4,7 @@ use argon2::{
 };
 use r3v3rs3_api::{
     error::Error,
+    header_rules::HeaderRules,
     policy::{
         is_header_name, AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, ForwardAuth,
     },
@@ -30,7 +31,13 @@ pub fn seal_proxy(proxy: &mut Proxy) -> Result<(), Error> {
             AuthPolicy::Forward(forward) => validate_forward_auth(forward)?,
         }
     }
-    Ok(())
+    let route_rules = http
+        .routes
+        .iter()
+        .filter_map(|route| route.headers.as_ref());
+    std::iter::once(&*http.headers)
+        .chain(route_rules)
+        .try_for_each(HeaderRules::validate)
 }
 
 /// Runs [`seal_proxy`] on a blocking thread, because hashing a password takes CPU time.
@@ -249,6 +256,30 @@ mod tests {
         assert!(matches!(
             seal_proxy(&mut forward(vec![], 0)),
             Err(Error::InvalidTimeout)
+        ));
+    }
+
+    #[test]
+    fn header_rules_are_validated() {
+        use r3v3rs3_api::header_rules::HeaderRule;
+        let remove = |name: &str| Proxy {
+            kind: ProxyKind::Http(HttpProxy {
+                headers: Box::new(HeaderRules {
+                    request: vec![HeaderRule::Remove { name: name.into() }],
+                    response: vec![],
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(seal_proxy(&mut remove("X-Secret")).is_ok());
+        assert!(matches!(
+            seal_proxy(&mut remove("Host")),
+            Err(Error::ProtectedHeader { .. })
+        ));
+        assert!(matches!(
+            seal_proxy(&mut remove("X Secret")),
+            Err(Error::InvalidHeaderName { .. })
         ));
     }
 

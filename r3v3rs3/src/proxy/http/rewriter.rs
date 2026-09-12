@@ -8,10 +8,11 @@ use hyper::{
     HeaderMap,
 };
 use sailfish::TemplateOnce;
-use std::{iter, net::IpAddr};
+use std::{iter, net::IpAddr, sync::Arc};
 
 use super::client_ip::{ClientAddr, CLIENT_IP_HEADERS};
 use super::error::{error_headers, map_error, ErrorTemplate};
+use super::header_rules::{CompiledHeaderRules, HeaderVariables};
 
 #[derive(Default, Debug)]
 pub struct RequestRewriter {
@@ -176,6 +177,8 @@ fn forwarded_proto_directive(proto: &str) -> String {
 pub struct ResponseRewriter {
     https_port: Option<u16>,
     quic_port: Option<u16>,
+    /// Response header rules of the route and the variable values of the request.
+    header_rules: Option<(Arc<CompiledHeaderRules>, HeaderVariables)>,
 }
 
 impl ResponseRewriter {
@@ -196,6 +199,9 @@ impl ResponseRewriter {
                 if let Some(alt_svc) = self.alt_svc() {
                     res.headers_mut()
                         .insert(ALT_SVC, HeaderValue::from_str(&alt_svc)?);
+                }
+                if let Some((rules, variables)) = &self.header_rules {
+                    rules.apply_response(res.headers_mut(), variables);
                 }
                 Ok(res.map(|body| BoxBody::new(body)))
             }
@@ -246,6 +252,15 @@ impl ResponseRewriterBuilder {
 
     pub fn quic_port(mut self, port: Option<u16>) -> Self {
         self.inner.quic_port = port;
+        self
+    }
+
+    pub fn header_rules(
+        mut self,
+        rules: Arc<CompiledHeaderRules>,
+        variables: HeaderVariables,
+    ) -> Self {
+        self.inner.header_rules = Some((rules, variables));
         self
     }
 

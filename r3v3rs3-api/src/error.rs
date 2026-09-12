@@ -95,6 +95,15 @@ pub enum Error {
     #[error("invalid header name: {name}")]
     InvalidHeaderName { name: String },
 
+    #[error("header cannot be changed: {name}")]
+    ProtectedHeader { name: String },
+
+    #[error("invalid header value: {value}")]
+    InvalidHeaderValue { value: String },
+
+    #[error("invalid header rule: {rule}")]
+    InvalidHeaderRule { rule: String },
+
     #[error("timeout must be greater than zero")]
     InvalidTimeout,
 

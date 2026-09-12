@@ -1,5 +1,6 @@
 use crate::client_ip::ClientIpConfig;
 use crate::error::Error;
+use crate::header_rules::HeaderRules;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
@@ -71,6 +72,9 @@ pub struct HttpProxy {
     /// Default authentication for every route of this proxy.
     #[serde(default, skip_serializing_if = "AuthPolicy::is_none")]
     pub auth: AuthPolicy,
+    /// Default header rules for every route of this proxy. Boxed, so that `ProxyKind` stays small.
+    #[serde(default, skip_serializing_if = "HeaderRules::is_empty")]
+    pub headers: Box<HeaderRules>,
 }
 
 fn upgrade_insecure_default() -> bool {
@@ -130,6 +134,9 @@ pub struct Route {
     /// Replaces the proxy authentication for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthPolicy>,
+    /// Replaces the proxy header rules for this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<HeaderRules>,
 }
 
 fn default_route_path() -> String {

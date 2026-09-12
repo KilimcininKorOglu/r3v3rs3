@@ -1,6 +1,7 @@
 use super::auth::{Authenticator, SessionService};
 use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, RequestFilter};
+use super::header_rules::CompiledHeaderRules;
 use super::rate_limit::{self, ClientRateLimiter};
 use hyper::Request;
 use r3v3rs3_api::{
@@ -36,6 +37,7 @@ impl Router {
             let proxy_ip_filter = Arc::new(http.ip_filter);
             let proxy_rate_limiter = rate_limit::limiter((id, None), http.rate_limit);
             let proxy_auth = Authenticator::new(http.auth, tls_client_config, sessions);
+            let proxy_header_rules = Arc::new(CompiledHeaderRules::new(&http.headers));
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 let base_path = filter
@@ -55,6 +57,10 @@ impl Router {
                     || proxy_auth.clone(),
                     |policy| Authenticator::new(policy, tls_client_config, sessions),
                 );
+                let header_rules = route.headers.as_ref().map_or_else(
+                    || proxy_header_rules.clone(),
+                    |rules| Arc::new(CompiledHeaderRules::new(rules)),
+                );
                 routes.push(FilteredRoute {
                     resource_id: id,
                     filter,
@@ -69,6 +75,7 @@ impl Router {
                     ip_filter,
                     rate_limiter,
                     auth,
+                    header_rules,
                 });
             }
         }
@@ -103,6 +110,7 @@ pub struct FilteredRoute {
     pub ip_filter: Arc<IpFilter>,
     pub rate_limiter: Option<Arc<ClientRateLimiter>>,
     pub auth: Option<Arc<Authenticator>>,
+    pub header_rules: Arc<CompiledHeaderRules>,
 }
 
 #[derive(Debug)]

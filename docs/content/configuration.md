@@ -209,6 +209,43 @@ auth = { type = "session" }
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+## Header Rules
+
+You can change the headers of proxied requests and responses in the "Header Rules" section. A route can replace the proxy rules with "Override Header Rules for This Route".
+
+Write one rule per line:
+
+| Rule | Action |
+|---|---|
+| `set Name: value` | Replaces every value of the header. |
+| `append Name: value` | Adds a value and keeps the existing values. |
+| `remove Name` | Removes the header. |
+
+r3v3rs3 skips empty lines and lines that start with `#`.
+
+- **Request Headers**: The rules change the request that r3v3rs3 sends to the upstream server. They run after r3v3rs3 sets `Forwarded`, `X-Forwarded-*` and `Via`, so a rule can replace these headers.
+- **Response Headers**: The rules change the upstream response before r3v3rs3 sends it to the client. They do not change the responses that r3v3rs3 creates itself, like error pages, redirects and sign-in pages.
+
+Values can use these variables. Write `{{` and `}}` for a literal brace.
+
+| Variable | Value |
+|---|---|
+| `{client_ip}` | The client IP address that the "Client IP" section resolves. |
+| `{host}` | The requested host name. |
+| `{scheme}` | `http` or `https`. |
+| `{request_id}` | A random 32-character hex ID. The request and response rules of one request use the same ID. |
+| `{route}` | The path of the matched route, e.g. `/api`. |
+
+Rules cannot change `Connection`, `Content-Length`, `Host`, `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding` and `Upgrade`, because these headers control the connection and the message framing.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+headers = { request = [{ action = "set", name = "X-Request-Id", value = "{request_id}" }, { action = "remove", name = "X-Debug" }], response = [{ action = "set", name = "X-Frame-Options", value = "DENY" }, { action = "remove", name = "Server" }] }
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
+```
+
 ## HTTP/2
 
 r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).

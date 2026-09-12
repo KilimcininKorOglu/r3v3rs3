@@ -240,6 +240,7 @@ pub fn http_route(path: &str, upstream: &str, ip_filter: Option<IpFilter>) -> Ro
         ip_filter,
         rate_limit: None,
         auth: None,
+        headers: None,
     }
 }
 

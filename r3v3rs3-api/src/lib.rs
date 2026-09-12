@@ -7,6 +7,7 @@ pub mod cidr;
 pub mod client_ip;
 pub mod error;
 pub mod event;
+pub mod header_rules;
 pub mod id;
 pub mod log;
 pub mod multiaddr;

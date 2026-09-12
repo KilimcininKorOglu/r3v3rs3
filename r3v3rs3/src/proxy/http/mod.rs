@@ -2,6 +2,7 @@ use self::{
     auth::{AuthContext, AuthRejection},
     error::ProxyError,
     filter::FilterResult,
+    header_rules::{new_request_id, HeaderVariables},
     pool::ConnectionPool,
     route::{FilteredRoute, ParsedRoute, Router},
 };
@@ -56,6 +57,7 @@ mod auth;
 pub(crate) mod client_ip;
 mod error;
 mod filter;
+mod header_rules;
 pub(crate) mod hyper_tls;
 mod pool;
 mod rate_limit;
@@ -649,7 +651,43 @@ where
         .header_rewriter
         .pre_process(req.headers_mut(), &client, header_host, info.proto);
     shared.header_rewriter.post_process(req.headers_mut());
+    let response_rewriter = apply_header_rules(
+        route,
+        req.headers_mut(),
+        client.ip,
+        request_host,
+        info.proto,
+        response_rewriter,
+    );
     (ProxiedRequest::Ok(req, span), response_rewriter)
+}
+
+/// Applies the request header rules of the route and hands the response header rules to the
+/// response rewriter. Request rules run after the forwarded headers, so they can replace them.
+fn apply_header_rules(
+    route: &FilteredRoute,
+    headers: &mut hyper::HeaderMap,
+    client: std::net::IpAddr,
+    host: Option<String>,
+    proto: &'static str,
+    response_rewriter: ResponseRewriterBuilder,
+) -> ResponseRewriterBuilder {
+    if route.header_rules.is_empty() {
+        return response_rewriter;
+    }
+    let variables = HeaderVariables {
+        client_ip: client,
+        host: host.unwrap_or_default(),
+        scheme: if proto == "http" { "http" } else { "https" },
+        request_id: new_request_id(),
+        route: if route.base_path.is_empty() {
+            "/".to_string()
+        } else {
+            route.base_path.clone()
+        },
+    };
+    route.header_rules.apply_request(headers, &variables);
+    response_rewriter.header_rules(route.header_rules.clone(), variables)
 }
 
 /// Applies the client IP filter and the rate limit of the route.
