@@ -26,6 +26,9 @@ pub enum ProxyError {
 
     #[error("authentication service is unavailable")]
     AuthServiceUnavailable,
+
+    #[error("the upstream client certificate of the proxy is invalid")]
+    UpstreamClientCertInvalid,
 }
 
 impl ProxyError {
@@ -36,7 +39,9 @@ impl ProxyError {
             Self::IpNotAllowed => StatusCode::FORBIDDEN,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
-            Self::AuthServiceUnavailable => StatusCode::BAD_GATEWAY,
+            Self::AuthServiceUnavailable | Self::UpstreamClientCertInvalid => {
+                StatusCode::BAD_GATEWAY
+            }
         }
     }
 }

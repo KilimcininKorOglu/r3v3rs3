@@ -1,4 +1,5 @@
 use super::RpcMethod;
+use crate::proxy::tls::upstream_client_config;
 use crate::server::credentials::seal;
 use crate::server::state::ServerState;
 use r3v3rs3_api::error::Error;
@@ -98,6 +99,7 @@ impl RpcMethod for AddProxy {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        validate_client_cert(&self.entry, state)?;
         let proxy = seal(self.entry).await?;
         if state.proxies.set((state.generate_id(), proxy).into()) {
             state.update_proxies().await;
@@ -116,6 +118,7 @@ impl RpcMethod for UpdateProxy {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        validate_client_cert(&self.entry.proxy, state)?;
         let proxy = seal(self.entry.proxy).await?;
         if state.proxies.set((self.entry.id, proxy).into()) {
             state.update_proxies().await;
@@ -123,4 +126,10 @@ impl RpcMethod for UpdateProxy {
         }
         Ok(())
     }
+}
+
+/// Checks that the upstream client certificate of the proxy is a client certificate with a
+/// private key.
+fn validate_client_cert(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
+    upstream_client_config(&state.certs, proxy.kind.client_cert()).map(|_| ())
 }

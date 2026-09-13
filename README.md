@@ -24,6 +24,7 @@ r3v3rs3 is currently in early development. Please be aware that breaking changes
 - Easily deployable single binary with a built-in WebUI
 - Allows live configuration updates via a REST API without restarting the service
 - Imports TLS certificates from the GUI or can generate a self-signed certificate
+- Supports mutual TLS: verifies client certificates on TLS ports and sends a client certificate to upstream servers
 - Provides Let's Encrypt support (ACME v2, HTTP challenge only) for seamless certificate provisioning
 
 ## Documentation

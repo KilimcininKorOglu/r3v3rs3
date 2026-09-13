@@ -1,5 +1,6 @@
 use super::{
-    tls::{port_acceptor, TlsTermination},
+    spawn_connection,
+    tls::{port_acceptor, upstream_client_config, TlsTermination},
     PortContextEvent, PortStatus, SocketState,
 };
 use crate::server::cert_list::CertList;
@@ -7,7 +8,7 @@ use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::name_server::{GenericConnector, TokioRuntimeProvider};
 use hickory_resolver::system_conf::read_system_conf;
 use hickory_resolver::AsyncResolver;
-use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind};
+use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind, proxy::TcpProxy};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
 use std::{net::SocketAddr, sync::Arc, time::SystemTime};
 use tokio::{
@@ -19,11 +20,8 @@ use tokio::{
     sync::Notify,
 };
 use tokio_rustls::rustls::pki_types::{IpAddr, ServerName};
-use tokio_rustls::{
-    rustls::{ClientConfig, RootCertStore},
-    TlsAcceptor, TlsConnector,
-};
-use tracing::{debug, error, info, span, Instrument, Level, Span};
+use tokio_rustls::{rustls::ClientConfig, TlsAcceptor, TlsConnector};
+use tracing::{debug, error, info, span, Level, Span};
 
 const MAX_BUFFER_SIZE: usize = 4096;
 
@@ -35,7 +33,6 @@ pub struct TcpPortContext {
     span: Span,
     resolver: AsyncResolver<GenericConnector<TokioRuntimeProvider>>,
     tls_termination: Option<TlsTermination>,
-    tls_client_config: Arc<ClientConfig>,
     stop_notifier: Arc<Notify>,
 }
 
@@ -67,27 +64,15 @@ impl TcpPortContext {
             span,
             resolver,
             tls_termination,
-            tls_client_config: Arc::new(
-                ClientConfig::builder()
-                    .with_root_certificates(RootCertStore::empty())
-                    .with_no_client_auth(),
-            ),
             stop_notifier: Arc::new(Notify::new()),
         })
     }
 
     pub async fn setup(&mut self, certs: &CertList, proxies: Vec<ProxyEntry>) -> Result<(), Error> {
-        let config = ClientConfig::builder()
-            .with_root_certificates(certs.root_certs().clone())
-            .with_no_client_auth();
-        self.tls_client_config = Arc::new(config);
-
         let mut servers = Vec::new();
         for proxy in proxies {
             if let ProxyKind::Tcp(proxy) = proxy.proxy.kind {
-                for server in proxy.upstream_servers {
-                    servers.push(multiaddr_to_host(&server.addr)?);
-                }
+                servers.extend(proxy_connections(certs, &proxy)?);
             }
         }
         self.servers = servers;
@@ -138,34 +123,14 @@ impl TcpPortContext {
             debug!("closing the connection: the TLS config is invalid");
             return;
         };
-        let span = self.span.clone();
-        let conn = self.servers[0].clone();
-        let tls_client_config = if conn.tls {
-            Some(self.tls_client_config.clone())
-        } else {
-            None
-        };
-
-        let stop_notifier = self.stop_notifier.clone();
-        let resolver = self.resolver.clone();
-
-        tokio::spawn(
-            async move {
-                if let Err(err) = start(
-                    stream,
-                    conn,
-                    resolver,
-                    tls_client_config,
-                    tls_acceptor,
-                    stop_notifier,
-                )
-                .await
-                {
-                    error!("{err}");
-                }
-            }
-            .instrument(span),
+        let task = start(
+            stream,
+            self.servers[0].clone(),
+            self.resolver.clone(),
+            tls_acceptor,
+            self.stop_notifier.clone(),
         );
+        spawn_connection(self.span.clone(), task);
     }
 }
 
@@ -173,7 +138,6 @@ pub async fn start(
     mut stream: BufStream<TcpStream>,
     conn: Connection,
     resolver: AsyncResolver<GenericConnector<TokioRuntimeProvider>>,
-    tls_client_config: Option<Arc<ClientConfig>>,
     tls_acceptor: Option<TlsAcceptor>,
     stop_notifier: Arc<Notify>,
 ) -> anyhow::Result<()> {
@@ -229,7 +193,7 @@ pub async fn start(
     }
 
     let mut out: Box<dyn IoStream> = Box::new(out);
-    if let Some(config) = tls_client_config {
+    if let Some(config) = conn.tls_client_config {
         debug!(%resolved, "client: tls handshake");
         let tls = TlsConnector::from(config);
         out = Box::new(tls.connect(conn.name, out).await?);
@@ -246,20 +210,37 @@ pub async fn start(
     Ok(())
 }
 
-fn multiaddr_to_host(addr: &Multiaddr) -> Result<Connection, Error> {
-    let tls = addr.is_tls();
+/// Resolves the upstream servers of the proxy. A proxy with an invalid client certificate gets no
+/// servers, so it does not connect without the certificate.
+fn proxy_connections(certs: &CertList, proxy: &TcpProxy) -> Result<Vec<Connection>, Error> {
+    let config = match upstream_client_config(certs, proxy.client_cert) {
+        Ok(config) => Arc::new(config),
+        Err(err) => {
+            error!(%err, "the proxy cannot connect to its upstream servers");
+            return Ok(vec![]);
+        }
+    };
+    proxy
+        .upstream_servers
+        .iter()
+        .map(|server| multiaddr_to_host(&server.addr, &config))
+        .collect()
+}
+
+fn multiaddr_to_host(addr: &Multiaddr, config: &Arc<ClientConfig>) -> Result<Connection, Error> {
+    let tls_client_config = addr.is_tls().then(|| config.clone());
     match (addr.ip_addr(), addr.host(), addr.port()) {
         (Ok(addr), _, Ok(port)) => Ok(Connection {
             name: ServerName::IpAddress(addr.into()),
             port,
-            tls,
+            tls_client_config,
         }),
         (_, Ok(host), Ok(port)) => Ok(Connection {
             name: ServerName::try_from(host.as_str())
                 .map_err(|_| Error::InvalidServerAddress { addr: addr.clone() })?
                 .to_owned(),
             port,
-            tls,
+            tls_client_config,
         }),
         _ => Err(Error::InvalidServerAddress { addr: addr.clone() }),
     }
@@ -273,5 +254,6 @@ impl<S> IoStream for S where S: AsyncRead + AsyncWrite + Unpin + Send {}
 pub struct Connection {
     pub name: ServerName<'static>,
     pub port: u16,
-    pub tls: bool,
+    /// The TLS client config for a TLS upstream server.
+    pub tls_client_config: Option<Arc<ClientConfig>>,
 }

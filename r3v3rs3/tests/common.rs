@@ -258,15 +258,19 @@ pub async fn admin_session_cookie(addr: SocketAddr) -> anyhow::Result<String> {
     Ok(cookie.to_string())
 }
 
-pub fn http_proxy_entry(id: &str, port_id: &str, http: HttpProxy) -> ProxyEntry {
+pub fn proxy_entry(id: &str, port_id: &str, kind: ProxyKind) -> ProxyEntry {
     ProxyEntry {
         id: id.parse().unwrap(),
         proxy: Proxy {
             ports: vec![port_id.parse().unwrap()],
-            kind: ProxyKind::Http(Box::new(http)),
+            kind,
             ..Default::default()
         },
     }
+}
+
+pub fn http_proxy_entry(id: &str, port_id: &str, http: HttpProxy) -> ProxyEntry {
+    proxy_entry(id, port_id, ProxyKind::Http(Box::new(http)))
 }
 
 pub fn http_route(path: &str, upstream: &str, ip_filter: Option<IpFilter>) -> Route {

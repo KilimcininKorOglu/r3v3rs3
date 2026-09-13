@@ -12,11 +12,28 @@ use r3v3rs3_api::{
     port::{Port, PortEntry},
     proxy::ProxyEntry,
 };
+use std::future::Future;
+use tracing::{error, Instrument, Span};
 
 pub mod http;
 pub mod tcp;
 pub mod tls;
 pub mod udp;
+
+/// Runs the task of a client connection in the span and logs its error.
+fn spawn_connection<F>(span: Span, task: F)
+where
+    F: Future<Output = anyhow::Result<()>> + Send + 'static,
+{
+    tokio::spawn(
+        async move {
+            if let Err(err) = task.await {
+                error!("{err}");
+            }
+        }
+        .instrument(span),
+    );
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PortContextEvent {

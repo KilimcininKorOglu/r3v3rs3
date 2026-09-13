@@ -305,13 +305,16 @@ impl Cert {
             .collect()
     }
 
-    fn certified_impl(&self) -> anyhow::Result<CertifiedKey> {
+    /// Returns the PKCS#8 private key in DER, the format that rustls reads.
+    pub fn private_key_der(&self) -> Result<PrivateKeyDer<'static>, Error> {
         let key = self.key.as_ref().ok_or(Error::FailedToReadPrivateKey)?;
-        let key = key
-            .decode_msg::<PrivateKeyInfo>()
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let key =
-            PrivateKeyDer::try_from(key.private_key).map_err(|err| anyhow::anyhow!("{err}"))?;
+        key.decode_msg::<PrivateKeyInfo>()
+            .map_err(|_| Error::FailedToReadPrivateKey)?;
+        Ok(PrivateKeyDer::Pkcs8(key.as_bytes().to_vec().into()))
+    }
+
+    fn certified_impl(&self) -> anyhow::Result<CertifiedKey> {
+        let key = self.private_key_der()?;
         let signing_key = sign::any_supported_type(&key).map_err(|err| anyhow::anyhow!("{err}"))?;
         let chain = self.certificates()?;
         Ok(CertifiedKey::new(chain, signing_key))

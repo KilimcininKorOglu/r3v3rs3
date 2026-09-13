@@ -54,6 +54,7 @@ async fn tls_proxy() -> anyhow::Result<()> {
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Tcp(TcpProxy {
+                    client_cert: None,
                     upstream_servers: vec![UpstreamServer {
                         addr: format!(
                             "/dns/localhost/tcp/{}/tls",

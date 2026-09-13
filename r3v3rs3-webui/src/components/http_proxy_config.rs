@@ -1,6 +1,8 @@
 use super::auth_config::{AuthConfig, AuthForm};
 use crate::i18n::use_locale;
+use crate::pages::cert_list::get_cert_list;
 use r3v3rs3_api::cache::CacheConfig;
+use r3v3rs3_api::cert::{CertInfo, CertKind};
 use r3v3rs3_api::cidr::{format_cidr_list, parse_cidr_list};
 use r3v3rs3_api::client_ip::ClientIpConfig;
 use r3v3rs3_api::compression::{
@@ -9,6 +11,7 @@ use r3v3rs3_api::compression::{
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::header_rules::{format_header_rules, HeaderRule, HeaderRules};
 use r3v3rs3_api::i18n::Locale;
+use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
 use r3v3rs3_api::vhost::VirtualHost;
@@ -50,6 +53,7 @@ struct ProxyForm {
     compression: CompressionForm,
     cache: CacheForm,
     h2c: bool,
+    client_cert: Option<ShortId>,
 }
 
 impl ProxyForm {
@@ -73,6 +77,7 @@ impl ProxyForm {
             compression: CompressionForm::new(&proxy.compression),
             cache: CacheForm::new(&proxy.cache),
             h2c: proxy.h2c,
+            client_cert: proxy.client_cert,
         }
     }
 }
@@ -200,6 +205,7 @@ impl RateLimitForm {
 pub fn http_proxy_config(props: &Props) -> Html {
     let locale = use_locale();
     let form = use_state(|| ProxyForm::new(&props.proxy));
+    let client_certs = use_client_certs();
     let routes = use_state(|| {
         let routes = props
             .proxy
@@ -291,6 +297,12 @@ pub fn http_proxy_config(props: &Props) -> Html {
                 { toggle(state_input(&form, checked, |form, value| form.h2c = value), form.h2c, locale.t("http_form.h2c"), "mt-4") }
             </div>
             <p class={HINT_CLASS}>{locale.t("http_form.h2c_hint")}</p>
+            { client_cert_view(
+                locale,
+                state_input(&form, select_value, |form, value| form.client_cert = parse_client_cert(&value)),
+                form.client_cert,
+                &client_certs,
+            ) }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.routes")}</label>
 
@@ -414,7 +426,7 @@ fn route_auth_view(
                 { toggle(route_input(routes, index, checked, |route, value| route.override_auth = value), route.override_auth, locale.t("http_form.override_auth"), "mt-6") }
             </div>
             if route.override_auth {
-                <AuthConfig form={route.auth.clone()} onchange={route_update(routes, index, |route, value| route.auth = value)} />
+                <AuthConfig form={route.auth.clone()} onchange={item_update(routes, index, |route, value| route.auth = value)} />
                 <p class={HINT_CLASS}>{locale.t("http_form.route_auth_hint")}</p>
             }
         </>
@@ -569,7 +581,70 @@ fn period_label(locale: Locale, period: RatePeriod) -> String {
     locale.t(&format!("period.{}", period.as_str())).to_string()
 }
 
-fn toggle(
+/// Loads the client certificates that have a private key.
+#[hook]
+pub fn use_client_certs() -> UseStateHandle<Vec<CertInfo>> {
+    let certs = use_state(Vec::<CertInfo>::new);
+    use_effect_with((), {
+        let certs = certs.clone();
+        move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Ok(list) = get_cert_list().await {
+                    certs.set(list.into_iter().filter(is_upstream_client_cert).collect());
+                }
+            });
+        }
+    });
+    certs
+}
+
+fn is_upstream_client_cert(cert: &CertInfo) -> bool {
+    cert.kind == CertKind::Client && cert.has_private_key
+}
+
+/// The select element of the client certificate that a proxy sends to its upstream servers.
+pub fn client_cert_view(
+    locale: Locale,
+    onchange: Callback<Event>,
+    selected: Option<ShortId>,
+    certs: &[CertInfo],
+) -> Html {
+    let options = html! {
+        <>
+            <option value="" selected={selected.is_none()}>{locale.t("proxy_form.client_cert_none")}</option>
+            { for certs.iter().map(|cert| html! {
+                <option value={cert.id.to_string()} selected={selected == Some(cert.id)}>{client_cert_label(cert)}</option>
+            }) }
+        </>
+    };
+    select_field(
+        locale.t("proxy_form.client_cert"),
+        onchange,
+        options,
+        Some(locale.t("proxy_form.client_cert_hint")),
+    )
+}
+
+/// Reads the value of the client certificate select element. The empty value is "None", because
+/// an empty string parses as the zero ID.
+pub fn parse_client_cert(value: &str) -> Option<ShortId> {
+    if value.is_empty() {
+        return None;
+    }
+    value.parse().ok()
+}
+
+fn client_cert_label(cert: &CertInfo) -> String {
+    let names = cert
+        .san
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{names} ({})", cert.id)
+}
+
+pub(super) fn toggle(
     onchange: Callback<Event>,
     checked: bool,
     label: &'static str,
@@ -623,8 +698,13 @@ pub fn select_setter<T: 'static>(
     })
 }
 
-fn input_element(event: &Event) -> HtmlInputElement {
+pub(super) fn input_element(event: &Event) -> HtmlInputElement {
     event.target().unwrap_throw().dyn_into().unwrap_throw()
+}
+
+fn select_value(event: &Event) -> String {
+    let select: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+    select.value()
 }
 
 fn text(event: &Event) -> String {
@@ -641,8 +721,7 @@ fn checked(event: &Event) -> bool {
 }
 
 fn period(event: &Event) -> RatePeriod {
-    let select: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-    let value = select.value();
+    let value = select_value(event);
     RatePeriod::ALL
         .into_iter()
         .find(|period| period.as_str() == value)
@@ -674,17 +753,22 @@ where
     state_update(state, update).reform(move |event: Event| read(&event))
 }
 
-fn route_update<V: 'static>(
-    routes: &UseStateHandle<Vec<RouteForm>>,
+/// Returns a handler that updates the item at the index of a list state.
+pub(super) fn item_update<T, V>(
+    items: &UseStateHandle<Vec<T>>,
     index: usize,
-    update: fn(&mut RouteForm, V),
-) -> Callback<V> {
-    let routes = routes.clone();
+    update: fn(&mut T, V),
+) -> Callback<V>
+where
+    T: Clone + 'static,
+    V: 'static,
+{
+    let items = items.clone();
     Callback::from(move |value: V| {
-        let mut list = (*routes).clone();
-        if let Some(route) = list.get_mut(index) {
-            update(route, value);
-            routes.set(list);
+        let mut list = (*items).clone();
+        if let Some(item) = list.get_mut(index) {
+            update(item, value);
+            items.set(list);
         }
     })
 }
@@ -695,7 +779,7 @@ fn route_input<V: 'static>(
     read: fn(&Event) -> V,
     update: fn(&mut RouteForm, V),
 ) -> Callback<Event> {
-    route_update(routes, index, update).reform(move |event: Event| read(&event))
+    item_update(routes, index, update).reform(move |event: Event| read(&event))
 }
 
 fn get_proxy(
@@ -753,6 +837,7 @@ fn get_proxy(
         compression,
         cache,
         h2c: form.h2c,
+        client_cert: form.client_cert,
     })
 }
 

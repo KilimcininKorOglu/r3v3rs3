@@ -67,7 +67,7 @@ impl RpcMethod for DeleteCert {
     }
 }
 
-/// Rejects the deletion of a certificate that a port uses.
+/// Rejects the deletion of a certificate that a port or a proxy uses.
 fn ensure_unused(state: &ServerState, id: ShortId) -> Result<(), Error> {
     let used_by_port = state.ports.entries().any(|entry| {
         entry
@@ -77,7 +77,11 @@ fn ensure_unused(state: &ServerState, id: ShortId) -> Result<(), Error> {
             .as_ref()
             .is_some_and(|tls| tls.client_ca_certs.contains(&id))
     });
-    if used_by_port {
+    let used_by_proxy = state
+        .proxies
+        .entries()
+        .any(|entry| entry.proxy.kind.client_cert() == Some(id));
+    if used_by_port || used_by_proxy {
         return Err(Error::CertificateInUse { id });
     }
     Ok(())

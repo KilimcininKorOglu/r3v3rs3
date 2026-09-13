@@ -14,7 +14,7 @@ use tokio_rustls::rustls::pki_types::CertificateDer;
 use tokio_rustls::rustls::server::danger::ClientCertVerifier;
 use tokio_rustls::rustls::server::{ClientHello, ResolvesServerCert, WebPkiClientVerifier};
 use tokio_rustls::rustls::sign::CertifiedKey;
-use tokio_rustls::rustls::{RootCertStore, ServerConfig};
+use tokio_rustls::rustls::{ClientConfig, RootCertStore, ServerConfig};
 use tokio_rustls::TlsAcceptor;
 use tracing::error;
 use x509_parser::parse_x509_certificate;
@@ -123,6 +123,30 @@ pub fn validate_client_auth(
         return Ok(());
     }
     client_roots(&config.client_ca_certs, certs).map(|_| ())
+}
+
+/// Builds the TLS client config for the upstream servers of a proxy. The config sends the client
+/// certificate when the proxy has one. An invalid client certificate is an error, so a proxy never
+/// connects without the certificate that it must send.
+pub fn upstream_client_config(
+    certs: &CertList,
+    client_cert: Option<ShortId>,
+) -> Result<ClientConfig, Error> {
+    let builder = ClientConfig::builder().with_root_certificates(certs.root_certs().clone());
+    let Some(id) = client_cert else {
+        return Ok(builder.with_no_client_auth());
+    };
+    let invalid = || Error::InvalidClientCert { id };
+    let cert = certs
+        .get(id)
+        .filter(|cert| cert.kind == CertKind::Client)
+        .ok_or_else(invalid)?;
+    let chain = cert.certificates().map_err(|_| invalid())?;
+    let key = cert.private_key_der().map_err(|_| invalid())?;
+    builder.with_client_auth_cert(chain, key).map_err(|err| {
+        error!(%id, %err, "failed to load the upstream client certificate");
+        invalid()
+    })
 }
 
 /// Builds the trust store of the client certificates from the selected root certificates.
@@ -276,6 +300,28 @@ mod tests {
         assert_eq!(tls.setup(&certs).await, TlsState::Error);
         assert!(port_acceptor(Some(&tls)).is_none());
         assert!(matches!(port_acceptor(None), Some(None)));
+    }
+
+    #[tokio::test]
+    async fn upstream_client_config_needs_a_client_certificate() {
+        let root = Arc::new(Cert::new_ca().unwrap());
+        let server =
+            Arc::new(Cert::new_self_signed(&["localhost".parse().unwrap()], &root).unwrap());
+        let client =
+            Arc::new(Cert::new_client(&["client.example.com".parse().unwrap()], &root).unwrap());
+        let certs = CertList::new([root.clone(), server.clone(), client.clone()]).await;
+
+        let config = upstream_client_config(&certs, None).unwrap();
+        assert!(!config.client_auth_cert_resolver.has_certs());
+        let config = upstream_client_config(&certs, Some(client.id)).unwrap();
+        assert!(config.client_auth_cert_resolver.has_certs());
+
+        for id in [server.id, root.id, "a1b2c3d".parse().unwrap()] {
+            assert!(matches!(
+                upstream_client_config(&certs, Some(id)),
+                Err(Error::InvalidClientCert { id: err_id }) if err_id == id
+            ));
+        }
     }
 
     #[test]

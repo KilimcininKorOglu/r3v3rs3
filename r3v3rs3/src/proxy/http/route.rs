@@ -3,6 +3,7 @@ use super::cache::{cache_for, HttpCache};
 use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, RequestFilter};
 use super::header_rules::CompiledHeaderRules;
+use super::pool::{ConnectionPool, UpstreamClients};
 use super::rate_limit::{self, ClientRateLimiter};
 use hyper::Request;
 use r3v3rs3_api::{
@@ -12,7 +13,6 @@ use r3v3rs3_api::{
     proxy::{ProxyEntry, ProxyKind, Server},
 };
 use std::sync::Arc;
-use tokio_rustls::rustls::ClientConfig;
 
 #[derive(Default, Debug)]
 pub struct Router {
@@ -24,7 +24,7 @@ impl Router {
         proxies: Vec<ProxyEntry>,
         https_port: Option<u16>,
         quic_port: Option<u16>,
-        tls_client_config: &Arc<ClientConfig>,
+        upstream: &UpstreamClients<'_>,
         sessions: &Arc<SessionService>,
     ) -> Self {
         let mut routes = vec![];
@@ -35,10 +35,11 @@ impl Router {
                 _ => None,
             })
         {
+            let (tls_client_config, pool) = upstream.for_cert(http.client_cert);
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
             let proxy_rate_limiter = rate_limit::limiter((id, None), http.rate_limit);
-            let proxy_auth = Authenticator::new(http.auth, tls_client_config, sessions);
+            let proxy_auth = Authenticator::new(http.auth, &tls_client_config, sessions);
             let proxy_header_rules = Arc::new(CompiledHeaderRules::new(&http.headers));
             let compression = (!http.compression.is_disabled()).then(|| Arc::new(http.compression));
             let proxy_cache = cache_for(id, &http.cache);
@@ -59,7 +60,7 @@ impl Router {
                 };
                 let auth = route.auth.map_or_else(
                     || proxy_auth.clone(),
-                    |policy| Authenticator::new(policy, tls_client_config, sessions),
+                    |policy| Authenticator::new(policy, &tls_client_config, sessions),
                 );
                 let header_rules = route.headers.as_ref().map_or_else(
                     || proxy_header_rules.clone(),
@@ -83,6 +84,7 @@ impl Router {
                     compression: compression.clone(),
                     cache: proxy_cache.clone(),
                     h2c: http.h2c,
+                    pool: pool.clone(),
                 });
             }
         }
@@ -124,6 +126,9 @@ pub struct FilteredRoute {
     pub cache: Option<Arc<HttpCache>>,
     /// Sends requests to plain HTTP upstream servers with HTTP/2 prior knowledge.
     pub h2c: bool,
+    /// The upstream connections of the proxy. `None` when the client certificate of the proxy is
+    /// invalid, so the route cannot reach its upstream servers.
+    pub pool: Option<Arc<ConnectionPool>>,
 }
 
 #[derive(Debug)]

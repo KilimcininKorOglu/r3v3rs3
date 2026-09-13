@@ -201,6 +201,9 @@ mod tests {
                 id: "abc".parse().unwrap(),
             },
             Error::ClientCaCertsMissing,
+            Error::InvalidClientCert {
+                id: "abc".parse().unwrap(),
+            },
             Error::FailedToGenerateSelfSignedCertificate,
             Error::FailedToReadCertificate,
             Error::FailedToReadPrivateKey,

@@ -195,7 +195,7 @@ For each client request, r3v3rs3 sends a `GET` request to the auth URL. The auth
 - **Other responses**: r3v3rs3 sends the auth response (status, headers and a body up to 64 KiB) to the client. So a redirect to a login page works.
 - **No response within the timeout, or a connection error**: The client receives `502 Bad Gateway`.
 
-The auth request trusts the same root certificates as the upstream requests.
+The auth request trusts the same root certificates as the upstream requests. It sends the client certificate of the proxy, see "Upstream Client Certificates".
 
 ```toml
 [my-app]
@@ -364,7 +364,7 @@ r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstre
 
 Downstream, HTTP/2 is automatically negotiated if the client supports it. Most web browsers use HTTP/2 only over TLS, because they need ALPN (Application-Layer Protocol Negotiation) to learn that the server supports HTTP/2.
 
-Upstream, r3v3rs3 offers `h2` and `http/1.1` with ALPN to HTTPS servers and uses the protocol that the server selects. Plain HTTP servers receive HTTP/1.1, because a plain connection cannot negotiate the protocol. Set `h2c = true` on a proxy whose plain HTTP servers accept HTTP/2 with prior knowledge (h2c). WebSocket and other upgrade requests always use HTTP/1.1. All connections of a port share the upstream connections, so one HTTP/2 upstream connection carries the requests of many clients.
+Upstream, r3v3rs3 offers `h2` and `http/1.1` with ALPN to HTTPS servers and uses the protocol that the server selects. Plain HTTP servers receive HTTP/1.1, because a plain connection cannot negotiate the protocol. Set `h2c = true` on a proxy whose plain HTTP servers accept HTTP/2 with prior knowledge (h2c). WebSocket and other upgrade requests always use HTTP/1.1. All connections of a port share the upstream connections, so one HTTP/2 upstream connection carries the requests of many clients. A proxy with a client certificate has its own upstream connections.
 
 ```toml
 [my-app]
@@ -384,6 +384,30 @@ To enable HTTP/3 proxying, bind a QUIC port in the Ports section and select HTTP
 
 WebTransport is not supported.
 
+## Upstream Client Certificates
+
+An upstream server can require a client certificate (mutual TLS). Select the certificate in the "Client Certificate" field of an HTTP / HTTPS proxy or a TCP / TCP over TLS proxy. The list shows the client certificates that have a private key. See "Client Certificates".
+
+- The proxy sends the certificate to every TLS upstream server that asks for one. A plain HTTP or plain TCP upstream server does not use it.
+- On an HTTP / HTTPS proxy, the forward auth request sends the same certificate.
+- r3v3rs3 rejects a proxy config whose certificate does not exist, is not a client certificate or has no private key. A client certificate that a proxy uses cannot be deleted.
+- When the certificate becomes invalid, for example after it is removed from the configuration directory, the proxy does not connect without it. An HTTP / HTTPS proxy returns `502 Bad Gateway`, and a TCP proxy closes the connection.
+
+On a TCP proxy, turn on "Connect with TLS" for an upstream server that expects TLS. The address of such a server ends with `/tls`.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+client_cert = "a1b2c3d"
+routes = [{ path = "/", servers = [{ url = "https://10.0.0.5:8443/" }] }]
+
+[my-database]
+protocol = "tcp"
+client_cert = "a1b2c3d"
+upstream_servers = [{ addr = "/dns/db.internal/tcp/5433/tls" }]
+```
+
 # Certificates
 
 ## Server Certificates
@@ -402,6 +426,8 @@ A TLS server can require a client certificate to authenticate the client. There 
 
 1. Generate a self-signed certificate and select "Client Certificate" as the certificate type. r3v3rs3 adds the `clientAuth` extended key usage, and the selected CA certificate signs it.
 2. Import a certificate chain and its private key from files (PEM format only). A client certificate needs a private key.
+
+A proxy sends a client certificate to its upstream servers. See "Upstream Client Certificates".
 
 ## Root Certificates
 

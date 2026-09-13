@@ -1,4 +1,6 @@
 use crate::proxy::http::{hyper_tls::client::HttpsConnector, HTTP2_MAX_FRAME_SIZE};
+use crate::proxy::tls::upstream_client_config;
+use crate::server::cert_list::CertList;
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{header::UPGRADE, http::uri::Scheme, Request, Response, StatusCode};
@@ -6,6 +8,7 @@ use hyper_util::{
     client::legacy::{connect::HttpConnector, Client},
     rt::{TokioExecutor, TokioIo},
 };
+use r3v3rs3_api::{error::Error, id::ShortId};
 use std::fmt;
 use std::sync::Arc;
 use tokio_rustls::rustls::ClientConfig;
@@ -98,6 +101,47 @@ impl ConnectionPool {
         }
 
         ResponseRewriter::default().map_response(result)
+    }
+}
+
+/// Builds the upstream TLS client config and the connection pool of each proxy on a port. Proxies
+/// without a client certificate share one pool.
+pub struct UpstreamClients<'a> {
+    certs: &'a CertList,
+    default_config: Arc<ClientConfig>,
+    default_pool: Arc<ConnectionPool>,
+}
+
+impl<'a> UpstreamClients<'a> {
+    pub fn new(certs: &'a CertList) -> Result<Self, Error> {
+        let default_config = Arc::new(upstream_client_config(certs, None)?);
+        Ok(Self {
+            certs,
+            default_pool: Arc::new(ConnectionPool::new(default_config.clone())),
+            default_config,
+        })
+    }
+
+    /// Returns the TLS client config and the connection pool for the client certificate. The pool
+    /// is `None` when the certificate is invalid, so the proxy does not connect without it.
+    pub fn for_cert(
+        &self,
+        client_cert: Option<ShortId>,
+    ) -> (Arc<ClientConfig>, Option<Arc<ConnectionPool>>) {
+        if client_cert.is_none() {
+            return (self.default_config.clone(), Some(self.default_pool.clone()));
+        }
+        match upstream_client_config(self.certs, client_cert) {
+            Ok(config) => {
+                let config = Arc::new(config);
+                let pool = Arc::new(ConnectionPool::new(config.clone()));
+                (config, Some(pool))
+            }
+            Err(err) => {
+                error!(%err, "the proxy cannot connect to its upstream servers");
+                (self.default_config.clone(), None)
+            }
+        }
     }
 }
 

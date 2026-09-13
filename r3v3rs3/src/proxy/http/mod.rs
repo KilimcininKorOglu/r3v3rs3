@@ -6,10 +6,11 @@ use self::{
     filter::FilterResult,
     header_rules::{new_request_id, HeaderVariables},
     page::PagePreferences,
-    pool::{ConnectionPool, UpstreamH2c},
+    pool::{ConnectionPool, UpstreamClients, UpstreamH2c},
     route::{FilteredRoute, ParsedRoute, Router},
 };
 use super::{
+    spawn_connection,
     tls::{port_acceptor, server_cert_resolver, ClientCertInfo, TlsTermination},
     PortContextEvent,
 };
@@ -50,10 +51,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-use tokio_rustls::{
-    rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
-    TlsAcceptor,
-};
+use tokio_rustls::{rustls::pki_types::ServerName, TlsAcceptor};
 use tracing::{debug, error, info, span, Instrument, Level, Span};
 
 mod auth;
@@ -81,9 +79,6 @@ pub struct HttpPortContext {
     status: PortStatus,
     span: Span,
     tls_termination: Option<TlsTermination>,
-    tls_client_config: Arc<ClientConfig>,
-    /// Upstream connections shared by every connection of this port.
-    pool: Arc<ConnectionPool>,
     h3_server_config: Option<Arc<quinn::ServerConfig>>,
     shared: Arc<ArcSwap<SharedContext>>,
     stop_notifier: Arc<Notify>,
@@ -112,18 +107,11 @@ impl HttpPortContext {
             None
         };
 
-        let tls_client_config = Arc::new(
-            ClientConfig::builder()
-                .with_root_certificates(RootCertStore::empty())
-                .with_no_client_auth(),
-        );
         Ok(Self {
             listen,
             status: Default::default(),
             span,
             tls_termination,
-            pool: Arc::new(ConnectionPool::new(tls_client_config.clone())),
-            tls_client_config,
             h3_server_config: None,
             shared: Arc::new(ArcSwap::from_pointee(SharedContext {
                 router: Default::default(),
@@ -203,20 +191,9 @@ impl HttpPortContext {
         .or(quic_ports.first())
         .and_then(|entry| entry.port.listen.port().ok());
 
-        let config = ClientConfig::builder()
-            .with_root_certificates(certs.root_certs().clone())
-            .with_no_client_auth();
-        self.tls_client_config = Arc::new(config);
-        self.pool = Arc::new(ConnectionPool::new(self.tls_client_config.clone()));
-
+        let upstream = UpstreamClients::new(certs)?;
         self.shared.store(Arc::new(SharedContext {
-            router: Router::new(
-                proxies,
-                https_port,
-                quic_port,
-                &self.tls_client_config,
-                sessions,
-            ),
+            router: Router::new(proxies, https_port, quic_port, &upstream, sessions),
             header_rewriter: RequestRewriter::builder()
                 .set_via(HeaderValue::from_static("r3v3rs3"))
                 .build(),
@@ -265,31 +242,14 @@ impl HttpPortContext {
             debug!("closing the connection: the TLS config is invalid");
             return;
         };
-        let span = self.span.clone();
-
-        let pool = self.pool.clone();
-
-        let stop_notifier = self.stop_notifier.clone();
-        let shared_cache = Cache::new(Arc::clone(&self.shared));
-        let span_cloned = span.clone();
-
-        tokio::spawn(
-            async move {
-                if let Err(err) = start(
-                    stream,
-                    pool,
-                    tls_acceptor,
-                    shared_cache,
-                    stop_notifier,
-                    span_cloned,
-                )
-                .await
-                {
-                    error!("{err}");
-                }
-            }
-            .instrument(span),
+        let task = start(
+            stream,
+            tls_acceptor,
+            Cache::new(Arc::clone(&self.shared)),
+            self.stop_notifier.clone(),
+            self.span.clone(),
         );
+        spawn_connection(self.span.clone(), task);
     }
 
     async fn accept_quic(
@@ -303,7 +263,6 @@ impl HttpPortContext {
         let span = self.span.clone();
         let stop_notifier = self.stop_notifier.clone();
         let span_cloned = span.clone();
-        let pool = self.pool.clone();
         let shared_cache = Cache::new(Arc::clone(&self.shared));
 
         let server_config = if let Some(config) = &self.h3_server_config {
@@ -332,7 +291,6 @@ impl HttpPortContext {
                                             stream,
                                             shared_cache.clone(),
                                             QuickContext {
-                                                pool: pool.clone(),
                                                 local,
                                                 remote,
                                                 client_cert: client_cert.clone(),
@@ -399,7 +357,6 @@ fn quic_client_cert(conn: &quinn::Connection) -> Option<Arc<ClientCertInfo>> {
 
 async fn start(
     mut stream: BufStream<TcpStream>,
-    pool: Arc<ConnectionPool>,
     tls_acceptor: Option<TlsAcceptor>,
     shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
     stop_notifier: Arc<Notify>,
@@ -472,7 +429,6 @@ async fn start(
         let enter = span.clone();
         let _enter = enter.enter();
 
-        let pool = pool.clone();
         let shared = shared_cache.load().clone();
         let sni = sni.clone();
         let client_cert = client_cert.clone();
@@ -494,7 +450,7 @@ async fn start(
                 route_request(&shared, req, &info).await
             };
             response_rewriter.build().map_response(match req {
-                ProxiedRequest::Ok(req, span, cache_request) => {
+                ProxiedRequest::Ok(req, pool, span, cache_request) => {
                     let req = req.map(|b| BoxBody::new(b.map_err(Into::into)));
                     cache::fetch(&pool, req, cache_request)
                         .instrument(span)
@@ -530,8 +486,9 @@ async fn start(
 }
 
 enum ProxiedRequest<R> {
-    /// A request for the upstream server, and its cache state when the proxy has a cache.
-    Ok(R, Span, Option<CacheRequest>),
+    /// A request for the upstream server with the connection pool of the proxy, and its cache
+    /// state when the proxy has a cache.
+    Ok(R, Arc<ConnectionPool>, Span, Option<CacheRequest>),
     /// A response that r3v3rs3 sends without contacting the upstream server.
     Respond(Response<Full<Bytes>>),
     Err(ProxyError),
@@ -577,7 +534,6 @@ fn get_secure_uri(req: &hyper::Request<Incoming>) -> anyhow::Result<Uri> {
 }
 
 struct QuickContext {
-    pool: Arc<ConnectionPool>,
     local: Option<std::net::IpAddr>,
     remote: SocketAddr,
     client_cert: Option<Arc<ClientCertInfo>>,
@@ -647,10 +603,13 @@ where
         .resolve(info.remote.ip(), req.headers(), &crate::cdn::table());
     let action = format!("{} {}", req.method().as_str(), req.uri());
 
-    if let Err(err) = check_policies(route, client.ip) {
-        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %err);
-        return (ProxiedRequest::Err(err), response_rewriter);
-    }
+    let pool = match check_policies(route, client.ip) {
+        Ok(pool) => pool,
+        Err(err) => {
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %err);
+            return (ProxiedRequest::Err(err), response_rewriter);
+        }
+    };
 
     if let Some(redirect) = upgrade_redirect(route, &req, header_host.as_deref(), info.proto) {
         return (ProxiedRequest::Respond(redirect), response_rewriter);
@@ -711,7 +670,7 @@ where
         .as_ref()
         .and_then(|cache| CacheRequest::new(cache, &mut req, &cache_host, authorized));
     (
-        ProxiedRequest::Ok(req, span, cache_request),
+        ProxiedRequest::Ok(req, pool, span, cache_request),
         response_rewriter,
     )
 }
@@ -751,8 +710,12 @@ fn apply_header_rules(
     response_rewriter.header_rules(route.header_rules.clone(), variables)
 }
 
-/// Applies the client IP filter and the rate limit of the route.
-fn check_policies(route: &FilteredRoute, client: std::net::IpAddr) -> Result<(), ProxyError> {
+/// Applies the client IP filter and the rate limit of the route, and returns the connection pool
+/// of the proxy.
+fn check_policies(
+    route: &FilteredRoute,
+    client: std::net::IpAddr,
+) -> Result<Arc<ConnectionPool>, ProxyError> {
     if !route.ip_filter.allows(client) {
         return Err(ProxyError::IpNotAllowed);
     }
@@ -763,7 +726,10 @@ fn check_policies(route: &FilteredRoute, client: std::net::IpAddr) -> Result<(),
     {
         return Err(ProxyError::TooManyRequests { retry_after });
     }
-    Ok(())
+    route
+        .pool
+        .clone()
+        .ok_or(ProxyError::UpstreamClientCertInvalid)
 }
 
 enum Authenticated<B> {
@@ -856,8 +822,6 @@ where
     T: BidiStream<Bytes> + Send + 'static,
     <T as BidiStream<Bytes>>::RecvStream: Send + Sync,
 {
-    let pool = ctx.pool;
-
     let enter = span.clone();
     let _enter = enter.enter();
 
@@ -875,7 +839,7 @@ where
     let (req, response_rewriter) = route_request(shared, req.map(|()| body), &info).await;
 
     let res = match req {
-        ProxiedRequest::Ok(req, span, cache_request) => {
+        ProxiedRequest::Ok(req, pool, span, cache_request) => {
             cache::fetch(&pool, req, cache_request)
                 .instrument(span)
                 .await

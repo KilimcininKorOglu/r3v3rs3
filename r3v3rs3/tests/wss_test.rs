@@ -79,6 +79,7 @@ async fn wss_proxy() -> anyhow::Result<()> {
                     compression: Default::default(),
                     cache: Default::default(),
                     h2c: false,
+                    client_cert: None,
                 })),
                 ..Default::default()
             },

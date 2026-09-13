@@ -44,10 +44,25 @@ pub enum ProxyKind {
     Udp(UdpProxy),
 }
 
+impl ProxyKind {
+    /// Returns the client certificate that the proxy sends to the upstream servers.
+    pub fn client_cert(&self) -> Option<ShortId> {
+        match self {
+            Self::Tcp(tcp) => tcp.client_cert,
+            Self::Http(http) => http.client_cert,
+            Self::Udp(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct TcpProxy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub upstream_servers: Vec<UpstreamServer>,
+    /// Client certificate that r3v3rs3 sends to the TLS upstream servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub client_cert: Option<ShortId>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -87,6 +102,11 @@ pub struct HttpProxy {
     /// Sends HTTP/2 with prior knowledge (h2c) to the plain HTTP upstream servers of this proxy.
     #[serde(default, skip_serializing_if = "is_false")]
     pub h2c: bool,
+    /// Client certificate that r3v3rs3 sends to the HTTPS upstream servers and the forward auth
+    /// service of this proxy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub client_cert: Option<ShortId>,
 }
 
 fn upgrade_insecure_default() -> bool {

@@ -9,14 +9,18 @@ use r3v3rs3_api::{
     proxy::{HttpProxy, ProxyEntry, ProxyKind, TcpProxy},
     tls::{ClientAuthMode, TlsTermination},
 };
-use reqwest::{header::COOKIE, Identity, StatusCode};
+use reqwest::{
+    header::{COOKIE, HOST},
+    Identity, StatusCode,
+};
 use std::{collections::HashMap, future::IntoFuture, sync::Arc};
+use tokio_rustls::rustls::{server::WebPkiClientVerifier, RootCertStore, ServerConfig};
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
 use common::{
-    admin_session_cookie, alloc_tcp_port, http_proxy_entry, http_route, port_entry,
-    wait_for_listener, with_server, TestPort, TestStorage,
+    admin_session_cookie, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route,
+    port_entry, proxy_entry, wait_for_listener, with_server, TestPort, TestStorage,
 };
 
 /// A root certificate with a server certificate and a client certificate that it signs.
@@ -107,6 +111,47 @@ async fn start_echo_upstream() -> anyhow::Result<TestPort> {
     let listener = tokio::net::TcpListener::bind(port.socket_addr()).await?;
     tokio::spawn(axum::serve(listener, Router::new().route("/", get(echo))).into_future());
     Ok(port)
+}
+
+/// Starts an HTTPS upstream server that requires a client certificate of the root certificate.
+async fn start_mtls_upstream(pki: &Pki) -> anyhow::Result<TestPort> {
+    let mut roots = RootCertStore::empty();
+    for der in pki.root.certificates()? {
+        roots.add(der)?;
+    }
+    let verifier = WebPkiClientVerifier::builder(Arc::new(roots)).build()?;
+    let config = ServerConfig::builder()
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(pki.server.certificates()?, pki.server.private_key_der()?)?;
+    let port = alloc_tcp_port().await?;
+    let app = Router::new().route("/hello", get(|| async { "Hello" }));
+    tokio::spawn(
+        axum_server::bind_rustls(
+            port.socket_addr(),
+            RustlsConfig::from_config(Arc::new(config)),
+        )
+        .serve(app.into_make_service()),
+    );
+    Ok(port)
+}
+
+fn tls_upstream_addr(upstream: &TestPort) -> Multiaddr {
+    format!("/dns/localhost/tcp/{}/tls", upstream.socket_addr().port())
+        .parse()
+        .unwrap()
+}
+
+fn tcp_proxy_entry(
+    id: &str,
+    port_id: &str,
+    addr: Multiaddr,
+    client_cert: Option<ShortId>,
+) -> ProxyEntry {
+    let tcp = TcpProxy {
+        client_cert,
+        upstream_servers: vec![UpstreamServer { addr }],
+    };
+    proxy_entry(id, port_id, ProxyKind::Tcp(tcp))
 }
 
 fn https_storage(
@@ -208,20 +253,7 @@ async fn tls_required_client_auth() -> anyhow::Result<()> {
         axum_server::bind_rustls(upstream.socket_addr(), config).serve(app.into_make_service()),
     );
 
-    let proxy = ProxyEntry {
-        id: "proxy".parse().unwrap(),
-        proxy: r3v3rs3_api::proxy::Proxy {
-            ports: vec!["mtls".parse().unwrap()],
-            kind: ProxyKind::Tcp(TcpProxy {
-                upstream_servers: vec![UpstreamServer {
-                    addr: format!("/dns/localhost/tcp/{}/tls", upstream.socket_addr().port())
-                        .parse()
-                        .unwrap(),
-                }],
-            }),
-            ..Default::default()
-        },
-    };
+    let proxy = tcp_proxy_entry("proxy", "mtls", tls_upstream_addr(&upstream), None);
     let storage = TestStorage::builder()
         .ports(vec![tls_port(
             "mtls",
@@ -249,7 +281,96 @@ async fn tls_required_client_auth() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn admin_api_checks_client_ca_certs() -> anyhow::Result<()> {
+async fn http_upstream_client_cert() -> anyhow::Result<()> {
+    let pki = Pki::new();
+    let upstream = start_mtls_upstream(&pki).await?;
+    let plain_upstream = start_echo_upstream().await?;
+    let proxy_port = alloc_tcp_port().await?;
+
+    let https_url = format!("https://localhost:{}/", upstream.socket_addr().port());
+    let proxy = |vhost: &str, url: &str, client_cert: Option<ShortId>| HttpProxy {
+        vhosts: vec![vhost.parse().unwrap()],
+        routes: vec![http_route("/", url, None)],
+        client_cert,
+        ..Default::default()
+    };
+    // An invalid certificate must not fall back to the connections without a certificate, so
+    // this proxy returns 502 even though its upstream server needs no certificate.
+    let plain_url = plain_upstream.http_url("/");
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &proxy_port)])
+        .proxies(vec![
+            http_proxy_entry(
+                "withcert",
+                "http",
+                proxy("withcert.localhost", &https_url, Some(pki.client.id)),
+            ),
+            http_proxy_entry(
+                "nocert",
+                "http",
+                proxy("nocert.localhost", &https_url, None),
+            ),
+            http_proxy_entry(
+                "badcert",
+                "http",
+                proxy("badcert.localhost", plain_url.as_str(), Some(pki.server.id)),
+            ),
+        ])
+        .certs(pki.certs())
+        .build();
+    let url = proxy_port.http_url("/hello");
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::new();
+        let get = |vhost: &'static str| client.get(url.clone()).header(HOST, vhost).send();
+        for (vhost, status) in [
+            ("nocert.localhost", StatusCode::BAD_GATEWAY),
+            ("withcert.localhost", StatusCode::OK),
+            ("nocert.localhost", StatusCode::BAD_GATEWAY),
+            ("badcert.localhost", StatusCode::BAD_GATEWAY),
+        ] {
+            assert_eq!(get(vhost).await?.status(), status, "{vhost}");
+        }
+        assert_eq!(get("withcert.localhost").await?.text().await?, "Hello");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn tcp_upstream_client_cert() -> anyhow::Result<()> {
+    let pki = Pki::new();
+    let upstream = start_mtls_upstream(&pki).await?;
+    let with_cert = alloc_tcp_port().await?;
+    let without_cert = alloc_tcp_port().await?;
+    let addr = tls_upstream_addr(&upstream);
+
+    let storage = TestStorage::builder()
+        .ports(vec![
+            port_entry("withcert", with_cert.multiaddr_tcp()),
+            port_entry("nocert", without_cert.multiaddr_tcp()),
+        ])
+        .proxies(vec![
+            tcp_proxy_entry("withcert", "withcert", addr.clone(), Some(pki.client.id)),
+            tcp_proxy_entry("nocert", "nocert", addr, None),
+        ])
+        .certs(pki.certs())
+        .build();
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::new();
+        let resp = client.get(with_cert.http_url("/hello")).send().await?;
+        assert_eq!(resp.text().await?, "Hello");
+
+        let result = client.get(without_cert.http_url("/hello")).send().await;
+        assert!(result.is_err(), "a proxy without a certificate: {result:?}");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn admin_api_checks_certificates() -> anyhow::Result<()> {
     let dir = std::env::temp_dir().join(format!("r3v3rs3-mtls-{}", std::process::id()));
     std::fs::create_dir_all(&dir)?;
     DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
@@ -265,6 +386,7 @@ async fn admin_api_checks_client_ca_certs() -> anyhow::Result<()> {
     let app_info = new_appinfo(&dir, &dir);
     let root_id = pki.root.id;
     let server_id = pki.server.id;
+    let client_id = pki.client.id;
     with_server(storage, |channels| async move {
         tokio::spawn(start_admin(
             app_info,
@@ -298,21 +420,35 @@ async fn admin_api_checks_client_ca_certs() -> anyhow::Result<()> {
 
         add_port(vec![root_id]).await?.error_for_status()?;
 
-        let resp = client
-            .delete(format!("http://{addr}/api/certs/{root_id}"))
-            .header(COOKIE, &cookie)
-            .send()
-            .await?;
+        let add_proxy = |client_cert: ShortId| {
+            let upstream = "/dns/localhost/tcp/1/tls".parse().unwrap();
+            let proxy = tcp_proxy_entry("unused", "unused", upstream, Some(client_cert)).proxy;
+            client
+                .post(format!("http://{addr}/api/proxies"))
+                .header(COOKIE, &cookie)
+                .json(&proxy)
+                .send()
+        };
+        let resp = add_proxy(server_id).await?;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         let body = resp.text().await?;
-        assert!(body.contains("certificate_in_use"), "{body}");
+        assert!(body.contains("invalid_client_cert"), "{body}");
+        add_proxy(client_id).await?.error_for_status()?;
 
-        client
-            .delete(format!("http://{addr}/api/certs/{server_id}"))
-            .header(COOKIE, &cookie)
-            .send()
-            .await?
-            .error_for_status()?;
+        let delete_cert = |id: ShortId| {
+            client
+                .delete(format!("http://{addr}/api/certs/{id}"))
+                .header(COOKIE, &cookie)
+                .send()
+        };
+        // The port uses the root certificate and the proxy uses the client certificate.
+        for id in [root_id, client_id] {
+            let resp = delete_cert(id).await?;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+            let body = resp.text().await?;
+            assert!(body.contains("certificate_in_use"), "{id}: {body}");
+        }
+        delete_cert(server_id).await?.error_for_status()?;
         Ok(())
     })
     .await?;

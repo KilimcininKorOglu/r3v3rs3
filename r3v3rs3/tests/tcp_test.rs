@@ -108,6 +108,7 @@ fn tcp_proxy_to(upstream: &TestPort) -> Proxy {
     Proxy {
         ports: vec!["test".parse().unwrap()],
         kind: ProxyKind::Tcp(TcpProxy {
+            client_cert: None,
             upstream_servers: vec![UpstreamServer {
                 addr: upstream.multiaddr_tcp(),
             }],

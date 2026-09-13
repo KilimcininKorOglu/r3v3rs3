@@ -56,6 +56,9 @@ pub enum Error {
     #[error("client authentication needs at least one root certificate")]
     ClientCaCertsMissing,
 
+    #[error("upstream client certificate must be a client certificate with a private key: {id}")]
+    InvalidClientCert { id: ShortId },
+
     #[error("failed to generate self-signed certificate")]
     FailedToGenerateSelfSignedCertificate,
 

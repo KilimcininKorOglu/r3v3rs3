@@ -195,7 +195,7 @@ r3v3rs3 her client request'inde auth URL'ine bir `GET` request'i gönderir. Bu r
 - **Diğer response'lar**: r3v3rs3 auth response'unu (status, header'lar ve en fazla 64 KiB body) client'a gönderir. Bu sayede giriş sayfasına yapılan redirect'ler de çalışır.
 - **Timeout süresinde response gelmezse veya bağlantı hatası olursa**: Client `502 Bad Gateway` alır.
 
-Auth request'i, upstream request'leriyle aynı root sertifikalarına güvenir.
+Auth request'i, upstream request'leriyle aynı root sertifikalarına güvenir. Proxy'nin client sertifikasını da gönderir. Ayrıntılar için "Upstream client sertifikaları" bölümüne bakın.
 
 ```toml
 [my-app]
@@ -364,7 +364,7 @@ r3v3rs3, HTTP ve HTTPS proxy'lerinde hem upstream hem de downstream bağlantıla
 
 Downstream tarafında client destekliyorsa HTTP/2 otomatik olarak seçilir. Çoğu web tarayıcısı HTTP/2'yi yalnız TLS üzerinden kullanır, çünkü sunucunun HTTP/2 desteklediğini ALPN (Application-Layer Protocol Negotiation) ile öğrenir.
 
-Upstream tarafında r3v3rs3, HTTPS sunucularına ALPN ile `h2` ve `http/1.1` önerir ve sunucunun seçtiği protokolü kullanır. Düz HTTP bağlantısında protokol seçimi yapılamadığı için düz HTTP sunucularına HTTP/1.1 ile bağlanılır. Proxy'nin düz HTTP sunucuları prior knowledge ile HTTP/2 (h2c) kabul ediyorsa `h2c = true` ayarlayın. WebSocket ve diğer upgrade request'leri her zaman HTTP/1.1 kullanır. Bir porttaki bütün bağlantılar upstream bağlantılarını ortak kullanır; bu yüzden tek bir HTTP/2 upstream bağlantısı birçok client'ın request'lerini taşır.
+Upstream tarafında r3v3rs3, HTTPS sunucularına ALPN ile `h2` ve `http/1.1` önerir ve sunucunun seçtiği protokolü kullanır. Düz HTTP bağlantısında protokol seçimi yapılamadığı için düz HTTP sunucularına HTTP/1.1 ile bağlanılır. Proxy'nin düz HTTP sunucuları prior knowledge ile HTTP/2 (h2c) kabul ediyorsa `h2c = true` ayarlayın. WebSocket ve diğer upgrade request'leri her zaman HTTP/1.1 kullanır. Bir porttaki bütün bağlantılar upstream bağlantılarını ortak kullanır; bu yüzden tek bir HTTP/2 upstream bağlantısı birçok client'ın request'lerini taşır. Client sertifikası olan bir proxy'nin upstream bağlantıları ayrıdır.
 
 ```toml
 [my-app]
@@ -384,6 +384,30 @@ HTTP/3 proxy'lemeyi açmak için "Portlar" bölümünde bir QUIC portu bağlayı
 
 WebTransport desteklenmez.
 
+## Upstream client sertifikaları
+
+Upstream sunucu client sertifikası isteyebilir (mutual TLS). Sertifikayı HTTP / HTTPS proxy'sinin veya TCP / TLS üzerinden TCP proxy'sinin "Client Sertifikası" alanında seçin. Listede private key'i olan client sertifikaları görünür. Ayrıntılar için "Client sertifikaları" bölümüne bakın.
+
+- Proxy sertifikayı, sertifika isteyen her TLS upstream sunucusuna gönderir. Düz HTTP veya düz TCP upstream sunucuları sertifikayı kullanmaz.
+- HTTP / HTTPS proxy'sinde forward auth request'i de aynı sertifikayı gönderir.
+- Sertifika yoksa, client sertifikası değilse veya private key'i yoksa r3v3rs3 proxy ayarını reddeder. Bir proxy'nin kullandığı client sertifikası silinemez.
+- Sertifika geçersiz hale gelirse, örneğin config dizininden silinirse, proxy sertifikasız bağlanmaz. HTTP / HTTPS proxy'si `502 Bad Gateway` döner, TCP proxy'si bağlantıyı kapatır.
+
+TCP proxy'sinde TLS bekleyen upstream sunucusu için "TLS ile Bağlan" seçeneğini açın. Bu sunucunun adresi `/tls` ile biter.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+client_cert = "a1b2c3d"
+routes = [{ path = "/", servers = [{ url = "https://10.0.0.5:8443/" }] }]
+
+[my-database]
+protocol = "tcp"
+client_cert = "a1b2c3d"
+upstream_servers = [{ addr = "/dns/db.internal/tcp/5433/tls" }]
+```
+
 # Sertifikalar
 
 ## Sunucu sertifikaları
@@ -402,6 +426,8 @@ TLS sunucusu, client'ı doğrulamak için client sertifikası isteyebilir. "Clie
 
 1. Self-signed bir sertifika oluşturun ve sertifika türü olarak "Client Sertifikası" seçin. r3v3rs3 sertifikaya `clientAuth` extended key usage değerini ekler. Seçilen CA sertifikası sertifikayı imzalar.
 2. Sertifika zincirini ve private key'i dosyadan içe aktarın (yalnız PEM formatı). Client sertifikası için private key gerekir.
+
+Proxy, client sertifikasını upstream sunucularına gönderir. Ayrıntılar için "Upstream client sertifikaları" bölümüne bakın.
 
 ## Root sertifikaları
 
