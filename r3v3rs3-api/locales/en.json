@@ -187,6 +187,7 @@
   "http_form.route_rate_limit_hint": "This route uses its own counter instead of the proxy counter. Set Requests to 0 to disable the limit for this route.",
   "http_form.route_timeouts_hint": "This route uses these timeouts instead of the proxy timeouts.",
   "http_form.routes": "Routes",
+  "http_form.routes_hint": "A request goes to the route with the longest matching path, e.g. /api/users goes to /api before /. A proxy whose virtual host is equal to the request host wins over a wildcard, a regex pattern and a proxy without virtual hosts. The order of the routes does not matter.",
   "http_form.target": "Target",
   "http_form.target_hint": "Enter one upstream server URL on each line. The proxy selects a server for each request with the load balancing policy.",
   "http_form.timeouts": "Upstream Timeouts",

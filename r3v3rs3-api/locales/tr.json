@@ -187,6 +187,7 @@
   "http_form.route_rate_limit_hint": "Bu route, proxy sayacı yerine kendi sayacını kullanır. Bu route'ta limiti kapatmak için Request değerini 0 yapın.",
   "http_form.route_timeouts_hint": "Bu route, proxy timeout'ları yerine buradaki timeout'ları kullanır.",
   "http_form.routes": "Route'lar",
+  "http_form.routes_hint": "Request, path'i en uzun eşleşen route'a gider. Örneğin /api/users, / yerine /api route'una gider. Virtual host'u request host'u ile aynı olan proxy; wildcard, regex pattern ve virtual host'u olmayan proxy'den önce gelir. Route'ların sırası sonucu değiştirmez.",
   "http_form.target": "Hedef",
   "http_form.target_hint": "Her satıra bir upstream sunucu URL'si girin. Proxy her request için sunucuyu load balancing policy'sine göre seçer.",
   "http_form.timeouts": "Upstream Timeout'ları",

@@ -25,7 +25,7 @@ use url::Url;
 
 mod common;
 use common::{alloc_tcp_port, alloc_udp_port, http_route, port_entry, proxy_entry, with_server};
-use common::{TestPort, TestStorage};
+use common::{serve_http_upstream, TestPort, TestStorage};
 
 /// Starts a listener that accepts TCP connections and never sends a byte, so a TLS handshake
 /// with it does not finish.
@@ -44,7 +44,7 @@ async fn start_silent_upstream() -> anyhow::Result<TestPort> {
 /// Starts an HTTP upstream server that answers every request with its name. The response can be
 /// cached for a minute.
 async fn start_named_upstream(name: &'static str) -> anyhow::Result<Url> {
-    serve_upstream(
+    serve_http_upstream(
         Router::new().fallback(move || async move { ([("cache-control", "max-age=60")], name) }),
     )
     .await
@@ -54,19 +54,12 @@ async fn start_named_upstream(name: &'static str) -> anyhow::Result<Url> {
 /// its name.
 async fn start_failing_health_upstream(name: &'static str) -> anyhow::Result<Url> {
     let unhealthy = get(|| async { StatusCode::INTERNAL_SERVER_ERROR });
-    serve_upstream(
+    serve_http_upstream(
         Router::new()
             .route("/health", unhealthy)
             .fallback(move || async move { name }),
     )
     .await
-}
-
-async fn serve_upstream(app: Router) -> anyhow::Result<Url> {
-    let port = alloc_tcp_port().await?;
-    let listener = TcpListener::bind(port.socket_addr()).await?;
-    tokio::spawn(axum::serve(listener, app).into_future());
-    Ok(port.http_url("/"))
 }
 
 /// Starts a TCP upstream server that sends its name and closes each connection.

@@ -1,7 +1,7 @@
 use super::auth::{Authenticator, SessionService};
 use super::cache::{cache_for, HttpCache};
 use super::client_ip::ClientIpResolver;
-use super::filter::{FilterResult, RequestFilter};
+use super::filter::{FilterResult, MatchRank, RequestFilter};
 use super::header_rules::CompiledHeaderRules;
 use super::pool::{ConnectionPool, Upstream, UpstreamClients};
 use super::rate_limit::{self, ClientRateLimiter};
@@ -93,14 +93,23 @@ impl Router {
         Self { routes }
     }
 
+    /// Returns the most specific route for the request: the most specific host match, then the
+    /// longest path. Of routes with the same rank, the first route wins.
     pub fn get_route<T>(
         &self,
         req: &Request<T>,
         host: Option<&str>,
     ) -> Option<(FilterResult, &FilteredRoute)> {
-        self.routes
-            .iter()
-            .find_map(|route| route.filter.test(req, host).map(|res| (res, route)))
+        let mut best: Option<(MatchRank, &FilteredRoute)> = None;
+        for route in &self.routes {
+            let Some(rank) = route.filter.rank(req, host) else {
+                continue;
+            };
+            if best.is_none_or(|(best_rank, _)| rank > best_rank) {
+                best = Some((rank, route));
+            }
+        }
+        best.map(|(_, route)| (route.filter.result(req), route))
     }
 }
 

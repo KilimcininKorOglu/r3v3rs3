@@ -63,6 +63,30 @@ r3v3rs3 üç proxy türünü destekler:
 
 Bir proxy'ye birden fazla port bağlayabilirsiniz. Ancak HTTP / HTTPS proxy'sine TCP veya TLS üzerinden TCP portu bağlanamaz. TCP / TLS üzerinden TCP proxy'sine de HTTP veya HTTPS portu bağlanamaz.
 
+## Routing
+
+Bir portu birden fazla HTTP / HTTPS proxy'si kullanıyorsa r3v3rs3, porttaki bütün proxy'lerin bütün route'larını karşılaştırır. Request'i en özel route'a gönderir. Proxy'lerin ve route'ların sırası sonucu değiştirmez.
+
+1. Önce request'in host'u proxy'leri seçer. Host ile aynı olan virtual host (`app.example.com` veya bir IP adresi), wildcard'dan (`*.example.com`) önce gelir. Wildcard, regex pattern'den önce gelir. Regex pattern, virtual host'u olmayan proxy'den önce gelir. Virtual host'u olmayan proxy her host'u kabul eder.
+2. Host eşleşmesi aynı olan route'lar arasında path'i en uzun olan route kazanır. Path tam segment'lerle eşleşir. Bu yüzden `/api`, `/api` ve `/api/users` ile eşleşir, `/apiv2` ile eşleşmez.
+3. İki route'un host eşleşmesi ve path'i aynıysa önce gelen route kazanır.
+
+Örneğin aşağıdaki route'larda `GET /api/users` request'i `http://api:8080/` sunucusuna, `GET /about` request'i `http://web:3000/` sunucusuna gider. `app.example.com` için gelen request, path'i `/api` olsa da `my-app` proxy'sine gider.
+
+```toml
+[my-default]
+protocol = "http"
+routes = [
+  { path = "/", servers = [{ url = "http://web:3000/" }] },
+  { path = "/api", servers = [{ url = "http://api:8080/" }] },
+]
+
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+routes = [{ path = "/", servers = [{ url = "http://app:9000/" }] }]
+```
+
 ## UDP Session'ları
 
 UDP proxy her client adresi için ayrı bir session açar. Her session'ın upstream sunucuya giden kendi socket'i vardır. Bu yüzden upstream sunucu her client'ı farklı bir kaynak porttan görür. r3v3rs3 upstream sunucunun yanıtlarını dinlediği porttan client'a geri gönderir.

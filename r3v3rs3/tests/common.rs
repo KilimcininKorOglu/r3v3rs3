@@ -287,6 +287,16 @@ pub fn http_route(path: &str, upstream: &str, ip_filter: Option<IpFilter>) -> Ro
     }
 }
 
+/// Serves the axum app on a new local port and returns the root URL of the server.
+pub async fn serve_http_upstream(app: axum::Router) -> anyhow::Result<Url> {
+    let port = alloc_tcp_port().await?;
+    let listener = tokio::net::TcpListener::bind(port.socket_addr()).await?;
+    tokio::spawn(std::future::IntoFuture::into_future(axum::serve(
+        listener, app,
+    )));
+    Ok(port.http_url("/"))
+}
+
 pub async fn alloc_tcp_port() -> Result<TestPort, std::io::Error> {
     let (conf, mut opts) = read_system_conf().unwrap_or_default();
     opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;

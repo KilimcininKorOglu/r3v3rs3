@@ -409,6 +409,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { upstream_form_view(locale, &upstream, &errors, true) }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.routes")}</label>
+            <p class={HINT_CLASS}>{locale.t("http_form.routes_hint")}</p>
 
             { routes.iter().enumerate().map(|(i, route)| {
                 route_view(locale, &routes, i, route, errors.get(&format!("routes_{i}")))

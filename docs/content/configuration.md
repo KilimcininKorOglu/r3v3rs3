@@ -63,6 +63,30 @@ r3v3rs3 supports three types of proxies:
 
 Multiple ports can be bound to a proxy. However, it's not possible to bind TCP / TCP over TLS ports to an HTTP / HTTPS proxy and vice versa.
 
+## Routing
+
+When several HTTP / HTTPS proxies share a port, r3v3rs3 compares every route of every proxy on the port and sends the request to the most specific route. The order of the proxies and the routes does not change the result.
+
+1. The host of the request selects the proxies first. A virtual host that is equal to the host (`app.example.com` or an IP address) wins over a wildcard (`*.example.com`). A wildcard wins over a regex pattern. A regex pattern wins over a proxy without virtual hosts, which accepts every host.
+2. Of the routes with the same host match, the route with the longest path wins. The path matches whole segments, so `/api` matches `/api` and `/api/users` but not `/apiv2`.
+3. When two routes have the same host match and the same path, the first route wins.
+
+For example, with the routes below, `GET /api/users` goes to `http://api:8080/` and `GET /about` goes to `http://web:3000/`. A request for `app.example.com` goes to the `my-app` proxy, also when its path is `/api`.
+
+```toml
+[my-default]
+protocol = "http"
+routes = [
+  { path = "/", servers = [{ url = "http://web:3000/" }] },
+  { path = "/api", servers = [{ url = "http://api:8080/" }] },
+]
+
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+routes = [{ path = "/", servers = [{ url = "http://app:9000/" }] }]
+```
+
 ## UDP Sessions
 
 A UDP proxy opens one session for each client address. The session has its own socket to the upstream server, so the upstream server sees a different source port for each client. r3v3rs3 sends the replies of the upstream server back to the client from the listening port.
