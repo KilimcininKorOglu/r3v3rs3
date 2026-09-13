@@ -85,7 +85,7 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
     let client_cert = use_state(|| props.proxy.client_cert);
     let client_certs = use_client_certs();
     let connect_timeout = use_state(|| format_seconds(props.proxy.connect_timeout));
-    let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check);
+    let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check.clone());
 
     let entry = get_proxy(
         locale,
@@ -100,7 +100,7 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
         <>
             { servers_view(locale, &upstream_servers, &errors, true) }
 
-            { upstream_form_view(locale, &upstream, &errors) }
+            { upstream_form_view(locale, &upstream, &errors, false) }
 
             { client_cert_view(
                 locale,
@@ -208,7 +208,7 @@ fn get_proxy(
 ) -> Result<TcpProxy, HashMap<String, String>> {
     let mut errors = HashMap::new();
     let upstream_servers = parse_servers(locale, servers, "tcp", &mut errors);
-    let (load_balancing, health_check) = upstream.parse(locale, &mut errors);
+    let (load_balancing, health_check) = upstream.parse(locale, false, &mut errors);
     let connect_timeout = or_error(
         parse_seconds(
             locale,

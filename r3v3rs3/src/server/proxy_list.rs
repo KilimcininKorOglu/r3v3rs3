@@ -20,7 +20,10 @@ impl ProxyContext {
         };
         Self {
             entry,
-            status: ProxyStatus { state },
+            status: ProxyStatus {
+                state,
+                upstreams: Vec::new(),
+            },
         }
     }
 }

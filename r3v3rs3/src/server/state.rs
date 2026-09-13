@@ -282,7 +282,7 @@ impl ServerState {
             for ctx in self.proxies.contexts() {
                 let _ = self.br_sender.send(ServerEvent::ProxyStatusUpdated {
                     id: ctx.entry.id,
-                    status: ctx.status,
+                    status: ctx.status.clone(),
                 });
             }
         }

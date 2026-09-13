@@ -103,12 +103,15 @@ impl TimeoutsForm {
 /// The errors of an [`UpstreamForm`] use this key.
 pub(super) const UPSTREAM_KEY: &str = "upstream";
 
-/// The load balancing policy and the passive health check of a proxy.
+/// The load balancing policy and the health check of a proxy.
 #[derive(Clone, PartialEq)]
 pub(super) struct UpstreamForm {
     load_balancing: LoadBalancing,
     max_fails: String,
     fail_timeout: String,
+    interval: String,
+    timeout: String,
+    path: String,
 }
 
 impl UpstreamForm {
@@ -117,32 +120,45 @@ impl UpstreamForm {
             load_balancing,
             max_fails: health_check.max_fails.to_string(),
             fail_timeout: format_seconds(health_check.fail_timeout),
+            interval: format_seconds(health_check.interval),
+            timeout: format_seconds(health_check.timeout),
+            path: health_check.path.clone(),
         }
     }
 
-    /// Records an error under [`UPSTREAM_KEY`].
+    /// Records an error under [`UPSTREAM_KEY`]. `http` allows a health check path.
     pub(super) fn parse(
         &self,
         locale: Locale,
+        http: bool,
         errors: &mut HashMap<String, String>,
     ) -> (LoadBalancing, HealthCheck) {
+        let mut seconds = |value: &str, name_key: &str, min: u64| {
+            or_error(
+                parse_seconds(locale, value, name_key, min),
+                UPSTREAM_KEY,
+                errors,
+            )
+        };
+        let fail_timeout = seconds(&self.fail_timeout, "proxy_form.fail_timeout_name", 1);
+        let interval = seconds(&self.interval, "proxy_form.check_interval_name", 0);
+        let timeout = seconds(&self.timeout, "proxy_form.check_timeout_name", 1);
         let health_check = HealthCheck {
             max_fails: or_error(
                 parse_count(locale, &self.max_fails, "proxy_form.max_fails"),
                 UPSTREAM_KEY,
                 errors,
             ),
-            fail_timeout: or_error(
-                parse_seconds(
-                    locale,
-                    &self.fail_timeout,
-                    "proxy_form.fail_timeout_name",
-                    1,
-                ),
-                UPSTREAM_KEY,
-                errors,
-            ),
+            fail_timeout,
+            interval,
+            timeout,
+            path: self.path.trim().to_string(),
         };
+        if let Err(err) = health_check.validate(http) {
+            errors
+                .entry(UPSTREAM_KEY.to_string())
+                .or_insert_with(|| locale.error_message(&err));
+        }
         (self.load_balancing, health_check)
     }
 }
@@ -284,7 +300,7 @@ impl RateLimitForm {
 pub fn http_proxy_config(props: &Props) -> Html {
     let locale = use_locale();
     let form = use_state(|| ProxyForm::new(&props.proxy));
-    let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check);
+    let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check.clone());
     let client_certs = use_client_certs();
     let routes = use_state(|| {
         let routes = props
@@ -390,7 +406,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { error_view(errors.get("timeouts")) }
             <p class={HINT_CLASS}>{locale.t("http_form.timeouts_hint")}</p>
 
-            { upstream_form_view(locale, &upstream, &errors) }
+            { upstream_form_view(locale, &upstream, &errors, true) }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.routes")}</label>
 
@@ -477,11 +493,13 @@ pub(super) fn list_buttons<T: Clone + 'static>(
     }
 }
 
-/// The load balancing policy select element and the passive health check inputs of a proxy.
+/// The load balancing policy select element and the health check inputs of a proxy. `with_path`
+/// shows the health check path input of an HTTP proxy.
 pub(super) fn upstream_form_view(
     locale: Locale,
     form: &UseStateHandle<UpstreamForm>,
     errors: &HashMap<String, String>,
+    with_path: bool,
 ) -> Html {
     let options = html! {
         { for LoadBalancing::ALL.iter().map(|value| html! {
@@ -503,8 +521,17 @@ pub(super) fn upstream_form_view(
                 </div>
                 <div>{ seconds_input(locale.t("proxy_form.fail_timeout"), &form.fail_timeout, 1, state_input(form, text, |form, value| form.fail_timeout = value)) }</div>
             </div>
-            { error_view(errors.get(UPSTREAM_KEY)) }
             <p class={HINT_CLASS}>{locale.t("proxy_form.health_check_hint")}</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+                <div>{ seconds_input(locale.t("proxy_form.check_interval"), &form.interval, 0, state_input(form, text, |form, value| form.interval = value)) }</div>
+                <div>{ seconds_input(locale.t("proxy_form.check_timeout"), &form.timeout, 1, state_input(form, text, |form, value| form.timeout = value)) }</div>
+            </div>
+            if with_path {
+                <label class={LABEL_CLASS}>{locale.t("proxy_form.health_check_path")}</label>
+                <input type="text" autocapitalize="off" placeholder="/health" value={form.path.clone()} onchange={state_input(form, text, |form, value| form.path = value)} class={INPUT_CLASS} />
+            }
+            { error_view(errors.get(UPSTREAM_KEY)) }
+            <p class={HINT_CLASS}>{locale.t(if with_path { "proxy_form.active_check_http_hint" } else { "proxy_form.active_check_hint" })}</p>
         </>
     }
 }
@@ -1074,7 +1101,7 @@ fn get_proxy(
     upstream: &UpstreamForm,
 ) -> Result<HttpProxy, HashMap<String, String>> {
     let mut errors = HashMap::new();
-    let (load_balancing, health_check) = upstream.parse(locale, &mut errors);
+    let (load_balancing, health_check) = upstream.parse(locale, true, &mut errors);
     let vhosts = parse_vhosts(locale, &form.vhosts, &mut errors);
     let routes = parse_routes(locale, routes, &mut errors);
     let trusted_proxies = or_error(
@@ -1533,23 +1560,31 @@ mod tests {
         let health_check = HealthCheck {
             max_fails: 3,
             fail_timeout: Duration::from_secs(10),
+            interval: Duration::from_secs(15),
+            timeout: Duration::from_secs(2),
+            path: "/health".into(),
         };
         let form = UpstreamForm::new(LoadBalancing::First, &health_check);
         let mut errors = HashMap::new();
         assert_eq!(
-            form.parse(Locale::En, &mut errors),
+            form.parse(Locale::En, true, &mut errors),
             (LoadBalancing::First, health_check)
         );
         assert!(errors.is_empty());
 
-        for (max_fails, fail_timeout) in [("x", "10"), ("3", "0")] {
+        form.parse(Locale::En, false, &mut errors);
+        assert!(errors.contains_key(UPSTREAM_KEY), "a TCP proxy has no path");
+
+        let invalid_values = [("x", "10", "0"), ("3", "0", "0"), ("3", "10", "-1")];
+        for (max_fails, fail_timeout, interval) in invalid_values {
             let invalid = UpstreamForm {
                 max_fails: max_fails.into(),
                 fail_timeout: fail_timeout.into(),
+                interval: interval.into(),
                 ..form.clone()
             };
             let mut errors = HashMap::new();
-            invalid.parse(Locale::En, &mut errors);
+            invalid.parse(Locale::En, true, &mut errors);
             assert!(errors.contains_key(UPSTREAM_KEY));
         }
     }

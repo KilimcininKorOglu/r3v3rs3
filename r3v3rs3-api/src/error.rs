@@ -128,6 +128,9 @@ pub enum Error {
     #[error("timeout must be greater than zero")]
     InvalidTimeout,
 
+    #[error("health check path must start with / and only HTTP proxies use it: {path}")]
+    InvalidHealthCheckPath { path: String },
+
     #[error("failed to hash password")]
     FailedToHashPassword,
 

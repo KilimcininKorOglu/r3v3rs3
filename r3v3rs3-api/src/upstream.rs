@@ -8,6 +8,7 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 pub const DEFAULT_SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 pub const DEFAULT_MAX_FAILS: u32 = 1;
 pub const DEFAULT_FAIL_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Timeouts of the requests that an HTTP proxy sends to its upstream servers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -75,7 +76,7 @@ impl LoadBalancing {
 }
 
 /// Health check of the upstream servers of a proxy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct HealthCheck {
     /// Consecutive failures that mark a server unhealthy. A failure is a failed connection or a
     /// request without a response. `0` disables the passive health check.
@@ -86,6 +87,30 @@ pub struct HealthCheck {
     #[serde(default = "default_fail_timeout", with = "humantime_serde")]
     #[schema(value_type = String, example = "30s")]
     pub fail_timeout: Duration,
+
+    /// Time between two active checks of the servers. `0s` disables the active health check.
+    #[serde(
+        default,
+        with = "humantime_serde",
+        skip_serializing_if = "Duration::is_zero"
+    )]
+    #[schema(value_type = String, example = "10s")]
+    pub interval: Duration,
+
+    /// Time limit of one active check.
+    #[serde(
+        default = "default_health_check_timeout",
+        with = "humantime_serde",
+        skip_serializing_if = "is_default_health_check_timeout"
+    )]
+    #[schema(value_type = String, example = "5s")]
+    pub timeout: Duration,
+
+    /// Path that the active check of an HTTP proxy requests with `GET`, from the root of the
+    /// server. A 2xx or 3xx response is healthy. Empty: the check opens a TCP connection.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[schema(example = "/health")]
+    pub path: String,
 }
 
 impl Default for HealthCheck {
@@ -93,6 +118,9 @@ impl Default for HealthCheck {
         Self {
             max_fails: DEFAULT_MAX_FAILS,
             fail_timeout: DEFAULT_FAIL_TIMEOUT,
+            interval: Duration::ZERO,
+            timeout: DEFAULT_HEALTH_CHECK_TIMEOUT,
+            path: String::new(),
         }
     }
 }
@@ -102,9 +130,35 @@ impl HealthCheck {
         *self == Self::default()
     }
 
-    pub fn validate(&self) -> Result<(), Error> {
-        validate_timeout(self.fail_timeout)
+    pub fn is_active(&self) -> bool {
+        !self.interval.is_zero()
     }
+
+    /// Rejects a zero fail timeout or check timeout, and a path that does not start with `/`.
+    /// Only an HTTP proxy can have a path.
+    pub fn validate(&self, http: bool) -> Result<(), Error> {
+        validate_timeout(self.fail_timeout)?;
+        validate_timeout(self.timeout)?;
+        if self.path.is_empty() || (http && self.path.starts_with('/')) {
+            return Ok(());
+        }
+        Err(Error::InvalidHealthCheckPath {
+            path: self.path.clone(),
+        })
+    }
+}
+
+/// The health of one upstream server of a proxy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct UpstreamHealth {
+    /// The URL or the address of the server.
+    pub addr: String,
+    pub healthy: bool,
+    /// Consecutive failed connections or requests.
+    pub failures: u32,
+    /// The error of the last failed connection, request or active check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 pub fn default_connect_timeout() -> Duration {
@@ -125,6 +179,14 @@ fn default_max_fails() -> u32 {
 
 fn default_fail_timeout() -> Duration {
     DEFAULT_FAIL_TIMEOUT
+}
+
+fn default_health_check_timeout() -> Duration {
+    DEFAULT_HEALTH_CHECK_TIMEOUT
+}
+
+fn is_default_health_check_timeout(timeout: &Duration) -> bool {
+    *timeout == DEFAULT_HEALTH_CHECK_TIMEOUT
 }
 
 pub fn is_default_connect_timeout(timeout: &Duration) -> bool {
@@ -192,6 +254,35 @@ mod tests {
             let json = serde_json::to_string(&policy).unwrap();
             assert_eq!(json, format!("\"{}\"", policy.as_str()));
         }
+
+        let json = r#"{"max_fails":0,"fail_timeout":"30s","interval":"10s","timeout":"2s","path":"/health"}"#;
+        let health_check: HealthCheck = serde_json::from_str(json).unwrap();
+        assert!(health_check.is_active());
+        assert_eq!(health_check.timeout, Duration::from_secs(2));
+        assert_eq!(serde_json::to_string(&health_check).unwrap(), json);
+        assert!(!HealthCheck::default().is_active());
+    }
+
+    #[test]
+    fn only_an_http_proxy_has_a_health_check_path() {
+        let with_path = HealthCheck {
+            path: "/health".into(),
+            ..Default::default()
+        };
+        assert!(with_path.validate(true).is_ok());
+        assert!(with_path.validate(false).is_err());
+
+        let relative = HealthCheck {
+            path: "health".into(),
+            ..Default::default()
+        };
+        assert!(relative.validate(true).is_err());
+
+        let no_timeout = HealthCheck {
+            timeout: Duration::ZERO,
+            ..Default::default()
+        };
+        assert!(no_timeout.validate(true).is_err());
     }
 
     #[test]

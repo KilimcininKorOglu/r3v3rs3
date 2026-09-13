@@ -1,5 +1,5 @@
 use super::{
-    health::{self, UpstreamGroup},
+    health::{self, Probe, UpstreamGroup},
     spawn_connection,
     tls::{port_acceptor, upstream_client_config, TlsTermination},
     PortContextEvent, PortStatus, SocketState,
@@ -163,7 +163,13 @@ impl TcpUpstream {
             .iter()
             .map(|server| server.addr.to_string())
             .collect();
-        let group = health::group((id, None), addrs, proxy.load_balancing, proxy.health_check);
+        let group = health::group(
+            (id, None),
+            addrs,
+            proxy.load_balancing,
+            proxy.health_check.clone(),
+            Probe::Connect(Probe::targets(&proxy.upstream_servers)),
+        );
         Self {
             servers: servers.into(),
             group,
@@ -188,7 +194,7 @@ impl TcpUpstream {
                     break;
                 }
                 Err(err) => {
-                    self.group.report_failure(index);
+                    self.group.report_failure(index, &err.to_string());
                     warn!(%err, "failed to connect to the upstream server");
                 }
             }

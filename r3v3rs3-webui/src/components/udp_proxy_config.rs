@@ -21,7 +21,7 @@ pub fn udp_proxy_config(props: &Props) -> Html {
     let locale = use_locale();
     let upstream_servers = use_server_forms(&props.proxy.upstream_servers);
     let idle_timeout = use_state(|| format_seconds(props.proxy.session_idle_timeout));
-    let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check);
+    let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check.clone());
 
     let entry = get_proxy(locale, &upstream_servers, &idle_timeout, &upstream);
     let errors = use_entry_errors(entry, props.onchanged.clone());
@@ -30,7 +30,7 @@ pub fn udp_proxy_config(props: &Props) -> Html {
         <>
             { servers_view(locale, &upstream_servers, &errors, false) }
 
-            { upstream_form_view(locale, &upstream, &errors) }
+            { upstream_form_view(locale, &upstream, &errors, false) }
 
             { timeout_field_view(
                 locale,
@@ -51,7 +51,7 @@ fn get_proxy(
 ) -> Result<UdpProxy, HashMap<String, String>> {
     let mut errors = HashMap::new();
     let upstream_servers = parse_servers(locale, servers, "udp", &mut errors);
-    let (load_balancing, health_check) = upstream.parse(locale, &mut errors);
+    let (load_balancing, health_check) = upstream.parse(locale, false, &mut errors);
     let session_idle_timeout = or_error(
         parse_seconds(
             locale,

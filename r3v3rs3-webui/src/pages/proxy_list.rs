@@ -9,13 +9,18 @@ use crate::pages::Route;
 use crate::store::{PortStore, ProxyStore};
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
+use gloo_timers::callback::Interval;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::{ProxyEntry, ProxyKind, ProxyState, ProxyStatus};
+use r3v3rs3_api::upstream::UpstreamHealth;
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
+
+/// The proxy list reloads the proxies and their statuses at this interval.
+const STATUS_REFRESH_INTERVAL_MS: u32 = 10_000;
 
 const COLUMNS: [Column; 4] = [
     Column {
@@ -45,21 +50,10 @@ pub fn proxy_list() -> Html {
     let (proxies, proxies_dispatcher) = use_store::<ProxyStore>();
 
     use_effect_with((), move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(res) = get_list().await {
-                let mut statuses = HashMap::new();
-                for entry in &res {
-                    if let Ok(status) = get_status(entry.id).await {
-                        statuses.insert(entry.id, status);
-                    }
-                }
-                proxies_dispatcher.set(ProxyStore {
-                    entries: res,
-                    statuses,
-                    loaded: true,
-                });
-            }
-        });
+        let load = move || load_proxies(proxies_dispatcher.clone());
+        load();
+        let interval = Interval::new(STATUS_REFRESH_INTERVAL_MS, load);
+        move || drop(interval)
     });
 
     let ports_cloned = ports.clone();
@@ -175,18 +169,13 @@ fn proxy_row(
     };
 
     let status = proxies.statuses.get(&id).cloned().unwrap_or_default();
-    let (status_key, color) = match status.state {
-        ProxyState::Active => ("state.active", "bg-green-500"),
-        ProxyState::Inactive => ("state.inactive", "bg-neutral-500"),
-        ProxyState::Unknown => ("state.unknown", "bg-neutral-500"),
-    };
 
     Row {
         key: id.to_string(),
         cells: vec![
             html! { <>{title}</> },
             html! { <>{port_names}</> },
-            status_badge(locale.t(status_key), color),
+            status_cell(locale, &status),
             active_toggle(entry.proxy.active, onchange),
         ],
         actions: html! {
@@ -200,6 +189,69 @@ fn proxy_row(
             </>
         },
     }
+}
+
+/// The state of a proxy, and the number of healthy upstream servers. The title of the number lists
+/// the unhealthy servers with their last errors.
+fn status_cell(locale: Locale, status: &ProxyStatus) -> Html {
+    let (status_key, color) = match status.state {
+        ProxyState::Active => ("state.active", "bg-green-500"),
+        ProxyState::Inactive => ("state.inactive", "bg-neutral-500"),
+        ProxyState::Unknown => ("state.unknown", "bg-neutral-500"),
+    };
+    let badge = status_badge(locale.t(status_key), color);
+    if status.upstreams.is_empty() {
+        return badge;
+    }
+    let (healthy, unhealthy) = health_summary(&status.upstreams);
+    let text = locale.tf(
+        "proxies.healthy_servers",
+        &[
+            ("healthy", &healthy.to_string()),
+            ("total", &status.upstreams.len().to_string()),
+        ],
+    );
+    html! {
+        <div>
+            {badge}
+            <span class="block text-xs text-neutral-500 dark:text-neutral-400" title={unhealthy}>{text}</span>
+        </div>
+    }
+}
+
+/// Returns the number of healthy servers, and one line for each unhealthy server.
+fn health_summary(upstreams: &[UpstreamHealth]) -> (usize, String) {
+    let healthy = upstreams.iter().filter(|server| server.healthy).count();
+    let unhealthy = upstreams
+        .iter()
+        .filter(|server| !server.healthy)
+        .map(|server| match &server.last_error {
+            Some(err) => format!("{}: {err}", server.addr),
+            None => server.addr.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (healthy, unhealthy)
+}
+
+/// Loads the proxies and their statuses into the store.
+fn load_proxies(dispatcher: Dispatch<ProxyStore>) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let Ok(entries) = get_list().await else {
+            return;
+        };
+        let mut statuses = HashMap::new();
+        for entry in &entries {
+            if let Ok(status) = get_status(entry.id).await {
+                statuses.insert(entry.id, status);
+            }
+        }
+        dispatcher.set(ProxyStore {
+            entries,
+            statuses,
+            loaded: true,
+        });
+    });
 }
 
 async fn get_ports() -> Result<Vec<PortEntry>, gloo_net::Error> {
@@ -259,4 +311,28 @@ async fn toggle_proxy(id: ShortId) -> Result<(), gloo_net::Error> {
         .send()
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_summary_lists_the_unhealthy_servers() {
+        let server = |addr: &str, healthy: bool, last_error: Option<&str>| UpstreamHealth {
+            addr: addr.into(),
+            healthy,
+            failures: 0,
+            last_error: last_error.map(Into::into),
+        };
+        let upstreams = [
+            server("http://a", true, Some("old error")),
+            server("http://b", false, Some("connection refused")),
+            server("http://c", false, None),
+        ];
+        assert_eq!(
+            health_summary(&upstreams),
+            (1, "http://b: connection refused\nhttp://c".to_string())
+        );
+    }
 }

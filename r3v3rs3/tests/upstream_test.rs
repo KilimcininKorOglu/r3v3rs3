@@ -1,9 +1,13 @@
-use axum::{routing::get, Router};
+use axum::{http::StatusCode, routing::get, Router};
+use r3v3rs3::{
+    command::ServerCommand,
+    server::rpc::{proxies::GetProxyStatus, ErasedRpcMethod, RpcWrapper},
+};
 use r3v3rs3_api::{
     cache::CacheConfig,
     multiaddr::Multiaddr,
     port::UpstreamServer,
-    proxy::{HttpProxy, ProxyKind, Route, Server, TcpProxy, UdpProxy},
+    proxy::{HttpProxy, ProxyKind, ProxyStatus, Route, Server, TcpProxy, UdpProxy},
     upstream::{HealthCheck, LoadBalancing, UpstreamTimeouts},
 };
 use std::{
@@ -40,9 +44,26 @@ async fn start_silent_upstream() -> anyhow::Result<TestPort> {
 /// Starts an HTTP upstream server that answers every request with its name. The response can be
 /// cached for a minute.
 async fn start_named_upstream(name: &'static str) -> anyhow::Result<Url> {
+    serve_upstream(
+        Router::new().fallback(move || async move { ([("cache-control", "max-age=60")], name) }),
+    )
+    .await
+}
+
+/// Starts an HTTP upstream server that answers `/health` with 500 and every other request with
+/// its name.
+async fn start_failing_health_upstream(name: &'static str) -> anyhow::Result<Url> {
+    let unhealthy = get(|| async { StatusCode::INTERNAL_SERVER_ERROR });
+    serve_upstream(
+        Router::new()
+            .route("/health", unhealthy)
+            .fallback(move || async move { name }),
+    )
+    .await
+}
+
+async fn serve_upstream(app: Router) -> anyhow::Result<Url> {
     let port = alloc_tcp_port().await?;
-    let app =
-        Router::new().fallback(move || async move { ([("cache-control", "max-age=60")], name) });
     let listener = TcpListener::bind(port.socket_addr()).await?;
     tokio::spawn(axum::serve(listener, app).into_future());
     Ok(port.http_url("/"))
@@ -346,6 +367,80 @@ async fn http_failover_and_passive_health_check() -> anyhow::Result<()> {
             .await?;
         assert_eq!(resp.status(), 200);
         assert_eq!(resp.text().await?, "live");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn active_health_check_marks_a_failing_server_unhealthy() -> anyhow::Result<()> {
+    let urls = [
+        start_failing_health_upstream("sick").await?,
+        start_named_upstream("live").await?,
+    ];
+    let proxy_port = alloc_tcp_port().await?;
+    // The passive check is disabled, so only the active check can move the first server.
+    let health_check = HealthCheck {
+        max_fails: 0,
+        interval: Duration::from_millis(200),
+        timeout: Duration::from_secs(1),
+        path: "/health".into(),
+        ..Default::default()
+    };
+    let config = storage(vec![(
+        "active",
+        proxy_port.multiaddr_http(),
+        balanced_http(&urls, LoadBalancing::First, health_check),
+    )]);
+
+    with_server(config, |mut channels| async move {
+        let mut body = String::new();
+        for _ in 0..50 {
+            body = get_body(proxy_port.http_url("/")).await?;
+            if body == "live" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(body, "live");
+
+        let id = "active".parse().unwrap();
+        let arg = Box::new(RpcWrapper::new(GetProxyStatus { id })) as Box<dyn ErasedRpcMethod>;
+        channels
+            .command
+            .send(ServerCommand::CallMethod { id: 1, arg })
+            .await?;
+        let callback = channels
+            .callback
+            .recv()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("callback channel closed"))?;
+        let status = callback
+            .result?
+            .downcast::<ProxyStatus>()
+            .map_err(|_| anyhow::anyhow!("the RPC returned another type"))?;
+        let health = status
+            .upstreams
+            .iter()
+            .map(|server| {
+                (
+                    server.addr.as_str(),
+                    server.healthy,
+                    server.last_error.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            health,
+            vec![
+                (
+                    urls[0].as_str(),
+                    false,
+                    Some("the active check received status 500 Internal Server Error"),
+                ),
+                (urls[1].as_str(), true, None),
+            ]
+        );
         Ok(())
     })
     .await

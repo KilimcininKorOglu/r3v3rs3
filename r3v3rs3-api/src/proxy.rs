@@ -6,7 +6,7 @@ use crate::header_rules::HeaderRules;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
 use crate::upstream::{
     default_connect_timeout, default_session_idle_timeout, is_default_connect_timeout,
-    is_default_session_idle_timeout, validate_timeout, HealthCheck, LoadBalancing,
+    is_default_session_idle_timeout, validate_timeout, HealthCheck, LoadBalancing, UpstreamHealth,
     UpstreamTimeouts,
 };
 use crate::vhost::VirtualHost;
@@ -60,19 +60,20 @@ impl ProxyKind {
         }
     }
 
-    /// Rejects a zero connect timeout, session idle timeout or fail timeout.
+    /// Rejects a zero connect timeout, session idle timeout, fail timeout or check timeout, and an
+    /// invalid health check path.
     pub fn validate_upstream(&self) -> Result<(), Error> {
         match self {
             Self::Tcp(tcp) => {
                 validate_timeout(tcp.connect_timeout)?;
-                tcp.health_check.validate()
+                tcp.health_check.validate(false)
             }
             Self::Udp(udp) => {
                 validate_timeout(udp.session_idle_timeout)?;
-                udp.health_check.validate()
+                udp.health_check.validate(false)
             }
             Self::Http(http) => {
-                http.health_check.validate()?;
+                http.health_check.validate(true)?;
                 http.routes
                     .iter()
                     .filter_map(|route| route.timeouts.as_ref())
@@ -192,9 +193,13 @@ pub enum ProxyState {
     Unknown,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ProxyStatus {
     pub state: ProxyState,
+    /// The health of the upstream servers. An HTTP proxy lists the servers of each route in route
+    /// order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub upstreams: Vec<UpstreamHealth>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

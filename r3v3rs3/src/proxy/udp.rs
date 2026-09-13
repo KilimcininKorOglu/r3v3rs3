@@ -1,4 +1,4 @@
-use super::health::{self, UpstreamGroup};
+use super::health::{self, Probe, UpstreamGroup};
 use super::{PortContextEvent, PortStatus, SocketState};
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::name_server::{GenericConnector, TokioRuntimeProvider};
@@ -111,7 +111,7 @@ impl UdpPortContext {
         };
         session.touch();
         if let Err(err) = session.socket.send(data).await {
-            session.context.report_failure();
+            session.context.report_failure(&err.to_string());
             self.span.in_scope(|| {
                 debug!(%client, %err, "failed to send the packet to the upstream server");
             });
@@ -152,14 +152,14 @@ impl UdpPortContext {
     async fn open_server_session(&mut self, context: SessionContext) -> Option<UdpSession> {
         let server = self.upstream.servers.get_mut(context.index)?;
         let Some(upstream) = resolve(&self.resolver, &self.span, server).await else {
-            context.report_failure();
+            context.report_failure("failed to resolve the upstream server");
             return None;
         };
         let context = Arc::new(context);
         match UdpSession::open(upstream, context.clone()).await {
             Ok(session) => Some(session),
             Err(err) => {
-                context.report_failure();
+                context.report_failure(&err.to_string());
                 self.span.in_scope(|| {
                     error!(%upstream, %err, "failed to open the upstream socket");
                 });
@@ -205,7 +205,8 @@ impl UdpUpstream {
                 (entry.id, None),
                 addrs,
                 proxy.load_balancing,
-                proxy.health_check,
+                proxy.health_check.clone(),
+                Probe::Resolve(Probe::targets(&proxy.upstream_servers)),
             );
             upstream = Self {
                 servers,
@@ -274,8 +275,8 @@ struct SessionContext {
 }
 
 impl SessionContext {
-    fn report_failure(&self) {
-        self.group.report_failure(self.index);
+    fn report_failure(&self, error: &str) {
+        self.group.report_failure(self.index, error);
     }
 }
 
@@ -367,7 +368,7 @@ async fn relay_replies(socket: Arc<UdpSocket>, context: Arc<SessionContext>) {
         let size = match tokio::time::timeout(remaining, socket.recv(&mut buf)).await {
             Ok(Ok(size)) => size,
             Ok(Err(err)) => {
-                context.report_failure();
+                context.report_failure(&err.to_string());
                 context
                     .span
                     .in_scope(|| debug!(%client, %err, "closing the udp session"));

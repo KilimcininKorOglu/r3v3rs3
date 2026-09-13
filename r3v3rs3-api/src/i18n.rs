@@ -229,6 +229,7 @@ mod tests {
             Error::DuplicateCompressionAlgorithm { algorithm: text() },
             Error::InvalidCacheSize,
             Error::InvalidTimeout,
+            Error::InvalidHealthCheckPath { path: text() },
             Error::FailedToHashPassword,
             Error::FailedToFetchLog,
             Error::FailedToInvokeRpc,

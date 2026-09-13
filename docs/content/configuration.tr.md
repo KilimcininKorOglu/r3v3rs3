@@ -110,14 +110,24 @@ Seçilen sunucuya bağlantı kurulamazsa veya connect timeout dolarsa r3v3rs3 bi
 
 Pasif health check her sunucunun art arda aldığı hataları sayar. Hata, kurulamayan bir bağlantı veya response gelmeyen bir request'tir. `health_check.max_fails` (varsayılan `1`) kadar hatadan sonra sunucu `health_check.fail_timeout` (varsayılan `30s`) süresince sağlıksız sayılır. Sağlıksız sunucu yeni trafiği yalnız sağlıklı sunuculardan sonra alır. Bütün sunucular sağlıksızsa r3v3rs3 trafiği aynı sırayla yine onlara gönderir. Başarılı bir deneme hata sayısını sıfırlar. `max_fails = 0` kontrolü kapatır. 500 gibi hata status'lu bir HTTP response başarılı sayılır, çünkü sunucu yanıt vermiştir.
 
+Aktif health check, `health_check.interval` değeri `0s`'den büyükse çalışır (varsayılan `0s`, kapalı). r3v3rs3 her interval'de her sunucuyu kontrol eder:
+
+- `health_check.path` verilen HTTP proxy, her sunucunun kök adresinden bu path'e `GET` gönderir. 2xx veya 3xx status kontrolü geçer. Path `/` ile başlamalıdır ve yalnız HTTP proxy path kullanır.
+- Path'i olmayan HTTP proxy ve TCP proxy her sunucuya TCP bağlantısı açar.
+- UDP proxy her sunucunun host adını çözümler.
+
+`health_check.timeout` (varsayılan `5s`) her kontrolü sınırlar. Kontrolü geçemeyen sunucu, bir kontrol başarılı olana kadar sağlıksız kalır. Bu kural `max_fails = 0` olduğunda da geçerlidir. Başarılı bir request bu durumu bitirmez.
+
 Sunucular, policy ve health check ayarları değişmediği sürece config reload sonrasında sunucuların sağlık durumu korunur.
+
+Status API'si (`GET /api/proxies/{id}/status`), her upstream sunucusunun sağlık durumunu `upstreams` alanında listeler: adres, `healthy`, art arda hata sayısı `failures` ve `last_error`. WebUI'daki proxy listesi sağlıklı sunucu sayısını gösterir ve status'leri 10 saniyede bir yeniler. Sayının title'ı sağlıksız sunucuları son hatalarıyla listeler.
 
 ```toml
 [my-app]
 protocol = "http"
 vhosts = ["app.example.com"]
 load_balancing = "round_robin"
-health_check = { max_fails = 3, fail_timeout = "10s" }
+health_check = { max_fails = 3, fail_timeout = "10s", interval = "10s", timeout = "2s", path = "/health" }
 routes = [
   { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
 ]

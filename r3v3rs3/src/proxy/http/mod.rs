@@ -62,7 +62,7 @@ mod filter;
 mod header_rules;
 pub(crate) mod hyper_tls;
 mod page;
-mod pool;
+pub(crate) mod pool;
 mod rate_limit;
 mod rewriter;
 mod route;

@@ -74,6 +74,16 @@ impl ConnectionPool {
         }
     }
 
+    /// Sends `GET` to the URI without a body, and returns the status of the response.
+    pub async fn probe(&self, uri: Uri) -> anyhow::Result<StatusCode> {
+        let req = Request::get(uri).body(empty_body())?;
+        let res = self
+            .send(req, Duration::ZERO)
+            .await
+            .map_err(|err| err.error)?;
+        Ok(res.status())
+    }
+
     /// Sends the request. `request_timeout` limits the time until the response headers arrive,
     /// and `Duration::ZERO` disables the limit.
     async fn send(
@@ -259,7 +269,7 @@ impl Upstream {
         let result = self.pool.send(req, self.request_timeout).await;
         match (&result, index) {
             (Ok(_), Some(index)) => self.group.report_success(index),
-            (Err(_), Some(index)) => self.group.report_failure(index),
+            (Err(err), Some(index)) => self.group.report_failure(index, &err.error.to_string()),
             _ => {}
         }
         result

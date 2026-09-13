@@ -3,18 +3,19 @@ use super::cache::{cache_for, HttpCache};
 use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, RequestFilter};
 use super::header_rules::CompiledHeaderRules;
-use super::pool::{Upstream, UpstreamClients};
+use super::pool::{ConnectionPool, Upstream, UpstreamClients};
 use super::rate_limit::{self, ClientRateLimiter};
-use crate::proxy::health::{self, GroupKey};
-use hyper::Request;
+use crate::proxy::health::{self, GroupKey, Probe};
+use hyper::{Request, Uri};
 use r3v3rs3_api::{
     compression::Compression,
     id::ShortId,
     policy::IpFilter,
-    proxy::{HttpProxy, ProxyEntry, ProxyKind, Route},
+    proxy::{HttpProxy, ProxyEntry, ProxyKind, Route, Server},
     upstream::{HealthCheck, LoadBalancing, UpstreamTimeouts},
 };
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
+use url::{Host, Url};
 
 #[derive(Default, Debug)]
 pub struct Router {
@@ -104,7 +105,6 @@ impl Router {
 }
 
 /// The upstream settings of an HTTP proxy that its routes share.
-#[derive(Clone, Copy)]
 struct ProxyUpstream {
     client_cert: Option<ShortId>,
     timeouts: UpstreamTimeouts,
@@ -118,7 +118,7 @@ impl ProxyUpstream {
             client_cert: http.client_cert,
             timeouts: http.timeouts,
             load_balancing: http.load_balancing,
-            health_check: http.health_check,
+            health_check: http.health_check.clone(),
         }
     }
 
@@ -132,19 +132,60 @@ impl ProxyUpstream {
     ) -> Option<Upstream> {
         let timeouts = route.timeouts.unwrap_or(self.timeouts);
         let (_, pool) = clients.get(self.client_cert, timeouts.connect);
+        let pool = pool?;
         let addrs = route
             .servers
             .iter()
             .map(|server| server.url.to_string())
             .collect();
-        let group = health::group(key, addrs, self.load_balancing, self.health_check);
+        let probe = http_probe(&route.servers, &self.health_check.path, &pool);
+        let group = health::group(
+            key,
+            addrs,
+            self.load_balancing,
+            self.health_check.clone(),
+            probe,
+        );
         Some(Upstream {
-            pool: pool?,
+            pool,
             request_timeout: timeouts.request,
             servers: route.servers.clone().into(),
             group,
         })
     }
+}
+
+/// The active health check of the servers of a route: `GET` to the path from the root of each
+/// server, or a TCP connection when the path is empty.
+fn http_probe(servers: &[Server], path: &str, pool: &Arc<ConnectionPool>) -> Probe {
+    if path.is_empty() {
+        return Probe::Connect(
+            servers
+                .iter()
+                .map(|server| url_target(&server.url.0))
+                .collect(),
+        );
+    }
+    let uris = servers
+        .iter()
+        .map(|server| {
+            let url = server.url.0.join(path).ok()?;
+            Uri::from_str(url.as_str()).ok()
+        })
+        .collect();
+    Probe::Http {
+        uris,
+        pool: pool.clone(),
+    }
+}
+
+fn url_target(url: &Url) -> Option<(String, u16)> {
+    let host = match url.host()? {
+        Host::Domain(domain) => domain.to_string(),
+        Host::Ipv4(ip) => ip.to_string(),
+        Host::Ipv6(ip) => ip.to_string(),
+    };
+    Some((host, url.port_or_known_default()?))
 }
 
 #[derive(Debug)]

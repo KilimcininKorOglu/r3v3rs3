@@ -110,14 +110,24 @@ When the connection to the selected server fails or its connect timeout expires,
 
 The passive health check counts the consecutive failures of each server. A failure is a failed connection or a request without a response. After `health_check.max_fails` failures (default `1`), the server is unhealthy for `health_check.fail_timeout` (default `30s`). An unhealthy server gets new traffic only after the healthy servers. When every server is unhealthy, r3v3rs3 still sends the traffic to them in the same order. A success resets the failure count. `max_fails = 0` disables the check. An HTTP response with an error status such as 500 is a success, because the server answered.
 
+The active health check runs when `health_check.interval` is above `0s` (default `0s`, disabled). Every interval, r3v3rs3 checks each server:
+
+- An HTTP proxy with `health_check.path` sends `GET` to the path from the root of each server. A 2xx or 3xx status passes the check. The path must start with `/`, and only an HTTP proxy uses it.
+- An HTTP proxy without a path and a TCP proxy open a TCP connection to each server.
+- A UDP proxy resolves the host name of each server.
+
+`health_check.timeout` (default `5s`) limits each check. A server that fails the check is unhealthy until a check passes, also when `max_fails = 0`. A successful request does not end this state.
+
 The health of the servers stays after a configuration reload while the servers, the policy and the health check settings do not change.
+
+The status API (`GET /api/proxies/{id}/status`) lists the health of each upstream server in `upstreams`: the address, `healthy`, the consecutive `failures`, and `last_error`. The proxy list of the WebUI shows the number of healthy servers and refreshes the statuses every 10 seconds. The title of the number lists the unhealthy servers with their last errors.
 
 ```toml
 [my-app]
 protocol = "http"
 vhosts = ["app.example.com"]
 load_balancing = "round_robin"
-health_check = { max_fails = 3, fail_timeout = "10s" }
+health_check = { max_fails = 3, fail_timeout = "10s", interval = "10s", timeout = "2s", path = "/health" }
 routes = [
   { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
 ]
