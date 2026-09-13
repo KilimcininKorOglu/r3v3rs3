@@ -63,6 +63,12 @@ r3v3rs3 üç proxy türünü destekler:
 
 Bir proxy'ye birden fazla port bağlayabilirsiniz. Ancak HTTP / HTTPS proxy'sine TCP veya TLS üzerinden TCP portu bağlanamaz. TCP / TLS üzerinden TCP proxy'sine de HTTP veya HTTPS portu bağlanamaz.
 
+## UDP Session'ları
+
+UDP proxy her client adresi için ayrı bir session açar. Her session'ın upstream sunucuya giden kendi socket'i vardır. Bu yüzden upstream sunucu her client'ı farklı bir kaynak porttan görür. r3v3rs3 upstream sunucunun yanıtlarını dinlediği porttan client'a geri gönderir.
+
+İki yönde de 60 saniye paket geçmezse session kapanır. Upstream socket hata verdiğinde veya portun upstream sunucuları değiştiğinde de session kapanır. Client'ın sonraki paketi yeni bir session açar. Bir port en fazla 10.000 session tutar. Bu sınıra ulaşılınca r3v3rs3 yeni client'ların paketlerini düşürür.
+
 ## Client IP
 
 CDN veya load balancer arkasında r3v3rs3'ün TCP peer'ı ziyaretçi değil, edge sunucusudur. r3v3rs3 gerçek client IP adresini yalnız peer güvenilirse belirler:

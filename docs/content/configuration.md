@@ -63,6 +63,12 @@ r3v3rs3 supports three types of proxies:
 
 Multiple ports can be bound to a proxy. However, it's not possible to bind TCP / TCP over TLS ports to an HTTP / HTTPS proxy and vice versa.
 
+## UDP Sessions
+
+A UDP proxy opens one session for each client address. The session has its own socket to the upstream server, so the upstream server sees a different source port for each client. r3v3rs3 sends the replies of the upstream server back to the client from the listening port.
+
+A session closes after 60 seconds without packets in either direction. It also closes when the upstream socket reports an error, or when the upstream servers of the port change. The next packet of the client opens a new session. A port keeps at most 10,000 sessions. When the limit is reached, r3v3rs3 drops the packets of new clients.
+
 ## Client IP
 
 Behind a CDN or a load balancer, the TCP peer of r3v3rs3 is the edge server, not the visitor. r3v3rs3 resolves the real client IP only when the peer is trusted:

@@ -108,6 +108,7 @@ tokio = { version = "1.29.1", features = [
     "net",
     "signal",
     "io-util",
+    "time",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = [
     "tls12",

@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::net::UdpSocket;
 use tracing::{error, info, span, Level};
@@ -84,7 +85,7 @@ impl UdpListenerPool {
                         Some(UdpListenerStream {
                             index: 0,
                             config_index: 0,
-                            inner: sock,
+                            inner: Arc::new(sock),
                         }),
                         SocketState::Listening,
                     ),
@@ -120,10 +121,10 @@ impl UdpListenerPool {
         }
     }
 
-    pub async fn send_to(&self, index: usize, addr: SocketAddr, data: &[u8]) {
-        if let Some(listener) = self.listeners.get(index) {
-            let _ = listener.inner.send_to(data, addr).await;
-        }
+    pub fn socket(&self, index: usize) -> Option<Arc<UdpSocket>> {
+        self.listeners
+            .get(index)
+            .map(|listener| listener.inner.clone())
     }
 }
 
@@ -146,7 +147,7 @@ fn create_udp_socket(addr: SocketAddr) -> io::Result<UdpSocket> {
 struct UdpListenerStream {
     index: usize,
     config_index: usize,
-    inner: UdpSocket,
+    inner: Arc<UdpSocket>,
 }
 
 impl Stream for UdpListenerStream {

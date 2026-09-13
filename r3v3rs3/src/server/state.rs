@@ -220,16 +220,15 @@ impl ServerState {
         &mut self,
         index: usize,
         config_index: usize,
-        _addr: SocketAddr,
+        addr: SocketAddr,
         data: Vec<u8>,
     ) {
-        if config_index < self.ports.as_slice().len() {
-            let state = &mut self.ports.as_mut_slice()[config_index];
-            if let PortContextKind::Udp(udp) = state.kind_mut() {
-                for addr in udp.target_addrs().await {
-                    self.udp_pool.send_to(index, addr, &data).await;
-                }
-            }
+        let Some(listener) = self.udp_pool.socket(index) else {
+            return;
+        };
+        let port = self.ports.as_mut_slice().get_mut(config_index);
+        if let Some(PortContextKind::Udp(udp)) = port.map(PortContext::kind_mut) {
+            udp.forward(addr, &data, &listener).await;
         }
     }
 
