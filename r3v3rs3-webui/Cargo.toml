@@ -26,4 +26,3 @@ base64 = "0.22.1"
 time = { version = "0.3.36", features = ["formatting"] }
 gloo-events = "0.2.0"
 web-time = "1.0.0"
-fancy-duration = "0.9.1"

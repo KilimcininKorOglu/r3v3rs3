@@ -1,5 +1,6 @@
 use crate::{
-    auth::use_ensure_auth, components::port_config::PortConfig, pages::Route, API_ENDPOINT,
+    auth::use_ensure_auth, components::port_config::PortConfig, i18n::use_locale, pages::Route,
+    API_ENDPOINT,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::port::Port;
@@ -10,6 +11,7 @@ use yew_router::prelude::*;
 #[function_component(NewPort)]
 pub fn new_port() -> Html {
     use_ensure_auth();
+    let locale = use_locale();
 
     let navigator = use_navigator().unwrap();
     let entry = use_state::<Result<Port, HashMap<String, String>>, _>(|| Err(Default::default()));
@@ -53,10 +55,10 @@ pub fn new_port() -> Html {
 
                 <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
                     <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                        {"Cancel"}
+                        {locale.t("common.cancel")}
                     </button>
                     <button type="submit" disabled={entry.is_err()} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                        {"Create"}
+                        {locale.t("common.create")}
                     </button>
                 </div>
             </form>

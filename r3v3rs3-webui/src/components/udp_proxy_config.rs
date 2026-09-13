@@ -1,3 +1,4 @@
+use crate::i18n::use_locale;
 use r3v3rs3_api::port::UpstreamServer;
 use r3v3rs3_api::proxy::UdpProxy;
 use std::collections::HashMap;
@@ -15,6 +16,7 @@ pub struct Props {
 
 #[function_component(UdpProxyConfig)]
 pub fn udp_proxy_config(props: &Props) -> Html {
+    let locale = use_locale();
     let upstream_servers = use_state(|| {
         props
             .proxy
@@ -43,7 +45,7 @@ pub fn udp_proxy_config(props: &Props) -> Html {
 
     html! {
         <>
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Upstream Server"}</label>
+            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("proxy_form.upstream_server")}</label>
 
             { upstream_servers.iter().enumerate().map(|(i, (host, port))| {
                 let upstream_servers_cloned = upstream_servers.clone();
@@ -64,10 +66,10 @@ pub fn udp_proxy_config(props: &Props) -> Html {
 
                 html! {
                     <div class="mt-2 bg-white shadow-sm p-5 border border-neutral-300 dark:border-neutral-600 dark:bg-neutral-800 rounded-md">
-                        <label class="block mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Host"}</label>
+                        <label class="block mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("proxy_form.host")}</label>
                         <input type="text" autocapitalize="off" placeholder="example.com" onchange={host_onchange} value={host.clone()} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
 
-                        <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Port"}</label>
+                        <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.port")}</label>
                         <input type="number" placeholder="8080" onchange={port_onchange} value={port.to_string()} max="65535" min="1" class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
                     </div>
                 }

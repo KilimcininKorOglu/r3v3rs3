@@ -1,7 +1,7 @@
 //! Display preferences of the WebUI. The values are stored in cookies, so the head script of
 //! `index.html` and the pages that the server renders read the same values.
 
-use r3v3rs3_api::i18n::{Theme, THEME_COOKIE};
+use r3v3rs3_api::i18n::{Locale, Theme, LOCALE_COOKIE, THEME_COOKIE};
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Document, HtmlDocument};
 use yewdux::prelude::*;
@@ -13,6 +13,7 @@ const DARK_THEME_COLOR: &str = "#333333";
 
 #[derive(Clone, PartialEq)]
 pub struct PreferencesStore {
+    pub locale: Locale,
     pub theme: Theme,
 }
 
@@ -22,6 +23,7 @@ impl Store for PreferencesStore {
             .map(|document| document.cookie().map_err(report).unwrap_or_default())
             .unwrap_or_default();
         Self {
+            locale: Locale::from_cookie_header(&cookies),
             theme: Theme::from_cookie_header(&cookies),
         }
     }
@@ -31,16 +33,33 @@ impl Store for PreferencesStore {
     }
 }
 
-/// Stores the theme in its cookie and applies it to the page.
-pub fn set_theme(dispatch: &Dispatch<PreferencesStore>, theme: Theme) {
-    if let Some(document) = html_document() {
-        let cookie = format!("{THEME_COOKIE}={}; {COOKIE_ATTRIBUTES}", theme.code());
-        if let Err(err) = document.set_cookie(&cookie) {
+/// Stores the language in its cookie and sets the `lang` attribute of the page.
+pub fn set_locale(dispatch: &Dispatch<PreferencesStore>, locale: Locale) {
+    write_cookie(LOCALE_COOKIE, locale.code());
+    let root = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.document_element());
+    if let Some(root) = root {
+        if let Err(err) = root.set_attribute("lang", locale.code()) {
             report(err);
         }
     }
+    dispatch.reduce_mut(|preferences| preferences.locale = locale);
+}
+
+/// Stores the theme in its cookie and applies it to the page.
+pub fn set_theme(dispatch: &Dispatch<PreferencesStore>, theme: Theme) {
+    write_cookie(THEME_COOKIE, theme.code());
     apply_theme(theme);
     dispatch.reduce_mut(|preferences| preferences.theme = theme);
+}
+
+fn write_cookie(name: &str, value: &str) {
+    if let Some(document) = html_document() {
+        if let Err(err) = document.set_cookie(&format!("{name}={value}; {COOKIE_ATTRIBUTES}")) {
+            report(err);
+        }
+    }
 }
 
 /// Sets the `dark` class on the root element and the matching `theme-color`. The head script of

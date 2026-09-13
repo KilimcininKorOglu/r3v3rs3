@@ -1,5 +1,6 @@
+use super::dropdown::Dropdown;
 use crate::preferences::{set_theme, PreferencesStore};
-use r3v3rs3_api::i18n::Theme;
+use r3v3rs3_api::i18n::{Locale, Theme};
 use yew::prelude::*;
 use yewdux::prelude::*;
 
@@ -12,61 +13,40 @@ pub struct Props {
 #[function_component(ThemeMenu)]
 pub fn theme_menu(props: &Props) -> Html {
     let (preferences, dispatch) = use_store::<PreferencesStore>();
-    let open = use_state(|| false);
-
-    let toggle_onclick = {
-        let open = open.clone();
-        Callback::from(move |_: MouseEvent| open.set(!*open))
-    };
-    let close_onclick = {
-        let open = open.clone();
-        Callback::from(move |_: MouseEvent| open.set(false))
-    };
+    let locale = preferences.locale;
 
     html! {
-        <div class="relative flex items-stretch">
-            <button type="button" onclick={toggle_onclick} class={props.class.clone()} title={label(preferences.theme)} aria-label={label(preferences.theme)} aria-haspopup="menu" aria-expanded={open.to_string()}>
-                { icon(preferences.theme) }
-            </button>
-            if *open {
-                <div class="fixed inset-0 z-10" onclick={close_onclick}></div>
-                <ul role="menu" class="absolute right-0 top-full z-20 mt-1 w-40 py-1 rounded-md shadow-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm text-neutral-700 dark:text-neutral-200">
-                    { for Theme::ALL.into_iter().map(|theme| theme_option(theme, preferences.theme, &dispatch, &open)) }
-                </ul>
-            }
-        </div>
+        <Dropdown class={props.class.clone()} menu_class="w-40" label={label(locale, preferences.theme)} button={icon(preferences.theme)}>
+            { for Theme::ALL.into_iter().map(|theme| theme_option(locale, theme, preferences.theme, &dispatch)) }
+        </Dropdown>
     }
 }
 
 fn theme_option(
+    locale: Locale,
     theme: Theme,
     current: Theme,
     dispatch: &Dispatch<PreferencesStore>,
-    open: &UseStateHandle<bool>,
 ) -> Html {
     let dispatch = dispatch.clone();
-    let open = open.clone();
-    let onclick = Callback::from(move |_: MouseEvent| {
-        set_theme(&dispatch, theme);
-        open.set(false);
-    });
+    let onclick = Callback::from(move |_: MouseEvent| set_theme(&dispatch, theme));
     let active = theme == current;
     html! {
         <li role="none">
             <button type="button" role="menuitemradio" aria-checked={active.to_string()} {onclick} class={classes!("flex", "w-full", "items-center", "gap-2", "px-3", "py-2", "hover:bg-neutral-100", "dark:hover:bg-neutral-700", active.then_some("font-semibold"))}>
                 { icon(theme) }
-                { label(theme) }
+                { label(locale, theme) }
             </button>
         </li>
     }
 }
 
-fn label(theme: Theme) -> &'static str {
-    match theme {
-        Theme::System => "System",
-        Theme::Light => "Light",
-        Theme::Dark => "Dark",
-    }
+fn label(locale: Locale, theme: Theme) -> &'static str {
+    locale.t(match theme {
+        Theme::System => "theme.system",
+        Theme::Light => "theme.light",
+        Theme::Dark => "theme.dark",
+    })
 }
 
 /// Outline icons from ionicons (MIT License). They use the current text color.

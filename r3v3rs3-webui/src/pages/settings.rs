@@ -1,9 +1,10 @@
-use crate::{auth::use_ensure_auth, API_ENDPOINT};
+use crate::{auth::use_ensure_auth, i18n::use_locale, API_ENDPOINT};
 use gloo_net::http::{Request, Response};
 use r3v3rs3_api::{
     app::{AdminConfig, AppConfig, LogConfig},
     cdn::{CdnRangesSource, CdnStatus},
     error::ErrorMessage,
+    i18n::Locale,
 };
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -59,6 +60,7 @@ enum Notice {
 #[function_component(Settings)]
 pub fn settings() -> Html {
     use_ensure_auth();
+    let locale = use_locale();
 
     let fields = use_state(|| Option::<Fields>::None);
     let notice = use_state(|| Option::<Notice>::None);
@@ -76,7 +78,7 @@ pub fn settings() -> Html {
     let Some(current) = (*fields).clone() else {
         return html! {};
     };
-    let parsed = parse_fields(&current);
+    let parsed = parse_fields(locale, &current);
 
     let onsubmit = {
         let parsed = parsed.clone();
@@ -94,8 +96,8 @@ pub fn settings() -> Html {
             let notice = notice.clone();
             let is_loading = is_loading.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                notice.set(Some(match update_config(&config).await {
-                    Ok(()) => Notice::Success("Settings saved."),
+                notice.set(Some(match update_config(locale, &config).await {
+                    Ok(()) => Notice::Success(locale.t("settings.saved")),
                     Err(message) => Notice::Failed(message),
                 }));
                 is_loading.set(false);
@@ -110,22 +112,22 @@ pub fn settings() -> Html {
         <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
             { notice_view(&notice) }
 
-            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"Admin"}</h2>
-            { text_field(&fields, &errors, "Session Expiry", "session_expiry", "1h", |f| &mut f.session_expiry) }
-            { text_field(&fields, &errors, "Max Login Attempts", "max_login_attempts", "10", |f| &mut f.max_login_attempts) }
-            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{"Failed logins allowed per client IP and username before the login is blocked."}</p>
-            { text_field(&fields, &errors, "Login Attempts Reset", "login_attempts_reset", "15m", |f| &mut f.login_attempts_reset) }
-            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{"How long a blocked client IP and username must wait before the next login attempt."}</p>
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.admin")}</h2>
+            { text_field(&fields, &errors, locale.t("settings.session_expiry"), "session_expiry", "1h", |f| &mut f.session_expiry) }
+            { text_field(&fields, &errors, locale.t("settings.max_login_attempts"), "max_login_attempts", "10", |f| &mut f.max_login_attempts) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.max_login_attempts_hint")}</p>
+            { text_field(&fields, &errors, locale.t("settings.login_attempts_reset"), "login_attempts_reset", "15m", |f| &mut f.login_attempts_reset) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.login_attempts_reset_hint")}</p>
 
-            <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"Server"}</h2>
-            { text_field(&fields, &errors, "Background Task Interval", "background_task_interval", "1h", |f| &mut f.background_task_interval) }
-            { text_field(&fields, &errors, "HTTP Challenge Address", "http_challenge_addr", "0.0.0.0:80", |f| &mut f.http_challenge_addr) }
-            { text_field(&fields, &errors, "Database Log Retention", "database_log_retention", "3months", |f| &mut f.database_log_retention) }
-            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{"Durations use a human-readable format, e.g, 30s, 15m, 1h, 7days."}</p>
+            <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.server")}</h2>
+            { text_field(&fields, &errors, locale.t("settings.background_task_interval"), "background_task_interval", "1h", |f| &mut f.background_task_interval) }
+            { text_field(&fields, &errors, locale.t("settings.http_challenge_addr"), "http_challenge_addr", "0.0.0.0:80", |f| &mut f.http_challenge_addr) }
+            { text_field(&fields, &errors, locale.t("settings.database_log_retention"), "database_log_retention", "3months", |f| &mut f.database_log_retention) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.duration_hint")}</p>
 
             <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
                 <button type="submit" disabled={parsed.is_err() || *is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                    {"Save"}
+                    {locale.t("settings.save")}
                 </button>
             </div>
         </form>
@@ -178,23 +180,26 @@ fn text_field(
     }
 }
 
+/// Parses one part of the config, or records `message` under `key`.
 fn parse_part<T: DeserializeOwned>(
     errors: &mut HashMap<String, String>,
     key: &str,
+    message: &str,
     value: serde_json::Value,
 ) -> Option<T> {
     serde_json::from_value::<T>(value)
-        .map_err(|err| errors.insert(key.to_string(), err.to_string()))
+        .map_err(|_| errors.insert(key.to_string(), message.to_string()))
         .ok()
 }
 
-fn parse_fields(fields: &Fields) -> Result<AppConfig, HashMap<String, String>> {
+fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<String, String>> {
     let mut errors = HashMap::new();
+    let invalid_duration = locale.t("settings.invalid_duration");
     let max_login_attempts = match fields.max_login_attempts.trim().parse::<u32>() {
         Ok(0) | Err(_) => {
             errors.insert(
                 "max_login_attempts".into(),
-                "Must be a positive integer".into(),
+                locale.t("settings.positive_integer").into(),
             );
             0
         }
@@ -205,23 +210,32 @@ fn parse_fields(fields: &Fields) -> Result<AppConfig, HashMap<String, String>> {
         ("login_attempts_reset", &fields.login_attempts_reset),
     ]
     .into_iter()
-    .map(|(key, value)| parse_part::<AdminConfig>(&mut errors, key, json!({ key: value.trim() })))
+    .map(|(key, value)| {
+        parse_part::<AdminConfig>(
+            &mut errors,
+            key,
+            invalid_duration,
+            json!({ key: value.trim() }),
+        )
+    })
     .collect::<Option<Vec<_>>>();
     let log = parse_part::<LogConfig>(
         &mut errors,
         "database_log_retention",
+        invalid_duration,
         json!({ "database_log_retention": fields.database_log_retention.trim() }),
     );
     let interval = parse_part::<AppConfig>(
         &mut errors,
         "background_task_interval",
+        invalid_duration,
         json!({ "background_task_interval": fields.background_task_interval.trim() }),
     );
     let addr = fields.http_challenge_addr.trim().parse::<SocketAddr>().ok();
     if addr.is_none() {
         errors.insert(
             "http_challenge_addr".into(),
-            "Must be an IP address and port, e.g, 0.0.0.0:80".into(),
+            locale.t("settings.invalid_socket_addr").into(),
         );
     }
     match (admin, log, interval, addr) {
@@ -249,7 +263,7 @@ async fn get_config() -> Result<AppConfig, gloo_net::Error> {
         .await
 }
 
-async fn update_config(config: &AppConfig) -> Result<(), String> {
+async fn update_config(locale: Locale, config: &AppConfig) -> Result<(), String> {
     let request = Request::put(&format!("{API_ENDPOINT}/config"))
         .json(config)
         .map_err(|err| err.to_string())?;
@@ -257,11 +271,14 @@ async fn update_config(config: &AppConfig) -> Result<(), String> {
     if response.ok() {
         return Ok(());
     }
-    Err(error_message(response).await)
+    Err(error_message(locale, response).await)
 }
 
-async fn error_message(response: Response) -> String {
+async fn error_message(locale: Locale, response: Response) -> String {
     match response.json::<ErrorMessage>().await {
+        Ok(ErrorMessage {
+            error: Some(error), ..
+        }) => locale.error_message(&error),
         Ok(err) => err.message,
         Err(err) => err.to_string(),
     }
@@ -269,6 +286,7 @@ async fn error_message(response: Response) -> String {
 
 #[function_component(CdnStatusCard)]
 fn cdn_status_card() -> Html {
+    let locale = use_locale();
     let status = use_state(|| Option::<CdnStatus>::None);
     let notice = use_state(|| Option::<Notice>::None);
     let is_loading = use_state(|| false);
@@ -295,10 +313,10 @@ fn cdn_status_card() -> Html {
             let notice = notice.clone();
             let is_loading = is_loading.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                match refresh_cdn_ranges().await {
+                match refresh_cdn_ranges(locale).await {
                     Ok(value) => {
                         status.set(Some(value));
-                        notice.set(Some(Notice::Success("CDN IP ranges refreshed.")));
+                        notice.set(Some(Notice::Success(locale.t("settings.cdn_refreshed"))));
                     }
                     Err(message) => notice.set(Some(Notice::Failed(message))),
                 }
@@ -310,33 +328,38 @@ fn cdn_status_card() -> Html {
     html! {
         <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
             { notice_view(&notice) }
-            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"CDN IP Ranges"}</h2>
-            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{"Edge server addresses of known CDNs. The list is refreshed every day."}</p>
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.cdn_title")}</h2>
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.cdn_hint")}</p>
             if let Some(status) = &*status {
-                { cdn_status_view(status) }
+                { cdn_status_view(locale, status) }
             }
             <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
                 <button type="button" {onclick} disabled={*is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                    {"Refresh Now"}
+                    {locale.t("settings.refresh_now")}
                 </button>
             </div>
         </div>
     }
 }
 
-fn cdn_status_view(status: &CdnStatus) -> Html {
-    let source = match status.source {
-        CdnRangesSource::Embedded => "built-in snapshot",
-        CdnRangesSource::Downloaded => "downloaded",
-    };
+fn cdn_status_view(locale: Locale, status: &CdnStatus) -> Html {
+    let source = locale.t(match status.source {
+        CdnRangesSource::Embedded => "settings.cdn_embedded",
+        CdnRangesSource::Downloaded => "settings.cdn_downloaded",
+    });
+    let updated = locale.tf(
+        "settings.cdn_updated",
+        &[
+            ("time", &format_unix_time(locale, status.updated_at)),
+            ("source", source),
+        ],
+    );
     html! {
         <>
-            <p class="mt-4 text-sm text-neutral-900 dark:text-neutral-200">
-                {format!("Updated: {} ({source})", format_unix_time(status.updated_at))}
-            </p>
+            <p class="mt-4 text-sm text-neutral-900 dark:text-neutral-200">{updated}</p>
             <ul class="mt-2 text-sm text-neutral-700 dark:text-neutral-300">
                 { status.providers.iter().map(|provider| html! {
-                    <li>{format!("{}: {} ranges", provider.provider, provider.ranges)}</li>
+                    <li>{locale.tf("settings.cdn_provider_ranges", &[("provider", &provider.provider.to_string()), ("count", &provider.ranges.to_string())])}</li>
                 }).collect::<Html>() }
             </ul>
             { status.errors.iter().map(|err| html! {
@@ -346,9 +369,9 @@ fn cdn_status_view(status: &CdnStatus) -> Html {
     }
 }
 
-fn format_unix_time(unix_time: i64) -> String {
+fn format_unix_time(locale: Locale, unix_time: i64) -> String {
     if unix_time <= 0 {
-        return "never".to_string();
+        return locale.t("settings.never").to_string();
     }
     OffsetDateTime::from_unix_timestamp(unix_time)
         .ok()
@@ -364,7 +387,7 @@ async fn get_cdn_status() -> Result<CdnStatus, gloo_net::Error> {
         .await
 }
 
-async fn refresh_cdn_ranges() -> Result<CdnStatus, String> {
+async fn refresh_cdn_ranges(locale: Locale) -> Result<CdnStatus, String> {
     let response = Request::post(&format!("{API_ENDPOINT}/cdn/refresh"))
         .send()
         .await
@@ -372,5 +395,5 @@ async fn refresh_cdn_ranges() -> Result<CdnStatus, String> {
     if response.ok() {
         return response.json().await.map_err(|err| err.to_string());
     }
-    Err(error_message(response).await)
+    Err(error_message(locale, response).await)
 }

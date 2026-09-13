@@ -20,9 +20,11 @@
     <meta name="theme-color" content="#ffffff">
     <meta name="robots" content="noindex" />
     <script>
-        // Applies the theme before the WebUI loads, so the page does not change color after the
-        // first paint. src/preferences.rs applies a theme that the user selects.
+        // Applies the language and the theme before the WebUI loads, so the page does not change
+        // color after the first paint. src/preferences.rs applies the values that the user selects.
         (function () {
+            var lang = document.cookie.match(/(?:^|;\s*)r3v3rs3_lang=([a-z]+)/);
+            document.documentElement.lang = lang && lang[1] === "tr" ? "tr" : "en";
             var query = window.matchMedia("(prefers-color-scheme: dark)");
             function apply() {
                 var match = document.cookie.match(/(?:^|;\s*)r3v3rs3_theme=([a-z]+)/);

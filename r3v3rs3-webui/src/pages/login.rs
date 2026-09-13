@@ -1,6 +1,7 @@
 use crate::{
     auth::{test_token, LoginQuery},
-    components::theme_menu::ThemeMenu,
+    components::{language_menu::LanguageMenu, theme_menu::ThemeMenu},
+    i18n::use_locale,
     pages::Route,
     API_ENDPOINT,
 };
@@ -28,9 +29,19 @@ extern "C" {
     fn logout();
 }
 
+const MENU_BUTTON_CLASS: [&str; 6] = [
+    "p-2",
+    "rounded-md",
+    "text-neutral-600",
+    "dark:text-neutral-300",
+    "hover:bg-neutral-200",
+    "dark:hover:bg-neutral-700",
+];
+
 #[function_component(Login)]
 pub fn login() -> Html {
     let navigator = use_navigator().unwrap();
+    let locale = use_locale();
 
     use_effect_with((), move |_| {
         EventListener::new(&gloo_utils::document(), "visibilitychange", move |_event| {
@@ -146,37 +157,43 @@ pub fn login() -> Html {
         });
     });
 
+    let error_text = (*error).as_ref().map(|err| match &err.error {
+        Some(api_error) => locale.error_message(api_error),
+        None => err.message.clone(),
+    });
+
     html! {
         <>
-        <div class="flex justify-end px-4">
-            <ThemeMenu class={classes!("p-2", "rounded-md", "text-neutral-600", "dark:text-neutral-300", "hover:bg-neutral-200", "dark:hover:bg-neutral-700")} />
+        <div class="flex justify-end gap-1 px-4">
+            <LanguageMenu class={classes!(MENU_BUTTON_CLASS.to_vec())} />
+            <ThemeMenu class={classes!(MENU_BUTTON_CLASS.to_vec())} />
         </div>
         <form class="mx-auto max-w-sm mt-4 px-4" {onsubmit}>
             <div class="mx-auto flex w-full justify-center items-center mb-2">
                 <img class="w-8 h-8 dark:invert" src="/assets/logo.svg" />
             </div>
             <div class="mx-auto flex w-full justify-center items-center mb-5">
-                <h1 class="font-semibold text-2xl text-neutral-700 dark:text-neutral-200">{"r3v3rs3 Admin"}</h1>
+                <h1 class="font-semibold text-2xl text-neutral-700 dark:text-neutral-200">{locale.t("login.heading")}</h1>
             </div>
 
-            if let Some(err) = &*error {
+            if let Some(message) = error_text {
                 <div class="bg-red-100 border border-red-400 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300 px-4 py-3 rounded relative mb-4" role="alert">
-                    <span class="block sm:inline">{&err.message}</span>
+                    <span class="block sm:inline">{message}</span>
                 </div>
             }
 
             if let Some(totp) = &*totp {
-                <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{"One Time Password"}</label>
+                <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.one_time_password")}</label>
                 <input type="number" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" oninput={oninput_totp} />
-                <input type="submit" class="w-full mt-4 text-neutral-50 font-bold bg-neutral-800 dark:bg-neutral-900 py-3 rounded-md hover:bg-neutral-600 transition duration-300" value={"Continue"} disabled={totp.is_empty()} />
+                <input type="submit" class="w-full mt-4 text-neutral-50 font-bold bg-neutral-800 dark:bg-neutral-900 py-3 rounded-md hover:bg-neutral-600 transition duration-300" value={locale.t("login.continue")} disabled={totp.is_empty()} />
             } else {
                 <div class="mb-4">
-                    <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{"Username"}</label>
+                    <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.username")}</label>
                     <input type="text" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocapitalize="off" autofocus={true} oninput={oninput_username} />
                 </div>
-                <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{"Password"}</label>
+                <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.password")}</label>
                 <input type="password" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" oninput={oninput_password} />
-                <input type="submit" class="w-full mt-4 text-neutral-50 font-bold bg-neutral-800 dark:bg-neutral-900 py-3 rounded-md hover:bg-neutral-600 transition duration-300" value={"Login"} disabled={username.is_empty() || password.is_empty()} />
+                <input type="submit" class="w-full mt-4 text-neutral-50 font-bold bg-neutral-800 dark:bg-neutral-900 py-3 rounded-md hover:bg-neutral-600 transition duration-300" value={locale.t("login.submit")} disabled={username.is_empty() || password.is_empty()} />
             }
         </form>
         </>

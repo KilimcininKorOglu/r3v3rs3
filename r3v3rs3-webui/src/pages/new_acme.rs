@@ -1,9 +1,10 @@
 use crate::components::acme_provider::AcmeProvider;
 use crate::components::custom_acme::CustomAcme;
 use crate::pages::cert_list::{CertsQuery, CertsTab};
-use crate::{auth::use_ensure_auth, pages::Route, API_ENDPOINT};
+use crate::{auth::use_ensure_auth, i18n::use_locale, pages::Route, API_ENDPOINT};
 use gloo_net::http::Request;
 use r3v3rs3_api::acme::AcmeRequest;
+use r3v3rs3_api::i18n::Locale;
 use std::collections::HashMap;
 use std::fmt::Display;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
@@ -34,6 +35,14 @@ impl Provider {
             Provider::Custom => html! { <CustomAcme {onchanged} /> },
         }
     }
+
+    /// Provider names are not translated. They are stored with the ACME configuration.
+    fn label(self, locale: Locale) -> String {
+        match self {
+            Provider::Custom => locale.t("acme.custom").to_string(),
+            _ => self.to_string(),
+        }
+    }
 }
 
 impl Display for Provider {
@@ -57,6 +66,7 @@ const PROVIDERS: &[Provider] = &[
 #[function_component(NewAcme)]
 pub fn new_acme() -> Html {
     use_ensure_auth();
+    let locale = use_locale();
 
     let navigator = use_navigator().unwrap();
 
@@ -119,11 +129,11 @@ pub fn new_acme() -> Html {
     html! {
         <>
             <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
-                <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Provider"}</label>
+                <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("certs.provider")}</label>
                 <select onchange={provider_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                     { PROVIDERS.iter().enumerate().map(|(i, item)| {
                         html! {
-                            <option selected={&*provider == item} value={i.to_string()}>{item.to_string()}</option>
+                            <option selected={&*provider == item} value={i.to_string()}>{item.label(locale)}</option>
                         }
                     }).collect::<Html>() }
                 </select>
@@ -132,7 +142,7 @@ pub fn new_acme() -> Html {
 
                 <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
                     <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                        {"Cancel"}
+                        {locale.t("common.cancel")}
                     </button>
                     <button disabled={entry.is_err()} type="submit" class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
                         if *is_loading {
@@ -141,7 +151,7 @@ pub fn new_acme() -> Html {
                             <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="#1C64F2"/>
                             </svg>
                         }
-                        {"Request"}
+                        {locale.t("acme.request")}
                     </button>
                 </div>
             </form>

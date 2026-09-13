@@ -9,6 +9,7 @@ mod auth;
 mod components;
 mod event;
 mod format;
+mod i18n;
 mod pages;
 mod preferences;
 mod store;

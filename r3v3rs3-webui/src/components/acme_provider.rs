@@ -1,3 +1,4 @@
+use crate::i18n::use_locale;
 use base64::{engine::general_purpose, Engine};
 use r3v3rs3_api::{
     acme::{Acme, AcmeConfig, AcmeRequest, ExternalAccountBinding},
@@ -19,6 +20,7 @@ pub struct Props {
 
 #[function_component(AcmeProvider)]
 pub fn letsencrypt(props: &Props) -> Html {
+    let locale = use_locale();
     let eab_kid = use_state(String::new);
     let eab_kid_onchange = Callback::from({
         let eab_kid: UseStateHandle<String> = eab_kid.clone();
@@ -74,23 +76,23 @@ pub fn letsencrypt(props: &Props) -> Html {
     html! {
         <>
             if props.eab {
-                <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"EAB Key ID"}</label>
+                <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.eab_key_id")}</label>
                 <input type="text" onchange={eab_kid_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
 
-                <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"EAB HMAC Key"}</label>
+                <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.eab_hmac_key")}</label>
                 <input type="text" onchange={eab_hmac_key_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
             }
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Email Address"}</label>
+            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.email")}</label>
             <input type="email" placeholder="admin@example.com" onchange={email_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Challenge"}</label>
+            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.challenge")}</label>
             <select class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                 <option selected={true}>{"HTTP"}</option>
             </select>
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Domain Name"}</label>
-            <input type="taxt" autocapitalize="off" placeholder="example.com" onchange={domain_name_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
+            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.domain_name")}</label>
+            <input type="text" autocapitalize="off" placeholder="example.com" onchange={domain_name_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
         </>
     }
 }

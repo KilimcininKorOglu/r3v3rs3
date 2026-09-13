@@ -1,4 +1,4 @@
-use crate::{auth::use_ensure_auth, API_ENDPOINT};
+use crate::{auth::use_ensure_auth, i18n::use_locale, API_ENDPOINT};
 use gloo_net::http::Request;
 use gloo_timers::callback::Timeout;
 use r3v3rs3_api::log::{LogLevel, SystemLogRow};
@@ -15,6 +15,7 @@ pub struct Props {
 #[function_component(LogView)]
 pub fn log_view(props: &Props) -> Html {
     use_ensure_auth();
+    let locale = use_locale();
 
     let ul_ref = use_node_ref();
 
@@ -37,7 +38,7 @@ pub fn log_view(props: &Props) -> Html {
                 <div>
                     <button onclick={back_onclick} class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2" type="button">
                         <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 mr-1" />
-                        {"Back"}
+                        {locale.t("common.back")}
                     </button>
                 </div>
             </div>
@@ -67,7 +68,7 @@ pub fn log_view(props: &Props) -> Html {
                 }).collect::<Html>()
             }
             if log.is_empty() {
-                <li class="my-8 px-4 sm:px-16 text-lg sm:text-xl font-bold text-neutral-500 dark:text-neutral-300 text-center">{"No logs."}</li>
+                <li class="my-8 px-4 sm:px-16 text-lg sm:text-xl font-bold text-neutral-500 dark:text-neutral-300 text-center">{locale.t("log.empty")}</li>
             }
             </ul>
         </>

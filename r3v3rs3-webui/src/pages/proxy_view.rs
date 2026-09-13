@@ -1,6 +1,6 @@
 use crate::{
-    auth::use_ensure_auth, components::proxy_config::ProxyConfig, pages::Route, store::ProxyStore,
-    API_ENDPOINT,
+    auth::use_ensure_auth, components::proxy_config::ProxyConfig, i18n::use_locale, pages::Route,
+    store::ProxyStore, API_ENDPOINT,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::{
@@ -20,6 +20,7 @@ pub struct Props {
 #[function_component(ProxyView)]
 pub fn proxy_view(props: &Props) -> Html {
     use_ensure_auth();
+    let locale = use_locale();
 
     let (proxies, _) = use_store::<ProxyStore>();
     let site = use_state(|| proxies.entries.iter().find(|e| e.id == props.id).cloned());
@@ -78,10 +79,10 @@ pub fn proxy_view(props: &Props) -> Html {
 
                     <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
                         <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                            {"Cancel"}
+                            {locale.t("common.cancel")}
                         </button>
                         <button type="submit" disabled={entry.is_err()} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                            {"Update"}
+                            {locale.t("common.update")}
                         </button>
                     </div>
                 </form>

@@ -1,9 +1,13 @@
+use super::language_menu::LanguageMenu;
 use super::theme_menu::ThemeMenu;
+use crate::i18n::use_locale;
 use crate::pages::Route;
+use r3v3rs3_api::i18n::Locale;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
 struct MenuItem {
+    /// The translation key of the name.
     name: &'static str,
     icon: &'static str,
     route: Route,
@@ -12,38 +16,47 @@ struct MenuItem {
 const ITEMS: &[MenuItem] = {
     &[
         MenuItem {
-            name: "Ports",
+            name: "nav.ports",
             icon: "/assets/icons/wifi.svg",
             route: Route::Ports,
         },
         MenuItem {
-            name: "Proxies",
+            name: "nav.proxies",
             icon: "/assets/icons/swap-horizontal.svg",
             route: Route::Proxies,
         },
         MenuItem {
-            name: "Certificates",
+            name: "nav.certificates",
             icon: "/assets/icons/ribbon.svg",
             route: Route::Certs,
         },
         MenuItem {
-            name: "Settings",
+            name: "nav.settings",
             icon: "/assets/icons/settings.svg",
             route: Route::Settings,
         },
     ]
 };
 
+const MENU_BUTTON_CLASS: [&str; 5] = [
+    "px-3",
+    "py-3",
+    "flex",
+    "items-center",
+    "hover:bg-neutral-600",
+];
+
 #[function_component(Navbar)]
 pub fn navbar() -> Html {
     let navigator = use_navigator().unwrap();
     let route = use_route::<Route>().unwrap();
     let menu_open = use_state(|| false);
+    let locale = use_locale();
 
     let navigator_cloned = navigator.clone();
     let logout_onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        if gloo_dialogs::confirm("Are you sure to log out?") {
+        if gloo_dialogs::confirm(locale.t("nav.logout_confirm")) {
             navigator_cloned.push(&Route::Logout);
         }
     });
@@ -70,13 +83,8 @@ pub fn navbar() -> Html {
                 ITEMS
                     .iter()
                     .map(|entry| {
-                        menu_item(
-                            entry,
-                            *root == entry.route,
-                            vertical,
-                            &navigator,
-                            &menu_open,
-                        )
+                        let is_active = *root == entry.route;
+                        menu_item(locale, entry, is_active, vertical, &navigator, &menu_open)
                     })
                     .collect::<Html>()
             })
@@ -93,12 +101,13 @@ pub fn navbar() -> Html {
                     { items(false) }
                 </div>
                 <div class="flex ml-auto">
-                    <ThemeMenu class={classes!("px-4", "py-3", "flex", "items-center", "hover:bg-neutral-600")} />
+                    <LanguageMenu class={classes!(MENU_BUTTON_CLASS.to_vec())} />
+                    <ThemeMenu class={classes!(MENU_BUTTON_CLASS.to_vec())} />
                     <button type="button" class="hidden md:flex rounded-r-md px-4 py-3 cursor-pointer hover:bg-neutral-600 items-center" onclick={logout_onclick.clone()}>
                         <img src="/assets/icons/log-out.svg" class="w-5 h-5" />
-                        <span class="ml-2">{"Logout"}</span>
+                        <span class="ml-2">{locale.t("nav.logout")}</span>
                     </button>
-                    <button type="button" class="md:hidden rounded-r-md px-4 py-3 flex items-center hover:bg-neutral-600" onclick={menu_onclick} aria-label="Menu" aria-expanded={menu_open.to_string()}>
+                    <button type="button" class="md:hidden rounded-r-md px-4 py-3 flex items-center hover:bg-neutral-600" onclick={menu_onclick} aria-label={locale.t("nav.menu")} aria-expanded={menu_open.to_string()}>
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" class="w-6 h-6" aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="32">
                             <path d="M80 160h352M80 256h352M80 352h352" />
                         </svg>
@@ -109,7 +118,7 @@ pub fn navbar() -> Html {
                         { items(true) }
                         <button type="button" class="px-4 py-3 flex items-center gap-2 hover:bg-neutral-600" onclick={logout_onclick}>
                             <img src="/assets/icons/log-out.svg" class="w-5 h-5" />
-                            {"Logout"}
+                            {locale.t("nav.logout")}
                         </button>
                     </div>
                 }
@@ -119,6 +128,7 @@ pub fn navbar() -> Html {
 }
 
 fn menu_item(
+    locale: Locale,
     entry: &'static MenuItem,
     is_active: bool,
     vertical: bool,
@@ -145,7 +155,7 @@ fn menu_item(
     html! {
         <button type="button" class={classes!("px-4", "py-3", "cursor-pointer", "hover:bg-neutral-600", "flex", "items-center", is_active.then_some("bg-neutral-700"), layout)} {onclick} aria-current={is_active.then_some("page")}>
             <img src={entry.icon} class="w-5 h-5" />
-            <span>{entry.name}</span>
+            <span>{locale.t(entry.name)}</span>
         </button>
     }
 }

@@ -1,14 +1,15 @@
 use crate::components::http_proxy_config::HttpProxyConfig;
 use crate::components::tcp_proxy_config::TcpProxyConfig;
 use crate::components::udp_proxy_config::UdpProxyConfig;
+use crate::i18n::use_locale;
 use crate::store::PortStore;
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
+use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::proxy::{HttpProxy, ProxyKind, TcpProxy, UdpProxy};
 use r3v3rs3_api::{port::PortEntry, proxy::Proxy};
 use std::collections::HashMap;
-use std::fmt::Display;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
@@ -21,12 +22,12 @@ pub enum ProxyProtocol {
     Udp,
 }
 
-impl Display for ProxyProtocol {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl ProxyProtocol {
+    fn label(self, locale: Locale) -> &'static str {
         match self {
-            ProxyProtocol::Http => write!(f, "HTTP / HTTPS"),
-            ProxyProtocol::Tcp => write!(f, "TCP / TCP over TLS"),
-            ProxyProtocol::Udp => write!(f, "UDP"),
+            ProxyProtocol::Http => "HTTP / HTTPS",
+            ProxyProtocol::Tcp => locale.t("protocol.tcp_tls"),
+            ProxyProtocol::Udp => "UDP",
         }
     }
 }
@@ -42,6 +43,7 @@ pub struct Props {
 
 #[function_component(ProxyConfig)]
 pub fn proxy_config(props: &Props) -> Html {
+    let locale = use_locale();
     let (ports, dispatcher) = use_store::<PortStore>();
 
     let ports_cloned = ports.clone();
@@ -174,22 +176,22 @@ pub fn proxy_config(props: &Props) -> Html {
             <label class="relative inline-flex items-center cursor-pointer mb-6">
                 <input onchange={active_onchange} type="checkbox" checked={*active} class="sr-only peer" />
                 <div class="shrink-0 w-9 h-5 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                <span class="ml-3 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Active"}</span>
+                <span class="ml-3 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.active")}</span>
             </label>
 
-            <label class="block mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Friendly Name (Optional)"}</label>
-            <input type="text" value={name.to_string()} onchange={name_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder="My Website" />
+            <label class="block mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.friendly_name")}</label>
+            <input type="text" value={name.to_string()} onchange={name_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder={locale.t("common.friendly_name_placeholder")} />
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Protocol"}</label>
+            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.protocol")}</label>
             <select onchange={protocol_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                 { PROTOCOLS.iter().enumerate().map(|(i, item)| {
                     html! {
-                        <option selected={&*protocol == item} value={i.to_string()}>{item.to_string()}</option>
+                        <option selected={&*protocol == item} value={i.to_string()}>{item.label(locale)}</option>
                     }
                 }).collect::<Html>() }
             </select>
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Ports"}</label>
+            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.ports")}</label>
             <ul class="h-32 pb-3 overflow-y-auto text-sm text-neutral-700 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 rounded-lg">
                 { compatible_ports.into_iter().map(|entry| {
                     let bound_ports_cloned = bound_ports.clone();

@@ -1,6 +1,8 @@
+use crate::i18n::use_locale;
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::{
+    i18n::Locale,
     port::{NetworkInterface, Port, PortOptions},
     tls::TlsTermination,
 };
@@ -37,8 +39,18 @@ const PROTOCOLS: &[(&str, &str)] = &[
     ("udp", "UDP"),
 ];
 
+/// Protocol names are the same in every language, except the ones that contain words.
+fn protocol_label(locale: Locale, value: &str, label: &'static str) -> &'static str {
+    match value {
+        "http3" => locale.t("protocol.http3"),
+        "tls" => locale.t("protocol.tls"),
+        _ => label,
+    }
+}
+
 #[function_component(PortConfig)]
 pub fn port_config(props: &Props) -> Html {
+    let locale = use_locale();
     let stack = &props.port.listen;
     let tls = stack.is_tls();
     let http = stack.is_http();
@@ -135,13 +147,13 @@ pub fn port_config(props: &Props) -> Html {
             <label class="relative inline-flex items-center cursor-pointer mb-6">
                 <input onchange={active_onchange} type="checkbox" checked={*active} class="sr-only peer" />
                 <div class="shrink-0 w-9 h-5 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                <span class="ml-3 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Active"}</span>
+                <span class="ml-3 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.active")}</span>
             </label>
 
-            <label class="block mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Friendly Name (Optional)"}</label>
-            <input type="text" value={name.to_string()} onchange={name_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder="My Website" />
+            <label class="block mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.friendly_name")}</label>
+            <input type="text" value={name.to_string()} onchange={name_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder={locale.t("common.friendly_name_placeholder")} />
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Interface"}</label>
+            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("ports.interface")}</label>
             <select onchange={interface_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                 { interfaces.iter().map(|value| {
                     html! {
@@ -150,14 +162,14 @@ pub fn port_config(props: &Props) -> Html {
                 }).collect::<Html>() }
             </select>
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Port"}</label>
+            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.port")}</label>
             <input type="number" placeholder="8080" onchange={port_onchange} value={port.to_string()} max="65535" min="1" class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Protocol"}</label>
+            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.protocol")}</label>
             <select onchange={protocol_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                 { PROTOCOLS.iter().map(|(value, label)| {
                     html! {
-                        <option selected={&*protocol == value} value={*value}>{label}</option>
+                        <option selected={&*protocol == value} value={*value}>{protocol_label(locale, value, label)}</option>
                     }
                 }).collect::<Html>() }
             </select>

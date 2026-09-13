@@ -1,4 +1,6 @@
 use super::http_proxy_config::{BUTTON_CLASS, HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
+use crate::i18n::use_locale;
+use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::policy::{
     is_header_name, AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, ForwardAuth,
     DEFAULT_FORWARD_AUTH_TIMEOUT,
@@ -41,14 +43,14 @@ impl AuthKind {
         }
     }
 
-    fn label(self) -> &'static str {
-        match self {
-            Self::None => "None",
-            Self::Basic => "Basic Auth",
-            Self::Bearer => "Bearer Token",
-            Self::Forward => "Forward Auth",
-            Self::Session => "Admin Session",
-        }
+    fn label(self, locale: Locale) -> &'static str {
+        locale.t(match self {
+            Self::None => "auth.kind_none",
+            Self::Basic => "auth.kind_basic",
+            Self::Bearer => "auth.kind_bearer",
+            Self::Forward => "auth.kind_forward",
+            Self::Session => "auth.kind_session",
+        })
     }
 }
 
@@ -110,20 +112,22 @@ impl AuthForm {
         form
     }
 
-    pub fn parse(&self) -> Result<AuthPolicy, String> {
+    /// Returns the policy, or the first error in the selected language.
+    pub fn parse(&self, locale: Locale) -> Result<AuthPolicy, String> {
         match self.kind {
             AuthKind::None => Ok(AuthPolicy::None),
-            AuthKind::Basic => self.parse_basic().map(AuthPolicy::Basic),
-            AuthKind::Bearer => self.parse_bearer().map(AuthPolicy::Bearer),
+            AuthKind::Basic => self.parse_basic(locale).map(AuthPolicy::Basic),
+            AuthKind::Bearer => self.parse_bearer(locale).map(AuthPolicy::Bearer),
             AuthKind::Forward => self
-                .parse_forward()
+                .parse_forward(locale)
                 .map(|forward| AuthPolicy::Forward(Box::new(forward))),
             AuthKind::Session => Ok(AuthPolicy::Session),
         }
     }
 
-    fn parse_forward(&self) -> Result<ForwardAuth, String> {
-        let url = ServerUrl::from_str(self.forward_url.trim()).map_err(|err| err.to_string())?;
+    fn parse_forward(&self, locale: Locale) -> Result<ForwardAuth, String> {
+        let url = ServerUrl::from_str(self.forward_url.trim())
+            .map_err(|err| locale.error_message(&err))?;
         let response_headers = self
             .forward_headers
             .split(',')
@@ -132,7 +136,7 @@ impl AuthForm {
             .map(str::to_string)
             .collect::<Vec<_>>();
         if let Some(name) = response_headers.iter().find(|name| !is_header_name(name)) {
-            return Err(format!("Invalid header name: {name}"));
+            return Err(locale.tf("error.invalid_header_name", &[("name", name)]));
         }
         let timeout = self
             .forward_timeout
@@ -141,8 +145,9 @@ impl AuthForm {
             .ok()
             .filter(|secs| (1..=MAX_FORWARD_AUTH_TIMEOUT_SECS).contains(secs))
             .ok_or_else(|| {
-                format!(
-                    "Timeout must be a whole number of seconds from 1 to {MAX_FORWARD_AUTH_TIMEOUT_SECS}"
+                locale.tf(
+                    "auth.timeout_range",
+                    &[("max", &MAX_FORWARD_AUTH_TIMEOUT_SECS.to_string())],
                 )
             })?;
         Ok(ForwardAuth {
@@ -152,32 +157,32 @@ impl AuthForm {
         })
     }
 
-    fn parse_bearer(&self) -> Result<BearerAuth, String> {
+    fn parse_bearer(&self, locale: Locale) -> Result<BearerAuth, String> {
         let tokens = self
             .tokens
             .iter()
-            .map(TokenForm::parse)
+            .map(|token| token.parse(locale))
             .collect::<Result<Vec<_>, _>>()?;
         if tokens.is_empty() {
-            return Err("Add at least one token".into());
+            return Err(locale.t("auth.at_least_one_token").into());
         }
         if let Some(name) = duplicate(tokens.iter().map(|token| &token.name)) {
-            return Err(format!("Token name {name} is used more than once"));
+            return Err(locale.tf("auth.duplicate_token_name", &[("name", name)]));
         }
         Ok(BearerAuth { tokens })
     }
 
-    fn parse_basic(&self) -> Result<BasicAuth, String> {
+    fn parse_basic(&self, locale: Locale) -> Result<BasicAuth, String> {
         let users = self
             .users
             .iter()
-            .map(UserForm::parse)
+            .map(|user| user.parse(locale))
             .collect::<Result<Vec<_>, _>>()?;
         if users.is_empty() {
-            return Err("Add at least one user".into());
+            return Err(locale.t("auth.at_least_one_user").into());
         }
         if let Some(username) = duplicate(users.iter().map(|user| &user.username)) {
-            return Err(format!("Username {username} is used more than once"));
+            return Err(locale.tf("auth.duplicate_username", &[("username", username)]));
         }
         Ok(BasicAuth {
             realm: self.realm.trim().into(),
@@ -200,23 +205,25 @@ impl TokenForm {
         }
     }
 
-    fn parse(&self) -> Result<BearerToken, String> {
+    fn parse(&self, locale: Locale) -> Result<BearerToken, String> {
         let token = BearerToken {
             name: self.name.trim().into(),
             token: self.token.trim().into(),
             token_hash: self.token_hash.clone(),
         };
         if token.name.is_empty() {
-            return Err("Token name is required".into());
+            return Err(locale.t("auth.token_name_required").into());
         }
         if token.token.is_empty() && token.token_hash.is_empty() {
-            return Err(format!("Token is required for {}", token.name));
+            return Err(locale.tf("auth.token_required", &[("name", &token.name)]));
         }
         if !token.token.is_empty() && token.token.len() < BearerToken::MIN_LENGTH {
-            return Err(format!(
-                "Token for {} must be at least {} characters",
-                token.name,
-                BearerToken::MIN_LENGTH
+            return Err(locale.tf(
+                "auth.token_too_short",
+                &[
+                    ("name", &token.name),
+                    ("min", &BearerToken::MIN_LENGTH.to_string()),
+                ],
             ));
         }
         Ok(token)
@@ -232,19 +239,29 @@ impl UserForm {
         }
     }
 
-    fn parse(&self) -> Result<BasicAuthUser, String> {
+    fn parse(&self, locale: Locale) -> Result<BasicAuthUser, String> {
         let user = BasicAuthUser {
             username: self.username.trim().into(),
             password: self.password.clone(),
             password_hash: self.password_hash.clone(),
         };
         if let Some(err) = user.username_error() {
-            return Err(err.into());
+            return Err(username_error_message(locale, err).into());
         }
         if user.password.is_empty() && user.password_hash.is_empty() {
-            return Err(format!("Password is required for {}", user.username));
+            return Err(locale.tf("auth.password_required", &[("username", &user.username)]));
         }
         Ok(user)
+    }
+}
+
+/// Translates a message of `BasicAuthUser::username_error`. An unknown message stays as it is.
+fn username_error_message(locale: Locale, message: &'static str) -> &'static str {
+    match message {
+        "Username is required" => locale.t("auth.username_required"),
+        "Username must not contain a colon" => locale.t("auth.username_colon"),
+        "Username must not contain control characters" => locale.t("auth.username_control"),
+        _ => message,
     }
 }
 
@@ -256,53 +273,54 @@ pub struct Props {
 
 #[function_component(AuthConfig)]
 pub fn auth_config(props: &Props) -> Html {
+    let locale = use_locale();
     let form = &props.form;
     html! {
         <>
             <select onchange={form_input(props, |form, value| form.kind = AuthKind::ALL.into_iter().find(|kind| kind.value() == value).unwrap_or(AuthKind::None))} class={classes!(INPUT_CLASS, "mt-2")}>
                 { for AuthKind::ALL.iter().map(|kind| html! {
-                    <option value={kind.value()} selected={*kind == form.kind}>{kind.label()}</option>
+                    <option value={kind.value()} selected={*kind == form.kind}>{kind.label(locale)}</option>
                 }) }
             </select>
             if form.kind == AuthKind::Basic {
-                <label class={LABEL_CLASS}>{"Realm"}</label>
+                <label class={LABEL_CLASS}>{locale.t("auth.realm")}</label>
                 <input type="text" placeholder="r3v3rs3" value={form.realm.clone()} onchange={form_input(props, |form, value| form.realm = value)} class={INPUT_CLASS} />
 
-                <label class={LABEL_CLASS}>{"Users"}</label>
-                { for form.users.iter().enumerate().map(|(index, user)| user_view(props, index, user)) }
-                <button type="button" onclick={add_user(props)} class={classes!(BUTTON_CLASS, "mt-2", "rounded-lg")}>{"Add User"}</button>
-                <p class={HINT_CLASS}>{"Clients receive 401 Unauthorized until they send a valid username and password. Passwords are stored as argon2 hashes. Leave the password empty to keep the current password."}</p>
+                <label class={LABEL_CLASS}>{locale.t("auth.users")}</label>
+                { for form.users.iter().enumerate().map(|(index, user)| user_view(locale, props, index, user)) }
+                <button type="button" onclick={add_user(props)} class={classes!(BUTTON_CLASS, "mt-2", "rounded-lg")}>{locale.t("auth.add_user")}</button>
+                <p class={HINT_CLASS}>{locale.t("auth.basic_hint")}</p>
             }
             if form.kind == AuthKind::Bearer {
-                <label class={LABEL_CLASS}>{"Tokens"}</label>
-                { for form.tokens.iter().enumerate().map(|(index, token)| token_view(props, index, token)) }
-                <button type="button" onclick={form_update(props, |form, _: MouseEvent| form.tokens.push(TokenForm::default()))} class={classes!(BUTTON_CLASS, "mt-2", "rounded-lg")}>{"Add Token"}</button>
-                <p class={HINT_CLASS}>{"Clients receive 401 Unauthorized until they send Authorization: Bearer with a valid token. Use a random value of at least 16 characters, e.g. openssl rand -hex 32. Tokens are stored as SHA-256 digests. Leave the token empty to keep the current token."}</p>
+                <label class={LABEL_CLASS}>{locale.t("auth.tokens")}</label>
+                { for form.tokens.iter().enumerate().map(|(index, token)| token_view(locale, props, index, token)) }
+                <button type="button" onclick={form_update(props, |form, _: MouseEvent| form.tokens.push(TokenForm::default()))} class={classes!(BUTTON_CLASS, "mt-2", "rounded-lg")}>{locale.t("auth.add_token")}</button>
+                <p class={HINT_CLASS}>{locale.t("auth.bearer_hint")}</p>
             }
             if form.kind == AuthKind::Forward {
-                <label class={LABEL_CLASS}>{"Auth URL"}</label>
+                <label class={LABEL_CLASS}>{locale.t("auth.forward_url")}</label>
                 <input type="url" placeholder="http://127.0.0.1:4180/oauth2/auth" value={form.forward_url.clone()} onchange={form_input(props, |form, value| form.forward_url = value)} class={INPUT_CLASS} />
 
-                <label class={LABEL_CLASS}>{"Copy Response Headers"}</label>
+                <label class={LABEL_CLASS}>{locale.t("auth.copy_response_headers")}</label>
                 <input type="text" autocapitalize="off" placeholder="X-Auth-Request-User, X-Auth-Request-Email" value={form.forward_headers.clone()} onchange={form_input(props, |form, value| form.forward_headers = value)} class={INPUT_CLASS} />
 
-                <label class={LABEL_CLASS}>{"Timeout (Seconds)"}</label>
+                <label class={LABEL_CLASS}>{locale.t("auth.timeout")}</label>
                 <input type="number" min="1" max="300" value={form.forward_timeout.clone()} onchange={form_input(props, |form, value| form.forward_timeout = value)} class={INPUT_CLASS} />
-                <p class={HINT_CLASS}>{"r3v3rs3 sends a GET request with the client headers and X-Forwarded-Method, X-Forwarded-Proto, X-Forwarded-Host, X-Forwarded-Uri and X-Forwarded-For to this URL. A 2xx response lets the request through and copies the listed headers to the upstream request. Any other response, for example a login redirect, is sent to the client."}</p>
+                <p class={HINT_CLASS}>{locale.t("auth.forward_hint")}</p>
             }
             if form.kind == AuthKind::Session {
-                <p class={HINT_CLASS}>{"Clients sign in with an r3v3rs3 panel account at /.r3v3rs3/auth/login below the route path. Browsers without a session are redirected to the sign-in page. Other requests without a session receive 401 Unauthorized. The HttpOnly session cookie is valid only for the host where the client signed in. A POST request to /.r3v3rs3/auth/logout ends the session."}</p>
+                <p class={HINT_CLASS}>{locale.t("auth.session_hint")}</p>
             }
         </>
     }
 }
 
-fn user_view(props: &Props, index: usize, user: &UserForm) -> Html {
+fn user_view(locale: Locale, props: &Props, index: usize, user: &UserForm) -> Html {
     let name = html! {
-        <input type="text" autocapitalize="off" autocomplete="off" placeholder="Username" value={user.username.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.users, index, |user| user.username = value))} class={INPUT_CLASS} />
+        <input type="text" autocapitalize="off" autocomplete="off" placeholder={locale.t("login.username")} value={user.username.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.users, index, |user| user.username = value))} class={INPUT_CLASS} />
     };
     let secret = html! {
-        <input type="password" autocomplete="new-password" placeholder={secret_placeholder(&user.password_hash, "Password")} value={user.password.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.users, index, |user| user.password = value))} class={INPUT_CLASS} />
+        <input type="password" autocomplete="new-password" placeholder={secret_placeholder(locale, &user.password_hash, "login.password")} value={user.password.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.users, index, |user| user.password = value))} class={INPUT_CLASS} />
     };
     let remove = form_update(props, move |form, _: MouseEvent| {
         remove_item(&mut form.users, index)
@@ -310,12 +328,12 @@ fn user_view(props: &Props, index: usize, user: &UserForm) -> Html {
     credential_row(name, secret, remove, props.form.users.len())
 }
 
-fn token_view(props: &Props, index: usize, token: &TokenForm) -> Html {
+fn token_view(locale: Locale, props: &Props, index: usize, token: &TokenForm) -> Html {
     let name = html! {
-        <input type="text" autocapitalize="off" autocomplete="off" placeholder="Name" value={token.name.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.tokens, index, |token| token.name = value))} class={INPUT_CLASS} />
+        <input type="text" autocapitalize="off" autocomplete="off" placeholder={locale.t("common.name")} value={token.name.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.tokens, index, |token| token.name = value))} class={INPUT_CLASS} />
     };
     let secret = html! {
-        <input type="password" autocomplete="off" placeholder={secret_placeholder(&token.token_hash, "Token")} value={token.token.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.tokens, index, |token| token.token = value))} class={INPUT_CLASS} />
+        <input type="password" autocomplete="off" placeholder={secret_placeholder(locale, &token.token_hash, "auth.token")} value={token.token.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.tokens, index, |token| token.token = value))} class={INPUT_CLASS} />
     };
     let remove = form_update(props, move |form, _: MouseEvent| {
         remove_item(&mut form.tokens, index)
@@ -335,11 +353,11 @@ fn credential_row(name: Html, secret: Html, remove: Callback<MouseEvent>, rows: 
     }
 }
 
-fn secret_placeholder(hash: &str, label: &'static str) -> &'static str {
+fn secret_placeholder(locale: Locale, hash: &str, label_key: &'static str) -> &'static str {
     if hash.is_empty() {
-        label
+        locale.t(label_key)
     } else {
-        "Unchanged"
+        locale.t("auth.unchanged")
     }
 }
 
@@ -415,7 +433,7 @@ mod tests {
             " X-Auth-User , ,X-Auth-Email",
             "5",
         )
-        .parse()
+        .parse(Locale::En)
         .unwrap();
         let AuthPolicy::Forward(forward) = &policy else {
             panic!("expected forward auth");
@@ -425,14 +443,19 @@ mod tests {
             vec!["X-Auth-User", "X-Auth-Email"]
         );
         assert_eq!(forward.timeout, Duration::from_secs(5));
-        assert_eq!(AuthForm::new(&policy).parse().unwrap(), policy);
+        assert_eq!(AuthForm::new(&policy).parse(Locale::En).unwrap(), policy);
 
-        assert!(form("not a url", "", "5").parse().is_err());
-        assert!(form("http://127.0.0.1/auth", "X Auth", "5")
-            .parse()
+        assert!(form("not a url", "", "5").parse(Locale::En).is_err());
+        assert_eq!(
+            form("http://127.0.0.1/auth", "X Auth", "5").parse(Locale::Tr),
+            Err(Locale::Tr.tf("error.invalid_header_name", &[("name", "X Auth")]))
+        );
+        assert!(form("http://127.0.0.1/auth", "", "0")
+            .parse(Locale::En)
             .is_err());
-        assert!(form("http://127.0.0.1/auth", "", "0").parse().is_err());
-        assert!(form("http://127.0.0.1/auth", "", "301").parse().is_err());
+        assert!(form("http://127.0.0.1/auth", "", "301")
+            .parse(Locale::En)
+            .is_err());
     }
 
     #[test]
@@ -449,23 +472,25 @@ mod tests {
         };
 
         let AuthPolicy::Bearer(bearer) = form(vec![token(" ci ", "0123456789abcdef", "")])
-            .parse()
+            .parse(Locale::En)
             .unwrap()
         else {
             panic!("expected bearer auth");
         };
         assert_eq!(bearer.tokens[0].name, "ci");
         assert_eq!(bearer.tokens[0].token, "0123456789abcdef");
-        assert!(form(vec![token("ci", "", "abc")]).parse().is_ok());
+        assert!(form(vec![token("ci", "", "abc")]).parse(Locale::En).is_ok());
 
-        assert!(form(vec![]).parse().is_err());
+        assert!(form(vec![]).parse(Locale::En).is_err());
         assert!(form(vec![token("", "0123456789abcdef", "")])
-            .parse()
+            .parse(Locale::En)
             .is_err());
-        assert!(form(vec![token("ci", "", "")]).parse().is_err());
-        assert!(form(vec![token("ci", "short", "")]).parse().is_err());
+        assert!(form(vec![token("ci", "", "")]).parse(Locale::En).is_err());
+        assert!(form(vec![token("ci", "short", "")])
+            .parse(Locale::En)
+            .is_err());
         assert!(form(vec![token("ci", "", "a"), token("ci", "", "b")])
-            .parse()
+            .parse(Locale::En)
             .is_err());
     }
 
@@ -473,7 +498,7 @@ mod tests {
     fn session_form_round_trips() {
         let form = AuthForm::new(&AuthPolicy::Session);
         assert!(form.kind == AuthKind::Session);
-        assert_eq!(form.parse().unwrap(), AuthPolicy::Session);
+        assert_eq!(form.parse(Locale::En).unwrap(), AuthPolicy::Session);
     }
 
     fn user(username: &str, password: &str, password_hash: &str) -> UserForm {
@@ -487,7 +512,7 @@ mod tests {
     #[test]
     fn basic_form_round_trips_without_the_password() {
         let form = basic_form(vec![user(" alice ", "secret", "")]);
-        let AuthPolicy::Basic(basic) = form.parse().unwrap() else {
+        let AuthPolicy::Basic(basic) = form.parse(Locale::En).unwrap() else {
             panic!("expected basic auth");
         };
         assert_eq!(basic.realm, "Staff");
@@ -504,7 +529,7 @@ mod tests {
             ..basic
         }));
         assert_eq!(form.users[0].password, "");
-        let AuthPolicy::Basic(basic) = form.parse().unwrap() else {
+        let AuthPolicy::Basic(basic) = form.parse(Locale::En).unwrap() else {
             panic!("expected basic auth");
         };
         assert_eq!(basic.users, vec![sealed]);
@@ -512,17 +537,36 @@ mod tests {
 
     #[test]
     fn basic_form_rejects_invalid_users() {
-        assert!(basic_form(vec![]).parse().is_err());
-        assert!(basic_form(vec![user("", "secret", "")]).parse().is_err());
-        assert!(basic_form(vec![user("al:ice", "secret", "")])
-            .parse()
+        assert!(basic_form(vec![]).parse(Locale::En).is_err());
+        assert!(basic_form(vec![user("", "secret", "")])
+            .parse(Locale::En)
             .is_err());
-        assert!(basic_form(vec![user("alice", "", "")]).parse().is_err());
+        assert!(basic_form(vec![user("alice", "", "")])
+            .parse(Locale::En)
+            .is_err());
         assert!(
             basic_form(vec![user("alice", "a", ""), user("alice", "b", "")])
-                .parse()
+                .parse(Locale::En)
                 .is_err()
         );
-        assert!(AuthForm::new(&AuthPolicy::None).parse().unwrap().is_none());
+        assert!(AuthForm::new(&AuthPolicy::None)
+            .parse(Locale::En)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn username_errors_are_translated() {
+        for (username, key) in [
+            ("", "auth.username_required"),
+            ("al:ice", "auth.username_colon"),
+            ("al\u{7}ice", "auth.username_control"),
+        ] {
+            assert_eq!(
+                basic_form(vec![user(username, "secret", "")]).parse(Locale::Tr),
+                Err(Locale::Tr.t(key).to_string()),
+                "username {username:?}"
+            );
+        }
     }
 }
