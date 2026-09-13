@@ -3,6 +3,9 @@ base_url = "https://kilimcininkoroglu.github.io/r3v3rs3"
 
 title = "r3v3rs3: Every Protocol, One Binary"
 
+# English pages are at the root URL, the other languages below their language code
+default_language = "en"
+
 # Whether to automatically compile all Sass files in the sass directory
 compile_sass = true
 
@@ -16,6 +19,34 @@ theme = "juice"
 # Theme can be customised by setting the `highlight_theme` variable to a theme supported by Zola
 highlight_code = true
 
+# Texts of the templates in the default language
+[translations]
+language_name = "English"
+flag = "gb"
+language = "Language"
+heading = "Every Protocol, One Binary"
+tagline = "A reverse proxy server with built-in WebUI."
+getting_started = "Getting Started"
+overview = "Overview"
+description = "A reverse proxy server with built-in WebUI, supporting TCP/UDP/HTTP/TLS/WebSocket, written in Rust."
+theme_by = "Zola theme by"
+
+[languages.tr]
+title = "r3v3rs3: Her Protokol, Tek Binary"
+# The search index does not support Turkish, and the theme has no search
+build_search_index = false
+
+[languages.tr.translations]
+language_name = "Türkçe"
+flag = "tr"
+language = "Dil"
+heading = "Her Protokol, Tek Binary"
+tagline = "Dahili WebUI'a sahip bir reverse proxy sunucusu."
+getting_started = "Başlarken"
+overview = "Genel Bakış"
+description = "TCP, UDP, HTTP, TLS ve WebSocket destekleyen, dahili WebUI'a sahip, Rust ile yazılmış bir reverse proxy sunucusu."
+theme_by = "Zola teması:"
+
 [extra]
 
 juice_logo_name = ""
@@ -24,4 +55,3 @@ juice_extra_menu = [
     { title = "Github", link = "https://github.com/KilimcininKorOglu/r3v3rs3"}
 ]
 repository_url = "https://github.com/KilimcininKorOglu/r3v3rs3"
-

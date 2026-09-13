@@ -1,0 +1,8 @@
+{% import "_macros.html" as macros %}
+{% extends "juice/templates/page.html" %}
+
+{% block header %}
+<header class="box-shadow">
+    {{ macros::render_header(config=config, lang=lang, translations=page.translations) }}
+</header>
+{% endblock header %}

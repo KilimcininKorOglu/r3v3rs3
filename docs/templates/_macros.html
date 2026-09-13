@@ -1,0 +1,53 @@
+{#- Replaces the header macro of the juice theme. The macro builds the navigation in the language
+    of the page and adds the language menu. Macros cannot read the template context, so the caller
+    passes it. -#}
+{% macro render_header(config, lang, translations) %}
+{% if lang == config.default_language %}
+{% set section = get_section(path="_index.md") %}
+{% else %}
+{% set section = get_section(path="_index." ~ lang ~ ".md") %}
+{% endif %}
+<a href="{{ section.permalink | safe }}">
+    <div class="logo">
+        <img src="{{ get_url(path=config.extra.juice_logo_path) }}" alt="logo">
+        {{ config.extra.juice_logo_name }}
+    </div>
+</a>
+
+<nav>
+    {% for page in section.pages %}
+    {% set exclude_menu = config.extra.juice_exclude_menu | default(value=[]) %}
+    {% if exclude_menu is not containing(page.title) %}
+    <a class="nav-item subtitle-text" href="{{ page.permalink | safe }}">{{ page.title }}</a>
+    {% endif %}
+    {% endfor %}
+    {% if config.extra.juice_extra_menu %}
+        {% for menu in config.extra.juice_extra_menu %}
+        <a class="nav-item subtitle-text" href="{{ menu.link | safe }}">{{ menu.title }}</a>
+        {% endfor %}
+    {% endif %}
+    {{ self::language_menu(config=config, lang=lang, translations=translations) }}
+</nav>
+{% endmacro render_header %}
+
+{#- A dropdown that shows each language only as the flag of its country. It links to the same
+    content in the other language. -#}
+{% macro language_menu(config, lang, translations) %}
+{% if translations | length > 1 %}
+<details class="lang-menu">
+    <summary title="{{ trans(key="language_name", lang=lang) }}" aria-label="{{ trans(key="language", lang=lang) }}: {{ trans(key="language_name", lang=lang) }}">
+        <img src="{{ get_url(path="flags/" ~ trans(key="flag", lang=lang) ~ ".svg") }}" alt="">
+    </summary>
+    <ul>
+        {% for translation in translations | sort(attribute="lang") %}
+        {% if translation.lang %}{% set code = translation.lang %}{% else %}{% set code = config.default_language %}{% endif %}
+        <li>
+            <a href="{{ translation.permalink | safe }}" hreflang="{{ code }}" lang="{{ code }}" title="{{ trans(key="language_name", lang=code) }}" aria-label="{{ trans(key="language_name", lang=code) }}"{% if code == lang %} aria-current="true"{% endif %}>
+                <img src="{{ get_url(path="flags/" ~ trans(key="flag", lang=code) ~ ".svg") }}" alt="">
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</details>
+{% endif %}
+{% endmacro language_menu %}

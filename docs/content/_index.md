@@ -112,7 +112,7 @@ You simply put the extracted binary somewhere in your `$PATH` and you're good to
 
 # Development
 
-Please refer to the [Development](/development) section for details.
+Please refer to the [Development](@/development.md) section for details.
 
 # First setup
 
@@ -178,6 +178,6 @@ Now you can create a proxy in the "Proxies" section. You need to specify the por
 6. Left the "Virtual Host" field empty to match all hosts.
 7. Enter the target URL. In this example, we will use the admin panel "http://localhost:46492". Put the URL in the "Target" field.
 8. Click on "Create".
-9. Make sure the created port appears in the list. The proxy is now active and you can access the admin panel via the proxy.
+9. Make sure the created proxy appears in the list. The proxy is now active and you can access the admin panel via the proxy.
 
 > If you want to expose the proxy to the public, you may need to configure the firewall.

@@ -403,6 +403,10 @@ If needed, these files can be edited manually. Note, however, that r3v3rs3 does 
 
 r3v3rs3 includes a built-in WebUI. By default, it is served on localhost:46492. However, you can customize the port using the `R3V3RS3_WEBUI` environment variable or the `--webui` command-line option. If you wish to disable the WebUI, set the `R3V3RS3_NO_WEBUI=1` environment variable or use the `--no-webui` command-line option.
 
+The flag menu in the navbar selects the WebUI language: English or Turkish. The theme menu selects the System, Light or Dark theme. The WebUI stores the selections in the `r3v3rs3_lang` and `r3v3rs3_theme` cookies. Without these cookies, the WebUI uses English and the system theme.
+
+The error pages of r3v3rs3 and the Admin Session sign-in page read these cookies too. A browser sends the cookies only to the host of the WebUI, so the pages of a proxy on another host use English and the system theme.
+
 # Logging
 
 r3v3rs3 logs to the standard output as its default setting. You can change this behavior by setting the `R3V3RS3_LOG`, `R3V3RS3_ACCESS_LOG` environment variable or using the `--log`, `--access-log` command-line option.

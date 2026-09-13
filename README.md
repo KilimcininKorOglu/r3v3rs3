@@ -26,6 +26,11 @@ r3v3rs3 is currently in early development. Please be aware that breaking changes
 - Imports TLS certificates from the GUI or can generate a self-signed certificate
 - Provides Let's Encrypt support (ACME v2, HTTP challenge only) for seamless certificate provisioning
 
+## Documentation
+
+- [English](https://kilimcininkoroglu.github.io/r3v3rs3/)
+- [Türkçe](https://kilimcininkoroglu.github.io/r3v3rs3/tr/)
+
 ## Screenshot
 
 ![r3v3rs3 WebUI Screenshot](https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/screenshot.png)
