@@ -1,12 +1,12 @@
 use crate::{auth::use_ensure_auth, i18n::use_locale, API_ENDPOINT};
-use gloo_net::http::{Request, Response};
+use gloo_net::http::{Request, RequestBuilder, Response};
 use r3v3rs3_api::{
     app::{AdminConfig, AppConfig, LogConfig},
     cdn::{CdnRangesSource, CdnStatus},
     error::ErrorMessage,
     i18n::Locale,
 };
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
 use std::{collections::HashMap, net::SocketAddr};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -285,9 +285,21 @@ async fn get_config() -> Result<AppConfig, gloo_net::Error> {
 }
 
 async fn update_config(locale: Locale, config: &AppConfig) -> Result<(), String> {
-    let request = Request::put(&format!("{API_ENDPOINT}/config"))
-        .json(config)
-        .map_err(|err| err.to_string())?;
+    send_json(
+        locale,
+        Request::put(&format!("{API_ENDPOINT}/config")),
+        config,
+    )
+    .await
+}
+
+/// Sends `body` as JSON. The error is the message of the failure in the selected language.
+pub async fn send_json(
+    locale: Locale,
+    builder: RequestBuilder,
+    body: &impl Serialize,
+) -> Result<(), String> {
+    let request = builder.json(body).map_err(|err| err.to_string())?;
     let response = request.send().await.map_err(|err| err.to_string())?;
     if response.ok() {
         return Ok(());
@@ -295,7 +307,8 @@ async fn update_config(locale: Locale, config: &AppConfig) -> Result<(), String>
     Err(error_message(locale, response).await)
 }
 
-async fn error_message(locale: Locale, response: Response) -> String {
+/// The message of an admin API error response in the selected language.
+pub async fn error_message(locale: Locale, response: Response) -> String {
     match response.json::<ErrorMessage>().await {
         Ok(ErrorMessage {
             error: Some(error), ..

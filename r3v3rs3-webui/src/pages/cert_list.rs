@@ -1,4 +1,5 @@
 use crate::auth::use_ensure_auth;
+use crate::components::acme_form::dns_provider_label;
 use crate::components::data_list::{
     active_toggle, list_card, Column, Row, DANGER_LINK_CLASS, LINK_CLASS,
 };
@@ -379,7 +380,7 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator) -> Row {
         key: id.to_string(),
         cells: vec![
             html! { <>{entry.identifiers.join(", ")}</> },
-            html! { <>{entry.config.provider.to_string()}</> },
+            html! { <>{acme_provider_text(entry)}</> },
             html! { <>{renewal}</> },
             active_toggle(entry.config.active, onchange),
         ],
@@ -389,6 +390,19 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator) -> Row {
                 <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
             </>
         },
+    }
+}
+
+/// The provider with the challenge, for example `Let's Encrypt (DNS-01, Cloudflare)`.
+fn acme_provider_text(entry: &AcmeInfo) -> String {
+    let challenge = entry.challenge_type.to_uppercase();
+    match &entry.dns_provider {
+        Some(name) => format!(
+            "{} ({challenge}, {})",
+            entry.config.provider,
+            dns_provider_label(name)
+        ),
+        None => format!("{} ({challenge})", entry.config.provider),
     }
 }
 
@@ -456,5 +470,27 @@ mod tests {
             assert_eq!(CertsTab::for_kind(kind).cert_kind(), Some(kind));
         }
         assert_eq!(CertsTab::Acme.cert_kind(), None);
+    }
+
+    #[test]
+    fn the_acme_provider_shows_the_challenge_and_the_dns_provider() {
+        let mut entry = AcmeInfo {
+            id: "acme1".parse().unwrap(),
+            config: r3v3rs3_api::acme::AcmeConfig {
+                provider: "Let's Encrypt".into(),
+                ..Default::default()
+            },
+            identifiers: vec!["*.example.com".into()],
+            challenge_type: "dns-01".into(),
+            dns_provider: Some("route53".into()),
+            next_renewal: None,
+        };
+        assert_eq!(
+            acme_provider_text(&entry),
+            "Let's Encrypt (DNS-01, Route 53)"
+        );
+        entry.challenge_type = "http-01".into();
+        entry.dns_provider = None;
+        assert_eq!(acme_provider_text(&entry), "Let's Encrypt (HTTP-01)");
     }
 }

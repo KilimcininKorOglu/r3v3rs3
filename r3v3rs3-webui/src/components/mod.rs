@@ -1,3 +1,4 @@
+pub mod acme_form;
 pub mod acme_provider;
 pub mod auth_config;
 pub mod custom_acme;

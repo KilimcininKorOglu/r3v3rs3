@@ -1,205 +1,131 @@
-use crate::i18n::use_locale;
-use base64::{engine::general_purpose, Engine};
-use r3v3rs3_api::{
-    acme::{Acme, AcmeConfig, AcmeRequest, ExternalAccountBinding},
-    subject_name::SubjectName,
+use crate::components::acme_form::{build_request, fields_view, AcmeFields, AcmeResult};
+use crate::components::http_proxy_config::{
+    error_view, input_element, text_setter, use_entry_errors, INPUT_CLASS, LABEL_CLASS,
 };
+use crate::i18n::use_locale;
+use r3v3rs3_api::{acme::AcmeConfig, i18n::Locale};
 use std::collections::HashMap;
 use url::Url;
-use wasm_bindgen::{JsCast, UnwrapThrowExt};
-use web_sys::HtmlInputElement;
 use yew::prelude::*;
+
+const DEFAULT_RENEWAL_DAYS: u64 = 60;
 
 #[derive(Properties, PartialEq)]
 pub struct Props {
-    pub onchanged: Callback<Result<AcmeRequest, HashMap<String, String>>>,
+    #[prop_or_default]
+    pub show_errors: bool,
+    pub onchanged: Callback<AcmeResult>,
 }
 
 #[function_component(CustomAcme)]
 pub fn custom_acme(props: &Props) -> Html {
     let locale = use_locale();
     let name = use_state(String::new);
-    let name_onchange = Callback::from({
-        let name = name.clone();
-        move |event: Event| {
-            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            name.set(target.value());
-        }
-    });
-
     let server_url = use_state(String::new);
-    let server_url_onchange = Callback::from({
-        let server_url = server_url.clone();
-        move |event: Event| {
-            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            server_url.set(target.value());
-        }
-    });
+    let fields = use_reducer_eq(AcmeFields::default);
 
-    let eab_kid = use_state(String::new);
-    let eab_kid_onchange = Callback::from({
-        let eab_kid: UseStateHandle<String> = eab_kid.clone();
-        move |event: Event| {
-            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            eab_kid.set(target.value());
-        }
-    });
-
-    let eab_hmac_key = use_state(String::new);
-    let eab_hmac_key_onchange = Callback::from({
-        let eab_hmac_key: UseStateHandle<String> = eab_hmac_key.clone();
-        move |event: Event| {
-            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            eab_hmac_key.set(target.value());
-        }
-    });
-
-    let email = use_state(String::new);
-    let email_onchange = Callback::from({
-        let email = email.clone();
-        move |event: Event| {
-            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            email.set(target.value());
-        }
-    });
-
-    let domain_name = use_state(String::new);
-    let domain_name_onchange = Callback::from({
-        let domain_name = domain_name.clone();
-        move |event: Event| {
-            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            domain_name.set(target.value());
-        }
-    });
-
-    let renewal = use_state(|| 60);
+    let renewal = use_state(|| DEFAULT_RENEWAL_DAYS);
     let renewal_onchange = Callback::from({
         let renewal = renewal.clone();
         move |event: Event| {
-            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            renewal.set(target.value().parse().unwrap_or(60));
+            let value = input_element(&event).value();
+            renewal.set(value.parse().unwrap_or(DEFAULT_RENEWAL_DAYS));
         }
     });
 
-    let prev_entry =
-        use_state::<Result<AcmeRequest, HashMap<String, String>>, _>(|| Err(Default::default()));
-    let entry = get_request(
-        &name,
-        &server_url,
-        &eab_kid,
-        &eab_hmac_key,
-        &email,
-        &domain_name,
-        *renewal,
-    );
-    if entry != *prev_entry {
-        prev_entry.set(entry.clone());
-        props.onchanged.emit(entry);
-    }
+    let entry = get_request(locale, &name, &server_url, &fields, *renewal);
+    let errors = use_entry_errors(entry, props.onchanged.clone());
+    let show = |key: &str, value: &str| {
+        error_view(
+            errors
+                .get(key)
+                .filter(|_| props.show_errors || !value.is_empty()),
+        )
+    };
+    let eab = Some(("acme.eab_key_id_optional", "acme.eab_hmac_key_optional"));
 
     html! {
         <>
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.name")}</label>
-            <input type="text" placeholder={locale.t("acme.name_placeholder")} onchange={name_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
+            <label class={LABEL_CLASS}>{locale.t("common.name")}</label>
+            <input type="text" placeholder={locale.t("acme.name_placeholder")} onchange={text_setter(&name)} class={INPUT_CLASS} />
+            { show("name", &name) }
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.server_url")}</label>
-            <input type="url" placeholder="https://example.com/" onchange={server_url_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
+            <label class={LABEL_CLASS}>{locale.t("acme.server_url")}</label>
+            <input type="url" placeholder="https://example.com/" onchange={text_setter(&server_url)} class={INPUT_CLASS} />
+            { show("server_url", &server_url) }
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.eab_key_id_optional")}</label>
-            <input type="text" onchange={eab_kid_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
+            { fields_view(locale, &fields, &errors, props.show_errors, eab) }
 
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.eab_hmac_key_optional")}</label>
-            <input type="text" onchange={eab_hmac_key_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
-
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.email")}</label>
-            <input type="email" placeholder="admin@example.com" onchange={email_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
-
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.challenge")}</label>
-            <select class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
-                <option selected={true}>{"HTTP"}</option>
-            </select>
-
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.domain_name")}</label>
-            <input type="text" autocapitalize="off" placeholder="example.com" onchange={domain_name_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
-
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("acme.renewal_interval")}</label>
-            <input type="number" value={renewal.to_string()} min="1" onchange={renewal_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
+            <label class={LABEL_CLASS}>{locale.t("acme.renewal_interval")}</label>
+            <input type="number" value={renewal.to_string()} min="1" onchange={renewal_onchange} class={INPUT_CLASS} />
         </>
     }
 }
 
 fn get_request(
+    locale: Locale,
     name: &str,
     server_url: &str,
-    eab_kid: &str,
-    eab_hmac_key: &str,
-    email: &str,
-    domain_name: &str,
+    fields: &AcmeFields,
     renewal: u64,
-) -> Result<AcmeRequest, HashMap<String, String>> {
+) -> AcmeResult {
     let mut errors = HashMap::new();
-
-    let eab_kid = eab_kid.trim();
-    let eab_hmac_key = eab_hmac_key.trim();
-    let eab = if !eab_kid.is_empty() || !eab_hmac_key.is_empty() {
-        if eab_kid.is_empty() {
-            errors.insert("eab_kid".to_string(), "Key ID is required".to_string());
-        }
-        let eab_hmac_key = match general_purpose::URL_SAFE_NO_PAD.decode(eab_hmac_key.as_bytes()) {
-            Ok(key) => key,
-            Err(_) => {
-                errors.insert("eab_hmac_key".to_string(), "Invalid HMAC Key".to_string());
-                Default::default()
-            }
-        };
-        Some(ExternalAccountBinding {
-            key_id: eab_kid.to_string(),
-            hmac_key: eab_hmac_key,
-        })
-    } else {
-        None
-    };
-
     if name.trim().is_empty() {
-        errors.insert("name".to_string(), "Name is required".to_string());
+        errors.insert("name".into(), locale.t("acme.name_required").into());
     }
-
     if Url::parse(server_url).is_err() {
-        errors.insert("server_url".to_string(), "Invalid URL".to_string());
-    }
-
-    if email.is_empty() {
-        errors.insert("email".to_string(), "Email is required".to_string());
-    }
-    if domain_name.is_empty() {
         errors.insert(
-            "domain_name".to_string(),
-            "Domain name is required".to_string(),
+            "server_url".into(),
+            locale.t("acme.invalid_server_url").into(),
         );
     }
-    let domain_name: SubjectName = match domain_name.parse() {
-        Ok(domain_name) => domain_name,
-        Err(err) => {
-            errors.insert("domain_name".to_string(), err.to_string());
-            return Err(errors);
-        }
+    let config = AcmeConfig {
+        active: true,
+        provider: name.trim().to_string(),
+        renewal_days: renewal,
     };
-    if !errors.is_empty() {
-        return Err(errors);
+    build_request(locale, fields, true, server_url, config, errors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use r3v3rs3_api::acme::DNS_01;
+
+    #[test]
+    fn name_and_server_url_are_checked_with_the_shared_fields() {
+        let errors =
+            get_request(Locale::En, " ", "not a url", &AcmeFields::default(), 30).unwrap_err();
+        assert_eq!(
+            errors.get("name").map(String::as_str),
+            Some(Locale::En.t("acme.name_required"))
+        );
+        assert_eq!(
+            errors.get("server_url").map(String::as_str),
+            Some(Locale::En.t("acme.invalid_server_url"))
+        );
+        assert!(errors.contains_key("email"));
     }
-    Ok(AcmeRequest {
-        server_url: server_url.to_string(),
-        contacts: vec![format!("mailto:{}", email)],
-        eab,
-        acme: Acme {
-            config: AcmeConfig {
-                active: true,
-                provider: name.trim().to_string(),
-                renewal_days: renewal,
-            },
-            identifiers: vec![domain_name],
-            challenge_type: "http-01".to_string(),
-            dns_provider: None,
-        },
-    })
+
+    #[test]
+    fn the_request_keeps_the_name_and_the_renewal_interval() {
+        let fields = AcmeFields {
+            email: "admin@example.com".into(),
+            domain_names: "*.example.com".into(),
+            challenge_type: DNS_01.into(),
+            api_token: "token".into(),
+            ..AcmeFields::default()
+        };
+        let request = get_request(
+            Locale::En,
+            " Pebble ",
+            "https://localhost:14000/dir",
+            &fields,
+            30,
+        )
+        .unwrap();
+        assert_eq!(request.acme.config.provider, "Pebble");
+        assert_eq!(request.acme.config.renewal_days, 30);
+        assert_eq!(request.server_url, "https://localhost:14000/dir");
+    }
 }

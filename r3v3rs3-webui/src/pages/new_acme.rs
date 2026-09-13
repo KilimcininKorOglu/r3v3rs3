@@ -1,11 +1,13 @@
+use crate::components::acme_form::AcmeResult;
 use crate::components::acme_provider::AcmeProvider;
 use crate::components::custom_acme::CustomAcme;
+use crate::components::http_proxy_config::error_view;
 use crate::pages::cert_list::{CertsQuery, CertsTab};
+use crate::pages::settings::send_json;
 use crate::{auth::use_ensure_auth, i18n::use_locale, pages::Route, API_ENDPOINT};
 use gloo_net::http::Request;
 use r3v3rs3_api::acme::AcmeRequest;
 use r3v3rs3_api::i18n::Locale;
-use std::collections::HashMap;
 use std::fmt::Display;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::HtmlSelectElement;
@@ -21,18 +23,18 @@ pub enum Provider {
 }
 
 impl Provider {
-    fn html(&self, onchanged: Callback<Result<AcmeRequest, HashMap<String, String>>>) -> Html {
+    fn html(&self, onchanged: Callback<AcmeResult>, show_errors: bool) -> Html {
         match self {
             Provider::LetsEncrypt => {
-                html! { <AcmeProvider name={self.to_string()} url={"https://acme-v02.api.letsencrypt.org/directory"} {onchanged} /> }
+                html! { <AcmeProvider name={self.to_string()} url={"https://acme-v02.api.letsencrypt.org/directory"} {show_errors} {onchanged} /> }
             }
             Provider::GoogleTrustServices => {
-                html! { <AcmeProvider name={self.to_string()} eab={true} url={"https://dv.acme-v02.api.pki.goog/directory"} {onchanged} /> }
+                html! { <AcmeProvider name={self.to_string()} eab={true} url={"https://dv.acme-v02.api.pki.goog/directory"} {show_errors} {onchanged} /> }
             }
             Provider::ZeroSSL => {
-                html! { <AcmeProvider name={self.to_string()} eab={true} url={"https://acme.zerossl.com/v2/DV90"} {onchanged} /> }
+                html! { <AcmeProvider name={self.to_string()} eab={true} url={"https://acme.zerossl.com/v2/DV90"} {show_errors} {onchanged} /> }
             }
-            Provider::Custom => html! { <CustomAcme {onchanged} /> },
+            Provider::Custom => html! { <CustomAcme {show_errors} {onchanged} /> },
         }
     }
 
@@ -80,35 +82,45 @@ pub fn new_acme() -> Html {
         );
     });
 
-    let entry =
-        use_state::<Result<AcmeRequest, HashMap<String, String>>, _>(|| Err(Default::default()));
+    let entry = use_state::<AcmeResult, _>(|| Err(Default::default()));
     let entry_cloned = entry.clone();
-    let onchanged: Callback<Result<AcmeRequest, HashMap<String, String>>> =
-        Callback::from(move |updated| {
-            entry_cloned.set(updated);
-        });
+    let onchanged: Callback<AcmeResult> = Callback::from(move |updated| {
+        entry_cloned.set(updated);
+    });
 
     let is_loading = use_state(|| false);
+    let show_errors = use_state(|| false);
+    let submit_error = use_state(|| Option::<String>::None);
 
     let entry_cloned = entry.clone();
     let is_loading_cloned = is_loading.clone();
+    let show_errors_cloned = show_errors.clone();
+    let submit_error_cloned = submit_error.clone();
     let onsubmit = Callback::from(move |event: SubmitEvent| {
         event.prevent_default();
+        show_errors_cloned.set(true);
         if *is_loading_cloned {
             return;
         }
         let navigator = navigator.clone();
         let is_loading_cloned = is_loading_cloned.clone();
+        let submit_error = submit_error_cloned.clone();
         if let Ok(entry) = (*entry_cloned).clone() {
             is_loading_cloned.set(true);
+            submit_error.set(None);
             wasm_bindgen_futures::spawn_local(async move {
-                if add_acme(&entry).await.is_ok() {
-                    let _ = navigator.push_with_query(
-                        &Route::Certs,
-                        &CertsQuery {
-                            tab: CertsTab::Acme,
-                        },
-                    );
+                match add_acme(locale, &entry).await {
+                    Ok(()) => {
+                        let _ = navigator.push_with_query(
+                            &Route::Certs,
+                            &CertsQuery {
+                                tab: CertsTab::Acme,
+                            },
+                        );
+                    }
+                    Err(message) => submit_error.set(Some(
+                        locale.tf("acme.request_failed", &[("message", &message)]),
+                    )),
                 }
                 is_loading_cloned.set(false);
             });
@@ -138,13 +150,15 @@ pub fn new_acme() -> Html {
                     }).collect::<Html>() }
                 </select>
 
-                { provider.html(onchanged) }
+                { provider.html(onchanged, *show_errors) }
+
+                { error_view(submit_error.as_ref()) }
 
                 <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
                     <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
                         {locale.t("common.cancel")}
                     </button>
-                    <button disabled={entry.is_err()} type="submit" class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                    <button disabled={*is_loading} type="submit" class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
                         if *is_loading {
                             <svg aria-hidden="true" role="status" class="inline w-4 h-4 mr-3 text-neutral-200 animate-spin dark:text-neutral-600" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="#ccc"/>
@@ -159,11 +173,6 @@ pub fn new_acme() -> Html {
     }
 }
 
-async fn add_acme(req: &AcmeRequest) -> Result<(), gloo_net::Error> {
-    Request::post(&format!("{API_ENDPOINT}/acme"))
-        .json(&req)?
-        .send()
-        .await?
-        .json()
-        .await
+async fn add_acme(locale: Locale, req: &AcmeRequest) -> Result<(), String> {
+    send_json(locale, Request::post(&format!("{API_ENDPOINT}/acme")), req).await
 }
