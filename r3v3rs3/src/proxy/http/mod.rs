@@ -1,5 +1,6 @@
 use self::{
     auth::{AuthContext, AuthRejection},
+    cache::CacheRequest,
     compression::ResponseCompression,
     error::ProxyError,
     filter::FilterResult,
@@ -19,7 +20,7 @@ use h3::{quic::BidiStream, server::RequestStream};
 use http_body_util::{combinators::BoxBody, BodyExt, BodyStream, Full, StreamBody};
 use hyper::{
     body::{Body, Frame, Incoming},
-    header::{HOST, LOCATION},
+    header::{AUTHORIZATION, HOST, LOCATION},
     http::{
         uri::{Parts, Scheme},
         HeaderValue,
@@ -55,6 +56,7 @@ use tokio_rustls::{
 use tracing::{debug, error, info, span, Instrument, Level, Span};
 
 mod auth;
+pub(crate) mod cache;
 pub(crate) mod client_ip;
 mod compression;
 mod error;
@@ -468,8 +470,9 @@ async fn start(
                 route_request(&shared, req, &info).await
             };
             response_rewriter.build().map_response(match req {
-                ProxiedRequest::Ok(req, span) => {
-                    pool.request(req.map(|b| BoxBody::new(b.map_err(Into::into))))
+                ProxiedRequest::Ok(req, span, cache_request) => {
+                    let req = req.map(|b| BoxBody::new(b.map_err(Into::into)));
+                    cache::fetch(&pool, req, cache_request)
                         .instrument(span)
                         .await
                 }
@@ -503,7 +506,8 @@ async fn start(
 }
 
 enum ProxiedRequest<R> {
-    Ok(R, Span),
+    /// A request for the upstream server, and its cache state when the proxy has a cache.
+    Ok(R, Span, Option<CacheRequest>),
     /// A response that r3v3rs3 sends without contacting the upstream server.
     Respond(Response<Full<Bytes>>),
     Err(ProxyError),
@@ -624,6 +628,9 @@ where
         return (ProxiedRequest::Respond(redirect), response_rewriter);
     }
 
+    // Authentication removes the credentials, so the cache reads them before.
+    let authorized = req.headers().contains_key(AUTHORIZATION);
+    let cache_host = request_host.clone().unwrap_or_default();
     let auth_ctx = AuthContext {
         client: client.ip,
         host: request_host.as_deref(),
@@ -667,7 +674,14 @@ where
         info.proto,
         response_rewriter,
     );
-    (ProxiedRequest::Ok(req, span), response_rewriter)
+    let cache_request = route
+        .cache
+        .as_ref()
+        .and_then(|cache| CacheRequest::new(cache, &mut req, &cache_host, authorized));
+    (
+        ProxiedRequest::Ok(req, span, cache_request),
+        response_rewriter,
+    )
 }
 
 /// Applies the request header rules of the route and hands the response header rules to the
@@ -821,7 +835,11 @@ where
     let (req, response_rewriter) = route_request(shared, req.map(|()| body), &info).await;
 
     let res = match req {
-        ProxiedRequest::Ok(req, span) => pool.request(req).instrument(span).await,
+        ProxiedRequest::Ok(req, span, cache_request) => {
+            cache::fetch(&pool, req, cache_request)
+                .instrument(span)
+                .await
+        }
         ProxiedRequest::Respond(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
         ProxiedRequest::Err(err) => Err(err.into()),
     };

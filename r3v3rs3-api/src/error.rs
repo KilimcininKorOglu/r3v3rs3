@@ -110,6 +110,9 @@ pub enum Error {
     #[error("compression algorithm is listed more than once: {algorithm}")]
     DuplicateCompressionAlgorithm { algorithm: String },
 
+    #[error("maximum response size must be from 1 byte to the memory limit")]
+    InvalidCacheSize,
+
     #[error("timeout must be greater than zero")]
     InvalidTimeout,
 

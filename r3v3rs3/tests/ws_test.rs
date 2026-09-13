@@ -57,6 +57,7 @@ async fn ws_proxy() -> anyhow::Result<()> {
                     auth: Default::default(),
                     headers: Default::default(),
                     compression: Default::default(),
+                    cache: Default::default(),
                 })),
                 ..Default::default()
             },

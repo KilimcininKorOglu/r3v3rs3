@@ -1,6 +1,6 @@
 use super::{AppError, AppState};
 use crate::server::rpc::proxies::{
-    AddProxy, DeleteProxy, GetProxy, GetProxyList, GetProxyStatus, UpdateProxy,
+    AddProxy, DeleteProxy, GetProxy, GetProxyList, GetProxyStatus, PurgeProxyCache, UpdateProxy,
 };
 use axum::{
     extract::{Path, State},
@@ -34,6 +34,13 @@ pub async fn delete(
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<()>>, AppError> {
     Ok(Json(state.call(DeleteProxy { id }).await?))
+}
+
+pub async fn purge_cache(
+    State(state): State<AppState>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Box<()>>, AppError> {
+    Ok(Json(state.call(PurgeProxyCache { id }).await?))
 }
 
 pub async fn add(

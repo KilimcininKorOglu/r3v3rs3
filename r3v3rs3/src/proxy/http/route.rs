@@ -1,4 +1,5 @@
 use super::auth::{Authenticator, SessionService};
+use super::cache::{cache_for, HttpCache};
 use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, RequestFilter};
 use super::header_rules::CompiledHeaderRules;
@@ -40,6 +41,7 @@ impl Router {
             let proxy_auth = Authenticator::new(http.auth, tls_client_config, sessions);
             let proxy_header_rules = Arc::new(CompiledHeaderRules::new(&http.headers));
             let compression = (!http.compression.is_disabled()).then(|| Arc::new(http.compression));
+            let proxy_cache = cache_for(id, &http.cache);
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 let base_path = filter
@@ -79,6 +81,7 @@ impl Router {
                     auth,
                     header_rules,
                     compression: compression.clone(),
+                    cache: proxy_cache.clone(),
                 });
             }
         }
@@ -116,6 +119,8 @@ pub struct FilteredRoute {
     pub header_rules: Arc<CompiledHeaderRules>,
     /// `None` when the proxy has no compression algorithm.
     pub compression: Option<Arc<Compression>>,
+    /// `None` when the proxy cache is disabled. Every route of the proxy shares the cache.
+    pub cache: Option<Arc<HttpCache>>,
 }
 
 #[derive(Debug)]

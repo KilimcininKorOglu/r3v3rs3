@@ -32,6 +32,7 @@ pub fn seal_proxy(proxy: &mut Proxy) -> Result<(), Error> {
         }
     }
     http.compression.validate()?;
+    http.cache.validate()?;
     let route_rules = http
         .routes
         .iter()

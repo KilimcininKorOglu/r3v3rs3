@@ -1,6 +1,7 @@
 pub mod acme;
 pub mod app;
 pub mod auth;
+pub mod cache;
 pub mod cdn;
 pub mod cert;
 pub mod cidr;

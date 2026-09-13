@@ -1,3 +1,4 @@
+use crate::cache::CacheConfig;
 use crate::client_ip::ClientIpConfig;
 use crate::compression::Compression;
 use crate::error::Error;
@@ -80,6 +81,9 @@ pub struct HttpProxy {
     /// Response compression for every route of this proxy.
     #[serde(default, skip_serializing_if = "Compression::is_disabled")]
     pub compression: Compression,
+    /// In-memory response cache shared by every route of this proxy.
+    #[serde(default, skip_serializing_if = "CacheConfig::is_disabled")]
+    pub cache: CacheConfig,
 }
 
 fn upgrade_insecure_default() -> bool {

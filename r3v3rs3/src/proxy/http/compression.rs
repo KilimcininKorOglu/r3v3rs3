@@ -161,15 +161,19 @@ fn has_compressible_type(config: &Compression, headers: &HeaderMap) -> bool {
 
 /// A response without `Content-Length` streams a body of unknown size, so it is compressed.
 fn meets_min_size(config: &Compression, headers: &HeaderMap) -> bool {
+    header_number(headers, CONTENT_LENGTH).is_none_or(|length| length >= config.min_size)
+}
+
+/// Returns the value of a header that holds a non-negative integer.
+pub(super) fn header_number(headers: &HeaderMap, name: hyper::header::HeaderName) -> Option<u64> {
     headers
-        .get(CONTENT_LENGTH)
+        .get(name)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .is_none_or(|length| length >= config.min_size)
+        .and_then(|value| value.trim().parse().ok())
 }
 
 /// Returns the trimmed items of a comma-separated header.
-fn header_items(
+pub(super) fn header_items(
     headers: &HeaderMap,
     name: hyper::header::HeaderName,
 ) -> impl Iterator<Item = &str> {

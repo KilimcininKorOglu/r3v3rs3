@@ -7,7 +7,7 @@ use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
-use r3v3rs3_api::proxy::{ProxyEntry, ProxyState, ProxyStatus};
+use r3v3rs3_api::proxy::{ProxyEntry, ProxyKind, ProxyState, ProxyStatus};
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
@@ -112,6 +112,19 @@ pub fn proxy_list() -> Html {
                             }
                         });
 
+                        let cache_enabled = matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.cache.enabled);
+                        let purge_onclick = Callback::from(move |e: MouseEvent|  {
+                            e.prevent_default();
+                            if gloo_dialogs::confirm(&format!("Are you sure to purge the cache of {id}?")) {
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    match purge_cache(id).await {
+                                        Ok(()) => gloo_dialogs::alert("The cache is purged."),
+                                        Err(err) => gloo_dialogs::alert(&format!("Failed to purge the cache: {err}")),
+                                    }
+                                });
+                            }
+                        });
+
                         let active = entry.proxy.active;
                         let onchange = Callback::from(move |_: Event| {
                             wasm_bindgen_futures::spawn_local(async move {
@@ -161,6 +174,9 @@ pub fn proxy_list() -> Html {
                                 <td class="px-4 py-4 w-0 whitespace-nowrap" align="right">
                                     <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={config_onclick}>{"Edit"}</a>
                                     <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={log_onclick}>{"Log"}</a>
+                                    if cache_enabled {
+                                        <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={purge_onclick}>{"Purge"}</a>
+                                    }
                                     <a class="cursor-pointer font-medium text-red-600 hover:underline" onclick={delete_onclick}>{"Delete"}</a>
                                 </td>
                             </tr>
@@ -204,6 +220,20 @@ async fn get_status(id: ShortId) -> Result<ProxyStatus, gloo_net::Error> {
         .await?
         .json()
         .await
+}
+
+async fn purge_cache(id: ShortId) -> Result<(), gloo_net::Error> {
+    let res = Request::delete(&format!("{API_ENDPOINT}/proxies/{id}/cache"))
+        .send()
+        .await?;
+    if res.ok() {
+        Ok(())
+    } else {
+        Err(gloo_net::Error::GlooError(format!(
+            "HTTP status {}",
+            res.status()
+        )))
+    }
 }
 
 async fn delete_site(id: ShortId) -> Result<(), gloo_net::Error> {

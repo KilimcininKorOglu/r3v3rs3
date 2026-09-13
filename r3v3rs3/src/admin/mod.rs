@@ -160,6 +160,7 @@ pub async fn start_admin(
         .route("/", post(proxies::add))
         .route("/{id}", get(proxies::get))
         .route("/{id}/status", get(proxies::status))
+        .route("/{id}/cache", delete(proxies::purge_cache))
         .route("/{id}", put(proxies::put))
         .route("/{id}", delete(proxies::delete));
 

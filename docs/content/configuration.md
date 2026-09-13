@@ -282,6 +282,46 @@ compression = { algorithms = ["br", "zstd", "gzip"], min_size = 1024, mime_types
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+## Cache
+
+You can store proxied responses in memory in the "Cache" section. A stored response goes to the client without a request to the upstream server. Every route of the proxy shares one cache, and each proxy has its own cache.
+
+| Setting | Default | Description |
+|---|---|---|
+| `enabled` | `false` | Enables the cache. |
+| `max_size` | `67108864` (64 MiB) | The memory limit of the stored responses in bytes. When the cache is full, r3v3rs3 removes the least used responses. |
+| `max_entry_size` | `1048576` (1 MiB) | r3v3rs3 does not store a response with a larger body. |
+| `default_ttl` | `0s` | The lifetime of a response without `Cache-Control: max-age`, `s-maxage` or `Expires`. With `0s`, r3v3rs3 stores such a response only when it has an `ETag` or `Last-Modified` header, and revalidates it on every request. |
+
+r3v3rs3 uses the cache only for `GET` and `HEAD` requests without `Range`, `Upgrade` and `Cache-Control: no-store`. A `HEAD` request uses the stored `GET` response. When the client sends `Cache-Control: no-cache` or `Pragma: no-cache`, r3v3rs3 sends the request to the upstream server and stores the new response. The cache key is the requested host and the upstream URL.
+
+r3v3rs3 stores a response only when all of these conditions are true:
+
+- The status is `200`, `203`, `204`, `300`, `301`, `308`, `404`, `405`, `410`, `414` or `501`.
+- `Cache-Control` does not contain `no-store` or `private`.
+- The response has no `Set-Cookie` header.
+- The response has no `Vary: *` header.
+- When the request has an `Authorization` header, `Cache-Control` contains `public`, `s-maxage` or `must-revalidate`.
+- The response has a lifetime or a validator, and the body is not larger than `max_entry_size`.
+
+The lifetime comes from `s-maxage`, then `max-age`, then `Expires`, then `default_ttl`. `Cache-Control: no-cache` sets the lifetime to zero. The age of a stored response includes the `Age` header of the upstream response.
+
+When a stored response is stale and has an `ETag` or `Last-Modified` header, r3v3rs3 sends a conditional request with `If-None-Match` or `If-Modified-Since`. When the upstream server answers `304 Not Modified`, r3v3rs3 updates the stored headers and sends the stored response. r3v3rs3 keeps a stale response with a validator for one hour after it expires. A client with a matching `If-None-Match` or `If-Modified-Since` header receives `304 Not Modified` from the cache.
+
+r3v3rs3 stores one response for each cache key. When `Vary` names request headers, r3v3rs3 sends the stored response only to a request with the same values of these headers.
+
+r3v3rs3 removes `Accept-Encoding` from the requests that can use the cache, so the upstream server sends unencoded responses. The "Compression" section then compresses the response for each client. Each response to these requests has an `X-Cache` header: `HIT` for a stored response and `MISS` for a response from the upstream server. A response from the cache also has an `Age` header.
+
+To remove every stored response of a proxy, click "Purge" in the proxy list, or send `DELETE /api/proxies/{id}/cache`. The stored responses stay in memory while the cache settings do not change. A restart or a change of the cache settings removes them.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+cache = { enabled = true, max_size = 67108864, max_entry_size = 1048576, default_ttl = "5m" }
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
+```
+
 ## HTTP/2
 
 r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).

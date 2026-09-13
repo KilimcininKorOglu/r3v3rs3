@@ -1,4 +1,5 @@
 use super::auth_config::{AuthConfig, AuthForm};
+use r3v3rs3_api::cache::CacheConfig;
 use r3v3rs3_api::cidr::{format_cidr_list, parse_cidr_list};
 use r3v3rs3_api::client_ip::ClientIpConfig;
 use r3v3rs3_api::compression::{
@@ -10,6 +11,7 @@ use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
 use r3v3rs3_api::vhost::VirtualHost;
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::time::Duration;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
@@ -43,6 +45,7 @@ struct ProxyForm {
     request_headers: String,
     response_headers: String,
     compression: CompressionForm,
+    cache: CacheForm,
 }
 
 impl ProxyForm {
@@ -64,6 +67,26 @@ impl ProxyForm {
             request_headers: format_header_rules(&proxy.headers.request),
             response_headers: format_header_rules(&proxy.headers.response),
             compression: CompressionForm::new(&proxy.compression),
+            cache: CacheForm::new(&proxy.cache),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct CacheForm {
+    enabled: bool,
+    max_size: String,
+    max_entry_size: String,
+    default_ttl: String,
+}
+
+impl CacheForm {
+    fn new(cache: &CacheConfig) -> Self {
+        Self {
+            enabled: cache.enabled,
+            max_size: cache.max_size.to_string(),
+            max_entry_size: cache.max_entry_size.to_string(),
+            default_ttl: cache.default_ttl.as_secs().to_string(),
         }
     }
 }
@@ -249,6 +272,11 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { compression_view(&form) }
             { error_view(errors.get("compression")) }
             <p class={HINT_CLASS}>{"Compresses upstream responses for clients that accept a selected encoding. When a client accepts several encodings equally, the first selected encoding wins. Responses that are already encoded, partial, smaller than the minimum size, not in the media types or marked Cache-Control: no-transform are not compressed. Select no encoding to disable compression."}</p>
+
+            <label class={SECTION_CLASS}>{"Cache"}</label>
+            { cache_view(&form) }
+            { error_view(errors.get("cache")) }
+            <p class={HINT_CLASS}>{"Stores GET responses in memory and sends them without contacting the upstream server. The cache follows Cache-Control, Expires, Vary, ETag and Last-Modified, and does not store private responses or responses with Set-Cookie. Default TTL applies to responses without a lifetime. With 0, such a response is stored only when it has a validator. Use Purge in the proxy list to remove the stored responses."}</p>
 
             <label class={SECTION_CLASS}>{"Routes"}</label>
 
@@ -442,6 +470,32 @@ fn compression_view(form: &UseStateHandle<ProxyForm>) -> Html {
     }
 }
 
+fn cache_view(form: &UseStateHandle<ProxyForm>) -> Html {
+    html! {
+        <>
+            <div>
+                { toggle(state_input(form, checked, |form, value| form.cache.enabled = value), form.cache.enabled, "Enable Cache", "mt-4") }
+            </div>
+            if form.cache.enabled {
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class={LABEL_CLASS}>{"Memory Limit (Bytes)"}</label>
+                        <input type="number" min="1" value={form.cache.max_size.clone()} onchange={state_input(form, text, |form, value| form.cache.max_size = value)} class={INPUT_CLASS} />
+                    </div>
+                    <div>
+                        <label class={LABEL_CLASS}>{"Maximum Response Size (Bytes)"}</label>
+                        <input type="number" min="1" value={form.cache.max_entry_size.clone()} onchange={state_input(form, text, |form, value| form.cache.max_entry_size = value)} class={INPUT_CLASS} />
+                    </div>
+                    <div>
+                        <label class={LABEL_CLASS}>{"Default TTL (Seconds)"}</label>
+                        <input type="number" min="0" value={form.cache.default_ttl.clone()} onchange={state_input(form, text, |form, value| form.cache.default_ttl = value)} class={INPUT_CLASS} />
+                    </div>
+                </div>
+            }
+        </>
+    }
+}
+
 /// Adds the algorithm to the end of the preference order, or removes it.
 fn algorithm_input(
     form: &UseStateHandle<ProxyForm>,
@@ -606,6 +660,7 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
         &mut errors,
     );
     let compression = parse_compression(&form.compression, "compression", &mut errors);
+    let cache = parse_cache(&form.cache, "cache", &mut errors);
 
     if !errors.is_empty() {
         return Err(errors);
@@ -623,7 +678,29 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
         auth,
         headers,
         compression,
+        cache,
     })
+}
+
+fn parse_cache(form: &CacheForm, key: &str, errors: &mut HashMap<String, String>) -> CacheConfig {
+    let cache = CacheConfig {
+        enabled: form.enabled,
+        max_size: or_error(parse_size(&form.max_size, "Memory limit"), key, errors),
+        max_entry_size: or_error(
+            parse_size(&form.max_entry_size, "Maximum response size"),
+            key,
+            errors,
+        ),
+        default_ttl: Duration::from_secs(or_error(
+            parse_size(&form.default_ttl, "Default TTL"),
+            key,
+            errors,
+        )),
+    };
+    if let Err(err) = cache.validate() {
+        errors.insert(key.to_string(), err.to_string());
+    }
+    cache
 }
 
 fn parse_compression(
@@ -633,19 +710,19 @@ fn parse_compression(
 ) -> Compression {
     Compression {
         algorithms: form.algorithms.clone(),
-        min_size: or_error(parse_size(&form.min_size), key, errors),
+        min_size: or_error(parse_size(&form.min_size, "Minimum size"), key, errors),
         mime_types: or_error(parse_mime_list(&form.mime_types), key, errors),
     }
 }
 
-fn parse_size(value: &str) -> Result<u64, String> {
+fn parse_size(value: &str, name: &str) -> Result<u64, String> {
     let value = value.trim();
     if value.is_empty() {
         return Ok(0);
     }
     value
         .parse()
-        .map_err(|_| "Minimum size must be a whole number of bytes".to_string())
+        .map_err(|_| format!("{name} must be a whole number"))
 }
 
 /// Returns the parsed value, or records the error under `key` and returns the default value.

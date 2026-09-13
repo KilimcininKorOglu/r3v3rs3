@@ -54,6 +54,25 @@ impl RpcMethod for GetProxyStatus {
     }
 }
 
+pub struct PurgeProxyCache {
+    pub id: ShortId,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for PurgeProxyCache {
+    type Output = ();
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        if state.proxies.get(self.id).is_none() {
+            return Err(Error::IdNotFound {
+                id: self.id.to_string(),
+            });
+        }
+        crate::proxy::http::cache::purge(self.id);
+        Ok(())
+    }
+}
+
 pub struct DeleteProxy {
     pub id: ShortId,
 }
