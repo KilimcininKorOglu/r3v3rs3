@@ -1,6 +1,9 @@
 use crate::{
     cdn::fetch::{build_client, HttpClient as FetchClient},
-    certs::Cert,
+    certs::{
+        dns::{self, TxtName},
+        Cert,
+    },
     server::cert_list::CertList,
 };
 use anyhow::{anyhow, bail};
@@ -15,7 +18,7 @@ use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, BodyWrapper, BytesResponse, ChallengeType,
     ExternalAccountKey, HttpClient, Identifier, NewAccount, NewOrder, Order, OrderStatus,
 };
-use r3v3rs3_api::acme::AcmeInfo;
+use r3v3rs3_api::acme::{AcmeInfo, DnsProvider, DNS_01};
 use r3v3rs3_api::{
     acme::Acme,
     cert::{CertKind, CertMetadata},
@@ -28,13 +31,15 @@ use std::{
     collections::HashMap,
     fmt,
     future::Future,
+    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 use tracing::{error, info};
 
-const HTTP_CHALLENGE_TIMEOUT: Duration = Duration::from_secs(180);
+/// Longest wait for the ACME server to validate the challenges.
+const VALIDATION_TIMEOUT: Duration = Duration::from_secs(180);
 const ACME_USER_AGENT: &str = concat!("r3v3rs3/", env!("CARGO_PKG_VERSION"));
 
 /// Adds the User-Agent header that RFC 8555 section 6.1 requires on every ACME request.
@@ -140,8 +145,9 @@ impl AcmeEntry {
         })
     }
 
-    pub async fn request(&self) -> anyhow::Result<AcmeOrder> {
-        AcmeOrder::new(self).await
+    /// Starts an order. `dns_resolver` is the DNS server that the DNS-01 challenge asks.
+    pub async fn request(&self, dns_resolver: Option<SocketAddr>) -> anyhow::Result<AcmeOrder> {
+        AcmeOrder::new(self, dns_resolver).await
     }
 
     pub fn id(&self) -> ShortId {
@@ -159,6 +165,11 @@ impl AcmeEntry {
                 .map(|id| id.to_string())
                 .collect(),
             challenge_type: self.acme.challenge_type.clone(),
+            dns_provider: self
+                .acme
+                .dns_provider
+                .as_ref()
+                .map(|provider| provider.name().to_string()),
             next_renewal: self
                 .next_renewal(certs)
                 .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
@@ -218,14 +229,29 @@ impl From<(ShortId, AcmeAccount)> for AcmeEntry {
 
 pub struct AcmeOrder {
     pub id: ShortId,
-    pub challenge_type: ChallengeType,
     pub identifiers: Vec<Identifier>,
+    /// Key authorizations of the HTTP-01 challenges, by token.
     pub http_challenges: HashMap<String, String>,
+    challenge_type: ChallengeType,
+    dns: Option<DnsChallenge>,
     pub order: Order,
 }
 
+struct DnsChallenge {
+    provider: DnsProvider,
+    resolver: Option<SocketAddr>,
+    names: Vec<TxtName>,
+}
+
+#[derive(Default)]
+struct Challenges {
+    http: HashMap<String, String>,
+    /// `(domain, TXT value)` pairs of the DNS-01 challenges.
+    dns: Vec<(String, String)>,
+}
+
 impl AcmeOrder {
-    pub async fn new(entry: &AcmeEntry) -> anyhow::Result<Self> {
+    pub async fn new(entry: &AcmeEntry, dns_resolver: Option<SocketAddr>) -> anyhow::Result<Self> {
         info!("requesting certificate");
 
         // An entry stored before validation existed can still hold a name the challenge cannot validate.
@@ -239,19 +265,28 @@ impl AcmeOrder {
         let account: AccountCredentials =
             serde_json::from_str(&serde_json::to_string(&entry.account)?)?;
         let challenge_type = match entry.acme.challenge_type.as_str() {
-            "http-01" => ChallengeType::Http01,
-            _ => bail!("challenge type is not supported"),
+            DNS_01 => ChallengeType::Dns01,
+            _ => ChallengeType::Http01,
         };
         let account = Account::builder_with_http(acme_http_client().await?)
             .from_credentials(account)
             .await?;
         let mut order = account.new_order(&NewOrder::new(&identifiers)).await?;
-        let http_challenges = collect_http_challenges(&mut order).await?;
+        let challenges = collect_challenges(&mut order, &challenge_type).await?;
+        let dns = match (&challenge_type, &entry.acme.dns_provider) {
+            (ChallengeType::Dns01, Some(provider)) => Some(DnsChallenge {
+                provider: provider.clone(),
+                resolver: dns_resolver,
+                names: dns::txt_names(challenges.dns),
+            }),
+            _ => None,
+        };
         Ok(Self {
             id: entry.id,
-            challenge_type,
             identifiers,
-            http_challenges,
+            http_challenges: challenges.http,
+            challenge_type,
+            dns,
             order,
         })
     }
@@ -278,26 +313,28 @@ impl AcmeOrder {
     }
 
     pub async fn start_challenge(&mut self) -> anyhow::Result<Cert> {
-        self.set_challenges_ready().await?;
+        let Some(dns) = self.dns.take() else {
+            return self.complete().await;
+        };
+        let client = dns::client(&dns.provider).await?;
+        let task = async {
+            dns::wait_for_propagation(
+                dns.resolver,
+                &dns.names,
+                dns::PROPAGATION_TIMEOUT,
+                dns::PROPAGATION_INTERVAL,
+            )
+            .await?;
+            self.complete().await
+        };
+        dns::with_txt_records(client.as_ref(), &dns.names, task).await
+    }
 
-        let mut backoff = ExponentialBackoffBuilder::new()
-            .with_max_elapsed_time(Some(HTTP_CHALLENGE_TIMEOUT))
-            .build();
-        loop {
-            let state = self.order.refresh().await?;
-            match state.status {
-                OrderStatus::Ready => break,
-                OrderStatus::Invalid => {
-                    bail!("order is invalid");
-                }
-                _ => (),
-            }
-            if let Some(next) = backoff.next_backoff() {
-                tokio::time::sleep(next).await;
-            } else {
-                bail!("order is timed-out");
-            }
-        }
+    /// Tells the ACME server that the challenges are ready, waits for the validation,
+    /// and downloads the certificate.
+    async fn complete(&mut self) -> anyhow::Result<Cert> {
+        self.set_challenges_ready().await?;
+        self.wait_until_ready().await?;
 
         let san = self
             .identifiers
@@ -338,11 +375,32 @@ impl AcmeOrder {
 
         Ok(cert?)
     }
+
+    async fn wait_until_ready(&mut self) -> anyhow::Result<()> {
+        let mut backoff = ExponentialBackoffBuilder::new()
+            .with_max_elapsed_time(Some(VALIDATION_TIMEOUT))
+            .build();
+        loop {
+            let state = self.order.refresh().await?;
+            match state.status {
+                OrderStatus::Ready => return Ok(()),
+                OrderStatus::Invalid => bail!("order is invalid"),
+                _ => (),
+            }
+            match backoff.next_backoff() {
+                Some(next) => tokio::time::sleep(next).await,
+                None => bail!("order is timed-out"),
+            }
+        }
+    }
 }
 
-/// Collects the key authorizations of the pending HTTP-01 challenges, by token.
-async fn collect_http_challenges(order: &mut Order) -> anyhow::Result<HashMap<String, String>> {
-    let mut challenges = HashMap::new();
+/// Collects the responses of the pending challenges of `challenge_type`.
+async fn collect_challenges(
+    order: &mut Order,
+    challenge_type: &ChallengeType,
+) -> anyhow::Result<Challenges> {
+    let mut challenges = Challenges::default();
     let mut authorizations = order.authorizations();
     while let Some(authz) = authorizations.next().await {
         let mut authz = authz?;
@@ -352,14 +410,28 @@ async fn collect_http_challenges(order: &mut Order) -> anyhow::Result<HashMap<St
             _ => bail!("authorization status is not valid"),
         }
         let challenge = authz
-            .challenge(ChallengeType::Http01)
-            .ok_or_else(|| anyhow!("no http01 challenge found"))?;
-        challenges.insert(
-            challenge.token.clone(),
-            challenge.key_authorization().as_str().to_string(),
-        );
+            .challenge(challenge_type.clone())
+            .ok_or_else(|| anyhow!("the ACME server offers no {challenge_type:?} challenge"))?;
+        let key_authorization = challenge.key_authorization();
+        if *challenge_type == ChallengeType::Dns01 {
+            let domain = dns_domain(challenge.identifier().identifier)?;
+            challenges.dns.push((domain, key_authorization.dns_value()));
+        } else {
+            challenges.http.insert(
+                challenge.token.clone(),
+                key_authorization.as_str().to_string(),
+            );
+        }
     }
     Ok(challenges)
+}
+
+/// The domain of a DNS identifier, without the wildcard label.
+fn dns_domain(identifier: &Identifier) -> anyhow::Result<String> {
+    match identifier {
+        Identifier::Dns(domain) => Ok(domain.clone()),
+        other => bail!("the DNS-01 challenge cannot validate {other:?}"),
+    }
 }
 
 #[cfg(test)]
@@ -369,7 +441,24 @@ mod tests {
         header::{HeaderMap, LOCATION},
         Response,
     };
+    use r3v3rs3_api::acme::AcmeConfig;
     use std::sync::Mutex;
+
+    #[test]
+    fn a_dns_provider_survives_the_acme_toml_round_trip() {
+        let acme = Acme {
+            config: AcmeConfig::default(),
+            identifiers: vec!["*.example.com".parse().unwrap()],
+            challenge_type: DNS_01.to_string(),
+            dns_provider: Some(DnsProvider::Route53 {
+                access_key_id: "AKID".to_string(),
+                secret_access_key: "secret".to_string(),
+                api_url: None,
+            }),
+        };
+        let text = toml_edit::ser::to_document(&acme).unwrap().to_string();
+        assert_eq!(toml::from_str::<Acme>(&text).unwrap(), acme);
+    }
 
     #[derive(Default)]
     struct RecordingClient {
@@ -399,11 +488,12 @@ mod tests {
         "identifier": {"type": "dns", "value": "example.com"},
         "challenges": [
             {"type": "dns-persist-01", "url": "https://acme.example/chall/2", "status": "pending", "issuer-domain-names": ["acme.example"]},
-            {"type": "http-01", "url": "https://acme.example/chall/1", "token": "http-token", "status": "pending"}
+            {"type": "http-01", "url": "https://acme.example/chall/1", "token": "http-token", "status": "pending"},
+            {"type": "dns-01", "url": "https://acme.example/chall/3", "token": "dns-token", "status": "pending"}
         ]
     }"#;
 
-    /// Answers the requests of an HTTP-01 order for `example.com`.
+    /// Answers the requests of an order for `example.com`.
     struct FakeAcmeServer;
 
     impl HttpClient for FakeAcmeServer {
@@ -454,17 +544,34 @@ mod tests {
         assert_eq!(stored_account().await.id(), "https://acme.example/acct/1");
     }
 
-    #[tokio::test]
-    async fn a_challenge_without_a_token_does_not_break_the_order() {
+    async fn challenges_of(challenge_type: ChallengeType) -> Challenges {
         let identifiers = [Identifier::Dns("example.com".to_string())];
         let mut order = stored_account()
             .await
             .new_order(&NewOrder::new(&identifiers))
             .await
             .unwrap();
-        let challenges = collect_http_challenges(&mut order).await.unwrap();
-        assert_eq!(challenges.keys().collect::<Vec<_>>(), ["http-token"]);
-        assert!(challenges["http-token"].starts_with("http-token."));
+        collect_challenges(&mut order, &challenge_type)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_challenge_without_a_token_does_not_break_the_order() {
+        let challenges = challenges_of(ChallengeType::Http01).await;
+        assert_eq!(challenges.http.keys().collect::<Vec<_>>(), ["http-token"]);
+        assert!(challenges.http["http-token"].starts_with("http-token."));
+        assert!(challenges.dns.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_dns_01_order_collects_one_txt_value_per_domain() {
+        let challenges = challenges_of(ChallengeType::Dns01).await;
+        assert!(challenges.http.is_empty());
+        assert_eq!(challenges.dns.len(), 1);
+        assert_eq!(challenges.dns[0].0, "example.com");
+        // The TXT value is the unpadded base64url SHA-256 digest: 43 characters.
+        assert_eq!(challenges.dns[0].1.len(), 43);
     }
 
     /// Sends one GET through the wrapper and returns its outcome with the headers the inner client saw.

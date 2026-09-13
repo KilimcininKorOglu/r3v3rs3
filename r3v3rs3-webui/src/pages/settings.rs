@@ -26,6 +26,7 @@ struct Fields {
     login_attempts_reset: String,
     database_log_retention: String,
     http_challenge_addr: String,
+    dns_challenge_resolver: String,
 }
 
 impl Fields {
@@ -47,6 +48,7 @@ impl Fields {
             login_attempts_reset: text("/admin/login_attempts_reset"),
             database_log_retention: text("/log/database_log_retention"),
             http_challenge_addr: text("/http_challenge_addr"),
+            dns_challenge_resolver: text("/dns_challenge_resolver"),
         }
     }
 }
@@ -122,6 +124,8 @@ pub fn settings() -> Html {
             <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.server")}</h2>
             { text_field(&fields, &errors, locale.t("settings.background_task_interval"), "background_task_interval", "1h", |f| &mut f.background_task_interval) }
             { text_field(&fields, &errors, locale.t("settings.http_challenge_addr"), "http_challenge_addr", "0.0.0.0:80", |f| &mut f.http_challenge_addr) }
+            { text_field(&fields, &errors, locale.t("settings.dns_challenge_resolver"), "dns_challenge_resolver", "1.1.1.1:53", |f| &mut f.dns_challenge_resolver) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.dns_challenge_resolver_hint")}</p>
             { text_field(&fields, &errors, locale.t("settings.database_log_retention"), "database_log_retention", "3months", |f| &mut f.database_log_retention) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.duration_hint")}</p>
 
@@ -238,8 +242,15 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             locale.t("settings.invalid_socket_addr").into(),
         );
     }
-    match (admin, log, interval, addr) {
-        (Some(admin), Some(log), Some(interval), Some(addr)) if errors.is_empty() => {
+    let resolver = parse_optional_addr(&fields.dns_challenge_resolver);
+    if resolver.is_err() {
+        errors.insert(
+            "dns_challenge_resolver".into(),
+            locale.t("settings.invalid_socket_addr").into(),
+        );
+    }
+    match (admin, log, interval, addr, resolver) {
+        (Some(admin), Some(log), Some(interval), Some(addr), Ok(resolver)) if errors.is_empty() => {
             Ok(AppConfig {
                 background_task_interval: interval.background_task_interval,
                 admin: AdminConfig {
@@ -249,10 +260,20 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 },
                 log,
                 http_challenge_addr: addr,
+                dns_challenge_resolver: resolver,
             })
         }
         _ => Err(errors),
     }
+}
+
+/// An empty value means that no address is set.
+fn parse_optional_addr(value: &str) -> Result<Option<SocketAddr>, std::net::AddrParseError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    value.parse().map(Some)
 }
 
 async fn get_config() -> Result<AppConfig, gloo_net::Error> {

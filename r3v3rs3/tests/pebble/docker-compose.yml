@@ -1,0 +1,25 @@
+# Pebble and pebble-challtestsrv for the ignored ACME DNS-01 end-to-end test.
+# Run the test with `make test-acme-pebble`.
+name: r3v3rs3-pebble
+
+services:
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:latest
+    command: ["-config", "test/config/pebble-config.json", "-dnsserver", "challtestsrv:8053"]
+    environment:
+      # Validate at once and never reject a valid nonce, so the test does not wait or retry.
+      PEBBLE_VA_NOSLEEP: "1"
+      PEBBLE_WFE_NONCEREJECT: "0"
+    ports:
+      - "127.0.0.1:8470:14000"
+    depends_on:
+      - challtestsrv
+
+  challtestsrv:
+    image: ghcr.io/letsencrypt/pebble-challtestsrv:latest
+    # Only the DNS server and the management API are needed.
+    command: ["-http01", "", "-https01", "", "-tlsalpn01", "", "-doh", ""]
+    ports:
+      - "127.0.0.1:8471:8053/tcp"
+      - "127.0.0.1:8471:8053/udp"
+      - "127.0.0.1:8472:8055"

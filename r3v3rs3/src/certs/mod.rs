@@ -20,6 +20,7 @@ use x509_parser::{extensions::GeneralName, time::ASN1Time};
 use x509_parser::{parse_x509_certificate, prelude::X509Certificate};
 
 pub mod acme;
+pub mod dns;
 
 #[derive(Clone)]
 pub struct Cert {

@@ -18,6 +18,12 @@ pub struct AppConfig {
     #[serde(default = "default_http_challenge_addr")]
     #[schema(value_type = String, example = "0.0.0.0:80")]
     pub http_challenge_addr: SocketAddr,
+
+    /// DNS server that is asked whether the TXT records of a DNS-01 challenge are visible.
+    /// The system resolver is used when it is not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "1.1.1.1:53")]
+    pub dns_challenge_resolver: Option<SocketAddr>,
 }
 
 fn default_background_task_interval() -> Duration {

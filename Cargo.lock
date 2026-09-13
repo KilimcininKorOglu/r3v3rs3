@@ -3204,6 +3204,7 @@ dependencies = [
  "h3-quinn",
  "hex",
  "hickory-resolver",
+ "hmac",
  "http-body-util",
  "httpdate",
  "humantime-serde",

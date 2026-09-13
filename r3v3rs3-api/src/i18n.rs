@@ -217,6 +217,7 @@ mod tests {
             Error::AcmeIdentifiersMissing,
             Error::AcmeInvalidIdentifier { identifier: text() },
             Error::AcmeWildcardNeedsDnsChallenge { identifier: text() },
+            Error::AcmeDnsProviderRequired,
             Error::Unauthorized,
             Error::FailedToCreateAccount,
             Error::InvalidLoginCredentials,

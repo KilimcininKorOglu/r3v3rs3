@@ -22,6 +22,7 @@ async fn a_wildcard_request_with_http_01_is_rejected_before_the_account_is_creat
             config: AcmeConfig::default(),
             identifiers: vec!["example.com".parse()?, "*.example.com".parse()?],
             challenge_type: HTTP_01.to_string(),
+            dns_provider: None,
         },
     };
 

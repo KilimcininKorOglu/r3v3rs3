@@ -423,6 +423,7 @@ impl ServerState {
             self.acme_schedule.start(entry.id);
         }
 
+        let dns_resolver = self.config.dns_challenge_resolver;
         let command = self.command_sender.clone();
         tokio::task::spawn(async move {
             let mut orders = Vec::new();
@@ -435,7 +436,7 @@ impl ServerState {
                         "starting acme request"
                     );
                 });
-                match entry.request().instrument(span.clone()).await {
+                match entry.request(dns_resolver).instrument(span.clone()).await {
                     Ok(request) => orders.push(request),
                     Err(err) => {
                         span.in_scope(|| error!("failed to request challenge: {}", err));
@@ -464,9 +465,12 @@ impl ServerState {
         // Orders of an earlier batch can still be running, so their challenges stay served.
         self.http_challenges
             .extend(orders.iter().flat_map(|req| req.http_challenges.clone()));
-        self.tcp_pool
-            .set_http_challenge_addr(Some(self.config.http_challenge_addr));
-        self.tcp_pool.update(self.ports.as_mut_slice()).await;
+        // DNS-01 orders need no listener.
+        if !self.http_challenges.is_empty() {
+            self.tcp_pool
+                .set_http_challenge_addr(Some(self.config.http_challenge_addr));
+            self.tcp_pool.update(self.ports.as_mut_slice()).await;
+        }
 
         let command = self.command_sender.clone();
         tokio::task::spawn(async move {

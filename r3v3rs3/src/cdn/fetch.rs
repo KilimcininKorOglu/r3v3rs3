@@ -214,6 +214,7 @@ fn google_cloud_ranges() -> anyhow::Result<Vec<IpNet>> {
         .collect()
 }
 
+/// Builds an HTTPS client that trusts the native root certificates.
 pub(crate) async fn build_client() -> anyhow::Result<HttpClient> {
     let native = tokio::task::spawn_blocking(rustls_native_certs::load_native_certs).await?;
     for err in native.errors {

@@ -2,28 +2,45 @@ use crate::{error::Error, id::ShortId, subject_name::SubjectName};
 use base64::{engine::general_purpose, Engine as _};
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
+use std::fmt;
 use utoipa::ToSchema;
 
 pub const HTTP_01: &str = "http-01";
+pub const DNS_01: &str = "dns-01";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 pub struct Acme {
     #[schema(inline)]
     #[serde(flatten)]
     pub config: AcmeConfig,
-    #[schema(value_type = [String], example = json!(["example.com"]))]
+    #[schema(value_type = [String], example = json!(["example.com", "*.example.com"]))]
     pub identifiers: Vec<SubjectName>,
-    #[schema(value_type = String, example = "http-01")]
+    #[schema(value_type = String, example = "dns-01")]
     pub challenge_type: String,
+    /// The DNS provider that publishes the TXT records of the `dns-01` challenge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns_provider: Option<DnsProvider>,
 }
 
 impl Acme {
     /// Checks that the challenge can validate every identifier.
     pub fn validate(&self) -> Result<(), Error> {
-        if self.challenge_type != HTTP_01 {
-            return Err(Error::AcmeUnsupportedChallenge {
-                challenge: self.challenge_type.clone(),
-            });
+        match self.challenge_type.as_str() {
+            HTTP_01 => {}
+            DNS_01 => {
+                let ready = self
+                    .dns_provider
+                    .as_ref()
+                    .is_some_and(DnsProvider::has_credentials);
+                if !ready {
+                    return Err(Error::AcmeDnsProviderRequired);
+                }
+            }
+            _ => {
+                return Err(Error::AcmeUnsupportedChallenge {
+                    challenge: self.challenge_type.clone(),
+                })
+            }
         }
         if self.identifiers.is_empty() {
             return Err(Error::AcmeIdentifiersMissing);
@@ -37,14 +54,82 @@ impl Acme {
         match identifier {
             SubjectName::DnsName(name) if !name.contains('*') => Ok(()),
             SubjectName::WildcardDnsName(name) if !name.contains('*') => {
-                Err(Error::AcmeWildcardNeedsDnsChallenge {
-                    identifier: identifier.to_string(),
-                })
+                if self.challenge_type == DNS_01 {
+                    Ok(())
+                } else {
+                    Err(Error::AcmeWildcardNeedsDnsChallenge {
+                        identifier: identifier.to_string(),
+                    })
+                }
             }
             _ => Err(Error::AcmeInvalidIdentifier {
                 identifier: identifier.to_string(),
             }),
         }
+    }
+}
+
+/// A DNS provider API that publishes the TXT records of the `dns-01` challenge.
+///
+/// `api_url` replaces the address of the provider API, for example with a test server.
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(tag = "provider", rename_all = "snake_case")]
+pub enum DnsProvider {
+    Cloudflare {
+        api_token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    Route53 {
+        access_key_id: String,
+        secret_access_key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    #[serde(rename = "digitalocean")]
+    DigitalOcean {
+        api_token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    Hetzner {
+        api_token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+}
+
+impl DnsProvider {
+    /// The `provider` value in the API and in the configuration.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Cloudflare { .. } => "cloudflare",
+            Self::Route53 { .. } => "route53",
+            Self::DigitalOcean { .. } => "digitalocean",
+            Self::Hetzner { .. } => "hetzner",
+        }
+    }
+
+    pub fn has_credentials(&self) -> bool {
+        match self {
+            Self::Cloudflare { api_token, .. }
+            | Self::DigitalOcean { api_token, .. }
+            | Self::Hetzner { api_token, .. } => !api_token.trim().is_empty(),
+            Self::Route53 {
+                access_key_id,
+                secret_access_key,
+                ..
+            } => !access_key_id.trim().is_empty() && !secret_access_key.trim().is_empty(),
+        }
+    }
+}
+
+impl fmt::Debug for DnsProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The credentials are secrets, so only the provider name is printed.
+        f.debug_struct("DnsProvider")
+            .field("provider", &self.name())
+            .finish_non_exhaustive()
     }
 }
 
@@ -82,6 +167,10 @@ pub struct AcmeInfo {
     pub identifiers: Vec<String>,
     #[schema(value_type = String, example = "http-01")]
     pub challenge_type: String,
+    /// The `provider` name of the DNS provider. The credentials are never returned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "cloudflare")]
+    pub dns_provider: Option<String>,
     pub next_renewal: Option<i64>,
 }
 
@@ -137,7 +226,15 @@ mod test {
             config: AcmeConfig::default(),
             identifiers: identifiers.iter().map(|id| id.parse().unwrap()).collect(),
             challenge_type: challenge_type.to_string(),
+            dns_provider: None,
         }
+    }
+
+    fn cloudflare(api_token: &str) -> Option<DnsProvider> {
+        Some(DnsProvider::Cloudflare {
+            api_token: api_token.to_string(),
+            api_url: None,
+        })
     }
 
     #[test]
@@ -153,6 +250,27 @@ mod test {
         assert!(matches!(
             result,
             Err(Error::AcmeWildcardNeedsDnsChallenge { identifier }) if identifier == "*.example.com"
+        ));
+    }
+
+    #[test]
+    fn dns_01_accepts_a_wildcard_domain_name() {
+        let mut request = acme(&["example.com", "*.example.com"], DNS_01);
+        request.dns_provider = cloudflare("token");
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn dns_01_needs_a_provider_with_credentials() {
+        let mut request = acme(&["example.com"], DNS_01);
+        assert!(matches!(
+            request.validate(),
+            Err(Error::AcmeDnsProviderRequired)
+        ));
+        request.dns_provider = cloudflare(" ");
+        assert!(matches!(
+            request.validate(),
+            Err(Error::AcmeDnsProviderRequired)
         ));
     }
 
@@ -176,5 +294,30 @@ mod test {
             acme(&["example.com"], "tls-alpn-01").validate(),
             Err(Error::AcmeUnsupportedChallenge { .. })
         ));
+    }
+
+    #[test]
+    fn a_dns_provider_is_tagged_by_its_name() {
+        let provider: DnsProvider =
+            serde_json::from_str(r#"{"provider":"digitalocean","api_token":"secret-token"}"#)
+                .unwrap();
+        assert_eq!(provider.name(), "digitalocean");
+        assert_eq!(
+            serde_json::to_value(&provider).unwrap(),
+            serde_json::json!({ "provider": "digitalocean", "api_token": "secret-token" })
+        );
+    }
+
+    #[test]
+    fn debug_output_does_not_contain_credentials() {
+        let provider = DnsProvider::Route53 {
+            access_key_id: "AKIDSECRET".to_string(),
+            secret_access_key: "very-secret".to_string(),
+            api_url: None,
+        };
+        let output = format!("{provider:?}");
+        assert!(output.contains("route53"));
+        assert!(!output.contains("AKIDSECRET"));
+        assert!(!output.contains("very-secret"));
     }
 }

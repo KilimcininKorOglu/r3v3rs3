@@ -158,6 +158,7 @@ fn get_request(
             },
             identifiers: vec![domain_name],
             challenge_type: "http-01".to_string(),
+            dns_provider: None,
         },
     })
 }

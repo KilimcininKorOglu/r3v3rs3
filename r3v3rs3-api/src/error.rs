@@ -92,6 +92,9 @@ pub enum Error {
     #[error("wildcard domain name needs the dns-01 challenge: {identifier}")]
     AcmeWildcardNeedsDnsChallenge { identifier: String },
 
+    #[error("dns-01 challenge needs a dns provider with credentials")]
+    AcmeDnsProviderRequired,
+
     #[error("unauthorized")]
     Unauthorized,
 
