@@ -3,6 +3,7 @@ use crate::{
     certs::{acme::AcmeOrder, Cert},
     server::rpc::ErasedRpcMethod,
 };
+use r3v3rs3_api::id::ShortId;
 use std::sync::Arc;
 
 pub enum ServerCommand {
@@ -12,8 +13,12 @@ pub enum ServerCommand {
     SetBroadcastEvents {
         enabled: bool,
     },
-    SetHttpChallenges {
+    AddAcmeOrders {
         orders: Vec<AcmeOrder>,
+    },
+    AcmeOrderFinished {
+        id: ShortId,
+        succeeded: bool,
     },
     CallMethod {
         id: usize,
@@ -32,9 +37,14 @@ impl std::fmt::Debug for ServerCommand {
                 .debug_struct("SetBroadcastEvents")
                 .field("enabled", enabled)
                 .finish(),
-            Self::SetHttpChallenges { orders } => f
-                .debug_struct("SetHttpChallenges")
+            Self::AddAcmeOrders { orders } => f
+                .debug_struct("AddAcmeOrders")
                 .field("orders", &orders.len())
+                .finish(),
+            Self::AcmeOrderFinished { id, succeeded } => f
+                .debug_struct("AcmeOrderFinished")
+                .field("id", id)
+                .field("succeeded", succeeded)
                 .finish(),
             Self::CallMethod { id, .. } => f.debug_struct("CallMethod").field("id", id).finish(),
             Self::SetCdnRanges { ranges } => f

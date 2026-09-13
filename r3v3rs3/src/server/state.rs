@@ -1,4 +1,5 @@
 use super::acme_list::AcmeList;
+use super::acme_schedule::AcmeSchedule;
 use super::cert_list::CertList;
 use super::proxy_list::ProxyList;
 use super::quic::QuicListenerPool;
@@ -27,6 +28,7 @@ use std::collections::HashSet;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::str;
+use std::time::Instant;
 use std::{collections::HashMap, sync::Arc};
 use tokio::io::AsyncBufReadExt;
 use tokio::select;
@@ -50,6 +52,7 @@ pub struct ServerState {
     udp_pool: UdpListenerPool,
     quic_pool: QuicListenerPool,
     http_challenges: HashMap<String, String>,
+    acme_schedule: AcmeSchedule,
     command_sender: mpsc::Sender<ServerCommand>,
     br_sender: broadcast::Sender<ServerEvent>,
     callback_sender: mpsc::Sender<RpcCallback>,
@@ -113,6 +116,7 @@ impl ServerState {
             udp_pool: UdpListenerPool::new(),
             quic_pool: QuicListenerPool::new(),
             http_challenges: HashMap::new(),
+            acme_schedule: AcmeSchedule::default(),
             command_sender,
             br_sender,
             callback_sender,
@@ -138,11 +142,13 @@ impl ServerState {
             ServerCommand::SetBroadcastEvents { enabled } => {
                 self.broadcast_events = enabled;
             }
-            ServerCommand::SetHttpChallenges { orders } => {
-                if orders.is_empty() {
+            ServerCommand::AddAcmeOrders { orders } => {
+                self.continue_http_challenges(orders).await;
+            }
+            ServerCommand::AcmeOrderFinished { id, succeeded } => {
+                self.acme_schedule.finish(id, succeeded, Instant::now());
+                if self.acme_schedule.is_idle() {
                     self.stop_http_challenges().await;
-                } else {
-                    self.continue_http_challenges(orders).await;
                 }
             }
             ServerCommand::CallMethod { id, mut arg } => {
@@ -398,20 +404,23 @@ impl ServerState {
     }
 
     async fn start_http_challenges(&mut self) {
-        let entries = self.acmes.entries().cloned();
-        let entries = entries
+        let now = Instant::now();
+        let entries = self
+            .acmes
+            .entries()
             .filter(|entry| entry.acme.config.active)
             .filter(|entry| {
-                if let Some(next) = entry.next_renewal(&self.certs) {
-                    next.elapsed().is_ok()
-                } else {
-                    true
-                }
+                self.acme_schedule
+                    .is_due(entry.id, entry.next_renewal(&self.certs), now)
             })
+            .cloned()
             .collect::<Vec<_>>();
 
         if entries.is_empty() {
             return;
+        }
+        for entry in &entries {
+            self.acme_schedule.start(entry.id);
         }
 
         let command = self.command_sender.clone();
@@ -429,14 +438,19 @@ impl ServerState {
                 match entry.request().instrument(span.clone()).await {
                     Ok(request) => orders.push(request),
                     Err(err) => {
-                        let _enter = span.enter();
-                        error!("failed to request challenge: {}", err)
+                        span.in_scope(|| error!("failed to request challenge: {}", err));
+                        let _ = command
+                            .send(ServerCommand::AcmeOrderFinished {
+                                id: entry.id,
+                                succeeded: false,
+                            })
+                            .await;
                     }
                 }
             }
-            let _ = command
-                .send(ServerCommand::SetHttpChallenges { orders })
-                .await;
+            if !orders.is_empty() {
+                let _ = command.send(ServerCommand::AddAcmeOrders { orders }).await;
+            }
         });
     }
 
@@ -447,12 +461,9 @@ impl ServerState {
     }
 
     async fn continue_http_challenges(&mut self, orders: Vec<AcmeOrder>) {
-        let challenges = orders
-            .iter()
-            .flat_map(|req| req.http_challenges.clone())
-            .collect();
-
-        self.http_challenges = challenges;
+        // Orders of an earlier batch can still be running, so their challenges stay served.
+        self.http_challenges
+            .extend(orders.iter().flat_map(|req| req.http_challenges.clone()));
         self.tcp_pool
             .set_http_challenge_addr(Some(self.config.http_challenge_addr));
         self.tcp_pool.update(self.ports.as_mut_slice()).await;
@@ -461,7 +472,7 @@ impl ServerState {
         tokio::task::spawn(async move {
             for mut order in orders {
                 let span = span!(Level::INFO, "acme", resource_id = order.id.to_string());
-                match order.start_challenge().instrument(span.clone()).await {
+                let succeeded = match order.start_challenge().instrument(span.clone()).await {
                     Ok(cert) => {
                         span.in_scope(|| {
                             info!(id = cert.id().to_string(), "acme request completed");
@@ -471,16 +482,20 @@ impl ServerState {
                                 cert: Arc::new(cert),
                             })
                             .await;
+                        true
                     }
                     Err(err) => {
-                        let _enter = span.enter();
-                        error!(%err, "failed to start challenge");
+                        span.in_scope(|| error!(%err, "failed to start challenge"));
+                        false
                     }
-                }
+                };
+                let _ = command
+                    .send(ServerCommand::AcmeOrderFinished {
+                        id: order.id,
+                        succeeded,
+                    })
+                    .await;
             }
-            let _ = command
-                .send(ServerCommand::SetHttpChallenges { orders: vec![] })
-                .await;
         });
     }
 

@@ -10,6 +10,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
 
 mod acme_list;
+mod acme_schedule;
 pub mod cert_list;
 mod credentials;
 mod port_list;
