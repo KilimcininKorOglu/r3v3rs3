@@ -19,11 +19,11 @@ use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
-pub(super) const LABEL_CLASS: &str =
+pub const LABEL_CLASS: &str =
     "block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200";
 const SECTION_CLASS: &str = "block mt-6 text-sm font-medium text-neutral-900 dark:text-neutral-200";
-pub(super) const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
-pub(super) const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500 dark:text-neutral-400";
+pub const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
+pub const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500 dark:text-neutral-400";
 const ERROR_CLASS: &str = "mt-2 text-sm text-red-600 dark:text-red-500";
 const TOGGLE_CLASS: &str = "shrink-0 w-9 h-5 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600";
 pub(super) const BUTTON_CLASS: &str = "inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600";
@@ -584,7 +584,7 @@ fn toggle(
     }
 }
 
-pub(super) fn error_view(error: Option<&String>) -> Html {
+pub fn error_view(error: Option<&String>) -> Html {
     match error {
         Some(error) => html! { <p class={ERROR_CLASS}>{error.clone()}</p> },
         None => html! {},

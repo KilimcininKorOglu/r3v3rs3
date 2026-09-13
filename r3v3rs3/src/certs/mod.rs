@@ -4,8 +4,8 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::subject_name::SubjectName;
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, Ia5String, IsCa, KeyPair,
-    SanType,
+    BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType,
+    ExtendedKeyUsagePurpose, Ia5String, IsCa, KeyPair, SanType,
 };
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -234,70 +234,55 @@ impl Cert {
 
         let keypair =
             KeyPair::generate().map_err(|_| Error::FailedToGenerateSelfSignedCertificate)?;
-        let cert = match params.self_signed(&keypair) {
-            Ok(cert) => cert,
-            Err(err) => {
-                error!(%err);
-                return Err(Error::FailedToGenerateSelfSignedCertificate);
-            }
-        };
+        let cert = params.self_signed(&keypair).map_err(generation_error)?;
 
         let pem_chain = cert.pem().into_bytes();
         let pem_key = keypair.serialize_pem().into_bytes();
         Self::new(CertKind::Root, pem_chain, Some(pem_key))
     }
 
+    /// Creates a server certificate signed by `ca`.
     pub fn new_self_signed(san: &[SubjectName], ca: &Cert) -> Result<Self, Error> {
+        Self::new_signed(CertKind::Server, san, ca)
+    }
+
+    /// Creates a client certificate with the `clientAuth` extended key usage, signed by `ca`.
+    pub fn new_client(san: &[SubjectName], ca: &Cert) -> Result<Self, Error> {
+        Self::new_signed(CertKind::Client, san, ca)
+    }
+
+    fn new_signed(kind: CertKind, san: &[SubjectName], ca: &Cert) -> Result<Self, Error> {
+        let (ca_cert, ca_keypair) = ca.signing_cert()?;
+
+        let mut params = leaf_params(san)?;
+        if kind == CertKind::Client {
+            params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        }
+
+        let keypair =
+            KeyPair::generate().map_err(|_| Error::FailedToGenerateSelfSignedCertificate)?;
+        let cert = params
+            .signed_by(&keypair, &ca_cert, &ca_keypair)
+            .map_err(generation_error)?;
+
+        let pem_chain = format!("{}\r\n{}", cert.pem(), ca_cert.pem()).into_bytes();
+        let pem_key = keypair.serialize_pem().into_bytes();
+        Self::new(kind, pem_chain, Some(pem_key))
+    }
+
+    /// Rebuilds this CA certificate and its key pair, so that they can sign a new certificate.
+    fn signing_cert(&self) -> Result<(Certificate, KeyPair), Error> {
         let ca_pem =
-            std::str::from_utf8(&ca.pem_chain).map_err(|_| Error::FailedToReadPrivateKey)?;
-        let pem_key = ca.pem_key.as_ref().ok_or(Error::FailedToReadPrivateKey)?;
+            std::str::from_utf8(&self.pem_chain).map_err(|_| Error::FailedToReadPrivateKey)?;
+        let pem_key = self.pem_key.as_ref().ok_or(Error::FailedToReadPrivateKey)?;
         let key_pem = std::str::from_utf8(pem_key).map_err(|_| Error::FailedToReadPrivateKey)?;
         let ca_keypair = KeyPair::from_pem(key_pem).map_err(|_| Error::FailedToReadPrivateKey)?;
         let ca_params = CertificateParams::from_ca_cert_pem(ca_pem)
             .map_err(|_| Error::FailedToGenerateSelfSignedCertificate)?;
-
-        let ca_cert = match ca_params.self_signed(&ca_keypair) {
-            Ok(cert) => cert,
-            Err(err) => {
-                error!(%err);
-                return Err(Error::FailedToGenerateSelfSignedCertificate);
-            }
-        };
-
-        let mut params = CertificateParams::default();
-        for name in san {
-            let name = if let SubjectName::IPAddress(ip) = name {
-                SanType::IpAddress(*ip)
-            } else {
-                let name = Ia5String::from_str(&name.to_string())
-                    .map_err(|_| Error::FailedToGenerateSelfSignedCertificate)?;
-                SanType::DnsName(name)
-            };
-            params.subject_alt_names.push(name);
-        }
-
-        let common_name = san
-            .iter()
-            .map(|name| name.to_string())
-            .next()
-            .unwrap_or_else(|| "r3v3rs3 Cert".into());
-        let mut distinguished_name = DistinguishedName::new();
-        distinguished_name.push(DnType::CommonName, common_name);
-        params.distinguished_name = distinguished_name;
-
-        let keypair =
-            KeyPair::generate().map_err(|_| Error::FailedToGenerateSelfSignedCertificate)?;
-        let cert = match params.signed_by(&keypair, &ca_cert, &ca_keypair) {
-            Ok(cert) => cert,
-            Err(err) => {
-                error!(%err);
-                return Err(Error::FailedToGenerateSelfSignedCertificate);
-            }
-        };
-
-        let pem_chain = format!("{}\r\n{}", cert.pem(), ca_cert.pem()).into_bytes();
-        let pem_key = keypair.serialize_pem().into_bytes();
-        Self::new(CertKind::Server, pem_chain, Some(pem_key))
+        let ca_cert = ca_params
+            .self_signed(&ca_keypair)
+            .map_err(generation_error)?;
+        Ok((ca_cert, ca_keypair))
     }
 
     pub fn certified_key(&self) -> Result<CertifiedKey, Error> {
@@ -333,6 +318,36 @@ impl Cert {
     }
 }
 
+/// Returns the parameters of a leaf certificate with the subject alternative names. The first name is the common name.
+fn leaf_params(san: &[SubjectName]) -> Result<CertificateParams, Error> {
+    let mut params = CertificateParams::default();
+    for name in san {
+        let name = if let SubjectName::IPAddress(ip) = name {
+            SanType::IpAddress(*ip)
+        } else {
+            let name = Ia5String::from_str(&name.to_string())
+                .map_err(|_| Error::FailedToGenerateSelfSignedCertificate)?;
+            SanType::DnsName(name)
+        };
+        params.subject_alt_names.push(name);
+    }
+
+    let common_name = san
+        .iter()
+        .map(|name| name.to_string())
+        .next()
+        .unwrap_or_else(|| "r3v3rs3 Cert".into());
+    let mut distinguished_name = DistinguishedName::new();
+    distinguished_name.push(DnType::CommonName, common_name);
+    params.distinguished_name = distinguished_name;
+    Ok(params)
+}
+
+fn generation_error(err: rcgen::Error) -> Error {
+    error!(%err);
+    Error::FailedToGenerateSelfSignedCertificate
+}
+
 fn parse_chain<'a>(chain: &'a [CertificateDer]) -> Result<Vec<X509Certificate<'a>>, Error> {
     chain
         .iter()
@@ -346,14 +361,38 @@ fn parse_chain<'a>(chain: &'a [CertificateDer]) -> Result<Vec<X509Certificate<'a
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
+    type Sign = fn(&[SubjectName], &Cert) -> Result<Cert, Error>;
+
+    /// Signs a certificate for `name` and returns it with its `clientAuth` extended key usage flag.
+    fn signed(sign: Sign, name: &str) -> (Cert, Option<bool>) {
+        let san = [SubjectName::from_str(name).unwrap()];
+        let ca = Cert::new_ca().unwrap();
+        let cert = sign(&san, &ca).unwrap();
+        assert_eq!(cert.san, san);
+        assert!(cert.key.is_some());
+
+        let chain = cert.certificates().unwrap();
+        let (_, x509) = parse_x509_certificate(chain[0].as_ref()).unwrap();
+        let client_auth = x509
+            .extended_key_usage()
+            .unwrap()
+            .map(|eku| eku.value.client_auth);
+        (cert, client_auth)
+    }
 
     #[test]
     fn test_self_signed() {
-        use super::*;
+        let (cert, client_auth) = signed(Cert::new_self_signed, "localhost");
+        assert_eq!(cert.kind, CertKind::Server);
+        assert_eq!(client_auth, None);
+    }
 
-        let san = [SubjectName::from_str("localhost").unwrap()];
-        let ca = Cert::new_ca().unwrap();
-        let cert = Cert::new_self_signed(&san, &ca).unwrap();
-        assert_eq!(cert.san, san);
+    #[test]
+    fn client_certificate_has_the_client_auth_usage() {
+        let (cert, client_auth) = signed(Cert::new_client, "client.example.com");
+        assert_eq!(cert.kind, CertKind::Client);
+        assert_eq!(client_auth, Some(true));
     }
 }

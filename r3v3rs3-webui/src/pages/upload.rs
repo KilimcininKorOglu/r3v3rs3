@@ -28,7 +28,7 @@ pub fn upload() -> Html {
         let _ = navigator_cloned.push_with_query(
             &Route::Certs,
             &CertsQuery {
-                tab: CertsTab::Server,
+                tab: CertsTab::for_kind(query.kind),
             },
         );
     });
@@ -75,11 +75,7 @@ pub fn upload() -> Html {
                     let _ = navigator.push_with_query(
                         &Route::Certs,
                         &CertsQuery {
-                            tab: if query.kind == CertKind::Server {
-                                CertsTab::Server
-                            } else {
-                                CertsTab::Root
-                            },
+                            tab: CertsTab::for_kind(query.kind),
                         },
                     );
                 }

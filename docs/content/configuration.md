@@ -370,6 +370,13 @@ For TCP over TLS and HTTPS proxy, r3v3rs3 requires a server certificate. There a
 
 r3v3rs3 will automatically search for a certificate from SNI (Server Name Indication) in the TLS client hello message.
 
+## Client Certificates
+
+A TLS server can require a client certificate to authenticate the client. There are two ways to add a client certificate in the "Client Certs" tab:
+
+1. Generate a self-signed certificate and select "Client Certificate" as the certificate type. r3v3rs3 adds the `clientAuth` extended key usage, and the selected CA certificate signs it.
+2. Import a certificate chain and its private key from files (PEM format only). A client certificate needs a private key.
+
 ## Root Certificates
 
 If your upstream server uses certificates not trusted by the system, you will need to add them to the root certificate store. r3v3rs3 automatically trusts all certificates signed by the root certificate, in addition to the system's root certificates.

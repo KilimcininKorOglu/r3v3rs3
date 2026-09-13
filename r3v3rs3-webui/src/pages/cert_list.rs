@@ -4,12 +4,13 @@ use crate::components::data_list::{
 };
 use crate::format::format_duration;
 use crate::i18n::use_locale;
+use crate::pages::self_sign::SelfSignQuery;
 use crate::pages::Route;
 use crate::store::{AcmeStore, CertStore};
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::acme::AcmeInfo;
-use r3v3rs3_api::cert::{CertInfo, CertKind, UploadQuery};
+use r3v3rs3_api::cert::{CertInfo, CertKind, SelfSignedCertKind, UploadQuery};
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use serde_derive::{Deserialize, Serialize};
@@ -22,6 +23,7 @@ use yewdux::prelude::*;
 pub enum CertsTab {
     #[default]
     Server,
+    Client,
     Root,
     Acme,
 }
@@ -33,16 +35,41 @@ pub struct CertsQuery {
 }
 
 impl CertsTab {
+    /// Returns the tab that lists certificates of this kind.
+    pub fn for_kind(kind: CertKind) -> Self {
+        match kind {
+            CertKind::Server => CertsTab::Server,
+            CertKind::Client => CertsTab::Client,
+            CertKind::Root => CertsTab::Root,
+        }
+    }
+
+    /// Returns the kind of the certificates in this tab. The ACME tab lists no certificates.
+    fn cert_kind(self) -> Option<CertKind> {
+        match self {
+            CertsTab::Server => Some(CertKind::Server),
+            CertsTab::Client => Some(CertKind::Client),
+            CertsTab::Root => Some(CertKind::Root),
+            CertsTab::Acme => None,
+        }
+    }
+
     fn label_key(self) -> &'static str {
         match self {
             CertsTab::Server => "certs.tab_server",
+            CertsTab::Client => "certs.tab_client",
             CertsTab::Root => "certs.tab_root",
             CertsTab::Acme => "certs.tab_acme",
         }
     }
 }
 
-const TABS: [CertsTab; 3] = [CertsTab::Server, CertsTab::Root, CertsTab::Acme];
+const TABS: [CertsTab; 4] = [
+    CertsTab::Server,
+    CertsTab::Client,
+    CertsTab::Root,
+    CertsTab::Acme,
+];
 
 const SERVER_COLUMNS: [Column; 4] = [
     Column {
@@ -135,23 +162,25 @@ pub fn cert_list() -> Html {
     let navigator = use_navigator().unwrap();
 
     let navigator_cloned = navigator.clone();
+    let self_sign_kind = if *tab == CertsTab::Client {
+        SelfSignedCertKind::Client
+    } else {
+        SelfSignedCertKind::Server
+    };
     let self_sign_onclick = Callback::from(move |_| {
-        navigator_cloned.push(&Route::SelfSign);
+        let _ = navigator_cloned.push_with_query(
+            &Route::SelfSign,
+            &SelfSignQuery {
+                kind: self_sign_kind,
+            },
+        );
     });
 
     let navigator_cloned = navigator.clone();
-    let tab_cloned = tab.clone();
+    let upload_kind = tab.cert_kind().unwrap_or(CertKind::Server);
     let upload_onclick = Callback::from(move |_| {
-        let _ = navigator_cloned.push_with_query(
-            &Route::Upload,
-            &UploadQuery {
-                kind: if *tab_cloned == CertsTab::Server {
-                    CertKind::Server
-                } else {
-                    CertKind::Root
-                },
-            },
-        );
+        let _ =
+            navigator_cloned.push_with_query(&Route::Upload, &UploadQuery { kind: upload_kind });
     });
 
     let navigator_cloned = navigator.clone();
@@ -159,18 +188,14 @@ pub fn cert_list() -> Html {
         navigator_cloned.push(&Route::NewAcme);
     });
 
-    let kind = if *tab == CertsTab::Server {
-        CertKind::Server
-    } else {
-        CertKind::Root
-    };
+    let kind = tab.cert_kind();
     let cert_list = certs
         .entries
         .iter()
-        .filter(|cert| cert.kind == kind)
+        .filter(|cert| Some(cert.kind) == kind)
         .collect::<Vec<_>>();
     let body = match *tab {
-        CertsTab::Server => {
+        CertsTab::Server | CertsTab::Client => {
             let rows = cert_list
                 .iter()
                 .map(|entry| server_row(locale, entry))
@@ -227,7 +252,7 @@ pub fn cert_list() -> Html {
         </div>
             { body }
             <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
-                if *tab == CertsTab::Server {
+                if matches!(*tab, CertsTab::Server | CertsTab::Client) {
                     <button onclick={self_sign_onclick} class="inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-l-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
                         <img src="/assets/icons/create.svg" class="w-4 h-4 mr-1 text-neutral-500" />
                         {locale.t("certs.self_sign")}
@@ -367,7 +392,7 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator) -> Row {
     }
 }
 
-async fn get_cert_list() -> Result<Vec<CertInfo>, gloo_net::Error> {
+pub async fn get_cert_list() -> Result<Vec<CertInfo>, gloo_net::Error> {
     Request::get(&format!("{API_ENDPOINT}/certs"))
         .send()
         .await?
@@ -418,5 +443,18 @@ mod location {
     extern "C" {
         #[wasm_bindgen(js_namespace = location)]
         pub fn assign(url: &str);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_certificate_kind_has_its_own_tab() {
+        for kind in [CertKind::Server, CertKind::Client, CertKind::Root] {
+            assert_eq!(CertsTab::for_kind(kind).cert_kind(), Some(kind));
+        }
+        assert_eq!(CertsTab::Acme.cert_kind(), None);
     }
 }

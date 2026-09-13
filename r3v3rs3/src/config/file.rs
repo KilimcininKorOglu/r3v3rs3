@@ -513,16 +513,13 @@ impl Storage for FileStorage {
         let dir = &self.dir;
         let path = dir.join("certs");
         let mut certs = Vec::new();
-        match self.load_certs_impl(&path, CertKind::Server).await {
-            Ok(mut entries) => certs.append(&mut entries),
-            Err(err) => {
-                warn!(?path, "failed to load: {err}");
-            }
-        }
-        match self.load_certs_impl(&path, CertKind::Root).await {
-            Ok(mut entries) => certs.append(&mut entries),
-            Err(err) => {
-                warn!(?path, "failed to load: {err}");
+        // Every kind has its own directory below `certs`.
+        for kind in [CertKind::Server, CertKind::Client, CertKind::Root] {
+            match self.load_certs_impl(&path, kind).await {
+                Ok(mut entries) => certs.append(&mut entries),
+                Err(err) => {
+                    warn!(?path, %kind, "failed to load: {err}");
+                }
             }
         }
         certs
@@ -558,6 +555,37 @@ impl Storage for FileStorage {
                 warn!(?path, "failed to load: {err}");
                 None
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn every_certificate_kind_is_loaded_after_save() {
+        let dir = std::env::temp_dir().join(format!("r3v3rs3-file-certs-{}", std::process::id()));
+        let storage = FileStorage::new(&dir);
+
+        let ca = Cert::new_ca().unwrap();
+        let san = ["client.example.com".parse().unwrap()];
+        let server = Cert::new_self_signed(&san, &ca).unwrap();
+        let client = Cert::new_client(&san, &ca).unwrap();
+        for cert in [&ca, &server, &client] {
+            storage.save_cert(cert).await;
+        }
+
+        let loaded = storage.load_certs().await;
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        for cert in [&ca, &server, &client] {
+            let found = loaded
+                .iter()
+                .find(|loaded| loaded.id == cert.id)
+                .unwrap_or_else(|| panic!("{:?} certificate is not loaded", cert.kind));
+            assert_eq!(found.kind, cert.kind);
+            assert!(found.key.is_some());
         }
     }
 }

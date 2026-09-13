@@ -55,6 +55,26 @@ pub struct SelfSignedCertRequest {
     pub san: Vec<SubjectName>,
     #[schema(example = "f9cf7e3faa1aca7e6086")]
     pub ca_cert: Option<ShortId>,
+    #[serde(default)]
+    pub kind: SelfSignedCertKind,
+}
+
+/// The kind of a self-signed certificate. A client certificate has the `clientAuth` extended key usage.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SelfSignedCertKind {
+    #[default]
+    Server,
+    Client,
+}
+
+impl From<SelfSignedCertKind> for CertKind {
+    fn from(kind: SelfSignedCertKind) -> Self {
+        match kind {
+            SelfSignedCertKind::Server => CertKind::Server,
+            SelfSignedCertKind::Client => CertKind::Client,
+        }
+    }
 }
 
 #[derive(DefaultFromSerde, Clone, Serialize, Deserialize, IntoParams)]

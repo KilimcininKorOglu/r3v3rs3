@@ -11,7 +11,8 @@ use axum::{
     Json,
 };
 use r3v3rs3_api::{
-    cert::{CertInfo, CertPostBody, SelfSignedCertRequest, UploadQuery},
+    cert::{CertInfo, CertPostBody, SelfSignedCertKind, SelfSignedCertRequest, UploadQuery},
+    error::Error,
     id::ShortId,
 };
 use std::{ops::Deref, sync::Arc};
@@ -45,7 +46,7 @@ pub async fn get(
     Ok(Json(Box::new(cert.info())))
 }
 
-/// Creates a self-signed server certificate. Without `ca_cert`, a new CA certificate signs it.
+/// Creates a self-signed server or client certificate. Without `ca_cert`, a new CA certificate signs it.
 #[utoipa::path(
     post,
     path = "/self_sign",
@@ -60,14 +61,21 @@ pub async fn self_sign(
 ) -> Result<Json<Box<()>>, AppError> {
     let cert = if let Some(ca_cert) = request.ca_cert {
         let ca = state.call(GetCert { id: ca_cert }).await?;
-        Cert::new_self_signed(&request.san, &ca)?
+        sign(&request, &ca)?
     } else {
         let ca = Arc::new(Cert::new_ca()?);
         state.call(AddCert { cert: ca.clone() }).await?;
-        Cert::new_self_signed(&request.san, &ca)?
+        sign(&request, &ca)?
     };
     let cert = Arc::new(cert);
     Ok(Json(state.call(AddCert { cert }).await?))
+}
+
+fn sign(request: &SelfSignedCertRequest, ca: &Cert) -> Result<Cert, Error> {
+    match request.kind {
+        SelfSignedCertKind::Server => Cert::new_self_signed(&request.san, ca),
+        SelfSignedCertKind::Client => Cert::new_client(&request.san, ca),
+    }
 }
 
 /// Uploads a PEM certificate chain and an optional PEM private key.

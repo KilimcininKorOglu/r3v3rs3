@@ -370,6 +370,13 @@ TLS üzerinden TCP ve HTTPS proxy'leri için bir sunucu sertifikası gerekir. Su
 
 r3v3rs3, TLS client hello mesajındaki SNI (Server Name Indication) değerine göre uygun sertifikayı otomatik olarak seçer.
 
+## Client sertifikaları
+
+TLS sunucusu, client'ı doğrulamak için client sertifikası isteyebilir. "Client Sertifikaları" sekmesinde client sertifikasını iki yolla ekleyebilirsiniz:
+
+1. Self-signed bir sertifika oluşturun ve sertifika türü olarak "Client Sertifikası" seçin. r3v3rs3 sertifikaya `clientAuth` extended key usage değerini ekler. Seçilen CA sertifikası sertifikayı imzalar.
+2. Sertifika zincirini ve private key'i dosyadan içe aktarın (yalnız PEM formatı). Client sertifikası için private key gerekir.
+
 ## Root sertifikaları
 
 Upstream sunucunuz sistemin güvenmediği sertifikalar kullanıyorsa bu sertifikaları root sertifika deposuna eklemeniz gerekir. r3v3rs3, sistemin root sertifikalarına ek olarak bu depodaki root sertifikalarının imzaladığı bütün sertifikalara da otomatik olarak güvenir.
