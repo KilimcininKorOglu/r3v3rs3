@@ -11,10 +11,10 @@ Projenin kaynak kodu [GitHub](https://github.com/KilimcininKorOglu/r3v3rs3) üze
 Başlamadan önce şunları kurun:
 
 - Rust toolchain: [rustup.rs](https://rustup.rs/) ile kurabilirsiniz.
-- WASM toolchain: Rust toolchain kurulduktan sonra terminalde `rustup target add wasm32-unknown-unknown` komutunu çalıştırarak WASM target'ını ekleyin.
-- [Trunk](https://trunkrs.dev/): Kurulum talimatları için web sitesine bakın.
+- WASM toolchain: Rust toolchain'i kurduktan sonra WASM target'ını `rustup target add wasm32-unknown-unknown` komutuyla ekleyin.
+- [Trunk](https://trunkrs.dev/): Kurulum talimatları web sitesinde bulunur.
 
-# Geliştirme Ortamı
+# Geliştirme ortamı
 
 ```bash
 # Clone the repository
@@ -29,7 +29,7 @@ cd r3v3rs3-webui
 trunk serve
 ```
 
-# Release Build
+# Release build
 
 ```bash
 # Build the WebUI
@@ -46,6 +46,6 @@ target/release/r3v3rs3 start
 
 # Gitpod
 
-r3v3rs3'ü Gitpod ile doğrudan tarayıcınızda geliştirmeye başlayabilirsiniz.
+Gitpod ile r3v3rs3'ü doğrudan tarayıcıda geliştirebilirsiniz.
 
 [![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/KilimcininKorOglu/r3v3rs3)

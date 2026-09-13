@@ -41,10 +41,10 @@ language_name = "Türkçe"
 flag = "tr"
 language = "Dil"
 heading = "Her Protokol, Tek Binary"
-tagline = "Dahili WebUI'a sahip bir reverse proxy sunucusu."
+tagline = "WebUI ile birlikte gelen bir reverse proxy sunucusu."
 getting_started = "Başlarken"
 overview = "Genel Bakış"
-description = "TCP, UDP, HTTP, TLS ve WebSocket destekleyen, dahili WebUI'a sahip, Rust ile yazılmış bir reverse proxy sunucusu."
+description = "Rust ile yazılmış, WebUI ile birlikte gelen ve TCP, UDP, HTTP, TLS ve WebSocket destekleyen bir reverse proxy sunucusu."
 theme_by = "Zola teması:"
 
 [extra]
