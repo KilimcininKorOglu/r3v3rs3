@@ -212,7 +212,7 @@ pub fn cert_list() -> Html {
                                     </td>
                                     <td class="px-4 py-4 w-0 whitespace-nowrap" align="right">
                                         <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={download_onclick}>{"Download"}</a>
-                                        <a class="cursor-pointer font-medium text-red-600 hover:underline" onclick={delete_onclick}>{"Delete"}</a>
+                                        <a class="cursor-pointer font-medium text-red-600 dark:text-red-500 hover:underline" onclick={delete_onclick}>{"Delete"}</a>
                                     </td>
                                 </tr>
                             }
@@ -291,7 +291,7 @@ pub fn cert_list() -> Html {
                                 </td>
                                 <td class="px-4 py-4 w-0 whitespace-nowrap" align="right">
                                     <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={download_onclick}>{"Download"}</a>
-                                    <a class="cursor-pointer font-medium text-red-600 hover:underline" onclick={delete_onclick}>{"Delete"}</a>
+                                    <a class="cursor-pointer font-medium text-red-600 dark:text-red-500 hover:underline" onclick={delete_onclick}>{"Delete"}</a>
                                 </td>
                             </tr>
                         }
@@ -375,12 +375,12 @@ pub fn cert_list() -> Html {
                                 <td class="px-4 py-4 w-0 whitespace-nowrap" align="center">
                                     <label class="relative inline-flex items-center cursor-pointer mt-1">
                                         <input {onchange} type="checkbox" checked={active} class="sr-only peer" />
-                                        <div class="w-9 h-4 bg-neutral-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                        <div class="w-9 h-4 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
                                     </label>
                                 </td>
                                 <td class="px-4 py-4 w-0 whitespace-nowrap" align="right">
                                     <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={log_onclick}>{"Log"}</a>
-                                    <a class="cursor-pointer font-medium text-red-600 hover:underline" onclick={delete_onclick}>{"Delete"}</a>
+                                    <a class="cursor-pointer font-medium text-red-600 dark:text-red-500 hover:underline" onclick={delete_onclick}>{"Delete"}</a>
                                 </td>
                             </tr>
                         }

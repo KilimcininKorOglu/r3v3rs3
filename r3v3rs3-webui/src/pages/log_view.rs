@@ -48,11 +48,11 @@ pub fn log_view(props: &Props) -> Html {
                     format!("{}={}", k, v)
                 }).collect::<Vec<String>>().join(" ");
                 let log_class = match entry.level {
-                    LogLevel::Error => "text-red-600",
-                    LogLevel::Warn => "text-yellow-600",
-                    LogLevel::Info => "text-green-600",
-                    LogLevel::Debug => "text-blue-600",
-                    LogLevel::Trace => "text-neutral-600",
+                    LogLevel::Error => "text-red-600 dark:text-red-400",
+                    LogLevel::Warn => "text-yellow-600 dark:text-yellow-400",
+                    LogLevel::Info => "text-green-600 dark:text-green-400",
+                    LogLevel::Debug => "text-blue-600 dark:text-blue-400",
+                    LogLevel::Trace => "text-neutral-600 dark:text-neutral-400",
                 };
                 html! {
                     <li class="font-mono text-sm px-4 py-1 border-b dark:border-neutral-700">
@@ -67,7 +67,7 @@ pub fn log_view(props: &Props) -> Html {
                 }).collect::<Html>()
             }
             if log.is_empty() {
-                <li class="mb-8 mt-8 text-xl font-bold text-neutral-500 px-16 text-center">{"No logs."}</li>
+                <li class="mb-8 mt-8 text-xl font-bold text-neutral-500 dark:text-neutral-300 px-16 text-center">{"No logs."}</li>
             }
             </ul>
         </>

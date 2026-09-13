@@ -113,15 +113,15 @@ pub fn settings() -> Html {
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"Admin"}</h2>
             { text_field(&fields, &errors, "Session Expiry", "session_expiry", "1h", |f| &mut f.session_expiry) }
             { text_field(&fields, &errors, "Max Login Attempts", "max_login_attempts", "10", |f| &mut f.max_login_attempts) }
-            <p class="mt-2 text-sm text-neutral-500">{"Failed logins allowed per client IP and username before the login is blocked."}</p>
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{"Failed logins allowed per client IP and username before the login is blocked."}</p>
             { text_field(&fields, &errors, "Login Attempts Reset", "login_attempts_reset", "15m", |f| &mut f.login_attempts_reset) }
-            <p class="mt-2 text-sm text-neutral-500">{"How long a blocked client IP and username must wait before the next login attempt."}</p>
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{"How long a blocked client IP and username must wait before the next login attempt."}</p>
 
             <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"Server"}</h2>
             { text_field(&fields, &errors, "Background Task Interval", "background_task_interval", "1h", |f| &mut f.background_task_interval) }
             { text_field(&fields, &errors, "HTTP Challenge Address", "http_challenge_addr", "0.0.0.0:80", |f| &mut f.http_challenge_addr) }
             { text_field(&fields, &errors, "Database Log Retention", "database_log_retention", "3months", |f| &mut f.database_log_retention) }
-            <p class="mt-2 text-sm text-neutral-500">{"Durations use a human-readable format, e.g, 30s, 15m, 1h, 7days."}</p>
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{"Durations use a human-readable format, e.g, 30s, 15m, 1h, 7days."}</p>
 
             <div class="flex mt-4 items-center justify-end">
                 <button type="submit" disabled={parsed.is_err() || *is_loading} class="inline-flex items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
@@ -137,12 +137,12 @@ pub fn settings() -> Html {
 fn notice_view(notice: &UseStateHandle<Option<Notice>>) -> Html {
     match &**notice {
         Some(Notice::Success(message)) => html! {
-            <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4" role="status">
+            <div class="bg-green-100 border border-green-400 text-green-700 dark:bg-green-950 dark:border-green-800 dark:text-green-300 px-4 py-3 rounded relative mb-4" role="status">
                 <span class="block sm:inline">{*message}</span>
             </div>
         },
         Some(Notice::Failed(message)) => html! {
-            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+            <div class="bg-red-100 border border-red-400 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300 px-4 py-3 rounded relative mb-4" role="alert">
                 <span class="block sm:inline">{message}</span>
             </div>
         },
@@ -311,7 +311,7 @@ fn cdn_status_card() -> Html {
         <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 lg:rounded-md">
             { notice_view(&notice) }
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"CDN IP Ranges"}</h2>
-            <p class="mt-2 text-sm text-neutral-500">{"Edge server addresses of known CDNs. The list is refreshed every day."}</p>
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{"Edge server addresses of known CDNs. The list is refreshed every day."}</p>
             if let Some(status) = &*status {
                 { cdn_status_view(status) }
             }

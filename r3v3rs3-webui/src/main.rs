@@ -10,6 +10,7 @@ mod components;
 mod event;
 mod format;
 mod pages;
+mod preferences;
 mod store;
 
 const API_ENDPOINT: &str = "/api";

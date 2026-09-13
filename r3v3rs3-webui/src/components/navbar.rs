@@ -1,3 +1,4 @@
+use super::theme_menu::ThemeMenu;
 use crate::pages::Route;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -88,6 +89,7 @@ pub fn navbar() -> Html {
                 }
             </div>
             <div class="flex justify-end ml-auto">
+                <ThemeMenu class={classes!("px-4", "py-3", "flex", "items-center", "hover:bg-neutral-600")} />
                 <span class="lg:rounded-r-md px-4 py-3 inline-block cursor-pointer hover:bg-neutral-600 text-md flex items-center" onclick={logout_onclick}>
                     <img src="/assets/icons/log-out.svg" class="w-5 h-5" />
                     <span class="ml-2 hidden md:inline">{"Logout"}</span>

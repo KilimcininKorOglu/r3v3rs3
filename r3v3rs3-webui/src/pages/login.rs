@@ -1,5 +1,6 @@
 use crate::{
     auth::{test_token, LoginQuery},
+    components::theme_menu::ThemeMenu,
     pages::Route,
     API_ENDPOINT,
 };
@@ -147,6 +148,9 @@ pub fn login() -> Html {
 
     html! {
         <>
+        <div class="flex justify-end px-4">
+            <ThemeMenu class={classes!("p-2", "rounded-md", "text-neutral-600", "dark:text-neutral-300", "hover:bg-neutral-200", "dark:hover:bg-neutral-700")} />
+        </div>
         <form class="mx-auto max-w-sm mt-4 px-4" {onsubmit}>
             <div class="mx-auto flex w-full justify-center items-center mb-2">
                 <img class="w-8 h-8 dark:invert" src="/assets/logo.svg" />
@@ -156,7 +160,7 @@ pub fn login() -> Html {
             </div>
 
             if let Some(err) = &*error {
-                <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                <div class="bg-red-100 border border-red-400 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300 px-4 py-3 rounded relative mb-4" role="alert">
                     <span class="block sm:inline">{&err.message}</span>
                 </div>
             }

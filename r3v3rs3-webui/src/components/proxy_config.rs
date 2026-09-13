@@ -209,7 +209,7 @@ pub fn proxy_config(props: &Props) -> Html {
                     html! {
                         <li>
                             <div class="flex items-center pl-2 rounded hover:bg-neutral-100 dark:hover:bg-neutral-900">
-                                <input {onchange} id={entry.id.to_string()} type="checkbox" checked={bound_ports_cloned.contains(&entry.id)} class="w-4 h-4 text-blue-600 bg-neutral-100 border-neutral-300 rounded focus:ring-blue-500 focus:ring-2" />
+                                <input {onchange} id={entry.id.to_string()} type="checkbox" checked={bound_ports_cloned.contains(&entry.id)} class="w-4 h-4 text-blue-600 bg-neutral-100 border-neutral-300 dark:bg-neutral-700 dark:border-neutral-600 rounded focus:ring-blue-500 focus:ring-2" />
                                 <label for={entry.id.to_string()} class="w-full py-2 ml-2 text-sm font-medium text-neutral-900 dark:text-neutral-200 rounded">{entry.port.listen.to_string()}</label>
                             </div>
                         </li>

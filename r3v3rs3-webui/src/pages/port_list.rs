@@ -160,8 +160,8 @@ pub fn post_list() -> Html {
                                     <td class="px-4 py-4 w-0 whitespace-nowrap" align="right">
                                         <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={config_onclick}>{"Edit"}</a>
                                         <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={log_onclick}>{"Log"}</a>
-                                        <a class="cursor-pointer font-medium text-orange-600 hover:underline mr-5" onclick={reset_onclick}>{"Reset"}</a>
-                                        <a class="cursor-pointer font-medium text-red-600 hover:underline" onclick={delete_onclick}>{"Delete"}</a>
+                                        <a class="cursor-pointer font-medium text-orange-600 dark:text-orange-500 hover:underline mr-5" onclick={reset_onclick}>{"Reset"}</a>
+                                        <a class="cursor-pointer font-medium text-red-600 dark:text-red-500 hover:underline" onclick={delete_onclick}>{"Delete"}</a>
                                     </td>
                                 </tr>
                             }

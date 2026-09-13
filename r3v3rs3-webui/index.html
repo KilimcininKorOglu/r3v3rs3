@@ -19,6 +19,22 @@
     <meta name="msapplication-TileColor" content="#ffc40d">
     <meta name="theme-color" content="#ffffff">
     <meta name="robots" content="noindex" />
+    <script>
+        // Applies the theme before the WebUI loads, so the page does not change color after the
+        // first paint. src/preferences.rs applies a theme that the user selects.
+        (function () {
+            var query = window.matchMedia("(prefers-color-scheme: dark)");
+            function apply() {
+                var match = document.cookie.match(/(?:^|;\s*)r3v3rs3_theme=([a-z]+)/);
+                var theme = match ? match[1] : "system";
+                var dark = theme === "dark" || (theme !== "light" && query.matches);
+                document.documentElement.classList.toggle("dark", dark);
+                document.querySelector('meta[name="theme-color"]').setAttribute("content", dark ? "#333333" : "#ffffff");
+            }
+            apply();
+            query.addEventListener("change", apply);
+        })();
+    </script>
 </head>
 
 <body>
