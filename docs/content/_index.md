@@ -17,7 +17,7 @@ sort_by = "weight"
 - Allows live configuration updates via a REST API without restarting the service
 - Imports TLS certificates from the GUI or can generate a self-signed certificate
 - Provides Let's Encrypt support (ACME v2 with the HTTP-01 and DNS-01 challenges) for seamless certificate provisioning, including wildcard certificates through the Cloudflare, Route 53, DigitalOcean and Hetzner Cloud DNS APIs
-- Discovers proxies from Docker container labels, Consul service tags and the Consul key-value store, and updates them when the source changes ([Service Discovery](@/discovery.md))
+- Discovers proxies from Docker container labels, Consul service tags and the Consul and etcd key-value stores, and updates them when the source changes ([Service Discovery](@/discovery.md))
 
 # Installation
 

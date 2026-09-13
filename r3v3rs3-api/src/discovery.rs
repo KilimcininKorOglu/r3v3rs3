@@ -94,27 +94,35 @@ pub struct DiscoveryConfig {
     pub docker: DockerDiscoveryConfig,
     #[serde(default)]
     pub consul: ConsulDiscoveryConfig,
+    #[serde(default)]
+    pub etcd: EtcdDiscoveryConfig,
 }
 
 impl DiscoveryConfig {
-    /// A copy without secrets, which the admin API returns. `token_set` tells whether a token is
-    /// set.
+    /// A copy without secrets, which the admin API returns. `token_set` and `password_set` tell
+    /// whether a secret is set.
     pub fn masked(&self) -> Self {
         let mut masked = self.clone();
         masked.consul.token_set = masked.consul.token.take().is_some();
+        masked.etcd.password_set = masked.etcd.password.take().is_some();
         masked
     }
 
     /// Takes the secrets that an update does not set from the current settings. An empty secret
     /// removes the secret.
     pub fn keep_secrets(&mut self, current: &Self) {
-        let consul = &mut self.consul;
-        consul.token_set = false;
-        match consul.token.as_deref() {
-            None => consul.token.clone_from(&current.consul.token),
-            Some("") => consul.token = None,
-            Some(_) => {}
-        }
+        self.consul.token_set = false;
+        keep_secret(&mut self.consul.token, &current.consul.token);
+        self.etcd.password_set = false;
+        keep_secret(&mut self.etcd.password, &current.etcd.password);
+    }
+}
+
+fn keep_secret(secret: &mut Option<String>, current: &Option<String>) {
+    match secret.as_deref() {
+        None => secret.clone_from(current),
+        Some("") => *secret = None,
+        Some(_) => {}
     }
 }
 
@@ -210,6 +218,55 @@ fn default_consul_address() -> String {
 
 fn default_consul_prefix() -> String {
     "r3v3rs3".to_string()
+}
+
+#[derive(
+    serde_default::DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema,
+)]
+pub struct EtcdDiscoveryConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// The v3 HTTP API addresses of the cluster members. A connection error selects the next
+    /// address.
+    #[serde(default = "default_etcd_endpoints")]
+    pub endpoints: Vec<String>,
+    /// The client certificate for an `https` endpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "abc-def")]
+    pub client_cert: Option<crate::id::ShortId>,
+    /// The user of etcd authentication. Empty sends no credentials.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[schema(example = "r3v3rs3")]
+    pub username: String,
+    /// The password of the user. The admin API does not return it. An update without a password
+    /// keeps the current password, and an empty password removes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(write_only)]
+    pub password: Option<String>,
+    /// Whether a password is set.
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schema(read_only)]
+    pub password_set: bool,
+    #[serde(default = "default_consul_prefix")]
+    #[schema(example = "r3v3rs3")]
+    pub prefix: String,
+}
+
+impl fmt::Debug for EtcdDiscoveryConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EtcdDiscoveryConfig")
+            .field("enabled", &self.enabled)
+            .field("endpoints", &self.endpoints)
+            .field("client_cert", &self.client_cert)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "***"))
+            .field("prefix", &self.prefix)
+            .finish()
+    }
+}
+
+fn default_etcd_endpoints() -> Vec<String> {
+    vec!["http://127.0.0.1:2379".to_string()]
 }
 
 fn default_true() -> bool {
@@ -339,6 +396,29 @@ mod endpoint_tests {
         let mut update = with_token(Some(""));
         update.keep_secrets(&current);
         assert_eq!(update.consul.token, None);
+    }
+
+    #[test]
+    fn the_etcd_password_is_masked_and_kept_until_an_update_sets_it() {
+        let mut current = DiscoveryConfig::default();
+        assert_eq!(current.etcd.endpoints, ["http://127.0.0.1:2379"]);
+        assert_eq!(current.etcd.prefix, "r3v3rs3");
+        current.etcd.username = "root".into();
+        current.etcd.password = Some("secret".into());
+        let masked = current.masked();
+        assert_eq!(masked.etcd.password, None);
+        assert!(masked.etcd.password_set);
+        assert!(!serde_json::to_string(&masked).unwrap().contains("secret"));
+        assert!(!format!("{:?}", current).contains("secret"));
+
+        let mut update = masked.clone();
+        update.keep_secrets(&current);
+        assert_eq!(update, current);
+
+        let mut update = masked;
+        update.etcd.password = Some(String::new());
+        update.keep_secrets(&current);
+        assert_eq!(update.etcd.password, None);
     }
 }
 

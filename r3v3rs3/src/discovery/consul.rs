@@ -3,10 +3,10 @@
 //! blocking queries.
 
 use super::http::{read_json, ApiClient, RESPONSE_TIMEOUT};
+use super::kv::{self, KvEntry};
 use super::labels::{self, Upstream};
 use super::{Built, ProxyGroups, Reporter, Watch, DEBOUNCE, MIN_BACKOFF};
 use anyhow::{anyhow, Context as _};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
 use bytes::Bytes;
 use futures::future::{select_all, BoxFuture, FutureExt};
 use http_body_util::Full;
@@ -72,7 +72,7 @@ struct ServiceInfo {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-struct KvEntry {
+struct ConsulKv {
     key: String,
     /// Base64 text. A folder has no value.
     #[serde(default)]
@@ -185,54 +185,6 @@ fn add_service(
     }
 }
 
-/// Adds the proxies of the keys under the prefix. The key `<prefix>/http/app/ports` is the label
-/// `r3v3rs3.http.app.ports`.
-fn add_kv(built: &mut Built, groups: &mut ProxyGroups, entries: &[KvEntry], prefix: &str) {
-    let mut pairs = Vec::new();
-    for entry in entries {
-        match kv_label(entry, prefix) {
-            Ok(Some(pair)) => pairs.push(pair),
-            Ok(None) => {}
-            Err(message) => built.issue(prefix, message),
-        }
-    }
-    let parsed = labels::parse(pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())), None);
-    for message in parsed.issues {
-        built.issue(prefix, message);
-    }
-    for definition in parsed.definitions {
-        let resource = format!("{prefix}/{}", definition.key.replace('.', "/"));
-        if let Err(message) = groups.add("kv", &resource, definition) {
-            built.issue(prefix, message);
-        }
-    }
-}
-
-/// The label of a key. A folder and a key outside the prefix have no label.
-fn kv_label(entry: &KvEntry, prefix: &str) -> Result<Option<(String, String)>, String> {
-    let rest = entry
-        .key
-        .strip_prefix(prefix)
-        .and_then(|rest| rest.strip_prefix('/'))
-        .filter(|rest| !rest.is_empty() && !rest.ends_with('/'));
-    let (Some(rest), Some(value)) = (rest, &entry.value) else {
-        return Ok(None);
-    };
-    if rest
-        .split('/')
-        .any(|part| part.is_empty() || part.contains('.'))
-    {
-        return Err(format!("invalid key: {}", entry.key));
-    }
-    let text = BASE64_STANDARD
-        .decode(value)
-        .ok()
-        .and_then(|bytes| String::from_utf8(bytes).ok())
-        .ok_or_else(|| format!("the value is not UTF-8 text: {}", entry.key))?;
-    let label = format!("{}.{}", labels::PREFIX, rest.replace('/', "."));
-    Ok(Some((label, text)))
-}
-
 /// The index of a response. Consul requires an index above zero in a blocking query.
 fn consul_index(response: &Response<Incoming>) -> anyhow::Result<u64> {
     let index = response
@@ -260,11 +212,8 @@ impl Watch for Provider {
         &self.reporter
     }
 
-    async fn watch(&self, backoff: &mut Duration) -> anyhow::Error {
-        match self.follow(backoff).await {
-            Ok(never) => match never {},
-            Err(err) => err,
-        }
+    async fn watch(&self, backoff: &mut Duration) -> anyhow::Result<Infallible> {
+        self.follow(backoff).await
     }
 }
 
@@ -362,12 +311,19 @@ impl Provider {
             .get(&self.settings.watched_path(Watched::Kv, &[]))
             .await?;
         // Consul answers 404 when no key has the prefix.
-        let entries: Vec<KvEntry> = if response.status() == StatusCode::NOT_FOUND {
+        let entries: Vec<ConsulKv> = if response.status() == StatusCode::NOT_FOUND {
             Vec::new()
         } else {
             read_json(response).await?
         };
-        add_kv(built, groups, &entries, &self.settings.prefix);
+        let entries = entries
+            .into_iter()
+            .map(|entry| KvEntry {
+                key: entry.key,
+                value: entry.value,
+            })
+            .collect::<Vec<_>>();
+        kv::add_kv(built, groups, &entries, &self.settings.prefix);
         Ok((Watched::Kv, index))
     }
 
@@ -461,49 +417,6 @@ mod tests {
         let (pairs, issues) = tag_labels(tags.iter());
         assert_eq!(pairs, [("a", "b")]);
         assert_eq!(issues, ["the tag has no value: r3v3rs3.enable"]);
-    }
-
-    #[test]
-    fn keys_under_the_prefix_become_labels() {
-        let value = |text: &str| Some(BASE64_STANDARD.encode(text));
-        let entries = [
-            KvEntry {
-                key: "r3v3rs3/http/".into(),
-                value: None,
-            },
-            KvEntry {
-                key: "r3v3rs3/http/app/ports".into(),
-                value: value("http"),
-            },
-            KvEntry {
-                key: "r3v3rs3/http/app/routes/0/servers/0/url".into(),
-                value: value("http://10.0.0.5:8080"),
-            },
-            KvEntry {
-                key: "r3v3rs3/http/app/vhosts".into(),
-                value: value("a.example.com,b.example.com"),
-            },
-            KvEntry {
-                key: "r3v3rs3/http/bad.name/ports".into(),
-                value: value("http"),
-            },
-            KvEntry {
-                key: "r3v3rs3x/http/other/ports".into(),
-                value: value("http"),
-            },
-        ];
-        let mut built = Built::default();
-        let mut groups = ProxyGroups::new(PROVIDER);
-        add_kv(&mut built, &mut groups, &entries, "r3v3rs3");
-        let proxies = groups.into_proxies();
-        assert_eq!(proxies.len(), 1);
-        assert_eq!(proxies[0].key, "kv/http.app");
-        assert_eq!(proxies[0].source.resource, "r3v3rs3/http/app");
-        assert_eq!(servers(&proxies[0]), ["http://10.0.0.5:8080/"]);
-        assert_eq!(
-            built.issues.iter().map(|i| &i.message).collect::<Vec<_>>(),
-            ["invalid key: r3v3rs3/http/bad.name/ports"]
-        );
     }
 
     #[test]

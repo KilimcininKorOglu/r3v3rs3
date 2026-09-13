@@ -6,12 +6,13 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Incoming;
 use hyper::client::conn::http1;
-use hyper::header::{HOST, USER_AGENT};
+use hyper::header::{HeaderValue, HOST, USER_AGENT};
 use hyper::http::request::Builder;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use r3v3rs3_api::discovery::Endpoint;
 use serde::de::DeserializeOwned;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -33,25 +34,29 @@ impl<T: AsyncRead + AsyncWrite + Send + Unpin + 'static> Io for T {}
 
 #[derive(Clone)]
 pub struct ApiClient {
-    endpoint: Endpoint,
+    endpoints: Arc<[Endpoint]>,
+    /// The index of the endpoint that accepted the last connection.
+    current: Arc<AtomicUsize>,
     tls: TlsConnector,
 }
 
 impl ApiClient {
-    /// `tls` is used only by an `https` endpoint.
-    pub fn new(endpoint: Endpoint, tls: Arc<ClientConfig>) -> Self {
+    /// A connection tries the endpoints in turn, starting with the endpoint that accepted the
+    /// last connection. `tls` is used only by an `https` endpoint.
+    pub fn new(endpoints: Vec<Endpoint>, tls: Arc<ClientConfig>) -> Self {
         Self {
-            endpoint,
+            endpoints: endpoints.into(),
+            current: Arc::default(),
             tls: TlsConnector::from(tls),
         }
     }
 
-    /// Starts a request to a path of the API, with the `Host` and `User-Agent` headers.
+    /// Starts a request to a path of the API, with the `User-Agent` header. The request gets the
+    /// `Host` header of the endpoint that it is sent to.
     pub fn builder(&self, method: Method, path: &str) -> Builder {
         Request::builder()
             .method(method)
             .uri(path)
-            .header(HOST, self.host())
             .header(USER_AGENT, concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")))
     }
 
@@ -59,14 +64,6 @@ impl ApiClient {
         Ok(self
             .builder(Method::GET, path)
             .body(Full::new(Bytes::new()))?)
-    }
-
-    fn host(&self) -> String {
-        match &self.endpoint {
-            Endpoint::Unix(_) => "localhost".to_string(),
-            Endpoint::Tcp { host, port, .. } if host.contains(':') => format!("[{host}]:{port}"),
-            Endpoint::Tcp { host, port, .. } => format!("{host}:{port}"),
-        }
     }
 
     /// Sends the request on a new connection and returns the response when its status is a
@@ -79,13 +76,13 @@ impl ApiClient {
     /// `allowed` is not an error.
     pub async fn send_with(
         &self,
-        request: Request<Full<Bytes>>,
+        mut request: Request<Full<Bytes>>,
         timeout: Duration,
         allowed: &[StatusCode],
     ) -> anyhow::Result<Response<Incoming>> {
-        let io = tokio::time::timeout(CONNECT_TIMEOUT, self.connect())
-            .await
-            .map_err(|_| anyhow!("the connection timed out"))??;
+        let (io, endpoint) = self.connect().await?;
+        let host = HeaderValue::from_str(&host_header(endpoint))?;
+        request.headers_mut().insert(HOST, host);
         let (mut sender, connection) = http1::handshake(TokioIo::new(io)).await?;
         tokio::spawn(async move {
             if let Err(err) = connection.await {
@@ -104,8 +101,28 @@ impl ApiClient {
         Ok(response)
     }
 
-    async fn connect(&self) -> anyhow::Result<Box<dyn Io>> {
-        match &self.endpoint {
+    /// Connects to the first endpoint that accepts a connection, and returns the connection and
+    /// the endpoint.
+    async fn connect(&self) -> anyhow::Result<(Box<dyn Io>, &Endpoint)> {
+        let count = self.endpoints.len();
+        let start = self.current.load(Ordering::Relaxed);
+        let mut last_error = anyhow!("no endpoint is set");
+        for index in (0..count).map(|offset| (start + offset) % count) {
+            let endpoint = &self.endpoints[index];
+            match tokio::time::timeout(CONNECT_TIMEOUT, self.connect_to(endpoint)).await {
+                Ok(Ok(io)) => {
+                    self.current.store(index, Ordering::Relaxed);
+                    return Ok((io, endpoint));
+                }
+                Ok(Err(err)) => last_error = err,
+                Err(_) => last_error = anyhow!("the connection timed out"),
+            }
+        }
+        Err(last_error)
+    }
+
+    async fn connect_to(&self, endpoint: &Endpoint) -> anyhow::Result<Box<dyn Io>> {
+        match endpoint {
             Endpoint::Unix(path) => connect_unix(path).await,
             Endpoint::Tcp { tls, host, port } => {
                 let tcp = TcpStream::connect((host.as_str(), *port))
@@ -120,6 +137,14 @@ impl ApiClient {
                 Ok(stream)
             }
         }
+    }
+}
+
+fn host_header(endpoint: &Endpoint) -> String {
+    match endpoint {
+        Endpoint::Unix(_) => "localhost".to_string(),
+        Endpoint::Tcp { host, port, .. } if host.contains(':') => format!("[{host}]:{port}"),
+        Endpoint::Tcp { host, port, .. } => format!("{host}:{port}"),
     }
 }
 

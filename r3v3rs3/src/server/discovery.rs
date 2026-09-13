@@ -7,7 +7,9 @@ use super::proxy_list::accepts;
 use crate::discovery::{ids, DiscoveredProxy, DiscoverySnapshot};
 use crate::proxy::tls::upstream_client_config;
 use hyper::header::HeaderValue;
-use r3v3rs3_api::discovery::{ConsulDiscoveryConfig, DiscoveryConfig, Endpoint};
+use r3v3rs3_api::discovery::{
+    ConsulDiscoveryConfig, DiscoveryConfig, Endpoint, EtcdDiscoveryConfig,
+};
 use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryProvider, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
@@ -209,28 +211,55 @@ impl Drop for DiscoveryTasks {
 /// Checks the settings of the enabled providers.
 pub fn validate_config(config: &DiscoveryConfig, certs: &CertList) -> Result<(), Error> {
     for provider in DiscoveryProvider::ALL {
-        if let Some((endpoint, client_cert)) = api_settings(config, provider) {
-            parse_endpoint(endpoint)?;
+        if let Some((endpoints, client_cert)) = api_settings(config, provider) {
+            for endpoint in endpoints {
+                parse_endpoint(endpoint)?;
+            }
             upstream_client_config(certs, client_cert)?;
         }
     }
-    validate_consul(&config.consul)
+    validate_consul(&config.consul)?;
+    validate_etcd(&config.etcd)
 }
 
-/// The API address and the client certificate of an enabled provider that reads an HTTP API.
+/// The API addresses and the client certificate of an enabled provider that reads an HTTP API.
 pub fn api_settings(
     config: &DiscoveryConfig,
     provider: DiscoveryProvider,
-) -> Option<(&str, Option<ShortId>)> {
+) -> Option<(Vec<&str>, Option<ShortId>)> {
     match provider {
-        DiscoveryProvider::Docker if config.docker.enabled => {
-            Some((&config.docker.endpoint, config.docker.client_cert))
-        }
-        DiscoveryProvider::Consul if config.consul.enabled => {
-            Some((&config.consul.address, config.consul.client_cert))
-        }
+        DiscoveryProvider::Docker if config.docker.enabled => Some((
+            vec![config.docker.endpoint.as_str()],
+            config.docker.client_cert,
+        )),
+        DiscoveryProvider::Consul if config.consul.enabled => Some((
+            vec![config.consul.address.as_str()],
+            config.consul.client_cert,
+        )),
+        DiscoveryProvider::Etcd if config.etcd.enabled => Some((
+            config.etcd.endpoints.iter().map(String::as_str).collect(),
+            config.etcd.client_cert,
+        )),
         _ => None,
     }
+}
+
+fn validate_etcd(etcd: &EtcdDiscoveryConfig) -> Result<(), Error> {
+    let has_user = !etcd.username.trim().is_empty();
+    let reason = if !etcd.enabled {
+        return Ok(());
+    } else if etcd.endpoints.is_empty() {
+        "etcd needs at least one endpoint"
+    } else if etcd.prefix.trim_matches('/').is_empty() {
+        "the etcd key prefix is empty"
+    } else if has_user != etcd.password.is_some() {
+        "the etcd user name and password must be set together"
+    } else {
+        return Ok(());
+    };
+    Err(Error::InvalidDiscoveryConfig {
+        reason: reason.to_string(),
+    })
 }
 
 fn validate_consul(consul: &ConsulDiscoveryConfig) -> Result<(), Error> {
@@ -272,6 +301,9 @@ pub fn changed_providers(old: &DiscoveryConfig, new: &DiscoveryConfig) -> Vec<Di
     }
     if old.consul != new.consul {
         changed.push(DiscoveryProvider::Consul);
+    }
+    if old.etcd != new.etcd {
+        changed.push(DiscoveryProvider::Etcd);
     }
     changed
 }

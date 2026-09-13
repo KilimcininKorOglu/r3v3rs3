@@ -3,8 +3,10 @@
 
 pub mod consul;
 pub mod docker;
+pub mod etcd;
 pub mod http;
 pub mod ids;
+pub mod kv;
 pub mod labels;
 mod tree;
 
@@ -17,6 +19,7 @@ use r3v3rs3_api::discovery::{
 use r3v3rs3_api::proxy::ProxyKind;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::convert::Infallible;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -233,7 +236,7 @@ pub trait Watch: Send + Sync + 'static {
 
     /// Reads the resources and follows their changes until an error occurs. A successful read
     /// resets `backoff`.
-    async fn watch(&self, backoff: &mut Duration) -> anyhow::Error;
+    async fn watch(&self, backoff: &mut Duration) -> anyhow::Result<Infallible>;
 }
 
 /// Runs the watch of a provider, and starts it again after each error with a growing delay.
@@ -244,7 +247,7 @@ pub async fn run(provider: impl Watch) {
     }
     let mut backoff = MIN_BACKOFF;
     loop {
-        let err = provider.watch(&mut backoff).await;
+        let Err(err) = provider.watch(&mut backoff).await;
         warn!(provider = %reporter.provider, %err, "service discovery failed");
         let error = Some(format!("{err:#}"));
         if !reporter.send(DiscoveryState::Error, error, None).await {
@@ -271,7 +274,10 @@ pub fn spawn(
         DiscoveryProvider::Consul => {
             tokio::spawn(run(consul::Provider::new(&config.consul, client, reporter)))
         }
-        DiscoveryProvider::Kubernetes | DiscoveryProvider::Etcd => tokio::spawn(async move {
+        DiscoveryProvider::Etcd => {
+            tokio::spawn(run(etcd::Provider::new(&config.etcd, client, reporter)))
+        }
+        DiscoveryProvider::Kubernetes => tokio::spawn(async move {
             let error = Some("the provider is not available".to_string());
             reporter.send(DiscoveryState::Error, error, None).await;
         }),

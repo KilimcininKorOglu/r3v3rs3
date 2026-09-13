@@ -7,7 +7,10 @@ use r3v3rs3_api::{
     app::{AdminConfig, AppConfig, LogConfig},
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
-    discovery::{ConsulDiscoveryConfig, DiscoveryConfig, DockerDiscoveryConfig, Endpoint},
+    discovery::{
+        ConsulDiscoveryConfig, DiscoveryConfig, DockerDiscoveryConfig, Endpoint,
+        EtcdDiscoveryConfig,
+    },
     error::ErrorMessage,
     i18n::Locale,
     id::ShortId,
@@ -50,6 +53,16 @@ struct Fields {
     consul_prefix: String,
     consul_exposed_by_default: bool,
     consul_client_cert: Option<ShortId>,
+    etcd_enabled: bool,
+    /// Comma-separated endpoints.
+    etcd_endpoints: String,
+    etcd_username: String,
+    /// A new password. Empty keeps the saved password.
+    etcd_password: String,
+    etcd_password_set: bool,
+    etcd_clear_password: bool,
+    etcd_prefix: String,
+    etcd_client_cert: Option<ShortId>,
 }
 
 impl Fields {
@@ -66,6 +79,7 @@ impl Fields {
         };
         let docker = &config.discovery.docker;
         let consul = &config.discovery.consul;
+        let etcd = &config.discovery.etcd;
         Self {
             docker_enabled: docker.enabled,
             docker_endpoint: docker.endpoint.clone(),
@@ -83,6 +97,14 @@ impl Fields {
             consul_prefix: consul.prefix.clone(),
             consul_exposed_by_default: consul.exposed_by_default,
             consul_client_cert: consul.client_cert,
+            etcd_enabled: etcd.enabled,
+            etcd_endpoints: etcd.endpoints.join(","),
+            etcd_username: etcd.username.clone(),
+            etcd_password: String::new(),
+            etcd_password_set: etcd.password_set,
+            etcd_clear_password: false,
+            etcd_prefix: etcd.prefix.clone(),
+            etcd_client_cert: etcd.client_cert,
             background_task_interval: text("/background_task_interval"),
             session_expiry: text("/admin/session_expiry"),
             max_login_attempts: text("/admin/max_login_attempts"),
@@ -180,6 +202,7 @@ pub fn settings() -> Html {
 
             { docker_section(locale, &fields, &errors, &client_certs) }
             { consul_section(locale, &fields, &errors, &client_certs) }
+            { etcd_section(locale, &fields, &errors, &client_certs) }
 
             <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
                 <button type="submit" disabled={parsed.is_err() || *is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
@@ -242,11 +265,14 @@ fn consul_section(
     errors: &HashMap<String, String>,
     certs: &[CertInfo],
 ) -> Html {
-    let token_set = (**fields).as_ref().is_some_and(|f| f.consul_token_set);
-    let token_placeholder = if token_set {
-        locale.t("settings.consul_token_saved")
-    } else {
-        ""
+    let token = SecretInput {
+        label: "settings.consul_token",
+        saved: "settings.consul_token_saved",
+        hint: "settings.consul_token_hint",
+        clear: "settings.consul_clear_token",
+        is_set: |f| f.consul_token_set,
+        value: |f| &mut f.consul_token,
+        clear_value: |f| &mut f.consul_clear_token,
     };
     html! {
         <>
@@ -254,11 +280,7 @@ fn consul_section(
             { checkbox_field(fields, locale.t("settings.consul_enabled"), |f| &mut f.consul_enabled) }
             { text_field(fields, errors, locale.t("settings.consul_address"), "consul_address", "http://127.0.0.1:8500", |f| &mut f.consul_address) }
             <p class={HINT_CLASS}>{locale.t("settings.consul_address_hint")}</p>
-            { password_field(fields, locale.t("settings.consul_token"), token_placeholder, |f| &mut f.consul_token) }
-            <p class={HINT_CLASS}>{locale.t("settings.consul_token_hint")}</p>
-            if token_set {
-                { checkbox_field(fields, locale.t("settings.consul_clear_token"), |f| &mut f.consul_clear_token) }
-            }
+            { secret_field(locale, fields, token) }
             { text_field(fields, errors, locale.t("settings.consul_datacenter"), "consul_datacenter", "dc1", |f| &mut f.consul_datacenter) }
             <p class={HINT_CLASS}>{locale.t("settings.consul_datacenter_hint")}</p>
             { checkbox_field(fields, locale.t("settings.consul_catalog"), |f| &mut f.consul_catalog) }
@@ -267,9 +289,86 @@ fn consul_section(
             <p class={HINT_CLASS}>{locale.t("settings.consul_prefix_hint")}</p>
             { checkbox_field(fields, locale.t("settings.consul_exposed_by_default"), |f| &mut f.consul_exposed_by_default) }
             <p class={HINT_CLASS}>{locale.t("settings.consul_exposed_by_default_hint")}</p>
-            <label class={LABEL_CLASS}>{locale.t("settings.consul_client_cert")}</label>
-            { client_cert_select(fields, certs, locale.t("proxy_form.client_cert_none"), |f| &mut f.consul_client_cert) }
-            <p class={HINT_CLASS}>{locale.t("settings.consul_client_cert_hint")}</p>
+            { client_cert_field(locale, fields, certs, "settings.consul_client_cert", "settings.consul_client_cert_hint", |f| &mut f.consul_client_cert) }
+        </>
+    }
+}
+
+fn etcd_section(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+    certs: &[CertInfo],
+) -> Html {
+    let password = SecretInput {
+        label: "settings.etcd_password",
+        saved: "settings.etcd_password_saved",
+        hint: "settings.etcd_password_hint",
+        clear: "settings.etcd_clear_password",
+        is_set: |f| f.etcd_password_set,
+        value: |f| &mut f.etcd_password,
+        clear_value: |f| &mut f.etcd_clear_password,
+    };
+    html! {
+        <>
+            { section_title(locale.t("settings.etcd_title")) }
+            { checkbox_field(fields, locale.t("settings.etcd_enabled"), |f| &mut f.etcd_enabled) }
+            { text_field(fields, errors, locale.t("settings.etcd_endpoints"), "etcd_endpoints", "http://127.0.0.1:2379", |f| &mut f.etcd_endpoints) }
+            <p class={HINT_CLASS}>{locale.t("settings.etcd_endpoints_hint")}</p>
+            { text_field(fields, errors, locale.t("settings.etcd_username"), "etcd_username", "", |f| &mut f.etcd_username) }
+            <p class={HINT_CLASS}>{locale.t("settings.etcd_username_hint")}</p>
+            { secret_field(locale, fields, password) }
+            { text_field(fields, errors, locale.t("settings.etcd_prefix"), "etcd_prefix", "r3v3rs3", |f| &mut f.etcd_prefix) }
+            <p class={HINT_CLASS}>{locale.t("settings.etcd_prefix_hint")}</p>
+            { client_cert_field(locale, fields, certs, "settings.etcd_client_cert", "settings.etcd_client_cert_hint", |f| &mut f.etcd_client_cert) }
+        </>
+    }
+}
+
+/// The locale keys and the fields of a secret that the admin API does not return.
+struct SecretInput {
+    label: &'static str,
+    /// The placeholder when a secret is saved.
+    saved: &'static str,
+    hint: &'static str,
+    /// The label of the checkbox that removes the saved secret.
+    clear: &'static str,
+    is_set: fn(&Fields) -> bool,
+    value: fn(&mut Fields) -> &mut String,
+    clear_value: fn(&mut Fields) -> &mut bool,
+}
+
+fn secret_field(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    input: SecretInput,
+) -> Html {
+    let is_set = (**fields).as_ref().is_some_and(input.is_set);
+    let placeholder = if is_set { locale.t(input.saved) } else { "" };
+    html! {
+        <>
+            { password_field(fields, locale.t(input.label), placeholder, input.value) }
+            <p class={HINT_CLASS}>{locale.t(input.hint)}</p>
+            if is_set {
+                { checkbox_field(fields, locale.t(input.clear), input.clear_value) }
+            }
+        </>
+    }
+}
+
+fn client_cert_field(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    certs: &[CertInfo],
+    label: &'static str,
+    hint: &'static str,
+    select: fn(&mut Fields) -> &mut Option<ShortId>,
+) -> Html {
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{locale.t(label)}</label>
+            { client_cert_select(fields, certs, locale.t("proxy_form.client_cert_none"), select) }
+            <p class={HINT_CLASS}>{locale.t(hint)}</p>
         </>
     }
 }
@@ -330,9 +429,7 @@ fn docker_section(
             <p class={HINT_CLASS}>{locale.t("settings.docker_network_hint")}</p>
             { checkbox_field(fields, locale.t("settings.docker_exposed_by_default"), |f| &mut f.docker_exposed_by_default) }
             <p class={HINT_CLASS}>{locale.t("settings.docker_exposed_by_default_hint")}</p>
-            <label class={LABEL_CLASS}>{locale.t("settings.docker_client_cert")}</label>
-            { client_cert_select(fields, certs, locale.t("proxy_form.client_cert_none"), |f| &mut f.docker_client_cert) }
-            <p class={HINT_CLASS}>{locale.t("settings.docker_client_cert_hint")}</p>
+            { client_cert_field(locale, fields, certs, "settings.docker_client_cert", "settings.docker_client_cert_hint", |f| &mut f.docker_client_cert) }
         </>
     }
 }
@@ -409,23 +506,90 @@ fn parse_consul(
             locale.t("settings.consul_prefix_required").into(),
         );
     }
-    // An empty token removes the saved token, and no token keeps it.
-    let token = if fields.consul_clear_token {
-        Some(String::new())
-    } else {
-        Some(fields.consul_token.trim().to_string()).filter(|token| !token.is_empty())
-    };
     ConsulDiscoveryConfig {
         enabled: fields.consul_enabled,
         address: address.to_string(),
         client_cert: fields.consul_client_cert,
-        token,
+        token: secret_update(&fields.consul_token, fields.consul_clear_token),
         token_set: false,
         datacenter: fields.consul_datacenter.trim().to_string(),
         catalog: fields.consul_catalog,
         kv: fields.consul_kv,
         prefix: prefix.to_string(),
         exposed_by_default: fields.consul_exposed_by_default,
+    }
+}
+
+/// The secret that an update sends. An empty secret removes the saved secret, and no secret
+/// keeps it.
+fn secret_update(typed: &str, clear: bool) -> Option<String> {
+    if clear {
+        return Some(String::new());
+    }
+    Some(typed.trim().to_string()).filter(|secret| !secret.is_empty())
+}
+
+fn parse_etcd(
+    locale: Locale,
+    fields: &Fields,
+    errors: &mut HashMap<String, String>,
+) -> EtcdDiscoveryConfig {
+    let endpoints = fields
+        .etcd_endpoints
+        .split(',')
+        .map(str::trim)
+        .filter(|endpoint| !endpoint.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if endpoints.is_empty() {
+        errors.insert(
+            "etcd_endpoints".into(),
+            locale.t("settings.etcd_endpoints_required").into(),
+        );
+    } else if endpoints.iter().any(|e| e.parse::<Endpoint>().is_err()) {
+        errors.insert(
+            "etcd_endpoints".into(),
+            locale.t("settings.invalid_endpoint").into(),
+        );
+    }
+    let prefix = fields.etcd_prefix.trim().trim_matches('/');
+    if prefix.is_empty() {
+        errors.insert(
+            "etcd_prefix".into(),
+            locale.t("settings.etcd_prefix_required").into(),
+        );
+    }
+    let username = fields.etcd_username.trim();
+    let password = secret_update(&fields.etcd_password, fields.etcd_clear_password);
+    if let Some(key) = credentials_error(username, password.as_deref(), fields.etcd_password_set) {
+        errors.insert("etcd_username".into(), locale.t(key).into());
+    }
+    EtcdDiscoveryConfig {
+        enabled: fields.etcd_enabled,
+        endpoints,
+        client_cert: fields.etcd_client_cert,
+        username: username.to_string(),
+        password,
+        password_set: false,
+        prefix: prefix.to_string(),
+    }
+}
+
+/// The message key when the user name and the password are not set together. `password` is the
+/// secret that the update sends.
+fn credentials_error(
+    username: &str,
+    password: Option<&str>,
+    password_set: bool,
+) -> Option<&'static str> {
+    let has_password = match password {
+        Some(secret) => !secret.is_empty(),
+        None => password_set,
+    };
+    match (username.is_empty(), has_password) {
+        (false, false) => Some("settings.etcd_password_required"),
+        (true, true) => Some("settings.etcd_username_required"),
+        _ => None,
     }
 }
 
@@ -489,6 +653,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
     }
     let docker = parse_docker(locale, fields, &mut errors);
     let consul = parse_consul(locale, fields, &mut errors);
+    let etcd = parse_etcd(locale, fields, &mut errors);
     let resolver = parse_optional_addr(&fields.dns_challenge_resolver);
     if resolver.is_err() {
         errors.insert(
@@ -508,7 +673,11 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 log,
                 http_challenge_addr: addr,
                 dns_challenge_resolver: resolver,
-                discovery: DiscoveryConfig { docker, consul },
+                discovery: DiscoveryConfig {
+                    docker,
+                    consul,
+                    etcd,
+                },
             })
         }
         _ => Err(errors),
@@ -735,6 +904,69 @@ mod tests {
         };
         let errors = parse_fields(Locale::En, &invalid).unwrap_err();
         assert!(errors.contains_key("consul_prefix"));
+    }
+
+    #[test]
+    fn etcd_settings_round_trip_and_the_credentials_are_checked() {
+        let mut config = AppConfig::default();
+        config.discovery.etcd = EtcdDiscoveryConfig {
+            enabled: true,
+            endpoints: vec![
+                "http://10.0.0.1:2379".into(),
+                "https://10.0.0.2:2379".into(),
+            ],
+            username: "r3v3rs3".into(),
+            password_set: true,
+            prefix: "apps".into(),
+            ..Default::default()
+        };
+        let fields = Fields::from_config(&config);
+        let parsed = parse_fields(Locale::En, &fields).unwrap();
+        config.discovery.etcd.password_set = false;
+        assert_eq!(parsed, config);
+
+        let spaced = Fields {
+            etcd_endpoints: " http://a:2379 , ,http://b:2379".into(),
+            etcd_password: "new".into(),
+            ..fields.clone()
+        };
+        let parsed = parse_fields(Locale::En, &spaced).unwrap();
+        assert_eq!(
+            parsed.discovery.etcd.endpoints,
+            ["http://a:2379", "http://b:2379"]
+        );
+        assert_eq!(parsed.discovery.etcd.password.as_deref(), Some("new"));
+
+        let error_of = |fields: &Fields, key: &str| {
+            parse_fields(Locale::En, fields)
+                .unwrap_err()
+                .get(key)
+                .cloned()
+        };
+        let cleared = Fields {
+            etcd_clear_password: true,
+            ..fields.clone()
+        };
+        assert_eq!(
+            error_of(&cleared, "etcd_username").as_deref(),
+            Some(Locale::En.t("settings.etcd_password_required"))
+        );
+        let without_user = Fields {
+            etcd_username: " ".into(),
+            ..fields.clone()
+        };
+        assert_eq!(
+            error_of(&without_user, "etcd_username").as_deref(),
+            Some(Locale::En.t("settings.etcd_username_required"))
+        );
+        let invalid = Fields {
+            etcd_endpoints: "10.0.0.1:2379".into(),
+            ..fields
+        };
+        assert_eq!(
+            error_of(&invalid, "etcd_endpoints").as_deref(),
+            Some(Locale::En.t("settings.invalid_endpoint"))
+        );
     }
 }
 

@@ -270,3 +270,54 @@ consul kv put r3v3rs3/http/app/ports https
 consul kv put r3v3rs3/http/app/vhosts app.example.com
 consul kv put r3v3rs3/http/app/routes/0/servers/0/url http://10.0.0.5:8080
 ```
+
+# etcd
+
+etcd provider, bir prefix'in altındaki key'leri etcd v3 HTTP API'si ile okur. Değişiklikleri bir watch stream'i ile izler. Değişen bir key proxy'leri yaklaşık bir saniye içinde günceller.
+
+## Ayarlar
+
+"Ayarlar" sayfasında "etcd Servis Keşfi" bölümünü doldurun veya `config.toml` dosyasını düzenleyin:
+
+```toml
+[discovery.etcd]
+enabled = true
+endpoints = ["http://10.0.0.1:2379", "http://10.0.0.2:2379"]
+username = "r3v3rs3"
+password = "<password>"
+prefix = "r3v3rs3"
+```
+
+| Ayar | Anlamı |
+|---|---|
+| `enabled` | Provider'ı başlatır. |
+| `endpoints` | Cluster üyelerinin HTTP API adresleri: `http://<host>:<port>`, `https://<host>:<port>` veya `unix://<path>`. Bağlantı başarısız olunca r3v3rs3 sıradaki adrese bağlanır. Varsayılan değer `http://127.0.0.1:2379` olur. |
+| `client_cert` | r3v3rs3'ün `https` endpoint'ine gönderdiği client sertifikasının id'si. |
+| `username` | etcd authentication kullanıcısı. Authentication kapalıysa boş bırakın. |
+| `password` | Kullanıcının parolası. `username` ile birlikte verin. |
+| `prefix` | Key prefix'i. Varsayılan değer `r3v3rs3` olur. |
+
+Admin API parolayı döndürmez. Kayıtlı bir parola varsa `GET /api/config` yanıtında `password_set: true` döner. `password` alanı olmayan bir `PUT /api/config` isteği kayıtlı parolayı korur. `"password": ""` parolayı siler. `config.toml` parolayı düz metin olarak saklar. Bu yüzden config dizinini yalnız r3v3rs3 kullanıcısı okuyabilmelidir.
+
+Authentication açıksa r3v3rs3 kullanıcı adı ve parola ile bir token alır. etcd süresi dolmuş bir token'ı reddedince r3v3rs3 yeni bir token alır ve isteği yeniden gönderir. Kullanıcının prefix üzerinde okuma izni olan bir rolü olmalıdır:
+
+```bash
+etcdctl role add r3v3rs3-reader
+etcdctl role grant-permission r3v3rs3-reader --prefix=true read r3v3rs3/
+etcdctl user add r3v3rs3
+etcdctl user grant-role r3v3rs3 r3v3rs3-reader
+```
+
+## Key'ler
+
+- Key'ler Consul key-value store'unun düzenini kullanır. Prefix `r3v3rs3` ise `r3v3rs3/http/app/ports` key'i `r3v3rs3.http.app.ports` label'ı olur.
+- r3v3rs3 prefix'in altındaki her proxy'yi okur. Bu yüzden key'ler `r3v3rs3.enable` gerektirmez.
+- Key'in adresi yoktur, bu yüzden `port` kullanılamaz. `routes.<n>.servers.<n>.url` veya `upstream_servers.<n>.addr` kullanın.
+- Key'in bir parçası `.` içeremez. Böyle bir key issue olur.
+- etcd, watch stream'inin ihtiyaç duyduğu revision'ı compact ederse r3v3rs3 bütün key'leri yeniden okur.
+
+```bash
+etcdctl put r3v3rs3/http/app/ports https
+etcdctl put r3v3rs3/http/app/vhosts app.example.com
+etcdctl put r3v3rs3/http/app/routes/0/servers/0/url http://10.0.0.5:8080
+```

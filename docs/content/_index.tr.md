@@ -17,7 +17,7 @@ sort_by = "weight"
 - REST API ile yapılan config değişiklikleri servisi yeniden başlatmadan uygulanır.
 - TLS sertifikaları arayüzden içe aktarılabilir veya self-signed sertifika oluşturulabilir.
 - Let's Encrypt ile sertifikalar otomatik alınır (ACME v2, HTTP-01 ve DNS-01 challenge'ları). Wildcard sertifikalar için Cloudflare, Route 53, DigitalOcean ve Hetzner Cloud DNS API'leri kullanılır.
-- Proxy'leri Docker container label'larından, Consul servis tag'lerinden ve Consul key-value store'undan oluşturur. Kaynak değişince proxy'leri günceller ([Servis keşfi](@/discovery.tr.md)).
+- Proxy'leri Docker container label'larından, Consul servis tag'lerinden, Consul ve etcd key-value store'larından oluşturur. Kaynak değişince proxy'leri günceller ([Servis keşfi](@/discovery.tr.md)).
 
 # Kurulum
 

@@ -207,11 +207,9 @@ impl Watch for Provider {
         &self.reporter
     }
 
-    async fn watch(&self, backoff: &mut Duration) -> anyhow::Error {
-        match self.follow(backoff).await {
-            Ok(()) => anyhow!("the Docker event stream closed"),
-            Err(err) => err,
-        }
+    async fn watch(&self, backoff: &mut Duration) -> anyhow::Result<std::convert::Infallible> {
+        self.follow(backoff).await?;
+        Err(anyhow!("the Docker event stream closed"))
     }
 }
 

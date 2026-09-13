@@ -270,3 +270,54 @@ consul kv put r3v3rs3/http/app/ports https
 consul kv put r3v3rs3/http/app/vhosts app.example.com
 consul kv put r3v3rs3/http/app/routes/0/servers/0/url http://10.0.0.5:8080
 ```
+
+# etcd
+
+The etcd provider reads the keys under a prefix through the etcd v3 HTTP API. It follows the changes with a watch stream, so a changed key updates the proxies within about one second.
+
+## Settings
+
+Fill in "etcd Service Discovery" in "Settings", or edit `config.toml`:
+
+```toml
+[discovery.etcd]
+enabled = true
+endpoints = ["http://10.0.0.1:2379", "http://10.0.0.2:2379"]
+username = "r3v3rs3"
+password = "<password>"
+prefix = "r3v3rs3"
+```
+
+| Setting | Meaning |
+|---|---|
+| `enabled` | Starts the provider. |
+| `endpoints` | The HTTP API addresses of the cluster members: `http://<host>:<port>`, `https://<host>:<port>` or `unix://<path>`. When a connection fails, r3v3rs3 connects to the next address. The default is `http://127.0.0.1:2379`. |
+| `client_cert` | The id of a client certificate that r3v3rs3 sends to an `https` endpoint. |
+| `username` | The user of etcd authentication. Leave it empty when authentication is off. |
+| `password` | The password of the user. Set it together with `username`. |
+| `prefix` | The key prefix. The default is `r3v3rs3`. |
+
+The admin API does not return the password. `GET /api/config` returns `password_set: true` when a password is saved. A `PUT /api/config` without `password` keeps the saved password, and `"password": ""` removes it. `config.toml` holds the password as plain text, so allow only the r3v3rs3 user to read the config directory.
+
+With authentication, r3v3rs3 requests a token with the user name and the password. When etcd rejects an expired token, r3v3rs3 requests a new token and sends the request again. The user needs a role with the read permission on the prefix:
+
+```bash
+etcdctl role add r3v3rs3-reader
+etcdctl role grant-permission r3v3rs3-reader --prefix=true read r3v3rs3/
+etcdctl user add r3v3rs3
+etcdctl user grant-role r3v3rs3 r3v3rs3-reader
+```
+
+## Keys
+
+- The keys use the layout of the Consul key-value store. With the prefix `r3v3rs3`, the key `r3v3rs3/http/app/ports` is the label `r3v3rs3.http.app.ports`.
+- r3v3rs3 reads every proxy under the prefix, so the keys do not need `r3v3rs3.enable`.
+- A key has no address, so `port` is not available. Use `routes.<n>.servers.<n>.url` or `upstream_servers.<n>.addr`.
+- A part of a key cannot contain a `.`. Such a key is an issue.
+- When etcd compacts the revision that the watch stream needs, r3v3rs3 reads every key again.
+
+```bash
+etcdctl put r3v3rs3/http/app/ports https
+etcdctl put r3v3rs3/http/app/vhosts app.example.com
+etcdctl put r3v3rs3/http/app/routes/0/servers/0/url http://10.0.0.5:8080
+```

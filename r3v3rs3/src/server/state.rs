@@ -200,14 +200,17 @@ impl ServerState {
 
     /// The API client of an enabled provider.
     fn discovery_client(&self, provider: DiscoveryProvider) -> Result<Option<ApiClient>, Error> {
-        let Some((endpoint, client_cert)) =
+        let Some((endpoints, client_cert)) =
             discovery::api_settings(&self.config.discovery, provider)
         else {
             return Ok(None);
         };
-        let endpoint = discovery::parse_endpoint(endpoint)?;
+        let endpoints = endpoints
+            .into_iter()
+            .map(discovery::parse_endpoint)
+            .collect::<Result<Vec<_>, _>>()?;
         let tls = upstream_client_config(&self.certs, client_cert)?;
-        Ok(Some(ApiClient::new(endpoint, Arc::new(tls))))
+        Ok(Some(ApiClient::new(endpoints, Arc::new(tls))))
     }
 
     fn set_discovery_error(&mut self, provider: DiscoveryProvider, error: String) {

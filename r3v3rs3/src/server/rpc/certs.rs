@@ -70,7 +70,12 @@ impl RpcMethod for DeleteCert {
 /// Rejects the deletion of a certificate that a port, a proxy or a discovery provider uses.
 fn ensure_unused(state: &ServerState, id: ShortId) -> Result<(), Error> {
     let discovery = &state.config().discovery;
-    if [discovery.docker.client_cert, discovery.consul.client_cert].contains(&Some(id)) {
+    let provider_certs = [
+        discovery.docker.client_cert,
+        discovery.consul.client_cert,
+        discovery.etcd.client_cert,
+    ];
+    if provider_certs.contains(&Some(id)) {
         return Err(Error::CertificateInUse { id });
     }
     let used_by_port = state.ports.entries().any(|entry| {
