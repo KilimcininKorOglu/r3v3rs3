@@ -1,6 +1,7 @@
 pub mod acme_provider;
 pub mod auth_config;
 pub mod custom_acme;
+pub mod data_list;
 pub mod http_proxy_config;
 pub mod navbar;
 pub mod port_config;

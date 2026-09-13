@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
 use crate::auth::use_ensure_auth;
+use crate::components::data_list::{
+    active_toggle, list_card, status_badge, Column, Row, DANGER_LINK_CLASS, LINK_CLASS,
+};
 use crate::pages::Route;
 use crate::store::{PortStore, ProxyStore};
 use crate::API_ENDPOINT;
@@ -11,6 +14,25 @@ use r3v3rs3_api::proxy::{ProxyEntry, ProxyKind, ProxyState, ProxyStatus};
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
+
+const COLUMNS: [Column; 4] = [
+    Column {
+        label: "Name",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "Ports",
+        class: "",
+    },
+    Column {
+        label: "Status",
+        class: "w-48",
+    },
+    Column {
+        label: "Active",
+        class: "w-0 whitespace-nowrap text-center",
+    },
+];
 
 #[function_component(ProxyList)]
 pub fn proxy_list() -> Html {
@@ -51,142 +73,21 @@ pub fn proxy_list() -> Html {
     });
 
     let navigator = use_navigator().unwrap();
-    let list = proxies.entries.clone();
 
     let navigator_cloned = navigator.clone();
     let new_proxy_onclick = Callback::from(move |_| {
         navigator_cloned.push(&Route::NewProxy);
     });
 
+    let rows = proxies
+        .entries
+        .iter()
+        .map(|entry| proxy_row(entry, &proxies, &ports, &navigator))
+        .collect::<Vec<_>>();
     html! {
         <>
-            <div class="relative overflow-x-auto bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 lg:rounded-md">
-                if !proxies.loaded {
-                    <svg aria-hidden="true" role="status" class="w-8 h-8 mx-auto my-7 text-neutral-200 animate-spin" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="#ccc"/>
-                    <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="#888"/>
-                    </svg>
-                } else if list.is_empty() {
-                    <p class="mb-8 mt-8 text-xl font-bold dark:text-neutral-300 text-neutral-500 px-16 text-center">{"List is empty. Click 'Add' to configure a new proxy."}</p>
-                } else {
-                <table class="w-full text-sm text-left text-neutral-600 dark:text-neutral-200 rounded-md">
-                    <thead class="text-xs text-neutral-800 dark:text-neutral-200 uppercase border-b border-neutral-300 dark:border-neutral-700">
-                        <tr>
-                            <th scope="col" class="px-4 py-3">
-                                {"Name"}
-                            </th>
-                            <th scope="col" class="px-4 py-3">
-                                {"Ports"}
-                            </th>
-                            <th scope="col" class="px-4 py-3 w-48">
-                                {"Status"}
-                            </th>
-                            <th scope="col" class="px-4 py-3" align="center">
-                                {"Active"}
-                            </th>
-                            <th scope="col" class="px-4 py-3" align="right">
-                                <span class="sr-only">{"Edit"}</span>
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    { list.into_iter().map(|entry| {
-                        let navigator = navigator.clone();
-
-                        let id = entry.id;
-                        let navigator_cloned = navigator.clone();
-                        let log_onclick = Callback::from(move |_|  {
-                            navigator_cloned.push(&Route::ProxyLogView {id});
-                        });
-
-                        let config_onclick = Callback::from(move |_|  {
-                            navigator.push(&Route::ProxyView {id});
-                        });
-
-                        let delete_onclick = Callback::from(move |e: MouseEvent|  {
-                            e.prevent_default();
-                            if gloo_dialogs::confirm(&format!("Are you sure to delete {id}?")) {
-                                wasm_bindgen_futures::spawn_local(async move {
-                                    let _ = delete_site(id).await;
-                                });
-                            }
-                        });
-
-                        let cache_enabled = matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.cache.enabled);
-                        let purge_onclick = Callback::from(move |e: MouseEvent|  {
-                            e.prevent_default();
-                            if gloo_dialogs::confirm(&format!("Are you sure to purge the cache of {id}?")) {
-                                wasm_bindgen_futures::spawn_local(async move {
-                                    match purge_cache(id).await {
-                                        Ok(()) => gloo_dialogs::alert("The cache is purged."),
-                                        Err(err) => gloo_dialogs::alert(&format!("Failed to purge the cache: {err}")),
-                                    }
-                                });
-                            }
-                        });
-
-                        let active = entry.proxy.active;
-                        let onchange = Callback::from(move |_: Event| {
-                            wasm_bindgen_futures::spawn_local(async move {
-                                let _ = toggle_proxy(id).await;
-                            });
-                        });
-
-                        let ports = entry.proxy.ports.iter().filter_map(|port| {
-                            ports.entries.iter().find(|p| p.id == *port)
-                        }).map(|entry| {
-                            format!("{}/{}", entry.port.listen.protocol_name(), entry.port.listen.socket_addr().unwrap())
-                        }).collect::<Vec<_>>();
-                        let ports = ports.join(", ");
-
-                        let title = if entry.proxy.name.is_empty() {
-                            entry.id.to_string()
-                        } else {
-                            entry.proxy.name.clone()
-                        };
-
-                        let status = proxies.statuses.get(&entry.id).cloned().unwrap_or_default();
-                        let (status_text, tag) = match status.state {
-                            ProxyState::Active => ("Active", "bg-green-500"),
-                            ProxyState::Inactive => ("Inactive", "bg-neutral-500"),
-                            ProxyState::Unknown => ("Unknown", "bg-neutral-500"),
-                        };
-
-                        html! {
-                            <tr class="border-b dark:border-neutral-700">
-                                <th scope="row" class="px-4 py-4 font-medium text-neutral-900 dark:text-neutral-200 whitespace-nowrap">
-                                    {title}
-                                </th>
-                                <td class="px-4 py-4">
-                                    {ports}
-                                </td>
-                                <td class="px-4 py-4">
-                                    <div class="flex items-center">
-                                        <div class={classes!("h-2.5", "w-2.5", "shrink-0", "rounded-full", "bg-green-500", "mr-2", tag)}></div> {status_text}
-                                    </div>
-                                </td>
-                                <td class="px-4 py-4 w-0 whitespace-nowrap" align="center">
-                                    <label class="relative inline-flex items-center cursor-pointer mt-1">
-                                        <input {onchange} type="checkbox" checked={active} class="sr-only peer" />
-                                        <div class="w-9 h-4 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                                    </label>
-                                </td>
-                                <td class="px-4 py-4 w-0 whitespace-nowrap" align="right">
-                                    <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={config_onclick}>{"Edit"}</a>
-                                    <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={log_onclick}>{"Log"}</a>
-                                    if cache_enabled {
-                                        <a class="cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline mr-5" onclick={purge_onclick}>{"Purge"}</a>
-                                    }
-                                    <a class="cursor-pointer font-medium text-red-600 dark:text-red-500 hover:underline" onclick={delete_onclick}>{"Delete"}</a>
-                                </td>
-                            </tr>
-                        }
-                    }).collect::<Html>() }
-                    </tbody>
-                </table>
-            }
-            </div>
-            <div class="flex items-center justify-end my-4 px-4 lg:px-0">
+            { list_card(proxies.loaded, "List is empty. Click 'Add' to configure a new proxy.", &COLUMNS, &rows) }
+            <div class="flex items-center justify-end my-4">
                 <div>
                     <button onclick={new_proxy_onclick} class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2" type="button">
                         <img src="/assets/icons/add.svg" class="w-4 h-4 mr-1" />
@@ -195,6 +96,103 @@ pub fn proxy_list() -> Html {
                 </div>
             </div>
         </>
+    }
+}
+
+fn proxy_row(
+    entry: &ProxyEntry,
+    proxies: &ProxyStore,
+    ports: &PortStore,
+    navigator: &Navigator,
+) -> Row {
+    let id = entry.id;
+
+    let navigator_cloned = navigator.clone();
+    let log_onclick = Callback::from(move |_| {
+        navigator_cloned.push(&Route::ProxyLogView { id });
+    });
+
+    let navigator_cloned = navigator.clone();
+    let config_onclick = Callback::from(move |_| {
+        navigator_cloned.push(&Route::ProxyView { id });
+    });
+
+    let delete_onclick = Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        if gloo_dialogs::confirm(&format!("Are you sure to delete {id}?")) {
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = delete_site(id).await;
+            });
+        }
+    });
+
+    let cache_enabled = matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.cache.enabled);
+    let purge_onclick = Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        if gloo_dialogs::confirm(&format!("Are you sure to purge the cache of {id}?")) {
+            wasm_bindgen_futures::spawn_local(async move {
+                match purge_cache(id).await {
+                    Ok(()) => gloo_dialogs::alert("The cache is purged."),
+                    Err(err) => gloo_dialogs::alert(&format!("Failed to purge the cache: {err}")),
+                }
+            });
+        }
+    });
+
+    let onchange = Callback::from(move |_: Event| {
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = toggle_proxy(id).await;
+        });
+    });
+
+    let port_names = entry
+        .proxy
+        .ports
+        .iter()
+        .filter_map(|port| ports.entries.iter().find(|p| p.id == *port))
+        .map(|entry| {
+            let addr = entry
+                .port
+                .listen
+                .socket_addr()
+                .map(|addr| addr.to_string())
+                .unwrap_or_default();
+            format!("{}/{}", entry.port.listen.protocol_name(), addr)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let title = if entry.proxy.name.is_empty() {
+        id.to_string()
+    } else {
+        entry.proxy.name.clone()
+    };
+
+    let status = proxies.statuses.get(&id).cloned().unwrap_or_default();
+    let (status_text, color) = match status.state {
+        ProxyState::Active => ("Active", "bg-green-500"),
+        ProxyState::Inactive => ("Inactive", "bg-neutral-500"),
+        ProxyState::Unknown => ("Unknown", "bg-neutral-500"),
+    };
+
+    Row {
+        key: id.to_string(),
+        cells: vec![
+            html! { <>{title}</> },
+            html! { <>{port_names}</> },
+            status_badge(status_text, color),
+            active_toggle(entry.proxy.active, onchange),
+        ],
+        actions: html! {
+            <>
+                <a class={LINK_CLASS} onclick={config_onclick}>{"Edit"}</a>
+                <a class={LINK_CLASS} onclick={log_onclick}>{"Log"}</a>
+                if cache_enabled {
+                    <a class={LINK_CLASS} onclick={purge_onclick}>{"Purge"}</a>
+                }
+                <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{"Delete"}</a>
+            </>
+        },
     }
 }
 

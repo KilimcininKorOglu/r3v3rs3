@@ -22,7 +22,7 @@ const SECTION_CLASS: &str = "block mt-6 text-sm font-medium text-neutral-900 dar
 pub(super) const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
 pub(super) const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500 dark:text-neutral-400";
 const ERROR_CLASS: &str = "mt-2 text-sm text-red-600 dark:text-red-500";
-const TOGGLE_CLASS: &str = "w-9 h-5 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600";
+const TOGGLE_CLASS: &str = "shrink-0 w-9 h-5 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600";
 pub(super) const BUTTON_CLASS: &str = "inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600";
 
 #[derive(Properties, PartialEq)]
@@ -335,7 +335,7 @@ fn route_view(
             { route_headers_view(routes, index, route) }
             { error_view(error) }
 
-            <div class="flex justify-end rounded-md mt-4 sm:ml-auto px-4 lg:px-0" role="group">
+            <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
                 <button type="button" onclick={add_onclick} class={classes!(BUTTON_CLASS, "rounded-l-lg")}>
                     <img src="/assets/icons/add.svg" class="w-4 h-4" />
                 </button>
@@ -440,7 +440,7 @@ fn header_rules_view(
     on_response: Callback<Event>,
 ) -> Html {
     html! {
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
             <div>
                 <label class={LABEL_CLASS}>{"Request Headers"}</label>
                 <textarea rows="4" autocapitalize="off" spellcheck="false" placeholder={"set X-Request-Id: {request_id}\nremove X-Debug"} value={request.to_string()} onchange={on_request} class={classes!(INPUT_CLASS, "font-mono")} />
@@ -464,12 +464,12 @@ fn compression_view(form: &UseStateHandle<ProxyForm>) -> Html {
                     "mt-4",
                 )) }
             </div>
-            <div class="grid grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-4">
                 <div>
                     <label class={LABEL_CLASS}>{"Minimum Size (Bytes)"}</label>
                     <input type="number" min="0" value={form.compression.min_size.clone()} onchange={state_input(form, text, |form, value| form.compression.min_size = value)} class={INPUT_CLASS} />
                 </div>
-                <div class="col-span-2">
+                <div class="sm:col-span-2">
                     <label class={LABEL_CLASS}>{"Media Types"}</label>
                     <input type="text" autocapitalize="off" placeholder="text/*, application/json" value={form.compression.mime_types.clone()} onchange={state_input(form, text, |form, value| form.compression.mime_types = value)} class={INPUT_CLASS} />
                 </div>
@@ -485,7 +485,7 @@ fn cache_view(form: &UseStateHandle<ProxyForm>) -> Html {
                 { toggle(state_input(form, checked, |form, value| form.cache.enabled = value), form.cache.enabled, "Enable Cache", "mt-4") }
             </div>
             if form.cache.enabled {
-                <div class="grid grid-cols-3 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-4">
                     <div>
                         <label class={LABEL_CLASS}>{"Memory Limit (Bytes)"}</label>
                         <input type="number" min="1" value={form.cache.max_size.clone()} onchange={state_input(form, text, |form, value| form.cache.max_size = value)} class={INPUT_CLASS} />
@@ -528,7 +528,7 @@ fn rate_limit_view(
     on_burst: Callback<Event>,
 ) -> Html {
     html! {
-        <div class="grid grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-4">
             <div>
                 <label class={LABEL_CLASS}>{"Requests"}</label>
                 <input type="number" min="0" value={limit.requests.clone()} onchange={on_requests} class={INPUT_CLASS} />

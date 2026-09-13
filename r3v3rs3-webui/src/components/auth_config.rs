@@ -325,8 +325,8 @@ fn token_view(props: &Props, index: usize, token: &TokenForm) -> Html {
 
 fn credential_row(name: Html, secret: Html, remove: Callback<MouseEvent>, rows: usize) -> Html {
     html! {
-        <div class="grid grid-cols-[1fr_1fr_auto] gap-2 mt-2">
-            { name }
+        <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_1fr_auto] gap-2 mt-2">
+            <div class="col-span-2 sm:col-span-1">{ name }</div>
             { secret }
             <button type="button" onclick={remove} disabled={rows <= 1} class={classes!(BUTTON_CLASS, "rounded-lg")}>
                 <img src="/assets/icons/remove.svg" class="w-4 h-4" />

@@ -22,7 +22,7 @@ pub fn app() -> Html {
         <>
         <BrowserRouter>
             <Navbar />
-            <div class="lg:w-4/5 py-4 mx-auto">
+            <div class="w-full max-w-6xl mx-auto px-4 sm:px-6 py-4">
                 <Switch<pages::Route> render={pages::switch} />
             </div>
         </BrowserRouter>

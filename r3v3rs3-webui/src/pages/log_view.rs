@@ -33,7 +33,7 @@ pub fn log_view(props: &Props) -> Html {
 
     html! {
         <>
-            <div class="flex items-center justify-start px-4 lg:px-0 mb-4">
+            <div class="flex items-center justify-start mb-4">
                 <div>
                     <button onclick={back_onclick} class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2" type="button">
                         <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 mr-1" />
@@ -41,7 +41,7 @@ pub fn log_view(props: &Props) -> Html {
                     </button>
                 </div>
             </div>
-            <ul ref={ul_ref.clone()} class="overflow-scroll max-h-96 bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 lg:rounded-md">
+            <ul ref={ul_ref.clone()} class="overflow-auto max-h-[70vh] bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 rounded-md">
             { log.iter().map(|entry| {
                 let timestamp = entry.timestamp.format(&Rfc3339).unwrap();
                 let fields = entry.fields.iter().map(|(k, v)| {
@@ -55,7 +55,7 @@ pub fn log_view(props: &Props) -> Html {
                     LogLevel::Trace => "text-neutral-600 dark:text-neutral-400",
                 };
                 html! {
-                    <li class="font-mono text-sm px-4 py-1 border-b dark:border-neutral-700">
+                    <li class="font-mono text-xs sm:text-sm px-4 py-1 border-b dark:border-neutral-700 break-words">
                         <span class="mr-2">{timestamp}</span>
                         <span class={classes!("font-bold", "mr-2", log_class)}>{
                             format!("{: <5}", entry.level.to_string().to_ascii_uppercase())
@@ -67,7 +67,7 @@ pub fn log_view(props: &Props) -> Html {
                 }).collect::<Html>()
             }
             if log.is_empty() {
-                <li class="mb-8 mt-8 text-xl font-bold text-neutral-500 dark:text-neutral-300 px-16 text-center">{"No logs."}</li>
+                <li class="my-8 px-4 sm:px-16 text-lg sm:text-xl font-bold text-neutral-500 dark:text-neutral-300 text-center">{"No logs."}</li>
             }
             </ul>
         </>

@@ -173,7 +173,7 @@ pub fn proxy_config(props: &Props) -> Html {
         <>
             <label class="relative inline-flex items-center cursor-pointer mb-6">
                 <input onchange={active_onchange} type="checkbox" checked={*active} class="sr-only peer" />
-                <div class="w-9 h-5 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                <div class="shrink-0 w-9 h-5 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
                 <span class="ml-3 text-sm font-medium text-neutral-900 dark:text-neutral-200">{"Active"}</span>
             </label>
 

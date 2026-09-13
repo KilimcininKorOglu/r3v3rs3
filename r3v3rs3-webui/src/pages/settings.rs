@@ -107,7 +107,7 @@ pub fn settings() -> Html {
 
     html! {
         <>
-        <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 lg:rounded-md">
+        <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
             { notice_view(&notice) }
 
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"Admin"}</h2>
@@ -123,8 +123,8 @@ pub fn settings() -> Html {
             { text_field(&fields, &errors, "Database Log Retention", "database_log_retention", "3months", |f| &mut f.database_log_retention) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{"Durations use a human-readable format, e.g, 30s, 15m, 1h, 7days."}</p>
 
-            <div class="flex mt-4 items-center justify-end">
-                <button type="submit" disabled={parsed.is_err() || *is_loading} class="inline-flex items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+            <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
+                <button type="submit" disabled={parsed.is_err() || *is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
                     {"Save"}
                 </button>
             </div>
@@ -308,15 +308,15 @@ fn cdn_status_card() -> Html {
     };
 
     html! {
-        <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 lg:rounded-md">
+        <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
             { notice_view(&notice) }
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{"CDN IP Ranges"}</h2>
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{"Edge server addresses of known CDNs. The list is refreshed every day."}</p>
             if let Some(status) = &*status {
                 { cdn_status_view(status) }
             }
-            <div class="flex mt-4 items-center justify-end">
-                <button type="button" {onclick} disabled={*is_loading} class="inline-flex items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+            <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
+                <button type="button" {onclick} disabled={*is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
                     {"Refresh Now"}
                 </button>
             </div>
