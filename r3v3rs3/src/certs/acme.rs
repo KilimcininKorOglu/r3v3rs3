@@ -1,14 +1,18 @@
-use crate::{cdn::fetch::build_client, certs::Cert, server::cert_list::CertList};
-use anyhow::bail;
+use crate::{
+    cdn::fetch::{build_client, HttpClient as FetchClient},
+    certs::Cert,
+    server::cert_list::CertList,
+};
+use anyhow::{anyhow, bail};
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use bytes::Bytes;
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::{
     header::{HeaderValue, USER_AGENT},
     Request,
 };
 use instant_acme::{
-    Account, AccountCredentials, AuthorizationStatus, BytesResponse, ChallengeType,
+    Account, AccountCredentials, AuthorizationStatus, BodyWrapper, BytesResponse, ChallengeType,
     ExternalAccountKey, HttpClient, Identifier, NewAccount, NewOrder, Order, OrderStatus,
 };
 use r3v3rs3_api::acme::AcmeInfo;
@@ -41,7 +45,7 @@ struct AcmeHttpClient<H> {
 impl<H: HttpClient> HttpClient for AcmeHttpClient<H> {
     fn request(
         &self,
-        mut req: Request<Full<Bytes>>,
+        mut req: Request<BodyWrapper<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, instant_acme::Error>> + Send>> {
         if req.uri().scheme_str() != Some("https") {
             return Box::pin(std::future::ready(Err(instant_acme::Error::Str(
@@ -54,9 +58,31 @@ impl<H: HttpClient> HttpClient for AcmeHttpClient<H> {
     }
 }
 
+/// Sends ACME requests through the hyper client that the server uses for other outbound HTTPS.
+struct HyperAcmeClient(FetchClient);
+
+impl HttpClient for HyperAcmeClient {
+    fn request(
+        &self,
+        req: Request<BodyWrapper<Bytes>>,
+    ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, instant_acme::Error>> + Send>> {
+        let client = self.0.clone();
+        Box::pin(async move {
+            let (parts, body) = req.into_parts();
+            let Ok(body) = body.collect().await;
+            let req = Request::from_parts(parts, Full::new(body.to_bytes()));
+            let rsp = client
+                .request(req)
+                .await
+                .map_err(|err| instant_acme::Error::Other(Box::new(err)))?;
+            Ok(BytesResponse::from(rsp))
+        })
+    }
+}
+
 async fn acme_http_client() -> anyhow::Result<Box<dyn HttpClient>> {
     Ok(Box::new(AcmeHttpClient {
-        inner: build_client().await?,
+        inner: HyperAcmeClient(build_client().await?),
     }))
 }
 
@@ -87,17 +113,17 @@ impl AcmeEntry {
             error!("failed to create the ACME http client: {}", e);
             Error::AcmeAccountCreationFailed
         })?;
-        let account = Account::create_with_http(
-            &NewAccount {
-                contact: &contact,
-                terms_of_service_agreed: true,
-                only_return_existing: false,
-            },
-            &req.server_url,
-            external_account.as_ref(),
-            http,
-        )
-        .await;
+        let account = Account::builder_with_http(http)
+            .create(
+                &NewAccount {
+                    contact: &contact,
+                    terms_of_service_agreed: true,
+                    only_return_existing: false,
+                },
+                req.server_url.clone(),
+                external_account.as_ref(),
+            )
+            .await;
 
         let (_, account) = match account {
             Ok(account) => account,
@@ -195,7 +221,6 @@ pub struct AcmeOrder {
     pub challenge_type: ChallengeType,
     pub identifiers: Vec<Identifier>,
     pub http_challenges: HashMap<String, String>,
-    pub challenges: Vec<(String, String)>,
     pub order: Order,
 }
 
@@ -213,57 +238,47 @@ impl AcmeOrder {
             .collect::<Vec<_>>();
         let account: AccountCredentials =
             serde_json::from_str(&serde_json::to_string(&entry.account)?)?;
-        let account =
-            Account::from_credentials_and_http(account, acme_http_client().await?).await?;
-        let mut order = account
-            .new_order(&NewOrder {
-                identifiers: &identifiers,
-            })
-            .await?;
-        let authorizations = order.authorizations().await?;
-
-        let mut http_challenges = HashMap::new();
-        let mut challenges = Vec::new();
-
-        for authz in &authorizations {
-            match authz.status {
-                AuthorizationStatus::Pending => {}
-                AuthorizationStatus::Valid => continue,
-                _ => bail!("authorization status is not valid"),
-            }
-
-            let challenge = authz
-                .challenges
-                .iter()
-                .find(|c| c.r#type == ChallengeType::Http01)
-                .ok_or_else(|| anyhow::anyhow!("no http01 challenge found"))?;
-
-            let Identifier::Dns(identifier) = &authz.identifier;
-
-            http_challenges.insert(
-                challenge.token.to_string(),
-                order.key_authorization(challenge).as_str().to_string(),
-            );
-            challenges.push((identifier.to_string(), challenge.url.to_string()));
-        }
         let challenge_type = match entry.acme.challenge_type.as_str() {
             "http-01" => ChallengeType::Http01,
             _ => bail!("challenge type is not supported"),
         };
+        let account = Account::builder_with_http(acme_http_client().await?)
+            .from_credentials(account)
+            .await?;
+        let mut order = account.new_order(&NewOrder::new(&identifiers)).await?;
+        let http_challenges = collect_http_challenges(&mut order).await?;
         Ok(Self {
             id: entry.id,
             challenge_type,
             identifiers,
             http_challenges,
-            challenges,
             order,
         })
     }
 
-    pub async fn start_challenge(&mut self) -> anyhow::Result<Cert> {
-        for (_, url) in &self.challenges {
-            self.order.set_challenge_ready(url).await?;
+    /// Tells the ACME server that every pending challenge is ready for validation.
+    async fn set_challenges_ready(&mut self) -> anyhow::Result<()> {
+        let mut authorizations = self.order.authorizations();
+        while let Some(authz) = authorizations.next().await {
+            let mut authz = authz?;
+            if authz.status != AuthorizationStatus::Pending {
+                continue;
+            }
+            let mut challenge = authz
+                .challenge(self.challenge_type.clone())
+                .ok_or_else(|| {
+                    anyhow!(
+                        "the ACME server offers no {:?} challenge",
+                        self.challenge_type
+                    )
+                })?;
+            challenge.set_ready().await?;
         }
+        Ok(())
+    }
+
+    pub async fn start_challenge(&mut self) -> anyhow::Result<Cert> {
+        self.set_challenges_ready().await?;
 
         let mut backoff = ExponentialBackoffBuilder::new()
             .with_max_elapsed_time(Some(HTTP_CHALLENGE_TIMEOUT))
@@ -287,9 +302,9 @@ impl AcmeOrder {
         let san = self
             .identifiers
             .iter()
-            .map(|id| {
-                let Identifier::Dns(domain) = id;
-                domain.clone()
+            .filter_map(|id| match id {
+                Identifier::Dns(domain) => Some(domain.clone()),
+                _ => None,
             })
             .collect::<Vec<_>>();
 
@@ -300,7 +315,7 @@ impl AcmeOrder {
         let request = params.serialize_request(&keypair)?;
         let csr = request.der();
 
-        self.order.finalize(csr).await?;
+        self.order.finalize_csr(csr).await?;
         let cert_chain_pem = loop {
             match self.order.certificate().await? {
                 Some(cert_chain_pem) => break cert_chain_pem,
@@ -325,10 +340,35 @@ impl AcmeOrder {
     }
 }
 
+/// Collects the key authorizations of the pending HTTP-01 challenges, by token.
+async fn collect_http_challenges(order: &mut Order) -> anyhow::Result<HashMap<String, String>> {
+    let mut challenges = HashMap::new();
+    let mut authorizations = order.authorizations();
+    while let Some(authz) = authorizations.next().await {
+        let mut authz = authz?;
+        match authz.status {
+            AuthorizationStatus::Pending => {}
+            AuthorizationStatus::Valid => continue,
+            _ => bail!("authorization status is not valid"),
+        }
+        let challenge = authz
+            .challenge(ChallengeType::Http01)
+            .ok_or_else(|| anyhow!("no http01 challenge found"))?;
+        challenges.insert(
+            challenge.token.clone(),
+            challenge.key_authorization().as_str().to_string(),
+        );
+    }
+    Ok(challenges)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyper::{header::HeaderMap, Response};
+    use hyper::{
+        header::{HeaderMap, LOCATION},
+        Response,
+    };
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -339,7 +379,7 @@ mod tests {
     impl HttpClient for RecordingClient {
         fn request(
             &self,
-            req: Request<Full<Bytes>>,
+            req: Request<BodyWrapper<Bytes>>,
         ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, instant_acme::Error>> + Send>>
         {
             if let Ok(mut headers) = self.headers.lock() {
@@ -351,12 +391,88 @@ mod tests {
         }
     }
 
+    const DIRECTORY: &str = r#"{"newNonce":"https://acme.example/nonce","newAccount":"https://acme.example/account","newOrder":"https://acme.example/order"}"#;
+    const ORDER: &str = r#"{"status":"pending","authorizations":["https://acme.example/authz/1"],"finalize":"https://acme.example/order/1/finalize"}"#;
+    /// Pebble and Let's Encrypt also offer `dns-persist-01`, which has no token.
+    const AUTHORIZATION: &str = r#"{
+        "status": "pending",
+        "identifier": {"type": "dns", "value": "example.com"},
+        "challenges": [
+            {"type": "dns-persist-01", "url": "https://acme.example/chall/2", "status": "pending", "issuer-domain-names": ["acme.example"]},
+            {"type": "http-01", "url": "https://acme.example/chall/1", "token": "http-token", "status": "pending"}
+        ]
+    }"#;
+
+    /// Answers the requests of an HTTP-01 order for `example.com`.
+    struct FakeAcmeServer;
+
+    impl HttpClient for FakeAcmeServer {
+        fn request(
+            &self,
+            req: Request<BodyWrapper<Bytes>>,
+        ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, instant_acme::Error>> + Send>>
+        {
+            let (status, body) = match req.uri().path() {
+                "/directory" => (200, DIRECTORY),
+                "/nonce" => (200, ""),
+                "/order" => (201, ORDER),
+                "/authz/1" => (200, AUTHORIZATION),
+                _ => (404, r#"{"type":"urn:ietf:params:acme:error:malformed"}"#),
+            };
+            let rsp = Response::builder()
+                .status(status)
+                .header("Replay-Nonce", "nonce")
+                .header(LOCATION, "https://acme.example/order/1")
+                .body(Full::new(Bytes::from_static(body.as_bytes())))
+                .unwrap();
+            Box::pin(std::future::ready(Ok(BytesResponse::from(rsp))))
+        }
+    }
+
+    /// Account credentials as instant-acme 0.7 stored them in `acme.toml`.
+    const STORED_BY_0_7: &str = r#"
+        [account]
+        id = "https://acme.example/acct/1"
+        key_pkcs8 = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH"
+        directory = "https://acme.example/directory"
+    "#;
+
+    async fn stored_account() -> Account {
+        #[derive(Deserialize)]
+        struct Stored {
+            account: AccountCredentials,
+        }
+        let stored: Stored = toml::from_str(STORED_BY_0_7).unwrap();
+        Account::builder_with_http(Box::new(FakeAcmeServer))
+            .from_credentials(stored.account)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn credentials_stored_by_instant_acme_0_7_still_load() {
+        assert_eq!(stored_account().await.id(), "https://acme.example/acct/1");
+    }
+
+    #[tokio::test]
+    async fn a_challenge_without_a_token_does_not_break_the_order() {
+        let identifiers = [Identifier::Dns("example.com".to_string())];
+        let mut order = stored_account()
+            .await
+            .new_order(&NewOrder::new(&identifiers))
+            .await
+            .unwrap();
+        let challenges = collect_http_challenges(&mut order).await.unwrap();
+        assert_eq!(challenges.keys().collect::<Vec<_>>(), ["http-token"]);
+        assert!(challenges["http-token"].starts_with("http-token."));
+    }
+
     /// Sends one GET through the wrapper and returns its outcome with the headers the inner client saw.
     async fn send(url: &str) -> (bool, Vec<HeaderMap>) {
         let inner = RecordingClient::default();
         let headers = inner.headers.clone();
         let client = AcmeHttpClient { inner };
-        let req = Request::get(url).body(Full::new(Bytes::new())).unwrap();
+        let req = Request::get(url).body(BodyWrapper::default()).unwrap();
         let ok = client.request(req).await.is_ok();
         let seen = headers.lock().unwrap().clone();
         (ok, seen)

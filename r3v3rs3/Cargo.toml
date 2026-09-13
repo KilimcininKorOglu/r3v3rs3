@@ -63,7 +63,7 @@ hyper-util = { version = "0.1.10", features = [
 include_dir = "0.7.3"
 indexmap = { version = "2.0.0", features = ["serde"] }
 ipnet = { version = "2.11.0", features = ["serde"] }
-instant-acme = "0.7.1"
+instant-acme = { version = "0.8.5", default-features = false, features = ["ring"] }
 log = "0.4.19"
 mime_guess = "2.0.4"
 moka = { version = "0.12.16", features = ["sync"] }
