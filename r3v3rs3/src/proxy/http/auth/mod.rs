@@ -1,4 +1,5 @@
 use super::error::ProxyError;
+use super::page::PagePreferences;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{body::Body, Request, Response};
@@ -35,6 +36,8 @@ pub struct AuthContext<'a> {
     pub base_path: &'a str,
     /// Segments of the request path below the route path.
     pub path_segments: &'a [String],
+    /// Language and theme of the pages that the authenticator renders.
+    pub preferences: PagePreferences,
 }
 
 /// Why a request did not pass authentication.

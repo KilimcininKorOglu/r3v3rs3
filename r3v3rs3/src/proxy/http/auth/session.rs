@@ -1,3 +1,4 @@
+use super::super::page::PagePreferences;
 use super::{AuthContext, AuthRejection};
 use crate::admin::auth::{LoginAttemptKey, LoginAttempts, MINIMUM_SESSION_EXPIRY};
 use crate::config::storage::Storage;
@@ -41,9 +42,9 @@ const TOKEN_LENGTH: usize = 32;
 
 const CONTENT_SECURITY: &str =
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'";
-const INVALID_CREDENTIALS: &str = "Invalid username, password or TOTP code.";
-const TOTP_REQUIRED: &str = "Enter the TOTP code of the account.";
-const TOO_MANY_ATTEMPTS: &str = "Too many failed sign-in attempts. Try again later.";
+const INVALID_CREDENTIALS: &str = "login.invalid_credentials";
+const TOTP_REQUIRED: &str = "login.totp_required";
+const TOO_MANY_ATTEMPTS: &str = "login.too_many_attempts";
 
 /// Signs clients in with the panel accounts and keeps their sessions. The server keeps one
 /// instance for all proxies, so the sessions survive a proxy reload.
@@ -238,6 +239,7 @@ impl SessionAuthenticator {
                     redirect: &query_redirect(&req),
                     error: None,
                     totp: false,
+                    preferences: ctx.preferences,
                 },
                 StatusCode::OK,
             ),
@@ -275,12 +277,13 @@ impl SessionAuthenticator {
         let Some(form) = read_form(req.into_body()).await else {
             return text_response(StatusCode::BAD_REQUEST, "Bad Request");
         };
-        let page = |error, totp, status| {
+        let page = |error_key, totp, status| {
             let template = LoginTemplate {
                 username: &form.username,
                 redirect: &form.redirect,
-                error: Some(error),
+                error: Some(ctx.preferences.locale.t(error_key)),
                 totp,
+                preferences: ctx.preferences,
             };
             login_page(template, status)
         };
@@ -496,6 +499,7 @@ struct LoginTemplate<'a> {
     redirect: &'a str,
     error: Option<&'a str>,
     totp: bool,
+    preferences: PagePreferences,
 }
 
 fn login_page(template: LoginTemplate<'_>, status: StatusCode) -> Response<Full<Bytes>> {

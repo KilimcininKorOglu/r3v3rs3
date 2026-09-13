@@ -2,10 +2,11 @@ use ipnet::IpNet;
 use mockito::Matcher;
 use r3v3rs3_api::{
     client_ip::ClientIpConfig,
+    i18n::Locale,
     policy::IpFilter,
     proxy::{HttpProxy, Route},
 };
-use reqwest::StatusCode;
+use reqwest::{header::COOKIE, StatusCode};
 
 mod common;
 use common::{
@@ -128,6 +129,24 @@ async fn ip_filter_allows_and_denies_clients() -> anyhow::Result<()> {
         assert_eq!(resp.headers()["content-type"], "text/html; charset=utf-8");
         let body = resp.text().await?;
         assert!(body.contains("<div class=\"error-text\">Forbidden</div>"));
+        assert!(body.contains(r#"<html lang="en">"#), "{body}");
+
+        // The error page uses the language and the theme that the WebUI stores in cookies.
+        let resp = client
+            .get(deny_port.http_url("/denied"))
+            .header(COOKIE, "r3v3rs3_lang=tr; r3v3rs3_theme=dark")
+            .send()
+            .await?;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = resp.text().await?;
+        assert!(
+            body.contains(r#"<html lang="tr" data-theme="dark">"#),
+            "{body}"
+        );
+        assert!(body.contains(&format!(
+            "<div class=\"error-text\">{}</div>",
+            Locale::Tr.t("error_page.403")
+        )));
 
         let resp = client.get(allow_port.http_url("/allowed")).send().await?;
         assert_eq!(resp.status(), StatusCode::OK);

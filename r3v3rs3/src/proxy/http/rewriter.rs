@@ -14,6 +14,7 @@ use super::client_ip::{ClientAddr, CLIENT_IP_HEADERS};
 use super::compression::ResponseCompression;
 use super::error::{error_headers, map_error, status_text, ErrorTemplate};
 use super::header_rules::{CompiledHeaderRules, HeaderVariables};
+use super::page::PagePreferences;
 
 #[derive(Default, Debug)]
 pub struct RequestRewriter {
@@ -181,6 +182,8 @@ pub struct ResponseRewriter {
     /// Response header rules of the route and the variable values of the request.
     header_rules: Option<(Arc<CompiledHeaderRules>, HeaderVariables)>,
     compression: Option<ResponseCompression>,
+    /// Language and theme of the error page.
+    preferences: PagePreferences,
 }
 
 impl ResponseRewriter {
@@ -212,7 +215,7 @@ impl ResponseRewriter {
                     None => res,
                 })
             }
-            Err(err) => error_response(err),
+            Err(err) => error_response(err, self.preferences),
         }
     }
 
@@ -231,12 +234,14 @@ impl ResponseRewriter {
 
 fn error_response(
     err: anyhow::Error,
+    preferences: PagePreferences,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let headers = error_headers(&err);
     let code = map_error(err);
     let body = ErrorTemplate {
         code: code.as_u16(),
-        text: status_text(code),
+        text: status_text(code, preferences.locale),
+        preferences,
     }
     .render_once()?;
     let mut res = Response::new(BoxBody::new(
@@ -278,6 +283,11 @@ impl ResponseRewriterBuilder {
 
     pub fn compression(mut self, compression: Option<ResponseCompression>) -> Self {
         self.inner.compression = compression;
+        self
+    }
+
+    pub fn preferences(mut self, preferences: PagePreferences) -> Self {
+        self.inner.preferences = preferences;
         self
     }
 

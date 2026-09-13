@@ -1,12 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
+<% let locale = self.preferences.locale; %><!DOCTYPE html>
+<html lang="<%= locale.code() %>"<% if let Some(theme) = self.preferences.theme_attribute() { %> data-theme="<%= theme %>"<% } %>>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex">
-    <title>Sign In</title>
+    <title><%= locale.t("login.title") %></title>
     <style>
         :root {
+            color-scheme: light;
             --background-color: #f6f6f6;
             --panel-color: #ffffff;
             --border-color: #d0d0d0;
@@ -17,8 +18,21 @@
             --button-text-color: #ffffff;
         }
 
+        :root[data-theme="dark"] {
+            color-scheme: dark;
+            --background-color: #121212;
+            --panel-color: #1e1e1e;
+            --border-color: #444444;
+            --text-color: #e0e0e0;
+            --link-color: #bbbbbb;
+            --error-color: #ff6b81;
+            --button-color: #e0e0e0;
+            --button-text-color: #121212;
+        }
+
         @media (prefers-color-scheme: dark) {
-            :root {
+            :root:not([data-theme="light"]) {
+                color-scheme: dark;
                 --background-color: #121212;
                 --panel-color: #1e1e1e;
                 --border-color: #444444;
@@ -108,20 +122,20 @@
 </head>
 <body>
     <form method="post">
-        <h1>Sign In</h1>
+        <h1><%= locale.t("login.title") %></h1>
         <% if let Some(error) = self.error { %>
             <p class="error" role="alert"><%= error %></p>
         <% } %>
-        <label for="username">Username</label>
+        <label for="username"><%= locale.t("login.username") %></label>
         <input id="username" name="username" type="text" autocomplete="username" autocapitalize="off" value="<%= self.username %>" required<% if self.username.is_empty() { %> autofocus<% } %>>
-        <label for="password">Password</label>
+        <label for="password"><%= locale.t("login.password") %></label>
         <input id="password" name="password" type="password" autocomplete="current-password" required<% if !self.username.is_empty() { %> autofocus<% } %>>
-        <label for="totp">TOTP Code<% if !self.totp { %> (if enabled)<% } %></label>
+        <label for="totp"><% if self.totp { %><%= locale.t("login.totp") %><% } else { %><%= locale.t("login.totp_optional") %><% } %></label>
         <input id="totp" name="totp" type="text" inputmode="numeric" autocomplete="one-time-code"<% if self.totp { %> required<% } %>>
         <input name="redirect" type="hidden" value="<%= self.redirect %>">
-        <button type="submit">Sign In</button>
+        <button type="submit"><%= locale.t("login.submit") %></button>
         <div class="powered-by">
-            <a href="https://github.com/KilimcininKorOglu/r3v3rs3" target="_blank" rel="noopener noreferrer">Powered by r3v3rs3</a>
+            <a href="https://github.com/KilimcininKorOglu/r3v3rs3" target="_blank" rel="noopener noreferrer"><%= locale.t("common.powered_by") %></a>
         </div>
     </form>
 </body>

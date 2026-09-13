@@ -5,6 +5,7 @@ use self::{
     error::ProxyError,
     filter::FilterResult,
     header_rules::{new_request_id, HeaderVariables},
+    page::PagePreferences,
     pool::{ConnectionPool, UpstreamH2c},
     route::{FilteredRoute, ParsedRoute, Router},
 };
@@ -63,6 +64,7 @@ mod error;
 mod filter;
 mod header_rules;
 pub(crate) mod hyper_tls;
+mod page;
 mod pool;
 mod rate_limit;
 mod rewriter;
@@ -595,7 +597,8 @@ where
     B: Body<Data = Bytes>,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    let response_rewriter = ResponseRewriter::builder();
+    let preferences = PagePreferences::from_headers(req.headers());
+    let response_rewriter = ResponseRewriter::builder().preferences(preferences);
     let header_host = header_host(&req).map(str::to_string);
     let request_host = header_host
         .clone()
@@ -641,6 +644,7 @@ where
         proto: info.proto,
         base_path: &route.base_path,
         path_segments: &res.path_segments,
+        preferences,
     };
     let mut req = match authenticate(route, req, &auth_ctx).await {
         Authenticated::Pass(req) => req,

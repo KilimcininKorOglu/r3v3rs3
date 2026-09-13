@@ -220,6 +220,7 @@ mod tests {
             proto: "h3",
             base_path: "",
             path_segments: &[],
+            preferences: Default::default(),
         };
         let auth_req = auth.auth_request(&req, &ctx).unwrap();
         let headers = auth_req.headers();

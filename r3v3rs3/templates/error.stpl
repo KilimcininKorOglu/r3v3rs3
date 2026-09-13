@@ -1,17 +1,26 @@
 <!DOCTYPE html>
-<html>
+<html lang="<%= self.preferences.locale.code() %>"<% if let Some(theme) = self.preferences.theme_attribute() { %> data-theme="<%= theme %>"<% } %>>
 <head>
     <meta charset="utf-8">
     <title><%= self.code %> <%= self.text %></title>
     <style>
         :root {
+            color-scheme: light;
             --background-color: #f6f6f6;
             --text-color: #303030;
             --link-color: #808080;
         }
 
+        :root[data-theme="dark"] {
+            color-scheme: dark;
+            --background-color: #121212;
+            --text-color: #e0e0e0;
+            --link-color: #bbbbbb;
+        }
+
         @media (prefers-color-scheme: dark) {
-            :root {
+            :root:not([data-theme="light"]) {
+                color-scheme: dark;
                 --background-color: #121212;
                 --text-color: #e0e0e0;
                 --link-color: #bbbbbb;
@@ -22,7 +31,7 @@
             background-color: var(--background-color);
             height: 100%;
         }
-        
+
         body {
             height: 100%;
             margin: 0;
@@ -63,7 +72,7 @@
         <div class="error-code"><%= self.code %></div>
         <div class="error-text"><%= self.text %></div>
         <div class="powered-by">
-            <a href="https://github.com/KilimcininKorOglu/r3v3rs3" target="_blank" rel="noopener noreferrer">Powered by r3v3rs3</a>
+            <a href="https://github.com/KilimcininKorOglu/r3v3rs3" target="_blank" rel="noopener noreferrer"><%= self.preferences.locale.t("common.powered_by") %></a>
         </div>
     </div>
 </body>

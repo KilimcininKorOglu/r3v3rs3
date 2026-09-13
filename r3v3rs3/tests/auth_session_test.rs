@@ -1,4 +1,4 @@
-use r3v3rs3_api::{app::AppConfig, policy::AuthPolicy, proxy::HttpProxy};
+use r3v3rs3_api::{app::AppConfig, i18n::Locale, policy::AuthPolicy, proxy::HttpProxy};
 use reqwest::{
     header::{COOKIE, HOST, LOCATION, SET_COOKIE},
     redirect::Policy,
@@ -64,7 +64,22 @@ async fn session_auth_signs_clients_in_with_panel_accounts() -> anyhow::Result<(
 
         let resp = client.get(login_url.clone()).send().await?;
         assert_eq!(resp.status(), StatusCode::OK);
-        assert!(resp.text().await?.contains(r#"name="password""#));
+        let body = resp.text().await?;
+        assert!(body.contains(r#"name="password""#));
+        assert!(body.contains(r#"<html lang="en">"#), "{body}");
+
+        // The sign-in page uses the language and the theme that the WebUI stores in cookies.
+        let resp = client
+            .get(login_url.clone())
+            .header(COOKIE, "r3v3rs3_lang=tr; r3v3rs3_theme=light")
+            .send()
+            .await?;
+        let body = resp.text().await?;
+        assert!(
+            body.contains(r#"<html lang="tr" data-theme="light">"#),
+            "{body}"
+        );
+        assert!(body.contains(&format!("<h1>{}</h1>", Locale::Tr.t("login.title"))));
 
         // Failed sign-ins are limited for each client IP address and username.
         for status in [
@@ -79,6 +94,18 @@ async fn session_auth_signs_clients_in_with_panel_accounts() -> anyhow::Result<(
                 .await?;
             assert_eq!(resp.status(), status);
         }
+
+        let resp = client
+            .post(login_url.clone())
+            .header(COOKIE, "r3v3rs3_lang=tr")
+            .form(&[("username", "admin"), ("password", "wrong")])
+            .send()
+            .await?;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(resp
+            .text()
+            .await?
+            .contains(Locale::Tr.t("login.invalid_credentials")));
 
         let resp = client
             .post(login_url.clone())
