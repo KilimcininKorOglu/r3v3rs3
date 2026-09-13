@@ -584,7 +584,7 @@ fn toggle(
     }
 }
 
-fn error_view(error: Option<&String>) -> Html {
+pub(super) fn error_view(error: Option<&String>) -> Html {
     match error {
         Some(error) => html! { <p class={ERROR_CLASS}>{error.clone()}</p> },
         None => html! {},
@@ -888,20 +888,27 @@ fn parse_vhosts(
     vhosts: &str,
     errors: &mut HashMap<String, String>,
 ) -> Vec<VirtualHost> {
-    let mut hosts = Vec::new();
-    for host in vhosts
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-    {
-        match VirtualHost::from_str(&host) {
-            Ok(host) => hosts.push(host),
+    parse_comma_list(locale, vhosts, "vhosts", errors, VirtualHost::from_str)
+}
+
+/// Parses a comma-separated list and skips empty items. Records the translated error of an invalid item under `key`.
+pub(super) fn parse_comma_list<T>(
+    locale: Locale,
+    text: &str,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+    parse: impl Fn(&str) -> Result<T, Error>,
+) -> Vec<T> {
+    let mut items = Vec::new();
+    for item in text.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        match parse(item) {
+            Ok(item) => items.push(item),
             Err(err) => {
-                errors.insert("vhosts".into(), locale.error_message(&err));
+                errors.insert(key.to_string(), locale.error_message(&err));
             }
         }
     }
-    hosts
+    items
 }
 
 fn parse_routes(

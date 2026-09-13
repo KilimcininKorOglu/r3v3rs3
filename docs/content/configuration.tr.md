@@ -17,6 +17,16 @@ r3v3rs3 altı port türünü destekler:
 - TLS üzerinden TCP
 - UDP
 
+## Server Name'ler
+
+HTTPS, QUIC üzerinden HTTP ve TLS üzerinden TCP portlarında "Server Name'ler" alanı bulunur. r3v3rs3, server sertifikasını client'ın SNI (Server Name Indication) değerine göre seçer. Client SNI göndermediğinde r3v3rs3, bütün server name'leri taşıyan geçerli bir server sertifikası seçer. Liste boşsa ilk geçerli server sertifikasını seçer.
+
+```toml
+[my-port]
+listen = "/ip4/0.0.0.0/tcp/443/https"
+tls_termination = { server_names = ["example.com", "*.example.com"] }
+```
+
 ## Portu sıfırlama
 
 Port config'ini değiştirdiğinizde açık bağlantılar etkilenmez; bu bağlantılar eski config ile çalışmaya devam eder. Açık bağlantıları kapatmak için portu sıfırlayın.

@@ -17,6 +17,16 @@ r3v3rs3 supports six types of ports:
 - TCP over TLS
 - UDP
 
+## Server Names
+
+HTTPS, HTTP over QUIC and TCP over TLS ports have a "Server Names" field. r3v3rs3 selects the server certificate from the SNI (Server Name Indication) of the client. When the client sends no SNI, r3v3rs3 selects a valid server certificate that has all the server names. When the list is empty, r3v3rs3 selects the first valid server certificate.
+
+```toml
+[my-port]
+listen = "/ip4/0.0.0.0/tcp/443/https"
+tls_termination = { server_names = ["example.com", "*.example.com"] }
+```
+
 ## Resetting a Port
 
 Changing the port configuration does not affect existing connections. Old connections will continue to use the old configuration. To forcibly close existing connections, you can reset the port.
