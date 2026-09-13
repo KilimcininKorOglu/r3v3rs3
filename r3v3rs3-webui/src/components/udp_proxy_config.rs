@@ -1,10 +1,11 @@
+use super::http_proxy_config::{
+    format_seconds, or_error, parse_seconds, timeout_field_view, use_entry_errors,
+};
+use super::tcp_proxy_config::{parse_servers, servers_view, use_server_forms, ServerForm};
 use crate::i18n::use_locale;
-use r3v3rs3_api::port::UpstreamServer;
+use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::proxy::UdpProxy;
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, Ipv6Addr};
-use wasm_bindgen::{JsCast, UnwrapThrowExt};
-use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -17,90 +18,73 @@ pub struct Props {
 #[function_component(UdpProxyConfig)]
 pub fn udp_proxy_config(props: &Props) -> Html {
     let locale = use_locale();
-    let upstream_servers = use_state(|| {
-        props
-            .proxy
-            .upstream_servers
-            .iter()
-            .map(|server| {
-                (
-                    server.addr.host().unwrap_or_default(),
-                    server.addr.port().unwrap_or(0),
-                )
-            })
-            .collect::<Vec<_>>()
-    });
-    if upstream_servers.is_empty() {
-        upstream_servers.set(vec![("example.com".into(), 8080)]);
-    }
+    let upstream_servers = use_server_forms(&props.proxy.upstream_servers);
+    let idle_timeout = use_state(|| format_seconds(props.proxy.session_idle_timeout));
 
-    let prev_entry =
-        use_state::<Result<UdpProxy, HashMap<String, String>>, _>(|| Err(Default::default()));
-    let entry = get_proxy(&upstream_servers);
-
-    if entry != *prev_entry {
-        prev_entry.set(entry.clone());
-        props.onchanged.emit(entry);
-    }
+    let entry = get_proxy(locale, &upstream_servers, &idle_timeout);
+    let errors = use_entry_errors(entry, props.onchanged.clone());
 
     html! {
         <>
-            <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("proxy_form.upstream_server")}</label>
+            { servers_view(locale, &upstream_servers, &errors, false) }
 
-            { upstream_servers.iter().enumerate().map(|(i, (host, port))| {
-                let upstream_servers_cloned = upstream_servers.clone();
-                let host_onchange = Callback::from(move |event: Event| {
-                    let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-                    let mut servers = (*upstream_servers_cloned).clone();
-                    servers[i].0 = target.value();
-                    upstream_servers_cloned.set(servers);
-                });
-
-                let upstream_servers_cloned = upstream_servers.clone();
-                let port_onchange = Callback::from(move |event: Event| {
-                    let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-                    let mut servers = (*upstream_servers_cloned).clone();
-                    servers[i].1 = target.value().parse().unwrap();
-                    upstream_servers_cloned.set(servers);
-                });
-
-                html! {
-                    <div class="mt-2 bg-white shadow-sm p-5 border border-neutral-300 dark:border-neutral-600 dark:bg-neutral-800 rounded-md">
-                        <label class="block mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("proxy_form.host")}</label>
-                        <input type="text" autocapitalize="off" placeholder="example.com" onchange={host_onchange} value={host.clone()} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
-
-                        <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.port")}</label>
-                        <input type="number" placeholder="8080" onchange={port_onchange} value={port.to_string()} max="65535" min="1" class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
-                    </div>
-                }
-            }).collect::<Html>() }
+            { timeout_field_view(
+                locale,
+                "proxy_form.session_idle_timeout",
+                "proxy_form.session_idle_timeout_hint",
+                &idle_timeout,
+                errors.get("session_idle_timeout"),
+            ) }
         </>
     }
 }
 
-fn get_proxy(servers: &[(String, u16)]) -> Result<UdpProxy, HashMap<String, String>> {
+fn get_proxy(
+    locale: Locale,
+    servers: &[ServerForm],
+    idle_timeout: &str,
+) -> Result<UdpProxy, HashMap<String, String>> {
     let mut errors = HashMap::new();
-
-    let mut upstream_servers = Vec::new();
-    for (i, (host, port)) in servers.iter().enumerate() {
-        if host.is_empty() {
-            errors.insert(format!("upstream_servers_{i}"), "Host is required".into());
-        } else {
-            let addr = if let Ok(addr) = host.parse::<Ipv4Addr>() {
-                format!("/ip4/{addr}/udp/{port}")
-            } else if let Ok(addr) = host.parse::<Ipv6Addr>() {
-                format!("/ip6/{addr}/udp/{port}")
-            } else {
-                format!("/dns/{host}/udp/{port}")
-            };
-            let addr = addr.parse().unwrap();
-            upstream_servers.push(UpstreamServer { addr });
-        }
+    let upstream_servers = parse_servers(locale, servers, "udp", &mut errors);
+    let session_idle_timeout = or_error(
+        parse_seconds(
+            locale,
+            idle_timeout,
+            "proxy_form.session_idle_timeout_name",
+            1,
+        ),
+        "session_idle_timeout",
+        &mut errors,
+    );
+    if !errors.is_empty() {
+        return Err(errors);
     }
+    Ok(UdpProxy {
+        upstream_servers,
+        session_idle_timeout,
+    })
+}
 
-    if errors.is_empty() {
-        Ok(UdpProxy { upstream_servers })
-    } else {
-        Err(errors)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::tcp_proxy_config::tests::server;
+    use std::time::Duration;
+
+    #[test]
+    fn get_proxy_builds_udp_servers_and_the_idle_timeout() {
+        let proxy = get_proxy(Locale::En, &[server("127.0.0.1", 53, false)], "30").unwrap();
+        assert_eq!(
+            proxy.upstream_servers[0].addr.to_string(),
+            "/ip4/127.0.0.1/udp/53"
+        );
+        assert_eq!(proxy.session_idle_timeout, Duration::from_secs(30));
+
+        let errors = get_proxy(Locale::Tr, &[server("", 53, false)], "0").unwrap_err();
+        assert_eq!(
+            errors.get("upstream_servers_0").map(String::as_str),
+            Some(Locale::Tr.t("proxy_form.invalid_server"))
+        );
+        assert!(errors.contains_key("session_idle_timeout"));
     }
 }

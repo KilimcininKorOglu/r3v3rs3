@@ -14,6 +14,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
+use r3v3rs3_api::upstream::UpstreamTimeouts;
 use r3v3rs3_api::vhost::VirtualHost;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -54,6 +55,7 @@ struct ProxyForm {
     cache: CacheForm,
     h2c: bool,
     client_cert: Option<ShortId>,
+    timeouts: TimeoutsForm,
 }
 
 impl ProxyForm {
@@ -78,6 +80,22 @@ impl ProxyForm {
             cache: CacheForm::new(&proxy.cache),
             h2c: proxy.h2c,
             client_cert: proxy.client_cert,
+            timeouts: TimeoutsForm::new(&proxy.timeouts),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct TimeoutsForm {
+    connect: String,
+    request: String,
+}
+
+impl TimeoutsForm {
+    fn new(timeouts: &UpstreamTimeouts) -> Self {
+        Self {
+            connect: format_seconds(timeouts.connect),
+            request: format_seconds(timeouts.request),
         }
     }
 }
@@ -133,6 +151,8 @@ struct RouteForm {
     override_headers: bool,
     request_headers: String,
     response_headers: String,
+    override_timeouts: bool,
+    timeouts: TimeoutsForm,
 }
 
 impl RouteForm {
@@ -163,6 +183,8 @@ impl RouteForm {
                 .as_ref()
                 .map(|rules| format_header_rules(&rules.response))
                 .unwrap_or_default(),
+            override_timeouts: route.timeouts.is_some(),
+            timeouts: TimeoutsForm::new(&route.timeouts.unwrap_or_default()),
         }
     }
 
@@ -180,6 +202,8 @@ impl RouteForm {
             override_headers: false,
             request_headers: String::new(),
             response_headers: String::new(),
+            override_timeouts: false,
+            timeouts: TimeoutsForm::new(&UpstreamTimeouts::default()),
         }
     }
 }
@@ -220,14 +244,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
         }
     });
 
-    let prev_entry =
-        use_state::<Result<HttpProxy, HashMap<String, String>>, _>(|| Err(Default::default()));
-    let entry = get_proxy(locale, &form, &routes);
-    if entry != *prev_entry {
-        prev_entry.set(entry.clone());
-        props.onchanged.emit(entry.clone());
-    }
-    let errors = entry.err().unwrap_or_default();
+    let errors = use_entry_errors(get_proxy(locale, &form, &routes), props.onchanged.clone());
 
     html! {
         <>
@@ -304,6 +321,16 @@ pub fn http_proxy_config(props: &Props) -> Html {
                 &client_certs,
             ) }
 
+            <label class={SECTION_CLASS}>{locale.t("http_form.timeouts")}</label>
+            { timeouts_view(
+                locale,
+                &form.timeouts,
+                state_input(&form, text, |form, value| form.timeouts.connect = value),
+                state_input(&form, text, |form, value| form.timeouts.request = value),
+            ) }
+            { error_view(errors.get("timeouts")) }
+            <p class={HINT_CLASS}>{locale.t("http_form.timeouts_hint")}</p>
+
             <label class={SECTION_CLASS}>{locale.t("http_form.routes")}</label>
 
             { routes.iter().enumerate().map(|(i, route)| {
@@ -352,6 +379,7 @@ fn route_view(
             { route_rate_limit_view(locale, routes, index, route) }
             { route_auth_view(locale, routes, index, route) }
             { route_headers_view(locale, routes, index, route) }
+            { route_timeouts_view(locale, routes, index, route) }
             { error_view(error) }
 
             <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
@@ -366,27 +394,53 @@ fn route_view(
     }
 }
 
+/// The toggle of a route setting that replaces the proxy setting. The form and the hint show
+/// when the toggle is on.
+fn route_override_view(
+    locale: Locale,
+    onchange: Callback<Event>,
+    enabled: bool,
+    label_key: &'static str,
+    hint_key: &'static str,
+    form: Html,
+) -> Html {
+    html! {
+        <>
+            <div>
+                { toggle(onchange, enabled, locale.t(label_key), "mt-6") }
+            </div>
+            if enabled {
+                { form }
+                <p class={HINT_CLASS}>{locale.t(hint_key)}</p>
+            }
+        </>
+    }
+}
+
 fn route_ip_filter_view(
     locale: Locale,
     routes: &UseStateHandle<Vec<RouteForm>>,
     index: usize,
     route: &RouteForm,
 ) -> Html {
-    html! {
-        <>
-            <div>
-                { toggle(route_input(routes, index, checked, |route, value| route.override_ip_filter = value), route.override_ip_filter, locale.t("http_form.override_ip_filter"), "mt-6") }
-            </div>
-            if route.override_ip_filter {
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| {
+            route.override_ip_filter = value
+        }),
+        route.override_ip_filter,
+        "http_form.override_ip_filter",
+        "http_form.route_ip_filter_hint",
+        html! {
+            <>
                 <label class={LABEL_CLASS}>{locale.t("http_form.allow")}</label>
                 <input type="text" autocapitalize="off" placeholder="192.168.0.0/16" value={route.allow.clone()} onchange={route_input(routes, index, text, |route, value| route.allow = value)} class={INPUT_CLASS} />
 
                 <label class={LABEL_CLASS}>{locale.t("http_form.deny")}</label>
                 <input type="text" autocapitalize="off" placeholder="203.0.113.0/24" value={route.deny.clone()} onchange={route_input(routes, index, text, |route, value| route.deny = value)} class={INPUT_CLASS} />
-                <p class={HINT_CLASS}>{locale.t("http_form.route_ip_filter_hint")}</p>
-            }
-        </>
-    }
+            </>
+        },
+    )
 }
 
 fn route_rate_limit_view(
@@ -395,23 +449,28 @@ fn route_rate_limit_view(
     index: usize,
     route: &RouteForm,
 ) -> Html {
-    html! {
-        <>
-            <div>
-                { toggle(route_input(routes, index, checked, |route, value| route.override_rate_limit = value), route.override_rate_limit, locale.t("http_form.override_rate_limit"), "mt-6") }
-            </div>
-            if route.override_rate_limit {
-                { rate_limit_view(
-                    locale,
-                    &route.rate_limit,
-                    route_input(routes, index, text, |route, value| route.rate_limit.requests = value),
-                    route_input(routes, index, period, |route, value| route.rate_limit.per = value),
-                    route_input(routes, index, text, |route, value| route.rate_limit.burst = value),
-                ) }
-                <p class={HINT_CLASS}>{locale.t("http_form.route_rate_limit_hint")}</p>
-            }
-        </>
-    }
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| {
+            route.override_rate_limit = value
+        }),
+        route.override_rate_limit,
+        "http_form.override_rate_limit",
+        "http_form.route_rate_limit_hint",
+        rate_limit_view(
+            locale,
+            &route.rate_limit,
+            route_input(routes, index, text, |route, value| {
+                route.rate_limit.requests = value
+            }),
+            route_input(routes, index, period, |route, value| {
+                route.rate_limit.per = value
+            }),
+            route_input(routes, index, text, |route, value| {
+                route.rate_limit.burst = value
+            }),
+        ),
+    )
 }
 
 fn route_auth_view(
@@ -420,17 +479,18 @@ fn route_auth_view(
     index: usize,
     route: &RouteForm,
 ) -> Html {
-    html! {
-        <>
-            <div>
-                { toggle(route_input(routes, index, checked, |route, value| route.override_auth = value), route.override_auth, locale.t("http_form.override_auth"), "mt-6") }
-            </div>
-            if route.override_auth {
-                <AuthConfig form={route.auth.clone()} onchange={item_update(routes, index, |route, value| route.auth = value)} />
-                <p class={HINT_CLASS}>{locale.t("http_form.route_auth_hint")}</p>
-            }
-        </>
-    }
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| {
+            route.override_auth = value
+        }),
+        route.override_auth,
+        "http_form.override_auth",
+        "http_form.route_auth_hint",
+        html! {
+            <AuthConfig form={route.auth.clone()} onchange={item_update(routes, index, |route, value| route.auth = value)} />
+        },
+    )
 }
 
 fn route_headers_view(
@@ -439,21 +499,80 @@ fn route_headers_view(
     index: usize,
     route: &RouteForm,
 ) -> Html {
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| {
+            route.override_headers = value
+        }),
+        route.override_headers,
+        "http_form.override_headers",
+        "http_form.route_headers_hint",
+        header_rules_view(
+            locale,
+            &route.request_headers,
+            &route.response_headers,
+            route_input(routes, index, text_area, |route, value| {
+                route.request_headers = value
+            }),
+            route_input(routes, index, text_area, |route, value| {
+                route.response_headers = value
+            }),
+        ),
+    )
+}
+
+fn route_timeouts_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| {
+            route.override_timeouts = value
+        }),
+        route.override_timeouts,
+        "http_form.override_timeouts",
+        "http_form.route_timeouts_hint",
+        timeouts_view(
+            locale,
+            &route.timeouts,
+            route_input(routes, index, text, |route, value| {
+                route.timeouts.connect = value
+            }),
+            route_input(routes, index, text, |route, value| {
+                route.timeouts.request = value
+            }),
+        ),
+    )
+}
+
+fn timeouts_view(
+    locale: Locale,
+    form: &TimeoutsForm,
+    on_connect: Callback<Event>,
+    on_request: Callback<Event>,
+) -> Html {
+    html! {
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+            <div>{ seconds_input(locale.t("proxy_form.connect_timeout"), &form.connect, 1, on_connect) }</div>
+            <div>{ seconds_input(locale.t("proxy_form.request_timeout"), &form.request, 0, on_request) }</div>
+        </div>
+    }
+}
+
+/// A labeled number input for a timeout in whole seconds.
+pub(super) fn seconds_input(
+    label: &'static str,
+    value: &str,
+    min: u64,
+    onchange: Callback<Event>,
+) -> Html {
     html! {
         <>
-            <div>
-                { toggle(route_input(routes, index, checked, |route, value| route.override_headers = value), route.override_headers, locale.t("http_form.override_headers"), "mt-6") }
-            </div>
-            if route.override_headers {
-                { header_rules_view(
-                    locale,
-                    &route.request_headers,
-                    &route.response_headers,
-                    route_input(routes, index, text_area, |route, value| route.request_headers = value),
-                    route_input(routes, index, text_area, |route, value| route.response_headers = value),
-                ) }
-                <p class={HINT_CLASS}>{locale.t("http_form.route_headers_hint")}</p>
-            }
+            <label class={LABEL_CLASS}>{label}</label>
+            <input type="number" min={min.to_string()} max={MAX_TIMEOUT_SECS.to_string()} value={value.to_string()} {onchange} class={INPUT_CLASS} />
         </>
     }
 }
@@ -702,6 +821,47 @@ pub(super) fn input_element(event: &Event) -> HtmlInputElement {
     event.target().unwrap_throw().dyn_into().unwrap_throw()
 }
 
+/// Returns a change handler of an input element that stores its value in the state.
+pub(super) fn text_setter(state: &UseStateHandle<String>) -> Callback<Event> {
+    let state = state.clone();
+    Callback::from(move |event: Event| state.set(text(&event)))
+}
+
+/// Emits `entry` to `onchanged` when it differs from the last emitted entry. Returns the errors
+/// of `entry`.
+#[hook]
+pub(super) fn use_entry_errors<T>(
+    entry: Result<T, HashMap<String, String>>,
+    onchanged: Callback<Result<T, HashMap<String, String>>>,
+) -> HashMap<String, String>
+where
+    T: Clone + PartialEq + 'static,
+{
+    let prev_entry = use_state::<Result<T, HashMap<String, String>>, _>(|| Err(Default::default()));
+    if entry != *prev_entry {
+        prev_entry.set(entry.clone());
+        onchanged.emit(entry.clone());
+    }
+    entry.err().unwrap_or_default()
+}
+
+/// A timeout input of a TCP or UDP proxy in whole seconds, with its error and its hint.
+pub(super) fn timeout_field_view(
+    locale: Locale,
+    label_key: &'static str,
+    hint_key: &'static str,
+    value: &UseStateHandle<String>,
+    error: Option<&String>,
+) -> Html {
+    html! {
+        <>
+            { seconds_input(locale.t(label_key), value, 1, text_setter(value)) }
+            { error_view(error) }
+            <p class={HINT_CLASS}>{locale.t(hint_key)}</p>
+        </>
+    }
+}
+
 fn select_value(event: &Event) -> String {
     let select: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
     select.value()
@@ -818,6 +978,7 @@ fn get_proxy(
     );
     let compression = parse_compression(locale, &form.compression, "compression", &mut errors);
     let cache = parse_cache(locale, &form.cache, "cache", &mut errors);
+    let timeouts = parse_timeouts(locale, &form.timeouts, "timeouts", &mut errors);
 
     if !errors.is_empty() {
         return Err(errors);
@@ -838,7 +999,65 @@ fn get_proxy(
         cache,
         h2c: form.h2c,
         client_cert: form.client_cert,
+        timeouts,
     })
+}
+
+/// The largest timeout that the forms accept, one day.
+pub(super) const MAX_TIMEOUT_SECS: u64 = 86_400;
+
+/// Shows a timeout in whole seconds. A timeout below one second shows as 1, so it does not read
+/// as a disabled limit.
+pub(super) fn format_seconds(timeout: Duration) -> String {
+    if timeout.is_zero() {
+        return "0".into();
+    }
+    timeout.as_secs().max(1).to_string()
+}
+
+/// Parses a timeout in whole seconds from `min` to [`MAX_TIMEOUT_SECS`].
+pub(super) fn parse_seconds(
+    locale: Locale,
+    value: &str,
+    name_key: &str,
+    min: u64,
+) -> Result<Duration, String> {
+    value
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|secs| (min..=MAX_TIMEOUT_SECS).contains(secs))
+        .map(Duration::from_secs)
+        .ok_or_else(|| {
+            locale.tf(
+                "proxy_form.seconds_range",
+                &[
+                    ("name", locale.t(name_key)),
+                    ("min", &min.to_string()),
+                    ("max", &MAX_TIMEOUT_SECS.to_string()),
+                ],
+            )
+        })
+}
+
+fn parse_timeouts(
+    locale: Locale,
+    form: &TimeoutsForm,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> UpstreamTimeouts {
+    UpstreamTimeouts {
+        connect: or_error(
+            parse_seconds(locale, &form.connect, "proxy_form.connect_timeout_name", 1),
+            key,
+            errors,
+        ),
+        request: or_error(
+            parse_seconds(locale, &form.request, "proxy_form.request_timeout_name", 0),
+            key,
+            errors,
+        ),
+    }
 }
 
 fn parse_cache(
@@ -912,7 +1131,7 @@ fn parse_size(locale: Locale, value: &str, name_key: &str) -> Result<u64, String
 }
 
 /// Returns the parsed value, or records the error under `key` and returns the default value.
-fn or_error<T: Default>(
+pub(super) fn or_error<T: Default>(
     result: Result<T, String>,
     key: &str,
     errors: &mut HashMap<String, String>,
@@ -1091,6 +1310,9 @@ fn parse_route(
             errors,
         )
     });
+    let timeouts = route
+        .override_timeouts
+        .then(|| parse_timeouts(locale, &route.timeouts, key, errors));
     (!servers.is_empty()).then(|| Route {
         path: route.path.clone(),
         servers,
@@ -1098,5 +1320,74 @@ fn parse_route(
         rate_limit,
         auth,
         headers,
+        timeouts,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seconds_round_trip_and_stay_in_range() {
+        assert_eq!(format_seconds(Duration::ZERO), "0");
+        assert_eq!(format_seconds(Duration::from_millis(300)), "1");
+        assert_eq!(format_seconds(Duration::from_secs(90)), "90");
+
+        let connect = "proxy_form.connect_timeout_name";
+        assert_eq!(
+            parse_seconds(Locale::En, " 90 ", connect, 1),
+            Ok(Duration::from_secs(90))
+        );
+        assert_eq!(
+            parse_seconds(Locale::En, "0", "proxy_form.request_timeout_name", 0),
+            Ok(Duration::ZERO)
+        );
+        let err = parse_seconds(Locale::En, "0", connect, 1).unwrap_err();
+        assert!(err.starts_with("Connect timeout"), "{err}");
+        assert!(parse_seconds(Locale::En, "86401", connect, 1).is_err());
+        assert!(parse_seconds(Locale::En, "1.5", connect, 1).is_err());
+    }
+
+    #[test]
+    fn route_timeouts_apply_only_when_overridden() {
+        let route = Route {
+            path: "/".into(),
+            servers: vec![Server {
+                url: "http://127.0.0.1:9000/".parse().unwrap(),
+            }],
+            ip_filter: None,
+            rate_limit: None,
+            auth: None,
+            headers: None,
+            timeouts: Some(UpstreamTimeouts {
+                connect: Duration::from_secs(3),
+                request: Duration::from_secs(120),
+            }),
+        };
+        let form = RouteForm::new(&route);
+        let mut errors = HashMap::new();
+        assert_eq!(
+            parse_route(Locale::En, &form, "routes_0", &mut errors),
+            Some(route)
+        );
+
+        let inherited = RouteForm {
+            override_timeouts: false,
+            ..form.clone()
+        };
+        let parsed = parse_route(Locale::En, &inherited, "routes_0", &mut errors);
+        assert_eq!(parsed.unwrap().timeouts, None);
+        assert!(errors.is_empty());
+
+        let invalid = RouteForm {
+            timeouts: TimeoutsForm {
+                connect: "0".into(),
+                request: "5".into(),
+            },
+            ..form
+        };
+        parse_route(Locale::En, &invalid, "routes_0", &mut errors);
+        assert!(errors.contains_key("routes_0"));
+    }
 }

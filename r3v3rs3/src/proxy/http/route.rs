@@ -3,7 +3,7 @@ use super::cache::{cache_for, HttpCache};
 use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, RequestFilter};
 use super::header_rules::CompiledHeaderRules;
-use super::pool::{ConnectionPool, UpstreamClients};
+use super::pool::{Upstream, UpstreamClients};
 use super::rate_limit::{self, ClientRateLimiter};
 use hyper::Request;
 use r3v3rs3_api::{
@@ -24,7 +24,7 @@ impl Router {
         proxies: Vec<ProxyEntry>,
         https_port: Option<u16>,
         quic_port: Option<u16>,
-        upstream: &UpstreamClients<'_>,
+        upstream: &mut UpstreamClients<'_>,
         sessions: &Arc<SessionService>,
     ) -> Self {
         let mut routes = vec![];
@@ -35,7 +35,7 @@ impl Router {
                 _ => None,
             })
         {
-            let (tls_client_config, pool) = upstream.for_cert(http.client_cert);
+            let (tls_client_config, _) = upstream.get(http.client_cert, http.timeouts.connect);
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
             let proxy_rate_limiter = rate_limit::limiter((id, None), http.rate_limit);
@@ -66,6 +66,8 @@ impl Router {
                     || proxy_header_rules.clone(),
                     |rules| Arc::new(CompiledHeaderRules::new(rules)),
                 );
+                let timeouts = route.timeouts.unwrap_or(http.timeouts);
+                let (_, pool) = upstream.get(http.client_cert, timeouts.connect);
                 routes.push(FilteredRoute {
                     resource_id: id,
                     filter,
@@ -84,7 +86,10 @@ impl Router {
                     compression: compression.clone(),
                     cache: proxy_cache.clone(),
                     h2c: http.h2c,
-                    pool: pool.clone(),
+                    upstream: pool.map(|pool| Upstream {
+                        pool,
+                        request_timeout: timeouts.request,
+                    }),
                 });
             }
         }
@@ -126,9 +131,9 @@ pub struct FilteredRoute {
     pub cache: Option<Arc<HttpCache>>,
     /// Sends requests to plain HTTP upstream servers with HTTP/2 prior knowledge.
     pub h2c: bool,
-    /// The upstream connections of the proxy. `None` when the client certificate of the proxy is
-    /// invalid, so the route cannot reach its upstream servers.
-    pub pool: Option<Arc<ConnectionPool>>,
+    /// The upstream connections and the request timeout of the route. `None` when the client
+    /// certificate of the proxy is invalid, so the route cannot reach its upstream servers.
+    pub upstream: Option<Upstream>,
 }
 
 #[derive(Debug)]

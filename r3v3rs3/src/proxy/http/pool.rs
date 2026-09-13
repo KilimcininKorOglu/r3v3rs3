@@ -1,3 +1,4 @@
+use crate::proxy::http::error::ProxyError;
 use crate::proxy::http::{hyper_tls::client::HttpsConnector, HTTP2_MAX_FRAME_SIZE};
 use crate::proxy::tls::upstream_client_config;
 use crate::server::cert_list::CertList;
@@ -9,8 +10,11 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
 };
 use r3v3rs3_api::{error::Error, id::ShortId};
-use std::fmt;
+use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
+use std::{fmt, io};
 use tokio_rustls::rustls::ClientConfig;
 use tracing::error;
 
@@ -23,7 +27,8 @@ type ProxyClient = Client<HttpsConnector<HttpConnector>, ProxyBody>;
 #[derive(Debug, Clone, Copy)]
 pub struct UpstreamH2c;
 
-/// Upstream clients shared by every connection of a port.
+/// Upstream clients shared by the proxies of a port that use the same client certificate and
+/// connect timeout.
 pub struct ConnectionPool {
     /// Negotiates HTTP/2 or HTTP/1.1 with ALPN on TLS, and uses HTTP/1.1 on plain HTTP.
     client: ProxyClient,
@@ -40,12 +45,13 @@ impl fmt::Debug for ConnectionPool {
 }
 
 impl ConnectionPool {
-    pub fn new(tls_client_config: Arc<ClientConfig>) -> Self {
+    pub fn new(tls_client_config: Arc<ClientConfig>, connect_timeout: Duration) -> Self {
         let negotiated = with_alpn(&tls_client_config, &[b"h2", b"http/1.1"]);
+        let http1 = with_alpn(&tls_client_config, &[b"http/1.1"]);
         Self {
-            client: build_client(negotiated.clone(), false),
-            http1_client: build_client(with_alpn(&tls_client_config, &[b"http/1.1"]), false),
-            h2c_client: build_client(negotiated, true),
+            client: build_client(negotiated.clone(), false, connect_timeout),
+            http1_client: build_client(http1, false, connect_timeout),
+            h2c_client: build_client(negotiated, true, connect_timeout),
         }
     }
 
@@ -61,9 +67,12 @@ impl ConnectionPool {
         }
     }
 
+    /// Sends the request. `request_timeout` limits the time until the response headers arrive,
+    /// and `Duration::ZERO` disables the limit.
     pub async fn request(
         &self,
         mut req: Request<ProxyBody>,
+        request_timeout: Duration,
     ) -> Result<Response<ProxyBody>, anyhow::Error> {
         let upgrading_req = if req.headers().contains_key(UPGRADE) {
             let mut cloned_req = Request::builder().uri(req.uri()).body(empty_body())?;
@@ -77,11 +86,9 @@ impl ConnectionPool {
         // version, and an HTTP/2 connection ignores the request version.
         *req.version_mut() = hyper::Version::HTTP_11;
 
-        let result: Result<_, anyhow::Error> = self
-            .client_for(&req, upgrading_req.is_some())
-            .request(req)
+        let sending = self.client_for(&req, upgrading_req.is_some()).request(req);
+        let result = response_headers(sending, request_timeout)
             .await
-            .map_err(Into::into)
             .map(|res| res.map(|body| BoxBody::new(body.map_err(Into::into))));
 
         let result = match (result, upgrading_req) {
@@ -104,37 +111,107 @@ impl ConnectionPool {
     }
 }
 
+/// Waits for the response headers. A request timeout or a connect timeout becomes
+/// [`ProxyError::UpstreamTimeout`].
+async fn response_headers<F, B>(
+    sending: F,
+    request_timeout: Duration,
+) -> Result<Response<B>, anyhow::Error>
+where
+    F: Future<Output = Result<Response<B>, hyper_util::client::legacy::Error>>,
+{
+    let result = if request_timeout.is_zero() {
+        sending.await
+    } else {
+        tokio::time::timeout(request_timeout, sending)
+            .await
+            .map_err(|_| ProxyError::UpstreamTimeout)?
+    };
+    result.map_err(|err| {
+        if is_timeout(&err) {
+            ProxyError::UpstreamTimeout.into()
+        } else {
+            err.into()
+        }
+    })
+}
+
+/// Returns true when the error or one of its sources is an `io::ErrorKind::TimedOut` error.
+fn is_timeout(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = Some(err);
+    while let Some(err) = source {
+        if err
+            .downcast_ref::<io::Error>()
+            .is_some_and(|err| err.kind() == io::ErrorKind::TimedOut)
+        {
+            return true;
+        }
+        source = err.source();
+    }
+    false
+}
+
+/// The upstream connections of a route and the time limit of its requests.
+#[derive(Debug, Clone)]
+pub struct Upstream {
+    pub pool: Arc<ConnectionPool>,
+    /// `Duration::ZERO` disables the limit.
+    pub request_timeout: Duration,
+}
+
+impl Upstream {
+    pub async fn request(
+        &self,
+        req: Request<ProxyBody>,
+    ) -> Result<Response<ProxyBody>, anyhow::Error> {
+        self.pool.request(req, self.request_timeout).await
+    }
+}
+
+type UpstreamClient = (Arc<ClientConfig>, Option<Arc<ConnectionPool>>);
+
 /// Builds the upstream TLS client config and the connection pool of each proxy on a port. Proxies
-/// without a client certificate share one pool.
+/// with the same client certificate and connect timeout share one pool.
 pub struct UpstreamClients<'a> {
     certs: &'a CertList,
     default_config: Arc<ClientConfig>,
-    default_pool: Arc<ConnectionPool>,
+    clients: HashMap<(Option<ShortId>, Duration), UpstreamClient>,
 }
 
 impl<'a> UpstreamClients<'a> {
     pub fn new(certs: &'a CertList) -> Result<Self, Error> {
-        let default_config = Arc::new(upstream_client_config(certs, None)?);
         Ok(Self {
             certs,
-            default_pool: Arc::new(ConnectionPool::new(default_config.clone())),
-            default_config,
+            default_config: Arc::new(upstream_client_config(certs, None)?),
+            clients: HashMap::new(),
         })
     }
 
-    /// Returns the TLS client config and the connection pool for the client certificate. The pool
-    /// is `None` when the certificate is invalid, so the proxy does not connect without it.
-    pub fn for_cert(
-        &self,
+    /// Returns the TLS client config and the connection pool for the client certificate and the
+    /// connect timeout. The pool is `None` when the certificate is invalid, so the proxy does not
+    /// connect without it.
+    pub fn get(
+        &mut self,
         client_cert: Option<ShortId>,
-    ) -> (Arc<ClientConfig>, Option<Arc<ConnectionPool>>) {
-        if client_cert.is_none() {
-            return (self.default_config.clone(), Some(self.default_pool.clone()));
+        connect_timeout: Duration,
+    ) -> UpstreamClient {
+        let key = (client_cert, connect_timeout);
+        if let Some(client) = self.clients.get(&key) {
+            return client.clone();
         }
-        match upstream_client_config(self.certs, client_cert) {
+        let client = self.build(client_cert, connect_timeout);
+        self.clients.insert(key, client.clone());
+        client
+    }
+
+    fn build(&self, client_cert: Option<ShortId>, connect_timeout: Duration) -> UpstreamClient {
+        let config = match client_cert {
+            None => Ok(self.default_config.clone()),
+            Some(_) => upstream_client_config(self.certs, client_cert).map(Arc::new),
+        };
+        match config {
             Ok(config) => {
-                let config = Arc::new(config);
-                let pool = Arc::new(ConnectionPool::new(config.clone()));
+                let pool = Arc::new(ConnectionPool::new(config.clone(), connect_timeout));
                 (config, Some(pool))
             }
             Err(err) => {
@@ -151,11 +228,15 @@ fn with_alpn(config: &ClientConfig, protocols: &[&[u8]]) -> Arc<ClientConfig> {
     Arc::new(config)
 }
 
-fn build_client(tls_client_config: Arc<ClientConfig>, http2_only: bool) -> ProxyClient {
+fn build_client(
+    tls_client_config: Arc<ClientConfig>,
+    http2_only: bool,
+    connect_timeout: Duration,
+) -> ProxyClient {
     Client::builder(TokioExecutor::new())
         .http2_only(http2_only)
         .http2_max_frame_size(Some(HTTP2_MAX_FRAME_SIZE as u32))
-        .build(HttpsConnector::new(tls_client_config))
+        .build(HttpsConnector::new(tls_client_config).with_connect_timeout(connect_timeout))
 }
 
 fn empty_body() -> ProxyBody {
@@ -175,4 +256,21 @@ async fn upgrade_connection(req: Request<ProxyBody>, res: Response<ProxyBody>) {
             error!("upgrading io error: {}", err);
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_timeout_reads_the_error_sources() {
+        let timed_out = io::Error::new(io::ErrorKind::TimedOut, "timed out");
+        assert!(is_timeout(&timed_out));
+
+        let wrapped = anyhow::Error::new(timed_out).context("connect error");
+        assert!(is_timeout(wrapped.as_ref()));
+
+        let refused = io::Error::new(io::ErrorKind::ConnectionRefused, "refused");
+        assert!(!is_timeout(&refused));
+    }
 }

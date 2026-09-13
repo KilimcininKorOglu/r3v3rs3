@@ -1,5 +1,5 @@
 use super::compression::{header_items, header_number};
-use super::pool::ConnectionPool;
+use super::pool::Upstream;
 use bytes::{Bytes, BytesMut};
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{
@@ -312,12 +312,12 @@ impl CacheRequest {
 
 /// Sends the request to the upstream server, or answers it from the cache.
 pub async fn fetch(
-    pool: &ConnectionPool,
+    upstream: &Upstream,
     mut req: Request<ProxyBody>,
     cache: Option<CacheRequest>,
 ) -> Result<Response<ProxyBody>, anyhow::Error> {
     let Some(cache) = cache else {
-        return pool.request(req).await;
+        return upstream.request(req).await;
     };
     let stored = cache.stored();
     if let Some(entry) = stored.as_ref().filter(|entry| entry.is_fresh()) {
@@ -326,7 +326,7 @@ pub async fn fetch(
     if let Some(entry) = &stored {
         set_validators(req.headers_mut(), &entry.head.headers);
     }
-    let res = pool.request(req).await?;
+    let res = upstream.request(req).await?;
     match stored {
         Some(entry) if res.status() == StatusCode::NOT_MODIFIED => {
             let entry = cache.refresh(&entry, res.headers());

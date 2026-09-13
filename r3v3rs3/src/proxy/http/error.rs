@@ -29,11 +29,15 @@ pub enum ProxyError {
 
     #[error("the upstream client certificate of the proxy is invalid")]
     UpstreamClientCertInvalid,
+
+    #[error("the upstream server did not respond in time")]
+    UpstreamTimeout,
 }
 
 impl ProxyError {
     fn code(&self) -> StatusCode {
         match self {
+            Self::UpstreamTimeout => StatusCode::GATEWAY_TIMEOUT,
             Self::DomainFrontingDetected => StatusCode::MISDIRECTED_REQUEST,
             Self::NoRouteFound => StatusCode::BAD_GATEWAY,
             Self::IpNotAllowed => StatusCode::FORBIDDEN,

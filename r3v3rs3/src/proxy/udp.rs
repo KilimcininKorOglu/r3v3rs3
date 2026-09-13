@@ -3,6 +3,7 @@ use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::name_server::{GenericConnector, TokioRuntimeProvider};
 use hickory_resolver::system_conf::read_system_conf;
 use hickory_resolver::AsyncResolver;
+use r3v3rs3_api::upstream::DEFAULT_SESSION_IDLE_TIMEOUT;
 use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
 use std::collections::HashMap;
@@ -20,7 +21,6 @@ use tracing::{debug, error, info, span, warn, Level, Span};
 type Resolver = AsyncResolver<GenericConnector<TokioRuntimeProvider>>;
 
 const DNS_LOOKUP_RETRY_INTERVAL: Duration = Duration::from_secs(5);
-const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_SESSIONS: usize = 10_000;
 const MAX_DATAGRAM_SIZE: usize = 65527;
 
@@ -28,6 +28,7 @@ const MAX_DATAGRAM_SIZE: usize = 65527;
 pub struct UdpPortContext {
     pub listen: SocketAddr,
     servers: Vec<Connection>,
+    idle_timeout: Duration,
     sessions: HashMap<SocketAddr, UdpSession>,
     status: PortStatus,
     span: Span,
@@ -50,6 +51,7 @@ impl UdpPortContext {
         Ok(Self {
             listen,
             servers: Default::default(),
+            idle_timeout: DEFAULT_SESSION_IDLE_TIMEOUT,
             sessions: Default::default(),
             status: Default::default(),
             span,
@@ -59,16 +61,19 @@ impl UdpPortContext {
 
     pub async fn setup(&mut self, proxies: Vec<ProxyEntry>) -> Result<(), Error> {
         let mut servers = Vec::new();
+        let mut idle_timeout = DEFAULT_SESSION_IDLE_TIMEOUT;
         for proxy in proxies {
             if let ProxyKind::Udp(proxy) = proxy.proxy.kind {
+                idle_timeout = proxy.session_idle_timeout;
                 for server in proxy.upstream_servers {
                     servers.push(multiaddr_to_host(&server.addr)?);
                 }
             }
         }
-        // Keep the open sessions and the resolved addresses when the servers do not change.
-        if !same_servers(&servers, &self.servers) {
+        // Keep the open sessions and the resolved addresses when the settings do not change.
+        if !same_servers(&servers, &self.servers) || idle_timeout != self.idle_timeout {
             self.servers = servers;
+            self.idle_timeout = idle_timeout;
             self.sessions.clear();
         }
         Ok(())
@@ -136,7 +141,16 @@ impl UdpPortContext {
         }
         let server = self.servers.first_mut()?;
         let upstream = resolve(&self.resolver, &self.span, server).await?;
-        match UdpSession::open(upstream, client, listener.clone(), self.span.clone()).await {
+        let activity = Arc::new(Activity::new(self.idle_timeout));
+        match UdpSession::open(
+            upstream,
+            client,
+            listener.clone(),
+            activity,
+            self.span.clone(),
+        )
+        .await
+        {
             Ok(session) => Some(session),
             Err(err) => {
                 self.span.in_scope(|| {
@@ -196,6 +210,7 @@ impl UdpSession {
         upstream: SocketAddr,
         client: SocketAddr,
         listener: Arc<UdpSocket>,
+        activity: Arc<Activity>,
         span: Span,
     ) -> io::Result<Self> {
         let bind: SocketAddr = if upstream.is_ipv6() {
@@ -206,7 +221,6 @@ impl UdpSession {
         let socket = UdpSocket::bind(bind).await?;
         socket.connect(upstream).await?;
         let socket = Arc::new(socket);
-        let activity = Arc::new(Activity::new());
         let task = tokio::spawn(relay_replies(
             socket.clone(),
             listener,
@@ -241,14 +255,21 @@ impl Drop for UdpSession {
 struct Activity {
     started: Instant,
     last_active_ms: AtomicU64,
+    idle_timeout: Duration,
 }
 
 impl Activity {
-    fn new() -> Self {
+    fn new(idle_timeout: Duration) -> Self {
         Self {
             started: Instant::now(),
             last_active_ms: AtomicU64::new(0),
+            idle_timeout,
         }
+    }
+
+    /// The time until the session is idle for `idle_timeout`.
+    fn remaining(&self) -> Duration {
+        self.idle_timeout.saturating_sub(self.idle_time())
     }
 
     fn touch(&self) {
@@ -262,8 +283,8 @@ impl Activity {
     }
 }
 
-/// Sends the replies of the upstream server to the client until the session is idle for
-/// `SESSION_IDLE_TIMEOUT` or the upstream socket fails.
+/// Sends the replies of the upstream server to the client until the session is idle for its
+/// idle timeout or the upstream socket fails.
 async fn relay_replies(
     socket: Arc<UdpSocket>,
     listener: Arc<UdpSocket>,
@@ -273,7 +294,7 @@ async fn relay_replies(
 ) {
     let mut buf = vec![0; MAX_DATAGRAM_SIZE];
     loop {
-        let remaining = SESSION_IDLE_TIMEOUT.saturating_sub(activity.idle_time());
+        let remaining = activity.remaining();
         if remaining.is_zero() {
             break;
         }
@@ -347,6 +368,7 @@ mod tests {
                     upstream_servers: vec![UpstreamServer {
                         addr: format!("/ip4/127.0.0.1/udp/{port}").parse().unwrap(),
                     }],
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -383,10 +405,13 @@ mod tests {
         let activity = Activity {
             started: Instant::now() - Duration::from_secs(10),
             last_active_ms: AtomicU64::new(0),
+            idle_timeout: Duration::from_secs(15),
         };
         assert!(activity.idle_time() >= Duration::from_secs(10));
+        assert!(activity.remaining() <= Duration::from_secs(5));
 
         activity.touch();
         assert!(activity.idle_time() < Duration::from_secs(1));
+        assert!(activity.remaining() > Duration::from_secs(14));
     }
 }

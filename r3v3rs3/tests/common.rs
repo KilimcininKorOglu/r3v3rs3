@@ -283,6 +283,7 @@ pub fn http_route(path: &str, upstream: &str, ip_filter: Option<IpFilter>) -> Ro
         rate_limit: None,
         auth: None,
         headers: None,
+        timeouts: None,
     }
 }
 

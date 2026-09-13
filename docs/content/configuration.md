@@ -67,7 +67,34 @@ Multiple ports can be bound to a proxy. However, it's not possible to bind TCP /
 
 A UDP proxy opens one session for each client address. The session has its own socket to the upstream server, so the upstream server sees a different source port for each client. r3v3rs3 sends the replies of the upstream server back to the client from the listening port.
 
-A session closes after 60 seconds without packets in either direction. It also closes when the upstream socket reports an error, or when the upstream servers of the port change. The next packet of the client opens a new session. A port keeps at most 10,000 sessions. When the limit is reached, r3v3rs3 drops the packets of new clients.
+A session closes when no packet passes in either direction for `session_idle_timeout` (default `60s`). It also closes when the upstream socket reports an error, or when the upstream servers or the idle timeout of the port change. The next packet of the client opens a new session. A port keeps at most 10,000 sessions. When the limit is reached, r3v3rs3 drops the packets of new clients.
+
+## Upstream Timeouts
+
+r3v3rs3 limits the time that it waits for an upstream server. A timeout is a duration such as `500ms`, `10s` or `1m`.
+
+- `timeouts.connect` of an HTTP / HTTPS proxy and `connect_timeout` of a TCP / TCP over TLS proxy limit the DNS lookup, the TCP connection and the TLS handshake of a new upstream connection. The default is `10s`.
+- `timeouts.request` of an HTTP / HTTPS proxy limits the time from the start of a request until the response headers arrive, including a new connection. The default is `60s`, and `0s` disables the limit. The response body, WebSocket and other upgraded connections have no limit.
+- A route can replace the proxy timeouts with its own `timeouts`. A value that the route does not set uses its default, not the proxy value.
+- `session_idle_timeout` of a UDP proxy closes an idle client session. See "UDP Sessions".
+
+When a timeout expires, an HTTP client receives 504 Gateway Timeout, and a TCP client connection closes. r3v3rs3 rejects a connect timeout or a session idle timeout of zero.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+timeouts = { connect = "5s", request = "30s" }
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] },
+  { path = "/reports", servers = [{ url = "http://127.0.0.1:9001/" }], timeouts = { connect = "5s", request = "5m" } },
+]
+
+[my-database]
+protocol = "tcp"
+upstream_servers = [{ addr = "/ip4/127.0.0.1/tcp/5432" }]
+connect_timeout = "3s"
+```
 
 ## Client IP
 
@@ -370,7 +397,7 @@ r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstre
 
 Downstream, HTTP/2 is automatically negotiated if the client supports it. Most web browsers use HTTP/2 only over TLS, because they need ALPN (Application-Layer Protocol Negotiation) to learn that the server supports HTTP/2.
 
-Upstream, r3v3rs3 offers `h2` and `http/1.1` with ALPN to HTTPS servers and uses the protocol that the server selects. Plain HTTP servers receive HTTP/1.1, because a plain connection cannot negotiate the protocol. Set `h2c = true` on a proxy whose plain HTTP servers accept HTTP/2 with prior knowledge (h2c). WebSocket and other upgrade requests always use HTTP/1.1. All connections of a port share the upstream connections, so one HTTP/2 upstream connection carries the requests of many clients. A proxy with a client certificate has its own upstream connections.
+Upstream, r3v3rs3 offers `h2` and `http/1.1` with ALPN to HTTPS servers and uses the protocol that the server selects. Plain HTTP servers receive HTTP/1.1, because a plain connection cannot negotiate the protocol. Set `h2c = true` on a proxy whose plain HTTP servers accept HTTP/2 with prior knowledge (h2c). WebSocket and other upgrade requests always use HTTP/1.1. The proxies of a port that use the same client certificate and the same connect timeout share the upstream connections, so one HTTP/2 upstream connection carries the requests of many clients.
 
 ```toml
 [my-app]

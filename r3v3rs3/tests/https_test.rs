@@ -65,6 +65,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                         rate_limit: None,
                         auth: None,
                         headers: None,
+                        timeouts: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
@@ -75,6 +76,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                     compression: Default::default(),
                     cache: Default::default(),
                     h2c: false,
+                    timeouts: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -182,6 +184,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                         rate_limit: None,
                         auth: None,
                         headers: None,
+                        timeouts: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
@@ -192,6 +195,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                     compression: Default::default(),
                     cache: Default::default(),
                     h2c: false,
+                    timeouts: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -280,6 +284,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                         rate_limit: None,
                         auth: None,
                         headers: None,
+                        timeouts: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
@@ -290,6 +295,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                     compression: Default::default(),
                     cache: Default::default(),
                     h2c: false,
+                    timeouts: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -393,6 +399,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                         rate_limit: None,
                         auth: None,
                         headers: None,
+                        timeouts: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
@@ -403,6 +410,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                     compression: Default::default(),
                     cache: Default::default(),
                     h2c: false,
+                    timeouts: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()

@@ -99,7 +99,7 @@ impl RpcMethod for AddProxy {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        validate_client_cert(&self.entry, state)?;
+        validate_proxy(&self.entry, state)?;
         let proxy = seal(self.entry).await?;
         if state.proxies.set((state.generate_id(), proxy).into()) {
             state.update_proxies().await;
@@ -118,7 +118,7 @@ impl RpcMethod for UpdateProxy {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        validate_client_cert(&self.entry.proxy, state)?;
+        validate_proxy(&self.entry.proxy, state)?;
         let proxy = seal(self.entry.proxy).await?;
         if state.proxies.set((self.entry.id, proxy).into()) {
             state.update_proxies().await;
@@ -128,8 +128,9 @@ impl RpcMethod for UpdateProxy {
     }
 }
 
-/// Checks that the upstream client certificate of the proxy is a client certificate with a
-/// private key.
-fn validate_client_cert(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
+/// Checks the upstream timeouts, and that the upstream client certificate of the proxy is a client
+/// certificate with a private key.
+fn validate_proxy(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
+    proxy.kind.validate_timeouts()?;
     upstream_client_config(&state.certs, proxy.kind.client_cert()).map(|_| ())
 }

@@ -1,8 +1,10 @@
 use std::fmt;
 use std::future::Future;
+use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use hyper::rt::{Read, Write};
 use hyper::Uri;
@@ -23,6 +25,8 @@ pub struct HttpsConnector<T> {
     force_https: bool,
     http: T,
     tls: TlsConnector,
+    /// Time limit for the DNS lookup, the TCP connection and the TLS handshake.
+    connect_timeout: Option<Duration>,
 }
 
 impl HttpsConnector<HttpConnector> {
@@ -54,6 +58,13 @@ impl HttpsConnector<HttpConnector> {
         http.enforce_http(false);
         HttpsConnector::from((http, tls))
     }
+
+    /// Fails a connection with `io::ErrorKind::TimedOut` when the DNS lookup, the TCP connection
+    /// and the TLS handshake take longer than `timeout`.
+    pub fn with_connect_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_timeout = Some(timeout);
+        self
+    }
 }
 
 impl<T> From<(T, TlsConnector)> for HttpsConnector<T> {
@@ -62,6 +73,7 @@ impl<T> From<(T, TlsConnector)> for HttpsConnector<T> {
             force_https: false,
             http: args.0,
             tls: args.1,
+            connect_timeout: None,
         }
     }
 }
@@ -109,19 +121,28 @@ where
         let connecting = self.http.call(dst);
 
         let tls_connector = self.tls.clone();
+        let connect_timeout = self.connect_timeout;
 
         let fut = async move {
-            let tcp = connecting.await.map_err(Into::into)?;
+            let connect = async move {
+                let tcp = connecting.await.map_err(Into::into)?;
 
-            let maybe = if is_https {
-                let stream = TokioIo::new(tcp);
-                let server_name = ServerName::try_from(host.as_str())?.to_owned();
-                let tls = TokioIo::new(tls_connector.connect(server_name, stream).await?);
-                MaybeHttpsStream::Https(tls)
-            } else {
-                MaybeHttpsStream::Http(tcp)
+                let maybe = if is_https {
+                    let stream = TokioIo::new(tcp);
+                    let server_name = ServerName::try_from(host.as_str())?.to_owned();
+                    let tls = TokioIo::new(tls_connector.connect(server_name, stream).await?);
+                    MaybeHttpsStream::Https(tls)
+                } else {
+                    MaybeHttpsStream::Http(tcp)
+                };
+                Ok::<_, BoxError>(maybe)
             };
-            Ok(maybe)
+            match connect_timeout {
+                Some(timeout) => tokio::time::timeout(timeout, connect)
+                    .await
+                    .unwrap_or_else(|_| Err(connect_timed_out())),
+                None => connect.await,
+            }
         };
         HttpsConnecting(Box::pin(fut))
     }
@@ -129,6 +150,13 @@ where
 
 fn err<T>(e: BoxError) -> HttpsConnecting<T> {
     HttpsConnecting(Box::pin(async { Err(e) }))
+}
+
+fn connect_timed_out() -> BoxError {
+    Box::new(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "the upstream connection timed out",
+    ))
 }
 
 type BoxedFut<T> = Pin<Box<dyn Future<Output = Result<MaybeHttpsStream<T>, BoxError>> + Send>>;
@@ -169,20 +197,37 @@ mod tests {
     use std::time::Duration;
     use tokio_rustls::rustls::RootCertStore;
 
-    #[tokio::test]
-    async fn invalid_server_name_returns_error() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+    fn untrusted_connector() -> HttpsConnector<HttpConnector> {
         let config = ClientConfig::builder()
             .with_root_certificates(RootCertStore::empty())
             .with_no_client_auth();
-        let mut connector = HttpsConnector::new(Arc::new(config));
+        HttpsConnector::new(Arc::new(config))
+    }
 
-        // "127.1" resolves to 127.0.0.1 but is neither a valid DNS name nor an IP literal.
-        let uri: Uri = format!("https://127.1:{port}/").parse().unwrap();
+    /// Connects to a local listener that accepts the TCP connection but never answers the TLS
+    /// handshake, and returns the connect error.
+    async fn connect_error(mut connector: HttpsConnector<HttpConnector>, host: &str) -> BoxError {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let uri: Uri = format!("https://{host}:{port}/").parse().unwrap();
         let result = tokio::time::timeout(Duration::from_secs(5), connector.call(uri))
             .await
             .unwrap();
-        assert!(result.is_err());
+        drop(listener);
+        result.err().unwrap()
+    }
+
+    #[tokio::test]
+    async fn invalid_server_name_returns_error() {
+        // "127.1" resolves to 127.0.0.1 but is neither a valid DNS name nor an IP literal.
+        connect_error(untrusted_connector(), "127.1").await;
+    }
+
+    #[tokio::test]
+    async fn connect_timeout_covers_the_tls_handshake() {
+        let connector = untrusted_connector().with_connect_timeout(Duration::from_millis(200));
+        let err = connect_error(connector, "127.0.0.1").await;
+        let err = err.downcast_ref::<io::Error>().unwrap();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
     }
 }

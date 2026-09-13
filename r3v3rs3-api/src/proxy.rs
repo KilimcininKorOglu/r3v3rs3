@@ -4,12 +4,17 @@ use crate::compression::Compression;
 use crate::error::Error;
 use crate::header_rules::HeaderRules;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
+use crate::upstream::{
+    default_connect_timeout, default_session_idle_timeout, is_default_connect_timeout,
+    is_default_session_idle_timeout, validate_timeout, UpstreamTimeouts,
+};
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+use std::time::Duration;
 use url::Url;
 use utoipa::ToSchema;
 
@@ -53,9 +58,23 @@ impl ProxyKind {
             Self::Udp(_) => None,
         }
     }
+
+    /// Rejects a zero connect timeout or a zero session idle timeout.
+    pub fn validate_timeouts(&self) -> Result<(), Error> {
+        match self {
+            Self::Tcp(tcp) => validate_timeout(tcp.connect_timeout),
+            Self::Udp(udp) => validate_timeout(udp.session_idle_timeout),
+            Self::Http(http) => http
+                .routes
+                .iter()
+                .filter_map(|route| route.timeouts.as_ref())
+                .chain([&http.timeouts])
+                .try_for_each(UpstreamTimeouts::validate),
+        }
+    }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct TcpProxy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub upstream_servers: Vec<UpstreamServer>,
@@ -63,12 +82,29 @@ pub struct TcpProxy {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub client_cert: Option<ShortId>,
+    /// Time limit for the DNS lookup, the TCP connection and the TLS handshake of an upstream
+    /// connection.
+    #[serde(
+        default = "default_connect_timeout",
+        with = "humantime_serde",
+        skip_serializing_if = "is_default_connect_timeout"
+    )]
+    #[schema(value_type = String, example = "10s")]
+    pub connect_timeout: Duration,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct UdpProxy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub upstream_servers: Vec<UpstreamServer>,
+    /// A client session closes when no packet passes in either direction for this time.
+    #[serde(
+        default = "default_session_idle_timeout",
+        with = "humantime_serde",
+        skip_serializing_if = "is_default_session_idle_timeout"
+    )]
+    #[schema(value_type = String, example = "60s")]
+    pub session_idle_timeout: Duration,
 }
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -107,6 +143,9 @@ pub struct HttpProxy {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub client_cert: Option<ShortId>,
+    /// Default upstream timeouts for every route of this proxy.
+    #[serde(default, skip_serializing_if = "UpstreamTimeouts::is_default")]
+    pub timeouts: UpstreamTimeouts,
 }
 
 fn upgrade_insecure_default() -> bool {
@@ -173,6 +212,9 @@ pub struct Route {
     /// Replaces the proxy header rules for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<HeaderRules>,
+    /// Replaces the proxy upstream timeouts for this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeouts: Option<UpstreamTimeouts>,
 }
 
 fn default_route_path() -> String {

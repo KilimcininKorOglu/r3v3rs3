@@ -55,6 +55,7 @@ async fn tls_proxy() -> anyhow::Result<()> {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Tcp(TcpProxy {
                     client_cert: None,
+                    connect_timeout: r3v3rs3_api::upstream::DEFAULT_CONNECT_TIMEOUT,
                     upstream_servers: vec![UpstreamServer {
                         addr: format!(
                             "/dns/localhost/tcp/{}/tls",

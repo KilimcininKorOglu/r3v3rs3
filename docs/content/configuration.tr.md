@@ -67,7 +67,34 @@ Bir proxy'ye birden fazla port bağlayabilirsiniz. Ancak HTTP / HTTPS proxy'sine
 
 UDP proxy her client adresi için ayrı bir session açar. Her session'ın upstream sunucuya giden kendi socket'i vardır. Bu yüzden upstream sunucu her client'ı farklı bir kaynak porttan görür. r3v3rs3 upstream sunucunun yanıtlarını dinlediği porttan client'a geri gönderir.
 
-İki yönde de 60 saniye paket geçmezse session kapanır. Upstream socket hata verdiğinde veya portun upstream sunucuları değiştiğinde de session kapanır. Client'ın sonraki paketi yeni bir session açar. Bir port en fazla 10.000 session tutar. Bu sınıra ulaşılınca r3v3rs3 yeni client'ların paketlerini düşürür.
+İki yönde de `session_idle_timeout` süresince (varsayılan `60s`) paket geçmezse session kapanır. Upstream socket hata verdiğinde veya portun upstream sunucuları ya da idle timeout değeri değiştiğinde de session kapanır. Client'ın sonraki paketi yeni bir session açar. Bir port en fazla 10.000 session tutar. Bu sınıra ulaşılınca r3v3rs3 yeni client'ların paketlerini düşürür.
+
+## Upstream Timeout'ları
+
+r3v3rs3 upstream sunucuyu sınırlı bir süre bekler. Timeout değerlerini `500ms`, `10s` veya `1m` gibi yazın.
+
+- HTTP / HTTPS proxy'sinde `timeouts.connect`, TCP / TLS üzerinden TCP proxy'sinde `connect_timeout` değeri yeni bir upstream bağlantısının DNS sorgusunu, TCP bağlantısını ve TLS handshake'ini sınırlar. Varsayılan değer `10s`'dir.
+- HTTP / HTTPS proxy'sinde `timeouts.request` değeri, request başladıktan response header'ları gelene kadar geçen süreyi sınırlar. Yeni bağlantının kurulma süresi de buna dahildir. Varsayılan değer `60s`'dir. `0s` limiti kapatır. Response body'si, WebSocket ve diğer upgrade edilmiş bağlantılar için limit yoktur.
+- Bir route, proxy timeout'ları yerine kendi `timeouts` değerini kullanabilir. Route'ta yazılmayan değer proxy değerini değil, varsayılan değeri alır.
+- UDP proxy'sinde `session_idle_timeout` değeri boşta kalan client session'ını kapatır. "UDP Session'ları" bölümüne bakın.
+
+Timeout dolduğunda HTTP client'ı 504 Gateway Timeout alır, TCP client bağlantısı kapanır. r3v3rs3 sıfır olan connect timeout ve session idle timeout değerlerini reddeder.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+timeouts = { connect = "5s", request = "30s" }
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] },
+  { path = "/reports", servers = [{ url = "http://127.0.0.1:9001/" }], timeouts = { connect = "5s", request = "5m" } },
+]
+
+[my-database]
+protocol = "tcp"
+upstream_servers = [{ addr = "/ip4/127.0.0.1/tcp/5432" }]
+connect_timeout = "3s"
+```
 
 ## Client IP
 
@@ -370,7 +397,7 @@ r3v3rs3, HTTP ve HTTPS proxy'lerinde hem upstream hem de downstream bağlantıla
 
 Downstream tarafında client destekliyorsa HTTP/2 otomatik olarak seçilir. Çoğu web tarayıcısı HTTP/2'yi yalnız TLS üzerinden kullanır, çünkü sunucunun HTTP/2 desteklediğini ALPN (Application-Layer Protocol Negotiation) ile öğrenir.
 
-Upstream tarafında r3v3rs3, HTTPS sunucularına ALPN ile `h2` ve `http/1.1` önerir ve sunucunun seçtiği protokolü kullanır. Düz HTTP bağlantısında protokol seçimi yapılamadığı için düz HTTP sunucularına HTTP/1.1 ile bağlanılır. Proxy'nin düz HTTP sunucuları prior knowledge ile HTTP/2 (h2c) kabul ediyorsa `h2c = true` ayarlayın. WebSocket ve diğer upgrade request'leri her zaman HTTP/1.1 kullanır. Bir porttaki bütün bağlantılar upstream bağlantılarını ortak kullanır; bu yüzden tek bir HTTP/2 upstream bağlantısı birçok client'ın request'lerini taşır. Client sertifikası olan bir proxy'nin upstream bağlantıları ayrıdır.
+Upstream tarafında r3v3rs3, HTTPS sunucularına ALPN ile `h2` ve `http/1.1` önerir ve sunucunun seçtiği protokolü kullanır. Düz HTTP bağlantısında protokol seçimi yapılamadığı için düz HTTP sunucularına HTTP/1.1 ile bağlanılır. Proxy'nin düz HTTP sunucuları prior knowledge ile HTTP/2 (h2c) kabul ediyorsa `h2c = true` ayarlayın. WebSocket ve diğer upgrade request'leri her zaman HTTP/1.1 kullanır. Bir portta aynı client sertifikasını ve aynı connect timeout değerini kullanan proxy'ler upstream bağlantılarını ortak kullanır. Bu yüzden tek bir HTTP/2 upstream bağlantısı birçok client'ın request'lerini taşır.
 
 ```toml
 [my-app]

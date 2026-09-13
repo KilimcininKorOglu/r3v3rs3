@@ -6,7 +6,7 @@ use self::{
     filter::FilterResult,
     header_rules::{new_request_id, HeaderVariables},
     page::PagePreferences,
-    pool::{ConnectionPool, UpstreamClients, UpstreamH2c},
+    pool::{Upstream, UpstreamClients, UpstreamH2c},
     route::{FilteredRoute, ParsedRoute, Router},
 };
 use super::{
@@ -191,9 +191,9 @@ impl HttpPortContext {
         .or(quic_ports.first())
         .and_then(|entry| entry.port.listen.port().ok());
 
-        let upstream = UpstreamClients::new(certs)?;
+        let mut upstream = UpstreamClients::new(certs)?;
         self.shared.store(Arc::new(SharedContext {
-            router: Router::new(proxies, https_port, quic_port, &upstream, sessions),
+            router: Router::new(proxies, https_port, quic_port, &mut upstream, sessions),
             header_rewriter: RequestRewriter::builder()
                 .set_via(HeaderValue::from_static("r3v3rs3"))
                 .build(),
@@ -450,9 +450,9 @@ async fn start(
                 route_request(&shared, req, &info).await
             };
             response_rewriter.build().map_response(match req {
-                ProxiedRequest::Ok(req, pool, span, cache_request) => {
+                ProxiedRequest::Ok(req, upstream, span, cache_request) => {
                     let req = req.map(|b| BoxBody::new(b.map_err(Into::into)));
-                    cache::fetch(&pool, req, cache_request)
+                    cache::fetch(&upstream, req, cache_request)
                         .instrument(span)
                         .await
                 }
@@ -486,9 +486,9 @@ async fn start(
 }
 
 enum ProxiedRequest<R> {
-    /// A request for the upstream server with the connection pool of the proxy, and its cache
-    /// state when the proxy has a cache.
-    Ok(R, Arc<ConnectionPool>, Span, Option<CacheRequest>),
+    /// A request for the upstream server with the upstream connections of the route, and its
+    /// cache state when the proxy has a cache.
+    Ok(R, Upstream, Span, Option<CacheRequest>),
     /// A response that r3v3rs3 sends without contacting the upstream server.
     Respond(Response<Full<Bytes>>),
     Err(ProxyError),
@@ -603,8 +603,8 @@ where
         .resolve(info.remote.ip(), req.headers(), &crate::cdn::table());
     let action = format!("{} {}", req.method().as_str(), req.uri());
 
-    let pool = match check_policies(route, client.ip) {
-        Ok(pool) => pool,
+    let upstream = match check_policies(route, client.ip) {
+        Ok(upstream) => upstream,
         Err(err) => {
             info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %err);
             return (ProxiedRequest::Err(err), response_rewriter);
@@ -670,7 +670,7 @@ where
         .as_ref()
         .and_then(|cache| CacheRequest::new(cache, &mut req, &cache_host, authorized));
     (
-        ProxiedRequest::Ok(req, pool, span, cache_request),
+        ProxiedRequest::Ok(req, upstream, span, cache_request),
         response_rewriter,
     )
 }
@@ -710,12 +710,9 @@ fn apply_header_rules(
     response_rewriter.header_rules(route.header_rules.clone(), variables)
 }
 
-/// Applies the client IP filter and the rate limit of the route, and returns the connection pool
-/// of the proxy.
-fn check_policies(
-    route: &FilteredRoute,
-    client: std::net::IpAddr,
-) -> Result<Arc<ConnectionPool>, ProxyError> {
+/// Applies the client IP filter and the rate limit of the route, and returns the upstream
+/// connections of the route.
+fn check_policies(route: &FilteredRoute, client: std::net::IpAddr) -> Result<Upstream, ProxyError> {
     if !route.ip_filter.allows(client) {
         return Err(ProxyError::IpNotAllowed);
     }
@@ -727,7 +724,7 @@ fn check_policies(
         return Err(ProxyError::TooManyRequests { retry_after });
     }
     route
-        .pool
+        .upstream
         .clone()
         .ok_or(ProxyError::UpstreamClientCertInvalid)
 }
@@ -839,8 +836,8 @@ where
     let (req, response_rewriter) = route_request(shared, req.map(|()| body), &info).await;
 
     let res = match req {
-        ProxiedRequest::Ok(req, pool, span, cache_request) => {
-            cache::fetch(&pool, req, cache_request)
+        ProxiedRequest::Ok(req, upstream, span, cache_request) => {
+            cache::fetch(&upstream, req, cache_request)
                 .instrument(span)
                 .await
         }

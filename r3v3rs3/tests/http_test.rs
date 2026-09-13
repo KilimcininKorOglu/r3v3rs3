@@ -116,6 +116,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                             rate_limit: None,
                             auth: None,
                             headers: None,
+                            timeouts: None,
                         },
                         Route {
                             path: "/".into(),
@@ -126,6 +127,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                             rate_limit: None,
                             auth: None,
                             headers: None,
+                            timeouts: None,
                         },
                     ],
                     upgrade_insecure: false,
@@ -137,6 +139,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                     compression: Default::default(),
                     cache: Default::default(),
                     h2c: false,
+                    timeouts: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -284,6 +287,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                         rate_limit: None,
                         auth: None,
                         headers: None,
+                        timeouts: None,
                     }],
                     upgrade_insecure: true,
                     client_ip: Default::default(),
@@ -294,6 +298,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     compression: Default::default(),
                     cache: Default::default(),
                     h2c: false,
+                    timeouts: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -366,6 +371,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                         rate_limit: None,
                         auth: None,
                         headers: None,
+                        timeouts: None,
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
@@ -376,6 +382,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     compression: Default::default(),
                     cache: Default::default(),
                     h2c: false,
+                    timeouts: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()

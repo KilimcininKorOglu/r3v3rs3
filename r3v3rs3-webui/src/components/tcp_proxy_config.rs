@@ -1,6 +1,7 @@
 use super::http_proxy_config::{
-    client_cert_view, error_view, input_element, item_update, parse_client_cert, select_setter,
-    toggle, use_client_certs, INPUT_CLASS, LABEL_CLASS,
+    client_cert_view, error_view, format_seconds, input_element, item_update, or_error,
+    parse_client_cert, parse_seconds, select_setter, timeout_field_view, toggle, use_client_certs,
+    use_entry_errors, INPUT_CLASS, LABEL_CLASS,
 };
 use crate::i18n::use_locale;
 use r3v3rs3_api::i18n::Locale;
@@ -19,8 +20,9 @@ pub struct Props {
     pub onchanged: Callback<Result<TcpProxy, HashMap<String, String>>>,
 }
 
+/// The form of one upstream server of a TCP or UDP proxy.
 #[derive(Clone, PartialEq, Debug)]
-struct ServerForm {
+pub(super) struct ServerForm {
     host: String,
     port: u16,
     tls: bool,
@@ -43,9 +45,9 @@ impl ServerForm {
         }
     }
 
-    /// Builds the address of the server, e.g. `/dns/example.com/tcp/443/tls`. `None` when the
-    /// host or the port is invalid.
-    fn addr(&self) -> Option<Multiaddr> {
+    /// Builds the address of the server for the transport protocol, e.g.
+    /// `/dns/example.com/tcp/443/tls`. `None` when the host or the port is invalid.
+    fn addr(&self, protocol: &str) -> Option<Multiaddr> {
         let host = self.host.trim();
         if host.is_empty() || self.port == 0 {
             return None;
@@ -58,46 +60,37 @@ impl ServerForm {
             format!("/dns/{host}")
         };
         let tls = if self.tls { "/tls" } else { "" };
-        format!("{host}/tcp/{}{tls}", self.port).parse().ok()
+        format!("{host}/{protocol}/{}{tls}", self.port).parse().ok()
     }
+}
+
+/// Returns the state of the server forms of a proxy, with an example server for a new proxy.
+#[hook]
+pub(super) fn use_server_forms(servers: &[UpstreamServer]) -> UseStateHandle<Vec<ServerForm>> {
+    let forms = servers.iter().map(ServerForm::new).collect::<Vec<_>>();
+    use_state(move || {
+        if forms.is_empty() {
+            vec![ServerForm::example()]
+        } else {
+            forms
+        }
+    })
 }
 
 #[function_component(TcpProxyConfig)]
 pub fn tcp_proxy_config(props: &Props) -> Html {
     let locale = use_locale();
-    let upstream_servers = use_state(|| {
-        let servers = props
-            .proxy
-            .upstream_servers
-            .iter()
-            .map(ServerForm::new)
-            .collect::<Vec<_>>();
-        if servers.is_empty() {
-            vec![ServerForm::example()]
-        } else {
-            servers
-        }
-    });
+    let upstream_servers = use_server_forms(&props.proxy.upstream_servers);
     let client_cert = use_state(|| props.proxy.client_cert);
     let client_certs = use_client_certs();
+    let connect_timeout = use_state(|| format_seconds(props.proxy.connect_timeout));
 
-    let prev_entry =
-        use_state::<Result<TcpProxy, HashMap<String, String>>, _>(|| Err(Default::default()));
-    let entry = get_proxy(locale, &upstream_servers, *client_cert);
-
-    if entry != *prev_entry {
-        prev_entry.set(entry.clone());
-        props.onchanged.emit(entry.clone());
-    }
-    let errors = entry.err().unwrap_or_default();
+    let entry = get_proxy(locale, &upstream_servers, *client_cert, &connect_timeout);
+    let errors = use_entry_errors(entry, props.onchanged.clone());
 
     html! {
         <>
-            <label class={LABEL_CLASS}>{locale.t("proxy_form.upstream_server")}</label>
-
-            { upstream_servers.iter().enumerate().map(|(i, server)| {
-                server_view(locale, &upstream_servers, i, server, errors.get(&server_key(i)))
-            }).collect::<Html>() }
+            { servers_view(locale, &upstream_servers, &errors, true) }
 
             { client_cert_view(
                 locale,
@@ -105,6 +98,29 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
                 *client_cert,
                 &client_certs,
             ) }
+
+            { timeout_field_view(
+                locale,
+                "proxy_form.connect_timeout",
+                "proxy_form.connect_timeout_hint",
+                &connect_timeout,
+                errors.get("connect_timeout"),
+            ) }
+        </>
+    }
+}
+
+/// The server forms of a proxy. `with_tls` shows the TLS toggle of each server.
+pub(super) fn servers_view(
+    locale: Locale,
+    servers: &UseStateHandle<Vec<ServerForm>>,
+    errors: &HashMap<String, String>,
+    with_tls: bool,
+) -> Html {
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{locale.t("proxy_form.upstream_server")}</label>
+            { for (0..servers.len()).map(|index| server_view(locale, servers, index, errors.get(&server_key(index)), with_tls)) }
         </>
     }
 }
@@ -113,9 +129,12 @@ fn server_view(
     locale: Locale,
     servers: &UseStateHandle<Vec<ServerForm>>,
     index: usize,
-    server: &ServerForm,
     error: Option<&String>,
+    with_tls: bool,
 ) -> Html {
+    let Some(server) = servers.get(index) else {
+        return html! {};
+    };
     let host_onchange = item_update(servers, index, |server, event: Event| {
         server.host = input_element(&event).value();
     });
@@ -134,9 +153,11 @@ fn server_view(
             <label class={LABEL_CLASS}>{locale.t("common.port")}</label>
             <input type="number" placeholder="8080" onchange={port_onchange} value={server.port.to_string()} max="65535" min="1" class={INPUT_CLASS} />
 
-            <div>
-                { toggle(tls_onchange, server.tls, locale.t("proxy_form.tls"), "mt-4") }
-            </div>
+            if with_tls {
+                <div>
+                    { toggle(tls_onchange, server.tls, locale.t("proxy_form.tls"), "mt-4") }
+                </div>
+            }
             { error_view(error) }
         </div>
     }
@@ -146,37 +167,60 @@ fn server_key(index: usize) -> String {
     format!("upstream_servers_{index}")
 }
 
-fn get_proxy(
+/// Builds the upstream servers for the transport protocol. Records an error for each invalid
+/// server.
+pub(super) fn parse_servers(
     locale: Locale,
     servers: &[ServerForm],
-    client_cert: Option<ShortId>,
-) -> Result<TcpProxy, HashMap<String, String>> {
-    let mut errors = HashMap::new();
+    protocol: &str,
+    errors: &mut HashMap<String, String>,
+) -> Vec<UpstreamServer> {
     let mut upstream_servers = Vec::new();
     for (i, server) in servers.iter().enumerate() {
-        match server.addr() {
+        match server.addr(protocol) {
             Some(addr) => upstream_servers.push(UpstreamServer { addr }),
             None => {
                 errors.insert(server_key(i), locale.t("proxy_form.invalid_server").into());
             }
         }
     }
+    upstream_servers
+}
 
-    if errors.is_empty() {
-        Ok(TcpProxy {
-            upstream_servers,
-            client_cert,
-        })
-    } else {
-        Err(errors)
+fn get_proxy(
+    locale: Locale,
+    servers: &[ServerForm],
+    client_cert: Option<ShortId>,
+    connect_timeout: &str,
+) -> Result<TcpProxy, HashMap<String, String>> {
+    let mut errors = HashMap::new();
+    let upstream_servers = parse_servers(locale, servers, "tcp", &mut errors);
+    let connect_timeout = or_error(
+        parse_seconds(
+            locale,
+            connect_timeout,
+            "proxy_form.connect_timeout_name",
+            1,
+        ),
+        "connect_timeout",
+        &mut errors,
+    );
+    if !errors.is_empty() {
+        return Err(errors);
     }
+    Ok(TcpProxy {
+        upstream_servers,
+        client_cert,
+        connect_timeout,
+    })
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
+    use std::time::Duration;
 
-    fn server(host: &str, port: u16, tls: bool) -> ServerForm {
+    pub(in crate::components) fn server(host: &str, port: u16, tls: bool) -> ServerForm {
         ServerForm {
             host: host.into(),
             port,
@@ -189,18 +233,23 @@ mod tests {
         let cases = [
             (
                 server("example.com", 443, true),
+                "tcp",
                 "/dns/example.com/tcp/443/tls",
             ),
-            (server("127.0.0.1", 8080, false), "/ip4/127.0.0.1/tcp/8080"),
-            (server("::1", 22, false), "/ip6/::1/tcp/22"),
+            (
+                server("127.0.0.1", 8080, false),
+                "tcp",
+                "/ip4/127.0.0.1/tcp/8080",
+            ),
+            (server("::1", 53, false), "udp", "/ip6/::1/udp/53"),
         ];
-        for (form, expected) in cases {
-            let addr = form.addr().unwrap();
+        for (form, protocol, expected) in cases {
+            let addr = form.addr(protocol).unwrap();
             assert_eq!(addr.to_string(), expected);
             assert_eq!(ServerForm::new(&UpstreamServer { addr }), form);
         }
-        assert_eq!(server(" ", 443, false).addr(), None);
-        assert_eq!(server("example.com", 0, false).addr(), None);
+        assert_eq!(server(" ", 443, false).addr("tcp"), None);
+        assert_eq!(server("example.com", 0, false).addr("tcp"), None);
     }
 
     #[test]
@@ -210,12 +259,17 @@ mod tests {
     }
 
     #[test]
-    fn get_proxy_keeps_the_client_cert() {
+    fn get_proxy_keeps_the_client_cert_and_the_connect_timeout() {
         let id = "a1b2c3d".parse().unwrap();
-        let proxy = get_proxy(Locale::En, &[server("example.com", 443, true)], Some(id)).unwrap();
+        let servers = [server("example.com", 443, true)];
+        let proxy = get_proxy(Locale::En, &servers, Some(id), "3").unwrap();
         assert_eq!(proxy.client_cert, Some(id));
+        assert_eq!(proxy.connect_timeout, Duration::from_secs(3));
 
-        let errors = get_proxy(Locale::En, &[server("", 443, true)], None).unwrap_err();
+        let errors = get_proxy(Locale::En, &[server("", 443, true)], None, "3").unwrap_err();
         assert!(errors.contains_key("upstream_servers_0"));
+
+        let errors = get_proxy(Locale::En, &servers, None, "0").unwrap_err();
+        assert!(errors.contains_key("connect_timeout"));
     }
 }

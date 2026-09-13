@@ -150,6 +150,7 @@ fn tcp_proxy_entry(
     let tcp = TcpProxy {
         client_cert,
         upstream_servers: vec![UpstreamServer { addr }],
+        ..Default::default()
     };
     proxy_entry(id, port_id, ProxyKind::Tcp(tcp))
 }

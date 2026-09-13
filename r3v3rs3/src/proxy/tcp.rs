@@ -10,10 +10,15 @@ use hickory_resolver::system_conf::read_system_conf;
 use hickory_resolver::AsyncResolver;
 use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind, proxy::TcpProxy};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
-use std::{net::SocketAddr, sync::Arc, time::SystemTime};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpSocket, TcpStream},
+    time::{timeout_at, Instant},
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, BufStream},
@@ -25,13 +30,15 @@ use tracing::{debug, error, info, span, Level, Span};
 
 const MAX_BUFFER_SIZE: usize = 4096;
 
+type Resolver = AsyncResolver<GenericConnector<TokioRuntimeProvider>>;
+
 #[derive(Debug)]
 pub struct TcpPortContext {
     pub listen: SocketAddr,
     servers: Vec<Connection>,
     status: PortStatus,
     span: Span,
-    resolver: AsyncResolver<GenericConnector<TokioRuntimeProvider>>,
+    resolver: Resolver,
     tls_termination: Option<TlsTermination>,
     stop_notifier: Arc<Notify>,
 }
@@ -137,7 +144,7 @@ impl TcpPortContext {
 pub async fn start(
     mut stream: BufStream<TcpStream>,
     conn: Connection,
-    resolver: AsyncResolver<GenericConnector<TokioRuntimeProvider>>,
+    resolver: Resolver,
     tls_acceptor: Option<TlsAcceptor>,
     stop_notifier: Arc<Notify>,
 ) -> anyhow::Result<()> {
@@ -158,6 +165,37 @@ pub async fn start(
         }
     });
 
+    // One deadline covers the DNS lookup, the TCP connection and the TLS handshake.
+    let connect_timeout = conn.connect_timeout;
+    let timed_out =
+        || anyhow::anyhow!("connecting to the upstream server timed out after {connect_timeout:?}");
+    let deadline = Instant::now() + connect_timeout;
+    let target = timeout_at(deadline, resolve_upstream(&conn, &resolver))
+        .await
+        .map_err(|_| timed_out())??;
+    info!(target: "r3v3rs3::access_log", remote = %remote, %local, %target);
+    let mut out = timeout_at(deadline, connect_upstream(conn, target))
+        .await
+        .map_err(|_| timed_out())??;
+
+    let mut stream: Box<dyn IoStream> = Box::new(server_stream);
+    if let Some(acceptor) = tls_acceptor {
+        debug!(%remote, "server: tls handshake");
+        stream = Box::new(acceptor.accept(stream).await?);
+    }
+
+    if let Err(err) = tokio::io::copy_bidirectional(&mut stream, &mut out).await {
+        error!("{err}");
+    }
+
+    stream.shutdown().await?;
+    out.shutdown().await?;
+
+    debug!(%target, "eof");
+    Ok(())
+}
+
+async fn resolve_upstream(conn: &Connection, resolver: &Resolver) -> anyhow::Result<SocketAddr> {
     let name = match &conn.name {
         ServerName::DnsName(name) => name.as_ref().to_string(),
         ServerName::IpAddress(addr) => match addr {
@@ -173,41 +211,30 @@ pub async fn start(
         .next()
         .ok_or_else(|| anyhow::anyhow!("No IP address found for {name}"))?;
     debug!(name, %resolved);
+    Ok((resolved, conn.port).into())
+}
 
-    let sock = if resolved.is_ipv4() {
+/// Connects to the upstream server, and runs the TLS handshake of a TLS server.
+async fn connect_upstream(
+    conn: Connection,
+    target: SocketAddr,
+) -> anyhow::Result<Box<dyn IoStream>> {
+    let sock = if target.is_ipv4() {
         TcpSocket::new_v4()
     } else {
         TcpSocket::new_v6()
     }?;
-
-    let target: SocketAddr = (resolved, conn.port).into();
-    info!(target: "r3v3rs3::access_log", remote = %remote, %local, %target);
-
     let out = sock.connect(target).await?;
     debug!(%target, "connected");
 
-    let mut stream: Box<dyn IoStream> = Box::new(server_stream);
-    if let Some(acceptor) = tls_acceptor {
-        debug!(%remote, "server: tls handshake");
-        stream = Box::new(acceptor.accept(stream).await?);
-    }
-
-    let mut out: Box<dyn IoStream> = Box::new(out);
-    if let Some(config) = conn.tls_client_config {
-        debug!(%resolved, "client: tls handshake");
-        let tls = TlsConnector::from(config);
-        out = Box::new(tls.connect(conn.name, out).await?);
-    }
-
-    if let Err(err) = tokio::io::copy_bidirectional(&mut stream, &mut out).await {
-        error!("{err}");
-    }
-
-    stream.shutdown().await?;
-    out.shutdown().await?;
-
-    debug!(%resolved, "eof");
-    Ok(())
+    let Some(config) = conn.tls_client_config else {
+        let out: Box<dyn IoStream> = Box::new(out);
+        return Ok(out);
+    };
+    debug!(%target, "client: tls handshake");
+    let tls = TlsConnector::from(config);
+    let out: Box<dyn IoStream> = Box::new(tls.connect(conn.name, out).await?);
+    Ok(out)
 }
 
 /// Resolves the upstream servers of the proxy. A proxy with an invalid client certificate gets no
@@ -223,27 +250,32 @@ fn proxy_connections(certs: &CertList, proxy: &TcpProxy) -> Result<Vec<Connectio
     proxy
         .upstream_servers
         .iter()
-        .map(|server| multiaddr_to_host(&server.addr, &config))
+        .map(|server| multiaddr_to_host(&server.addr, &config, proxy.connect_timeout))
         .collect()
 }
 
-fn multiaddr_to_host(addr: &Multiaddr, config: &Arc<ClientConfig>) -> Result<Connection, Error> {
+fn multiaddr_to_host(
+    addr: &Multiaddr,
+    config: &Arc<ClientConfig>,
+    connect_timeout: Duration,
+) -> Result<Connection, Error> {
     let tls_client_config = addr.is_tls().then(|| config.clone());
-    match (addr.ip_addr(), addr.host(), addr.port()) {
-        (Ok(addr), _, Ok(port)) => Ok(Connection {
-            name: ServerName::IpAddress(addr.into()),
-            port,
-            tls_client_config,
-        }),
-        (_, Ok(host), Ok(port)) => Ok(Connection {
-            name: ServerName::try_from(host.as_str())
-                .map_err(|_| Error::InvalidServerAddress { addr: addr.clone() })?
-                .to_owned(),
-            port,
-            tls_client_config,
-        }),
-        _ => Err(Error::InvalidServerAddress { addr: addr.clone() }),
-    }
+    let name = match (addr.ip_addr(), addr.host()) {
+        (Ok(ip), _) => ServerName::IpAddress(ip.into()),
+        (_, Ok(host)) => ServerName::try_from(host.as_str())
+            .map_err(|_| Error::InvalidServerAddress { addr: addr.clone() })?
+            .to_owned(),
+        _ => return Err(Error::InvalidServerAddress { addr: addr.clone() }),
+    };
+    let port = addr
+        .port()
+        .map_err(|_| Error::InvalidServerAddress { addr: addr.clone() })?;
+    Ok(Connection {
+        name,
+        port,
+        tls_client_config,
+        connect_timeout,
+    })
 }
 
 trait IoStream: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -256,4 +288,5 @@ pub struct Connection {
     pub port: u16,
     /// The TLS client config for a TLS upstream server.
     pub tls_client_config: Option<Arc<ClientConfig>>,
+    pub connect_timeout: Duration,
 }
