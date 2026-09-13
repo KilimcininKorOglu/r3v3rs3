@@ -1,8 +1,10 @@
-use crate::{id::ShortId, subject_name::SubjectName};
+use crate::{error::Error, id::ShortId, subject_name::SubjectName};
 use base64::{engine::general_purpose, Engine as _};
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+pub const HTTP_01: &str = "http-01";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 pub struct Acme {
@@ -13,6 +15,37 @@ pub struct Acme {
     pub identifiers: Vec<SubjectName>,
     #[schema(value_type = String, example = "http-01")]
     pub challenge_type: String,
+}
+
+impl Acme {
+    /// Checks that the challenge can validate every identifier.
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.challenge_type != HTTP_01 {
+            return Err(Error::AcmeUnsupportedChallenge {
+                challenge: self.challenge_type.clone(),
+            });
+        }
+        if self.identifiers.is_empty() {
+            return Err(Error::AcmeIdentifiersMissing);
+        }
+        self.identifiers
+            .iter()
+            .try_for_each(|identifier| self.validate_identifier(identifier))
+    }
+
+    fn validate_identifier(&self, identifier: &SubjectName) -> Result<(), Error> {
+        match identifier {
+            SubjectName::DnsName(name) if !name.contains('*') => Ok(()),
+            SubjectName::WildcardDnsName(name) if !name.contains('*') => {
+                Err(Error::AcmeWildcardNeedsDnsChallenge {
+                    identifier: identifier.to_string(),
+                })
+            }
+            _ => Err(Error::AcmeInvalidIdentifier {
+                identifier: identifier.to_string(),
+            }),
+        }
+    }
 }
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -93,4 +126,55 @@ where
     general_purpose::URL_SAFE_NO_PAD
         .decode(hmac_key.as_bytes())
         .map_err(serde::de::Error::custom)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn acme(identifiers: &[&str], challenge_type: &str) -> Acme {
+        Acme {
+            config: AcmeConfig::default(),
+            identifiers: identifiers.iter().map(|id| id.parse().unwrap()).collect(),
+            challenge_type: challenge_type.to_string(),
+        }
+    }
+
+    #[test]
+    fn http_01_accepts_plain_domain_names() {
+        assert!(acme(&["example.com", "www.example.com"], HTTP_01)
+            .validate()
+            .is_ok());
+    }
+
+    #[test]
+    fn http_01_rejects_a_wildcard_domain_name() {
+        let result = acme(&["example.com", "*.example.com"], HTTP_01).validate();
+        assert!(matches!(
+            result,
+            Err(Error::AcmeWildcardNeedsDnsChallenge { identifier }) if identifier == "*.example.com"
+        ));
+    }
+
+    #[test]
+    fn ip_addresses_and_inner_asterisks_are_rejected() {
+        for name in ["127.0.0.1", "a.*.example.com"] {
+            assert!(matches!(
+                acme(&[name], HTTP_01).validate(),
+                Err(Error::AcmeInvalidIdentifier { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn an_empty_list_and_an_unknown_challenge_are_rejected() {
+        assert!(matches!(
+            acme(&[], HTTP_01).validate(),
+            Err(Error::AcmeIdentifiersMissing)
+        ));
+        assert!(matches!(
+            acme(&["example.com"], "tls-alpn-01").validate(),
+            Err(Error::AcmeUnsupportedChallenge { .. })
+        ));
+    }
 }

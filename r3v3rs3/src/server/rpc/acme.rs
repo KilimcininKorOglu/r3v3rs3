@@ -49,6 +49,7 @@ impl RpcMethod for AddAcme {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        self.request.acme.validate()?;
         let entry = AcmeEntry::new(state.generate_id(), self.request).await?;
         state.acmes.add(entry.clone())?;
         state.storage.save_acme(&entry).await;

@@ -80,6 +80,18 @@ pub enum Error {
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 
+    #[error("unsupported acme challenge: {challenge}")]
+    AcmeUnsupportedChallenge { challenge: String },
+
+    #[error("acme request needs at least one domain name")]
+    AcmeIdentifiersMissing,
+
+    #[error("invalid acme domain name: {identifier}")]
+    AcmeInvalidIdentifier { identifier: String },
+
+    #[error("wildcard domain name needs the dns-01 challenge: {identifier}")]
+    AcmeWildcardNeedsDnsChallenge { identifier: String },
+
     #[error("unauthorized")]
     Unauthorized,
 

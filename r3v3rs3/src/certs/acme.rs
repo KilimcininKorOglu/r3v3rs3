@@ -5,12 +5,12 @@ use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, ChallengeType, ExternalAccountKey,
     Identifier, NewAccount, NewOrder, Order, OrderStatus,
 };
+use r3v3rs3_api::acme::AcmeInfo;
 use r3v3rs3_api::{
     acme::Acme,
     cert::{CertKind, CertMetadata},
     id::ShortId,
 };
-use r3v3rs3_api::{acme::AcmeInfo, subject_name::SubjectName};
 use r3v3rs3_api::{acme::AcmeRequest, error::Error};
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use serde_derive::{Deserialize, Serialize};
@@ -162,14 +162,13 @@ impl AcmeOrder {
     pub async fn new(entry: &AcmeEntry) -> anyhow::Result<Self> {
         info!("requesting certificate");
 
+        // An entry stored before validation existed can still hold a name the challenge cannot validate.
+        entry.acme.validate()?;
         let identifiers = entry
             .acme
             .identifiers
             .iter()
-            .filter_map(|id| match id {
-                SubjectName::DnsName(domain) => Some(Identifier::Dns(domain.to_string())),
-                _ => None,
-            })
+            .map(|id| Identifier::Dns(id.to_string()))
             .collect::<Vec<_>>();
         let account: AccountCredentials =
             serde_json::from_str(&serde_json::to_string(&entry.account)?)?;
