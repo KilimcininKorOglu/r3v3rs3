@@ -1,5 +1,6 @@
 use indexmap::map::Entry;
 use indexmap::IndexMap;
+use r3v3rs3_api::discovery::DiscoveryProvider;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
@@ -26,6 +27,21 @@ impl ProxyContext {
             },
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct DiscoveredUpdate {
+    /// Whether the proxies of the provider changed.
+    pub changed: bool,
+    /// The proxies that were not added.
+    pub skipped: Vec<ShortId>,
+}
+
+fn is_from(entry: &ProxyEntry, provider: DiscoveryProvider) -> bool {
+    entry
+        .source
+        .as_ref()
+        .is_some_and(|source| source.provider == provider)
 }
 
 #[derive(Debug, Default)]
@@ -114,6 +130,48 @@ impl ProxyList {
         changed
     }
 
+    /// Replaces the proxies of a discovery provider. A proxy is skipped when it is not from the
+    /// provider, when its id is already used, or when it is a TCP proxy on a port of another TCP
+    /// proxy.
+    pub fn replace_discovered(
+        &mut self,
+        provider: DiscoveryProvider,
+        entries: Vec<ProxyEntry>,
+    ) -> DiscoveredUpdate {
+        let previous = self.discovered_by(provider);
+        self.entries.retain(|_, ctx| !is_from(&ctx.entry, provider));
+        let mut skipped = Vec::new();
+        for entry in entries {
+            if !is_from(&entry, provider)
+                || self.entries.contains_key(&entry.id)
+                || self.uses_taken_tcp_port(&entry.proxy)
+            {
+                skipped.push(entry.id);
+                continue;
+            }
+            self.entries.insert(entry.id, ProxyContext::new(entry));
+        }
+        DiscoveredUpdate {
+            changed: previous != self.discovered_by(provider),
+            skipped,
+        }
+    }
+
+    fn discovered_by(&self, provider: DiscoveryProvider) -> Vec<ProxyEntry> {
+        self.entries()
+            .filter(|entry| is_from(entry, provider))
+            .cloned()
+            .collect()
+    }
+
+    fn uses_taken_tcp_port(&self, proxy: &Proxy) -> bool {
+        let is_tcp = |proxy: &Proxy| matches!(proxy.kind, ProxyKind::Tcp(_));
+        is_tcp(proxy)
+            && self.entries().any(|entry| {
+                is_tcp(&entry.proxy) && entry.proxy.ports.iter().any(|p| proxy.ports.contains(p))
+            })
+    }
+
     fn remove_deplicate_ports(&mut self, proxy: &Proxy) {
         if let ProxyKind::Tcp(_) = &proxy.kind {
             for ctx in self.entries.values_mut() {
@@ -126,5 +184,95 @@ impl ProxyList {
                     .collect();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use r3v3rs3_api::discovery::DiscoverySource;
+    use r3v3rs3_api::proxy::TcpProxy;
+
+    fn entry(id: &str, kind: ProxyKind, provider: Option<DiscoveryProvider>) -> ProxyEntry {
+        ProxyEntry {
+            id: id.parse().unwrap(),
+            proxy: Proxy {
+                ports: vec!["port".parse().unwrap()],
+                kind,
+                ..Default::default()
+            },
+            source: provider.map(|provider| DiscoverySource {
+                provider,
+                resource: id.into(),
+            }),
+        }
+    }
+
+    fn http() -> ProxyKind {
+        ProxyKind::Http(Box::default())
+    }
+
+    fn tcp() -> ProxyKind {
+        ProxyKind::Tcp(TcpProxy::default())
+    }
+
+    const DOCKER: Option<DiscoveryProvider> = Some(DiscoveryProvider::Docker);
+    const CONSUL: Option<DiscoveryProvider> = Some(DiscoveryProvider::Consul);
+
+    #[test]
+    fn replace_discovered_changes_only_the_proxies_of_the_provider() {
+        let mut list = ProxyList::from_iter([
+            entry("manual", http(), None),
+            entry("consul", http(), CONSUL),
+        ]);
+
+        let update = list.replace_discovered(
+            DiscoveryProvider::Docker,
+            vec![entry("web", http(), DOCKER)],
+        );
+        assert_eq!(
+            update,
+            DiscoveredUpdate {
+                changed: true,
+                skipped: vec![]
+            }
+        );
+        let ids = |list: &ProxyList| list.entries().map(|e| e.id.to_string()).collect::<Vec<_>>();
+        assert_eq!(ids(&list), ["manual", "consul", "web"]);
+
+        let update = list.replace_discovered(
+            DiscoveryProvider::Docker,
+            vec![entry("web", http(), DOCKER)],
+        );
+        assert!(!update.changed);
+
+        let update = list.replace_discovered(DiscoveryProvider::Docker, vec![]);
+        assert!(update.changed);
+        assert_eq!(ids(&list), ["manual", "consul"]);
+    }
+
+    #[test]
+    fn replace_discovered_skips_conflicting_proxies() {
+        let mut list = ProxyList::from_iter([entry("manual", tcp(), None)]);
+        let update = list.replace_discovered(
+            DiscoveryProvider::Docker,
+            vec![
+                entry("manual", http(), DOCKER),
+                entry("stream", tcp(), DOCKER),
+                entry("other", http(), CONSUL),
+                entry("web", http(), DOCKER),
+            ],
+        );
+        let skipped = update
+            .skipped
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(skipped, ["manual", "stream", "other"]);
+        assert!(update.changed);
+        assert_eq!(list.entries().count(), 2);
+        assert!(list
+            .get("manual".parse().unwrap())
+            .is_some_and(|ctx| !ctx.entry.is_discovered()));
     }
 }

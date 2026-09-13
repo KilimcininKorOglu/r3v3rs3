@@ -77,6 +77,9 @@ pub enum Error {
     #[error("port id already exists: {id}")]
     IdAlreadyExists { id: ShortId },
 
+    #[error("proxy is managed by service discovery and cannot be changed: {id}")]
+    ProxyReadOnly { id: ShortId },
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 
@@ -164,6 +167,7 @@ impl Error {
         match self {
             Self::IdNotFound { .. } => 404,
             Self::Unauthorized => 401,
+            Self::ProxyReadOnly { .. } => 403,
             Self::TooManyLoginAttempts => 429,
             Self::FailedToFetchLog | Self::FailedToInvokeRpc | Self::FailedToHashPassword => 500,
             _ => 400,

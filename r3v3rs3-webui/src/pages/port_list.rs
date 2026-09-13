@@ -151,7 +151,7 @@ fn port_row(locale: Locale, entry: &PortEntry, ports: &PortStore, navigator: &Na
             html! { <>{entry.port.listen.protocol_name()}</> },
             html! { <>{addr}</> },
             status_badge(locale.t(status_key), color),
-            active_toggle(entry.port.active, onchange),
+            active_toggle(entry.port.active, false, onchange),
         ],
         actions: html! {
             <>

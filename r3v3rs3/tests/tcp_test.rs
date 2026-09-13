@@ -30,6 +30,7 @@ async fn tcp_proxy() -> anyhow::Result<()> {
         .ports(vec![port_entry("test", proxy_port.multiaddr_tcp())])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
+            source: None,
             proxy: tcp_proxy_to(&listen_port),
         }])
         .build();
@@ -65,6 +66,7 @@ async fn tcp_proxy_uses_updated_upstream() -> anyhow::Result<()> {
         .ports(vec![port_entry("test", proxy_port.multiaddr_tcp())])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
+            source: None,
             proxy: tcp_proxy_to(&first_port),
         }])
         .accounts(HashMap::from([("admin".to_string(), "secret".to_string())]))

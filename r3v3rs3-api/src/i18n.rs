@@ -212,6 +212,9 @@ mod tests {
             Error::IdAlreadyExists {
                 id: "abc".parse().unwrap(),
             },
+            Error::ProxyReadOnly {
+                id: "abc".parse().unwrap(),
+            },
             Error::AcmeAccountCreationFailed,
             Error::AcmeUnsupportedChallenge { challenge: text() },
             Error::AcmeIdentifiersMissing,

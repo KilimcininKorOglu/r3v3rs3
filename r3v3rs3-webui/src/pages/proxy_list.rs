@@ -22,9 +22,13 @@ use yewdux::prelude::*;
 /// The proxy list reloads the proxies and their statuses at this interval.
 const STATUS_REFRESH_INTERVAL_MS: u32 = 10_000;
 
-const COLUMNS: [Column; 4] = [
+const COLUMNS: [Column; 5] = [
     Column {
         label: "common.name",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "proxies.source",
         class: "whitespace-nowrap",
     },
     Column {
@@ -169,25 +173,52 @@ fn proxy_row(
     };
 
     let status = proxies.statuses.get(&id).cloned().unwrap_or_default();
+    let discovered = entry.is_discovered();
+    let config_label = if discovered {
+        "common.view"
+    } else {
+        "common.edit"
+    };
 
     Row {
         key: id.to_string(),
         cells: vec![
             html! { <>{title}</> },
+            source_cell(locale, entry),
             html! { <>{port_names}</> },
             status_cell(locale, &status),
-            active_toggle(entry.proxy.active, onchange),
+            active_toggle(entry.proxy.active, discovered, onchange),
         ],
         actions: html! {
             <>
-                <a class={LINK_CLASS} onclick={config_onclick}>{locale.t("common.edit")}</a>
+                <a class={LINK_CLASS} onclick={config_onclick}>{locale.t(config_label)}</a>
                 <a class={LINK_CLASS} onclick={log_onclick}>{locale.t("common.log")}</a>
                 if cache_enabled {
                     <a class={LINK_CLASS} onclick={purge_onclick}>{locale.t("proxies.purge")}</a>
                 }
-                <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
+                if !discovered {
+                    <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
+                }
             </>
         },
+    }
+}
+
+/// The source of the proxy. The title names the resource of a discovered proxy.
+fn source_cell(locale: Locale, entry: &ProxyEntry) -> Html {
+    let resource = entry
+        .source
+        .as_ref()
+        .map(|source| source.resource.clone())
+        .unwrap_or_default();
+    html! { <span title={resource}>{source_label(locale, entry)}</span> }
+}
+
+/// The name of the discovery provider that created the proxy, or the manual source.
+fn source_label(locale: Locale, entry: &ProxyEntry) -> String {
+    match &entry.source {
+        Some(source) => source.provider.name().to_string(),
+        None => locale.t("proxies.source_manual").to_string(),
     }
 }
 
@@ -316,6 +347,24 @@ async fn toggle_proxy(id: ShortId) -> Result<(), gloo_net::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoverySource};
+    use r3v3rs3_api::proxy::Proxy;
+
+    #[test]
+    fn source_label_names_the_provider_or_the_manual_source() {
+        let manual = ProxyEntry::from(("abc".parse().unwrap(), Proxy::default()));
+        assert_eq!(source_label(Locale::Tr, &manual), "Manuel");
+        assert_eq!(source_label(Locale::En, &manual), "Manual");
+
+        let discovered = ProxyEntry {
+            source: Some(DiscoverySource {
+                provider: DiscoveryProvider::Etcd,
+                resource: "r3v3rs3/http/app".into(),
+            }),
+            ..manual
+        };
+        assert_eq!(source_label(Locale::Tr, &discovered), "etcd");
+    }
 
     #[test]
     fn health_summary_lists_the_unhealthy_servers() {

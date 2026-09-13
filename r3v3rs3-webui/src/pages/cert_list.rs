@@ -382,7 +382,7 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator) -> Row {
             html! { <>{entry.identifiers.join(", ")}</> },
             html! { <>{acme_provider_text(entry)}</> },
             html! { <>{renewal}</> },
-            active_toggle(entry.config.active, onchange),
+            active_toggle(entry.config.active, false, onchange),
         ],
         actions: html! {
             <>

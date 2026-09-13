@@ -1,6 +1,7 @@
 use crate::cache::CacheConfig;
 use crate::client_ip::ClientIpConfig;
 use crate::compression::Compression;
+use crate::discovery::DiscoverySource;
 use crate::error::Error;
 use crate::header_rules::HeaderRules;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
@@ -208,11 +209,25 @@ pub struct ProxyEntry {
     #[schema(inline)]
     #[serde(flatten)]
     pub proxy: Proxy,
+    /// The service discovery provider that created the proxy. A proxy without a source was added
+    /// manually. A discovered proxy is read-only and is not saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<DiscoverySource>,
+}
+
+impl ProxyEntry {
+    pub fn is_discovered(&self) -> bool {
+        self.source.is_some()
+    }
 }
 
 impl From<(ShortId, Proxy)> for ProxyEntry {
     fn from((id, proxy): (ShortId, Proxy)) -> Self {
-        Self { id, proxy }
+        Self {
+            id,
+            proxy,
+            source: None,
+        }
     }
 }
 

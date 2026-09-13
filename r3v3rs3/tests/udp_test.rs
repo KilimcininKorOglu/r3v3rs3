@@ -36,6 +36,7 @@ fn udp_storage(proxy_port: &TestPort, upstream_port: &TestPort, idle: Duration) 
         }])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
+            source: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Udp(UdpProxy {

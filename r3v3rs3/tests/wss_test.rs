@@ -56,6 +56,7 @@ async fn wss_proxy() -> anyhow::Result<()> {
         }])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
+            source: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Http(Box::new(HttpProxy {

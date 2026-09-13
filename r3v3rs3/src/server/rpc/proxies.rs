@@ -87,6 +87,7 @@ impl RpcMethod for DeleteProxy {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        ensure_manual(state, self.id)?;
         state.proxies.delete(self.id)?;
         state.update_proxies().await;
         state.reload_proxies().await;
@@ -122,6 +123,7 @@ impl RpcMethod for UpdateProxy {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        ensure_manual(state, self.entry.id)?;
         validate_proxy(&self.entry.proxy, state)?;
         let proxy = seal(self.entry.proxy).await?;
         if state.proxies.set((self.entry.id, proxy).into()) {
@@ -132,9 +134,17 @@ impl RpcMethod for UpdateProxy {
     }
 }
 
+/// Service discovery owns a discovered proxy, so the API cannot change or delete it.
+fn ensure_manual(state: &ServerState, id: ShortId) -> Result<(), Error> {
+    match state.proxies.get(id) {
+        Some(ctx) if ctx.entry.is_discovered() => Err(Error::ProxyReadOnly { id }),
+        _ => Ok(()),
+    }
+}
+
 /// Checks the upstream timeouts and the health check, and that the upstream client certificate of
 /// the proxy is a client certificate with a private key.
-fn validate_proxy(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
+pub fn validate_proxy(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
     proxy.kind.validate_upstream()?;
     upstream_client_config(&state.certs, proxy.kind.client_cert()).map(|_| ())
 }

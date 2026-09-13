@@ -75,15 +75,24 @@ pub fn proxy_view(props: &Props) -> Html {
         <>
             if let Some(proxy_entry) = &*site {
                 <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
-                    <ProxyConfig proxy={proxy_entry.proxy.clone()} {onchanged} />
+                    if let Some(source) = &proxy_entry.source {
+                        <p class="mb-4 p-3 text-sm text-blue-800 dark:text-blue-300 bg-blue-50 dark:bg-neutral-900 border border-blue-200 dark:border-blue-900 rounded-md">
+                            {locale.tf("proxies.read_only_notice", &[("provider", source.provider.name()), ("resource", &source.resource)])}
+                        </p>
+                    }
+                    <fieldset disabled={proxy_entry.is_discovered()}>
+                        <ProxyConfig proxy={proxy_entry.proxy.clone()} {onchanged} />
+                    </fieldset>
 
                     <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
                         <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                            {locale.t("common.cancel")}
+                            {locale.t(if proxy_entry.is_discovered() { "common.back" } else { "common.cancel" })}
                         </button>
-                        <button type="submit" disabled={entry.is_err()} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                            {locale.t("common.update")}
-                        </button>
+                        if !proxy_entry.is_discovered() {
+                            <button type="submit" disabled={entry.is_err()} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                                {locale.t("common.update")}
+                            </button>
+                        }
                     </div>
                 </form>
             } else {

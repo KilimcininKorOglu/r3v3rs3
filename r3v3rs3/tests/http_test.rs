@@ -99,6 +99,7 @@ async fn http_proxy() -> anyhow::Result<()> {
         }])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
+            source: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Http(Box::new(HttpProxy {
@@ -276,6 +277,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
         ])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
+            source: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap(), "secure".parse().unwrap()],
                 kind: ProxyKind::Http(Box::new(HttpProxy {
@@ -362,6 +364,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
         }])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
+            source: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Http(Box::new(HttpProxy {

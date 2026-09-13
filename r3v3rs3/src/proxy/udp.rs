@@ -435,6 +435,7 @@ mod tests {
     fn proxy_entry(id: &str, ports: &[u16]) -> ProxyEntry {
         ProxyEntry {
             id: id.parse().unwrap(),
+            source: None,
             proxy: Proxy {
                 ports: vec![port_entry().id],
                 kind: ProxyKind::Udp(UdpProxy {

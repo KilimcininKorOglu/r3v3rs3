@@ -266,6 +266,7 @@ pub fn proxy_entry(id: &str, port_id: &str, kind: ProxyKind) -> ProxyEntry {
             kind,
             ..Default::default()
         },
+        source: None,
     }
 }
 

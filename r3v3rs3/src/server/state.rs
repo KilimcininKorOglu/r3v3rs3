@@ -19,6 +19,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use quinn::Incoming;
 use r3v3rs3_api::app::{AppConfig, AppInfo};
+use r3v3rs3_api::discovery::DiscoveryProvider;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
@@ -37,7 +38,7 @@ use tokio::{
     net::TcpStream,
     sync::{broadcast, mpsc},
 };
-use tracing::{error, info, span, Instrument, Level};
+use tracing::{error, info, span, warn, Instrument, Level};
 use x509_parser::time::ASN1Time;
 
 pub struct ServerState {
@@ -84,6 +85,8 @@ impl ServerState {
         let certs = storage.load_certs().await;
         let acmes = storage.load_acmes().await;
         let mut proxies = storage.load_proxies().await;
+        // Discovered proxies are not saved. A source in the file comes from a manual edit.
+        proxies.retain(|entry| !entry.is_discovered());
         for entry in &mut proxies {
             if let Err(err) = super::credentials::seal_proxy(&mut entry.proxy) {
                 error!(id = %entry.id, %err, "invalid proxy credentials");
@@ -160,6 +163,24 @@ impl ServerState {
                     self.storage.save_cdn_ranges(&ranges).await;
                 }
             }
+            ServerCommand::SetDiscoveredProxies { provider, entries } => {
+                self.set_discovered_proxies(provider, entries).await;
+            }
+        }
+    }
+
+    async fn set_discovered_proxies(
+        &mut self,
+        provider: DiscoveryProvider,
+        entries: Vec<ProxyEntry>,
+    ) {
+        let update = self.proxies.replace_discovered(provider, entries);
+        for id in &update.skipped {
+            warn!(%provider, %id, "skipped a discovered proxy that conflicts with another proxy");
+        }
+        if update.changed {
+            self.publish_proxies();
+            self.reload_proxies().await;
         }
     }
 
@@ -278,12 +299,21 @@ impl ServerState {
         }
     }
 
+    /// Saves the manual proxies and sends the proxy list to the event subscribers.
     pub async fn update_proxies(&mut self) {
+        let manual = self
+            .proxies
+            .entries()
+            .filter(|entry| !entry.is_discovered())
+            .cloned()
+            .collect::<Vec<_>>();
+        self.storage.save_proxies(&manual).await;
+        self.publish_proxies();
+    }
+
+    fn publish_proxies(&self) {
         let entries = self.proxies.entries().cloned().collect::<Vec<_>>();
-        self.storage.save_proxies(&entries).await;
-        let _ = self.br_sender.send(ServerEvent::ProxiesUpdated {
-            entries: entries.clone(),
-        });
+        let _ = self.br_sender.send(ServerEvent::ProxiesUpdated { entries });
         if self.broadcast_events {
             for ctx in self.proxies.contexts() {
                 let _ = self.br_sender.send(ServerEvent::ProxyStatusUpdated {

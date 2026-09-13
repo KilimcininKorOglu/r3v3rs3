@@ -3,7 +3,9 @@ use crate::{
     certs::{acme::AcmeOrder, Cert},
     server::rpc::ErasedRpcMethod,
 };
+use r3v3rs3_api::discovery::DiscoveryProvider;
 use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::proxy::ProxyEntry;
 use std::sync::Arc;
 
 pub enum ServerCommand {
@@ -26,6 +28,11 @@ pub enum ServerCommand {
     },
     SetCdnRanges {
         ranges: CdnRanges,
+    },
+    /// Replaces every proxy of the provider with these proxies.
+    SetDiscoveredProxies {
+        provider: DiscoveryProvider,
+        entries: Vec<ProxyEntry>,
     },
 }
 
@@ -50,6 +57,11 @@ impl std::fmt::Debug for ServerCommand {
             Self::SetCdnRanges { ranges } => f
                 .debug_struct("SetCdnRanges")
                 .field("updated_at", &ranges.updated_at)
+                .finish(),
+            Self::SetDiscoveredProxies { provider, entries } => f
+                .debug_struct("SetDiscoveredProxies")
+                .field("provider", provider)
+                .field("entries", &entries.len())
                 .finish(),
         }
     }

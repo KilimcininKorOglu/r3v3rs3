@@ -106,11 +106,16 @@ fn card(locale: Locale, columns: &[Column], row: &Row) -> Html {
     }
 }
 
-/// A switch that turns a list entry on or off.
-pub fn active_toggle(active: bool, onchange: Callback<Event>) -> Html {
+/// A switch that turns a list entry on or off. A disabled switch only shows the state.
+pub fn active_toggle(active: bool, disabled: bool, onchange: Callback<Event>) -> Html {
+    let cursor = if disabled {
+        "cursor-not-allowed opacity-50"
+    } else {
+        "cursor-pointer"
+    };
     html! {
-        <label class="relative inline-flex items-center cursor-pointer mt-1">
-            <input {onchange} type="checkbox" checked={active} class="sr-only peer" />
+        <label class={classes!("relative", "inline-flex", "items-center", "mt-1", cursor)}>
+            <input {onchange} {disabled} type="checkbox" checked={active} class="sr-only peer" />
             <div class="w-9 h-4 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
         </label>
     }
