@@ -112,7 +112,7 @@ const SOURCES: &[Source] = &[
     },
 ];
 
-type HttpClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
+pub(crate) type HttpClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
 
 pub struct FetchResult {
     pub ranges: CdnRanges,
@@ -214,7 +214,7 @@ fn google_cloud_ranges() -> anyhow::Result<Vec<IpNet>> {
         .collect()
 }
 
-async fn build_client() -> anyhow::Result<HttpClient> {
+pub(crate) async fn build_client() -> anyhow::Result<HttpClient> {
     let native = tokio::task::spawn_blocking(rustls_native_certs::load_native_certs).await?;
     for err in native.errors {
         warn!(%err, "failed to load a native root certificate");

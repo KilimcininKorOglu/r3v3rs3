@@ -1,9 +1,15 @@
-use crate::{certs::Cert, server::cert_list::CertList};
+use crate::{cdn::fetch::build_client, certs::Cert, server::cert_list::CertList};
 use anyhow::bail;
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
+use bytes::Bytes;
+use http_body_util::Full;
+use hyper::{
+    header::{HeaderValue, USER_AGENT},
+    Request,
+};
 use instant_acme::{
-    Account, AccountCredentials, AuthorizationStatus, ChallengeType, ExternalAccountKey,
-    Identifier, NewAccount, NewOrder, Order, OrderStatus,
+    Account, AccountCredentials, AuthorizationStatus, BytesResponse, ChallengeType,
+    ExternalAccountKey, HttpClient, Identifier, NewAccount, NewOrder, Order, OrderStatus,
 };
 use r3v3rs3_api::acme::AcmeInfo;
 use r3v3rs3_api::{
@@ -17,12 +23,42 @@ use serde_derive::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt,
+    future::Future,
+    pin::Pin,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 use tracing::{error, info};
 
 const HTTP_CHALLENGE_TIMEOUT: Duration = Duration::from_secs(180);
+const ACME_USER_AGENT: &str = concat!("r3v3rs3/", env!("CARGO_PKG_VERSION"));
+
+/// Adds the User-Agent header that RFC 8555 section 6.1 requires on every ACME request.
+struct AcmeHttpClient<H> {
+    inner: H,
+}
+
+impl<H: HttpClient> HttpClient for AcmeHttpClient<H> {
+    fn request(
+        &self,
+        mut req: Request<Full<Bytes>>,
+    ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, instant_acme::Error>> + Send>> {
+        if req.uri().scheme_str() != Some("https") {
+            return Box::pin(std::future::ready(Err(instant_acme::Error::Str(
+                "ACME requests need an https URL",
+            ))));
+        }
+        req.headers_mut()
+            .insert(USER_AGENT, HeaderValue::from_static(ACME_USER_AGENT));
+        self.inner.request(req)
+    }
+}
+
+async fn acme_http_client() -> anyhow::Result<Box<dyn HttpClient>> {
+    Ok(Box::new(AcmeHttpClient {
+        inner: build_client().await?,
+    }))
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AcmeEntry {
@@ -47,7 +83,11 @@ impl AcmeEntry {
         let external_account = req
             .eab
             .map(|eab| ExternalAccountKey::new(eab.key_id, &eab.hmac_key));
-        let account = Account::create(
+        let http = acme_http_client().await.map_err(|e| {
+            error!("failed to create the ACME http client: {}", e);
+            Error::AcmeAccountCreationFailed
+        })?;
+        let account = Account::create_with_http(
             &NewAccount {
                 contact: &contact,
                 terms_of_service_agreed: true,
@@ -55,6 +95,7 @@ impl AcmeEntry {
             },
             &req.server_url,
             external_account.as_ref(),
+            http,
         )
         .await;
 
@@ -172,7 +213,8 @@ impl AcmeOrder {
             .collect::<Vec<_>>();
         let account: AccountCredentials =
             serde_json::from_str(&serde_json::to_string(&entry.account)?)?;
-        let account = Account::from_credentials(account).await?;
+        let account =
+            Account::from_credentials_and_http(account, acme_http_client().await?).await?;
         let mut order = account
             .new_order(&NewOrder {
                 identifiers: &identifiers,
@@ -280,5 +322,58 @@ impl AcmeOrder {
         );
 
         Ok(cert?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyper::{header::HeaderMap, Response};
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingClient {
+        headers: Arc<Mutex<Vec<HeaderMap>>>,
+    }
+
+    impl HttpClient for RecordingClient {
+        fn request(
+            &self,
+            req: Request<Full<Bytes>>,
+        ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, instant_acme::Error>> + Send>>
+        {
+            if let Ok(mut headers) = self.headers.lock() {
+                headers.push(req.headers().clone());
+            }
+            Box::pin(std::future::ready(Ok(BytesResponse::from(Response::new(
+                Full::new(Bytes::new()),
+            )))))
+        }
+    }
+
+    /// Sends one GET through the wrapper and returns its outcome with the headers the inner client saw.
+    async fn send(url: &str) -> (bool, Vec<HeaderMap>) {
+        let inner = RecordingClient::default();
+        let headers = inner.headers.clone();
+        let client = AcmeHttpClient { inner };
+        let req = Request::get(url).body(Full::new(Bytes::new())).unwrap();
+        let ok = client.request(req).await.is_ok();
+        let seen = headers.lock().unwrap().clone();
+        (ok, seen)
+    }
+
+    #[tokio::test]
+    async fn every_acme_request_carries_a_user_agent() {
+        let (ok, headers) = send("https://acme.example/directory").await;
+        assert!(ok);
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0][USER_AGENT], ACME_USER_AGENT);
+    }
+
+    #[tokio::test]
+    async fn a_plain_http_url_is_refused_before_it_is_sent() {
+        let (ok, headers) = send("http://acme.example/directory").await;
+        assert!(!ok);
+        assert!(headers.is_empty());
     }
 }
