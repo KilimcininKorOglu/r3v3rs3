@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Gateway Error</title>
+    <meta charset="utf-8">
+    <title><%= self.code %> <%= self.text %></title>
     <style>
         :root {
             --background-color: #f6f6f6;
@@ -60,17 +61,7 @@
 <body>
     <div class="error-container">
         <div class="error-code"><%= self.code %></div>
-        <% if self.code == 523 { %>
-            <div class="error-text">Origin Is Unreachable</div>
-        <% } else if self.code == 525 { %>
-            <div class="error-text">SSL Handshake Failed</div>
-        <% } else if self.code == 526 { %>
-            <div class="error-text">Invalid SSL Certificate</div>
-        <% } else if self.code == 421 { %>
-            <div class="error-text">Misdirected Request</div>
-        <% } else { %>
-            <div class="error-text">Bad Gateway</div>
-        <% } %>
+        <div class="error-text"><%= self.text %></div>
         <div class="powered-by">
             <a href="https://github.com/KilimcininKorOglu/r3v3rs3" target="_blank" rel="noopener noreferrer">Powered by r3v3rs3</a>
         </div>

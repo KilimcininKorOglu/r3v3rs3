@@ -125,6 +125,9 @@ async fn ip_filter_allows_and_denies_clients() -> anyhow::Result<()> {
 
         let resp = client.get(deny_port.http_url("/denied")).send().await?;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert_eq!(resp.headers()["content-type"], "text/html; charset=utf-8");
+        let body = resp.text().await?;
+        assert!(body.contains("<div class=\"error-text\">Forbidden</div>"));
 
         let resp = client.get(allow_port.http_url("/allowed")).send().await?;
         assert_eq!(resp.status(), StatusCode::OK);

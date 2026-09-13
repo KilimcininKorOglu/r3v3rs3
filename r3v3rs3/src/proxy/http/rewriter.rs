@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
-use hyper::header::ALT_SVC;
+use hyper::header::{ALT_SVC, CONTENT_TYPE};
 use hyper::{body::Body, Response};
 use hyper::{
     header::{FORWARDED, VIA},
@@ -12,7 +12,7 @@ use std::{iter, net::IpAddr, sync::Arc};
 
 use super::client_ip::{ClientAddr, CLIENT_IP_HEADERS};
 use super::compression::ResponseCompression;
-use super::error::{error_headers, map_error, ErrorTemplate};
+use super::error::{error_headers, map_error, status_text, ErrorTemplate};
 use super::header_rules::{CompiledHeaderRules, HeaderVariables};
 
 #[derive(Default, Debug)]
@@ -236,6 +236,7 @@ fn error_response(
     let code = map_error(err);
     let body = ErrorTemplate {
         code: code.as_u16(),
+        text: status_text(code),
     }
     .render_once()?;
     let mut res = Response::new(BoxBody::new(
@@ -243,6 +244,10 @@ fn error_response(
     ));
     *res.status_mut() = code;
     res.headers_mut().extend(headers);
+    res.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
     Ok(res)
 }
 
