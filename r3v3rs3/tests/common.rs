@@ -6,8 +6,12 @@ use net2::{TcpBuilder, UdpBuilder};
 use r3v3rs3::{
     cdn::CdnRanges,
     certs::{acme::AcmeEntry, Cert},
+    command::ServerCommand,
     config::{new_appinfo, storage::Storage},
-    server::{Server, ServerChannels},
+    server::{
+        rpc::{ErasedRpcMethod, RpcMethod, RpcWrapper},
+        Server, ServerChannels,
+    },
 };
 use r3v3rs3_api::{
     app::AppConfig,
@@ -53,6 +57,45 @@ pub async fn wait_for_listener(addr: SocketAddr) -> anyhow::Result<()> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     anyhow::bail!("server did not start listening on {addr}")
+}
+
+/// Calls an RPC method through the server command channel and returns its result.
+pub async fn call<M>(
+    channels: &mut ServerChannels,
+    method: M,
+) -> anyhow::Result<Result<M::Output, Error>>
+where
+    M: RpcMethod + 'static,
+{
+    let arg = Box::new(RpcWrapper::new(method)) as Box<dyn ErasedRpcMethod>;
+    channels
+        .command
+        .send(ServerCommand::CallMethod { id: 1, arg })
+        .await?;
+    let callback = channels
+        .callback
+        .recv()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("callback channel closed"))?;
+    Ok(callback.result.and_then(|value| {
+        value
+            .downcast::<M::Output>()
+            .map(|value| *value)
+            .map_err(|_| Error::FailedToInvokeRpc)
+    }))
+}
+
+/// Sends requests until the proxy answers with the expected status.
+pub async fn wait_for_status(url: &str, expected: u16) -> anyhow::Result<String> {
+    for _ in 0..50 {
+        if let Ok(res) = reqwest::get(url).await {
+            if res.status().as_u16() == expected {
+                return Ok(res.text().await?);
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("{url} did not answer with {expected}")
 }
 
 #[derive(Debug, Default, Clone)]

@@ -1,6 +1,8 @@
 //! Service discovery. A provider reads proxy definitions from an external system and sends a
 //! snapshot to the server. The server turns the definitions into read-only proxies.
 
+pub mod docker;
+pub mod http;
 pub mod ids;
 pub mod labels;
 mod tree;
@@ -32,6 +34,9 @@ pub struct DiscoveredProxy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoverySnapshot {
     pub provider: DiscoveryProvider,
+    /// The provider task that sent the snapshot. The server ignores a snapshot of a stopped task.
+    /// A snapshot of a provider that the server did not start uses 0.
+    pub generation: u64,
     pub state: DiscoveryState,
     pub error: Option<String>,
     /// `None` keeps the proxies of the previous snapshot, for example after a connection error.

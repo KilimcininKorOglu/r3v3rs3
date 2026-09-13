@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 pub const PREFIX: &str = "r3v3rs3";
 
-const ENABLE: &str = "r3v3rs3.enable";
+pub const ENABLE: &str = "r3v3rs3.enable";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Protocol {

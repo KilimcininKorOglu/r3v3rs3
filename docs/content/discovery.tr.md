@@ -130,3 +130,72 @@ r3v3rs3.udp.dns.ports=dns
 r3v3rs3.udp.dns.upstream_servers.0.addr=/ip4/10.0.0.53/udp/53
 r3v3rs3.udp.dns.session_idle_timeout=30s
 ```
+
+# Docker
+
+Docker provider, çalışan container'ların label'larını Docker Engine API ile okur. Container event'lerini izler. Başlayan, duran veya değişen bir container proxy'leri yaklaşık bir saniye içinde günceller.
+
+## Ayarlar
+
+"Ayarlar" sayfasında "Docker Servis Keşfi" bölümünü doldurun veya `config.toml` dosyasını düzenleyin:
+
+```toml
+[discovery.docker]
+enabled = true
+endpoint = "unix:///var/run/docker.sock"
+network = "proxy"
+exposed_by_default = false
+```
+
+| Ayar | Anlamı |
+|---|---|
+| `enabled` | Provider'ı başlatır. |
+| `endpoint` | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` veya `https://<host>:<port>`. Varsayılan değer `unix:///var/run/docker.sock` olur. Windows `unix://` desteklemez. |
+| `client_cert` | r3v3rs3'ün `https` endpoint'ine gönderdiği client sertifikasının id'si. Server sertifikasını bir sistem root sertifikası veya r3v3rs3'teki bir root sertifika imzalamalıdır. |
+| `network` | Upstream adreslerinin alındığı Docker network'ü. Her container tek network'e bağlıysa boş bırakın. |
+| `exposed_by_default` | `true`, `r3v3rs3.` label'ı olan her container'ı okur. `false` yalnız `r3v3rs3.enable=true` olan container'ları okur. |
+
+Ayar değişikliği provider'ı server restart olmadan yeniden başlatır. Provider'ın kullandığı sertifika silinemez.
+
+## Container'lar
+
+- Container'ın upstream adresi, seçilen network'teki IP adresidir. `host` network modundaki container `127.0.0.1` kullanır.
+- Health check'i başarısız olan container atlanır ve issue olarak gösterilir. Health check'i henüz geçmemiş container atlanır.
+- Bir Compose servisinin replica'ları proxy'lerini paylaşır. Her replica kendi server'larını proxy'nin route'larına ekler, böylece proxy yükü replica'lara dağıtır. Replica'lar aynı sayıda route tanımlamalıdır.
+- Proxy'nin key'i Compose projesi, Compose servisi ve proxy adından oluşur. Compose dışındaki container kendi adını kullanır.
+- r3v3rs3, event gelmezse container listesini beş dakikada bir yeniden okur.
+
+## Compose örneği
+
+```yaml
+services:
+  r3v3rs3:
+    image: ghcr.io/kilimcininkoroglu/r3v3rs3:latest
+    volumes:
+      - r3v3rs3-config:/root/.config/r3v3rs3
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [proxy]
+    ports:
+      - 80:80
+      - 127.0.0.1:46492:46492
+
+  whoami:
+    image: traefik/whoami
+    networks: [proxy]
+    labels:
+      r3v3rs3.enable: "true"
+      r3v3rs3.http.whoami.ports: http
+      r3v3rs3.http.whoami.vhosts: whoami.example.com
+      r3v3rs3.http.whoami.port: "80"
+
+networks:
+  proxy:
+    name: proxy
+
+volumes:
+  r3v3rs3-config:
+```
+
+"Portlar" sayfasında `http` adında bir port ekleyin, provider'ı `proxy` network'ü ile açın ve stack'i başlatın. Network `name` alanını vermezse Compose network adının başına proje adını ekler.
+
+> Docker socket erişimi Docker host'unun tam kontrolünü verir. Bu yetki root erişimine eşittir. `:ro` seçeneği yalnız socket dosyasına uygulanır ve API'yi salt okunur yapmaz. Yönetim paneline veya host'a güvenilmeyen network'lerden erişilebiliyorsa r3v3rs3'ü yalnız `GET /containers/json` ve `GET /events` isteklerine izin veren bir Docker socket proxy'sine bağlayın.

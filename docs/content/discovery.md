@@ -130,3 +130,72 @@ r3v3rs3.udp.dns.ports=dns
 r3v3rs3.udp.dns.upstream_servers.0.addr=/ip4/10.0.0.53/udp/53
 r3v3rs3.udp.dns.session_idle_timeout=30s
 ```
+
+# Docker
+
+The Docker provider reads the labels of the running containers through the Docker Engine API. It follows the container events, so a started, stopped or changed container updates the proxies within about one second.
+
+## Settings
+
+Fill in "Docker Service Discovery" in "Settings", or edit `config.toml`:
+
+```toml
+[discovery.docker]
+enabled = true
+endpoint = "unix:///var/run/docker.sock"
+network = "proxy"
+exposed_by_default = false
+```
+
+| Setting | Meaning |
+|---|---|
+| `enabled` | Starts the provider. |
+| `endpoint` | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` or `https://<host>:<port>`. The default is `unix:///var/run/docker.sock`. Windows does not support `unix://`. |
+| `client_cert` | The id of a client certificate that r3v3rs3 sends to an `https` endpoint. A system root certificate or a root certificate in r3v3rs3 must sign the server certificate. |
+| `network` | The Docker network of the upstream addresses. Leave it empty when each container is on one network. |
+| `exposed_by_default` | `true` reads every container that has `r3v3rs3.` labels. `false` reads only the containers with `r3v3rs3.enable=true`. |
+
+A change of the settings restarts the provider without a server restart. A certificate that the provider uses cannot be deleted.
+
+## Containers
+
+- The upstream address of a container is its IP address on the selected network. A container with the `host` network mode uses `127.0.0.1`.
+- A container whose health check fails is skipped and shown as an issue. A container whose health check has not passed yet is skipped.
+- The replicas of a Compose service share their proxies. Each replica adds its servers to the routes of the proxy, so the proxy balances the load across the replicas. The replicas must define the same number of routes.
+- The key of a proxy is the Compose project, the Compose service and the proxy name. A container outside Compose uses its container name.
+- r3v3rs3 reads the container list again every five minutes without events.
+
+## Compose Example
+
+```yaml
+services:
+  r3v3rs3:
+    image: ghcr.io/kilimcininkoroglu/r3v3rs3:latest
+    volumes:
+      - r3v3rs3-config:/root/.config/r3v3rs3
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [proxy]
+    ports:
+      - 80:80
+      - 127.0.0.1:46492:46492
+
+  whoami:
+    image: traefik/whoami
+    networks: [proxy]
+    labels:
+      r3v3rs3.enable: "true"
+      r3v3rs3.http.whoami.ports: http
+      r3v3rs3.http.whoami.vhosts: whoami.example.com
+      r3v3rs3.http.whoami.port: "80"
+
+networks:
+  proxy:
+    name: proxy
+
+volumes:
+  r3v3rs3-config:
+```
+
+Add a port with the name `http` in "Ports", enable the provider with the network `proxy`, and start the stack. Compose adds the project name to a network name unless the network sets `name`.
+
+> Access to the Docker socket gives full control of the Docker host, which equals root access. The `:ro` option applies only to the socket file and does not make the API read-only. When the admin panel or the host is reachable from untrusted networks, connect r3v3rs3 to a Docker socket proxy that allows only `GET /containers/json` and `GET /events`.

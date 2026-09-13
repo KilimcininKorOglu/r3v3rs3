@@ -17,6 +17,7 @@ sort_by = "weight"
 - REST API ile yapılan config değişiklikleri servisi yeniden başlatmadan uygulanır.
 - TLS sertifikaları arayüzden içe aktarılabilir veya self-signed sertifika oluşturulabilir.
 - Let's Encrypt ile sertifikalar otomatik alınır (ACME v2, HTTP-01 ve DNS-01 challenge'ları). Wildcard sertifikalar için Cloudflare, Route 53, DigitalOcean ve Hetzner Cloud DNS API'leri kullanılır.
+- Proxy'leri Docker container label'larından oluşturur ve container başlayınca veya durunca günceller ([Servis keşfi](@/discovery.tr.md)).
 
 # Kurulum
 
@@ -56,6 +57,8 @@ services:
     container_name: r3v3rs3
     volumes:
       - r3v3rs3-config:/root/.config/r3v3rs3
+      # Uncomment to discover proxies from Docker labels
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
       # Add ports here if you want to expose them to the host
       - 80:80

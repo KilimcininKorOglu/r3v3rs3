@@ -85,6 +85,132 @@ pub struct DiscoveryStatus {
     pub updated_at: i64,
 }
 
+/// The settings of the discovery providers.
+#[derive(
+    Debug, serde_default::DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema,
+)]
+pub struct DiscoveryConfig {
+    #[serde(default)]
+    pub docker: DockerDiscoveryConfig,
+}
+
+#[derive(
+    Debug, serde_default::DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema,
+)]
+pub struct DockerDiscoveryConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` or `https://<host>:<port>`.
+    #[serde(default = "default_docker_endpoint")]
+    #[schema(example = "unix:///var/run/docker.sock")]
+    pub endpoint: String,
+    /// The client certificate for an `https` endpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "abc-def")]
+    pub client_cert: Option<crate::id::ShortId>,
+    /// The Docker network of the upstream addresses. Empty uses the only network of a container.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[schema(example = "proxy")]
+    pub network: String,
+    /// Reads every container. Otherwise only the containers with `r3v3rs3.enable=true` are read.
+    #[serde(default)]
+    pub exposed_by_default: bool,
+}
+
+fn default_docker_endpoint() -> String {
+    "unix:///var/run/docker.sock".to_string()
+}
+
+/// The address of a provider API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Endpoint {
+    /// The path of a Unix socket.
+    Unix(String),
+    Tcp {
+        tls: bool,
+        host: String,
+        port: u16,
+    },
+}
+
+impl std::str::FromStr for Endpoint {
+    type Err = crate::error::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        let invalid = || crate::error::Error::InvalidDiscoveryConfig {
+            reason: format!("invalid endpoint: {s}"),
+        };
+        let (scheme, rest) = s.split_once("://").ok_or_else(invalid)?;
+        match scheme {
+            "unix" if rest.len() > 1 && rest.starts_with('/') => Ok(Self::Unix(rest.to_string())),
+            "tcp" | "http" | "https" => {
+                let tls = scheme == "https";
+                let url =
+                    url::Url::parse(&format!("{}://{rest}", if tls { "https" } else { "http" }))
+                        .map_err(|_| invalid())?;
+                let plain = url.path() == "/" && url.query().is_none() && url.username().is_empty();
+                match (plain, url.host_str(), url.port_or_known_default()) {
+                    (true, Some(host), Some(port)) => Ok(Self::Tcp {
+                        tls,
+                        host: host.trim_matches(['[', ']']).to_string(),
+                        port,
+                    }),
+                    _ => Err(invalid()),
+                }
+            }
+            _ => Err(invalid()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::*;
+
+    #[test]
+    fn endpoints_parse_their_address() {
+        assert_eq!(
+            "unix:///var/run/docker.sock".parse::<Endpoint>().unwrap(),
+            Endpoint::Unix("/var/run/docker.sock".into())
+        );
+        assert_eq!(
+            "tcp://10.0.0.1:2375".parse::<Endpoint>().unwrap(),
+            Endpoint::Tcp {
+                tls: false,
+                host: "10.0.0.1".into(),
+                port: 2375
+            }
+        );
+        assert_eq!(
+            "https://[fd00::1]".parse::<Endpoint>().unwrap(),
+            Endpoint::Tcp {
+                tls: true,
+                host: "fd00::1".into(),
+                port: 443
+            }
+        );
+        for invalid in [
+            "",
+            "/var/run/docker.sock",
+            "unix://",
+            "unix://docker.sock",
+            "ftp://host:21",
+            "http://host:80/v1",
+            "http://user@host:80",
+        ] {
+            assert!(invalid.parse::<Endpoint>().is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn the_default_docker_config_uses_the_local_socket() {
+        let config = DiscoveryConfig::default();
+        assert!(!config.docker.enabled);
+        assert_eq!(config.docker.endpoint, "unix:///var/run/docker.sock");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

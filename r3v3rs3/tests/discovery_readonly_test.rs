@@ -7,7 +7,6 @@ use r3v3rs3::{
         discovery::GetDiscoveryStatus,
         ports::UpdatePort,
         proxies::{DeleteProxy, GetProxyList, UpdateProxy},
-        ErasedRpcMethod, RpcMethod, RpcWrapper,
     },
     server::ServerChannels,
 };
@@ -17,51 +16,12 @@ use r3v3rs3_api::{
     port::PortEntry,
     proxy::{HttpProxy, ProxyEntry, ProxyKind},
 };
-use std::time::Duration;
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, serve_http_upstream,
-    with_server, TestStorage,
+    alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route, serve_http_upstream,
+    wait_for_status, with_server, TestStorage,
 };
-
-async fn call<M>(
-    channels: &mut ServerChannels,
-    method: M,
-) -> anyhow::Result<Result<M::Output, Error>>
-where
-    M: RpcMethod + 'static,
-{
-    let arg = Box::new(RpcWrapper::new(method)) as Box<dyn ErasedRpcMethod>;
-    channels
-        .command
-        .send(ServerCommand::CallMethod { id: 1, arg })
-        .await?;
-    let callback = channels
-        .callback
-        .recv()
-        .await
-        .ok_or_else(|| anyhow::anyhow!("callback channel closed"))?;
-    Ok(callback.result.and_then(|value| {
-        value
-            .downcast::<M::Output>()
-            .map(|value| *value)
-            .map_err(|_| Error::FailedToInvokeRpc)
-    }))
-}
-
-/// Sends requests until the proxy answers with the expected status.
-async fn wait_for_status(url: &str, expected: u16) -> anyhow::Result<String> {
-    for _ in 0..50 {
-        if let Ok(res) = reqwest::get(url).await {
-            if res.status().as_u16() == expected {
-                return Ok(res.text().await?);
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    anyhow::bail!("{url} did not answer with {expected}")
-}
 
 fn discovered(name: &str, port: &str, upstream: &str) -> DiscoveredProxy {
     let http = HttpProxy {
@@ -91,6 +51,7 @@ async fn send_snapshot(
 ) -> anyhow::Result<()> {
     let snapshot = DiscoverySnapshot {
         provider: DiscoveryProvider::Docker,
+        generation: 0,
         state,
         error: None,
         proxies,

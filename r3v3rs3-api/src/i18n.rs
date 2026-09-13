@@ -215,6 +215,7 @@ mod tests {
             Error::ProxyReadOnly {
                 id: "abc".parse().unwrap(),
             },
+            Error::InvalidDiscoveryConfig { reason: text() },
             Error::AcmeAccountCreationFailed,
             Error::AcmeUnsupportedChallenge { challenge: text() },
             Error::AcmeIdentifiersMissing,

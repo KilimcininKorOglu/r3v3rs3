@@ -1,9 +1,12 @@
 //! The server side of service discovery: the latest snapshot of each provider, the proxies that
 //! the server builds from the snapshots and the provider statuses.
 
+use super::cert_list::CertList;
 use super::credentials::seal;
 use super::proxy_list::accepts;
 use crate::discovery::{ids, DiscoveredProxy, DiscoverySnapshot};
+use crate::proxy::tls::upstream_client_config;
+use r3v3rs3_api::discovery::{DiscoveryConfig, Endpoint};
 use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryProvider, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
@@ -11,6 +14,7 @@ use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyKind};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::SystemTime;
+use tokio::task::JoinHandle;
 
 #[derive(Debug, Default)]
 pub struct DiscoveryRegistry {
@@ -59,6 +63,14 @@ impl DiscoveryRegistry {
         if let Some(proxies) = snapshot.proxies {
             record.proxies = proxies;
         }
+    }
+
+    pub fn contains(&self, provider: DiscoveryProvider) -> bool {
+        self.providers.contains_key(&provider)
+    }
+
+    pub fn remove(&mut self, provider: DiscoveryProvider) {
+        self.providers.remove(&provider);
     }
 
     pub fn providers(&self) -> Vec<DiscoveryProvider> {
@@ -132,6 +144,94 @@ impl DiscoveryRegistry {
             })
             .collect()
     }
+}
+
+/// The running provider tasks. A snapshot of a stopped task is ignored, because it can arrive
+/// after the task stopped.
+#[derive(Debug, Default)]
+pub struct DiscoveryTasks {
+    tasks: BTreeMap<DiscoveryProvider, ProviderTask>,
+    generation: u64,
+}
+
+#[derive(Debug)]
+struct ProviderTask {
+    generation: u64,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl DiscoveryTasks {
+    /// Whether a snapshot comes from the running task of the provider. A provider that the server
+    /// never started accepts every snapshot.
+    pub fn accepts(&self, provider: DiscoveryProvider, generation: u64) -> bool {
+        self.tasks
+            .get(&provider)
+            .is_none_or(|task| task.handle.is_some() && task.generation == generation)
+    }
+
+    /// Stops the running task and starts a new one with the next generation.
+    pub fn start(
+        &mut self,
+        provider: DiscoveryProvider,
+        spawn: impl FnOnce(u64) -> JoinHandle<()>,
+    ) {
+        self.stop(provider);
+        self.generation += 1;
+        let generation = self.generation;
+        let handle = Some(spawn(generation));
+        self.tasks
+            .insert(provider, ProviderTask { generation, handle });
+    }
+
+    /// Returns true when a task was running.
+    pub fn stop(&mut self, provider: DiscoveryProvider) -> bool {
+        self.tasks
+            .get_mut(&provider)
+            .and_then(|task| task.handle.take())
+            .map(|handle| handle.abort())
+            .is_some()
+    }
+}
+
+impl Drop for DiscoveryTasks {
+    fn drop(&mut self) {
+        for handle in self
+            .tasks
+            .values_mut()
+            .filter_map(|task| task.handle.take())
+        {
+            handle.abort();
+        }
+    }
+}
+
+/// Checks the settings of the enabled providers.
+pub fn validate_config(config: &DiscoveryConfig, certs: &CertList) -> Result<(), Error> {
+    let docker = &config.docker;
+    if docker.enabled {
+        parse_endpoint(&docker.endpoint)?;
+        upstream_client_config(certs, docker.client_cert)?;
+    }
+    Ok(())
+}
+
+pub fn parse_endpoint(endpoint: &str) -> Result<Endpoint, Error> {
+    let endpoint = endpoint.parse::<Endpoint>()?;
+    if cfg!(not(unix)) && matches!(endpoint, Endpoint::Unix(_)) {
+        return Err(Error::InvalidDiscoveryConfig {
+            reason: "Unix sockets are not available on this platform".to_string(),
+        });
+    }
+    Ok(endpoint)
+}
+
+/// The providers whose settings differ.
+pub fn changed_providers(old: &DiscoveryConfig, new: &DiscoveryConfig) -> Vec<DiscoveryProvider> {
+    let mut changed = Vec::new();
+    if old.docker != new.docker {
+        changed.push(DiscoveryProvider::Docker);
+    }
+    changed
 }
 
 async fn seal_cached(
@@ -392,6 +492,7 @@ mod tests {
         let mut registry = DiscoveryRegistry::default();
         registry.update(DiscoverySnapshot {
             provider: DiscoveryProvider::Docker,
+            generation: 0,
             state: DiscoveryState::Running,
             error: None,
             proxies: Some(vec![]),

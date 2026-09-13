@@ -26,6 +26,7 @@ r3v3rs3 is currently in early development. Please be aware that breaking changes
 - Imports TLS certificates from the GUI or can generate a self-signed certificate
 - Supports mutual TLS: verifies client certificates on TLS ports and sends a client certificate to upstream servers
 - Provides Let's Encrypt support (ACME v2 with the HTTP-01 and DNS-01 challenges) for seamless certificate provisioning, including wildcard certificates through the Cloudflare, Route 53, DigitalOcean and Hetzner Cloud DNS APIs
+- Discovers proxies from Docker container labels and updates them when containers start or stop
 
 ## Documentation
 
@@ -74,6 +75,8 @@ services:
     container_name: r3v3rs3
     volumes:
       - r3v3rs3-config:/root/.config/r3v3rs3
+      # Uncomment to discover proxies from Docker labels
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
       # Add ports here if you want to expose them to the host
       - 80:80

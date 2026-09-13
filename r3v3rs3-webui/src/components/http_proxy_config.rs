@@ -896,7 +896,7 @@ pub fn parse_client_cert(value: &str) -> Option<ShortId> {
     value.parse().ok()
 }
 
-fn client_cert_label(cert: &CertInfo) -> String {
+pub fn client_cert_label(cert: &CertInfo) -> String {
     let names = cert
         .san
         .iter()

@@ -1,17 +1,23 @@
+use crate::components::http_proxy_config::{
+    client_cert_label, parse_client_cert, use_client_certs,
+};
 use crate::{auth::use_ensure_auth, i18n::use_locale, API_ENDPOINT};
 use gloo_net::http::{Request, RequestBuilder, Response};
 use r3v3rs3_api::{
     app::{AdminConfig, AppConfig, LogConfig},
     cdn::{CdnRangesSource, CdnStatus},
+    cert::CertInfo,
+    discovery::{DiscoveryConfig, DockerDiscoveryConfig, Endpoint},
     error::ErrorMessage,
     i18n::Locale,
+    id::ShortId,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
 use std::{collections::HashMap, net::SocketAddr};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
 const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
@@ -27,6 +33,11 @@ struct Fields {
     database_log_retention: String,
     http_challenge_addr: String,
     dns_challenge_resolver: String,
+    docker_enabled: bool,
+    docker_endpoint: String,
+    docker_network: String,
+    docker_exposed_by_default: bool,
+    docker_client_cert: Option<ShortId>,
 }
 
 impl Fields {
@@ -41,7 +52,13 @@ impl Fields {
                 })
                 .unwrap_or_default()
         };
+        let docker = &config.discovery.docker;
         Self {
+            docker_enabled: docker.enabled,
+            docker_endpoint: docker.endpoint.clone(),
+            docker_network: docker.network.clone(),
+            docker_exposed_by_default: docker.exposed_by_default,
+            docker_client_cert: docker.client_cert,
             background_task_interval: text("/background_task_interval"),
             session_expiry: text("/admin/session_expiry"),
             max_login_attempts: text("/admin/max_login_attempts"),
@@ -67,6 +84,7 @@ pub fn settings() -> Html {
     let fields = use_state(|| Option::<Fields>::None);
     let notice = use_state(|| Option::<Notice>::None);
     let is_loading = use_state(|| false);
+    let client_certs = use_client_certs();
 
     let fields_cloned = fields.clone();
     use_effect_with((), move |_| {
@@ -129,6 +147,8 @@ pub fn settings() -> Html {
             { text_field(&fields, &errors, locale.t("settings.database_log_retention"), "database_log_retention", "3months", |f| &mut f.database_log_retention) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.duration_hint")}</p>
 
+            { docker_section(locale, &fields, &errors, &client_certs) }
+
             <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
                 <button type="submit" disabled={parsed.is_err() || *is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
                     {locale.t("settings.save")}
@@ -164,15 +184,7 @@ fn text_field(
     placeholder: &'static str,
     select: fn(&mut Fields) -> &mut String,
 ) -> Html {
-    let mut current = (**fields).clone().unwrap_or_default();
-    let value = select(&mut current).clone();
-    let fields = fields.clone();
-    let onchange = Callback::from(move |event: Event| {
-        let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-        let mut updated = (*fields).clone().unwrap_or_default();
-        *select(&mut updated) = target.value();
-        fields.set(Some(updated));
-    });
+    let (value, onchange) = field_binding(fields, select, HtmlInputElement::value);
     html! {
         <>
             <label class={LABEL_CLASS}>{label}</label>
@@ -181,6 +193,97 @@ fn text_field(
                 <p class="mt-2 text-sm text-red-600 dark:text-red-500">{err}</p>
             }
         </>
+    }
+}
+
+const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500 dark:text-neutral-400";
+
+fn docker_section(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+    certs: &[CertInfo],
+) -> Html {
+    let selected = (**fields).as_ref().and_then(|f| f.docker_client_cert);
+    let fields_cloned = fields.clone();
+    let on_client_cert = Callback::from(move |event: Event| {
+        let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        let mut updated = (*fields_cloned).clone().unwrap_or_default();
+        updated.docker_client_cert = parse_client_cert(&target.value());
+        fields_cloned.set(Some(updated));
+    });
+    html! {
+        <>
+            <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.docker_title")}</h2>
+            { checkbox_field(fields, locale.t("settings.docker_enabled"), |f| &mut f.docker_enabled) }
+            { text_field(fields, errors, locale.t("settings.docker_endpoint"), "docker_endpoint", "unix:///var/run/docker.sock", |f| &mut f.docker_endpoint) }
+            <p class={HINT_CLASS}>{locale.t("settings.docker_endpoint_hint")}</p>
+            { text_field(fields, errors, locale.t("settings.docker_network"), "docker_network", "proxy", |f| &mut f.docker_network) }
+            <p class={HINT_CLASS}>{locale.t("settings.docker_network_hint")}</p>
+            { checkbox_field(fields, locale.t("settings.docker_exposed_by_default"), |f| &mut f.docker_exposed_by_default) }
+            <p class={HINT_CLASS}>{locale.t("settings.docker_exposed_by_default_hint")}</p>
+            <label class={LABEL_CLASS}>{locale.t("settings.docker_client_cert")}</label>
+            <select onchange={on_client_cert} class={INPUT_CLASS}>
+                <option value="" selected={selected.is_none()}>{locale.t("proxy_form.client_cert_none")}</option>
+                { for certs.iter().map(|cert| html! {
+                    <option value={cert.id.to_string()} selected={selected == Some(cert.id)}>{client_cert_label(cert)}</option>
+                }) }
+            </select>
+            <p class={HINT_CLASS}>{locale.t("settings.docker_client_cert_hint")}</p>
+        </>
+    }
+}
+
+/// The current value of a field and the callback that stores the new value of its input element.
+fn field_binding<T: Clone + 'static>(
+    fields: &UseStateHandle<Option<Fields>>,
+    select: fn(&mut Fields) -> &mut T,
+    read: fn(&HtmlInputElement) -> T,
+) -> (T, Callback<Event>) {
+    let mut current = (**fields).clone().unwrap_or_default();
+    let value = select(&mut current).clone();
+    let fields = fields.clone();
+    let onchange = Callback::from(move |event: Event| {
+        let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        let mut updated = (*fields).clone().unwrap_or_default();
+        *select(&mut updated) = read(&target);
+        fields.set(Some(updated));
+    });
+    (value, onchange)
+}
+
+fn checkbox_field(
+    fields: &UseStateHandle<Option<Fields>>,
+    label: &'static str,
+    select: fn(&mut Fields) -> &mut bool,
+) -> Html {
+    let (checked, onchange) = field_binding(fields, select, HtmlInputElement::checked);
+    html! {
+        <label class="flex items-center mt-4 text-sm font-medium text-neutral-900 dark:text-neutral-200">
+            <input type="checkbox" {checked} {onchange} class="w-4 h-4 mr-2 rounded" />
+            {label}
+        </label>
+    }
+}
+
+fn parse_docker(
+    locale: Locale,
+    fields: &Fields,
+    errors: &mut HashMap<String, String>,
+) -> DockerDiscoveryConfig {
+    let endpoint = fields.docker_endpoint.trim();
+    if endpoint.parse::<Endpoint>().is_err() {
+        errors.insert(
+            "docker_endpoint".into(),
+            locale.t("settings.invalid_endpoint").into(),
+        );
+    }
+    DockerDiscoveryConfig {
+        enabled: fields.docker_enabled,
+        endpoint: endpoint.to_string(),
+        client_cert: fields.docker_client_cert,
+        network: fields.docker_network.trim().to_string(),
+        exposed_by_default: fields.docker_exposed_by_default,
     }
 }
 
@@ -242,6 +345,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             locale.t("settings.invalid_socket_addr").into(),
         );
     }
+    let docker = parse_docker(locale, fields, &mut errors);
     let resolver = parse_optional_addr(&fields.dns_challenge_resolver);
     if resolver.is_err() {
         errors.insert(
@@ -261,6 +365,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 log,
                 http_challenge_addr: addr,
                 dns_challenge_resolver: resolver,
+                discovery: DiscoveryConfig { docker },
             })
         }
         _ => Err(errors),
@@ -419,6 +524,35 @@ async fn get_cdn_status() -> Result<CdnStatus, gloo_net::Error> {
         .await?
         .json()
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn docker_settings_round_trip_and_the_endpoint_is_validated() {
+        let mut config = AppConfig::default();
+        config.discovery.docker = DockerDiscoveryConfig {
+            enabled: true,
+            endpoint: "tcp://10.0.0.1:2375".into(),
+            client_cert: Some("abc".parse().unwrap()),
+            network: "proxy".into(),
+            exposed_by_default: true,
+        };
+        let fields = Fields::from_config(&config);
+        assert_eq!(parse_fields(Locale::En, &fields), Ok(config));
+
+        let invalid = Fields {
+            docker_endpoint: "docker.sock".into(),
+            ..fields
+        };
+        let errors = parse_fields(Locale::En, &invalid).unwrap_err();
+        assert_eq!(
+            errors.get("docker_endpoint").map(String::as_str),
+            Some(Locale::En.t("settings.invalid_endpoint"))
+        );
+    }
 }
 
 async fn refresh_cdn_ranges(locale: Locale) -> Result<CdnStatus, String> {

@@ -24,6 +24,9 @@ pub struct AppConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, example = "1.1.1.1:53")]
     pub dns_challenge_resolver: Option<SocketAddr>,
+
+    #[serde(default)]
+    pub discovery: crate::discovery::DiscoveryConfig,
 }
 
 fn default_background_task_interval() -> Duration {

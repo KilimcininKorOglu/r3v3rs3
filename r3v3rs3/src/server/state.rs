@@ -1,7 +1,7 @@
 use super::acme_list::AcmeList;
 use super::acme_schedule::AcmeSchedule;
 use super::cert_list::CertList;
-use super::discovery::{self, DiscoveryRegistry};
+use super::discovery::{self, DiscoveryRegistry, DiscoveryTasks};
 use super::proxy_list::ProxyList;
 use super::quic::QuicListenerPool;
 use super::rpc::proxies::validate_proxy;
@@ -9,9 +9,10 @@ use super::udp::UdpListenerPool;
 use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
 use crate::certs::acme::AcmeOrder;
 use crate::config::storage::Storage;
-use crate::discovery::DiscoverySnapshot;
+use crate::discovery::{docker, http::ApiClient, DiscoverySnapshot};
 use crate::log::DatabaseLayer;
 use crate::proxy::http::SessionService;
+use crate::proxy::tls::upstream_client_config;
 use crate::{
     command::ServerCommand,
     proxy::{PortContext, PortContextKind},
@@ -22,7 +23,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use quinn::Incoming;
 use r3v3rs3_api::app::{AppConfig, AppInfo};
-use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryStatus};
+use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
@@ -62,6 +63,7 @@ pub struct ServerState {
     callback_sender: mpsc::Sender<RpcCallback>,
     broadcast_events: bool,
     discovery: DiscoveryRegistry,
+    discovery_tasks: DiscoveryTasks,
 }
 
 pub enum Received {
@@ -129,6 +131,7 @@ impl ServerState {
             callback_sender,
             broadcast_events: false,
             discovery: DiscoveryRegistry::default(),
+            discovery_tasks: DiscoveryTasks::default(),
         };
 
         this.update_ports().await;
@@ -136,6 +139,9 @@ impl ServerState {
         this.update_proxies().await;
         this.update_acmes().await;
         this.reload_proxies().await;
+        for provider in DiscoveryProvider::ALL {
+            this.restart_discovery(provider).await;
+        }
         this
     }
 
@@ -174,7 +180,68 @@ impl ServerState {
         }
     }
 
+    /// Stops the task of the provider, removes its proxies and starts it again with the current
+    /// settings.
+    async fn restart_discovery(&mut self, provider: DiscoveryProvider) {
+        if self.discovery_tasks.stop(provider) || self.discovery.contains(provider) {
+            self.clear_discovery(provider).await;
+        }
+        let client = match self.discovery_client(provider) {
+            Ok(Some(client)) => client,
+            Ok(None) => return,
+            Err(err) => return self.set_discovery_error(provider, err.to_string()),
+        };
+        let config = self.config.discovery.docker.clone();
+        let command = self.command_sender.clone();
+        self.discovery_tasks.start(provider, move |generation| {
+            docker::spawn(&config, client, command, generation)
+        });
+    }
+
+    /// The API client of an enabled provider.
+    fn discovery_client(&self, provider: DiscoveryProvider) -> Result<Option<ApiClient>, Error> {
+        let docker = &self.config.discovery.docker;
+        if provider != DiscoveryProvider::Docker || !docker.enabled {
+            return Ok(None);
+        }
+        let endpoint = discovery::parse_endpoint(&docker.endpoint)?;
+        let tls = upstream_client_config(&self.certs, docker.client_cert)?;
+        Ok(Some(ApiClient::new(endpoint, Arc::new(tls))))
+    }
+
+    fn set_discovery_error(&mut self, provider: DiscoveryProvider, error: String) {
+        error!(%provider, %error, "failed to start service discovery");
+        self.discovery.update(DiscoverySnapshot {
+            provider,
+            generation: 0,
+            state: DiscoveryState::Error,
+            error: Some(error),
+            proxies: Some(Vec::new()),
+            issues: Vec::new(),
+        });
+        self.publish_discovery();
+    }
+
+    async fn clear_discovery(&mut self, provider: DiscoveryProvider) {
+        self.discovery.remove(provider);
+        if self
+            .proxies
+            .replace_discovered(provider, Vec::new())
+            .changed
+        {
+            self.publish_proxies();
+            self.reload_proxies().await;
+        }
+        self.publish_discovery();
+    }
+
     async fn set_discovery(&mut self, snapshot: DiscoverySnapshot) {
+        if !self
+            .discovery_tasks
+            .accepts(snapshot.provider, snapshot.generation)
+        {
+            return;
+        }
         let provider = snapshot.provider;
         self.discovery.update(snapshot);
         if self.apply_discovery(provider).await {
@@ -603,6 +670,12 @@ impl ServerState {
     }
 
     pub async fn set_config(&mut self, config: AppConfig) -> Result<(), Error> {
+        discovery::validate_config(&config.discovery, &self.certs)?;
+        let changed = discovery::changed_providers(&self.config.discovery, &config.discovery);
+        self.config.discovery.clone_from(&config.discovery);
+        for provider in changed {
+            self.restart_discovery(provider).await;
+        }
         self.config.clone_from(&config);
         self.sessions.set_config(config.admin);
         self.storage.save_app_config(&config).await;

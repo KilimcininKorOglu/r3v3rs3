@@ -80,6 +80,9 @@ pub enum Error {
     #[error("proxy is managed by service discovery and cannot be changed: {id}")]
     ProxyReadOnly { id: ShortId },
 
+    #[error("invalid service discovery settings: {reason}")]
+    InvalidDiscoveryConfig { reason: String },
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 
