@@ -34,6 +34,10 @@ pub struct HeaderVariables {
     pub scheme: &'static str,
     pub request_id: String,
     pub route: String,
+    /// Empty when the client sent no certificate.
+    pub client_cert_subject: String,
+    /// Empty when the client sent no certificate.
+    pub client_cert_fingerprint: String,
 }
 
 impl HeaderVariables {
@@ -44,6 +48,8 @@ impl HeaderVariables {
             HeaderVariable::Scheme => Cow::Borrowed(self.scheme),
             HeaderVariable::RequestId => Cow::Borrowed(&self.request_id),
             HeaderVariable::Route => Cow::Borrowed(&self.route),
+            HeaderVariable::ClientCertSubject => Cow::Borrowed(&self.client_cert_subject),
+            HeaderVariable::ClientCertFingerprint => Cow::Borrowed(&self.client_cert_fingerprint),
         }
     }
 }
@@ -148,7 +154,30 @@ mod tests {
             scheme: "https",
             request_id: "abc".into(),
             route: "/api".into(),
+            client_cert_subject: "CN=client".into(),
+            client_cert_fingerprint: String::new(),
         }
+    }
+
+    #[test]
+    fn client_certificate_variables() {
+        let rules = CompiledHeaderRules::new(&HeaderRules {
+            request: parse_header_rules(
+                "set X-Client-Cert: {client_cert_subject}\nset X-Client-Cert-Fingerprint: {client_cert_fingerprint}",
+            )
+            .unwrap(),
+            response: vec![],
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert("x-client-cert", HeaderValue::from_static("CN=spoofed"));
+        headers.insert(
+            "x-client-cert-fingerprint",
+            HeaderValue::from_static("spoofed"),
+        );
+
+        rules.apply_request(&mut headers, &variables());
+        assert_eq!(headers["x-client-cert"], "CN=client");
+        assert_eq!(headers["x-client-cert-fingerprint"], "");
     }
 
     #[test]

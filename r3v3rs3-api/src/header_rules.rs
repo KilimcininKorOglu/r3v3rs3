@@ -143,15 +143,19 @@ pub enum HeaderVariable {
     Scheme,
     RequestId,
     Route,
+    ClientCertSubject,
+    ClientCertFingerprint,
 }
 
 impl HeaderVariable {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::ClientIp,
         Self::Host,
         Self::Scheme,
         Self::RequestId,
         Self::Route,
+        Self::ClientCertSubject,
+        Self::ClientCertFingerprint,
     ];
 
     pub fn name(self) -> &'static str {
@@ -161,6 +165,8 @@ impl HeaderVariable {
             Self::Scheme => "scheme",
             Self::RequestId => "request_id",
             Self::Route => "route",
+            Self::ClientCertSubject => "client_cert_subject",
+            Self::ClientCertFingerprint => "client_cert_fingerprint",
         }
     }
 }
@@ -267,6 +273,14 @@ mod tests {
                 TemplatePart::Literal("://".into()),
                 TemplatePart::Variable(HeaderVariable::Host),
                 TemplatePart::Literal("{x}".into()),
+            ]
+        );
+        assert_eq!(
+            parse_header_template("{client_cert_subject}/{client_cert_fingerprint}").unwrap(),
+            vec![
+                TemplatePart::Variable(HeaderVariable::ClientCertSubject),
+                TemplatePart::Literal("/".into()),
+                TemplatePart::Variable(HeaderVariable::ClientCertFingerprint),
             ]
         );
         assert!(parse_header_template("").unwrap().is_empty());

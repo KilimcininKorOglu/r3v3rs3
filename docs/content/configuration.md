@@ -27,6 +27,28 @@ listen = "/ip4/0.0.0.0/tcp/443/https"
 tls_termination = { server_names = ["example.com", "*.example.com"] }
 ```
 
+## TLS Client Authentication
+
+HTTPS, HTTP over QUIC and TCP over TLS ports can verify the certificate of the client (mutual TLS). Select the mode in "Client Authentication":
+
+| Mode | Behavior |
+|---|---|
+| Off | The port does not ask for a client certificate. This is the default. |
+| Optional | The port asks for a certificate but also accepts clients without one. A certificate that the client sends must be valid. |
+| Required | The TLS handshake fails when the client sends no valid certificate. |
+
+In Optional and Required mode, select one or more root certificates in "Client CA Certificates". A client certificate must be signed by one of them. The system root certificates are not used. r3v3rs3 rejects a port config without a root certificate, or with a certificate that is not a root certificate. A root certificate that a port uses cannot be deleted.
+
+When the client authentication config becomes invalid, for example after the root certificate is removed from the configuration directory, the port closes every connection and the port list shows "TLS Error".
+
+On HTTPS and HTTP over QUIC ports, header rules can send the verified certificate to the upstream server with the `{client_cert_subject}` and `{client_cert_fingerprint}` variables. See "Header Rules".
+
+```toml
+[my-port]
+listen = "/ip4/0.0.0.0/tcp/443/https"
+tls_termination = { server_names = ["example.com"], client_auth = "required", client_ca_certs = ["a1b2c3d"] }
+```
+
 ## Resetting a Port
 
 Changing the port configuration does not affect existing connections. Old connections will continue to use the old configuration. To forcibly close existing connections, you can reset the port.
@@ -245,6 +267,10 @@ Values can use these variables. Write `{{` and `}}` for a literal brace.
 | `{scheme}` | `http` or `https`. |
 | `{request_id}` | A random 32-character hex ID. The request and response rules of one request use the same ID. |
 | `{route}` | The path of the matched route, e.g. `/api`. |
+| `{client_cert_subject}` | The subject of the verified client certificate, e.g. `CN=client.example.com`. Empty without a client certificate. |
+| `{client_cert_fingerprint}` | The SHA-256 fingerprint of the verified client certificate in hex. Empty without a client certificate. |
+
+A client can send a header with the same name itself. Use `set`, not `append`, for the client certificate headers, so the rule replaces the value of the client.
 
 Rules cannot change `Connection`, `Content-Length`, `Host`, `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding` and `Upgrade`, because these headers control the connection and the message framing.
 

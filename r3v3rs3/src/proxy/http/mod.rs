@@ -10,7 +10,7 @@ use self::{
     route::{FilteredRoute, ParsedRoute, Router},
 };
 use super::{
-    tls::{CertResolver, TlsTermination},
+    tls::{port_acceptor, server_cert_resolver, ClientCertInfo, TlsTermination},
     PortContextEvent,
 };
 use crate::server::cert_list::CertList;
@@ -35,10 +35,10 @@ use hyper_util::{
 };
 use quinn::{
     crypto::rustls::QuicServerConfig,
-    rustls::{server::ResolvesServerCert, ServerConfig},
+    rustls::{pki_types::CertificateDer, server::WebPkiClientVerifier, ServerConfig},
 };
+use r3v3rs3_api::error::Error;
 use r3v3rs3_api::port::{PortStatus, SocketState};
-use r3v3rs3_api::{cert::CertKind, error::Error};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
 use rewriter::{RequestRewriter, ResponseRewriter, ResponseRewriterBuilder};
 use std::{net::SocketAddr, ops::ControlFlow, str::FromStr, sync::Arc, time::SystemTime};
@@ -226,25 +226,7 @@ impl HttpPortContext {
             self.status.state.tls = Some(tls.setup(certs).await);
         }
 
-        let resolver: Arc<dyn ResolvesServerCert> = Arc::new(CertResolver::new(
-            certs
-                .iter()
-                .filter(|cert| cert.kind == CertKind::Server)
-                .cloned()
-                .collect(),
-            vec![],
-            true,
-        ));
-
-        let mut tls_config = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_cert_resolver(resolver);
-        tls_config.max_early_data_size = u32::MAX;
-        tls_config.alpn_protocols = vec!["h3".into()];
-
-        self.h3_server_config = QuicServerConfig::try_from(tls_config.clone())
-            .ok()
-            .map(|config| Arc::new(quinn::ServerConfig::with_crypto(Arc::new(config))));
+        self.h3_server_config = h3_server_config(certs, self.tls_termination.as_ref());
         Ok(())
     }
 
@@ -279,13 +261,13 @@ impl HttpPortContext {
     }
 
     pub fn start_proxy(&mut self, stream: BufStream<TcpStream>) {
+        let Some(tls_acceptor) = port_acceptor(self.tls_termination.as_ref()) else {
+            debug!("closing the connection: the TLS config is invalid");
+            return;
+        };
         let span = self.span.clone();
 
         let pool = self.pool.clone();
-        let tls_acceptor = self
-            .tls_termination
-            .as_ref()
-            .and_then(|tls| tls.acceptor.clone());
 
         let stop_notifier = self.stop_notifier.clone();
         let shared_cache = Cache::new(Arc::clone(&self.shared));
@@ -336,6 +318,7 @@ impl HttpPortContext {
                     Ok(conn) => {
                         let local = conn.local_ip();
                         let remote = conn.remote_address();
+                        let client_cert = quic_client_cert(&conn);
                         let h3_conn = h3::server::Connection::<_, Bytes>::new(
                             h3_quinn::Connection::new(conn),
                         )
@@ -352,6 +335,7 @@ impl HttpPortContext {
                                                 pool: pool.clone(),
                                                 local,
                                                 remote,
+                                                client_cert: client_cert.clone(),
                                             },
                                             span_cloned.clone(),
                                             stop_notifier.clone(),
@@ -381,6 +365,36 @@ impl HttpPortContext {
             .instrument(span),
         );
     }
+}
+
+/// Builds the HTTP/3 server config with the client authentication of the port. `None` means that
+/// the client authentication config is invalid, so the port refuses QUIC connections.
+fn h3_server_config(
+    certs: &CertList,
+    tls: Option<&TlsTermination>,
+) -> Option<Arc<quinn::ServerConfig>> {
+    let verifier = match tls {
+        Some(tls) => tls.client_verifier(certs).ok()?,
+        None => WebPkiClientVerifier::no_client_auth(),
+    };
+    let mut tls_config = ServerConfig::builder()
+        .with_client_cert_verifier(verifier)
+        .with_cert_resolver(server_cert_resolver(certs, vec![]));
+    tls_config.max_early_data_size = u32::MAX;
+    tls_config.alpn_protocols = vec!["h3".into()];
+
+    QuicServerConfig::try_from(tls_config)
+        .ok()
+        .map(|config| Arc::new(quinn::ServerConfig::with_crypto(Arc::new(config))))
+}
+
+/// Reads the verified client certificate of a QUIC connection.
+fn quic_client_cert(conn: &quinn::Connection) -> Option<Arc<ClientCertInfo>> {
+    let chain = conn
+        .peer_identity()?
+        .downcast::<Vec<CertificateDer<'static>>>()
+        .ok()?;
+    ClientCertInfo::from_chain(Some(chain.as_slice())).map(Arc::new)
 }
 
 async fn start(
@@ -433,6 +447,7 @@ async fn start(
     let mut stream: Box<dyn IoStream> = Box::new(server_stream);
     let mut server_http2 = false;
     let mut sni = None;
+    let mut client_cert = None;
 
     let forwarded_proto = if tls_acceptor.is_some() {
         "https"
@@ -446,6 +461,7 @@ async fn start(
         let tls_conn = &accepted.get_ref().1;
         server_http2 = tls_conn.alpn_protocol() == Some(b"h2");
         sni = tls_conn.server_name().map(|sni| sni.to_string());
+        client_cert = ClientCertInfo::from_chain(tls_conn.peer_certificates()).map(Arc::new);
         stream = Box::new(accepted);
     }
 
@@ -459,6 +475,7 @@ async fn start(
         let pool = pool.clone();
         let shared = shared_cache.load().clone();
         let sni = sni.clone();
+        let client_cert = client_cert.clone();
 
         async move {
             let (req, response_rewriter) = if is_domain_fronting(&req, sni.as_deref()) {
@@ -472,6 +489,7 @@ async fn start(
                     local: local.to_string(),
                     sni: sni.as_deref(),
                     proto: forwarded_proto,
+                    client_cert: client_cert.as_deref(),
                 };
                 route_request(&shared, req, &info).await
             };
@@ -562,6 +580,7 @@ struct QuickContext {
     pool: Arc<ConnectionPool>,
     local: Option<std::net::IpAddr>,
     remote: SocketAddr,
+    client_cert: Option<Arc<ClientCertInfo>>,
 }
 
 /// Connection details that the TCP and QUIC paths pass to [`route_request`].
@@ -570,6 +589,8 @@ struct RequestInfo<'a> {
     local: String,
     sni: Option<&'a str>,
     proto: &'static str,
+    /// The verified client certificate of the TLS connection.
+    client_cert: Option<&'a ClientCertInfo>,
 }
 
 fn header_host<B>(req: &Request<B>) -> Option<&str> {
@@ -682,7 +703,7 @@ where
         req.headers_mut(),
         client.ip,
         request_host,
-        info.proto,
+        info,
         response_rewriter,
     );
     let cache_request = route
@@ -702,22 +723,29 @@ fn apply_header_rules(
     headers: &mut hyper::HeaderMap,
     client: std::net::IpAddr,
     host: Option<String>,
-    proto: &'static str,
+    info: &RequestInfo<'_>,
     response_rewriter: ResponseRewriterBuilder,
 ) -> ResponseRewriterBuilder {
     if route.header_rules.is_empty() {
         return response_rewriter;
     }
+    let client_cert = info.client_cert.cloned().unwrap_or_default();
     let variables = HeaderVariables {
         client_ip: client,
         host: host.unwrap_or_default(),
-        scheme: if proto == "http" { "http" } else { "https" },
+        scheme: if info.proto == "http" {
+            "http"
+        } else {
+            "https"
+        },
         request_id: new_request_id(),
         route: if route.base_path.is_empty() {
             "/".to_string()
         } else {
             route.base_path.clone()
         },
+        client_cert_subject: client_cert.subject,
+        client_cert_fingerprint: client_cert.fingerprint,
     };
     route.header_rules.apply_request(headers, &variables);
     response_rewriter.header_rules(route.header_rules.clone(), variables)
@@ -839,6 +867,7 @@ where
         local: ctx.local.map(|ip| ip.to_string()).unwrap_or_default(),
         sni: None,
         proto: "h3",
+        client_cert: ctx.client_cert.as_deref(),
     };
     // The body is attached before routing, so an authenticator can read a form submission.
     let (mut send, recv) = stream.split();

@@ -1,15 +1,19 @@
 use super::http_proxy_config::{
-    error_view, parse_comma_list, HINT_CLASS, INPUT_CLASS, LABEL_CLASS,
+    error_view, parse_comma_list, select_field, select_setter, HINT_CLASS, INPUT_CLASS, LABEL_CLASS,
 };
 use crate::i18n::use_locale;
+use crate::pages::cert_list::get_cert_list;
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::{
+    cert::{CertInfo, CertKind},
+    error::Error,
     i18n::Locale,
+    id::ShortId,
     multiaddr::Multiaddr,
     port::{NetworkInterface, Port, PortOptions},
     subject_name::SubjectName,
-    tls::TlsTermination,
+    tls::{ClientAuthMode, TlsTermination},
 };
 use std::{
     collections::HashMap,
@@ -45,6 +49,20 @@ const PROTOCOLS: &[(&str, &str)] = &[
     ("udp", "UDP"),
 ];
 
+const CLIENT_AUTH_MODES: [(ClientAuthMode, &str, &str); 3] = [
+    (ClientAuthMode::Off, "off", "ports.client_auth_off"),
+    (
+        ClientAuthMode::Optional,
+        "optional",
+        "ports.client_auth_optional",
+    ),
+    (
+        ClientAuthMode::Required,
+        "required",
+        "ports.client_auth_required",
+    ),
+];
+
 /// Protocol names are the same in every language, except the ones that contain words.
 fn protocol_label(locale: Locale, value: &str, label: &'static str) -> &'static str {
     match value {
@@ -66,6 +84,16 @@ struct PortForm {
     interface: String,
     port: u16,
     server_names: String,
+    client_auth: ClientAuthMode,
+    client_ca_certs: Vec<ShortId>,
+}
+
+/// The state of the TLS section of the form.
+struct TlsFields {
+    server_names: UseStateHandle<String>,
+    client_auth: UseStateHandle<ClientAuthMode>,
+    client_ca_certs: UseStateHandle<Vec<ShortId>>,
+    root_certs: UseStateHandle<Vec<CertInfo>>,
 }
 
 #[function_component(PortConfig)]
@@ -155,14 +183,7 @@ pub fn port_config(props: &Props) -> Html {
     });
 
     let tls_termination = props.port.opts.tls_termination.clone().unwrap_or_default();
-    let server_names = use_state(|| tls_termination.server_names.join(", "));
-    let server_names_onchange = Callback::from({
-        let server_names = server_names.clone();
-        move |event: Event| {
-            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            server_names.set(target.value());
-        }
-    });
+    let tls_fields = use_tls_fields(&tls_termination);
 
     let form = PortForm {
         active: *active,
@@ -170,7 +191,9 @@ pub fn port_config(props: &Props) -> Html {
         protocol: protocol.to_string(),
         interface: interface.to_string(),
         port: *port,
-        server_names: server_names.to_string(),
+        server_names: tls_fields.server_names.to_string(),
+        client_auth: *tls_fields.client_auth,
+        client_ca_certs: (*tls_fields.client_ca_certs).clone(),
     };
     let prev_entry =
         use_state::<Result<Port, HashMap<String, String>>, _>(|| Err(Default::default()));
@@ -215,13 +238,131 @@ pub fn port_config(props: &Props) -> Html {
             </select>
 
             if is_tls_protocol(&protocol) {
-                <label class={LABEL_CLASS}>{locale.t("ports.server_names")}</label>
-                <input type="text" autocapitalize="off" value={server_names.to_string()} onchange={server_names_onchange} class={INPUT_CLASS} placeholder="example.com, *.example.com" />
-                { error_view(errors.get("server_names")) }
-                <p class={HINT_CLASS}>{locale.t("ports.server_names_hint")}</p>
+                { tls_view(locale, &tls_fields, &errors) }
             }
         </>
     }
+}
+
+/// Returns the state of the TLS section from the saved TLS config and loads the root certificates.
+#[hook]
+fn use_tls_fields(tls_termination: &TlsTermination) -> TlsFields {
+    let fields = TlsFields {
+        server_names: use_state(|| tls_termination.server_names.join(", ")),
+        client_auth: use_state(|| tls_termination.client_auth),
+        client_ca_certs: use_state(|| tls_termination.client_ca_certs.clone()),
+        root_certs: use_state(Vec::<CertInfo>::new),
+    };
+    use_effect_with((), {
+        let root_certs = fields.root_certs.clone();
+        move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Ok(list) = get_cert_list().await {
+                    root_certs.set(
+                        list.into_iter()
+                            .filter(|cert| cert.kind == CertKind::Root)
+                            .collect(),
+                    );
+                }
+            });
+        }
+    });
+    fields
+}
+
+/// The server names and the client authentication of a TLS port.
+fn tls_view(locale: Locale, fields: &TlsFields, errors: &HashMap<String, String>) -> Html {
+    let server_names_onchange = Callback::from({
+        let server_names = fields.server_names.clone();
+        move |event: Event| {
+            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+            server_names.set(target.value());
+        }
+    });
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{locale.t("ports.server_names")}</label>
+            <input type="text" autocapitalize="off" value={fields.server_names.to_string()} onchange={server_names_onchange} class={INPUT_CLASS} placeholder="example.com, *.example.com" />
+            { error_view(errors.get("server_names")) }
+            <p class={HINT_CLASS}>{locale.t("ports.server_names_hint")}</p>
+
+            { client_auth_view(locale, &fields.client_auth) }
+            if !fields.client_auth.is_off() {
+                { client_ca_certs_view(locale, &fields.client_ca_certs, &fields.root_certs) }
+                { error_view(errors.get("client_ca_certs")) }
+            }
+        </>
+    }
+}
+
+fn client_auth_view(locale: Locale, client_auth: &UseStateHandle<ClientAuthMode>) -> Html {
+    let options = CLIENT_AUTH_MODES
+        .iter()
+        .map(|(mode, value, key)| {
+            html! {
+                <option selected={**client_auth == *mode} value={*value}>{locale.t(key)}</option>
+            }
+        })
+        .collect::<Html>();
+    select_field(
+        locale.t("ports.client_auth"),
+        select_setter(client_auth, parse_client_auth),
+        options,
+        Some(locale.t("ports.client_auth_hint")),
+    )
+}
+
+fn client_ca_certs_view(
+    locale: Locale,
+    selected: &UseStateHandle<Vec<ShortId>>,
+    root_certs: &[CertInfo],
+) -> Html {
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{locale.t("ports.client_ca_certs")}</label>
+            if root_certs.is_empty() {
+                <p class={HINT_CLASS}>{locale.t("ports.no_root_certs")}</p>
+            }
+            { root_certs.iter().map(|cert| {
+                let id = cert.id;
+                let onchange = Callback::from({
+                    let selected = selected.clone();
+                    move |event: Event| {
+                        let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+                        selected.set(toggle_id(&selected, id, target.checked()));
+                    }
+                });
+                html! {
+                    <label class="flex items-center gap-2 mb-1 text-sm text-neutral-900 dark:text-neutral-200">
+                        <input type="checkbox" checked={selected.contains(&id)} {onchange} class="w-4 h-4" />
+                        <span>{format!("{} ({})", cert.issuer, id)}</span>
+                    </label>
+                }
+            }).collect::<Html>() }
+            <p class={HINT_CLASS}>{locale.t("ports.client_ca_certs_hint")}</p>
+        </>
+    }
+}
+
+fn parse_client_auth(value: &str) -> ClientAuthMode {
+    CLIENT_AUTH_MODES
+        .iter()
+        .find(|(_, name, _)| *name == value)
+        .map(|(mode, _, _)| *mode)
+        .unwrap_or_default()
+}
+
+/// Adds the ID to the list or removes it from the list.
+fn toggle_id(list: &[ShortId], id: ShortId, checked: bool) -> Vec<ShortId> {
+    let mut list = list
+        .iter()
+        .copied()
+        .filter(|item| *item != id)
+        .collect::<Vec<_>>();
+    if checked {
+        list.push(id);
+    }
+    list
 }
 
 /// Builds the port from the form. `tls_termination` is the saved TLS config; the form replaces only its fields.
@@ -240,6 +381,8 @@ fn get_port(
         &mut errors,
         |name| SubjectName::from_str(name).map(|_| name.to_string()),
     );
+    tls_termination.client_auth = form.client_auth;
+    tls_termination.client_ca_certs = client_ca_certs(locale, form, &mut errors);
 
     match listen {
         Some(listen) if errors.is_empty() => Ok(Port {
@@ -252,6 +395,24 @@ fn get_port(
         }),
         _ => Err(errors),
     }
+}
+
+/// Returns the selected root certificates. `Off` keeps no certificate.
+fn client_ca_certs(
+    locale: Locale,
+    form: &PortForm,
+    errors: &mut HashMap<String, String>,
+) -> Vec<ShortId> {
+    if form.client_auth.is_off() || !is_tls_protocol(&form.protocol) {
+        return Vec::new();
+    }
+    if form.client_ca_certs.is_empty() {
+        errors.insert(
+            "client_ca_certs".into(),
+            locale.error_message(&Error::ClientCaCertsMissing),
+        );
+    }
+    form.client_ca_certs.clone()
 }
 
 fn listen_addr(
@@ -315,6 +476,8 @@ mod tests {
             interface: "0.0.0.0".into(),
             port: 443,
             server_names: server_names.into(),
+            client_auth: ClientAuthMode::Off,
+            client_ca_certs: Vec::new(),
         }
     }
 
@@ -354,5 +517,38 @@ mod tests {
             errors["interface"],
             Locale::En.t("ports.interface_required")
         );
+    }
+
+    #[test]
+    fn client_auth_needs_a_root_certificate() {
+        let root: ShortId = "abc".parse().unwrap();
+        let mut form = form("https", "");
+        form.client_auth = parse_client_auth("required");
+        let errors = build(&form).unwrap_err();
+        assert_eq!(
+            errors["client_ca_certs"],
+            Locale::En.error_message(&Error::ClientCaCertsMissing)
+        );
+
+        form.client_ca_certs = vec![root];
+        let tls = build(&form).unwrap().opts.tls_termination.unwrap();
+        assert_eq!(tls.client_auth, ClientAuthMode::Required);
+        assert_eq!(tls.client_ca_certs, vec![root]);
+
+        form.client_auth = parse_client_auth("off");
+        let tls = build(&form).unwrap().opts.tls_termination.unwrap();
+        assert_eq!(tls.client_auth, ClientAuthMode::Off);
+        assert!(tls.client_ca_certs.is_empty());
+    }
+
+    #[test]
+    fn toggle_id_adds_and_removes_the_id() {
+        let a: ShortId = "abc".parse().unwrap();
+        let b: ShortId = "def".parse().unwrap();
+        assert_eq!(toggle_id(&[a], b, true), vec![a, b]);
+        assert_eq!(toggle_id(&[a, b], a, false), vec![b]);
+        assert_eq!(toggle_id(&[a], a, true), vec![a]);
+        assert_eq!(parse_client_auth("optional"), ClientAuthMode::Optional);
+        assert_eq!(parse_client_auth("unknown"), ClientAuthMode::Off);
     }
 }

@@ -591,6 +591,38 @@ pub fn error_view(error: Option<&String>) -> Html {
     }
 }
 
+/// A labeled select element with an optional hint below it.
+pub fn select_field(
+    label: &str,
+    onchange: Callback<Event>,
+    options: Html,
+    hint: Option<&str>,
+) -> Html {
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{label.to_string()}</label>
+            <select {onchange} class={INPUT_CLASS}>
+                { options }
+            </select>
+            if let Some(hint) = hint {
+                <p class={HINT_CLASS}>{hint.to_string()}</p>
+            }
+        </>
+    }
+}
+
+/// Returns a change handler of a select element that stores the parsed value in the state.
+pub fn select_setter<T: 'static>(
+    state: &UseStateHandle<T>,
+    parse: fn(&str) -> T,
+) -> Callback<Event> {
+    let state = state.clone();
+    Callback::from(move |event: Event| {
+        let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        state.set(parse(&target.value()));
+    })
+}
+
 fn input_element(event: &Event) -> HtmlInputElement {
     event.target().unwrap_throw().dyn_into().unwrap_throw()
 }

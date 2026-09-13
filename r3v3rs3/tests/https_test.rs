@@ -45,6 +45,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                 opts: PortOptions {
                     tls_termination: Some(TlsTermination {
                         server_names: vec!["localhost".into()],
+                        ..Default::default()
                     }),
                 },
             },
@@ -160,6 +161,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                 opts: PortOptions {
                     tls_termination: Some(TlsTermination {
                         server_names: vec!["localhost".into()],
+                        ..Default::default()
                     }),
                 },
             },
@@ -256,6 +258,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                 opts: PortOptions {
                     tls_termination: Some(TlsTermination {
                         server_names: vec!["localhost".into()],
+                        ..Default::default()
                     }),
                 },
             },
@@ -367,6 +370,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                 opts: PortOptions {
                     tls_termination: Some(TlsTermination {
                         server_names: vec!["localhost".into()],
+                        ..Default::default()
                     }),
                 },
             },

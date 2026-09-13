@@ -58,12 +58,29 @@ impl RpcMethod for DeleteCert {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        ensure_unused(state, self.id)?;
         state.certs.delete(self.id)?;
         state.update_certs().await;
         state.reload_proxies().await;
         state.storage.delete_cert(self.id).await;
         Ok(())
     }
+}
+
+/// Rejects the deletion of a certificate that a port uses.
+fn ensure_unused(state: &ServerState, id: ShortId) -> Result<(), Error> {
+    let used_by_port = state.ports.entries().any(|entry| {
+        entry
+            .port
+            .opts
+            .tls_termination
+            .as_ref()
+            .is_some_and(|tls| tls.client_ca_certs.contains(&id))
+    });
+    if used_by_port {
+        return Err(Error::CertificateInUse { id });
+    }
+    Ok(())
 }
 
 pub struct DownloadCert {

@@ -27,6 +27,28 @@ listen = "/ip4/0.0.0.0/tcp/443/https"
 tls_termination = { server_names = ["example.com", "*.example.com"] }
 ```
 
+## TLS client authentication
+
+HTTPS, QUIC üzerinden HTTP ve TLS üzerinden TCP portları client'ın sertifikasını doğrulayabilir (mutual TLS). Modu "Client Authentication" alanından seçin:
+
+| Mod | Davranış |
+|---|---|
+| Kapalı | Port client sertifikası istemez. Varsayılan mod budur. |
+| İsteğe bağlı | Port sertifika ister, fakat sertifikasız client'ları da kabul eder. Client'ın gönderdiği sertifika geçerli olmalıdır. |
+| Zorunlu | Client geçerli bir sertifika göndermezse TLS handshake başarısız olur. |
+
+İsteğe bağlı ve Zorunlu modlarda "Client CA Sertifikaları" listesinden bir veya daha fazla root sertifika seçin. Client sertifikası bunlardan biriyle imzalanmış olmalıdır. Sistemin root sertifikaları kullanılmaz. r3v3rs3, root sertifika seçilmemiş veya root olmayan bir sertifika seçilmiş port config'ini reddeder. Bir portun kullandığı root sertifika silinemez.
+
+Client authentication config'i geçersiz hale gelirse (örneğin root sertifika config dizininden silinirse) port bütün bağlantıları kapatır ve port listesi "TLS Hatası" gösterir.
+
+HTTPS ve QUIC üzerinden HTTP portlarında header kuralları, doğrulanan sertifikayı `{client_cert_subject}` ve `{client_cert_fingerprint}` değişkenleriyle upstream sunucuya gönderebilir. "Header kuralları" bölümüne bakın.
+
+```toml
+[my-port]
+listen = "/ip4/0.0.0.0/tcp/443/https"
+tls_termination = { server_names = ["example.com"], client_auth = "required", client_ca_certs = ["a1b2c3d"] }
+```
+
 ## Portu sıfırlama
 
 Port config'ini değiştirdiğinizde açık bağlantılar etkilenmez; bu bağlantılar eski config ile çalışmaya devam eder. Açık bağlantıları kapatmak için portu sıfırlayın.
@@ -245,6 +267,10 @@ Değerlerde şu değişkenleri kullanabilirsiniz. Süslü parantez yazmak için 
 | `{scheme}` | `http` veya `https`. |
 | `{request_id}` | Rastgele 32 karakterlik hex ID. Aynı request'in request ve response kuralları aynı ID'yi kullanır. |
 | `{route}` | Eşleşen route'un path'i, örneğin `/api`. |
+| `{client_cert_subject}` | Doğrulanan client sertifikasının subject değeri, örneğin `CN=client.example.com`. Client sertifikası yoksa boştur. |
+| `{client_cert_fingerprint}` | Doğrulanan client sertifikasının hex SHA-256 fingerprint'i. Client sertifikası yoksa boştur. |
+
+Client aynı adlı bir header'ı kendisi de gönderebilir. Client sertifikası header'ları için `append` yerine `set` kullanın. Böylece kural client'ın gönderdiği değeri değiştirir.
 
 Kurallar `Connection`, `Content-Length`, `Host`, `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding` ve `Upgrade` header'larını değiştiremez, çünkü bu header'lar bağlantıyı ve mesajın framing'ini kontrol eder.
 

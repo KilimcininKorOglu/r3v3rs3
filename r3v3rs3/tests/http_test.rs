@@ -262,6 +262,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     opts: PortOptions {
                         tls_termination: Some(TlsTermination {
                             server_names: vec!["localhost".into()],
+                            ..Default::default()
                         }),
                     },
                 },

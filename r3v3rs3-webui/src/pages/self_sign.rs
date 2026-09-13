@@ -1,6 +1,8 @@
 use crate::{
     auth::use_ensure_auth,
-    components::http_proxy_config::{error_view, HINT_CLASS, INPUT_CLASS, LABEL_CLASS},
+    components::http_proxy_config::{
+        error_view, select_field, select_setter, HINT_CLASS, INPUT_CLASS, LABEL_CLASS,
+    },
     i18n::use_locale,
     pages::{
         cert_list::{get_cert_list, CertsQuery, CertsTab},
@@ -18,7 +20,7 @@ use r3v3rs3_api::{
 use serde_derive::{Deserialize, Serialize};
 use std::str::FromStr;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
-use web_sys::{HtmlInputElement, HtmlSelectElement};
+use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
@@ -136,46 +138,33 @@ fn show_certs(navigator: &Navigator, kind: SelfSignedCertKind) {
 }
 
 fn kind_view(locale: Locale, kind: &UseStateHandle<SelfSignedCertKind>) -> Html {
-    let onchange = Callback::from({
-        let kind = kind.clone();
-        move |event: Event| {
-            let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            kind.set(parse_kind(&target.value()));
-        }
-    });
-    html! {
+    let options = html! {
         <>
-            <label class="block mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("certs.kind")}</label>
-            <select {onchange} class={INPUT_CLASS}>
-                <option selected={**kind == SelfSignedCertKind::Server} value="server">{locale.t("certs.kind_server")}</option>
-                <option selected={**kind == SelfSignedCertKind::Client} value="client">{locale.t("certs.kind_client")}</option>
-            </select>
-            <p class={HINT_CLASS}>{locale.t("certs.kind_hint")}</p>
+            <option selected={**kind == SelfSignedCertKind::Server} value="server">{locale.t("certs.kind_server")}</option>
+            <option selected={**kind == SelfSignedCertKind::Client} value="client">{locale.t("certs.kind_client")}</option>
         </>
-    }
+    };
+    select_field(
+        locale.t("certs.kind"),
+        select_setter(kind, parse_kind),
+        options,
+        Some(locale.t("certs.kind_hint")),
+    )
 }
 
 fn ca_cert_view(locale: Locale, ca_cert: &UseStateHandle<ShortId>, list: &[CertInfo]) -> Html {
-    let onchange = Callback::from({
-        let ca_cert = ca_cert.clone();
-        move |event: Event| {
-            let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            ca_cert.set(target.value().parse().unwrap_throw());
-        }
-    });
-    html! {
+    let options = html! {
         <>
-            <label class={LABEL_CLASS}>{locale.t("certs.ca_certificate")}</label>
-            <select {onchange} class={INPUT_CLASS}>
-                { list.iter().map(|cert| {
-                    html! {
-                        <option selected={**ca_cert == cert.id} value={cert.id.to_string()}>{format!("{} ({})", cert.issuer, cert.id)}</option>
-                    }
-                }).collect::<Html>() }
-                <option selected={ca_cert.to_string() == GENERATE_CA} value={GENERATE_CA}>{locale.t("certs.generate_ca")}</option>
-            </select>
+            { list.iter().map(|cert| {
+                html! {
+                    <option selected={**ca_cert == cert.id} value={cert.id.to_string()}>{format!("{} ({})", cert.issuer, cert.id)}</option>
+                }
+            }).collect::<Html>() }
+            <option selected={ca_cert.to_string() == GENERATE_CA} value={GENERATE_CA}>{locale.t("certs.generate_ca")}</option>
         </>
-    }
+    };
+    let onchange = select_setter(ca_cert, |value| value.parse().unwrap_throw());
+    select_field(locale.t("certs.ca_certificate"), onchange, options, None)
 }
 
 fn parse_kind(value: &str) -> SelfSignedCertKind {

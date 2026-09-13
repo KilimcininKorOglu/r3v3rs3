@@ -44,6 +44,7 @@ async fn tls_proxy() -> anyhow::Result<()> {
                 opts: PortOptions {
                     tls_termination: Some(TlsTermination {
                         server_names: vec!["localhost".into()],
+                        ..Default::default()
                     }),
                 },
             },

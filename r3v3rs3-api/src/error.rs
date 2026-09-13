@@ -47,6 +47,15 @@ pub enum Error {
     #[error("missing TLS termination config")]
     TlsTerminationConfigMissing,
 
+    #[error("certificate is in use: {id}")]
+    CertificateInUse { id: ShortId },
+
+    #[error("client CA certificate must be a root certificate: {id}")]
+    InvalidClientCaCert { id: ShortId },
+
+    #[error("client authentication needs at least one root certificate")]
+    ClientCaCertsMissing,
+
     #[error("failed to generate self-signed certificate")]
     FailedToGenerateSelfSignedCertificate,
 

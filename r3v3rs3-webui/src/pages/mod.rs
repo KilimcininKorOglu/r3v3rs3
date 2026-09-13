@@ -3,7 +3,7 @@ use serde_derive::{Deserialize, Serialize};
 use yew::prelude::*;
 use yew_router::prelude::*;
 
-mod cert_list;
+pub mod cert_list;
 mod log_view;
 mod login;
 mod logout;

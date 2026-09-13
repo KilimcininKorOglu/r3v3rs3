@@ -11,7 +11,8 @@ use gloo_net::http::Request;
 use r3v3rs3_api::{
     i18n::Locale,
     id::ShortId,
-    port::{PortEntry, PortStatus, SocketState},
+    port::{PortEntry, PortState, PortStatus, SocketState},
+    tls::TlsState,
 };
 use std::collections::HashMap;
 use yew::prelude::*;
@@ -107,7 +108,7 @@ fn port_row(locale: Locale, entry: &PortEntry, ports: &PortStore, navigator: &Na
         .map(|addr| addr.to_string())
         .unwrap_or_default();
     let status = ports.statuses.get(&id).cloned().unwrap_or_default();
-    let (status_key, color) = socket_state(&status.state.socket);
+    let (status_key, color) = port_state(&status.state);
 
     let navigator_cloned = navigator.clone();
     let config_onclick = Callback::from(move |_| {
@@ -161,6 +162,15 @@ fn port_row(locale: Locale, entry: &PortEntry, ports: &PortStore, navigator: &Na
             </>
         },
     }
+}
+
+/// Returns the translation key and the color of the port state. A TLS error hides the socket state,
+/// because the port closes every connection.
+fn port_state(state: &PortState) -> (&'static str, &'static str) {
+    if state.tls == Some(TlsState::Error) {
+        return ("state.tls_error", "bg-red-500");
+    }
+    socket_state(&state.socket)
 }
 
 /// Returns the translation key and the color of the socket state.

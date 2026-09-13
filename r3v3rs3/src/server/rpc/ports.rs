@@ -1,5 +1,5 @@
 use super::RpcMethod;
-use crate::proxy::PortContext;
+use crate::proxy::{tls::validate_client_auth, PortContext};
 use crate::server::state::ServerState;
 use network_interface::NetworkInterfaceConfig;
 use r3v3rs3_api::error::Error;
@@ -89,9 +89,18 @@ impl RpcMethod for AddPort {
         if state.ports.get(entry.id).is_some() {
             Err(Error::IdAlreadyExists { id: entry.id })
         } else {
+            validate_port(&entry.port, state)?;
             state.update_port(PortContext::new(entry)?).await;
             Ok(())
         }
+    }
+}
+
+/// Checks the parts of the port config that depend on the certificates.
+fn validate_port(port: &Port, state: &ServerState) -> Result<(), Error> {
+    match &port.opts.tls_termination {
+        Some(tls) => validate_client_auth(tls, &state.certs),
+        None => Ok(()),
     }
 }
 
@@ -105,6 +114,7 @@ impl RpcMethod for UpdatePort {
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         if state.ports.get(self.entry.id).is_some() {
+            validate_port(&self.entry.port, state)?;
             state.update_port(PortContext::new(self.entry)?).await;
             Ok(())
         } else {

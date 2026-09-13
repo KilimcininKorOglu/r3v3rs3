@@ -194,6 +194,13 @@ mod tests {
             Error::FailedToRefreshCdnRanges,
             Error::InvalidMultiaddr { addr: text() },
             Error::TlsTerminationConfigMissing,
+            Error::CertificateInUse {
+                id: "abc".parse().unwrap(),
+            },
+            Error::InvalidClientCaCert {
+                id: "abc".parse().unwrap(),
+            },
+            Error::ClientCaCertsMissing,
             Error::FailedToGenerateSelfSignedCertificate,
             Error::FailedToReadCertificate,
             Error::FailedToReadPrivateKey,

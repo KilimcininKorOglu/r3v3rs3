@@ -1,4 +1,7 @@
-use super::{tls::TlsTermination, PortContextEvent, PortStatus, SocketState};
+use super::{
+    tls::{port_acceptor, TlsTermination},
+    PortContextEvent, PortStatus, SocketState,
+};
 use crate::server::cert_list::CertList;
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::name_server::{GenericConnector, TokioRuntimeProvider};
@@ -131,6 +134,10 @@ impl TcpPortContext {
             return;
         }
 
+        let Some(tls_acceptor) = port_acceptor(self.tls_termination.as_ref()) else {
+            debug!("closing the connection: the TLS config is invalid");
+            return;
+        };
         let span = self.span.clone();
         let conn = self.servers[0].clone();
         let tls_client_config = if conn.tls {
@@ -138,10 +145,6 @@ impl TcpPortContext {
         } else {
             None
         };
-        let tls_acceptor = self
-            .tls_termination
-            .as_ref()
-            .and_then(|tls| tls.acceptor.clone());
 
         let stop_notifier = self.stop_notifier.clone();
         let resolver = self.resolver.clone();
