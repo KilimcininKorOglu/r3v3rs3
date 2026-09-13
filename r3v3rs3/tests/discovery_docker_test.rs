@@ -7,10 +7,7 @@ use hyper::body::{Frame, Incoming};
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
-use r3v3rs3::{
-    server::rpc::{config::SetConfig, discovery::GetDiscoveryStatus},
-    server::ServerChannels,
-};
+use r3v3rs3::server::rpc::config::SetConfig;
 use r3v3rs3_api::{
     app::AppConfig,
     discovery::{DiscoveryState, DiscoveryStatus},
@@ -20,15 +17,14 @@ use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use tokio::net::UnixListener;
 use tokio::sync::broadcast;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
 mod common;
 use common::{
-    alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_status, with_server,
-    TestStorage,
+    alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_discovery,
+    wait_for_status, with_server, TestStorage,
 };
 
 type MockBody = BoxBody<Bytes, Infallible>;
@@ -102,21 +98,6 @@ fn container(name: &str, port_name: &str, upstream_port: u16) -> Value {
         "HostConfig": {"NetworkMode": "bridge"},
         "NetworkSettings": {"Networks": {"bridge": {"IPAddress": "127.0.0.1"}}},
     })
-}
-
-async fn wait_for_discovery(
-    channels: &mut ServerChannels,
-    done: impl Fn(&[DiscoveryStatus]) -> bool,
-) -> anyhow::Result<Vec<DiscoveryStatus>> {
-    let mut statuses = Vec::new();
-    for _ in 0..50 {
-        statuses = call(channels, GetDiscoveryStatus).await??;
-        if done(&statuses) {
-            return Ok(statuses);
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    anyhow::bail!("unexpected discovery status: {statuses:?}")
 }
 
 #[tokio::test]

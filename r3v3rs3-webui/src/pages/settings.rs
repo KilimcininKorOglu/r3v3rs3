@@ -7,7 +7,7 @@ use r3v3rs3_api::{
     app::{AdminConfig, AppConfig, LogConfig},
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
-    discovery::{DiscoveryConfig, DockerDiscoveryConfig, Endpoint},
+    discovery::{ConsulDiscoveryConfig, DiscoveryConfig, DockerDiscoveryConfig, Endpoint},
     error::ErrorMessage,
     i18n::Locale,
     id::ShortId,
@@ -38,6 +38,18 @@ struct Fields {
     docker_network: String,
     docker_exposed_by_default: bool,
     docker_client_cert: Option<ShortId>,
+    consul_enabled: bool,
+    consul_address: String,
+    /// A new token. Empty keeps the saved token.
+    consul_token: String,
+    consul_token_set: bool,
+    consul_clear_token: bool,
+    consul_datacenter: String,
+    consul_catalog: bool,
+    consul_kv: bool,
+    consul_prefix: String,
+    consul_exposed_by_default: bool,
+    consul_client_cert: Option<ShortId>,
 }
 
 impl Fields {
@@ -53,12 +65,24 @@ impl Fields {
                 .unwrap_or_default()
         };
         let docker = &config.discovery.docker;
+        let consul = &config.discovery.consul;
         Self {
             docker_enabled: docker.enabled,
             docker_endpoint: docker.endpoint.clone(),
             docker_network: docker.network.clone(),
             docker_exposed_by_default: docker.exposed_by_default,
             docker_client_cert: docker.client_cert,
+            consul_enabled: consul.enabled,
+            consul_address: consul.address.clone(),
+            consul_token: String::new(),
+            consul_token_set: consul.token_set,
+            consul_clear_token: false,
+            consul_datacenter: consul.datacenter.clone(),
+            consul_catalog: consul.catalog,
+            consul_kv: consul.kv,
+            consul_prefix: consul.prefix.clone(),
+            consul_exposed_by_default: consul.exposed_by_default,
+            consul_client_cert: consul.client_cert,
             background_task_interval: text("/background_task_interval"),
             session_expiry: text("/admin/session_expiry"),
             max_login_attempts: text("/admin/max_login_attempts"),
@@ -104,6 +128,7 @@ pub fn settings() -> Html {
         let parsed = parsed.clone();
         let notice = notice.clone();
         let is_loading = is_loading.clone();
+        let fields = fields.clone();
         Callback::from(move |event: SubmitEvent| {
             event.prevent_default();
             let Ok(config) = parsed.clone() else {
@@ -115,8 +140,14 @@ pub fn settings() -> Html {
             is_loading.set(true);
             let notice = notice.clone();
             let is_loading = is_loading.clone();
+            let fields = fields.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                notice.set(Some(match update_config(locale, &config).await {
+                let result = update_config(locale, &config).await;
+                // The saved settings clear the typed secrets and show which secrets are set.
+                if let (Ok(()), Ok(saved)) = (&result, get_config().await) {
+                    fields.set(Some(Fields::from_config(&saved)));
+                }
+                notice.set(Some(match result {
                     Ok(()) => Notice::Success(locale.t("settings.saved")),
                     Err(message) => Notice::Failed(message),
                 }));
@@ -148,6 +179,7 @@ pub fn settings() -> Html {
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.duration_hint")}</p>
 
             { docker_section(locale, &fields, &errors, &client_certs) }
+            { consul_section(locale, &fields, &errors, &client_certs) }
 
             <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
                 <button type="submit" disabled={parsed.is_err() || *is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
@@ -198,23 +230,99 @@ fn text_field(
 
 const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500 dark:text-neutral-400";
 
+fn section_title(title: &'static str) -> Html {
+    html! {
+        <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{title}</h2>
+    }
+}
+
+fn consul_section(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+    certs: &[CertInfo],
+) -> Html {
+    let token_set = (**fields).as_ref().is_some_and(|f| f.consul_token_set);
+    let token_placeholder = if token_set {
+        locale.t("settings.consul_token_saved")
+    } else {
+        ""
+    };
+    html! {
+        <>
+            { section_title(locale.t("settings.consul_title")) }
+            { checkbox_field(fields, locale.t("settings.consul_enabled"), |f| &mut f.consul_enabled) }
+            { text_field(fields, errors, locale.t("settings.consul_address"), "consul_address", "http://127.0.0.1:8500", |f| &mut f.consul_address) }
+            <p class={HINT_CLASS}>{locale.t("settings.consul_address_hint")}</p>
+            { password_field(fields, locale.t("settings.consul_token"), token_placeholder, |f| &mut f.consul_token) }
+            <p class={HINT_CLASS}>{locale.t("settings.consul_token_hint")}</p>
+            if token_set {
+                { checkbox_field(fields, locale.t("settings.consul_clear_token"), |f| &mut f.consul_clear_token) }
+            }
+            { text_field(fields, errors, locale.t("settings.consul_datacenter"), "consul_datacenter", "dc1", |f| &mut f.consul_datacenter) }
+            <p class={HINT_CLASS}>{locale.t("settings.consul_datacenter_hint")}</p>
+            { checkbox_field(fields, locale.t("settings.consul_catalog"), |f| &mut f.consul_catalog) }
+            { checkbox_field(fields, locale.t("settings.consul_kv"), |f| &mut f.consul_kv) }
+            { text_field(fields, errors, locale.t("settings.consul_prefix"), "consul_prefix", "r3v3rs3", |f| &mut f.consul_prefix) }
+            <p class={HINT_CLASS}>{locale.t("settings.consul_prefix_hint")}</p>
+            { checkbox_field(fields, locale.t("settings.consul_exposed_by_default"), |f| &mut f.consul_exposed_by_default) }
+            <p class={HINT_CLASS}>{locale.t("settings.consul_exposed_by_default_hint")}</p>
+            <label class={LABEL_CLASS}>{locale.t("settings.consul_client_cert")}</label>
+            { client_cert_select(fields, certs, locale.t("proxy_form.client_cert_none"), |f| &mut f.consul_client_cert) }
+            <p class={HINT_CLASS}>{locale.t("settings.consul_client_cert_hint")}</p>
+        </>
+    }
+}
+
+fn password_field(
+    fields: &UseStateHandle<Option<Fields>>,
+    label: &'static str,
+    placeholder: &'static str,
+    select: fn(&mut Fields) -> &mut String,
+) -> Html {
+    let (value, onchange) = field_binding(fields, select, HtmlInputElement::value);
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{label}</label>
+            <input type="password" autocomplete="new-password" {value} {onchange} class={INPUT_CLASS} {placeholder} />
+        </>
+    }
+}
+
+fn client_cert_select(
+    fields: &UseStateHandle<Option<Fields>>,
+    certs: &[CertInfo],
+    none_label: &'static str,
+    select: fn(&mut Fields) -> &mut Option<ShortId>,
+) -> Html {
+    let mut current = (**fields).clone().unwrap_or_default();
+    let selected = *select(&mut current);
+    let fields = fields.clone();
+    let onchange = Callback::from(move |event: Event| {
+        let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        let mut updated = (*fields).clone().unwrap_or_default();
+        *select(&mut updated) = parse_client_cert(&target.value());
+        fields.set(Some(updated));
+    });
+    html! {
+        <select {onchange} class={INPUT_CLASS}>
+            <option value="" selected={selected.is_none()}>{none_label}</option>
+            { for certs.iter().map(|cert| html! {
+                <option value={cert.id.to_string()} selected={selected == Some(cert.id)}>{client_cert_label(cert)}</option>
+            }) }
+        </select>
+    }
+}
+
 fn docker_section(
     locale: Locale,
     fields: &UseStateHandle<Option<Fields>>,
     errors: &HashMap<String, String>,
     certs: &[CertInfo],
 ) -> Html {
-    let selected = (**fields).as_ref().and_then(|f| f.docker_client_cert);
-    let fields_cloned = fields.clone();
-    let on_client_cert = Callback::from(move |event: Event| {
-        let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-        let mut updated = (*fields_cloned).clone().unwrap_or_default();
-        updated.docker_client_cert = parse_client_cert(&target.value());
-        fields_cloned.set(Some(updated));
-    });
     html! {
         <>
-            <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.docker_title")}</h2>
+            { section_title(locale.t("settings.docker_title")) }
             { checkbox_field(fields, locale.t("settings.docker_enabled"), |f| &mut f.docker_enabled) }
             { text_field(fields, errors, locale.t("settings.docker_endpoint"), "docker_endpoint", "unix:///var/run/docker.sock", |f| &mut f.docker_endpoint) }
             <p class={HINT_CLASS}>{locale.t("settings.docker_endpoint_hint")}</p>
@@ -223,12 +331,7 @@ fn docker_section(
             { checkbox_field(fields, locale.t("settings.docker_exposed_by_default"), |f| &mut f.docker_exposed_by_default) }
             <p class={HINT_CLASS}>{locale.t("settings.docker_exposed_by_default_hint")}</p>
             <label class={LABEL_CLASS}>{locale.t("settings.docker_client_cert")}</label>
-            <select onchange={on_client_cert} class={INPUT_CLASS}>
-                <option value="" selected={selected.is_none()}>{locale.t("proxy_form.client_cert_none")}</option>
-                { for certs.iter().map(|cert| html! {
-                    <option value={cert.id.to_string()} selected={selected == Some(cert.id)}>{client_cert_label(cert)}</option>
-                }) }
-            </select>
+            { client_cert_select(fields, certs, locale.t("proxy_form.client_cert_none"), |f| &mut f.docker_client_cert) }
             <p class={HINT_CLASS}>{locale.t("settings.docker_client_cert_hint")}</p>
         </>
     }
@@ -284,6 +387,45 @@ fn parse_docker(
         client_cert: fields.docker_client_cert,
         network: fields.docker_network.trim().to_string(),
         exposed_by_default: fields.docker_exposed_by_default,
+    }
+}
+
+fn parse_consul(
+    locale: Locale,
+    fields: &Fields,
+    errors: &mut HashMap<String, String>,
+) -> ConsulDiscoveryConfig {
+    let address = fields.consul_address.trim();
+    if address.parse::<Endpoint>().is_err() {
+        errors.insert(
+            "consul_address".into(),
+            locale.t("settings.invalid_endpoint").into(),
+        );
+    }
+    let prefix = fields.consul_prefix.trim().trim_matches('/');
+    if fields.consul_kv && prefix.is_empty() {
+        errors.insert(
+            "consul_prefix".into(),
+            locale.t("settings.consul_prefix_required").into(),
+        );
+    }
+    // An empty token removes the saved token, and no token keeps it.
+    let token = if fields.consul_clear_token {
+        Some(String::new())
+    } else {
+        Some(fields.consul_token.trim().to_string()).filter(|token| !token.is_empty())
+    };
+    ConsulDiscoveryConfig {
+        enabled: fields.consul_enabled,
+        address: address.to_string(),
+        client_cert: fields.consul_client_cert,
+        token,
+        token_set: false,
+        datacenter: fields.consul_datacenter.trim().to_string(),
+        catalog: fields.consul_catalog,
+        kv: fields.consul_kv,
+        prefix: prefix.to_string(),
+        exposed_by_default: fields.consul_exposed_by_default,
     }
 }
 
@@ -346,6 +488,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         );
     }
     let docker = parse_docker(locale, fields, &mut errors);
+    let consul = parse_consul(locale, fields, &mut errors);
     let resolver = parse_optional_addr(&fields.dns_challenge_resolver);
     if resolver.is_err() {
         errors.insert(
@@ -365,7 +508,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 log,
                 http_challenge_addr: addr,
                 dns_challenge_resolver: resolver,
-                discovery: DiscoveryConfig { docker },
+                discovery: DiscoveryConfig { docker, consul },
             })
         }
         _ => Err(errors),
@@ -552,6 +695,46 @@ mod tests {
             errors.get("docker_endpoint").map(String::as_str),
             Some(Locale::En.t("settings.invalid_endpoint"))
         );
+    }
+
+    #[test]
+    fn a_consul_token_is_sent_only_when_it_changes() {
+        let mut config = AppConfig::default();
+        config.discovery.consul = ConsulDiscoveryConfig {
+            enabled: true,
+            address: "https://consul:8501".into(),
+            token_set: true,
+            datacenter: "dc2".into(),
+            kv: false,
+            prefix: "apps".into(),
+            ..Default::default()
+        };
+        let fields = Fields::from_config(&config);
+        let parsed = parse_fields(Locale::En, &fields).unwrap();
+        config.discovery.consul.token_set = false;
+        assert_eq!(parsed, config);
+
+        let typed = Fields {
+            consul_token: " new-token ".into(),
+            ..fields.clone()
+        };
+        let parsed = parse_fields(Locale::En, &typed).unwrap();
+        assert_eq!(parsed.discovery.consul.token.as_deref(), Some("new-token"));
+
+        let cleared = Fields {
+            consul_clear_token: true,
+            ..typed
+        };
+        let parsed = parse_fields(Locale::En, &cleared).unwrap();
+        assert_eq!(parsed.discovery.consul.token.as_deref(), Some(""));
+
+        let invalid = Fields {
+            consul_kv: true,
+            consul_prefix: "/".into(),
+            ..fields
+        };
+        let errors = parse_fields(Locale::En, &invalid).unwrap_err();
+        assert!(errors.contains_key("consul_prefix"));
     }
 }
 

@@ -13,7 +13,7 @@ use utoipa::ToSchema;
 #[serde(rename_all = "snake_case", tag = "event")]
 #[non_exhaustive]
 pub enum ServerEvent {
-    AppConfigUpdated { config: AppConfig },
+    AppConfigUpdated { config: Box<AppConfig> },
     PortTableUpdated { entries: Vec<PortEntry> },
     PortStatusUpdated { id: ShortId, status: PortStatus },
     CertsUpdated { entries: Vec<CertInfo> },

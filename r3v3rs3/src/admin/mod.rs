@@ -94,7 +94,7 @@ pub async fn start_admin(
         loop {
             match event_recv.recv().await {
                 Ok(ServerEvent::AppConfigUpdated { config }) => {
-                    data.lock().await.config = config;
+                    data.lock().await.config = *config;
                 }
                 Ok(ServerEvent::Shutdown) => break,
                 Err(RecvError::Lagged(n)) => {

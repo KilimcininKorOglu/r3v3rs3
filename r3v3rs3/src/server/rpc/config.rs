@@ -10,7 +10,7 @@ impl RpcMethod for GetConfig {
     type Output = AppConfig;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        Ok(state.config().clone())
+        Ok(state.config().masked())
     }
 }
 

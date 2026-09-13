@@ -51,6 +51,16 @@ pub struct Parsed {
     pub issues: Vec<String>,
 }
 
+/// The address of the resource that defines the proxies.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Upstream<'a> {
+    /// The host that the `port` fields use.
+    pub host: Option<&'a str>,
+    /// The port of a proxy without `port`, `routes` and `upstream_servers`, and of a route
+    /// without `port` and `servers`.
+    pub port: Option<u16>,
+}
+
 /// Returns the value of the `r3v3rs3.enable` label.
 pub fn enabled<'a>(labels: impl IntoIterator<Item = (&'a str, &'a str)>) -> Option<bool> {
     labels
@@ -59,11 +69,39 @@ pub fn enabled<'a>(labels: impl IntoIterator<Item = (&'a str, &'a str)>) -> Opti
         .map(|(_, value)| value.trim().eq_ignore_ascii_case("true"))
 }
 
+/// Whether the key belongs to a proxy definition.
+pub fn is_definition(key: &str) -> bool {
+    key.strip_prefix(PREFIX)
+        .is_some_and(|rest| rest.starts_with('.'))
+        && key != ENABLE
+}
+
+/// Whether a resource with the labels is read: it defines a proxy, and `r3v3rs3.enable` or
+/// `exposed_by_default` selects it.
+pub fn selects<'a, I>(labels: I, exposed_by_default: bool) -> bool
+where
+    I: IntoIterator<Item = (&'a str, &'a str)> + Clone,
+{
+    labels
+        .clone()
+        .into_iter()
+        .any(|(key, _)| is_definition(key))
+        && enabled(labels).unwrap_or(exposed_by_default)
+}
+
 /// Reads the proxy definitions from the labels. `host` is the address of the resource, which the
 /// `port` fields use. Labels without the `r3v3rs3.` prefix are skipped.
 pub fn parse<'a>(
     labels: impl IntoIterator<Item = (&'a str, &'a str)>,
     host: Option<&str>,
+) -> Parsed {
+    parse_at(labels, Upstream { host, port: None })
+}
+
+/// Reads the proxy definitions from the labels of a resource at the upstream address.
+pub fn parse_at<'a>(
+    labels: impl IntoIterator<Item = (&'a str, &'a str)>,
+    upstream: Upstream<'_>,
 ) -> Parsed {
     let mut parsed = Parsed::default();
     let mut groups = BTreeMap::<(Protocol, String), Node>::new();
@@ -73,7 +111,7 @@ pub fn parse<'a>(
         }
     }
     for ((protocol, name), node) in groups {
-        match definition(protocol, &name, node, host) {
+        match definition(protocol, &name, node, upstream) {
             Ok(definition) => parsed.definitions.push(definition),
             Err(issue) => parsed.issues.push(format!("{protocol}.{name}: {issue}")),
         }
@@ -121,7 +159,7 @@ fn definition(
     protocol: Protocol,
     name: &str,
     mut node: Node,
-    host: Option<&str>,
+    upstream: Upstream<'_>,
 ) -> Result<ProxyDefinition, String> {
     let ports = take::<Vec<String>>(&mut node, "ports")?.unwrap_or_default();
     if ports.is_empty() {
@@ -131,15 +169,15 @@ fn definition(
     let display_name = take::<String>(&mut node, "name")?.unwrap_or_else(|| name.to_string());
     let kind = match protocol {
         Protocol::Http => {
-            expand_http_ports(&mut node, host)?;
+            expand_http_ports(&mut node, upstream)?;
             ProxyKind::Http(Box::new(read::<HttpProxy>(node)?))
         }
         Protocol::Tcp => {
-            expand_stream_port(&mut node, host, "tcp")?;
+            expand_stream_port(&mut node, upstream, "tcp")?;
             ProxyKind::Tcp(read::<TcpProxy>(node)?)
         }
         Protocol::Udp => {
-            expand_stream_port(&mut node, host, "udp")?;
+            expand_stream_port(&mut node, upstream, "udp")?;
             ProxyKind::Udp(read::<UdpProxy>(node)?)
         }
     };
@@ -169,9 +207,11 @@ fn take<T: DeserializeOwned>(node: &mut Node, key: &str) -> Result<Option<T>, St
 
 /// `port` and `scheme` of the proxy define one route to `/`. `port` and `scheme` of a route
 /// define its only server.
-fn expand_http_ports(node: &mut Node, host: Option<&str>) -> Result<(), String> {
-    if let Some(url) = take_upstream_url(node, host)? {
-        if node.contains("routes") {
+fn expand_http_ports(node: &mut Node, upstream: Upstream<'_>) -> Result<(), String> {
+    let has_routes = node.contains("routes");
+    let default_port = upstream.port.filter(|_| !has_routes);
+    if let Some(url) = take_upstream_url(node, upstream.host, default_port)? {
+        if has_routes {
             return Err("port cannot be used together with routes".into());
         }
         node.insert(&["routes", "0", "servers", "0", "url"], &url);
@@ -181,8 +221,10 @@ fn expand_http_ports(node: &mut Node, host: Option<&str>) -> Result<(), String> 
         .into_iter()
         .flat_map(Node::children_mut);
     for route in routes {
-        if let Some(url) = take_upstream_url(route, host)? {
-            if route.contains("servers") {
+        let has_servers = route.contains("servers");
+        let default_port = upstream.port.filter(|_| !has_servers);
+        if let Some(url) = take_upstream_url(route, upstream.host, default_port)? {
+            if has_servers {
                 return Err("port cannot be used together with servers".into());
             }
             route.insert(&["servers", "0", "url"], &url);
@@ -191,9 +233,13 @@ fn expand_http_ports(node: &mut Node, host: Option<&str>) -> Result<(), String> 
     Ok(())
 }
 
-fn take_upstream_url(node: &mut Node, host: Option<&str>) -> Result<Option<String>, String> {
+fn take_upstream_url(
+    node: &mut Node,
+    host: Option<&str>,
+    default_port: Option<u16>,
+) -> Result<Option<String>, String> {
     let scheme = take::<String>(node, "scheme")?;
-    let Some(port) = take::<u16>(node, "port")? else {
+    let Some(port) = take::<u16>(node, "port")?.or(default_port) else {
         return match scheme {
             Some(_) => Err("scheme needs port".into()),
             None => Ok(None),
@@ -209,14 +255,22 @@ fn take_upstream_url(node: &mut Node, host: Option<&str>) -> Result<Option<Strin
 }
 
 /// `port` of a TCP or UDP proxy defines its only upstream server.
-fn expand_stream_port(node: &mut Node, host: Option<&str>, transport: &str) -> Result<(), String> {
-    let Some(port) = take::<u16>(node, "port")? else {
+fn expand_stream_port(
+    node: &mut Node,
+    upstream: Upstream<'_>,
+    transport: &str,
+) -> Result<(), String> {
+    let has_servers = node.contains("upstream_servers");
+    let default_port = upstream.port.filter(|_| !has_servers);
+    let Some(port) = take::<u16>(node, "port")?.or(default_port) else {
         return Ok(());
     };
-    if node.contains("upstream_servers") {
+    if has_servers {
         return Err("port cannot be used together with upstream_servers".into());
     }
-    let host = host.ok_or("port needs the address of the resource")?;
+    let host = upstream
+        .host
+        .ok_or("port needs the address of the resource")?;
     let family = match host.parse::<IpAddr>() {
         Ok(IpAddr::V4(_)) => "ip4",
         Ok(IpAddr::V6(_)) => "ip6",
@@ -233,6 +287,23 @@ mod tests {
 
     fn labels(pairs: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'static str)> {
         pairs.to_vec()
+    }
+
+    /// The first upstream server of each HTTP route, TCP proxy and UDP proxy.
+    fn upstream_urls(parsed: &Parsed) -> Vec<String> {
+        parsed
+            .definitions
+            .iter()
+            .flat_map(|definition| match &definition.kind {
+                ProxyKind::Http(http) => http
+                    .routes
+                    .iter()
+                    .map(|route| route.servers[0].url.to_string())
+                    .collect(),
+                ProxyKind::Tcp(tcp) => vec![tcp.upstream_servers[0].addr.to_string()],
+                ProxyKind::Udp(udp) => vec![udp.upstream_servers[0].addr.to_string()],
+            })
+            .collect()
     }
 
     fn http(definition: &ProxyDefinition) -> &HttpProxy {
@@ -309,17 +380,8 @@ mod tests {
             Some("db.internal"),
         );
         assert_eq!(parsed.issues, Vec::<String>::new());
-        let addrs = parsed
-            .definitions
-            .iter()
-            .map(|definition| match &definition.kind {
-                ProxyKind::Tcp(tcp) => tcp.upstream_servers[0].addr.to_string(),
-                ProxyKind::Udp(udp) => udp.upstream_servers[0].addr.to_string(),
-                ProxyKind::Http(_) => String::new(),
-            })
-            .collect::<Vec<_>>();
         assert_eq!(
-            addrs,
+            upstream_urls(&parsed),
             ["/dns/db.internal/tcp/5432", "/dns/db.internal/udp/53"]
         );
     }
@@ -381,5 +443,46 @@ mod tests {
         assert_eq!(enabled(labels(&[("r3v3rs3.enable", "True")])), Some(true));
         assert_eq!(enabled(labels(&[("r3v3rs3.enable", "no")])), Some(false));
         assert_eq!(enabled(labels(&[("traefik.enable", "true")])), None);
+
+        let definition = labels(&[("r3v3rs3.http.app.ports", "http")]);
+        assert!(!selects(definition.clone(), false));
+        assert!(selects(definition, true));
+        assert!(!selects(labels(&[("r3v3rs3.enable", "true")]), true));
+        assert!(!is_definition("r3v3rs3x.http.app.ports"));
+    }
+
+    #[test]
+    fn the_default_port_serves_definitions_without_a_server() {
+        let upstream = Upstream {
+            host: Some("10.0.0.7"),
+            port: Some(8080),
+        };
+        let parsed = parse_at(
+            labels(&[
+                ("r3v3rs3.http.plain.ports", "http"),
+                ("r3v3rs3.http.routes.ports", "http"),
+                ("r3v3rs3.http.routes.routes.0.path", "/"),
+                ("r3v3rs3.http.routes.routes.1.path", "/static"),
+                (
+                    "r3v3rs3.http.routes.routes.1.servers.0.url",
+                    "http://cdn:80",
+                ),
+                ("r3v3rs3.http.own.ports", "http"),
+                ("r3v3rs3.http.own.port", "9090"),
+                ("r3v3rs3.tcp.db.ports", "tcp"),
+            ]),
+            upstream,
+        );
+        assert_eq!(parsed.issues, Vec::<String>::new());
+        assert_eq!(
+            upstream_urls(&parsed),
+            [
+                "http://10.0.0.7:9090/",
+                "http://10.0.0.7:8080/",
+                "http://10.0.0.7:8080/",
+                "http://cdn/",
+                "/ip4/10.0.0.7/tcp/8080",
+            ]
+        );
     }
 }

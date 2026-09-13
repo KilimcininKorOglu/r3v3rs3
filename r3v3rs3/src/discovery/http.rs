@@ -8,7 +8,7 @@ use hyper::body::Incoming;
 use hyper::client::conn::http1;
 use hyper::header::{HOST, USER_AGENT};
 use hyper::http::request::Builder;
-use hyper::{Method, Request, Response};
+use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use r3v3rs3_api::discovery::Endpoint;
 use serde::de::DeserializeOwned;
@@ -22,7 +22,7 @@ use tokio_rustls::TlsConnector;
 use tracing::debug;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+pub const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY_SIZE: usize = 32 * 1024 * 1024;
 const MAX_LINE_SIZE: usize = 1024 * 1024;
 const MAX_ERROR_TEXT: usize = 200;
@@ -72,6 +72,17 @@ impl ApiClient {
     /// Sends the request on a new connection and returns the response when its status is a
     /// success. The body is not read, so a stream can stay open.
     pub async fn send(&self, request: Request<Full<Bytes>>) -> anyhow::Result<Response<Incoming>> {
+        self.send_with(request, RESPONSE_TIMEOUT, &[]).await
+    }
+
+    /// Sends the request and waits for the response headers up to `timeout`. A status in
+    /// `allowed` is not an error.
+    pub async fn send_with(
+        &self,
+        request: Request<Full<Bytes>>,
+        timeout: Duration,
+        allowed: &[StatusCode],
+    ) -> anyhow::Result<Response<Incoming>> {
         let io = tokio::time::timeout(CONNECT_TIMEOUT, self.connect())
             .await
             .map_err(|_| anyhow!("the connection timed out"))??;
@@ -81,11 +92,11 @@ impl ApiClient {
                 debug!(%err, "a discovery API connection failed");
             }
         });
-        let response = tokio::time::timeout(RESPONSE_TIMEOUT, sender.send_request(request))
+        let response = tokio::time::timeout(timeout, sender.send_request(request))
             .await
             .map_err(|_| anyhow!("the response timed out"))??;
         let status = response.status();
-        if !status.is_success() {
+        if !status.is_success() && !allowed.contains(&status) {
             let body = read_body(response).await.unwrap_or_default();
             let text = String::from_utf8_lossy(&body[..body.len().min(MAX_ERROR_TEXT)]);
             bail!("unexpected status {status}: {}", text.trim());

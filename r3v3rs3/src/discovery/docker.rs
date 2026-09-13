@@ -3,32 +3,20 @@
 
 use super::http::{read_json, ApiClient, Lines};
 use super::labels;
-use super::{DiscoveredProxy, DiscoverySnapshot, ProxyDefinition};
-use crate::command::ServerCommand;
+use super::{Built, ProxyGroups, Reporter, Watch, DEBOUNCE, MIN_BACKOFF};
 use anyhow::anyhow;
-use r3v3rs3_api::discovery::{
-    DiscoveryIssue, DiscoveryProvider, DiscoverySource, DiscoveryState, DockerDiscoveryConfig,
-};
-use r3v3rs3_api::proxy::ProxyKind;
+use r3v3rs3_api::discovery::{DiscoveryProvider, DockerDiscoveryConfig};
 use serde_derive::Deserialize;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::time::Duration;
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use tokio::time::{timeout, timeout_at, Instant};
-use tracing::warn;
 
 const PROVIDER: DiscoveryProvider = DiscoveryProvider::Docker;
 const CONTAINERS_PATH: &str = "/containers/json";
 /// The container events: `filters={"type":["container"]}`.
 const EVENTS_PATH: &str = "/events?filters=%7B%22type%22%3A%5B%22container%22%5D%7D";
-/// Events that arrive within this time cause one read of the containers.
-const DEBOUNCE: Duration = Duration::from_secs(1);
 /// The containers are read again after this time without events.
 const RESYNC_INTERVAL: Duration = Duration::from_secs(300);
-const MIN_BACKOFF: Duration = Duration::from_secs(1);
-const MAX_BACKOFF: Duration = Duration::from_secs(30);
 const COMPOSE_PROJECT: &str = "com.docker.compose.project";
 const COMPOSE_SERVICE: &str = "com.docker.compose.service";
 
@@ -81,7 +69,7 @@ impl Container {
             .unwrap_or_else(|| self.id.chars().take(12).collect())
     }
 
-    fn labels(&self) -> impl Iterator<Item = (&str, &str)> {
+    fn labels(&self) -> impl Iterator<Item = (&str, &str)> + Clone {
         self.labels
             .iter()
             .flatten()
@@ -98,11 +86,6 @@ impl Container {
             (Some(project), Some(service)) => format!("{project}/{service}"),
             _ => self.name(),
         }
-    }
-
-    fn has_definitions(&self) -> bool {
-        self.labels()
-            .any(|(key, _)| key.starts_with("r3v3rs3.") && key != labels::ENABLE)
     }
 
     fn networks(&self) -> Vec<(&str, &Network)> {
@@ -123,8 +106,7 @@ struct Settings {
 
 impl Settings {
     fn selects(&self, container: &Container) -> bool {
-        container.has_definitions()
-            && labels::enabled(container.labels()).unwrap_or(self.exposed_by_default)
+        labels::selects(container.labels(), self.exposed_by_default)
     }
 }
 
@@ -182,41 +164,20 @@ fn select_network<'a>(networks: &[(&str, &'a Network)], name: &str) -> Result<&'
     }
 }
 
-#[derive(Debug, Default)]
-struct Built {
-    proxies: Vec<DiscoveredProxy>,
-    issues: Vec<DiscoveryIssue>,
-}
-
 fn build(mut containers: Vec<Container>, settings: &Settings) -> Built {
     containers.sort_by_key(Container::name);
-    let mut groups = BTreeMap::new();
-    let mut issues = Vec::new();
+    let mut groups = ProxyGroups::new(PROVIDER);
+    let mut built = Built::default();
     for container in containers.iter().filter(|c| settings.selects(c)) {
         let name = container.name();
-        let mut issue = |message: String| {
-            issues.push(DiscoveryIssue {
-                resource: name.clone(),
-                message,
-            })
-        };
         match container_definitions(container, settings) {
-            Ok((definitions, label_issues)) => {
-                label_issues.into_iter().for_each(&mut issue);
-                for definition in definitions {
-                    if let Err(message) = add(&mut groups, &container.group(), &name, definition) {
-                        issue(message);
-                    }
-                }
-            }
-            Err(Some(message)) => issue(message),
+            Ok(parsed) => built.add_parsed(&mut groups, &container.group(), &name, parsed),
+            Err(Some(message)) => built.issue(&name, message),
             Err(None) => {}
         }
     }
-    Built {
-        proxies: groups.into_values().collect(),
-        issues,
-    }
+    built.proxies = groups.into_proxies();
+    built
 }
 
 /// The proxy definitions and the label issues of a container. `Err(None)` skips a container whose
@@ -224,116 +185,56 @@ fn build(mut containers: Vec<Container>, settings: &Settings) -> Built {
 fn container_definitions(
     container: &Container,
     settings: &Settings,
-) -> Result<(Vec<ProxyDefinition>, Vec<String>), Option<String>> {
+) -> Result<labels::Parsed, Option<String>> {
     match health(&container.status) {
         Health::Starting => return Err(None),
         Health::Unhealthy => return Err(Some("the container is unhealthy".to_string())),
         Health::Ready => {}
     }
     let host = address(container, &settings.network).map_err(Some)?;
-    let parsed = labels::parse(container.labels(), Some(&host));
-    Ok((parsed.definitions, parsed.issues))
+    Ok(labels::parse(container.labels(), Some(&host)))
 }
 
-/// Adds a definition. The replicas of a Compose service add their servers to the same proxy.
-fn add(
-    groups: &mut BTreeMap<String, DiscoveredProxy>,
-    group: &str,
-    resource: &str,
-    definition: ProxyDefinition,
-) -> Result<(), String> {
-    match groups.entry(format!("{group}/{}", definition.key)) {
-        Entry::Vacant(entry) => {
-            let key = entry.key().clone();
-            entry.insert(DiscoveredProxy {
-                key,
-                source: DiscoverySource {
-                    provider: PROVIDER,
-                    resource: resource.to_string(),
-                },
-                definition,
-            });
-        }
-        Entry::Occupied(mut entry) => {
-            let proxy = entry.get_mut();
-            append_servers(&mut proxy.definition.kind, definition.kind)
-                .map_err(|message| format!("{}: {message}", definition.key))?;
-            proxy.source.resource = format!("{}, {resource}", proxy.source.resource);
-        }
-    }
-    Ok(())
-}
-
-fn append_servers(target: &mut ProxyKind, other: ProxyKind) -> Result<(), &'static str> {
-    match (target, other) {
-        (ProxyKind::Http(target), ProxyKind::Http(other))
-            if target.routes.len() == other.routes.len() =>
-        {
-            for (route, other) in target.routes.iter_mut().zip(other.routes) {
-                route.servers.extend(other.servers);
-            }
-        }
-        (ProxyKind::Tcp(target), ProxyKind::Tcp(other)) => {
-            target.upstream_servers.extend(other.upstream_servers);
-        }
-        (ProxyKind::Udp(target), ProxyKind::Udp(other)) => {
-            target.upstream_servers.extend(other.upstream_servers);
-        }
-        _ => return Err("the replicas define the proxy with different routes"),
-    }
-    Ok(())
-}
-
-/// Starts the provider task.
-pub fn spawn(
-    config: &DockerDiscoveryConfig,
-    client: ApiClient,
-    command: mpsc::Sender<ServerCommand>,
-    generation: u64,
-) -> JoinHandle<()> {
-    let provider = Provider {
-        client,
-        settings: Settings {
-            network: config.network.trim().to_string(),
-            exposed_by_default: config.exposed_by_default,
-        },
-        command,
-        generation,
-    };
-    tokio::spawn(provider.run())
-}
-
-struct Provider {
+pub(super) struct Provider {
     client: ApiClient,
     settings: Settings,
-    command: mpsc::Sender<ServerCommand>,
-    generation: u64,
+    reporter: Reporter,
+}
+
+#[async_trait::async_trait]
+impl Watch for Provider {
+    fn reporter(&self) -> &Reporter {
+        &self.reporter
+    }
+
+    async fn watch(&self, backoff: &mut Duration) -> anyhow::Error {
+        match self.follow(backoff).await {
+            Ok(()) => anyhow!("the Docker event stream closed"),
+            Err(err) => err,
+        }
+    }
 }
 
 impl Provider {
-    async fn run(self) {
-        if !self.send(DiscoveryState::Connecting, None, None).await {
-            return;
-        }
-        let mut backoff = MIN_BACKOFF;
-        loop {
-            let err = match self.watch(&mut backoff).await {
-                Ok(()) => anyhow!("the Docker event stream closed"),
-                Err(err) => err,
-            };
-            warn!(%err, "Docker service discovery failed");
-            let state = DiscoveryState::Error;
-            if !self.send(state, Some(format!("{err:#}")), None).await {
-                return;
-            }
-            tokio::time::sleep(backoff).await;
-            backoff = (backoff * 2).min(MAX_BACKOFF);
+    pub(super) fn new(
+        config: &DockerDiscoveryConfig,
+        client: ApiClient,
+        reporter: Reporter,
+    ) -> Self {
+        let settings = Settings {
+            network: config.network.trim().to_string(),
+            exposed_by_default: config.exposed_by_default,
+        };
+        Self {
+            client,
+            settings,
+            reporter,
         }
     }
 
     /// Opens the event stream, reads the containers and reads them again after each burst of
     /// events. Returns when the stream ends.
-    async fn watch(&self, backoff: &mut Duration) -> anyhow::Result<()> {
+    async fn follow(&self, backoff: &mut Duration) -> anyhow::Result<()> {
         let mut events = Lines::new(self.client.send(self.client.get(EVENTS_PATH)?).await?);
         self.sync().await?;
         *backoff = MIN_BACKOFF;
@@ -350,37 +251,7 @@ impl Provider {
     async fn sync(&self) -> anyhow::Result<()> {
         let response = self.client.send(self.client.get(CONTAINERS_PATH)?).await?;
         let built = build(read_json(response).await?, &self.settings);
-        let state = DiscoveryState::Running;
-        if self.send(state, None, Some(built)).await {
-            Ok(())
-        } else {
-            Err(anyhow!("the server stopped"))
-        }
-    }
-
-    /// Returns false when the server stopped.
-    async fn send(
-        &self,
-        state: DiscoveryState,
-        error: Option<String>,
-        built: Option<Built>,
-    ) -> bool {
-        let (proxies, issues) = match built {
-            Some(built) => (Some(built.proxies), built.issues),
-            None => (None, Vec::new()),
-        };
-        let snapshot = DiscoverySnapshot {
-            provider: PROVIDER,
-            generation: self.generation,
-            state,
-            error,
-            proxies,
-            issues,
-        };
-        self.command
-            .send(ServerCommand::SetDiscovery { snapshot })
-            .await
-            .is_ok()
+        self.reporter.running(built).await
     }
 }
 
@@ -398,6 +269,8 @@ async fn debounce(events: &mut Lines) -> anyhow::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discovery::first_route_servers as servers;
+    use r3v3rs3_api::discovery::DiscoveryIssue;
     use serde_json::json;
 
     fn containers(value: serde_json::Value) -> Vec<Container> {
@@ -417,17 +290,6 @@ mod tests {
             "HostConfig": {"NetworkMode": "bridge"},
             "NetworkSettings": {"Networks": networks},
         })
-    }
-
-    fn servers(proxy: &DiscoveredProxy) -> Vec<String> {
-        let ProxyKind::Http(http) = &proxy.definition.kind else {
-            panic!("expected an HTTP proxy");
-        };
-        http.routes[0]
-            .servers
-            .iter()
-            .map(|server| server.url.to_string())
-            .collect()
     }
 
     #[test]

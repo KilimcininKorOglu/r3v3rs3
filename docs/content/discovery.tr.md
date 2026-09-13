@@ -199,3 +199,74 @@ volumes:
 "Portlar" sayfasında `http` adında bir port ekleyin, provider'ı `proxy` network'ü ile açın ve stack'i başlatın. Network `name` alanını vermezse Compose network adının başına proje adını ekler.
 
 > Docker socket erişimi Docker host'unun tam kontrolünü verir. Bu yetki root erişimine eşittir. `:ro` seçeneği yalnız socket dosyasına uygulanır ve API'yi salt okunur yapmaz. Yönetim paneline veya host'a güvenilmeyen network'lerden erişilebiliyorsa r3v3rs3'ü yalnız `GET /containers/json` ve `GET /events` isteklerine izin veren bir Docker socket proxy'sine bağlayın.
+
+# Consul
+
+Consul provider, catalog'daki servislerin `r3v3rs3.*` tag'lerini ve key-value store'da bir prefix'in altındaki key'leri okur. Değişiklikleri blocking query'lerle izler. Kaydedilen, silinen veya health check'i başarısız olan bir servis instance'ı ve değişen bir key proxy'leri yaklaşık bir saniye içinde günceller.
+
+## Ayarlar
+
+"Ayarlar" sayfasında "Consul Servis Keşfi" bölümünü doldurun veya `config.toml` dosyasını düzenleyin:
+
+```toml
+[discovery.consul]
+enabled = true
+address = "http://127.0.0.1:8500"
+token = "<ACL token>"
+catalog = true
+kv = true
+prefix = "r3v3rs3"
+exposed_by_default = false
+```
+
+| Ayar | Anlamı |
+|---|---|
+| `enabled` | Provider'ı başlatır. |
+| `address` | Bir Consul agent'ının HTTP API'si: `http://<host>:<port>`, `https://<host>:<port>` veya `unix://<path>`. Varsayılan değer `http://127.0.0.1:8500` olur. |
+| `client_cert` | r3v3rs3'ün `https` adresine gönderdiği client sertifikasının id'si. |
+| `token` | ACL token'ı. Catalog için `service:read` ve `node:read`, key-value store için prefix üzerinde `key:read` izni gerekir. |
+| `datacenter` | Okunacak datacenter. Agent'ın kendi datacenter'ını okumak için boş bırakın. |
+| `catalog` | Catalog'daki servislerin tag'lerini okur. Varsayılan değer `true` olur. |
+| `kv` | `prefix` altındaki key'leri okur. Varsayılan değer `true` olur. |
+| `prefix` | Key prefix'i. Varsayılan değer `r3v3rs3` olur. |
+| `exposed_by_default` | `true`, `r3v3rs3.` tag'i olan her servisi okur. `false` yalnız `r3v3rs3.enable=true` tag'i olan servisleri okur. |
+
+Admin API token'ı döndürmez. Kayıtlı bir token varsa `GET /api/config` yanıtında `token_set: true` döner. `token` alanı olmayan bir `PUT /api/config` isteği kayıtlı token'ı korur. `"token": ""` token'ı siler. `config.toml` token'ı düz metin olarak saklar. Bu yüzden config dizinini yalnız r3v3rs3 kullanıcısı okuyabilmelidir.
+
+## Catalog servisleri
+
+- Tag `<key>=<value>` biçimindedir, örneğin `r3v3rs3.http.app.ports=https`. `=` içermeyen bir `r3v3rs3.` tag'i issue olur.
+- r3v3rs3 yalnız health check'lerini geçen instance'ları okur. Health check'i geçen instance'ı olmayan seçili bir servis issue olur ve proxy'leri kaldırılır.
+- Instance'ın upstream adresi servis adresidir. Servis adresi olmayan instance node adresini kullanır.
+- `port`, `routes` ve `upstream_servers` alanları olmayan bir proxy servisin portunu kullanır. `port` ve `servers` alanları olmayan bir route da servisin portunu kullanır.
+- Bir servisin instance'ları proxy'lerini paylaşır. Her instance kendi server'larını proxy'nin route'larına ekler, böylece proxy yükü instance'lara dağıtır.
+
+Servisi Consul agent'ına kaydedin, örneğin `consul services register whoami.json` komutuyla:
+
+```json
+{
+  "Service": {
+    "Name": "whoami",
+    "Port": 8080,
+    "Tags": [
+      "r3v3rs3.enable=true",
+      "r3v3rs3.http.whoami.ports=http",
+      "r3v3rs3.http.whoami.vhosts=whoami.example.com"
+    ],
+    "Check": { "HTTP": "http://localhost:8080/", "Interval": "10s" }
+  }
+}
+```
+
+## Key-value store
+
+- Prefix'in altındaki her key bir label'dır. Prefix `r3v3rs3` ise `r3v3rs3/http/app/ports` key'i `r3v3rs3.http.app.ports` label'ı olur.
+- r3v3rs3 prefix'in altındaki her proxy'yi okur. Bu yüzden key'ler `r3v3rs3.enable` gerektirmez.
+- Key'in adresi yoktur, bu yüzden `port` kullanılamaz. `routes.<n>.servers.<n>.url` veya `upstream_servers.<n>.addr` kullanın.
+- Key'in bir parçası `.` içeremez. Böyle bir key issue olur.
+
+```bash
+consul kv put r3v3rs3/http/app/ports https
+consul kv put r3v3rs3/http/app/vhosts app.example.com
+consul kv put r3v3rs3/http/app/routes/0/servers/0/url http://10.0.0.5:8080
+```

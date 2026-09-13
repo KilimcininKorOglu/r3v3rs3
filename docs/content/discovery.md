@@ -199,3 +199,74 @@ volumes:
 Add a port with the name `http` in "Ports", enable the provider with the network `proxy`, and start the stack. Compose adds the project name to a network name unless the network sets `name`.
 
 > Access to the Docker socket gives full control of the Docker host, which equals root access. The `:ro` option applies only to the socket file and does not make the API read-only. When the admin panel or the host is reachable from untrusted networks, connect r3v3rs3 to a Docker socket proxy that allows only `GET /containers/json` and `GET /events`.
+
+# Consul
+
+The Consul provider reads the `r3v3rs3.*` tags of the services in the catalog and the keys under a prefix in the key-value store. It follows the changes with blocking queries, so a registered, removed or failing service instance and a changed key update the proxies within about one second.
+
+## Settings
+
+Fill in "Consul Service Discovery" in "Settings", or edit `config.toml`:
+
+```toml
+[discovery.consul]
+enabled = true
+address = "http://127.0.0.1:8500"
+token = "<ACL token>"
+catalog = true
+kv = true
+prefix = "r3v3rs3"
+exposed_by_default = false
+```
+
+| Setting | Meaning |
+|---|---|
+| `enabled` | Starts the provider. |
+| `address` | The HTTP API of a Consul agent: `http://<host>:<port>`, `https://<host>:<port>` or `unix://<path>`. The default is `http://127.0.0.1:8500`. |
+| `client_cert` | The id of a client certificate that r3v3rs3 sends to an `https` address. |
+| `token` | The ACL token. The catalog needs `service:read` and `node:read`, and the key-value store needs `key:read` on the prefix. |
+| `datacenter` | The datacenter to read. Leave it empty to read the datacenter of the agent. |
+| `catalog` | Reads the tags of the services in the catalog. The default is `true`. |
+| `kv` | Reads the keys under `prefix`. The default is `true`. |
+| `prefix` | The key prefix. The default is `r3v3rs3`. |
+| `exposed_by_default` | `true` reads every service that has `r3v3rs3.` tags. `false` reads only the services with the `r3v3rs3.enable=true` tag. |
+
+The admin API does not return the token. `GET /api/config` returns `token_set: true` when a token is saved. A `PUT /api/config` without `token` keeps the saved token, and `"token": ""` removes it. `config.toml` holds the token as plain text, so allow only the r3v3rs3 user to read the config directory.
+
+## Catalog Services
+
+- A tag has the form `<key>=<value>`, for example `r3v3rs3.http.app.ports=https`. A `r3v3rs3.` tag without `=` is an issue.
+- r3v3rs3 reads only the instances that pass their health checks. A selected service without a passing instance is an issue, and its proxies are removed.
+- The upstream address of an instance is the service address. An instance without a service address uses the node address.
+- A proxy without `port`, `routes` and `upstream_servers` uses the port of the service. A route without `port` and `servers` also uses the port of the service.
+- The instances of a service share its proxies. Each instance adds its servers to the routes of the proxy, so the proxy balances the load across the instances.
+
+Register a service with the Consul agent, for example with `consul services register whoami.json`:
+
+```json
+{
+  "Service": {
+    "Name": "whoami",
+    "Port": 8080,
+    "Tags": [
+      "r3v3rs3.enable=true",
+      "r3v3rs3.http.whoami.ports=http",
+      "r3v3rs3.http.whoami.vhosts=whoami.example.com"
+    ],
+    "Check": { "HTTP": "http://localhost:8080/", "Interval": "10s" }
+  }
+}
+```
+
+## Key-Value Store
+
+- A key under the prefix is a label. With the prefix `r3v3rs3`, the key `r3v3rs3/http/app/ports` is the label `r3v3rs3.http.app.ports`.
+- r3v3rs3 reads every proxy under the prefix, so the keys do not need `r3v3rs3.enable`.
+- A key has no address, so `port` is not available. Use `routes.<n>.servers.<n>.url` or `upstream_servers.<n>.addr`.
+- A part of a key cannot contain a `.`. Such a key is an issue.
+
+```bash
+consul kv put r3v3rs3/http/app/ports https
+consul kv put r3v3rs3/http/app/vhosts app.example.com
+consul kv put r3v3rs3/http/app/routes/0/servers/0/url http://10.0.0.5:8080
+```

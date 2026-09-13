@@ -6,7 +6,8 @@ use super::credentials::seal;
 use super::proxy_list::accepts;
 use crate::discovery::{ids, DiscoveredProxy, DiscoverySnapshot};
 use crate::proxy::tls::upstream_client_config;
-use r3v3rs3_api::discovery::{DiscoveryConfig, Endpoint};
+use hyper::header::HeaderValue;
+use r3v3rs3_api::discovery::{ConsulDiscoveryConfig, DiscoveryConfig, Endpoint};
 use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryProvider, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
@@ -207,12 +208,50 @@ impl Drop for DiscoveryTasks {
 
 /// Checks the settings of the enabled providers.
 pub fn validate_config(config: &DiscoveryConfig, certs: &CertList) -> Result<(), Error> {
-    let docker = &config.docker;
-    if docker.enabled {
-        parse_endpoint(&docker.endpoint)?;
-        upstream_client_config(certs, docker.client_cert)?;
+    for provider in DiscoveryProvider::ALL {
+        if let Some((endpoint, client_cert)) = api_settings(config, provider) {
+            parse_endpoint(endpoint)?;
+            upstream_client_config(certs, client_cert)?;
+        }
     }
-    Ok(())
+    validate_consul(&config.consul)
+}
+
+/// The API address and the client certificate of an enabled provider that reads an HTTP API.
+pub fn api_settings(
+    config: &DiscoveryConfig,
+    provider: DiscoveryProvider,
+) -> Option<(&str, Option<ShortId>)> {
+    match provider {
+        DiscoveryProvider::Docker if config.docker.enabled => {
+            Some((&config.docker.endpoint, config.docker.client_cert))
+        }
+        DiscoveryProvider::Consul if config.consul.enabled => {
+            Some((&config.consul.address, config.consul.client_cert))
+        }
+        _ => None,
+    }
+}
+
+fn validate_consul(consul: &ConsulDiscoveryConfig) -> Result<(), Error> {
+    let reason = if !consul.enabled {
+        return Ok(());
+    } else if !consul.catalog && !consul.kv {
+        "Consul needs the catalog or the key-value store"
+    } else if consul.kv && consul.prefix.trim_matches('/').is_empty() {
+        "the Consul key prefix is empty"
+    } else if consul
+        .token
+        .as_deref()
+        .is_some_and(|token| HeaderValue::from_str(token).is_err())
+    {
+        "the Consul token contains characters that a header cannot hold"
+    } else {
+        return Ok(());
+    };
+    Err(Error::InvalidDiscoveryConfig {
+        reason: reason.to_string(),
+    })
 }
 
 pub fn parse_endpoint(endpoint: &str) -> Result<Endpoint, Error> {
@@ -230,6 +269,9 @@ pub fn changed_providers(old: &DiscoveryConfig, new: &DiscoveryConfig) -> Vec<Di
     let mut changed = Vec::new();
     if old.docker != new.docker {
         changed.push(DiscoveryProvider::Docker);
+    }
+    if old.consul != new.consul {
+        changed.push(DiscoveryProvider::Consul);
     }
     changed
 }

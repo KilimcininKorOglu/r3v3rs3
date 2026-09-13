@@ -9,7 +9,7 @@ use super::udp::UdpListenerPool;
 use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
 use crate::certs::acme::AcmeOrder;
 use crate::config::storage::Storage;
-use crate::discovery::{docker, http::ApiClient, DiscoverySnapshot};
+use crate::discovery::{http::ApiClient, DiscoverySnapshot};
 use crate::log::DatabaseLayer;
 use crate::proxy::http::SessionService;
 use crate::proxy::tls::upstream_client_config;
@@ -81,7 +81,7 @@ impl ServerState {
     ) -> Self {
         let config = storage.load_app_config().await;
         let _ = br_sender.send(ServerEvent::AppConfigUpdated {
-            config: config.clone(),
+            config: Box::new(config.masked()),
         });
 
         if let Some(ranges) = storage.load_cdn_ranges().await {
@@ -191,21 +191,22 @@ impl ServerState {
             Ok(None) => return,
             Err(err) => return self.set_discovery_error(provider, err.to_string()),
         };
-        let config = self.config.discovery.docker.clone();
+        let config = self.config.discovery.clone();
         let command = self.command_sender.clone();
         self.discovery_tasks.start(provider, move |generation| {
-            docker::spawn(&config, client, command, generation)
+            crate::discovery::spawn(provider, &config, client, command, generation)
         });
     }
 
     /// The API client of an enabled provider.
     fn discovery_client(&self, provider: DiscoveryProvider) -> Result<Option<ApiClient>, Error> {
-        let docker = &self.config.discovery.docker;
-        if provider != DiscoveryProvider::Docker || !docker.enabled {
+        let Some((endpoint, client_cert)) =
+            discovery::api_settings(&self.config.discovery, provider)
+        else {
             return Ok(None);
-        }
-        let endpoint = discovery::parse_endpoint(&docker.endpoint)?;
-        let tls = upstream_client_config(&self.certs, docker.client_cert)?;
+        };
+        let endpoint = discovery::parse_endpoint(endpoint)?;
+        let tls = upstream_client_config(&self.certs, client_cert)?;
         Ok(Some(ApiClient::new(endpoint, Arc::new(tls))))
     }
 
@@ -669,7 +670,8 @@ impl ServerState {
         &self.config
     }
 
-    pub async fn set_config(&mut self, config: AppConfig) -> Result<(), Error> {
+    pub async fn set_config(&mut self, mut config: AppConfig) -> Result<(), Error> {
+        config.keep_secrets(&self.config);
         discovery::validate_config(&config.discovery, &self.certs)?;
         let changed = discovery::changed_providers(&self.config.discovery, &config.discovery);
         self.config.discovery.clone_from(&config.discovery);
@@ -679,9 +681,9 @@ impl ServerState {
         self.config.clone_from(&config);
         self.sessions.set_config(config.admin);
         self.storage.save_app_config(&config).await;
-        let _ = self
-            .br_sender
-            .send(ServerEvent::AppConfigUpdated { config });
+        let _ = self.br_sender.send(ServerEvent::AppConfigUpdated {
+            config: Box::new(config.masked()),
+        });
         Ok(())
     }
 

@@ -9,13 +9,14 @@ use r3v3rs3::{
     command::ServerCommand,
     config::{new_appinfo, storage::Storage},
     server::{
-        rpc::{ErasedRpcMethod, RpcMethod, RpcWrapper},
+        rpc::{discovery::GetDiscoveryStatus, ErasedRpcMethod, RpcMethod, RpcWrapper},
         Server, ServerChannels,
     },
 };
 use r3v3rs3_api::{
     app::AppConfig,
     auth::{Account, LoginMethod, LoginRequest, LoginResponse},
+    discovery::DiscoveryStatus,
     error::Error,
     id::ShortId,
     multiaddr::Multiaddr,
@@ -85,10 +86,40 @@ where
     }))
 }
 
+/// Reads the discovery statuses until `done` accepts them.
+pub async fn wait_for_discovery(
+    channels: &mut ServerChannels,
+    done: impl Fn(&[DiscoveryStatus]) -> bool,
+) -> anyhow::Result<Vec<DiscoveryStatus>> {
+    let mut statuses = Vec::new();
+    for _ in 0..50 {
+        statuses = call(channels, GetDiscoveryStatus).await??;
+        if done(&statuses) {
+            return Ok(statuses);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("unexpected discovery status: {statuses:?}")
+}
+
 /// Sends requests until the proxy answers with the expected status.
 pub async fn wait_for_status(url: &str, expected: u16) -> anyhow::Result<String> {
+    wait_for_host_status(url, None, expected).await
+}
+
+/// Sends requests with the `Host` header until the proxy answers with the expected status.
+pub async fn wait_for_host_status(
+    url: &str,
+    host: Option<&str>,
+    expected: u16,
+) -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
     for _ in 0..50 {
-        if let Ok(res) = reqwest::get(url).await {
+        let mut request = client.get(url);
+        if let Some(host) = host {
+            request = request.header(reqwest::header::HOST, host);
+        }
+        if let Ok(res) = request.send().await {
             if res.status().as_u16() == expected {
                 return Ok(res.text().await?);
             }

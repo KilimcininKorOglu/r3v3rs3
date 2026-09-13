@@ -29,6 +29,21 @@ pub struct AppConfig {
     pub discovery: crate::discovery::DiscoveryConfig,
 }
 
+impl AppConfig {
+    /// A copy without secrets, which the admin API returns.
+    pub fn masked(&self) -> Self {
+        Self {
+            discovery: self.discovery.masked(),
+            ..self.clone()
+        }
+    }
+
+    /// Takes the secrets that an update does not set from the current settings.
+    pub fn keep_secrets(&mut self, current: &Self) {
+        self.discovery.keep_secrets(&current.discovery);
+    }
+}
+
 fn default_background_task_interval() -> Duration {
     Duration::from_secs(60 * 60)
 }
