@@ -44,6 +44,17 @@ where
     Ok(())
 }
 
+/// Waits until a TCP listener accepts connections on the address.
+pub async fn wait_for_listener(addr: SocketAddr) -> anyhow::Result<()> {
+    for _ in 0..50 {
+        if tokio::net::TcpStream::connect(addr).await.is_ok() {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("server did not start listening on {addr}")
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct TestStorage {
     inner: Arc<Mutex<Inner>>,

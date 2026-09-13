@@ -407,6 +407,26 @@ The flag menu in the navbar selects the WebUI language: English or Turkish. The 
 
 The error pages of r3v3rs3 and the Admin Session sign-in page read these cookies too. A browser sends the cookies only to the host of the WebUI, so the pages of a proxy on another host use English and the system theme.
 
+# Admin API
+
+The WebUI uses the admin API under `/api`. r3v3rs3 generates the OpenAPI document of this API from the server code, so the document lists the routes of the running version.
+
+- OpenAPI document: `http://localhost:46492/api/openapi.json`
+- Swagger UI: `http://localhost:46492/api/docs/`
+
+Both addresses require a session. Sign in to the WebUI, then open them in the same browser. The API link in the WebUI footer opens the Swagger UI.
+
+A script signs in with `POST /api/login` and sends the `token` cookie of the response with the next requests:
+
+```bash
+$ curl -c cookies.txt -H 'Content-Type: application/json' \
+    -d '{"username":"admin","method":"password","password":"passw0rd","insecure":true}' \
+    http://localhost:46492/api/login
+$ curl -b cookies.txt http://localhost:46492/api/ports
+```
+
+`"insecure": true` removes the `Secure` attribute from the cookie. Use it when the admin panel uses plain HTTP.
+
 # Logging
 
 r3v3rs3 logs to the standard output as its default setting. You can change this behavior by setting the `R3V3RS3_LOG`, `R3V3RS3_ACCESS_LOG` environment variable or using the `--log`, `--access-log` command-line option.

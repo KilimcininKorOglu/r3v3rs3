@@ -12,7 +12,7 @@ use axum_extra::extract::{
 };
 use r3v3rs3_api::{
     auth::{LoginMethod, LoginRequest, LoginResponse},
-    error::Error,
+    error::{Error, ErrorMessage},
 };
 use rand::distributions::{Alphanumeric, DistString};
 use std::{
@@ -24,6 +24,22 @@ use std::{
 pub const MINIMUM_SESSION_EXPIRY: Duration = Duration::from_secs(60 * 5); // 5 minutes
 const SESSION_TOKEN_LENGTH: usize = 32;
 
+/// Signs in and sets the `token` session cookie. An account with TOTP returns `totp_required`
+/// first, and a second request with the TOTP code completes the sign-in.
+#[utoipa::path(
+    post,
+    path = "/login",
+    tag = "auth",
+    operation_id = "login",
+    security(()),
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "The sign-in step succeeded.", body = LoginResponse),
+        (status = 400, description = "The credentials are not valid.", body = ErrorMessage),
+        (status = 429, description = "The client made too many sign-in attempts.", body = ErrorMessage),
+        (status = 500, description = "The server failed to handle the request.", body = ErrorMessage)
+    )
+)]
 pub async fn login(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -103,6 +119,15 @@ async fn verify_login_session(state: &AppState, token: &str, username: &str) -> 
         .is_some_and(|session| session.username == username)
 }
 
+/// Ends the session and removes the `token` cookie.
+#[utoipa::path(
+    get,
+    path = "/logout",
+    tag = "auth",
+    operation_id = "logout",
+    security(()),
+    responses((status = 200, description = "The session is ended."))
+)]
 pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     if let Some(token) = jar.get("token") {
         state.data.lock().await.sessions.remove(token.value());

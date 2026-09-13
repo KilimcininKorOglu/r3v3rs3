@@ -7,7 +7,7 @@ use std::{collections::HashMap, net::SocketAddr, time::Duration};
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::{alloc_tcp_port, with_server, TestStorage};
+use common::{alloc_tcp_port, wait_for_listener, with_server, TestStorage};
 
 // The admin login route also has a governor layer that allows a burst of 2
 // and replenishes one request every 4 seconds.
@@ -26,16 +26,6 @@ async fn login(addr: SocketAddr, username: &str, password: &str) -> anyhow::Resu
         .send()
         .await?;
     Ok(res.status().as_u16())
-}
-
-async fn wait_for_listener(addr: SocketAddr) -> anyhow::Result<()> {
-    for _ in 0..50 {
-        if tokio::net::TcpStream::connect(addr).await.is_ok() {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    anyhow::bail!("admin server did not start")
 }
 
 #[tokio::test]

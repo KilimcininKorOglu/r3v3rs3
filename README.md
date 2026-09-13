@@ -145,6 +145,8 @@ $ r3v3rs3 start
 
 Once the server is running, you can access the admin panel at [http://localhost:46492/](http://localhost:46492/).
 
+The admin API has an OpenAPI document at `/api/openapi.json` and a Swagger UI at `/api/docs/`. Both require a signed-in session. See [Admin API](https://kilimcininkoroglu.github.io/r3v3rs3/configuration/#admin-api) in the documentation.
+
 ## Development
 
 To contribute or develop r3v3rs3, follow these steps:

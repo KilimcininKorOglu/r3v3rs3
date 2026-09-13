@@ -8,6 +8,7 @@ use yew_router::prelude::*;
 const REPOSITORY_URL: &str = "https://github.com/KilimcininKorOglu/r3v3rs3";
 const DOCS_URL_EN: &str = "https://kilimcininkoroglu.github.io/r3v3rs3/";
 const DOCS_URL_TR: &str = "https://kilimcininkoroglu.github.io/r3v3rs3/tr/";
+const API_DOCS_PATH: &str = "/api/docs/";
 const LINK_CLASS: &str = "hover:underline hover:text-neutral-900 dark:hover:text-neutral-200";
 
 #[derive(Deserialize)]
@@ -44,6 +45,8 @@ pub fn footer() -> Html {
             <span>{format!("r3v3rs3 v{version}")}</span>
             <span aria-hidden="true">{"·"}</span>
             <a href={docs_url(locale)} target="_blank" rel="noopener noreferrer" class={LINK_CLASS}>{locale.t("footer.documentation")}</a>
+            <span aria-hidden="true">{"·"}</span>
+            <a href={API_DOCS_PATH} target="_blank" rel="noopener noreferrer" class={LINK_CLASS}>{"API"}</a>
             <span aria-hidden="true">{"·"}</span>
             <a href={REPOSITORY_URL} target="_blank" rel="noopener noreferrer" class={LINK_CLASS}>{"GitHub"}</a>
         </footer>

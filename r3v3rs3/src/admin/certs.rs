@@ -1,3 +1,4 @@
+use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
 use crate::{
     certs::Cert,
@@ -10,15 +11,32 @@ use axum::{
     Json,
 };
 use r3v3rs3_api::{
-    cert::{CertInfo, SelfSignedCertRequest, UploadQuery},
+    cert::{CertInfo, CertPostBody, SelfSignedCertRequest, UploadQuery},
     id::ShortId,
 };
 use std::{ops::Deref, sync::Arc};
 
+/// Lists the certificates.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "certs",
+    operation_id = "list_certs",
+    responses((status = 200, description = "The certificates.", body = Vec<CertInfo>), ErrorResponses)
+)]
 pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<CertInfo>>>, AppError> {
     Ok(Json(state.call(GetCertList).await?))
 }
 
+/// Returns one certificate.
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    tag = "certs",
+    operation_id = "get_cert",
+    params(("id" = ShortId, Path, description = "Certificate id.")),
+    responses((status = 200, description = "The certificate.", body = CertInfo), NotFoundResponse, ErrorResponses)
+)]
 pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<ShortId>,
@@ -27,6 +45,15 @@ pub async fn get(
     Ok(Json(Box::new(cert.info())))
 }
 
+/// Creates a self-signed server certificate. Without `ca_cert`, a new CA certificate signs it.
+#[utoipa::path(
+    post,
+    path = "/self_sign",
+    tag = "certs",
+    operation_id = "self_sign_cert",
+    request_body = SelfSignedCertRequest,
+    responses((status = 200, description = "The certificate is created."), NotFoundResponse, ErrorResponses)
+)]
 pub async fn self_sign(
     State(state): State<AppState>,
     Json(request): Json<SelfSignedCertRequest>,
@@ -43,6 +70,16 @@ pub async fn self_sign(
     Ok(Json(state.call(AddCert { cert }).await?))
 }
 
+/// Uploads a PEM certificate chain and an optional PEM private key.
+#[utoipa::path(
+    post,
+    path = "/upload",
+    tag = "certs",
+    operation_id = "upload_cert",
+    params(UploadQuery),
+    request_body(content = CertPostBody, content_type = "multipart/form-data"),
+    responses((status = 200, description = "The certificate is added."), ErrorResponses)
+)]
 pub async fn upload(
     State(state): State<AppState>,
     Query(query): Query<UploadQuery>,
@@ -67,6 +104,15 @@ pub async fn upload(
     Ok(Json(state.call(AddCert { cert }).await?))
 }
 
+/// Deletes a certificate.
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    tag = "certs",
+    operation_id = "delete_cert",
+    params(("id" = ShortId, Path, description = "Certificate id.")),
+    responses((status = 200, description = "The certificate is deleted."), NotFoundResponse, ErrorResponses)
+)]
 pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<ShortId>,
@@ -74,6 +120,15 @@ pub async fn delete(
     Ok(Json(state.call(DeleteCert { id }).await?))
 }
 
+/// Downloads the certificate chain and the private key as a `tar.gz` archive.
+#[utoipa::path(
+    get,
+    path = "/{id}/download",
+    tag = "certs",
+    operation_id = "download_cert",
+    params(("id" = ShortId, Path, description = "Certificate id.")),
+    responses((status = 200, description = "The archive.", content_type = "application/gzip", body = Vec<u8>), NotFoundResponse, ErrorResponses)
+)]
 pub async fn download(
     State(state): State<AppState>,
     Path(id): Path<ShortId>,

@@ -1,3 +1,4 @@
+use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
 use axum::{
     extract::{Path, Query, State},
@@ -16,6 +17,19 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_INTERVAL: Duration = Duration::from_secs(1);
 const REQUEST_DEFAULT_LIMIT: u32 = 100;
 
+/// Returns the log rows of a port, a proxy or a certificate, oldest first. Without `until`, the
+/// request waits up to 10 seconds for a new row.
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    tag = "logs",
+    operation_id = "get_logs",
+    params(
+        ("id" = String, Path, description = "Id of the port, the proxy or the certificate."),
+        LogQuery
+    ),
+    responses((status = 200, description = "The log rows.", body = Vec<SystemLogRow>), ErrorResponses)
+)]
 pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<String>,

@@ -407,6 +407,26 @@ WebUI dilini navbar'daki bayrak menüsünden seçebilirsiniz: İngilizce veya T�
 
 r3v3rs3'ün hata sayfaları ve Panel Session giriş sayfası da bu cookie'lere bakar. Ancak tarayıcı bu cookie'leri yalnız WebUI'ın host'una gönderir. Bu yüzden başka bir host'taki proxy'nin sayfaları İngilizce ve sistem temasıyla açılır.
 
+# Yönetim API'si
+
+WebUI, `/api` altındaki yönetim API'sini kullanır. r3v3rs3 bu API'nin OpenAPI dokümanını sunucu kodundan üretir. Bu yüzden doküman, çalışan sürümün route'larını listeler.
+
+- OpenAPI dokümanı: `http://localhost:46492/api/openapi.json`
+- Swagger UI: `http://localhost:46492/api/docs/`
+
+İki adres de session ister. Önce WebUI'a giriş yapın, sonra adresleri aynı tarayıcıda açın. WebUI footer'ındaki API linki de Swagger UI'ı açar.
+
+Bir script, `POST /api/login` ile giriş yapar ve cevaptaki `token` cookie'sini sonraki request'lerle gönderir:
+
+```bash
+$ curl -c cookies.txt -H 'Content-Type: application/json' \
+    -d '{"username":"admin","method":"password","password":"passw0rd","insecure":true}' \
+    http://localhost:46492/api/login
+$ curl -b cookies.txt http://localhost:46492/api/ports
+```
+
+`"insecure": true` değeri cookie'den `Secure` özelliğini kaldırır. Yönetim paneli düz HTTP kullanıyorsa bu değeri gönderin.
+
 # Log
 
 r3v3rs3 varsayılan olarak log'ları standart çıktıya yazar. Bunu `R3V3RS3_LOG`, `R3V3RS3_ACCESS_LOG` environment variable'larıyla veya `--log`, `--access-log` komut satırı seçenekleriyle değiştirebilirsiniz.

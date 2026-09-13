@@ -2,20 +2,20 @@ use crate::command::ServerCommand;
 use crate::server::rpc::config::GetConfig;
 use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
 use auth::{LoginAttempts, SessionStore};
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, post, put};
 use axum::{middleware, Json};
 use axum::{
     response::{
         sse::{Event, KeepAlive},
         Sse,
     },
-    routing::get,
     Router,
 };
 use futures::{Stream, TryStreamExt};
 use logs::LogReader;
+use openapi::{ApiDoc, ErrorResponses, DOCS_PATH, OPENAPI_PATH};
 use r3v3rs3_api::app::{AppConfig, AppInfo};
 use r3v3rs3_api::error::{Error, ErrorMessage};
 use r3v3rs3_api::event::ServerEvent;
@@ -37,6 +37,10 @@ use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::{GovernorError, GovernorLayer};
 use tracing::{trace, warn};
+use utoipa::OpenApi;
+use utoipa_axum::router::{OpenApiRouter, UtoipaMethodRouterExt};
+use utoipa_axum::routes;
+use utoipa_swagger_ui::SwaggerUi;
 
 mod acme;
 mod app_info;
@@ -45,6 +49,7 @@ mod cdn;
 mod certs;
 mod config;
 mod logs;
+mod openapi;
 mod ports;
 mod proxies;
 mod static_file;
@@ -60,6 +65,7 @@ pub async fn start_admin(
     let data = Arc::new(Mutex::new(data));
     let app_state = AppState {
         sender: command,
+        event: event.clone(),
         event_listener_counter: Arc::new(AtomicUsize::new(0)),
         data: data.clone(),
     };
@@ -98,117 +104,9 @@ pub async fn start_admin(
         }
     });
 
-    let event_stream = EventStream {
-        send: event.clone(),
-        recv: event.subscribe(),
-    };
-
     let mut event_recv = event.subscribe();
-
-    let counter = app_state.event_listener_counter.clone();
-    let sender = app_state.sender.clone();
-
-    let governor_conf = Arc::new(
-        GovernorConfigBuilder::default()
-            .per_second(4)
-            .burst_size(2)
-            .error_handler(|error| match error {
-                GovernorError::TooManyRequests { .. } => {
-                    AppError::R3v3rs3(Error::TooManyLoginAttempts).into_response()
-                }
-                _ => AppError::Anyhow(anyhow::anyhow!(error)).into_response(),
-            })
-            .finish()
-            .unwrap(),
-    );
-
-    let event_routes = Router::new().route(
-        "/",
-        get(move || async move {
-            let event_stream = event_stream.clone();
-            let stream =
-                StreamWrapper::new(BroadcastStream::new(event_stream.recv), counter, sender);
-            Sse::new(stream).keep_alive(KeepAlive::default())
-        }),
-    );
-
-    let auth_routes = Router::new()
-        .route(
-            "/login",
-            post(auth::login).layer(GovernorLayer {
-                config: governor_conf,
-            }),
-        )
-        .route("/logout", get(auth::logout));
-
-    let config_routes = Router::new()
-        .route("/", get(config::get))
-        .route("/", put(config::put));
-
-    let ports_routes = Router::new()
-        .route("/", get(ports::list))
-        .route("/", post(ports::add))
-        .route("/{id}", get(ports::get))
-        .route("/{id}/status", get(ports::status))
-        .route("/{id}", put(ports::put))
-        .route("/{id}", delete(ports::delete))
-        .route("/{id}/reset", get(ports::reset))
-        .route("/interfaces", get(ports::interfaces));
-
-    let proxies_routes = Router::new()
-        .route("/", get(proxies::list))
-        .route("/", post(proxies::add))
-        .route("/{id}", get(proxies::get))
-        .route("/{id}/status", get(proxies::status))
-        .route("/{id}/cache", delete(proxies::purge_cache))
-        .route("/{id}", put(proxies::put))
-        .route("/{id}", delete(proxies::delete));
-
-    let certs_routes = Router::new()
-        .route("/", get(certs::list))
-        .route("/self_sign", post(certs::self_sign))
-        .route("/upload", post(certs::upload))
-        .route("/{id}/download", get(certs::download))
-        .route("/{id}", get(certs::get))
-        .route("/{id}", delete(certs::delete));
-
-    let acme_routes = Router::new()
-        .route("/", get(acme::list))
-        .route("/{id}", get(acme::get))
-        .route("/{id}", put(acme::put))
-        .route("/", post(acme::add))
-        .route("/{id}", delete(acme::delete));
-
-    let logs_routes = Router::new().route("/{id}", get(logs::get));
-
-    let app_info_routes = Router::new().route("/", get(app_info::get));
-
-    let cdn_routes = Router::new()
-        .route("/", get(cdn::get))
-        .route("/refresh", post(cdn::refresh));
-
-    let api_routes = Router::new()
-        .nest("/events", event_routes)
-        .nest("/config", config_routes)
-        .nest("/ports", ports_routes)
-        .nest("/proxies", proxies_routes)
-        .nest("/certs", certs_routes)
-        .nest("/acme", acme_routes)
-        .nest("/logs", logs_routes)
-        .nest("/app_info", app_info_routes)
-        .nest("/cdn", cdn_routes)
-        .route_layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            auth::verify,
-        ));
-
-    let app = Router::new()
-        .nest("/api", auth_routes)
-        .nest("/api", api_routes)
-        .fallback(static_file::fallback)
-        .with_state(app_state);
-
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let app = admin_router(app_state)?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
 
     axum::serve(
         listener,
@@ -231,6 +129,114 @@ pub async fn start_admin(
     })
     .await?;
     Ok(())
+}
+
+/// Builds the admin router. The OpenAPI document and the Swagger UI require a session, like the
+/// other endpoints under `/api` except sign-in and sign-out.
+fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
+    let verify = middleware::from_fn_with_state(app_state.clone(), auth::verify);
+    let (api, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .nest("/api", auth_routes()?)
+        .nest("/api", resource_routes().route_layer(verify.clone()))
+        .split_for_parts();
+    let docs: Router<AppState> =
+        Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi)).route_layer(verify);
+    Ok(api
+        .merge(docs)
+        .fallback(static_file::fallback)
+        .with_state(app_state))
+}
+
+fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
+    let governor_conf = GovernorConfigBuilder::default()
+        .per_second(4)
+        .burst_size(2)
+        .error_handler(|error| match error {
+            GovernorError::TooManyRequests { .. } => {
+                AppError::R3v3rs3(Error::TooManyLoginAttempts).into_response()
+            }
+            _ => AppError::Anyhow(anyhow::anyhow!(error)).into_response(),
+        })
+        .finish()
+        .ok_or_else(|| anyhow::anyhow!("invalid login rate limit config"))?;
+    let login_limit = GovernorLayer {
+        config: Arc::new(governor_conf),
+    };
+    Ok(OpenApiRouter::new()
+        .routes(routes!(auth::login).layer(login_limit))
+        .routes(routes!(auth::logout)))
+}
+
+fn resource_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .nest("/events", OpenApiRouter::new().routes(routes!(events)))
+        .nest(
+            "/config",
+            OpenApiRouter::new().routes(routes!(config::get, config::put)),
+        )
+        .nest(
+            "/ports",
+            OpenApiRouter::new()
+                .routes(routes!(ports::list, ports::add))
+                .routes(routes!(ports::get, ports::put, ports::delete))
+                .routes(routes!(ports::status))
+                .routes(routes!(ports::reset))
+                .routes(routes!(ports::interfaces)),
+        )
+        .nest(
+            "/proxies",
+            OpenApiRouter::new()
+                .routes(routes!(proxies::list, proxies::add))
+                .routes(routes!(proxies::get, proxies::put, proxies::delete))
+                .routes(routes!(proxies::status))
+                .routes(routes!(proxies::purge_cache)),
+        )
+        .nest(
+            "/certs",
+            OpenApiRouter::new()
+                .routes(routes!(certs::list))
+                .routes(routes!(certs::self_sign))
+                .routes(routes!(certs::upload))
+                .routes(routes!(certs::get, certs::delete))
+                .routes(routes!(certs::download)),
+        )
+        .nest(
+            "/acme",
+            OpenApiRouter::new()
+                .routes(routes!(acme::list, acme::add))
+                .routes(routes!(acme::get, acme::put, acme::delete)),
+        )
+        .nest("/logs", OpenApiRouter::new().routes(routes!(logs::get)))
+        .nest(
+            "/app_info",
+            OpenApiRouter::new().routes(routes!(app_info::get)),
+        )
+        .nest(
+            "/cdn",
+            OpenApiRouter::new()
+                .routes(routes!(cdn::get))
+                .routes(routes!(cdn::refresh)),
+        )
+}
+
+/// Streams the server events as Server-Sent Events. Each event carries one JSON `ServerEvent`.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "events",
+    operation_id = "subscribe_events",
+    responses(
+        (status = 200, description = "The event stream.", content_type = "text/event-stream", body = ServerEvent),
+        ErrorResponses
+    )
+)]
+async fn events(State(state): State<AppState>) -> Sse<StreamWrapper> {
+    let stream = StreamWrapper::new(
+        BroadcastStream::new(state.event.subscribe()),
+        state.event_listener_counter.clone(),
+        state.sender.clone(),
+    );
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 struct StreamWrapper {
@@ -281,20 +287,6 @@ impl Drop for StreamWrapper {
     }
 }
 
-struct EventStream {
-    send: broadcast::Sender<ServerEvent>,
-    recv: broadcast::Receiver<ServerEvent>,
-}
-
-impl Clone for EventStream {
-    fn clone(&self) -> Self {
-        Self {
-            send: self.send.clone(),
-            recv: self.send.subscribe(),
-        }
-    }
-}
-
 pub enum AppError {
     NotFound,
     Anyhow(anyhow::Error),
@@ -341,6 +333,7 @@ impl IntoResponse for AppError {
 #[derive(Clone)]
 pub struct AppState {
     pub sender: mpsc::Sender<ServerCommand>,
+    pub event: broadcast::Sender<ServerEvent>,
     pub event_listener_counter: Arc<AtomicUsize>,
     pub data: Arc<Mutex<Data>>,
 }

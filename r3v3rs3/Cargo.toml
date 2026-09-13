@@ -125,6 +125,8 @@ tracing-appender = "0.2.2"
 tracing-subscriber = { version = "0.3.17", features = ["json"] }
 url = { version = "2.4.0", features = ["serde"] }
 utoipa = "5.2.0"
+utoipa-axum = "0.2.0"
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "vendored"] }
 webpki = "0.22.4"
 x509-parser = "0.17.0"
 

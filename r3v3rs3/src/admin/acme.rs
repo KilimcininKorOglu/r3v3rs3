@@ -1,3 +1,4 @@
+use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
 use crate::server::rpc::acme::{AddAcme, DeleteAcme, GetAcme, GetAcmeList, UpdateAcme};
 use axum::{
@@ -9,10 +10,27 @@ use r3v3rs3_api::{
     id::ShortId,
 };
 
+/// Lists the ACME requests.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "acme",
+    operation_id = "list_acme",
+    responses((status = 200, description = "The ACME requests.", body = Vec<AcmeInfo>), ErrorResponses)
+)]
 pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<AcmeInfo>>>, AppError> {
     Ok(Json(state.call(GetAcmeList).await?))
 }
 
+/// Returns one ACME request.
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    tag = "acme",
+    operation_id = "get_acme",
+    params(("id" = ShortId, Path, description = "ACME request id.")),
+    responses((status = 200, description = "The ACME request.", body = AcmeInfo), NotFoundResponse, ErrorResponses)
+)]
 pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<ShortId>,
@@ -20,6 +38,15 @@ pub async fn get(
     Ok(Json(state.call(GetAcme { id }).await?))
 }
 
+/// Creates an ACME account and adds the request.
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "acme",
+    operation_id = "add_acme",
+    request_body = AcmeRequest,
+    responses((status = 200, description = "The ACME request is added."), ErrorResponses)
+)]
 pub async fn add(
     State(state): State<AppState>,
     Json(request): Json<AcmeRequest>,
@@ -27,6 +54,16 @@ pub async fn add(
     Ok(Json(state.call(AddAcme { request }).await?))
 }
 
+/// Replaces the config of an ACME request.
+#[utoipa::path(
+    put,
+    path = "/{id}",
+    tag = "acme",
+    operation_id = "update_acme",
+    params(("id" = ShortId, Path, description = "ACME request id.")),
+    request_body = AcmeConfig,
+    responses((status = 200, description = "The ACME request is updated."), NotFoundResponse, ErrorResponses)
+)]
 pub async fn put(
     State(state): State<AppState>,
     Path(id): Path<ShortId>,
@@ -35,6 +72,15 @@ pub async fn put(
     Ok(Json(state.call(UpdateAcme { id, config }).await?))
 }
 
+/// Deletes an ACME request.
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    tag = "acme",
+    operation_id = "delete_acme",
+    params(("id" = ShortId, Path, description = "ACME request id.")),
+    responses((status = 200, description = "The ACME request is deleted."), NotFoundResponse, ErrorResponses)
+)]
 pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<ShortId>,
