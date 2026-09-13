@@ -5,12 +5,14 @@ use super::filter::{FilterResult, RequestFilter};
 use super::header_rules::CompiledHeaderRules;
 use super::pool::{Upstream, UpstreamClients};
 use super::rate_limit::{self, ClientRateLimiter};
+use crate::proxy::health::{self, GroupKey};
 use hyper::Request;
 use r3v3rs3_api::{
     compression::Compression,
     id::ShortId,
     policy::IpFilter,
-    proxy::{ProxyEntry, ProxyKind, Server},
+    proxy::{HttpProxy, ProxyEntry, ProxyKind, Route},
+    upstream::{HealthCheck, LoadBalancing, UpstreamTimeouts},
 };
 use std::sync::Arc;
 
@@ -36,6 +38,7 @@ impl Router {
             })
         {
             let (tls_client_config, _) = upstream.get(http.client_cert, http.timeouts.connect);
+            let proxy_upstream = ProxyUpstream::new(&http);
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
             let proxy_rate_limiter = rate_limit::limiter((id, None), http.rate_limit);
@@ -50,6 +53,7 @@ impl Router {
                     .iter()
                     .map(|segment| format!("/{segment}"))
                     .collect();
+                let upstream = proxy_upstream.route((id, Some(index)), &route, upstream);
                 let ip_filter = route
                     .ip_filter
                     .map(Arc::new)
@@ -66,15 +70,10 @@ impl Router {
                     || proxy_header_rules.clone(),
                     |rules| Arc::new(CompiledHeaderRules::new(rules)),
                 );
-                let timeouts = route.timeouts.unwrap_or(http.timeouts);
-                let (_, pool) = upstream.get(http.client_cert, timeouts.connect);
                 routes.push(FilteredRoute {
                     resource_id: id,
                     filter,
                     base_path,
-                    route: ParsedRoute {
-                        servers: route.servers,
-                    },
                     https_port,
                     quic_port,
                     upgrade_insecure: http.upgrade_insecure,
@@ -86,10 +85,7 @@ impl Router {
                     compression: compression.clone(),
                     cache: proxy_cache.clone(),
                     h2c: http.h2c,
-                    upstream: pool.map(|pool| Upstream {
-                        pool,
-                        request_timeout: timeouts.request,
-                    }),
+                    upstream,
                 });
             }
         }
@@ -100,12 +96,53 @@ impl Router {
         &self,
         req: &Request<T>,
         host: Option<&str>,
-    ) -> Option<(&ParsedRoute, FilterResult, &FilteredRoute)> {
-        self.routes.iter().find_map(|route| {
-            route
-                .filter
-                .test(req, host)
-                .map(|res| (&route.route, res, route))
+    ) -> Option<(FilterResult, &FilteredRoute)> {
+        self.routes
+            .iter()
+            .find_map(|route| route.filter.test(req, host).map(|res| (res, route)))
+    }
+}
+
+/// The upstream settings of an HTTP proxy that its routes share.
+#[derive(Clone, Copy)]
+struct ProxyUpstream {
+    client_cert: Option<ShortId>,
+    timeouts: UpstreamTimeouts,
+    load_balancing: LoadBalancing,
+    health_check: HealthCheck,
+}
+
+impl ProxyUpstream {
+    fn new(http: &HttpProxy) -> Self {
+        Self {
+            client_cert: http.client_cert,
+            timeouts: http.timeouts,
+            load_balancing: http.load_balancing,
+            health_check: http.health_check,
+        }
+    }
+
+    /// Builds the upstream servers of a route. `None` when the client certificate of the proxy is
+    /// invalid, so the route cannot reach its upstream servers.
+    fn route(
+        &self,
+        key: GroupKey,
+        route: &Route,
+        clients: &mut UpstreamClients<'_>,
+    ) -> Option<Upstream> {
+        let timeouts = route.timeouts.unwrap_or(self.timeouts);
+        let (_, pool) = clients.get(self.client_cert, timeouts.connect);
+        let addrs = route
+            .servers
+            .iter()
+            .map(|server| server.url.to_string())
+            .collect();
+        let group = health::group(key, addrs, self.load_balancing, self.health_check);
+        Some(Upstream {
+            pool: pool?,
+            request_timeout: timeouts.request,
+            servers: route.servers.clone().into(),
+            group,
         })
     }
 }
@@ -116,7 +153,6 @@ pub struct FilteredRoute {
     pub filter: RequestFilter,
     /// Path of the route without a trailing slash, e.g. `/admin`. Empty for `/`.
     pub base_path: String,
-    pub route: ParsedRoute,
     pub https_port: Option<u16>,
     pub quic_port: Option<u16>,
     pub upgrade_insecure: bool,
@@ -131,12 +167,8 @@ pub struct FilteredRoute {
     pub cache: Option<Arc<HttpCache>>,
     /// Sends requests to plain HTTP upstream servers with HTTP/2 prior knowledge.
     pub h2c: bool,
-    /// The upstream connections and the request timeout of the route. `None` when the client
-    /// certificate of the proxy is invalid, so the route cannot reach its upstream servers.
+    /// The upstream servers, their connections and the request timeout of the route. `None` when
+    /// the client certificate of the proxy is invalid, so the route cannot reach its upstream
+    /// servers.
     pub upstream: Option<Upstream>,
-}
-
-#[derive(Debug)]
-pub struct ParsedRoute {
-    pub servers: Vec<Server>,
 }

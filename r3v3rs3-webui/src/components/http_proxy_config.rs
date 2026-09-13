@@ -14,7 +14,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
-use r3v3rs3_api::upstream::UpstreamTimeouts;
+use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing, UpstreamTimeouts};
 use r3v3rs3_api::vhost::VirtualHost;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -98,6 +98,61 @@ impl TimeoutsForm {
             request: format_seconds(timeouts.request),
         }
     }
+}
+
+/// The errors of an [`UpstreamForm`] use this key.
+pub(super) const UPSTREAM_KEY: &str = "upstream";
+
+/// The load balancing policy and the passive health check of a proxy.
+#[derive(Clone, PartialEq)]
+pub(super) struct UpstreamForm {
+    load_balancing: LoadBalancing,
+    max_fails: String,
+    fail_timeout: String,
+}
+
+impl UpstreamForm {
+    pub(super) fn new(load_balancing: LoadBalancing, health_check: &HealthCheck) -> Self {
+        Self {
+            load_balancing,
+            max_fails: health_check.max_fails.to_string(),
+            fail_timeout: format_seconds(health_check.fail_timeout),
+        }
+    }
+
+    /// Records an error under [`UPSTREAM_KEY`].
+    pub(super) fn parse(
+        &self,
+        locale: Locale,
+        errors: &mut HashMap<String, String>,
+    ) -> (LoadBalancing, HealthCheck) {
+        let health_check = HealthCheck {
+            max_fails: or_error(
+                parse_count(locale, &self.max_fails, "proxy_form.max_fails"),
+                UPSTREAM_KEY,
+                errors,
+            ),
+            fail_timeout: or_error(
+                parse_seconds(
+                    locale,
+                    &self.fail_timeout,
+                    "proxy_form.fail_timeout_name",
+                    1,
+                ),
+                UPSTREAM_KEY,
+                errors,
+            ),
+        };
+        (self.load_balancing, health_check)
+    }
+}
+
+#[hook]
+pub(super) fn use_upstream_form(
+    load_balancing: LoadBalancing,
+    health_check: HealthCheck,
+) -> UseStateHandle<UpstreamForm> {
+    use_state(move || UpstreamForm::new(load_balancing, &health_check))
 }
 
 #[derive(Clone, PartialEq)]
@@ -229,6 +284,7 @@ impl RateLimitForm {
 pub fn http_proxy_config(props: &Props) -> Html {
     let locale = use_locale();
     let form = use_state(|| ProxyForm::new(&props.proxy));
+    let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check);
     let client_certs = use_client_certs();
     let routes = use_state(|| {
         let routes = props
@@ -244,7 +300,10 @@ pub fn http_proxy_config(props: &Props) -> Html {
         }
     });
 
-    let errors = use_entry_errors(get_proxy(locale, &form, &routes), props.onchanged.clone());
+    let errors = use_entry_errors(
+        get_proxy(locale, &form, &routes, &upstream),
+        props.onchanged.clone(),
+    );
 
     html! {
         <>
@@ -331,6 +390,8 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { error_view(errors.get("timeouts")) }
             <p class={HINT_CLASS}>{locale.t("http_form.timeouts_hint")}</p>
 
+            { upstream_form_view(locale, &upstream, &errors) }
+
             <label class={SECTION_CLASS}>{locale.t("http_form.routes")}</label>
 
             { routes.iter().enumerate().map(|(i, route)| {
@@ -347,33 +408,14 @@ fn route_view(
     route: &RouteForm,
     error: Option<&String>,
 ) -> Html {
-    let add_onclick = {
-        let routes = routes.clone();
-        Callback::from(move |_| {
-            let mut list = (*routes).clone();
-            list.insert(index + 1, RouteForm::empty());
-            routes.set(list);
-        })
-    };
-
-    let remove_onclick = {
-        let routes = routes.clone();
-        Callback::from(move |_| {
-            if routes.len() > 1 {
-                let mut list = (*routes).clone();
-                list.remove(index);
-                routes.set(list);
-            }
-        })
-    };
-
     html! {
         <div class="mt-2 bg-white dark:text-neutral-200 dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
             <label class="block mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("http_form.path")}</label>
             <input type="text" autocapitalize="off" placeholder="/" onchange={route_input(routes, index, text, |route, value| route.path = value)} value={route.path.clone()} class={INPUT_CLASS} />
 
             <label class={LABEL_CLASS}>{locale.t("http_form.target")}</label>
-            <input type="url" placeholder="https://example.com/backend" value={route.servers.join("\n")} onchange={route_input(routes, index, text, |route, value| route.servers = value.split('\n').map(str::to_string).collect())} class={INPUT_CLASS} />
+            <textarea rows="2" autocapitalize="off" spellcheck="false" placeholder={"https://a.example.com/backend\nhttps://b.example.com/backend"} value={route.servers.join("\n")} onchange={route_input(routes, index, text_area, |route, value| route.servers = server_lines(&value))} class={INPUT_CLASS} />
+            <p class={HINT_CLASS}>{locale.t("http_form.target_hint")}</p>
 
             { route_ip_filter_view(locale, routes, index, route) }
             { route_rate_limit_view(locale, routes, index, route) }
@@ -382,15 +424,88 @@ fn route_view(
             { route_timeouts_view(locale, routes, index, route) }
             { error_view(error) }
 
-            <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
-                <button type="button" onclick={add_onclick} class={classes!(BUTTON_CLASS, "rounded-l-lg")}>
-                    <img src="/assets/icons/add.svg" class="w-4 h-4" />
-                </button>
-                <button type="button" onclick={remove_onclick} disabled={routes.len() <= 1} class={classes!(BUTTON_CLASS, "border-l-0", "rounded-r-lg")}>
-                    <img src="/assets/icons/remove.svg" class="w-4 h-4" />
-                </button>
-            </div>
+            { list_buttons(routes, index, RouteForm::empty) }
         </div>
+    }
+}
+
+/// Reads one upstream server URL from each line and skips the empty lines.
+fn server_lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The buttons that add a new item after the item at the index and remove the item. The last
+/// item cannot be removed.
+pub(super) fn list_buttons<T: Clone + 'static>(
+    items: &UseStateHandle<Vec<T>>,
+    index: usize,
+    new_item: fn() -> T,
+) -> Html {
+    let add_onclick = {
+        let items = items.clone();
+        Callback::from(move |_: MouseEvent| {
+            let mut list = (*items).clone();
+            list.insert(index + 1, new_item());
+            items.set(list);
+        })
+    };
+
+    let remove_onclick = {
+        let items = items.clone();
+        Callback::from(move |_: MouseEvent| {
+            if items.len() > 1 {
+                let mut list = (*items).clone();
+                list.remove(index);
+                items.set(list);
+            }
+        })
+    };
+
+    html! {
+        <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
+            <button type="button" onclick={add_onclick} class={classes!(BUTTON_CLASS, "rounded-l-lg")}>
+                <img src="/assets/icons/add.svg" class="w-4 h-4" />
+            </button>
+            <button type="button" onclick={remove_onclick} disabled={items.len() <= 1} class={classes!(BUTTON_CLASS, "border-l-0", "rounded-r-lg")}>
+                <img src="/assets/icons/remove.svg" class="w-4 h-4" />
+            </button>
+        </div>
+    }
+}
+
+/// The load balancing policy select element and the passive health check inputs of a proxy.
+pub(super) fn upstream_form_view(
+    locale: Locale,
+    form: &UseStateHandle<UpstreamForm>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    let options = html! {
+        { for LoadBalancing::ALL.iter().map(|value| html! {
+            <option value={value.as_str()} selected={*value == form.load_balancing}>{locale.t(&format!("load_balancing.{}", value.as_str()))}</option>
+        }) }
+    };
+    html! {
+        <>
+            { select_field(
+                locale.t("proxy_form.load_balancing"),
+                state_input(form, load_balancing, |form, value| form.load_balancing = value),
+                options,
+                Some(locale.t("proxy_form.load_balancing_hint")),
+            ) }
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("proxy_form.max_fails")}</label>
+                    <input type="number" min="0" value={form.max_fails.clone()} onchange={state_input(form, text, |form, value| form.max_fails = value)} class={INPUT_CLASS} />
+                </div>
+                <div>{ seconds_input(locale.t("proxy_form.fail_timeout"), &form.fail_timeout, 1, state_input(form, text, |form, value| form.fail_timeout = value)) }</div>
+            </div>
+            { error_view(errors.get(UPSTREAM_KEY)) }
+            <p class={HINT_CLASS}>{locale.t("proxy_form.health_check_hint")}</p>
+        </>
     }
 }
 
@@ -880,12 +995,22 @@ fn checked(event: &Event) -> bool {
     input_element(event).checked()
 }
 
-fn period(event: &Event) -> RatePeriod {
+/// Returns the option whose name is the value of the select element, or the default option.
+fn select_option<T: Copy + Default>(event: &Event, options: &[T], name: fn(&T) -> &str) -> T {
     let value = select_value(event);
-    RatePeriod::ALL
-        .into_iter()
-        .find(|period| period.as_str() == value)
+    options
+        .iter()
+        .find(|option| name(option) == value)
+        .copied()
         .unwrap_or_default()
+}
+
+fn load_balancing(event: &Event) -> LoadBalancing {
+    select_option(event, &LoadBalancing::ALL, LoadBalancing::as_str)
+}
+
+fn period(event: &Event) -> RatePeriod {
+    select_option(event, &RatePeriod::ALL, |period| period.as_str())
 }
 
 fn state_update<T, V>(state: &UseStateHandle<T>, update: fn(&mut T, V)) -> Callback<V>
@@ -946,8 +1071,10 @@ fn get_proxy(
     locale: Locale,
     form: &ProxyForm,
     routes: &[RouteForm],
+    upstream: &UpstreamForm,
 ) -> Result<HttpProxy, HashMap<String, String>> {
     let mut errors = HashMap::new();
+    let (load_balancing, health_check) = upstream.parse(locale, &mut errors);
     let vhosts = parse_vhosts(locale, &form.vhosts, &mut errors);
     let routes = parse_routes(locale, routes, &mut errors);
     let trusted_proxies = or_error(
@@ -1000,6 +1127,8 @@ fn get_proxy(
         h2c: form.h2c,
         client_cert: form.client_cert,
         timeouts,
+        load_balancing,
+        health_check,
     })
 }
 
@@ -1389,5 +1518,39 @@ mod tests {
         };
         parse_route(Locale::En, &invalid, "routes_0", &mut errors);
         assert!(errors.contains_key("routes_0"));
+    }
+
+    #[test]
+    fn server_lines_skip_the_empty_lines() {
+        assert_eq!(
+            server_lines(" http://a:80/ \n\n\thttp://b:80/\n"),
+            ["http://a:80/", "http://b:80/"]
+        );
+    }
+
+    #[test]
+    fn upstream_form_round_trips_and_reports_invalid_values() {
+        let health_check = HealthCheck {
+            max_fails: 3,
+            fail_timeout: Duration::from_secs(10),
+        };
+        let form = UpstreamForm::new(LoadBalancing::First, &health_check);
+        let mut errors = HashMap::new();
+        assert_eq!(
+            form.parse(Locale::En, &mut errors),
+            (LoadBalancing::First, health_check)
+        );
+        assert!(errors.is_empty());
+
+        for (max_fails, fail_timeout) in [("x", "10"), ("3", "0")] {
+            let invalid = UpstreamForm {
+                max_fails: max_fails.into(),
+                fail_timeout: fail_timeout.into(),
+                ..form.clone()
+            };
+            let mut errors = HashMap::new();
+            invalid.parse(Locale::En, &mut errors);
+            assert!(errors.contains_key(UPSTREAM_KEY));
+        }
     }
 }

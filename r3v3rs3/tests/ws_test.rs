@@ -61,6 +61,8 @@ async fn ws_proxy() -> anyhow::Result<()> {
                     cache: Default::default(),
                     h2c: false,
                     timeouts: Default::default(),
+                    load_balancing: Default::default(),
+                    health_check: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()

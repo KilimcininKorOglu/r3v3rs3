@@ -43,6 +43,7 @@ fn udp_storage(proxy_port: &TestPort, upstream_port: &TestPort, idle: Duration) 
                         addr: upstream_port.multiaddr_udp(),
                     }],
                     session_idle_timeout: idle,
+                    ..Default::default()
                 }),
                 ..Default::default()
             },

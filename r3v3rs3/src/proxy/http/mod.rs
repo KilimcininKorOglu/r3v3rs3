@@ -3,11 +3,10 @@ use self::{
     cache::CacheRequest,
     compression::ResponseCompression,
     error::ProxyError,
-    filter::FilterResult,
     header_rules::{new_request_id, HeaderVariables},
     page::PagePreferences,
     pool::{Upstream, UpstreamClients, UpstreamH2c},
-    route::{FilteredRoute, ParsedRoute, Router},
+    route::{FilteredRoute, Router},
 };
 use super::{
     spawn_connection,
@@ -42,7 +41,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::port::{PortStatus, SocketState};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
 use rewriter::{RequestRewriter, ResponseRewriter, ResponseRewriterBuilder};
-use std::{net::SocketAddr, ops::ControlFlow, str::FromStr, sync::Arc, time::SystemTime};
+use std::{net::SocketAddr, ops::ControlFlow, sync::Arc, time::SystemTime};
 use tokio::{
     io::{AsyncRead, AsyncWrite, BufStream},
     sync::Notify,
@@ -581,7 +580,7 @@ where
         .clone()
         .or_else(|| info.sni.map(str::to_string))
         .or_else(|| req.uri().host().map(str::to_string));
-    let Some((parsed, res, route)) = shared.router.get_route(&req, request_host.as_deref()) else {
+    let Some((res, route)) = shared.router.get_route(&req, request_host.as_deref()) else {
         return (
             ProxiedRequest::Err(ProxyError::NoRouteFound),
             response_rewriter,
@@ -615,9 +614,14 @@ where
         return (ProxiedRequest::Respond(redirect), response_rewriter);
     }
 
-    // Authentication removes the credentials, so the cache reads them before.
+    // Authentication removes the credentials, so the cache reads them before. The cache key uses
+    // the client host and path, so the selected upstream server does not split the cache.
     let authorized = req.headers().contains_key(AUTHORIZATION);
-    let cache_host = request_host.clone().unwrap_or_default();
+    let cache_key = format!(
+        "{} {}",
+        request_host.as_deref().unwrap_or_default(),
+        req.uri().path_and_query().map_or("/", |path| path.as_str())
+    );
     let auth_ctx = AuthContext {
         client: client.ip,
         host: request_host.as_deref(),
@@ -637,21 +641,13 @@ where
         }
     };
 
-    set_upstream_uri(&mut req, parsed, res);
+    upstream.select(&mut req, res.path_segments);
     if route.h2c {
         req.extensions_mut().insert(UpstreamH2c);
     }
 
     info!(target: "r3v3rs3::access_log", remote = %info.remote, client = %client.ip, local = %info.local, action, target = %req.uri());
     let span: Span = span!(Level::INFO, "http", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, target = %req.uri());
-
-    if let Some(host) = req
-        .uri()
-        .authority()
-        .and_then(|host| HeaderValue::from_str(host.as_str()).ok())
-    {
-        req.headers_mut().insert(HOST, host);
-    }
 
     shared
         .header_rewriter
@@ -668,7 +664,7 @@ where
     let cache_request = route
         .cache
         .as_ref()
-        .and_then(|cache| CacheRequest::new(cache, &mut req, &cache_host, authorized));
+        .and_then(|cache| CacheRequest::new(cache, &mut req, cache_key, authorized));
     (
         ProxiedRequest::Ok(req, upstream, span, cache_request),
         response_rewriter,
@@ -791,20 +787,6 @@ fn upgrade_redirect<B>(
         .header(LOCATION, uri.to_string())
         .body(Full::new(Bytes::new()))
         .ok()
-}
-
-fn set_upstream_uri<B>(req: &mut Request<B>, parsed: &ParsedRoute, res: FilterResult) {
-    let Some(server) = parsed.servers.first() else {
-        return;
-    };
-    let mut url = server.url.0.clone();
-    if let Ok(mut segments) = url.path_segments_mut() {
-        segments.extend(res.path_segments);
-    }
-    url.set_query(req.uri().query());
-    if let Ok(uri) = Uri::from_str(url.as_str()) {
-        *req.uri_mut() = uri;
-    }
 }
 
 async fn start_quic<T>(

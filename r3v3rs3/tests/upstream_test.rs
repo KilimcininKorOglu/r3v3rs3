@@ -1,22 +1,26 @@
 use axum::{routing::get, Router};
 use r3v3rs3_api::{
+    cache::CacheConfig,
     multiaddr::Multiaddr,
     port::UpstreamServer,
-    proxy::{HttpProxy, ProxyKind, Route, TcpProxy},
-    upstream::UpstreamTimeouts,
+    proxy::{HttpProxy, ProxyKind, Route, Server, TcpProxy, UdpProxy},
+    upstream::{HealthCheck, LoadBalancing, UpstreamTimeouts},
 };
 use std::{
-    future::IntoFuture,
+    collections::HashMap,
+    future::{Future, IntoFuture},
+    net::SocketAddr,
     time::{Duration, Instant},
 };
 use tokio::{
-    io::AsyncReadExt,
-    net::{TcpListener, TcpStream},
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream, UdpSocket},
     time::timeout,
 };
+use url::Url;
 
 mod common;
-use common::{alloc_tcp_port, http_route, port_entry, proxy_entry, with_server};
+use common::{alloc_tcp_port, alloc_udp_port, http_route, port_entry, proxy_entry, with_server};
 use common::{TestPort, TestStorage};
 
 /// Starts a listener that accepts TCP connections and never sends a byte, so a TLS handshake
@@ -33,20 +37,136 @@ async fn start_silent_upstream() -> anyhow::Result<TestPort> {
     Ok(port)
 }
 
+/// Starts an HTTP upstream server that answers every request with its name. The response can be
+/// cached for a minute.
+async fn start_named_upstream(name: &'static str) -> anyhow::Result<Url> {
+    let port = alloc_tcp_port().await?;
+    let app =
+        Router::new().fallback(move || async move { ([("cache-control", "max-age=60")], name) });
+    let listener = TcpListener::bind(port.socket_addr()).await?;
+    tokio::spawn(axum::serve(listener, app).into_future());
+    Ok(port.http_url("/"))
+}
+
+/// Starts a TCP upstream server that sends its name and closes each connection.
+async fn start_named_tcp_upstream(name: &'static str) -> anyhow::Result<TestPort> {
+    let port = alloc_tcp_port().await?;
+    let listener = TcpListener::bind(port.socket_addr()).await?;
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let _ = stream.write_all(name.as_bytes()).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+    Ok(port)
+}
+
+/// Starts a UDP upstream server that answers each packet with its name.
+async fn start_named_udp_upstream(name: &'static str) -> anyhow::Result<TestPort> {
+    let port = alloc_udp_port().await?;
+    let socket = UdpSocket::bind(port.socket_addr()).await?;
+    tokio::spawn(async move {
+        let mut buf = [0; 64];
+        while let Ok((_, addr)) = socket.recv_from(&mut buf).await {
+            let _ = socket.send_to(name.as_bytes(), addr).await;
+        }
+    });
+    Ok(port)
+}
+
 fn timeouts(connect: Duration, request: Duration) -> UpstreamTimeouts {
     UpstreamTimeouts { connect, request }
 }
 
-/// Builds a storage with one port that listens on `listen` and one proxy of `kind` on it.
-fn single_proxy(listen: Multiaddr, kind: ProxyKind) -> TestStorage {
-    TestStorage::builder()
-        .ports(vec![port_entry("test", listen)])
-        .proxies(vec![proxy_entry("test2", "test", kind)])
-        .build()
+fn no_passive_check() -> HealthCheck {
+    HealthCheck {
+        max_fails: 0,
+        ..Default::default()
+    }
+}
+
+/// Builds a storage with one port and one proxy for each `(id, listen, kind)`. The id of the
+/// port is the id of the proxy with a `p` suffix.
+fn storage(proxies: Vec<(&str, Multiaddr, ProxyKind)>) -> TestStorage {
+    let ports = proxies
+        .iter()
+        .map(|(id, listen, _)| port_entry(&format!("{id}p"), listen.clone()))
+        .collect();
+    let proxies = proxies
+        .into_iter()
+        .map(|(id, _, kind)| proxy_entry(id, &format!("{id}p"), kind))
+        .collect();
+    TestStorage::builder().ports(ports).proxies(proxies).build()
 }
 
 fn http(proxy: HttpProxy) -> ProxyKind {
     ProxyKind::Http(Box::new(proxy))
+}
+
+/// An HTTP proxy for `localhost` with one route to the servers.
+fn balanced_http(
+    urls: &[Url],
+    load_balancing: LoadBalancing,
+    health_check: HealthCheck,
+) -> ProxyKind {
+    let servers = urls
+        .iter()
+        .map(|url| Server {
+            url: url.as_str().parse().unwrap(),
+        })
+        .collect();
+    http(HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![Route {
+            servers,
+            ..http_route("/", urls[0].as_str(), None)
+        }],
+        load_balancing,
+        health_check,
+        ..Default::default()
+    })
+}
+
+fn tcp_servers(ports: &[&TestPort]) -> Vec<UpstreamServer> {
+    ports
+        .iter()
+        .map(|port| UpstreamServer {
+            addr: port.multiaddr_tcp(),
+        })
+        .collect()
+}
+
+async fn get_body(url: Url) -> anyhow::Result<String> {
+    Ok(reqwest::get(url).await?.error_for_status()?.text().await?)
+}
+
+async fn read_name(addr: SocketAddr) -> anyhow::Result<String> {
+    let mut stream = TcpStream::connect(addr).await?;
+    let mut name = String::new();
+    timeout(Duration::from_secs(5), stream.read_to_string(&mut name)).await??;
+    Ok(name)
+}
+
+/// Reads a server name `times` times, and counts the answers of each server.
+async fn count_names<F, Fut>(times: usize, read: F) -> anyhow::Result<HashMap<String, usize>>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = anyhow::Result<String>>,
+{
+    let mut counts = HashMap::new();
+    for _ in 0..times {
+        *counts.entry(read().await?).or_default() += 1;
+    }
+    Ok(counts)
+}
+
+fn counts(pairs: &[(&str, usize)]) -> HashMap<String, usize> {
+    pairs
+        .iter()
+        .map(|(name, count)| (name.to_string(), *count))
+        .collect()
 }
 
 #[tokio::test]
@@ -76,7 +196,7 @@ async fn http_request_timeout_returns_gateway_timeout() -> anyhow::Result<()> {
         timeouts: timeouts(Duration::from_secs(10), Duration::from_millis(200)),
         ..Default::default()
     };
-    let config = single_proxy(proxy_port.multiaddr_http(), http(proxy));
+    let config = storage(vec![("reqtime", proxy_port.multiaddr_http(), http(proxy))]);
 
     with_server(config, |_| async move {
         let started = Instant::now();
@@ -105,7 +225,7 @@ async fn http_connect_timeout_covers_the_tls_handshake() -> anyhow::Result<()> {
         timeouts: timeouts(Duration::from_millis(300), Duration::ZERO),
         ..Default::default()
     };
-    let config = single_proxy(proxy_port.multiaddr_http(), http(proxy));
+    let config = storage(vec![("connto", proxy_port.multiaddr_http(), http(proxy))]);
 
     with_server(config, |_| async move {
         let request = reqwest::get(proxy_port.http_url("/"));
@@ -133,13 +253,226 @@ async fn tcp_connect_timeout_closes_the_client_connection() -> anyhow::Result<()
         connect_timeout: Duration::from_millis(300),
         ..Default::default()
     };
-    let config = single_proxy(proxy_port.multiaddr_tcp(), ProxyKind::Tcp(tcp));
+    let config = storage(vec![(
+        "tcptime",
+        proxy_port.multiaddr_tcp(),
+        ProxyKind::Tcp(tcp),
+    )]);
 
     with_server(config, |_| async move {
         let mut client = TcpStream::connect(proxy_port.socket_addr()).await?;
         let mut buf = [0; 16];
         let read = timeout(Duration::from_secs(5), client.read(&mut buf)).await?;
         assert_eq!(read.unwrap_or(0), 0);
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn http_load_balancing_policies() -> anyhow::Result<()> {
+    let urls = [
+        start_named_upstream("a").await?,
+        start_named_upstream("b").await?,
+    ];
+    let round_robin_port = alloc_tcp_port().await?;
+    let first_port = alloc_tcp_port().await?;
+    let config = storage(vec![
+        (
+            "httprr",
+            round_robin_port.multiaddr_http(),
+            balanced_http(&urls, LoadBalancing::RoundRobin, HealthCheck::default()),
+        ),
+        (
+            "httpfst",
+            first_port.multiaddr_http(),
+            balanced_http(&urls, LoadBalancing::First, HealthCheck::default()),
+        ),
+    ]);
+
+    with_server(config, |_| async move {
+        let round_robin = count_names(4, || get_body(round_robin_port.http_url("/"))).await?;
+        assert_eq!(round_robin, counts(&[("a", 2), ("b", 2)]));
+
+        let first = count_names(3, || get_body(first_port.http_url("/"))).await?;
+        assert_eq!(first, counts(&[("a", 3)]));
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn http_failover_and_passive_health_check() -> anyhow::Result<()> {
+    let urls = [
+        alloc_tcp_port().await?.http_url("/"),
+        start_named_upstream("live").await?,
+    ];
+    let retry_port = alloc_tcp_port().await?;
+    let passive_port = alloc_tcp_port().await?;
+    let config = storage(vec![
+        (
+            "retry",
+            retry_port.multiaddr_http(),
+            balanced_http(&urls, LoadBalancing::First, no_passive_check()),
+        ),
+        (
+            "passive",
+            passive_port.multiaddr_http(),
+            balanced_http(&urls, LoadBalancing::First, HealthCheck::default()),
+        ),
+    ]);
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::new();
+
+        // The first server refuses the connection, so a request without a body goes to the next
+        // server. A request with a body is not sent again.
+        let retried = count_names(2, || get_body(retry_port.http_url("/"))).await?;
+        assert_eq!(retried, counts(&[("live", 2)]));
+        let resp = client
+            .post(retry_port.http_url("/"))
+            .body("data")
+            .send()
+            .await?;
+        assert_eq!(resp.status(), 502);
+
+        // After one failure, the passive health check moves the first server behind the second
+        // server, so the next request with a body reaches the second server.
+        assert_eq!(get_body(passive_port.http_url("/")).await?, "live");
+        let resp = client
+            .post(passive_port.http_url("/"))
+            .body("data")
+            .send()
+            .await?;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.text().await?, "live");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn cache_key_does_not_depend_on_the_upstream_server() -> anyhow::Result<()> {
+    let urls = [
+        start_named_upstream("a").await?,
+        start_named_upstream("b").await?,
+    ];
+    let proxy_port = alloc_tcp_port().await?;
+    let ProxyKind::Http(mut proxy) =
+        balanced_http(&urls, LoadBalancing::RoundRobin, HealthCheck::default())
+    else {
+        unreachable!();
+    };
+    proxy.cache = CacheConfig {
+        enabled: true,
+        ..Default::default()
+    };
+    let config = storage(vec![(
+        "cachelb",
+        proxy_port.multiaddr_http(),
+        ProxyKind::Http(proxy),
+    )]);
+
+    with_server(config, |_| async move {
+        let x_cache = |resp: &reqwest::Response| resp.headers().get("x-cache").cloned();
+        let first = reqwest::get(proxy_port.http_url("/page")).await?;
+        assert_eq!(
+            x_cache(&first).as_ref().map(|v| v.as_bytes()),
+            Some(&b"MISS"[..])
+        );
+        let body = first.text().await?;
+
+        let second = reqwest::get(proxy_port.http_url("/page")).await?;
+        assert_eq!(
+            x_cache(&second).as_ref().map(|v| v.as_bytes()),
+            Some(&b"HIT"[..])
+        );
+        assert_eq!(second.text().await?, body);
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn tcp_load_balancing_and_failover() -> anyhow::Result<()> {
+    let a = start_named_tcp_upstream("a").await?;
+    let b = start_named_tcp_upstream("b").await?;
+    let closed = alloc_tcp_port().await?;
+    let round_robin_port = alloc_tcp_port().await?;
+    let failover_port = alloc_tcp_port().await?;
+    let round_robin = TcpProxy {
+        upstream_servers: tcp_servers(&[&a, &b]),
+        ..Default::default()
+    };
+    let failover = TcpProxy {
+        upstream_servers: tcp_servers(&[&closed, &a]),
+        load_balancing: LoadBalancing::First,
+        health_check: no_passive_check(),
+        ..Default::default()
+    };
+    let config = storage(vec![
+        (
+            "tcprr",
+            round_robin_port.multiaddr_tcp(),
+            ProxyKind::Tcp(round_robin),
+        ),
+        (
+            "tcpfo",
+            failover_port.multiaddr_tcp(),
+            ProxyKind::Tcp(failover),
+        ),
+    ]);
+
+    with_server(config, |_| async move {
+        let round_robin = count_names(4, || read_name(round_robin_port.socket_addr())).await?;
+        assert_eq!(round_robin, counts(&[("a", 2), ("b", 2)]));
+
+        let failover = count_names(2, || read_name(failover_port.socket_addr())).await?;
+        assert_eq!(failover, counts(&[("a", 2)]));
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn udp_sessions_use_the_servers_in_turn() -> anyhow::Result<()> {
+    let servers = [
+        start_named_udp_upstream("a").await?,
+        start_named_udp_upstream("b").await?,
+    ];
+    let proxy_port = alloc_udp_port().await?;
+    let udp = UdpProxy {
+        upstream_servers: servers
+            .iter()
+            .map(|port| UpstreamServer {
+                addr: port.multiaddr_udp(),
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let config = storage(vec![(
+        "udprr",
+        proxy_port.multiaddr_udp(),
+        ProxyKind::Udp(udp),
+    )]);
+
+    with_server(config, |_| async move {
+        let proxy = proxy_port.socket_addr();
+        let mut names = Vec::new();
+        for _ in 0..2 {
+            let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
+            // A session keeps its server, so both packets of a client reach the same server.
+            for _ in 0..2 {
+                client.send_to(b"ping", proxy).await?;
+                let mut buf = [0; 64];
+                let (size, _) =
+                    timeout(Duration::from_secs(5), client.recv_from(&mut buf)).await??;
+                names.push(String::from_utf8_lossy(&buf[..size]).to_string());
+            }
+        }
+        assert_eq!(names[0], names[1]);
+        assert_eq!(names[2], names[3]);
+        assert_ne!(names[0], names[2]);
         Ok(())
     })
     .await

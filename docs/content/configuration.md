@@ -96,6 +96,41 @@ upstream_servers = [{ addr = "/ip4/127.0.0.1/tcp/5432" }]
 connect_timeout = "3s"
 ```
 
+## Load Balancing and Health Checks
+
+A proxy or an HTTP route with more than one upstream server spreads the traffic with `load_balancing`:
+
+- `round_robin` (default) uses the servers in turn.
+- `random` selects a random server.
+- `first` uses the first healthy server. The other servers are backups.
+
+An HTTP proxy selects a server for each request, a TCP proxy for each connection, and a UDP proxy for each client session. The servers of each HTTP route are a separate group.
+
+When the connection to the selected server fails or its connect timeout expires, r3v3rs3 tries the next server once. An HTTP request goes to the next server only when it has no body and is not an upgrade request, because r3v3rs3 cannot send such a request again. Other HTTP errors, such as a request timeout, are not retried.
+
+The passive health check counts the consecutive failures of each server. A failure is a failed connection or a request without a response. After `health_check.max_fails` failures (default `1`), the server is unhealthy for `health_check.fail_timeout` (default `30s`). An unhealthy server gets new traffic only after the healthy servers. When every server is unhealthy, r3v3rs3 still sends the traffic to them in the same order. A success resets the failure count. `max_fails = 0` disables the check. An HTTP response with an error status such as 500 is a success, because the server answered.
+
+The health of the servers stays after a configuration reload while the servers, the policy and the health check settings do not change.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+load_balancing = "round_robin"
+health_check = { max_fails = 3, fail_timeout = "10s" }
+routes = [
+  { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
+]
+
+[my-database]
+protocol = "tcp"
+load_balancing = "first"
+upstream_servers = [
+  { addr = "/ip4/10.0.0.1/tcp/5432" },
+  { addr = "/ip4/10.0.0.2/tcp/5432" },
+]
+```
+
 ## Client IP
 
 Behind a CDN or a load balancer, the TCP peer of r3v3rs3 is the edge server, not the visitor. r3v3rs3 resolves the real client IP only when the peer is trusted:
@@ -362,7 +397,7 @@ You can store proxied responses in memory in the "Cache" section. A stored respo
 | `max_entry_size` | `1048576` (1 MiB) | r3v3rs3 does not store a response with a larger body. |
 | `default_ttl` | `0s` | The lifetime of a response without `Cache-Control: max-age`, `s-maxage` or `Expires`. With `0s`, r3v3rs3 stores such a response only when it has an `ETag` or `Last-Modified` header, and revalidates it on every request. |
 
-r3v3rs3 uses the cache only for `GET` and `HEAD` requests without `Range`, `Upgrade` and `Cache-Control: no-store`. A `HEAD` request uses the stored `GET` response. When the client sends `Cache-Control: no-cache` or `Pragma: no-cache`, r3v3rs3 sends the request to the upstream server and stores the new response. The cache key is the requested host and the upstream URL.
+r3v3rs3 uses the cache only for `GET` and `HEAD` requests without `Range`, `Upgrade` and `Cache-Control: no-store`. A `HEAD` request uses the stored `GET` response. When the client sends `Cache-Control: no-cache` or `Pragma: no-cache`, r3v3rs3 sends the request to the upstream server and stores the new response. The cache key is the requested host with the path and the query of the request, so the upstream server that load balancing selects does not change the key.
 
 r3v3rs3 stores a response only when all of these conditions are true:
 

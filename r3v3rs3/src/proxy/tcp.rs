@@ -1,4 +1,5 @@
 use super::{
+    health::{self, UpstreamGroup},
     spawn_connection,
     tls::{port_acceptor, upstream_client_config, TlsTermination},
     PortContextEvent, PortStatus, SocketState,
@@ -8,8 +9,11 @@ use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::name_server::{GenericConnector, TokioRuntimeProvider};
 use hickory_resolver::system_conf::read_system_conf;
 use hickory_resolver::AsyncResolver;
-use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind, proxy::TcpProxy};
-use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
+use r3v3rs3_api::{error::Error, id::ShortId, multiaddr::Multiaddr};
+use r3v3rs3_api::{
+    port::PortEntry,
+    proxy::{ProxyEntry, ProxyKind, TcpProxy},
+};
 use std::{
     net::SocketAddr,
     sync::Arc,
@@ -26,7 +30,7 @@ use tokio::{
 };
 use tokio_rustls::rustls::pki_types::{IpAddr, ServerName};
 use tokio_rustls::{rustls::ClientConfig, TlsAcceptor, TlsConnector};
-use tracing::{debug, error, info, span, Level, Span};
+use tracing::{debug, error, info, span, warn, Level, Span};
 
 const MAX_BUFFER_SIZE: usize = 4096;
 
@@ -35,7 +39,7 @@ type Resolver = AsyncResolver<GenericConnector<TokioRuntimeProvider>>;
 #[derive(Debug)]
 pub struct TcpPortContext {
     pub listen: SocketAddr,
-    servers: Vec<Connection>,
+    upstream: Option<TcpUpstream>,
     status: PortStatus,
     span: Span,
     resolver: Resolver,
@@ -66,7 +70,7 @@ impl TcpPortContext {
 
         Ok(Self {
             listen,
-            servers: Default::default(),
+            upstream: None,
             status: Default::default(),
             span,
             resolver,
@@ -75,14 +79,18 @@ impl TcpPortContext {
         })
     }
 
+    /// Uses the upstream servers of the first proxy of the port that has a valid server.
     pub async fn setup(&mut self, certs: &CertList, proxies: Vec<ProxyEntry>) -> Result<(), Error> {
-        let mut servers = Vec::new();
-        for proxy in proxies {
-            if let ProxyKind::Tcp(proxy) = proxy.proxy.kind {
-                servers.extend(proxy_connections(certs, &proxy)?);
+        let mut upstream = None;
+        for entry in proxies {
+            if let ProxyKind::Tcp(proxy) = &entry.proxy.kind {
+                let servers = proxy_connections(certs, proxy)?;
+                if upstream.is_none() && !servers.is_empty() {
+                    upstream = Some(TcpUpstream::new(entry.id, proxy, servers));
+                }
             }
         }
-        self.servers = servers;
+        self.upstream = upstream;
 
         if let Some(tls) = &mut self.tls_termination {
             self.status.state.tls = Some(tls.setup(certs).await);
@@ -121,10 +129,10 @@ impl TcpPortContext {
     }
 
     pub fn start_proxy(&mut self, mut stream: BufStream<TcpStream>) {
-        if self.servers.is_empty() {
+        let Some(upstream) = self.upstream.clone() else {
             tokio::spawn(async move { stream.get_mut().shutdown().await });
             return;
-        }
+        };
 
         let Some(tls_acceptor) = port_acceptor(self.tls_termination.as_ref()) else {
             debug!("closing the connection: the TLS config is invalid");
@@ -132,7 +140,7 @@ impl TcpPortContext {
         };
         let task = start(
             stream,
-            self.servers[0].clone(),
+            upstream,
             self.resolver.clone(),
             tls_acceptor,
             self.stop_notifier.clone(),
@@ -141,9 +149,57 @@ impl TcpPortContext {
     }
 }
 
-pub async fn start(
+/// The upstream servers of the TCP proxy of a port.
+#[derive(Debug, Clone)]
+struct TcpUpstream {
+    servers: Arc<[Connection]>,
+    group: Arc<UpstreamGroup>,
+}
+
+impl TcpUpstream {
+    fn new(id: ShortId, proxy: &TcpProxy, servers: Vec<Connection>) -> Self {
+        let addrs = proxy
+            .upstream_servers
+            .iter()
+            .map(|server| server.addr.to_string())
+            .collect();
+        let group = health::group((id, None), addrs, proxy.load_balancing, proxy.health_check);
+        Self {
+            servers: servers.into(),
+            group,
+        }
+    }
+
+    /// Connects to the selected server. When the connection fails, it connects once to the next
+    /// server.
+    async fn connect(
+        &self,
+        resolver: &Resolver,
+    ) -> anyhow::Result<(SocketAddr, Box<dyn IoStream>)> {
+        let mut result = Err(anyhow::anyhow!("the proxy has no upstream server"));
+        for index in self.group.candidates().into_iter().take(2) {
+            let Some(conn) = self.servers.get(index) else {
+                continue;
+            };
+            result = connect_server(conn, resolver).await;
+            match &result {
+                Ok(_) => {
+                    self.group.report_success(index);
+                    break;
+                }
+                Err(err) => {
+                    self.group.report_failure(index);
+                    warn!(%err, "failed to connect to the upstream server");
+                }
+            }
+        }
+        result
+    }
+}
+
+async fn start(
     mut stream: BufStream<TcpStream>,
-    conn: Connection,
+    upstream: TcpUpstream,
     resolver: Resolver,
     tls_acceptor: Option<TlsAcceptor>,
     stop_notifier: Arc<Notify>,
@@ -165,18 +221,8 @@ pub async fn start(
         }
     });
 
-    // One deadline covers the DNS lookup, the TCP connection and the TLS handshake.
-    let connect_timeout = conn.connect_timeout;
-    let timed_out =
-        || anyhow::anyhow!("connecting to the upstream server timed out after {connect_timeout:?}");
-    let deadline = Instant::now() + connect_timeout;
-    let target = timeout_at(deadline, resolve_upstream(&conn, &resolver))
-        .await
-        .map_err(|_| timed_out())??;
+    let (target, mut out) = upstream.connect(&resolver).await?;
     info!(target: "r3v3rs3::access_log", remote = %remote, %local, %target);
-    let mut out = timeout_at(deadline, connect_upstream(conn, target))
-        .await
-        .map_err(|_| timed_out())??;
 
     let mut stream: Box<dyn IoStream> = Box::new(server_stream);
     if let Some(acceptor) = tls_acceptor {
@@ -193,6 +239,25 @@ pub async fn start(
 
     debug!(%target, "eof");
     Ok(())
+}
+
+/// Resolves and connects to the server. One deadline covers the DNS lookup, the TCP connection
+/// and the TLS handshake.
+async fn connect_server(
+    conn: &Connection,
+    resolver: &Resolver,
+) -> anyhow::Result<(SocketAddr, Box<dyn IoStream>)> {
+    let connect_timeout = conn.connect_timeout;
+    let timed_out =
+        || anyhow::anyhow!("connecting to the upstream server timed out after {connect_timeout:?}");
+    let deadline = Instant::now() + connect_timeout;
+    let target = timeout_at(deadline, resolve_upstream(conn, resolver))
+        .await
+        .map_err(|_| timed_out())??;
+    let out = timeout_at(deadline, connect_upstream(conn.clone(), target))
+        .await
+        .map_err(|_| timed_out())??;
+    Ok((target, out))
 }
 
 async fn resolve_upstream(conn: &Connection, resolver: &Resolver) -> anyhow::Result<SocketAddr> {

@@ -128,9 +128,9 @@ impl RpcMethod for UpdateProxy {
     }
 }
 
-/// Checks the upstream timeouts, and that the upstream client certificate of the proxy is a client
-/// certificate with a private key.
+/// Checks the upstream timeouts and the health check, and that the upstream client certificate of
+/// the proxy is a client certificate with a private key.
 fn validate_proxy(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
-    proxy.kind.validate_timeouts()?;
+    proxy.kind.validate_upstream()?;
     upstream_client_config(&state.certs, proxy.kind.client_cert()).map(|_| ())
 }

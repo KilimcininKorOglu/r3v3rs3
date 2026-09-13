@@ -77,6 +77,8 @@ async fn https_proxy() -> anyhow::Result<()> {
                     cache: Default::default(),
                     h2c: false,
                     timeouts: Default::default(),
+                    load_balancing: Default::default(),
+                    health_check: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -196,6 +198,8 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                     cache: Default::default(),
                     h2c: false,
                     timeouts: Default::default(),
+                    load_balancing: Default::default(),
+                    health_check: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -296,6 +300,8 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                     cache: Default::default(),
                     h2c: false,
                     timeouts: Default::default(),
+                    load_balancing: Default::default(),
+                    health_check: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -411,6 +417,8 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                     cache: Default::default(),
                     h2c: false,
                     timeouts: Default::default(),
+                    load_balancing: Default::default(),
+                    health_check: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()

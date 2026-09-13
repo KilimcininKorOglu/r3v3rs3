@@ -15,6 +15,7 @@ use r3v3rs3_api::{
 use std::future::Future;
 use tracing::{error, Instrument, Span};
 
+pub mod health;
 pub mod http;
 pub mod tcp;
 pub mod tls;

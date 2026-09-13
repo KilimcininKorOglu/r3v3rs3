@@ -1,7 +1,8 @@
 use super::http_proxy_config::{
-    client_cert_view, error_view, format_seconds, input_element, item_update, or_error,
-    parse_client_cert, parse_seconds, select_setter, timeout_field_view, toggle, use_client_certs,
-    use_entry_errors, INPUT_CLASS, LABEL_CLASS,
+    client_cert_view, error_view, format_seconds, input_element, item_update, list_buttons,
+    or_error, parse_client_cert, parse_seconds, select_setter, timeout_field_view, toggle,
+    upstream_form_view, use_client_certs, use_entry_errors, use_upstream_form, UpstreamForm,
+    INPUT_CLASS, LABEL_CLASS,
 };
 use crate::i18n::use_locale;
 use r3v3rs3_api::i18n::Locale;
@@ -84,13 +85,22 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
     let client_cert = use_state(|| props.proxy.client_cert);
     let client_certs = use_client_certs();
     let connect_timeout = use_state(|| format_seconds(props.proxy.connect_timeout));
+    let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check);
 
-    let entry = get_proxy(locale, &upstream_servers, *client_cert, &connect_timeout);
+    let entry = get_proxy(
+        locale,
+        &upstream_servers,
+        *client_cert,
+        &connect_timeout,
+        &upstream,
+    );
     let errors = use_entry_errors(entry, props.onchanged.clone());
 
     html! {
         <>
             { servers_view(locale, &upstream_servers, &errors, true) }
+
+            { upstream_form_view(locale, &upstream, &errors) }
 
             { client_cert_view(
                 locale,
@@ -159,6 +169,8 @@ fn server_view(
                 </div>
             }
             { error_view(error) }
+
+            { list_buttons(servers, index, ServerForm::example) }
         </div>
     }
 }
@@ -192,9 +204,11 @@ fn get_proxy(
     servers: &[ServerForm],
     client_cert: Option<ShortId>,
     connect_timeout: &str,
+    upstream: &UpstreamForm,
 ) -> Result<TcpProxy, HashMap<String, String>> {
     let mut errors = HashMap::new();
     let upstream_servers = parse_servers(locale, servers, "tcp", &mut errors);
+    let (load_balancing, health_check) = upstream.parse(locale, &mut errors);
     let connect_timeout = or_error(
         parse_seconds(
             locale,
@@ -212,13 +226,20 @@ fn get_proxy(
         upstream_servers,
         client_cert,
         connect_timeout,
+        load_balancing,
+        health_check,
     })
 }
 
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing};
     use std::time::Duration;
+
+    pub(in crate::components) fn first_server_policy() -> UpstreamForm {
+        UpstreamForm::new(LoadBalancing::First, &HealthCheck::default())
+    }
 
     pub(in crate::components) fn server(host: &str, port: u16, tls: bool) -> ServerForm {
         ServerForm {
@@ -259,17 +280,20 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn get_proxy_keeps_the_client_cert_and_the_connect_timeout() {
+    fn get_proxy_keeps_the_client_cert_the_connect_timeout_and_the_policy() {
         let id = "a1b2c3d".parse().unwrap();
         let servers = [server("example.com", 443, true)];
-        let proxy = get_proxy(Locale::En, &servers, Some(id), "3").unwrap();
+        let upstream = first_server_policy();
+        let proxy = get_proxy(Locale::En, &servers, Some(id), "3", &upstream).unwrap();
         assert_eq!(proxy.client_cert, Some(id));
         assert_eq!(proxy.connect_timeout, Duration::from_secs(3));
+        assert_eq!(proxy.load_balancing, LoadBalancing::First);
 
-        let errors = get_proxy(Locale::En, &[server("", 443, true)], None, "3").unwrap_err();
+        let invalid = [server("", 443, true)];
+        let errors = get_proxy(Locale::En, &invalid, None, "3", &upstream).unwrap_err();
         assert!(errors.contains_key("upstream_servers_0"));
 
-        let errors = get_proxy(Locale::En, &servers, None, "0").unwrap_err();
+        let errors = get_proxy(Locale::En, &servers, None, "0", &upstream).unwrap_err();
         assert!(errors.contains_key("connect_timeout"));
     }
 }

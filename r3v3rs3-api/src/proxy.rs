@@ -6,7 +6,8 @@ use crate::header_rules::HeaderRules;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
 use crate::upstream::{
     default_connect_timeout, default_session_idle_timeout, is_default_connect_timeout,
-    is_default_session_idle_timeout, validate_timeout, UpstreamTimeouts,
+    is_default_session_idle_timeout, validate_timeout, HealthCheck, LoadBalancing,
+    UpstreamTimeouts,
 };
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
@@ -59,17 +60,25 @@ impl ProxyKind {
         }
     }
 
-    /// Rejects a zero connect timeout or a zero session idle timeout.
-    pub fn validate_timeouts(&self) -> Result<(), Error> {
+    /// Rejects a zero connect timeout, session idle timeout or fail timeout.
+    pub fn validate_upstream(&self) -> Result<(), Error> {
         match self {
-            Self::Tcp(tcp) => validate_timeout(tcp.connect_timeout),
-            Self::Udp(udp) => validate_timeout(udp.session_idle_timeout),
-            Self::Http(http) => http
-                .routes
-                .iter()
-                .filter_map(|route| route.timeouts.as_ref())
-                .chain([&http.timeouts])
-                .try_for_each(UpstreamTimeouts::validate),
+            Self::Tcp(tcp) => {
+                validate_timeout(tcp.connect_timeout)?;
+                tcp.health_check.validate()
+            }
+            Self::Udp(udp) => {
+                validate_timeout(udp.session_idle_timeout)?;
+                udp.health_check.validate()
+            }
+            Self::Http(http) => {
+                http.health_check.validate()?;
+                http.routes
+                    .iter()
+                    .filter_map(|route| route.timeouts.as_ref())
+                    .chain([&http.timeouts])
+                    .try_for_each(UpstreamTimeouts::validate)
+            }
         }
     }
 }
@@ -91,6 +100,10 @@ pub struct TcpProxy {
     )]
     #[schema(value_type = String, example = "10s")]
     pub connect_timeout: Duration,
+    #[serde(default, skip_serializing_if = "LoadBalancing::is_default")]
+    pub load_balancing: LoadBalancing,
+    #[serde(default, skip_serializing_if = "HealthCheck::is_default")]
+    pub health_check: HealthCheck,
 }
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -105,6 +118,10 @@ pub struct UdpProxy {
     )]
     #[schema(value_type = String, example = "60s")]
     pub session_idle_timeout: Duration,
+    #[serde(default, skip_serializing_if = "LoadBalancing::is_default")]
+    pub load_balancing: LoadBalancing,
+    #[serde(default, skip_serializing_if = "HealthCheck::is_default")]
+    pub health_check: HealthCheck,
 }
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -146,6 +163,12 @@ pub struct HttpProxy {
     /// Default upstream timeouts for every route of this proxy.
     #[serde(default, skip_serializing_if = "UpstreamTimeouts::is_default")]
     pub timeouts: UpstreamTimeouts,
+    /// Selects the upstream server of each request in every route of this proxy.
+    #[serde(default, skip_serializing_if = "LoadBalancing::is_default")]
+    pub load_balancing: LoadBalancing,
+    /// Health check of the upstream servers in every route of this proxy.
+    #[serde(default, skip_serializing_if = "HealthCheck::is_default")]
+    pub health_check: HealthCheck,
 }
 
 fn upgrade_insecure_default() -> bool {

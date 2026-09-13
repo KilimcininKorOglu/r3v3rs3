@@ -96,6 +96,41 @@ upstream_servers = [{ addr = "/ip4/127.0.0.1/tcp/5432" }]
 connect_timeout = "3s"
 ```
 
+## Load Balancing ve Health Check
+
+Birden fazla upstream sunucusu olan proxy veya HTTP route, trafiği `load_balancing` değerine göre dağıtır:
+
+- `round_robin` (varsayılan) sunucuları sırayla kullanır.
+- `random` rastgele bir sunucu seçer.
+- `first` ilk sağlıklı sunucuyu kullanır. Diğer sunucular yedektir.
+
+HTTP proxy her request için, TCP proxy her bağlantı için, UDP proxy her client session'ı için bir sunucu seçer. Her HTTP route'unun sunucuları ayrı bir gruptur.
+
+Seçilen sunucuya bağlantı kurulamazsa veya connect timeout dolarsa r3v3rs3 bir kez sıradaki sunucuyu dener. HTTP request'i yalnız body'si yoksa ve upgrade request'i değilse sıradaki sunucuya gider, çünkü r3v3rs3 diğer request'leri yeniden gönderemez. Request timeout gibi diğer HTTP hatalarında tekrar deneme yapılmaz.
+
+Pasif health check her sunucunun art arda aldığı hataları sayar. Hata, kurulamayan bir bağlantı veya response gelmeyen bir request'tir. `health_check.max_fails` (varsayılan `1`) kadar hatadan sonra sunucu `health_check.fail_timeout` (varsayılan `30s`) süresince sağlıksız sayılır. Sağlıksız sunucu yeni trafiği yalnız sağlıklı sunuculardan sonra alır. Bütün sunucular sağlıksızsa r3v3rs3 trafiği aynı sırayla yine onlara gönderir. Başarılı bir deneme hata sayısını sıfırlar. `max_fails = 0` kontrolü kapatır. 500 gibi hata status'lu bir HTTP response başarılı sayılır, çünkü sunucu yanıt vermiştir.
+
+Sunucular, policy ve health check ayarları değişmediği sürece config reload sonrasında sunucuların sağlık durumu korunur.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+load_balancing = "round_robin"
+health_check = { max_fails = 3, fail_timeout = "10s" }
+routes = [
+  { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
+]
+
+[my-database]
+protocol = "tcp"
+load_balancing = "first"
+upstream_servers = [
+  { addr = "/ip4/10.0.0.1/tcp/5432" },
+  { addr = "/ip4/10.0.0.2/tcp/5432" },
+]
+```
+
 ## Client IP
 
 CDN veya load balancer arkasında r3v3rs3'ün TCP peer'ı ziyaretçi değil, edge sunucusudur. r3v3rs3 gerçek client IP adresini yalnız peer güvenilirse belirler:
@@ -362,7 +397,7 @@ Proxy'den geçen response'ları "Cache" bölümünden memory'de saklayabilirsini
 | `max_entry_size` | `1048576` (1 MiB) | Body'si bu değerden büyük response'lar saklanmaz. |
 | `default_ttl` | `0s` | `Cache-Control: max-age`, `s-maxage` veya `Expires` içermeyen response'un geçerlilik süresi. Değer `0s` ise r3v3rs3 böyle bir response'u yalnız `ETag` veya `Last-Modified` header'ı varsa saklar ve her request'te yeniden doğrular. |
 
-r3v3rs3 cache'i yalnız `Range`, `Upgrade` ve `Cache-Control: no-store` içermeyen `GET` ve `HEAD` request'lerinde kullanır. `HEAD` request'ine saklanan `GET` response'u verilir. Client `Cache-Control: no-cache` veya `Pragma: no-cache` gönderirse r3v3rs3 cache'e bakmadan request'i upstream sunucuya iletir ve gelen yeni response'u saklar. Cache key, istenen host ile upstream URL'den oluşur.
+r3v3rs3 cache'i yalnız `Range`, `Upgrade` ve `Cache-Control: no-store` içermeyen `GET` ve `HEAD` request'lerinde kullanır. `HEAD` request'ine saklanan `GET` response'u verilir. Client `Cache-Control: no-cache` veya `Pragma: no-cache` gönderirse r3v3rs3 cache'e bakmadan request'i upstream sunucuya iletir ve gelen yeni response'u saklar. Cache key, istenen host ile request'in path ve query değerinden oluşur. Bu yüzden load balancing'in seçtiği upstream sunucu key'i değiştirmez.
 
 r3v3rs3 bir response'u yalnız şu koşulların hepsi sağlanırsa saklar:
 

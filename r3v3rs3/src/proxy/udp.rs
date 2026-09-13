@@ -1,9 +1,10 @@
+use super::health::{self, UpstreamGroup};
 use super::{PortContextEvent, PortStatus, SocketState};
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::name_server::{GenericConnector, TokioRuntimeProvider};
 use hickory_resolver::system_conf::read_system_conf;
 use hickory_resolver::AsyncResolver;
-use r3v3rs3_api::upstream::DEFAULT_SESSION_IDLE_TIMEOUT;
+use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing};
 use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
 use std::collections::HashMap;
@@ -27,8 +28,7 @@ const MAX_DATAGRAM_SIZE: usize = 65527;
 #[derive(Debug)]
 pub struct UdpPortContext {
     pub listen: SocketAddr,
-    servers: Vec<Connection>,
-    idle_timeout: Duration,
+    upstream: UdpUpstream,
     sessions: HashMap<SocketAddr, UdpSession>,
     status: PortStatus,
     span: Span,
@@ -50,8 +50,7 @@ impl UdpPortContext {
         let listen = entry.port.listen.socket_addr()?;
         Ok(Self {
             listen,
-            servers: Default::default(),
-            idle_timeout: DEFAULT_SESSION_IDLE_TIMEOUT,
+            upstream: Default::default(),
             sessions: Default::default(),
             status: Default::default(),
             span,
@@ -60,20 +59,11 @@ impl UdpPortContext {
     }
 
     pub async fn setup(&mut self, proxies: Vec<ProxyEntry>) -> Result<(), Error> {
-        let mut servers = Vec::new();
-        let mut idle_timeout = DEFAULT_SESSION_IDLE_TIMEOUT;
-        for proxy in proxies {
-            if let ProxyKind::Udp(proxy) = proxy.proxy.kind {
-                idle_timeout = proxy.session_idle_timeout;
-                for server in proxy.upstream_servers {
-                    servers.push(multiaddr_to_host(&server.addr)?);
-                }
-            }
-        }
-        // Keep the open sessions and the resolved addresses when the settings do not change.
-        if !same_servers(&servers, &self.servers) || idle_timeout != self.idle_timeout {
-            self.servers = servers;
-            self.idle_timeout = idle_timeout;
+        let upstream = UdpUpstream::from_proxies(proxies)?;
+        // Keep the open sessions, the resolved addresses and the server health when the settings
+        // do not change.
+        if !upstream.same_settings(&self.upstream) {
+            self.upstream = upstream;
             self.sessions.clear();
         }
         Ok(())
@@ -121,12 +111,15 @@ impl UdpPortContext {
         };
         session.touch();
         if let Err(err) = session.socket.send(data).await {
+            session.context.report_failure();
             self.span.in_scope(|| {
                 debug!(%client, %err, "failed to send the packet to the upstream server");
             });
         }
     }
 
+    /// Opens a session to the selected server. When the server cannot be resolved or its socket
+    /// fails, it opens the session once to the next server.
     async fn open_session(
         &mut self,
         client: SocketAddr,
@@ -139,26 +132,97 @@ impl UdpPortContext {
             });
             return None;
         }
-        let server = self.servers.first_mut()?;
-        let upstream = resolve(&self.resolver, &self.span, server).await?;
-        let activity = Arc::new(Activity::new(self.idle_timeout));
-        match UdpSession::open(
-            upstream,
-            client,
-            listener.clone(),
-            activity,
-            self.span.clone(),
-        )
-        .await
-        {
+        let group = self.upstream.group.clone()?;
+        for index in group.candidates().into_iter().take(2) {
+            let context = SessionContext {
+                listener: listener.clone(),
+                client,
+                activity: Activity::new(self.upstream.idle_timeout),
+                group: group.clone(),
+                index,
+                span: self.span.clone(),
+            };
+            if let Some(session) = self.open_server_session(context).await {
+                return Some(session);
+            }
+        }
+        None
+    }
+
+    async fn open_server_session(&mut self, context: SessionContext) -> Option<UdpSession> {
+        let server = self.upstream.servers.get_mut(context.index)?;
+        let Some(upstream) = resolve(&self.resolver, &self.span, server).await else {
+            context.report_failure();
+            return None;
+        };
+        let context = Arc::new(context);
+        match UdpSession::open(upstream, context.clone()).await {
             Ok(session) => Some(session),
             Err(err) => {
+                context.report_failure();
                 self.span.in_scope(|| {
                     error!(%upstream, %err, "failed to open the upstream socket");
                 });
                 None
             }
         }
+    }
+}
+
+/// The upstream servers and the session settings of the UDP proxy of a port.
+#[derive(Debug, Default)]
+struct UdpUpstream {
+    servers: Vec<Connection>,
+    idle_timeout: Duration,
+    load_balancing: LoadBalancing,
+    health_check: HealthCheck,
+    /// `None` when no proxy of the port has a server.
+    group: Option<Arc<UpstreamGroup>>,
+}
+
+impl UdpUpstream {
+    /// Uses the upstream servers of the first proxy of the port that has a server.
+    fn from_proxies(proxies: Vec<ProxyEntry>) -> Result<Self, Error> {
+        let mut upstream = Self::default();
+        for entry in proxies {
+            let ProxyKind::Udp(proxy) = entry.proxy.kind else {
+                continue;
+            };
+            let servers = proxy
+                .upstream_servers
+                .iter()
+                .map(|server| multiaddr_to_host(&server.addr))
+                .collect::<Result<Vec<_>, _>>()?;
+            if upstream.group.is_some() || servers.is_empty() {
+                continue;
+            }
+            let addrs = proxy
+                .upstream_servers
+                .iter()
+                .map(|server| server.addr.to_string())
+                .collect();
+            let group = health::group(
+                (entry.id, None),
+                addrs,
+                proxy.load_balancing,
+                proxy.health_check,
+            );
+            upstream = Self {
+                servers,
+                idle_timeout: proxy.session_idle_timeout,
+                load_balancing: proxy.load_balancing,
+                health_check: proxy.health_check,
+                group: Some(group),
+            };
+        }
+        Ok(upstream)
+    }
+
+    fn same_settings(&self, other: &Self) -> bool {
+        same_servers(&self.servers, &other.servers)
+            && self.idle_timeout == other.idle_timeout
+            && self.load_balancing == other.load_balancing
+            && self.health_check == other.health_check
     }
 }
 
@@ -197,22 +261,34 @@ async fn resolve(resolver: &Resolver, span: &Span, server: &mut Connection) -> O
     server.addr
 }
 
+/// The client, the server and the activity of a session.
+#[derive(Debug)]
+struct SessionContext {
+    listener: Arc<UdpSocket>,
+    client: SocketAddr,
+    activity: Activity,
+    group: Arc<UpstreamGroup>,
+    /// The index of the upstream server in `group`.
+    index: usize,
+    span: Span,
+}
+
+impl SessionContext {
+    fn report_failure(&self) {
+        self.group.report_failure(self.index);
+    }
+}
+
 /// The upstream socket of one client. Dropping the session stops its reply task.
 #[derive(Debug)]
 struct UdpSession {
     socket: Arc<UdpSocket>,
-    activity: Arc<Activity>,
+    context: Arc<SessionContext>,
     task: JoinHandle<()>,
 }
 
 impl UdpSession {
-    async fn open(
-        upstream: SocketAddr,
-        client: SocketAddr,
-        listener: Arc<UdpSocket>,
-        activity: Arc<Activity>,
-        span: Span,
-    ) -> io::Result<Self> {
+    async fn open(upstream: SocketAddr, context: Arc<SessionContext>) -> io::Result<Self> {
         let bind: SocketAddr = if upstream.is_ipv6() {
             (Ipv6Addr::UNSPECIFIED, 0).into()
         } else {
@@ -221,16 +297,10 @@ impl UdpSession {
         let socket = UdpSocket::bind(bind).await?;
         socket.connect(upstream).await?;
         let socket = Arc::new(socket);
-        let task = tokio::spawn(relay_replies(
-            socket.clone(),
-            listener,
-            client,
-            activity.clone(),
-            span,
-        ));
+        let task = tokio::spawn(relay_replies(socket.clone(), context.clone()));
         Ok(Self {
             socket,
-            activity,
+            context,
             task,
         })
     }
@@ -240,7 +310,7 @@ impl UdpSession {
     }
 
     fn touch(&self) {
-        self.activity.touch();
+        self.context.activity.touch();
     }
 }
 
@@ -284,31 +354,33 @@ impl Activity {
 }
 
 /// Sends the replies of the upstream server to the client until the session is idle for its
-/// idle timeout or the upstream socket fails.
-async fn relay_replies(
-    socket: Arc<UdpSocket>,
-    listener: Arc<UdpSocket>,
-    client: SocketAddr,
-    activity: Arc<Activity>,
-    span: Span,
-) {
+/// idle timeout or the upstream socket fails. A reply marks the server healthy, and a socket
+/// error, such as an ICMP port unreachable message, counts as a failure.
+async fn relay_replies(socket: Arc<UdpSocket>, context: Arc<SessionContext>) {
+    let client = context.client;
     let mut buf = vec![0; MAX_DATAGRAM_SIZE];
     loop {
-        let remaining = activity.remaining();
+        let remaining = context.activity.remaining();
         if remaining.is_zero() {
             break;
         }
         let size = match tokio::time::timeout(remaining, socket.recv(&mut buf)).await {
             Ok(Ok(size)) => size,
             Ok(Err(err)) => {
-                span.in_scope(|| debug!(%client, %err, "closing the udp session"));
+                context.report_failure();
+                context
+                    .span
+                    .in_scope(|| debug!(%client, %err, "closing the udp session"));
                 break;
             }
             Err(_) => continue,
         };
-        activity.touch();
-        if let Err(err) = listener.send_to(&buf[..size], client).await {
-            span.in_scope(|| debug!(%client, %err, "failed to send the reply to the client"));
+        context.activity.touch();
+        context.group.report_success(context.index);
+        if let Err(err) = context.listener.send_to(&buf[..size], client).await {
+            context
+                .span
+                .in_scope(|| debug!(%client, %err, "failed to send the reply to the client"));
         }
     }
 }
@@ -359,15 +431,18 @@ mod tests {
         }
     }
 
-    fn proxy_entry(port: u16) -> ProxyEntry {
+    fn proxy_entry(id: &str, ports: &[u16]) -> ProxyEntry {
         ProxyEntry {
-            id: "proxy".parse().unwrap(),
+            id: id.parse().unwrap(),
             proxy: Proxy {
                 ports: vec![port_entry().id],
                 kind: ProxyKind::Udp(UdpProxy {
-                    upstream_servers: vec![UpstreamServer {
-                        addr: format!("/ip4/127.0.0.1/udp/{port}").parse().unwrap(),
-                    }],
+                    upstream_servers: ports
+                        .iter()
+                        .map(|port| UpstreamServer {
+                            addr: format!("/ip4/127.0.0.1/udp/{port}").parse().unwrap(),
+                        })
+                        .collect(),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -376,11 +451,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn setup_rebuilds_the_server_list() {
+    async fn setup_uses_the_first_proxy_with_a_server() {
         let mut ctx = UdpPortContext::new(&port_entry()).unwrap();
-        ctx.setup(vec![proxy_entry(5353)]).await.unwrap();
-        ctx.setup(vec![proxy_entry(5353)]).await.unwrap();
-        assert_eq!(ctx.servers.len(), 1);
+        let proxies = || {
+            vec![
+                proxy_entry("udpempty", &[]),
+                proxy_entry("udpfirst", &[5353, 5354]),
+                proxy_entry("udplast", &[5355]),
+            ]
+        };
+        ctx.setup(proxies()).await.unwrap();
+        ctx.setup(proxies()).await.unwrap();
+        let ports = ctx
+            .upstream
+            .servers
+            .iter()
+            .map(|server| server.port)
+            .collect::<Vec<_>>();
+        assert_eq!(ports, [5353, 5354]);
     }
 
     #[tokio::test]
@@ -389,14 +477,20 @@ mod tests {
         let client = "127.0.0.1:40000".parse().unwrap();
         let mut ctx = UdpPortContext::new(&port_entry()).unwrap();
 
-        ctx.setup(vec![proxy_entry(5353)]).await.unwrap();
+        ctx.setup(vec![proxy_entry("udpses", &[5353])])
+            .await
+            .unwrap();
         ctx.forward(client, b"ping", &listener).await;
         assert_eq!(ctx.sessions.len(), 1);
 
-        ctx.setup(vec![proxy_entry(5353)]).await.unwrap();
+        ctx.setup(vec![proxy_entry("udpses", &[5353])])
+            .await
+            .unwrap();
         assert_eq!(ctx.sessions.len(), 1);
 
-        ctx.setup(vec![proxy_entry(5354)]).await.unwrap();
+        ctx.setup(vec![proxy_entry("udpses", &[5354])])
+            .await
+            .unwrap();
         assert!(ctx.sessions.is_empty());
     }
 

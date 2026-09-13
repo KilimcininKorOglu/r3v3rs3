@@ -189,11 +189,12 @@ pub struct CacheRequest {
 
 impl CacheRequest {
     /// Returns `None` when the request cannot use the cache. Removes `Accept-Encoding`, so the
-    /// upstream server sends an unencoded response that every client can receive.
+    /// upstream server sends an unencoded response that every client can receive. `key`
+    /// identifies the stored response.
     pub fn new<B>(
         cache: &Arc<HttpCache>,
         req: &mut Request<B>,
-        host: &str,
+        key: String,
         authorized: bool,
     ) -> Option<Self> {
         if !is_cacheable_request(req) {
@@ -205,7 +206,7 @@ impl CacheRequest {
             && !has_directive(&headers, PRAGMA, "no-cache");
         Some(Self {
             cache: cache.clone(),
-            key: format!("{host} {}", req.uri()),
+            key,
             head: req.method() == Method::HEAD,
             headers,
             lookup,
