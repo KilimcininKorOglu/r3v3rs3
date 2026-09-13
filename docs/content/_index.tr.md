@@ -143,7 +143,7 @@ $ r3v3rs3 start
 
 Sunucu çalışınca yönetim paneline [http://localhost:46492/](http://localhost:46492/) adresinden erişebilirsiniz.
 
-> Sunucu uzak bir makinede çalışıyorsa yönetim paneline SSH port forwarding ile bağlanmanızı öneririz. Panel bağlantısı şifrelenmemiş düz HTTP kullanır ve SSH port forwarding ile panelin portunu internete açmanız gerekmez. İsterseniz paneli daha sonra r3v3rs3 üzerinden HTTPS ile de sunabilirsiniz.
+> Sunucu uzak bir makinede çalışıyorsa yönetim paneline SSH port forwarding ile bağlanmanızı öneririz. Panel bağlantısı şifrelenmemiş düz HTTP kullanır. SSH port forwarding ile panelin portunu internete açmanız gerekmez. İsterseniz paneli daha sonra r3v3rs3 üzerinden HTTPS ile de sunabilirsiniz.
 
 # Başlangıç rehberi
 
