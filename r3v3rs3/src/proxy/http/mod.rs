@@ -5,7 +5,7 @@ use self::{
     error::ProxyError,
     filter::FilterResult,
     header_rules::{new_request_id, HeaderVariables},
-    pool::ConnectionPool,
+    pool::{ConnectionPool, UpstreamH2c},
     route::{FilteredRoute, ParsedRoute, Router},
 };
 use super::{
@@ -80,6 +80,8 @@ pub struct HttpPortContext {
     span: Span,
     tls_termination: Option<TlsTermination>,
     tls_client_config: Arc<ClientConfig>,
+    /// Upstream connections shared by every connection of this port.
+    pool: Arc<ConnectionPool>,
     h3_server_config: Option<Arc<quinn::ServerConfig>>,
     shared: Arc<ArcSwap<SharedContext>>,
     stop_notifier: Arc<Notify>,
@@ -108,16 +110,18 @@ impl HttpPortContext {
             None
         };
 
+        let tls_client_config = Arc::new(
+            ClientConfig::builder()
+                .with_root_certificates(RootCertStore::empty())
+                .with_no_client_auth(),
+        );
         Ok(Self {
             listen,
             status: Default::default(),
             span,
             tls_termination,
-            tls_client_config: Arc::new(
-                ClientConfig::builder()
-                    .with_root_certificates(RootCertStore::empty())
-                    .with_no_client_auth(),
-            ),
+            pool: Arc::new(ConnectionPool::new(tls_client_config.clone())),
+            tls_client_config,
             h3_server_config: None,
             shared: Arc::new(ArcSwap::from_pointee(SharedContext {
                 router: Default::default(),
@@ -201,6 +205,7 @@ impl HttpPortContext {
             .with_root_certificates(certs.root_certs().clone())
             .with_no_client_auth();
         self.tls_client_config = Arc::new(config);
+        self.pool = Arc::new(ConnectionPool::new(self.tls_client_config.clone()));
 
         self.shared.store(Arc::new(SharedContext {
             router: Router::new(
@@ -274,7 +279,7 @@ impl HttpPortContext {
     pub fn start_proxy(&mut self, stream: BufStream<TcpStream>) {
         let span = self.span.clone();
 
-        let tls_client_config = self.tls_client_config.clone();
+        let pool = self.pool.clone();
         let tls_acceptor = self
             .tls_termination
             .as_ref()
@@ -288,7 +293,7 @@ impl HttpPortContext {
             async move {
                 if let Err(err) = start(
                     stream,
-                    tls_client_config,
+                    pool,
                     tls_acceptor,
                     shared_cache,
                     stop_notifier,
@@ -314,7 +319,7 @@ impl HttpPortContext {
         let span = self.span.clone();
         let stop_notifier = self.stop_notifier.clone();
         let span_cloned = span.clone();
-        let tls_client_config = self.tls_client_config.clone();
+        let pool = self.pool.clone();
         let shared_cache = Cache::new(Arc::clone(&self.shared));
 
         let server_config = if let Some(config) = &self.h3_server_config {
@@ -342,7 +347,7 @@ impl HttpPortContext {
                                             stream,
                                             shared_cache.clone(),
                                             QuickContext {
-                                                tls_client_config: tls_client_config.clone(),
+                                                pool: pool.clone(),
                                                 local,
                                                 remote,
                                             },
@@ -378,7 +383,7 @@ impl HttpPortContext {
 
 async fn start(
     mut stream: BufStream<TcpStream>,
-    tls_client_config: Arc<ClientConfig>,
+    pool: Arc<ConnectionPool>,
     tls_acceptor: Option<TlsAcceptor>,
     shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
     stop_notifier: Arc<Notify>,
@@ -442,7 +447,6 @@ async fn start(
         stream = Box::new(accepted);
     }
 
-    let pool = Arc::new(ConnectionPool::new(tls_client_config));
     let span_cloned = span.clone();
     let service = hyper::service::service_fn(move |req: Request<Incoming>| {
         let mut shared_cache = shared_cache.clone();
@@ -553,7 +557,7 @@ fn get_secure_uri(req: &hyper::Request<Incoming>) -> anyhow::Result<Uri> {
 }
 
 struct QuickContext {
-    tls_client_config: Arc<ClientConfig>,
+    pool: Arc<ConnectionPool>,
     local: Option<std::net::IpAddr>,
     remote: SocketAddr,
 }
@@ -650,6 +654,9 @@ where
     };
 
     set_upstream_uri(&mut req, parsed, res);
+    if route.h2c {
+        req.extensions_mut().insert(UpstreamH2c);
+    }
 
     info!(target: "r3v3rs3::access_log", remote = %info.remote, client = %client.ip, local = %info.local, action, target = %req.uri());
     let span: Span = span!(Level::INFO, "http", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, target = %req.uri());
@@ -817,7 +824,7 @@ where
     T: BidiStream<Bytes> + Send + 'static,
     <T as BidiStream<Bytes>>::RecvStream: Send + Sync,
 {
-    let pool = Arc::new(ConnectionPool::new(ctx.tls_client_config));
+    let pool = ctx.pool;
 
     let enter = span.clone();
     let _enter = enter.enter();

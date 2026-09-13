@@ -82,6 +82,7 @@ impl Router {
                     header_rules,
                     compression: compression.clone(),
                     cache: proxy_cache.clone(),
+                    h2c: http.h2c,
                 });
             }
         }
@@ -121,6 +122,8 @@ pub struct FilteredRoute {
     pub compression: Option<Arc<Compression>>,
     /// `None` when the proxy cache is disabled. Every route of the proxy shares the cache.
     pub cache: Option<Arc<HttpCache>>,
+    /// Sends requests to plain HTTP upstream servers with HTTP/2 prior knowledge.
+    pub h2c: bool,
 }
 
 #[derive(Debug)]

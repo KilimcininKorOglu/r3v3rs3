@@ -73,6 +73,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                     headers: Default::default(),
                     compression: Default::default(),
                     cache: Default::default(),
+                    h2c: false,
                 })),
                 ..Default::default()
             },
@@ -187,6 +188,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                     headers: Default::default(),
                     compression: Default::default(),
                     cache: Default::default(),
+                    h2c: false,
                 })),
                 ..Default::default()
             },
@@ -282,6 +284,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                     headers: Default::default(),
                     compression: Default::default(),
                     cache: Default::default(),
+                    h2c: false,
                 })),
                 ..Default::default()
             },
@@ -392,6 +395,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                     headers: Default::default(),
                     compression: Default::default(),
                     cache: Default::default(),
+                    h2c: false,
                 })),
                 ..Default::default()
             },

@@ -115,7 +115,15 @@ impl<T: Write + Read + Connection + Unpin> Connection for MaybeHttpsStream<T> {
     fn connected(&self) -> Connected {
         match self {
             MaybeHttpsStream::Http(s) => s.connected(),
-            MaybeHttpsStream::Https(s) => s.inner().get_ref().0.connected(),
+            MaybeHttpsStream::Https(s) => {
+                let (tcp, tls) = s.inner().get_ref();
+                let connected = tcp.connected();
+                if tls.alpn_protocol() == Some(b"h2") {
+                    connected.negotiated_h2()
+                } else {
+                    connected
+                }
+            }
         }
     }
 }

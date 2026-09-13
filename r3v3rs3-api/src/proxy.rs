@@ -84,6 +84,9 @@ pub struct HttpProxy {
     /// In-memory response cache shared by every route of this proxy.
     #[serde(default, skip_serializing_if = "CacheConfig::is_disabled")]
     pub cache: CacheConfig,
+    /// Sends HTTP/2 with prior knowledge (h2c) to the plain HTTP upstream servers of this proxy.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub h2c: bool,
 }
 
 fn upgrade_insecure_default() -> bool {
@@ -92,6 +95,10 @@ fn upgrade_insecure_default() -> bool {
 
 fn is_true(b: &bool) -> bool {
     *b
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

@@ -46,6 +46,7 @@ struct ProxyForm {
     response_headers: String,
     compression: CompressionForm,
     cache: CacheForm,
+    h2c: bool,
 }
 
 impl ProxyForm {
@@ -68,6 +69,7 @@ impl ProxyForm {
             response_headers: format_header_rules(&proxy.headers.response),
             compression: CompressionForm::new(&proxy.compression),
             cache: CacheForm::new(&proxy.cache),
+            h2c: proxy.h2c,
         }
     }
 }
@@ -277,6 +279,12 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { cache_view(&form) }
             { error_view(errors.get("cache")) }
             <p class={HINT_CLASS}>{"Stores GET responses in memory and sends them without contacting the upstream server. The cache follows Cache-Control, Expires, Vary, ETag and Last-Modified, and does not store private responses or responses with Set-Cookie. Default TTL applies to responses without a lifetime. With 0, such a response is stored only when it has a validator. Use Purge in the proxy list to remove the stored responses."}</p>
+
+            <label class={SECTION_CLASS}>{"Upstream Protocol"}</label>
+            <div>
+                { toggle(state_input(&form, checked, |form, value| form.h2c = value), form.h2c, "Use HTTP/2 for Plain HTTP Servers (h2c)", "mt-4") }
+            </div>
+            <p class={HINT_CLASS}>{"HTTPS servers negotiate HTTP/2 or HTTP/1.1 automatically. Plain HTTP servers receive HTTP/1.1, unless this option is on. Turn it on only when every plain HTTP server of this proxy accepts HTTP/2 with prior knowledge. WebSocket and other upgrade requests always use HTTP/1.1."}</p>
 
             <label class={SECTION_CLASS}>{"Routes"}</label>
 
@@ -679,6 +687,7 @@ fn get_proxy(form: &ProxyForm, routes: &[RouteForm]) -> Result<HttpProxy, HashMa
         headers,
         compression,
         cache,
+        h2c: form.h2c,
     })
 }
 

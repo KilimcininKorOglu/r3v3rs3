@@ -32,6 +32,7 @@ fn proxy(routes: Vec<Route>, ip_filter: IpFilter, client_ip: ClientIpConfig) -> 
         headers: Default::default(),
         compression: Default::default(),
         cache: Default::default(),
+        h2c: false,
     }
 }
 

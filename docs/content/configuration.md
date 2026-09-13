@@ -324,7 +324,19 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 ## HTTP/2
 
-r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections. HTTP/2 is automatically negotiated if the client supports it. However, most web browsers will only use HTTP/2 if the connection is over TLS because they have no prior knowledge of the server's support for HTTP/2 without ALPN (Application-Layer Protocol Negotiation).
+r3v3rs3 supports HTTP/2 for HTTP and HTTPS proxies in both upstream and downstream connections.
+
+Downstream, HTTP/2 is automatically negotiated if the client supports it. Most web browsers use HTTP/2 only over TLS, because they need ALPN (Application-Layer Protocol Negotiation) to learn that the server supports HTTP/2.
+
+Upstream, r3v3rs3 offers `h2` and `http/1.1` with ALPN to HTTPS servers and uses the protocol that the server selects. Plain HTTP servers receive HTTP/1.1, because a plain connection cannot negotiate the protocol. Set `h2c = true` on a proxy whose plain HTTP servers accept HTTP/2 with prior knowledge (h2c). WebSocket and other upgrade requests always use HTTP/1.1. All connections of a port share the upstream connections, so one HTTP/2 upstream connection carries the requests of many clients.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+h2c = true
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
+```
 
 ## WebSocket
 

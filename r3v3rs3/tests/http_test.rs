@@ -136,6 +136,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                     headers: Default::default(),
                     compression: Default::default(),
                     cache: Default::default(),
+                    h2c: false,
                 })),
                 ..Default::default()
             },
@@ -290,6 +291,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     headers: Default::default(),
                     compression: Default::default(),
                     cache: Default::default(),
+                    h2c: false,
                 })),
                 ..Default::default()
             },
@@ -370,6 +372,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     headers: Default::default(),
                     compression: Default::default(),
                     cache: Default::default(),
+                    h2c: false,
                 })),
                 ..Default::default()
             },
