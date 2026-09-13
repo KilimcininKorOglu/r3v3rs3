@@ -219,16 +219,43 @@ impl TestStorageBuilder {
     }
 }
 
-pub fn http_port_entry(id: &str, port: &TestPort) -> PortEntry {
+pub fn port_entry(id: &str, listen: Multiaddr) -> PortEntry {
     PortEntry {
         id: id.parse().unwrap(),
         port: Port {
             active: true,
             name: String::new(),
-            listen: port.multiaddr_http(),
+            listen,
             opts: Default::default(),
         },
     }
+}
+
+pub fn http_port_entry(id: &str, port: &TestPort) -> PortEntry {
+    port_entry(id, port.multiaddr_http())
+}
+
+/// Signs in to the admin API as `admin` with the password `secret` and returns the session cookie.
+pub async fn admin_session_cookie(addr: SocketAddr) -> anyhow::Result<String> {
+    let res = reqwest::Client::new()
+        .post(format!("http://{addr}/api/login"))
+        .json(&LoginRequest {
+            username: "admin".to_string(),
+            method: LoginMethod::Password {
+                password: "secret".to_string(),
+            },
+            insecure: true,
+        })
+        .send()
+        .await?
+        .error_for_status()?;
+    let cookie = res
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .ok_or_else(|| anyhow::anyhow!("login response has no session cookie"))?;
+    Ok(cookie.to_string())
 }
 
 pub fn http_proxy_entry(id: &str, port_id: &str, http: HttpProxy) -> ProxyEntry {

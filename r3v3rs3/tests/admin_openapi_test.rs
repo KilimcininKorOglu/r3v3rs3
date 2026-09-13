@@ -1,6 +1,5 @@
 use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
-use r3v3rs3_api::auth::{LoginMethod, LoginRequest};
-use reqwest::header::{CONTENT_TYPE, COOKIE, SET_COOKIE};
+use reqwest::header::{CONTENT_TYPE, COOKIE};
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
@@ -8,7 +7,7 @@ use std::net::SocketAddr;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::{alloc_tcp_port, wait_for_listener, with_server, TestStorage};
+use common::{admin_session_cookie, alloc_tcp_port, wait_for_listener, with_server, TestStorage};
 
 /// Every route of the admin API. The OpenAPI document must list exactly these operations.
 const OPERATIONS: [(&str, &str); 35] = [
@@ -77,7 +76,7 @@ async fn openapi_document_and_swagger_ui_require_a_session() -> anyhow::Result<(
         assert_eq!(status(&client, addr, "/api/openapi.json", None).await?, 401);
         assert_eq!(status(&client, addr, "/api/docs/", None).await?, 401);
 
-        let cookie = login(&client, addr).await?;
+        let cookie = admin_session_cookie(addr).await?;
         let document: Value = client
             .get(format!("http://{addr}/api/openapi.json"))
             .header(COOKIE, &cookie)
@@ -186,28 +185,6 @@ fn collect_references(value: &Value, references: &mut Vec<String>) {
             .for_each(|child| collect_references(child, references)),
         _ => {}
     }
-}
-
-async fn login(client: &Client, addr: SocketAddr) -> anyhow::Result<String> {
-    let res = client
-        .post(format!("http://{addr}/api/login"))
-        .json(&LoginRequest {
-            username: "admin".to_string(),
-            method: LoginMethod::Password {
-                password: "secret".to_string(),
-            },
-            insecure: true,
-        })
-        .send()
-        .await?
-        .error_for_status()?;
-    let cookie = res
-        .headers()
-        .get(SET_COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .ok_or_else(|| anyhow::anyhow!("login response has no session cookie"))?;
-    Ok(cookie.to_string())
 }
 
 async fn status(

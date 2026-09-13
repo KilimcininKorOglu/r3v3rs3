@@ -79,14 +79,15 @@ impl TcpPortContext {
             .with_no_client_auth();
         self.tls_client_config = Arc::new(config);
 
+        let mut servers = Vec::new();
         for proxy in proxies {
             if let ProxyKind::Tcp(proxy) = proxy.proxy.kind {
                 for server in proxy.upstream_servers {
-                    let server = multiaddr_to_host(&server.addr)?;
-                    self.servers.push(server);
+                    servers.push(multiaddr_to_host(&server.addr)?);
                 }
             }
         }
+        self.servers = servers;
 
         if let Some(tls) = &mut self.tls_termination {
             self.status.state.tls = Some(tls.setup(certs).await);
