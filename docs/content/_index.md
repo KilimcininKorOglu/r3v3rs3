@@ -16,7 +16,7 @@ sort_by = "weight"
 - Easily deployable single binary with a built-in WebUI
 - Allows live configuration updates via a REST API without restarting the service
 - Imports TLS certificates from the GUI or can generate a self-signed certificate
-- Provides Let's Encrypt support (ACME v2, HTTP challenge only) for seamless certificate provisioning
+- Provides Let's Encrypt support (ACME v2 with the HTTP-01 and DNS-01 challenges) for seamless certificate provisioning, including wildcard certificates through the Cloudflare, Route 53, DigitalOcean and Hetzner Cloud DNS APIs
 
 # Installation
 

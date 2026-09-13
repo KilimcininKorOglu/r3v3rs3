@@ -541,7 +541,66 @@ Self-signed bir sertifika oluşturduğunuzda r3v3rs3 bir CA sertifikası da olu�
 
 r3v3rs3, sertifikaları [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment) ile otomatik alabilir. Let's Encrypt, ZeroSSL ve Google Trust Services gibi birçok sertifika otoritesi ACME'yi destekler.
 
-r3v3rs3 ACME v2'yi yalnız HTTP challenge ile destekler. TCP 80 portunun açık ve internetten erişilebilir olduğundan emin olun.
+Bir ACME kaydı bir veya daha fazla domain adı içerir. Domain adlarını "Domain Adları" alanına virgülle ayırarak yazın, örneğin `example.com, *.example.com`. Sertifika her domain adını Subject Alternative Name olarak içerir. r3v3rs3 sertifikayı süresi dolmadan otomatik yeniler. Bir order başarısız olursa r3v3rs3 bir saat sonra yeniden order oluşturur.
+
+## Challenge'lar
+
+Sertifika otoritesi, her domain adını sizin yönettiğinizi bir challenge ile doğrular. Challenge'ı "Challenge" alanından seçin.
+
+| Challenge | Nasıl çalışır | Gereksinimler |
+|---|---|---|
+| HTTP-01 | Sertifika otoritesi `http://<domain>/.well-known/acme-challenge/<token>` adresine istek gönderir ve r3v3rs3 yanıt verir. | Her domain adı r3v3rs3'e çözümlenmeli, TCP 80 portu açık ve internetten erişilebilir olmalıdır. Wildcard domain adı kullanılamaz. |
+| DNS-01 | r3v3rs3, DNS provider'ınızın API'si ile `_acme-challenge.<domain>` TXT kaydını oluşturur. | Aşağıdaki tablodaki DNS provider'larından biri ve zone'u düzenleyebilen bir API credential'ı. |
+
+`*.example.com` gibi bir wildcard domain adı DNS-01 gerektirir. r3v3rs3, HTTP-01 ile girilen wildcard domain adını reddeder.
+
+## DNS-01
+
+r3v3rs3 her domain adı için şu adımları uygular:
+
+1. Provider API'si ile domain adının zone'unu bulur. Adı içeren en uzun zone kullanılır.
+2. `_acme-challenge.<domain>` TXT kaydını 60 saniyelik TTL ile oluşturur. `*.example.com` için kayıt adı `example.com` ile aynıdır: `_acme-challenge.example.com`. Bu yüzden kayıt iki değer taşır.
+3. TXT değerleri görünene kadar DNS'i 5 saniyede bir sorgular, en fazla 5 dakika bekler. Sorgulanan DNS sunucusunu "DNS Challenge Resolver" ayarı belirler. Ayar boşsa r3v3rs3 sistem resolver'ını kullanır.
+4. Sertifika otoritesine challenge'ların hazır olduğunu bildirir ve doğrulama için en fazla 3 dakika bekler.
+5. TXT kayıtlarını siler. Order başarısız olsa da kayıtları siler.
+
+Sistem resolver'ı cache'teki eski yanıtları döndürebilir. Propagation kontrolü sık başarısız oluyorsa "DNS Challenge Resolver" ayarına `1.1.1.1:53` gibi public bir resolver veya zone'un authoritative name server'ını yazın.
+
+| DNS provider | Credential'lar | Gereken izinler |
+|---|---|---|
+| Cloudflare | API Token | Zone için `Zone:Read` ve `DNS:Edit`. |
+| Route 53 | Access Key ID, Secret Access Key | `route53:ListHostedZones` ve `route53:ChangeResourceRecordSets`. Private hosted zone'lar atlanır. |
+| DigitalOcean | API Token | Domain'leri okuyabilen, domain kayıtlarını oluşturup silebilen bir token. |
+| Hetzner Cloud | API Token | Okuma ve yazma yetkisi olan bir Hetzner Cloud proje token'ı. Zone, Hetzner Cloud DNS'te olmalıdır. |
+
+r3v3rs3 bu API'lerin mock sunucularıyla ve [Pebble](https://github.com/letsencrypt/pebble) test sertifika otoritesiyle test edilir. Gerçek provider hesaplarıyla test edilmez.
+
+## Saklanan veriler
+
+r3v3rs3, ACME kayıtlarını config dizinindeki `acme.toml` dosyasında saklar. Dosya, her ACME hesabının private key'ini ve DNS provider credential'larını düz metin olarak içerir. Unix'te r3v3rs3 dosyayı `0600` izniyle oluşturur ve yazar. Böylece dosyayı yalnız process'in sahibi okuyabilir. Yönetim API'si ve WebUI credential'ları hiçbir zaman döndürmez. ACME listesi yalnız provider adını gösterir, örneğin `Let's Encrypt (DNS-01, Cloudflare)`.
+
+ACME kayıtlarını WebUI'dan oluşturun. r3v3rs3, ACME hesabını kayıt eklendiğinde oluşturur. `acme.toml` içindeki bir kayıt şöyle görünür:
+
+```toml
+version = "0.3.40"
+
+[acme1]
+provider = "Let's Encrypt"
+renewal_days = 60
+identifiers = ["example.com", "*.example.com"]
+challenge_type = "dns-01"
+
+[acme1.dns_provider]
+provider = "cloudflare"
+api_token = "<Cloudflare API token>"
+
+[acme1.account]
+id = "https://acme-v02.api.letsencrypt.org/acme/acct/123456789"
+key_pkcs8 = "<hesabın private key'i>"
+directory = "https://acme-v02.api.letsencrypt.org/directory"
+```
+
+`dns_provider` altındaki `provider` değeri `cloudflare`, `route53`, `digitalocean` veya `hetzner` olabilir. Route 53, `api_token` yerine `access_key_id` ve `secret_access_key` kullanır.
 
 # Ayarlar
 
@@ -554,6 +613,7 @@ WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütü
 | Giriş Denemesi Sıfırlama | `15m` | Limite ulaşıldıktan sonraki bekleme süresi. |
 | Arka Plan Görevi Aralığı | `1h` | Sertifika yenileme ve log temizleme görevlerinin çalışma aralığı. |
 | HTTP Challenge Adresi | `0.0.0.0:80` | ACME HTTP challenge'larının dinlendiği adres. |
+| DNS Challenge Resolver | boş | r3v3rs3'ün DNS-01 challenge'ının TXT kayıtları görünene kadar sorguladığı DNS sunucusu, örneğin `1.1.1.1:53`. Boş bırakılırsa sistem resolver'ı kullanılır. |
 | Veritabanı Log Saklama Süresi | `3months` | Log'ların log veritabanında ne kadar tutulacağı. |
 
 Süreleri `30s`, `15m`, `1h` veya `7days` gibi okunabilir bir biçimde yazın.

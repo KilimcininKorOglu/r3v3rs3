@@ -16,7 +16,7 @@ sort_by = "weight"
 - WebUI ile birlikte tek bir binary olarak gelir, kurulumu kolaydır.
 - REST API ile yapılan config değişiklikleri servisi yeniden başlatmadan uygulanır.
 - TLS sertifikaları arayüzden içe aktarılabilir veya self-signed sertifika oluşturulabilir.
-- Let's Encrypt ile sertifikalar otomatik alınır (ACME v2, yalnız HTTP challenge).
+- Let's Encrypt ile sertifikalar otomatik alınır (ACME v2, HTTP-01 ve DNS-01 challenge'ları). Wildcard sertifikalar için Cloudflare, Route 53, DigitalOcean ve Hetzner Cloud DNS API'leri kullanılır.
 
 # Kurulum
 

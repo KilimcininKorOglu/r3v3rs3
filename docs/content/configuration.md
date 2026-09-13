@@ -541,7 +541,66 @@ Also, if you generate a self-signed certificate, r3v3rs3 will automatically gene
 
 r3v3rs3 supports automatic certificate provisioning using [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment). ACME is supported by many certificate authorities, such as Let's Encrypt, ZeroSSL, and Google Trust Services.
 
-r3v3rs3 supports ACME v2 with HTTP challenge only. Make sure that TCP port 80 is open and accessible from the internet.
+An ACME entry holds one or more domain names. Enter them separated by commas in the "Domain Names" field, for example `example.com, *.example.com`. The certificate contains every domain name as a Subject Alternative Name. r3v3rs3 renews the certificate automatically before it expires. If an order fails, r3v3rs3 orders again after one hour.
+
+## Challenges
+
+The certificate authority checks that you control each domain name with a challenge. Select the challenge in the "Challenge" field.
+
+| Challenge | How it works | Requirements |
+|---|---|---|
+| HTTP-01 | The certificate authority requests `http://<domain>/.well-known/acme-challenge/<token>`, and r3v3rs3 answers. | Every domain name resolves to r3v3rs3, and TCP port 80 is open and accessible from the internet. Wildcard domain names are not possible. |
+| DNS-01 | r3v3rs3 creates a TXT record `_acme-challenge.<domain>` through the API of your DNS provider. | A DNS provider from the table below and an API credential that can edit the zone. |
+
+A wildcard domain name such as `*.example.com` needs DNS-01. r3v3rs3 rejects a wildcard domain name with HTTP-01.
+
+## DNS-01
+
+For each domain name, r3v3rs3 does these steps:
+
+1. It finds the zone of the domain name with the provider API. The longest zone that contains the name is used.
+2. It creates the TXT record `_acme-challenge.<domain>` with a TTL of 60 seconds. For `*.example.com`, the record is `_acme-challenge.example.com`, the same name as for `example.com`, so the record set holds two values.
+3. It asks DNS every 5 seconds until the TXT values are visible, for at most 5 minutes. The "DNS Challenge Resolver" setting selects the DNS server. Without this setting, r3v3rs3 uses the system resolver.
+4. It tells the certificate authority that the challenges are ready and waits at most 3 minutes for the validation.
+5. It deletes the TXT records. It also deletes them when the order fails.
+
+A system resolver can return cached answers. If the propagation check fails often, set "DNS Challenge Resolver" to a public resolver such as `1.1.1.1:53` or to an authoritative name server of the zone.
+
+| DNS provider | Credentials | Required permissions |
+|---|---|---|
+| Cloudflare | API Token | `Zone:Read` and `DNS:Edit` for the zone. |
+| Route 53 | Access Key ID, Secret Access Key | `route53:ListHostedZones` and `route53:ChangeResourceRecordSets`. Private hosted zones are skipped. |
+| DigitalOcean | API Token | A token that can read domains and create and delete domain records. |
+| Hetzner Cloud | API Token | A Hetzner Cloud project token with read and write access. The zone must be in Hetzner Cloud DNS. |
+
+r3v3rs3 is tested against mock servers of these APIs and against the [Pebble](https://github.com/letsencrypt/pebble) test certificate authority. It is not tested against real provider accounts.
+
+## Stored data
+
+r3v3rs3 stores ACME entries in `acme.toml` in the configuration directory. The file contains the private key of each ACME account and the DNS provider credentials in plain text. On Unix, r3v3rs3 creates and writes the file with mode `0600`, so only the owner of the process can read it. The admin API and the WebUI never return the credentials. The ACME list shows only the provider name, for example `Let's Encrypt (DNS-01, Cloudflare)`.
+
+Create ACME entries in the WebUI, because r3v3rs3 creates the ACME account when you add an entry. An entry in `acme.toml` looks like this:
+
+```toml
+version = "0.3.40"
+
+[acme1]
+provider = "Let's Encrypt"
+renewal_days = 60
+identifiers = ["example.com", "*.example.com"]
+challenge_type = "dns-01"
+
+[acme1.dns_provider]
+provider = "cloudflare"
+api_token = "<Cloudflare API token>"
+
+[acme1.account]
+id = "https://acme-v02.api.letsencrypt.org/acme/acct/123456789"
+key_pkcs8 = "<account private key>"
+directory = "https://acme-v02.api.letsencrypt.org/directory"
+```
+
+The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean` or `hetzner`. Route 53 uses `access_key_id` and `secret_access_key` instead of `api_token`.
 
 # Settings
 
@@ -554,6 +613,7 @@ The "Settings" section of the WebUI edits the server-wide options stored in `con
 | Login Attempts Reset | `15m` | Wait time after the limit is reached. |
 | Background Task Interval | `1h` | Interval of certificate renewal and log cleanup tasks. |
 | HTTP Challenge Address | `0.0.0.0:80` | Listening address for ACME HTTP challenges. |
+| DNS Challenge Resolver | empty | DNS server, for example `1.1.1.1:53`, that r3v3rs3 asks until the TXT records of a DNS-01 challenge are visible. Empty uses the system resolver. |
 | Database Log Retention | `3months` | How long logs are kept in the log database. |
 
 Durations use a human-readable format, for example `30s`, `15m`, `1h`, or `7days`.
