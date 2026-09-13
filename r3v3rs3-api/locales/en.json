@@ -104,7 +104,7 @@
   "common.upload": "Upload",
   "common.view": "View",
   "common.yes": "Yes",
-  "discovery.proxies": "{count} proxies",
+  "discovery.proxies": "Proxies: {count}",
   "discovery.state_connecting": "Connecting",
   "discovery.state_error": "Error",
   "discovery.state_running": "Running",
