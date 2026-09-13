@@ -44,14 +44,15 @@ impl UdpPortContext {
     }
 
     pub async fn setup(&mut self, proxies: Vec<ProxyEntry>) -> Result<(), Error> {
+        let mut servers = Vec::new();
         for proxy in proxies {
             if let ProxyKind::Udp(proxy) = proxy.proxy.kind {
                 for server in proxy.upstream_servers {
-                    let server = multiaddr_to_host(&server.addr)?;
-                    self.servers.push(server);
+                    servers.push(multiaddr_to_host(&server.addr)?);
                 }
             }
         }
+        self.servers = servers;
         Ok(())
     }
 
@@ -147,4 +148,41 @@ pub struct Connection {
     pub port: u16,
     pub addr: Option<SocketAddr>,
     pub ttl: Instant,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use r3v3rs3_api::port::{Port, UpstreamServer};
+    use r3v3rs3_api::proxy::{Proxy, UdpProxy};
+
+    #[tokio::test]
+    async fn setup_rebuilds_the_server_list() {
+        let entry = PortEntry {
+            id: "port".parse().unwrap(),
+            port: Port {
+                active: true,
+                name: String::new(),
+                listen: "/ip4/127.0.0.1/udp/53".parse().unwrap(),
+                opts: Default::default(),
+            },
+        };
+        let proxy = ProxyEntry {
+            id: "proxy".parse().unwrap(),
+            proxy: Proxy {
+                ports: vec![entry.id],
+                kind: ProxyKind::Udp(UdpProxy {
+                    upstream_servers: vec![UpstreamServer {
+                        addr: "/ip4/127.0.0.1/udp/5353".parse().unwrap(),
+                    }],
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut ctx = UdpPortContext::new(&entry).unwrap();
+        ctx.setup(vec![proxy.clone()]).await.unwrap();
+        ctx.setup(vec![proxy]).await.unwrap();
+        assert_eq!(ctx.servers.len(), 1);
+    }
 }
