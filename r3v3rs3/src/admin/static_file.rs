@@ -21,15 +21,7 @@ pub async fn fallback(uri: Uri, req_headers: HeaderMap) -> Result<impl IntoRespo
     if path.starts_with("/api/") {
         return Err(AppError::NotFound);
     }
-    let path_has_extension = path
-        .rfind('.')
-        .map(|i| i > path.rfind('/').unwrap_or(0))
-        .unwrap_or_default();
-    let file_name = if path == "/" || !path_has_extension {
-        "index.html"
-    } else {
-        path.trim_start_matches('/')
-    };
+    let file_name = requested_file_name(path);
 
     let Some(file) = STATIC_DIR.get_file(Path::new("webui").join(format!("{file_name}.gz"))) else {
         return Err(AppError::NotFound);
@@ -66,6 +58,19 @@ pub async fn fallback(uri: Uri, req_headers: HeaderMap) -> Result<impl IntoRespo
     Ok((StatusCode::OK, headers, Bytes::from_static(file.contents())))
 }
 
+/// Paths without a file extension are WebUI routes, so they load index.html.
+fn requested_file_name(path: &str) -> &str {
+    let path_has_extension = path
+        .rfind('.')
+        .map(|i| i > path.rfind('/').unwrap_or(0))
+        .unwrap_or_default();
+    if path == "/" || !path_has_extension {
+        "index.html"
+    } else {
+        path.trim_start_matches('/')
+    }
+}
+
 /// Hashed bundle files never change, so browsers may keep them. Every other file,
 /// index.html included, must be revalidated so that an upgrade loads the new bundle.
 fn cache_control(file_name: &str) -> &'static str {
@@ -87,37 +92,38 @@ fn header_value(value: &str) -> Result<HeaderValue, AppError> {
 mod tests {
     use super::*;
 
-    async fn cache_control_of(path: &str) -> String {
-        let uri: Uri = path.parse().unwrap();
-        let Ok(response) = fallback(uri, HeaderMap::new()).await else {
-            panic!("static file not found: {path}");
-        };
-        response.into_response().headers()[CACHE_CONTROL]
-            .to_str()
-            .unwrap()
-            .to_string()
+    // These tests do not read STATIC_DIR, because CI builds the server without the WebUI bundle.
+    fn cache_control_of(path: &str) -> &'static str {
+        cache_control(requested_file_name(path))
+    }
+
+    #[test]
+    fn index_html_is_revalidated() {
+        assert_eq!(requested_file_name("/"), "index.html");
+        assert_eq!(requested_file_name("/proxies/abc"), "index.html");
+        assert_eq!(requested_file_name("/proxies/a.b/edit"), "index.html");
+        assert_eq!(cache_control_of("/"), "no-cache");
+        assert_eq!(cache_control_of("/proxies/abc"), "no-cache");
+        assert_eq!(cache_control_of("/robots.txt"), "no-cache");
+    }
+
+    #[test]
+    fn hashed_bundle_is_immutable() {
+        for path in [
+            "/r3v3rs3-webui-f5ed843114223c55.js",
+            "/r3v3rs3-webui-f5ed843114223c55_bg.wasm",
+            "/tailwind-cd802f743c089f72.css",
+        ] {
+            assert_eq!(
+                cache_control_of(path),
+                "public, max-age=31536000, immutable"
+            );
+        }
     }
 
     #[tokio::test]
-    async fn index_html_is_revalidated() {
-        assert_eq!(cache_control_of("/").await, "no-cache");
-        assert_eq!(cache_control_of("/proxies/abc").await, "no-cache");
-    }
-
-    #[tokio::test]
-    async fn hashed_bundle_is_immutable() {
-        let bundle = STATIC_DIR
-            .get_dir("webui")
-            .and_then(|dir| {
-                dir.files()
-                    .filter_map(|file| file.path().file_name()?.to_str())
-                    .find(|name| name.starts_with("r3v3rs3-webui-") && name.ends_with(".js.gz"))
-            })
-            .unwrap();
-        let path = format!("/{}", bundle.trim_end_matches(".gz"));
-        assert_eq!(
-            cache_control_of(&path).await,
-            "public, max-age=31536000, immutable"
-        );
+    async fn api_paths_are_not_served() {
+        let uri: Uri = "/api/unknown".parse().unwrap();
+        assert!(fallback(uri, HeaderMap::new()).await.is_err());
     }
 }
