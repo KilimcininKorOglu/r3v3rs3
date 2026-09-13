@@ -1,12 +1,15 @@
 use super::acme_list::AcmeList;
 use super::acme_schedule::AcmeSchedule;
 use super::cert_list::CertList;
+use super::discovery::{self, DiscoveryRegistry};
 use super::proxy_list::ProxyList;
 use super::quic::QuicListenerPool;
+use super::rpc::proxies::validate_proxy;
 use super::udp::UdpListenerPool;
 use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
 use crate::certs::acme::AcmeOrder;
 use crate::config::storage::Storage;
+use crate::discovery::DiscoverySnapshot;
 use crate::log::DatabaseLayer;
 use crate::proxy::http::SessionService;
 use crate::{
@@ -19,7 +22,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use quinn::Incoming;
 use r3v3rs3_api::app::{AppConfig, AppInfo};
-use r3v3rs3_api::discovery::DiscoveryProvider;
+use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
@@ -58,6 +61,7 @@ pub struct ServerState {
     br_sender: broadcast::Sender<ServerEvent>,
     callback_sender: mpsc::Sender<RpcCallback>,
     broadcast_events: bool,
+    discovery: DiscoveryRegistry,
 }
 
 pub enum Received {
@@ -124,6 +128,7 @@ impl ServerState {
             br_sender,
             callback_sender,
             broadcast_events: false,
+            discovery: DiscoveryRegistry::default(),
         };
 
         this.update_ports().await;
@@ -163,25 +168,82 @@ impl ServerState {
                     self.storage.save_cdn_ranges(&ranges).await;
                 }
             }
-            ServerCommand::SetDiscoveredProxies { provider, entries } => {
-                self.set_discovered_proxies(provider, entries).await;
+            ServerCommand::SetDiscovery { snapshot } => {
+                self.set_discovery(snapshot).await;
             }
         }
     }
 
-    async fn set_discovered_proxies(
-        &mut self,
-        provider: DiscoveryProvider,
-        entries: Vec<ProxyEntry>,
-    ) {
-        let update = self.proxies.replace_discovered(provider, entries);
-        for id in &update.skipped {
-            warn!(%provider, %id, "skipped a discovered proxy that conflicts with another proxy");
-        }
-        if update.changed {
+    async fn set_discovery(&mut self, snapshot: DiscoverySnapshot) {
+        let provider = snapshot.provider;
+        self.discovery.update(snapshot);
+        if self.apply_discovery(provider).await {
             self.publish_proxies();
             self.reload_proxies().await;
         }
+        self.publish_discovery();
+    }
+
+    /// Builds the proxies of a provider from its latest snapshot and the current ports. Returns
+    /// true when the proxy list changed.
+    async fn apply_discovery(&mut self, provider: DiscoveryProvider) -> bool {
+        let ports = self.ports.entries().cloned().collect::<Vec<_>>();
+        let proxies = self.discovery.proxies(provider);
+        let built = discovery::build(
+            provider,
+            &proxies,
+            &ports,
+            self.ids_not_owned_by(provider),
+            |proxy| validate_proxy(proxy, self),
+        );
+        let mut issues = built.issues;
+        let (entries, seal_issues) = self.discovery.seal(provider, built.entries).await;
+        issues.extend(seal_issues);
+        let update = self.proxies.replace_discovered(provider, entries.clone());
+        issues.extend(discovery::conflict_issues(&entries, &update.skipped));
+        let added = entries.len() - update.skipped.len();
+        if !issues.is_empty() {
+            warn!(%provider, issues = issues.len(), "some discovered proxies were not added");
+        }
+        self.discovery.set_result(provider, added, issues);
+        update.changed
+    }
+
+    /// Rebuilds the proxies of every provider, because a port change can resolve a port name
+    /// differently. Returns true when the proxy list changed.
+    async fn refresh_discovery(&mut self) -> bool {
+        let providers = self.discovery.providers();
+        let mut changed = false;
+        for provider in &providers {
+            changed |= self.apply_discovery(*provider).await;
+        }
+        if !providers.is_empty() {
+            self.publish_discovery();
+        }
+        changed
+    }
+
+    fn ids_not_owned_by(&self, provider: DiscoveryProvider) -> HashSet<ShortId> {
+        let other_proxies = self
+            .proxies
+            .entries()
+            .filter(|entry| entry.source.as_ref().map(|source| source.provider) != Some(provider));
+        self.acmes
+            .entries()
+            .map(|acme| acme.id)
+            .chain(self.ports.entries().map(|port| port.id))
+            .chain(other_proxies.map(|entry| entry.id))
+            .collect()
+    }
+
+    fn publish_discovery(&self) {
+        let _ = self.br_sender.send(ServerEvent::DiscoveryStatusUpdated {
+            entries: self.discovery.statuses(),
+        });
+    }
+
+    pub fn discovery_statuses(&self) -> Vec<DiscoveryStatus> {
+        self.discovery.statuses()
     }
 
     pub fn has_active_listeners(&self) -> bool {
@@ -285,6 +347,9 @@ impl ServerState {
         self.storage.save_ports(&entries).await;
         if self.proxies.remove_incompatible_ports(&entries) {
             self.update_proxies().await;
+        }
+        if self.refresh_discovery().await {
+            self.publish_proxies();
         }
         let _ = self
             .br_sender

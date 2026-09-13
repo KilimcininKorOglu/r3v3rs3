@@ -1,6 +1,7 @@
 use crate::acme::AcmeInfo;
 use crate::app::AppConfig;
 use crate::cert::CertInfo;
+use crate::discovery::DiscoveryStatus;
 use crate::id::ShortId;
 use crate::port::PortStatus;
 use crate::proxy::ProxyStatus;
@@ -19,5 +20,6 @@ pub enum ServerEvent {
     ProxiesUpdated { entries: Vec<ProxyEntry> },
     ProxyStatusUpdated { id: ShortId, status: ProxyStatus },
     AcmeUpdated { entries: Vec<AcmeInfo> },
+    DiscoveryStatusUpdated { entries: Vec<DiscoveryStatus> },
     Shutdown,
 }

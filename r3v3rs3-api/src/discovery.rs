@@ -49,6 +49,42 @@ pub struct DiscoverySource {
     pub resource: String,
 }
 
+/// The connection state of a discovery provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DiscoveryState {
+    /// The provider has not read its resources yet.
+    Connecting,
+    /// The provider has read its resources and watches them for changes.
+    Running,
+    /// The provider cannot read its resources. The proxies of its last read stay active.
+    Error,
+}
+
+/// A resource definition that did not become a proxy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DiscoveryIssue {
+    #[schema(example = "web-1")]
+    pub resource: String,
+    #[schema(example = "http.app: port not found: https")]
+    pub message: String,
+}
+
+/// The state of a discovery provider and the result of its last read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DiscoveryStatus {
+    pub provider: DiscoveryProvider,
+    pub state: DiscoveryState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The number of proxies that the provider added.
+    pub proxies: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub issues: Vec<DiscoveryIssue>,
+    /// Unix time of the last update.
+    pub updated_at: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

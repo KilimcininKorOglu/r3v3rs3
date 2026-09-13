@@ -4,6 +4,7 @@ use crate::auth::use_ensure_auth;
 use crate::components::data_list::{
     active_toggle, list_card, status_badge, Column, Row, DANGER_LINK_CLASS, LINK_CLASS,
 };
+use crate::components::discovery_status::DiscoveryStatusCard;
 use crate::i18n::use_locale;
 use crate::pages::Route;
 use crate::store::{PortStore, ProxyStore};
@@ -87,6 +88,7 @@ pub fn proxy_list() -> Html {
         .collect::<Vec<_>>();
     html! {
         <>
+            <DiscoveryStatusCard />
             { list_card(locale, proxies.loaded, "proxies.empty", &COLUMNS, &rows) }
             <div class="flex items-center justify-end my-4">
                 <div>

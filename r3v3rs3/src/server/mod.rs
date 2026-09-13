@@ -13,6 +13,7 @@ mod acme_list;
 mod acme_schedule;
 pub mod cert_list;
 mod credentials;
+mod discovery;
 mod port_list;
 mod proxy_list;
 mod quic;

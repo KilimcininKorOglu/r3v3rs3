@@ -41,6 +41,7 @@ const SESSION_COOKIE: &str = "token";
         (name = "logs", description = "Logs of ports, proxies and certificates."),
         (name = "app_info", description = "Build and path information of the server."),
         (name = "cdn", description = "CDN IP ranges for the client IP resolution."),
+        (name = "discovery", description = "Service discovery providers."),
     )
 )]
 pub struct ApiDoc;

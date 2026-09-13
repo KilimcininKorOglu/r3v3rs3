@@ -3,6 +3,7 @@ use indexmap::IndexMap;
 use r3v3rs3_api::discovery::DiscoveryProvider;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::multiaddr::Multiaddr;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyKind, ProxyState, ProxyStatus};
 
@@ -35,6 +36,15 @@ pub struct DiscoveredUpdate {
     pub changed: bool,
     /// The proxies that were not added.
     pub skipped: Vec<ShortId>,
+}
+
+/// Whether a port with this listening address can serve a proxy of this kind.
+pub fn accepts(kind: &ProxyKind, listen: &Multiaddr) -> bool {
+    match kind {
+        ProxyKind::Http(_) => listen.is_http(),
+        ProxyKind::Tcp(_) => !listen.is_udp() && !listen.is_http(),
+        ProxyKind::Udp(_) => listen.is_udp() && !listen.is_http(),
+    }
 }
 
 fn is_from(entry: &ProxyEntry, provider: DiscoveryProvider) -> bool {
@@ -113,16 +123,7 @@ impl ProxyList {
                     ports
                         .iter()
                         .find(|p| p.id == *port)
-                        .map(|port| match ctx.entry.proxy.kind {
-                            ProxyKind::Http(_) => port.port.listen.is_http(),
-                            ProxyKind::Tcp(_) => {
-                                !port.port.listen.is_udp() && !port.port.listen.is_http()
-                            }
-                            ProxyKind::Udp(_) => {
-                                port.port.listen.is_udp() && !port.port.listen.is_http()
-                            }
-                        })
-                        .unwrap_or_default()
+                        .is_some_and(|port| accepts(&ctx.entry.proxy.kind, &port.port.listen))
                 })
                 .collect();
             changed |= len != ctx.entry.proxy.ports.len();

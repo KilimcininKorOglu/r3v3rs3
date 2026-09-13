@@ -48,6 +48,7 @@ pub(crate) mod auth;
 mod cdn;
 mod certs;
 mod config;
+mod discovery;
 mod logs;
 mod openapi;
 mod ports;
@@ -216,6 +217,10 @@ fn resource_routes() -> OpenApiRouter<AppState> {
             OpenApiRouter::new()
                 .routes(routes!(cdn::get))
                 .routes(routes!(cdn::refresh)),
+        )
+        .nest(
+            "/discovery",
+            OpenApiRouter::new().routes(routes!(discovery::list)),
         )
 }
 

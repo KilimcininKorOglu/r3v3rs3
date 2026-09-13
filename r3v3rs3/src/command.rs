@@ -1,11 +1,10 @@
 use crate::{
     cdn::CdnRanges,
     certs::{acme::AcmeOrder, Cert},
+    discovery::DiscoverySnapshot,
     server::rpc::ErasedRpcMethod,
 };
-use r3v3rs3_api::discovery::DiscoveryProvider;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::proxy::ProxyEntry;
 use std::sync::Arc;
 
 pub enum ServerCommand {
@@ -29,10 +28,9 @@ pub enum ServerCommand {
     SetCdnRanges {
         ranges: CdnRanges,
     },
-    /// Replaces every proxy of the provider with these proxies.
-    SetDiscoveredProxies {
-        provider: DiscoveryProvider,
-        entries: Vec<ProxyEntry>,
+    /// Replaces the state and the proxies of a discovery provider.
+    SetDiscovery {
+        snapshot: DiscoverySnapshot,
     },
 }
 
@@ -58,10 +56,12 @@ impl std::fmt::Debug for ServerCommand {
                 .debug_struct("SetCdnRanges")
                 .field("updated_at", &ranges.updated_at)
                 .finish(),
-            Self::SetDiscoveredProxies { provider, entries } => f
-                .debug_struct("SetDiscoveredProxies")
-                .field("provider", provider)
-                .field("entries", &entries.len())
+            // The definitions can hold plain text passwords, so only the counts are printed.
+            Self::SetDiscovery { snapshot } => f
+                .debug_struct("SetDiscovery")
+                .field("provider", &snapshot.provider)
+                .field("state", &snapshot.state)
+                .field("proxies", &snapshot.proxies.as_ref().map(Vec::len))
                 .finish(),
         }
     }

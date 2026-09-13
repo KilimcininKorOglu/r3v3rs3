@@ -1,5 +1,5 @@
 use crate::{
-    store::{AcmeStore, CertStore, PortStore, ProxyStore},
+    store::{AcmeStore, CertStore, DiscoveryStore, PortStore, ProxyStore},
     API_ENDPOINT,
 };
 use futures::StreamExt;
@@ -17,13 +17,25 @@ struct EventSession {
     active: bool,
 }
 
+/// The stores that the server events update.
+struct Dispatchers {
+    ports: Dispatch<PortStore>,
+    certs: Dispatch<CertStore>,
+    acme: Dispatch<AcmeStore>,
+    proxies: Dispatch<ProxyStore>,
+    discovery: Dispatch<DiscoveryStore>,
+}
+
 #[hook]
 pub fn use_event_subscriber() {
     let (event, dispatcher) = use_store::<EventSession>();
-    let (_, ports) = use_store::<PortStore>();
-    let (_, certs) = use_store::<CertStore>();
-    let (_, acme) = use_store::<AcmeStore>();
-    let (_, proxies) = use_store::<ProxyStore>();
+    let dispatchers = Dispatchers {
+        ports: use_store::<PortStore>().1,
+        certs: use_store::<CertStore>().1,
+        acme: use_store::<AcmeStore>().1,
+        proxies: use_store::<ProxyStore>().1,
+        discovery: use_store::<DiscoveryStore>().1,
+    };
     if !event.active {
         let mut es = EventSource::new(&format!("{API_ENDPOINT}/events")).unwrap();
         let mut stream = es.subscribe("message").unwrap();
@@ -32,57 +44,13 @@ pub fn use_event_subscriber() {
         spawn_local(async move {
             let _es = es;
             while let Some(Ok((_, msg))) = stream.next().await {
-                if let Ok(s) = msg.data().into_serde::<String>() {
-                    if let Ok(event) = serde_json::from_str::<ServerEvent>(&s) {
-                        match event {
-                            ServerEvent::PortTableUpdated { entries } => {
-                                ports.reduce(|state| {
-                                    PortStore {
-                                        entries,
-                                        ..(*state).clone()
-                                    }
-                                    .into()
-                                });
-                            }
-                            ServerEvent::CertsUpdated { entries } => {
-                                certs.set(CertStore {
-                                    entries,
-                                    loaded: true,
-                                });
-                            }
-                            ServerEvent::AcmeUpdated { entries } => {
-                                acme.set(AcmeStore {
-                                    entries,
-                                    loaded: true,
-                                });
-                            }
-                            ServerEvent::ProxiesUpdated { entries } => {
-                                proxies.reduce(|state| {
-                                    ProxyStore {
-                                        entries,
-                                        loaded: true,
-                                        ..(*state).clone()
-                                    }
-                                    .into()
-                                });
-                            }
-                            ServerEvent::PortStatusUpdated { id, status } => {
-                                ports.reduce(|state| {
-                                    let mut cloned = (*state).clone();
-                                    cloned.statuses.insert(id, status);
-                                    cloned.into()
-                                });
-                            }
-                            ServerEvent::ProxyStatusUpdated { id, status } => {
-                                proxies.reduce(|state| {
-                                    let mut cloned = (*state).clone();
-                                    cloned.statuses.insert(id, status);
-                                    cloned.into()
-                                });
-                            }
-                            _ => (),
-                        }
-                    }
+                let event = msg
+                    .data()
+                    .into_serde::<String>()
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<ServerEvent>(&s).ok());
+                if let Some(event) = event {
+                    apply_event(&dispatchers, event);
                 }
             }
             Timeout::new(5000, move || {
@@ -90,5 +58,59 @@ pub fn use_event_subscriber() {
             })
             .forget();
         })
+    }
+}
+
+fn apply_event(stores: &Dispatchers, event: ServerEvent) {
+    match event {
+        ServerEvent::PortTableUpdated { entries } => {
+            stores.ports.reduce(|state| {
+                PortStore {
+                    entries,
+                    ..(*state).clone()
+                }
+                .into()
+            });
+        }
+        ServerEvent::CertsUpdated { entries } => {
+            stores.certs.set(CertStore {
+                entries,
+                loaded: true,
+            });
+        }
+        ServerEvent::AcmeUpdated { entries } => {
+            stores.acme.set(AcmeStore {
+                entries,
+                loaded: true,
+            });
+        }
+        ServerEvent::ProxiesUpdated { entries } => {
+            stores.proxies.reduce(|state| {
+                ProxyStore {
+                    entries,
+                    loaded: true,
+                    ..(*state).clone()
+                }
+                .into()
+            });
+        }
+        ServerEvent::PortStatusUpdated { id, status } => {
+            stores.ports.reduce(|state| {
+                let mut cloned = (*state).clone();
+                cloned.statuses.insert(id, status);
+                cloned.into()
+            });
+        }
+        ServerEvent::ProxyStatusUpdated { id, status } => {
+            stores.proxies.reduce(|state| {
+                let mut cloned = (*state).clone();
+                cloned.statuses.insert(id, status);
+                cloned.into()
+            });
+        }
+        ServerEvent::DiscoveryStatusUpdated { entries } => {
+            stores.discovery.set(DiscoveryStore { entries });
+        }
+        _ => (),
     }
 }

@@ -4,6 +4,7 @@ pub mod cdn;
 pub mod certs;
 pub mod command;
 pub mod config;
+pub mod discovery;
 pub mod log;
 pub mod proxy;
 pub mod server;

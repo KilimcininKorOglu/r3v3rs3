@@ -6,6 +6,7 @@ pub mod acme;
 pub mod auth;
 pub mod certs;
 pub mod config;
+pub mod discovery;
 pub mod ports;
 pub mod proxies;
 

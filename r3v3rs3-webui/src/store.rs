@@ -1,6 +1,7 @@
 use r3v3rs3_api::{
     acme::AcmeInfo,
     cert::CertInfo,
+    discovery::DiscoveryStatus,
     id::ShortId,
     port::{PortEntry, PortStatus},
     proxy::{ProxyEntry, ProxyStatus},
@@ -32,4 +33,9 @@ pub struct CertStore {
 pub struct AcmeStore {
     pub entries: Vec<AcmeInfo>,
     pub loaded: bool,
+}
+
+#[derive(Default, Clone, PartialEq, Store)]
+pub struct DiscoveryStore {
+    pub entries: Vec<DiscoveryStatus>,
 }

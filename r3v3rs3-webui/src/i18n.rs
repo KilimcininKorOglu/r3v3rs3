@@ -17,11 +17,12 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    const NAMESPACES: [&str; 19] = [
+    const NAMESPACES: [&str; 20] = [
         "acme",
         "auth",
         "certs",
         "common",
+        "discovery",
         "footer",
         "http_form",
         "log",
