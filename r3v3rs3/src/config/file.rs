@@ -45,6 +45,63 @@ fn default_version() -> String {
     build_info::PKG_VERSION.to_owned()
 }
 
+/// Writes a file that holds secrets, such as ACME account keys, so only the owner can read it.
+async fn write_private(path: &Path, contents: String) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(path).await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // The creation mode does not apply to a file that an earlier version created.
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .await?;
+    }
+    file.write_all(contents.as_bytes()).await?;
+    file.flush().await?;
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod private_file_test {
+    use super::write_private;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[tokio::test]
+    async fn an_existing_readable_file_becomes_owner_only() -> anyhow::Result<()> {
+        let path = std::env::temp_dir().join(format!("r3v3rs3-acme-{}.toml", std::process::id()));
+        std::fs::write(&path, "")?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))?;
+
+        write_private(&path, "version = \"1\"".to_string()).await?;
+
+        let mode = std::fs::metadata(&path)?.permissions().mode() & 0o777;
+        let contents = std::fs::read_to_string(&path)?;
+        std::fs::remove_file(&path)?;
+        assert_eq!(mode, 0o600);
+        assert_eq!(contents, "version = \"1\"");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_new_file_is_created_owner_only() -> anyhow::Result<()> {
+        let path =
+            std::env::temp_dir().join(format!("r3v3rs3-acme-new-{}.toml", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+
+        write_private(&path, String::new()).await?;
+
+        let mode = std::fs::metadata(&path)?.permissions().mode() & 0o777;
+        std::fs::remove_file(&path)?;
+        assert_eq!(mode, 0o600);
+        Ok(())
+    }
+}
+
 pub struct FileStorage {
     dir: PathBuf,
 }
@@ -191,7 +248,7 @@ impl FileStorage {
         doc[&id].clone_from(toml_edit::ser::to_document(&entry)?.as_item());
 
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        fs::write(path, doc.to_string()).await?;
+        write_private(path, doc.to_string()).await?;
         Ok(())
     }
 
@@ -207,7 +264,7 @@ impl FileStorage {
 
         doc.remove(&id.to_string());
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        fs::write(path, doc.to_string()).await?;
+        write_private(path, doc.to_string()).await?;
         Ok(())
     }
 
