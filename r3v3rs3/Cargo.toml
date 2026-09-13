@@ -2,7 +2,7 @@
 name = "r3v3rs3"
 version = "0.3.40"
 edition = "2021"
-include = ["/src", "/templates", "/build.rs", "/LICENSE", "/dist/webui"]
+include = ["/src", "/templates", "/data", "/build.rs", "/LICENSE", "/dist/webui"]
 build = "build.rs"
 description = "A reverse proxy server with built-in WebUI, supporting TCP/UDP/HTTP/TLS/WebSocket."
 authors = ["picoHz <picoHz@outlook.com>", "KilimcininKorOglu"]
