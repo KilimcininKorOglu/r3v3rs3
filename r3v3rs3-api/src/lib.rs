@@ -10,6 +10,7 @@ pub mod compression;
 pub mod error;
 pub mod event;
 pub mod header_rules;
+pub mod i18n;
 pub mod id;
 pub mod log;
 pub mod multiaddr;
