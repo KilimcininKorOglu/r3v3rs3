@@ -1,5 +1,6 @@
 #![recursion_limit = "1024"]
 
+use components::footer::Footer;
 use components::navbar::Navbar;
 use console_error_panic_hook::set_once as set_panic_hook;
 use yew::prelude::*;
@@ -22,9 +23,12 @@ pub fn app() -> Html {
     html! {
         <>
         <BrowserRouter>
-            <Navbar />
-            <div class="w-full max-w-6xl mx-auto px-4 sm:px-6 py-4">
-                <Switch<pages::Route> render={pages::switch} />
+            <div class="min-h-screen flex flex-col">
+                <Navbar />
+                <div class="w-full max-w-6xl mx-auto px-4 sm:px-6 py-4 flex-1">
+                    <Switch<pages::Route> render={pages::switch} />
+                </div>
+                <Footer />
             </div>
         </BrowserRouter>
         </>

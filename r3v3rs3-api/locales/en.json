@@ -129,6 +129,7 @@
   "error_page.523": "Origin Is Unreachable",
   "error_page.525": "SSL Handshake Failed",
   "error_page.526": "Invalid SSL Certificate",
+  "footer.documentation": "Documentation",
   "http_form.allow": "Allowed IP Addresses",
   "http_form.allow_hint": "When set, only clients in these IP addresses or CIDR blocks can access the proxy.",
   "http_form.authentication": "Authentication",
