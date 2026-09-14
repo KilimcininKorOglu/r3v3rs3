@@ -32,8 +32,10 @@ use common::{
 
 const TOKEN: &str = "mock-token";
 const HOST: &str = "app.example.com";
-const COLLECTIONS: [(&str, &str); 4] = [
+const CRD_HOST: &str = "crd.example.com";
+const COLLECTIONS: [(&str, &str); 5] = [
     ("/apis/networking.k8s.io/v1/ingresses", "ingresses"),
+    ("/apis/r3v3rs3.io/v1/r3v3rs3proxies", "r3v3rs3proxies"),
     ("/api/v1/services", "services"),
     ("/apis/discovery.k8s.io/v1/endpointslices", "endpointslices"),
     ("/api/v1/secrets", "secrets"),
@@ -202,6 +204,17 @@ fn ingress(class: &str) -> Value {
     })
 }
 
+/// An R3v3rs3Proxy resource that routes `crd.example.com` to the `app` Service.
+fn crd_proxy() -> Value {
+    json!({
+        "apiVersion": "r3v3rs3.io/v1", "kind": "R3v3rs3Proxy", "metadata": metadata("crd"),
+        "spec": {
+            "ports": ["web"], "vhosts": [CRD_HOST],
+            "routes": [{"path": "/", "service": {"name": "app", "port": "http"}}],
+        },
+    })
+}
+
 fn tls_secret(cert: &Cert) -> anyhow::Result<Value> {
     let key = cert
         .pem_key
@@ -223,25 +236,33 @@ fn kubeconfig(server: &str) -> Value {
     })
 }
 
-async fn wait_for_host_body(url: &str, expected: &str) -> anyhow::Result<()> {
+async fn wait_for_host_body(url: &str, host: &str, expected: &str) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
     for _ in 0..50 {
-        let response = client.get(url).header("host", HOST).send().await?;
+        let response = client.get(url).header("host", host).send().await?;
         if response.text().await? == expected {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    anyhow::bail!("the proxy did not answer {expected}")
+    anyhow::bail!("{host} did not answer {expected}")
 }
 
-/// The server URLs of the first route of the discovered proxy.
-async fn first_route_servers(channels: &mut ServerChannels) -> anyhow::Result<Vec<String>> {
+/// The server URLs of the first route of the proxy that the resource defines.
+async fn first_route_servers(
+    channels: &mut ServerChannels,
+    resource: &str,
+) -> anyhow::Result<Vec<String>> {
     let entries = call(channels, GetProxyList).await??;
     let entry = entries
         .into_iter()
-        .find(|entry| entry.is_discovered())
-        .ok_or_else(|| anyhow::anyhow!("no discovered proxy"))?;
+        .find(|entry| {
+            entry
+                .source
+                .as_ref()
+                .is_some_and(|s| s.resource == resource)
+        })
+        .ok_or_else(|| anyhow::anyhow!("no proxy of {resource}"))?;
     let ProxyKind::Http(http) = entry.proxy.kind else {
         anyhow::bail!("the discovered proxy is not an HTTP proxy");
     };
@@ -253,8 +274,7 @@ async fn first_route_servers(channels: &mut ServerChannels) -> anyhow::Result<Ve
 }
 
 #[tokio::test]
-async fn ingress_resources_define_proxies_and_certificates_that_follow_changes(
-) -> anyhow::Result<()> {
+async fn ingress_and_custom_resources_define_proxies_that_follow_changes() -> anyhow::Result<()> {
     let first = serve_http_upstream(Router::new().route("/", get(|| async { "first" }))).await?;
     let second = serve_http_upstream(Router::new().route("/", get(|| async { "second" }))).await?;
     let port_of = |url: &url::Url| url.port().ok_or_else(|| anyhow::anyhow!("no port"));
@@ -274,6 +294,7 @@ async fn ingress_resources_define_proxies_and_certificates_that_follow_changes(
         other["metadata"]["name"] = json!("other");
         other
     });
+    mock.put("r3v3rs3proxies", crd_proxy());
     let api = serve_http_upstream(mock.router()).await?;
     let kubeconfig_path =
         std::env::temp_dir().join(format!("r3v3rs3-kubeconfig-{}.json", port_of(&api)?));
@@ -284,6 +305,7 @@ async fn ingress_resources_define_proxies_and_certificates_that_follow_changes(
     config.discovery.kubernetes.enabled = true;
     config.discovery.kubernetes.kubeconfig = kubeconfig_path.to_string_lossy().into_owned();
     config.discovery.kubernetes.ingress_class = "r3v3rs3".into();
+    config.discovery.kubernetes.crd = true;
     let storage = TestStorage::builder().ports(vec![port]).build();
     let saved = storage.clone();
     let url = proxy_port.http_url("/").to_string();
@@ -291,11 +313,13 @@ async fn ingress_resources_define_proxies_and_certificates_that_follow_changes(
     let result = with_server(storage, |mut channels| async move {
         call(&mut channels, SetConfig { config }).await??;
         assert_eq!(wait_for_host_status(&url, Some(HOST), 200).await?, "first");
+        let crd_body = wait_for_host_status(&url, Some(CRD_HOST), 200).await?;
+        assert_eq!(crd_body, "first");
         let statuses = wait_for_discovery(&mut channels, |statuses| {
             statuses.iter().any(|status| {
                 status.provider == DiscoveryProvider::Kubernetes
                     && status.state == DiscoveryState::Running
-                    && status.proxies == 1
+                    && status.proxies == 2
             })
         })
         .await?;
@@ -310,7 +334,9 @@ async fn ingress_resources_define_proxies_and_certificates_that_follow_changes(
         );
 
         // Only the ready endpoint is a server.
-        let servers = first_route_servers(&mut channels).await?;
+        let servers = first_route_servers(&mut channels, "ingress default/app").await?;
+        assert_eq!(servers, [first.as_str()]);
+        let servers = first_route_servers(&mut channels, "r3v3rs3proxy default/crd").await?;
         assert_eq!(servers, [first.as_str()]);
 
         // The route of a backend without endpoints stays, so its requests fail.
@@ -334,15 +360,22 @@ async fn ingress_resources_define_proxies_and_certificates_that_follow_changes(
         assert!(matches!(deleted, Err(Error::CertificateReadOnly { .. })));
         assert!(saved.load_certs().await.is_empty());
 
-        // The watch stream reports the moved endpoint.
+        // The watch stream reports the moved endpoint to both proxies.
         mock.put("endpointslices", slice(port_of(&second)?));
-        wait_for_host_body(&url, "second").await?;
+        wait_for_host_body(&url, HOST, "second").await?;
+        wait_for_host_body(&url, CRD_HOST, "second").await?;
 
         // A deleted Ingress removes its proxy and the certificate of its secret.
         mock.delete("ingresses", ingress("r3v3rs3"));
         wait_for_host_status(&url, Some(HOST), 502).await?;
         let certs = call(&mut channels, GetCertList).await??;
         assert!(certs.iter().all(|info| info.source.is_none()));
+        let crd_body = wait_for_host_status(&url, Some(CRD_HOST), 200).await?;
+        assert_eq!(crd_body, "second");
+
+        // A deleted R3v3rs3Proxy removes its proxy.
+        mock.delete("r3v3rs3proxies", crd_proxy());
+        wait_for_host_status(&url, Some(CRD_HOST), 502).await?;
         Ok(())
     })
     .await;

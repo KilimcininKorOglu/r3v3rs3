@@ -202,7 +202,9 @@ Add a port with the name `http` in "Ports", enable the provider with the network
 
 # Kubernetes
 
-The Kubernetes provider reads the `networking.k8s.io/v1` Ingress resources, the Services and EndpointSlices of their backends, and their TLS secrets. It follows the changes with watch streams, so a changed Ingress, a new ready pod or a renewed secret updates the proxies within about one second.
+The Kubernetes provider reads the `networking.k8s.io/v1` Ingress resources, the `r3v3rs3.io/v1` R3v3rs3Proxy resources, the Services and EndpointSlices of their backends, and the TLS secrets of the Ingress resources. It follows the changes with watch streams, so a changed resource, a new ready pod or a renewed secret updates the proxies within about one second.
+
+The `deploy/kubernetes` directory holds the custom resource definition (`crd.yaml`), the service account with its ClusterRole (`rbac.yaml`) and an example Deployment (`deployment.yaml`).
 
 ## Settings
 
@@ -214,6 +216,7 @@ enabled = true
 kubeconfig = ""
 namespaces = []
 ingress = true
+crd = true
 ingress_class = "r3v3rs3"
 ports = ["http"]
 ```
@@ -223,7 +226,8 @@ ports = ["http"]
 | `enabled` | Starts the provider. |
 | `kubeconfig` | The path of a kubeconfig file. Leave it empty to use `KUBECONFIG` or `~/.kube/config`, or the service account of the pod inside a cluster. |
 | `namespaces` | The namespaces to read. Leave it empty to read every namespace. |
-| `ingress` | Reads the Ingress resources. The default is `true`, and the provider needs it. |
+| `ingress` | Reads the Ingress resources. The default is `true`. |
+| `crd` | Reads the R3v3rs3Proxy resources. The default is `false`. Install the custom resource definition first, because the provider cannot watch a resource that the cluster does not know. The provider needs `ingress` or `crd`. |
 | `ingress_class` | r3v3rs3 reads only the Ingress resources of this class. The class comes from `spec.ingressClassName` or the `kubernetes.io/ingress.class` annotation. Leave it empty to read every Ingress. |
 | `ports` | The port names or ids of an Ingress without the `r3v3rs3.io/ports` annotation. |
 
@@ -257,9 +261,57 @@ The rules of the Ingress set `routes` and `vhosts`, so an annotation for `routes
 - r3v3rs3 does not save these certificates. The certificate list shows the provider, and a certificate of a secret cannot be deleted. When the Ingress or the secret is deleted, the certificate is removed.
 - A missing secret, or a secret with an invalid certificate or private key, is an issue.
 
+## R3v3rs3Proxy Resources
+
+An R3v3rs3Proxy resource defines one proxy with the fields of the proxy model, so it can define a TCP or a UDP proxy and set every field. Install the definition, then enable `crd`:
+
+```bash
+kubectl apply -f deploy/kubernetes/crd.yaml
+```
+
+- `spec.protocol` is `http`, `tcp` or `udp`. The default is `http`.
+- The other fields of `spec` are the fields of a proxy in [Labels](@/discovery.md#labels), for example `ports`, `name`, `active`, `vhosts` and `routes`. A list is a YAML list, and a number or a boolean is a YAML value.
+- `ports` is required unless the `ports` setting is set. The default name is `<namespace>/<name>`.
+- `service` with `name` and `port` names a Service in the namespace of the resource. `port` is the number or the name of a Service port. In a route of an HTTP proxy, the ready endpoints of the Service become the servers of the route. In a TCP or UDP proxy, they become the upstream servers. `service` cannot be used together with `servers` or `upstream_servers`.
+- A route whose Service has no ready endpoint stays without servers and is an issue, as with an Ingress.
+- The resource has no address, so `port` and `scheme` are not available.
+- A key inside `spec` cannot contain a `.`.
+- `kubectl get rproxy` lists the resources.
+
+```yaml
+apiVersion: r3v3rs3.io/v1
+kind: R3v3rs3Proxy
+metadata:
+  name: whoami
+  namespace: default
+spec:
+  ports: [https]
+  vhosts: [whoami.example.com]
+  rate_limit:
+    requests: 100
+    per: minute
+  routes:
+    - path: /
+      service:
+        name: whoami
+        port: http
+---
+apiVersion: r3v3rs3.io/v1
+kind: R3v3rs3Proxy
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  protocol: tcp
+  ports: [postgres]
+  service:
+    name: postgres
+    port: 5432
+```
+
 ## RBAC
 
-The provider lists and watches four resources. Grant the service account of r3v3rs3 a ClusterRole, or a Role in each namespace of `namespaces`:
+The provider lists and watches five resources. `deploy/kubernetes/rbac.yaml` holds these objects. Grant the service account of r3v3rs3 a ClusterRole, or a Role in each namespace of `namespaces`:
 
 ```yaml
 apiVersion: v1
@@ -281,6 +333,9 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["r3v3rs3.io"]
+    resources: ["r3v3rs3proxies"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

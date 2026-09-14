@@ -202,7 +202,9 @@ volumes:
 
 # Kubernetes
 
-Kubernetes provider, `networking.k8s.io/v1` Ingress kaynaklarını, backend'lerinin Service ve EndpointSlice'larını ve TLS secret'larını okur. Değişiklikleri watch stream'leriyle izler. Değişen bir Ingress, hazır hale gelen yeni bir pod veya yenilenen bir secret proxy'leri yaklaşık bir saniye içinde günceller.
+Kubernetes provider, `networking.k8s.io/v1` Ingress kaynaklarını, `r3v3rs3.io/v1` R3v3rs3Proxy kaynaklarını, backend'lerinin Service ve EndpointSlice'larını ve Ingress kaynaklarının TLS secret'larını okur. Değişiklikleri watch stream'leriyle izler. Değişen bir kaynak, hazır hale gelen yeni bir pod veya yenilenen bir secret proxy'leri yaklaşık bir saniye içinde günceller.
+
+`deploy/kubernetes` dizininde custom resource definition (`crd.yaml`), service account ve ClusterRole'ü (`rbac.yaml`) ve örnek bir Deployment (`deployment.yaml`) bulunur.
 
 ## Ayarlar
 
@@ -214,6 +216,7 @@ enabled = true
 kubeconfig = ""
 namespaces = []
 ingress = true
+crd = true
 ingress_class = "r3v3rs3"
 ports = ["http"]
 ```
@@ -223,7 +226,8 @@ ports = ["http"]
 | `enabled` | Provider'ı başlatır. |
 | `kubeconfig` | Kubeconfig dosyasının yolu. `KUBECONFIG` değişkenini veya `~/.kube/config` dosyasını kullanmak için boş bırakın. Cluster içinde boş değer pod'un service account'unu kullanır. |
 | `namespaces` | Okunacak namespace'ler. Her namespace'i okumak için boş bırakın. |
-| `ingress` | Ingress kaynaklarını okur. Varsayılan değer `true` olur ve provider bu ayarı gerektirir. |
+| `ingress` | Ingress kaynaklarını okur. Varsayılan değer `true` olur. |
+| `crd` | R3v3rs3Proxy kaynaklarını okur. Varsayılan değer `false` olur. Önce custom resource definition'ı kurun, çünkü provider cluster'ın tanımadığı bir kaynağı watch edemez. Provider `ingress` veya `crd` ayarını gerektirir. |
 | `ingress_class` | r3v3rs3 yalnız bu class'ın Ingress kaynaklarını okur. Class, `spec.ingressClassName` alanından veya `kubernetes.io/ingress.class` annotation'ından gelir. Her Ingress'i okumak için boş bırakın. |
 | `ports` | `r3v3rs3.io/ports` annotation'ı olmayan bir Ingress'in kullandığı port adları veya id'leri. |
 
@@ -257,9 +261,57 @@ Ayar değişikliği provider'ı server restart olmadan yeniden başlatır.
 - r3v3rs3 bu sertifikaları kaydetmez. Sertifika listesi provider'ı gösterir. Secret'tan gelen sertifika silinemez. Ingress veya secret silinince sertifika listeden çıkar.
 - Bulunmayan secret veya sertifikası ya da private key'i geçersiz olan secret issue olur.
 
+## R3v3rs3Proxy kaynakları
+
+Bir R3v3rs3Proxy kaynağı, proxy modelinin alanlarıyla bir proxy tanımlar. Bu yüzden TCP veya UDP proxy de tanımlayabilir ve her alanı ayarlayabilir. Önce definition'ı kurun, sonra `crd` ayarını açın:
+
+```bash
+kubectl apply -f deploy/kubernetes/crd.yaml
+```
+
+- `spec.protocol` değeri `http`, `tcp` veya `udp` olur. Varsayılan değer `http` olur.
+- `spec` içindeki diğer alanlar, [Label'lar](@/discovery.tr.md#label-lar) bölümündeki proxy alanlarıdır. Örneğin `ports`, `name`, `active`, `vhosts` ve `routes`. Liste bir YAML listesidir. Sayı ve boolean birer YAML değeridir.
+- `ports` ayarı yoksa `ports` alanı gereklidir. Varsayılan ad `<namespace>/<name>` olur.
+- `name` ve `port` alanlarıyla verilen `service`, kaynağın namespace'indeki bir Service'i seçer. `port`, Service portunun numarası veya adıdır. HTTP proxy'nin bir route'unda Service'in hazır endpoint'leri route'un server'ları olur. TCP veya UDP proxy'de upstream server'lar olur. `service`, `servers` veya `upstream_servers` ile birlikte kullanılamaz.
+- Service'inin hazır endpoint'i olmayan route, Ingress'te olduğu gibi server'sız kalır ve issue olur.
+- Kaynağın adresi yoktur, bu yüzden `port` ve `scheme` kullanılamaz.
+- `spec` içindeki bir key `.` içeremez.
+- `kubectl get rproxy` kaynakları listeler.
+
+```yaml
+apiVersion: r3v3rs3.io/v1
+kind: R3v3rs3Proxy
+metadata:
+  name: whoami
+  namespace: default
+spec:
+  ports: [https]
+  vhosts: [whoami.example.com]
+  rate_limit:
+    requests: 100
+    per: minute
+  routes:
+    - path: /
+      service:
+        name: whoami
+        port: http
+---
+apiVersion: r3v3rs3.io/v1
+kind: R3v3rs3Proxy
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  protocol: tcp
+  ports: [postgres]
+  service:
+    name: postgres
+    port: 5432
+```
+
 ## RBAC
 
-Provider dört kaynağı list ve watch eder. r3v3rs3'ün service account'una bir ClusterRole verin veya `namespaces` ayarındaki her namespace'te bir Role verin:
+Provider beş kaynağı list ve watch eder. `deploy/kubernetes/rbac.yaml` dosyası bu nesneleri içerir. r3v3rs3'ün service account'una bir ClusterRole verin veya `namespaces` ayarındaki her namespace'te bir Role verin:
 
 ```yaml
 apiVersion: v1
@@ -281,6 +333,9 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["r3v3rs3.io"]
+    resources: ["r3v3rs3proxies"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -46,6 +46,7 @@ struct Fields {
     /// Comma-separated namespaces.
     kubernetes_namespaces: String,
     kubernetes_ingress: bool,
+    kubernetes_crd: bool,
     kubernetes_ingress_class: String,
     /// Comma-separated port names or ids.
     kubernetes_ports: String,
@@ -99,6 +100,7 @@ impl Fields {
             kubernetes_kubeconfig: kubernetes.kubeconfig.clone(),
             kubernetes_namespaces: kubernetes.namespaces.join(","),
             kubernetes_ingress: kubernetes.ingress,
+            kubernetes_crd: kubernetes.crd,
             kubernetes_ingress_class: kubernetes.ingress_class.clone(),
             kubernetes_ports: kubernetes.ports.join(","),
             consul_enabled: consul.enabled,
@@ -291,6 +293,8 @@ fn kubernetes_section(
             { checkbox_field(fields, locale.t("settings.kubernetes_ingress"), |f| &mut f.kubernetes_ingress) }
             { text_field(fields, errors, locale.t("settings.kubernetes_ingress_class"), "kubernetes_ingress_class", "r3v3rs3", |f| &mut f.kubernetes_ingress_class) }
             <p class={HINT_CLASS}>{locale.t("settings.kubernetes_ingress_class_hint")}</p>
+            { checkbox_field(fields, locale.t("settings.kubernetes_crd"), |f| &mut f.kubernetes_crd) }
+            <p class={HINT_CLASS}>{locale.t("settings.kubernetes_crd_hint")}</p>
             { text_field(fields, errors, locale.t("settings.kubernetes_ports"), "kubernetes_ports", "http,https", |f| &mut f.kubernetes_ports) }
             <p class={HINT_CLASS}>{locale.t("settings.kubernetes_ports_hint")}</p>
         </>
@@ -583,6 +587,7 @@ fn parse_kubernetes(fields: &Fields) -> KubernetesDiscoveryConfig {
         kubeconfig: fields.kubernetes_kubeconfig.trim().to_string(),
         namespaces: comma_list(&fields.kubernetes_namespaces),
         ingress: fields.kubernetes_ingress,
+        crd: fields.kubernetes_crd,
         ingress_class: fields.kubernetes_ingress_class.trim().to_string(),
         ports: comma_list(&fields.kubernetes_ports),
     }
@@ -929,6 +934,7 @@ mod tests {
             kubeconfig: "/etc/r3v3rs3/kubeconfig".into(),
             namespaces: vec!["default".into(), "apps".into()],
             ingress: true,
+            crd: true,
             ingress_class: "r3v3rs3".into(),
             ports: vec!["http".into(), "https".into()],
         };

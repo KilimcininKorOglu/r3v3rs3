@@ -158,6 +158,8 @@
   "settings.etcd_username": "User Name",
   "settings.etcd_username_hint": "Leave it empty when etcd authentication is off. The user needs the read permission on the prefix.",
   "settings.etcd_username_required": "Enter the user of the password.",
+  "settings.kubernetes_crd": "Read R3v3rs3Proxy resources",
+  "settings.kubernetes_crd_hint": "The cluster needs the R3v3rs3Proxy custom resource definition from deploy/kubernetes/crd.yaml.",
   "settings.kubernetes_enabled": "Read proxies from Kubernetes",
   "settings.kubernetes_ingress": "Read Ingress resources",
   "settings.kubernetes_ingress_class": "Ingress Class",

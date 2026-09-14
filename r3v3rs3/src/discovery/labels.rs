@@ -271,14 +271,21 @@ fn expand_stream_port(
     let host = upstream
         .host
         .ok_or("port needs the address of the resource")?;
+    node.insert(
+        &["upstream_servers", "0", "addr"],
+        &stream_addr(host, transport, port),
+    );
+    Ok(())
+}
+
+/// The multiaddr of a TCP or UDP upstream server: `/ip4/<ip>/tcp/<port>`, `/ip6/...` or `/dns/...`.
+pub fn stream_addr(host: &str, transport: &str, port: u16) -> String {
     let family = match host.parse::<IpAddr>() {
         Ok(IpAddr::V4(_)) => "ip4",
         Ok(IpAddr::V6(_)) => "ip6",
         Err(_) => "dns",
     };
-    let addr = format!("/{family}/{host}/{transport}/{port}");
-    node.insert(&["upstream_servers", "0", "addr"], &addr);
-    Ok(())
+    format!("/{family}/{host}/{transport}/{port}")
 }
 
 #[cfg(test)]

@@ -2,24 +2,17 @@
 //! the host becomes one route to the ready endpoints of its Service. The `r3v3rs3.io/<field>`
 //! annotations set the other fields of the proxies.
 
-use crate::certs::Cert;
+use super::cluster::{object_key, Cluster, Resources};
+use super::PROVIDER;
 use crate::discovery::{labels, Built, ProxyDefinition, ProxyGroups};
-use k8s_openapi::api::core::v1::{Secret, Service, ServicePort};
-use k8s_openapi::api::discovery::v1::EndpointSlice;
-use k8s_openapi::api::networking::v1::{Ingress, IngressBackend, IngressServiceBackend};
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use r3v3rs3_api::cert::CertKind;
-use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoverySource};
-use r3v3rs3_api::proxy::{ProxyKind, Route, Server};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::net::IpAddr;
+use k8s_openapi::api::networking::v1::{Ingress, IngressBackend};
+use r3v3rs3_api::discovery::DiscoverySource;
+use r3v3rs3_api::proxy::{ProxyKind, Route};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-const PROVIDER: DiscoveryProvider = DiscoveryProvider::Kubernetes;
 pub const ANNOTATION_PREFIX: &str = "r3v3rs3.io/";
 const CLASS_ANNOTATION: &str = "kubernetes.io/ingress.class";
-const SERVICE_NAME_LABEL: &str = "kubernetes.io/service-name";
-const TLS_SECRET_TYPE: &str = "kubernetes.io/tls";
 /// The fields that the rules of an Ingress set, so an annotation cannot set them.
 const RULE_FIELDS: [&str; 4] = ["routes", "vhosts", "port", "scheme"];
 /// The label name of the proxy of the rules without a host and of the default backend. A host
@@ -34,15 +27,6 @@ pub struct Settings {
     pub ingress_class: String,
     /// The ports of an Ingress without the `r3v3rs3.io/ports` annotation.
     pub ports: Vec<String>,
-}
-
-/// The resources that the proxies use.
-#[derive(Debug, Default)]
-pub struct Resources {
-    pub ingresses: Vec<Arc<Ingress>>,
-    pub services: Vec<Arc<Service>>,
-    pub slices: Vec<Arc<EndpointSlice>>,
-    pub secrets: Vec<Arc<Secret>>,
 }
 
 /// Builds the proxies of the selected Ingress resources, and the certificates of their TLS
@@ -85,176 +69,6 @@ fn selects_class(ingress: &Ingress, class: &str) -> bool {
         .and_then(|annotations| annotations.get(CLASS_ANNOTATION))
         .map(String::as_str);
     spec_class.or(annotation) == Some(class)
-}
-
-fn object_key(meta: &ObjectMeta) -> (String, String) {
-    (
-        meta.namespace.clone().unwrap_or_default(),
-        meta.name.clone().unwrap_or_default(),
-    )
-}
-
-fn object_ref(meta: &ObjectMeta) -> Option<(&str, &str)> {
-    Some((meta.namespace.as_deref()?, meta.name.as_deref()?))
-}
-
-/// The Services, the EndpointSlices and the TLS secrets by namespace and name.
-struct Cluster<'a> {
-    services: HashMap<(&'a str, &'a str), &'a Service>,
-    /// The slices of each Service.
-    slices: HashMap<(&'a str, &'a str), Vec<&'a EndpointSlice>>,
-    secrets: HashMap<(&'a str, &'a str), &'a Secret>,
-}
-
-impl<'a> Cluster<'a> {
-    fn new(resources: &'a Resources) -> Self {
-        let services = resources
-            .services
-            .iter()
-            .filter_map(|service| Some((object_ref(&service.metadata)?, service.as_ref())))
-            .collect();
-        let mut slices = HashMap::<_, Vec<_>>::new();
-        for slice in &resources.slices {
-            let service = slice
-                .metadata
-                .labels
-                .as_ref()
-                .and_then(|labels| labels.get(SERVICE_NAME_LABEL));
-            if let (Some(namespace), Some(service)) = (slice.metadata.namespace.as_deref(), service)
-            {
-                slices
-                    .entry((namespace, service.as_str()))
-                    .or_default()
-                    .push(slice.as_ref());
-            }
-        }
-        let secrets = resources
-            .secrets
-            .iter()
-            .filter(|secret| secret.type_.as_deref() == Some(TLS_SECRET_TYPE))
-            .filter_map(|secret| Some((object_ref(&secret.metadata)?, secret.as_ref())))
-            .collect();
-        Self {
-            services,
-            slices,
-            secrets,
-        }
-    }
-
-    /// The servers of the ready endpoints of a Service port.
-    fn servers(
-        &self,
-        namespace: &str,
-        backend: &IngressServiceBackend,
-    ) -> Result<Vec<Server>, String> {
-        let name = backend.name.as_str();
-        let service = self
-            .services
-            .get(&(namespace, name))
-            .ok_or_else(|| format!("service not found: {namespace}/{name}"))?;
-        let port = service_port(service, backend)?;
-        let scheme = if is_https(port) { "https" } else { "http" };
-        let mut urls = BTreeSet::new();
-        for slice in self.slices.get(&(namespace, name)).into_iter().flatten() {
-            let Some(number) = endpoint_port(slice, port) else {
-                continue;
-            };
-            urls.extend(ready_addresses(slice).map(|host| server_url(scheme, host, number)));
-        }
-        if urls.is_empty() {
-            return Err(format!("service {namespace}/{name} has no ready endpoint"));
-        }
-        urls.into_iter()
-            .map(|url| {
-                url.parse()
-                    .map(|url| Server { url })
-                    .map_err(|err| format!("invalid endpoint address {url}: {err}"))
-            })
-            .collect()
-    }
-
-    /// The certificate and the private key of a TLS secret.
-    fn certificate(&self, namespace: &str, name: &str) -> Result<Cert, String> {
-        let secret = self
-            .secrets
-            .get(&(namespace, name))
-            .ok_or("the TLS secret is not found")?;
-        let item = |key: &str| {
-            secret
-                .data
-                .as_ref()
-                .and_then(|data| data.get(key))
-                .map(|bytes| bytes.0.clone())
-                .ok_or_else(|| format!("the secret has no {key}"))
-        };
-        let cert = Cert::new(CertKind::Server, item("tls.crt")?, Some(item("tls.key")?))
-            .map_err(|err| err.to_string())?;
-        cert.certified_key().map_err(|err| err.to_string())?;
-        Ok(cert)
-    }
-}
-
-/// The port of the Service that the backend selects by number or by name.
-fn service_port<'a>(
-    service: &'a Service,
-    backend: &IngressServiceBackend,
-) -> Result<&'a ServicePort, String> {
-    let ports = service
-        .spec
-        .as_ref()
-        .and_then(|spec| spec.ports.as_deref())
-        .unwrap_or_default();
-    let wanted = backend.port.as_ref();
-    let number = wanted.and_then(|port| port.number);
-    let name = wanted.and_then(|port| port.name.as_deref());
-    let found = match (number, name) {
-        (Some(number), _) => ports.iter().find(|port| port.port == number),
-        (None, Some(name)) => ports.iter().find(|port| port.name.as_deref() == Some(name)),
-        (None, None) => None,
-    };
-    found.ok_or_else(|| {
-        let port = number.map_or_else(|| name.unwrap_or_default().to_string(), |n| n.to_string());
-        format!("service {} has no port {port}", backend.name)
-    })
-}
-
-fn is_https(port: &ServicePort) -> bool {
-    port.app_protocol.as_deref() == Some("https") || port.name.as_deref() == Some("https")
-}
-
-/// The endpoint port with the name of the Service port. A Service port without a name matches an
-/// endpoint port without a name.
-fn endpoint_port(slice: &EndpointSlice, port: &ServicePort) -> Option<u16> {
-    let name = port.name.as_deref().unwrap_or_default();
-    slice
-        .ports
-        .iter()
-        .flatten()
-        .find(|endpoint| endpoint.name.as_deref().unwrap_or_default() == name)
-        .and_then(|endpoint| endpoint.port)
-        .and_then(|number| u16::try_from(number).ok())
-}
-
-/// The addresses of the ready endpoints. An endpoint without the ready condition is ready.
-fn ready_addresses(slice: &EndpointSlice) -> impl Iterator<Item = &str> {
-    slice
-        .endpoints
-        .iter()
-        .filter(|endpoint| {
-            endpoint
-                .conditions
-                .as_ref()
-                .and_then(|conditions| conditions.ready)
-                != Some(false)
-        })
-        .flat_map(|endpoint| endpoint.addresses.iter().map(String::as_str))
-}
-
-fn server_url(scheme: &str, host: &str, port: u16) -> String {
-    match host.parse::<IpAddr>() {
-        Ok(IpAddr::V6(ip)) => format!("{scheme}://[{ip}]:{port}"),
-        _ => format!("{scheme}://{host}:{port}"),
-    }
 }
 
 /// A path of a rule, or the default backend.
@@ -480,30 +294,13 @@ fn add_secret(built: &mut Built, cluster: &Cluster, namespace: &str, name: &str)
 
 #[cfg(test)]
 mod tests {
+    use super::super::cluster::fixtures::{cluster_resources, http, messages, object, urls};
+    use super::super::cluster::TLS_SECRET_TYPE;
     use super::*;
+    use crate::certs::Cert;
+    use k8s_openapi::api::core::v1::Secret;
     use r3v3rs3_api::subject_name::SubjectName;
-    use serde::de::DeserializeOwned;
     use serde_json::{json, Value};
-
-    fn object<T: DeserializeOwned>(value: Value) -> Arc<T> {
-        Arc::new(serde_json::from_value(value).unwrap())
-    }
-
-    fn service(name: &str, ports: Value) -> Arc<Service> {
-        object(json!({
-            "apiVersion": "v1", "kind": "Service",
-            "metadata": {"namespace": "default", "name": name},
-            "spec": {"ports": ports},
-        }))
-    }
-
-    fn slice(service: &str, ports: Value, endpoints: Value) -> Arc<EndpointSlice> {
-        object(json!({
-            "apiVersion": "discovery.k8s.io/v1", "kind": "EndpointSlice",
-            "metadata": {"namespace": "default", "name": format!("{service}-abc"), "labels": {SERVICE_NAME_LABEL: service}},
-            "addressType": "IPv4", "ports": ports, "endpoints": endpoints,
-        }))
-    }
 
     fn ingress(name: &str, annotations: Value, spec: Value) -> Arc<Ingress> {
         object(json!({
@@ -515,60 +312,6 @@ mod tests {
 
     fn backend(service: &str, port: Value) -> Value {
         json!({"service": {"name": service, "port": port}})
-    }
-
-    fn http(proxy: &crate::discovery::DiscoveredProxy) -> &r3v3rs3_api::proxy::HttpProxy {
-        let ProxyKind::Http(http) = &proxy.definition.kind else {
-            panic!("expected an HTTP proxy");
-        };
-        http
-    }
-
-    fn urls(route: &Route) -> Vec<String> {
-        route.servers.iter().map(|s| s.url.to_string()).collect()
-    }
-
-    fn messages(built: &Built) -> Vec<String> {
-        built
-            .issues
-            .iter()
-            .map(|issue| format!("{}: {}", issue.resource, issue.message))
-            .collect()
-    }
-
-    fn cluster_resources() -> Resources {
-        Resources {
-            services: vec![
-                service("app", json!([{"name": "http", "port": 80}])),
-                service(
-                    "api",
-                    json!([{"name": "tls", "port": 8443, "appProtocol": "https"}]),
-                ),
-                service("idle", json!([{"port": 80}])),
-            ],
-            slices: vec![
-                slice(
-                    "app",
-                    json!([{"name": "http", "port": 8080}]),
-                    json!([
-                        {"addresses": ["10.0.0.1"], "conditions": {"ready": true}},
-                        {"addresses": ["10.0.0.2"], "conditions": {"ready": false}},
-                        {"addresses": ["fd00::3"]},
-                    ]),
-                ),
-                slice(
-                    "api",
-                    json!([{"name": "tls", "port": 9443}]),
-                    json!([{"addresses": ["10.0.0.4"]}]),
-                ),
-                slice(
-                    "idle",
-                    json!([{"port": 8080}]),
-                    json!([{"addresses": ["10.0.0.5"], "conditions": {"ready": false}}]),
-                ),
-            ],
-            ..Default::default()
-        }
     }
 
     fn settings() -> Settings {

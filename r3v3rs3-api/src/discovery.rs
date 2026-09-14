@@ -172,6 +172,10 @@ pub struct KubernetesDiscoveryConfig {
     /// Reads the Ingress resources.
     #[serde(default = "default_true")]
     pub ingress: bool,
+    /// Reads the `R3v3rs3Proxy` custom resources. The cluster needs the custom resource
+    /// definition.
+    #[serde(default)]
+    pub crd: bool,
     /// The class of the Ingress resources to read, from `spec.ingressClassName` or the
     /// `kubernetes.io/ingress.class` annotation. Empty reads every Ingress.
     #[serde(default, skip_serializing_if = "String::is_empty")]

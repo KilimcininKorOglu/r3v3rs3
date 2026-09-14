@@ -139,6 +139,7 @@ built = "0.6.1"
 
 [dev-dependencies]
 mockito = "1.6.1"
+serde-saphyr = "1.2.0"
 net2 = "0.2.39"
 reqwest = { version = "0.12.1", default-features = false, features = [
     "rustls-tls",

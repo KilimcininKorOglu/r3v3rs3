@@ -290,8 +290,8 @@ fn validate_kubernetes(kubernetes: &KubernetesDiscoveryConfig) -> Result<(), Err
     let empty_namespace = kubernetes.namespaces.iter().any(|ns| ns.trim().is_empty());
     check_rules(&[
         (
-            !kubernetes.ingress,
-            "Kubernetes needs the Ingress resources",
+            !kubernetes.ingress && !kubernetes.crd,
+            "Kubernetes needs the Ingress or the R3v3rs3Proxy resources",
         ),
         (empty_namespace, "a Kubernetes namespace is empty"),
     ])

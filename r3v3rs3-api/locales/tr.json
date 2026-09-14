@@ -158,6 +158,8 @@
   "settings.etcd_username": "Kullanıcı Adı",
   "settings.etcd_username_hint": "etcd authentication kapalıysa boş bırakın. Kullanıcının prefix üzerinde okuma izni olmalıdır.",
   "settings.etcd_username_required": "Parolanın kullanıcısını girin.",
+  "settings.kubernetes_crd": "R3v3rs3Proxy kaynaklarını oku",
+  "settings.kubernetes_crd_hint": "Cluster'da deploy/kubernetes/crd.yaml dosyasındaki R3v3rs3Proxy custom resource definition'ı kurulu olmalıdır.",
   "settings.kubernetes_enabled": "Proxy'leri Kubernetes'ten oku",
   "settings.kubernetes_ingress": "Ingress kaynaklarını oku",
   "settings.kubernetes_ingress_class": "Ingress Class",

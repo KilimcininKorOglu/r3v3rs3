@@ -1,0 +1,66 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: r3v3rs3proxies.r3v3rs3.io
+spec:
+  group: r3v3rs3.io
+  names:
+    kind: R3v3rs3Proxy
+    listKind: R3v3rs3ProxyList
+    plural: r3v3rs3proxies
+    singular: r3v3rs3proxy
+    shortNames:
+      - rproxy
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Protocol
+          type: string
+          jsonPath: .spec.protocol
+        - name: Ports
+          type: string
+          jsonPath: .spec.ports
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: A proxy that r3v3rs3 reads from the cluster.
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              description: The fields of the r3v3rs3 proxy model. r3v3rs3 checks the fields and reports an unknown field as an issue.
+              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                protocol:
+                  type: string
+                  description: The protocol of the proxy. The default is http.
+                  enum:
+                    - http
+                    - tcp
+                    - udp
+                ports:
+                  type: array
+                  description: The names or ids of the r3v3rs3 ports.
+                  items:
+                    type: string
+                service:
+                  type: object
+                  description: The Service whose ready endpoints are the upstream servers of a TCP or UDP proxy.
+                  required:
+                    - name
+                    - port
+                  properties:
+                    name:
+                      type: string
+                    port:
+                      x-kubernetes-int-or-string: true
+                      anyOf:
+                        - type: integer
+                        - type: string
