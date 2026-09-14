@@ -3,6 +3,7 @@
 
 use super::tree::{from_node, Node};
 use super::ProxyDefinition;
+use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::proxy::{HttpProxy, ProxyKind, TcpProxy, UdpProxy};
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
@@ -167,6 +168,10 @@ fn definition(
     }
     let active = take::<bool>(&mut node, "active")?.unwrap_or(true);
     let display_name = take::<String>(&mut node, "name")?.unwrap_or_else(|| name.to_string());
+    let acme = take::<ShortId>(&mut node, "acme")?;
+    if acme.is_some() && protocol != Protocol::Http {
+        return Err("acme is available only for HTTP proxies".into());
+    }
     let kind = match protocol {
         Protocol::Http => {
             expand_http_ports(&mut node, upstream)?;
@@ -186,6 +191,7 @@ fn definition(
         name: display_name,
         ports,
         active,
+        acme,
         kind,
     })
 }
@@ -328,6 +334,7 @@ mod tests {
                 ("r3v3rs3.http.app.ports", "https"),
                 ("r3v3rs3.http.app.vhosts", "app.example.com"),
                 ("r3v3rs3.http.app.port", "8080"),
+                ("r3v3rs3.http.app.acme", "abc-def"),
                 ("com.docker.compose.service", "app"),
             ]),
             Some("172.18.0.5"),
@@ -338,6 +345,7 @@ mod tests {
         assert_eq!(definition.name, "app");
         assert_eq!(definition.ports, ["https"]);
         assert!(definition.active);
+        assert_eq!(definition.acme, Some("abc-def".parse().unwrap()));
         let http = http(definition);
         assert_eq!(http.routes[0].path, "/");
         assert_eq!(
@@ -433,14 +441,21 @@ mod tests {
                 ("r3v3rs3.http.typo.ports", "http"),
                 ("r3v3rs3.http.typo.port", "80"),
                 ("r3v3rs3.http.typo.vhost", "app"),
+                ("r3v3rs3.http.badacme.ports", "http"),
+                ("r3v3rs3.http.badacme.acme", "not-a-short-id"),
+                ("r3v3rs3.tcp.db.ports", "tcp"),
+                ("r3v3rs3.tcp.db.port", "5432"),
+                ("r3v3rs3.tcp.db.acme", "abc-def"),
             ]),
             Some("10.0.0.1"),
         );
         assert_eq!(
             parsed.issues,
             [
+                "http.badacme: acme: invalid short id: not-a-short-id",
                 "http.both: port cannot be used together with routes",
                 "http.typo: unknown keys: vhost",
+                "tcp.db: acme is available only for HTTP proxies",
             ]
         );
     }

@@ -52,6 +52,7 @@ r3v3rs3.<protocol>.<name>.<field>=<value>
 | `active` | `false` adds the proxy as inactive. The default is `true`. |
 | `port` | The port of the upstream server on the address of the resource. |
 | `scheme` | `http` or `https` for `port` of an HTTP proxy. The default is `http`. |
+| `acme` | The id of an ACME entry that orders a certificate for the `vhosts` of an HTTP proxy. See [ACME Certificates](@/discovery.md#acme-certificates). |
 
 ## Values
 
@@ -130,6 +131,26 @@ r3v3rs3.udp.dns.ports=dns
 r3v3rs3.udp.dns.upstream_servers.0.addr=/ip4/10.0.0.53/udp/53
 r3v3rs3.udp.dns.session_idle_timeout=30s
 ```
+
+## ACME Certificates
+
+`acme` names an existing ACME entry of the certificate list. r3v3rs3 orders a certificate for the virtual hosts of the proxy with the account, the challenge and the DNS provider of the entry.
+
+```text
+r3v3rs3.http.app.ports=https
+r3v3rs3.http.app.vhosts=app.example.com,www.example.com
+r3v3rs3.http.app.port=8080
+r3v3rs3.http.app.acme=abc-def
+```
+
+- The certificate has the virtual hosts as its domain names. It is a separate order of the entry, so it renews on its own schedule after the `renewal_days` of the entry. The certificates of the entry keep their schedule.
+- r3v3rs3 does not order a certificate while a valid server certificate with a private key has every virtual host, for example a wildcard certificate of the entry. After the first certificate of the proxy, the renewal follows the proxy certificate.
+- The proxies with the same entry and the same virtual hosts share one certificate.
+- A missing or inactive entry, a proxy without virtual hosts, a regular expression virtual host and a name that the challenge of the entry cannot validate are issues, for example a wildcard virtual host with `http-01`. The proxy is added without a certificate.
+- An inactive proxy does not order a certificate. A TCP or UDP proxy with `acme` is an issue.
+- After a failed order, r3v3rs3 waits one hour before the next order.
+- When the label is removed, the certificate is not renewed. r3v3rs3 removes it from the certificate list after it expires.
+- An Ingress uses the `r3v3rs3.io/acme` annotation, and an R3v3rs3Proxy uses `spec.acme`.
 
 # Docker
 
@@ -251,6 +272,7 @@ An `r3v3rs3.io/<field>` annotation sets a field of the proxies of the Ingress. T
 |---|---|
 | `r3v3rs3.io/ports` | The port names or ids of the proxies. It overrides the `ports` setting. An Ingress without this annotation and without the setting is an issue. |
 | `r3v3rs3.io/name` | The name of the proxies. |
+| `r3v3rs3.io/acme` | The ACME entry that orders a certificate for each host. See [ACME Certificates](@/discovery.md#acme-certificates). |
 | `r3v3rs3.io/<field>` | Any other field, for example `r3v3rs3.io/rate_limit.requests` or `r3v3rs3.io/headers.response.0.name`. |
 
 The rules of the Ingress set `routes` and `vhosts`, so an annotation for `routes`, `vhosts`, `port` or `scheme` is an issue.
@@ -270,7 +292,7 @@ kubectl apply -f deploy/kubernetes/crd.yaml
 ```
 
 - `spec.protocol` is `http`, `tcp` or `udp`. The default is `http`.
-- The other fields of `spec` are the fields of a proxy in [Labels](@/discovery.md#labels), for example `ports`, `name`, `active`, `vhosts` and `routes`. A list is a YAML list, and a number or a boolean is a YAML value.
+- The other fields of `spec` are the fields of a proxy in [Labels](@/discovery.md#labels), for example `ports`, `name`, `active`, `acme`, `vhosts` and `routes`. A list is a YAML list, and a number or a boolean is a YAML value.
 - `ports` is required unless the `ports` setting is set. The default name is `<namespace>/<name>`.
 - `service` with `name` and `port` names a Service in the namespace of the resource. `port` is the number or the name of a Service port. In a route of an HTTP proxy, the ready endpoints of the Service become the servers of the route. In a TCP or UDP proxy, they become the upstream servers. `service` cannot be used together with `servers` or `upstream_servers`.
 - A route whose Service has no ready endpoint stays without servers and is an issue, as with an Ingress.

@@ -1,12 +1,14 @@
-use crate::certs::Cert;
+use crate::certs::{acme::AcmeTarget, Cert};
 use indexmap::IndexMap;
 use log::warn;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoverySource};
+use r3v3rs3_api::subject_name::SubjectName;
 use r3v3rs3_api::{cert::CertKind, error::Error, id::ShortId};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use tokio_rustls::rustls::RootCertStore;
+use x509_parser::time::ASN1Time;
 
 #[derive(Debug)]
 pub struct CertList {
@@ -54,13 +56,52 @@ impl CertList {
         &self.root_certs
     }
 
-    pub fn find_certs_by_acme(&self, acme: ShortId) -> Vec<&Arc<Cert>> {
+    /// The ACME certificates of the target, from the newest to the oldest.
+    pub fn find_certs_for_target(&self, target: &AcmeTarget) -> Vec<&Arc<Cert>> {
         self.certs
             .values()
-            .filter(|cert| {
-                cert.metadata
-                    .as_ref()
-                    .is_some_and(|meta| meta.acme_id == acme)
+            .filter(|cert| AcmeTarget::of_cert(cert).as_ref() == Some(target))
+            .collect()
+    }
+
+    /// Whether a valid server certificate with a private key has every name.
+    pub fn covers(&self, names: &[String]) -> bool {
+        let Ok(names) = names
+            .iter()
+            .map(|name| name.parse::<SubjectName>())
+            .collect::<Result<Vec<_>, _>>()
+        else {
+            return false;
+        };
+        self.certs.values().any(|cert| {
+            cert.kind == CertKind::Server
+                && cert.key.is_some()
+                && cert.is_valid()
+                && names.iter().all(|name| cert.has_subject_name(name))
+        })
+    }
+
+    /// The ACME certificates that expired before `now`. A target in `active` keeps its newest
+    /// certificate. A target that no entry or proxy orders loses every expired certificate.
+    pub fn expired_acme_certs(&self, active: &HashSet<AcmeTarget>, now: ASN1Time) -> Vec<ShortId> {
+        let mut groups = BTreeMap::<AcmeTarget, Vec<&Arc<Cert>>>::new();
+        for cert in self.certs.values() {
+            if let Some(target) = AcmeTarget::of_cert(cert) {
+                groups.entry(target).or_default().push(cert);
+            }
+        }
+        groups
+            .into_iter()
+            .flat_map(|(target, certs)| {
+                let mut expired = certs
+                    .iter()
+                    .filter(|cert| cert.not_after < now)
+                    .map(|cert| cert.id)
+                    .collect::<Vec<_>>();
+                if active.contains(&target) && expired.len() == certs.len() {
+                    expired.remove(0);
+                }
+                expired
             })
             .collect()
     }
@@ -151,4 +192,97 @@ impl CertList {
 /// Sorts the certificates from the newest to the oldest.
 fn sort_certs(certs: &mut IndexMap<ShortId, Arc<Cert>>) {
     certs.sort_unstable_by(|_, v1, _, v2| v1.partial_cmp(v2).unwrap_or(Ordering::Equal));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use r3v3rs3_api::cert::CertMetadata;
+    use std::time::SystemTime;
+
+    fn names(names: &[&str]) -> Vec<SubjectName> {
+        names.iter().map(|name| name.parse().unwrap()).collect()
+    }
+
+    fn server_cert(san: &[&str]) -> Cert {
+        let ca = Cert::new_ca().unwrap();
+        Cert::new_self_signed(&names(san), &ca).unwrap()
+    }
+
+    /// A certificate that the ACME entry `acme_id` ordered for the names.
+    fn acme_cert(acme_id: &str, san: &[&str]) -> Arc<Cert> {
+        let cert = server_cert(san);
+        let metadata = CertMetadata {
+            acme_id: acme_id.parse().unwrap(),
+            created_at: SystemTime::now(),
+        };
+        let chain = String::from_utf8(cert.pem_chain.clone()).unwrap();
+        let pem = format!(
+            "# {}\r\n\r\n{chain}",
+            serde_qs::to_string(&metadata).unwrap()
+        );
+        Arc::new(Cert::new(CertKind::Server, pem.into_bytes(), cert.pem_key.clone()).unwrap())
+    }
+
+    fn target(acme_id: &str, names: &[&str]) -> AcmeTarget {
+        AcmeTarget::new(acme_id.parse().unwrap(), names)
+    }
+
+    #[tokio::test]
+    async fn the_certificates_of_an_entry_are_grouped_by_their_names() {
+        let manual = acme_cert("abc", &["www.example.com", "example.com"]);
+        let discovered = acme_cert("abc", &["app.example.com"]);
+        let other_entry = acme_cert("def", &["example.com", "www.example.com"]);
+        let certs = CertList::new([manual.clone(), discovered.clone(), other_entry]).await;
+
+        let found =
+            certs.find_certs_for_target(&target("abc", &["EXAMPLE.com", "www.example.com"]));
+        assert_eq!(found, [&manual]);
+        let found = certs.find_certs_for_target(&target("abc", &["app.example.com"]));
+        assert_eq!(found, [&discovered]);
+    }
+
+    #[tokio::test]
+    async fn a_valid_server_certificate_with_every_name_covers_the_names() {
+        let wildcard = Arc::new(server_cert(&["*.example.com"]));
+        let certs = CertList::new([wildcard]).await;
+        let covers = |names: &[&str]| {
+            certs.covers(
+                &names
+                    .iter()
+                    .map(|name| name.to_string())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert!(covers(&["app.example.com", "www.example.com"]));
+        assert!(!covers(&["app.example.com", "example.com"]));
+        assert!(!covers(&["app.example.org"]));
+    }
+
+    #[tokio::test]
+    async fn only_an_ordered_target_keeps_an_expired_certificate() {
+        let manual = [
+            acme_cert("abc", &["example.com"]),
+            acme_cert("abc", &["example.com"]),
+        ];
+        let removed_label = acme_cert("abc", &["app.example.com"]);
+        let certs = CertList::new(manual.iter().cloned().chain([removed_label.clone()])).await;
+        let active = HashSet::from([target("abc", &["example.com"])]);
+        // rcgen certificates expire in 4096, before the end of 9999.
+        let later = ASN1Time::from_timestamp(253_402_300_799).unwrap();
+
+        let expired = certs.expired_acme_certs(&active, later);
+        assert_eq!(expired.len(), 2);
+        assert!(expired.contains(&removed_label.id));
+        assert_eq!(
+            manual
+                .iter()
+                .filter(|cert| expired.contains(&cert.id))
+                .count(),
+            1
+        );
+        assert!(certs
+            .expired_acme_certs(&active, ASN1Time::now())
+            .is_empty());
+    }
 }

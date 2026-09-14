@@ -1,10 +1,12 @@
 use crate::{
     cdn::CdnRanges,
-    certs::{acme::AcmeOrder, Cert},
+    certs::{
+        acme::{AcmeOrder, AcmeTarget},
+        Cert,
+    },
     discovery::DiscoverySnapshot,
     server::rpc::ErasedRpcMethod,
 };
-use r3v3rs3_api::id::ShortId;
 use std::sync::Arc;
 
 pub enum ServerCommand {
@@ -18,7 +20,7 @@ pub enum ServerCommand {
         orders: Vec<AcmeOrder>,
     },
     AcmeOrderFinished {
-        id: ShortId,
+        target: AcmeTarget,
         succeeded: bool,
     },
     CallMethod {
@@ -46,9 +48,9 @@ impl std::fmt::Debug for ServerCommand {
                 .debug_struct("AddAcmeOrders")
                 .field("orders", &orders.len())
                 .finish(),
-            Self::AcmeOrderFinished { id, succeeded } => f
+            Self::AcmeOrderFinished { target, succeeded } => f
                 .debug_struct("AcmeOrderFinished")
-                .field("id", id)
+                .field("target", target)
                 .field("succeeded", succeeded)
                 .finish(),
             Self::CallMethod { id, .. } => f.debug_struct("CallMethod").field("id", id).finish(),

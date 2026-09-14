@@ -7,7 +7,7 @@ use super::quic::QuicListenerPool;
 use super::rpc::proxies::validate_proxy;
 use super::udp::UdpListenerPool;
 use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
-use crate::certs::acme::AcmeOrder;
+use crate::certs::acme::{AcmeEntry, AcmeOrder, AcmeTarget};
 use crate::config::storage::Storage;
 use crate::discovery::{http::ApiClient, DiscoverySnapshot};
 use crate::log::DatabaseLayer;
@@ -33,7 +33,7 @@ use std::collections::HashSet;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::str;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use tokio::io::AsyncBufReadExt;
 use tokio::select;
@@ -159,8 +159,9 @@ impl ServerState {
             ServerCommand::AddAcmeOrders { orders } => {
                 self.continue_http_challenges(orders).await;
             }
-            ServerCommand::AcmeOrderFinished { id, succeeded } => {
-                self.acme_schedule.finish(id, succeeded, Instant::now());
+            ServerCommand::AcmeOrderFinished { target, succeeded } => {
+                self.acme_schedule
+                    .finish(&target, succeeded, Instant::now());
                 if self.acme_schedule.is_idle() {
                     self.stop_http_challenges().await;
                 }
@@ -253,6 +254,7 @@ impl ServerState {
         let proxies_changed = self.apply_discovery(provider).await;
         self.finish_discovery_update(proxies_changed, certs_changed)
             .await;
+        self.start_http_challenges().await;
     }
 
     /// Sends the changed lists to the event subscribers and sets up the ports again.
@@ -294,11 +296,15 @@ impl ServerState {
         issues.extend(seal_issues);
         let update = self.proxies.replace_discovered(provider, entries.clone());
         issues.extend(discovery::conflict_issues(&entries, &update.skipped));
+        let (acme_targets, acme_issues) =
+            discovery::acme_targets(&built.acme, &update.skipped, &self.acmes);
+        issues.extend(acme_issues);
         let added = entries.len() - update.skipped.len();
         if !issues.is_empty() {
             warn!(%provider, issues = issues.len(), "some discovered proxies were not added");
         }
-        self.discovery.set_result(provider, added, issues);
+        self.discovery
+            .set_result(provider, added, issues, acme_targets);
         update.changed
     }
 
@@ -489,6 +495,11 @@ impl ServerState {
     }
 
     pub async fn update_acmes(&mut self) {
+        // The ACME targets of the discovered proxies depend on the entries.
+        if self.refresh_discovery().await {
+            self.publish_proxies();
+            self.reload_proxies().await;
+        }
         let _ = self.br_sender.send(ServerEvent::AcmeUpdated {
             entries: self
                 .acmes
@@ -557,19 +568,13 @@ impl ServerState {
     }
 
     fn remove_expired_certs(&mut self) {
-        let mut removing_items = Vec::new();
-        for acme in self.acmes.entries() {
-            let certs = self.certs.find_certs_by_acme(acme.id);
-            let mut expired = certs
-                .iter()
-                .filter(|cert| cert.not_after < ASN1Time::now())
-                .map(|cert| cert.id)
-                .collect::<Vec<_>>();
-            if expired.len() >= certs.len() {
-                expired.pop();
-            }
-            removing_items.append(&mut expired);
-        }
+        let ordered = self
+            .acmes
+            .entries()
+            .map(AcmeEntry::target)
+            .chain(self.discovery.acme_targets())
+            .collect::<HashSet<_>>();
+        let removing_items = self.certs.expired_acme_certs(&ordered, ASN1Time::now());
         for id in &removing_items {
             if let Err(err) = self.certs.delete(*id) {
                 error!(%err, "failed to delete cert");
@@ -591,46 +596,75 @@ impl ServerState {
         Ok(())
     }
 
-    async fn start_http_challenges(&mut self) {
-        let now = Instant::now();
-        let entries = self
+    /// The targets to order with their entries and their renewal times: the targets of the active
+    /// entries, and the discovered targets that no valid certificate covers without an own
+    /// certificate.
+    fn acme_renewals(&self) -> Vec<(&AcmeEntry, AcmeTarget, Option<SystemTime>)> {
+        let mut renewals = self
             .acmes
             .entries()
             .filter(|entry| entry.acme.config.active)
-            .filter(|entry| {
-                self.acme_schedule
-                    .is_due(entry.id, entry.next_renewal(&self.certs), now)
+            .map(|entry| (entry, entry.target(), entry.next_renewal(&self.certs)))
+            .collect::<Vec<_>>();
+        for target in self.discovery.acme_targets() {
+            let entry = self.acmes.get(target.acme_id);
+            let Some(entry) = entry.filter(|entry| entry.acme.config.active) else {
+                continue;
+            };
+            if renewals.iter().any(|(_, known, _)| *known == target) {
+                continue;
+            }
+            let next_renewal = entry.next_renewal_for(&target, &self.certs);
+            if next_renewal.is_none() && self.certs.covers(&target.identifiers) {
+                continue;
+            }
+            renewals.push((entry, target, next_renewal));
+        }
+        renewals
+    }
+
+    async fn start_http_challenges(&mut self) {
+        let now = Instant::now();
+        let targets = self
+            .acme_renewals()
+            .into_iter()
+            .filter(|(_, target, next_renewal)| {
+                self.acme_schedule.is_due(target, *next_renewal, now)
             })
-            .cloned()
+            .map(|(entry, target, _)| (entry.clone(), target))
             .collect::<Vec<_>>();
 
-        if entries.is_empty() {
+        if targets.is_empty() {
             return;
         }
-        for entry in &entries {
-            self.acme_schedule.start(entry.id);
+        for (_, target) in &targets {
+            self.acme_schedule.start(target.clone());
         }
 
         let dns_resolver = self.config.dns_challenge_resolver;
         let command = self.command_sender.clone();
         tokio::task::spawn(async move {
             let mut orders = Vec::new();
-            for entry in entries {
+            for (entry, target) in targets {
                 let span = span!(Level::INFO, "acme", resource_id = entry.id.to_string());
                 span.in_scope(|| {
                     info!(
                         provider = entry.acme.config.provider,
-                        identifiers = ?entry.acme.identifiers,
+                        identifiers = ?target.identifiers,
                         "starting acme request"
                     );
                 });
-                match entry.request(dns_resolver).instrument(span.clone()).await {
+                match entry
+                    .request(&target, dns_resolver)
+                    .instrument(span.clone())
+                    .await
+                {
                     Ok(request) => orders.push(request),
                     Err(err) => {
                         span.in_scope(|| error!("failed to request challenge: {}", err));
                         let _ = command
                             .send(ServerCommand::AcmeOrderFinished {
-                                id: entry.id,
+                                target,
                                 succeeded: false,
                             })
                             .await;
@@ -663,7 +697,11 @@ impl ServerState {
         let command = self.command_sender.clone();
         tokio::task::spawn(async move {
             for mut order in orders {
-                let span = span!(Level::INFO, "acme", resource_id = order.id.to_string());
+                let span = span!(
+                    Level::INFO,
+                    "acme",
+                    resource_id = order.target.acme_id.to_string()
+                );
                 let succeeded = match order.start_challenge().instrument(span.clone()).await {
                     Ok(cert) => {
                         span.in_scope(|| {
@@ -683,7 +721,7 @@ impl ServerState {
                 };
                 let _ = command
                     .send(ServerCommand::AcmeOrderFinished {
-                        id: order.id,
+                        target: order.target,
                         succeeded,
                     })
                     .await;

@@ -1,10 +1,11 @@
 //! The server side of service discovery: the latest snapshot of each provider, the proxies that
 //! the server builds from the snapshots and the provider statuses.
 
+use super::acme_list::AcmeList;
 use super::cert_list::CertList;
 use super::credentials::seal;
 use super::proxy_list::accepts;
-use crate::certs::Cert;
+use crate::certs::{acme::AcmeTarget, Cert};
 use crate::discovery::{ids, DiscoveredProxy, DiscoverySnapshot};
 use crate::proxy::tls::upstream_client_config;
 use hyper::header::HeaderValue;
@@ -17,7 +18,8 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyKind};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use r3v3rs3_api::vhost::VirtualHost;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::task::JoinHandle;
@@ -36,6 +38,7 @@ struct ProviderRecord {
     provider_issues: Vec<DiscoveryIssue>,
     build_issues: Vec<DiscoveryIssue>,
     added: usize,
+    acme_targets: Vec<AcmeTarget>,
     updated_at: i64,
     /// Sealed proxies by the JSON text of the proxy before sealing. A definition that does not
     /// change keeps its password hashes, so the proxy does not change on every read.
@@ -52,6 +55,7 @@ impl ProviderRecord {
             provider_issues: Vec::new(),
             build_issues: Vec::new(),
             added: 0,
+            acme_targets: Vec::new(),
             updated_at: 0,
             sealed: HashMap::new(),
         }
@@ -141,11 +145,21 @@ impl DiscoveryRegistry {
         provider: DiscoveryProvider,
         added: usize,
         issues: Vec<DiscoveryIssue>,
+        acme_targets: Vec<AcmeTarget>,
     ) {
         if let Some(record) = self.providers.get_mut(&provider) {
             record.added = added;
             record.build_issues = issues;
+            record.acme_targets = acme_targets;
         }
+    }
+
+    /// The ACME targets of the added proxies of every provider.
+    pub fn acme_targets(&self) -> BTreeSet<AcmeTarget> {
+        self.providers
+            .values()
+            .flat_map(|record| record.acme_targets.iter().cloned())
+            .collect()
     }
 
     pub fn statuses(&self) -> Vec<DiscoveryStatus> {
@@ -396,6 +410,81 @@ fn unix_now() -> i64 {
 pub struct Built {
     pub entries: Vec<ProxyEntry>,
     pub issues: Vec<DiscoveryIssue>,
+    pub acme: Vec<AcmeHosts>,
+}
+
+/// The virtual hosts of an active HTTP proxy with `acme`.
+#[derive(Debug, Clone)]
+pub struct AcmeHosts {
+    pub proxy: ShortId,
+    pub acme_id: ShortId,
+    pub resource: String,
+    pub key: String,
+    pub vhosts: Vec<VirtualHost>,
+}
+
+impl AcmeHosts {
+    fn of(proxy: &DiscoveredProxy, id: ShortId) -> Option<Self> {
+        let definition = &proxy.definition;
+        let acme_id = definition.acme.filter(|_| definition.active)?;
+        let ProxyKind::Http(http) = &definition.kind else {
+            return None;
+        };
+        Some(Self {
+            proxy: id,
+            acme_id,
+            resource: proxy.source.resource.clone(),
+            key: definition.key.clone(),
+            vhosts: http.vhosts.clone(),
+        })
+    }
+}
+
+/// The ACME targets of the proxies that the proxy list added, and one issue for each proxy whose
+/// target cannot be ordered.
+pub fn acme_targets(
+    hosts: &[AcmeHosts],
+    skipped: &[ShortId],
+    acmes: &AcmeList,
+) -> (Vec<AcmeTarget>, Vec<DiscoveryIssue>) {
+    let mut targets = Vec::new();
+    let mut issues = Vec::new();
+    for hosts in hosts.iter().filter(|hosts| !skipped.contains(&hosts.proxy)) {
+        match acme_target(hosts, acmes) {
+            Ok(target) if !targets.contains(&target) => targets.push(target),
+            Ok(_) => {}
+            Err(message) => issues.push(DiscoveryIssue {
+                resource: hosts.resource.clone(),
+                message: format!("{}: {message}", hosts.key),
+            }),
+        }
+    }
+    (targets, issues)
+}
+
+fn acme_target(hosts: &AcmeHosts, acmes: &AcmeList) -> Result<AcmeTarget, String> {
+    let entry = acmes
+        .get(hosts.acme_id)
+        .ok_or_else(|| format!("ACME entry not found: {}", hosts.acme_id))?;
+    if !entry.acme.config.active {
+        return Err(format!("ACME entry {} is not active", hosts.acme_id));
+    }
+    if hosts.vhosts.is_empty() {
+        return Err("acme needs vhosts".into());
+    }
+    let names = hosts
+        .vhosts
+        .iter()
+        .map(|vhost| match vhost {
+            VirtualHost::SubjectName(name) => Ok(name),
+            VirtualHost::Regex(regex) => Err(format!(
+                "acme cannot order a certificate for the regular expression {regex}"
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let target = AcmeTarget::new(hosts.acme_id, names);
+    entry.acme_for(&target).map_err(|err| err.to_string())?;
+    Ok(target)
 }
 
 /// Builds the proxies of a provider. `taken` holds the ids of the resources that the provider
@@ -419,6 +508,7 @@ pub fn build(
             Ok(value) => {
                 let id = ids::discovered_id(provider, &proxy.key, &taken);
                 taken.insert(id);
+                built.acme.extend(AcmeHosts::of(proxy, id));
                 built.entries.push(ProxyEntry {
                     id,
                     proxy: value,
@@ -507,7 +597,9 @@ pub fn conflict_issues(entries: &[ProxyEntry], skipped: &[ShortId]) -> Vec<Disco
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::certs::acme::AcmeEntry;
     use crate::discovery::ProxyDefinition;
+    use r3v3rs3_api::acme::{Acme, AcmeConfig, HTTP_01};
     use r3v3rs3_api::discovery::DiscoverySource;
     use r3v3rs3_api::port::Port;
     use r3v3rs3_api::proxy::{HttpProxy, TcpProxy};
@@ -536,6 +628,7 @@ mod tests {
                 name: "app".into(),
                 ports: ports.iter().map(|port| port.to_string()).collect(),
                 active: true,
+                acme: None,
                 kind,
             },
         }
@@ -621,6 +714,97 @@ mod tests {
         );
         assert!(rejected.entries.is_empty());
         assert_eq!(rejected.issues.len(), 1);
+    }
+
+    fn acme_entry(id: &str, challenge_type: &str, active: bool) -> AcmeEntry {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+        let key = rcgen::KeyPair::generate().unwrap();
+        let account = serde_json::from_value(serde_json::json!({
+            "id": "https://acme.example/acct/1",
+            "key_pkcs8": URL_SAFE_NO_PAD.encode(key.serialize_der()),
+            "directory": "https://acme.example/directory",
+        }))
+        .unwrap();
+        AcmeEntry {
+            id: id.parse().unwrap(),
+            acme: Acme {
+                config: AcmeConfig {
+                    active,
+                    ..Default::default()
+                },
+                identifiers: vec!["example.com".parse().unwrap()],
+                challenge_type: challenge_type.into(),
+                dns_provider: None,
+            },
+            account: Arc::new(account),
+        }
+    }
+
+    fn acme_hosts(proxy: &str, acme_id: &str, vhosts: &[&str]) -> AcmeHosts {
+        AcmeHosts {
+            proxy: proxy.parse().unwrap(),
+            acme_id: acme_id.parse().unwrap(),
+            resource: format!("{proxy}-1"),
+            key: "http.app".into(),
+            vhosts: vhosts.iter().map(|vhost| vhost.parse().unwrap()).collect(),
+        }
+    }
+
+    #[test]
+    fn acme_targets_need_an_active_entry_and_names_that_its_challenge_validates() {
+        let acmes = [
+            acme_entry("http", HTTP_01, true),
+            acme_entry("off", HTTP_01, false),
+        ]
+        .into_iter()
+        .collect::<AcmeList>();
+        let hosts = [
+            acme_hosts("a", "http", &["App.example.com", "www.example.com"]),
+            acme_hosts("b", "http", &["www.example.com", "app.example.com"]),
+            acme_hosts("c", "missing", &["c.example.com"]),
+            acme_hosts("d", "off", &["d.example.com"]),
+            acme_hosts("e", "http", &[]),
+            acme_hosts("f", "http", &["*.example.com"]),
+            acme_hosts("g", "http", &["^.+\\.example\\.com$"]),
+            acme_hosts("h", "http", &["h.example.com"]),
+        ];
+        let skipped = ["h".parse().unwrap()];
+        let (targets, issues) = acme_targets(&hosts, &skipped, &acmes);
+
+        assert_eq!(
+            targets,
+            [AcmeTarget::new(
+                "http".parse().unwrap(),
+                ["app.example.com", "www.example.com"]
+            )]
+        );
+        let messages = issues
+            .iter()
+            .map(|issue| format!("{}: {}", issue.resource, issue.message))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            messages,
+            [
+                "c-1: http.app: ACME entry not found: missing",
+                "d-1: http.app: ACME entry off is not active",
+                "e-1: http.app: acme needs vhosts",
+                "f-1: http.app: wildcard domain name needs the dns-01 challenge: *.example.com",
+                "g-1: http.app: acme cannot order a certificate for the regular expression ^.+\\.example\\.com$",
+            ]
+        );
+    }
+
+    #[test]
+    fn only_an_active_http_proxy_with_acme_has_acme_hosts() {
+        let mut proxy = discovered("a", &["http"], http());
+        let id = "abc".parse().unwrap();
+        assert!(AcmeHosts::of(&proxy, id).is_none());
+
+        proxy.definition.acme = Some("def".parse().unwrap());
+        assert!(AcmeHosts::of(&proxy, id).is_some());
+
+        proxy.definition.active = false;
+        assert!(AcmeHosts::of(&proxy, id).is_none());
     }
 
     #[tokio::test]

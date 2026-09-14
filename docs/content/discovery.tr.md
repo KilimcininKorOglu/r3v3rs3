@@ -52,6 +52,7 @@ r3v3rs3.<protocol>.<name>.<field>=<value>
 | `active` | `false` proxy'yi pasif olarak ekler. Varsayılan değer `true` olur. |
 | `port` | Kaynağın adresindeki upstream server'ın portu. |
 | `scheme` | HTTP proxy'nin `port` alanı için `http` veya `https`. Varsayılan değer `http` olur. |
+| `acme` | HTTP proxy'nin `vhosts` alanı için sertifika alan ACME kaydının id'si. [ACME sertifikaları](@/discovery.tr.md#acme-sertifikalari) bölümüne bakın. |
 
 ## Değerler
 
@@ -130,6 +131,26 @@ r3v3rs3.udp.dns.ports=dns
 r3v3rs3.udp.dns.upstream_servers.0.addr=/ip4/10.0.0.53/udp/53
 r3v3rs3.udp.dns.session_idle_timeout=30s
 ```
+
+## ACME sertifikaları
+
+`acme`, sertifika listesindeki mevcut bir ACME kaydını verir. r3v3rs3, kaydın account'u, challenge'ı ve DNS provider'ı ile proxy'nin virtual host'ları için sertifika alır.
+
+```text
+r3v3rs3.http.app.ports=https
+r3v3rs3.http.app.vhosts=app.example.com,www.example.com
+r3v3rs3.http.app.port=8080
+r3v3rs3.http.app.acme=abc-def
+```
+
+- Sertifikanın domain adları proxy'nin virtual host'larıdır. Sertifika, kaydın ayrı bir order'ıdır. Bu yüzden kaydın `renewal_days` süresinden sonra kendi zamanında yenilenir. Kaydın kendi sertifikalarının yenileme zamanı değişmez.
+- Private key'i olan geçerli bir server sertifikası bütün virtual host'ları kapsıyorsa r3v3rs3 sertifika almaz. Örneğin kaydın wildcard sertifikası bütün host'ları kapsayabilir. Proxy'nin ilk sertifikasından sonra yenileme, proxy sertifikasına göre yapılır.
+- Aynı kaydı ve aynı virtual host'ları kullanan proxy'ler tek sertifikayı paylaşır.
+- Bulunmayan veya pasif kayıt, virtual host'u olmayan proxy, regular expression virtual host'u ve kaydın challenge'ının doğrulayamadığı ad issue olur. Örneğin `http-01` ile wildcard virtual host issue olur. Proxy sertifikasız eklenir.
+- Pasif proxy sertifika almaz. `acme` alanı olan TCP veya UDP proxy issue olur.
+- Başarısız bir order'dan sonra r3v3rs3 bir sonraki order için bir saat bekler.
+- Label kaldırılınca sertifika yenilenmez. r3v3rs3 süresi dolan sertifikayı sertifika listesinden çıkarır.
+- Ingress `r3v3rs3.io/acme` annotation'ını, R3v3rs3Proxy ise `spec.acme` alanını kullanır.
 
 # Docker
 
@@ -251,6 +272,7 @@ Ayar değişikliği provider'ı server restart olmadan yeniden başlatır.
 |---|---|
 | `r3v3rs3.io/ports` | Proxy'lerin port adları veya id'leri. `ports` ayarının yerine geçer. Bu annotation'ı ve ayarı olmayan Ingress issue olur. |
 | `r3v3rs3.io/name` | Proxy'lerin adı. |
+| `r3v3rs3.io/acme` | Her host için sertifika alan ACME kaydı. [ACME sertifikaları](@/discovery.tr.md#acme-sertifikalari) bölümüne bakın. |
 | `r3v3rs3.io/<field>` | Diğer her alan, örneğin `r3v3rs3.io/rate_limit.requests` veya `r3v3rs3.io/headers.response.0.name`. |
 
 `routes` ve `vhosts` alanlarını Ingress kuralları ayarlar. Bu yüzden `routes`, `vhosts`, `port` veya `scheme` annotation'ı issue olur.
@@ -270,7 +292,7 @@ kubectl apply -f deploy/kubernetes/crd.yaml
 ```
 
 - `spec.protocol` değeri `http`, `tcp` veya `udp` olur. Varsayılan değer `http` olur.
-- `spec` içindeki diğer alanlar, [Label'lar](@/discovery.tr.md#label-lar) bölümündeki proxy alanlarıdır. Örneğin `ports`, `name`, `active`, `vhosts` ve `routes`. Liste bir YAML listesidir. Sayı ve boolean birer YAML değeridir.
+- `spec` içindeki diğer alanlar, [Label'lar](@/discovery.tr.md#label-lar) bölümündeki proxy alanlarıdır. Örneğin `ports`, `name`, `active`, `acme`, `vhosts` ve `routes`. Liste bir YAML listesidir. Sayı ve boolean birer YAML değeridir.
 - `ports` ayarı yoksa `ports` alanı gereklidir. Varsayılan ad `<namespace>/<name>` olur.
 - `name` ve `port` alanlarıyla verilen `service`, kaynağın namespace'indeki bir Service'i seçer. `port`, Service portunun numarası veya adıdır. HTTP proxy'nin bir route'unda Service'in hazır endpoint'leri route'un server'ları olur. TCP veya UDP proxy'de upstream server'lar olur. `service`, `servers` veya `upstream_servers` ile birlikte kullanılamaz.
 - Service'inin hazır endpoint'i olmayan route, Ingress'te olduğu gibi server'sız kalır ve issue olur.

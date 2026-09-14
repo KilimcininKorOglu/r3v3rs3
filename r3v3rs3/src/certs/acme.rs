@@ -24,7 +24,7 @@ use r3v3rs3_api::{
     cert::{CertKind, CertMetadata},
     id::ShortId,
 };
-use r3v3rs3_api::{acme::AcmeRequest, error::Error};
+use r3v3rs3_api::{acme::AcmeRequest, error::Error, subject_name::SubjectName};
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use serde_derive::{Deserialize, Serialize};
 use std::{
@@ -145,13 +145,39 @@ impl AcmeEntry {
         })
     }
 
-    /// Starts an order. `dns_resolver` is the DNS server that the DNS-01 challenge asks.
-    pub async fn request(&self, dns_resolver: Option<SocketAddr>) -> anyhow::Result<AcmeOrder> {
-        AcmeOrder::new(self, dns_resolver).await
+    /// Starts an order for the domain names of the target. `dns_resolver` is the DNS server that
+    /// the DNS-01 challenge asks.
+    pub async fn request(
+        &self,
+        target: &AcmeTarget,
+        dns_resolver: Option<SocketAddr>,
+    ) -> anyhow::Result<AcmeOrder> {
+        AcmeOrder::new(self, target, dns_resolver).await
     }
 
     pub fn id(&self) -> ShortId {
         self.id
+    }
+
+    /// The target of the domain names of this entry.
+    pub fn target(&self) -> AcmeTarget {
+        AcmeTarget::new(self.id, &self.acme.identifiers)
+    }
+
+    /// The settings of this entry with the domain names of the target. Fails when the challenge
+    /// of the entry cannot validate a name.
+    pub fn acme_for(&self, target: &AcmeTarget) -> Result<Acme, Error> {
+        let identifiers = target
+            .identifiers
+            .iter()
+            .map(|name| name.parse::<SubjectName>())
+            .collect::<Result<Vec<_>, _>>()?;
+        let acme = Acme {
+            identifiers,
+            ..self.acme.clone()
+        };
+        acme.validate()?;
+        Ok(acme)
     }
 
     pub fn info(&self, certs: &CertList) -> AcmeInfo {
@@ -177,9 +203,14 @@ impl AcmeEntry {
         }
     }
 
-    pub fn last_issued(&self, certs: &CertList) -> Option<SystemTime> {
-        certs
-            .find_certs_by_acme(self.id)
+    pub fn next_renewal(&self, certs: &CertList) -> Option<SystemTime> {
+        self.next_renewal_for(&self.target(), certs)
+    }
+
+    /// The renewal time of the newest certificate of the target, or `None` without a certificate.
+    pub fn next_renewal_for(&self, target: &AcmeTarget, certs: &CertList) -> Option<SystemTime> {
+        let last_issued = certs
+            .find_certs_for_target(target)
             .iter()
             .map(|cert| {
                 cert.metadata
@@ -187,14 +218,39 @@ impl AcmeEntry {
                     .map(|meta| meta.created_at)
                     .unwrap_or(SystemTime::UNIX_EPOCH)
             })
-            .max()
+            .max()?;
+        let renewal_days = self.acme.config.renewal_days;
+        Some(last_issued + Duration::from_secs(60 * 60 * 24 * renewal_days))
+    }
+}
+
+/// The domain names that one ACME entry orders together. The certificates of a target renew
+/// together, apart from the other certificates of the entry.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AcmeTarget {
+    pub acme_id: ShortId,
+    /// Lowercase, sorted and without duplicates.
+    pub identifiers: Vec<String>,
+}
+
+impl AcmeTarget {
+    pub fn new<T: fmt::Display>(acme_id: ShortId, names: impl IntoIterator<Item = T>) -> Self {
+        let mut identifiers = names
+            .into_iter()
+            .map(|name| name.to_string().to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        identifiers.sort();
+        identifiers.dedup();
+        Self {
+            acme_id,
+            identifiers,
+        }
     }
 
-    pub fn next_renewal(&self, certs: &CertList) -> Option<SystemTime> {
-        let last_issued = self.last_issued(certs)?;
-        let renewal_days = self.acme.config.renewal_days;
-        let next_renewal = last_issued + Duration::from_secs(60 * 60 * 24 * renewal_days);
-        Some(next_renewal)
+    /// The target of an ACME certificate: its entry and its subject names.
+    pub fn of_cert(cert: &Cert) -> Option<Self> {
+        let metadata = cert.metadata.as_ref()?;
+        Some(Self::new(metadata.acme_id, &cert.san))
     }
 }
 
@@ -228,7 +284,7 @@ impl From<(ShortId, AcmeAccount)> for AcmeEntry {
 }
 
 pub struct AcmeOrder {
-    pub id: ShortId,
+    pub target: AcmeTarget,
     pub identifiers: Vec<Identifier>,
     /// Key authorizations of the HTTP-01 challenges, by token.
     pub http_challenges: HashMap<String, String>,
@@ -251,13 +307,16 @@ struct Challenges {
 }
 
 impl AcmeOrder {
-    pub async fn new(entry: &AcmeEntry, dns_resolver: Option<SocketAddr>) -> anyhow::Result<Self> {
+    pub async fn new(
+        entry: &AcmeEntry,
+        target: &AcmeTarget,
+        dns_resolver: Option<SocketAddr>,
+    ) -> anyhow::Result<Self> {
         info!("requesting certificate");
 
         // An entry stored before validation existed can still hold a name the challenge cannot validate.
-        entry.acme.validate()?;
-        let identifiers = entry
-            .acme
+        let acme = entry.acme_for(target)?;
+        let identifiers = acme
             .identifiers
             .iter()
             .map(|id| Identifier::Dns(id.to_string()))
@@ -282,7 +341,7 @@ impl AcmeOrder {
             _ => None,
         };
         Ok(Self {
-            id: entry.id,
+            target: target.clone(),
             identifiers,
             http_challenges: challenges.http,
             challenge_type,
@@ -361,7 +420,7 @@ impl AcmeOrder {
         };
 
         let metadata = CertMetadata {
-            acme_id: self.id,
+            acme_id: self.target.acme_id,
             created_at: SystemTime::now(),
         };
         let metadata = serde_qs::to_string(&metadata).unwrap_or_default();

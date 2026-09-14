@@ -18,6 +18,7 @@ use http::ApiClient;
 use r3v3rs3_api::discovery::{
     DiscoveryConfig, DiscoveryIssue, DiscoveryProvider, DiscoverySource, DiscoveryState,
 };
+use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::proxy::ProxyKind;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
@@ -42,6 +43,8 @@ pub struct ProxyDefinition {
     /// Port names or port ids.
     pub ports: Vec<String>,
     pub active: bool,
+    /// The ACME entry that orders the certificate of the virtual hosts.
+    pub acme: Option<ShortId>,
     pub kind: ProxyKind,
 }
 

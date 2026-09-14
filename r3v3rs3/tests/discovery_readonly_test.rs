@@ -20,7 +20,7 @@ use r3v3rs3_api::{
 mod common;
 use common::{
     alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route, serve_http_upstream,
-    wait_for_status, with_server, TestStorage,
+    wait_for_host_status, wait_for_status, with_server, TestStorage,
 };
 
 fn discovered(name: &str, port: &str, upstream: &str) -> DiscoveredProxy {
@@ -39,6 +39,7 @@ fn discovered(name: &str, port: &str, upstream: &str) -> DiscoveredProxy {
             name: name.into(),
             ports: vec![port.into()],
             active: true,
+            acme: None,
             kind: ProxyKind::Http(Box::new(http)),
         },
     }
@@ -219,6 +220,37 @@ async fn discovery_status_reports_issues_and_follows_port_names() -> anyhow::Res
         call(&mut channels, UpdatePort { entry: port }).await??;
         assert_eq!(wait_for_status(&url, 200).await?, "discovered");
         assert_eq!(discovered_entry(&mut channels).await?.id, entry.id);
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn an_acme_label_without_an_entry_is_an_issue_and_the_proxy_stays() -> anyhow::Result<()> {
+    let Setup {
+        upstream,
+        url,
+        storage,
+        ..
+    } = setup().await?;
+    with_server(storage, |mut channels| async move {
+        let mut proxy = discovered("web-1", "web", &upstream);
+        proxy.definition.acme = Some("abc-def".parse()?);
+        if let ProxyKind::Http(http) = &mut proxy.definition.kind {
+            http.vhosts = vec!["app.example".parse()?];
+        }
+        send_snapshot(&mut channels, DiscoveryState::Running, Some(vec![proxy])).await?;
+        wait_for_host_status(&url, Some("app.example"), 200).await?;
+
+        let statuses = call(&mut channels, GetDiscoveryStatus).await??;
+        assert_eq!(statuses[0].proxies, 1);
+        assert_eq!(
+            statuses[0].issues,
+            [DiscoveryIssue {
+                resource: "web-1".into(),
+                message: "http.app: ACME entry not found: abc-def".into(),
+            }]
+        );
         Ok(())
     })
     .await
