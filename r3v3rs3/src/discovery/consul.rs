@@ -2,17 +2,13 @@
 //! catalog and the keys under a prefix in the key-value store, and follows their changes with
 //! blocking queries.
 
-use super::http::{read_json, ApiClient, RESPONSE_TIMEOUT};
 use super::kv::{self, KvEntry};
 use super::labels::{self, Upstream};
 use super::{Built, ProxyGroups, Reporter, Watch, DEBOUNCE, MIN_BACKOFF};
-use anyhow::{anyhow, Context as _};
-use bytes::Bytes;
+use crate::kv::consul::{self, ConsulClient, WAIT};
+use crate::kv::http::{read_json, ApiClient};
+use anyhow::anyhow;
 use futures::future::{select_all, BoxFuture, FutureExt};
-use http_body_util::Full;
-use hyper::body::Incoming;
-use hyper::{Method, Request, Response, StatusCode};
-use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use r3v3rs3_api::discovery::{ConsulDiscoveryConfig, DiscoveryProvider};
 use serde_derive::Deserialize;
 use std::collections::BTreeMap;
@@ -20,18 +16,6 @@ use std::convert::Infallible;
 use std::time::Duration;
 
 const PROVIDER: DiscoveryProvider = DiscoveryProvider::Consul;
-const TOKEN_HEADER: &str = "X-Consul-Token";
-const INDEX_HEADER: &str = "X-Consul-Index";
-/// The longest time that Consul holds a blocking query.
-const WAIT: &str = "5m";
-/// The wait time plus the jitter of up to 1/16 that Consul adds.
-const BLOCKING_TIMEOUT: Duration = Duration::from_secs(6 * 60);
-/// The characters that stay unencoded in a path segment or a query value.
-const UNRESERVED: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'_')
-    .remove(b'.')
-    .remove(b'~');
 
 /// A resource that a blocking query follows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,15 +54,6 @@ struct ServiceInfo {
     port: u16,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct ConsulKv {
-    key: String,
-    /// Base64 text. A folder has no value.
-    #[serde(default)]
-    value: Option<String>,
-}
-
 #[derive(Debug, Clone, Default)]
 struct Settings {
     datacenter: String,
@@ -101,23 +76,7 @@ impl Settings {
 
     /// The path and the query of an API request. The datacenter is added to the query.
     fn path(&self, segments: &[&str], query: &[(&str, &str)]) -> String {
-        let mut path = String::new();
-        for segment in segments {
-            path.push('/');
-            path.push_str(&utf8_percent_encode(segment, UNRESERVED).to_string());
-        }
-        let datacenter = Some(("dc", self.datacenter.as_str())).filter(|(_, dc)| !dc.is_empty());
-        let pairs = query
-            .iter()
-            .copied()
-            .chain(datacenter)
-            .map(|(key, value)| format!("{key}={}", utf8_percent_encode(value, UNRESERVED)))
-            .collect::<Vec<_>>();
-        if !pairs.is_empty() {
-            path.push('?');
-            path.push_str(&pairs.join("&"));
-        }
-        path
+        consul::path(&self.datacenter, segments, query)
     }
 
     fn watched_path(&self, watched: Watched, query: &[(&str, &str)]) -> String {
@@ -185,21 +144,8 @@ fn add_service(
     }
 }
 
-/// The index of a response. Consul requires an index above zero in a blocking query.
-fn consul_index(response: &Response<Incoming>) -> anyhow::Result<u64> {
-    let index = response
-        .headers()
-        .get(INDEX_HEADER)
-        .context("the response has no X-Consul-Index header")?
-        .to_str()?
-        .parse::<u64>()
-        .context("invalid X-Consul-Index header")?;
-    Ok(index.max(1))
-}
-
 pub(super) struct Provider {
-    client: ApiClient,
-    token: Option<String>,
+    client: ConsulClient,
     settings: Settings,
     reporter: Reporter,
 }
@@ -224,8 +170,7 @@ impl Provider {
         reporter: Reporter,
     ) -> Self {
         Self {
-            client,
-            token: config.token.clone().filter(|token| !token.is_empty()),
+            client: ConsulClient::new(client, config.token.as_deref()),
             settings: Settings::new(config),
             reporter,
         }
@@ -281,10 +226,11 @@ impl Provider {
     ) -> anyhow::Result<[(Watched, u64); 2]> {
         let settings = &self.settings;
         let (_, health_index) = self
+            .client
             .get(&settings.watched_path(Watched::Health, &[]))
             .await?;
         let path = settings.watched_path(Watched::Services, &[]);
-        let (response, services_index) = self.get(&path).await?;
+        let (response, services_index) = self.client.get(&path).await?;
         let services: BTreeMap<String, Option<Vec<String>>> = read_json(response).await?;
         for (name, tags) in &services {
             let (pairs, _) = tag_labels(tags.iter().flatten());
@@ -292,7 +238,7 @@ impl Provider {
                 continue;
             }
             let path = settings.path(&["v1", "health", "service", name], &[("passing", "true")]);
-            let (response, _) = self.get(&path).await?;
+            let (response, _) = self.client.get(&path).await?;
             let entries: Vec<ServiceEntry> = read_json(response).await?;
             add_service(built, groups, name, &entries, settings.exposed_by_default);
         }
@@ -307,15 +253,8 @@ impl Provider {
         built: &mut Built,
         groups: &mut ProxyGroups,
     ) -> anyhow::Result<(Watched, u64)> {
-        let (response, index) = self
-            .get(&self.settings.watched_path(Watched::Kv, &[]))
-            .await?;
-        // Consul answers 404 when no key has the prefix.
-        let entries: Vec<ConsulKv> = if response.status() == StatusCode::NOT_FOUND {
-            Vec::new()
-        } else {
-            read_json(response).await?
-        };
+        let path = self.settings.watched_path(Watched::Kv, &[]);
+        let (entries, index) = self.client.list(&path).await?;
         let entries = entries
             .into_iter()
             .map(|entry| KvEntry {
@@ -334,30 +273,9 @@ impl Provider {
             let index = index.to_string();
             let query = [("index", index.as_str()), ("wait", WAIT)];
             let path = self.settings.watched_path(watched, &query);
-            let result = self.request(&path, BLOCKING_TIMEOUT).await;
-            (watched, result.map(|(_, index)| index))
+            (watched, self.client.block(&path).await)
         }
         .boxed()
-    }
-
-    async fn get(&self, path: &str) -> anyhow::Result<(Response<Incoming>, u64)> {
-        self.request(path, RESPONSE_TIMEOUT).await
-    }
-
-    async fn request(
-        &self,
-        path: &str,
-        timeout: Duration,
-    ) -> anyhow::Result<(Response<Incoming>, u64)> {
-        let mut builder = self.client.builder(Method::GET, path);
-        if let Some(token) = &self.token {
-            builder = builder.header(TOKEN_HEADER, token);
-        }
-        let request: Request<Full<Bytes>> = builder.body(Full::new(Bytes::new()))?;
-        let allowed = [StatusCode::NOT_FOUND];
-        let response = self.client.send_with(request, timeout, &allowed).await?;
-        let index = consul_index(&response)?;
-        Ok((response, index))
     }
 }
 
@@ -420,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn paths_encode_names_and_add_the_datacenter() {
+    fn watched_paths_add_the_prefix_and_the_datacenter() {
         let settings = Settings::new(&ConsulDiscoveryConfig {
             datacenter: "eu west".into(),
             prefix: "/apps/r3v3rs3/".into(),
@@ -429,10 +347,6 @@ mod tests {
         assert_eq!(
             settings.watched_path(Watched::Kv, &[("index", "7"), ("wait", WAIT)]),
             "/v1/kv/apps/r3v3rs3/?recurse=true&index=7&wait=5m&dc=eu%20west"
-        );
-        assert_eq!(
-            settings.path(&["v1", "health", "service", "a/b"], &[("passing", "true")]),
-            "/v1/health/service/a%2Fb?passing=true&dc=eu%20west"
         );
         assert_eq!(
             Settings::default().watched_path(Watched::Services, &[]),

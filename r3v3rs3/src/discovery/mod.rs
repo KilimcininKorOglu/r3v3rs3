@@ -4,7 +4,6 @@
 pub mod consul;
 pub mod docker;
 pub mod etcd;
-pub mod http;
 pub mod ids;
 pub mod kubernetes;
 pub mod kv;
@@ -13,8 +12,8 @@ mod tree;
 
 use crate::certs::Cert;
 use crate::command::ServerCommand;
+use crate::kv::http::ApiClient;
 use anyhow::anyhow;
-use http::ApiClient;
 use r3v3rs3_api::discovery::{
     DiscoveryConfig, DiscoveryIssue, DiscoveryProvider, DiscoverySource, DiscoveryState,
 };

@@ -1,4 +1,4 @@
-//! A small HTTP/1.1 client for the APIs of the discovery providers. It connects over a Unix
+//! A small HTTP/1.1 client for the APIs of Docker, etcd and Consul. It connects over a Unix
 //! socket, TCP or TLS, and reads JSON bodies and line-delimited streams.
 
 use anyhow::{anyhow, bail, Context as _};
@@ -86,7 +86,7 @@ impl ApiClient {
         let (mut sender, connection) = http1::handshake(TokioIo::new(io)).await?;
         tokio::spawn(async move {
             if let Err(err) = connection.await {
-                debug!(%err, "a discovery API connection failed");
+                debug!(%err, "an API connection failed");
             }
         });
         let response = tokio::time::timeout(timeout, sender.send_request(request))

@@ -5,6 +5,7 @@ pub mod certs;
 pub mod command;
 pub mod config;
 pub mod discovery;
+pub mod kv;
 pub mod log;
 pub mod proxy;
 pub mod server;

@@ -1,9 +1,9 @@
 //! The Docker provider. It lists the running containers, reads their `r3v3rs3.*` labels and
 //! follows the container events of the Docker Engine API.
 
-use super::http::{read_json, ApiClient, Lines};
 use super::labels;
 use super::{Built, ProxyGroups, Reporter, Watch, DEBOUNCE, MIN_BACKOFF};
+use crate::kv::http::{read_json, ApiClient, Lines};
 use anyhow::anyhow;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DockerDiscoveryConfig};
 use serde_derive::Deserialize;
