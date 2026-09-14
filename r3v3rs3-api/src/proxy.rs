@@ -6,6 +6,7 @@ use crate::error::Error;
 use crate::header_rules::HeaderRules;
 use crate::mirror::Mirror;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
+use crate::proxy_protocol::ProxyProtocolVersion;
 use crate::redirect::RedirectRule;
 use crate::rewrite::PathRewrite;
 use crate::upstream::{
@@ -130,6 +131,10 @@ pub struct TcpProxy {
     pub health_check: HealthCheck,
     #[serde(default, skip_serializing_if = "CircuitBreaker::is_default")]
     pub circuit_breaker: CircuitBreaker,
+    /// Sends the client address in a PROXY protocol header before the data of each upstream
+    /// connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_protocol: Option<ProxyProtocolVersion>,
 }
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

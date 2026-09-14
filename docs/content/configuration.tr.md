@@ -672,6 +672,24 @@ client_cert = "a1b2c3d"
 upstream_servers = [{ addr = "/dns/db.internal/tcp/5433/tls" }]
 ```
 
+## PROXY protocol gönderme
+
+TCP / TLS üzerinden TCP proxy'si client adresini upstream sunuculara gönderebilir. Versiyonu "PROXY Protocol Gönder" alanında seçin. Bundan sonra her upstream bağlantısı bir PROXY protocol header'ı ile başlar. TLS upstream sunucusunda header TLS handshake'ten önce gider.
+
+- Kaynak adres bağlantının client adresidir. Port PROXY protocol alıyorsa bu adres o header'daki adrestir. "PROXY protocol" bölümüne bakın.
+- Hedef adres client'ın bağlandığı adrestir.
+- İki adresin ailesi farklıysa ikisi de IPv6 adresi olarak yazılır. IPv4 adresi IPv4-mapped IPv6 adresine dönüşür.
+- Aktif health check versiyon 2 `LOCAL` header'ı gönderir.
+
+Bunu yalnız bütün upstream sunucular header'ı okuyorsa açın, çünkü header'ı okumayan sunucu onu veri olarak alır. HTTP / HTTPS proxy'leri PROXY protocol göndermez. Onların yerine `Forwarded` ve `X-Forwarded-For` header'larını kullanın.
+
+```toml
+[my-mail]
+protocol = "tcp"
+proxy_protocol = "v2"
+upstream_servers = [{ addr = "/dns/mail.internal/tcp/25" }]
+```
+
 # Sertifikalar
 
 ## Sunucu sertifikaları

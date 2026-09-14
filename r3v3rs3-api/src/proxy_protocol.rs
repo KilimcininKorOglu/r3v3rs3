@@ -21,6 +21,14 @@ pub enum ProxyProtocolAccept {
     Any,
 }
 
+/// The PROXY protocol version that a TCP proxy sends to its upstream servers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProxyProtocolVersion {
+    V1,
+    V2,
+}
+
 /// Reads the PROXY protocol header on a TCP, TLS, HTTP or HTTPS port.
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ProxyProtocolReceive {

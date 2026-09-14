@@ -340,7 +340,7 @@ fn proxy_protocol_fields_view(
 }
 
 /// The options of a select field. Each option is a value, its form name and its locale key.
-fn option_list<T: Copy + PartialEq>(
+pub(super) fn option_list<T: Copy + PartialEq>(
     locale: Locale,
     options: &[(T, &str, &str)],
     selected: T,
@@ -356,7 +356,7 @@ fn option_list<T: Copy + PartialEq>(
 }
 
 /// The value of the option with the form name. The default value for an unknown name.
-fn find_option<T: Copy + Default>(options: &[(T, &str, &str)], name: &str) -> T {
+pub(super) fn find_option<T: Copy + Default>(options: &[(T, &str, &str)], name: &str) -> T {
     options
         .iter()
         .find(|(_, option, _)| *option == name)

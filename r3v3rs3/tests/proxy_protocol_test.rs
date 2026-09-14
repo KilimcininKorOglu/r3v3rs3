@@ -4,13 +4,14 @@ use r3v3rs3_api::{
     policy::IpFilter,
     port::{PortEntry, UpstreamServer},
     proxy::{HttpProxy, ProxyKind, TcpProxy},
-    proxy_protocol::{ProxyProtocolAccept, ProxyProtocolReceive},
+    proxy_protocol::{ProxyProtocolAccept, ProxyProtocolReceive, ProxyProtocolVersion},
     tls::TlsTermination,
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    sync::mpsc,
 };
 use tokio_rustls::{
     rustls::{crypto::ring, pki_types::ServerName, ClientConfig, RootCertStore},
@@ -183,6 +184,7 @@ async fn tcp_port_passes_the_payload_after_the_header() -> anyhow::Result<()> {
         load_balancing: Default::default(),
         health_check: Default::default(),
         circuit_breaker: Default::default(),
+        proxy_protocol: None,
         upstream_servers: vec![UpstreamServer::new(
             format!("/ip4/127.0.0.1/tcp/{}", echo.port()).parse()?,
         )],
@@ -217,6 +219,119 @@ async fn tcp_port_passes_the_payload_after_the_header() -> anyhow::Result<()> {
         let mut buf = [0; 1];
         let read = tokio::time::timeout(Duration::from_secs(3), idle.read(&mut buf)).await?;
         assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
+        Ok(())
+    })
+    .await
+}
+
+/// Starts a TCP server that sends the bytes of each connection, up to `hello`, to the channel.
+async fn start_recording_server() -> anyhow::Result<(SocketAddr, mpsc::Receiver<Vec<u8>>)> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (sender, receiver) = mpsc::channel(8);
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let sender = sender.clone();
+            tokio::spawn(async move {
+                let mut received = Vec::new();
+                let mut buf = [0; 256];
+                while !received.ends_with(b"hello") {
+                    match stream.read(&mut buf).await {
+                        Ok(len) if len > 0 => received.extend_from_slice(&buf[..len]),
+                        _ => break,
+                    }
+                }
+                // A connection without `hello`, e.g. from `wait_for_listener`, is not recorded.
+                if received.ends_with(b"hello") {
+                    let _ = sender.send(received).await;
+                }
+            });
+        }
+    });
+    Ok((addr, receiver))
+}
+
+fn sending_proxy(upstream: SocketAddr, version: ProxyProtocolVersion) -> ProxyKind {
+    ProxyKind::Tcp(TcpProxy {
+        upstream_servers: vec![UpstreamServer::new(
+            format!("/ip4/127.0.0.1/tcp/{}", upstream.port())
+                .parse()
+                .unwrap(),
+        )],
+        proxy_protocol: Some(version),
+        ..Default::default()
+    })
+}
+
+#[tokio::test]
+async fn tcp_proxy_sends_the_header_to_the_upstream() -> anyhow::Result<()> {
+    let v1_port = alloc_tcp_port().await?;
+    let v2_port = alloc_tcp_port().await?;
+    let (upstream, mut received) = start_recording_server().await?;
+    let config = TestStorage::builder()
+        .ports(vec![
+            port_entry("v1", v1_port.multiaddr_tcp()),
+            with_proxy_protocol(
+                port_entry("v2", v2_port.multiaddr_tcp()),
+                receive(&["127.0.0.0/8", "::1/128"]),
+            ),
+        ])
+        .proxies(vec![
+            proxy_entry(
+                "send1",
+                "v1",
+                sending_proxy(upstream, ProxyProtocolVersion::V1),
+            ),
+            proxy_entry(
+                "send2",
+                "v2",
+                sending_proxy(upstream, ProxyProtocolVersion::V2),
+            ),
+        ])
+        .build();
+
+    with_server(config, |_| async move {
+        // A port without PROXY protocol sends the peer address of the client.
+        let addr = v1_port.socket_addr();
+        wait_for_listener(addr).await?;
+        let mut stream = TcpStream::connect(addr).await?;
+        let client = stream.local_addr()?;
+        stream.write_all(b"hello").await?;
+        let bytes = tokio::time::timeout(Duration::from_secs(5), received.recv())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("the upstream received no connection"))?;
+        let expected = format!(
+            "PROXY TCP4 {} {} {} {}\r\nhello",
+            client.ip(),
+            addr.ip(),
+            client.port(),
+            addr.port()
+        );
+        assert_eq!(String::from_utf8_lossy(&bytes), expected);
+
+        // A port that receives a header sends its source address.
+        let addr = v2_port.socket_addr();
+        wait_for_listener(addr).await?;
+        let mut stream = TcpStream::connect(addr).await?;
+        stream
+            .write_all(&[v1_header(DENIED_SOURCE), b"hello".to_vec()].concat())
+            .await?;
+        let bytes = tokio::time::timeout(Duration::from_secs(5), received.recv())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("the upstream received no connection"))?;
+        let header = v2::Header::try_from(bytes.as_slice())?;
+        let v2::Addresses::IPv4(addresses) = header.addresses else {
+            anyhow::bail!("unexpected addresses: {:?}", header.addresses);
+        };
+        assert_eq!(
+            SocketAddr::from((addresses.source_address, addresses.source_port)),
+            DENIED_SOURCE.parse::<SocketAddr>()?
+        );
+        assert_eq!(
+            SocketAddr::from((addresses.destination_address, addresses.destination_port)),
+            addr
+        );
+        assert!(bytes.ends_with(b"hello"));
         Ok(())
     })
     .await

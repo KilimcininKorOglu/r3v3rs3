@@ -1,8 +1,11 @@
-//! Reads the PROXY protocol header that a trusted load balancer sends before the client data.
+//! Reads the PROXY protocol header that a trusted load balancer sends before the client data, and
+//! builds the header that a TCP proxy sends to its upstream servers.
 
 use anyhow::{anyhow, bail, ensure};
 use ppp::{v1, v2};
-use r3v3rs3_api::proxy_protocol::{ProxyProtocolAccept, ProxyProtocolReceive};
+use r3v3rs3_api::proxy_protocol::{
+    ProxyProtocolAccept, ProxyProtocolReceive, ProxyProtocolVersion,
+};
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncReadExt, BufStream};
 use tokio::net::TcpStream;
@@ -23,6 +26,55 @@ pub struct Client {
     pub remote: SocketAddr,
     /// The address of the connected peer.
     pub peer: SocketAddr,
+}
+
+/// Builds the header of a TCP connection from the client address to the address that the client
+/// connected to. When the families differ, both addresses become IPv6 addresses.
+pub fn header(
+    version: ProxyProtocolVersion,
+    source: SocketAddr,
+    destination: SocketAddr,
+) -> std::io::Result<Vec<u8>> {
+    let (source, destination) = if source.is_ipv4() == destination.is_ipv4() {
+        (source, destination)
+    } else {
+        (ipv6(source), ipv6(destination))
+    };
+    match version {
+        ProxyProtocolVersion::V1 => {
+            let family = if source.is_ipv4() { "TCP4" } else { "TCP6" };
+            let line = format!(
+                "PROXY {family} {} {} {} {}\r\n",
+                source.ip(),
+                destination.ip(),
+                source.port(),
+                destination.port()
+            );
+            Ok(line.into_bytes())
+        }
+        ProxyProtocolVersion::V2 => v2::Builder::with_addresses(
+            v2::Version::Two | v2::Command::Proxy,
+            v2::Protocol::Stream,
+            (source, destination),
+        )
+        .build(),
+    }
+}
+
+/// The v2 `LOCAL` header of a connection that carries no client, for example a health check.
+pub fn local_header() -> std::io::Result<Vec<u8>> {
+    v2::Builder::new(
+        v2::Version::Two | v2::Command::Local,
+        v2::AddressFamily::Unspecified | v2::Protocol::Unspecified,
+    )
+    .build()
+}
+
+fn ipv6(addr: SocketAddr) -> SocketAddr {
+    match addr {
+        SocketAddr::V4(addr) => (addr.ip().to_ipv6_mapped(), addr.port()).into(),
+        SocketAddr::V6(_) => addr,
+    }
 }
 
 /// Reads the client address of a new connection.
@@ -193,6 +245,38 @@ mod tests {
         )
         .build()
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_built_header_reads_back_as_the_same_addresses() {
+        let config = config(ProxyProtocolAccept::Any);
+        let cases = [
+            ("203.0.113.9:51000", "127.0.0.1:8080", "203.0.113.9:51000"),
+            ("[2001:db8::1]:51000", "[::1]:8080", "[2001:db8::1]:51000"),
+            (
+                "203.0.113.9:51000",
+                "[::1]:8080",
+                "[::ffff:203.0.113.9]:51000",
+            ),
+        ];
+        for version in [ProxyProtocolVersion::V1, ProxyProtocolVersion::V2] {
+            for (source, destination, expected) in cases {
+                let bytes = header(
+                    version,
+                    source.parse().unwrap(),
+                    destination.parse().unwrap(),
+                )
+                .unwrap();
+                let (result, rest) = read(&bytes, &config).await;
+                assert_eq!(result.unwrap(), expected.parse().unwrap(), "{version:?}");
+                assert!(rest.is_empty());
+            }
+        }
+
+        let local = local_header().unwrap();
+        let (result, rest) = read(&local, &config).await;
+        assert_eq!(result.unwrap(), PEER.parse().unwrap());
+        assert!(rest.is_empty());
     }
 
     #[tokio::test]

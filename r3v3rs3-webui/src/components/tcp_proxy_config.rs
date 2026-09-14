@@ -1,15 +1,18 @@
 use super::http_proxy_config::{
     circuit_breaker_view, client_cert_view, error_view, format_seconds, input_element, item_update,
-    list_buttons, or_error, parse_client_cert, parse_seconds, parse_weight, select_setter,
-    timeout_field_view, toggle, upstream_form_view, use_client_certs, use_entry_errors,
-    use_upstream_form, CircuitBreakerForm, UpstreamForm, INPUT_CLASS, LABEL_CLASS,
+    list_buttons, or_error, parse_client_cert, parse_seconds, parse_weight, select_field,
+    select_setter, timeout_field_view, toggle, upstream_form_view, use_client_certs,
+    use_entry_errors, use_upstream_form, CircuitBreakerForm, UpstreamForm, INPUT_CLASS,
+    LABEL_CLASS,
 };
+use super::port_config::{find_option, option_list};
 use crate::i18n::use_locale;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::multiaddr::Multiaddr;
 use r3v3rs3_api::port::UpstreamServer;
 use r3v3rs3_api::proxy::TcpProxy;
+use r3v3rs3_api::proxy_protocol::ProxyProtocolVersion;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use yew::prelude::*;
@@ -20,6 +23,20 @@ pub struct Props {
     pub proxy: TcpProxy,
     pub onchanged: Callback<Result<TcpProxy, HashMap<String, String>>>,
 }
+
+const SEND_PROXY_PROTOCOL: [(Option<ProxyProtocolVersion>, &str, &str); 3] = [
+    (None, "off", "proxy_form.proxy_protocol_off"),
+    (
+        Some(ProxyProtocolVersion::V1),
+        "v1",
+        "proxy_form.proxy_protocol_v1",
+    ),
+    (
+        Some(ProxyProtocolVersion::V2),
+        "v2",
+        "proxy_form.proxy_protocol_v2",
+    ),
+];
 
 /// The form of one upstream server of a TCP or UDP proxy.
 #[derive(Clone, PartialEq, Debug)]
@@ -90,6 +107,7 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
     let connect_timeout = use_state(|| format_seconds(props.proxy.connect_timeout));
     let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check.clone());
     let circuit_breaker = use_state(|| CircuitBreakerForm::new(&props.proxy.circuit_breaker));
+    let proxy_protocol = use_state(|| props.proxy.proxy_protocol);
 
     let entry = get_proxy(
         locale,
@@ -98,7 +116,11 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
         &connect_timeout,
         &upstream,
         &circuit_breaker,
-    );
+    )
+    .map(|proxy| TcpProxy {
+        proxy_protocol: *proxy_protocol,
+        ..proxy
+    });
     let errors = use_entry_errors(entry, props.onchanged.clone());
 
     html! {
@@ -123,8 +145,20 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
                 &connect_timeout,
                 errors.get("connect_timeout"),
             ) }
+
+            { select_field(
+                locale.t("proxy_form.proxy_protocol"),
+                select_setter(&proxy_protocol, parse_proxy_protocol),
+                option_list(locale, &SEND_PROXY_PROTOCOL, *proxy_protocol),
+                Some(locale.t("proxy_form.proxy_protocol_hint")),
+            ) }
         </>
     }
+}
+
+/// Reads the selected version. `off` and an unknown value send no header.
+fn parse_proxy_protocol(value: &str) -> Option<ProxyProtocolVersion> {
+    find_option(&SEND_PROXY_PROTOCOL, value)
 }
 
 /// The server forms of a proxy. `with_tls` shows the TLS toggle of each server.
@@ -256,6 +290,8 @@ fn get_proxy(
         load_balancing,
         health_check,
         circuit_breaker,
+        // The form component sets the selected version.
+        proxy_protocol: None,
     })
 }
 
@@ -299,6 +335,14 @@ pub(super) mod tests {
         }
         assert_eq!(server(" ", 443, false).addr("tcp"), None);
         assert_eq!(server("example.com", 0, false).addr("tcp"), None);
+    }
+
+    #[test]
+    fn parse_proxy_protocol_reads_the_version() {
+        assert_eq!(parse_proxy_protocol("off"), None);
+        assert_eq!(parse_proxy_protocol("v1"), Some(ProxyProtocolVersion::V1));
+        assert_eq!(parse_proxy_protocol("v2"), Some(ProxyProtocolVersion::V2));
+        assert_eq!(parse_proxy_protocol("v3"), None);
     }
 
     #[test]

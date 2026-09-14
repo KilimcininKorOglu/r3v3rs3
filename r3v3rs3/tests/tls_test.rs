@@ -61,6 +61,7 @@ async fn tls_proxy() -> anyhow::Result<()> {
                     load_balancing: Default::default(),
                     health_check: Default::default(),
                     circuit_breaker: Default::default(),
+                    proxy_protocol: None,
                     upstream_servers: vec![UpstreamServer::new(
                         format!(
                             "/dns/localhost/tcp/{}/tls",

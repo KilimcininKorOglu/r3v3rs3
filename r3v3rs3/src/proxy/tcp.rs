@@ -14,7 +14,7 @@ use r3v3rs3_api::{error::Error, id::ShortId, multiaddr::Multiaddr};
 use r3v3rs3_api::{
     port::PortEntry,
     proxy::{ProxyEntry, ProxyKind, TcpProxy},
-    proxy_protocol::ProxyProtocolReceive,
+    proxy_protocol::{ProxyProtocolReceive, ProxyProtocolVersion},
 };
 use std::{
     net::SocketAddr,
@@ -185,13 +185,19 @@ struct TcpUpstream {
 impl TcpUpstream {
     fn new(id: ShortId, proxy: &TcpProxy, servers: Vec<Connection>) -> Self {
         let members = health::members(&proxy.upstream_servers);
+        let targets = Probe::targets(&proxy.upstream_servers);
+        let probe = if proxy.proxy_protocol.is_some() {
+            Probe::ConnectLocal(targets)
+        } else {
+            Probe::Connect(targets)
+        };
         let group = health::group(
             (id, None),
             members,
             proxy.load_balancing,
             proxy.health_check.clone(),
             proxy.circuit_breaker,
-            Probe::Connect(Probe::targets(&proxy.upstream_servers)),
+            probe,
         );
         Self {
             servers: servers.into(),
@@ -200,24 +206,25 @@ impl TcpUpstream {
     }
 
     /// Connects to the selected server. When the connection fails, it connects once to the next
-    /// server. A server whose circuit blocks the connection is skipped. `client` is the IP address
-    /// that the client IP hash uses.
+    /// server. A server whose circuit blocks the connection is skipped. `client` is the client
+    /// address and the address that the client connected to. The client IP hash uses the client
+    /// address.
     async fn connect(
         &self,
         resolver: &Resolver,
-        client: std::net::IpAddr,
+        client: ClientAddrs,
     ) -> anyhow::Result<(SocketAddr, Box<dyn IoStream>)> {
         let mut result = Err(anyhow::anyhow!("the proxy has no upstream server"));
         let permits = self
             .group
-            .candidates(client)
+            .candidates(client.0.ip())
             .into_iter()
             .filter_map(|index| self.group.acquire(index));
         for permit in permits.take(2) {
             let Some(conn) = self.servers.get(permit.index()) else {
                 continue;
             };
-            result = connect_server(conn, resolver).await;
+            result = connect_server(conn, resolver, client).await;
             match &result {
                 Ok(_) => {
                     permit.success();
@@ -261,7 +268,7 @@ async fn start(
         }
     });
 
-    let (target, mut out) = upstream.connect(&resolver, remote.ip()).await?;
+    let (target, mut out) = upstream.connect(&resolver, (remote, local)).await?;
     info!(target: "r3v3rs3::access_log", remote = %remote, %peer, %local, %target);
 
     let mut stream: Box<dyn IoStream> = Box::new(server_stream);
@@ -286,6 +293,7 @@ async fn start(
 async fn connect_server(
     conn: &Connection,
     resolver: &Resolver,
+    client: ClientAddrs,
 ) -> anyhow::Result<(SocketAddr, Box<dyn IoStream>)> {
     let connect_timeout = conn.connect_timeout;
     let timed_out =
@@ -294,7 +302,7 @@ async fn connect_server(
     let target = timeout_at(deadline, resolve_upstream(conn, resolver))
         .await
         .map_err(|_| timed_out())??;
-    let out = timeout_at(deadline, connect_upstream(conn.clone(), target))
+    let out = timeout_at(deadline, connect_upstream(conn.clone(), target, client))
         .await
         .map_err(|_| timed_out())??;
     Ok((target, out))
@@ -319,18 +327,25 @@ async fn resolve_upstream(conn: &Connection, resolver: &Resolver) -> anyhow::Res
     Ok((resolved, conn.port).into())
 }
 
-/// Connects to the upstream server, and runs the TLS handshake of a TLS server.
+/// Connects to the upstream server, sends the PROXY protocol header of the proxy, and runs the TLS
+/// handshake of a TLS server.
 async fn connect_upstream(
     conn: Connection,
     target: SocketAddr,
+    client: ClientAddrs,
 ) -> anyhow::Result<Box<dyn IoStream>> {
     let sock = if target.is_ipv4() {
         TcpSocket::new_v4()
     } else {
         TcpSocket::new_v6()
     }?;
-    let out = sock.connect(target).await?;
+    let mut out = sock.connect(target).await?;
     debug!(%target, "connected");
+    if let Some(version) = conn.proxy_protocol {
+        let (source, destination) = client;
+        out.write_all(&proxy_protocol::header(version, source, destination)?)
+            .await?;
+    }
 
     let Some(config) = conn.tls_client_config else {
         let out: Box<dyn IoStream> = Box::new(out);
@@ -355,14 +370,14 @@ fn proxy_connections(certs: &CertList, proxy: &TcpProxy) -> Result<Vec<Connectio
     proxy
         .upstream_servers
         .iter()
-        .map(|server| multiaddr_to_host(&server.addr, &config, proxy.connect_timeout))
+        .map(|server| multiaddr_to_host(&server.addr, &config, proxy))
         .collect()
 }
 
 fn multiaddr_to_host(
     addr: &Multiaddr,
     config: &Arc<ClientConfig>,
-    connect_timeout: Duration,
+    proxy: &TcpProxy,
 ) -> Result<Connection, Error> {
     let tls_client_config = addr.is_tls().then(|| config.clone());
     let name = match (addr.ip_addr(), addr.host()) {
@@ -379,9 +394,13 @@ fn multiaddr_to_host(
         name,
         port,
         tls_client_config,
-        connect_timeout,
+        connect_timeout: proxy.connect_timeout,
+        proxy_protocol: proxy.proxy_protocol,
     })
 }
+
+/// The client address and the address that the client connected to.
+type ClientAddrs = (SocketAddr, SocketAddr);
 
 trait IoStream: AsyncRead + AsyncWrite + Unpin + Send {}
 
@@ -394,4 +413,5 @@ pub struct Connection {
     /// The TLS client config for a TLS upstream server.
     pub tls_client_config: Option<Arc<ClientConfig>>,
     pub connect_timeout: Duration,
+    pub proxy_protocol: Option<ProxyProtocolVersion>,
 }

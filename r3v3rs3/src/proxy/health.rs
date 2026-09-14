@@ -1,4 +1,5 @@
 use crate::proxy::http::pool::ConnectionPool;
+use crate::proxy::proxy_protocol;
 use fnv::FnvHasher;
 use hyper::Uri;
 use once_cell::sync::Lazy;
@@ -15,7 +16,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
     time::{Duration, Instant},
 };
-use tokio::{net::TcpStream, task::JoinSet, time::MissedTickBehavior};
+use tokio::{io::AsyncWriteExt, net::TcpStream, task::JoinSet, time::MissedTickBehavior};
 use tracing::{info, warn};
 
 /// Identifies an upstream group: the proxy, and the route index for an HTTP route.
@@ -241,6 +242,9 @@ impl Drop for Permit {
 pub enum Probe {
     /// Opens a TCP connection to the host and the port.
     Connect(Vec<Option<(String, u16)>>),
+    /// Opens a TCP connection and sends a PROXY protocol v2 `LOCAL` header, for servers that
+    /// expect a header on each connection.
+    ConnectLocal(Vec<Option<(String, u16)>>),
     /// Resolves the host name.
     Resolve(Vec<Option<(String, u16)>>),
     /// Sends `GET` to the URI through the connection pool of the proxy.
@@ -274,6 +278,12 @@ impl Probe {
                     .map(drop)
                     .map_err(|err| err.to_string())
             }
+            Self::ConnectLocal(targets) => {
+                let (host, port) = target(targets, index)?;
+                connect_local(host, *port)
+                    .await
+                    .map_err(|err| err.to_string())
+            }
             Self::Resolve(targets) => {
                 let (host, port) = target(targets, index)?;
                 let mut addrs = tokio::net::lookup_host((host.as_str(), *port))
@@ -298,6 +308,11 @@ impl Probe {
             }
         }
     }
+}
+
+async fn connect_local(host: &str, port: u16) -> std::io::Result<()> {
+    let mut stream = TcpStream::connect((host, port)).await?;
+    stream.write_all(&proxy_protocol::local_header()?).await
 }
 
 /// The addresses and the weights of the servers of a TCP or UDP proxy.
@@ -1053,5 +1068,22 @@ mod tests {
 
         let resolve = Probe::Resolve(vec![Some(("localhost".into(), 53))]);
         assert_eq!(resolve.check(0, timeout).await, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn connect_local_probe_sends_a_local_header() {
+        use tokio::io::AsyncReadExt;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let probe = Probe::ConnectLocal(vec![Some(("127.0.0.1".into(), port))]);
+        let (checked, accepted) =
+            tokio::join!(probe.check(0, Duration::from_secs(2)), listener.accept());
+        assert_eq!(checked, Ok(()));
+
+        let expected = proxy_protocol::local_header().unwrap();
+        let mut received = vec![0; expected.len()];
+        accepted.unwrap().0.read_exact(&mut received).await.unwrap();
+        assert_eq!(received, expected);
     }
 }

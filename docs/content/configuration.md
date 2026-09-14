@@ -672,6 +672,24 @@ client_cert = "a1b2c3d"
 upstream_servers = [{ addr = "/dns/db.internal/tcp/5433/tls" }]
 ```
 
+## Sending PROXY Protocol
+
+A TCP / TCP over TLS proxy can send the client address to its upstream servers. Select the version in "Send PROXY Protocol". Each upstream connection then starts with a PROXY protocol header, before the TLS handshake of a TLS upstream server.
+
+- The source address is the client address of the connection. When the port receives PROXY protocol, it is the address from that header. See "PROXY Protocol".
+- The destination address is the address that the client connected to.
+- When the two addresses have different families, both are written as IPv6 addresses. An IPv4 address becomes an IPv4-mapped IPv6 address.
+- The active health check sends a version 2 `LOCAL` header.
+
+Enable it only when every upstream server reads the header, because a server that does not read it receives the header as data. HTTP / HTTPS proxies do not send PROXY protocol. Use the `Forwarded` and `X-Forwarded-For` headers instead.
+
+```toml
+[my-mail]
+protocol = "tcp"
+proxy_protocol = "v2"
+upstream_servers = [{ addr = "/dns/mail.internal/tcp/25" }]
+```
+
 # Certificates
 
 ## Server Certificates
