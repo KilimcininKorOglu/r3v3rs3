@@ -110,6 +110,9 @@ pub enum Error {
     #[error("dns-01 challenge needs a dns provider with credentials")]
     AcmeDnsProviderRequired,
 
+    #[error("the webhook url must use https, or http on a loopback address: {url}")]
+    AcmeWebhookUrlInvalid { url: String },
+
     #[error("unauthorized")]
     Unauthorized,
 

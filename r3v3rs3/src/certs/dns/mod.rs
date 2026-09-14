@@ -15,6 +15,7 @@ mod route53;
 mod rrset;
 mod sigv4;
 mod vultr;
+mod webhook;
 
 use crate::cdn::fetch::HttpClient;
 use anyhow::{anyhow, bail};
@@ -24,7 +25,9 @@ use hickory_resolver::{
     system_conf::read_system_conf,
     TokioAsyncResolver,
 };
-use r3v3rs3_api::acme::{CloudProvider, DnsProvider, KeyedProvider, TokenApi, TokenProvider};
+use r3v3rs3_api::acme::{
+    CloudProvider, DnsProvider, KeyedProvider, LocalProvider, TokenApi, TokenProvider,
+};
 use std::{future::Future, net::SocketAddr, time::Duration};
 use tracing::{debug, info, warn};
 
@@ -135,7 +138,15 @@ pub async fn client(provider: &DnsProvider) -> anyhow::Result<Box<dyn DnsClient>
         DnsProvider::Token(provider) => token_client(http, provider),
         DnsProvider::Keyed(provider) => keyed_client(http, provider),
         DnsProvider::Cloud(provider) => cloud_client(http, provider),
+        DnsProvider::Local(provider) => local_client(http, provider),
     }
+}
+
+fn local_client(http: HttpClient, provider: &LocalProvider) -> anyhow::Result<Box<dyn DnsClient>> {
+    let client: Box<dyn DnsClient> = match provider {
+        LocalProvider::Webhook { url, token } => Box::new(webhook::Webhook::new(http, url, token)?),
+    };
+    Ok(client)
 }
 
 fn cloud_client(http: HttpClient, provider: &CloudProvider) -> anyhow::Result<Box<dyn DnsClient>> {

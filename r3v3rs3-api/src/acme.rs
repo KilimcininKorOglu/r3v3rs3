@@ -28,15 +28,10 @@ impl Acme {
     pub fn validate(&self) -> Result<(), Error> {
         match self.challenge_type.as_str() {
             HTTP_01 | TLS_ALPN_01 => {}
-            DNS_01 => {
-                let ready = self
-                    .dns_provider
-                    .as_ref()
-                    .is_some_and(DnsProvider::has_credentials);
-                if !ready {
-                    return Err(Error::AcmeDnsProviderRequired);
-                }
-            }
+            DNS_01 => match &self.dns_provider {
+                Some(provider) if provider.has_credentials() => provider.validate()?,
+                _ => return Err(Error::AcmeDnsProviderRequired),
+            },
             _ => {
                 return Err(Error::AcmeUnsupportedChallenge {
                     challenge: self.challenge_type.clone(),
@@ -80,6 +75,7 @@ pub enum DnsProvider {
     Token(TokenProvider),
     Keyed(KeyedProvider),
     Cloud(CloudProvider),
+    Local(LocalProvider),
 }
 
 /// A provider API that takes one API token.
@@ -258,6 +254,48 @@ impl CloudProvider {
     }
 }
 
+/// A provider that the operator runs, instead of the API of a DNS hosting service.
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(tag = "provider", rename_all = "snake_case")]
+pub enum LocalProvider {
+    /// An HTTP service that receives the TXT records in a JSON `POST` request.
+    Webhook {
+        #[schema(example = "https://dns-hook.example.com/acme")]
+        url: String,
+        /// The bearer token of the requests. An empty token sends no `Authorization` header.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        token: String,
+    },
+}
+
+impl LocalProvider {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Webhook { .. } => "webhook",
+        }
+    }
+
+    fn has_credentials(&self) -> bool {
+        match self {
+            Self::Webhook { url, .. } => filled(&[url]),
+        }
+    }
+}
+
+/// Whether a webhook URL uses HTTPS, or HTTP on a loopback address.
+pub fn webhook_url_allowed(url: &str) -> bool {
+    let Ok(url) = url::Url::parse(url.trim()) else {
+        return false;
+    };
+    match (url.scheme(), url.host()) {
+        ("https", Some(_)) => true,
+        ("http", Some(url::Host::Domain(host))) => host.eq_ignore_ascii_case("localhost"),
+        ("http", Some(url::Host::Ipv4(ip))) => ip.is_loopback(),
+        ("http", Some(url::Host::Ipv6(ip))) => ip.is_loopback(),
+        _ => false,
+    }
+}
+
 /// Whether no credential is empty or only whitespace.
 fn filled(values: &[&str]) -> bool {
     values.iter().all(|value| !value.trim().is_empty())
@@ -270,6 +308,17 @@ impl DnsProvider {
             Self::Token(provider) => provider.provider.name(),
             Self::Keyed(provider) => provider.name(),
             Self::Cloud(provider) => provider.name(),
+            Self::Local(provider) => provider.name(),
+        }
+    }
+
+    /// Checks the settings of the provider besides the presence of its credentials.
+    pub fn validate(&self) -> Result<(), Error> {
+        match self {
+            Self::Local(LocalProvider::Webhook { url, .. }) if !webhook_url_allowed(url) => {
+                Err(Error::AcmeWebhookUrlInvalid { url: url.clone() })
+            }
+            _ => Ok(()),
         }
     }
 
@@ -278,6 +327,7 @@ impl DnsProvider {
             Self::Token(provider) => filled(&[&provider.api_token]),
             Self::Keyed(provider) => provider.has_credentials(),
             Self::Cloud(provider) => provider.has_credentials(),
+            Self::Local(provider) => provider.has_credentials(),
         }
     }
 }
@@ -494,6 +544,8 @@ mod test {
                 "auth_url": "http://a",
             }),
             serde_json::json!({ "provider": "google_cloud", "service_account_key": "{}" }),
+            serde_json::json!({ "provider": "webhook", "url": "https://h" }),
+            serde_json::json!({ "provider": "webhook", "url": "https://h", "token": "t" }),
             serde_json::json!({ "provider": "google_cloud", "service_account_key": "{}", "project_id": "p" }),
         ];
         for value in providers {
@@ -502,6 +554,38 @@ mod test {
             assert!(provider.has_credentials());
             assert_eq!(serde_json::to_value(&provider).unwrap(), value);
         }
+    }
+
+    #[test]
+    fn a_webhook_url_needs_https_unless_it_is_a_loopback_address() {
+        for url in [
+            "https://dns-hook.example.com/acme",
+            " https://10.0.0.5:8443 ",
+            "http://127.0.0.1:8080/dns",
+            "http://[::1]/dns",
+            "http://LocalHost/dns",
+        ] {
+            assert!(webhook_url_allowed(url), "{url}");
+        }
+        for url in [
+            "http://dns-hook.example.com/acme",
+            "http://10.0.0.5/dns",
+            "ftp://127.0.0.1/dns",
+            "not a url",
+            "",
+        ] {
+            assert!(!webhook_url_allowed(url), "{url}");
+        }
+
+        let mut request = acme(&["example.com"], DNS_01);
+        request.dns_provider = Some(DnsProvider::Local(LocalProvider::Webhook {
+            url: "http://dns-hook.example.com/acme".to_string(),
+            token: String::new(),
+        }));
+        assert!(matches!(
+            request.validate(),
+            Err(Error::AcmeWebhookUrlInvalid { url }) if url == "http://dns-hook.example.com/acme"
+        ));
     }
 
     #[test]

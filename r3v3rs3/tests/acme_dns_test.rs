@@ -5,7 +5,7 @@ use axum::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use r3v3rs3::certs::dns::{self, DnsClient, TxtName};
 use r3v3rs3_api::acme::{
-    CloudProvider, DnsProvider, KeyedProvider, OvhEndpoint, TokenApi, TokenProvider,
+    CloudProvider, DnsProvider, KeyedProvider, LocalProvider, OvhEndpoint, TokenApi, TokenProvider,
 };
 use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
 use rsa::{
@@ -722,6 +722,58 @@ async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_othe
         requests(&calls).get(1).map(String::as_str),
         Some("GET /projects/dns-project/managedZones?dnsName=app.example.test.")
     );
+    Ok(())
+}
+
+fn webhook_with(url: String) -> DnsProvider {
+    DnsProvider::Local(LocalProvider::Webhook {
+        url: format!("{url}/acme"),
+        token: "wh-token".to_string(),
+    })
+}
+
+fn webhook(_: &Call) -> (StatusCode, String) {
+    (StatusCode::NO_CONTENT, String::new())
+}
+
+#[tokio::test]
+async fn a_webhook_receives_the_action_the_name_and_the_values() -> anyhow::Result<()> {
+    let calls = add_and_remove(webhook, webhook_with).await?;
+
+    assert_eq!(requests(&calls), vec!["POST /acme", "POST /acme"]);
+    let expected = |action: &str| json!({ "action": action, "fqdn": "_acme-challenge.app.example.test", "values": ["v1", "v2"] });
+    assert_eq!(body(&calls, 0)?, expected("add"));
+    assert_eq!(body(&calls, 1)?, expected("remove"));
+    assert!(calls
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|call| call.authorization == "Bearer wh-token"));
+    Ok(())
+}
+
+fn webhook_add_fails(call: &Call) -> (StatusCode, String) {
+    if call.body.contains("\"add\"") {
+        return (StatusCode::BAD_GATEWAY, "upstream DNS failed".to_string());
+    }
+    webhook(call)
+}
+
+#[tokio::test]
+async fn a_failed_webhook_add_sends_a_remove_and_a_plain_http_host_is_refused() -> anyhow::Result<()>
+{
+    let (client, calls) = mock_client(webhook_add_fails, webhook_with).await?;
+    let Err(err) = client.add_txt(&challenge_name()).await else {
+        anyhow::bail!("add_txt succeeded");
+    };
+    assert!(format!("{err:#}").contains("502"), "{err:#}");
+    assert_eq!(body(&calls, 1)?["action"], "remove");
+
+    let remote = DnsProvider::Local(LocalProvider::Webhook {
+        url: "http://dns-hook.example.test/acme".to_string(),
+        token: String::new(),
+    });
+    assert!(dns::client(&remote).await.is_err());
     Ok(())
 }
 

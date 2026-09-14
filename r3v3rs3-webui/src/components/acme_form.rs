@@ -75,7 +75,7 @@ const OVH_ENDPOINTS: [&str; 7] = [
     "soyoustart-ca",
 ];
 
-pub static DNS_PROVIDERS: [DnsProviderInfo; 12] = [
+pub static DNS_PROVIDERS: [DnsProviderInfo; 13] = [
     DnsProviderInfo {
         name: "cloudflare",
         label: "Cloudflare",
@@ -162,6 +162,14 @@ pub static DNS_PROVIDERS: [DnsProviderInfo; 12] = [
         name: "vultr",
         label: "Vultr",
         fields: &[secret("api_token", "acme.api_key")],
+    },
+    DnsProviderInfo {
+        name: "webhook",
+        label: "Webhook",
+        fields: &[
+            text("url", "acme.webhook_url"),
+            secret("token", "acme.bearer_token_optional"),
+        ],
     },
 ];
 
@@ -455,7 +463,7 @@ pub fn build_request(
     };
     if let Err(err) = acme.validate() {
         let key = match err {
-            Error::AcmeDnsProviderRequired => "dns_provider",
+            Error::AcmeDnsProviderRequired | Error::AcmeWebhookUrlInvalid { .. } => "dns_provider",
             _ => "domain_names",
         };
         errors
@@ -613,10 +621,12 @@ mod tests {
             input.dns_provider = info.name.into();
             // A select field keeps its first option.
             for field in info.fields {
+                let value = match field.key {
+                    "url" => "https://dns-hook.example.test/acme".to_string(),
+                    key => format!("{key}-value"),
+                };
                 if !matches!(field.kind, FieldKind::Select(_)) {
-                    input
-                        .credentials
-                        .insert(field.key, format!("{}-value", field.key));
+                    input.credentials.insert(field.key, value);
                 }
             }
             let provider = build(&input, false).unwrap().acme.dns_provider.unwrap();
@@ -633,6 +643,20 @@ mod tests {
             errors.get("dns_provider"),
             Some(&Locale::En.error_message(&Error::AcmeDnsProviderRequired))
         );
+    }
+
+    #[test]
+    fn a_plain_http_webhook_url_is_a_provider_error() {
+        let mut input = fields("example.com", DNS_01);
+        input.dns_provider = "webhook".into();
+        input
+            .credentials
+            .insert("url", "http://dns-hook.example.test/acme".into());
+        let errors = build(&input, false).unwrap_err();
+        let expected = Locale::En.error_message(&Error::AcmeWebhookUrlInvalid {
+            url: "http://dns-hook.example.test/acme".into(),
+        });
+        assert_eq!(errors.get("dns_provider"), Some(&expected));
     }
 
     #[test]
