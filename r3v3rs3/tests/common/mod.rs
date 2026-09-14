@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod kv;
+
 use futures::Future;
 use hickory_resolver::{config::LookupIpStrategy, system_conf::read_system_conf, AsyncResolver};
 use net2::{TcpBuilder, UdpBuilder};

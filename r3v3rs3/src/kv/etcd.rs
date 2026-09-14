@@ -12,7 +12,7 @@ use hyper::{Method, Response, StatusCode};
 use serde::Deserialize as _;
 use serde_derive::Deserialize;
 use serde_json::{json, Value};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 /// etcd sends a progress notification on an idle watch every ten minutes, so a longer silence
@@ -26,7 +26,7 @@ struct ResponseHeader {
 }
 
 /// The keys of a range and the revision of the read.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct RangeResponse {
     #[serde(default)]
     header: ResponseHeader,
@@ -41,13 +41,19 @@ impl RangeResponse {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct KeyValue {
     /// Base64 text.
+    #[serde(default)]
     pub key: String,
     /// Base64 text. The JSON gateway omits an empty value.
     #[serde(default)]
     pub value: Option<String>,
+    #[serde(default, deserialize_with = "int64")]
+    pub mod_revision: i64,
+    /// The lease of the key, or 0.
+    #[serde(default, deserialize_with = "int64")]
+    pub lease: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,19 +70,37 @@ struct WatchMessage {
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct WatchResult {
+pub(super) struct WatchResult {
     #[serde(default)]
     canceled: bool,
     #[serde(default, deserialize_with = "int64")]
-    compact_revision: i64,
+    pub(super) compact_revision: i64,
     #[serde(default)]
     cancel_reason: String,
     #[serde(default)]
-    events: Vec<Value>,
+    pub(super) events: Vec<Event>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub(super) enum EventType {
+    #[default]
+    #[serde(rename = "PUT")]
+    Put,
+    #[serde(rename = "DELETE")]
+    Delete,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct Event {
+    /// The JSON gateway omits the default type, `PUT`.
+    #[serde(default, rename = "type")]
+    pub(super) kind: EventType,
+    #[serde(default)]
+    pub(super) kv: KeyValue,
 }
 
 /// An int64 field, which the JSON gateway writes as a string.
-fn int64<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
+pub(super) fn int64<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum Int64 {
@@ -89,49 +113,85 @@ fn int64<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Er
     }
 }
 
-/// Whether a message of the watch stream needs a new read: a change of a key, or a compacted
-/// start revision.
-fn watch_changed(line: &[u8]) -> anyhow::Result<bool> {
+/// The result of a message of the watch stream. A failed watch, or a watch that etcd canceled for
+/// another reason than a compaction, is an error.
+pub(super) fn watch_result(line: &[u8]) -> anyhow::Result<WatchResult> {
     let message: WatchMessage = serde_json::from_slice(line).context("invalid watch message")?;
     if let Some(error) = message.error {
         bail!("the watch failed: {error}");
     }
     let result = message.result.unwrap_or_default();
-    if result.compact_revision > 0 {
-        return Ok(true);
-    }
-    if result.canceled {
+    if result.canceled && result.compact_revision <= 0 {
         bail!("etcd canceled the watch: {}", result.cancel_reason);
     }
-    Ok(!result.events.is_empty())
+    Ok(result)
 }
 
-/// The keys under a prefix as a Base64 key range.
+/// Whether a message of the watch stream needs a new read: a change of a key, or a compacted
+/// start revision.
+fn watch_changed(line: &[u8]) -> anyhow::Result<bool> {
+    let result = watch_result(line)?;
+    Ok(result.compact_revision > 0 || !result.events.is_empty())
+}
+
+/// The next line of a watch stream.
+pub(super) async fn next_watch_line(lines: &mut Lines) -> anyhow::Result<Vec<u8>> {
+    tokio::time::timeout(WATCH_IDLE_TIMEOUT, lines.next())
+        .await
+        .map_err(|_| anyhow!("the watch stream is idle"))??
+        .context("the watch stream ended")
+}
+
+/// A Base64 key range.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyRange {
-    /// The prefix without a leading or a trailing `/`.
+    /// The prefix of the keys.
     pub prefix: String,
     key: String,
     range_end: String,
 }
 
 impl KeyRange {
+    /// The keys under `<prefix>/`. The range prefix has no leading or trailing `/`.
     pub fn new(prefix: &str) -> Self {
         let prefix = prefix.trim_matches('/').to_string();
-        // The range ends before the byte that follows `/`, so `r3v3rs3x/...` is outside it.
+        let key = format!("{prefix}/");
+        Self::starting_with(&key, prefix)
+    }
+
+    /// Every key that starts with `prefix`.
+    pub(super) fn with_prefix(prefix: &str) -> Self {
+        Self::starting_with(prefix, prefix.to_string())
+    }
+
+    fn starting_with(start: &str, prefix: String) -> Self {
         Self {
-            key: BASE64_STANDARD.encode(format!("{prefix}/")),
-            range_end: BASE64_STANDARD.encode(format!("{prefix}0")),
+            key: BASE64_STANDARD.encode(start),
+            range_end: BASE64_STANDARD.encode(prefix_end(start.as_bytes())),
             prefix,
         }
     }
 }
 
+/// The first key after every key that starts with `prefix`.
+fn prefix_end(prefix: &[u8]) -> Vec<u8> {
+    let mut end = prefix.to_vec();
+    while let Some(last) = end.pop() {
+        if last < u8::MAX {
+            end.push(last + 1);
+            return end;
+        }
+    }
+    // The key `\0` as the range end means the end of the key space.
+    vec![0]
+}
+
+#[derive(Clone)]
 pub struct EtcdClient {
     client: ApiClient,
     /// The user name and the password of etcd authentication.
     credentials: Option<(String, String)>,
-    token: Mutex<Option<String>>,
+    token: Arc<Mutex<Option<String>>>,
 }
 
 impl EtcdClient {
@@ -145,7 +205,7 @@ impl EtcdClient {
         Self {
             client,
             credentials,
-            token: Mutex::default(),
+            token: Arc::default(),
         }
     }
 
@@ -173,23 +233,55 @@ impl EtcdClient {
     /// Watches the keys of the range from the revision after `revision`, and returns at the first
     /// change.
     pub async fn wait_for_change(&self, range: &KeyRange, revision: i64) -> anyhow::Result<()> {
+        let mut lines = self.watch(range, revision).await?;
+        loop {
+            let line = next_watch_line(&mut lines).await?;
+            if !line.trim_ascii().is_empty() && watch_changed(&line)? {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Opens a watch stream on the keys of the range from the revision after `revision`.
+    pub(super) async fn watch(&self, range: &KeyRange, revision: i64) -> anyhow::Result<Lines> {
         let body = json!({"create_request": {
             "key": range.key,
             "range_end": range.range_end,
             "start_revision": revision.saturating_add(1).to_string(),
             "progress_notify": true,
         }});
-        let response = self.post("/v3/watch", &body).await?;
-        let mut lines = Lines::new(response);
-        loop {
-            let line = tokio::time::timeout(WATCH_IDLE_TIMEOUT, lines.next())
-                .await
-                .map_err(|_| anyhow!("the watch stream is idle"))??
-                .context("the watch stream ended")?;
-            if !line.trim_ascii().is_empty() && watch_changed(&line)? {
-                return Ok(());
-            }
+        Ok(Lines::new(self.post("/v3/watch", &body).await?))
+    }
+
+    pub(super) async fn post(
+        &self,
+        path: &str,
+        body: &Value,
+    ) -> anyhow::Result<Response<Incoming>> {
+        self.post_with(path, body, &[]).await
+    }
+
+    /// Sends a request with the token. An expired or revoked token is replaced once. A status in
+    /// `allowed` is not an error.
+    pub(super) async fn post_with(
+        &self,
+        path: &str,
+        body: &Value,
+        allowed: &[StatusCode],
+    ) -> anyhow::Result<Response<Incoming>> {
+        let mut retry = allowed.to_vec();
+        if self.credentials.is_some() {
+            retry.push(StatusCode::UNAUTHORIZED);
         }
+        let response = self
+            .send(self.token().as_deref(), path, body, &retry)
+            .await?;
+        if response.status() != StatusCode::UNAUTHORIZED {
+            return Ok(response);
+        }
+        self.authenticate().await?;
+        self.send(self.token().as_deref(), path, body, allowed)
+            .await
     }
 
     fn token(&self) -> Option<String> {
@@ -197,23 +289,6 @@ impl EtcdClient {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
-    }
-
-    /// Sends a request with the token. An expired or revoked token is replaced once.
-    async fn post(&self, path: &str, body: &Value) -> anyhow::Result<Response<Incoming>> {
-        let retry: &[StatusCode] = if self.credentials.is_some() {
-            &[StatusCode::UNAUTHORIZED]
-        } else {
-            &[]
-        };
-        let response = self
-            .send(self.token().as_deref(), path, body, retry)
-            .await?;
-        if response.status() != StatusCode::UNAUTHORIZED {
-            return Ok(response);
-        }
-        self.authenticate().await?;
-        self.send(self.token().as_deref(), path, body, &[]).await
     }
 
     async fn send(
@@ -262,20 +337,38 @@ mod tests {
     }
 
     #[test]
+    fn watch_events_have_a_type_and_a_key() {
+        let line = br#"{"result":{"events":[{"kv":{"key":"YQ==","mod_revision":"4"}},{"type":"DELETE","kv":{"key":"Yg==","mod_revision":"5"}}]}}"#;
+        let events = watch_result(line).unwrap().events;
+        let kinds = events.iter().map(|event| event.kind).collect::<Vec<_>>();
+        assert_eq!(kinds, [EventType::Put, EventType::Delete]);
+        assert_eq!(events[1].kv.mod_revision, 5);
+    }
+
+    #[test]
     fn the_range_covers_only_the_prefix() {
         let range = KeyRange::new("/apps/r3v3rs3/");
         assert_eq!(range.prefix, "apps/r3v3rs3");
         assert_eq!(range.key, BASE64_STANDARD.encode("apps/r3v3rs3/"));
         assert_eq!(range.range_end, BASE64_STANDARD.encode("apps/r3v3rs30"));
 
+        let range = KeyRange::with_prefix("a\u{7f}");
+        assert_eq!(range.range_end, BASE64_STANDARD.encode([b'a', 0x80]));
+        assert_eq!(prefix_end(&[b'a', 0xff, 0xff]), b"b");
+        assert_eq!(prefix_end(&[0xff]), [0]);
+
         let key = BASE64_STANDARD.encode("apps/r3v3rs3/http/app/ports");
         let response: RangeResponse = serde_json::from_value(json!({
             "header": {"revision": "12"},
-            "kvs": [{"key": key, "value": BASE64_STANDARD.encode("web")}],
+            "kvs": [{"key": key, "value": BASE64_STANDARD.encode("web"), "mod_revision": "11", "lease": "7"}],
         }))
         .unwrap();
         assert_eq!(response.revision(), 12);
         assert_eq!(response.kvs[0].key, key);
+        assert_eq!(
+            (response.kvs[0].mod_revision, response.kvs[0].lease),
+            (11, 7)
+        );
 
         let empty: RangeResponse = serde_json::from_value(json!({"header": {}})).unwrap();
         assert!(empty.kvs.is_empty());

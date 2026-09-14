@@ -6,9 +6,12 @@ use anyhow::Context as _;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::body::Incoming;
-use hyper::{Method, Request, Response, StatusCode};
+use hyper::header::CONTENT_TYPE;
+use hyper::http::request::Builder;
+use hyper::{Method, Response, StatusCode};
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_derive::Deserialize;
+use serde_json::Value;
 use std::time::Duration;
 
 const TOKEN_HEADER: &str = "X-Consul-Token";
@@ -24,13 +27,15 @@ const UNRESERVED: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'.')
     .remove(b'~');
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct KeyValue {
     pub key: String,
-    /// Base64 text. A folder has no value.
+    /// Base64 text. A folder and an empty value have no value.
     #[serde(default)]
     pub value: Option<String>,
+    #[serde(default)]
+    pub modify_index: u64,
 }
 
 /// The path and the query of an API request. A datacenter that is not empty is added to the query.
@@ -66,6 +71,7 @@ fn consul_index(response: &Response<Incoming>) -> anyhow::Result<u64> {
     Ok(index.max(1))
 }
 
+#[derive(Clone)]
 pub struct ConsulClient {
     client: ApiClient,
     token: Option<String>,
@@ -92,9 +98,42 @@ impl ConsulClient {
         Ok(index)
     }
 
-    /// Reads the keys of a recursive key-value path, and returns them with the index.
+    /// Reads the keys of a key-value path, and returns them with the index.
     pub async fn list(&self, path: &str) -> anyhow::Result<(Vec<KeyValue>, u64)> {
-        let (response, index) = self.get(path).await?;
+        self.list_with(path, RESPONSE_TIMEOUT).await
+    }
+
+    /// Reads the keys of a key-value path with a blocking query. `path` has the `index` and the
+    /// `wait` parameters.
+    pub async fn wait_list(&self, path: &str) -> anyhow::Result<(Vec<KeyValue>, u64)> {
+        self.list_with(path, BLOCKING_TIMEOUT).await
+    }
+
+    /// Sends a PUT request with an optional JSON body. A status in `allowed` is not an error.
+    pub async fn put(
+        &self,
+        path: &str,
+        body: Option<&Value>,
+        allowed: &[StatusCode],
+    ) -> anyhow::Result<Response<Incoming>> {
+        let builder = self.builder(Method::PUT, path);
+        let request = match body {
+            Some(body) => builder
+                .header(CONTENT_TYPE, "application/json")
+                .body(Full::new(Bytes::from(body.to_string())))?,
+            None => builder.body(Full::new(Bytes::new()))?,
+        };
+        self.client
+            .send_with(request, RESPONSE_TIMEOUT, allowed)
+            .await
+    }
+
+    async fn list_with(
+        &self,
+        path: &str,
+        timeout: Duration,
+    ) -> anyhow::Result<(Vec<KeyValue>, u64)> {
+        let (response, index) = self.request(path, timeout).await?;
         // Consul answers 404 when no key has the prefix.
         if response.status() == StatusCode::NOT_FOUND {
             return Ok((Vec::new(), index));
@@ -102,16 +141,22 @@ impl ConsulClient {
         Ok((read_json(response).await?, index))
     }
 
+    fn builder(&self, method: Method, path: &str) -> Builder {
+        let builder = self.client.builder(method, path);
+        match &self.token {
+            Some(token) => builder.header(TOKEN_HEADER, token),
+            None => builder,
+        }
+    }
+
     async fn request(
         &self,
         path: &str,
         timeout: Duration,
     ) -> anyhow::Result<(Response<Incoming>, u64)> {
-        let mut builder = self.client.builder(Method::GET, path);
-        if let Some(token) = &self.token {
-            builder = builder.header(TOKEN_HEADER, token);
-        }
-        let request: Request<Full<Bytes>> = builder.body(Full::new(Bytes::new()))?;
+        let request = self
+            .builder(Method::GET, path)
+            .body(Full::new(Bytes::new()))?;
         let allowed = [StatusCode::NOT_FOUND];
         let response = self.client.send_with(request, timeout, &allowed).await?;
         let index = consul_index(&response)?;

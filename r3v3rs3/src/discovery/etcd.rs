@@ -94,10 +94,12 @@ mod tests {
             KeyValue {
                 key: BASE64_STANDARD.encode("apps/r3v3rs3/http/app/ports"),
                 value: web.clone(),
+                ..Default::default()
             },
             KeyValue {
                 key: "%%%".into(),
                 value: web,
+                ..Default::default()
             },
         ];
         let mut built = Built::default();
