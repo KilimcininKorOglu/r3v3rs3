@@ -128,24 +128,45 @@ impl TcpPortContext {
         self.stop_notifier.notify_waiters();
     }
 
-    pub fn start_proxy(&mut self, mut stream: BufStream<TcpStream>) {
-        let Some(upstream) = self.upstream.clone() else {
+    pub fn starter(&self) -> TcpStarter {
+        TcpStarter {
+            upstream: self.upstream.clone(),
+            resolver: self.resolver.clone(),
+            tls_acceptor: port_acceptor(self.tls_termination.as_ref()),
+            stop_notifier: self.stop_notifier.clone(),
+            span: self.span.clone(),
+        }
+    }
+}
+
+/// Starts a client connection of a TCP port.
+pub struct TcpStarter {
+    upstream: Option<TcpUpstream>,
+    resolver: Resolver,
+    /// `None` when the TLS config of the port is invalid.
+    tls_acceptor: Option<Option<TlsAcceptor>>,
+    stop_notifier: Arc<Notify>,
+    span: Span,
+}
+
+impl TcpStarter {
+    pub fn start(self, mut stream: BufStream<TcpStream>) {
+        let Some(upstream) = self.upstream else {
             tokio::spawn(async move { stream.get_mut().shutdown().await });
             return;
         };
-
-        let Some(tls_acceptor) = port_acceptor(self.tls_termination.as_ref()) else {
+        let Some(tls_acceptor) = self.tls_acceptor else {
             debug!("closing the connection: the TLS config is invalid");
             return;
         };
         let task = start(
             stream,
             upstream,
-            self.resolver.clone(),
+            self.resolver,
             tls_acceptor,
-            self.stop_notifier.clone(),
+            self.stop_notifier,
         );
-        spawn_connection(self.span.clone(), task);
+        spawn_connection(self.span, task);
     }
 }
 

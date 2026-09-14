@@ -1,6 +1,7 @@
 use super::acme_list::AcmeList;
 use super::acme_schedule::AcmeSchedule;
 use super::cert_list::CertList;
+use super::connection::{self, HttpChallenges};
 use super::discovery::{self, DiscoveryRegistry, DiscoveryTasks};
 use super::proxy_list::ProxyList;
 use super::quic::QuicListenerPool;
@@ -17,10 +18,6 @@ use crate::{
     command::ServerCommand,
     proxy::{PortContext, PortContextKind},
 };
-use hyper::service::service_fn;
-use hyper::Response;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto;
 use quinn::Incoming;
 use r3v3rs3_api::app::{AppConfig, AppInfo};
 use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryState, DiscoveryStatus};
@@ -30,15 +27,12 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::proxy::ProxyEntry;
 use rand::seq::SliceRandom;
 use std::collections::HashSet;
-use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::str;
+use std::sync::Arc;
 use std::time::{Instant, SystemTime};
-use std::{collections::HashMap, sync::Arc};
-use tokio::io::AsyncBufReadExt;
 use tokio::select;
 use tokio::{
-    io::BufStream,
     net::TcpStream,
     sync::{broadcast, mpsc},
 };
@@ -56,7 +50,7 @@ pub struct ServerState {
     tcp_pool: TcpListenerPool,
     udp_pool: UdpListenerPool,
     quic_pool: QuicListenerPool,
-    http_challenges: HashMap<String, String>,
+    http_challenges: HttpChallenges,
     acme_schedule: AcmeSchedule,
     command_sender: mpsc::Sender<ServerCommand>,
     br_sender: broadcast::Sender<ServerEvent>,
@@ -124,7 +118,7 @@ impl ServerState {
             tcp_pool: TcpListenerPool::new(),
             udp_pool: UdpListenerPool::new(),
             quic_pool: QuicListenerPool::new(),
-            http_challenges: HashMap::new(),
+            http_challenges: HttpChallenges::default(),
             acme_schedule: AcmeSchedule::default(),
             command_sender,
             br_sender,
@@ -366,42 +360,19 @@ impl ServerState {
         }
     }
 
-    pub async fn handle_tcp_connection(&mut self, index: usize, stream: TcpStream) {
-        let mut stream = BufStream::new(stream);
-
-        if !self.http_challenges.is_empty() {
-            if let Some(body) = self.handle_http_challenge(&mut stream).await {
-                tokio::task::spawn(async move {
-                    let stream = TokioIo::new(BufStream::new(stream));
-                    if let Err(err) = auto::Builder::new(TokioExecutor::new())
-                        .serve_connection(
-                            stream,
-                            service_fn(|_| {
-                                let body = body.clone();
-                                async move { Ok::<_, Infallible>(Response::new(body)) }
-                            }),
-                        )
-                        .await
-                    {
-                        error!("Error serving connection: {:?}", err);
-                    }
-                });
-                return;
+    /// Starts the connection without waiting for the client, so a slow client does not delay the
+    /// server loop.
+    pub fn handle_tcp_connection(&self, index: usize, stream: TcpStream) {
+        let starter = self
+            .ports
+            .as_slice()
+            .get(index)
+            .and_then(PortContext::starter);
+        connection::accept(stream, &self.http_challenges, move |stream| {
+            if let Some(starter) = starter {
+                starter.start(stream);
             }
-        }
-
-        if index < self.ports.as_slice().len() {
-            let state = &mut self.ports.as_mut_slice()[index];
-            match state.kind_mut() {
-                PortContextKind::Tcp(tcp) => {
-                    tcp.start_proxy(stream);
-                }
-                PortContextKind::Http(http) => {
-                    http.start_proxy(stream);
-                }
-                _ => (),
-            }
-        }
+        });
     }
 
     pub async fn handle_udp_packet(
@@ -515,22 +486,6 @@ impl ServerState {
             self.update_ports().await;
             self.reload_proxies().await;
         }
-    }
-
-    async fn handle_http_challenge(&mut self, stream: &mut BufStream<TcpStream>) -> Option<String> {
-        const HTTP_CHALLENGE_HEADER: &[u8] = b"GET /.well-known/acme-challenge/";
-        if let Ok(buf) = stream.fill_buf().await {
-            if buf.starts_with(HTTP_CHALLENGE_HEADER) {
-                return buf[HTTP_CHALLENGE_HEADER.len()..]
-                    .split(|&b| b == b' ')
-                    .next()
-                    .and_then(|line| {
-                        let key = std::str::from_utf8(line).unwrap_or("");
-                        self.http_challenges.get(key).cloned()
-                    });
-            }
-        }
-        None
     }
 
     pub async fn reload_proxies(&mut self) {
@@ -678,14 +633,14 @@ impl ServerState {
     }
 
     async fn stop_http_challenges(&mut self) {
-        self.http_challenges.clear();
+        self.http_challenges = HttpChallenges::default();
         self.tcp_pool.set_http_challenge_addr(None);
         self.tcp_pool.update(self.ports.as_mut_slice()).await;
     }
 
     async fn continue_http_challenges(&mut self, orders: Vec<AcmeOrder>) {
         // Orders of an earlier batch can still be running, so their challenges stay served.
-        self.http_challenges
+        Arc::make_mut(&mut self.http_challenges)
             .extend(orders.iter().flat_map(|req| req.http_challenges.clone()));
         // DNS-01 orders need no listener.
         if !self.http_challenges.is_empty() {

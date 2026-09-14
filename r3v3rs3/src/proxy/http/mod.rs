@@ -78,6 +78,32 @@ pub use auth::SessionService;
 const MAX_BUFFER_SIZE: usize = 4096;
 const HTTP2_MAX_FRAME_SIZE: usize = 16384;
 
+/// Starts a client connection of an HTTP port.
+pub struct HttpStarter {
+    /// `None` when the TLS config of the port is invalid.
+    tls_acceptor: Option<Option<TlsAcceptor>>,
+    shared: Arc<ArcSwap<SharedContext>>,
+    stop_notifier: Arc<Notify>,
+    span: Span,
+}
+
+impl HttpStarter {
+    pub fn start(self, stream: BufStream<TcpStream>) {
+        let Some(tls_acceptor) = self.tls_acceptor else {
+            debug!("closing the connection: the TLS config is invalid");
+            return;
+        };
+        let task = start(
+            stream,
+            tls_acceptor,
+            Cache::new(self.shared),
+            self.stop_notifier,
+            self.span.clone(),
+        );
+        spawn_connection(self.span, task);
+    }
+}
+
 #[derive(Debug)]
 pub struct HttpPortContext {
     pub listen: SocketAddr,
@@ -242,19 +268,13 @@ impl HttpPortContext {
         self.stop_notifier.notify_waiters();
     }
 
-    pub fn start_proxy(&mut self, stream: BufStream<TcpStream>) {
-        let Some(tls_acceptor) = port_acceptor(self.tls_termination.as_ref()) else {
-            debug!("closing the connection: the TLS config is invalid");
-            return;
-        };
-        let task = start(
-            stream,
-            tls_acceptor,
-            Cache::new(Arc::clone(&self.shared)),
-            self.stop_notifier.clone(),
-            self.span.clone(),
-        );
-        spawn_connection(self.span.clone(), task);
+    pub fn starter(&self) -> HttpStarter {
+        HttpStarter {
+            tls_acceptor: port_acceptor(self.tls_termination.as_ref()),
+            shared: Arc::clone(&self.shared),
+            stop_notifier: self.stop_notifier.clone(),
+            span: self.span.clone(),
+        }
     }
 
     async fn accept_quic(

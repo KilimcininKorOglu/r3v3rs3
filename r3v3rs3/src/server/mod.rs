@@ -12,6 +12,7 @@ use tracing::{info, warn};
 mod acme_list;
 mod acme_schedule;
 pub mod cert_list;
+mod connection;
 mod credentials;
 mod discovery;
 mod port_list;
@@ -117,7 +118,7 @@ async fn start_server(
             sock = server.select(), if server.has_active_listeners() => {
                 match sock {
                     Some(Received::Tcp(index, stream)) => {
-                        server.handle_tcp_connection(index, stream).await;
+                        server.handle_tcp_connection(index, stream);
                     }
                     Some(Received::Udp(index, config_index, addr, data)) => {
                         server.handle_udp_packet(index, config_index, addr, data).await;

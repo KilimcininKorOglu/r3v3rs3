@@ -1,6 +1,6 @@
 use self::{
-    http::{HttpPortContext, SessionService},
-    tcp::TcpPortContext,
+    http::{HttpPortContext, HttpStarter, SessionService},
+    tcp::{TcpPortContext, TcpStarter},
     udp::UdpPortContext,
 };
 use crate::server::cert_list::CertList;
@@ -13,6 +13,7 @@ use r3v3rs3_api::{
     proxy::ProxyEntry,
 };
 use std::future::Future;
+use tokio::{io::BufStream, net::TcpStream};
 use tracing::{error, Instrument, Span};
 
 pub mod health;
@@ -88,6 +89,15 @@ impl PortContext {
         &mut self.kind
     }
 
+    /// Starts the client connections of a TCP or HTTP port. `None` for another port.
+    pub fn starter(&self) -> Option<ConnectionStarter> {
+        match &self.kind {
+            PortContextKind::Tcp(ctx) => Some(ConnectionStarter::Tcp(Box::new(ctx.starter()))),
+            PortContextKind::Http(ctx) => Some(ConnectionStarter::Http(ctx.starter())),
+            _ => None,
+        }
+    }
+
     pub async fn setup(
         &mut self,
         ports: &[PortEntry],
@@ -145,6 +155,23 @@ impl PortContext {
             PortContextKind::Http(ctx) => ctx.reset(),
             PortContextKind::Http3(ctx) => ctx.reset(),
             PortContextKind::Reserved => (),
+        }
+    }
+}
+
+/// Starts a client connection of a TCP or HTTP port. It holds a copy of the port settings, so the
+/// connection can start in another task.
+pub enum ConnectionStarter {
+    /// Boxed, because the DNS resolver makes this variant much larger than the other.
+    Tcp(Box<TcpStarter>),
+    Http(HttpStarter),
+}
+
+impl ConnectionStarter {
+    pub fn start(self, stream: BufStream<TcpStream>) {
+        match self {
+            Self::Tcp(starter) => starter.start(stream),
+            Self::Http(starter) => starter.start(stream),
         }
     }
 }
