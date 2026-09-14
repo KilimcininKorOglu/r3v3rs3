@@ -1,4 +1,4 @@
-use pkcs8::{PrivateKeyInfo, SecretDocument};
+use pkcs8::SecretDocument;
 use r3v3rs3_api::cert::{CertInfo, CertKind, CertMetadata};
 use r3v3rs3_api::discovery::DiscoverySource;
 use r3v3rs3_api::error::Error;
@@ -127,15 +127,14 @@ impl Cert {
         pem_chain: Vec<u8>,
         pem_key: Option<Vec<u8>>,
     ) -> Result<Self, Error> {
-        let key = if let Some(pem_key) = &pem_key {
-            let key_pem =
-                std::str::from_utf8(pem_key).map_err(|_| Error::FailedToReadPrivateKey)?;
-            let (_, key) =
-                SecretDocument::from_pem(key_pem).map_err(|_| Error::FailedToReadPrivateKey)?;
-            Some(key)
-        } else {
-            None
-        };
+        let key = pem_key
+            .as_deref()
+            .map(|pem_key| {
+                let key = parse_private_key(pem_key)?;
+                SecretDocument::try_from(key.secret_der())
+                    .map_err(|_| Error::FailedToReadPrivateKey)
+            })
+            .transpose()?;
         let chain_meta = pem_chain.as_slice();
         let mut meta_read = BufReader::new(chain_meta);
         let mut comment = String::new();
@@ -311,12 +310,13 @@ impl Cert {
             .collect()
     }
 
-    /// Returns the PKCS#8 private key in DER, the format that rustls reads.
+    /// Returns the private key in DER with its format: PKCS#8, PKCS#1 or SEC1.
     pub fn private_key_der(&self) -> Result<PrivateKeyDer<'static>, Error> {
-        let key = self.key.as_ref().ok_or(Error::FailedToReadPrivateKey)?;
-        key.decode_msg::<PrivateKeyInfo>()
-            .map_err(|_| Error::FailedToReadPrivateKey)?;
-        Ok(PrivateKeyDer::Pkcs8(key.as_bytes().to_vec().into()))
+        let pem_key = self
+            .pem_key
+            .as_deref()
+            .ok_or(Error::FailedToReadPrivateKey)?;
+        parse_private_key(pem_key)
     }
 
     fn certified_impl(&self) -> anyhow::Result<CertifiedKey> {
@@ -357,6 +357,15 @@ fn generation_error(err: rcgen::Error) -> Error {
     Error::FailedToGenerateSelfSignedCertificate
 }
 
+/// Reads the first private key of a PEM text. rustls signs with PKCS#8, PKCS#1 (RSA) and SEC1 (EC)
+/// keys.
+fn parse_private_key(mut pem_key: &[u8]) -> Result<PrivateKeyDer<'static>, Error> {
+    match rustls_pemfile::private_key(&mut pem_key) {
+        Ok(Some(key)) => Ok(key),
+        Ok(None) | Err(_) => Err(Error::FailedToReadPrivateKey),
+    }
+}
+
 fn parse_chain<'a>(chain: &'a [CertificateDer]) -> Result<Vec<X509Certificate<'a>>, Error> {
     chain
         .iter()
@@ -371,6 +380,7 @@ fn parse_chain<'a>(chain: &'a [CertificateDer]) -> Result<Vec<X509Certificate<'a
 #[cfg(test)]
 mod test {
     use super::*;
+    use pkcs8::PrivateKeyInfo;
 
     type Sign = fn(&[SubjectName], &Cert) -> Result<Cert, Error>;
 
@@ -403,5 +413,40 @@ mod test {
         let (cert, client_auth) = signed(Cert::new_client, "client.example.com");
         assert_eq!(cert.kind, CertKind::Client);
         assert_eq!(client_auth, Some(true));
+    }
+
+    /// OpenSSL and cert-manager write EC keys as SEC1 `EC PRIVATE KEY` blocks. The private key
+    /// bytes of a PKCS#8 EC key are its SEC1 key.
+    #[test]
+    fn a_sec1_private_key_signs_like_its_pkcs8_key() {
+        let (cert, _) = signed(Cert::new_self_signed, "sec1.example.com");
+        let pkcs8 = cert.key.as_ref().unwrap();
+        let info = pkcs8.decode_msg::<PrivateKeyInfo>().unwrap();
+        let line_ending = pkcs8::der::pem::LineEnding::LF;
+        let sec1 = pkcs8::der::pem::encode_string("EC PRIVATE KEY", line_ending, info.private_key)
+            .unwrap();
+
+        let reloaded = Cert::new(
+            CertKind::Server,
+            cert.pem_chain.clone(),
+            Some(sec1.into_bytes()),
+        )
+        .unwrap();
+        assert!(matches!(
+            reloaded.private_key_der().unwrap(),
+            PrivateKeyDer::Sec1(_)
+        ));
+        assert!(reloaded.certified_key().is_ok());
+    }
+
+    #[test]
+    fn a_text_without_a_private_key_is_rejected() {
+        let (cert, _) = signed(Cert::new_self_signed, "nokey.example.com");
+        let result = Cert::new(
+            CertKind::Server,
+            cert.pem_chain.clone(),
+            Some(cert.pem_chain.clone()),
+        );
+        assert!(matches!(result, Err(Error::FailedToReadPrivateKey)));
     }
 }
