@@ -260,6 +260,150 @@ async fn hetzner_adds_and_removes_both_values_in_one_rrset() -> anyhow::Result<(
     Ok(())
 }
 
+fn linode(call: &Call) -> (StatusCode, String) {
+    match (call.method.as_str(), call.uri.as_str()) {
+        ("GET", "/domains?page=1&page_size=500") => {
+            ok(r#"{"data":[{"id":7,"domain":"other.test"}],"page":1,"pages":2}"#)
+        }
+        ("GET", "/domains?page=2&page_size=500") => {
+            ok(r#"{"data":[{"id":8,"domain":"example.test"}],"page":2,"pages":2}"#)
+        }
+        ("POST", _) if call.body.contains("\"v2\"") => ok(r#"{"id":22}"#),
+        ("POST", _) => ok(r#"{"id":21}"#),
+        _ => ok("{}"),
+    }
+}
+
+#[tokio::test]
+async fn linode_reads_every_domain_page_and_uses_its_lowest_ttl() -> anyhow::Result<()> {
+    let calls = add_and_remove(linode, token_provider(TokenApi::Linode, "ln-token")).await?;
+
+    assert_eq!(
+        requests(&calls),
+        vec![
+            "GET /domains?page=1&page_size=500",
+            "GET /domains?page=2&page_size=500",
+            "POST /domains/8/records",
+            "POST /domains/8/records",
+            "DELETE /domains/8/records/21",
+            "DELETE /domains/8/records/22",
+        ]
+    );
+    assert_eq!(
+        body(&calls, 2)?,
+        json!({ "type": "TXT", "name": "_acme-challenge.app.example.test", "target": "v1", "ttl_sec": 300 })
+    );
+    assert_eq!(calls.lock().unwrap()[2].authorization, "Bearer ln-token");
+    Ok(())
+}
+
+fn vultr(call: &Call) -> (StatusCode, String) {
+    match (call.method.as_str(), call.uri.as_str()) {
+        ("GET", "/domains?per_page=100") => ok(
+            r#"{"domains":[{"domain":"other.test"}],"meta":{"total":2,"links":{"next":"b2Zmc2V0PTE=","prev":""}}}"#,
+        ),
+        ("GET", "/domains?per_page=100&cursor=b2Zmc2V0PTE%3D") => ok(
+            r#"{"domains":[{"domain":"example.test"}],"meta":{"total":2,"links":{"next":"","prev":""}}}"#,
+        ),
+        ("POST", _) if call.body.contains("v2") => (
+            StatusCode::CREATED,
+            r#"{"record":{"id":"rec-b"}}"#.to_string(),
+        ),
+        ("POST", _) => (
+            StatusCode::CREATED,
+            r#"{"record":{"id":"rec-a"}}"#.to_string(),
+        ),
+        _ => (StatusCode::NO_CONTENT, String::new()),
+    }
+}
+
+#[tokio::test]
+async fn vultr_follows_the_cursor_and_quotes_the_txt_data() -> anyhow::Result<()> {
+    let calls = add_and_remove(vultr, token_provider(TokenApi::Vultr, "vu-token")).await?;
+
+    assert_eq!(
+        requests(&calls),
+        vec![
+            "GET /domains?per_page=100",
+            "GET /domains?per_page=100&cursor=b2Zmc2V0PTE%3D",
+            "POST /domains/example.test/records",
+            "POST /domains/example.test/records",
+            "DELETE /domains/example.test/records/rec-a",
+            "DELETE /domains/example.test/records/rec-b",
+        ]
+    );
+    assert_eq!(
+        body(&calls, 2)?,
+        json!({ "type": "TXT", "name": "_acme-challenge.app", "data": "\"v1\"", "ttl": 60 })
+    );
+    assert_eq!(calls.lock().unwrap()[2].authorization, "Bearer vu-token");
+    Ok(())
+}
+
+fn porkbun_with(url: String) -> DnsProvider {
+    DnsProvider::Keyed(KeyedProvider::Porkbun {
+        api_key: "pk-key".to_string(),
+        secret_api_key: "pk-secret".to_string(),
+        api_url: Some(url),
+    })
+}
+
+fn porkbun(call: &Call) -> (StatusCode, String) {
+    let create = call.uri.starts_with("/dns/create/");
+    match call.uri.as_str() {
+        "/domain/listAll" => ok(
+            r#"{"status":"SUCCESS","domains":[{"domain":"other.test"},{"domain":"example.test"}]}"#,
+        ),
+        _ if create && call.body.contains("\"v2\"") => ok(r#"{"status":"SUCCESS","id":102}"#),
+        _ if create => ok(r#"{"status":"SUCCESS","id":101}"#),
+        _ => ok(r#"{"status":"SUCCESS"}"#),
+    }
+}
+
+#[tokio::test]
+async fn porkbun_sends_the_keys_in_every_body() -> anyhow::Result<()> {
+    let calls = add_and_remove(porkbun, porkbun_with).await?;
+
+    assert_eq!(
+        requests(&calls),
+        vec![
+            "POST /domain/listAll",
+            "POST /dns/create/example.test",
+            "POST /dns/create/example.test",
+            "POST /dns/delete/example.test/101",
+            "POST /dns/delete/example.test/102",
+        ]
+    );
+    let keys = json!({ "apikey": "pk-key", "secretapikey": "pk-secret" });
+    assert_eq!(
+        body(&calls, 0)?,
+        json!({ "start": 0, "apikey": keys["apikey"], "secretapikey": keys["secretapikey"] })
+    );
+    assert_eq!(
+        body(&calls, 1)?,
+        json!({ "name": "_acme-challenge.app", "type": "TXT", "content": "v1", "apikey": "pk-key", "secretapikey": "pk-secret" })
+    );
+    assert_eq!(body(&calls, 3)?, keys);
+    Ok(())
+}
+
+fn porkbun_error(_: &Call) -> (StatusCode, String) {
+    ok(r#"{"status":"ERROR","message":"Invalid API key."}"#)
+}
+
+#[tokio::test]
+async fn a_porkbun_error_status_fails_without_the_keys() -> anyhow::Result<()> {
+    let (client, _) = mock_client(porkbun_error, porkbun_with).await?;
+
+    let Err(err) = client.add_txt(&challenge_name()).await else {
+        anyhow::bail!("add_txt succeeded");
+    };
+    let message = format!("{err:#}");
+    assert!(message.contains("Invalid API key."), "{message}");
+    assert!(!message.contains("pk-secret"), "{message}");
+    Ok(())
+}
+
 fn route53(call: &Call) -> (StatusCode, String) {
     if call.method == "GET" {
         return ok(concat!(

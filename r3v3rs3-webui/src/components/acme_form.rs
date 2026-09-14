@@ -6,8 +6,8 @@ use crate::components::http_proxy_config::{
 use base64::{engine::general_purpose, Engine};
 use r3v3rs3_api::{
     acme::{
-        Acme, AcmeConfig, AcmeRequest, DnsProvider, ExternalAccountBinding, KeyedProvider,
-        TokenApi, TokenProvider, DNS_01, HTTP_01, TLS_ALPN_01,
+        Acme, AcmeConfig, AcmeRequest, DnsProvider, ExternalAccountBinding, DNS_01, HTTP_01,
+        TLS_ALPN_01,
     },
     error::Error,
     i18n::Locale,
@@ -22,13 +22,81 @@ use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
-/// The `provider` names of the DNS providers and their labels, which are not translated.
-pub const DNS_PROVIDERS: [(&str, &str); 4] = [
-    ("cloudflare", "Cloudflare"),
-    ("route53", "Route 53"),
-    ("digitalocean", "DigitalOcean"),
-    ("hetzner", "Hetzner Cloud"),
+/// A credential field of a DNS provider.
+pub struct ProviderField {
+    /// The field name in the API.
+    pub key: &'static str,
+    /// The locale key of the label.
+    pub label: &'static str,
+    pub secret: bool,
+}
+
+/// A DNS provider of the form. `name` is the `provider` value, and `label` is not translated.
+pub struct DnsProviderInfo {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub fields: &'static [ProviderField],
+}
+
+const fn field(key: &'static str, label: &'static str, secret: bool) -> ProviderField {
+    ProviderField { key, label, secret }
+}
+
+const API_TOKEN: [ProviderField; 1] = [field("api_token", "acme.api_token", true)];
+
+pub static DNS_PROVIDERS: [DnsProviderInfo; 7] = [
+    DnsProviderInfo {
+        name: "cloudflare",
+        label: "Cloudflare",
+        fields: &API_TOKEN,
+    },
+    DnsProviderInfo {
+        name: "route53",
+        label: "Route 53",
+        fields: &[
+            field("access_key_id", "acme.access_key_id", false),
+            field("secret_access_key", "acme.secret_access_key", true),
+        ],
+    },
+    DnsProviderInfo {
+        name: "digitalocean",
+        label: "DigitalOcean",
+        fields: &API_TOKEN,
+    },
+    DnsProviderInfo {
+        name: "hetzner",
+        label: "Hetzner Cloud",
+        fields: &API_TOKEN,
+    },
+    DnsProviderInfo {
+        name: "linode",
+        label: "Linode",
+        fields: &API_TOKEN,
+    },
+    DnsProviderInfo {
+        name: "porkbun",
+        label: "Porkbun",
+        fields: &[
+            field("api_key", "acme.api_key", true),
+            field("secret_api_key", "acme.secret_api_key", true),
+        ],
+    },
+    DnsProviderInfo {
+        name: "vultr",
+        label: "Vultr",
+        fields: &[field("api_token", "acme.api_key", true)],
+    },
 ];
+
+/// The DNS provider whose `provider` value is `name`.
+fn find_provider(name: &str) -> Option<&'static DnsProviderInfo> {
+    DNS_PROVIDERS.iter().find(|info| info.name == name)
+}
+
+/// The selected DNS provider. An unknown name selects the first provider.
+fn provider_info(name: &str) -> &'static DnsProviderInfo {
+    find_provider(name).unwrap_or(&DNS_PROVIDERS[0])
+}
 
 pub type AcmeResult = Result<AcmeRequest, HashMap<String, String>>;
 
@@ -43,9 +111,8 @@ pub struct AcmeFields {
     pub domain_names: String,
     pub challenge_type: String,
     pub dns_provider: String,
-    pub api_token: String,
-    pub access_key_id: String,
-    pub secret_access_key: String,
+    /// The credentials of the DNS providers by their field names in the API.
+    pub credentials: HashMap<&'static str, String>,
     /// The error keys of the fields that the user changed.
     pub touched: HashSet<&'static str>,
 }
@@ -58,18 +125,23 @@ impl Default for AcmeFields {
             email: String::new(),
             domain_names: String::new(),
             challenge_type: HTTP_01.to_string(),
-            dns_provider: DNS_PROVIDERS[0].0.to_string(),
-            api_token: String::new(),
-            access_key_id: String::new(),
-            secret_access_key: String::new(),
+            dns_provider: DNS_PROVIDERS[0].name.to_string(),
+            credentials: HashMap::new(),
             touched: HashSet::new(),
         }
     }
 }
 
+#[derive(Clone, Copy)]
+enum Setter {
+    Field(fn(&mut AcmeFields, String)),
+    /// A credential of the DNS provider, by its field name in the API.
+    Credential(&'static str),
+}
+
 pub struct FieldChange {
     key: &'static str,
-    set: fn(&mut AcmeFields, String),
+    set: Setter,
     value: String,
 }
 
@@ -78,18 +150,31 @@ impl Reducible for AcmeFields {
 
     fn reduce(self: Rc<Self>, action: FieldChange) -> Rc<Self> {
         let mut fields = (*self).clone();
-        (action.set)(&mut fields, action.value);
+        match action.set {
+            Setter::Field(set) => set(&mut fields, action.value),
+            Setter::Credential(name) => {
+                fields.credentials.insert(name, action.value);
+            }
+        }
         fields.touched.insert(action.key);
         fields.into()
     }
 }
 
-/// Returns a callback that stores the value of an input or a select element and marks `key` as touched.
-/// A reducer applies the change to the latest fields, so two quick changes do not overwrite each other.
 fn setter(
     fields: &UseReducerHandle<AcmeFields>,
     key: &'static str,
     set: fn(&mut AcmeFields, String),
+) -> Callback<Event> {
+    on_change(fields, key, Setter::Field(set))
+}
+
+/// Returns a callback that stores the value of an input or a select element and marks `key` as touched.
+/// A reducer applies the change to the latest fields, so two quick changes do not overwrite each other.
+fn on_change(
+    fields: &UseReducerHandle<AcmeFields>,
+    key: &'static str,
+    set: Setter,
 ) -> Callback<Event> {
     let fields = fields.clone();
     Callback::from(move |event: Event| {
@@ -104,10 +189,7 @@ fn setter(
 
 /// The label of a DNS provider name. An unknown name is shown as it is.
 pub fn dns_provider_label(name: &str) -> &str {
-    DNS_PROVIDERS
-        .iter()
-        .find(|(provider, _)| *provider == name)
-        .map_or(name, |(_, label)| label)
+    find_provider(name).map_or(name, |info| info.label)
 }
 
 /// Shows the error of `key` after the user changed the field or tried to submit the form.
@@ -200,37 +282,38 @@ fn dns_provider_view(
     errors: &HashMap<String, String>,
     show_errors: bool,
 ) -> Html {
-    let provider = fields.dns_provider.as_str();
-    let credentials = if provider == "route53" {
-        html! {
-            <>
-                <label class={LABEL_CLASS}>{locale.t("acme.access_key_id")}</label>
-                <input type="text" autocomplete="off" value={fields.access_key_id.clone()} onchange={setter(fields, "dns_provider", |f, v| f.access_key_id = v)} class={INPUT_CLASS} />
-
-                <label class={LABEL_CLASS}>{locale.t("acme.secret_access_key")}</label>
-                <input type="password" autocomplete="off" value={fields.secret_access_key.clone()} onchange={setter(fields, "dns_provider", |f, v| f.secret_access_key = v)} class={INPUT_CLASS} />
-            </>
-        }
-    } else {
-        html! {
-            <>
-                <label class={LABEL_CLASS}>{locale.t("acme.api_token")}</label>
-                <input type="password" autocomplete="off" value={fields.api_token.clone()} onchange={setter(fields, "dns_provider", |f, v| f.api_token = v)} class={INPUT_CLASS} />
-            </>
-        }
-    };
+    let provider = provider_info(&fields.dns_provider);
     html! {
         <>
             <label class={LABEL_CLASS}>{locale.t("acme.dns_provider")}</label>
             <select onchange={setter(fields, "dns_provider", |f, v| f.dns_provider = v)} class={INPUT_CLASS}>
-                { DNS_PROVIDERS.iter().map(|(name, label)| html! {
-                    <option selected={provider == *name} value={*name}>{*label}</option>
+                { DNS_PROVIDERS.iter().map(|info| html! {
+                    <option selected={provider.name == info.name} value={info.name}>{info.label}</option>
                 }).collect::<Html>() }
             </select>
 
-            { credentials }
+            { provider.fields.iter().map(|field| credential_view(locale, fields, field)).collect::<Html>() }
             { field_error(fields, errors, show_errors, "dns_provider") }
             <p class={HINT_CLASS}>{locale.t("acme.dns_credentials_hint")}</p>
+        </>
+    }
+}
+
+fn credential_view(
+    locale: Locale,
+    fields: &UseReducerHandle<AcmeFields>,
+    field: &'static ProviderField,
+) -> Html {
+    let value = fields
+        .credentials
+        .get(field.key)
+        .cloned()
+        .unwrap_or_default();
+    let input_type = if field.secret { "password" } else { "text" };
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{locale.t(field.label)}</label>
+            <input type={input_type} autocomplete="off" {value} onchange={on_change(fields, "dns_provider", Setter::Credential(field.key))} class={INPUT_CLASS} />
         </>
     }
 }
@@ -320,32 +403,25 @@ fn parse_eab(
 }
 
 /// The DNS provider of the `dns-01` challenge with the credentials of the selected provider.
+/// The object has the same form as in the API, so the provider type reads it.
 fn dns_provider(fields: &AcmeFields) -> Option<DnsProvider> {
     if fields.challenge_type != DNS_01 {
         return None;
     }
-    let token = |provider| {
-        DnsProvider::Token(TokenProvider {
-            provider,
-            api_token: fields.api_token.trim().to_string(),
-            api_url: None,
-        })
-    };
-    Some(match fields.dns_provider.as_str() {
-        "route53" => DnsProvider::Keyed(KeyedProvider::Route53 {
-            access_key_id: fields.access_key_id.trim().to_string(),
-            secret_access_key: fields.secret_access_key.trim().to_string(),
-            api_url: None,
-        }),
-        "digitalocean" => token(TokenApi::DigitalOcean),
-        "hetzner" => token(TokenApi::Hetzner),
-        _ => token(TokenApi::Cloudflare),
-    })
+    let provider = provider_info(&fields.dns_provider);
+    let mut object = serde_json::Map::new();
+    object.insert("provider".into(), provider.name.into());
+    for field in provider.fields {
+        let value = fields.credentials.get(field.key).map_or("", |v| v.trim());
+        object.insert(field.key.into(), value.into());
+    }
+    serde_json::from_value(object.into()).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use r3v3rs3_api::acme::KeyedProvider;
 
     const SERVER_URL: &str = "https://acme.example.test/directory";
 
@@ -410,9 +486,11 @@ mod tests {
     fn dns_01_sends_the_selected_provider_and_its_credentials() {
         let mut input = fields("example.com, *.example.com", DNS_01);
         input.dns_provider = "route53".into();
-        input.access_key_id = " AKIDTEST ".into();
-        input.secret_access_key = "secret".into();
-        input.api_token = "unused".into();
+        input.credentials = HashMap::from([
+            ("access_key_id", " AKIDTEST ".to_string()),
+            ("secret_access_key", "secret".to_string()),
+            ("api_token", "unused".to_string()),
+        ]);
 
         let request = build(&input, false).unwrap();
         assert_eq!(request.acme.challenge_type, DNS_01);
@@ -424,6 +502,21 @@ mod tests {
                 api_url: None,
             }))
         );
+    }
+
+    #[test]
+    fn every_dns_provider_is_built_from_its_fields() {
+        for info in &DNS_PROVIDERS {
+            let mut input = fields("example.com", DNS_01);
+            input.dns_provider = info.name.into();
+            for field in info.fields {
+                input
+                    .credentials
+                    .insert(field.key, format!("{}-value", field.key));
+            }
+            let provider = build(&input, false).unwrap().acme.dns_provider.unwrap();
+            assert_eq!(provider.name(), info.name);
+        }
     }
 
     #[test]

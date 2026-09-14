@@ -4,11 +4,14 @@ mod api;
 mod cloudflare;
 mod digitalocean;
 mod hetzner;
+mod linode;
+mod porkbun;
 mod route53;
 mod sigv4;
+mod vultr;
 
 use crate::cdn::fetch::HttpClient;
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use hickory_resolver::{
     config::{NameServerConfigGroup, ResolverConfig, ResolverOpts},
@@ -129,6 +132,14 @@ fn token_client(http: HttpClient, provider: &TokenProvider) -> anyhow::Result<Bo
             api::ApiClient::new(http, url, hetzner::API_URL)?,
             token,
         )),
+        TokenApi::Linode => Box::new(PerValue(linode::Linode::new(
+            api::ApiClient::new(http, url, linode::API_URL)?,
+            token,
+        ))),
+        TokenApi::Vultr => Box::new(PerValue(vultr::Vultr::new(
+            api::ApiClient::new(http, url, vultr::API_URL)?,
+            token,
+        ))),
     };
     Ok(client)
 }
@@ -144,6 +155,15 @@ fn keyed_client(http: HttpClient, provider: &KeyedProvider) -> anyhow::Result<Bo
             access_key_id,
             secret_access_key,
         )),
+        KeyedProvider::Porkbun {
+            api_key,
+            secret_api_key,
+            api_url,
+        } => Box::new(PerValue(porkbun::Porkbun::new(
+            api::ApiClient::new(http, api_url.as_deref(), porkbun::API_URL)?,
+            api_key,
+            secret_api_key,
+        ))),
     };
     Ok(client)
 }
@@ -203,6 +223,13 @@ fn longest_zone<'a, 'z, T>(
             })
             .map(|zone| (candidate, zone))
     })
+}
+
+/// The longest domain of `domains` that holds `fqdn`. `provider` names the provider in the error.
+fn domain_zone(fqdn: &str, domains: &[String], provider: &str) -> anyhow::Result<String> {
+    longest_zone(fqdn, domains, String::as_str)
+        .map(|(zone, _)| zone.to_string())
+        .ok_or_else(|| anyhow!("no {provider} domain contains {fqdn}"))
 }
 
 /// Adds the TXT records, runs `task`, and then removes every record that was added,

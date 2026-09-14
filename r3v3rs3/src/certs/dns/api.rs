@@ -11,6 +11,25 @@ use hyper::{
 use serde_json::Value;
 use std::time::Duration;
 
+/// An ID as a string. Providers use strings or numbers as IDs.
+pub fn id_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(id) => Some(id.clone()),
+        Value::Number(id) => Some(id.to_string()),
+        _ => None,
+    }
+}
+
+/// The string field `key` of every object in the JSON array `items`.
+pub fn strings(items: &Value, key: &str) -> Vec<String> {
+    items
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item[key].as_str().map(str::to_string))
+        .collect()
+}
+
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY_SIZE: usize = 4 * 1024 * 1024;
 /// Bytes of an error response that the error message keeps.
@@ -144,11 +163,7 @@ impl ApiClient {
         request: ApiRequest,
         pointer: &str,
     ) -> anyhow::Result<Option<String>> {
-        Ok(match self.json(request).await?.pointer(pointer) {
-            Some(Value::String(id)) => Some(id.clone()),
-            Some(Value::Number(id)) => Some(id.to_string()),
-            _ => None,
-        })
+        Ok(self.json(request).await?.pointer(pointer).and_then(id_text))
     }
 
     /// Looks up the candidate zones of `fqdn`, the longest first, with the requests that

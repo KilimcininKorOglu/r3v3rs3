@@ -109,13 +109,13 @@ mod tests {
 
     #[test]
     fn the_request_keeps_the_name_and_the_renewal_interval() {
-        let fields = AcmeFields {
+        let mut fields = AcmeFields {
             email: "admin@example.com".into(),
             domain_names: "*.example.com".into(),
             challenge_type: DNS_01.into(),
-            api_token: "token".into(),
             ..AcmeFields::default()
         };
+        fields.credentials.insert("api_token", "token".into());
         let request = get_request(
             Locale::En,
             " Pebble ",

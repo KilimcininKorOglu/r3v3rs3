@@ -1,5 +1,6 @@
 {
   "acme.access_key_id": "Access Key ID",
+  "acme.api_key": "API Key",
   "acme.api_token": "API Token",
   "acme.challenge": "Challenge",
   "acme.challenge_hint": "HTTP-01 için her domain adının 80 portundan r3v3rs3'e ulaşması gerekir. TLS-ALPN-01 için her domain adının 443 portundan r3v3rs3'e ulaşması gerekir. DNS-01, TXT kayıtlarını DNS provider'ının API'si ile yayınlar. Wildcard domain adı DNS-01 gerektirir.",
@@ -23,6 +24,7 @@
   "acme.request": "Sertifika Al",
   "acme.request_failed": "İstek başarısız oldu: {message}",
   "acme.secret_access_key": "Secret Access Key",
+  "acme.secret_api_key": "Secret API Key",
   "acme.server_url": "Sunucu URL'i",
   "auth.add_token": "Token Ekle",
   "auth.add_user": "Kullanıcı Ekle",

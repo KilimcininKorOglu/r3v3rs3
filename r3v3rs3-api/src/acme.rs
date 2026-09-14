@@ -99,6 +99,8 @@ pub enum TokenApi {
     #[serde(rename = "digitalocean")]
     DigitalOcean,
     Hetzner,
+    Linode,
+    Vultr,
 }
 
 impl TokenApi {
@@ -107,6 +109,8 @@ impl TokenApi {
             Self::Cloudflare => "cloudflare",
             Self::DigitalOcean => "digitalocean",
             Self::Hetzner => "hetzner",
+            Self::Linode => "linode",
+            Self::Vultr => "vultr",
         }
     }
 }
@@ -121,12 +125,19 @@ pub enum KeyedProvider {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         api_url: Option<String>,
     },
+    Porkbun {
+        api_key: String,
+        secret_api_key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
 }
 
 impl KeyedProvider {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Route53 { .. } => "route53",
+            Self::Porkbun { .. } => "porkbun",
         }
     }
 
@@ -137,6 +148,11 @@ impl KeyedProvider {
                 secret_access_key,
                 ..
             } => filled(&[access_key_id, secret_access_key]),
+            Self::Porkbun {
+                api_key,
+                secret_api_key,
+                ..
+            } => filled(&[api_key, secret_api_key]),
         }
     }
 }
@@ -353,6 +369,9 @@ mod test {
             serde_json::json!({ "provider": "cloudflare", "api_token": "t" }),
             serde_json::json!({ "provider": "digitalocean", "api_token": "t", "api_url": "http://u" }),
             serde_json::json!({ "provider": "hetzner", "api_token": "t" }),
+            serde_json::json!({ "provider": "linode", "api_token": "t" }),
+            serde_json::json!({ "provider": "vultr", "api_token": "t" }),
+            serde_json::json!({ "provider": "porkbun", "api_key": "k", "secret_api_key": "s" }),
             serde_json::json!({ "provider": "route53", "access_key_id": "a", "secret_access_key": "s" }),
         ];
         for value in providers {

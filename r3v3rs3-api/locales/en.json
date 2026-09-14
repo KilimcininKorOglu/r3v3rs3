@@ -1,5 +1,6 @@
 {
   "acme.access_key_id": "Access Key ID",
+  "acme.api_key": "API Key",
   "acme.api_token": "API Token",
   "acme.challenge": "Challenge",
   "acme.challenge_hint": "HTTP-01 needs every domain name to reach r3v3rs3 on port 80. TLS-ALPN-01 needs every domain name to reach r3v3rs3 on port 443. DNS-01 publishes TXT records through the API of the DNS provider. A wildcard domain name needs DNS-01.",
@@ -23,6 +24,7 @@
   "acme.request": "Request",
   "acme.request_failed": "The request failed: {message}",
   "acme.secret_access_key": "Secret Access Key",
+  "acme.secret_api_key": "Secret API Key",
   "acme.server_url": "Server URL",
   "auth.add_token": "Add Token",
   "auth.add_user": "Add User",

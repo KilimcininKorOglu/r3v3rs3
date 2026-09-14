@@ -742,7 +742,7 @@ TLS-ALPN-01 challenge'ı sürerken her TLS portu ve her HTTPS portu, yalnız `ac
 r3v3rs3 her domain adı için şu adımları uygular:
 
 1. Provider API'si ile domain adının zone'unu bulur. Adı içeren en uzun zone kullanılır.
-2. `_acme-challenge.<domain>` TXT kaydını 60 saniyelik TTL ile oluşturur. `*.example.com` için kayıt adı `example.com` ile aynıdır: `_acme-challenge.example.com`. Bu yüzden kayıt iki değer taşır.
+2. `_acme-challenge.<domain>` TXT kaydını 60 saniyelik TTL ile oluşturur. Linode'da TTL, Linode'un kabul ettiği en düşük değer olan 300 saniyedir. Porkbun'a TTL gönderilmez, bu yüzden kayıt hesabın en düşük TTL değerini alır. `*.example.com` için kayıt adı `example.com` ile aynıdır: `_acme-challenge.example.com`. Bu yüzden kayıt iki değer taşır.
 3. TXT değerleri görünene kadar DNS'i 5 saniyede bir sorgular, en fazla 5 dakika bekler. Sorgulanan DNS sunucusunu "DNS Challenge Resolver" ayarı belirler. Ayar boşsa r3v3rs3 sistem resolver'ını kullanır.
 4. Sertifika otoritesine challenge'ların hazır olduğunu bildirir ve doğrulama için en fazla 3 dakika bekler.
 5. TXT kayıtlarını siler. Order başarısız olsa da kayıtları siler.
@@ -755,6 +755,9 @@ Sistem resolver'ı cache'teki eski yanıtları döndürebilir. Propagation kontr
 | Route 53 | Access Key ID, Secret Access Key | `route53:ListHostedZones` ve `route53:ChangeResourceRecordSets`. Private hosted zone'lar atlanır. |
 | DigitalOcean | API Token | Domain'leri okuyabilen, domain kayıtlarını oluşturup silebilen bir token. |
 | Hetzner Cloud | API Token | Okuma ve yazma yetkisi olan bir Hetzner Cloud proje token'ı. Zone, Hetzner Cloud DNS'te olmalıdır. |
+| Linode | API Token | Domains için okuma ve yazma yetkisi olan bir personal access token. |
+| Vultr | API Key | Hesabın API key'i. |
+| Porkbun | API Key, Secret API Key | Porkbun domain yönetiminde domain için "API Access" açık olmalıdır. |
 
 r3v3rs3 bu API'lerin mock sunucularıyla ve [Pebble](https://github.com/letsencrypt/pebble) test sertifika otoritesiyle test edilir. Gerçek provider hesaplarıyla test edilmez.
 
@@ -783,7 +786,7 @@ key_pkcs8 = "<hesabın private key'i>"
 directory = "https://acme-v02.api.letsencrypt.org/directory"
 ```
 
-`dns_provider` altındaki `provider` değeri `cloudflare`, `route53`, `digitalocean` veya `hetzner` olabilir. Route 53, `api_token` yerine `access_key_id` ve `secret_access_key` kullanır.
+`dns_provider` altındaki `provider` değeri `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr` veya `porkbun` olabilir. Route 53, `api_token` yerine `access_key_id` ve `secret_access_key` kullanır. Porkbun, `api_key` ve `secret_api_key` kullanır. Vultr API key'i `api_token` alanına yazılır.
 
 # Ayarlar
 
