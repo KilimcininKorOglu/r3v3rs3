@@ -97,13 +97,11 @@ impl TcpListenerPool {
             let bind = match ctx.kind() {
                 PortContextKind::Tcp(state) => state.listen,
                 PortContextKind::Http(state) => state.listen,
-                _ => {
-                    if let Some(addr) = self.http_challenge_addr {
-                        addr
-                    } else {
-                        continue;
-                    }
-                }
+                PortContextKind::Reserved => match self.http_challenge_addr {
+                    Some(addr) => addr,
+                    None => continue,
+                },
+                _ => continue,
             };
             let (listener, state) = if !ctx.entry.port.active {
                 (None, SocketState::Inactive)
@@ -185,5 +183,31 @@ impl Stream for TcpListenerStream {
             Poll::Ready(Err(err)) => Poll::Ready(Some((self.index, Err(err)))),
             Poll::Pending => Poll::Pending,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use r3v3rs3_api::port::{Port, PortEntry};
+
+    #[tokio::test]
+    async fn only_the_reserved_port_listens_on_the_challenge_address() {
+        let entry = PortEntry {
+            id: "udp".parse().unwrap(),
+            port: Port {
+                active: true,
+                name: String::new(),
+                listen: "/ip4/127.0.0.1/udp/5353".parse().unwrap(),
+                opts: Default::default(),
+            },
+        };
+        let mut ports = [PortContext::new(entry).unwrap()];
+        let mut pool = TcpListenerPool::new();
+        pool.set_http_challenge_addr(Some("127.0.0.1:0".parse().unwrap()));
+        pool.update(&mut ports).await;
+
+        assert_eq!(ports[0].status().state.socket, SocketState::Unknown);
+        assert_eq!(pool.listeners.len(), 1);
     }
 }
