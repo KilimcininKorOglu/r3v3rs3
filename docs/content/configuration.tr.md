@@ -181,6 +181,25 @@ routes = [
 ]
 ```
 
+## Trafik Mirroring
+
+Route'un `mirror` değeri route request'lerinin bir kopyasını başka sunuculara gönderir. Örneğin yeni bir sürümü gerçek trafikle denemek için kullanılır. r3v3rs3 mirror sunucuların response'larını atar. Kopyayı retry etmez, health check'e ve circuit breaker'a saymaz ve kopyayı beklemez. Bu yüzden client, route sunucusunun response'unu önceki gibi alır.
+
+- `servers` mirror sunucuların listesidir. Her sunucu her kopyayı alır. Weight değerinin etkisi yoktur. Kopyanın path'i, `rewrite` dahil, route sunucularının path'iyle aynı kurallara uyar.
+- `percent` r3v3rs3'ün kopyaladığı request oranıdır. Değer `1` ile `100` (varsayılan) arasındadır.
+- `max_body_size` r3v3rs3'ün kopyaladığı en büyük request body'sidir, byte cinsinden. Varsayılan değer `65536`'dır. Body'si daha uzun olan request kopyalanmaz. r3v3rs3 her kopya için memory'de en fazla bu kadar byte tutar.
+
+r3v3rs3 kopyayı request body'sinin tamamını okuduktan sonra gönderir. Hata veren veya client'ın tamamlamadığı body için kopya gönderilmez. Cache'ten gelen response, WebSocket gibi upgrade request'leri ve route'ta 64 kopya gönderilirken gelen request kopyalanmaz. Kopya, header kuralları uygulandıktan sonraki method ve header'ları taşır. Bu yüzden kimlik doğrulamanın kaldırmadığı cookie gibi credential'ları da taşır. Bu verilere güvendiğiniz bir mirror sunucu kullanın. r3v3rs3 `1` ile `100` dışındaki `percent` değerini reddeder.
+
+```toml
+[my-api]
+protocol = "http"
+vhosts = ["api.example.com"]
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:9000/" }], mirror = { servers = [{ url = "http://127.0.0.1:9100/" }], percent = 10 } },
+]
+```
+
 ## Load Balancing ve Health Check
 
 Birden fazla upstream sunucusu olan proxy veya HTTP route, trafiği `load_balancing` değerine göre dağıtır:

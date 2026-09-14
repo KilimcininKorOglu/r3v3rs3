@@ -182,6 +182,9 @@ pub enum Error {
     #[error("redirect target cannot be empty or contain a control character: {target}")]
     InvalidRedirectTarget { target: String },
 
+    #[error("mirror percent must be from 1 to 100: {percent}")]
+    InvalidMirrorPercent { percent: u8 },
+
     #[error("failed to hash password")]
     FailedToHashPassword,
 

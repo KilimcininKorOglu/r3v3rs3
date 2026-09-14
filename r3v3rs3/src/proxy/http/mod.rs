@@ -64,6 +64,7 @@ mod error;
 mod filter;
 mod header_rules;
 pub(crate) mod hyper_tls;
+mod mirror;
 mod page;
 pub(crate) mod pool;
 mod rate_limit;

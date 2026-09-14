@@ -14,6 +14,7 @@ pub mod header_rules;
 pub mod i18n;
 pub mod id;
 pub mod log;
+pub mod mirror;
 pub mod multiaddr;
 pub mod policy;
 pub mod port;

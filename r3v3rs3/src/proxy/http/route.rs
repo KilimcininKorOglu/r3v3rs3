@@ -4,6 +4,7 @@ use super::cache::{cache_for, HttpCache};
 use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, MatchRank, RequestFilter};
 use super::header_rules::CompiledHeaderRules;
+use super::mirror::Mirror;
 use super::pool::{ConnectionPool, Upstream, UpstreamClients};
 use super::rate_limit::{self, ClientRateLimiter};
 use super::rewrite::Rewrite;
@@ -169,6 +170,10 @@ impl ProxyUpstream {
             })
             .collect();
         let probe = http_probe(&route.servers, &self.health_check.path, &pool);
+        let mirror = route
+            .mirror
+            .as_ref()
+            .map(|config| Arc::new(Mirror::new(config, pool.clone(), timeouts.request)));
         let group = health::group(
             key,
             members,
@@ -191,6 +196,7 @@ impl ProxyUpstream {
                 .map(Arc::new),
             max_body_size: route.max_body_size.unwrap_or(self.max_body_size),
             rewrite: Arc::new(Rewrite::new(&route.rewrite, base_path)),
+            mirror,
         })
     }
 }

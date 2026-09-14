@@ -181,6 +181,25 @@ routes = [
 ]
 ```
 
+## Traffic Mirroring
+
+`mirror` of a route sends a copy of the route requests to other servers, e.g. to test a new version with real traffic. r3v3rs3 drops the responses of the mirror servers. It does not retry a copy, does not count a copy in the health checks or the circuit breaker, and does not wait for a copy. So the client receives the response of the route server as before.
+
+- `servers` lists the mirror servers. Every server receives each copy, and the weight has no effect. The path of a copy follows the same rules as the path for the route servers, including `rewrite`.
+- `percent` is the share of the requests that r3v3rs3 copies, from `1` to `100` (default).
+- `max_body_size` is the largest request body in bytes that r3v3rs3 copies. The default is `65536`. A request with a longer body is not copied. r3v3rs3 keeps at most this many bytes in memory for each copy.
+
+r3v3rs3 sends a copy after it reads the whole request body. A body that fails or that the client does not finish sends no copy. A response from the cache, an upgrade request such as WebSocket, and a request that arrives while 64 copies of the route are in progress are not copied. A copy has the method and the headers of the request after the header rules. So it also carries the credentials that authentication does not remove, such as cookies. Use a mirror server that you trust with this data. r3v3rs3 rejects a `percent` outside `1` to `100`.
+
+```toml
+[my-api]
+protocol = "http"
+vhosts = ["api.example.com"]
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:9000/" }], mirror = { servers = [{ url = "http://127.0.0.1:9100/" }], percent = 10 } },
+]
+```
+
 ## Load Balancing and Health Checks
 
 A proxy or an HTTP route with more than one upstream server spreads the traffic with `load_balancing`:

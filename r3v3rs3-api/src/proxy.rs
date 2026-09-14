@@ -4,6 +4,7 @@ use crate::compression::Compression;
 use crate::discovery::DiscoverySource;
 use crate::error::Error;
 use crate::header_rules::HeaderRules;
+use crate::mirror::Mirror;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
 use crate::redirect::RedirectRule;
 use crate::rewrite::PathRewrite;
@@ -88,6 +89,7 @@ impl ProxyKind {
                 http.redirects.iter().try_for_each(RedirectRule::validate)?;
                 http.routes.iter().try_for_each(|route| {
                     validate_weights(route.servers.iter().map(|server| server.weight))?;
+                    route.mirror.iter().try_for_each(Mirror::validate)?;
                     route.rewrite.validate()
                 })?;
                 http.routes
@@ -309,6 +311,9 @@ pub struct Route {
     /// Changes the request path before the request goes to an upstream server.
     #[serde(default, skip_serializing_if = "PathRewrite::is_default")]
     pub rewrite: PathRewrite,
+    /// Sends a copy of the requests of this route to other servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror: Option<Mirror>,
 }
 
 fn default_route_path() -> String {

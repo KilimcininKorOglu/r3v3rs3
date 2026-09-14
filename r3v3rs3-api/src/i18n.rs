@@ -251,6 +251,7 @@ mod tests {
             Error::InvalidRedirectRule { rule: text() },
             Error::InvalidRedirectStatus { status: 303 },
             Error::InvalidRedirectTarget { target: text() },
+            Error::InvalidMirrorPercent { percent: 0 },
             Error::FailedToHashPassword,
             Error::FailedToFetchLog,
             Error::FailedToInvokeRpc,

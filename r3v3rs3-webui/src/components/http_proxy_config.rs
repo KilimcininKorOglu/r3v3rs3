@@ -12,6 +12,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::header_rules::{format_header_rules, HeaderRule, HeaderRules};
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::mirror::{Mirror, DEFAULT_MIRROR_BODY_SIZE};
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
 use r3v3rs3_api::redirect::RedirectRule;
@@ -390,11 +391,16 @@ struct RouteForm {
     path_regex: String,
     replacement: String,
     add_prefix: String,
+    mirror: bool,
+    mirror_servers: Vec<String>,
+    mirror_percent: String,
+    mirror_max_body_size: String,
 }
 
 impl RouteForm {
     fn new(route: &Route) -> Self {
         let ip_filter = route.ip_filter.clone().unwrap_or_default();
+        let mirror = route.mirror.clone().unwrap_or_default();
         Self {
             path: route.path.clone(),
             servers: route.servers.iter().map(format_server_line).collect(),
@@ -431,6 +437,10 @@ impl RouteForm {
                 .unwrap_or_default(),
             replacement: route.rewrite.replacement.clone(),
             add_prefix: route.rewrite.add_prefix.clone(),
+            mirror: route.mirror.is_some(),
+            mirror_servers: mirror.servers.iter().map(format_server_line).collect(),
+            mirror_percent: mirror.percent.to_string(),
+            mirror_max_body_size: mirror.max_body_size.to_string(),
         }
     }
 
@@ -458,6 +468,10 @@ impl RouteForm {
             path_regex: String::new(),
             replacement: String::new(),
             add_prefix: String::new(),
+            mirror: false,
+            mirror_servers: Vec::new(),
+            mirror_percent: "100".into(),
+            mirror_max_body_size: DEFAULT_MIRROR_BODY_SIZE.to_string(),
         }
     }
 }
@@ -649,6 +663,7 @@ fn route_view(
             { route_timeouts_view(locale, routes, index, route) }
             { route_retry_view(locale, routes, index, route) }
             { route_body_limit_view(locale, routes, index, route) }
+            { route_mirror_view(locale, routes, index, route) }
             { error_view(error) }
 
             { list_buttons(routes, index, RouteForm::empty) }
@@ -1006,6 +1021,35 @@ fn route_body_limit_view(
                 route.max_body_size = value
             }),
         ),
+    )
+}
+
+/// The mirror servers of a route, the share of the copied requests and the copy body limit.
+fn route_mirror_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| route.mirror = value),
+        route.mirror,
+        "http_form.enable_mirror",
+        "http_form.mirror_hint",
+        html! {
+            <>
+                <label class={LABEL_CLASS}>{locale.t("http_form.mirror_servers")}</label>
+                <textarea rows="2" autocapitalize="off" spellcheck="false" placeholder={"http://shadow.example.com/backend"} value={route.mirror_servers.join("\n")} onchange={route_input(routes, index, text_area, |route, value| route.mirror_servers = server_lines(&value))} class={INPUT_CLASS} />
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+                    <div>
+                        <label class={LABEL_CLASS}>{locale.t("http_form.mirror_percent")}</label>
+                        <input type="number" min="1" max="100" value={route.mirror_percent.clone()} onchange={route_input(routes, index, text, |route, value| route.mirror_percent = value)} class={INPUT_CLASS} />
+                    </div>
+                    <div>{ body_limit_input(locale, &route.mirror_max_body_size, route_input(routes, index, text, |route, value| route.mirror_max_body_size = value)) }</div>
+                </div>
+            </>
+        },
     )
 }
 
@@ -1943,17 +1987,7 @@ fn parse_route(
         );
         return None;
     }
-    let servers = route
-        .servers
-        .iter()
-        .filter_map(|line| match parse_server_line(locale, line) {
-            Ok(server) => Some(server),
-            Err(err) => {
-                errors.insert(key.into(), err);
-                None
-            }
-        })
-        .collect::<Vec<_>>();
+    let servers = parse_server_lines(locale, &route.servers, key, errors);
     let ip_filter = route.override_ip_filter.then(|| IpFilter {
         allow: or_error(
             translated(locale, parse_cidr_list(&route.allow)),
@@ -1992,6 +2026,7 @@ fn parse_route(
         or_error(size, key, errors)
     });
     let rewrite = parse_rewrite(locale, route, key, errors);
+    let mirror = parse_mirror(locale, route, key, errors);
     (!servers.is_empty()).then(|| Route {
         path: route.path.clone(),
         servers,
@@ -2003,6 +2038,56 @@ fn parse_route(
         retry,
         max_body_size,
         rewrite,
+        mirror,
+    })
+}
+
+/// Reads one server from each line. An invalid line records its error under the key.
+fn parse_server_lines(
+    locale: Locale,
+    lines: &[String],
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> Vec<Server> {
+    lines
+        .iter()
+        .filter_map(|line| match parse_server_line(locale, line) {
+            Ok(server) => Some(server),
+            Err(err) => {
+                errors.insert(key.into(), err);
+                None
+            }
+        })
+        .collect()
+}
+
+/// Reads the mirror of a route. `None` when the mirror is off.
+fn parse_mirror(
+    locale: Locale,
+    route: &RouteForm,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> Option<Mirror> {
+    if !route.mirror {
+        return None;
+    }
+    let servers = parse_server_lines(locale, &route.mirror_servers, key, errors);
+    let percent = parse_percent(
+        locale,
+        &route.mirror_percent,
+        "http_form.mirror_percent_name",
+    );
+    let percent = or_error(percent, key, errors);
+    let size = parse_size(
+        locale,
+        &route.mirror_max_body_size,
+        "http_form.max_body_size_name",
+    );
+    let max_body_size = or_error(size, key, errors);
+    Some(Mirror {
+        servers,
+        percent,
+        max_body_size,
     })
 }
 
@@ -2155,6 +2240,42 @@ mod tests {
         let message = Locale::Tr.error_message(&Error::InvalidRedirectStatus { status: 303 });
         let expected = Locale::Tr.tf(key, &[("line", "2"), ("error", &message)]);
         assert_eq!(err, expected);
+    }
+
+    #[test]
+    fn route_mirror_round_trips_and_reports_an_invalid_percent() {
+        let route = Route {
+            servers: vec![Server::new("http://127.0.0.1:9000/".parse().unwrap())],
+            mirror: Some(Mirror {
+                servers: vec![Server::new("http://127.0.0.1:9100/".parse().unwrap())],
+                percent: 10,
+                max_body_size: 1024,
+            }),
+            ..Default::default()
+        };
+        let form = RouteForm::new(&route);
+        let mut errors = HashMap::new();
+        assert_eq!(
+            parse_route(Locale::En, &form, "routes_0", &mut errors),
+            Some(route)
+        );
+        assert!(errors.is_empty());
+
+        let off = RouteForm {
+            mirror: false,
+            ..form.clone()
+        };
+        let parsed = parse_route(Locale::En, &off, "routes_0", &mut errors);
+        assert_eq!(parsed.unwrap().mirror, None);
+
+        let invalid = RouteForm {
+            mirror_percent: "0".into(),
+            ..form
+        };
+        parse_route(Locale::Tr, &invalid, "routes_0", &mut errors);
+        let name = Locale::Tr.t("http_form.mirror_percent_name");
+        let expected = Locale::Tr.tf("proxy_form.percent_range", &[("name", name)]);
+        assert_eq!(errors.get("routes_0"), Some(&expected));
     }
 
     #[test]

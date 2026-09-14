@@ -30,6 +30,7 @@ use url::Url;
 
 use super::affinity::{Affinity, CookieSlot};
 use super::body_limit::BodyLimit;
+use super::mirror::Mirror;
 use super::rewrite::Rewrite;
 use super::rewriter::ResponseRewriter;
 
@@ -83,8 +84,17 @@ impl ConnectionPool {
     /// Sends `GET` to the URI without a body, and returns the status of the response.
     pub async fn probe(&self, uri: Uri) -> anyhow::Result<StatusCode> {
         let req = Request::get(uri).body(empty_body())?;
+        self.send_discarded(req, Duration::ZERO).await
+    }
+
+    /// Sends the request, drops the response body and returns the status of the response.
+    pub async fn send_discarded(
+        &self,
+        req: Request<ProxyBody>,
+        request_timeout: Duration,
+    ) -> anyhow::Result<StatusCode> {
         let res = self
-            .send(req, Duration::ZERO)
+            .send(req, request_timeout)
             .await
             .map_err(|err| err.error)?;
         Ok(res.status())
@@ -203,6 +213,8 @@ pub struct Upstream {
     /// The largest request body in bytes. `0` has no limit.
     pub max_body_size: u64,
     pub rewrite: Arc<Rewrite>,
+    /// `None` when the route has no mirror.
+    pub mirror: Option<Arc<Mirror>>,
 }
 
 /// The servers to try for a request in order, and the part of the client URI that follows the
@@ -327,6 +339,7 @@ impl Upstream {
         req: Request<ProxyBody>,
     ) -> Result<Response<ProxyBody>, anyhow::Error> {
         let (req, limit) = BodyLimit::apply(req, self.max_body_size);
+        let req = self.mirror(req);
         let result = self.send_request(req).await.map_err(|err| {
             if limit.exceeded() {
                 SendError::other(ProxyError::PayloadTooLarge)
@@ -335,6 +348,31 @@ impl Upstream {
             }
         });
         finish(result)
+    }
+
+    /// Starts the copy of the request for the mirror servers when the mirror admits the request.
+    fn mirror(&self, req: Request<ProxyBody>) -> Request<ProxyBody> {
+        let Some(mirror) = &self.mirror else {
+            return req;
+        };
+        let (Some(target), Some(permit)) =
+            (req.extensions().get::<UpstreamTarget>(), mirror.admit(&req))
+        else {
+            return req;
+        };
+        let uris = mirror
+            .servers
+            .iter()
+            .filter_map(|server| {
+                let url = upstream_url(
+                    &server.url.0,
+                    &target.path_segments,
+                    target.query.as_deref(),
+                );
+                Uri::from_str(url.as_str()).ok()
+            })
+            .collect();
+        mirror.tee(req, uris, permit)
     }
 
     async fn send_request(
