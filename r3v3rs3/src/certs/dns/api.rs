@@ -8,6 +8,7 @@ use hyper::{
     header::{CONTENT_TYPE, USER_AGENT},
     Method, Request, StatusCode, Uri,
 };
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::time::Duration;
 
@@ -89,6 +90,14 @@ impl ApiRequest {
         self.body("application/json", value.to_string().into_bytes())
     }
 
+    /// A URL-encoded form body.
+    pub fn form(self, fields: &[(&str, &str)]) -> Self {
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(fields)
+            .finish();
+        self.body("application/x-www-form-urlencoded", body.into_bytes())
+    }
+
     pub fn body(mut self, content_type: &'static str, body: Vec<u8>) -> Self {
         self.body = Some((content_type, body));
         self
@@ -138,19 +147,22 @@ impl ApiClient {
         success_body(&target, status, body)
     }
 
-    /// Sends the request and returns the strings of the JSON array at `key` of the response.
-    /// A 404 response has no strings.
-    pub async fn optional_strings(
+    /// Sends the request and reads the value at the JSON `pointer` of the response.
+    /// A 404 response is the default value.
+    pub async fn optional<T: DeserializeOwned + Default>(
         &self,
         request: ApiRequest,
-        key: &str,
-    ) -> anyhow::Result<Vec<String>> {
+        pointer: &str,
+    ) -> anyhow::Result<T> {
         let (target, status, body) = self.exchange(request).await?;
         if status == StatusCode::NOT_FOUND {
-            return Ok(Vec::new());
+            return Ok(T::default());
         }
         let response = parse_json(&success_body(&target, status, body)?)?;
-        Ok(serde_json::from_value(response[key].clone())?)
+        let value = response
+            .pointer(pointer)
+            .ok_or_else(|| anyhow!("{target} returned no {pointer}"))?;
+        Ok(T::deserialize(value)?)
     }
 
     /// Sends the request and returns the method and path, the status and the body.

@@ -742,7 +742,7 @@ TLS-ALPN-01 challenge'ı sürerken her TLS portu ve her HTTPS portu, yalnız `ac
 r3v3rs3 her domain adı için şu adımları uygular:
 
 1. Provider API'si ile domain adının zone'unu bulur. Adı içeren en uzun zone kullanılır.
-2. `_acme-challenge.<domain>` TXT kaydını 60 saniyelik TTL ile oluşturur. Linode'da TTL, Linode'un kabul ettiği en düşük değer olan 300 saniyedir. Porkbun'a TTL gönderilmez, bu yüzden kayıt hesabın en düşük TTL değerini alır. Gandi'de TTL, Gandi'nin kabul ettiği en düşük değer olan 300 saniyedir. deSEC'te TTL 3600 saniyedir, çünkü deSEC domain'in minimum TTL değerinden düşük bir TTL'i reddeder. Gandi ve deSEC bir adın bütün kayıt kümesini yazar. Bu yüzden r3v3rs3 kendi değerlerini mevcut TXT değerlerine ekler ve yalnız kendi değerlerini siler. `*.example.com` için kayıt adı `example.com` ile aynıdır: `_acme-challenge.example.com`. Bu yüzden kayıt iki değer taşır.
+2. `_acme-challenge.<domain>` TXT kaydını 60 saniyelik TTL ile oluşturur. Linode'da TTL, Linode'un kabul ettiği en düşük değer olan 300 saniyedir. Porkbun'a TTL gönderilmez, bu yüzden kayıt hesabın en düşük TTL değerini alır. Gandi'de TTL, Gandi'nin kabul ettiği en düşük değer olan 300 saniyedir. deSEC'te TTL 3600 saniyedir, çünkü deSEC domain'in minimum TTL değerinden düşük bir TTL'i reddeder. Gandi, deSEC ve Azure DNS bir adın bütün kayıt kümesini yazar. Bu yüzden r3v3rs3 kendi değerlerini mevcut TXT değerlerine ekler ve yalnız kendi değerlerini siler. `*.example.com` için kayıt adı `example.com` ile aynıdır: `_acme-challenge.example.com`. Bu yüzden kayıt iki değer taşır.
 3. TXT değerleri görünene kadar DNS'i 5 saniyede bir sorgular, en fazla 5 dakika bekler. Sorgulanan DNS sunucusunu "DNS Challenge Resolver" ayarı belirler. Ayar boşsa r3v3rs3 sistem resolver'ını kullanır.
 4. Sertifika otoritesine challenge'ların hazır olduğunu bildirir ve doğrulama için en fazla 3 dakika bekler.
 5. TXT kayıtlarını siler. Order başarısız olsa da kayıtları siler.
@@ -753,6 +753,7 @@ Sistem resolver'ı cache'teki eski yanıtları döndürebilir. Propagation kontr
 |---|---|---|
 | Cloudflare | API Token | Zone için `Zone:Read` ve `DNS:Edit`. |
 | Route 53 | Access Key ID, Secret Access Key | `route53:ListHostedZones` ve `route53:ChangeResourceRecordSets`. Private hosted zone'lar atlanır. |
+| Azure DNS | Tenant ID, Client ID, Client Secret, Subscription ID | Zone'larda DNS Zone Contributor rolü olan bir service principal. r3v3rs3, subscription'daki DNS zone'larını listeler ve resource group'u zone ID'sinden alır. |
 | deSEC | API Token | Hesabın bir token'ı. Policy ile sınırlanmış bir token, `_acme-challenge` TXT kayıt kümelerine yazma izni vermelidir. |
 | DigitalOcean | API Token | Domain'leri okuyabilen, domain kayıtlarını oluşturup silebilen bir token. |
 | Gandi | API Token | Domain'leri okuyabilen ve LiveDNS kayıtlarını değiştirebilen bir personal access token. |
@@ -789,7 +790,7 @@ key_pkcs8 = "<hesabın private key'i>"
 directory = "https://acme-v02.api.letsencrypt.org/directory"
 ```
 
-`dns_provider` altındaki `provider` değeri `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun` veya `ovh` olabilir. Route 53, `api_token` yerine `access_key_id` ve `secret_access_key` kullanır. Porkbun, `api_key` ve `secret_api_key` kullanır. OVHcloud, `endpoint`, `application_key`, `application_secret` ve `consumer_key` kullanır. Vultr API key'i `api_token` alanına yazılır.
+`dns_provider` altındaki `provider` değeri `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun`, `ovh` veya `azure` olabilir. Route 53, `api_token` yerine `access_key_id` ve `secret_access_key` kullanır. Porkbun, `api_key` ve `secret_api_key` kullanır. OVHcloud, `endpoint`, `application_key`, `application_secret` ve `consumer_key` kullanır. Azure DNS, `tenant_id`, `client_id`, `client_secret` ve `subscription_id` kullanır. Vultr API key'i `api_token` alanına yazılır.
 
 # Ayarlar
 

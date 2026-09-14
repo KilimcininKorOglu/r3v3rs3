@@ -79,6 +79,7 @@ impl Acme {
 pub enum DnsProvider {
     Token(TokenProvider),
     Keyed(KeyedProvider),
+    Cloud(CloudProvider),
 }
 
 /// A provider API that takes one API token.
@@ -203,6 +204,44 @@ impl KeyedProvider {
     }
 }
 
+/// A cloud platform API that authenticates with a service account of the platform.
+///
+/// `auth_url` replaces the address of the token endpoint, for example with a test server.
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(tag = "provider", rename_all = "snake_case")]
+pub enum CloudProvider {
+    Azure {
+        tenant_id: String,
+        client_id: String,
+        client_secret: String,
+        subscription_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auth_url: Option<String>,
+    },
+}
+
+impl CloudProvider {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Azure { .. } => "azure",
+        }
+    }
+
+    fn has_credentials(&self) -> bool {
+        match self {
+            Self::Azure {
+                tenant_id,
+                client_id,
+                client_secret,
+                subscription_id,
+                ..
+            } => filled(&[tenant_id, client_id, client_secret, subscription_id]),
+        }
+    }
+}
+
 /// Whether no credential is empty or only whitespace.
 fn filled(values: &[&str]) -> bool {
     values.iter().all(|value| !value.trim().is_empty())
@@ -214,6 +253,7 @@ impl DnsProvider {
         match self {
             Self::Token(provider) => provider.provider.name(),
             Self::Keyed(provider) => provider.name(),
+            Self::Cloud(provider) => provider.name(),
         }
     }
 
@@ -221,6 +261,7 @@ impl DnsProvider {
         match self {
             Self::Token(provider) => filled(&[&provider.api_token]),
             Self::Keyed(provider) => provider.has_credentials(),
+            Self::Cloud(provider) => provider.has_credentials(),
         }
     }
 }
@@ -428,6 +469,14 @@ mod test {
                 "consumer_key": "c",
             }),
             serde_json::json!({ "provider": "route53", "access_key_id": "a", "secret_access_key": "s" }),
+            serde_json::json!({
+                "provider": "azure",
+                "tenant_id": "t",
+                "client_id": "c",
+                "client_secret": "s",
+                "subscription_id": "u",
+                "auth_url": "http://a",
+            }),
         ];
         for value in providers {
             let provider: DnsProvider = serde_json::from_value(value.clone()).unwrap();

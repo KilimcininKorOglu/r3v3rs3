@@ -3,10 +3,15 @@ use axum::{
     Router,
 };
 use r3v3rs3::certs::dns::{self, DnsClient, TxtName};
-use r3v3rs3_api::acme::{DnsProvider, KeyedProvider, OvhEndpoint, TokenApi, TokenProvider};
+use r3v3rs3_api::acme::{
+    CloudProvider, DnsProvider, KeyedProvider, OvhEndpoint, TokenApi, TokenProvider,
+};
 use serde_json::json;
 use sha1::{Digest, Sha1};
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 mod common;
 use common::serve_http_upstream;
@@ -459,6 +464,98 @@ async fn desec_creates_a_missing_rrset_and_deletes_it_when_only_its_values_remai
         requests(&calls),
         vec![format!("GET {rrset}"), format!("DELETE {rrset}")]
     );
+    Ok(())
+}
+
+const AZURE_ZONES: &str =
+    "/subscriptions/sub-1/providers/Microsoft.Network/dnszones?api-version=2018-05-01";
+const AZURE_RECORD: &str = "/subscriptions/sub-1/resourceGroups/rg2/providers/Microsoft.Network/dnszones/example.test/TXT/_acme-challenge.app?api-version=2018-05-01";
+
+fn azure_zone(group: &str, name: &str) -> serde_json::Value {
+    json!({
+        "id": format!("/subscriptions/sub-1/resourceGroups/{group}/providers/Microsoft.Network/dnszones/{name}"),
+        "name": name,
+    })
+}
+
+fn azure(call: &Call) -> (StatusCode, String) {
+    let second_page = format!("{AZURE_ZONES}&$skipToken=2");
+    match (call.method.as_str(), call.uri.as_str()) {
+        ("POST", "/tenant-1/oauth2/v2.0/token") => {
+            ok(r#"{"token_type":"Bearer","expires_in":3599,"access_token":"az-access"}"#)
+        }
+        ("GET", AZURE_ZONES) => {
+            // The next link is a full URL, as in the Azure API.
+            let next = format!("http://{}{second_page}", call.header("host"));
+            ok(
+                &json!({ "value": [azure_zone("rg1", "other.test")], "nextLink": next })
+                    .to_string(),
+            )
+        }
+        ("GET", uri) if uri == second_page => {
+            ok(&json!({ "value": [azure_zone("rg2", "example.test")] }).to_string())
+        }
+        // Another tool keeps its own value in the record set, and v1 is already there.
+        ("GET", AZURE_RECORD) => {
+            ok(r#"{"properties":{"TTL":60,"TXTRecords":[{"value":["other"]},{"value":["v1"]}]}}"#)
+        }
+        _ => ok("{}"),
+    }
+}
+
+#[tokio::test]
+async fn azure_reuses_its_token_follows_the_next_link_and_keeps_other_values() -> anyhow::Result<()>
+{
+    let (base, calls) = start_mock(azure).await?;
+    let provider = DnsProvider::Cloud(CloudProvider::Azure {
+        tenant_id: "tenant-1".to_string(),
+        client_id: "client-1".to_string(),
+        client_secret: "az-secret".to_string(),
+        subscription_id: "sub-1".to_string(),
+        api_url: Some(base.clone()),
+        auth_url: Some(base.clone()),
+    });
+    let client = dns::client(&provider).await?;
+    let record = client.add_txt(&challenge_name()).await?;
+    client.remove_txt(&record).await?;
+
+    assert_eq!(
+        requests(&calls),
+        vec![
+            "POST /tenant-1/oauth2/v2.0/token".to_string(),
+            format!("GET {AZURE_ZONES}"),
+            format!("GET {AZURE_ZONES}&$skipToken=2"),
+            format!("GET {AZURE_RECORD}"),
+            format!("PUT {AZURE_RECORD}"),
+            format!("GET {AZURE_RECORD}"),
+            format!("PUT {AZURE_RECORD}"),
+        ]
+    );
+    assert_eq!(
+        body(&calls, 4)?,
+        json!({ "properties": { "TTL": 60, "TXTRecords": [
+            { "value": ["other"] }, { "value": ["v1"] }, { "value": ["v2"] }
+        ] } })
+    );
+    assert_eq!(
+        body(&calls, 6)?,
+        json!({ "properties": { "TTL": 60, "TXTRecords": [{ "value": ["other"] }] } })
+    );
+    let calls = calls.lock().unwrap();
+    let form: HashMap<String, String> = url::form_urlencoded::parse(calls[0].body.as_bytes())
+        .into_owned()
+        .collect();
+    let expected = [
+        ("grant_type", "client_credentials".to_string()),
+        ("client_id", "client-1".to_string()),
+        ("client_secret", "az-secret".to_string()),
+        ("scope", format!("{base}/.default")),
+    ]
+    .map(|(key, value)| (key.to_string(), value));
+    assert_eq!(form, HashMap::from(expected));
+    assert!(calls[1..]
+        .iter()
+        .all(|call| call.authorization == "Bearer az-access"));
     Ok(())
 }
 

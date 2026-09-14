@@ -1,6 +1,6 @@
 use super::{
     api::{ApiClient, ApiRequest},
-    rrset::RrsetApi,
+    rrset::{quoted, RrsetApi},
 };
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -36,18 +36,26 @@ impl Desec {
 
 #[async_trait]
 impl RrsetApi for Desec {
+    type Value = String;
+
+    fn value(txt: &str) -> String {
+        quoted(txt)
+    }
+
     /// deSEC returns the domain that is responsible for a name.
-    async fn zone(&self, fqdn: &str) -> anyhow::Result<String> {
+    async fn zone(&self, fqdn: &str) -> anyhow::Result<(String, String)> {
         let request = self.request(Method::GET, format!("/domains/?owns_qname={fqdn}"));
-        self.api
+        let zone = self
+            .api
             .json_id(request, "/0/name")
             .await?
-            .ok_or_else(|| anyhow!("no deSEC domain contains {fqdn}"))
+            .ok_or_else(|| anyhow!("no deSEC domain contains {fqdn}"))?;
+        Ok((zone.clone(), zone))
     }
 
     async fn values(&self, zone: &str, name: &str) -> anyhow::Result<Vec<String>> {
         let request = self.request(Method::GET, Self::rrset_path(zone, name));
-        self.api.optional_strings(request, "records").await
+        self.api.optional(request, "/records").await
     }
 
     async fn put(&self, zone: &str, name: &str, values: &[String]) -> anyhow::Result<()> {

@@ -1,7 +1,7 @@
 use super::{
     api::{strings, ApiClient, ApiRequest},
     domain_zone,
-    rrset::RrsetApi,
+    rrset::{quoted, RrsetApi},
 };
 use async_trait::async_trait;
 use hyper::Method;
@@ -53,13 +53,20 @@ impl Gandi {
 
 #[async_trait]
 impl RrsetApi for Gandi {
-    async fn zone(&self, fqdn: &str) -> anyhow::Result<String> {
-        domain_zone(fqdn, &self.domains().await?, "Gandi")
+    type Value = String;
+
+    fn value(txt: &str) -> String {
+        quoted(txt)
+    }
+
+    async fn zone(&self, fqdn: &str) -> anyhow::Result<(String, String)> {
+        let zone = domain_zone(fqdn, &self.domains().await?, "Gandi")?;
+        Ok((zone.clone(), zone))
     }
 
     async fn values(&self, zone: &str, name: &str) -> anyhow::Result<Vec<String>> {
         let request = self.request(Method::GET, Self::record_path(zone, name));
-        self.api.optional_strings(request, "rrset_values").await
+        self.api.optional(request, "/rrset_values").await
     }
 
     async fn put(&self, zone: &str, name: &str, values: &[String]) -> anyhow::Result<()> {

@@ -4,17 +4,22 @@ use super::{relative_name, DnsClient, TxtName, TxtRecord};
 use async_trait::async_trait;
 
 /// A provider API that reads and writes every TXT value of a name together.
-/// Values are in the form of the API, which is a quoted string.
 #[async_trait]
 pub trait RrsetApi: Send + Sync {
-    /// The zone that holds `fqdn`.
-    async fn zone(&self, fqdn: &str) -> anyhow::Result<String>;
+    /// A TXT value in the form of the API.
+    type Value: Clone + PartialEq + Send + Sync;
 
-    /// The TXT values of `name`, relative to `zone`. A missing record set has no values.
-    async fn values(&self, zone: &str, name: &str) -> anyhow::Result<Vec<String>>;
+    /// A challenge value in the form of the API.
+    fn value(txt: &str) -> Self::Value;
+
+    /// The name of the zone that holds `fqdn`, and the zone reference that the other methods take.
+    async fn zone(&self, fqdn: &str) -> anyhow::Result<(String, String)>;
+
+    /// The TXT values of `name`, relative to the zone. A missing record set has no values.
+    async fn values(&self, zone: &str, name: &str) -> anyhow::Result<Vec<Self::Value>>;
 
     /// Replaces the TXT values of `name` with `values`.
-    async fn put(&self, zone: &str, name: &str, values: &[String]) -> anyhow::Result<()>;
+    async fn put(&self, zone: &str, name: &str, values: &[Self::Value]) -> anyhow::Result<()>;
 
     async fn delete(&self, zone: &str, name: &str) -> anyhow::Result<()>;
 }
@@ -24,17 +29,17 @@ pub trait RrsetApi: Send + Sync {
 pub struct MergedRrset<T>(pub T);
 
 /// A TXT value as a quoted string.
-fn quoted(value: &str) -> String {
+pub fn quoted(value: &str) -> String {
     format!("\"{value}\"")
 }
 
 #[async_trait]
 impl<T: RrsetApi> DnsClient for MergedRrset<T> {
     async fn add_txt(&self, name: &TxtName) -> anyhow::Result<TxtRecord> {
-        let zone = self.0.zone(&name.fqdn).await?;
-        let relative = relative_name(&name.fqdn, &zone).to_string();
+        let (zone_name, zone) = self.0.zone(&name.fqdn).await?;
+        let relative = relative_name(&name.fqdn, &zone_name).to_string();
         let mut values = self.0.values(&zone, &relative).await?;
-        for value in name.values.iter().map(|value| quoted(value)) {
+        for value in name.values.iter().map(|value| T::value(value)) {
             if !values.contains(&value) {
                 values.push(value);
             }
@@ -49,9 +54,9 @@ impl<T: RrsetApi> DnsClient for MergedRrset<T> {
         let Some(name) = record.ids.first() else {
             return Ok(());
         };
-        let ours: Vec<String> = record.values.iter().map(|value| quoted(value)).collect();
+        let ours: Vec<T::Value> = record.values.iter().map(|value| T::value(value)).collect();
         let values = self.0.values(&record.zone, name).await?;
-        let rest: Vec<String> = values
+        let rest: Vec<T::Value> = values
             .iter()
             .filter(|value| !ours.contains(value))
             .cloned()

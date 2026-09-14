@@ -1,6 +1,7 @@
 //! Publishes the TXT records of the ACME DNS-01 challenge through DNS provider APIs.
 
 mod api;
+mod azure;
 mod cloudflare;
 mod desec;
 mod digitalocean;
@@ -22,7 +23,7 @@ use hickory_resolver::{
     system_conf::read_system_conf,
     TokioAsyncResolver,
 };
-use r3v3rs3_api::acme::{DnsProvider, KeyedProvider, TokenApi, TokenProvider};
+use r3v3rs3_api::acme::{CloudProvider, DnsProvider, KeyedProvider, TokenApi, TokenProvider};
 use std::{future::Future, net::SocketAddr, time::Duration};
 use tracing::{debug, info, warn};
 
@@ -132,7 +133,31 @@ pub async fn client(provider: &DnsProvider) -> anyhow::Result<Box<dyn DnsClient>
     match provider {
         DnsProvider::Token(provider) => token_client(http, provider),
         DnsProvider::Keyed(provider) => keyed_client(http, provider),
+        DnsProvider::Cloud(provider) => cloud_client(http, provider),
     }
+}
+
+fn cloud_client(http: HttpClient, provider: &CloudProvider) -> anyhow::Result<Box<dyn DnsClient>> {
+    let client: Box<dyn DnsClient> = match provider {
+        CloudProvider::Azure {
+            tenant_id,
+            client_id,
+            client_secret,
+            subscription_id,
+            api_url,
+            auth_url,
+        } => Box::new(rrset::MergedRrset(azure::Azure::new(
+            api::ApiClient::new(http.clone(), api_url.as_deref(), azure::API_URL)?,
+            api::ApiClient::new(http, auth_url.as_deref(), azure::AUTH_URL)?,
+            azure::Credentials {
+                tenant_id: tenant_id.clone(),
+                client_id: client_id.clone(),
+                client_secret: client_secret.clone(),
+                subscription_id: subscription_id.clone(),
+            },
+        ))),
+    };
+    Ok(client)
 }
 
 fn token_client(http: HttpClient, provider: &TokenProvider) -> anyhow::Result<Box<dyn DnsClient>> {
@@ -269,6 +294,18 @@ fn domain_zone(fqdn: &str, domains: &[String], provider: &str) -> anyhow::Result
     longest_zone(fqdn, domains, String::as_str)
         .map(|(zone, _)| zone.to_string())
         .ok_or_else(|| anyhow!("no {provider} domain contains {fqdn}"))
+}
+
+/// The name and the ID of the longest zone of `zones` that holds `fqdn`.
+/// Each item of `zones` is a zone name and its ID. `provider` names the provider in the error.
+fn zone_with_id(
+    fqdn: &str,
+    zones: &[(String, String)],
+    provider: &str,
+) -> anyhow::Result<(String, String)> {
+    longest_zone(fqdn, zones, |(name, _)| name)
+        .map(|(name, (_, id))| (name.to_string(), id.clone()))
+        .ok_or_else(|| anyhow!("no {provider} zone contains {fqdn}"))
 }
 
 /// Adds the TXT records, runs `task`, and then removes every record that was added,

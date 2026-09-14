@@ -1,6 +1,6 @@
 use super::{
     api::{id_text, ApiClient, ApiRequest},
-    longest_zone, RecordApi,
+    zone_with_id, RecordApi,
 };
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -52,10 +52,8 @@ fn domain(item: &Value) -> Option<(String, String)> {
 #[async_trait]
 impl RecordApi for Linode {
     async fn zone(&self, fqdn: &str) -> anyhow::Result<String> {
-        let domains = self.domains().await?;
-        longest_zone(fqdn, &domains, |(name, _)| name)
-            .map(|(_, (_, id))| id.clone())
-            .ok_or_else(|| anyhow!("no Linode domain contains {fqdn}"))
+        let (_, id) = zone_with_id(fqdn, &self.domains().await?, "Linode")?;
+        Ok(id)
     }
 
     async fn create(&self, zone: &str, fqdn: &str, value: &str) -> anyhow::Result<String> {

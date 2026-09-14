@@ -73,7 +73,7 @@ const OVH_ENDPOINTS: [&str; 7] = [
     "soyoustart-ca",
 ];
 
-pub static DNS_PROVIDERS: [DnsProviderInfo; 10] = [
+pub static DNS_PROVIDERS: [DnsProviderInfo; 11] = [
     DnsProviderInfo {
         name: "cloudflare",
         label: "Cloudflare",
@@ -85,6 +85,16 @@ pub static DNS_PROVIDERS: [DnsProviderInfo; 10] = [
         fields: &[
             text("access_key_id", "acme.access_key_id"),
             secret("secret_access_key", "acme.secret_access_key"),
+        ],
+    },
+    DnsProviderInfo {
+        name: "azure",
+        label: "Azure DNS",
+        fields: &[
+            text("tenant_id", "acme.tenant_id"),
+            text("client_id", "acme.client_id"),
+            secret("client_secret", "acme.client_secret"),
+            text("subscription_id", "acme.subscription_id"),
         ],
     },
     DnsProviderInfo {
