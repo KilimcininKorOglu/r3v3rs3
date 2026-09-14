@@ -72,55 +72,93 @@ impl Acme {
 
 /// A DNS provider API that publishes the TXT records of the `dns-01` challenge.
 ///
+/// The providers are grouped by the shape of their credentials. Every group is an object with
+/// a `provider` name, so the groups do not change the serialized form.
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum DnsProvider {
+    Token(TokenProvider),
+    Keyed(KeyedProvider),
+}
+
+/// A provider API that takes one API token.
+///
 /// `api_url` replaces the address of the provider API, for example with a test server.
 #[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+pub struct TokenProvider {
+    pub provider: TokenApi,
+    pub api_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenApi {
+    Cloudflare,
+    #[serde(rename = "digitalocean")]
+    DigitalOcean,
+    Hetzner,
+}
+
+impl TokenApi {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cloudflare => "cloudflare",
+            Self::DigitalOcean => "digitalocean",
+            Self::Hetzner => "hetzner",
+        }
+    }
+}
+
+/// A provider API that takes a key pair or several keys.
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 #[serde(tag = "provider", rename_all = "snake_case")]
-pub enum DnsProvider {
-    Cloudflare {
-        api_token: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        api_url: Option<String>,
-    },
+pub enum KeyedProvider {
     Route53 {
         access_key_id: String,
         secret_access_key: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         api_url: Option<String>,
     },
-    #[serde(rename = "digitalocean")]
-    DigitalOcean {
-        api_token: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        api_url: Option<String>,
-    },
-    Hetzner {
-        api_token: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        api_url: Option<String>,
-    },
+}
+
+impl KeyedProvider {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Route53 { .. } => "route53",
+        }
+    }
+
+    fn has_credentials(&self) -> bool {
+        match self {
+            Self::Route53 {
+                access_key_id,
+                secret_access_key,
+                ..
+            } => filled(&[access_key_id, secret_access_key]),
+        }
+    }
+}
+
+/// Whether no credential is empty or only whitespace.
+fn filled(values: &[&str]) -> bool {
+    values.iter().all(|value| !value.trim().is_empty())
 }
 
 impl DnsProvider {
     /// The `provider` value in the API and in the configuration.
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Cloudflare { .. } => "cloudflare",
-            Self::Route53 { .. } => "route53",
-            Self::DigitalOcean { .. } => "digitalocean",
-            Self::Hetzner { .. } => "hetzner",
+            Self::Token(provider) => provider.provider.name(),
+            Self::Keyed(provider) => provider.name(),
         }
     }
 
     pub fn has_credentials(&self) -> bool {
         match self {
-            Self::Cloudflare { api_token, .. }
-            | Self::DigitalOcean { api_token, .. }
-            | Self::Hetzner { api_token, .. } => !api_token.trim().is_empty(),
-            Self::Route53 {
-                access_key_id,
-                secret_access_key,
-                ..
-            } => !access_key_id.trim().is_empty() && !secret_access_key.trim().is_empty(),
+            Self::Token(provider) => filled(&[&provider.api_token]),
+            Self::Keyed(provider) => provider.has_credentials(),
         }
     }
 }
@@ -232,10 +270,11 @@ mod test {
     }
 
     fn cloudflare(api_token: &str) -> Option<DnsProvider> {
-        Some(DnsProvider::Cloudflare {
+        Some(DnsProvider::Token(TokenProvider {
+            provider: TokenApi::Cloudflare,
             api_token: api_token.to_string(),
             api_url: None,
-        })
+        }))
     }
 
     #[test]
@@ -309,24 +348,44 @@ mod test {
     }
 
     #[test]
-    fn a_dns_provider_is_tagged_by_its_name() {
-        let provider: DnsProvider =
-            serde_json::from_str(r#"{"provider":"digitalocean","api_token":"secret-token"}"#)
-                .unwrap();
-        assert_eq!(provider.name(), "digitalocean");
-        assert_eq!(
-            serde_json::to_value(&provider).unwrap(),
-            serde_json::json!({ "provider": "digitalocean", "api_token": "secret-token" })
-        );
+    fn every_dns_provider_keeps_its_serialized_form() {
+        let providers = [
+            serde_json::json!({ "provider": "cloudflare", "api_token": "t" }),
+            serde_json::json!({ "provider": "digitalocean", "api_token": "t", "api_url": "http://u" }),
+            serde_json::json!({ "provider": "hetzner", "api_token": "t" }),
+            serde_json::json!({ "provider": "route53", "access_key_id": "a", "secret_access_key": "s" }),
+        ];
+        for value in providers {
+            let provider: DnsProvider = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(provider.name(), value["provider"]);
+            assert!(provider.has_credentials());
+            assert_eq!(serde_json::to_value(&provider).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn an_unknown_dns_provider_is_rejected() {
+        let result = serde_json::from_str::<DnsProvider>(r#"{"provider":"other","api_token":"t"}"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_keyed_provider_needs_every_key() {
+        let provider = DnsProvider::Keyed(KeyedProvider::Route53 {
+            access_key_id: "AKID".to_string(),
+            secret_access_key: " ".to_string(),
+            api_url: None,
+        });
+        assert!(!provider.has_credentials());
     }
 
     #[test]
     fn debug_output_does_not_contain_credentials() {
-        let provider = DnsProvider::Route53 {
+        let provider = DnsProvider::Keyed(KeyedProvider::Route53 {
             access_key_id: "AKIDSECRET".to_string(),
             secret_access_key: "very-secret".to_string(),
             api_url: None,
-        };
+        });
         let output = format!("{provider:?}");
         assert!(output.contains("route53"));
         assert!(!output.contains("AKIDSECRET"));

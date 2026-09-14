@@ -528,7 +528,7 @@ mod tests {
         header::{HeaderMap, LOCATION},
         Response,
     };
-    use r3v3rs3_api::acme::AcmeConfig;
+    use r3v3rs3_api::acme::{AcmeConfig, KeyedProvider, TokenApi, TokenProvider};
     use sha2::{Digest, Sha256};
     use std::sync::Mutex;
 
@@ -538,14 +538,26 @@ mod tests {
             config: AcmeConfig::default(),
             identifiers: vec!["*.example.com".parse().unwrap()],
             challenge_type: DNS_01.to_string(),
-            dns_provider: Some(DnsProvider::Route53 {
+            dns_provider: Some(DnsProvider::Keyed(KeyedProvider::Route53 {
                 access_key_id: "AKID".to_string(),
                 secret_access_key: "secret".to_string(),
                 api_url: None,
-            }),
+            })),
         };
         let text = toml_edit::ser::to_document(&acme).unwrap().to_string();
         assert_eq!(toml::from_str::<Acme>(&text).unwrap(), acme);
+
+        let token = Acme {
+            dns_provider: Some(DnsProvider::Token(TokenProvider {
+                provider: TokenApi::DigitalOcean,
+                api_token: "token".to_string(),
+                api_url: None,
+            })),
+            ..acme
+        };
+        let text = toml_edit::ser::to_document(&token).unwrap().to_string();
+        assert!(text.contains("provider = \"digitalocean\""), "{text}");
+        assert_eq!(toml::from_str::<Acme>(&text).unwrap(), token);
     }
 
     #[derive(Default)]

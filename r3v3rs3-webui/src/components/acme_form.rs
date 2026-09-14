@@ -6,8 +6,8 @@ use crate::components::http_proxy_config::{
 use base64::{engine::general_purpose, Engine};
 use r3v3rs3_api::{
     acme::{
-        Acme, AcmeConfig, AcmeRequest, DnsProvider, ExternalAccountBinding, DNS_01, HTTP_01,
-        TLS_ALPN_01,
+        Acme, AcmeConfig, AcmeRequest, DnsProvider, ExternalAccountBinding, KeyedProvider,
+        TokenApi, TokenProvider, DNS_01, HTTP_01, TLS_ALPN_01,
     },
     error::Error,
     i18n::Locale,
@@ -324,25 +324,22 @@ fn dns_provider(fields: &AcmeFields) -> Option<DnsProvider> {
     if fields.challenge_type != DNS_01 {
         return None;
     }
-    let api_token = fields.api_token.trim().to_string();
+    let token = |provider| {
+        DnsProvider::Token(TokenProvider {
+            provider,
+            api_token: fields.api_token.trim().to_string(),
+            api_url: None,
+        })
+    };
     Some(match fields.dns_provider.as_str() {
-        "route53" => DnsProvider::Route53 {
+        "route53" => DnsProvider::Keyed(KeyedProvider::Route53 {
             access_key_id: fields.access_key_id.trim().to_string(),
             secret_access_key: fields.secret_access_key.trim().to_string(),
             api_url: None,
-        },
-        "digitalocean" => DnsProvider::DigitalOcean {
-            api_token,
-            api_url: None,
-        },
-        "hetzner" => DnsProvider::Hetzner {
-            api_token,
-            api_url: None,
-        },
-        _ => DnsProvider::Cloudflare {
-            api_token,
-            api_url: None,
-        },
+        }),
+        "digitalocean" => token(TokenApi::DigitalOcean),
+        "hetzner" => token(TokenApi::Hetzner),
+        _ => token(TokenApi::Cloudflare),
     })
 }
 
@@ -421,11 +418,11 @@ mod tests {
         assert_eq!(request.acme.challenge_type, DNS_01);
         assert_eq!(
             request.acme.dns_provider,
-            Some(DnsProvider::Route53 {
+            Some(DnsProvider::Keyed(KeyedProvider::Route53 {
                 access_key_id: "AKIDTEST".into(),
                 secret_access_key: "secret".into(),
                 api_url: None,
-            })
+            }))
         );
     }
 

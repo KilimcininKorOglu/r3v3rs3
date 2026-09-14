@@ -3,7 +3,7 @@ use axum::{
     Router,
 };
 use r3v3rs3::certs::dns::{self, DnsClient, TxtName};
-use r3v3rs3_api::acme::DnsProvider;
+use r3v3rs3_api::acme::{DnsProvider, KeyedProvider, TokenApi, TokenProvider};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 
@@ -91,11 +91,19 @@ async fn add_and_remove(
     Ok(calls)
 }
 
-fn cloudflare_with(token: &str) -> impl FnOnce(String) -> DnsProvider + '_ {
-    move |url| DnsProvider::Cloudflare {
-        api_token: token.to_string(),
-        api_url: Some(url),
+/// A token provider that uses the mock URL.
+fn token_provider(provider: TokenApi, token: &str) -> impl FnOnce(String) -> DnsProvider + '_ {
+    move |url| {
+        DnsProvider::Token(TokenProvider {
+            provider,
+            api_token: token.to_string(),
+            api_url: Some(url),
+        })
     }
+}
+
+fn cloudflare_with(token: &str) -> impl FnOnce(String) -> DnsProvider + '_ {
+    token_provider(TokenApi::Cloudflare, token)
 }
 
 fn ok(body: &str) -> (StatusCode, String) {
@@ -200,10 +208,10 @@ fn digitalocean(call: &Call) -> (StatusCode, String) {
 
 #[tokio::test]
 async fn digitalocean_uses_the_name_relative_to_the_domain() -> anyhow::Result<()> {
-    let calls = add_and_remove(digitalocean, |url| DnsProvider::DigitalOcean {
-        api_token: "do-token".to_string(),
-        api_url: Some(url),
-    })
+    let calls = add_and_remove(
+        digitalocean,
+        token_provider(TokenApi::DigitalOcean, "do-token"),
+    )
     .await?;
 
     assert_eq!(
@@ -234,11 +242,7 @@ fn hetzner(call: &Call) -> (StatusCode, String) {
 
 #[tokio::test]
 async fn hetzner_adds_and_removes_both_values_in_one_rrset() -> anyhow::Result<()> {
-    let calls = add_and_remove(hetzner, |url| DnsProvider::Hetzner {
-        api_token: "hz-token".to_string(),
-        api_url: Some(url),
-    })
-    .await?;
+    let calls = add_and_remove(hetzner, token_provider(TokenApi::Hetzner, "hz-token")).await?;
 
     assert_eq!(
         requests(&calls),
@@ -274,10 +278,12 @@ fn route53(call: &Call) -> (StatusCode, String) {
 
 #[tokio::test]
 async fn route53_upserts_and_deletes_one_record_set_in_the_public_zone() -> anyhow::Result<()> {
-    let calls = add_and_remove(route53, |url| DnsProvider::Route53 {
-        access_key_id: "AKIDTEST".to_string(),
-        secret_access_key: "route53-secret".to_string(),
-        api_url: Some(url),
+    let calls = add_and_remove(route53, |url| {
+        DnsProvider::Keyed(KeyedProvider::Route53 {
+            access_key_id: "AKIDTEST".to_string(),
+            secret_access_key: "route53-secret".to_string(),
+            api_url: Some(url),
+        })
     })
     .await?;
 

@@ -19,7 +19,9 @@ use r3v3rs3::{
     },
 };
 use r3v3rs3_api::{
-    acme::{Acme, AcmeConfig, AcmeRequest, DnsProvider, DNS_01, TLS_ALPN_01},
+    acme::{
+        Acme, AcmeConfig, AcmeRequest, DnsProvider, TokenApi, TokenProvider, DNS_01, TLS_ALPN_01,
+    },
     app::AppConfig,
     discovery::{DiscoveryProvider, DiscoverySource, DiscoveryState},
     id::ShortId,
@@ -156,10 +158,11 @@ async fn pebble_setup(
                 .map(|name| name.parse())
                 .collect::<Result<_, _>>()?,
             challenge_type: DNS_01.to_string(),
-            dns_provider: Some(DnsProvider::Cloudflare {
+            dns_provider: Some(DnsProvider::Token(TokenProvider {
+                provider: TokenApi::Cloudflare,
                 api_token: "test-token".to_string(),
                 api_url: Some(provider_url),
-            }),
+            })),
         },
     };
     Ok((provider, storage, request))

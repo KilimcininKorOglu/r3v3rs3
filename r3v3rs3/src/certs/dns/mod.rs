@@ -7,6 +7,7 @@ mod hetzner;
 mod route53;
 mod sigv4;
 
+use crate::cdn::fetch::HttpClient;
 use anyhow::bail;
 use async_trait::async_trait;
 use hickory_resolver::{
@@ -14,7 +15,7 @@ use hickory_resolver::{
     system_conf::read_system_conf,
     TokioAsyncResolver,
 };
-use r3v3rs3_api::acme::DnsProvider;
+use r3v3rs3_api::acme::{DnsProvider, KeyedProvider, TokenApi, TokenProvider};
 use std::{future::Future, net::SocketAddr, time::Duration};
 use tracing::{debug, info, warn};
 
@@ -106,14 +107,35 @@ impl<T: RecordApi> DnsClient for PerValue<T> {
 
 pub async fn client(provider: &DnsProvider) -> anyhow::Result<Box<dyn DnsClient>> {
     let http = crate::cdn::fetch::build_client().await?;
+    match provider {
+        DnsProvider::Token(provider) => token_client(http, provider),
+        DnsProvider::Keyed(provider) => keyed_client(http, provider),
+    }
+}
+
+fn token_client(http: HttpClient, provider: &TokenProvider) -> anyhow::Result<Box<dyn DnsClient>> {
+    let url = provider.api_url.as_deref();
+    let token = &provider.api_token;
+    let client: Box<dyn DnsClient> = match provider.provider {
+        TokenApi::Cloudflare => Box::new(PerValue(cloudflare::Cloudflare::new(
+            api::ApiClient::new(http, url, cloudflare::API_URL)?,
+            token,
+        ))),
+        TokenApi::DigitalOcean => Box::new(PerValue(digitalocean::DigitalOcean::new(
+            api::ApiClient::new(http, url, digitalocean::API_URL)?,
+            token,
+        ))),
+        TokenApi::Hetzner => Box::new(hetzner::Hetzner::new(
+            api::ApiClient::new(http, url, hetzner::API_URL)?,
+            token,
+        )),
+    };
+    Ok(client)
+}
+
+fn keyed_client(http: HttpClient, provider: &KeyedProvider) -> anyhow::Result<Box<dyn DnsClient>> {
     let client: Box<dyn DnsClient> = match provider {
-        DnsProvider::Cloudflare { api_token, api_url } => {
-            Box::new(PerValue(cloudflare::Cloudflare::new(
-                api::ApiClient::new(http, api_url.as_deref(), cloudflare::API_URL)?,
-                api_token,
-            )))
-        }
-        DnsProvider::Route53 {
+        KeyedProvider::Route53 {
             access_key_id,
             secret_access_key,
             api_url,
@@ -121,16 +143,6 @@ pub async fn client(provider: &DnsProvider) -> anyhow::Result<Box<dyn DnsClient>
             api::ApiClient::new(http, api_url.as_deref(), route53::API_URL)?,
             access_key_id,
             secret_access_key,
-        )),
-        DnsProvider::DigitalOcean { api_token, api_url } => {
-            Box::new(PerValue(digitalocean::DigitalOcean::new(
-                api::ApiClient::new(http, api_url.as_deref(), digitalocean::API_URL)?,
-                api_token,
-            )))
-        }
-        DnsProvider::Hetzner { api_token, api_url } => Box::new(hetzner::Hetzner::new(
-            api::ApiClient::new(http, api_url.as_deref(), hetzner::API_URL)?,
-            api_token,
         )),
     };
     Ok(client)
