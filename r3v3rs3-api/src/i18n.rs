@@ -242,6 +242,7 @@ mod tests {
             Error::InvalidCacheSize,
             Error::InvalidTimeout,
             Error::InvalidHealthCheckPath { path: text() },
+            Error::AllServersDrained,
             Error::FailedToHashPassword,
             Error::FailedToFetchLog,
             Error::FailedToInvokeRpc,

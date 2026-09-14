@@ -6,9 +6,10 @@ use crate::error::Error;
 use crate::header_rules::HeaderRules;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
 use crate::upstream::{
-    default_connect_timeout, default_session_idle_timeout, is_default_connect_timeout,
-    is_default_session_idle_timeout, validate_timeout, HealthCheck, LoadBalancing, UpstreamHealth,
-    UpstreamTimeouts,
+    default_connect_timeout, default_session_idle_timeout, default_weight,
+    is_default_connect_timeout, is_default_session_idle_timeout, is_default_weight,
+    validate_timeout, validate_weights, HealthCheck, LoadBalancing, UpstreamHealth,
+    UpstreamTimeouts, DEFAULT_WEIGHT,
 };
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
@@ -61,20 +62,25 @@ impl ProxyKind {
         }
     }
 
-    /// Rejects a zero connect timeout, session idle timeout, fail timeout or check timeout, and an
-    /// invalid health check path.
+    /// Rejects a zero connect timeout, session idle timeout, fail timeout or check timeout, an
+    /// invalid health check path, and a server list in which every server has weight 0.
     pub fn validate_upstream(&self) -> Result<(), Error> {
         match self {
             Self::Tcp(tcp) => {
                 validate_timeout(tcp.connect_timeout)?;
+                validate_weights(tcp.upstream_servers.iter().map(|server| server.weight))?;
                 tcp.health_check.validate(false)
             }
             Self::Udp(udp) => {
                 validate_timeout(udp.session_idle_timeout)?;
+                validate_weights(udp.upstream_servers.iter().map(|server| server.weight))?;
                 udp.health_check.validate(false)
             }
             Self::Http(http) => {
                 http.health_check.validate(true)?;
+                http.routes.iter().try_for_each(|route| {
+                    validate_weights(route.servers.iter().map(|server| server.weight))
+                })?;
                 http.routes
                     .iter()
                     .filter_map(|route| route.timeouts.as_ref())
@@ -269,11 +275,19 @@ fn default_route_path() -> String {
 pub struct Server {
     #[schema(value_type = String, example = "https://example.com/api")]
     pub url: ServerUrl,
+    /// Share of the traffic compared with the other servers. `0` sends no new traffic to the
+    /// server.
+    #[serde(default = "default_weight", skip_serializing_if = "is_default_weight")]
+    #[schema(example = 1)]
+    pub weight: u16,
 }
 
 impl Server {
     pub fn new(url: ServerUrl) -> Self {
-        Self { url }
+        Self {
+            url,
+            weight: DEFAULT_WEIGHT,
+        }
     }
 }
 

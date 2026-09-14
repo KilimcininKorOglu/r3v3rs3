@@ -158,14 +158,10 @@ struct TcpUpstream {
 
 impl TcpUpstream {
     fn new(id: ShortId, proxy: &TcpProxy, servers: Vec<Connection>) -> Self {
-        let addrs = proxy
-            .upstream_servers
-            .iter()
-            .map(|server| server.addr.to_string())
-            .collect();
+        let members = health::members(&proxy.upstream_servers);
         let group = health::group(
             (id, None),
-            addrs,
+            members,
             proxy.load_balancing,
             proxy.health_check.clone(),
             Probe::Connect(Probe::targets(&proxy.upstream_servers)),

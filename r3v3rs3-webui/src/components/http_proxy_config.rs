@@ -14,7 +14,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
-use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing, UpstreamTimeouts};
+use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing, UpstreamTimeouts, DEFAULT_WEIGHT};
 use r3v3rs3_api::vhost::VirtualHost;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -231,11 +231,7 @@ impl RouteForm {
         let ip_filter = route.ip_filter.clone().unwrap_or_default();
         Self {
             path: route.path.clone(),
-            servers: route
-                .servers
-                .iter()
-                .map(|server| server.url.to_string())
-                .collect(),
+            servers: route.servers.iter().map(format_server_line).collect(),
             override_ip_filter: route.ip_filter.is_some(),
             allow: format_cidr_list(&ip_filter.allow),
             deny: format_cidr_list(&ip_filter.deny),
@@ -444,6 +440,37 @@ fn route_view(
             { list_buttons(routes, index, RouteForm::empty) }
         </div>
     }
+}
+
+/// Writes a server as its URL, followed by its weight when the weight is not the default.
+fn format_server_line(server: &Server) -> String {
+    if server.weight == DEFAULT_WEIGHT {
+        server.url.to_string()
+    } else {
+        format!("{} {}", server.url, server.weight)
+    }
+}
+
+/// Reads a server line: the URL, and an optional weight after a space.
+fn parse_server_line(locale: Locale, line: &str) -> Result<Server, String> {
+    let mut parts = line.split_whitespace();
+    let url = ServerUrl::from_str(parts.next().unwrap_or_default())
+        .map_err(|err| locale.error_message(&err))?;
+    let rest = parts.collect::<Vec<_>>();
+    let weight = match rest.as_slice() {
+        [] => DEFAULT_WEIGHT,
+        [value] => parse_weight(locale, value)?,
+        _ => parse_weight(locale, &rest.join(" "))?,
+    };
+    Ok(Server { url, weight })
+}
+
+/// Reads a server weight from 0 to 65535.
+pub(super) fn parse_weight(locale: Locale, value: &str) -> Result<u16, String> {
+    let value = value.trim();
+    value
+        .parse()
+        .map_err(|_| locale.tf("proxy_form.invalid_weight", &[("value", value)]))
 }
 
 /// Reads one upstream server URL from each line and skips the empty lines.
@@ -1432,10 +1459,10 @@ fn parse_route(
     let servers = route
         .servers
         .iter()
-        .filter_map(|url| match ServerUrl::from_str(url) {
-            Ok(url) => Some(Server::new(url)),
+        .filter_map(|line| match parse_server_line(locale, line) {
+            Ok(server) => Some(server),
             Err(err) => {
-                errors.insert(key.into(), locale.error_message(&err));
+                errors.insert(key.into(), err);
                 None
             }
         })
@@ -1548,6 +1575,25 @@ mod tests {
             server_lines(" http://a:80/ \n\n\thttp://b:80/\n"),
             ["http://a:80/", "http://b:80/"]
         );
+    }
+
+    #[test]
+    fn server_lines_carry_an_optional_weight() {
+        let weighted = parse_server_line(Locale::En, "http://a:8080/  3").unwrap();
+        assert_eq!(weighted.weight, 3);
+        assert_eq!(format_server_line(&weighted), "http://a:8080/ 3");
+
+        let plain = parse_server_line(Locale::En, "http://a:8080/").unwrap();
+        assert_eq!(plain.weight, DEFAULT_WEIGHT);
+        assert_eq!(format_server_line(&plain), "http://a:8080/");
+
+        let err = parse_server_line(Locale::Tr, "http://a:8080/ -1").unwrap_err();
+        assert_eq!(
+            err,
+            Locale::Tr.tf("proxy_form.invalid_weight", &[("value", "-1")])
+        );
+        assert!(parse_server_line(Locale::En, "http://a:80/ 1 2").is_err());
+        assert!(parse_server_line(Locale::En, "http://a:80/ 65536").is_err());
     }
 
     #[test]

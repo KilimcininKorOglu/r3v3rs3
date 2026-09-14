@@ -2,6 +2,7 @@ use crate::{
     id::ShortId,
     multiaddr::Multiaddr,
     tls::{TlsState, TlsTermination},
+    upstream::{default_weight, is_default_weight, DEFAULT_WEIGHT},
 };
 use serde_derive::{Deserialize, Serialize};
 use std::{
@@ -77,11 +78,19 @@ where
 pub struct UpstreamServer {
     #[schema(value_type = String, example = "/dns/example.com/tcp/8080")]
     pub addr: Multiaddr,
+    /// Share of the traffic compared with the other servers. `0` sends no new traffic to the
+    /// server.
+    #[serde(default = "default_weight", skip_serializing_if = "is_default_weight")]
+    #[schema(example = 1)]
+    pub weight: u16,
 }
 
 impl UpstreamServer {
     pub fn new(addr: Multiaddr) -> Self {
-        Self { addr }
+        Self {
+            addr,
+            weight: DEFAULT_WEIGHT,
+        }
     }
 }
 

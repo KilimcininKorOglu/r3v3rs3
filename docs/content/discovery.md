@@ -85,11 +85,12 @@ r3v3rs3.http.app.routes.1.port=9443
 r3v3rs3.http.app.routes.1.scheme=https
 ```
 
-A server can have an explicit URL:
+A server can have an explicit URL and a weight:
 
 ```text
 r3v3rs3.http.app.routes.0.servers.0.url=http://10.0.0.5:8080
 r3v3rs3.http.app.routes.0.servers.1.url=http://10.0.0.6:8080
+r3v3rs3.http.app.routes.0.servers.1.weight=3
 r3v3rs3.http.app.load_balancing=round_robin
 ```
 

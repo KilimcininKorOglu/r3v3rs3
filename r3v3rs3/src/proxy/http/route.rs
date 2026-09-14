@@ -142,15 +142,18 @@ impl ProxyUpstream {
         let timeouts = route.timeouts.unwrap_or(self.timeouts);
         let (_, pool) = clients.get(self.client_cert, timeouts.connect);
         let pool = pool?;
-        let addrs = route
+        let members = route
             .servers
             .iter()
-            .map(|server| server.url.to_string())
+            .map(|server| health::GroupServer {
+                addr: server.url.to_string(),
+                weight: server.weight,
+            })
             .collect();
         let probe = http_probe(&route.servers, &self.health_check.path, &pool);
         let group = health::group(
             key,
-            addrs,
+            members,
             self.load_balancing,
             self.health_check.clone(),
             probe,

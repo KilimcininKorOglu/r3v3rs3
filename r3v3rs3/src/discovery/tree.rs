@@ -430,6 +430,7 @@ mod tests {
             ("vhosts", "app.example.com, www.example.com"),
             ("routes.0.path", "/"),
             ("routes.0.servers.0.url", "http://10.0.0.5:8080"),
+            ("routes.0.servers.0.weight", "3"),
             ("routes.1.path", "/api"),
             ("routes.1.servers.0.url", "http://10.0.0.6:8080"),
             ("upgrade_insecure", "false"),
@@ -446,6 +447,8 @@ mod tests {
             http.routes[0].servers[0].url.to_string(),
             "http://10.0.0.5:8080/"
         );
+        assert_eq!(http.routes[0].servers[0].weight, 3);
+        assert_eq!(http.routes[1].servers[0].weight, 1);
         assert!(!http.upgrade_insecure);
         assert_eq!(http.rate_limit.requests, 100);
         assert_eq!(http.rate_limit.per, RatePeriod::Minute);

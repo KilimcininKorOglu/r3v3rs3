@@ -1,8 +1,8 @@
 use super::http_proxy_config::{
     client_cert_view, error_view, format_seconds, input_element, item_update, list_buttons,
-    or_error, parse_client_cert, parse_seconds, select_setter, timeout_field_view, toggle,
-    upstream_form_view, use_client_certs, use_entry_errors, use_upstream_form, UpstreamForm,
-    INPUT_CLASS, LABEL_CLASS,
+    or_error, parse_client_cert, parse_seconds, parse_weight, select_setter, timeout_field_view,
+    toggle, upstream_form_view, use_client_certs, use_entry_errors, use_upstream_form,
+    UpstreamForm, INPUT_CLASS, LABEL_CLASS,
 };
 use crate::i18n::use_locale;
 use r3v3rs3_api::i18n::Locale;
@@ -27,6 +27,7 @@ pub(super) struct ServerForm {
     host: String,
     port: u16,
     tls: bool,
+    weight: String,
 }
 
 impl ServerForm {
@@ -35,6 +36,7 @@ impl ServerForm {
             host: server.addr.host().unwrap_or_default(),
             port: server.addr.port().unwrap_or(0),
             tls: server.addr.is_tls(),
+            weight: server.weight.to_string(),
         }
     }
 
@@ -43,6 +45,7 @@ impl ServerForm {
             host: "example.com".into(),
             port: 8080,
             tls: false,
+            weight: "1".into(),
         }
     }
 
@@ -154,6 +157,9 @@ fn server_view(
     let tls_onchange = item_update(servers, index, |server, event: Event| {
         server.tls = input_element(&event).checked();
     });
+    let weight_onchange = item_update(servers, index, |server, event: Event| {
+        server.weight = input_element(&event).value();
+    });
 
     html! {
         <div class="mt-2 bg-white shadow-sm p-5 border border-neutral-300 dark:border-neutral-600 dark:bg-neutral-800 rounded-md">
@@ -162,6 +168,9 @@ fn server_view(
 
             <label class={LABEL_CLASS}>{locale.t("common.port")}</label>
             <input type="number" placeholder="8080" onchange={port_onchange} value={server.port.to_string()} max="65535" min="1" class={INPUT_CLASS} />
+
+            <label class={LABEL_CLASS}>{locale.t("proxy_form.weight")}</label>
+            <input type="number" placeholder="1" onchange={weight_onchange} value={server.weight.clone()} max="65535" min="0" class={INPUT_CLASS} />
 
             if with_tls {
                 <div>
@@ -189,14 +198,26 @@ pub(super) fn parse_servers(
 ) -> Vec<UpstreamServer> {
     let mut upstream_servers = Vec::new();
     for (i, server) in servers.iter().enumerate() {
-        match server.addr(protocol) {
-            Some(addr) => upstream_servers.push(UpstreamServer::new(addr)),
-            None => {
-                errors.insert(server_key(i), locale.t("proxy_form.invalid_server").into());
+        match parse_server(locale, server, protocol) {
+            Ok(server) => upstream_servers.push(server),
+            Err(err) => {
+                errors.insert(server_key(i), err);
             }
         }
     }
     upstream_servers
+}
+
+fn parse_server(
+    locale: Locale,
+    server: &ServerForm,
+    protocol: &str,
+) -> Result<UpstreamServer, String> {
+    let addr = server
+        .addr(protocol)
+        .ok_or_else(|| locale.t("proxy_form.invalid_server").to_string())?;
+    let weight = parse_weight(locale, &server.weight)?;
+    Ok(UpstreamServer { addr, weight })
 }
 
 fn get_proxy(
@@ -246,6 +267,7 @@ pub(super) mod tests {
             host: host.into(),
             port,
             tls,
+            weight: "1".into(),
         }
     }
 
@@ -295,5 +317,26 @@ pub(super) mod tests {
 
         let errors = get_proxy(Locale::En, &servers, None, "0", &upstream).unwrap_err();
         assert!(errors.contains_key("connect_timeout"));
+    }
+
+    #[test]
+    fn server_forms_carry_the_weight() {
+        let upstream = first_server_policy();
+        let with_weight = |weight: &str| ServerForm {
+            weight: weight.into(),
+            ..server("example.com", 443, true)
+        };
+        let proxy = get_proxy(Locale::En, &[with_weight(" 0 ")], None, "3", &upstream).unwrap();
+        assert_eq!(proxy.upstream_servers[0].weight, 0);
+        assert_eq!(
+            ServerForm::new(&proxy.upstream_servers[0]),
+            with_weight("0")
+        );
+
+        let errors = get_proxy(Locale::Tr, &[with_weight("x")], None, "3", &upstream).unwrap_err();
+        assert_eq!(
+            errors.get("upstream_servers_0"),
+            Some(&Locale::Tr.tf("proxy_form.invalid_weight", &[("value", "x")]))
+        );
     }
 }

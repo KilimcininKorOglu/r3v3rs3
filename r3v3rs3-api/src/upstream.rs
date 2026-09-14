@@ -9,6 +9,7 @@ pub const DEFAULT_SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 pub const DEFAULT_MAX_FAILS: u32 = 1;
 pub const DEFAULT_FAIL_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DEFAULT_WEIGHT: u16 = 1;
 
 /// Timeouts of the requests that an HTTP proxy sends to its upstream servers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -46,14 +47,15 @@ impl UpstreamTimeouts {
     }
 }
 
-/// Selects the upstream server of each new request, connection or UDP session.
+/// Selects the upstream server of each new request, connection or UDP session. A server with weight
+/// 0 gets no new traffic.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LoadBalancing {
-    /// Uses the servers in turn.
+    /// Uses the servers in turn, each server as often as its weight.
     #[default]
     RoundRobin,
-    /// Uses a random server.
+    /// Uses a random server. The chance of a server is proportional to its weight.
     Random,
     /// Uses the first healthy server in the list. The other servers are backups.
     First,
@@ -153,6 +155,7 @@ impl HealthCheck {
 pub struct UpstreamHealth {
     /// The URL or the address of the server.
     pub addr: String,
+    pub weight: u16,
     pub healthy: bool,
     /// Consecutive failed connections or requests.
     pub failures: u32,
@@ -197,6 +200,24 @@ pub fn is_default_session_idle_timeout(timeout: &Duration) -> bool {
     *timeout == DEFAULT_SESSION_IDLE_TIMEOUT
 }
 
+pub fn default_weight() -> u16 {
+    DEFAULT_WEIGHT
+}
+
+pub fn is_default_weight(weight: &u16) -> bool {
+    *weight == DEFAULT_WEIGHT
+}
+
+/// Rejects a server list in which every server has weight 0, because no server of it gets traffic.
+/// An empty list is valid.
+pub fn validate_weights(weights: impl IntoIterator<Item = u16>) -> Result<(), Error> {
+    let mut weights = weights.into_iter().peekable();
+    if weights.peek().is_some() && weights.all(|weight| weight == 0) {
+        return Err(Error::AllServersDrained);
+    }
+    Ok(())
+}
+
 /// Rejects a zero timeout, because a zero time limit fails every connection.
 pub fn validate_timeout(timeout: Duration) -> Result<(), Error> {
     if timeout.is_zero() {
@@ -208,7 +229,8 @@ pub fn validate_timeout(timeout: Duration) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proxy::{HttpProxy, ProxyKind, Route, TcpProxy, UdpProxy};
+    use crate::port::UpstreamServer;
+    use crate::proxy::{HttpProxy, ProxyKind, Route, Server, TcpProxy, UdpProxy};
 
     #[test]
     fn default_upstream_settings_are_not_serialized() {
@@ -283,6 +305,47 @@ mod tests {
             ..Default::default()
         };
         assert!(no_timeout.validate(true).is_err());
+    }
+
+    #[test]
+    fn weights_default_to_one_and_every_group_needs_a_server_above_zero() {
+        let tcp: TcpProxy =
+            serde_json::from_str(r#"{"upstream_servers":[{"addr":"/ip4/10.0.0.1/tcp/80"}]}"#)
+                .unwrap();
+        assert_eq!(tcp.upstream_servers[0].weight, DEFAULT_WEIGHT);
+        assert!(!serde_json::to_string(&tcp).unwrap().contains("weight"));
+
+        let route: Route =
+            serde_json::from_str(r#"{"servers":[{"url":"http://a/","weight":3}]}"#).unwrap();
+        assert_eq!(route.servers[0].weight, 3);
+        assert!(serde_json::to_string(&route)
+            .unwrap()
+            .contains(r#""weight":3"#));
+
+        assert!(validate_weights([]).is_ok());
+        assert!(validate_weights([0, 1]).is_ok());
+        assert!(validate_weights([0, 0]).is_err());
+
+        let drained = |weight| TcpProxy {
+            upstream_servers: vec![UpstreamServer {
+                weight,
+                ..tcp.upstream_servers[0].clone()
+            }],
+            ..tcp.clone()
+        };
+        assert!(ProxyKind::Tcp(drained(0)).validate_upstream().is_err());
+        assert!(ProxyKind::Tcp(drained(2)).validate_upstream().is_ok());
+        let http = HttpProxy {
+            routes: vec![Route {
+                servers: vec![Server {
+                    weight: 0,
+                    ..route.servers[0].clone()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(ProxyKind::Http(Box::new(http)).validate_upstream().is_err());
     }
 
     #[test]

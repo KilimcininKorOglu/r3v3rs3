@@ -128,6 +128,8 @@ A proxy or an HTTP route with more than one upstream server spreads the traffic 
 - `random` selects a random server.
 - `first` uses the first healthy server. The other servers are backups.
 
+Each server has a `weight` from `0` to `65535` (default `1`). `round_robin` uses each server as often as its weight and spreads the turns of a server over the cycle, as the smooth weighted round robin of nginx does. For example, weights `3` and `1` send three of every four requests to the first server. `random` selects a server with a chance that is proportional to its weight. `first` ignores the weight. A server with `weight = 0` gets no new traffic, also when every other server is unhealthy, so you can take a server out of service without removing it. Its open TCP connections and UDP sessions stay. At least one server of each proxy or HTTP route must have a weight above `0`.
+
 An HTTP proxy selects a server for each request, a TCP proxy for each connection, and a UDP proxy for each client session. The servers of each HTTP route are a separate group.
 
 When the connection to the selected server fails or its connect timeout expires, r3v3rs3 tries the next server once. An HTTP request goes to the next server only when it has no body and is not an upgrade request, because r3v3rs3 cannot send such a request again. Other HTTP errors, such as a request timeout, are not retried.
@@ -142,9 +144,9 @@ The active health check runs when `health_check.interval` is above `0s` (default
 
 `health_check.timeout` (default `5s`) limits each check. A server that fails the check is unhealthy until a check passes, also when `max_fails = 0`. A successful request does not end this state.
 
-The health of the servers stays after a configuration reload while the servers, the policy and the health check settings do not change.
+The health of the servers stays after a configuration reload while the servers, their weights, the policy and the health check settings do not change.
 
-The status API (`GET /api/proxies/{id}/status`) lists the health of each upstream server in `upstreams`: the address, `healthy`, the consecutive `failures`, and `last_error`. The proxy list of the WebUI shows the number of healthy servers and refreshes the statuses every 10 seconds. The title of the number lists the unhealthy servers with their last errors.
+The status API (`GET /api/proxies/{id}/status`) lists the health of each upstream server in `upstreams`: the address, the `weight`, `healthy`, the consecutive `failures`, and `last_error`. The proxy list of the WebUI shows the number of healthy servers and refreshes the statuses every 10 seconds. The title of the number lists the unhealthy servers with their last errors.
 
 ```toml
 [my-app]
@@ -153,7 +155,7 @@ vhosts = ["app.example.com"]
 load_balancing = "round_robin"
 health_check = { max_fails = 3, fail_timeout = "10s", interval = "10s", timeout = "2s", path = "/health" }
 routes = [
-  { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
+  { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/", weight = 3 }] },
 ]
 
 [my-database]

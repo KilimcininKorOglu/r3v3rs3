@@ -85,11 +85,12 @@ r3v3rs3.http.app.routes.1.port=9443
 r3v3rs3.http.app.routes.1.scheme=https
 ```
 
-Server'a açık bir URL verilebilir:
+Server'a açık bir URL ve weight verilebilir:
 
 ```text
 r3v3rs3.http.app.routes.0.servers.0.url=http://10.0.0.5:8080
 r3v3rs3.http.app.routes.0.servers.1.url=http://10.0.0.6:8080
+r3v3rs3.http.app.routes.0.servers.1.weight=3
 r3v3rs3.http.app.load_balancing=round_robin
 ```
 

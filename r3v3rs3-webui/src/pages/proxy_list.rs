@@ -372,6 +372,7 @@ mod tests {
     fn health_summary_lists_the_unhealthy_servers() {
         let server = |addr: &str, healthy: bool, last_error: Option<&str>| UpstreamHealth {
             addr: addr.into(),
+            weight: 1,
             healthy,
             failures: 0,
             last_error: last_error.map(Into::into),

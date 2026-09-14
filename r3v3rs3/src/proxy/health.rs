@@ -9,10 +9,7 @@ use r3v3rs3_api::{
 use rand::Rng;
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex, MutexGuard, PoisonError, Weak,
-    },
+    sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
     time::{Duration, Instant},
 };
 use tokio::{net::TcpStream, task::JoinSet, time::MissedTickBehavior};
@@ -23,15 +20,23 @@ pub type GroupKey = (ShortId, Option<usize>);
 
 static REGISTRY: Lazy<Mutex<HashMap<GroupKey, Weak<UpstreamGroup>>>> = Lazy::new(Default::default);
 
+/// An upstream server of a group: its URL or address, and its weight.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupServer {
+    pub addr: String,
+    pub weight: u16,
+}
+
 /// The upstream servers of a proxy or an HTTP route, with the load balancing policy and the
 /// health of each server.
 #[derive(Debug)]
 pub struct UpstreamGroup {
-    addrs: Vec<String>,
+    members: Vec<GroupServer>,
     policy: LoadBalancing,
     health_check: HealthCheck,
     servers: Vec<Mutex<ServerHealth>>,
-    cursor: AtomicUsize,
+    /// The current weight of each server for the smooth weighted round robin.
+    current_weights: Mutex<Vec<i64>>,
     probe: Mutex<Option<Arc<Probe>>>,
 }
 
@@ -115,6 +120,17 @@ impl Probe {
     }
 }
 
+/// The addresses and the weights of the servers of a TCP or UDP proxy.
+pub fn members(servers: &[UpstreamServer]) -> Vec<GroupServer> {
+    servers
+        .iter()
+        .map(|server| GroupServer {
+            addr: server.addr.to_string(),
+            weight: server.weight,
+        })
+        .collect()
+}
+
 fn target<T>(targets: &[Option<T>], index: usize) -> Result<&T, String> {
     targets
         .get(index)
@@ -122,12 +138,12 @@ fn target<T>(targets: &[Option<T>], index: usize) -> Result<&T, String> {
         .ok_or_else(|| "the server address has no host or port".to_string())
 }
 
-/// Returns the group for `key`. The existing group is reused while its servers and settings are
-/// unchanged, so a configuration reload keeps the health of the servers. A new group with an
-/// active health check starts its check task.
+/// Returns the group for `key`. The existing group is reused while its servers, their weights and
+/// the settings are unchanged, so a configuration reload keeps the health of the servers. A new
+/// group with an active health check starts its check task.
 pub fn group(
     key: GroupKey,
-    addrs: Vec<String>,
+    members: Vec<GroupServer>,
     policy: LoadBalancing,
     health_check: HealthCheck,
     probe: Probe,
@@ -135,7 +151,7 @@ pub fn group(
     let mut registry = REGISTRY.lock().unwrap_or_else(PoisonError::into_inner);
     registry.retain(|_, group| group.strong_count() > 0);
     if let Some(existing) = registry.get(&key).and_then(Weak::upgrade) {
-        if existing.addrs == addrs
+        if existing.members == members
             && existing.policy == policy
             && existing.health_check == health_check
         {
@@ -143,7 +159,7 @@ pub fn group(
             return existing;
         }
     }
-    let group = Arc::new(UpstreamGroup::new(addrs, policy, health_check));
+    let group = Arc::new(UpstreamGroup::new(members, policy, health_check));
     group.set_probe(probe);
     registry.insert(key, Arc::downgrade(&group));
     spawn_checker(&group);
@@ -192,14 +208,15 @@ fn spawn_checker(group: &Arc<UpstreamGroup>) {
 }
 
 impl UpstreamGroup {
-    fn new(addrs: Vec<String>, policy: LoadBalancing, health_check: HealthCheck) -> Self {
-        let servers = addrs.iter().map(|_| Mutex::default()).collect();
+    fn new(members: Vec<GroupServer>, policy: LoadBalancing, health_check: HealthCheck) -> Self {
+        let servers = members.iter().map(|_| Mutex::default()).collect();
+        let current_weights = Mutex::new(vec![0; members.len()]);
         Self {
-            addrs,
+            members,
             policy,
             health_check,
             servers,
-            cursor: AtomicUsize::new(0),
+            current_weights,
             probe: Mutex::new(None),
         }
     }
@@ -209,24 +226,75 @@ impl UpstreamGroup {
     }
 
     /// Returns the server indexes in the order to try: the healthy servers in the order of the
-    /// policy, then the unhealthy servers. When every server is unhealthy, the request still goes
-    /// to a server.
+    /// policy, then the unhealthy servers. When every server is unhealthy, the unhealthy servers
+    /// use the order of the policy, so the request still goes to a server. A server with weight 0
+    /// is never a candidate.
     pub fn candidates(&self) -> Vec<usize> {
-        let len = self.servers.len();
-        if len == 0 {
-            return Vec::new();
-        }
-        let start = match self.policy {
-            LoadBalancing::RoundRobin => self.cursor.fetch_add(1, Ordering::Relaxed) % len,
-            LoadBalancing::Random => rand::thread_rng().gen_range(0..len),
-            LoadBalancing::First => 0,
-        };
         let now = Instant::now();
-        let (mut ordered, unhealthy): (Vec<_>, Vec<_>) = (start..len)
-            .chain(0..start)
+        let (healthy, unhealthy): (Vec<_>, Vec<_>) = (0..self.members.len())
+            .filter(|&index| self.weight(index) > 0)
             .partition(|&index| self.health(index).is_some_and(|h| h.is_healthy(now)));
+        if healthy.is_empty() {
+            return self.order(unhealthy);
+        }
+        let mut ordered = self.order(healthy);
         ordered.extend(unhealthy);
         ordered
+    }
+
+    fn order(&self, servers: Vec<usize>) -> Vec<usize> {
+        match self.policy {
+            LoadBalancing::RoundRobin => self.order_round_robin(servers),
+            LoadBalancing::Random => self.order_random(servers),
+            LoadBalancing::First => servers,
+        }
+    }
+
+    /// The smooth weighted round robin of nginx: each server gains its weight, and the server
+    /// with the highest current weight goes first and loses the total weight. The other servers
+    /// follow it in list order.
+    fn order_round_robin(&self, mut servers: Vec<usize>) -> Vec<usize> {
+        let mut current = self
+            .current_weights
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let total = servers
+            .iter()
+            .map(|&index| i64::from(self.weight(index)))
+            .sum::<i64>();
+        let mut best: Option<(usize, i64)> = None;
+        for (position, &index) in servers.iter().enumerate() {
+            let Some(value) = current.get_mut(index) else {
+                continue;
+            };
+            *value += i64::from(self.weight(index));
+            if best.is_none_or(|(_, top)| *value > top) {
+                best = Some((position, *value));
+            }
+        }
+        let Some((position, _)) = best else {
+            return servers;
+        };
+        if let Some(value) = servers.get(position).and_then(|&i| current.get_mut(i)) {
+            *value -= total;
+        }
+        servers.rotate_left(position);
+        servers
+    }
+
+    /// The weighted random order of Efraimidis and Spirakis: each server gets the key
+    /// `u^(1/weight)` for a random `u` in `[0, 1)`, and a higher key goes first.
+    fn order_random(&self, servers: Vec<usize>) -> Vec<usize> {
+        let mut rng = rand::thread_rng();
+        let mut keyed = servers
+            .into_iter()
+            .map(|index| {
+                let key = rng.gen::<f64>().powf(1.0 / f64::from(self.weight(index)));
+                (key, index)
+            })
+            .collect::<Vec<_>>();
+        keyed.sort_by(|a, b| b.0.total_cmp(&a.0));
+        keyed.into_iter().map(|(_, index)| index).collect()
     }
 
     /// Records a successful connection or request. A failed active check stays until the next
@@ -322,13 +390,14 @@ impl UpstreamGroup {
     }
 
     fn upstream_health(&self, now: Instant) -> Vec<UpstreamHealth> {
-        self.addrs
+        self.members
             .iter()
             .enumerate()
-            .filter_map(|(index, addr)| {
+            .filter_map(|(index, member)| {
                 let health = self.health(index)?;
                 Some(UpstreamHealth {
-                    addr: addr.clone(),
+                    addr: member.addr.clone(),
+                    weight: member.weight,
                     healthy: health.is_healthy(now),
                     failures: health.failures,
                     last_error: health.last_error.clone(),
@@ -338,7 +407,13 @@ impl UpstreamGroup {
     }
 
     fn addr(&self, index: usize) -> &str {
-        self.addrs.get(index).map_or("", String::as_str)
+        self.members
+            .get(index)
+            .map_or("", |member| member.addr.as_str())
+    }
+
+    fn weight(&self, index: usize) -> u16 {
+        self.members.get(index).map_or(0, |member| member.weight)
     }
 
     fn health(&self, index: usize) -> Option<MutexGuard<'_, ServerHealth>> {
@@ -353,9 +428,20 @@ mod tests {
     use super::*;
     use tokio::net::TcpListener;
 
+    /// Servers named a, b, c and so on with the weights.
+    fn members(weights: &[u16]) -> Vec<GroupServer> {
+        weights
+            .iter()
+            .zip('a'..)
+            .map(|(&weight, name)| GroupServer {
+                addr: name.to_string(),
+                weight,
+            })
+            .collect()
+    }
+
     fn test_group(policy: LoadBalancing, health_check: HealthCheck) -> UpstreamGroup {
-        let addrs = ["a", "b", "c"].map(String::from).to_vec();
-        UpstreamGroup::new(addrs, policy, health_check)
+        UpstreamGroup::new(members(&[1, 1, 1]), policy, health_check)
     }
 
     fn no_passive_check() -> HealthCheck {
@@ -382,6 +468,46 @@ mod tests {
             candidates.sort_unstable();
             assert_eq!(candidates, [0, 1, 2]);
         }
+    }
+
+    #[test]
+    fn weighted_round_robin_is_smooth() {
+        let group = UpstreamGroup::new(
+            members(&[5, 1, 1]),
+            LoadBalancing::RoundRobin,
+            HealthCheck::default(),
+        );
+        let first = (0..14).map(|_| group.candidates()[0]).collect::<Vec<_>>();
+        assert_eq!(first, [0, 0, 1, 0, 2, 0, 0, 0, 0, 1, 0, 2, 0, 0]);
+    }
+
+    #[test]
+    fn weight_zero_is_never_selected() {
+        for policy in LoadBalancing::ALL {
+            let group = UpstreamGroup::new(members(&[0, 1, 2]), policy, no_passive_check());
+            for _ in 0..20 {
+                let candidates = group.candidates();
+                assert_eq!(candidates.len(), 2, "{policy:?}");
+                assert!(!candidates.contains(&0), "{policy:?}");
+            }
+        }
+
+        // A drained server stays unused also when every other server is unhealthy.
+        let group = UpstreamGroup::new(
+            members(&[0, 1]),
+            LoadBalancing::First,
+            HealthCheck::default(),
+        );
+        group.report_failure(1, "refused");
+        assert_eq!(group.candidates(), [1]);
+    }
+
+    #[test]
+    fn weighted_random_follows_weights() {
+        let group = UpstreamGroup::new(members(&[9, 1]), LoadBalancing::Random, no_passive_check());
+        let first = (0..2000).filter(|_| group.candidates()[0] == 0).count();
+        // The expected count is 1800, with a standard deviation of about 13.
+        assert!((1700..=1900).contains(&first), "{first}");
     }
 
     #[test]
@@ -431,18 +557,17 @@ mod tests {
     #[test]
     fn registry_reuses_a_group_with_the_same_servers_and_settings() {
         let key = ("group".parse().unwrap(), Some(0));
-        let addrs = || vec!["a".to_string(), "b".to_string()];
         let probe = || Probe::Connect(Vec::new());
         let first = group(
             key,
-            addrs(),
+            members(&[1, 1]),
             LoadBalancing::First,
             Default::default(),
             probe(),
         );
         let same = group(
             key,
-            addrs(),
+            members(&[1, 1]),
             LoadBalancing::First,
             Default::default(),
             probe(),
@@ -451,12 +576,21 @@ mod tests {
 
         let changed = group(
             key,
-            addrs(),
+            members(&[1, 1]),
             LoadBalancing::Random,
             Default::default(),
             probe(),
         );
         assert!(!Arc::ptr_eq(&first, &changed));
+
+        let reweighted = group(
+            key,
+            members(&[1, 3]),
+            LoadBalancing::Random,
+            Default::default(),
+            probe(),
+        );
+        assert!(!Arc::ptr_eq(&changed, &reweighted));
     }
 
     #[test]
@@ -466,14 +600,14 @@ mod tests {
         let policy = LoadBalancing::First;
         let second = group(
             (id, Some(1)),
-            vec!["b".into()],
+            members(&[1, 2])[1..].to_vec(),
             policy,
             no_passive_check(),
             probe(),
         );
         let first = group(
             (id, Some(0)),
-            vec!["a".into()],
+            members(&[1]),
             policy,
             no_passive_check(),
             probe(),
@@ -483,6 +617,7 @@ mod tests {
         let health = snapshot(id);
         let addrs = health.iter().map(|h| h.addr.as_str()).collect::<Vec<_>>();
         assert_eq!(addrs, ["a", "b"]);
+        assert_eq!(health[1].weight, 2);
         assert!(health[0].healthy);
         assert!(!health[1].healthy);
         assert_eq!(health[1].last_error.as_deref(), Some("status 500"));

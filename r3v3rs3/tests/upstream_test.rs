@@ -559,3 +559,79 @@ async fn udp_sessions_use_the_servers_in_turn() -> anyhow::Result<()> {
     })
     .await
 }
+
+#[tokio::test]
+async fn http_weights_split_requests() -> anyhow::Result<()> {
+    let a = start_named_upstream("a").await?;
+    let b = start_named_upstream("b").await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let servers = vec![
+        Server {
+            weight: 3,
+            ..Server::new(a.as_str().parse()?)
+        },
+        Server::new(b.as_str().parse()?),
+    ];
+    let proxy = http(HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![Route {
+            servers,
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    let config = storage(vec![("httpwt", proxy_port.multiaddr_http(), proxy)]);
+
+    with_server(config, |_| async move {
+        let names = count_names(8, || get_body(proxy_port.http_url("/"))).await?;
+        assert_eq!(names, counts(&[("a", 6), ("b", 2)]));
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn tcp_and_udp_servers_with_weight_zero_get_no_traffic() -> anyhow::Result<()> {
+    let tcp_a = start_named_tcp_upstream("a").await?;
+    let tcp_b = start_named_tcp_upstream("b").await?;
+    let udp_a = start_named_udp_upstream("a").await?;
+    let udp_b = start_named_udp_upstream("b").await?;
+    let tcp_port = alloc_tcp_port().await?;
+    let udp_port = alloc_udp_port().await?;
+    let mut drained_tcp = tcp_servers(&[&tcp_a, &tcp_b]);
+    drained_tcp[0].weight = 0;
+    let tcp = TcpProxy {
+        upstream_servers: drained_tcp,
+        ..Default::default()
+    };
+    let udp = UdpProxy {
+        upstream_servers: vec![
+            UpstreamServer {
+                weight: 0,
+                ..UpstreamServer::new(udp_a.multiaddr_udp())
+            },
+            UpstreamServer::new(udp_b.multiaddr_udp()),
+        ],
+        ..Default::default()
+    };
+    let config = storage(vec![
+        ("tcpdrn", tcp_port.multiaddr_tcp(), ProxyKind::Tcp(tcp)),
+        ("udpdrn", udp_port.multiaddr_udp(), ProxyKind::Udp(udp)),
+    ]);
+
+    with_server(config, |_| async move {
+        let names = count_names(4, || read_name(tcp_port.socket_addr())).await?;
+        assert_eq!(names, counts(&[("b", 4)]));
+
+        let proxy = udp_port.socket_addr();
+        for _ in 0..3 {
+            let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
+            client.send_to(b"ping", proxy).await?;
+            let mut buf = [0; 64];
+            let (size, _) = timeout(Duration::from_secs(5), client.recv_from(&mut buf)).await??;
+            assert_eq!(&buf[..size], b"b");
+        }
+        Ok(())
+    })
+    .await
+}

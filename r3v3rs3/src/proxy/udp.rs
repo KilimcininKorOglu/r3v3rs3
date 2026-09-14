@@ -196,14 +196,9 @@ impl UdpUpstream {
             if upstream.group.is_some() || servers.is_empty() {
                 continue;
             }
-            let addrs = proxy
-                .upstream_servers
-                .iter()
-                .map(|server| server.addr.to_string())
-                .collect();
             let group = health::group(
                 (entry.id, None),
-                addrs,
+                health::members(&proxy.upstream_servers),
                 proxy.load_balancing,
                 proxy.health_check.clone(),
                 Probe::Resolve(Probe::targets(&proxy.upstream_servers)),
@@ -221,9 +216,18 @@ impl UdpUpstream {
 
     fn same_settings(&self, other: &Self) -> bool {
         same_servers(&self.servers, &other.servers)
+            && same_group(&self.group, &other.group)
             && self.idle_timeout == other.idle_timeout
             && self.load_balancing == other.load_balancing
             && self.health_check == other.health_check
+    }
+}
+
+/// True when both upstreams use the same group. A change of a server weight builds a new group.
+fn same_group(a: &Option<Arc<UpstreamGroup>>, b: &Option<Arc<UpstreamGroup>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (a, b) => a.is_none() && b.is_none(),
     }
 }
 

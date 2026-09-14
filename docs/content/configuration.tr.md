@@ -128,6 +128,8 @@ Birden fazla upstream sunucusu olan proxy veya HTTP route, trafiği `load_balanc
 - `random` rastgele bir sunucu seçer.
 - `first` ilk sağlıklı sunucuyu kullanır. Diğer sunucular yedektir.
 
+Her sunucunun `0` ile `65535` arasında bir `weight` değeri vardır (varsayılan `1`). `round_robin` her sunucuyu weight değeri kadar kullanır. nginx'in smooth weighted round robin yöntemindeki gibi, bir sunucunun sıraları döngüye yayılır. Örneğin `3` ve `1` weight değerlerinde her dört request'in üçü ilk sunucuya gider. `random` sunucuyu weight değeriyle orantılı bir olasılıkla seçer. `first` weight değerini dikkate almaz. `weight = 0` olan sunucu, diğer bütün sunucular sağlıksız olsa da yeni trafik almaz. Bu yüzden bir sunucuyu silmeden servis dışına alabilirsiniz. Sunucunun açık TCP bağlantıları ve UDP session'ları devam eder. Her proxy'nin veya HTTP route'unun en az bir sunucusunun weight değeri `0`'dan büyük olmalıdır.
+
 HTTP proxy her request için, TCP proxy her bağlantı için, UDP proxy her client session'ı için bir sunucu seçer. Her HTTP route'unun sunucuları ayrı bir gruptur.
 
 Seçilen sunucuya bağlantı kurulamazsa veya connect timeout dolarsa r3v3rs3 bir kez sıradaki sunucuyu dener. HTTP request'i yalnız body'si yoksa ve upgrade request'i değilse sıradaki sunucuya gider, çünkü r3v3rs3 diğer request'leri yeniden gönderemez. Request timeout gibi diğer HTTP hatalarında tekrar deneme yapılmaz.
@@ -142,9 +144,9 @@ Aktif health check, `health_check.interval` değeri `0s`'den büyükse çalış�
 
 `health_check.timeout` (varsayılan `5s`) her kontrolü sınırlar. Kontrolü geçemeyen sunucu, bir kontrol başarılı olana kadar sağlıksız kalır. Bu kural `max_fails = 0` olduğunda da geçerlidir. Başarılı bir request bu durumu bitirmez.
 
-Sunucular, policy ve health check ayarları değişmediği sürece config reload sonrasında sunucuların sağlık durumu korunur.
+Sunucular, weight değerleri, policy ve health check ayarları değişmediği sürece config reload sonrasında sunucuların sağlık durumu korunur.
 
-Status API'si (`GET /api/proxies/{id}/status`), her upstream sunucusunun sağlık durumunu `upstreams` alanında listeler: adres, `healthy`, art arda hata sayısı `failures` ve `last_error`. WebUI'daki proxy listesi sağlıklı sunucu sayısını gösterir ve status'leri 10 saniyede bir yeniler. Sayının title'ı sağlıksız sunucuları son hatalarıyla listeler.
+Status API'si (`GET /api/proxies/{id}/status`), her upstream sunucusunun sağlık durumunu `upstreams` alanında listeler: adres, `weight`, `healthy`, art arda hata sayısı `failures` ve `last_error`. WebUI'daki proxy listesi sağlıklı sunucu sayısını gösterir ve status'leri 10 saniyede bir yeniler. Sayının title'ı sağlıksız sunucuları son hatalarıyla listeler.
 
 ```toml
 [my-app]
@@ -153,7 +155,7 @@ vhosts = ["app.example.com"]
 load_balancing = "round_robin"
 health_check = { max_fails = 3, fail_timeout = "10s", interval = "10s", timeout = "2s", path = "/health" }
 routes = [
-  { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
+  { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/", weight = 3 }] },
 ]
 
 [my-database]
