@@ -19,7 +19,7 @@ use std::{
     str::FromStr,
 };
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
-use web_sys::{HtmlInputElement, HtmlSelectElement};
+use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
 /// A credential field of a DNS provider.
@@ -34,6 +34,8 @@ pub struct ProviderField {
 pub enum FieldKind {
     Text,
     Secret,
+    /// A text area for a value with several lines.
+    Multiline,
     /// A select element with these values. Each value is its own label.
     Select(&'static [&'static str]),
 }
@@ -73,7 +75,7 @@ const OVH_ENDPOINTS: [&str; 7] = [
     "soyoustart-ca",
 ];
 
-pub static DNS_PROVIDERS: [DnsProviderInfo; 11] = [
+pub static DNS_PROVIDERS: [DnsProviderInfo; 12] = [
     DnsProviderInfo {
         name: "cloudflare",
         label: "Cloudflare",
@@ -111,6 +113,18 @@ pub static DNS_PROVIDERS: [DnsProviderInfo; 11] = [
         name: "gandi",
         label: "Gandi",
         fields: &API_TOKEN,
+    },
+    DnsProviderInfo {
+        name: "google_cloud",
+        label: "Google Cloud DNS",
+        fields: &[
+            ProviderField {
+                key: "service_account_key",
+                label: "acme.service_account_key",
+                kind: FieldKind::Multiline,
+            },
+            text("project_id", "acme.project_id_optional"),
+        ],
     },
     DnsProviderInfo {
         name: "hetzner",
@@ -242,9 +256,12 @@ fn on_change(
     let fields = fields.clone();
     Callback::from(move |event: Event| {
         let target = event.target().unwrap_throw();
-        let value = match target.dyn_ref::<HtmlInputElement>() {
-            Some(input) => input.value(),
-            None => target.unchecked_into::<HtmlSelectElement>().value(),
+        let value = if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
+            input.value()
+        } else if let Some(area) = target.dyn_ref::<HtmlTextAreaElement>() {
+            area.value()
+        } else {
+            target.unchecked_into::<HtmlSelectElement>().value()
         };
         fields.dispatch(FieldChange { key, set, value });
     })
@@ -382,6 +399,9 @@ fn credential_view(
         },
         FieldKind::Secret => html! {
             <input type="password" autocomplete="off" {value} {onchange} class={INPUT_CLASS} />
+        },
+        FieldKind::Multiline => html! {
+            <textarea rows="4" autocapitalize="off" spellcheck="false" {value} {onchange} class={classes!(INPUT_CLASS, "font-mono")} />
         },
     };
     html! {

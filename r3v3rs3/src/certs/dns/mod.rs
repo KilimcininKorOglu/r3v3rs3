@@ -6,6 +6,7 @@ mod cloudflare;
 mod desec;
 mod digitalocean;
 mod gandi;
+mod google;
 mod hetzner;
 mod linode;
 mod ovh;
@@ -155,6 +156,16 @@ fn cloud_client(http: HttpClient, provider: &CloudProvider) -> anyhow::Result<Bo
                 client_secret: client_secret.clone(),
                 subscription_id: subscription_id.clone(),
             },
+        ))),
+        CloudProvider::GoogleCloud {
+            service_account_key,
+            project_id,
+            api_url,
+            auth_url,
+        } => Box::new(rrset::MergedRrset(google::GoogleCloud::new(
+            api::ApiClient::new(http.clone(), api_url.as_deref(), google::API_URL)?,
+            api::ApiClient::new(http, auth_url.as_deref(), google::AUTH_URL)?,
+            google::ServiceAccount::parse(service_account_key, project_id)?,
         ))),
     };
     Ok(client)

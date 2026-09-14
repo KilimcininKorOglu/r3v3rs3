@@ -12,6 +12,10 @@ lto = true
 [profile.dev.package.argon2]
 opt-level = 3
 
+# RSA key generation in the tests is slow without optimization.
+[profile.dev.package.num-bigint-dig]
+opt-level = 3
+
 [profile.web-release]
 inherits = "release"
 opt-level = 'z'

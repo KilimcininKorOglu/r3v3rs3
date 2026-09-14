@@ -2,9 +2,15 @@ use axum::{
     http::{HeaderMap, Method, StatusCode, Uri},
     Router,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use r3v3rs3::certs::dns::{self, DnsClient, TxtName};
 use r3v3rs3_api::acme::{
     CloudProvider, DnsProvider, KeyedProvider, OvhEndpoint, TokenApi, TokenProvider,
+};
+use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
+use rsa::{
+    pkcs1::EncodeRsaPublicKey,
+    pkcs8::{EncodePrivateKey, LineEnding},
 };
 use serde_json::json;
 use sha1::{Digest, Sha1};
@@ -556,6 +562,166 @@ async fn azure_reuses_its_token_follows_the_next_link_and_keeps_other_values() -
     assert!(calls[1..]
         .iter()
         .all(|call| call.authorization == "Bearer az-access"));
+    Ok(())
+}
+
+const GOOGLE_RRSET: &str =
+    "/projects/key-project/managedZones/example-zone/rrsets/_acme-challenge.app.example.test./TXT";
+
+/// Answers the token and the managed zone requests of a mock Google Cloud DNS API.
+fn google_zones(call: &Call) -> Option<(StatusCode, String)> {
+    match (call.method.as_str(), call.uri.as_str()) {
+        ("POST", "/token") => Some(ok(
+            r#"{"access_token":"gc-access","expires_in":3599,"token_type":"Bearer"}"#,
+        )),
+        // A private zone with the same DNS name comes first and is skipped.
+        ("GET", "/projects/key-project/managedZones?dnsName=example.test.") => Some(ok(concat!(
+            r#"{"managedZones":[{"name":"private-zone","dnsName":"example.test.","visibility":"private"},"#,
+            r#"{"name":"example-zone","dnsName":"example.test.","visibility":"public"}]}"#
+        ))),
+        ("GET", uri) if uri.contains("/managedZones?") => Some(ok(r#"{"managedZones":[]}"#)),
+        _ => None,
+    }
+}
+
+/// A mock Google Cloud DNS API whose TXT record set holds `rrdatas`, or does not exist.
+fn google_with(call: &Call, rrdatas: Option<&str>) -> (StatusCode, String) {
+    google_zones(call).unwrap_or_else(|| match (call.method.as_str(), rrdatas) {
+        ("GET", Some(rrdatas)) => ok(&format!(
+            r#"{{"name":"_acme-challenge.app.example.test.","type":"TXT","ttl":60,"rrdatas":{rrdatas}}}"#
+        )),
+        ("GET", None) => (
+            StatusCode::NOT_FOUND,
+            r#"{"error":{"code":404,"message":"Not found"}}"#.to_string(),
+        ),
+        _ => ok("{}"),
+    })
+}
+
+fn google_missing(call: &Call) -> (StatusCode, String) {
+    google_with(call, None)
+}
+
+fn google_with_other(call: &Call) -> (StatusCode, String) {
+    google_with(call, Some(r#"["\"other\"","\"v1\"","\"v2\""]"#))
+}
+
+fn google_challenge_only(call: &Call) -> (StatusCode, String) {
+    google_with(call, Some(r#"["\"v1\"","\"v2\""]"#))
+}
+
+/// Checks the form and the signed JWT of a Google token request with the public key of `key`.
+fn verify_google_assertion(
+    call: &Call,
+    key: &rsa::RsaPrivateKey,
+    audience: &str,
+) -> anyhow::Result<()> {
+    let form: HashMap<String, String> = url::form_urlencoded::parse(call.body.as_bytes())
+        .into_owned()
+        .collect();
+    assert_eq!(
+        form["grant_type"],
+        "urn:ietf:params:oauth:grant-type:jwt-bearer"
+    );
+    let (message, signature) = form["assertion"]
+        .rsplit_once('.')
+        .ok_or_else(|| anyhow::anyhow!("the assertion has no signature"))?;
+    let (header, claims) = message
+        .split_once('.')
+        .ok_or_else(|| anyhow::anyhow!("the assertion has no claims"))?;
+    let decode = |part: &str| -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::from_slice(&URL_SAFE_NO_PAD.decode(part)?)?)
+    };
+    assert_eq!(decode(header)?, json!({ "alg": "RS256", "typ": "JWT" }));
+    let claims = decode(claims)?;
+    assert_eq!(claims["iss"], "dns@key-project.iam.gserviceaccount.com");
+    assert_eq!(
+        claims["scope"],
+        "https://www.googleapis.com/auth/ndev.clouddns.readwrite"
+    );
+    assert_eq!(claims["aud"], audience);
+    let issued = claims["iat"].as_i64().unwrap_or_default();
+    assert_eq!(claims["exp"].as_i64(), Some(issued + 3600));
+    let public_key = key.to_public_key().to_pkcs1_der()?;
+    UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, public_key.as_bytes())
+        .verify(message.as_bytes(), &URL_SAFE_NO_PAD.decode(signature)?)
+        .map_err(|_| anyhow::anyhow!("the assertion signature is invalid"))
+}
+
+#[tokio::test]
+async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_other_values(
+) -> anyhow::Result<()> {
+    // The test creates its own key, so no key file is stored in the repository.
+    let key = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048)?;
+    let key_file = json!({
+        "type": "service_account",
+        "project_id": "key-project",
+        "client_email": "dns@key-project.iam.gserviceaccount.com",
+        "private_key": key.to_pkcs8_pem(LineEnding::LF)?.as_str(),
+    })
+    .to_string();
+    let provider = |project_id: &str, url: String| {
+        DnsProvider::Cloud(CloudProvider::GoogleCloud {
+            service_account_key: key_file.clone(),
+            project_id: project_id.to_string(),
+            api_url: Some(url.clone()),
+            auth_url: Some(url),
+        })
+    };
+
+    let (base, calls) = start_mock(google_missing).await?;
+    let client = dns::client(&provider("", base.clone())).await?;
+    let record = client.add_txt(&challenge_name()).await?;
+    assert_eq!(
+        requests(&calls),
+        vec![
+            "POST /token".to_string(),
+            "GET /projects/key-project/managedZones?dnsName=app.example.test.".to_string(),
+            "GET /projects/key-project/managedZones?dnsName=example.test.".to_string(),
+            format!("GET {GOOGLE_RRSET}"),
+            "POST /projects/key-project/managedZones/example-zone/rrsets".to_string(),
+        ]
+    );
+    let rrset = |rrdatas: serde_json::Value| json!({ "name": "_acme-challenge.app.example.test.", "type": "TXT", "ttl": 60, "rrdatas": rrdatas });
+    assert_eq!(body(&calls, 4)?, rrset(json!(["\"v1\"", "\"v2\""])));
+    {
+        let calls = calls.lock().unwrap();
+        verify_google_assertion(&calls[0], &key, &format!("{base}/token"))?;
+        assert!(calls[1..]
+            .iter()
+            .all(|call| call.authorization == "Bearer gc-access"));
+    }
+
+    let (client, calls) = mock_client(google_with_other, |url| provider("", url)).await?;
+    client.remove_txt(&record).await?;
+    assert_eq!(
+        requests(&calls),
+        vec![
+            "POST /token".to_string(),
+            format!("GET {GOOGLE_RRSET}"),
+            format!("PATCH {GOOGLE_RRSET}"),
+        ]
+    );
+    assert_eq!(body(&calls, 2)?, rrset(json!(["\"other\""])));
+
+    let (client, calls) = mock_client(google_challenge_only, |url| provider("", url)).await?;
+    client.remove_txt(&record).await?;
+    assert_eq!(
+        requests(&calls),
+        vec![
+            "POST /token".to_string(),
+            format!("GET {GOOGLE_RRSET}"),
+            format!("DELETE {GOOGLE_RRSET}"),
+        ]
+    );
+
+    // A project ID replaces the project of the key.
+    let (client, calls) = mock_client(google_missing, |url| provider("dns-project", url)).await?;
+    assert!(client.add_txt(&challenge_name()).await.is_err());
+    assert_eq!(
+        requests(&calls).get(1).map(String::as_str),
+        Some("GET /projects/dns-project/managedZones?dnsName=app.example.test.")
+    );
     Ok(())
 }
 

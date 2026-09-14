@@ -58,7 +58,13 @@ impl RrsetApi for Desec {
         self.api.optional(request, "/records").await
     }
 
-    async fn put(&self, zone: &str, name: &str, values: &[String]) -> anyhow::Result<()> {
+    async fn put(
+        &self,
+        zone: &str,
+        name: &str,
+        values: &[String],
+        _exists: bool,
+    ) -> anyhow::Result<()> {
         let body = json!({ "subname": name, "type": "TXT", "ttl": TTL, "records": values });
         let request = self
             .request(Method::PUT, Self::rrset_path(zone, name))

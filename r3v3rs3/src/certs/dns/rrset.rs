@@ -18,8 +18,15 @@ pub trait RrsetApi: Send + Sync {
     /// The TXT values of `name`, relative to the zone. A missing record set has no values.
     async fn values(&self, zone: &str, name: &str) -> anyhow::Result<Vec<Self::Value>>;
 
-    /// Replaces the TXT values of `name` with `values`.
-    async fn put(&self, zone: &str, name: &str, values: &[Self::Value]) -> anyhow::Result<()>;
+    /// Replaces the TXT values of `name` with `values`. `exists` tells whether the record set
+    /// exists, for APIs that create a record set with another request than they change it.
+    async fn put(
+        &self,
+        zone: &str,
+        name: &str,
+        values: &[Self::Value],
+        exists: bool,
+    ) -> anyhow::Result<()>;
 
     async fn delete(&self, zone: &str, name: &str) -> anyhow::Result<()>;
 }
@@ -39,12 +46,14 @@ impl<T: RrsetApi> DnsClient for MergedRrset<T> {
         let (zone_name, zone) = self.0.zone(&name.fqdn).await?;
         let relative = relative_name(&name.fqdn, &zone_name).to_string();
         let mut values = self.0.values(&zone, &relative).await?;
+        // A record set always holds a value, so a record set without values does not exist.
+        let exists = !values.is_empty();
         for value in name.values.iter().map(|value| T::value(value)) {
             if !values.contains(&value) {
                 values.push(value);
             }
         }
-        self.0.put(&zone, &relative, &values).await?;
+        self.0.put(&zone, &relative, &values, exists).await?;
         let mut record = TxtRecord::new(name, zone);
         record.ids = vec![relative];
         Ok(record)
@@ -67,6 +76,6 @@ impl<T: RrsetApi> DnsClient for MergedRrset<T> {
         if rest.is_empty() {
             return self.0.delete(&record.zone, name).await;
         }
-        self.0.put(&record.zone, name, &rest).await
+        self.0.put(&record.zone, name, &rest, true).await
     }
 }

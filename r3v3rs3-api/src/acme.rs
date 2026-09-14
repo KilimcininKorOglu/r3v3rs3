@@ -220,12 +220,24 @@ pub enum CloudProvider {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         auth_url: Option<String>,
     },
+    GoogleCloud {
+        /// The JSON key file of the service account.
+        service_account_key: String,
+        /// The project of the managed zones. An empty value selects the project of the key.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        project_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auth_url: Option<String>,
+    },
 }
 
 impl CloudProvider {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Azure { .. } => "azure",
+            Self::GoogleCloud { .. } => "google_cloud",
         }
     }
 
@@ -238,6 +250,10 @@ impl CloudProvider {
                 subscription_id,
                 ..
             } => filled(&[tenant_id, client_id, client_secret, subscription_id]),
+            Self::GoogleCloud {
+                service_account_key,
+                ..
+            } => filled(&[service_account_key]),
         }
     }
 }
@@ -477,6 +493,8 @@ mod test {
                 "subscription_id": "u",
                 "auth_url": "http://a",
             }),
+            serde_json::json!({ "provider": "google_cloud", "service_account_key": "{}" }),
+            serde_json::json!({ "provider": "google_cloud", "service_account_key": "{}", "project_id": "p" }),
         ];
         for value in providers {
             let provider: DnsProvider = serde_json::from_value(value.clone()).unwrap();

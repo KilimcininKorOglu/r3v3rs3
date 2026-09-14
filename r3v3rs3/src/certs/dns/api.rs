@@ -10,7 +10,10 @@ use hyper::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use std::time::Duration;
+use std::{
+    future::Future,
+    time::{Duration, Instant},
+};
 
 /// An ID as a string. Providers use strings or numbers as IDs.
 pub fn id_text(value: &Value) -> Option<String> {
@@ -46,6 +49,40 @@ fn parse_json(body: &[u8]) -> anyhow::Result<Value> {
         return Ok(Value::Null);
     }
     Ok(serde_json::from_slice(body)?)
+}
+
+/// Seconds before the expiry of an access token when a new token is requested.
+const TOKEN_MARGIN: u64 = 60;
+
+/// An OAuth access token that is reused until shortly before it expires.
+#[derive(Default)]
+pub struct TokenCache(tokio::sync::Mutex<Option<(String, Instant)>>);
+
+impl TokenCache {
+    /// The cached token, or the token of the OAuth token response that `request` returns.
+    /// `request` runs only when no valid token is cached.
+    pub async fn get(
+        &self,
+        request: impl Future<Output = anyhow::Result<Value>>,
+    ) -> anyhow::Result<String> {
+        let mut cached = self.0.lock().await;
+        if let Some((token, expires)) = cached.as_ref() {
+            if Instant::now() < *expires {
+                return Ok(token.clone());
+            }
+        }
+        let response = request.await?;
+        let token = response["access_token"]
+            .as_str()
+            .ok_or_else(|| anyhow!("the token endpoint returned no access token"))?
+            .to_string();
+        let lifetime = response["expires_in"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("the token endpoint returned no token lifetime"))?;
+        let expires = Instant::now() + Duration::from_secs(lifetime.saturating_sub(TOKEN_MARGIN));
+        *cached = Some((token.clone(), expires));
+        Ok(token)
+    }
 }
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);

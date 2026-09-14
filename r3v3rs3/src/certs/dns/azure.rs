@@ -1,5 +1,5 @@
 use super::{
-    api::{ApiClient, ApiRequest},
+    api::{ApiClient, ApiRequest, TokenCache},
     rrset::RrsetApi,
     zone_with_id, TXT_TTL,
 };
@@ -7,14 +7,10 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use hyper::Method;
 use serde_json::{json, Value};
-use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
 
 pub const API_URL: &str = "https://management.azure.com";
 pub const AUTH_URL: &str = "https://login.microsoftonline.com";
 const API_VERSION: &str = "api-version=2018-05-01";
-/// Seconds before the expiry of an access token when a new token is requested.
-const TOKEN_MARGIN: u64 = 60;
 
 /// The credentials of a Microsoft Entra service principal.
 pub struct Credentials {
@@ -30,7 +26,7 @@ pub struct Azure {
     api: ApiClient,
     auth: ApiClient,
     credentials: Credentials,
-    token: Mutex<Option<(String, Instant)>>,
+    token: TokenCache,
 }
 
 impl Azure {
@@ -39,18 +35,12 @@ impl Azure {
             api,
             auth,
             credentials,
-            token: Mutex::new(None),
+            token: TokenCache::default(),
         }
     }
 
-    /// A valid access token. A token is reused until shortly before it expires.
-    async fn token(&self) -> anyhow::Result<String> {
-        let mut cached = self.token.lock().await;
-        if let Some((token, expires)) = cached.as_ref() {
-            if Instant::now() < *expires {
-                return Ok(token.clone());
-            }
-        }
+    /// Requests a new access token with the client credentials grant.
+    async fn token_response(&self) -> anyhow::Result<Value> {
         let tenant: String =
             url::form_urlencoded::byte_serialize(self.credentials.tenant_id.as_bytes()).collect();
         // The scope of Azure Resource Manager is its URL with the `.default` suffix.
@@ -62,21 +52,12 @@ impl Azure {
                 ("client_secret", &self.credentials.client_secret),
                 ("scope", &scope),
             ]);
-        let response = self.auth.json(request).await?;
-        let token = response["access_token"]
-            .as_str()
-            .ok_or_else(|| anyhow!("Azure returned no access token"))?
-            .to_string();
-        let lifetime = response["expires_in"]
-            .as_u64()
-            .ok_or_else(|| anyhow!("Azure returned no token lifetime"))?;
-        let expires = Instant::now() + Duration::from_secs(lifetime.saturating_sub(TOKEN_MARGIN));
-        *cached = Some((token.clone(), expires));
-        Ok(token)
+        self.auth.json(request).await
     }
 
     async fn request(&self, method: Method, path: String) -> anyhow::Result<ApiRequest> {
-        Ok(ApiRequest::new(method, path).bearer(&self.token().await?))
+        let token = self.token.get(self.token_response()).await?;
+        Ok(ApiRequest::new(method, path).bearer(&token))
     }
 
     /// The name and the resource ID of every DNS zone of the subscription.
@@ -144,7 +125,13 @@ impl RrsetApi for Azure {
             .collect()
     }
 
-    async fn put(&self, zone: &str, name: &str, values: &[Vec<String>]) -> anyhow::Result<()> {
+    async fn put(
+        &self,
+        zone: &str,
+        name: &str,
+        values: &[Vec<String>],
+        _exists: bool,
+    ) -> anyhow::Result<()> {
         let records: Vec<Value> = values
             .iter()
             .map(|value| json!({ "value": value }))

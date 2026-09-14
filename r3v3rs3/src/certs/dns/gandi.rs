@@ -69,7 +69,13 @@ impl RrsetApi for Gandi {
         self.api.optional(request, "/rrset_values").await
     }
 
-    async fn put(&self, zone: &str, name: &str, values: &[String]) -> anyhow::Result<()> {
+    async fn put(
+        &self,
+        zone: &str,
+        name: &str,
+        values: &[String],
+        _exists: bool,
+    ) -> anyhow::Result<()> {
         let body = json!({ "rrset_ttl": TTL, "rrset_values": values });
         let request = self
             .request(Method::PUT, Self::record_path(zone, name))
