@@ -116,6 +116,9 @@ pub enum Error {
     #[error("the dns exec program is not in the acme_exec programs of config.toml: {program}")]
     AcmeExecProgramNotAllowed { program: String },
 
+    #[error("the {field} value of the dns provider is invalid")]
+    AcmeDnsProviderInvalid { field: String },
+
     #[error("unauthorized")]
     Unauthorized,
 

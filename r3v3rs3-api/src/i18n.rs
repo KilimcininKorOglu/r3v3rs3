@@ -229,6 +229,7 @@ mod tests {
             Error::AcmeDnsProviderRequired,
             Error::AcmeWebhookUrlInvalid { url: text() },
             Error::AcmeExecProgramNotAllowed { program: text() },
+            Error::AcmeDnsProviderInvalid { field: text() },
             Error::Unauthorized,
             Error::FailedToCreateAccount,
             Error::InvalidLoginCredentials,

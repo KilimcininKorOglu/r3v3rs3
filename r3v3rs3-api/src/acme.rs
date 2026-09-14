@@ -271,6 +271,53 @@ pub enum LocalProvider {
         #[schema(example = "/usr/local/bin/r3v3rs3-dns-hook")]
         program: String,
     },
+    /// A DNS server that accepts RFC 2136 dynamic updates signed with a TSIG key.
+    Rfc2136 {
+        /// The address of the primary server, as `host:port`.
+        #[schema(example = "ns1.example.com:53")]
+        server: String,
+        /// The zone of the names. An empty value asks the server for the SOA record of each name.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        zone: String,
+        key_name: String,
+        #[serde(default)]
+        key_algorithm: TsigKeyAlgorithm,
+        /// The base64 secret of the TSIG key.
+        key_secret: String,
+    },
+}
+
+/// The HMAC algorithm of a TSIG key.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum TsigKeyAlgorithm {
+    #[default]
+    HmacSha256,
+    HmacSha384,
+    HmacSha512,
+}
+
+/// Checks that `server` has a port and that `key_secret` is base64.
+fn validate_rfc2136(server: &str, key_secret: &str) -> Result<(), Error> {
+    use base64::Engine as _;
+
+    let port = server
+        .trim()
+        .rsplit_once(':')
+        .filter(|(host, _)| !host.is_empty())
+        .and_then(|(_, port)| port.parse::<u16>().ok());
+    if !matches!(port, Some(port) if port > 0) {
+        return Err(Error::AcmeDnsProviderInvalid {
+            field: "server".to_string(),
+        });
+    }
+    let secret = base64::engine::general_purpose::STANDARD.decode(key_secret.trim());
+    if !matches!(secret, Ok(key) if !key.is_empty()) {
+        return Err(Error::AcmeDnsProviderInvalid {
+            field: "key_secret".to_string(),
+        });
+    }
+    Ok(())
 }
 
 impl LocalProvider {
@@ -278,6 +325,7 @@ impl LocalProvider {
         match self {
             Self::Webhook { .. } => "webhook",
             Self::Exec { .. } => "exec",
+            Self::Rfc2136 { .. } => "rfc2136",
         }
     }
 
@@ -285,6 +333,12 @@ impl LocalProvider {
         match self {
             Self::Webhook { url, .. } => filled(&[url]),
             Self::Exec { program } => filled(&[program]),
+            Self::Rfc2136 {
+                server,
+                key_name,
+                key_secret,
+                ..
+            } => filled(&[server, key_name, key_secret]),
         }
     }
 }
@@ -325,6 +379,9 @@ impl DnsProvider {
             Self::Local(LocalProvider::Webhook { url, .. }) if !webhook_url_allowed(url) => {
                 Err(Error::AcmeWebhookUrlInvalid { url: url.clone() })
             }
+            Self::Local(LocalProvider::Rfc2136 {
+                server, key_secret, ..
+            }) => validate_rfc2136(server, key_secret),
             _ => Ok(()),
         }
     }
@@ -554,6 +611,8 @@ mod test {
             serde_json::json!({ "provider": "webhook", "url": "https://h" }),
             serde_json::json!({ "provider": "webhook", "url": "https://h", "token": "t" }),
             serde_json::json!({ "provider": "exec", "program": "/usr/local/bin/hook" }),
+            serde_json::json!({ "provider": "rfc2136", "server": "ns:53", "key_name": "k", "key_algorithm": "hmac-sha512", "key_secret": "c2VjcmV0" }),
+            serde_json::json!({ "provider": "rfc2136", "server": "ns:53", "zone": "example.com", "key_name": "k", "key_algorithm": "hmac-sha256", "key_secret": "c2VjcmV0" }),
             serde_json::json!({ "provider": "google_cloud", "service_account_key": "{}", "project_id": "p" }),
         ];
         for value in providers {
@@ -594,6 +653,36 @@ mod test {
             request.validate(),
             Err(Error::AcmeWebhookUrlInvalid { url }) if url == "http://dns-hook.example.com/acme"
         ));
+    }
+
+    #[test]
+    fn rfc2136_needs_a_server_port_and_a_base64_secret() {
+        let provider = |server: &str, key_secret: &str| {
+            DnsProvider::Local(LocalProvider::Rfc2136 {
+                server: server.to_string(),
+                zone: String::new(),
+                key_name: "r3v3rs3".to_string(),
+                key_algorithm: TsigKeyAlgorithm::HmacSha256,
+                key_secret: key_secret.to_string(),
+            })
+        };
+        for server in ["ns1.example.com:53", "[::1]:5353", "192.0.2.1:53"] {
+            assert!(provider(server, "c2VjcmV0").validate().is_ok(), "{server}");
+        }
+        for (server, key_secret, field) in [
+            ("ns1.example.com", "c2VjcmV0", "server"),
+            (":53", "c2VjcmV0", "server"),
+            ("ns1.example.com:0", "c2VjcmV0", "server"),
+            ("ns1.example.com:53", "not base64!", "key_secret"),
+        ] {
+            assert!(
+                matches!(
+                    provider(server, key_secret).validate(),
+                    Err(Error::AcmeDnsProviderInvalid { field: invalid }) if invalid == field
+                ),
+                "{server} {key_secret}"
+            );
+        }
     }
 
     #[test]

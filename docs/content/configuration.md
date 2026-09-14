@@ -765,6 +765,7 @@ A system resolver can return cached answers. If the propagation check fails ofte
 | OVHcloud | API Endpoint, Application Key, Application Secret, Consumer Key | A consumer key with the rights `GET /domain/zone`, `POST /domain/zone/*` and `DELETE /domain/zone/*`. The endpoint is `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` or `soyoustart-ca`. r3v3rs3 refreshes the zone after it creates the records and after it deletes them. |
 | Webhook | Webhook URL, Bearer Token | A service of your own that creates and deletes the TXT records. See "DNS webhook" below. |
 | Exec | Program Path | A program on the r3v3rs3 host that creates and deletes the TXT records. See "DNS exec" below. |
+| RFC 2136 | DNS Server, Zone, TSIG Key Name, TSIG Algorithm, TSIG Secret | A DNS server that accepts dynamic updates, for example BIND, Knot DNS or PowerDNS. See "RFC 2136" below. |
 
 r3v3rs3 is tested against mock servers of these APIs and against the [Pebble](https://github.com/letsencrypt/pebble) test certificate authority. It is not tested against real provider accounts.
 
@@ -813,6 +814,35 @@ timeout = "30s"
 - r3v3rs3 checks the program when you add the ACME entry and before each run.
 - `timeout` is the longest run time of one call. The default is `30s`.
 
+## RFC 2136
+
+The RFC 2136 provider sends dynamic updates to the primary DNS server of the zone. Every message carries a TSIG signature.
+
+- **DNS Server** is the address of the primary server as `host:port`, for example `ns1.example.com:53`. r3v3rs3 sends the messages over TCP.
+- **Zone** is the zone of the names, for example `example.com`. When it is empty, r3v3rs3 asks the server for the SOA record of each TXT name and uses the owner name of that record.
+- **TSIG Key Name**, **TSIG Algorithm** and **TSIG Secret** must match the key on the server. The algorithm is `hmac-sha256`, `hmac-sha384` or `hmac-sha512`. The secret is base64.
+- One update adds all TXT values of a name. After the validation, a second update deletes only these values, so the other TXT values of the name stay.
+- r3v3rs3 verifies the TSIG signature of every response. The clocks of r3v3rs3 and the server can differ by at most 300 seconds.
+
+A BIND example. `tsig-keygen -a hmac-sha256 r3v3rs3` prints the key block with a new secret:
+
+```
+key "r3v3rs3" {
+    algorithm hmac-sha256;
+    secret "<base64 secret>";
+};
+
+zone "example.com" {
+    type primary;
+    file "example.com.zone";
+    update-policy {
+        grant r3v3rs3 name _acme-challenge.example.com. TXT;
+    };
+};
+```
+
+Add a `grant` rule for each challenge name. A certificate for `*.example.com` uses the `_acme-challenge.example.com` name too.
+
 ## Stored data
 
 r3v3rs3 stores ACME entries in `acme.toml` in the configuration directory. The file contains the private key of each ACME account and the DNS provider credentials in plain text. On Unix, r3v3rs3 creates and writes the file with mode `0600`, so only the owner of the process can read it. The admin API and the WebUI never return the credentials. The ACME list shows only the provider name, for example `Let's Encrypt (DNS-01, Cloudflare)`.
@@ -838,7 +868,7 @@ key_pkcs8 = "<account private key>"
 directory = "https://acme-v02.api.letsencrypt.org/directory"
 ```
 
-The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun`, `ovh`, `azure`, `google_cloud`, `webhook` or `exec`. Route 53 uses `access_key_id` and `secret_access_key` instead of `api_token`. Porkbun uses `api_key` and `secret_api_key`. OVHcloud uses `endpoint`, `application_key`, `application_secret` and `consumer_key`. Azure DNS uses `tenant_id`, `client_id`, `client_secret` and `subscription_id`. Google Cloud DNS uses `service_account_key` and an optional `project_id`. The webhook uses `url` and an optional `token`. Exec uses `program`. The Vultr API key goes in `api_token`.
+The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun`, `ovh`, `azure`, `google_cloud`, `webhook`, `exec` or `rfc2136`. Route 53 uses `access_key_id` and `secret_access_key` instead of `api_token`. Porkbun uses `api_key` and `secret_api_key`. OVHcloud uses `endpoint`, `application_key`, `application_secret` and `consumer_key`. Azure DNS uses `tenant_id`, `client_id`, `client_secret` and `subscription_id`. Google Cloud DNS uses `service_account_key` and an optional `project_id`. The webhook uses `url` and an optional `token`. Exec uses `program`. RFC 2136 uses `server`, an optional `zone`, `key_name`, `key_algorithm` and `key_secret`. The Vultr API key goes in `api_token`.
 
 # Settings
 

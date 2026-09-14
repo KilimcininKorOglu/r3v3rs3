@@ -47,6 +47,7 @@ h3 = "0.0.7"
 h3-quinn = "0.0.9"
 hex = "0.4.3"
 hmac = "0.12.1"
+hickory-proto = { version = "0.24.4", features = ["dnssec-ring"] }
 hickory-resolver = { version = "0.24.1", features = [
     "tokio-runtime",
     "system-config",

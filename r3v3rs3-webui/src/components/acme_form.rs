@@ -75,7 +75,9 @@ const OVH_ENDPOINTS: [&str; 7] = [
     "soyoustart-ca",
 ];
 
-pub static DNS_PROVIDERS: [DnsProviderInfo; 14] = [
+const TSIG_ALGORITHMS: [&str; 3] = ["hmac-sha256", "hmac-sha384", "hmac-sha512"];
+
+pub static DNS_PROVIDERS: [DnsProviderInfo; 15] = [
     DnsProviderInfo {
         name: "cloudflare",
         label: "Cloudflare",
@@ -161,6 +163,21 @@ pub static DNS_PROVIDERS: [DnsProviderInfo; 14] = [
         fields: &[
             secret("api_key", "acme.api_key"),
             secret("secret_api_key", "acme.secret_api_key"),
+        ],
+    },
+    DnsProviderInfo {
+        name: "rfc2136",
+        label: "RFC 2136",
+        fields: &[
+            text("server", "acme.dns_server"),
+            text("zone", "acme.zone_optional"),
+            text("key_name", "acme.tsig_key_name"),
+            ProviderField {
+                key: "key_algorithm",
+                label: "acme.tsig_algorithm",
+                kind: FieldKind::Select(&TSIG_ALGORITHMS),
+            },
+            secret("key_secret", "acme.tsig_secret"),
         ],
     },
     DnsProviderInfo {
@@ -468,7 +485,9 @@ pub fn build_request(
     };
     if let Err(err) = acme.validate() {
         let key = match err {
-            Error::AcmeDnsProviderRequired | Error::AcmeWebhookUrlInvalid { .. } => "dns_provider",
+            Error::AcmeDnsProviderRequired
+            | Error::AcmeWebhookUrlInvalid { .. }
+            | Error::AcmeDnsProviderInvalid { .. } => "dns_provider",
             _ => "domain_names",
         };
         errors
@@ -628,6 +647,8 @@ mod tests {
             for field in info.fields {
                 let value = match field.key {
                     "url" => "https://dns-hook.example.test/acme".to_string(),
+                    "server" => "ns1.example.test:53".to_string(),
+                    "key_secret" => "c2VjcmV0".to_string(),
                     key => format!("{key}-value"),
                 };
                 if !matches!(field.kind, FieldKind::Select(_)) {

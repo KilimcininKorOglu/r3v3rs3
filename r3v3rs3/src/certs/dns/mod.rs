@@ -12,6 +12,7 @@ mod hetzner;
 mod linode;
 mod ovh;
 mod porkbun;
+mod rfc2136;
 mod route53;
 mod rrset;
 mod sigv4;
@@ -158,6 +159,19 @@ fn local_client(
     let client: Box<dyn DnsClient> = match provider {
         LocalProvider::Webhook { url, token } => Box::new(webhook::Webhook::new(http, url, token)?),
         LocalProvider::Exec { program } => Box::new(exec::Exec::new(program, acme_exec)?),
+        LocalProvider::Rfc2136 {
+            server,
+            zone,
+            key_name,
+            key_algorithm,
+            key_secret,
+        } => Box::new(rfc2136::Rfc2136::new(
+            server,
+            zone,
+            key_name,
+            *key_algorithm,
+            key_secret,
+        )?),
     };
     Ok(client)
 }
