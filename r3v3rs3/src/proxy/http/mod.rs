@@ -11,7 +11,10 @@ use self::{
 use super::{
     proxy_protocol::{self, Client},
     spawn_connection,
-    tls::{port_acceptor, server_cert_resolver, ClientCertInfo, TlsTermination},
+    tls::{
+        port_acceptor, port_tls, server_cert_resolver, ClientCertInfo, Handshake, PortTls,
+        TlsTermination,
+    },
     PortContextEvent,
 };
 use crate::server::cert_list::CertList;
@@ -90,16 +93,16 @@ pub struct HttpStarter {
 }
 
 impl HttpStarter {
-    pub fn start(self, stream: BufStream<TcpStream>) {
-        let Some(tls_acceptor) = self.tls_acceptor else {
-            debug!("closing the connection: the TLS config is invalid");
+    /// `challenge` is the TLS config of the active TLS-ALPN-01 challenges.
+    pub fn start(self, stream: BufStream<TcpStream>, challenge: Option<Arc<ServerConfig>>) {
+        let Some(tls) = port_tls(self.tls_acceptor, challenge) else {
             return;
         };
         let (shared, stop_notifier) = (Cache::new(self.shared), self.stop_notifier);
         let (proxy_protocol, span) = (self.proxy_protocol, self.span.clone());
         let task = async move {
             let client = proxy_protocol::accept(stream, proxy_protocol.as_deref()).await?;
-            start(client, tls_acceptor, shared, stop_notifier, span).await
+            start(client, tls, shared, stop_notifier, span).await
         };
         spawn_connection(self.span, task);
     }
@@ -386,7 +389,7 @@ fn quic_client_cert(conn: &quinn::Connection) -> Option<Arc<ClientCertInfo>> {
 
 async fn start(
     client: Client,
-    tls_acceptor: Option<TlsAcceptor>,
+    tls: Option<PortTls>,
     shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
     stop_notifier: Arc<Notify>,
     span: Span,
@@ -418,7 +421,7 @@ async fn start(
         .instrument(span.clone()),
     );
 
-    if tls_acceptor.is_some() && local.port() != 80 && first_byte != 0x16 {
+    if tls.is_some() && local.port() != 80 && first_byte != 0x16 {
         tokio::task::spawn(
             async move {
                 let server_stream = TokioIo::new(server_stream);
@@ -434,26 +437,15 @@ async fn start(
         return Ok(());
     }
 
-    let mut stream: Box<dyn IoStream> = Box::new(server_stream);
-    let mut server_http2 = false;
-    let mut sni = None;
-    let mut client_cert = None;
-
-    let forwarded_proto = if tls_acceptor.is_some() {
-        "https"
-    } else {
-        "http"
+    let forwarded_proto = if tls.is_some() { "https" } else { "http" };
+    let Some((stream, tls_info)) = handshake(tls, Box::new(server_stream), remote).await? else {
+        return Ok(());
     };
-
-    if let Some(acceptor) = tls_acceptor {
-        debug!(%remote, "server: tls handshake");
-        let accepted = acceptor.accept(stream).await?;
-        let tls_conn = &accepted.get_ref().1;
-        server_http2 = tls_conn.alpn_protocol() == Some(b"h2");
-        sni = tls_conn.server_name().map(|sni| sni.to_string());
-        client_cert = ClientCertInfo::from_chain(tls_conn.peer_certificates()).map(Arc::new);
-        stream = Box::new(accepted);
-    }
+    let TlsInfo {
+        http2: server_http2,
+        sni,
+        client_cert,
+    } = tls_info;
 
     let span_cloned = span.clone();
     let service = hyper::service::service_fn(move |req: Request<Incoming>| {
@@ -517,6 +509,37 @@ async fn start(
     );
 
     Ok(())
+}
+
+/// The details of the TLS connection of a client.
+#[derive(Default)]
+struct TlsInfo {
+    http2: bool,
+    sni: Option<String>,
+    client_cert: Option<Arc<ClientCertInfo>>,
+}
+
+/// Runs the TLS handshake when the port terminates TLS. `None` when the connection served a
+/// TLS-ALPN-01 challenge.
+async fn handshake(
+    tls: Option<PortTls>,
+    stream: Box<dyn IoStream>,
+    remote: SocketAddr,
+) -> anyhow::Result<Option<(Box<dyn IoStream>, TlsInfo)>> {
+    let Some(tls) = tls else {
+        return Ok(Some((stream, TlsInfo::default())));
+    };
+    debug!(%remote, "server: tls handshake");
+    let Handshake::Established(accepted) = tls.accept(stream).await? else {
+        return Ok(None);
+    };
+    let conn = &accepted.get_ref().1;
+    let info = TlsInfo {
+        http2: conn.alpn_protocol() == Some(b"h2"),
+        sni: conn.server_name().map(str::to_string),
+        client_cert: ClientCertInfo::from_chain(conn.peer_certificates()).map(Arc::new),
+    };
+    Ok(Some((accepted, info)))
 }
 
 enum ProxiedRequest<R> {

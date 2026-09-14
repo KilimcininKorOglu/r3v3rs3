@@ -1,3 +1,4 @@
+use crate::certs::alpn::offers_only_acme_tls;
 use crate::certs::Cert;
 use crate::server::cert_list::CertList;
 use dashmap::DashMap;
@@ -8,15 +9,19 @@ use r3v3rs3_api::subject_name::SubjectName;
 use r3v3rs3_api::tls::{ClientAuthMode, TlsState};
 use sha2::{Digest, Sha256};
 use std::fmt;
+use std::io;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use tokio_rustls::rustls::server::danger::ClientCertVerifier;
-use tokio_rustls::rustls::server::{ClientHello, ResolvesServerCert, WebPkiClientVerifier};
+use tokio_rustls::rustls::server::{
+    Acceptor, ClientHello, ResolvesServerCert, WebPkiClientVerifier,
+};
 use tokio_rustls::rustls::sign::CertifiedKey;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore, ServerConfig};
-use tokio_rustls::TlsAcceptor;
-use tracing::error;
+use tokio_rustls::{server::TlsStream, LazyConfigAcceptor, TlsAcceptor};
+use tracing::{debug, error};
 use x509_parser::parse_x509_certificate;
 
 pub struct TlsTermination {
@@ -179,6 +184,69 @@ pub(crate) fn port_acceptor(tls: Option<&TlsTermination>) -> Option<Option<TlsAc
     }
 }
 
+/// Combines the TLS acceptor of a port with the TLS config of the active TLS-ALPN-01 challenges.
+/// `None` when the TLS config of the port is invalid, so the connection must be closed.
+pub(crate) fn port_tls(
+    acceptor: Option<Option<TlsAcceptor>>,
+    challenge: Option<Arc<ServerConfig>>,
+) -> Option<Option<PortTls>> {
+    let Some(acceptor) = acceptor else {
+        debug!("closing the connection: the TLS config is invalid");
+        return None;
+    };
+    Some(acceptor.map(|acceptor| PortTls::new(acceptor, challenge)))
+}
+
+/// The result of the TLS handshake of a port.
+pub enum Handshake<IO> {
+    Established(Box<TlsStream<IO>>),
+    /// The client validated a TLS-ALPN-01 challenge, so the connection carries no data.
+    ChallengeServed,
+}
+
+impl<IO> Handshake<IO> {
+    fn established(stream: TlsStream<IO>) -> Self {
+        Self::Established(Box::new(stream))
+    }
+}
+
+/// The TLS acceptor of a port with the TLS config of the active TLS-ALPN-01 challenges.
+#[derive(Clone)]
+pub struct PortTls {
+    acceptor: TlsAcceptor,
+    challenge: Option<Arc<ServerConfig>>,
+}
+
+impl PortTls {
+    pub fn new(acceptor: TlsAcceptor, challenge: Option<Arc<ServerConfig>>) -> Self {
+        Self {
+            acceptor,
+            challenge,
+        }
+    }
+
+    /// Runs the handshake. While a challenge is active, a client that offers only `acme-tls/1`
+    /// receives the challenge certificate instead of the certificate of the port.
+    pub async fn accept<IO>(&self, io: IO) -> io::Result<Handshake<IO>>
+    where
+        IO: AsyncRead + AsyncWrite + Unpin,
+    {
+        let Some(challenge) = &self.challenge else {
+            return self.acceptor.accept(io).await.map(Handshake::established);
+        };
+        let start = LazyConfigAcceptor::new(Acceptor::default(), io).await?;
+        if !offers_only_acme_tls(&start.client_hello()) {
+            let config = self.acceptor.config().clone();
+            return start.into_stream(config).await.map(Handshake::established);
+        }
+        let mut stream = start.into_stream(challenge.clone()).await?;
+        if let Err(err) = stream.shutdown().await {
+            debug!(%err, "failed to close the TLS-ALPN-01 challenge connection");
+        }
+        Ok(Handshake::ChallengeServed)
+    }
+}
+
 /// The verified client certificate of a connection.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ClientCertInfo {
@@ -258,7 +326,103 @@ impl ResolvesServerCert for CertResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge, ACME_TLS_ALPN};
     use r3v3rs3_api::tls::TlsTermination as TlsConfig;
+    use tokio::io::DuplexStream;
+    use tokio_rustls::rustls::client::danger::{
+        HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
+    };
+    use tokio_rustls::rustls::crypto::ring;
+    use tokio_rustls::rustls::pki_types::{ServerName, UnixTime};
+    use tokio_rustls::rustls::{DigitallySignedStruct, SignatureScheme};
+    use tokio_rustls::TlsConnector;
+
+    /// Accepts every server certificate, so the test can read a challenge certificate.
+    #[derive(Debug)]
+    struct AcceptAnyCert;
+
+    impl ServerCertVerifier for AcceptAnyCert {
+        fn verify_server_cert(
+            &self,
+            _: &CertificateDer<'_>,
+            _: &[CertificateDer<'_>],
+            _: &ServerName<'_>,
+            _: &[u8],
+            _: UnixTime,
+        ) -> Result<ServerCertVerified, tokio_rustls::rustls::Error> {
+            Ok(ServerCertVerified::assertion())
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            _: &[u8],
+            _: &CertificateDer<'_>,
+            _: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, tokio_rustls::rustls::Error> {
+            Ok(HandshakeSignatureValid::assertion())
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            _: &[u8],
+            _: &CertificateDer<'_>,
+            _: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, tokio_rustls::rustls::Error> {
+            Ok(HandshakeSignatureValid::assertion())
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+            ring::default_provider()
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
+    }
+
+    /// Returns the TLS of a port with a certificate for `localhost`, and that certificate.
+    fn port_tls(challenges: &[TlsAlpnChallenge]) -> (PortTls, CertificateDer<'static>) {
+        let root = Cert::new_ca().unwrap();
+        let server =
+            Arc::new(Cert::new_self_signed(&["localhost".parse().unwrap()], &root).unwrap());
+        let resolver = CertResolver::new(vec![server.clone()], vec![], true);
+        let config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(Arc::new(resolver));
+        let challenge = (!challenges.is_empty())
+            .then(|| challenge_config(Arc::new(ChallengeCerts::new(challenges).unwrap())));
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let cert = server.certificates().unwrap().remove(0);
+        (PortTls::new(acceptor, challenge), cert)
+    }
+
+    /// Runs the handshake of a client that offers the ALPN protocols. Returns the result of the
+    /// port, the certificate that the client received and the negotiated ALPN protocol.
+    async fn handshake(
+        tls: &PortTls,
+        alpn: &[&[u8]],
+    ) -> (
+        Handshake<DuplexStream>,
+        CertificateDer<'static>,
+        Option<Vec<u8>>,
+    ) {
+        let mut config = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+            .with_no_client_auth();
+        config.alpn_protocols = alpn.iter().map(|protocol| protocol.to_vec()).collect();
+        let connector = TlsConnector::from(Arc::new(config));
+        let (client_io, server_io) = tokio::io::duplex(16384);
+        let name = ServerName::try_from("localhost").unwrap();
+        let (server, client) =
+            tokio::join!(tls.accept(server_io), connector.connect(name, client_io));
+        let client = client.unwrap();
+        let conn = &client.get_ref().1;
+        let cert = conn.peer_certificates().unwrap()[0].clone();
+        (
+            server.unwrap(),
+            cert,
+            conn.alpn_protocol().map(<[u8]>::to_vec),
+        )
+    }
 
     fn config(client_auth: ClientAuthMode, client_ca_certs: Vec<ShortId>) -> TlsConfig {
         TlsConfig {
@@ -335,5 +499,34 @@ mod tests {
         assert_eq!(info.fingerprint, client.fingerprint);
         assert_eq!(ClientCertInfo::from_chain(None), None);
         assert_eq!(ClientCertInfo::from_chain(Some(&[])), None);
+    }
+
+    #[tokio::test]
+    async fn only_an_acme_tls_client_receives_the_challenge_certificate() {
+        let challenge = TlsAlpnChallenge {
+            domain: "localhost".to_string(),
+            digest: [9; 32],
+        };
+        let (tls, port_cert) = port_tls(&[challenge]);
+
+        let (result, cert, alpn) = handshake(&tls, &[ACME_TLS_ALPN]).await;
+        assert!(matches!(result, Handshake::ChallengeServed));
+        assert_ne!(cert, port_cert);
+        assert_eq!(alpn.as_deref(), Some(ACME_TLS_ALPN));
+        let (_, x509) = parse_x509_certificate(cert.as_ref()).unwrap();
+        assert!(x509
+            .extensions()
+            .iter()
+            .any(|ext| ext.critical && ext.oid.to_id_string() == "1.3.6.1.5.5.7.1.31"));
+
+        let (result, cert, alpn) = handshake(&tls, &[b"h2", ACME_TLS_ALPN]).await;
+        assert!(matches!(result, Handshake::Established(_)));
+        assert_eq!(cert, port_cert);
+        assert_eq!(alpn, None);
+
+        let (tls, port_cert) = port_tls(&[]);
+        let (result, cert, _) = handshake(&tls, &[ACME_TLS_ALPN]).await;
+        assert!(matches!(result, Handshake::Established(_)));
+        assert_eq!(cert, port_cert);
     }
 }

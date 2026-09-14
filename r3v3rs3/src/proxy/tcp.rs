@@ -2,7 +2,7 @@ use super::{
     health::{self, Probe, UpstreamGroup},
     proxy_protocol::{self, Client},
     spawn_connection,
-    tls::{port_acceptor, upstream_client_config, TlsTermination},
+    tls::{port_acceptor, port_tls, upstream_client_config, Handshake, PortTls, TlsTermination},
     PortContextEvent, PortStatus, SocketState,
 };
 use crate::server::cert_list::CertList;
@@ -31,7 +31,10 @@ use tokio::{
     sync::Notify,
 };
 use tokio_rustls::rustls::pki_types::{IpAddr, ServerName};
-use tokio_rustls::{rustls::ClientConfig, TlsAcceptor, TlsConnector};
+use tokio_rustls::{
+    rustls::{ClientConfig, ServerConfig},
+    TlsAcceptor, TlsConnector,
+};
 use tracing::{debug, error, info, span, warn, Level, Span};
 
 const MAX_BUFFER_SIZE: usize = 4096;
@@ -156,20 +159,20 @@ pub struct TcpStarter {
 }
 
 impl TcpStarter {
-    pub fn start(self, mut stream: BufStream<TcpStream>) {
+    /// `challenge` is the TLS config of the active TLS-ALPN-01 challenges.
+    pub fn start(self, mut stream: BufStream<TcpStream>, challenge: Option<Arc<ServerConfig>>) {
         let Some(upstream) = self.upstream else {
             tokio::spawn(async move { stream.get_mut().shutdown().await });
             return;
         };
-        let Some(tls_acceptor) = self.tls_acceptor else {
-            debug!("closing the connection: the TLS config is invalid");
+        let Some(tls) = port_tls(self.tls_acceptor, challenge) else {
             return;
         };
         let (resolver, stop_notifier) = (self.resolver, self.stop_notifier);
         let proxy_protocol = self.proxy_protocol;
         let task = async move {
             let client = proxy_protocol::accept(stream, proxy_protocol.as_deref()).await?;
-            start(client, upstream, resolver, tls_acceptor, stop_notifier).await
+            start(client, upstream, resolver, tls, stop_notifier).await
         };
         spawn_connection(self.span, task);
     }
@@ -244,7 +247,7 @@ async fn start(
     client: Client,
     upstream: TcpUpstream,
     resolver: Resolver,
-    tls_acceptor: Option<TlsAcceptor>,
+    tls: Option<PortTls>,
     stop_notifier: Arc<Notify>,
 ) -> anyhow::Result<()> {
     let Client {
@@ -268,14 +271,19 @@ async fn start(
         }
     });
 
+    // The handshake runs before the upstream connection, so a TLS-ALPN-01 challenge and a failed
+    // handshake do not reach the upstream server.
+    let mut stream: Box<dyn IoStream> = Box::new(server_stream);
+    if let Some(tls) = tls {
+        debug!(%remote, "server: tls handshake");
+        match tls.accept(stream).await? {
+            Handshake::Established(accepted) => stream = accepted,
+            Handshake::ChallengeServed => return Ok(()),
+        }
+    }
+
     let (target, mut out) = upstream.connect(&resolver, (remote, local)).await?;
     info!(target: "r3v3rs3::access_log", remote = %remote, %peer, %local, %target);
-
-    let mut stream: Box<dyn IoStream> = Box::new(server_stream);
-    if let Some(acceptor) = tls_acceptor {
-        debug!(%remote, "server: tls handshake");
-        stream = Box::new(acceptor.accept(stream).await?);
-    }
 
     if let Err(err) = tokio::io::copy_bidirectional(&mut stream, &mut out).await {
         error!("{err}");

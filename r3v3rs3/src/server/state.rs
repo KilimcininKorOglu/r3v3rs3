@@ -36,6 +36,7 @@ use tokio::{
     net::TcpStream,
     sync::{broadcast, mpsc},
 };
+use tokio_rustls::rustls::ServerConfig;
 use tracing::{error, info, span, warn, Instrument, Level};
 use x509_parser::time::ASN1Time;
 
@@ -51,6 +52,8 @@ pub struct ServerState {
     udp_pool: UdpListenerPool,
     quic_pool: QuicListenerPool,
     http_challenges: HttpChallenges,
+    /// The TLS config of the active TLS-ALPN-01 challenges.
+    tls_alpn_challenge: Option<Arc<ServerConfig>>,
     acme_schedule: AcmeSchedule,
     command_sender: mpsc::Sender<ServerCommand>,
     br_sender: broadcast::Sender<ServerEvent>,
@@ -119,6 +122,7 @@ impl ServerState {
             udp_pool: UdpListenerPool::new(),
             quic_pool: QuicListenerPool::new(),
             http_challenges: HttpChallenges::default(),
+            tls_alpn_challenge: None,
             acme_schedule: AcmeSchedule::default(),
             command_sender,
             br_sender,
@@ -368,9 +372,10 @@ impl ServerState {
             .as_slice()
             .get(index)
             .and_then(PortContext::starter);
+        let challenge = self.tls_alpn_challenge.clone();
         connection::accept(stream, &self.http_challenges, move |stream| {
             if let Some(starter) = starter {
-                starter.start(stream);
+                starter.start(stream, challenge);
             }
         });
     }

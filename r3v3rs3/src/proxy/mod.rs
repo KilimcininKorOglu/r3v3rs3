@@ -13,7 +13,9 @@ use r3v3rs3_api::{
     proxy::ProxyEntry,
 };
 use std::future::Future;
+use std::sync::Arc;
 use tokio::{io::BufStream, net::TcpStream};
+use tokio_rustls::rustls::ServerConfig;
 use tracing::{error, Instrument, Span};
 
 pub mod health;
@@ -172,10 +174,11 @@ pub enum ConnectionStarter {
 }
 
 impl ConnectionStarter {
-    pub fn start(self, stream: BufStream<TcpStream>) {
+    /// `challenge` is the TLS config of the active TLS-ALPN-01 challenges.
+    pub fn start(self, stream: BufStream<TcpStream>, challenge: Option<Arc<ServerConfig>>) {
         match self {
-            Self::Tcp(starter) => starter.start(stream),
-            Self::Http(starter) => starter.start(stream),
+            Self::Tcp(starter) => starter.start(stream, challenge),
+            Self::Http(starter) => starter.start(stream, challenge),
         }
     }
 }
