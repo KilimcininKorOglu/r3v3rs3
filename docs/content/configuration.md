@@ -120,6 +120,23 @@ upstream_servers = [{ addr = "/ip4/127.0.0.1/tcp/5432" }]
 connect_timeout = "3s"
 ```
 
+## Request Body Size
+
+`max_body_size` of an HTTP / HTTPS proxy limits the request body in bytes. The default is `0`, and `0` disables the limit. A route can replace the proxy value with its own `max_body_size`, and `0` in a route disables the limit for that route.
+
+r3v3rs3 checks the `Content-Length` header before authentication, so a larger request receives 413 Payload Too Large and does not reach an upstream server. A body without `Content-Length`, such as a chunked body, is counted while r3v3rs3 sends it to the upstream server. When the body passes the limit before the upstream server answers, r3v3rs3 stops the upstream request and the client receives 413. The upstream server can receive the start of such a body. The limit applies to HTTP/1.1, HTTP/2 and HTTP/3 requests.
+
+```toml
+[uploads]
+protocol = "http"
+vhosts = ["files.example.com"]
+max_body_size = 1048576
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] },
+  { path = "/upload", servers = [{ url = "http://127.0.0.1:9000/" }], max_body_size = 104857600 },
+]
+```
+
 ## Load Balancing and Health Checks
 
 A proxy or an HTTP route with more than one upstream server spreads the traffic with `load_balancing`:

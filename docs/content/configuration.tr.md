@@ -120,6 +120,23 @@ upstream_servers = [{ addr = "/ip4/127.0.0.1/tcp/5432" }]
 connect_timeout = "3s"
 ```
 
+## Request Body Boyutu
+
+HTTP / HTTPS proxy'sinde `max_body_size` değeri request body'sini byte cinsinden sınırlar. Varsayılan değer `0`'dır. `0` limiti kapatır. Bir route, proxy değeri yerine kendi `max_body_size` değerini kullanabilir. Route'taki `0` değeri o route için limiti kapatır.
+
+r3v3rs3 `Content-Length` header'ını authentication'dan önce kontrol eder. Bu yüzden limitten büyük bir request 413 Payload Too Large alır ve upstream sunucuya ulaşmaz. `Content-Length` taşımayan body, örneğin chunked body, r3v3rs3 onu upstream sunucuya gönderirken sayılır. Body upstream sunucu yanıt vermeden limiti geçerse r3v3rs3 upstream request'ini durdurur ve client 413 alır. Upstream sunucu böyle bir body'nin başını alabilir. Limit HTTP/1.1, HTTP/2 ve HTTP/3 request'lerine uygulanır.
+
+```toml
+[uploads]
+protocol = "http"
+vhosts = ["files.example.com"]
+max_body_size = 1048576
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] },
+  { path = "/upload", servers = [{ url = "http://127.0.0.1:9000/" }], max_body_size = 104857600 },
+]
+```
+
 ## Load Balancing ve Health Check
 
 Birden fazla upstream sunucusu olan proxy veya HTTP route, trafiği `load_balancing` değerine göre dağıtır:

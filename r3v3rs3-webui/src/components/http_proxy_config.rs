@@ -61,6 +61,7 @@ struct ProxyForm {
     timeouts: TimeoutsForm,
     retry: RetryForm,
     sticky: StickyForm,
+    max_body_size: String,
 }
 
 impl ProxyForm {
@@ -88,6 +89,7 @@ impl ProxyForm {
             timeouts: TimeoutsForm::new(&proxy.timeouts),
             retry: RetryForm::new(&proxy.retry),
             sticky: StickyForm::new(&proxy.sticky),
+            max_body_size: proxy.max_body_size.to_string(),
         }
     }
 }
@@ -372,6 +374,8 @@ struct RouteForm {
     timeouts: TimeoutsForm,
     override_retry: bool,
     retry: RetryForm,
+    override_body_limit: bool,
+    max_body_size: String,
 }
 
 impl RouteForm {
@@ -402,6 +406,8 @@ impl RouteForm {
             timeouts: TimeoutsForm::new(&route.timeouts.unwrap_or_default()),
             override_retry: route.retry.is_some(),
             retry: RetryForm::new(&route.retry.clone().unwrap_or_default()),
+            override_body_limit: route.max_body_size.is_some(),
+            max_body_size: route.max_body_size.unwrap_or_default().to_string(),
         }
     }
 
@@ -423,6 +429,8 @@ impl RouteForm {
             timeouts: TimeoutsForm::new(&UpstreamTimeouts::default()),
             override_retry: false,
             retry: RetryForm::new(&RetryPolicy::default()),
+            override_body_limit: false,
+            max_body_size: "0".into(),
         }
     }
 }
@@ -555,6 +563,11 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { error_view(errors.get("timeouts")) }
             <p class={HINT_CLASS}>{locale.t("http_form.timeouts_hint")}</p>
 
+            <label class={SECTION_CLASS}>{locale.t("http_form.body_limit")}</label>
+            { body_limit_input(locale, &form.max_body_size, state_input(&form, text, |form, value| form.max_body_size = value)) }
+            { error_view(errors.get("max_body_size")) }
+            <p class={HINT_CLASS}>{locale.t("http_form.body_limit_hint")}</p>
+
             <label class={SECTION_CLASS}>{locale.t("http_form.retries")}</label>
             { retry_view(locale, &form.retry, state_update(&form, |form, value| form.retry = value)) }
             { error_view(errors.get("retry")) }
@@ -601,6 +614,7 @@ fn route_view(
             { route_headers_view(locale, routes, index, route) }
             { route_timeouts_view(locale, routes, index, route) }
             { route_retry_view(locale, routes, index, route) }
+            { route_body_limit_view(locale, routes, index, route) }
             { error_view(error) }
 
             { list_buttons(routes, index, RouteForm::empty) }
@@ -904,6 +918,40 @@ fn route_retry_view(
             item_update(routes, index, |route, value| route.retry = value),
         ),
     )
+}
+
+fn route_body_limit_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| {
+            route.override_body_limit = value
+        }),
+        route.override_body_limit,
+        "http_form.override_body_limit",
+        "http_form.route_body_limit_hint",
+        body_limit_input(
+            locale,
+            &route.max_body_size,
+            route_input(routes, index, text, |route, value| {
+                route.max_body_size = value
+            }),
+        ),
+    )
+}
+
+/// The labeled number input of a request body limit in bytes.
+fn body_limit_input(locale: Locale, value: &str, onchange: Callback<Event>) -> Html {
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{locale.t("http_form.max_body_size")}</label>
+            <input type="number" min="0" value={value.to_string()} {onchange} class={INPUT_CLASS} />
+        </>
+    }
 }
 
 /// The attempts, the replay body limit and the failures of a retry policy. Each change emits the
@@ -1446,6 +1494,11 @@ fn get_proxy(
     let timeouts = parse_timeouts(locale, &form.timeouts, "timeouts", &mut errors);
     let retry = parse_retry(locale, &form.retry, "retry", &mut errors);
     let sticky = parse_sticky(locale, &form.sticky, "sticky", &mut errors);
+    let max_body_size = or_error(
+        parse_size(locale, &form.max_body_size, "http_form.max_body_size_name"),
+        "max_body_size",
+        &mut errors,
+    );
 
     if !errors.is_empty() {
         return Err(errors);
@@ -1472,6 +1525,7 @@ fn get_proxy(
         circuit_breaker,
         retry,
         sticky,
+        max_body_size,
     })
 }
 
@@ -1841,6 +1895,10 @@ fn parse_route(
     let retry = route
         .override_retry
         .then(|| parse_retry(locale, &route.retry, key, errors));
+    let max_body_size = route.override_body_limit.then(|| {
+        let size = parse_size(locale, &route.max_body_size, "http_form.max_body_size_name");
+        or_error(size, key, errors)
+    });
     (!servers.is_empty()).then(|| Route {
         path: route.path.clone(),
         servers,
@@ -1850,6 +1908,7 @@ fn parse_route(
         headers,
         timeouts,
         retry,
+        max_body_size,
     })
 }
 
@@ -1952,6 +2011,37 @@ mod tests {
         };
         parse_route(Locale::Tr, &invalid, "routes_0", &mut errors);
         let expected = Locale::Tr.error_message(&Error::InvalidRetryAttempts);
+        assert_eq!(errors.get("routes_0"), Some(&expected));
+    }
+
+    #[test]
+    fn route_body_limit_round_trips_and_reports_an_invalid_size() {
+        let route = Route {
+            servers: vec![Server::new("http://127.0.0.1:9000/".parse().unwrap())],
+            max_body_size: Some(1024),
+            ..Default::default()
+        };
+        let form = RouteForm::new(&route);
+        let mut errors = HashMap::new();
+        assert_eq!(
+            parse_route(Locale::En, &form, "routes_0", &mut errors),
+            Some(route)
+        );
+        let unlimited = RouteForm {
+            max_body_size: "0".into(),
+            ..form.clone()
+        };
+        let parsed = parse_route(Locale::En, &unlimited, "routes_0", &mut errors);
+        assert_eq!(parsed.unwrap().max_body_size, Some(0));
+        assert!(errors.is_empty());
+
+        let invalid = RouteForm {
+            max_body_size: "1k".into(),
+            ..form
+        };
+        parse_route(Locale::Tr, &invalid, "routes_0", &mut errors);
+        let name = Locale::Tr.t("http_form.max_body_size_name");
+        let expected = Locale::Tr.tf("http_form.whole_number", &[("name", name)]);
         assert_eq!(errors.get("routes_0"), Some(&expected));
     }
 

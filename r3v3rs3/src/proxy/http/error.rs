@@ -35,6 +35,9 @@ pub enum ProxyError {
 
     #[error("every upstream server of the route has an open circuit")]
     NoUpstreamAvailable,
+
+    #[error("the request body is larger than the limit of the route")]
+    PayloadTooLarge,
 }
 
 impl ProxyError {
@@ -45,6 +48,7 @@ impl ProxyError {
             Self::DomainFrontingDetected => StatusCode::MISDIRECTED_REQUEST,
             Self::NoRouteFound => StatusCode::BAD_GATEWAY,
             Self::IpNotAllowed => StatusCode::FORBIDDEN,
+            Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
             Self::AuthServiceUnavailable | Self::UpstreamClientCertInvalid => {
@@ -98,9 +102,10 @@ fn status_code(code: u16) -> StatusCode {
 }
 
 /// The `error_page.<code>` key of every status code that [`map_error`] returns.
-const ERROR_PAGE_KEYS: [(u16, &str); 10] = [
+const ERROR_PAGE_KEYS: [(u16, &str); 11] = [
     (401, "error_page.401"),
     (403, "error_page.403"),
+    (413, "error_page.413"),
     (421, "error_page.421"),
     (429, "error_page.429"),
     (502, "error_page.502"),
@@ -140,6 +145,7 @@ mod tests {
         let text = |code| status_text(code, Locale::En);
         assert_eq!(text(StatusCode::UNAUTHORIZED), "Unauthorized");
         assert_eq!(text(StatusCode::FORBIDDEN), "Forbidden");
+        assert_eq!(text(StatusCode::PAYLOAD_TOO_LARGE), "Payload Too Large");
         assert_eq!(text(StatusCode::TOO_MANY_REQUESTS), "Too Many Requests");
         assert_eq!(text(StatusCode::GATEWAY_TIMEOUT), "Gateway Timeout");
         assert_eq!(text(StatusCode::MISDIRECTED_REQUEST), "Misdirected Request");

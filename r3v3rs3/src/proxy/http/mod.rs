@@ -55,6 +55,7 @@ use tracing::{debug, error, info, span, Instrument, Level, Span};
 
 mod affinity;
 mod auth;
+mod body_limit;
 pub(crate) mod cache;
 pub(crate) mod client_ip;
 mod compression;
@@ -614,6 +615,12 @@ where
 
     if let Some(redirect) = upgrade_redirect(route, &req, header_host.as_deref(), info.proto) {
         return (ProxiedRequest::Respond(redirect), response_rewriter);
+    }
+
+    if body_limit::declared_too_large(req.headers(), upstream.max_body_size) {
+        let err = ProxyError::PayloadTooLarge;
+        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %err);
+        return (ProxiedRequest::Err(err), response_rewriter);
     }
 
     // Authentication removes the credentials, so the cache reads them before. The cache key uses

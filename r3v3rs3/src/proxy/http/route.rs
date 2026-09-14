@@ -126,6 +126,7 @@ struct ProxyUpstream {
     circuit_breaker: CircuitBreaker,
     retry: RetryPolicy,
     sticky: StickyCookie,
+    max_body_size: u64,
 }
 
 impl ProxyUpstream {
@@ -138,6 +139,7 @@ impl ProxyUpstream {
             circuit_breaker: http.circuit_breaker,
             retry: http.retry.clone(),
             sticky: http.sticky.clone(),
+            max_body_size: http.max_body_size,
         }
     }
 
@@ -183,6 +185,7 @@ impl ProxyUpstream {
                 .then(|| Affinity::new(&self.sticky, key, &route.servers, base_path))
                 .flatten()
                 .map(Arc::new),
+            max_body_size: route.max_body_size.unwrap_or(self.max_body_size),
         })
     }
 }

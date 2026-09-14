@@ -82,6 +82,7 @@ async fn wss_proxy() -> anyhow::Result<()> {
                     circuit_breaker: Default::default(),
                     retry: Default::default(),
                     sticky: Default::default(),
+                    max_body_size: 0,
                     client_cert: None,
                 })),
                 ..Default::default()

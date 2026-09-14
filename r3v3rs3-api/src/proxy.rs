@@ -197,6 +197,13 @@ pub struct HttpProxy {
     /// Sticky sessions for every route of this proxy.
     #[serde(default, skip_serializing_if = "StickyCookie::is_default")]
     pub sticky: StickyCookie,
+    /// The largest request body in bytes for every route of this proxy. `0` has no limit.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub max_body_size: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 fn upgrade_insecure_default() -> bool {
@@ -288,6 +295,9 @@ pub struct Route {
     /// Replaces the proxy retry policy for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry: Option<RetryPolicy>,
+    /// Replaces the proxy request body limit for this route. `0` has no limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_body_size: Option<u64>,
 }
 
 fn default_route_path() -> String {

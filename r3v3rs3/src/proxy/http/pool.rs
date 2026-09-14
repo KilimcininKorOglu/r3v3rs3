@@ -29,6 +29,7 @@ use tracing::{error, warn};
 use url::Url;
 
 use super::affinity::{Affinity, CookieSlot};
+use super::body_limit::BodyLimit;
 use super::rewriter::ResponseRewriter;
 
 type ProxyBody = BoxBody<Bytes, anyhow::Error>;
@@ -198,6 +199,8 @@ pub struct Upstream {
     pub retry: RetryPolicy,
     /// `None` when the route has no sticky sessions.
     pub affinity: Option<Arc<Affinity>>,
+    /// The largest request body in bytes. `0` has no limit.
+    pub max_body_size: u64,
 }
 
 /// The servers to try for a request in order, and the part of the client URI that follows the
@@ -315,18 +318,32 @@ impl Upstream {
 
     /// Sends the request to the selected server. A failure that the retry policy names sends the
     /// request again to the next server, until the policy has no attempts left. When the circuit
-    /// of every server blocks the request, the client receives 503.
+    /// of every server blocks the request, the client receives 503. A request body larger than
+    /// the limit fails the request with 413.
     pub async fn request(
         &self,
         req: Request<ProxyBody>,
     ) -> Result<Response<ProxyBody>, anyhow::Error> {
+        let (req, limit) = BodyLimit::apply(req, self.max_body_size);
+        let result = self.send_request(req).await.map_err(|err| {
+            if limit.exceeded() {
+                SendError::other(ProxyError::PayloadTooLarge)
+            } else {
+                err
+            }
+        });
+        finish(result)
+    }
+
+    async fn send_request(
+        &self,
+        req: Request<ProxyBody>,
+    ) -> Result<Response<ProxyBody>, SendError> {
         let Some(target) = req.extensions().get::<UpstreamTarget>().cloned() else {
-            return finish(self.pool.send(req, self.request_timeout).await);
+            return self.pool.send(req, self.request_timeout).await;
         };
-        match Replay::prepare(req, self.retry.replay_body_limit).await {
-            Ok(replay) => finish(self.send_with_retries(replay, &target).await),
-            Err(err) => finish(Err(err)),
-        }
+        let replay = Replay::prepare(req, self.retry.replay_body_limit).await?;
+        self.send_with_retries(replay, &target).await
     }
 
     async fn send_with_retries(
