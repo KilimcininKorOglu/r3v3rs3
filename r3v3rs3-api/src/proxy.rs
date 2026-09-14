@@ -5,6 +5,7 @@ use crate::discovery::DiscoverySource;
 use crate::error::Error;
 use crate::header_rules::HeaderRules;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
+use crate::rewrite::PathRewrite;
 use crate::upstream::{
     default_connect_timeout, default_session_idle_timeout, default_weight,
     is_default_connect_timeout, is_default_session_idle_timeout, is_default_weight,
@@ -64,7 +65,7 @@ impl ProxyKind {
 
     /// Rejects a zero connect timeout, session idle timeout, fail timeout or check timeout, an
     /// invalid health check path, a server list in which every server has weight 0, an invalid
-    /// circuit breaker, invalid retry attempts and an invalid sticky cookie.
+    /// circuit breaker, invalid retry attempts, an invalid sticky cookie and an invalid path prefix.
     pub fn validate_upstream(&self) -> Result<(), Error> {
         match self {
             Self::Tcp(tcp) => {
@@ -83,7 +84,8 @@ impl ProxyKind {
                 http.circuit_breaker.validate()?;
                 http.sticky.validate()?;
                 http.routes.iter().try_for_each(|route| {
-                    validate_weights(route.servers.iter().map(|server| server.weight))
+                    validate_weights(route.servers.iter().map(|server| server.weight))?;
+                    route.rewrite.validate()
                 })?;
                 http.routes
                     .iter()
@@ -298,6 +300,9 @@ pub struct Route {
     /// Replaces the proxy request body limit for this route. `0` has no limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_body_size: Option<u64>,
+    /// Changes the request path before the request goes to an upstream server.
+    #[serde(default, skip_serializing_if = "PathRewrite::is_default")]
+    pub rewrite: PathRewrite,
 }
 
 fn default_route_path() -> String {

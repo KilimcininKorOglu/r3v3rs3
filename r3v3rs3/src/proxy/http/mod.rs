@@ -67,6 +67,7 @@ pub(crate) mod hyper_tls;
 mod page;
 pub(crate) mod pool;
 mod rate_limit;
+mod rewrite;
 mod rewriter;
 mod route;
 

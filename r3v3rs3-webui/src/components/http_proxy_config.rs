@@ -14,6 +14,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
+use r3v3rs3_api::rewrite::{PathRegex, PathRewrite};
 use r3v3rs3_api::upstream::{
     CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, StickyCookie,
     UpstreamTimeouts, DEFAULT_WEIGHT, MAX_RETRY_ATTEMPTS,
@@ -376,6 +377,10 @@ struct RouteForm {
     retry: RetryForm,
     override_body_limit: bool,
     max_body_size: String,
+    strip_prefix: bool,
+    path_regex: String,
+    replacement: String,
+    add_prefix: String,
 }
 
 impl RouteForm {
@@ -408,6 +413,15 @@ impl RouteForm {
             retry: RetryForm::new(&route.retry.clone().unwrap_or_default()),
             override_body_limit: route.max_body_size.is_some(),
             max_body_size: route.max_body_size.unwrap_or_default().to_string(),
+            strip_prefix: route.rewrite.strip_prefix,
+            path_regex: route
+                .rewrite
+                .regex
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+            replacement: route.rewrite.replacement.clone(),
+            add_prefix: route.rewrite.add_prefix.clone(),
         }
     }
 
@@ -431,6 +445,10 @@ impl RouteForm {
             retry: RetryForm::new(&RetryPolicy::default()),
             override_body_limit: false,
             max_body_size: "0".into(),
+            strip_prefix: true,
+            path_regex: String::new(),
+            replacement: String::new(),
+            add_prefix: String::new(),
         }
     }
 }
@@ -607,6 +625,8 @@ fn route_view(
             <label class={LABEL_CLASS}>{locale.t("http_form.target")}</label>
             <textarea rows="2" autocapitalize="off" spellcheck="false" placeholder={"https://a.example.com/backend\nhttps://b.example.com/backend"} value={route.servers.join("\n")} onchange={route_input(routes, index, text_area, |route, value| route.servers = server_lines(&value))} class={INPUT_CLASS} />
             <p class={HINT_CLASS}>{locale.t("http_form.target_hint")}</p>
+
+            { route_rewrite_view(locale, routes, index, route) }
 
             { route_ip_filter_view(locale, routes, index, route) }
             { route_rate_limit_view(locale, routes, index, route) }
@@ -918,6 +938,37 @@ fn route_retry_view(
             item_update(routes, index, |route, value| route.retry = value),
         ),
     )
+}
+
+/// The path rewrite of a route: the route path toggle, the regex, its replacement and the prefix.
+fn route_rewrite_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    html! {
+        <>
+            <div>
+                { toggle(route_input(routes, index, checked, |route, value| route.strip_prefix = value), route.strip_prefix, locale.t("http_form.strip_prefix"), "mt-4") }
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-4">
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("http_form.path_regex")}</label>
+                    <input type="text" autocapitalize="off" spellcheck="false" placeholder="^/items/([0-9]+)$" value={route.path_regex.clone()} onchange={route_input(routes, index, text, |route, value| route.path_regex = value)} class={classes!(INPUT_CLASS, "font-mono")} />
+                </div>
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("http_form.replacement")}</label>
+                    <input type="text" autocapitalize="off" spellcheck="false" placeholder="/item/${1}" value={route.replacement.clone()} onchange={route_input(routes, index, text, |route, value| route.replacement = value)} class={classes!(INPUT_CLASS, "font-mono")} />
+                </div>
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("http_form.add_prefix")}</label>
+                    <input type="text" autocapitalize="off" spellcheck="false" placeholder="/v2" value={route.add_prefix.clone()} onchange={route_input(routes, index, text, |route, value| route.add_prefix = value)} class={INPUT_CLASS} />
+                </div>
+            </div>
+            <p class={HINT_CLASS}>{locale.t("http_form.path_rewrite_hint")}</p>
+        </>
+    }
 }
 
 fn route_body_limit_view(
@@ -1899,6 +1950,7 @@ fn parse_route(
         let size = parse_size(locale, &route.max_body_size, "http_form.max_body_size_name");
         or_error(size, key, errors)
     });
+    let rewrite = parse_rewrite(locale, route, key, errors);
     (!servers.is_empty()).then(|| Route {
         path: route.path.clone(),
         servers,
@@ -1909,7 +1961,36 @@ fn parse_route(
         timeouts,
         retry,
         max_body_size,
+        rewrite,
     })
+}
+
+/// Reads the path rewrite of a route. An empty regex is no regex.
+fn parse_rewrite(
+    locale: Locale,
+    route: &RouteForm,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> PathRewrite {
+    let pattern = route.path_regex.trim();
+    let regex = if pattern.is_empty() {
+        None
+    } else {
+        let regex = pattern.parse::<PathRegex>().map(Some);
+        or_error(translated(locale, regex), key, errors)
+    };
+    let rewrite = PathRewrite {
+        strip_prefix: route.strip_prefix,
+        regex,
+        replacement: route.replacement.clone(),
+        add_prefix: route.add_prefix.trim().to_string(),
+    };
+    if let Err(err) = rewrite.validate() {
+        errors
+            .entry(key.to_string())
+            .or_insert_with(|| locale.error_message(&err));
+    }
+    rewrite
 }
 
 #[cfg(test)]
@@ -2012,6 +2093,54 @@ mod tests {
         parse_route(Locale::Tr, &invalid, "routes_0", &mut errors);
         let expected = Locale::Tr.error_message(&Error::InvalidRetryAttempts);
         assert_eq!(errors.get("routes_0"), Some(&expected));
+    }
+
+    #[test]
+    fn route_rewrite_round_trips_and_reports_invalid_values() {
+        let route = Route {
+            servers: vec![Server::new("http://127.0.0.1:9000/".parse().unwrap())],
+            rewrite: PathRewrite {
+                strip_prefix: false,
+                regex: Some("^/items/([0-9]+)$".parse().unwrap()),
+                replacement: "/item/${1}".into(),
+                add_prefix: "/v2".into(),
+            },
+            ..Default::default()
+        };
+        let form = RouteForm::new(&route);
+        let mut errors = HashMap::new();
+        assert_eq!(
+            parse_route(Locale::En, &form, "routes_0", &mut errors),
+            Some(route)
+        );
+        assert!(errors.is_empty());
+
+        let cases = [
+            (
+                RouteForm {
+                    path_regex: "(".into(),
+                    ..form.clone()
+                },
+                Error::InvalidPathRegex {
+                    pattern: "(".into(),
+                },
+            ),
+            (
+                RouteForm {
+                    add_prefix: "v2".into(),
+                    ..form
+                },
+                Error::InvalidPathPrefix {
+                    prefix: "v2".into(),
+                },
+            ),
+        ];
+        for (invalid, err) in cases {
+            let mut errors = HashMap::new();
+            parse_route(Locale::Tr, &invalid, "routes_0", &mut errors);
+            let expected = Locale::Tr.error_message(&err);
+            assert_eq!(errors.get("routes_0"), Some(&expected));
+        }
     }
 
     #[test]

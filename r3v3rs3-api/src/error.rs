@@ -167,6 +167,12 @@ pub enum Error {
     #[error("sticky cookie name must be a cookie token: {name}")]
     InvalidStickyCookieName { name: String },
 
+    #[error("invalid path regex: {pattern}")]
+    InvalidPathRegex { pattern: String },
+
+    #[error("path prefix must start with / and cannot contain ? or #: {prefix}")]
+    InvalidPathPrefix { prefix: String },
+
     #[error("failed to hash password")]
     FailedToHashPassword,
 

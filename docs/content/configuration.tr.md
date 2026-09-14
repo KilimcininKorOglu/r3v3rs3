@@ -87,6 +87,27 @@ vhosts = ["app.example.com"]
 routes = [{ path = "/", servers = [{ url = "http://app:9000/" }] }]
 ```
 
+## Path Rewrite
+
+r3v3rs3 varsayılan olarak route path'ini request path'inden kaldırır ve kalan kısmı sunucu URL'sinin path'ine ekler. Örneğin `path = "/api"` değerli bir route ve `http://api:8080/v1/` sunucusu için `GET /api/users` request'i `http://api:8080/v1/users` adresine gider. Route'un `rewrite` tablosu path'i şu sırayla değiştirir:
+
+1. `strip_prefix = false` route path'ini korur. Bu durumda aynı request `http://api:8080/v1/api/users` adresine gider.
+2. `regex` path'teki ilk eşleşmeyi `replacement` değeriyle değiştirir. Path `/` ile başlar. `${1}` veya `${name}` bir capture group ekler. Eşleşme yoksa path değişmez.
+3. `add_prefix` path'in başına `/v2` gibi bir path ekler.
+
+r3v3rs3 query string'i korur. Kimlik doğrulama ve cache, client request'inin path'ini kullanır. r3v3rs3 geçersiz regex'i reddeder. `/` ile başlamayan veya `?` ya da `#` içeren `add_prefix` değerini de reddeder.
+
+Aşağıdaki route'larda `GET /api/users` request'i `http://api:8080/v2/users` adresine, `GET /items/42` request'i `http://shop:9000/item/42` adresine gider.
+
+```toml
+[my-shop]
+protocol = "http"
+routes = [
+  { path = "/api", servers = [{ url = "http://api:8080/" }], rewrite = { add_prefix = "/v2" } },
+  { path = "/items", servers = [{ url = "http://shop:9000/" }], rewrite = { strip_prefix = false, regex = "^/items/([0-9]+)$", replacement = "/item/${1}" } },
+]
+```
+
 ## UDP Session'ları
 
 UDP proxy her client adresi için ayrı bir session açar. Her session'ın upstream sunucuya giden kendi socket'i vardır. Bu yüzden upstream sunucu her client'ı farklı bir kaynak porttan görür. r3v3rs3 upstream sunucunun yanıtlarını dinlediği porttan client'a geri gönderir.

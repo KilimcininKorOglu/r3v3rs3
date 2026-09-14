@@ -6,6 +6,7 @@ use super::filter::{FilterResult, MatchRank, RequestFilter};
 use super::header_rules::CompiledHeaderRules;
 use super::pool::{ConnectionPool, Upstream, UpstreamClients};
 use super::rate_limit::{self, ClientRateLimiter};
+use super::rewrite::Rewrite;
 use crate::proxy::health::{self, GroupKey, Probe};
 use hyper::{Request, Uri};
 use r3v3rs3_api::{
@@ -144,8 +145,8 @@ impl ProxyUpstream {
     }
 
     /// Builds the upstream servers of a route. `None` when the client certificate of the proxy is
-    /// invalid, so the route cannot reach its upstream servers. `base_path` is the path of the
-    /// sticky cookie.
+    /// invalid, so the route cannot reach its upstream servers. `base_path` is the route path,
+    /// which the sticky cookie and the path rewrite use.
     fn route(
         &self,
         key: GroupKey,
@@ -186,6 +187,7 @@ impl ProxyUpstream {
                 .flatten()
                 .map(Arc::new),
             max_body_size: route.max_body_size.unwrap_or(self.max_body_size),
+            rewrite: Arc::new(Rewrite::new(&route.rewrite, base_path)),
         })
     }
 }

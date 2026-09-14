@@ -246,6 +246,8 @@ mod tests {
             Error::InvalidCircuitBreaker,
             Error::InvalidRetryAttempts,
             Error::InvalidStickyCookieName { name: text() },
+            Error::InvalidPathRegex { pattern: text() },
+            Error::InvalidPathPrefix { prefix: text() },
             Error::FailedToHashPassword,
             Error::FailedToFetchLog,
             Error::FailedToInvokeRpc,

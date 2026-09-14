@@ -1,6 +1,7 @@
 use axum::http::Uri;
 use axum::Router;
 use r3v3rs3_api::proxy::{HttpProxy, Route};
+use r3v3rs3_api::rewrite::PathRewrite;
 use url::Url;
 
 mod common;
@@ -74,15 +75,19 @@ async fn the_most_specific_host_and_the_longest_path_win() -> anyhow::Result<()>
     .await
 }
 
-#[tokio::test]
-async fn the_server_path_and_the_request_path_are_joined_once() -> anyhow::Result<()> {
-    // The upstream answers with the path and the query that it received.
-    let echo = serve_http_upstream(Router::new().fallback(|uri: Uri| async move {
+/// Starts an HTTP upstream server that answers with the path and the query that it received.
+async fn start_path_echo() -> anyhow::Result<Url> {
+    serve_http_upstream(Router::new().fallback(|uri: Uri| async move {
         uri.path_and_query()
             .map(|path| path.to_string())
             .unwrap_or_default()
     }))
-    .await?;
+    .await
+}
+
+#[tokio::test]
+async fn the_server_path_and_the_request_path_are_joined_once() -> anyhow::Result<()> {
+    let echo = start_path_echo().await?;
     let port = alloc_tcp_port().await?;
     let routes = vec![
         http_route("/slash", echo.join("base/")?.as_str(), None),
@@ -106,6 +111,69 @@ async fn the_server_path_and_the_request_path_are_joined_once() -> anyhow::Resul
         for (request, expected) in cases {
             assert_eq!(
                 get_name(&port, "join.test", request).await?,
+                expected,
+                "{request}"
+            );
+        }
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn route_paths_are_rewritten_before_the_server_path() -> anyhow::Result<()> {
+    let server = start_path_echo().await?.join("base/")?;
+    let port = alloc_tcp_port().await?;
+    let route = |path: &str, rewrite: PathRewrite| Route {
+        rewrite,
+        ..http_route(path, server.as_str(), None)
+    };
+    let routes = vec![
+        route(
+            "/keep",
+            PathRewrite {
+                strip_prefix: false,
+                ..Default::default()
+            },
+        ),
+        route(
+            "/v1",
+            PathRewrite {
+                add_prefix: "/v2".into(),
+                ..Default::default()
+            },
+        ),
+        route(
+            "/re",
+            PathRewrite {
+                regex: Some("^/items/([0-9]+)$".parse()?),
+                replacement: "/item/${1}".into(),
+                add_prefix: "/p".into(),
+                ..Default::default()
+            },
+        ),
+    ];
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("rewrite", &port)])
+        .proxies(vec![http_proxy_entry(
+            "rewrite",
+            "rewrite",
+            proxy(&[], routes),
+        )])
+        .build();
+
+    with_server(config, |_| async move {
+        let cases = [
+            ("/keep/a?q=1", "/base/keep/a?q=1"),
+            ("/keep", "/base/keep"),
+            ("/v1/users", "/base/v2/users"),
+            ("/v1", "/base/v2"),
+            ("/re/items/42?full=1", "/base/p/item/42?full=1"),
+            ("/re/other", "/base/p/other"),
+        ];
+        for (request, expected) in cases {
+            assert_eq!(
+                get_name(&port, "rewrite.test", request).await?,
                 expected,
                 "{request}"
             );

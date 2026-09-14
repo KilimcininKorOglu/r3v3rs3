@@ -30,6 +30,7 @@ use url::Url;
 
 use super::affinity::{Affinity, CookieSlot};
 use super::body_limit::BodyLimit;
+use super::rewrite::Rewrite;
 use super::rewriter::ResponseRewriter;
 
 type ProxyBody = BoxBody<Bytes, anyhow::Error>;
@@ -201,6 +202,7 @@ pub struct Upstream {
     pub affinity: Option<Arc<Affinity>>,
     /// The largest request body in bytes. `0` has no limit.
     pub max_body_size: u64,
+    pub rewrite: Arc<Rewrite>,
 }
 
 /// The servers to try for a request in order, and the part of the client URI that follows the
@@ -246,7 +248,7 @@ impl Upstream {
         let cookie = sticky.as_ref().map(|sticky| sticky.cookie.clone());
         let target = UpstreamTarget {
             candidates,
-            path_segments,
+            path_segments: self.rewrite.apply(path_segments),
             query: req.uri().query().map(str::to_string),
             sticky,
         };

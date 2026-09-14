@@ -87,6 +87,27 @@ vhosts = ["app.example.com"]
 routes = [{ path = "/", servers = [{ url = "http://app:9000/" }] }]
 ```
 
+## Path Rewrite
+
+By default, r3v3rs3 removes the route path from the request path and adds the rest to the path of the server URL. For example, a route with `path = "/api"` and the server `http://api:8080/v1/` sends `GET /api/users` to `http://api:8080/v1/users`. The `rewrite` table of a route changes the path in this order:
+
+1. `strip_prefix = false` keeps the route path, so the same request goes to `http://api:8080/v1/api/users`.
+2. `regex` replaces its first match in the path with `replacement`. The path starts with `/`. `${1}` or `${name}` inserts a capture group. A path without a match stays unchanged.
+3. `add_prefix` adds a path, such as `/v2`, before the path.
+
+r3v3rs3 keeps the query string. Authentication and the cache use the path of the client request. r3v3rs3 rejects an invalid regex, and an `add_prefix` that does not start with `/` or that contains `?` or `#`.
+
+With the routes below, `GET /api/users` goes to `http://api:8080/v2/users` and `GET /items/42` goes to `http://shop:9000/item/42`.
+
+```toml
+[my-shop]
+protocol = "http"
+routes = [
+  { path = "/api", servers = [{ url = "http://api:8080/" }], rewrite = { add_prefix = "/v2" } },
+  { path = "/items", servers = [{ url = "http://shop:9000/" }], rewrite = { strip_prefix = false, regex = "^/items/([0-9]+)$", replacement = "/item/${1}" } },
+]
+```
+
 ## UDP Sessions
 
 A UDP proxy opens one session for each client address. The session has its own socket to the upstream server, so the upstream server sees a different source port for each client. r3v3rs3 sends the replies of the upstream server back to the client from the listening port.
