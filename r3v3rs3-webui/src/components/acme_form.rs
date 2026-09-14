@@ -28,7 +28,14 @@ pub struct ProviderField {
     pub key: &'static str,
     /// The locale key of the label.
     pub label: &'static str,
-    pub secret: bool,
+    pub kind: FieldKind,
+}
+
+pub enum FieldKind {
+    Text,
+    Secret,
+    /// A select element with these values. Each value is its own label.
+    Select(&'static [&'static str]),
 }
 
 /// A DNS provider of the form. `name` is the `provider` value, and `label` is not translated.
@@ -38,13 +45,35 @@ pub struct DnsProviderInfo {
     pub fields: &'static [ProviderField],
 }
 
-const fn field(key: &'static str, label: &'static str, secret: bool) -> ProviderField {
-    ProviderField { key, label, secret }
+const fn text(key: &'static str, label: &'static str) -> ProviderField {
+    ProviderField {
+        key,
+        label,
+        kind: FieldKind::Text,
+    }
 }
 
-const API_TOKEN: [ProviderField; 1] = [field("api_token", "acme.api_token", true)];
+const fn secret(key: &'static str, label: &'static str) -> ProviderField {
+    ProviderField {
+        key,
+        label,
+        kind: FieldKind::Secret,
+    }
+}
 
-pub static DNS_PROVIDERS: [DnsProviderInfo; 7] = [
+const API_TOKEN: [ProviderField; 1] = [secret("api_token", "acme.api_token")];
+
+const OVH_ENDPOINTS: [&str; 7] = [
+    "ovh-eu",
+    "ovh-ca",
+    "ovh-us",
+    "kimsufi-eu",
+    "kimsufi-ca",
+    "soyoustart-eu",
+    "soyoustart-ca",
+];
+
+pub static DNS_PROVIDERS: [DnsProviderInfo; 8] = [
     DnsProviderInfo {
         name: "cloudflare",
         label: "Cloudflare",
@@ -54,8 +83,8 @@ pub static DNS_PROVIDERS: [DnsProviderInfo; 7] = [
         name: "route53",
         label: "Route 53",
         fields: &[
-            field("access_key_id", "acme.access_key_id", false),
-            field("secret_access_key", "acme.secret_access_key", true),
+            text("access_key_id", "acme.access_key_id"),
+            secret("secret_access_key", "acme.secret_access_key"),
         ],
     },
     DnsProviderInfo {
@@ -74,17 +103,31 @@ pub static DNS_PROVIDERS: [DnsProviderInfo; 7] = [
         fields: &API_TOKEN,
     },
     DnsProviderInfo {
+        name: "ovh",
+        label: "OVHcloud",
+        fields: &[
+            ProviderField {
+                key: "endpoint",
+                label: "acme.api_endpoint",
+                kind: FieldKind::Select(&OVH_ENDPOINTS),
+            },
+            text("application_key", "acme.application_key"),
+            secret("application_secret", "acme.application_secret"),
+            secret("consumer_key", "acme.consumer_key"),
+        ],
+    },
+    DnsProviderInfo {
         name: "porkbun",
         label: "Porkbun",
         fields: &[
-            field("api_key", "acme.api_key", true),
-            field("secret_api_key", "acme.secret_api_key", true),
+            secret("api_key", "acme.api_key"),
+            secret("secret_api_key", "acme.secret_api_key"),
         ],
     },
     DnsProviderInfo {
         name: "vultr",
         label: "Vultr",
-        fields: &[field("api_token", "acme.api_key", true)],
+        fields: &[secret("api_token", "acme.api_key")],
     },
 ];
 
@@ -304,17 +347,37 @@ fn credential_view(
     fields: &UseReducerHandle<AcmeFields>,
     field: &'static ProviderField,
 ) -> Html {
-    let value = fields
-        .credentials
-        .get(field.key)
-        .cloned()
-        .unwrap_or_default();
-    let input_type = if field.secret { "password" } else { "text" };
+    let value = credential(fields, field).to_string();
+    let onchange = on_change(fields, "dns_provider", Setter::Credential(field.key));
+    let input = match field.kind {
+        FieldKind::Select(options) => html! {
+            <select {onchange} class={INPUT_CLASS}>
+                { options.iter().map(|option| html! {
+                    <option selected={value == *option} value={*option}>{*option}</option>
+                }).collect::<Html>() }
+            </select>
+        },
+        FieldKind::Text => html! {
+            <input type="text" autocomplete="off" {value} {onchange} class={INPUT_CLASS} />
+        },
+        FieldKind::Secret => html! {
+            <input type="password" autocomplete="off" {value} {onchange} class={INPUT_CLASS} />
+        },
+    };
     html! {
         <>
             <label class={LABEL_CLASS}>{locale.t(field.label)}</label>
-            <input type={input_type} autocomplete="off" {value} onchange={on_change(fields, "dns_provider", Setter::Credential(field.key))} class={INPUT_CLASS} />
+            { input }
         </>
+    }
+}
+
+/// The value of a credential field. A select without a value has its first option.
+fn credential<'a>(fields: &'a AcmeFields, field: &ProviderField) -> &'a str {
+    match (fields.credentials.get(field.key), &field.kind) {
+        (Some(value), _) => value.trim(),
+        (None, FieldKind::Select(options)) => options.first().copied().unwrap_or_default(),
+        (None, _) => "",
     }
 }
 
@@ -412,8 +475,7 @@ fn dns_provider(fields: &AcmeFields) -> Option<DnsProvider> {
     let mut object = serde_json::Map::new();
     object.insert("provider".into(), provider.name.into());
     for field in provider.fields {
-        let value = fields.credentials.get(field.key).map_or("", |v| v.trim());
-        object.insert(field.key.into(), value.into());
+        object.insert(field.key.into(), credential(fields, field).into());
     }
     serde_json::from_value(object.into()).ok()
 }
@@ -509,10 +571,13 @@ mod tests {
         for info in &DNS_PROVIDERS {
             let mut input = fields("example.com", DNS_01);
             input.dns_provider = info.name.into();
+            // A select field keeps its first option.
             for field in info.fields {
-                input
-                    .credentials
-                    .insert(field.key, format!("{}-value", field.key));
+                if !matches!(field.kind, FieldKind::Select(_)) {
+                    input
+                        .credentials
+                        .insert(field.key, format!("{}-value", field.key));
+                }
             }
             let provider = build(&input, false).unwrap().acme.dns_provider.unwrap();
             assert_eq!(provider.name(), info.name);

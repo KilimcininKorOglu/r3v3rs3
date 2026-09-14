@@ -758,6 +758,7 @@ A system resolver can return cached answers. If the propagation check fails ofte
 | Linode | API Token | A personal access token with read and write access to Domains. |
 | Vultr | API Key | The API key of the account. |
 | Porkbun | API Key, Secret API Key | "API Access" is on for the domain in the Porkbun domain management. |
+| OVHcloud | API Endpoint, Application Key, Application Secret, Consumer Key | A consumer key with the rights `GET /domain/zone`, `POST /domain/zone/*` and `DELETE /domain/zone/*`. The endpoint is `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` or `soyoustart-ca`. r3v3rs3 refreshes the zone after it creates the records and after it deletes them. |
 
 r3v3rs3 is tested against mock servers of these APIs and against the [Pebble](https://github.com/letsencrypt/pebble) test certificate authority. It is not tested against real provider accounts.
 
@@ -786,7 +787,7 @@ key_pkcs8 = "<account private key>"
 directory = "https://acme-v02.api.letsencrypt.org/directory"
 ```
 
-The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr` or `porkbun`. Route 53 uses `access_key_id` and `secret_access_key` instead of `api_token`. Porkbun uses `api_key` and `secret_api_key`. The Vultr API key goes in `api_token`.
+The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `porkbun` or `ovh`. Route 53 uses `access_key_id` and `secret_access_key` instead of `api_token`. Porkbun uses `api_key` and `secret_api_key`. OVHcloud uses `endpoint`, `application_key`, `application_secret` and `consumer_key`. The Vultr API key goes in `api_token`.
 
 # Settings
 

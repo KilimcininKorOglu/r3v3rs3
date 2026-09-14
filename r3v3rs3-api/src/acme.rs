@@ -131,6 +131,41 @@ pub enum KeyedProvider {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         api_url: Option<String>,
     },
+    Ovh {
+        endpoint: OvhEndpoint,
+        application_key: String,
+        application_secret: String,
+        consumer_key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+}
+
+/// The API endpoint of an OVHcloud account, by its name in the OVH API clients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum OvhEndpoint {
+    OvhEu,
+    OvhCa,
+    OvhUs,
+    KimsufiEu,
+    KimsufiCa,
+    SoyoustartEu,
+    SoyoustartCa,
+}
+
+impl OvhEndpoint {
+    pub fn url(self) -> &'static str {
+        match self {
+            Self::OvhEu => "https://eu.api.ovh.com/1.0",
+            Self::OvhCa => "https://ca.api.ovh.com/1.0",
+            Self::OvhUs => "https://api.us.ovhcloud.com/1.0",
+            Self::KimsufiEu => "https://eu.api.kimsufi.com/1.0",
+            Self::KimsufiCa => "https://ca.api.kimsufi.com/1.0",
+            Self::SoyoustartEu => "https://eu.api.soyoustart.com/1.0",
+            Self::SoyoustartCa => "https://ca.api.soyoustart.com/1.0",
+        }
+    }
 }
 
 impl KeyedProvider {
@@ -138,6 +173,7 @@ impl KeyedProvider {
         match self {
             Self::Route53 { .. } => "route53",
             Self::Porkbun { .. } => "porkbun",
+            Self::Ovh { .. } => "ovh",
         }
     }
 
@@ -153,6 +189,12 @@ impl KeyedProvider {
                 secret_api_key,
                 ..
             } => filled(&[api_key, secret_api_key]),
+            Self::Ovh {
+                application_key,
+                application_secret,
+                consumer_key,
+                ..
+            } => filled(&[application_key, application_secret, consumer_key]),
         }
     }
 }
@@ -372,6 +414,13 @@ mod test {
             serde_json::json!({ "provider": "linode", "api_token": "t" }),
             serde_json::json!({ "provider": "vultr", "api_token": "t" }),
             serde_json::json!({ "provider": "porkbun", "api_key": "k", "secret_api_key": "s" }),
+            serde_json::json!({
+                "provider": "ovh",
+                "endpoint": "soyoustart-ca",
+                "application_key": "a",
+                "application_secret": "s",
+                "consumer_key": "c",
+            }),
             serde_json::json!({ "provider": "route53", "access_key_id": "a", "secret_access_key": "s" }),
         ];
         for value in providers {

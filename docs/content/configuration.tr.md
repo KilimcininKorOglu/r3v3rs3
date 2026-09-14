@@ -758,6 +758,7 @@ Sistem resolver'ı cache'teki eski yanıtları döndürebilir. Propagation kontr
 | Linode | API Token | Domains için okuma ve yazma yetkisi olan bir personal access token. |
 | Vultr | API Key | Hesabın API key'i. |
 | Porkbun | API Key, Secret API Key | Porkbun domain yönetiminde domain için "API Access" açık olmalıdır. |
+| OVHcloud | API Endpoint, Application Key, Application Secret, Consumer Key | `GET /domain/zone`, `POST /domain/zone/*` ve `DELETE /domain/zone/*` yetkileri olan bir consumer key. Endpoint `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` veya `soyoustart-ca` olabilir. r3v3rs3, kayıtları oluşturduktan sonra ve sildikten sonra zone'u refresh eder. |
 
 r3v3rs3 bu API'lerin mock sunucularıyla ve [Pebble](https://github.com/letsencrypt/pebble) test sertifika otoritesiyle test edilir. Gerçek provider hesaplarıyla test edilmez.
 
@@ -786,7 +787,7 @@ key_pkcs8 = "<hesabın private key'i>"
 directory = "https://acme-v02.api.letsencrypt.org/directory"
 ```
 
-`dns_provider` altındaki `provider` değeri `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr` veya `porkbun` olabilir. Route 53, `api_token` yerine `access_key_id` ve `secret_access_key` kullanır. Porkbun, `api_key` ve `secret_api_key` kullanır. Vultr API key'i `api_token` alanına yazılır.
+`dns_provider` altındaki `provider` değeri `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `porkbun` veya `ovh` olabilir. Route 53, `api_token` yerine `access_key_id` ve `secret_access_key` kullanır. Porkbun, `api_key` ve `secret_api_key` kullanır. OVHcloud, `endpoint`, `application_key`, `application_secret` ve `consumer_key` kullanır. Vultr API key'i `api_token` alanına yazılır.
 
 # Ayarlar
 

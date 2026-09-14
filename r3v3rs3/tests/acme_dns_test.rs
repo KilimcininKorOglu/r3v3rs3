@@ -3,8 +3,9 @@ use axum::{
     Router,
 };
 use r3v3rs3::certs::dns::{self, DnsClient, TxtName};
-use r3v3rs3_api::acme::{DnsProvider, KeyedProvider, TokenApi, TokenProvider};
+use r3v3rs3_api::acme::{DnsProvider, KeyedProvider, OvhEndpoint, TokenApi, TokenProvider};
 use serde_json::json;
+use sha1::{Digest, Sha1};
 use std::sync::{Arc, Mutex};
 
 mod common;
@@ -16,7 +17,17 @@ struct Call {
     method: String,
     uri: String,
     authorization: String,
+    headers: HeaderMap,
     body: String,
+}
+
+impl Call {
+    fn header(&self, name: &str) -> &str {
+        self.headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+    }
 }
 
 type Calls = Arc<Mutex<Vec<Call>>>;
@@ -38,6 +49,7 @@ async fn start_mock(respond: Respond) -> anyhow::Result<(String, Calls)> {
                         .and_then(|value| value.to_str().ok())
                         .unwrap_or_default()
                         .to_string(),
+                    headers,
                     body,
                 };
                 let response = respond(&call);
@@ -401,6 +413,71 @@ async fn a_porkbun_error_status_fails_without_the_keys() -> anyhow::Result<()> {
     let message = format!("{err:#}");
     assert!(message.contains("Invalid API key."), "{message}");
     assert!(!message.contains("pk-secret"), "{message}");
+    Ok(())
+}
+
+/// The clock of the mock OVH API.
+const OVH_TIME: i64 = 1_700_000_000;
+
+fn ovh(call: &Call) -> (StatusCode, String) {
+    match (call.method.as_str(), call.uri.as_str()) {
+        ("GET", "/auth/time") => ok(&OVH_TIME.to_string()),
+        ("GET", "/domain/zone") => ok(r#"["other.test","example.test"]"#),
+        ("POST", "/domain/zone/example.test/record") if call.body.contains("\"v2\"") => {
+            ok(r#"{"id":502}"#)
+        }
+        ("POST", "/domain/zone/example.test/record") => ok(r#"{"id":501}"#),
+        _ => ok("null"),
+    }
+}
+
+#[tokio::test]
+async fn ovh_signs_each_request_with_the_ovh_clock_and_refreshes_the_zone() -> anyhow::Result<()> {
+    let (url, calls) = start_mock(ovh).await?;
+    let provider = DnsProvider::Keyed(KeyedProvider::Ovh {
+        endpoint: OvhEndpoint::OvhEu,
+        application_key: "app-key".to_string(),
+        application_secret: "app-secret".to_string(),
+        consumer_key: "consumer-key".to_string(),
+        api_url: Some(url.clone()),
+    });
+    let client = dns::client(&provider).await?;
+    let record = client.add_txt(&challenge_name()).await?;
+    client.remove_txt(&record).await?;
+
+    assert_eq!(
+        requests(&calls),
+        vec![
+            "GET /auth/time",
+            "GET /domain/zone",
+            "POST /domain/zone/example.test/record",
+            "POST /domain/zone/example.test/record",
+            "POST /domain/zone/example.test/refresh",
+            "DELETE /domain/zone/example.test/record/501",
+            "DELETE /domain/zone/example.test/record/502",
+            "POST /domain/zone/example.test/refresh",
+        ]
+    );
+    assert_eq!(
+        body(&calls, 2)?,
+        json!({ "fieldType": "TXT", "subDomain": "_acme-challenge.app", "target": "v1", "ttl": 60 })
+    );
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls[0].header("x-ovh-signature"), "");
+    for call in &calls[1..] {
+        assert_eq!(call.header("x-ovh-application"), "app-key");
+        assert_eq!(call.header("x-ovh-consumer"), "consumer-key");
+        let timestamp = call.header("x-ovh-timestamp");
+        // The timestamp follows the clock of the API, not the local clock.
+        let seconds: i64 = timestamp.parse()?;
+        assert!((OVH_TIME..OVH_TIME + 60).contains(&seconds), "{timestamp}");
+        let signed = format!(
+            "app-secret+consumer-key+{}+{url}{}+{}+{timestamp}",
+            call.method, call.uri, call.body
+        );
+        let expected = format!("$1${}", hex::encode(Sha1::digest(signed)));
+        assert_eq!(call.header("x-ovh-signature"), expected);
+    }
     Ok(())
 }
 

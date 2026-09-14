@@ -1,9 +1,13 @@
 {
   "acme.access_key_id": "Access Key ID",
+  "acme.api_endpoint": "API Endpoint",
   "acme.api_key": "API Key",
   "acme.api_token": "API Token",
+  "acme.application_key": "Application Key",
+  "acme.application_secret": "Application Secret",
   "acme.challenge": "Challenge",
   "acme.challenge_hint": "HTTP-01 needs every domain name to reach r3v3rs3 on port 80. TLS-ALPN-01 needs every domain name to reach r3v3rs3 on port 443. DNS-01 publishes TXT records through the API of the DNS provider. A wildcard domain name needs DNS-01.",
+  "acme.consumer_key": "Consumer Key",
   "acme.custom": "Custom",
   "acme.dns_credentials_hint": "r3v3rs3 creates the _acme-challenge TXT records with these credentials and deletes them after the validation. The credentials are stored in acme.toml, and the admin API does not return them.",
   "acme.dns_provider": "DNS Provider",

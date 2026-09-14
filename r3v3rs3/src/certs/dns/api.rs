@@ -108,6 +108,11 @@ impl ApiClient {
             .unwrap_or("")
     }
 
+    /// The full URL of a request path.
+    pub fn url(&self, path: &str) -> String {
+        format!("{}{path}", self.base)
+    }
+
     /// Sends the request and returns the body of a successful response.
     /// The error message holds the method, the path, the status and the start of the body,
     /// never the request headers.
@@ -115,7 +120,7 @@ impl ApiClient {
         let target = format!("{} {}", request.method, request.path);
         let mut builder = Request::builder()
             .method(request.method)
-            .uri(format!("{}{}", self.base, request.path))
+            .uri(self.url(&request.path))
             .header(USER_AGENT, concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")));
         for (name, value) in request.headers {
             builder = builder.header(name, value);

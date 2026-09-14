@@ -5,6 +5,7 @@ mod cloudflare;
 mod digitalocean;
 mod hetzner;
 mod linode;
+mod ovh;
 mod porkbun;
 mod route53;
 mod sigv4;
@@ -76,35 +77,50 @@ trait RecordApi: Send + Sync {
     async fn create(&self, zone: &str, fqdn: &str, value: &str) -> anyhow::Result<String>;
 
     async fn delete(&self, zone: &str, id: &str) -> anyhow::Result<()>;
+
+    /// Applies the created or deleted records of `zone`, for providers that need a separate step.
+    async fn commit(&self, _zone: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 /// A [`DnsClient`] that adds the values of a name one record at a time.
 struct PerValue<T>(T);
+
+impl<T: RecordApi> PerValue<T> {
+    /// Creates a record for every value of `record` and commits the zone.
+    async fn create_all(&self, record: &mut TxtRecord) -> anyhow::Result<()> {
+        for index in 0..record.values.len() {
+            let value = &record.values[index];
+            let id = self.0.create(&record.zone, &record.fqdn, value).await?;
+            record.ids.push(id);
+        }
+        self.0.commit(&record.zone).await
+    }
+}
 
 #[async_trait]
 impl<T: RecordApi> DnsClient for PerValue<T> {
     async fn add_txt(&self, name: &TxtName) -> anyhow::Result<TxtRecord> {
         let zone = self.0.zone(&name.fqdn).await?;
         let mut record = TxtRecord::new(name, zone);
-        for value in &name.values {
-            match self.0.create(&record.zone, &name.fqdn, value).await {
-                Ok(id) => record.ids.push(id),
-                Err(err) => {
-                    if let Err(remove_err) = self.remove_txt(&record).await {
-                        warn!(fqdn = name.fqdn, err = %remove_err, "failed to remove TXT record");
-                    }
-                    return Err(err);
-                }
+        if let Err(err) = self.create_all(&mut record).await {
+            if let Err(remove_err) = self.remove_txt(&record).await {
+                warn!(fqdn = name.fqdn, err = %remove_err, "failed to remove TXT record");
             }
+            return Err(err);
         }
         Ok(record)
     }
 
     async fn remove_txt(&self, record: &TxtRecord) -> anyhow::Result<()> {
+        if record.ids.is_empty() {
+            return Ok(());
+        }
         for id in &record.ids {
             self.0.delete(&record.zone, id).await?;
         }
-        Ok(())
+        self.0.commit(&record.zone).await
     }
 }
 
@@ -163,6 +179,18 @@ fn keyed_client(http: HttpClient, provider: &KeyedProvider) -> anyhow::Result<Bo
             api::ApiClient::new(http, api_url.as_deref(), porkbun::API_URL)?,
             api_key,
             secret_api_key,
+        ))),
+        KeyedProvider::Ovh {
+            endpoint,
+            application_key,
+            application_secret,
+            consumer_key,
+            api_url,
+        } => Box::new(PerValue(ovh::Ovh::new(
+            api::ApiClient::new(http, api_url.as_deref(), endpoint.url())?,
+            application_key,
+            application_secret,
+            consumer_key,
         ))),
     };
     Ok(client)
