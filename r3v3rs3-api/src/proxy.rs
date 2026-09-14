@@ -8,8 +8,8 @@ use crate::policy::{AuthPolicy, IpFilter, RateLimit};
 use crate::upstream::{
     default_connect_timeout, default_session_idle_timeout, default_weight,
     is_default_connect_timeout, is_default_session_idle_timeout, is_default_weight,
-    validate_timeout, validate_weights, CircuitBreaker, HealthCheck, LoadBalancing, UpstreamHealth,
-    UpstreamTimeouts, DEFAULT_WEIGHT,
+    validate_timeout, validate_weights, CircuitBreaker, HealthCheck, LoadBalancing, RetryPolicy,
+    UpstreamHealth, UpstreamTimeouts, DEFAULT_WEIGHT,
 };
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
@@ -63,7 +63,8 @@ impl ProxyKind {
     }
 
     /// Rejects a zero connect timeout, session idle timeout, fail timeout or check timeout, an
-    /// invalid health check path, and a server list in which every server has weight 0.
+    /// invalid health check path, a server list in which every server has weight 0, an invalid
+    /// circuit breaker and invalid retry attempts.
     pub fn validate_upstream(&self) -> Result<(), Error> {
         match self {
             Self::Tcp(tcp) => {
@@ -83,6 +84,11 @@ impl ProxyKind {
                 http.routes.iter().try_for_each(|route| {
                     validate_weights(route.servers.iter().map(|server| server.weight))
                 })?;
+                http.routes
+                    .iter()
+                    .filter_map(|route| route.retry.as_ref())
+                    .chain([&http.retry])
+                    .try_for_each(RetryPolicy::validate)?;
                 http.routes
                     .iter()
                     .filter_map(|route| route.timeouts.as_ref())
@@ -184,6 +190,9 @@ pub struct HttpProxy {
     /// Circuit breaker of the upstream servers in every route of this proxy.
     #[serde(default, skip_serializing_if = "CircuitBreaker::is_default")]
     pub circuit_breaker: CircuitBreaker,
+    /// Default retry policy for every route of this proxy.
+    #[serde(default, skip_serializing_if = "RetryPolicy::is_default")]
+    pub retry: RetryPolicy,
 }
 
 fn upgrade_insecure_default() -> bool {
@@ -272,6 +281,9 @@ pub struct Route {
     /// Replaces the proxy upstream timeouts for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeouts: Option<UpstreamTimeouts>,
+    /// Replaces the proxy retry policy for this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<RetryPolicy>,
 }
 
 fn default_route_path() -> String {

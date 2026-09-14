@@ -8,7 +8,9 @@ use r3v3rs3_api::{
     multiaddr::Multiaddr,
     port::UpstreamServer,
     proxy::{HttpProxy, ProxyKind, ProxyStatus, Route, Server, TcpProxy, UdpProxy},
-    upstream::{CircuitBreaker, HealthCheck, LoadBalancing, UpstreamTimeouts},
+    upstream::{
+        CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, UpstreamTimeouts,
+    },
 };
 use std::{
     collections::HashMap,
@@ -718,6 +720,104 @@ async fn http_circuit_breaker_opens_and_recovers() -> anyhow::Result<()> {
         tokio::time::sleep(Duration::from_millis(1100)).await;
         assert_eq!(get("/").await?, (200, "a".to_string()));
         assert_eq!(get("/").await?, (200, "a".to_string()));
+        Ok(())
+    })
+    .await
+}
+
+/// Starts an HTTP upstream server that answers every request with the request body.
+async fn start_echo_upstream() -> anyhow::Result<Url> {
+    serve_http_upstream(Router::new().fallback(|body: String| async move { body })).await
+}
+
+fn retry(attempts: u8, retry_on: &[RetryOn], replay_body_limit: u64) -> RetryPolicy {
+    RetryPolicy {
+        attempts,
+        retry_on: retry_on.to_vec(),
+        replay_body_limit,
+    }
+}
+
+/// An HTTP proxy for `localhost` with one route to the servers, the first server policy, no
+/// passive health check and the retry policy.
+fn retrying_http(urls: &[Url], retry: RetryPolicy) -> ProxyKind {
+    let servers = urls
+        .iter()
+        .map(|url| Server::new(url.as_str().parse().unwrap()))
+        .collect();
+    http(HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![Route {
+            servers,
+            ..Default::default()
+        }],
+        load_balancing: LoadBalancing::First,
+        health_check: no_passive_check(),
+        retry,
+        ..Default::default()
+    })
+}
+
+#[tokio::test]
+async fn http_retries_503_only_for_idempotent_requests() -> anyhow::Result<()> {
+    let down = start_switchable_upstream("a", Arc::new(AtomicBool::new(true))).await?;
+    let live = start_named_upstream("b").await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let proxy = retrying_http(&[down, live], retry(2, &[RetryOn::Http503], 0));
+    let config = storage(vec![("rtry503", proxy_port.multiaddr_http(), proxy)]);
+
+    with_server(config, |_| async move {
+        assert_eq!(get_body(proxy_port.http_url("/")).await?, "b");
+
+        let client = reqwest::Client::new();
+        let resp = client.post(proxy_port.http_url("/")).send().await?;
+        assert_eq!(resp.status(), 503);
+        assert_eq!(resp.text().await?, "down");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn http_replays_a_body_up_to_the_limit() -> anyhow::Result<()> {
+    let refused = alloc_tcp_port().await?.http_url("/");
+    let echo = start_echo_upstream().await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let proxy = retrying_http(&[refused, echo], retry(2, &[RetryOn::Connect], 8));
+    let config = storage(vec![("replay", proxy_port.multiaddr_http(), proxy)]);
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::new();
+        let small = client
+            .post(proxy_port.http_url("/"))
+            .body("12345678")
+            .send()
+            .await?;
+        assert_eq!(small.status(), 200);
+        assert_eq!(small.text().await?, "12345678");
+
+        let large = client
+            .post(proxy_port.http_url("/"))
+            .body("123456789")
+            .send()
+            .await?;
+        assert_eq!(large.status(), 502);
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn http_one_attempt_disables_retries() -> anyhow::Result<()> {
+    let refused = alloc_tcp_port().await?.http_url("/");
+    let live = start_named_upstream("b").await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let proxy = retrying_http(&[refused, live], retry(1, &[RetryOn::Connect], 0));
+    let config = storage(vec![("noretry", proxy_port.multiaddr_http(), proxy)]);
+
+    with_server(config, |_| async move {
+        let resp = reqwest::get(proxy_port.http_url("/")).await?;
+        assert_eq!(resp.status(), 502);
         Ok(())
     })
     .await

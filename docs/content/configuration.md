@@ -132,7 +132,17 @@ Each server has a `weight` from `0` to `65535` (default `1`). `round_robin` uses
 
 An HTTP proxy selects a server for each request, a TCP proxy for each connection, and a UDP proxy for each client session. The servers of each HTTP route are a separate group.
 
-When the connection to the selected server fails or its connect timeout expires, r3v3rs3 tries the next server once. An HTTP request goes to the next server only when it has no body and is not an upgrade request, because r3v3rs3 cannot send such a request again. Other HTTP errors, such as a request timeout, are not retried.
+When the connection of a TCP proxy to the selected server fails or its connect timeout expires, r3v3rs3 tries the next server once.
+
+An HTTP proxy sends a failed request again to the next server with its retry policy. `retry.attempts` (default `2`) is the number of tries of one request, including the first try, from `1` to `10`. `attempts = 1` disables retries. `retry.retry_on` (default `["connect"]`) lists the failures that start a retry:
+
+- `connect`: the connection fails or the connect timeout expires. The server received nothing, so r3v3rs3 retries every method.
+- `timeout`: the request timeout expires.
+- `http_502`, `http_503`, `http_504`: the server answers with this status.
+
+`timeout`, `http_502`, `http_503` and `http_504` retry only the idempotent methods of RFC 9110: `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT` and `DELETE`. The request timeout applies to each try. A retry goes to the next server in the order of the policy and skips a server whose circuit is open. After the last try, the client receives the last response or error.
+
+A request with a body is retried only when the length of the body is known, e.g. from `Content-Length`, and is at most `retry.replay_body_limit` bytes (default `0`). r3v3rs3 keeps such a body in memory. With `0`, only requests without a body are retried. An upgrade request, such as a WebSocket request, is not retried. A route can replace the retry policy of the proxy with its own `retry`.
 
 The passive health check counts the consecutive failures of each server. A failure is a failed connection or a request without a response. After `health_check.max_fails` failures (default `1`), the server is unhealthy for `health_check.fail_timeout` (default `30s`). An unhealthy server gets new traffic only after the healthy servers. When every server is unhealthy, r3v3rs3 still sends the traffic to them in the same order. A success resets the failure count. `max_fails = 0` disables the check. An HTTP response with an error status such as 500 is a success, because the server answered.
 
@@ -154,6 +164,7 @@ protocol = "http"
 vhosts = ["app.example.com"]
 load_balancing = "round_robin"
 health_check = { max_fails = 3, fail_timeout = "10s", interval = "10s", timeout = "2s", path = "/health" }
+retry = { attempts = 3, retry_on = ["connect", "http_503"], replay_body_limit = 65536 }
 routes = [
   { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/", weight = 3 }] },
 ]

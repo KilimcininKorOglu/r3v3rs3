@@ -76,6 +76,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                     load_balancing: Default::default(),
                     health_check: Default::default(),
                     circuit_breaker: Default::default(),
+                    retry: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -194,6 +195,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                     load_balancing: Default::default(),
                     health_check: Default::default(),
                     circuit_breaker: Default::default(),
+                    retry: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -293,6 +295,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                     load_balancing: Default::default(),
                     health_check: Default::default(),
                     circuit_breaker: Default::default(),
+                    retry: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -407,6 +410,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                     load_balancing: Default::default(),
                     health_check: Default::default(),
                     circuit_breaker: Default::default(),
+                    retry: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()

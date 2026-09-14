@@ -14,6 +14,8 @@ pub const DEFAULT_FAILURE_RATIO: u8 = 50;
 pub const DEFAULT_MIN_REQUESTS: u32 = 20;
 pub const DEFAULT_BREAKER_WINDOW: Duration = Duration::from_secs(10);
 pub const DEFAULT_OPEN_DURATION: Duration = Duration::from_secs(30);
+pub const DEFAULT_RETRY_ATTEMPTS: u8 = 2;
+pub const MAX_RETRY_ATTEMPTS: u8 = 10;
 
 /// Timeouts of the requests that an HTTP proxy sends to its upstream servers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -48,6 +50,86 @@ impl UpstreamTimeouts {
 
     pub fn validate(&self) -> Result<(), Error> {
         validate_timeout(self.connect)
+    }
+}
+
+/// Sends a failed HTTP request again to the next upstream server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RetryPolicy {
+    /// Tries of one request, including the first try, from 1 to 10. `1` disables retries.
+    #[serde(default = "default_retry_attempts")]
+    pub attempts: u8,
+
+    /// Failures that send the request again. `timeout`, `http_502`, `http_503` and `http_504`
+    /// apply only to the idempotent methods `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT` and `DELETE`.
+    #[serde(default = "default_retry_on")]
+    pub retry_on: Vec<RetryOn>,
+
+    /// Largest request body in bytes that r3v3rs3 keeps in memory to send again. The length of
+    /// the body must be known. `0` retries only requests without a body.
+    #[serde(default)]
+    pub replay_body_limit: u64,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            attempts: DEFAULT_RETRY_ATTEMPTS,
+            retry_on: default_retry_on(),
+            replay_body_limit: 0,
+        }
+    }
+}
+
+impl RetryPolicy {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Rejects attempts outside 1 to [`MAX_RETRY_ATTEMPTS`].
+    pub fn validate(&self) -> Result<(), Error> {
+        if (1..=MAX_RETRY_ATTEMPTS).contains(&self.attempts) {
+            Ok(())
+        } else {
+            Err(Error::InvalidRetryAttempts)
+        }
+    }
+}
+
+/// A failure of one try that a [`RetryPolicy`] can retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+pub enum RetryOn {
+    /// The connection fails or the connect timeout expires. The server received nothing.
+    #[serde(rename = "connect")]
+    Connect,
+    /// The request timeout expires.
+    #[serde(rename = "timeout")]
+    Timeout,
+    #[serde(rename = "http_502")]
+    Http502,
+    #[serde(rename = "http_503")]
+    Http503,
+    #[serde(rename = "http_504")]
+    Http504,
+}
+
+impl RetryOn {
+    pub const ALL: [Self; 5] = [
+        Self::Connect,
+        Self::Timeout,
+        Self::Http502,
+        Self::Http503,
+        Self::Http504,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Connect => "connect",
+            Self::Timeout => "timeout",
+            Self::Http502 => "http_502",
+            Self::Http503 => "http_503",
+            Self::Http504 => "http_504",
+        }
     }
 }
 
@@ -287,6 +369,14 @@ pub fn is_default_session_idle_timeout(timeout: &Duration) -> bool {
     *timeout == DEFAULT_SESSION_IDLE_TIMEOUT
 }
 
+fn default_retry_attempts() -> u8 {
+    DEFAULT_RETRY_ATTEMPTS
+}
+
+fn default_retry_on() -> Vec<RetryOn> {
+    vec![RetryOn::Connect]
+}
+
 fn default_failure_ratio() -> u8 {
     DEFAULT_FAILURE_RATIO
 }
@@ -494,6 +584,53 @@ mod tests {
 
         let half_open = serde_json::to_string(&CircuitState::HalfOpen).unwrap();
         assert_eq!(half_open, r#""half_open""#);
+    }
+
+    #[test]
+    fn retry_policies_use_snake_case_names_and_need_one_to_ten_attempts() {
+        use crate::proxy::{Route, Server};
+
+        let json = r#"{"routes":[],"retry":{"attempts":3,"retry_on":["timeout","http_502"],"replay_body_limit":1024}}"#;
+        let http: HttpProxy = serde_json::from_str(json).unwrap();
+        let expected = RetryPolicy {
+            attempts: 3,
+            retry_on: vec![RetryOn::Timeout, RetryOn::Http502],
+            replay_body_limit: 1024,
+        };
+        assert_eq!(http.retry, expected);
+        assert_eq!(RetryPolicy::default().retry_on, [RetryOn::Connect]);
+        let default = serde_json::to_value(HttpProxy::default()).unwrap();
+        assert!(default.get("retry").is_none());
+        for reason in RetryOn::ALL {
+            assert_eq!(serde_json::to_value(reason).unwrap(), reason.as_str());
+        }
+
+        for attempts in [0, MAX_RETRY_ATTEMPTS + 1] {
+            let retry = RetryPolicy {
+                attempts,
+                ..Default::default()
+            };
+            let proxy = HttpProxy {
+                retry: retry.clone(),
+                ..Default::default()
+            };
+            assert!(ProxyKind::Http(Box::new(proxy))
+                .validate_upstream()
+                .is_err());
+
+            let route = Route {
+                servers: vec![Server::new("http://127.0.0.1:9000/".parse().unwrap())],
+                retry: Some(retry),
+                ..Default::default()
+            };
+            let proxy = HttpProxy {
+                routes: vec![route],
+                ..Default::default()
+            };
+            assert!(ProxyKind::Http(Box::new(proxy))
+                .validate_upstream()
+                .is_err());
+        }
     }
 
     #[test]

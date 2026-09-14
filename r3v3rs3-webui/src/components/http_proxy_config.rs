@@ -15,7 +15,8 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
 use r3v3rs3_api::upstream::{
-    CircuitBreaker, HealthCheck, LoadBalancing, UpstreamTimeouts, DEFAULT_WEIGHT,
+    CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, UpstreamTimeouts,
+    DEFAULT_WEIGHT, MAX_RETRY_ATTEMPTS,
 };
 use r3v3rs3_api::vhost::VirtualHost;
 use std::collections::HashMap;
@@ -58,6 +59,7 @@ struct ProxyForm {
     h2c: bool,
     client_cert: Option<ShortId>,
     timeouts: TimeoutsForm,
+    retry: RetryForm,
 }
 
 impl ProxyForm {
@@ -83,6 +85,7 @@ impl ProxyForm {
             h2c: proxy.h2c,
             client_cert: proxy.client_cert,
             timeouts: TimeoutsForm::new(&proxy.timeouts),
+            retry: RetryForm::new(&proxy.retry),
         }
     }
 }
@@ -98,6 +101,23 @@ impl TimeoutsForm {
         Self {
             connect: format_seconds(timeouts.connect),
             request: format_seconds(timeouts.request),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct RetryForm {
+    attempts: String,
+    retry_on: Vec<RetryOn>,
+    replay_body_limit: String,
+}
+
+impl RetryForm {
+    fn new(retry: &RetryPolicy) -> Self {
+        Self {
+            attempts: retry.attempts.to_string(),
+            retry_on: retry.retry_on.clone(),
+            replay_body_limit: retry.replay_body_limit.to_string(),
         }
     }
 }
@@ -330,6 +350,8 @@ struct RouteForm {
     response_headers: String,
     override_timeouts: bool,
     timeouts: TimeoutsForm,
+    override_retry: bool,
+    retry: RetryForm,
 }
 
 impl RouteForm {
@@ -358,6 +380,8 @@ impl RouteForm {
                 .unwrap_or_default(),
             override_timeouts: route.timeouts.is_some(),
             timeouts: TimeoutsForm::new(&route.timeouts.unwrap_or_default()),
+            override_retry: route.retry.is_some(),
+            retry: RetryForm::new(&route.retry.clone().unwrap_or_default()),
         }
     }
 
@@ -377,6 +401,8 @@ impl RouteForm {
             response_headers: String::new(),
             override_timeouts: false,
             timeouts: TimeoutsForm::new(&UpstreamTimeouts::default()),
+            override_retry: false,
+            retry: RetryForm::new(&RetryPolicy::default()),
         }
     }
 }
@@ -509,6 +535,11 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { error_view(errors.get("timeouts")) }
             <p class={HINT_CLASS}>{locale.t("http_form.timeouts_hint")}</p>
 
+            <label class={SECTION_CLASS}>{locale.t("http_form.retries")}</label>
+            { retry_view(locale, &form.retry, state_update(&form, |form, value| form.retry = value)) }
+            { error_view(errors.get("retry")) }
+            <p class={HINT_CLASS}>{locale.t("http_form.retries_hint")}</p>
+
             { upstream_form_view(locale, &upstream, &errors, true) }
 
             { circuit_breaker_view(locale, &circuit_breaker, &errors, "proxy_form.circuit_breaker_hint") }
@@ -544,6 +575,7 @@ fn route_view(
             { route_auth_view(locale, routes, index, route) }
             { route_headers_view(locale, routes, index, route) }
             { route_timeouts_view(locale, routes, index, route) }
+            { route_retry_view(locale, routes, index, route) }
             { error_view(error) }
 
             { list_buttons(routes, index, RouteForm::empty) }
@@ -825,6 +857,102 @@ fn route_timeouts_view(
             }),
         ),
     )
+}
+
+fn route_retry_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| {
+            route.override_retry = value
+        }),
+        route.override_retry,
+        "http_form.override_retry",
+        "http_form.route_retry_hint",
+        retry_view(
+            locale,
+            &route.retry,
+            item_update(routes, index, |route, value| route.retry = value),
+        ),
+    )
+}
+
+/// The attempts, the replay body limit and the failures of a retry policy. Each change emits the
+/// changed form to `onchange`.
+fn retry_view(locale: Locale, form: &RetryForm, onchange: Callback<RetryForm>) -> Html {
+    let update = |apply: fn(&mut RetryForm, &Event)| {
+        let (form, onchange) = (form.clone(), onchange.clone());
+        Callback::from(move |event: Event| {
+            let mut next = form.clone();
+            apply(&mut next, &event);
+            onchange.emit(next);
+        })
+    };
+    html! {
+        <>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("http_form.retry_attempts")}</label>
+                    <input type="number" min="1" max={MAX_RETRY_ATTEMPTS.to_string()} value={form.attempts.clone()} onchange={update(|form, event| form.attempts = text(event))} class={INPUT_CLASS} />
+                </div>
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("http_form.replay_body_limit")}</label>
+                    <input type="number" min="0" value={form.replay_body_limit.clone()} onchange={update(|form, event| form.replay_body_limit = text(event))} class={INPUT_CLASS} />
+                </div>
+            </div>
+            <label class={LABEL_CLASS}>{locale.t("http_form.retry_on")}</label>
+            <div class="flex flex-wrap gap-x-6">
+                { for RetryOn::ALL.into_iter().map(|reason| toggle(
+                    retry_on_input(form, &onchange, reason),
+                    form.retry_on.contains(&reason),
+                    locale.t(retry_on_key(reason)),
+                    "mt-2",
+                )) }
+            </div>
+        </>
+    }
+}
+
+fn retry_on_key(reason: RetryOn) -> &'static str {
+    match reason {
+        RetryOn::Connect => "http_form.retry_on_connect",
+        RetryOn::Timeout => "http_form.retry_on_timeout",
+        RetryOn::Http502 => "http_form.retry_on_http_502",
+        RetryOn::Http503 => "http_form.retry_on_http_503",
+        RetryOn::Http504 => "http_form.retry_on_http_504",
+    }
+}
+
+fn retry_on_input(
+    form: &RetryForm,
+    onchange: &Callback<RetryForm>,
+    reason: RetryOn,
+) -> Callback<Event> {
+    let (form, onchange) = (form.clone(), onchange.clone());
+    Callback::from(move |event: Event| {
+        let mut next = form.clone();
+        next.retry_on = toggled(&form.retry_on, reason, checked(&event));
+        onchange.emit(next);
+    })
+}
+
+/// The failures in the order of [`RetryOn::ALL`], with `reason` added when `on` is true and
+/// removed otherwise.
+fn toggled(current: &[RetryOn], reason: RetryOn, on: bool) -> Vec<RetryOn> {
+    RetryOn::ALL
+        .into_iter()
+        .filter(|value| {
+            if *value == reason {
+                on
+            } else {
+                current.contains(value)
+            }
+        })
+        .collect()
 }
 
 fn timeouts_view(
@@ -1272,6 +1400,7 @@ fn get_proxy(
     let compression = parse_compression(locale, &form.compression, "compression", &mut errors);
     let cache = parse_cache(locale, &form.cache, "cache", &mut errors);
     let timeouts = parse_timeouts(locale, &form.timeouts, "timeouts", &mut errors);
+    let retry = parse_retry(locale, &form.retry, "retry", &mut errors);
 
     if !errors.is_empty() {
         return Err(errors);
@@ -1296,6 +1425,7 @@ fn get_proxy(
         load_balancing,
         health_check,
         circuit_breaker,
+        retry,
     })
 }
 
@@ -1334,6 +1464,34 @@ pub(super) fn parse_seconds(
                 ],
             )
         })
+}
+
+fn parse_retry(
+    locale: Locale,
+    form: &RetryForm,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> RetryPolicy {
+    let attempts = form
+        .attempts
+        .trim()
+        .parse::<u8>()
+        .ok()
+        .filter(|attempts| (1..=MAX_RETRY_ATTEMPTS).contains(attempts))
+        .ok_or_else(|| locale.error_message(&Error::InvalidRetryAttempts));
+    RetryPolicy {
+        attempts: or_error(attempts, key, errors),
+        retry_on: form.retry_on.clone(),
+        replay_body_limit: or_error(
+            parse_size(
+                locale,
+                &form.replay_body_limit,
+                "http_form.replay_body_limit_name",
+            ),
+            key,
+            errors,
+        ),
+    }
 }
 
 fn parse_timeouts(
@@ -1609,6 +1767,9 @@ fn parse_route(
     let timeouts = route
         .override_timeouts
         .then(|| parse_timeouts(locale, &route.timeouts, key, errors));
+    let retry = route
+        .override_retry
+        .then(|| parse_retry(locale, &route.retry, key, errors));
     (!servers.is_empty()).then(|| Route {
         path: route.path.clone(),
         servers,
@@ -1617,6 +1778,7 @@ fn parse_route(
         auth,
         headers,
         timeouts,
+        retry,
     })
 }
 
@@ -1679,6 +1841,47 @@ mod tests {
         };
         parse_route(Locale::En, &invalid, "routes_0", &mut errors);
         assert!(errors.contains_key("routes_0"));
+    }
+
+    #[test]
+    fn route_retry_round_trips_and_reports_invalid_attempts() {
+        let retry = RetryPolicy {
+            attempts: 3,
+            retry_on: vec![RetryOn::Connect, RetryOn::Http503],
+            replay_body_limit: 4096,
+        };
+        let route = Route {
+            servers: vec![Server::new("http://127.0.0.1:9000/".parse().unwrap())],
+            retry: Some(retry.clone()),
+            ..Default::default()
+        };
+        let form = RouteForm::new(&route);
+        let mut errors = HashMap::new();
+        assert_eq!(
+            parse_route(Locale::En, &form, "routes_0", &mut errors),
+            Some(route)
+        );
+        assert!(errors.is_empty());
+
+        assert_eq!(
+            toggled(&retry.retry_on, RetryOn::Timeout, true),
+            [RetryOn::Connect, RetryOn::Timeout, RetryOn::Http503]
+        );
+        assert_eq!(
+            toggled(&retry.retry_on, RetryOn::Connect, false),
+            [RetryOn::Http503]
+        );
+
+        let invalid = RouteForm {
+            retry: RetryForm {
+                attempts: "11".into(),
+                ..form.retry.clone()
+            },
+            ..form
+        };
+        parse_route(Locale::Tr, &invalid, "routes_0", &mut errors);
+        let expected = Locale::Tr.error_message(&Error::InvalidRetryAttempts);
+        assert_eq!(errors.get("routes_0"), Some(&expected));
     }
 
     #[test]

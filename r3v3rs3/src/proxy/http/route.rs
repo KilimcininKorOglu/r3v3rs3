@@ -120,6 +120,7 @@ struct ProxyUpstream {
     load_balancing: LoadBalancing,
     health_check: HealthCheck,
     circuit_breaker: r3v3rs3_api::upstream::CircuitBreaker,
+    retry: r3v3rs3_api::upstream::RetryPolicy,
 }
 
 impl ProxyUpstream {
@@ -130,6 +131,7 @@ impl ProxyUpstream {
             load_balancing: http.load_balancing,
             health_check: http.health_check.clone(),
             circuit_breaker: http.circuit_breaker,
+            retry: http.retry.clone(),
         }
     }
 
@@ -166,6 +168,7 @@ impl ProxyUpstream {
             request_timeout: timeouts.request,
             servers: route.servers.clone().into(),
             group,
+            retry: route.retry.clone().unwrap_or_else(|| self.retry.clone()),
         })
     }
 }

@@ -244,6 +244,7 @@ mod tests {
             Error::InvalidHealthCheckPath { path: text() },
             Error::AllServersDrained,
             Error::InvalidCircuitBreaker,
+            Error::InvalidRetryAttempts,
             Error::FailedToHashPassword,
             Error::FailedToFetchLog,
             Error::FailedToInvokeRpc,

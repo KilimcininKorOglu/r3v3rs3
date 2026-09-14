@@ -132,7 +132,17 @@ Her sunucunun `0` ile `65535` arasında bir `weight` değeri vardır (varsayıla
 
 HTTP proxy her request için, TCP proxy her bağlantı için, UDP proxy her client session'ı için bir sunucu seçer. Her HTTP route'unun sunucuları ayrı bir gruptur.
 
-Seçilen sunucuya bağlantı kurulamazsa veya connect timeout dolarsa r3v3rs3 bir kez sıradaki sunucuyu dener. HTTP request'i yalnız body'si yoksa ve upgrade request'i değilse sıradaki sunucuya gider, çünkü r3v3rs3 diğer request'leri yeniden gönderemez. Request timeout gibi diğer HTTP hatalarında tekrar deneme yapılmaz.
+TCP proxy seçilen sunucuya bağlanamazsa veya connect timeout dolarsa r3v3rs3 bir kez sıradaki sunucuyu dener.
+
+HTTP proxy, başarısız request'i retry policy'sine göre sıradaki sunucuya yeniden gönderir. `retry.attempts` (varsayılan `2`), bir request'in ilk deneme dahil en fazla kaç kez gönderileceğini belirler ve `1` ile `10` arasında olmalıdır. `attempts = 1` retry'ı kapatır. `retry.retry_on` (varsayılan `["connect"]`) retry başlatan hataları listeler:
+
+- `connect`: bağlantı kurulamaz veya connect timeout dolar. Sunucuya hiçbir şey ulaşmadığı için r3v3rs3 her method'u retry eder.
+- `timeout`: request timeout dolar.
+- `http_502`, `http_503`, `http_504`: sunucu bu status ile yanıt verir.
+
+`timeout`, `http_502`, `http_503` ve `http_504` yalnız RFC 9110'daki idempotent method'ları retry eder: `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT` ve `DELETE`. Request timeout her denemeye ayrı uygulanır. Retry, policy sırasındaki sıradaki sunucuya gider ve circuit'i açık sunucuyu atlar. Son denemeden sonra client son response'u veya hatayı alır.
+
+Body'si olan request yalnız body uzunluğu biliniyorsa (örneğin `Content-Length` ile) ve `retry.replay_body_limit` (varsayılan `0`) byte değerini aşmıyorsa retry edilir. r3v3rs3 bu body'yi memory'de tutar. Değer `0` ise yalnız body'si olmayan request'ler retry edilir. WebSocket gibi upgrade request'leri retry edilmez. Bir route kendi `retry` ayarıyla proxy'nin retry policy'sini değiştirebilir.
 
 Pasif health check her sunucunun art arda aldığı hataları sayar. Hata, kurulamayan bir bağlantı veya response gelmeyen bir request'tir. `health_check.max_fails` (varsayılan `1`) kadar hatadan sonra sunucu `health_check.fail_timeout` (varsayılan `30s`) süresince sağlıksız sayılır. Sağlıksız sunucu yeni trafiği yalnız sağlıklı sunuculardan sonra alır. Bütün sunucular sağlıksızsa r3v3rs3 trafiği aynı sırayla yine onlara gönderir. Başarılı bir deneme hata sayısını sıfırlar. `max_fails = 0` kontrolü kapatır. 500 gibi hata status'lu bir HTTP response başarılı sayılır, çünkü sunucu yanıt vermiştir.
 
@@ -154,6 +164,7 @@ protocol = "http"
 vhosts = ["app.example.com"]
 load_balancing = "round_robin"
 health_check = { max_fails = 3, fail_timeout = "10s", interval = "10s", timeout = "2s", path = "/health" }
+retry = { attempts = 3, retry_on = ["connect", "http_503"], replay_body_limit = 65536 }
 routes = [
   { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/", weight = 3 }] },
 ]

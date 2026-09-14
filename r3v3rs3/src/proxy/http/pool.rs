@@ -4,17 +4,18 @@ use crate::proxy::http::{hyper_tls::client::HttpsConnector, HTTP2_MAX_FRAME_SIZE
 use crate::proxy::tls::upstream_client_config;
 use crate::server::cert_list::CertList;
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{combinators::BoxBody, BodyExt, Full, Limited};
 use hyper::{
     body::Body,
-    header::{HeaderValue, HOST, UPGRADE},
+    header::{HeaderValue, CONTENT_LENGTH, HOST, UPGRADE},
     http::uri::Scheme,
-    Request, Response, StatusCode, Uri,
+    Method, Request, Response, StatusCode, Uri,
 };
 use hyper_util::{
     client::legacy::{connect::HttpConnector, Client},
     rt::{TokioExecutor, TokioIo},
 };
+use r3v3rs3_api::upstream::{RetryOn, RetryPolicy};
 use r3v3rs3_api::{error::Error, id::ShortId, proxy::Server};
 use std::collections::HashMap;
 use std::future::Future;
@@ -192,6 +193,7 @@ pub struct Upstream {
     pub request_timeout: Duration,
     pub servers: Arc<[Server]>,
     pub group: Arc<UpstreamGroup>,
+    pub retry: RetryPolicy,
 }
 
 /// The servers to try for a request in order, and the part of the client URI that follows the
@@ -242,30 +244,58 @@ impl Upstream {
         *req.uri_mut() = uri;
     }
 
-    /// Sends the request to the selected server. When the connection to the server fails and the
-    /// request has no body, the request goes once to the next server. When the circuit of every
-    /// server blocks the request, the client receives 503.
+    /// Sends the request to the selected server. A failure that the retry policy names sends the
+    /// request again to the next server, until the policy has no attempts left. When the circuit
+    /// of every server blocks the request, the client receives 503.
     pub async fn request(
         &self,
-        mut req: Request<ProxyBody>,
+        req: Request<ProxyBody>,
     ) -> Result<Response<ProxyBody>, anyhow::Error> {
         let Some(target) = req.extensions().get::<UpstreamTarget>().cloned() else {
             return finish(self.pool.send(req, self.request_timeout).await);
         };
-        let copy = replayable_copy(&req);
+        match Replay::prepare(req, self.retry.replay_body_limit).await {
+            Ok(replay) => finish(self.send_with_retries(replay, &target).await),
+            Err(err) => finish(Err(err)),
+        }
+    }
+
+    async fn send_with_retries(
+        &self,
+        mut replay: Replay,
+        target: &UpstreamTarget,
+    ) -> Result<Response<ProxyBody>, SendError> {
         let mut candidates = target.candidates.iter().copied();
-        let Some(permit) = self.claim(&mut req, &target, &mut candidates) else {
-            return finish(Err(SendError::other(ProxyError::NoUpstreamAvailable)));
-        };
-        let mut result = self.attempt(req, permit).await;
-        let connect_failed = matches!(&result, Err(err) if err.connect);
-        if let (true, Some(mut req)) = (connect_failed, copy) {
-            if let Some(permit) = self.claim(&mut req, &target, &mut candidates) {
-                warn!(uri = %req.uri(), "retrying the request on the next upstream server");
-                result = self.attempt(req, permit).await;
+        let mut result = Err(SendError::other(ProxyError::NoUpstreamAvailable));
+        for attempt in 1..=self.retry.attempts.max(1) {
+            let Some(mut req) = replay.next() else {
+                break;
+            };
+            let Some(permit) = self.claim(&mut req, target, &mut candidates) else {
+                break;
+            };
+            if attempt > 1 {
+                warn!(uri = %req.uri(), attempt, "retrying the request on the next upstream server");
+            }
+            result = self.attempt(req, permit).await;
+            if !self.should_retry(&result, &replay.method) {
+                break;
             }
         }
-        finish(result)
+        result
+    }
+
+    /// True when the policy names the failure. A failure after the server received the request
+    /// retries only an idempotent method.
+    fn should_retry(
+        &self,
+        result: &Result<Response<ProxyBody>, SendError>,
+        method: &Method,
+    ) -> bool {
+        retry_reason(result).is_some_and(|reason| {
+            self.retry.retry_on.contains(&reason)
+                && (reason == RetryOn::Connect || is_idempotent(method))
+        })
     }
 
     /// Takes the next candidate whose circuit lets the request through, and points the request at
@@ -299,6 +329,32 @@ impl Upstream {
         }
         result
     }
+}
+
+/// The failure of one try that a retry policy can name.
+fn retry_reason(result: &Result<Response<ProxyBody>, SendError>) -> Option<RetryOn> {
+    match result {
+        Err(err) if err.connect => Some(RetryOn::Connect),
+        Err(err) => matches!(
+            err.error.downcast_ref::<ProxyError>(),
+            Some(ProxyError::UpstreamTimeout)
+        )
+        .then_some(RetryOn::Timeout),
+        Ok(res) => match res.status() {
+            StatusCode::BAD_GATEWAY => Some(RetryOn::Http502),
+            StatusCode::SERVICE_UNAVAILABLE => Some(RetryOn::Http503),
+            StatusCode::GATEWAY_TIMEOUT => Some(RetryOn::Http504),
+            _ => None,
+        },
+    }
+}
+
+/// The idempotent methods of RFC 9110 section 9.2.2.
+fn is_idempotent(method: &Method) -> bool {
+    matches!(
+        *method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE | Method::PUT | Method::DELETE
+    )
 }
 
 /// A 502, 503 or 504 response, which the circuit breaker counts as a failure.
@@ -348,19 +404,79 @@ fn finish(
     ResponseRewriter::default().map_response(result)
 }
 
-/// Copies a request without a body, so that it can go to another server. Returns `None` for a
-/// request with a body and for an upgrade request, because they cannot be sent again.
-fn replayable_copy(req: &Request<ProxyBody>) -> Option<Request<ProxyBody>> {
-    if req.body().size_hint().exact() != Some(0) || req.headers().contains_key(UPGRADE) {
-        return None;
+/// The request of the first try, and a copy of the request for the retries.
+struct Replay {
+    first: Option<Request<ProxyBody>>,
+    copy: Option<Request<Bytes>>,
+    method: Method,
+}
+
+impl Replay {
+    /// Keeps a copy of a request without a body, and of a request whose body length is known and
+    /// at most `limit` bytes. The body of such a request is read into memory. An upgrade request
+    /// and a request with a longer or an unknown body length have no copy.
+    async fn prepare(req: Request<ProxyBody>, limit: u64) -> Result<Self, SendError> {
+        let method = req.method().clone();
+        let length = body_length(&req).filter(|length| *length <= limit);
+        if req.headers().contains_key(UPGRADE) || length.is_none() {
+            return Ok(Self {
+                first: Some(req),
+                copy: None,
+                method,
+            });
+        }
+        if req.body().size_hint().exact() == Some(0) {
+            let copy = copy_request(&req, Bytes::new());
+            return Ok(Self {
+                first: Some(req),
+                copy: Some(copy),
+                method,
+            });
+        }
+        let (parts, body) = req.into_parts();
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        let body = Limited::new(body, limit)
+            .collect()
+            .await
+            .map_err(|err| SendError::other(anyhow::anyhow!(err)))?
+            .to_bytes();
+        let copy = Request::from_parts(parts, body);
+        Ok(Self {
+            first: Some(copy_request(&copy, full_body(copy.body().clone()))),
+            copy: Some(copy),
+            method,
+        })
     }
-    let mut copy = Request::new(empty_body());
+
+    /// Returns the request of the first try, then a new copy for each retry.
+    fn next(&mut self) -> Option<Request<ProxyBody>> {
+        self.first.take().or_else(|| {
+            let copy = self.copy.as_ref()?;
+            Some(copy_request(copy, full_body(copy.body().clone())))
+        })
+    }
+}
+
+/// The body length from the body, or from the `Content-Length` header when the body does not
+/// know it, e.g. on HTTP/3.
+fn body_length<B: Body>(req: &Request<B>) -> Option<u64> {
+    req.body().size_hint().exact().or_else(|| {
+        req.headers()
+            .get(CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse().ok())
+    })
+}
+
+/// Copies the method, the URI, the version, the headers and the extensions of a request.
+fn copy_request<B, C>(req: &Request<B>, body: C) -> Request<C> {
+    let mut copy = Request::new(body);
     *copy.method_mut() = req.method().clone();
     *copy.uri_mut() = req.uri().clone();
     *copy.version_mut() = req.version();
     *copy.headers_mut() = req.headers().clone();
     *copy.extensions_mut() = req.extensions().clone();
-    Some(copy)
+    copy
 }
 
 type UpstreamClient = (Arc<ClientConfig>, Option<Arc<ConnectionPool>>);
@@ -435,7 +551,11 @@ fn build_client(
 }
 
 fn empty_body() -> ProxyBody {
-    BoxBody::new(Full::new(Bytes::new()).map_err(Into::into))
+    full_body(Bytes::new())
+}
+
+fn full_body(data: Bytes) -> ProxyBody {
+    BoxBody::new(Full::new(data).map_err(Into::into))
 }
 
 async fn upgrade_connection(req: Request<ProxyBody>, res: Response<ProxyBody>) {
@@ -499,27 +619,79 @@ mod tests {
         );
     }
 
-    #[test]
-    fn only_a_request_without_a_body_can_be_sent_again() {
+    async fn prepared(req: Request<ProxyBody>, limit: u64) -> Replay {
+        match Replay::prepare(req, limit).await {
+            Ok(replay) => replay,
+            Err(err) => panic!("{}", err.error),
+        }
+    }
+
+    async fn body_text(req: Request<ProxyBody>) -> String {
+        let body = req.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(body.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_replay_copies_a_request_without_a_body_or_with_a_small_body() {
         let mut get = Request::get("http://127.0.0.1:9000/a?b=c")
             .header("x-test", "1")
             .body(empty_body())
             .unwrap();
         get.extensions_mut().insert(UpstreamH2c);
-        let copy = replayable_copy(&get).unwrap();
-        assert_eq!(copy.method(), get.method());
-        assert_eq!(copy.uri(), get.uri());
-        assert_eq!(copy.headers(), get.headers());
+        let mut replay = prepared(get, 0).await;
+        let first = replay.next().unwrap();
+        let copy = replay.next().unwrap();
+        assert_eq!(copy.method(), first.method());
+        assert_eq!(copy.uri(), first.uri());
+        assert_eq!(copy.headers(), first.headers());
         assert!(copy.extensions().get::<UpstreamH2c>().is_some());
 
-        let body = BoxBody::new(Full::new(Bytes::from("data")).map_err(Into::into));
-        let post = Request::post("http://127.0.0.1:9000/").body(body).unwrap();
-        assert!(replayable_copy(&post).is_none());
+        let data = || full_body(Bytes::from_static(b"data"));
+        let post = Request::post("http://127.0.0.1:9000/")
+            .body(data())
+            .unwrap();
+        let mut replay = prepared(post, 4).await;
+        assert_eq!(body_text(replay.next().unwrap()).await, "data");
+        assert_eq!(body_text(replay.next().unwrap()).await, "data");
+
+        let post = Request::post("http://127.0.0.1:9000/")
+            .body(data())
+            .unwrap();
+        let mut replay = prepared(post, 3).await;
+        assert_eq!(body_text(replay.next().unwrap()).await, "data");
+        assert!(replay.next().is_none());
 
         let upgrade = Request::get("http://127.0.0.1:9000/")
             .header(UPGRADE, "websocket")
             .body(empty_body())
             .unwrap();
-        assert!(replayable_copy(&upgrade).is_none());
+        let mut replay = prepared(upgrade, 1024).await;
+        assert!(replay.next().is_some());
+        assert!(replay.next().is_none());
+    }
+
+    #[test]
+    fn retry_reasons_name_the_failure_of_a_try() {
+        let status = |code: u16| -> Result<Response<ProxyBody>, SendError> {
+            Ok(Response::builder().status(code).body(empty_body()).unwrap())
+        };
+        assert_eq!(retry_reason(&status(502)), Some(RetryOn::Http502));
+        assert_eq!(retry_reason(&status(503)), Some(RetryOn::Http503));
+        assert_eq!(retry_reason(&status(504)), Some(RetryOn::Http504));
+        assert_eq!(retry_reason(&status(500)), None);
+
+        let timeout = SendError::other(ProxyError::UpstreamTimeout);
+        assert_eq!(retry_reason(&Err(timeout)), Some(RetryOn::Timeout));
+        let refused = SendError {
+            error: anyhow::anyhow!("connection refused"),
+            connect: true,
+        };
+        assert_eq!(retry_reason(&Err(refused)), Some(RetryOn::Connect));
+        let reset = SendError::other(anyhow::anyhow!("connection reset"));
+        assert_eq!(retry_reason(&Err(reset)), None);
+
+        assert!(is_idempotent(&Method::PUT));
+        assert!(!is_idempotent(&Method::POST));
+        assert!(!is_idempotent(&Method::PATCH));
     }
 }

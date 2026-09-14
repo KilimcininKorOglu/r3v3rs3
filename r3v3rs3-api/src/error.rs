@@ -161,6 +161,9 @@ pub enum Error {
     #[error("circuit breaker needs a failure ratio from 1 to 100, at least one request, and a window and an open duration above zero")]
     InvalidCircuitBreaker,
 
+    #[error("retry attempts must be from 1 to 10")]
+    InvalidRetryAttempts,
+
     #[error("failed to hash password")]
     FailedToHashPassword,
 
