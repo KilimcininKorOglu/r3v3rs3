@@ -127,8 +127,9 @@ A proxy or an HTTP route with more than one upstream server spreads the traffic 
 - `round_robin` (default) uses the servers in turn.
 - `random` selects a random server.
 - `first` uses the first healthy server. The other servers are backups.
+- `client_ip_hash` sends each client IP address to the same server while that server is healthy. An HTTP proxy uses the resolved client IP (see [Client IP](#client-ip)). When a server is unhealthy, drained or removed, only its own clients move to the other servers.
 
-Each server has a `weight` from `0` to `65535` (default `1`). `round_robin` uses each server as often as its weight and spreads the turns of a server over the cycle, as the smooth weighted round robin of nginx does. For example, weights `3` and `1` send three of every four requests to the first server. `random` selects a server with a chance that is proportional to its weight. `first` ignores the weight. A server with `weight = 0` gets no new traffic, also when every other server is unhealthy, so you can take a server out of service without removing it. Its open TCP connections and UDP sessions stay. At least one server of each proxy or HTTP route must have a weight above `0`.
+Each server has a `weight` from `0` to `65535` (default `1`). `round_robin` uses each server as often as its weight and spreads the turns of a server over the cycle, as the smooth weighted round robin of nginx does. For example, weights `3` and `1` send three of every four requests to the first server. `random` selects a server with a chance that is proportional to its weight. `client_ip_hash` gives each server a share of the client addresses that is proportional to its weight. `first` ignores the weight. A server with `weight = 0` gets no new traffic, also when every other server is unhealthy, so you can take a server out of service without removing it. Its open TCP connections and UDP sessions stay. At least one server of each proxy or HTTP route must have a weight above `0`.
 
 An HTTP proxy selects a server for each request, a TCP proxy for each connection, and a UDP proxy for each client session. The servers of each HTTP route are a separate group.
 
@@ -194,6 +195,30 @@ The passive health check still counts a 5xx response as a success, because the s
 protocol = "http"
 vhosts = ["app.example.com"]
 circuit_breaker = { enabled = true, failure_ratio = 50, min_requests = 20, window = "10s", open_duration = "30s" }
+routes = [
+  { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
+]
+```
+
+## Sticky Sessions
+
+`sticky` keeps each client of an HTTP proxy on one upstream server with a cookie. It is off by default.
+
+- The first response to a client sets the cookie `sticky.name` (default `r3v3rs3_affinity`). Its value is the HMAC-SHA256 signature of the proxy, the route and the server URL, so a client cannot select a server with a forged value. A value that does not match a server of the route is ignored.
+- A request with a valid cookie goes to its server while the server is healthy and its circuit is not open. A server with `weight = 0` keeps its sticky clients, so a drained server finishes the sessions that it has. Otherwise `load_balancing` selects the server, and the response sets a new cookie. A retry to another server also sets a new cookie.
+- r3v3rs3 removes the cookie from the request, so the upstream server does not receive it.
+- The cookie has the `Path` of the route, `HttpOnly` and `SameSite=Lax`. On HTTPS and HTTP/3 it also has `Secure`. `sticky.max_age` sets `Max-Age`. Without `max_age`, the cookie ends with the browser session.
+- The name must be a cookie token of RFC 6265: visible ASCII characters without spaces and separators.
+- r3v3rs3 creates a new signature key at each start. After a restart, the old cookies are invalid, and each client gets a server from `load_balancing` again.
+- A response from the cache does not set the cookie.
+
+A TCP or UDP proxy, and a client that does not keep cookies, can use `load_balancing = "client_ip_hash"` instead.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+sticky = { enabled = true, name = "app_server", max_age = "1h" }
 routes = [
   { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
 ]

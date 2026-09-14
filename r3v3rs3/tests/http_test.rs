@@ -136,6 +136,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                     health_check: Default::default(),
                     circuit_breaker: Default::default(),
                     retry: Default::default(),
+                    sticky: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -295,6 +296,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     health_check: Default::default(),
                     circuit_breaker: Default::default(),
                     retry: Default::default(),
+                    sticky: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -379,6 +381,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     health_check: Default::default(),
                     circuit_breaker: Default::default(),
                     retry: Default::default(),
+                    sticky: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()

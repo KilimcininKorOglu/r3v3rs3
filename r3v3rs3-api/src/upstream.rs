@@ -16,6 +16,7 @@ pub const DEFAULT_BREAKER_WINDOW: Duration = Duration::from_secs(10);
 pub const DEFAULT_OPEN_DURATION: Duration = Duration::from_secs(30);
 pub const DEFAULT_RETRY_ATTEMPTS: u8 = 2;
 pub const MAX_RETRY_ATTEMPTS: u8 = 10;
+pub const DEFAULT_STICKY_COOKIE_NAME: &str = "r3v3rs3_affinity";
 
 /// Timeouts of the requests that an HTTP proxy sends to its upstream servers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -145,16 +146,25 @@ pub enum LoadBalancing {
     Random,
     /// Uses the first healthy server in the list. The other servers are backups.
     First,
+    /// Uses the same server for each client IP address while the servers stay healthy. The share
+    /// of the client addresses of a server is proportional to its weight.
+    ClientIpHash,
 }
 
 impl LoadBalancing {
-    pub const ALL: [Self; 3] = [Self::RoundRobin, Self::Random, Self::First];
+    pub const ALL: [Self; 4] = [
+        Self::RoundRobin,
+        Self::Random,
+        Self::First,
+        Self::ClientIpHash,
+    ];
 
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::RoundRobin => "round_robin",
             Self::Random => "random",
             Self::First => "first",
+            Self::ClientIpHash => "client_ip_hash",
         }
     }
 
@@ -297,6 +307,60 @@ impl CircuitBreaker {
     }
 }
 
+/// Keeps each client of an HTTP proxy on one upstream server with a signed cookie.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct StickyCookie {
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Name of the cookie, a token of RFC 6265.
+    #[serde(default = "default_sticky_cookie_name")]
+    pub name: String,
+
+    /// `Max-Age` of the cookie. Without a value, the cookie ends with the browser session.
+    #[serde(
+        default,
+        with = "humantime_serde",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>, example = "1h")]
+    pub max_age: Option<Duration>,
+}
+
+impl Default for StickyCookie {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            name: default_sticky_cookie_name(),
+            max_age: None,
+        }
+    }
+}
+
+impl StickyCookie {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Rejects a name that is not a cookie token and a zero `Max-Age`.
+    pub fn validate(&self) -> Result<(), Error> {
+        if !is_cookie_token(&self.name) {
+            return Err(Error::InvalidStickyCookieName {
+                name: self.name.clone(),
+            });
+        }
+        self.max_age.map_or(Ok(()), validate_timeout)
+    }
+}
+
+/// A token of RFC 6265: visible ASCII characters without separators.
+fn is_cookie_token(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() && !b"()<>@,;:\\\"/[]?={}".contains(&byte))
+}
+
 /// The circuit of an upstream server.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -375,6 +439,10 @@ fn default_retry_attempts() -> u8 {
 
 fn default_retry_on() -> Vec<RetryOn> {
     vec![RetryOn::Connect]
+}
+
+fn default_sticky_cookie_name() -> String {
+    DEFAULT_STICKY_COOKIE_NAME.to_string()
 }
 
 fn default_failure_ratio() -> u8 {
@@ -631,6 +699,51 @@ mod tests {
                 .validate_upstream()
                 .is_err());
         }
+    }
+
+    #[test]
+    fn sticky_cookies_need_a_token_name_and_a_positive_max_age() {
+        let json = r#"{"routes":[],"load_balancing":"client_ip_hash","sticky":{"enabled":true,"name":"srv","max_age":"1h"}}"#;
+        let http: HttpProxy = serde_json::from_str(json).unwrap();
+        assert_eq!(http.load_balancing, LoadBalancing::ClientIpHash);
+        assert_eq!(
+            http.sticky,
+            StickyCookie {
+                enabled: true,
+                name: "srv".into(),
+                max_age: Some(Duration::from_secs(3600)),
+            }
+        );
+        assert_eq!(serde_json::to_string(&http).unwrap(), json);
+
+        let enabled: StickyCookie = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert_eq!(enabled.name, DEFAULT_STICKY_COOKIE_NAME);
+        assert_eq!(enabled.max_age, None);
+        assert!(enabled.validate().is_ok());
+        let default = serde_json::to_value(HttpProxy::default()).unwrap();
+        assert!(default.get("sticky").is_none());
+
+        for name in ["", "a b", "a;b", "a=b", "çerez"] {
+            let sticky = StickyCookie {
+                name: name.into(),
+                ..Default::default()
+            };
+            let proxy = HttpProxy {
+                sticky,
+                ..Default::default()
+            };
+            assert!(
+                ProxyKind::Http(Box::new(proxy))
+                    .validate_upstream()
+                    .is_err(),
+                "{name}"
+            );
+        }
+        let zero = StickyCookie {
+            max_age: Some(Duration::ZERO),
+            ..Default::default()
+        };
+        assert!(zero.validate().is_err());
     }
 
     #[test]

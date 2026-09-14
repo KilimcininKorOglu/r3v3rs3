@@ -164,6 +164,9 @@ pub enum Error {
     #[error("retry attempts must be from 1 to 10")]
     InvalidRetryAttempts,
 
+    #[error("sticky cookie name must be a cookie token: {name}")]
+    InvalidStickyCookieName { name: String },
+
     #[error("failed to hash password")]
     FailedToHashPassword,
 

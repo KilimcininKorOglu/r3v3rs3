@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
-use hyper::header::{ALT_SVC, CONTENT_TYPE};
+use hyper::header::{ALT_SVC, CONTENT_TYPE, SET_COOKIE};
 use hyper::{body::Body, Response};
 use hyper::{
     header::{FORWARDED, VIA},
@@ -8,8 +8,9 @@ use hyper::{
     HeaderMap,
 };
 use sailfish::TemplateOnce;
-use std::{iter, net::IpAddr, sync::Arc};
+use std::{iter, net::IpAddr, sync::Arc, sync::PoisonError};
 
+use super::affinity::CookieSlot;
 use super::client_ip::{ClientAddr, CLIENT_IP_HEADERS};
 use super::compression::ResponseCompression;
 use super::error::{error_headers, map_error, status_text, ErrorTemplate};
@@ -184,6 +185,9 @@ pub struct ResponseRewriter {
     compression: Option<ResponseCompression>,
     /// Language and theme of the error page.
     preferences: PagePreferences,
+    /// The sticky cookie that the upstream request sets. It is added outside the cache, because
+    /// the cache does not store a response with `Set-Cookie`.
+    sticky_cookie: Option<CookieSlot>,
 }
 
 impl ResponseRewriter {
@@ -208,6 +212,9 @@ impl ResponseRewriter {
                 if let Some((rules, variables)) = &self.header_rules {
                     rules.apply_response(res.headers_mut(), variables);
                 }
+                if let Some(cookie) = self.sticky_cookie_value() {
+                    res.headers_mut().append(SET_COOKIE, cookie);
+                }
                 // Compression runs after the header rules, so a rule can add `no-transform`.
                 let res = res.map(|body| BoxBody::new(body));
                 Ok(match &self.compression {
@@ -217,6 +224,14 @@ impl ResponseRewriter {
             }
             Err(err) => error_response(err, self.preferences),
         }
+    }
+
+    fn sticky_cookie_value(&self) -> Option<HeaderValue> {
+        self.sticky_cookie
+            .as_ref()?
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn alt_svc(&self) -> Option<String> {
@@ -288,6 +303,11 @@ impl ResponseRewriterBuilder {
 
     pub fn preferences(mut self, preferences: PagePreferences) -> Self {
         self.inner.preferences = preferences;
+        self
+    }
+
+    pub fn sticky_cookie(mut self, cookie: Option<CookieSlot>) -> Self {
+        self.inner.sticky_cookie = cookie;
         self
     }
 

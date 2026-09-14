@@ -15,8 +15,8 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
 use r3v3rs3_api::upstream::{
-    CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, UpstreamTimeouts,
-    DEFAULT_WEIGHT, MAX_RETRY_ATTEMPTS,
+    CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, StickyCookie,
+    UpstreamTimeouts, DEFAULT_WEIGHT, MAX_RETRY_ATTEMPTS,
 };
 use r3v3rs3_api::vhost::VirtualHost;
 use std::collections::HashMap;
@@ -60,6 +60,7 @@ struct ProxyForm {
     client_cert: Option<ShortId>,
     timeouts: TimeoutsForm,
     retry: RetryForm,
+    sticky: StickyForm,
 }
 
 impl ProxyForm {
@@ -86,6 +87,7 @@ impl ProxyForm {
             client_cert: proxy.client_cert,
             timeouts: TimeoutsForm::new(&proxy.timeouts),
             retry: RetryForm::new(&proxy.retry),
+            sticky: StickyForm::new(&proxy.sticky),
         }
     }
 }
@@ -118,6 +120,24 @@ impl RetryForm {
             attempts: retry.attempts.to_string(),
             retry_on: retry.retry_on.clone(),
             replay_body_limit: retry.replay_body_limit.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct StickyForm {
+    enabled: bool,
+    name: String,
+    /// `0` is a cookie without `Max-Age`.
+    max_age: String,
+}
+
+impl StickyForm {
+    fn new(sticky: &StickyCookie) -> Self {
+        Self {
+            enabled: sticky.enabled,
+            name: sticky.name.clone(),
+            max_age: sticky.max_age.map_or_else(|| "0".into(), format_seconds),
         }
     }
 }
@@ -539,6 +559,11 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { retry_view(locale, &form.retry, state_update(&form, |form, value| form.retry = value)) }
             { error_view(errors.get("retry")) }
             <p class={HINT_CLASS}>{locale.t("http_form.retries_hint")}</p>
+
+            <label class={SECTION_CLASS}>{locale.t("http_form.sticky_sessions")}</label>
+            { sticky_view(locale, &form) }
+            { error_view(errors.get("sticky")) }
+            <p class={HINT_CLASS}>{locale.t("http_form.sticky_hint")}</p>
 
             { upstream_form_view(locale, &upstream, &errors, true) }
 
@@ -1056,6 +1081,25 @@ fn cache_view(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
     }
 }
 
+fn sticky_view(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
+    html! {
+        <>
+            <div>
+                { toggle(state_input(form, checked, |form, value| form.sticky.enabled = value), form.sticky.enabled, locale.t("http_form.enable_sticky_cookie"), "mt-4") }
+            </div>
+            if form.sticky.enabled {
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+                    <div>
+                        <label class={LABEL_CLASS}>{locale.t("http_form.sticky_cookie_name")}</label>
+                        <input type="text" autocapitalize="off" spellcheck="false" value={form.sticky.name.clone()} onchange={state_input(form, text, |form, value| form.sticky.name = value)} class={INPUT_CLASS} />
+                    </div>
+                    <div>{ seconds_input(locale.t("http_form.sticky_max_age"), &form.sticky.max_age, 0, state_input(form, text, |form, value| form.sticky.max_age = value)) }</div>
+                </div>
+            }
+        </>
+    }
+}
+
 /// Adds the algorithm to the end of the preference order, or removes it.
 fn algorithm_input(
     form: &UseStateHandle<ProxyForm>,
@@ -1401,6 +1445,7 @@ fn get_proxy(
     let cache = parse_cache(locale, &form.cache, "cache", &mut errors);
     let timeouts = parse_timeouts(locale, &form.timeouts, "timeouts", &mut errors);
     let retry = parse_retry(locale, &form.retry, "retry", &mut errors);
+    let sticky = parse_sticky(locale, &form.sticky, "sticky", &mut errors);
 
     if !errors.is_empty() {
         return Err(errors);
@@ -1426,6 +1471,7 @@ fn get_proxy(
         health_check,
         circuit_breaker,
         retry,
+        sticky,
     })
 }
 
@@ -1492,6 +1538,31 @@ fn parse_retry(
             errors,
         ),
     }
+}
+
+/// Reads the sticky cookie. A `Max-Age` of 0 seconds is a cookie without `Max-Age`.
+fn parse_sticky(
+    locale: Locale,
+    form: &StickyForm,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> StickyCookie {
+    let max_age = or_error(
+        parse_seconds(locale, &form.max_age, "http_form.sticky_max_age_name", 0),
+        key,
+        errors,
+    );
+    let sticky = StickyCookie {
+        enabled: form.enabled,
+        name: form.name.trim().to_string(),
+        max_age: (!max_age.is_zero()).then_some(max_age),
+    };
+    if let Err(err) = sticky.validate() {
+        errors
+            .entry(key.to_string())
+            .or_insert_with(|| locale.error_message(&err));
+    }
+    sticky
 }
 
 fn parse_timeouts(
@@ -1882,6 +1953,39 @@ mod tests {
         parse_route(Locale::Tr, &invalid, "routes_0", &mut errors);
         let expected = Locale::Tr.error_message(&Error::InvalidRetryAttempts);
         assert_eq!(errors.get("routes_0"), Some(&expected));
+    }
+
+    #[test]
+    fn sticky_form_round_trips_and_reports_an_invalid_name() {
+        let sticky = StickyCookie {
+            enabled: true,
+            name: "srv".into(),
+            max_age: Some(Duration::from_secs(3600)),
+        };
+        let form = StickyForm::new(&sticky);
+        let mut errors = HashMap::new();
+        assert_eq!(
+            parse_sticky(Locale::En, &form, "sticky", &mut errors),
+            sticky
+        );
+        assert!(errors.is_empty());
+
+        let session = StickyForm {
+            max_age: "0".into(),
+            ..form.clone()
+        };
+        let parsed = parse_sticky(Locale::En, &session, "sticky", &mut errors);
+        assert_eq!(parsed.max_age, None);
+        assert_eq!(StickyForm::new(&parsed).max_age, "0");
+
+        let invalid = StickyForm {
+            name: "a b".into(),
+            ..form
+        };
+        parse_sticky(Locale::Tr, &invalid, "sticky", &mut errors);
+        let expected =
+            Locale::Tr.error_message(&Error::InvalidStickyCookieName { name: "a b".into() });
+        assert_eq!(errors.get("sticky"), Some(&expected));
     }
 
     #[test]

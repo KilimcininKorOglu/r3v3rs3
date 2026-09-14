@@ -53,10 +53,12 @@ use tokio::{
 use tokio_rustls::{rustls::pki_types::ServerName, TlsAcceptor};
 use tracing::{debug, error, info, span, Instrument, Level, Span};
 
+mod affinity;
 mod auth;
 pub(crate) mod cache;
 pub(crate) mod client_ip;
 mod compression;
+mod cookie;
 mod error;
 mod filter;
 mod header_rules;
@@ -641,7 +643,9 @@ where
         }
     };
 
-    upstream.select(&mut req, res.path_segments);
+    let secure = info.proto != "http";
+    let sticky_cookie = upstream.select(&mut req, res.path_segments, client.ip, secure);
+    let response_rewriter = response_rewriter.sticky_cookie(sticky_cookie);
     if route.h2c {
         req.extensions_mut().insert(UpstreamH2c);
     }

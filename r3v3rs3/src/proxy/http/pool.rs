@@ -19,14 +19,16 @@ use r3v3rs3_api::upstream::{RetryOn, RetryPolicy};
 use r3v3rs3_api::{error::Error, id::ShortId, proxy::Server};
 use std::collections::HashMap;
 use std::future::Future;
+use std::net::IpAddr;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 use std::{fmt, io};
 use tokio_rustls::rustls::ClientConfig;
 use tracing::{error, warn};
 use url::Url;
 
+use super::affinity::{Affinity, CookieSlot};
 use super::rewriter::ResponseRewriter;
 
 type ProxyBody = BoxBody<Bytes, anyhow::Error>;
@@ -194,6 +196,8 @@ pub struct Upstream {
     pub servers: Arc<[Server]>,
     pub group: Arc<UpstreamGroup>,
     pub retry: RetryPolicy,
+    /// `None` when the route has no sticky sessions.
+    pub affinity: Option<Arc<Affinity>>,
 }
 
 /// The servers to try for a request in order, and the part of the client URI that follows the
@@ -203,24 +207,89 @@ struct UpstreamTarget {
     candidates: Vec<usize>,
     path_segments: Vec<String>,
     query: Option<String>,
+    sticky: Option<StickyTarget>,
+}
+
+/// The sticky session of a request.
+#[derive(Debug, Clone)]
+struct StickyTarget {
+    /// The server that the cookie of the request names, when that server can take the request.
+    pinned: Option<usize>,
+    /// Adds `Secure` to the cookie.
+    secure: bool,
+    cookie: CookieSlot,
 }
 
 impl Upstream {
     /// Selects the upstream server of the request, and sets the request URI and the `Host` header
-    /// for that server. A route without a server leaves the request unchanged.
-    pub fn select<B>(&self, req: &mut Request<B>, path_segments: Vec<String>) {
+    /// for that server. A route without a server leaves the request unchanged. `client` is the
+    /// IP address of the client, and `secure` is true for a TLS connection. Returns the slot of
+    /// the sticky cookie of the response when the route has sticky sessions.
+    pub fn select<B>(
+        &self,
+        req: &mut Request<B>,
+        path_segments: Vec<String>,
+        client: IpAddr,
+        secure: bool,
+    ) -> Option<CookieSlot> {
         if self.servers.is_empty() {
-            return;
+            return None;
         }
+        let mut candidates = self.group.candidates(client);
+        let sticky = self
+            .affinity
+            .as_ref()
+            .map(|affinity| self.pin(affinity, req, &mut candidates, secure));
+        let cookie = sticky.as_ref().map(|sticky| sticky.cookie.clone());
         let target = UpstreamTarget {
-            candidates: self.group.candidates(),
+            candidates,
             path_segments,
             query: req.uri().query().map(str::to_string),
+            sticky,
         };
         if let Some(&first) = target.candidates.first() {
             self.apply(req, first, &target);
         }
         req.extensions_mut().insert(target);
+        cookie
+    }
+
+    /// Moves the server of the sticky cookie to the front of the candidates, and removes the
+    /// cookie from the request.
+    fn pin<B>(
+        &self,
+        affinity: &Affinity,
+        req: &mut Request<B>,
+        candidates: &mut Vec<usize>,
+        secure: bool,
+    ) -> StickyTarget {
+        let pinned = affinity
+            .pinned(req.headers())
+            .filter(|&index| self.group.is_pinnable(index));
+        affinity.strip(req.headers_mut());
+        if let Some(index) = pinned {
+            candidates.retain(|&candidate| candidate != index);
+            candidates.insert(0, index);
+        }
+        StickyTarget {
+            pinned,
+            secure,
+            cookie: CookieSlot::default(),
+        }
+    }
+
+    /// Sets the sticky cookie of the response to the server that answered. A client that keeps
+    /// its server gets no new cookie.
+    fn remember(&self, target: &UpstreamTarget, index: usize) {
+        let (Some(affinity), Some(sticky)) = (&self.affinity, &target.sticky) else {
+            return;
+        };
+        let cookie = if sticky.pinned == Some(index) {
+            None
+        } else {
+            affinity.set_cookie(index, sticky.secure)
+        };
+        *sticky.cookie.lock().unwrap_or_else(PoisonError::into_inner) = cookie;
     }
 
     fn apply<B>(&self, req: &mut Request<B>, index: usize, target: &UpstreamTarget) {
@@ -277,7 +346,11 @@ impl Upstream {
             if attempt > 1 {
                 warn!(uri = %req.uri(), attempt, "retrying the request on the next upstream server");
             }
+            let index = permit.index();
             result = self.attempt(req, permit).await;
+            if result.is_ok() {
+                self.remember(target, index);
+            }
             if !self.should_retry(&result, &replay.method) {
                 break;
             }

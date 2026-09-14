@@ -174,15 +174,17 @@ impl TcpUpstream {
     }
 
     /// Connects to the selected server. When the connection fails, it connects once to the next
-    /// server. A server whose circuit blocks the connection is skipped.
+    /// server. A server whose circuit blocks the connection is skipped. `client` is the IP address
+    /// that the client IP hash uses.
     async fn connect(
         &self,
         resolver: &Resolver,
+        client: std::net::IpAddr,
     ) -> anyhow::Result<(SocketAddr, Box<dyn IoStream>)> {
         let mut result = Err(anyhow::anyhow!("the proxy has no upstream server"));
         let permits = self
             .group
-            .candidates()
+            .candidates(client)
             .into_iter()
             .filter_map(|index| self.group.acquire(index));
         for permit in permits.take(2) {
@@ -229,7 +231,7 @@ async fn start(
         }
     });
 
-    let (target, mut out) = upstream.connect(&resolver).await?;
+    let (target, mut out) = upstream.connect(&resolver, remote.ip()).await?;
     info!(target: "r3v3rs3::access_log", remote = %remote, %local, %target);
 
     let mut stream: Box<dyn IoStream> = Box::new(server_stream);

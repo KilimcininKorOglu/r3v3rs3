@@ -245,6 +245,7 @@ mod tests {
             Error::AllServersDrained,
             Error::InvalidCircuitBreaker,
             Error::InvalidRetryAttempts,
+            Error::InvalidStickyCookieName { name: text() },
             Error::FailedToHashPassword,
             Error::FailedToFetchLog,
             Error::FailedToInvokeRpc,

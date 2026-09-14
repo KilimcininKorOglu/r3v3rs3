@@ -9,7 +9,8 @@ use r3v3rs3_api::{
     port::UpstreamServer,
     proxy::{HttpProxy, ProxyKind, ProxyStatus, Route, Server, TcpProxy, UdpProxy},
     upstream::{
-        CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, UpstreamTimeouts,
+        CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, StickyCookie,
+        UpstreamTimeouts,
     },
 };
 use std::{
@@ -802,6 +803,162 @@ async fn http_replays_a_body_up_to_the_limit() -> anyhow::Result<()> {
             .send()
             .await?;
         assert_eq!(large.status(), 502);
+        Ok(())
+    })
+    .await
+}
+
+/// Starts an HTTP upstream server that answers every request with its name and the `Cookie`
+/// header of the request, or `-` without the header.
+async fn start_cookie_upstream(name: &'static str) -> anyhow::Result<Url> {
+    serve_http_upstream(
+        Router::new().fallback(move |headers: axum::http::HeaderMap| async move {
+            let cookie = headers
+                .get("cookie")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("-")
+                .to_string();
+            format!("{name} {cookie}")
+        }),
+    )
+    .await
+}
+
+/// An HTTP proxy for `localhost` with one route to the servers, sticky sessions, no passive
+/// health check and the circuit breaker.
+fn sticky_http(
+    urls: &[Url],
+    load_balancing: LoadBalancing,
+    circuit_breaker: CircuitBreaker,
+) -> ProxyKind {
+    let ProxyKind::Http(proxy) = balanced_http(urls, load_balancing, no_passive_check()) else {
+        unreachable!();
+    };
+    http(HttpProxy {
+        circuit_breaker,
+        sticky: StickyCookie {
+            enabled: true,
+            ..Default::default()
+        },
+        ..*proxy
+    })
+}
+
+/// Sends `GET` with the `Cookie` header, and returns the status, the body and the `name=value`
+/// part of the `Set-Cookie` header.
+async fn get_with_cookie(
+    url: Url,
+    cookie: Option<&str>,
+) -> anyhow::Result<(u16, String, Option<String>)> {
+    let mut request = reqwest::Client::new().get(url);
+    if let Some(cookie) = cookie {
+        request = request.header("cookie", cookie);
+    }
+    let res = request.send().await?;
+    let set_cookie = res
+        .headers()
+        .get("set-cookie")
+        .map(|value| value.to_str())
+        .transpose()?
+        .and_then(|value| value.split(';').next())
+        .map(str::to_string);
+    Ok((res.status().as_u16(), res.text().await?, set_cookie))
+}
+
+#[tokio::test]
+async fn sticky_cookie_pins_the_client() -> anyhow::Result<()> {
+    let urls = [
+        start_cookie_upstream("a").await?,
+        start_cookie_upstream("b").await?,
+    ];
+    let proxy_port = alloc_tcp_port().await?;
+    let proxy = sticky_http(&urls, LoadBalancing::RoundRobin, CircuitBreaker::default());
+    let config = storage(vec![("sticky", proxy_port.multiaddr_http(), proxy)]);
+
+    with_server(config, |_| async move {
+        let url = || proxy_port.http_url("/");
+        let (status, body, cookie) = get_with_cookie(url(), None).await?;
+        assert_eq!(status, 200);
+        let (server, received) = body.split_once(' ').unwrap();
+        assert_eq!(received, "-");
+        let cookie = cookie.unwrap();
+        assert!(cookie.starts_with("r3v3rs3_affinity="), "{cookie}");
+
+        // Round robin alone would alternate the servers. The upstream server receives only the
+        // other cookies, and a client that keeps its server gets no new cookie.
+        let header = format!("theme=dark; {cookie}");
+        for _ in 0..4 {
+            let answer = get_with_cookie(url(), Some(&header)).await?;
+            assert_eq!(answer, (200, format!("{server} theme=dark"), None));
+        }
+
+        let (_, body, cookie) = get_with_cookie(url(), Some("r3v3rs3_affinity=forged")).await?;
+        assert!(body.ends_with(" -"), "{body}");
+        assert!(cookie.is_some());
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn sticky_cookie_moves_when_the_circuit_opens() -> anyhow::Result<()> {
+    let failing = Arc::new(AtomicBool::new(false));
+    let a = start_switchable_upstream("a", failing.clone()).await?;
+    let b = start_named_upstream("b").await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let circuit_breaker = CircuitBreaker {
+        enabled: true,
+        failure_ratio: 50,
+        min_requests: 1,
+        window: Duration::from_secs(10),
+        open_duration: Duration::from_secs(60),
+    };
+    let proxy = sticky_http(&[a, b], LoadBalancing::First, circuit_breaker);
+    let config = storage(vec![("stkmove", proxy_port.multiaddr_http(), proxy)]);
+
+    with_server(config, |_| async move {
+        let url = || proxy_port.http_url("/");
+        let (_, body, first) = get_with_cookie(url(), None).await?;
+        assert_eq!(body, "a");
+        let first = first.unwrap();
+
+        // The 503 answer of a opens its circuit, and the client keeps its cookie.
+        failing.store(true, Ordering::SeqCst);
+        let answer = get_with_cookie(url(), Some(&first)).await?;
+        assert_eq!(answer, (503, "down".to_string(), None));
+
+        let (status, body, second) = get_with_cookie(url(), Some(&first)).await?;
+        assert_eq!((status, body.as_str()), (200, "b"));
+        let second = second.unwrap();
+        assert_ne!(second, first);
+
+        let answer = get_with_cookie(url(), Some(&second)).await?;
+        assert_eq!(answer, (200, "b".to_string(), None));
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn tcp_client_ip_hash_keeps_the_client_on_one_server() -> anyhow::Result<()> {
+    let a = start_named_tcp_upstream("a").await?;
+    let b = start_named_tcp_upstream("b").await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let tcp = TcpProxy {
+        upstream_servers: tcp_servers(&[&a, &b]),
+        load_balancing: LoadBalancing::ClientIpHash,
+        ..Default::default()
+    };
+    let config = storage(vec![(
+        "tcphash",
+        proxy_port.multiaddr_tcp(),
+        ProxyKind::Tcp(tcp),
+    )]);
+
+    with_server(config, |_| async move {
+        let names = count_names(6, || read_name(proxy_port.socket_addr())).await?;
+        assert_eq!(names.len(), 1, "{names:?}");
+        assert_eq!(names.values().sum::<usize>(), 6);
         Ok(())
     })
     .await

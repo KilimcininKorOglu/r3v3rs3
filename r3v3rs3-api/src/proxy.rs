@@ -9,7 +9,7 @@ use crate::upstream::{
     default_connect_timeout, default_session_idle_timeout, default_weight,
     is_default_connect_timeout, is_default_session_idle_timeout, is_default_weight,
     validate_timeout, validate_weights, CircuitBreaker, HealthCheck, LoadBalancing, RetryPolicy,
-    UpstreamHealth, UpstreamTimeouts, DEFAULT_WEIGHT,
+    StickyCookie, UpstreamHealth, UpstreamTimeouts, DEFAULT_WEIGHT,
 };
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
@@ -64,7 +64,7 @@ impl ProxyKind {
 
     /// Rejects a zero connect timeout, session idle timeout, fail timeout or check timeout, an
     /// invalid health check path, a server list in which every server has weight 0, an invalid
-    /// circuit breaker and invalid retry attempts.
+    /// circuit breaker, invalid retry attempts and an invalid sticky cookie.
     pub fn validate_upstream(&self) -> Result<(), Error> {
         match self {
             Self::Tcp(tcp) => {
@@ -81,6 +81,7 @@ impl ProxyKind {
             Self::Http(http) => {
                 http.health_check.validate(true)?;
                 http.circuit_breaker.validate()?;
+                http.sticky.validate()?;
                 http.routes.iter().try_for_each(|route| {
                     validate_weights(route.servers.iter().map(|server| server.weight))
                 })?;
@@ -193,6 +194,9 @@ pub struct HttpProxy {
     /// Default retry policy for every route of this proxy.
     #[serde(default, skip_serializing_if = "RetryPolicy::is_default")]
     pub retry: RetryPolicy,
+    /// Sticky sessions for every route of this proxy.
+    #[serde(default, skip_serializing_if = "StickyCookie::is_default")]
+    pub sticky: StickyCookie,
 }
 
 fn upgrade_insecure_default() -> bool {

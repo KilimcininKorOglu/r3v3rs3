@@ -433,6 +433,9 @@ mod tests {
             ("routes.0.servers.0.weight", "3"),
             ("circuit_breaker.failure_ratio", "25"),
             ("retry.retry_on", "connect, http_503"),
+            ("load_balancing", "client_ip_hash"),
+            ("sticky.enabled", "true"),
+            ("sticky.max_age", "30m"),
             ("routes.1.path", "/api"),
             ("routes.1.servers.0.url", "http://10.0.0.6:8080"),
             ("upgrade_insecure", "false"),
@@ -459,6 +462,12 @@ mod tests {
                 r3v3rs3_api::upstream::RetryOn::Http503
             ]
         );
+        assert_eq!(
+            http.load_balancing,
+            r3v3rs3_api::upstream::LoadBalancing::ClientIpHash
+        );
+        assert!(http.sticky.enabled);
+        assert_eq!(http.sticky.max_age, Some(Duration::from_secs(1800)));
         assert!(!http.upgrade_insecure);
         assert_eq!(http.rate_limit.requests, 100);
         assert_eq!(http.rate_limit.per, RatePeriod::Minute);

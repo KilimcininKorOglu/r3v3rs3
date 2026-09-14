@@ -61,6 +61,7 @@ async fn ws_proxy() -> anyhow::Result<()> {
                     health_check: Default::default(),
                     circuit_breaker: Default::default(),
                     retry: Default::default(),
+                    sticky: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()

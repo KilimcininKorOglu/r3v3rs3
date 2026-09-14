@@ -1,4 +1,5 @@
 use crate::proxy::http::pool::ConnectionPool;
+use fnv::FnvHasher;
 use hyper::Uri;
 use once_cell::sync::Lazy;
 use r3v3rs3_api::{
@@ -9,6 +10,8 @@ use r3v3rs3_api::{
 use rand::Rng;
 use std::{
     collections::HashMap,
+    hash::Hasher,
+    net::IpAddr,
     sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
     time::{Duration, Instant},
 };
@@ -417,26 +420,59 @@ impl UpstreamGroup {
     /// Returns the server indexes in the order to try: the healthy servers in the order of the
     /// policy, then the unhealthy servers. When every server is unhealthy, the unhealthy servers
     /// use the order of the policy, so the request still goes to a server. A server with weight 0
-    /// and a server whose circuit blocks the traffic are never candidates.
-    pub fn candidates(&self) -> Vec<usize> {
+    /// and a server whose circuit blocks the traffic are never candidates. `client` is the IP
+    /// address that the client IP hash uses.
+    pub fn candidates(&self, client: IpAddr) -> Vec<usize> {
         let now = Instant::now();
         let (healthy, unhealthy): (Vec<_>, Vec<_>) = (0..self.members.len())
             .filter(|&index| self.weight(index) > 0 && !self.blocked(index, now))
             .partition(|&index| self.health(index).is_some_and(|h| h.is_healthy(now)));
         if healthy.is_empty() {
-            return self.order(unhealthy);
+            return self.order(unhealthy, client);
         }
-        let mut ordered = self.order(healthy);
+        let mut ordered = self.order(healthy, client);
         ordered.extend(unhealthy);
         ordered
     }
 
-    fn order(&self, servers: Vec<usize>) -> Vec<usize> {
+    /// True when a sticky session can stay on the server: the server is healthy and its circuit
+    /// lets the traffic through. A server with weight 0 keeps its sticky sessions.
+    pub fn is_pinnable(&self, index: usize) -> bool {
+        let now = Instant::now();
+        !self.blocked(index, now) && self.health(index).is_some_and(|h| h.is_healthy(now))
+    }
+
+    fn order(&self, servers: Vec<usize>, client: IpAddr) -> Vec<usize> {
         match self.policy {
             LoadBalancing::RoundRobin => self.order_round_robin(servers),
             LoadBalancing::Random => self.order_random(servers),
             LoadBalancing::First => servers,
+            LoadBalancing::ClientIpHash => self.order_hash(servers, client),
         }
+    }
+
+    /// The weighted rendezvous hash: each server gets the score `-ln(u) / weight` for a `u` in
+    /// `(0, 1)` from the hash of the client IP address and the server address, and a lower score
+    /// goes first. When a server leaves the order, only its own clients move.
+    fn order_hash(&self, servers: Vec<usize>, client: IpAddr) -> Vec<usize> {
+        let mut keyed = servers
+            .into_iter()
+            .map(|index| (self.hash_score(index, client), index))
+            .collect::<Vec<_>>();
+        keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
+        keyed.into_iter().map(|(_, index)| index).collect()
+    }
+
+    fn hash_score(&self, index: usize, client: IpAddr) -> f64 {
+        let mut hasher = FnvHasher::default();
+        match client.to_canonical() {
+            IpAddr::V4(ip) => hasher.write(&ip.octets()),
+            IpAddr::V6(ip) => hasher.write(&ip.octets()),
+        }
+        hasher.write(self.addr(index).as_bytes());
+        // The upper 53 bits of the hash fit an f64 exactly.
+        let unit = ((hasher.finish() >> 11) as f64 + 1.0) / ((1u64 << 53) as f64 + 1.0);
+        -unit.ln() / f64::from(self.weight(index))
     }
 
     /// The smooth weighted round robin of nginx: each server gains its weight, and the server
@@ -676,7 +712,10 @@ impl UpstreamGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
     use tokio::net::TcpListener;
+
+    const CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
     /// Servers named a, b, c and so on with the weights.
     fn members(weights: &[u16]) -> Vec<GroupServer> {
@@ -705,16 +744,16 @@ mod tests {
     fn policies_order_every_server() {
         let group = test_group(LoadBalancing::RoundRobin, HealthCheck::default());
         for expected in [[0, 1, 2], [1, 2, 0], [2, 0, 1], [0, 1, 2]] {
-            assert_eq!(group.candidates(), expected);
+            assert_eq!(group.candidates(CLIENT), expected);
         }
 
         let group = test_group(LoadBalancing::First, HealthCheck::default());
-        assert_eq!(group.candidates(), [0, 1, 2]);
-        assert_eq!(group.candidates(), [0, 1, 2]);
+        assert_eq!(group.candidates(CLIENT), [0, 1, 2]);
+        assert_eq!(group.candidates(CLIENT), [0, 1, 2]);
 
         let group = test_group(LoadBalancing::Random, HealthCheck::default());
         for _ in 0..20 {
-            let mut candidates = group.candidates();
+            let mut candidates = group.candidates(CLIENT);
             candidates.sort_unstable();
             assert_eq!(candidates, [0, 1, 2]);
         }
@@ -727,7 +766,9 @@ mod tests {
             LoadBalancing::RoundRobin,
             HealthCheck::default(),
         );
-        let first = (0..14).map(|_| group.candidates()[0]).collect::<Vec<_>>();
+        let first = (0..14)
+            .map(|_| group.candidates(CLIENT)[0])
+            .collect::<Vec<_>>();
         assert_eq!(first, [0, 0, 1, 0, 2, 0, 0, 0, 0, 1, 0, 2, 0, 0]);
     }
 
@@ -736,7 +777,7 @@ mod tests {
         for policy in LoadBalancing::ALL {
             let group = UpstreamGroup::new(members(&[0, 1, 2]), policy, no_passive_check());
             for _ in 0..20 {
-                let candidates = group.candidates();
+                let candidates = group.candidates(CLIENT);
                 assert_eq!(candidates.len(), 2, "{policy:?}");
                 assert!(!candidates.contains(&0), "{policy:?}");
             }
@@ -749,15 +790,57 @@ mod tests {
             HealthCheck::default(),
         );
         group.report_failure(1, "refused");
-        assert_eq!(group.candidates(), [1]);
+        assert_eq!(group.candidates(CLIENT), [1]);
     }
 
     #[test]
     fn weighted_random_follows_weights() {
         let group = UpstreamGroup::new(members(&[9, 1]), LoadBalancing::Random, no_passive_check());
-        let first = (0..2000).filter(|_| group.candidates()[0] == 0).count();
+        let first = (0..2000)
+            .filter(|_| group.candidates(CLIENT)[0] == 0)
+            .count();
         // The expected count is 1800, with a standard deviation of about 13.
         assert!((1700..=1900).contains(&first), "{first}");
+    }
+
+    #[test]
+    fn client_ip_hash_keeps_each_client_on_its_server() {
+        let group = test_group(LoadBalancing::ClientIpHash, HealthCheck::default());
+        let clients = (1..=60)
+            .map(|n| IpAddr::V4(Ipv4Addr::new(10, 0, 0, n)))
+            .collect::<Vec<_>>();
+        let servers = |group: &UpstreamGroup| {
+            clients
+                .iter()
+                .map(|&client| group.candidates(client)[0])
+                .collect::<Vec<_>>()
+        };
+        let first = servers(&group);
+        assert_eq!(servers(&group), first);
+        for server in 0..3 {
+            assert!(first.contains(&server), "server {server} gets no client");
+        }
+        let mapped = "::ffff:10.0.0.1".parse().unwrap();
+        assert_eq!(group.candidates(mapped), group.candidates(clients[0]));
+
+        // An unhealthy server moves only its own clients.
+        group.report_failure(0, "refused");
+        for (now, before) in servers(&group).into_iter().zip(first) {
+            if before == 0 {
+                assert_ne!(now, 0);
+            } else {
+                assert_eq!(now, before);
+            }
+        }
+        assert!(!group.is_pinnable(0));
+        assert!(group.is_pinnable(1));
+    }
+
+    #[test]
+    fn a_drained_server_keeps_its_sticky_sessions() {
+        let group = UpstreamGroup::new(members(&[0, 1]), LoadBalancing::First, no_passive_check());
+        assert_eq!(group.candidates(CLIENT), [1]);
+        assert!(group.is_pinnable(0));
     }
 
     fn breaker(min_requests: u32, open_duration: Duration) -> CircuitBreaker {
@@ -785,23 +868,23 @@ mod tests {
         group.acquire(0).unwrap().failure("refused");
         group.acquire(0).unwrap().success();
         group.acquire(0).unwrap().success();
-        assert_eq!(group.candidates(), [0, 1], "1 of 3 failed");
+        assert_eq!(group.candidates(CLIENT), [0, 1], "1 of 3 failed");
 
         // The fourth request makes 2 failures in 4 requests, which is the ratio of 50 percent.
         group.acquire(0).unwrap().error_response("status 503");
-        assert_eq!(group.candidates(), [1]);
+        assert_eq!(group.candidates(CLIENT), [1]);
         assert!(group.acquire(0).is_none());
         assert_eq!(circuit(&group), CircuitState::Open);
 
         std::thread::sleep(Duration::from_millis(60));
-        assert_eq!(group.candidates(), [0, 1]);
+        assert_eq!(group.candidates(CLIENT), [0, 1]);
         let trial = group.acquire(0).unwrap();
         assert!(group.acquire(0).is_none(), "one trial at a time");
-        assert_eq!(group.candidates(), [1]);
+        assert_eq!(group.candidates(CLIENT), [1]);
         assert_eq!(circuit(&group), CircuitState::HalfOpen);
 
         trial.success();
-        assert_eq!(group.candidates(), [0, 1]);
+        assert_eq!(group.candidates(CLIENT), [0, 1]);
         assert_eq!(circuit(&group), CircuitState::Closed);
     }
 
@@ -825,7 +908,7 @@ mod tests {
         for _ in 0..50 {
             group.acquire(0).unwrap().failure("refused");
         }
-        assert_eq!(group.candidates(), [0, 1]);
+        assert_eq!(group.candidates(CLIENT), [0, 1]);
         assert!(group.acquire(0).is_some());
         assert_eq!(circuit(&group), CircuitState::Closed);
     }
@@ -839,18 +922,18 @@ mod tests {
         };
         let group = test_group(LoadBalancing::First, health_check);
         group.report_failure(0, "refused");
-        assert_eq!(group.candidates(), [0, 1, 2]);
+        assert_eq!(group.candidates(CLIENT), [0, 1, 2]);
         group.report_failure(0, "refused");
-        assert_eq!(group.candidates(), [1, 2, 0]);
+        assert_eq!(group.candidates(CLIENT), [1, 2, 0]);
 
         std::thread::sleep(Duration::from_millis(60));
-        assert_eq!(group.candidates(), [0, 1, 2]);
+        assert_eq!(group.candidates(CLIENT), [0, 1, 2]);
         // The failure count stays until a success, so one more failure marks the server again.
         group.report_failure(0, "refused");
-        assert_eq!(group.candidates(), [1, 2, 0]);
+        assert_eq!(group.candidates(CLIENT), [1, 2, 0]);
 
         group.report_success(0);
-        assert_eq!(group.candidates(), [0, 1, 2]);
+        assert_eq!(group.candidates(CLIENT), [0, 1, 2]);
     }
 
     #[test]
@@ -858,20 +941,20 @@ mod tests {
         let group = test_group(LoadBalancing::First, no_passive_check());
         group.report_failure(0, "refused");
         group.report_failure(0, "refused");
-        assert_eq!(group.candidates(), [0, 1, 2]);
+        assert_eq!(group.candidates(CLIENT), [0, 1, 2]);
     }
 
     #[test]
     fn a_failed_active_check_stays_until_a_check_passes() {
         let group = test_group(LoadBalancing::First, no_passive_check());
         group.record_check(0, Err("status 500".into()));
-        assert_eq!(group.candidates(), [1, 2, 0]);
+        assert_eq!(group.candidates(CLIENT), [1, 2, 0]);
 
         group.report_success(0);
-        assert_eq!(group.candidates(), [1, 2, 0]);
+        assert_eq!(group.candidates(CLIENT), [1, 2, 0]);
 
         group.record_check(0, Ok(()));
-        assert_eq!(group.candidates(), [0, 1, 2]);
+        assert_eq!(group.candidates(CLIENT), [0, 1, 2]);
     }
 
     #[test]

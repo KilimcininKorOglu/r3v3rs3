@@ -1,3 +1,4 @@
+use super::super::cookie::{cookie_values, remove_cookie};
 use super::super::page::PagePreferences;
 use super::{AuthContext, AuthRejection};
 use crate::admin::auth::{LoginAttemptKey, LoginAttempts, MINIMUM_SESSION_EXPIRY};
@@ -8,7 +9,7 @@ use hyper::{
     body::Body,
     header::{
         HeaderMap, HeaderValue, ALLOW, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE,
-        COOKIE, LOCATION, REFERRER_POLICY, SET_COOKIE,
+        LOCATION, REFERRER_POLICY, SET_COOKIE,
     },
     Method, Request, Response, StatusCode,
 };
@@ -447,49 +448,12 @@ where
 }
 
 fn session_token(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get_all(COOKIE)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(';'))
-        .filter_map(|pair| pair.trim().split_once('='))
-        .find_map(|(name, value)| (name == COOKIE_NAME).then_some(value))
+    cookie_values(headers, COOKIE_NAME).next()
 }
 
 /// Removes the session cookie, so the upstream server never receives the session token.
 fn remove_session_cookie(headers: &mut HeaderMap) {
-    let values = headers
-        .get_all(COOKIE)
-        .iter()
-        .filter_map(without_session_cookie)
-        .collect::<Vec<_>>();
-    headers.remove(COOKIE);
-    for value in values {
-        headers.append(COOKIE, value);
-    }
-}
-
-/// Returns the `Cookie` header value without the session cookie, or `None` when no cookie is
-/// left. A value that is not visible ASCII cannot carry the session cookie and is kept.
-fn without_session_cookie(value: &HeaderValue) -> Option<HeaderValue> {
-    let Ok(text) = value.to_str() else {
-        return Some(value.clone());
-    };
-    let rest = text
-        .split(';')
-        .map(str::trim)
-        .filter(|pair| {
-            !pair.is_empty()
-                && pair
-                    .split_once('=')
-                    .is_none_or(|(name, _)| name != COOKIE_NAME)
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    if rest.is_empty() {
-        return None;
-    }
-    HeaderValue::from_str(&rest).ok()
+    remove_cookie(headers, COOKIE_NAME);
 }
 
 #[derive(TemplateOnce)]
@@ -598,24 +562,6 @@ mod tests {
         assert_eq!(form.password, "p@ss word");
         assert_eq!(form.totp, "123456");
         assert_eq!(form.redirect, "/");
-    }
-
-    #[test]
-    fn session_cookie_is_found_and_removed() {
-        let mut headers = HeaderMap::new();
-        headers.append(
-            COOKIE,
-            HeaderValue::from_static("theme=dark; r3v3rs3_session=abc"),
-        );
-        headers.append(COOKIE, HeaderValue::from_static("r3v3rs3_session=def"));
-        assert_eq!(session_token(&headers), Some("abc"));
-
-        remove_session_cookie(&mut headers);
-        assert_eq!(
-            headers.get_all(COOKIE).iter().collect::<Vec<_>>(),
-            ["theme=dark"]
-        );
-        assert_eq!(session_token(&headers), None);
     }
 
     #[test]

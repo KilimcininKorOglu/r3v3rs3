@@ -1,3 +1,4 @@
+use super::affinity::Affinity;
 use super::auth::{Authenticator, SessionService};
 use super::cache::{cache_for, HttpCache};
 use super::client_ip::ClientIpResolver;
@@ -12,7 +13,9 @@ use r3v3rs3_api::{
     id::ShortId,
     policy::IpFilter,
     proxy::{HttpProxy, ProxyEntry, ProxyKind, Route, Server},
-    upstream::{HealthCheck, LoadBalancing, UpstreamTimeouts},
+    upstream::{
+        CircuitBreaker, HealthCheck, LoadBalancing, RetryPolicy, StickyCookie, UpstreamTimeouts,
+    },
 };
 use std::{str::FromStr, sync::Arc};
 use url::{Host, Url};
@@ -49,12 +52,13 @@ impl Router {
             let proxy_cache = cache_for(id, &http.cache);
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
-                let base_path = filter
+                let base_path: String = filter
                     .path
                     .iter()
                     .map(|segment| format!("/{segment}"))
                     .collect();
-                let upstream = proxy_upstream.route((id, Some(index)), &route, upstream);
+                let upstream =
+                    proxy_upstream.route((id, Some(index)), &route, &base_path, upstream);
                 let ip_filter = route
                     .ip_filter
                     .map(Arc::new)
@@ -119,8 +123,9 @@ struct ProxyUpstream {
     timeouts: UpstreamTimeouts,
     load_balancing: LoadBalancing,
     health_check: HealthCheck,
-    circuit_breaker: r3v3rs3_api::upstream::CircuitBreaker,
-    retry: r3v3rs3_api::upstream::RetryPolicy,
+    circuit_breaker: CircuitBreaker,
+    retry: RetryPolicy,
+    sticky: StickyCookie,
 }
 
 impl ProxyUpstream {
@@ -132,15 +137,18 @@ impl ProxyUpstream {
             health_check: http.health_check.clone(),
             circuit_breaker: http.circuit_breaker,
             retry: http.retry.clone(),
+            sticky: http.sticky.clone(),
         }
     }
 
     /// Builds the upstream servers of a route. `None` when the client certificate of the proxy is
-    /// invalid, so the route cannot reach its upstream servers.
+    /// invalid, so the route cannot reach its upstream servers. `base_path` is the path of the
+    /// sticky cookie.
     fn route(
         &self,
         key: GroupKey,
         route: &Route,
+        base_path: &str,
         clients: &mut UpstreamClients<'_>,
     ) -> Option<Upstream> {
         let timeouts = route.timeouts.unwrap_or(self.timeouts);
@@ -169,6 +177,12 @@ impl ProxyUpstream {
             servers: route.servers.clone().into(),
             group,
             retry: route.retry.clone().unwrap_or_else(|| self.retry.clone()),
+            affinity: self
+                .sticky
+                .enabled
+                .then(|| Affinity::new(&self.sticky, key, &route.servers, base_path))
+                .flatten()
+                .map(Arc::new),
         })
     }
 }

@@ -133,7 +133,7 @@ impl UdpPortContext {
             return None;
         }
         let group = self.upstream.group.clone()?;
-        for index in group.candidates().into_iter().take(2) {
+        for index in group.candidates(client.ip()).into_iter().take(2) {
             let context = SessionContext {
                 listener: listener.clone(),
                 client,

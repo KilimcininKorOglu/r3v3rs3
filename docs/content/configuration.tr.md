@@ -127,8 +127,9 @@ Birden fazla upstream sunucusu olan proxy veya HTTP route, trafiği `load_balanc
 - `round_robin` (varsayılan) sunucuları sırayla kullanır.
 - `random` rastgele bir sunucu seçer.
 - `first` ilk sağlıklı sunucuyu kullanır. Diğer sunucular yedektir.
+- `client_ip_hash` her client IP adresini, o sunucu sağlıklı kaldıkça aynı sunucuya gönderir. HTTP proxy, belirlenen client IP adresini kullanır (bkz. [Client IP](#client-ip)). Bir sunucu sağlıksız olursa, drain edilirse veya silinirse yalnız o sunucunun client'ları diğer sunuculara geçer.
 
-Her sunucunun `0` ile `65535` arasında bir `weight` değeri vardır (varsayılan `1`). `round_robin` her sunucuyu weight değeri kadar kullanır. nginx'in smooth weighted round robin yöntemindeki gibi, bir sunucunun sıraları döngüye yayılır. Örneğin `3` ve `1` weight değerlerinde her dört request'in üçü ilk sunucuya gider. `random` sunucuyu weight değeriyle orantılı bir olasılıkla seçer. `first` weight değerini dikkate almaz. `weight = 0` olan sunucu, diğer bütün sunucular sağlıksız olsa da yeni trafik almaz. Bu yüzden bir sunucuyu silmeden servis dışına alabilirsiniz. Sunucunun açık TCP bağlantıları ve UDP session'ları devam eder. Her proxy'nin veya HTTP route'unun en az bir sunucusunun weight değeri `0`'dan büyük olmalıdır.
+Her sunucunun `0` ile `65535` arasında bir `weight` değeri vardır (varsayılan `1`). `round_robin` her sunucuyu weight değeri kadar kullanır. nginx'in smooth weighted round robin yöntemindeki gibi, bir sunucunun sıraları döngüye yayılır. Örneğin `3` ve `1` weight değerlerinde her dört request'in üçü ilk sunucuya gider. `random` sunucuyu weight değeriyle orantılı bir olasılıkla seçer. `client_ip_hash` her sunucuya, weight değeriyle orantılı sayıda client adresi verir. `first` weight değerini dikkate almaz. `weight = 0` olan sunucu, diğer bütün sunucular sağlıksız olsa da yeni trafik almaz. Bu yüzden bir sunucuyu silmeden servis dışına alabilirsiniz. Sunucunun açık TCP bağlantıları ve UDP session'ları devam eder. Her proxy'nin veya HTTP route'unun en az bir sunucusunun weight değeri `0`'dan büyük olmalıdır.
 
 HTTP proxy her request için, TCP proxy her bağlantı için, UDP proxy her client session'ı için bir sunucu seçer. Her HTTP route'unun sunucuları ayrı bir gruptur.
 
@@ -194,6 +195,30 @@ Pasif health check 5xx response'u yine başarılı sayar, çünkü sunucu yanıt
 protocol = "http"
 vhosts = ["app.example.com"]
 circuit_breaker = { enabled = true, failure_ratio = 50, min_requests = 20, window = "10s", open_duration = "30s" }
+routes = [
+  { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
+]
+```
+
+## Sticky Session'lar
+
+`sticky`, HTTP proxy'nin her client'ını bir cookie ile tek bir upstream sunucusunda tutar. Varsayılan olarak kapalıdır.
+
+- Client'a giden ilk response `sticky.name` (varsayılan `r3v3rs3_affinity`) cookie'sini yazar. Cookie değeri proxy'nin, route'un ve sunucu URL'inin HMAC-SHA256 imzasıdır. Bu yüzden client sahte bir değerle sunucu seçemez. Route'un hiçbir sunucusuna uymayan değer dikkate alınmaz.
+- Geçerli cookie taşıyan request, sunucu sağlıklı olduğu ve circuit'i açık olmadığı sürece aynı sunucuya gider. `weight = 0` olan sunucu sticky client'larını korur, böylece drain edilen sunucu mevcut session'larını tamamlar. Aksi halde sunucuyu `load_balancing` seçer ve response yeni bir cookie yazar. Başka bir sunucuya giden retry de yeni bir cookie yazar.
+- r3v3rs3 cookie'yi request'ten siler, bu yüzden upstream sunucu cookie'yi almaz.
+- Cookie route'un `Path` değerini, `HttpOnly` ve `SameSite=Lax` özelliklerini taşır. HTTPS ve HTTP/3'te `Secure` de eklenir. `sticky.max_age`, `Max-Age` değerini belirler. `max_age` yoksa cookie browser kapanınca silinir.
+- Ad, RFC 6265'teki cookie token kuralına uymalıdır: boşluk ve ayırıcı karakter içermeyen görünür ASCII karakterler.
+- r3v3rs3 her başlangıçta yeni bir imza key'i üretir. Yeniden başlatmadan sonra eski cookie'ler geçersiz olur ve her client sunucusunu yine `load_balancing` ile alır.
+- Cache'ten gelen response cookie yazmaz.
+
+TCP veya UDP proxy ve cookie saklamayan client'lar bunun yerine `load_balancing = "client_ip_hash"` kullanabilir.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+sticky = { enabled = true, name = "app_server", max_age = "1h" }
 routes = [
   { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
 ]
