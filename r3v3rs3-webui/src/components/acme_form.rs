@@ -73,7 +73,7 @@ const OVH_ENDPOINTS: [&str; 7] = [
     "soyoustart-ca",
 ];
 
-pub static DNS_PROVIDERS: [DnsProviderInfo; 8] = [
+pub static DNS_PROVIDERS: [DnsProviderInfo; 10] = [
     DnsProviderInfo {
         name: "cloudflare",
         label: "Cloudflare",
@@ -88,8 +88,18 @@ pub static DNS_PROVIDERS: [DnsProviderInfo; 8] = [
         ],
     },
     DnsProviderInfo {
+        name: "desec",
+        label: "deSEC",
+        fields: &API_TOKEN,
+    },
+    DnsProviderInfo {
         name: "digitalocean",
         label: "DigitalOcean",
+        fields: &API_TOKEN,
+    },
+    DnsProviderInfo {
+        name: "gandi",
+        label: "Gandi",
         fields: &API_TOKEN,
     },
     DnsProviderInfo {

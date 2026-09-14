@@ -2,12 +2,15 @@
 
 mod api;
 mod cloudflare;
+mod desec;
 mod digitalocean;
+mod gandi;
 mod hetzner;
 mod linode;
 mod ovh;
 mod porkbun;
 mod route53;
+mod rrset;
 mod sigv4;
 mod vultr;
 
@@ -154,6 +157,14 @@ fn token_client(http: HttpClient, provider: &TokenProvider) -> anyhow::Result<Bo
         ))),
         TokenApi::Vultr => Box::new(PerValue(vultr::Vultr::new(
             api::ApiClient::new(http, url, vultr::API_URL)?,
+            token,
+        ))),
+        TokenApi::Gandi => Box::new(rrset::MergedRrset(gandi::Gandi::new(
+            api::ApiClient::new(http, url, gandi::API_URL)?,
+            token,
+        ))),
+        TokenApi::Desec => Box::new(rrset::MergedRrset(desec::Desec::new(
+            api::ApiClient::new(http, url, desec::API_URL)?,
             token,
         ))),
     };

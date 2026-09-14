@@ -6,7 +6,7 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
     header::{CONTENT_TYPE, USER_AGENT},
-    Method, Request, Uri,
+    Method, Request, StatusCode, Uri,
 };
 use serde_json::Value;
 use std::time::Duration;
@@ -28,6 +28,23 @@ pub fn strings(items: &Value, key: &str) -> Vec<String> {
         .flatten()
         .filter_map(|item| item[key].as_str().map(str::to_string))
         .collect()
+}
+
+/// The body of a successful response, or an error with the status and the start of the body.
+fn success_body(target: &str, status: StatusCode, body: Bytes) -> anyhow::Result<Bytes> {
+    if !status.is_success() {
+        let text = String::from_utf8_lossy(&body[..body.len().min(MAX_ERROR_BODY)]);
+        bail!("{target} returned {status}: {text}");
+    }
+    Ok(body)
+}
+
+/// The body as JSON. An empty body is `null`.
+fn parse_json(body: &[u8]) -> anyhow::Result<Value> {
+    if body.is_empty() {
+        return Ok(Value::Null);
+    }
+    Ok(serde_json::from_slice(body)?)
 }
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -117,6 +134,27 @@ impl ApiClient {
     /// The error message holds the method, the path, the status and the start of the body,
     /// never the request headers.
     pub async fn send(&self, request: ApiRequest) -> anyhow::Result<Bytes> {
+        let (target, status, body) = self.exchange(request).await?;
+        success_body(&target, status, body)
+    }
+
+    /// Sends the request and returns the strings of the JSON array at `key` of the response.
+    /// A 404 response has no strings.
+    pub async fn optional_strings(
+        &self,
+        request: ApiRequest,
+        key: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        let (target, status, body) = self.exchange(request).await?;
+        if status == StatusCode::NOT_FOUND {
+            return Ok(Vec::new());
+        }
+        let response = parse_json(&success_body(&target, status, body)?)?;
+        Ok(serde_json::from_value(response[key].clone())?)
+    }
+
+    /// Sends the request and returns the method and path, the status and the body.
+    async fn exchange(&self, request: ApiRequest) -> anyhow::Result<(String, StatusCode, Bytes)> {
         let target = format!("{} {}", request.method, request.path);
         let mut builder = Request::builder()
             .method(request.method)
@@ -145,20 +183,12 @@ impl ApiClient {
         .map_err(|_| anyhow!("{target} timed out"))?
         .map_err(|err| anyhow!(err))?
         .to_bytes();
-        if !status.is_success() {
-            let text = String::from_utf8_lossy(&body[..body.len().min(MAX_ERROR_BODY)]);
-            bail!("{target} returned {status}: {text}");
-        }
-        Ok(body)
+        Ok((target, status, body))
     }
 
     /// Sends the request and parses the body as JSON. An empty body is `null`.
     pub async fn json(&self, request: ApiRequest) -> anyhow::Result<Value> {
-        let body = self.send(request).await?;
-        if body.is_empty() {
-            return Ok(Value::Null);
-        }
-        Ok(serde_json::from_slice(&body)?)
+        parse_json(&self.send(request).await?)
     }
 
     /// Sends the request and returns the ID at the JSON `pointer` of the response.

@@ -352,6 +352,116 @@ async fn vultr_follows_the_cursor_and_quotes_the_txt_data() -> anyhow::Result<()
     Ok(())
 }
 
+fn gandi(call: &Call) -> (StatusCode, String) {
+    match (call.method.as_str(), call.uri.as_str()) {
+        ("GET", "/domains?per_page=100&page=1") => {
+            ok(r#"[{"fqdn":"other.test"},{"fqdn":"example.test"}]"#)
+        }
+        // Another tool keeps its own value in the record set, and v1 is already there.
+        ("GET", "/domains/example.test/records/_acme-challenge.app/TXT") => ok(
+            r#"{"rrset_name":"_acme-challenge.app","rrset_type":"TXT","rrset_ttl":300,"rrset_values":["\"other\"","\"v1\""]}"#,
+        ),
+        _ => (
+            StatusCode::CREATED,
+            r#"{"message":"DNS Record Created"}"#.to_string(),
+        ),
+    }
+}
+
+#[tokio::test]
+async fn gandi_merges_the_values_and_keeps_the_values_of_other_tools() -> anyhow::Result<()> {
+    let calls = add_and_remove(gandi, token_provider(TokenApi::Gandi, "gd-token")).await?;
+
+    let record = "/domains/example.test/records/_acme-challenge.app/TXT";
+    assert_eq!(
+        requests(&calls),
+        vec![
+            "GET /domains?per_page=100&page=1".to_string(),
+            format!("GET {record}"),
+            format!("PUT {record}"),
+            format!("GET {record}"),
+            format!("PUT {record}"),
+        ]
+    );
+    assert_eq!(
+        body(&calls, 2)?,
+        json!({ "rrset_ttl": 300, "rrset_values": ["\"other\"", "\"v1\"", "\"v2\""] })
+    );
+    assert_eq!(
+        body(&calls, 4)?,
+        json!({ "rrset_ttl": 300, "rrset_values": ["\"other\""] })
+    );
+    assert!(calls
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|call| call.authorization == "Bearer gd-token"));
+    Ok(())
+}
+
+fn desec_zone(call: &Call) -> Option<(StatusCode, String)> {
+    (call.uri == "/domains/?owns_qname=_acme-challenge.app.example.test")
+        .then(|| ok(r#"[{"name":"example.test","minimum_ttl":3600}]"#))
+}
+
+/// A deSEC API where the record set of the challenge name does not exist.
+fn desec_missing(call: &Call) -> (StatusCode, String) {
+    desec_zone(call).unwrap_or_else(|| match call.method.as_str() {
+        "GET" => (
+            StatusCode::NOT_FOUND,
+            r#"{"detail":"Not found."}"#.to_string(),
+        ),
+        _ => ok("{}"),
+    })
+}
+
+/// A deSEC API where the record set holds only the challenge values.
+fn desec_challenge_only(call: &Call) -> (StatusCode, String) {
+    desec_zone(call).unwrap_or_else(|| match call.method.as_str() {
+        "GET" => {
+            ok(r#"{"subname":"_acme-challenge.app","type":"TXT","records":["\"v1\"","\"v2\""]}"#)
+        }
+        _ => (StatusCode::NO_CONTENT, String::new()),
+    })
+}
+
+fn desec_with(url: String) -> DnsProvider {
+    token_provider(TokenApi::Desec, "ds-token")(url)
+}
+
+#[tokio::test]
+async fn desec_creates_a_missing_rrset_and_deletes_it_when_only_its_values_remain(
+) -> anyhow::Result<()> {
+    let rrset = "/domains/example.test/rrsets/_acme-challenge.app/TXT/";
+
+    let (client, calls) = mock_client(desec_missing, desec_with).await?;
+    let record = client.add_txt(&challenge_name()).await?;
+    // The record set is gone, so there is nothing to remove.
+    client.remove_txt(&record).await?;
+    assert_eq!(
+        requests(&calls),
+        vec![
+            "GET /domains/?owns_qname=_acme-challenge.app.example.test".to_string(),
+            format!("GET {rrset}"),
+            format!("PUT {rrset}"),
+            format!("GET {rrset}"),
+        ]
+    );
+    assert_eq!(
+        body(&calls, 2)?,
+        json!({ "subname": "_acme-challenge.app", "type": "TXT", "ttl": 3600, "records": ["\"v1\"", "\"v2\""] })
+    );
+    assert_eq!(calls.lock().unwrap()[0].authorization, "Token ds-token");
+
+    let (client, calls) = mock_client(desec_challenge_only, desec_with).await?;
+    client.remove_txt(&record).await?;
+    assert_eq!(
+        requests(&calls),
+        vec![format!("GET {rrset}"), format!("DELETE {rrset}")]
+    );
+    Ok(())
+}
+
 fn porkbun_with(url: String) -> DnsProvider {
     DnsProvider::Keyed(KeyedProvider::Porkbun {
         api_key: "pk-key".to_string(),

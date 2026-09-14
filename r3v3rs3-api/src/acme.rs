@@ -101,6 +101,8 @@ pub enum TokenApi {
     Hetzner,
     Linode,
     Vultr,
+    Gandi,
+    Desec,
 }
 
 impl TokenApi {
@@ -111,6 +113,8 @@ impl TokenApi {
             Self::Hetzner => "hetzner",
             Self::Linode => "linode",
             Self::Vultr => "vultr",
+            Self::Gandi => "gandi",
+            Self::Desec => "desec",
         }
     }
 }
@@ -413,6 +417,8 @@ mod test {
             serde_json::json!({ "provider": "hetzner", "api_token": "t" }),
             serde_json::json!({ "provider": "linode", "api_token": "t" }),
             serde_json::json!({ "provider": "vultr", "api_token": "t" }),
+            serde_json::json!({ "provider": "gandi", "api_token": "t" }),
+            serde_json::json!({ "provider": "desec", "api_token": "t" }),
             serde_json::json!({ "provider": "porkbun", "api_key": "k", "secret_api_key": "s" }),
             serde_json::json!({
                 "provider": "ovh",

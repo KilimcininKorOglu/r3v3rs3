@@ -742,7 +742,7 @@ During a TLS-ALPN-01 challenge, every TLS port and every HTTPS port answers a cl
 For each domain name, r3v3rs3 does these steps:
 
 1. It finds the zone of the domain name with the provider API. The longest zone that contains the name is used.
-2. It creates the TXT record `_acme-challenge.<domain>` with a TTL of 60 seconds. Linode gets 300 seconds, the lowest TTL that Linode accepts. Porkbun gets no TTL, so the record has the lowest TTL of the account. For `*.example.com`, the record is `_acme-challenge.example.com`, the same name as for `example.com`, so the record set holds two values.
+2. It creates the TXT record `_acme-challenge.<domain>` with a TTL of 60 seconds. Linode gets 300 seconds, the lowest TTL that Linode accepts. Porkbun gets no TTL, so the record has the lowest TTL of the account. Gandi gets 300 seconds, the lowest TTL that Gandi accepts. deSEC gets 3600 seconds, because deSEC rejects a TTL below the minimum TTL of the domain. Gandi and deSEC write the whole record set of a name, so r3v3rs3 adds its values to the TXT values that are already there and removes only its own values. For `*.example.com`, the record is `_acme-challenge.example.com`, the same name as for `example.com`, so the record set holds two values.
 3. It asks DNS every 5 seconds until the TXT values are visible, for at most 5 minutes. The "DNS Challenge Resolver" setting selects the DNS server. Without this setting, r3v3rs3 uses the system resolver.
 4. It tells the certificate authority that the challenges are ready and waits at most 3 minutes for the validation.
 5. It deletes the TXT records. It also deletes them when the order fails.
@@ -753,7 +753,9 @@ A system resolver can return cached answers. If the propagation check fails ofte
 |---|---|---|
 | Cloudflare | API Token | `Zone:Read` and `DNS:Edit` for the zone. |
 | Route 53 | Access Key ID, Secret Access Key | `route53:ListHostedZones` and `route53:ChangeResourceRecordSets`. Private hosted zones are skipped. |
+| deSEC | API Token | A token of the account. A token with a scoped policy must allow writes to the `_acme-challenge` TXT record sets. |
 | DigitalOcean | API Token | A token that can read domains and create and delete domain records. |
+| Gandi | API Token | A personal access token that can read the domains and change their LiveDNS records. |
 | Hetzner Cloud | API Token | A Hetzner Cloud project token with read and write access. The zone must be in Hetzner Cloud DNS. |
 | Linode | API Token | A personal access token with read and write access to Domains. |
 | Vultr | API Key | The API key of the account. |
@@ -787,7 +789,7 @@ key_pkcs8 = "<account private key>"
 directory = "https://acme-v02.api.letsencrypt.org/directory"
 ```
 
-The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `porkbun` or `ovh`. Route 53 uses `access_key_id` and `secret_access_key` instead of `api_token`. Porkbun uses `api_key` and `secret_api_key`. OVHcloud uses `endpoint`, `application_key`, `application_secret` and `consumer_key`. The Vultr API key goes in `api_token`.
+The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun` or `ovh`. Route 53 uses `access_key_id` and `secret_access_key` instead of `api_token`. Porkbun uses `api_key` and `secret_api_key`. OVHcloud uses `endpoint`, `application_key`, `application_secret` and `consumer_key`. The Vultr API key goes in `api_token`.
 
 # Settings
 
