@@ -55,6 +55,7 @@ async fn send_snapshot(
         state,
         error: None,
         proxies,
+        certs: vec![],
         issues: vec![],
     };
     channels

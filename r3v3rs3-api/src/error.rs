@@ -80,6 +80,9 @@ pub enum Error {
     #[error("proxy is managed by service discovery and cannot be changed: {id}")]
     ProxyReadOnly { id: ShortId },
 
+    #[error("certificate is managed by service discovery and cannot be deleted: {id}")]
+    CertificateReadOnly { id: ShortId },
+
     #[error("invalid service discovery settings: {reason}")]
     InvalidDiscoveryConfig { reason: String },
 
@@ -170,7 +173,7 @@ impl Error {
         match self {
             Self::IdNotFound { .. } => 404,
             Self::Unauthorized => 401,
-            Self::ProxyReadOnly { .. } => 403,
+            Self::ProxyReadOnly { .. } | Self::CertificateReadOnly { .. } => 403,
             Self::TooManyLoginAttempts => 429,
             Self::FailedToFetchLog | Self::FailedToInvokeRpc | Self::FailedToHashPassword => 500,
             _ => 400,

@@ -9,7 +9,7 @@ use r3v3rs3_api::{
     cert::CertInfo,
     discovery::{
         ConsulDiscoveryConfig, DiscoveryConfig, DockerDiscoveryConfig, Endpoint,
-        EtcdDiscoveryConfig,
+        EtcdDiscoveryConfig, KubernetesDiscoveryConfig,
     },
     error::ErrorMessage,
     i18n::Locale,
@@ -41,6 +41,14 @@ struct Fields {
     docker_network: String,
     docker_exposed_by_default: bool,
     docker_client_cert: Option<ShortId>,
+    kubernetes_enabled: bool,
+    kubernetes_kubeconfig: String,
+    /// Comma-separated namespaces.
+    kubernetes_namespaces: String,
+    kubernetes_ingress: bool,
+    kubernetes_ingress_class: String,
+    /// Comma-separated port names or ids.
+    kubernetes_ports: String,
     consul_enabled: bool,
     consul_address: String,
     /// A new token. Empty keeps the saved token.
@@ -78,6 +86,7 @@ impl Fields {
                 .unwrap_or_default()
         };
         let docker = &config.discovery.docker;
+        let kubernetes = &config.discovery.kubernetes;
         let consul = &config.discovery.consul;
         let etcd = &config.discovery.etcd;
         Self {
@@ -86,6 +95,12 @@ impl Fields {
             docker_network: docker.network.clone(),
             docker_exposed_by_default: docker.exposed_by_default,
             docker_client_cert: docker.client_cert,
+            kubernetes_enabled: kubernetes.enabled,
+            kubernetes_kubeconfig: kubernetes.kubeconfig.clone(),
+            kubernetes_namespaces: kubernetes.namespaces.join(","),
+            kubernetes_ingress: kubernetes.ingress,
+            kubernetes_ingress_class: kubernetes.ingress_class.clone(),
+            kubernetes_ports: kubernetes.ports.join(","),
             consul_enabled: consul.enabled,
             consul_address: consul.address.clone(),
             consul_token: String::new(),
@@ -201,6 +216,7 @@ pub fn settings() -> Html {
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.duration_hint")}</p>
 
             { docker_section(locale, &fields, &errors, &client_certs) }
+            { kubernetes_section(locale, &fields, &errors) }
             { consul_section(locale, &fields, &errors, &client_certs) }
             { etcd_section(locale, &fields, &errors, &client_certs) }
 
@@ -256,6 +272,28 @@ const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500 dark:text-neutral-400";
 fn section_title(title: &'static str) -> Html {
     html! {
         <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{title}</h2>
+    }
+}
+
+fn kubernetes_section(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    html! {
+        <>
+            { section_title(locale.t("settings.kubernetes_title")) }
+            { checkbox_field(fields, locale.t("settings.kubernetes_enabled"), |f| &mut f.kubernetes_enabled) }
+            { text_field(fields, errors, locale.t("settings.kubernetes_kubeconfig"), "kubernetes_kubeconfig", "", |f| &mut f.kubernetes_kubeconfig) }
+            <p class={HINT_CLASS}>{locale.t("settings.kubernetes_kubeconfig_hint")}</p>
+            { text_field(fields, errors, locale.t("settings.kubernetes_namespaces"), "kubernetes_namespaces", "default,apps", |f| &mut f.kubernetes_namespaces) }
+            <p class={HINT_CLASS}>{locale.t("settings.kubernetes_namespaces_hint")}</p>
+            { checkbox_field(fields, locale.t("settings.kubernetes_ingress"), |f| &mut f.kubernetes_ingress) }
+            { text_field(fields, errors, locale.t("settings.kubernetes_ingress_class"), "kubernetes_ingress_class", "r3v3rs3", |f| &mut f.kubernetes_ingress_class) }
+            <p class={HINT_CLASS}>{locale.t("settings.kubernetes_ingress_class_hint")}</p>
+            { text_field(fields, errors, locale.t("settings.kubernetes_ports"), "kubernetes_ports", "http,https", |f| &mut f.kubernetes_ports) }
+            <p class={HINT_CLASS}>{locale.t("settings.kubernetes_ports_hint")}</p>
+        </>
     }
 }
 
@@ -529,18 +567,33 @@ fn secret_update(typed: &str, clear: bool) -> Option<String> {
     Some(typed.trim().to_string()).filter(|secret| !secret.is_empty())
 }
 
+/// The non-empty items of a comma-separated value.
+fn comma_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn parse_kubernetes(fields: &Fields) -> KubernetesDiscoveryConfig {
+    KubernetesDiscoveryConfig {
+        enabled: fields.kubernetes_enabled,
+        kubeconfig: fields.kubernetes_kubeconfig.trim().to_string(),
+        namespaces: comma_list(&fields.kubernetes_namespaces),
+        ingress: fields.kubernetes_ingress,
+        ingress_class: fields.kubernetes_ingress_class.trim().to_string(),
+        ports: comma_list(&fields.kubernetes_ports),
+    }
+}
+
 fn parse_etcd(
     locale: Locale,
     fields: &Fields,
     errors: &mut HashMap<String, String>,
 ) -> EtcdDiscoveryConfig {
-    let endpoints = fields
-        .etcd_endpoints
-        .split(',')
-        .map(str::trim)
-        .filter(|endpoint| !endpoint.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
+    let endpoints = comma_list(&fields.etcd_endpoints);
     if endpoints.is_empty() {
         errors.insert(
             "etcd_endpoints".into(),
@@ -652,6 +705,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         );
     }
     let docker = parse_docker(locale, fields, &mut errors);
+    let kubernetes = parse_kubernetes(fields);
     let consul = parse_consul(locale, fields, &mut errors);
     let etcd = parse_etcd(locale, fields, &mut errors);
     let resolver = parse_optional_addr(&fields.dns_challenge_resolver);
@@ -675,6 +729,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 dns_challenge_resolver: resolver,
                 discovery: DiscoveryConfig {
                     docker,
+                    kubernetes,
                     consul,
                     etcd,
                 },
@@ -864,6 +919,35 @@ mod tests {
             errors.get("docker_endpoint").map(String::as_str),
             Some(Locale::En.t("settings.invalid_endpoint"))
         );
+    }
+
+    #[test]
+    fn kubernetes_settings_round_trip_and_the_lists_are_trimmed() {
+        let mut config = AppConfig::default();
+        config.discovery.kubernetes = KubernetesDiscoveryConfig {
+            enabled: true,
+            kubeconfig: "/etc/r3v3rs3/kubeconfig".into(),
+            namespaces: vec!["default".into(), "apps".into()],
+            ingress: true,
+            ingress_class: "r3v3rs3".into(),
+            ports: vec!["http".into(), "https".into()],
+        };
+        let fields = Fields::from_config(&config);
+        assert_eq!(parse_fields(Locale::En, &fields), Ok(config));
+
+        let spaced = Fields {
+            kubernetes_namespaces: " default , ,apps".into(),
+            kubernetes_ports: "".into(),
+            kubernetes_ingress_class: " ".into(),
+            ..fields
+        };
+        let parsed = parse_fields(Locale::En, &spaced)
+            .unwrap()
+            .discovery
+            .kubernetes;
+        assert_eq!(parsed.namespaces, ["default", "apps"]);
+        assert!(parsed.ports.is_empty());
+        assert!(parsed.ingress_class.is_empty());
     }
 
     #[test]

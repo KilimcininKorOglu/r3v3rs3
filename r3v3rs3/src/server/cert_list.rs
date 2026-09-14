@@ -1,7 +1,10 @@
 use crate::certs::Cert;
 use indexmap::IndexMap;
 use log::warn;
+use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoverySource};
 use r3v3rs3_api::{cert::CertKind, error::Error, id::ShortId};
+use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_rustls::rustls::RootCertStore;
 
@@ -18,7 +21,7 @@ impl CertList {
             .into_iter()
             .map(|cert| (cert.id(), cert))
             .collect::<IndexMap<_, _>>();
-        certs.sort_unstable_by(|_, v1, _, v2| v1.partial_cmp(v2).unwrap());
+        sort_certs(&mut certs);
 
         let mut system_root_certs = RootCertStore::empty();
         if let Ok(result) =
@@ -68,8 +71,7 @@ impl CertList {
 
     pub fn add(&mut self, cert: Arc<Cert>) {
         self.certs.insert(cert.id(), cert.clone());
-        self.certs
-            .sort_unstable_by(|_, v1, _, v2| v1.partial_cmp(v2).unwrap());
+        sort_certs(&mut self.certs);
         if cert.kind == CertKind::Root {
             self.update_root_certs();
         }
@@ -88,6 +90,47 @@ impl CertList {
         }
     }
 
+    /// Replaces the certificates of a discovery provider. A certificate that is already in the
+    /// list without this provider as its source is skipped. Returns true when the list changed.
+    pub fn replace_discovered(
+        &mut self,
+        provider: DiscoveryProvider,
+        certs: Vec<Arc<Cert>>,
+    ) -> bool {
+        let owned = |cert: &Cert| {
+            cert.source
+                .as_ref()
+                .is_some_and(|source| source.provider == provider)
+        };
+        let current = self
+            .certs
+            .values()
+            .filter(|cert| owned(cert))
+            .map(|cert| (cert.id, cert.source.clone()))
+            .collect::<HashMap<ShortId, Option<DiscoverySource>>>();
+        let next = certs
+            .into_iter()
+            .filter(|cert| {
+                self.certs
+                    .get(&cert.id)
+                    .is_none_or(|existing| owned(existing))
+            })
+            .map(|cert| (cert.id, cert))
+            .collect::<IndexMap<_, _>>();
+        let unchanged = current.len() == next.len()
+            && next
+                .values()
+                .all(|cert| current.get(&cert.id) == Some(&cert.source));
+        if unchanged {
+            return false;
+        }
+        self.certs.retain(|_, cert| !owned(cert));
+        self.certs.extend(next);
+        sort_certs(&mut self.certs);
+        self.update_root_certs();
+        true
+    }
+
     fn update_root_certs(&mut self) {
         let mut root_certs = self.system_root_certs.clone();
         for cert in self.certs.values() {
@@ -103,4 +146,9 @@ impl CertList {
         }
         self.root_certs = root_certs;
     }
+}
+
+/// Sorts the certificates from the newest to the oldest.
+fn sort_certs(certs: &mut IndexMap<ShortId, Arc<Cert>>) {
+    certs.sort_unstable_by(|_, v1, _, v2| v1.partial_cmp(v2).unwrap_or(Ordering::Equal));
 }

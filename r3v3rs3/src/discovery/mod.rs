@@ -6,10 +6,12 @@ pub mod docker;
 pub mod etcd;
 pub mod http;
 pub mod ids;
+pub mod kubernetes;
 pub mod kv;
 pub mod labels;
 mod tree;
 
+use crate::certs::Cert;
 use crate::command::ServerCommand;
 use anyhow::anyhow;
 use http::ApiClient;
@@ -20,6 +22,7 @@ use r3v3rs3_api::proxy::ProxyKind;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::convert::Infallible;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -59,15 +62,19 @@ pub struct DiscoverySnapshot {
     pub generation: u64,
     pub state: DiscoveryState,
     pub error: Option<String>,
-    /// `None` keeps the proxies of the previous snapshot, for example after a connection error.
+    /// `None` keeps the proxies and the certificates of the previous snapshot, for example after a
+    /// connection error.
     pub proxies: Option<Vec<DiscoveredProxy>>,
+    /// The server certificates of the read. The server uses them only together with `proxies`.
+    pub certs: Vec<Arc<Cert>>,
     pub issues: Vec<DiscoveryIssue>,
 }
 
-/// The proxies and the issues of one read.
+/// The proxies, the certificates and the issues of one read.
 #[derive(Debug, Default)]
 pub struct Built {
     pub proxies: Vec<DiscoveredProxy>,
+    pub certs: Vec<Arc<Cert>>,
     pub issues: Vec<DiscoveryIssue>,
 }
 
@@ -201,9 +208,9 @@ impl Reporter {
         error: Option<String>,
         built: Option<Built>,
     ) -> bool {
-        let (proxies, issues) = match built {
-            Some(built) => (Some(built.proxies), built.issues),
-            None => (None, Vec::new()),
+        let (proxies, certs, issues) = match built {
+            Some(built) => (Some(built.proxies), built.certs, built.issues),
+            None => (None, Vec::new(), Vec::new()),
         };
         let snapshot = DiscoverySnapshot {
             provider: self.provider,
@@ -211,6 +218,7 @@ impl Reporter {
             state,
             error,
             proxies,
+            certs,
             issues,
         };
         self.command
@@ -258,27 +266,31 @@ pub async fn run(provider: impl Watch) {
     }
 }
 
-/// Starts the task of a provider that reads an HTTP API.
+/// Starts the task of a provider. A provider that reads an HTTP API needs `client`. The
+/// Kubernetes provider builds its own client.
 pub fn spawn(
     provider: DiscoveryProvider,
     config: &DiscoveryConfig,
-    client: ApiClient,
+    client: Option<ApiClient>,
     command: mpsc::Sender<ServerCommand>,
     generation: u64,
 ) -> JoinHandle<()> {
     let reporter = Reporter::new(provider, generation, command);
-    match provider {
-        DiscoveryProvider::Docker => {
+    match (provider, client) {
+        (DiscoveryProvider::Kubernetes, _) => {
+            tokio::spawn(run(kubernetes::Provider::new(&config.kubernetes, reporter)))
+        }
+        (DiscoveryProvider::Docker, Some(client)) => {
             tokio::spawn(run(docker::Provider::new(&config.docker, client, reporter)))
         }
-        DiscoveryProvider::Consul => {
+        (DiscoveryProvider::Consul, Some(client)) => {
             tokio::spawn(run(consul::Provider::new(&config.consul, client, reporter)))
         }
-        DiscoveryProvider::Etcd => {
+        (DiscoveryProvider::Etcd, Some(client)) => {
             tokio::spawn(run(etcd::Provider::new(&config.etcd, client, reporter)))
         }
-        DiscoveryProvider::Kubernetes => tokio::spawn(async move {
-            let error = Some("the provider is not available".to_string());
+        (_, None) => tokio::spawn(async move {
+            let error = Some("the provider has no API client".to_string());
             reporter.send(DiscoveryState::Error, error, None).await;
         }),
     }

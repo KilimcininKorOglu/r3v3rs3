@@ -1,5 +1,6 @@
 use pkcs8::{PrivateKeyInfo, SecretDocument};
 use r3v3rs3_api::cert::{CertInfo, CertKind, CertMetadata};
+use r3v3rs3_api::discovery::DiscoverySource;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::subject_name::SubjectName;
@@ -37,6 +38,8 @@ pub struct Cert {
     pub not_before: ASN1Time,
     pub is_ca: bool,
     pub metadata: Option<CertMetadata>,
+    /// The discovery provider that read the certificate. A discovered certificate is not saved.
+    pub source: Option<DiscoverySource>,
 }
 
 impl PartialEq for Cert {
@@ -93,6 +96,7 @@ impl Cert {
             is_ca: self.is_ca,
             has_private_key: self.key.is_some(),
             metadata: self.metadata.clone(),
+            source: self.source.clone(),
         }
     }
 
@@ -223,6 +227,7 @@ impl Cert {
             not_before,
             is_ca,
             metadata,
+            source: None,
         })
     }
 

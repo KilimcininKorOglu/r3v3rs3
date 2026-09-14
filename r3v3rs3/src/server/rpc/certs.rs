@@ -58,6 +58,13 @@ impl RpcMethod for DeleteCert {
     type Output = ();
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        if state
+            .certs
+            .get(self.id)
+            .is_some_and(|cert| cert.source.is_some())
+        {
+            return Err(Error::CertificateReadOnly { id: self.id });
+        }
         ensure_unused(state, self.id)?;
         state.certs.delete(self.id)?;
         state.update_certs().await;

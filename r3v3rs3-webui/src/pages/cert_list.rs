@@ -12,6 +12,7 @@ use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::acme::AcmeInfo;
 use r3v3rs3_api::cert::{CertInfo, CertKind, SelfSignedCertKind, UploadQuery};
+use r3v3rs3_api::discovery::DiscoverySource;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use serde_derive::{Deserialize, Serialize};
@@ -303,13 +304,33 @@ fn download_onclick(locale: Locale, id: ShortId, has_private_key: bool) -> Callb
     })
 }
 
+/// The download action, and the delete action of a certificate that service discovery does not
+/// manage.
 fn cert_actions(locale: Locale, entry: &CertInfo, has_private_key: bool) -> Html {
     html! {
         <>
             <a class={LINK_CLASS} onclick={download_onclick(locale, entry.id, has_private_key)}>{locale.t("certs.download")}</a>
-            <a class={DANGER_LINK_CLASS} onclick={delete_cert_onclick(locale, entry.id)}>{locale.t("common.delete")}</a>
+            if entry.source.is_none() {
+                <a class={DANGER_LINK_CLASS} onclick={delete_cert_onclick(locale, entry.id)}>{locale.t("common.delete")}</a>
+            }
         </>
     }
+}
+
+/// The name of the discovery provider of the certificate. The title names the resource.
+fn source_badge(locale: Locale, entry: &CertInfo) -> Html {
+    let Some(source) = &entry.source else {
+        return html! {};
+    };
+    html! {
+        <span title={discovered_title(locale, source)} class="ml-2 px-2 py-0.5 text-xs font-medium rounded bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200">
+            {source.provider.name()}
+        </span>
+    }
+}
+
+fn discovered_title(locale: Locale, source: &DiscoverySource) -> String {
+    locale.tf("certs.discovered_title", &[("resource", &source.resource)])
 }
 
 fn server_row(locale: Locale, entry: &CertInfo) -> Row {
@@ -322,7 +343,7 @@ fn server_row(locale: Locale, entry: &CertInfo) -> Row {
     Row {
         key: entry.id.to_string(),
         cells: vec![
-            html! { <>{subject_names}</> },
+            html! { <>{subject_names}{source_badge(locale, entry)}</> },
             html! { <>{entry.issuer.clone()}</> },
             html! { <>{entry.id.to_string()}</> },
             html! { <>{format_duration(locale, entry.not_after)}</> },
@@ -340,7 +361,7 @@ fn root_row(locale: Locale, entry: &CertInfo) -> Row {
     Row {
         key: entry.id.to_string(),
         cells: vec![
-            html! { <>{entry.issuer.clone()}</> },
+            html! { <>{entry.issuer.clone()}{source_badge(locale, entry)}</> },
             html! { <>{entry.id.to_string()}</> },
             html! { <>{locale.t(private_key)}</> },
             html! { <>{format_duration(locale, entry.not_after)}</> },
@@ -470,6 +491,22 @@ mod tests {
             assert_eq!(CertsTab::for_kind(kind).cert_kind(), Some(kind));
         }
         assert_eq!(CertsTab::Acme.cert_kind(), None);
+    }
+
+    #[test]
+    fn the_title_of_a_discovered_certificate_names_its_resource() {
+        let source = DiscoverySource {
+            provider: r3v3rs3_api::discovery::DiscoveryProvider::Kubernetes,
+            resource: "secret default/app-tls".into(),
+        };
+        assert_eq!(
+            discovered_title(Locale::En, &source),
+            "Service discovery manages this certificate: secret default/app-tls"
+        );
+        assert_eq!(
+            discovered_title(Locale::Tr, &source),
+            "Bu sertifikayı servis keşfi yönetir: secret default/app-tls"
+        );
     }
 
     #[test]

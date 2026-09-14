@@ -47,6 +47,10 @@ pub struct CertInfo {
     pub is_ca: bool,
     pub has_private_key: bool,
     pub metadata: Option<CertMetadata>,
+    /// The service discovery provider that read the certificate, for example from a Kubernetes
+    /// TLS secret. A discovered certificate is read-only and is not saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<crate::discovery::DiscoverySource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

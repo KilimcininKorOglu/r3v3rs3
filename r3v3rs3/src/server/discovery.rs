@@ -4,11 +4,13 @@
 use super::cert_list::CertList;
 use super::credentials::seal;
 use super::proxy_list::accepts;
+use crate::certs::Cert;
 use crate::discovery::{ids, DiscoveredProxy, DiscoverySnapshot};
 use crate::proxy::tls::upstream_client_config;
 use hyper::header::HeaderValue;
 use r3v3rs3_api::discovery::{
     ConsulDiscoveryConfig, DiscoveryConfig, Endpoint, EtcdDiscoveryConfig,
+    KubernetesDiscoveryConfig,
 };
 use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryProvider, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
@@ -16,6 +18,7 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyKind};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::task::JoinHandle;
 
@@ -29,6 +32,7 @@ struct ProviderRecord {
     state: DiscoveryState,
     error: Option<String>,
     proxies: Vec<DiscoveredProxy>,
+    certs: Vec<Arc<Cert>>,
     provider_issues: Vec<DiscoveryIssue>,
     build_issues: Vec<DiscoveryIssue>,
     added: usize,
@@ -44,6 +48,7 @@ impl ProviderRecord {
             state: DiscoveryState::Connecting,
             error: None,
             proxies: Vec::new(),
+            certs: Vec::new(),
             provider_issues: Vec::new(),
             build_issues: Vec::new(),
             added: 0,
@@ -65,6 +70,7 @@ impl DiscoveryRegistry {
         record.updated_at = unix_now();
         if let Some(proxies) = snapshot.proxies {
             record.proxies = proxies;
+            record.certs = snapshot.certs;
         }
     }
 
@@ -81,9 +87,22 @@ impl DiscoveryRegistry {
     }
 
     pub fn proxies(&self, provider: DiscoveryProvider) -> Vec<DiscoveredProxy> {
+        self.record_list(provider, |record| &record.proxies)
+    }
+
+    pub fn certs(&self, provider: DiscoveryProvider) -> Vec<Arc<Cert>> {
+        self.record_list(provider, |record| &record.certs)
+    }
+
+    /// A list of the record of a provider, or an empty list without a record.
+    fn record_list<T: Clone>(
+        &self,
+        provider: DiscoveryProvider,
+        list: fn(&ProviderRecord) -> &Vec<T>,
+    ) -> Vec<T> {
         self.providers
             .get(&provider)
-            .map(|record| record.proxies.clone())
+            .map(|record| list(record).clone())
             .unwrap_or_default()
     }
 
@@ -218,8 +237,18 @@ pub fn validate_config(config: &DiscoveryConfig, certs: &CertList) -> Result<(),
             upstream_client_config(certs, client_cert)?;
         }
     }
+    validate_kubernetes(&config.kubernetes)?;
     validate_consul(&config.consul)?;
     validate_etcd(&config.etcd)
+}
+
+pub fn is_enabled(config: &DiscoveryConfig, provider: DiscoveryProvider) -> bool {
+    match provider {
+        DiscoveryProvider::Docker => config.docker.enabled,
+        DiscoveryProvider::Kubernetes => config.kubernetes.enabled,
+        DiscoveryProvider::Consul => config.consul.enabled,
+        DiscoveryProvider::Etcd => config.etcd.enabled,
+    }
 }
 
 /// The API addresses and the client certificate of an enabled provider that reads an HTTP API.
@@ -244,43 +273,73 @@ pub fn api_settings(
     }
 }
 
+/// Fails with the reason of the first rule that holds.
+fn check_rules(rules: &[(bool, &str)]) -> Result<(), Error> {
+    match rules.iter().find(|(broken, _)| *broken) {
+        Some((_, reason)) => Err(Error::InvalidDiscoveryConfig {
+            reason: reason.to_string(),
+        }),
+        None => Ok(()),
+    }
+}
+
+fn validate_kubernetes(kubernetes: &KubernetesDiscoveryConfig) -> Result<(), Error> {
+    if !kubernetes.enabled {
+        return Ok(());
+    }
+    let empty_namespace = kubernetes.namespaces.iter().any(|ns| ns.trim().is_empty());
+    check_rules(&[
+        (
+            !kubernetes.ingress,
+            "Kubernetes needs the Ingress resources",
+        ),
+        (empty_namespace, "a Kubernetes namespace is empty"),
+    ])
+}
+
 fn validate_etcd(etcd: &EtcdDiscoveryConfig) -> Result<(), Error> {
+    if !etcd.enabled {
+        return Ok(());
+    }
     let has_user = !etcd.username.trim().is_empty();
-    let reason = if !etcd.enabled {
-        return Ok(());
-    } else if etcd.endpoints.is_empty() {
-        "etcd needs at least one endpoint"
-    } else if etcd.prefix.trim_matches('/').is_empty() {
-        "the etcd key prefix is empty"
-    } else if has_user != etcd.password.is_some() {
-        "the etcd user name and password must be set together"
-    } else {
-        return Ok(());
-    };
-    Err(Error::InvalidDiscoveryConfig {
-        reason: reason.to_string(),
-    })
+    check_rules(&[
+        (
+            etcd.endpoints.is_empty(),
+            "etcd needs at least one endpoint",
+        ),
+        (
+            etcd.prefix.trim_matches('/').is_empty(),
+            "the etcd key prefix is empty",
+        ),
+        (
+            has_user != etcd.password.is_some(),
+            "the etcd user name and password must be set together",
+        ),
+    ])
 }
 
 fn validate_consul(consul: &ConsulDiscoveryConfig) -> Result<(), Error> {
-    let reason = if !consul.enabled {
+    if !consul.enabled {
         return Ok(());
-    } else if !consul.catalog && !consul.kv {
-        "Consul needs the catalog or the key-value store"
-    } else if consul.kv && consul.prefix.trim_matches('/').is_empty() {
-        "the Consul key prefix is empty"
-    } else if consul
+    }
+    let invalid_token = consul
         .token
         .as_deref()
-        .is_some_and(|token| HeaderValue::from_str(token).is_err())
-    {
-        "the Consul token contains characters that a header cannot hold"
-    } else {
-        return Ok(());
-    };
-    Err(Error::InvalidDiscoveryConfig {
-        reason: reason.to_string(),
-    })
+        .is_some_and(|token| HeaderValue::from_str(token).is_err());
+    check_rules(&[
+        (
+            !consul.catalog && !consul.kv,
+            "Consul needs the catalog or the key-value store",
+        ),
+        (
+            consul.kv && consul.prefix.trim_matches('/').is_empty(),
+            "the Consul key prefix is empty",
+        ),
+        (
+            invalid_token,
+            "the Consul token contains characters that a header cannot hold",
+        ),
+    ])
 }
 
 pub fn parse_endpoint(endpoint: &str) -> Result<Endpoint, Error> {
@@ -298,6 +357,9 @@ pub fn changed_providers(old: &DiscoveryConfig, new: &DiscoveryConfig) -> Vec<Di
     let mut changed = Vec::new();
     if old.docker != new.docker {
         changed.push(DiscoveryProvider::Docker);
+    }
+    if old.kubernetes != new.kubernetes {
+        changed.push(DiscoveryProvider::Kubernetes);
     }
     if old.consul != new.consul {
         changed.push(DiscoveryProvider::Consul);
@@ -570,6 +632,7 @@ mod tests {
             state: DiscoveryState::Running,
             error: None,
             proxies: Some(vec![]),
+            certs: vec![],
             issues: vec![],
         });
         let http: HttpProxy = serde_json::from_value(serde_json::json!({

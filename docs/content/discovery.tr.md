@@ -200,6 +200,138 @@ volumes:
 
 > Docker socket erişimi Docker host'unun tam kontrolünü verir. Bu yetki root erişimine eşittir. `:ro` seçeneği yalnız socket dosyasına uygulanır ve API'yi salt okunur yapmaz. Yönetim paneline veya host'a güvenilmeyen network'lerden erişilebiliyorsa r3v3rs3'ü yalnız `GET /containers/json` ve `GET /events` isteklerine izin veren bir Docker socket proxy'sine bağlayın.
 
+# Kubernetes
+
+Kubernetes provider, `networking.k8s.io/v1` Ingress kaynaklarını, backend'lerinin Service ve EndpointSlice'larını ve TLS secret'larını okur. Değişiklikleri watch stream'leriyle izler. Değişen bir Ingress, hazır hale gelen yeni bir pod veya yenilenen bir secret proxy'leri yaklaşık bir saniye içinde günceller.
+
+## Ayarlar
+
+"Ayarlar" sayfasında "Kubernetes Servis Keşfi" bölümünü doldurun veya `config.toml` dosyasını düzenleyin:
+
+```toml
+[discovery.kubernetes]
+enabled = true
+kubeconfig = ""
+namespaces = []
+ingress = true
+ingress_class = "r3v3rs3"
+ports = ["http"]
+```
+
+| Ayar | Anlamı |
+|---|---|
+| `enabled` | Provider'ı başlatır. |
+| `kubeconfig` | Kubeconfig dosyasının yolu. `KUBECONFIG` değişkenini veya `~/.kube/config` dosyasını kullanmak için boş bırakın. Cluster içinde boş değer pod'un service account'unu kullanır. |
+| `namespaces` | Okunacak namespace'ler. Her namespace'i okumak için boş bırakın. |
+| `ingress` | Ingress kaynaklarını okur. Varsayılan değer `true` olur ve provider bu ayarı gerektirir. |
+| `ingress_class` | r3v3rs3 yalnız bu class'ın Ingress kaynaklarını okur. Class, `spec.ingressClassName` alanından veya `kubernetes.io/ingress.class` annotation'ından gelir. Her Ingress'i okumak için boş bırakın. |
+| `ports` | `r3v3rs3.io/ports` annotation'ı olmayan bir Ingress'in kullandığı port adları veya id'leri. |
+
+Ayar değişikliği provider'ı server restart olmadan yeniden başlatır.
+
+## Ingress kaynakları
+
+- Ingress'in her host'u bir HTTP proxy olur. Host, proxy'nin virtual host'udur. Host'un her path'i bir route olur. Proxy'nin adı `<namespace>/<name> <host>` olur.
+- Host'u olmayan kurallar ve `spec.defaultBackend` virtual host'u olmayan tek bir proxy olur. Porttaki başka hiçbir proxy'nin eşleşmediği istekler bu proxy'ye gelir.
+- `Prefix` ve `ImplementationSpecific` path tipleri path'i prefix olarak eşler. r3v3rs3'te tam path eşleşmesi yoktur. Bu yüzden `Exact` tipindeki path issue olur ve route olmaz.
+- Route'un server'ları, Service'in EndpointSlice'larında Service portunun hazır endpoint'leridir. Backend, Service portunu `port.number` veya `port.name` ile seçer. `ready` koşulu olmayan endpoint hazır sayılır.
+- Adı `https` olan veya `appProtocol` değeri `https` olan Service portu endpoint'lere HTTPS ile bağlanır.
+- Bulunmayan Service, bulunmayan port veya hazır endpoint'i olmayan Service issue olur. Route server'sız kalır. Bu yüzden route'un istekleri hata alır ve başka bir route'a gitmez.
+- Yalnız Service backend'i kullanılabilir. `resource` backend'i issue olur.
+
+## Annotation'lar
+
+`r3v3rs3.io/<field>` annotation'ı Ingress'in proxy'lerinde bir alanı ayarlar. Alanlar ve değerler, [Label'lar](@/discovery.tr.md#label-lar) bölümündeki HTTP proxy alanlarıdır. `r3v3rs3.http.<name>.` prefix'i yazılmaz.
+
+| Annotation | Anlamı |
+|---|---|
+| `r3v3rs3.io/ports` | Proxy'lerin port adları veya id'leri. `ports` ayarının yerine geçer. Bu annotation'ı ve ayarı olmayan Ingress issue olur. |
+| `r3v3rs3.io/name` | Proxy'lerin adı. |
+| `r3v3rs3.io/<field>` | Diğer her alan, örneğin `r3v3rs3.io/rate_limit.requests` veya `r3v3rs3.io/headers.response.0.name`. |
+
+`routes` ve `vhosts` alanlarını Ingress kuralları ayarlar. Bu yüzden `routes`, `vhosts`, `port` veya `scheme` annotation'ı issue olur.
+
+## TLS secret'ları
+
+- r3v3rs3, seçili bir Ingress'in `spec.tls` alanında adı geçen `kubernetes.io/tls` secret'larını okur. Her secret'ı sertifika listesine server sertifikası olarak ekler. TLS portu sertifikayı, yüklenen bir sertifikada olduğu gibi server adıyla seçer.
+- r3v3rs3 bu sertifikaları kaydetmez. Sertifika listesi provider'ı gösterir. Secret'tan gelen sertifika silinemez. Ingress veya secret silinince sertifika listeden çıkar.
+- Bulunmayan secret veya sertifikası ya da private key'i geçersiz olan secret issue olur.
+
+## RBAC
+
+Provider dört kaynağı list ve watch eder. r3v3rs3'ün service account'una bir ClusterRole verin veya `namespaces` ayarındaki her namespace'te bir Role verin:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: r3v3rs3
+  namespace: r3v3rs3
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: r3v3rs3
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: r3v3rs3
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: r3v3rs3
+subjects:
+  - kind: ServiceAccount
+    name: r3v3rs3
+    namespace: r3v3rs3
+```
+
+Provider yalnız `kubernetes.io/tls` tipindeki secret'ları okur. Kubernetes RBAC ise `list` iznini tipe göre sınırlayamaz. Bu yüzden rol, r3v3rs3'ün namespace'lerindeki bütün secret'ları okumasına izin verir. Bu erişimi sınırlamak için `namespaces` ayarını ve her namespace'te bir Role kullanın.
+
+## Ingress örneği
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whoami
+  namespace: default
+  annotations:
+    r3v3rs3.io/ports: https
+    r3v3rs3.io/headers.response.0.action: set
+    r3v3rs3.io/headers.response.0.name: X-Frame-Options
+    r3v3rs3.io/headers.response.0.value: DENY
+spec:
+  ingressClassName: r3v3rs3
+  tls:
+    - hosts: [whoami.example.com]
+      secretName: whoami-tls
+  rules:
+    - host: whoami.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: whoami
+                port:
+                  name: http
+```
+
+"Portlar" sayfasında `https` adında bir TLS portu ekleyin. r3v3rs3 pod adreslerine erişebilmelidir. Bu yüzden r3v3rs3'ü cluster içinde veya cluster'ın bir node'unda çalıştırın.
+
 # Consul
 
 Consul provider, catalog'daki servislerin `r3v3rs3.*` tag'lerini ve key-value store'da bir prefix'in altındaki key'leri okur. Değişiklikleri blocking query'lerle izler. Kaydedilen, silinen veya health check'i başarısız olan bir servis instance'ı ve değişen bir key proxy'leri yaklaşık bir saniye içinde günceller.

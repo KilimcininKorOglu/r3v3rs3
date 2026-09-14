@@ -186,9 +186,11 @@ impl ServerState {
         if self.discovery_tasks.stop(provider) || self.discovery.contains(provider) {
             self.clear_discovery(provider).await;
         }
+        if !discovery::is_enabled(&self.config.discovery, provider) {
+            return;
+        }
         let client = match self.discovery_client(provider) {
-            Ok(Some(client)) => client,
-            Ok(None) => return,
+            Ok(client) => client,
             Err(err) => return self.set_discovery_error(provider, err.to_string()),
         };
         let config = self.config.discovery.clone();
@@ -198,7 +200,7 @@ impl ServerState {
         });
     }
 
-    /// The API client of an enabled provider.
+    /// The API client of an enabled provider that reads an HTTP API.
     fn discovery_client(&self, provider: DiscoveryProvider) -> Result<Option<ApiClient>, Error> {
         let Some((endpoints, client_cert)) =
             discovery::api_settings(&self.config.discovery, provider)
@@ -221,6 +223,7 @@ impl ServerState {
             state: DiscoveryState::Error,
             error: Some(error),
             proxies: Some(Vec::new()),
+            certs: Vec::new(),
             issues: Vec::new(),
         });
         self.publish_discovery();
@@ -228,15 +231,13 @@ impl ServerState {
 
     async fn clear_discovery(&mut self, provider: DiscoveryProvider) {
         self.discovery.remove(provider);
-        if self
+        let certs_changed = self.apply_discovery_certs(provider).await;
+        let proxies_changed = self
             .proxies
             .replace_discovered(provider, Vec::new())
-            .changed
-        {
-            self.publish_proxies();
-            self.reload_proxies().await;
-        }
-        self.publish_discovery();
+            .changed;
+        self.finish_discovery_update(proxies_changed, certs_changed)
+            .await;
     }
 
     async fn set_discovery(&mut self, snapshot: DiscoverySnapshot) {
@@ -248,11 +249,32 @@ impl ServerState {
         }
         let provider = snapshot.provider;
         self.discovery.update(snapshot);
-        if self.apply_discovery(provider).await {
+        let certs_changed = self.apply_discovery_certs(provider).await;
+        let proxies_changed = self.apply_discovery(provider).await;
+        self.finish_discovery_update(proxies_changed, certs_changed)
+            .await;
+    }
+
+    /// Sends the changed lists to the event subscribers and sets up the ports again.
+    async fn finish_discovery_update(&mut self, proxies_changed: bool, certs_changed: bool) {
+        if proxies_changed {
             self.publish_proxies();
+        }
+        if proxies_changed || certs_changed {
             self.reload_proxies().await;
         }
         self.publish_discovery();
+    }
+
+    /// Replaces the certificates of a provider with the certificates of its latest snapshot.
+    /// Returns true when the certificate list changed.
+    async fn apply_discovery_certs(&mut self, provider: DiscoveryProvider) -> bool {
+        let certs = self.discovery.certs(provider);
+        let changed = self.certs.replace_discovered(provider, certs);
+        if changed {
+            self.update_certs().await;
+        }
+        changed
     }
 
     /// Builds the proxies of a provider from its latest snapshot and the current ports. Returns

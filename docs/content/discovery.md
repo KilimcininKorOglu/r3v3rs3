@@ -200,6 +200,138 @@ Add a port with the name `http` in "Ports", enable the provider with the network
 
 > Access to the Docker socket gives full control of the Docker host, which equals root access. The `:ro` option applies only to the socket file and does not make the API read-only. When the admin panel or the host is reachable from untrusted networks, connect r3v3rs3 to a Docker socket proxy that allows only `GET /containers/json` and `GET /events`.
 
+# Kubernetes
+
+The Kubernetes provider reads the `networking.k8s.io/v1` Ingress resources, the Services and EndpointSlices of their backends, and their TLS secrets. It follows the changes with watch streams, so a changed Ingress, a new ready pod or a renewed secret updates the proxies within about one second.
+
+## Settings
+
+Fill in "Kubernetes Service Discovery" in "Settings", or edit `config.toml`:
+
+```toml
+[discovery.kubernetes]
+enabled = true
+kubeconfig = ""
+namespaces = []
+ingress = true
+ingress_class = "r3v3rs3"
+ports = ["http"]
+```
+
+| Setting | Meaning |
+|---|---|
+| `enabled` | Starts the provider. |
+| `kubeconfig` | The path of a kubeconfig file. Leave it empty to use `KUBECONFIG` or `~/.kube/config`, or the service account of the pod inside a cluster. |
+| `namespaces` | The namespaces to read. Leave it empty to read every namespace. |
+| `ingress` | Reads the Ingress resources. The default is `true`, and the provider needs it. |
+| `ingress_class` | r3v3rs3 reads only the Ingress resources of this class. The class comes from `spec.ingressClassName` or the `kubernetes.io/ingress.class` annotation. Leave it empty to read every Ingress. |
+| `ports` | The port names or ids of an Ingress without the `r3v3rs3.io/ports` annotation. |
+
+A change of the settings restarts the provider without a server restart.
+
+## Ingress Resources
+
+- Each host of an Ingress becomes one HTTP proxy with the host as its virtual host. Each path of the host becomes a route. The name of the proxy is `<namespace>/<name> <host>`.
+- The rules without a host and `spec.defaultBackend` become one proxy without a virtual host. The requests that no other proxy on the port matches reach this proxy.
+- The `Prefix` and `ImplementationSpecific` path types match the path as a prefix. r3v3rs3 has no exact path match, so a path with the `Exact` type is an issue and does not become a route.
+- The servers of a route are the ready endpoints of the Service port in the EndpointSlices of the Service. A backend selects the Service port by `port.number` or `port.name`. An endpoint without the `ready` condition is ready.
+- A Service port with the name `https` or the `appProtocol` `https` uses HTTPS to the endpoints.
+- A missing Service, a missing port or a Service without ready endpoints is an issue. The route stays without servers, so its requests receive an error and do not reach another route.
+- Only a Service backend is available. A `resource` backend is an issue.
+
+## Annotations
+
+An `r3v3rs3.io/<field>` annotation sets a field of the proxies of the Ingress. The fields and values are the fields of an HTTP proxy in [Labels](@/discovery.md#labels) without the `r3v3rs3.http.<name>.` prefix.
+
+| Annotation | Meaning |
+|---|---|
+| `r3v3rs3.io/ports` | The port names or ids of the proxies. It overrides the `ports` setting. An Ingress without this annotation and without the setting is an issue. |
+| `r3v3rs3.io/name` | The name of the proxies. |
+| `r3v3rs3.io/<field>` | Any other field, for example `r3v3rs3.io/rate_limit.requests` or `r3v3rs3.io/headers.response.0.name`. |
+
+The rules of the Ingress set `routes` and `vhosts`, so an annotation for `routes`, `vhosts`, `port` or `scheme` is an issue.
+
+## TLS Secrets
+
+- r3v3rs3 reads the `kubernetes.io/tls` secrets that the `spec.tls` of a selected Ingress names, and adds each one to the certificate list as a server certificate. A TLS port selects the certificate by the server name, as with an uploaded certificate.
+- r3v3rs3 does not save these certificates. The certificate list shows the provider, and a certificate of a secret cannot be deleted. When the Ingress or the secret is deleted, the certificate is removed.
+- A missing secret, or a secret with an invalid certificate or private key, is an issue.
+
+## RBAC
+
+The provider lists and watches four resources. Grant the service account of r3v3rs3 a ClusterRole, or a Role in each namespace of `namespaces`:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: r3v3rs3
+  namespace: r3v3rs3
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: r3v3rs3
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: r3v3rs3
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: r3v3rs3
+subjects:
+  - kind: ServiceAccount
+    name: r3v3rs3
+    namespace: r3v3rs3
+```
+
+The provider reads only the secrets of the type `kubernetes.io/tls`, but Kubernetes RBAC cannot limit `list` to a type. The role therefore allows r3v3rs3 to read every secret in its namespaces. Use `namespaces` and a Role in each namespace to limit this access.
+
+## Ingress Example
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whoami
+  namespace: default
+  annotations:
+    r3v3rs3.io/ports: https
+    r3v3rs3.io/headers.response.0.action: set
+    r3v3rs3.io/headers.response.0.name: X-Frame-Options
+    r3v3rs3.io/headers.response.0.value: DENY
+spec:
+  ingressClassName: r3v3rs3
+  tls:
+    - hosts: [whoami.example.com]
+      secretName: whoami-tls
+  rules:
+    - host: whoami.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: whoami
+                port:
+                  name: http
+```
+
+Add a TLS port with the name `https` in "Ports". r3v3rs3 must reach the pod addresses, so run it inside the cluster or on a node of the cluster.
+
 # Consul
 
 The Consul provider reads the `r3v3rs3.*` tags of the services in the catalog and the keys under a prefix in the key-value store. It follows the changes with blocking queries, so a registered, removed or failing service instance and a changed key update the proxies within about one second.
