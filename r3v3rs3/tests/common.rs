@@ -107,26 +107,47 @@ pub async fn wait_for_status(url: &str, expected: u16) -> anyhow::Result<String>
     wait_for_host_status(url, None, expected).await
 }
 
+/// Sends requests with the optional `Host` header until `accept` accepts the status and the body
+/// of a response. Returns the body, or the last status and body in the error.
+async fn wait_for_response(
+    url: &str,
+    host: Option<&str>,
+    attempts: usize,
+    accept: impl Fn(u16, &str) -> bool,
+) -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+    let mut last = None;
+    for _ in 0..attempts {
+        let mut request = client.get(url);
+        if let Some(host) = host {
+            request = request.header(reqwest::header::HOST, host);
+        }
+        if let Ok(res) = request.send().await {
+            let status = res.status().as_u16();
+            let body = res.text().await?;
+            if accept(status, &body) {
+                return Ok(body);
+            }
+            last = Some((status, body));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("{url} (host {host:?}) did not answer as expected, last response: {last:?}")
+}
+
 /// Sends requests with the `Host` header until the proxy answers with the expected status.
 pub async fn wait_for_host_status(
     url: &str,
     host: Option<&str>,
     expected: u16,
 ) -> anyhow::Result<String> {
-    let client = reqwest::Client::new();
-    for _ in 0..50 {
-        let mut request = client.get(url);
-        if let Some(host) = host {
-            request = request.header(reqwest::header::HOST, host);
-        }
-        if let Ok(res) = request.send().await {
-            if res.status().as_u16() == expected {
-                return Ok(res.text().await?);
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    anyhow::bail!("{url} did not answer with {expected}")
+    wait_for_response(url, host, 50, |status, _| status == expected).await
+}
+
+/// Sends requests with the `Host` header until the proxy answers with the expected body.
+pub async fn wait_for_host_body(url: &str, host: &str, expected: &str) -> anyhow::Result<()> {
+    wait_for_response(url, Some(host), 100, |_, body| body == expected).await?;
+    Ok(())
 }
 
 #[derive(Debug, Default, Clone)]

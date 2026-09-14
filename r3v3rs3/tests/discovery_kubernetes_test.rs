@@ -20,14 +20,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
 
 mod common;
 use common::{
     alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_discovery,
-    wait_for_host_status, with_server, TestStorage,
+    wait_for_host_body, wait_for_host_status, with_server, TestStorage,
 };
 
 const TOKEN: &str = "mock-token";
@@ -234,18 +233,6 @@ fn kubeconfig(server: &str) -> Value {
         "users": [{"name": "mock", "user": {"token": TOKEN}}],
         "contexts": [{"name": "mock", "context": {"cluster": "mock", "user": "mock"}}],
     })
-}
-
-async fn wait_for_host_body(url: &str, host: &str, expected: &str) -> anyhow::Result<()> {
-    let client = reqwest::Client::new();
-    for _ in 0..50 {
-        let response = client.get(url).header("host", host).send().await?;
-        if response.text().await? == expected {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    anyhow::bail!("{host} did not answer {expected}")
 }
 
 /// The server URLs of the first route of the proxy that the resource defines.

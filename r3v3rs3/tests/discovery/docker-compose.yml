@@ -1,0 +1,50 @@
+# Consul, etcd and k3s for the ignored service discovery end-to-end tests.
+# Run the tests with `make test-discovery-e2e`.
+name: r3v3rs3-discovery
+
+services:
+  consul:
+    image: hashicorp/consul:1.21
+    command: ["agent", "-dev", "-client=0.0.0.0"]
+    environment:
+      # A throwaway ACL token, so the tests also send the token header. The agent token lets the
+      # agent sync a deregistered service to the catalog.
+      CONSUL_LOCAL_CONFIG: '{"acl": {"enabled": true, "default_policy": "deny", "tokens": {"initial_management": "e2e-consul-token", "agent": "e2e-consul-token"}}}'
+      CONSUL_HTTP_TOKEN: e2e-consul-token
+    ports:
+      - "127.0.0.1:8480:8500"
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 2s
+      retries: 30
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.6.4
+    command:
+      - /usr/local/bin/etcd
+      - --name=e2e
+      - --data-dir=/tmp/etcd
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://127.0.0.1:8481
+    ports:
+      - "127.0.0.1:8481:2379"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "endpoint", "health"]
+      interval: 2s
+      retries: 30
+
+  k3s:
+    image: rancher/k3s:v1.32.8-k3s1
+    command: ["server", "--disable=traefik", "--disable=metrics-server", "--tls-san=127.0.0.1"]
+    privileged: true
+    tmpfs:
+      - /run
+      - /var/run
+    ports:
+      - "127.0.0.1:8482:6443"
+    volumes:
+      - ../../../deploy/kubernetes:/manifests:ro
+    healthcheck:
+      test: ["CMD", "kubectl", "get", "--raw=/readyz"]
+      interval: 2s
+      retries: 60
