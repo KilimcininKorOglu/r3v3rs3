@@ -18,7 +18,7 @@ use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, BodyWrapper, BytesResponse, ChallengeType,
     ExternalAccountKey, HttpClient, Identifier, NewAccount, NewOrder, Order, OrderStatus,
 };
-use r3v3rs3_api::acme::{AcmeInfo, DnsProvider, DNS_01};
+use r3v3rs3_api::acme::{AcmeInfo, DnsProvider, DNS_01, HTTP_01};
 use r3v3rs3_api::{
     acme::Acme,
     cert::{CertKind, CertMetadata},
@@ -324,8 +324,9 @@ impl AcmeOrder {
         let account: AccountCredentials =
             serde_json::from_str(&serde_json::to_string(&entry.account)?)?;
         let challenge_type = match entry.acme.challenge_type.as_str() {
+            HTTP_01 => ChallengeType::Http01,
             DNS_01 => ChallengeType::Dns01,
-            _ => ChallengeType::Http01,
+            other => bail!("the {other} challenge cannot order certificates yet"),
         };
         let account = Account::builder_with_http(acme_http_client().await?)
             .from_credentials(account)

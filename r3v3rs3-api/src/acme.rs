@@ -7,6 +7,7 @@ use utoipa::ToSchema;
 
 pub const HTTP_01: &str = "http-01";
 pub const DNS_01: &str = "dns-01";
+pub const TLS_ALPN_01: &str = "tls-alpn-01";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 pub struct Acme {
@@ -26,7 +27,7 @@ impl Acme {
     /// Checks that the challenge can validate every identifier.
     pub fn validate(&self) -> Result<(), Error> {
         match self.challenge_type.as_str() {
-            HTTP_01 => {}
+            HTTP_01 | TLS_ALPN_01 => {}
             DNS_01 => {
                 let ready = self
                     .dns_provider
@@ -254,6 +255,17 @@ mod test {
     }
 
     #[test]
+    fn tls_alpn_01_accepts_plain_domain_names_but_not_a_wildcard() {
+        assert!(acme(&["example.com"], TLS_ALPN_01).validate().is_ok());
+        // RFC 8737 section 3 forbids a wildcard identifier for this challenge.
+        let result = acme(&["example.com", "*.example.com"], TLS_ALPN_01).validate();
+        assert!(matches!(
+            result,
+            Err(Error::AcmeWildcardNeedsDnsChallenge { identifier }) if identifier == "*.example.com"
+        ));
+    }
+
+    #[test]
     fn dns_01_accepts_a_wildcard_domain_name() {
         let mut request = acme(&["example.com", "*.example.com"], DNS_01);
         request.dns_provider = cloudflare("token");
@@ -291,7 +303,7 @@ mod test {
             Err(Error::AcmeIdentifiersMissing)
         ));
         assert!(matches!(
-            acme(&["example.com"], "tls-alpn-01").validate(),
+            acme(&["example.com"], "tls-sni-01").validate(),
             Err(Error::AcmeUnsupportedChallenge { .. })
         ));
     }
