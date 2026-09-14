@@ -49,6 +49,29 @@ listen = "/ip4/0.0.0.0/tcp/443/https"
 tls_termination = { server_names = ["example.com"], client_auth = "required", client_ca_certs = ["a1b2c3d"] }
 ```
 
+## PROXY protocol
+
+r3v3rs3 önündeki bir load balancer, client adresini PROXY protocol header'ı (versiyon 1 veya 2) ile gönderebilir. TCP, TLS üzerinden TCP, HTTP ve HTTPS portları bu header'ı okuyabilir. UDP ve QUIC üzerinden HTTP portları okuyamaz.
+
+"PROXY Protocol Al" seçeneğini açın. Load balancer'ların IP adreslerini veya CIDR bloklarını "Güvenilen Load Balancer'lar" alanına yazın:
+
+- Güvenilen bir adresten gelen bağlantı geçerli bir header ile başlamalıdır. Header geçersizse, versiyonu "Kabul Edilen Versiyonlar" içinde yoksa veya header "Header Timeout" süresinde gelmezse r3v3rs3 bağlantıyı kapatır. Varsayılan timeout 5 saniyedir.
+- r3v3rs3 diğer adreslerden header okumaz. Bu bağlantıların client adresi peer adresidir.
+- Versiyon 2 `LOCAL` header'ı ve versiyon 1 `UNKNOWN` header'ı peer adresini korur. Load balancer'lar bunları health check'lerde gönderir.
+
+r3v3rs3 header'ı TLS handshake'ten önce okur. Header'daki adres bağlantının client adresi olur. IP filtreleri, rate limit'ler, client IP hash, `Forwarded` ve `X-Forwarded-For` header'ları ve access log bu adresi kullanır. Access log peer adresini de `peer` alanına yazar.
+
+PROXY protocol header'ı ile başlayan bir ACME HTTP-01 challenge request'i challenge yanıtını almaz. Böyle bir load balancer'ın sunduğu sertifika için DNS-01 challenge kullanın.
+
+```toml
+[my-port]
+listen = "/ip4/0.0.0.0/tcp/443/https"
+tls_termination = { server_names = ["example.com"] }
+proxy_protocol = { trusted = ["10.0.0.0/8"], accept = "v2", timeout = "5s" }
+```
+
+`accept` değeri `any` (varsayılan), `v1` veya `v2` olur.
+
 ## Portu sıfırlama
 
 Port config'ini değiştirdiğinizde açık bağlantılar etkilenmez; bu bağlantılar eski config ile çalışmaya devam eder. Açık bağlantıları kapatmak için portu sıfırlayın.

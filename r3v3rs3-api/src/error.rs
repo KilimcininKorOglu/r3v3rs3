@@ -47,6 +47,12 @@ pub enum Error {
     #[error("missing TLS termination config")]
     TlsTerminationConfigMissing,
 
+    #[error("PROXY protocol works only on TCP, TLS, HTTP and HTTPS ports")]
+    ProxyProtocolNotSupported,
+
+    #[error("PROXY protocol needs at least one trusted address block")]
+    ProxyProtocolTrustedMissing,
+
     #[error("certificate is in use: {id}")]
     CertificateInUse { id: ShortId },
 

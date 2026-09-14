@@ -18,6 +18,7 @@ use tracing::{error, Instrument, Span};
 
 pub mod health;
 pub mod http;
+pub mod proxy_protocol;
 pub mod tcp;
 pub mod tls;
 pub mod udp;
@@ -50,6 +51,9 @@ pub struct PortContext {
 
 impl PortContext {
     pub fn new(entry: PortEntry) -> Result<Self, Error> {
+        if let Some(proxy_protocol) = &entry.port.opts.proxy_protocol {
+            proxy_protocol.validate(&entry.port.listen)?;
+        }
         let kind = if entry.port.listen.is_quic() {
             PortContextKind::Http3(HttpPortContext::new(&entry)?)
         } else if entry.port.listen.is_udp() {

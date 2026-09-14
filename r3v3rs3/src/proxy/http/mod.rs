@@ -9,6 +9,7 @@ use self::{
     route::{FilteredRoute, Router},
 };
 use super::{
+    proxy_protocol::{self, Client},
     spawn_connection,
     tls::{port_acceptor, server_cert_resolver, ClientCertInfo, TlsTermination},
     PortContextEvent,
@@ -39,7 +40,7 @@ use quinn::{
 };
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::port::{PortStatus, SocketState};
-use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
+use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry, proxy_protocol::ProxyProtocolReceive};
 use rewriter::{RequestRewriter, ResponseRewriter, ResponseRewriterBuilder};
 use std::{net::SocketAddr, ops::ControlFlow, sync::Arc, time::SystemTime};
 use tokio::{
@@ -82,6 +83,7 @@ const HTTP2_MAX_FRAME_SIZE: usize = 16384;
 pub struct HttpStarter {
     /// `None` when the TLS config of the port is invalid.
     tls_acceptor: Option<Option<TlsAcceptor>>,
+    proxy_protocol: Option<Arc<ProxyProtocolReceive>>,
     shared: Arc<ArcSwap<SharedContext>>,
     stop_notifier: Arc<Notify>,
     span: Span,
@@ -93,13 +95,12 @@ impl HttpStarter {
             debug!("closing the connection: the TLS config is invalid");
             return;
         };
-        let task = start(
-            stream,
-            tls_acceptor,
-            Cache::new(self.shared),
-            self.stop_notifier,
-            self.span.clone(),
-        );
+        let (shared, stop_notifier) = (Cache::new(self.shared), self.stop_notifier);
+        let (proxy_protocol, span) = (self.proxy_protocol, self.span.clone());
+        let task = async move {
+            let client = proxy_protocol::accept(stream, proxy_protocol.as_deref()).await?;
+            start(client, tls_acceptor, shared, stop_notifier, span).await
+        };
         spawn_connection(self.span, task);
     }
 }
@@ -110,6 +111,7 @@ pub struct HttpPortContext {
     status: PortStatus,
     span: Span,
     tls_termination: Option<TlsTermination>,
+    proxy_protocol: Option<Arc<ProxyProtocolReceive>>,
     h3_server_config: Option<Arc<quinn::ServerConfig>>,
     shared: Arc<ArcSwap<SharedContext>>,
     stop_notifier: Arc<Notify>,
@@ -143,6 +145,7 @@ impl HttpPortContext {
             status: Default::default(),
             span,
             tls_termination,
+            proxy_protocol: entry.port.opts.proxy_protocol.clone().map(Arc::new),
             h3_server_config: None,
             shared: Arc::new(ArcSwap::from_pointee(SharedContext {
                 router: Default::default(),
@@ -271,6 +274,7 @@ impl HttpPortContext {
     pub fn starter(&self) -> HttpStarter {
         HttpStarter {
             tls_acceptor: port_acceptor(self.tls_termination.as_ref()),
+            proxy_protocol: self.proxy_protocol.clone(),
             shared: Arc::clone(&self.shared),
             stop_notifier: self.stop_notifier.clone(),
             span: self.span.clone(),
@@ -381,14 +385,18 @@ fn quic_client_cert(conn: &quinn::Connection) -> Option<Arc<ClientCertInfo>> {
 }
 
 async fn start(
-    mut stream: BufStream<TcpStream>,
+    client: Client,
     tls_acceptor: Option<TlsAcceptor>,
     shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
     stop_notifier: Arc<Notify>,
     span: Span,
 ) -> anyhow::Result<()> {
+    let Client {
+        mut stream,
+        remote,
+        peer,
+    } = client;
     let local = stream.get_ref().local_addr()?;
-    let remote = stream.get_ref().peer_addr()?;
     let (mut client_stream, server_stream) = tokio::io::duplex(MAX_BUFFER_SIZE);
 
     let first_byte = stream.read_u8().await?;
@@ -467,6 +475,7 @@ async fn start(
             } else {
                 let info = RequestInfo {
                     remote,
+                    peer,
                     local: local.to_string(),
                     sni: sni.as_deref(),
                     proto: forwarded_proto,
@@ -566,7 +575,10 @@ struct QuickContext {
 
 /// Connection details that the TCP and QUIC paths pass to [`route_request`].
 struct RequestInfo<'a> {
+    /// The client address from the PROXY protocol header, or the peer address.
     remote: SocketAddr,
+    /// The address of the connected peer.
+    peer: SocketAddr,
     local: String,
     sni: Option<&'a str>,
     proto: &'static str,
@@ -631,7 +643,7 @@ where
     let upstream = match check_policies(route, client.ip) {
         Ok(upstream) => upstream,
         Err(err) => {
-            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %err);
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
             return (ProxiedRequest::Err(err), response_rewriter);
         }
     };
@@ -644,7 +656,7 @@ where
 
     if body_limit::declared_too_large(req.headers(), upstream.max_body_size) {
         let err = ProxyError::PayloadTooLarge;
-        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %err);
+        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
         return (ProxiedRequest::Err(err), response_rewriter);
     }
 
@@ -670,7 +682,7 @@ where
             return (ProxiedRequest::Respond(response), response_rewriter)
         }
         Authenticated::Rejected(rejection) => {
-            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, error = %rejection);
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %rejection);
             return (rejected(rejection), response_rewriter);
         }
     };
@@ -682,8 +694,8 @@ where
         req.extensions_mut().insert(UpstreamH2c);
     }
 
-    info!(target: "r3v3rs3::access_log", remote = %info.remote, client = %client.ip, local = %info.local, action, target = %req.uri());
-    let span: Span = span!(Level::INFO, "http", %resource_id, remote = %info.remote, client = %client.ip, local = %info.local, action, target = %req.uri());
+    info!(target: "r3v3rs3::access_log", remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
+    let span: Span = span!(Level::INFO, "http", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
 
     shared
         .header_rewriter
@@ -843,6 +855,7 @@ where
     let shared = shared_cache.load();
     let info = RequestInfo {
         remote: ctx.remote,
+        peer: ctx.remote,
         local: ctx.local.map(|ip| ip.to_string()).unwrap_or_default(),
         sni: None,
         proto: "h3",

@@ -51,6 +51,7 @@ async fn wss_proxy() -> anyhow::Result<()> {
                         server_names: vec!["localhost".into()],
                         ..Default::default()
                     }),
+                    proxy_protocol: None,
                 },
             },
         }])

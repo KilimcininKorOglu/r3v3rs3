@@ -269,6 +269,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                                 server_names: vec!["localhost".into()],
                                 ..Default::default()
                             }),
+                            proxy_protocol: None,
                         },
                     },
                 },

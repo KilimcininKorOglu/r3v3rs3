@@ -1,6 +1,7 @@
 use crate::{
     id::ShortId,
     multiaddr::Multiaddr,
+    proxy_protocol::ProxyProtocolReceive,
     tls::{TlsState, TlsTermination},
     upstream::{default_weight, is_default_weight, DEFAULT_WEIGHT},
 };
@@ -138,6 +139,8 @@ impl From<PortEntry> for (ShortId, Port) {
 pub struct PortOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls_termination: Option<TlsTermination>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_protocol: Option<ProxyProtocolReceive>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

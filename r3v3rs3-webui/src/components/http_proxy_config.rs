@@ -1475,7 +1475,7 @@ fn select_value(event: &Event) -> String {
     select.value()
 }
 
-fn text(event: &Event) -> String {
+pub(super) fn text(event: &Event) -> String {
     input_element(event).value()
 }
 
@@ -1484,7 +1484,7 @@ fn text_area(event: &Event) -> String {
     area.value()
 }
 
-fn checked(event: &Event) -> bool {
+pub(super) fn checked(event: &Event) -> bool {
     input_element(event).checked()
 }
 
@@ -1519,7 +1519,7 @@ where
     })
 }
 
-fn state_input<T, V>(
+pub(super) fn state_input<T, V>(
     state: &UseStateHandle<T>,
     read: fn(&Event) -> V,
     update: fn(&mut T, V),

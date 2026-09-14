@@ -87,6 +87,7 @@ fn tls_port(id: &str, listen: Multiaddr, mode: ClientAuthMode, roots: Vec<ShortI
             client_auth: mode,
             client_ca_certs: roots,
         }),
+        proxy_protocol: None,
     };
     entry
 }

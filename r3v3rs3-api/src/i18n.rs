@@ -194,6 +194,8 @@ mod tests {
             Error::FailedToRefreshCdnRanges,
             Error::InvalidMultiaddr { addr: text() },
             Error::TlsTerminationConfigMissing,
+            Error::ProxyProtocolNotSupported,
+            Error::ProxyProtocolTrustedMissing,
             Error::CertificateInUse {
                 id: "abc".parse().unwrap(),
             },

@@ -1,5 +1,6 @@
 use super::{
     health::{self, Probe, UpstreamGroup},
+    proxy_protocol::{self, Client},
     spawn_connection,
     tls::{port_acceptor, upstream_client_config, TlsTermination},
     PortContextEvent, PortStatus, SocketState,
@@ -13,6 +14,7 @@ use r3v3rs3_api::{error::Error, id::ShortId, multiaddr::Multiaddr};
 use r3v3rs3_api::{
     port::PortEntry,
     proxy::{ProxyEntry, ProxyKind, TcpProxy},
+    proxy_protocol::ProxyProtocolReceive,
 };
 use std::{
     net::SocketAddr,
@@ -44,6 +46,7 @@ pub struct TcpPortContext {
     span: Span,
     resolver: Resolver,
     tls_termination: Option<TlsTermination>,
+    proxy_protocol: Option<Arc<ProxyProtocolReceive>>,
     stop_notifier: Arc<Notify>,
 }
 
@@ -75,6 +78,7 @@ impl TcpPortContext {
             span,
             resolver,
             tls_termination,
+            proxy_protocol: entry.port.opts.proxy_protocol.clone().map(Arc::new),
             stop_notifier: Arc::new(Notify::new()),
         })
     }
@@ -133,6 +137,7 @@ impl TcpPortContext {
             upstream: self.upstream.clone(),
             resolver: self.resolver.clone(),
             tls_acceptor: port_acceptor(self.tls_termination.as_ref()),
+            proxy_protocol: self.proxy_protocol.clone(),
             stop_notifier: self.stop_notifier.clone(),
             span: self.span.clone(),
         }
@@ -145,6 +150,7 @@ pub struct TcpStarter {
     resolver: Resolver,
     /// `None` when the TLS config of the port is invalid.
     tls_acceptor: Option<Option<TlsAcceptor>>,
+    proxy_protocol: Option<Arc<ProxyProtocolReceive>>,
     stop_notifier: Arc<Notify>,
     span: Span,
 }
@@ -159,13 +165,12 @@ impl TcpStarter {
             debug!("closing the connection: the TLS config is invalid");
             return;
         };
-        let task = start(
-            stream,
-            upstream,
-            self.resolver,
-            tls_acceptor,
-            self.stop_notifier,
-        );
+        let (resolver, stop_notifier) = (self.resolver, self.stop_notifier);
+        let proxy_protocol = self.proxy_protocol;
+        let task = async move {
+            let client = proxy_protocol::accept(stream, proxy_protocol.as_deref()).await?;
+            start(client, upstream, resolver, tls_acceptor, stop_notifier).await
+        };
         spawn_connection(self.span, task);
     }
 }
@@ -229,13 +234,17 @@ impl TcpUpstream {
 }
 
 async fn start(
-    mut stream: BufStream<TcpStream>,
+    client: Client,
     upstream: TcpUpstream,
     resolver: Resolver,
     tls_acceptor: Option<TlsAcceptor>,
     stop_notifier: Arc<Notify>,
 ) -> anyhow::Result<()> {
-    let remote = stream.get_ref().peer_addr()?;
+    let Client {
+        mut stream,
+        remote,
+        peer,
+    } = client;
     let local = stream.get_ref().local_addr()?;
 
     let (mut client_stream, server_stream) = tokio::io::duplex(MAX_BUFFER_SIZE);
@@ -253,7 +262,7 @@ async fn start(
     });
 
     let (target, mut out) = upstream.connect(&resolver, remote.ip()).await?;
-    info!(target: "r3v3rs3::access_log", remote = %remote, %local, %target);
+    info!(target: "r3v3rs3::access_log", remote = %remote, %peer, %local, %target);
 
     let mut stream: Box<dyn IoStream> = Box::new(server_stream);
     if let Some(acceptor) = tls_acceptor {

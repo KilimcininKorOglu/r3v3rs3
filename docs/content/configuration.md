@@ -49,6 +49,29 @@ listen = "/ip4/0.0.0.0/tcp/443/https"
 tls_termination = { server_names = ["example.com"], client_auth = "required", client_ca_certs = ["a1b2c3d"] }
 ```
 
+## PROXY Protocol
+
+A load balancer in front of r3v3rs3 can send the client address in a PROXY protocol header (version 1 or 2). TCP, TCP over TLS, HTTP and HTTPS ports can read this header. UDP and HTTP over QUIC ports cannot.
+
+Enable "Receive PROXY Protocol" and list the IP addresses or CIDR blocks of the load balancers in "Trusted Load Balancers":
+
+- A connection from a trusted address must start with a valid header. r3v3rs3 closes the connection when the header is invalid, when "Accepted Versions" does not include its version, or when the header does not arrive in "Header Timeout". The default timeout is 5 seconds.
+- r3v3rs3 does not read a header from other addresses. The client address of such a connection is the peer address.
+- A version 2 `LOCAL` header and a version 1 `UNKNOWN` header keep the peer address. Load balancers send them in health checks.
+
+r3v3rs3 reads the header before the TLS handshake. The address from the header is the client address of the connection. IP filters, rate limits, the client IP hash, the `Forwarded` and `X-Forwarded-For` headers and the access log use it. The access log also writes the peer address in the `peer` field.
+
+An ACME HTTP-01 challenge request that starts with a PROXY protocol header does not receive the challenge response. Use the DNS-01 challenge for a certificate that such a load balancer serves.
+
+```toml
+[my-port]
+listen = "/ip4/0.0.0.0/tcp/443/https"
+tls_termination = { server_names = ["example.com"] }
+proxy_protocol = { trusted = ["10.0.0.0/8"], accept = "v2", timeout = "5s" }
+```
+
+`accept` is `any` (the default), `v1` or `v2`.
+
 ## Resetting a Port
 
 Changing the port configuration does not affect existing connections. Old connections will continue to use the old configuration. To forcibly close existing connections, you can reset the port.

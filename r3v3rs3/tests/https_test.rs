@@ -47,6 +47,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                         server_names: vec!["localhost".into()],
                         ..Default::default()
                     }),
+                    proxy_protocol: None,
                 },
             },
         }])
@@ -169,6 +170,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                         server_names: vec!["localhost".into()],
                         ..Default::default()
                     }),
+                    proxy_protocol: None,
                 },
             },
         }])
@@ -272,6 +274,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                         server_names: vec!["localhost".into()],
                         ..Default::default()
                     }),
+                    proxy_protocol: None,
                 },
             },
         }])
@@ -390,6 +393,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                         server_names: vec!["localhost".into()],
                         ..Default::default()
                     }),
+                    proxy_protocol: None,
                 },
             },
         }])
