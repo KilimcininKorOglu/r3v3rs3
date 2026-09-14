@@ -32,12 +32,14 @@ test-api:
 test-server:
 	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --all-features
 
-# Runs the ACME DNS-01 end-to-end test against Pebble in Docker, then removes the containers.
+# Runs the ACME DNS-01 and TLS-ALPN-01 end-to-end tests against Pebble in Docker, then removes the
+# containers. Pebble validates TLS-ALPN-01 on port 5001 of the Docker host address.
 test-acme-pebble:
 	docker compose -f $(PEBBLE_COMPOSE) up -d
 	mkdir -p $(dir $(PEBBLE_CA))
 	docker compose -f $(PEBBLE_COMPOSE) cp pebble:/test/certs/pebble.minica.pem $(PEBBLE_CA)
-	SSL_CERT_FILE=$(CURDIR)/$(PEBBLE_CA) CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test acme_pebble_test -- --ignored; \
+	PEBBLE_HOST_IP=$$(docker run --rm --add-host=host.docker.internal:host-gateway busybox:latest awk '/host.docker.internal/{print $$1}' /etc/hosts) \
+		SSL_CERT_FILE=$(CURDIR)/$(PEBBLE_CA) CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test acme_pebble_test -- --ignored; \
 		status=$$?; docker compose -f $(PEBBLE_COMPOSE) down; exit $$status
 
 # Runs the service discovery end-to-end tests against Consul, etcd and k3s in Docker and against

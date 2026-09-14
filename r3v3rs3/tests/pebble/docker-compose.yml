@@ -1,4 +1,4 @@
-# Pebble and pebble-challtestsrv for the ignored ACME DNS-01 end-to-end test.
+# Pebble and pebble-challtestsrv for the ignored ACME DNS-01 and TLS-ALPN-01 end-to-end tests.
 # Run the test with `make test-acme-pebble`.
 name: r3v3rs3-pebble
 
@@ -17,8 +17,9 @@ services:
 
   challtestsrv:
     image: ghcr.io/letsencrypt/pebble-challtestsrv:latest
-    # Only the DNS server and the management API are needed.
-    command: ["-http01", "", "-https01", "", "-tlsalpn01", "", "-doh", ""]
+    # Only the DNS server and the management API are needed. Without a default AAAA answer, Pebble
+    # connects to the IPv4 address that the TLS-ALPN-01 test publishes.
+    command: ["-http01", "", "-https01", "", "-tlsalpn01", "", "-doh", "", "-defaultIPv6", ""]
     ports:
       - "127.0.0.1:8471:8053/tcp"
       - "127.0.0.1:8471:8053/udp"

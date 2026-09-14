@@ -1,4 +1,4 @@
-//! The ACME DNS-01 flow against Pebble, from the order to the stored certificate.
+//! The ACME DNS-01 and TLS-ALPN-01 flows against Pebble, from the order to the stored certificate.
 //!
 //! The test needs the containers of `tests/pebble/docker-compose.yml`, and `SSL_CERT_FILE`
 //! must name the Pebble test CA. `make test-acme-pebble` does both.
@@ -19,7 +19,7 @@ use r3v3rs3::{
     },
 };
 use r3v3rs3_api::{
-    acme::{Acme, AcmeConfig, AcmeRequest, DnsProvider, DNS_01},
+    acme::{Acme, AcmeConfig, AcmeRequest, DnsProvider, DNS_01, TLS_ALPN_01},
     app::AppConfig,
     discovery::{DiscoveryProvider, DiscoverySource, DiscoveryState},
     id::ShortId,
@@ -184,6 +184,58 @@ async fn dns_01_issues_a_wildcard_certificate() -> anyhow::Result<()> {
     deleted.sort();
     assert_eq!(deleted, vec!["rec-1", "rec-2"]);
     Ok(())
+}
+
+/// Pebble validates TLS-ALPN-01 on port 5001 of the address that pebble-challtestsrv returns.
+const PEBBLE_TLS_ALPN_ADDR: &str = "0.0.0.0:5001";
+
+/// The Docker host address that the Pebble container reaches. `make test-acme-pebble` sets it.
+fn pebble_host_ip() -> anyhow::Result<String> {
+    std::env::var("PEBBLE_HOST_IP")
+        .map_err(|_| anyhow::anyhow!("PEBBLE_HOST_IP is not set, run make test-acme-pebble"))
+}
+
+#[tokio::test]
+#[ignore = "needs the Pebble containers, run it with make test-acme-pebble"]
+async fn tls_alpn_01_issues_a_certificate_without_a_port() -> anyhow::Result<()> {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    wait_for_listener("127.0.0.1:8470".parse()?).await?;
+    let addresses = vec![pebble_host_ip()?];
+    challtestsrv(
+        "add-a",
+        json!({ "host": "alpn.test", "addresses": addresses }),
+    )
+    .await
+    .map_err(anyhow::Error::msg)?;
+
+    let config = AppConfig {
+        tls_alpn_challenge_addr: PEBBLE_TLS_ALPN_ADDR.parse()?,
+        ..Default::default()
+    };
+    let storage = TestStorage::builder().config(config).build();
+    let request = AcmeRequest {
+        server_url: PEBBLE_DIRECTORY.to_string(),
+        contacts: vec![],
+        eab: None,
+        acme: Acme {
+            config: AcmeConfig {
+                provider: "Pebble".to_string(),
+                ..Default::default()
+            },
+            identifiers: vec!["alpn.test".parse()?],
+            challenge_type: TLS_ALPN_01.to_string(),
+            dns_provider: None,
+        },
+    };
+    let cert_storage = storage.clone();
+    with_server(storage, move |mut channels| async move {
+        if let Err(err) = call(&mut channels, AddAcme { request }).await? {
+            anyhow::bail!("AddAcme failed: {err}");
+        }
+        wait_for_cert(&cert_storage, &["alpn.test"]).await?;
+        Ok(())
+    })
+    .await
 }
 
 /// Sends a Docker snapshot with one proxy for `app.site.test` that names the ACME entry.
