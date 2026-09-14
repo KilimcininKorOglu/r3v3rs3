@@ -8,8 +8,9 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufStream};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufStream};
 use tokio::net::TcpStream;
+use tokio_rustls::{rustls::ServerConfig, TlsAcceptor};
 use tracing::error;
 
 /// The ACME HTTP-01 tokens and their key authorizations.
@@ -71,13 +72,45 @@ async fn serve_challenge(stream: BufStream<TcpStream>, body: String) {
     }
 }
 
+/// Serves a connection of a listener that only the challenges use. On the port of the TLS-ALPN-01
+/// challenges, the connection runs the challenge handshake. Every other connection is closed.
+pub fn serve_reserved(
+    stream: BufStream<TcpStream>,
+    tls_alpn: Option<Arc<ServerConfig>>,
+    tls_alpn_port: u16,
+) {
+    let on_tls_alpn_port = stream
+        .get_ref()
+        .local_addr()
+        .is_ok_and(|addr| addr.port() == tls_alpn_port);
+    let Some(config) = tls_alpn.filter(|_| on_tls_alpn_port) else {
+        return;
+    };
+    tokio::spawn(async move {
+        if let Err(err) = serve_tls_alpn(stream, config).await {
+            error!(%err, "failed to serve the TLS-ALPN-01 challenge");
+        }
+    });
+}
+
+async fn serve_tls_alpn(
+    stream: BufStream<TcpStream>,
+    config: Arc<ServerConfig>,
+) -> std::io::Result<()> {
+    let mut stream = TlsAcceptor::from(config).accept(stream).await?;
+    stream.shutdown().await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge, ACME_TLS_ALPN};
+    use crate::proxy::tls::testing::connector;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
+    use tokio_rustls::rustls::pki_types::ServerName;
 
     fn challenges() -> HttpChallenges {
         Arc::new(HashMap::from([(
@@ -144,6 +177,26 @@ mod tests {
             let mut line = String::new();
             stream.read_line(&mut line).await.unwrap();
             assert_eq!(line, "GET /other HTTP/1.1\r\n");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reserved_listener_serves_only_on_the_tls_alpn_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let challenge = TlsAlpnChallenge {
+            domain: "localhost".to_string(),
+            digest: [5; 32],
+        };
+        let certs = ChallengeCerts::new(&[challenge]).unwrap();
+        let config = Some(challenge_config(Arc::new(certs)));
+
+        for (tls_alpn_port, served) in [(port, true), (port.wrapping_add(1), false)] {
+            let (client, accepted) = connect(&listener).await;
+            serve_reserved(BufStream::new(accepted), config.clone(), tls_alpn_port);
+            let name = ServerName::try_from("localhost").unwrap();
+            let result = connector(&[ACME_TLS_ALPN]).connect(name, client).await;
+            assert_eq!(result.is_ok(), served, "{result:?}");
         }
     }
 }

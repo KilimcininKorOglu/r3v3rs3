@@ -19,6 +19,11 @@ pub struct AppConfig {
     #[schema(value_type = String, example = "0.0.0.0:80")]
     pub http_challenge_addr: SocketAddr,
 
+    /// The listening address of the ACME TLS-ALPN-01 challenges when no port uses its port.
+    #[serde(default = "default_tls_alpn_challenge_addr")]
+    #[schema(value_type = String, example = "0.0.0.0:443")]
+    pub tls_alpn_challenge_addr: SocketAddr,
+
     /// DNS server that is asked whether the TXT records of a DNS-01 challenge are visible.
     /// The system resolver is used when it is not set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,6 +55,10 @@ fn default_background_task_interval() -> Duration {
 
 fn default_http_challenge_addr() -> SocketAddr {
     SocketAddr::from(([0, 0, 0, 0], 80))
+}
+
+fn default_tls_alpn_challenge_addr() -> SocketAddr {
+    SocketAddr::from(([0, 0, 0, 0], 443))
 }
 
 #[derive(Clone, Serialize, ToSchema)]

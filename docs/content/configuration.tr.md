@@ -730,9 +730,12 @@ Sertifika otoritesi, her domain adını sizin yönettiğinizi bir challenge ile 
 | Challenge | Nasıl çalışır | Gereksinimler |
 |---|---|---|
 | HTTP-01 | Sertifika otoritesi `http://<domain>/.well-known/acme-challenge/<token>` adresine istek gönderir ve r3v3rs3 yanıt verir. | Her domain adı r3v3rs3'e çözümlenmeli, TCP 80 portu açık ve internetten erişilebilir olmalıdır. Wildcard domain adı kullanılamaz. |
+| TLS-ALPN-01 | Sertifika otoritesi, domain adının 443 portuna `acme-tls/1` ALPN protokolüyle bir TLS bağlantısı açar ve r3v3rs3 bir challenge sertifikasıyla yanıt verir. | Her domain adı r3v3rs3'e çözümlenmeli, TCP 443 portu açık ve internetten erişilebilir olmalıdır. Wildcard domain adı kullanılamaz. |
 | DNS-01 | r3v3rs3, DNS provider'ınızın API'si ile `_acme-challenge.<domain>` TXT kaydını oluşturur. | Aşağıdaki tablodaki DNS provider'larından biri ve zone'u düzenleyebilen bir API credential'ı. |
 
-`*.example.com` gibi bir wildcard domain adı DNS-01 gerektirir. r3v3rs3, HTTP-01 ile girilen wildcard domain adını reddeder.
+`*.example.com` gibi bir wildcard domain adı DNS-01 gerektirir. r3v3rs3, HTTP-01 veya TLS-ALPN-01 ile girilen wildcard domain adını reddeder.
+
+TLS-ALPN-01 challenge'ı sürerken her TLS portu ve her HTTPS portu, yalnız `acme-tls/1` sunan bir client'a challenge sertifikasıyla yanıt verir. Diğer client'lar portun sertifikasını alır. TLS portu, challenge bağlantısı için upstream sunucusuna bağlanmaz. Hiçbir TCP veya HTTP portu "TLS-ALPN Challenge Adresi" ayarındaki portu kullanmıyorsa r3v3rs3, challenge'lar bitene kadar bu adresi dinler. 443 portundaki TLS'siz bir HTTP portu challenge'a yanıt veremez.
 
 ## DNS-01
 
@@ -793,6 +796,7 @@ WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütü
 | Giriş Denemesi Sıfırlama | `15m` | Limite ulaşıldıktan sonraki bekleme süresi. |
 | Arka Plan Görevi Aralığı | `1h` | Sertifika yenileme ve log temizleme görevlerinin çalışma aralığı. |
 | HTTP Challenge Adresi | `0.0.0.0:80` | ACME HTTP challenge'larının dinlendiği adres. |
+| TLS-ALPN Challenge Adresi | `0.0.0.0:443` | Hiçbir port bu portu kullanmıyorsa ACME TLS-ALPN-01 challenge'larının dinlendiği adres. |
 | DNS Challenge Resolver | boş | r3v3rs3'ün DNS-01 challenge'ının TXT kayıtları görünene kadar sorguladığı DNS sunucusu, örneğin `1.1.1.1:53`. Boş bırakılırsa sistem resolver'ı kullanılır. |
 | Veritabanı Log Saklama Süresi | `3months` | Log'ların log veritabanında ne kadar tutulacağı. |
 

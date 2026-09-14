@@ -9,6 +9,7 @@ use super::rpc::proxies::validate_proxy;
 use super::udp::UdpListenerPool;
 use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
 use crate::certs::acme::{AcmeEntry, AcmeOrder, AcmeTarget};
+use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge};
 use crate::config::storage::Storage;
 use crate::discovery::{http::ApiClient, DiscoverySnapshot};
 use crate::log::DatabaseLayer;
@@ -54,6 +55,7 @@ pub struct ServerState {
     http_challenges: HttpChallenges,
     /// The TLS config of the active TLS-ALPN-01 challenges.
     tls_alpn_challenge: Option<Arc<ServerConfig>>,
+    tls_alpn_challenges: Vec<TlsAlpnChallenge>,
     acme_schedule: AcmeSchedule,
     command_sender: mpsc::Sender<ServerCommand>,
     br_sender: broadcast::Sender<ServerEvent>,
@@ -67,6 +69,20 @@ pub enum Received {
     Tcp(usize, TcpStream),
     Udp(usize, usize, SocketAddr, Vec<u8>),
     Quic(usize, Box<Incoming>),
+}
+
+/// The TLS config that answers the TLS-ALPN-01 challenges. `None` without a challenge.
+fn tls_alpn_config(challenges: &[TlsAlpnChallenge]) -> Option<Arc<ServerConfig>> {
+    if challenges.is_empty() {
+        return None;
+    }
+    match ChallengeCerts::new(challenges) {
+        Ok(certs) => Some(challenge_config(Arc::new(certs))),
+        Err(err) => {
+            error!(%err, "failed to build the TLS-ALPN-01 challenge certificates");
+            None
+        }
+    }
 }
 
 impl ServerState {
@@ -123,6 +139,7 @@ impl ServerState {
             quic_pool: QuicListenerPool::new(),
             http_challenges: HttpChallenges::default(),
             tls_alpn_challenge: None,
+            tls_alpn_challenges: Vec::new(),
             acme_schedule: AcmeSchedule::default(),
             command_sender,
             br_sender,
@@ -373,10 +390,10 @@ impl ServerState {
             .get(index)
             .and_then(PortContext::starter);
         let challenge = self.tls_alpn_challenge.clone();
-        connection::accept(stream, &self.http_challenges, move |stream| {
-            if let Some(starter) = starter {
-                starter.start(stream, challenge);
-            }
+        let tls_alpn_port = self.config.tls_alpn_challenge_addr.port();
+        connection::accept(stream, &self.http_challenges, move |stream| match starter {
+            Some(starter) => starter.start(stream, challenge),
+            None => connection::serve_reserved(stream, challenge, tls_alpn_port),
         });
     }
 
@@ -639,20 +656,14 @@ impl ServerState {
 
     async fn stop_http_challenges(&mut self) {
         self.http_challenges = HttpChallenges::default();
-        self.tcp_pool.set_http_challenge_addr(None);
+        self.tls_alpn_challenges.clear();
+        self.tls_alpn_challenge = None;
+        self.tcp_pool.set_challenge_addrs(Vec::new());
         self.tcp_pool.update(self.ports.as_mut_slice()).await;
     }
 
     async fn continue_http_challenges(&mut self, orders: Vec<AcmeOrder>) {
-        // Orders of an earlier batch can still be running, so their challenges stay served.
-        Arc::make_mut(&mut self.http_challenges)
-            .extend(orders.iter().flat_map(|req| req.http_challenges.clone()));
-        // DNS-01 orders need no listener.
-        if !self.http_challenges.is_empty() {
-            self.tcp_pool
-                .set_http_challenge_addr(Some(self.config.http_challenge_addr));
-            self.tcp_pool.update(self.ports.as_mut_slice()).await;
-        }
+        self.serve_challenges(&orders).await;
 
         let command = self.command_sender.clone();
         tokio::task::spawn(async move {
@@ -687,6 +698,38 @@ impl ServerState {
                     .await;
             }
         });
+    }
+
+    /// Serves the HTTP-01 and TLS-ALPN-01 challenges of the orders. Orders of an earlier batch can
+    /// still be running, so their challenges stay served.
+    async fn serve_challenges(&mut self, orders: &[AcmeOrder]) {
+        Arc::make_mut(&mut self.http_challenges).extend(
+            orders
+                .iter()
+                .flat_map(|order| order.http_challenges.clone()),
+        );
+        self.tls_alpn_challenges.extend(
+            orders
+                .iter()
+                .flat_map(|order| order.tls_alpn_challenges.clone()),
+        );
+        self.tls_alpn_challenge = tls_alpn_config(&self.tls_alpn_challenges);
+        let addrs = self.challenge_addrs();
+        // DNS-01 orders need no listener.
+        if !addrs.is_empty() {
+            self.tcp_pool.set_challenge_addrs(addrs);
+            self.tcp_pool.update(self.ports.as_mut_slice()).await;
+        }
+    }
+
+    /// The listening addresses of the active challenges.
+    fn challenge_addrs(&self) -> Vec<SocketAddr> {
+        let http = (!self.http_challenges.is_empty()).then_some(self.config.http_challenge_addr);
+        let tls_alpn = self
+            .tls_alpn_challenge
+            .as_ref()
+            .map(|_| self.config.tls_alpn_challenge_addr);
+        http.into_iter().chain(tls_alpn).collect()
     }
 
     pub fn config(&self) -> &AppConfig {

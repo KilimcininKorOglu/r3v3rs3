@@ -730,9 +730,12 @@ The certificate authority checks that you control each domain name with a challe
 | Challenge | How it works | Requirements |
 |---|---|---|
 | HTTP-01 | The certificate authority requests `http://<domain>/.well-known/acme-challenge/<token>`, and r3v3rs3 answers. | Every domain name resolves to r3v3rs3, and TCP port 80 is open and accessible from the internet. Wildcard domain names are not possible. |
+| TLS-ALPN-01 | The certificate authority opens a TLS connection to port 443 of the domain with the ALPN protocol `acme-tls/1`, and r3v3rs3 answers with a challenge certificate. | Every domain name resolves to r3v3rs3, and TCP port 443 is open and accessible from the internet. Wildcard domain names are not possible. |
 | DNS-01 | r3v3rs3 creates a TXT record `_acme-challenge.<domain>` through the API of your DNS provider. | A DNS provider from the table below and an API credential that can edit the zone. |
 
-A wildcard domain name such as `*.example.com` needs DNS-01. r3v3rs3 rejects a wildcard domain name with HTTP-01.
+A wildcard domain name such as `*.example.com` needs DNS-01. r3v3rs3 rejects a wildcard domain name with HTTP-01 and TLS-ALPN-01.
+
+During a TLS-ALPN-01 challenge, every TLS port and every HTTPS port answers a client that offers only `acme-tls/1` with the challenge certificate. Other clients get the certificate of the port. A TLS port does not connect to the upstream server for a challenge connection. If no TCP or HTTP port uses the port of the "TLS-ALPN Challenge Address" setting, r3v3rs3 listens on that address until the challenges end. An HTTP port without TLS on port 443 cannot answer the challenge.
 
 ## DNS-01
 
@@ -793,6 +796,7 @@ The "Settings" section of the WebUI edits the server-wide options stored in `con
 | Login Attempts Reset | `15m` | Wait time after the limit is reached. |
 | Background Task Interval | `1h` | Interval of certificate renewal and log cleanup tasks. |
 | HTTP Challenge Address | `0.0.0.0:80` | Listening address for ACME HTTP challenges. |
+| TLS-ALPN Challenge Address | `0.0.0.0:443` | Listening address for ACME TLS-ALPN-01 challenges when no port uses its port. |
 | DNS Challenge Resolver | empty | DNS server, for example `1.1.1.1:53`, that r3v3rs3 asks until the TXT records of a DNS-01 challenge are visible. Empty uses the system resolver. |
 | Database Log Retention | `3months` | How long logs are kept in the log database. |
 

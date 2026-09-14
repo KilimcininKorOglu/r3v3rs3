@@ -329,54 +329,7 @@ mod tests {
     use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge, ACME_TLS_ALPN};
     use r3v3rs3_api::tls::TlsTermination as TlsConfig;
     use tokio::io::DuplexStream;
-    use tokio_rustls::rustls::client::danger::{
-        HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
-    };
-    use tokio_rustls::rustls::crypto::ring;
-    use tokio_rustls::rustls::pki_types::{ServerName, UnixTime};
-    use tokio_rustls::rustls::{DigitallySignedStruct, SignatureScheme};
-    use tokio_rustls::TlsConnector;
-
-    /// Accepts every server certificate, so the test can read a challenge certificate.
-    #[derive(Debug)]
-    struct AcceptAnyCert;
-
-    impl ServerCertVerifier for AcceptAnyCert {
-        fn verify_server_cert(
-            &self,
-            _: &CertificateDer<'_>,
-            _: &[CertificateDer<'_>],
-            _: &ServerName<'_>,
-            _: &[u8],
-            _: UnixTime,
-        ) -> Result<ServerCertVerified, tokio_rustls::rustls::Error> {
-            Ok(ServerCertVerified::assertion())
-        }
-
-        fn verify_tls12_signature(
-            &self,
-            _: &[u8],
-            _: &CertificateDer<'_>,
-            _: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, tokio_rustls::rustls::Error> {
-            Ok(HandshakeSignatureValid::assertion())
-        }
-
-        fn verify_tls13_signature(
-            &self,
-            _: &[u8],
-            _: &CertificateDer<'_>,
-            _: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, tokio_rustls::rustls::Error> {
-            Ok(HandshakeSignatureValid::assertion())
-        }
-
-        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-            ring::default_provider()
-                .signature_verification_algorithms
-                .supported_schemes()
-        }
-    }
+    use tokio_rustls::rustls::pki_types::ServerName;
 
     /// Returns the TLS of a port with a certificate for `localhost`, and that certificate.
     fn port_tls(challenges: &[TlsAlpnChallenge]) -> (PortTls, CertificateDer<'static>) {
@@ -404,12 +357,7 @@ mod tests {
         CertificateDer<'static>,
         Option<Vec<u8>>,
     ) {
-        let mut config = ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
-            .with_no_client_auth();
-        config.alpn_protocols = alpn.iter().map(|protocol| protocol.to_vec()).collect();
-        let connector = TlsConnector::from(Arc::new(config));
+        let connector = super::testing::connector(alpn);
         let (client_io, server_io) = tokio::io::duplex(16384);
         let name = ServerName::try_from("localhost").unwrap();
         let (server, client) =
@@ -528,5 +476,69 @@ mod tests {
         let (result, cert, _) = handshake(&tls, &[ACME_TLS_ALPN]).await;
         assert!(matches!(result, Handshake::Established(_)));
         assert_eq!(cert, port_cert);
+    }
+}
+
+/// TLS clients for the tests.
+#[cfg(test)]
+pub(crate) mod testing {
+    use std::sync::Arc;
+    use tokio_rustls::rustls::client::danger::{
+        HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
+    };
+    use tokio_rustls::rustls::crypto::ring;
+    use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+    use tokio_rustls::rustls::{ClientConfig, DigitallySignedStruct, Error, SignatureScheme};
+    use tokio_rustls::TlsConnector;
+
+    /// Accepts every server certificate, so a test can read a challenge certificate.
+    #[derive(Debug)]
+    struct AcceptAnyCert;
+
+    impl ServerCertVerifier for AcceptAnyCert {
+        fn verify_server_cert(
+            &self,
+            _: &CertificateDer<'_>,
+            _: &[CertificateDer<'_>],
+            _: &ServerName<'_>,
+            _: &[u8],
+            _: UnixTime,
+        ) -> Result<ServerCertVerified, Error> {
+            Ok(ServerCertVerified::assertion())
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            _: &[u8],
+            _: &CertificateDer<'_>,
+            _: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, Error> {
+            Ok(HandshakeSignatureValid::assertion())
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            _: &[u8],
+            _: &CertificateDer<'_>,
+            _: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, Error> {
+            Ok(HandshakeSignatureValid::assertion())
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+            ring::default_provider()
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
+    }
+
+    /// A client that offers the ALPN protocols and accepts every server certificate.
+    pub(crate) fn connector(alpn: &[&[u8]]) -> TlsConnector {
+        let mut config = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+            .with_no_client_auth();
+        config.alpn_protocols = alpn.iter().map(|protocol| protocol.to_vec()).collect();
+        TlsConnector::from(Arc::new(config))
     }
 }

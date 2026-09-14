@@ -5,7 +5,10 @@ use crate::components::http_proxy_config::{
 };
 use base64::{engine::general_purpose, Engine};
 use r3v3rs3_api::{
-    acme::{Acme, AcmeConfig, AcmeRequest, DnsProvider, ExternalAccountBinding, DNS_01, HTTP_01},
+    acme::{
+        Acme, AcmeConfig, AcmeRequest, DnsProvider, ExternalAccountBinding, DNS_01, HTTP_01,
+        TLS_ALPN_01,
+    },
     error::Error,
     i18n::Locale,
     subject_name::SubjectName,
@@ -179,6 +182,7 @@ fn challenge_view(
             <label class={LABEL_CLASS}>{locale.t("acme.challenge")}</label>
             <select onchange={setter(fields, "challenge_type", |f, v| f.challenge_type = v)} class={INPUT_CLASS}>
                 <option selected={challenge == HTTP_01} value={HTTP_01}>{"HTTP-01"}</option>
+                <option selected={challenge == TLS_ALPN_01} value={TLS_ALPN_01}>{"TLS-ALPN-01"}</option>
                 <option selected={challenge == DNS_01} value={DNS_01}>{"DNS-01"}</option>
             </select>
             <p class={HINT_CLASS}>{locale.t("acme.challenge_hint")}</p>
@@ -386,6 +390,19 @@ mod tests {
     #[test]
     fn a_wildcard_with_http_01_is_a_domain_name_error() {
         let errors = build(&fields("example.com, *.example.com", HTTP_01), false).unwrap_err();
+        let expected = Locale::En.error_message(&Error::AcmeWildcardNeedsDnsChallenge {
+            identifier: "*.example.com".into(),
+        });
+        assert_eq!(errors.get("domain_names"), Some(&expected));
+    }
+
+    #[test]
+    fn tls_alpn_01_sends_no_dns_provider_and_rejects_a_wildcard() {
+        let request = build(&fields("example.com", TLS_ALPN_01), false).unwrap();
+        assert_eq!(request.acme.challenge_type, TLS_ALPN_01);
+        assert_eq!(request.acme.dns_provider, None);
+
+        let errors = build(&fields("*.example.com", TLS_ALPN_01), false).unwrap_err();
         let expected = Locale::En.error_message(&Error::AcmeWildcardNeedsDnsChallenge {
             identifier: "*.example.com".into(),
         });

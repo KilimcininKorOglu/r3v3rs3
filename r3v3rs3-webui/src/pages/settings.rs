@@ -35,6 +35,7 @@ struct Fields {
     login_attempts_reset: String,
     database_log_retention: String,
     http_challenge_addr: String,
+    tls_alpn_challenge_addr: String,
     dns_challenge_resolver: String,
     docker_enabled: bool,
     docker_endpoint: String,
@@ -128,6 +129,7 @@ impl Fields {
             login_attempts_reset: text("/admin/login_attempts_reset"),
             database_log_retention: text("/log/database_log_retention"),
             http_challenge_addr: text("/http_challenge_addr"),
+            tls_alpn_challenge_addr: text("/tls_alpn_challenge_addr"),
             dns_challenge_resolver: text("/dns_challenge_resolver"),
         }
     }
@@ -212,6 +214,7 @@ pub fn settings() -> Html {
             <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.server")}</h2>
             { text_field(&fields, &errors, locale.t("settings.background_task_interval"), "background_task_interval", "1h", |f| &mut f.background_task_interval) }
             { text_field(&fields, &errors, locale.t("settings.http_challenge_addr"), "http_challenge_addr", "0.0.0.0:80", |f| &mut f.http_challenge_addr) }
+            { text_field(&fields, &errors, locale.t("settings.tls_alpn_challenge_addr"), "tls_alpn_challenge_addr", "0.0.0.0:443", |f| &mut f.tls_alpn_challenge_addr) }
             { text_field(&fields, &errors, locale.t("settings.dns_challenge_resolver"), "dns_challenge_resolver", "1.1.1.1:53", |f| &mut f.dns_challenge_resolver) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.dns_challenge_resolver_hint")}</p>
             { text_field(&fields, &errors, locale.t("settings.database_log_retention"), "database_log_retention", "3months", |f| &mut f.database_log_retention) }
@@ -702,13 +705,18 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         invalid_duration,
         json!({ "background_task_interval": fields.background_task_interval.trim() }),
     );
-    let addr = fields.http_challenge_addr.trim().parse::<SocketAddr>().ok();
-    if addr.is_none() {
-        errors.insert(
-            "http_challenge_addr".into(),
-            locale.t("settings.invalid_socket_addr").into(),
-        );
-    }
+    let addr = parse_addr(
+        locale,
+        &mut errors,
+        "http_challenge_addr",
+        &fields.http_challenge_addr,
+    );
+    let tls_alpn_addr = parse_addr(
+        locale,
+        &mut errors,
+        "tls_alpn_challenge_addr",
+        &fields.tls_alpn_challenge_addr,
+    );
     let docker = parse_docker(locale, fields, &mut errors);
     let kubernetes = parse_kubernetes(fields);
     let consul = parse_consul(locale, fields, &mut errors);
@@ -720,28 +728,50 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             locale.t("settings.invalid_socket_addr").into(),
         );
     }
-    match (admin, log, interval, addr, resolver) {
-        (Some(admin), Some(log), Some(interval), Some(addr), Ok(resolver)) if errors.is_empty() => {
-            Ok(AppConfig {
-                background_task_interval: interval.background_task_interval,
-                admin: AdminConfig {
-                    session_expiry: admin[0].session_expiry,
-                    max_login_attempts,
-                    login_attempts_reset: admin[1].login_attempts_reset,
-                },
-                log,
-                http_challenge_addr: addr,
-                dns_challenge_resolver: resolver,
-                discovery: DiscoveryConfig {
-                    docker,
-                    kubernetes,
-                    consul,
-                    etcd,
-                },
-            })
-        }
+    match (admin, log, interval, (addr, tls_alpn_addr), resolver) {
+        (
+            Some(admin),
+            Some(log),
+            Some(interval),
+            (Some(addr), Some(tls_alpn_addr)),
+            Ok(resolver),
+        ) if errors.is_empty() => Ok(AppConfig {
+            background_task_interval: interval.background_task_interval,
+            admin: AdminConfig {
+                session_expiry: admin[0].session_expiry,
+                max_login_attempts,
+                login_attempts_reset: admin[1].login_attempts_reset,
+            },
+            log,
+            http_challenge_addr: addr,
+            tls_alpn_challenge_addr: tls_alpn_addr,
+            dns_challenge_resolver: resolver,
+            discovery: DiscoveryConfig {
+                docker,
+                kubernetes,
+                consul,
+                etcd,
+            },
+        }),
         _ => Err(errors),
     }
+}
+
+/// Parses a required socket address, or records the error under `key`.
+fn parse_addr(
+    locale: Locale,
+    errors: &mut HashMap<String, String>,
+    key: &str,
+    value: &str,
+) -> Option<SocketAddr> {
+    let addr = value.trim().parse::<SocketAddr>().ok();
+    if addr.is_none() {
+        errors.insert(
+            key.to_string(),
+            locale.t("settings.invalid_socket_addr").into(),
+        );
+    }
+    addr
 }
 
 /// An empty value means that no address is set.

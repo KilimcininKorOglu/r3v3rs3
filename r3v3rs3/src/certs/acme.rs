@@ -1,6 +1,7 @@
 use crate::{
     cdn::fetch::{build_client, HttpClient as FetchClient},
     certs::{
+        alpn::TlsAlpnChallenge,
         dns::{self, TxtName},
         Cert,
     },
@@ -18,7 +19,7 @@ use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, BodyWrapper, BytesResponse, ChallengeType,
     ExternalAccountKey, HttpClient, Identifier, NewAccount, NewOrder, Order, OrderStatus,
 };
-use r3v3rs3_api::acme::{AcmeInfo, DnsProvider, DNS_01, HTTP_01};
+use r3v3rs3_api::acme::{AcmeInfo, DnsProvider, DNS_01, HTTP_01, TLS_ALPN_01};
 use r3v3rs3_api::{
     acme::Acme,
     cert::{CertKind, CertMetadata},
@@ -288,6 +289,8 @@ pub struct AcmeOrder {
     pub identifiers: Vec<Identifier>,
     /// Key authorizations of the HTTP-01 challenges, by token.
     pub http_challenges: HashMap<String, String>,
+    /// Digests of the TLS-ALPN-01 challenges, by domain name.
+    pub tls_alpn_challenges: Vec<TlsAlpnChallenge>,
     challenge_type: ChallengeType,
     dns: Option<DnsChallenge>,
     pub order: Order,
@@ -304,6 +307,7 @@ struct Challenges {
     http: HashMap<String, String>,
     /// `(domain, TXT value)` pairs of the DNS-01 challenges.
     dns: Vec<(String, String)>,
+    tls_alpn: Vec<TlsAlpnChallenge>,
 }
 
 impl AcmeOrder {
@@ -326,7 +330,8 @@ impl AcmeOrder {
         let challenge_type = match entry.acme.challenge_type.as_str() {
             HTTP_01 => ChallengeType::Http01,
             DNS_01 => ChallengeType::Dns01,
-            other => bail!("the {other} challenge cannot order certificates yet"),
+            TLS_ALPN_01 => ChallengeType::TlsAlpn01,
+            other => bail!("the {other} challenge is not supported"),
         };
         let account = Account::builder_with_http(acme_http_client().await?)
             .from_credentials(account)
@@ -345,6 +350,7 @@ impl AcmeOrder {
             target: target.clone(),
             identifiers,
             http_challenges: challenges.http,
+            tls_alpn_challenges: challenges.tls_alpn,
             challenge_type,
             dns,
             order,
@@ -473,14 +479,24 @@ async fn collect_challenges(
             .challenge(challenge_type.clone())
             .ok_or_else(|| anyhow!("the ACME server offers no {challenge_type:?} challenge"))?;
         let key_authorization = challenge.key_authorization();
-        if *challenge_type == ChallengeType::Dns01 {
-            let domain = dns_domain(challenge.identifier().identifier)?;
-            challenges.dns.push((domain, key_authorization.dns_value()));
-        } else {
-            challenges.http.insert(
-                challenge.token.clone(),
-                key_authorization.as_str().to_string(),
-            );
+        match challenge_type {
+            ChallengeType::Dns01 => {
+                let domain = dns_domain(challenge.identifier().identifier)?;
+                challenges.dns.push((domain, key_authorization.dns_value()));
+            }
+            ChallengeType::TlsAlpn01 => {
+                let digest = key_authorization.digest();
+                let identifier = challenge.identifier().identifier;
+                challenges
+                    .tls_alpn
+                    .push(tls_alpn_challenge(identifier, digest.as_ref())?);
+            }
+            _ => {
+                challenges.http.insert(
+                    challenge.token.clone(),
+                    key_authorization.as_str().to_string(),
+                );
+            }
         }
     }
     Ok(challenges)
@@ -494,6 +510,17 @@ fn dns_domain(identifier: &Identifier) -> anyhow::Result<String> {
     }
 }
 
+/// The TLS-ALPN-01 challenge of a DNS identifier with the SHA-256 digest of its key authorization.
+fn tls_alpn_challenge(identifier: &Identifier, digest: &[u8]) -> anyhow::Result<TlsAlpnChallenge> {
+    let Identifier::Dns(domain) = identifier else {
+        bail!("the TLS-ALPN-01 challenge cannot validate {identifier:?}");
+    };
+    Ok(TlsAlpnChallenge {
+        domain: domain.clone(),
+        digest: digest.try_into()?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,6 +529,7 @@ mod tests {
         Response,
     };
     use r3v3rs3_api::acme::AcmeConfig;
+    use sha2::{Digest, Sha256};
     use std::sync::Mutex;
 
     #[test]
@@ -549,7 +577,8 @@ mod tests {
         "challenges": [
             {"type": "dns-persist-01", "url": "https://acme.example/chall/2", "status": "pending", "issuer-domain-names": ["acme.example"]},
             {"type": "http-01", "url": "https://acme.example/chall/1", "token": "http-token", "status": "pending"},
-            {"type": "dns-01", "url": "https://acme.example/chall/3", "token": "dns-token", "status": "pending"}
+            {"type": "dns-01", "url": "https://acme.example/chall/3", "token": "dns-token", "status": "pending"},
+            {"type": "tls-alpn-01", "url": "https://acme.example/chall/4", "token": "alpn-token", "status": "pending"}
         ]
     }"#;
 
@@ -632,6 +661,25 @@ mod tests {
         assert_eq!(challenges.dns[0].0, "example.com");
         // The TXT value is the unpadded base64url SHA-256 digest: 43 characters.
         assert_eq!(challenges.dns[0].1.len(), 43);
+    }
+
+    #[tokio::test]
+    async fn a_tls_alpn_01_order_collects_the_digest_of_the_key_authorization() {
+        // A key authorization is `<token>.<account key thumbprint>`.
+        let http = challenges_of(ChallengeType::Http01).await;
+        let thumbprint = http.http["http-token"].trim_start_matches("http-token.");
+        let expected: [u8; 32] = Sha256::digest(format!("alpn-token.{thumbprint}")).into();
+
+        let challenges = challenges_of(ChallengeType::TlsAlpn01).await;
+        assert!(challenges.http.is_empty());
+        assert!(challenges.dns.is_empty());
+        assert_eq!(
+            challenges.tls_alpn,
+            vec![TlsAlpnChallenge {
+                domain: "example.com".to_string(),
+                digest: expected,
+            }]
+        );
     }
 
     /// Sends one GET through the wrapper and returns its outcome with the headers the inner client saw.

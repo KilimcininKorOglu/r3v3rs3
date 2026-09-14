@@ -14,19 +14,20 @@ const SOCKET_BACKLOG_SIZE: i32 = 128;
 #[derive(Debug)]
 pub struct TcpListenerPool {
     listeners: Vec<TcpListenerStream>,
-    http_challenge_addr: Option<SocketAddr>,
+    /// The listening addresses of the active ACME challenges.
+    challenge_addrs: Vec<SocketAddr>,
 }
 
 impl TcpListenerPool {
     pub fn new() -> Self {
         Self {
             listeners: Vec::new(),
-            http_challenge_addr: None,
+            challenge_addrs: Vec::new(),
         }
     }
 
-    pub fn set_http_challenge_addr(&mut self, addr: Option<SocketAddr>) {
-        self.http_challenge_addr = addr;
+    pub fn set_challenge_addrs(&mut self, addrs: Vec<SocketAddr>) {
+        self.challenge_addrs = addrs;
     }
 
     pub fn has_active_listeners(&self) -> bool {
@@ -34,14 +35,7 @@ impl TcpListenerPool {
     }
 
     pub async fn remove_unused_ports(&mut self, ports: &[PortContext]) {
-        let used_addrs = ports
-            .iter()
-            .filter_map(|ctx| match ctx.kind() {
-                PortContextKind::Tcp(state) => Some(state.listen),
-                PortContextKind::Http(state) => Some(state.listen),
-                _ => None,
-            })
-            .collect::<HashSet<_>>();
+        let used_addrs = ports.iter().filter_map(listen_addr).collect::<HashSet<_>>();
 
         self.listeners.retain(|listener| {
             if let Ok(addr) = listener.inner.local_addr() {
@@ -53,27 +47,29 @@ impl TcpListenerPool {
     }
 
     pub async fn update(&mut self, ports: &mut [PortContext]) {
-        let mut reserved_ports = Vec::new();
-        if let Some(reserved_addr) = self.http_challenge_addr {
-            let port_used = ports.iter().any(|ctx| match ctx.kind() {
-                PortContextKind::Tcp(state) => state.listen.port() == reserved_addr.port(),
-                PortContextKind::Http(state) => state.listen.port() == reserved_addr.port(),
-                _ => false,
-            });
-            if !port_used {
-                reserved_ports.push(PortContext::reserved());
-            }
-        }
-
-        let used_addrs = ports
+        // A challenge address needs its own listener when no port uses its port.
+        let reserved_addrs = self
+            .challenge_addrs
             .iter()
-            .chain(&reserved_ports)
-            .filter_map(|ctx| match ctx.kind() {
-                PortContextKind::Tcp(state) => Some(state.listen),
-                PortContextKind::Http(state) => Some(state.listen),
-                _ => None,
+            .copied()
+            .filter(|addr| {
+                !ports
+                    .iter()
+                    .filter_map(listen_addr)
+                    .any(|listen| listen.port() == addr.port())
             })
-            .collect::<HashSet<_>>();
+            .collect::<Vec<_>>();
+        let mut reserved_ports = reserved_addrs
+            .iter()
+            .map(|_| PortContext::reserved())
+            .collect::<Vec<_>>();
+        // The bind address of each port, then of each reserved port, in the order of the loop.
+        let bind_addrs = ports
+            .iter()
+            .map(listen_addr)
+            .chain(reserved_addrs.into_iter().map(Some))
+            .collect::<Vec<_>>();
+        let used_addrs = bind_addrs.iter().flatten().copied().collect::<HashSet<_>>();
 
         let mut listeners: HashMap<_, _> = self
             .listeners
@@ -94,14 +90,8 @@ impl TcpListenerPool {
             .enumerate()
         {
             let span = span!(Level::INFO, "port", resource_id = ctx.entry.id.to_string());
-            let bind = match ctx.kind() {
-                PortContextKind::Tcp(state) => state.listen,
-                PortContextKind::Http(state) => state.listen,
-                PortContextKind::Reserved => match self.http_challenge_addr {
-                    Some(addr) => addr,
-                    None => continue,
-                },
-                _ => continue,
+            let Some(bind) = bind_addrs.get(index).copied().flatten() else {
+                continue;
             };
             let (listener, state) = if !ctx.entry.port.active {
                 (None, SocketState::Inactive)
@@ -146,6 +136,15 @@ impl TcpListenerPool {
             Some((index, Ok(sock))) => Some((index, sock)),
             _ => None,
         }
+    }
+}
+
+/// The listening address of a TCP or HTTP port. `None` for another port.
+fn listen_addr(ctx: &PortContext) -> Option<SocketAddr> {
+    match ctx.kind() {
+        PortContextKind::Tcp(state) => Some(state.listen),
+        PortContextKind::Http(state) => Some(state.listen),
+        _ => None,
     }
 }
 
@@ -204,10 +203,16 @@ mod tests {
         };
         let mut ports = [PortContext::new(entry).unwrap()];
         let mut pool = TcpListenerPool::new();
-        pool.set_http_challenge_addr(Some("127.0.0.1:0".parse().unwrap()));
+        // The HTTP-01 and the TLS-ALPN-01 challenges each get a listener.
+        let addr = "127.0.0.1:0".parse().unwrap();
+        pool.set_challenge_addrs(vec![addr, addr]);
         pool.update(&mut ports).await;
 
         assert_eq!(ports[0].status().state.socket, SocketState::Unknown);
-        assert_eq!(pool.listeners.len(), 1);
+        assert_eq!(pool.listeners.len(), 2);
+
+        pool.set_challenge_addrs(Vec::new());
+        pool.update(&mut ports).await;
+        assert!(pool.listeners.is_empty());
     }
 }

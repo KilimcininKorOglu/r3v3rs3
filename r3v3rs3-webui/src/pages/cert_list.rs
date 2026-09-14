@@ -529,5 +529,7 @@ mod tests {
         entry.challenge_type = "http-01".into();
         entry.dns_provider = None;
         assert_eq!(acme_provider_text(&entry), "Let's Encrypt (HTTP-01)");
+        entry.challenge_type = "tls-alpn-01".into();
+        assert_eq!(acme_provider_text(&entry), "Let's Encrypt (TLS-ALPN-01)");
     }
 }
