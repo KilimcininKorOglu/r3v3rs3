@@ -1,3 +1,4 @@
+use axum::http::Uri;
 use axum::Router;
 use r3v3rs3_api::proxy::{HttpProxy, Route};
 use url::Url;
@@ -68,6 +69,47 @@ async fn the_most_specific_host_and_the_longest_path_win() -> anyhow::Result<()>
         assert_eq!(get_name(&port, "other.test", "/about").await?, "default");
         assert_eq!(get_name(&port, "x.example.test", "/api").await?, "wildcard");
         assert_eq!(get_name(&port, "app.example.test", "/api").await?, "app");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn the_server_path_and_the_request_path_are_joined_once() -> anyhow::Result<()> {
+    // The upstream answers with the path and the query that it received.
+    let echo = serve_http_upstream(Router::new().fallback(|uri: Uri| async move {
+        uri.path_and_query()
+            .map(|path| path.to_string())
+            .unwrap_or_default()
+    }))
+    .await?;
+    let port = alloc_tcp_port().await?;
+    let routes = vec![
+        http_route("/slash", echo.join("base/")?.as_str(), None),
+        http_route("/plain", echo.join("base")?.as_str(), None),
+        http_route("/root", echo.as_str(), None),
+    ];
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("join", &port)])
+        .proxies(vec![http_proxy_entry("join", "join", proxy(&[], routes))])
+        .build();
+
+    with_server(config, |_| async move {
+        let cases = [
+            ("/slash/x?q=1", "/base/x?q=1"),
+            ("/slash/x/", "/base/x/"),
+            ("/slash/a%20b", "/base/a%20b"),
+            ("/slash", "/base/"),
+            ("/plain/x", "/base/x"),
+            ("/root/x", "/x"),
+        ];
+        for (request, expected) in cases {
+            assert_eq!(
+                get_name(&port, "join.test", request).await?,
+                expected,
+                "{request}"
+            );
+        }
         Ok(())
     })
     .await

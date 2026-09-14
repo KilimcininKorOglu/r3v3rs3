@@ -24,6 +24,7 @@ use std::time::Duration;
 use std::{fmt, io};
 use tokio_rustls::rustls::ClientConfig;
 use tracing::{error, warn};
+use url::Url;
 
 use super::rewriter::ResponseRewriter;
 
@@ -222,11 +223,11 @@ impl Upstream {
         let Some(server) = self.servers.get(index) else {
             return;
         };
-        let mut url = server.url.0.clone();
-        if let Ok(mut segments) = url.path_segments_mut() {
-            segments.extend(&target.path_segments);
-        }
-        url.set_query(target.query.as_deref());
+        let url = upstream_url(
+            &server.url.0,
+            &target.path_segments,
+            target.query.as_deref(),
+        );
         let Ok(uri) = Uri::from_str(url.as_str()) else {
             return;
         };
@@ -274,6 +275,34 @@ impl Upstream {
         }
         result
     }
+}
+
+/// The URL of a request to a server: the path of the server URL, then the request path segments
+/// after the route path, then the query of the request. The segments keep their percent-encoding.
+/// A request without segments keeps the server path unchanged.
+fn upstream_url(server: &Url, segments: &[String], query: Option<&str>) -> Url {
+    let mut url = server.clone();
+    if !segments.is_empty() {
+        let rest = segments
+            .iter()
+            .map(String::as_str)
+            .filter(|segment| !is_dot_segment(segment))
+            .collect::<Vec<_>>()
+            .join("/");
+        let path = format!("{}/{rest}", url.path().trim_end_matches('/'));
+        url.set_path(&path);
+    }
+    url.set_query(query);
+    url
+}
+
+/// A `.` or `..` segment, also percent-encoded. The URL parser resolves these segments, so they
+/// could move the request out of the server path.
+fn is_dot_segment(segment: &str) -> bool {
+    matches!(
+        segment.to_ascii_lowercase().as_str(),
+        "." | ".." | "%2e" | ".%2e" | "%2e." | "%2e%2e"
+    )
 }
 
 /// Logs a failed request, and turns the error into the error response for the client.
@@ -406,6 +435,36 @@ mod tests {
 
         let refused = io::Error::new(io::ErrorKind::ConnectionRefused, "refused");
         assert!(!is_timeout(&refused));
+    }
+
+    fn joined(server: &str, segments: &[&str], query: Option<&str>) -> String {
+        let segments = segments.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        upstream_url(&server.parse().unwrap(), &segments, query).to_string()
+    }
+
+    #[test]
+    fn the_server_path_is_joined_with_one_slash() {
+        let base = "http://up/base/";
+        assert_eq!(joined(base, &["x"], Some("q=1")), "http://up/base/x?q=1");
+        assert_eq!(joined("http://up/base", &["x"], None), "http://up/base/x");
+        assert_eq!(joined("http://up/", &["x"], None), "http://up/x");
+        assert_eq!(joined(base, &["x", ""], None), "http://up/base/x/");
+        assert_eq!(joined("http://up/base", &[], None), "http://up/base");
+    }
+
+    #[test]
+    fn the_request_segments_keep_their_percent_encoding() {
+        let url = joined("http://up/base/", &["a%20b", "c%2Fd"], None);
+        assert_eq!(url, "http://up/base/a%20b/c%2Fd");
+    }
+
+    #[test]
+    fn dot_segments_cannot_leave_the_server_path() {
+        let segments = ["..", "%2e%2E", ".", "%2e", "secret"];
+        assert_eq!(
+            joined("http://up/base/", &segments, None),
+            "http://up/base/secret"
+        );
     }
 
     #[test]
