@@ -1,5 +1,4 @@
 use super::RpcMethod;
-use crate::proxy::health;
 use crate::proxy::tls::upstream_client_config;
 use crate::server::credentials::seal;
 use crate::server::state::ServerState;
@@ -51,7 +50,7 @@ impl RpcMethod for GetProxyStatus {
             .get(self.id)
             .map(|ctx| ProxyStatus {
                 state: ctx.status.state,
-                upstreams: health::snapshot(self.id),
+                upstreams: state.registries.groups.snapshot(self.id),
             })
             .ok_or(Error::IdNotFound {
                 id: self.id.to_string(),
@@ -73,7 +72,7 @@ impl RpcMethod for PurgeProxyCache {
                 id: self.id.to_string(),
             });
         }
-        crate::proxy::http::cache::purge(self.id);
+        state.registries.caches.purge(self.id);
         Ok(())
     }
 }

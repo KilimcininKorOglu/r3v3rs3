@@ -1,14 +1,15 @@
 use super::affinity::Affinity;
 use super::auth::{Authenticator, SessionService};
-use super::cache::{cache_for, HttpCache};
+use super::cache::HttpCache;
 use super::client_ip::ClientIpResolver;
 use super::filter::{FilterResult, MatchRank, RequestFilter};
 use super::header_rules::CompiledHeaderRules;
 use super::mirror::Mirror;
 use super::pool::{ConnectionPool, Upstream, UpstreamClients};
-use super::rate_limit::{self, ClientRateLimiter};
+use super::rate_limit::ClientRateLimiter;
 use super::rewrite::Rewrite;
-use crate::proxy::health::{self, GroupKey, Probe};
+use crate::proxy::health::{self, GroupKey, GroupRegistry, Probe};
+use crate::proxy::ProxyRegistries;
 use hyper::{Request, Uri};
 use r3v3rs3_api::redirect::RedirectRule;
 use r3v3rs3_api::{
@@ -35,6 +36,7 @@ impl Router {
         quic_port: Option<u16>,
         upstream: &mut UpstreamClients<'_>,
         sessions: &Arc<SessionService>,
+        registries: &ProxyRegistries,
     ) -> Self {
         let mut routes = vec![];
         for (id, http) in proxies
@@ -48,11 +50,11 @@ impl Router {
             let proxy_upstream = ProxyUpstream::new(&http);
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
-            let proxy_rate_limiter = rate_limit::limiter((id, None), http.rate_limit);
+            let proxy_rate_limiter = registries.limiters.limiter((id, None), http.rate_limit);
             let proxy_auth = Authenticator::new(http.auth, &tls_client_config, sessions);
             let proxy_header_rules = Arc::new(CompiledHeaderRules::new(&http.headers));
             let compression = (!http.compression.is_disabled()).then(|| Arc::new(http.compression));
-            let proxy_cache = cache_for(id, &http.cache);
+            let proxy_cache = registries.caches.cache_for(id, &http.cache);
             let redirects: Arc<[RedirectRule]> = http.redirects.clone().into();
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
@@ -61,14 +63,19 @@ impl Router {
                     .iter()
                     .map(|segment| format!("/{segment}"))
                     .collect();
-                let upstream =
-                    proxy_upstream.route((id, Some(index)), &route, &base_path, upstream);
+                let upstream = proxy_upstream.route(
+                    (id, Some(index)),
+                    &route,
+                    &base_path,
+                    upstream,
+                    &registries.groups,
+                );
                 let ip_filter = route
                     .ip_filter
                     .map(Arc::new)
                     .unwrap_or_else(|| proxy_ip_filter.clone());
                 let rate_limiter = match route.rate_limit {
-                    Some(config) => rate_limit::limiter((id, Some(index)), config),
+                    Some(config) => registries.limiters.limiter((id, Some(index)), config),
                     None => proxy_rate_limiter.clone(),
                 };
                 let auth = route.auth.map_or_else(
@@ -157,6 +164,7 @@ impl ProxyUpstream {
         route: &Route,
         base_path: &str,
         clients: &mut UpstreamClients<'_>,
+        groups: &GroupRegistry,
     ) -> Option<Upstream> {
         let timeouts = route.timeouts.unwrap_or(self.timeouts);
         let (_, pool) = clients.get(self.client_cert, timeouts.connect);
@@ -174,7 +182,7 @@ impl ProxyUpstream {
             .mirror
             .as_ref()
             .map(|config| Arc::new(Mirror::new(config, pool.clone(), timeouts.request)));
-        let group = health::group(
+        let group = groups.group(
             key,
             members,
             self.load_balancing,

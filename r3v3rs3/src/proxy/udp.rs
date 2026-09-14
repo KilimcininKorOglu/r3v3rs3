@@ -1,4 +1,4 @@
-use super::health::{self, Probe, UpstreamGroup};
+use super::health::{self, GroupRegistry, Probe, UpstreamGroup};
 use super::{PortContextEvent, PortStatus, SocketState};
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::name_server::{GenericConnector, TokioRuntimeProvider};
@@ -58,8 +58,12 @@ impl UdpPortContext {
         })
     }
 
-    pub async fn setup(&mut self, proxies: Vec<ProxyEntry>) -> Result<(), Error> {
-        let upstream = UdpUpstream::from_proxies(proxies)?;
+    pub async fn setup(
+        &mut self,
+        proxies: Vec<ProxyEntry>,
+        groups: &GroupRegistry,
+    ) -> Result<(), Error> {
+        let upstream = UdpUpstream::from_proxies(proxies, groups)?;
         // Keep the open sessions, the resolved addresses and the server health when the settings
         // do not change.
         if !upstream.same_settings(&self.upstream) {
@@ -182,7 +186,7 @@ struct UdpUpstream {
 
 impl UdpUpstream {
     /// Uses the upstream servers of the first proxy of the port that has a server.
-    fn from_proxies(proxies: Vec<ProxyEntry>) -> Result<Self, Error> {
+    fn from_proxies(proxies: Vec<ProxyEntry>, groups: &GroupRegistry) -> Result<Self, Error> {
         let mut upstream = Self::default();
         for entry in proxies {
             let ProxyKind::Udp(proxy) = entry.proxy.kind else {
@@ -196,7 +200,7 @@ impl UdpUpstream {
             if upstream.group.is_some() || servers.is_empty() {
                 continue;
             }
-            let group = health::group(
+            let group = groups.group(
                 (entry.id, None),
                 health::members(&proxy.upstream_servers),
                 proxy.load_balancing,
@@ -461,6 +465,7 @@ mod tests {
 
     #[tokio::test]
     async fn setup_uses_the_first_proxy_with_a_server() {
+        let groups = GroupRegistry::default();
         let mut ctx = UdpPortContext::new(&port_entry()).unwrap();
         let proxies = || {
             vec![
@@ -469,8 +474,8 @@ mod tests {
                 proxy_entry("udplast", &[5355]),
             ]
         };
-        ctx.setup(proxies()).await.unwrap();
-        ctx.setup(proxies()).await.unwrap();
+        ctx.setup(proxies(), &groups).await.unwrap();
+        ctx.setup(proxies(), &groups).await.unwrap();
         let ports = ctx
             .upstream
             .servers
@@ -484,20 +489,21 @@ mod tests {
     async fn setup_closes_the_sessions_when_the_servers_change() {
         let listener = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let client = "127.0.0.1:40000".parse().unwrap();
+        let groups = GroupRegistry::default();
         let mut ctx = UdpPortContext::new(&port_entry()).unwrap();
 
-        ctx.setup(vec![proxy_entry("udpses", &[5353])])
+        ctx.setup(vec![proxy_entry("udpses", &[5353])], &groups)
             .await
             .unwrap();
         ctx.forward(client, b"ping", &listener).await;
         assert_eq!(ctx.sessions.len(), 1);
 
-        ctx.setup(vec![proxy_entry("udpses", &[5353])])
+        ctx.setup(vec![proxy_entry("udpses", &[5353])], &groups)
             .await
             .unwrap();
         assert_eq!(ctx.sessions.len(), 1);
 
-        ctx.setup(vec![proxy_entry("udpses", &[5354])])
+        ctx.setup(vec![proxy_entry("udpses", &[5354])], &groups)
             .await
             .unwrap();
         assert!(ctx.sessions.is_empty());

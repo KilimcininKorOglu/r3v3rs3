@@ -1,8 +1,8 @@
 use crate::proxy::http::pool::ConnectionPool;
 use crate::proxy::proxy_protocol;
+use crate::proxy::registry::WeakRegistry;
 use fnv::FnvHasher;
 use hyper::Uri;
-use once_cell::sync::Lazy;
 use r3v3rs3_api::{
     id::ShortId,
     port::UpstreamServer,
@@ -10,10 +10,9 @@ use r3v3rs3_api::{
 };
 use rand::Rng;
 use std::{
-    collections::HashMap,
     hash::Hasher,
     net::IpAddr,
-    sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant},
 };
 use tokio::{io::AsyncWriteExt, net::TcpStream, task::JoinSet, time::MissedTickBehavior};
@@ -21,8 +20,6 @@ use tracing::{info, warn};
 
 /// Identifies an upstream group: the proxy, and the route index for an HTTP route.
 pub type GroupKey = (ShortId, Option<usize>);
-
-static REGISTRY: Lazy<Mutex<HashMap<GroupKey, Weak<UpstreamGroup>>>> = Lazy::new(Default::default);
 
 /// An upstream server of a group: its URL or address, and its weight.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,54 +330,66 @@ fn target<T>(targets: &[Option<T>], index: usize) -> Result<&T, String> {
         .ok_or_else(|| "the server address has no host or port".to_string())
 }
 
-/// Returns the group for `key`. The existing group is reused while its servers, their weights and
-/// the settings are unchanged, so a configuration reload keeps the health of the servers. A new
-/// group with an active health check starts its check task.
-pub fn group(
-    key: GroupKey,
-    members: Vec<GroupServer>,
-    policy: LoadBalancing,
-    health_check: HealthCheck,
-    circuit_breaker: CircuitBreaker,
-    probe: Probe,
-) -> Arc<UpstreamGroup> {
-    let mut registry = REGISTRY.lock().unwrap_or_else(PoisonError::into_inner);
-    registry.retain(|_, group| group.strong_count() > 0);
-    if let Some(existing) = registry.get(&key).and_then(Weak::upgrade) {
-        if existing.members == members
-            && existing.policy == policy
-            && existing.health_check == health_check
-            && existing.circuit_breaker == circuit_breaker
-        {
-            existing.set_probe(probe);
-            return existing;
-        }
-    }
-    let group = Arc::new(
-        UpstreamGroup::new(members, policy, health_check).with_circuit_breaker(circuit_breaker),
-    );
-    group.set_probe(probe);
-    registry.insert(key, Arc::downgrade(&group));
-    spawn_checker(&group);
-    group
+/// The upstream groups of one server.
+#[derive(Debug, Default)]
+pub struct GroupRegistry {
+    groups: WeakRegistry<GroupKey, UpstreamGroup>,
 }
 
-/// Returns the health of the upstream servers of a proxy. An HTTP proxy lists the servers of each
-/// route in route order.
-pub fn snapshot(id: ShortId) -> Vec<UpstreamHealth> {
-    let mut groups = REGISTRY
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .iter()
-        .filter(|((proxy, _), _)| *proxy == id)
-        .filter_map(|((_, route), group)| Some((*route, group.upgrade()?)))
-        .collect::<Vec<_>>();
-    groups.sort_by_key(|(route, _)| *route);
-    let now = Instant::now();
-    groups
-        .iter()
-        .flat_map(|(_, group)| group.upstream_health(now))
-        .collect()
+impl GroupRegistry {
+    /// Returns the group for `key`. The existing group is reused while its servers, their weights
+    /// and the settings are unchanged, so a configuration reload keeps the health of the servers.
+    /// A new group with an active health check starts its check task.
+    pub fn group(
+        &self,
+        key: GroupKey,
+        members: Vec<GroupServer>,
+        policy: LoadBalancing,
+        health_check: HealthCheck,
+        circuit_breaker: CircuitBreaker,
+        probe: Probe,
+    ) -> Arc<UpstreamGroup> {
+        let mut created = false;
+        let group = self.groups.get_or_create(
+            key,
+            |existing| {
+                existing.members == members
+                    && existing.policy == policy
+                    && existing.health_check == health_check
+                    && existing.circuit_breaker == circuit_breaker
+            },
+            || {
+                created = true;
+                Arc::new(
+                    UpstreamGroup::new(members.clone(), policy, health_check.clone())
+                        .with_circuit_breaker(circuit_breaker),
+                )
+            },
+        );
+        group.set_probe(probe);
+        if created {
+            spawn_checker(&group);
+        }
+        group
+    }
+
+    /// Returns the health of the upstream servers of a proxy. An HTTP proxy lists the servers of
+    /// each route in route order.
+    pub fn snapshot(&self, id: ShortId) -> Vec<UpstreamHealth> {
+        let mut groups = self
+            .groups
+            .live()
+            .into_iter()
+            .filter(|((proxy, _), _)| *proxy == id)
+            .map(|((_, route), group)| (route, group))
+            .collect::<Vec<_>>();
+        groups.sort_by_key(|(route, _)| *route);
+        let now = Instant::now();
+        groups
+            .iter()
+            .flat_map(|(_, group)| group.upstream_health(now))
+            .collect()
+    }
 }
 
 /// Checks the servers of the group every interval until the group is dropped.
@@ -974,71 +983,52 @@ mod tests {
 
     #[test]
     fn registry_reuses_a_group_with_the_same_servers_and_settings() {
+        let registry = GroupRegistry::default();
         let key = ("group".parse().unwrap(), Some(0));
-        let probe = || Probe::Connect(Vec::new());
-        let first = group(
-            key,
-            members(&[1, 1]),
-            LoadBalancing::First,
-            Default::default(),
-            CircuitBreaker::default(),
-            probe(),
-        );
-        let same = group(
-            key,
-            members(&[1, 1]),
-            LoadBalancing::First,
-            Default::default(),
-            CircuitBreaker::default(),
-            probe(),
-        );
+        let group = |registry: &GroupRegistry, weights: &[u16], policy| {
+            registry.group(
+                key,
+                members(weights),
+                policy,
+                Default::default(),
+                CircuitBreaker::default(),
+                Probe::Connect(Vec::new()),
+            )
+        };
+        let first = group(&registry, &[1, 1], LoadBalancing::First);
+        let same = group(&registry, &[1, 1], LoadBalancing::First);
         assert!(Arc::ptr_eq(&first, &same));
 
-        let changed = group(
-            key,
-            members(&[1, 1]),
-            LoadBalancing::Random,
-            Default::default(),
-            CircuitBreaker::default(),
-            probe(),
-        );
+        let other_server = group(&GroupRegistry::default(), &[1, 1], LoadBalancing::First);
+        assert!(!Arc::ptr_eq(&first, &other_server));
+
+        let changed = group(&registry, &[1, 1], LoadBalancing::Random);
         assert!(!Arc::ptr_eq(&first, &changed));
 
-        let reweighted = group(
-            key,
-            members(&[1, 3]),
-            LoadBalancing::Random,
-            Default::default(),
-            CircuitBreaker::default(),
-            probe(),
-        );
+        let reweighted = group(&registry, &[1, 3], LoadBalancing::Random);
         assert!(!Arc::ptr_eq(&changed, &reweighted));
     }
 
     #[test]
     fn snapshot_lists_the_servers_of_each_route_in_route_order() {
+        let registry = GroupRegistry::default();
         let id = "snap".parse().unwrap();
-        let probe = || Probe::Connect(Vec::new());
-        let policy = LoadBalancing::First;
-        let second = group(
-            (id, Some(1)),
-            members(&[1, 2])[1..].to_vec(),
-            policy,
-            no_passive_check(),
-            CircuitBreaker::default(),
-            probe(),
-        );
-        let first = group(
-            (id, Some(0)),
-            members(&[1]),
-            policy,
-            no_passive_check(),
-            CircuitBreaker::default(),
-            probe(),
-        );
+        let group = |route, members| {
+            registry.group(
+                (id, Some(route)),
+                members,
+                LoadBalancing::First,
+                no_passive_check(),
+                CircuitBreaker::default(),
+                Probe::Connect(Vec::new()),
+            )
+        };
+        let second = group(1, members(&[1, 2])[1..].to_vec());
+        let first = group(0, members(&[1]));
         second.record_check(0, Err("status 500".into()));
 
-        let health = snapshot(id);
+        assert!(GroupRegistry::default().snapshot(id).is_empty());
+        let health = registry.snapshot(id);
         let addrs = health.iter().map(|h| h.addr.as_str()).collect::<Vec<_>>();
         assert_eq!(addrs, ["a", "b"]);
         assert_eq!(health[1].weight, 2);

@@ -1,5 +1,5 @@
 use super::{
-    health::{self, Probe, UpstreamGroup},
+    health::{self, GroupRegistry, Probe, UpstreamGroup},
     proxy_protocol::{self, Client},
     spawn_connection,
     tls::{port_acceptor, port_tls, upstream_client_config, Handshake, PortTls, TlsTermination},
@@ -87,13 +87,18 @@ impl TcpPortContext {
     }
 
     /// Uses the upstream servers of the first proxy of the port that has a valid server.
-    pub async fn setup(&mut self, certs: &CertList, proxies: Vec<ProxyEntry>) -> Result<(), Error> {
+    pub async fn setup(
+        &mut self,
+        certs: &CertList,
+        proxies: Vec<ProxyEntry>,
+        groups: &GroupRegistry,
+    ) -> Result<(), Error> {
         let mut upstream = None;
         for entry in proxies {
             if let ProxyKind::Tcp(proxy) = &entry.proxy.kind {
                 let servers = proxy_connections(certs, proxy)?;
                 if upstream.is_none() && !servers.is_empty() {
-                    upstream = Some(TcpUpstream::new(entry.id, proxy, servers));
+                    upstream = Some(TcpUpstream::new(entry.id, proxy, servers, groups));
                 }
             }
         }
@@ -186,7 +191,12 @@ struct TcpUpstream {
 }
 
 impl TcpUpstream {
-    fn new(id: ShortId, proxy: &TcpProxy, servers: Vec<Connection>) -> Self {
+    fn new(
+        id: ShortId,
+        proxy: &TcpProxy,
+        servers: Vec<Connection>,
+        groups: &GroupRegistry,
+    ) -> Self {
         let members = health::members(&proxy.upstream_servers);
         let targets = Probe::targets(&proxy.upstream_servers);
         let probe = if proxy.proxy_protocol.is_some() {
@@ -194,7 +204,7 @@ impl TcpUpstream {
         } else {
             Probe::Connect(targets)
         };
-        let group = health::group(
+        let group = groups.group(
             (id, None),
             members,
             proxy.load_balancing,

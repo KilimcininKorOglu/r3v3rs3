@@ -17,7 +17,7 @@ use crate::proxy::http::SessionService;
 use crate::proxy::tls::upstream_client_config;
 use crate::{
     command::ServerCommand,
-    proxy::{PortContext, PortContextKind},
+    proxy::{PortContext, PortContextKind, ProxyRegistries},
 };
 use quinn::Incoming;
 use r3v3rs3_api::app::{AppConfig, AppInfo};
@@ -48,6 +48,7 @@ pub struct ServerState {
     pub ports: PortList,
     pub storage: Arc<dyn Storage>,
     sessions: Arc<SessionService>,
+    pub registries: ProxyRegistries,
     config: AppConfig,
     tcp_pool: TcpListenerPool,
     udp_pool: UdpListenerPool,
@@ -133,6 +134,7 @@ impl ServerState {
             ports,
             storage,
             sessions,
+            registries: ProxyRegistries::default(),
             config,
             tcp_pool: TcpListenerPool::new(),
             udp_pool: UdpListenerPool::new(),
@@ -523,7 +525,13 @@ impl ServerState {
                 .collect();
             let span = span!(Level::INFO, "port", resource_id = ctx.entry.id.to_string());
             if let Err(err) = ctx
-                .setup(&ports, &self.certs, proxies, &self.sessions)
+                .setup(
+                    &ports,
+                    &self.certs,
+                    proxies,
+                    &self.sessions,
+                    &self.registries,
+                )
                 .instrument(span.clone())
                 .await
             {

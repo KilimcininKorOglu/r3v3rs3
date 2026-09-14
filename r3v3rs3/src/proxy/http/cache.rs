@@ -1,5 +1,6 @@
 use super::compression::{header_items, header_number};
 use super::pool::Upstream;
+use crate::proxy::registry::WeakRegistry;
 use bytes::{Bytes, BytesMut};
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{
@@ -12,14 +13,12 @@ use hyper::{
     HeaderMap, Method, Request, Response, StatusCode,
 };
 use moka::{sync::Cache, Expiry};
-use once_cell::sync::Lazy;
 use pin_project_lite::pin_project;
 use r3v3rs3_api::{cache::CacheConfig, id::ShortId};
 use std::{
-    collections::HashMap,
     fmt,
     pin::Pin,
-    sync::{Arc, Mutex, PoisonError, Weak},
+    sync::Arc,
     task::{ready, Context, Poll},
     time::{Duration, Instant, SystemTime},
 };
@@ -33,8 +32,6 @@ const REVALIDATION_WINDOW: Duration = Duration::from_secs(3600);
 
 /// Status codes that are cacheable by default (RFC 9110 15.1).
 const CACHEABLE_STATUSES: [u16; 11] = [200, 203, 204, 300, 301, 308, 404, 405, 410, 414, 501];
-
-static REGISTRY: Lazy<Mutex<HashMap<ShortId, Weak<HttpCache>>>> = Lazy::new(Default::default);
 
 /// The stored responses of one proxy.
 pub struct HttpCache {
@@ -64,33 +61,31 @@ impl HttpCache {
     }
 }
 
-/// Returns the cache of the proxy, or `None` when the cache is disabled. The existing cache is
-/// reused while its configuration is unchanged, so a configuration reload keeps the responses.
-pub fn cache_for(id: ShortId, config: &CacheConfig) -> Option<Arc<HttpCache>> {
-    if config.is_disabled() {
-        return None;
-    }
-    let mut registry = REGISTRY.lock().unwrap_or_else(PoisonError::into_inner);
-    registry.retain(|_, cache| cache.strong_count() > 0);
-    if let Some(existing) = registry.get(&id).and_then(Weak::upgrade) {
-        if existing.config == *config {
-            return Some(existing);
-        }
-    }
-    let cache = Arc::new(HttpCache::new(config.clone()));
-    registry.insert(id, Arc::downgrade(&cache));
-    Some(cache)
+/// The HTTP caches of one server.
+#[derive(Debug, Default)]
+pub struct CacheRegistry {
+    caches: WeakRegistry<ShortId, HttpCache>,
 }
 
-/// Removes every stored response of the proxy.
-pub fn purge(id: ShortId) {
-    let cache = REGISTRY
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(&id)
-        .and_then(Weak::upgrade);
-    if let Some(cache) = cache {
-        cache.entries.invalidate_all();
+impl CacheRegistry {
+    /// Returns the cache of the proxy, or `None` when the cache is disabled. The existing cache is
+    /// reused while its configuration is unchanged, so a configuration reload keeps the responses.
+    pub fn cache_for(&self, id: ShortId, config: &CacheConfig) -> Option<Arc<HttpCache>> {
+        if config.is_disabled() {
+            return None;
+        }
+        Some(self.caches.get_or_create(
+            id,
+            |existing| existing.config == *config,
+            || Arc::new(HttpCache::new(config.clone())),
+        ))
+    }
+
+    /// Removes every stored response of the proxy.
+    pub fn purge(&self, id: ShortId) {
+        if let Some(cache) = self.caches.get(&id) {
+            cache.entries.invalidate_all();
+        }
     }
 }
 
@@ -691,9 +686,15 @@ mod tests {
             enabled: true,
             ..Default::default()
         };
-        assert!(cache_for(id, &CacheConfig::default()).is_none());
-        let cache = cache_for(id, &config).unwrap();
-        assert!(Arc::ptr_eq(&cache, &cache_for(id, &config).unwrap()));
+        let registry = CacheRegistry::default();
+        assert!(registry.cache_for(id, &CacheConfig::default()).is_none());
+        let cache = registry.cache_for(id, &config).unwrap();
+        assert!(Arc::ptr_eq(
+            &cache,
+            &registry.cache_for(id, &config).unwrap()
+        ));
+        let other = CacheRegistry::default();
+        assert!(!Arc::ptr_eq(&cache, &other.cache_for(id, &config).unwrap()));
 
         let entry = CachedResponse {
             head: StoredHead {
@@ -708,7 +709,9 @@ mod tests {
         };
         cache.entries.insert("key".into(), Arc::new(entry));
         assert!(cache.entries.get("key").is_some());
-        purge(id);
+        other.purge(id);
+        assert!(cache.entries.get("key").is_some());
+        registry.purge(id);
         assert!(cache.entries.get("key").is_none());
     }
 }

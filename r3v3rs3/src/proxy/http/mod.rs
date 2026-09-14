@@ -15,7 +15,7 @@ use super::{
         port_acceptor, port_tls, server_cert_resolver, ClientCertInfo, Handshake, PortTls,
         TlsTermination,
     },
-    PortContextEvent,
+    PortContextEvent, ProxyRegistries,
 };
 use crate::server::cert_list::CertList;
 use arc_swap::{ArcSwap, Cache};
@@ -71,7 +71,7 @@ pub(crate) mod hyper_tls;
 mod mirror;
 mod page;
 pub(crate) mod pool;
-mod rate_limit;
+pub(crate) mod rate_limit;
 mod redirect;
 mod rewrite;
 mod rewriter;
@@ -164,6 +164,7 @@ impl HttpPortContext {
         certs: &CertList,
         proxies: Vec<ProxyEntry>,
         sessions: &Arc<SessionService>,
+        registries: &ProxyRegistries,
     ) -> Result<(), Error> {
         let https_ports = ports
             .iter()
@@ -230,7 +231,14 @@ impl HttpPortContext {
 
         let mut upstream = UpstreamClients::new(certs)?;
         self.shared.store(Arc::new(SharedContext {
-            router: Router::new(proxies, https_port, quic_port, &mut upstream, sessions),
+            router: Router::new(
+                proxies,
+                https_port,
+                quic_port,
+                &mut upstream,
+                sessions,
+                registries,
+            ),
             header_rewriter: RequestRewriter::builder()
                 .set_via(HeaderValue::from_static("r3v3rs3"))
                 .build(),

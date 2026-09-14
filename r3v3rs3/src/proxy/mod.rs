@@ -21,9 +21,19 @@ use tracing::{error, Instrument, Span};
 pub mod health;
 pub mod http;
 pub mod proxy_protocol;
+pub mod registry;
 pub mod tcp;
 pub mod tls;
 pub mod udp;
+
+/// The rate limiters, HTTP caches and upstream groups of one server. A configuration reload reuses
+/// them, and two servers in one process do not share them.
+#[derive(Debug, Default)]
+pub struct ProxyRegistries {
+    pub limiters: http::rate_limit::LimiterRegistry,
+    pub caches: http::cache::CacheRegistry,
+    pub groups: health::GroupRegistry,
+}
 
 /// Runs the task of a client connection in the span and logs its error.
 fn spawn_connection<F>(span: Span, task: F)
@@ -110,12 +120,17 @@ impl PortContext {
         certs: &CertList,
         proxies: Vec<ProxyEntry>,
         sessions: &std::sync::Arc<SessionService>,
+        registries: &ProxyRegistries,
     ) -> Result<(), Error> {
         match &mut self.kind {
-            PortContextKind::Tcp(ctx) => ctx.setup(certs, proxies).await,
-            PortContextKind::Http(ctx) => ctx.setup(ports, certs, proxies, sessions).await,
-            PortContextKind::Udp(ctx) => ctx.setup(proxies).await,
-            PortContextKind::Http3(ctx) => ctx.setup(ports, certs, proxies, sessions).await,
+            PortContextKind::Tcp(ctx) => ctx.setup(certs, proxies, &registries.groups).await,
+            PortContextKind::Http(ctx) => {
+                ctx.setup(ports, certs, proxies, sessions, registries).await
+            }
+            PortContextKind::Udp(ctx) => ctx.setup(proxies, &registries.groups).await,
+            PortContextKind::Http3(ctx) => {
+                ctx.setup(ports, certs, proxies, sessions, registries).await
+            }
             PortContextKind::Reserved => Ok(()),
         }
     }
