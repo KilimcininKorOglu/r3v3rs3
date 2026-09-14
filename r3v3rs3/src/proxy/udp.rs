@@ -441,8 +441,10 @@ mod tests {
                 kind: ProxyKind::Udp(UdpProxy {
                     upstream_servers: ports
                         .iter()
-                        .map(|port| UpstreamServer {
-                            addr: format!("/ip4/127.0.0.1/udp/{port}").parse().unwrap(),
+                        .map(|port| {
+                            UpstreamServer::new(
+                                format!("/ip4/127.0.0.1/udp/{port}").parse().unwrap(),
+                            )
                         })
                         .collect(),
                     ..Default::default()

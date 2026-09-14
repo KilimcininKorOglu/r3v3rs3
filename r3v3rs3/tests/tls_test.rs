@@ -59,14 +59,14 @@ async fn tls_proxy() -> anyhow::Result<()> {
                     connect_timeout: r3v3rs3_api::upstream::DEFAULT_CONNECT_TIMEOUT,
                     load_balancing: Default::default(),
                     health_check: Default::default(),
-                    upstream_servers: vec![UpstreamServer {
-                        addr: format!(
+                    upstream_servers: vec![UpstreamServer::new(
+                        format!(
                             "/dns/localhost/tcp/{}/tls",
                             listen_port.socket_addr().port()
                         )
                         .parse()
                         .unwrap(),
-                    }],
+                    )],
                 }),
                 ..Default::default()
             },

@@ -40,9 +40,7 @@ fn udp_storage(proxy_port: &TestPort, upstream_port: &TestPort, idle: Duration) 
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Udp(UdpProxy {
-                    upstream_servers: vec![UpstreamServer {
-                        addr: upstream_port.multiaddr_udp(),
-                    }],
+                    upstream_servers: vec![UpstreamServer::new(upstream_port.multiaddr_udp())],
                     session_idle_timeout: idle,
                     ..Default::default()
                 }),

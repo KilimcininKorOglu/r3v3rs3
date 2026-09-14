@@ -372,14 +372,9 @@ pub fn http_proxy_entry(id: &str, port_id: &str, http: HttpProxy) -> ProxyEntry 
 pub fn http_route(path: &str, upstream: &str, ip_filter: Option<IpFilter>) -> Route {
     Route {
         path: path.into(),
-        servers: vec![UpstreamUrl {
-            url: upstream.parse().unwrap(),
-        }],
+        servers: vec![UpstreamUrl::new(upstream.parse().unwrap())],
         ip_filter,
-        rate_limit: None,
-        auth: None,
-        headers: None,
-        timeouts: None,
+        ..Default::default()
     }
 }
 

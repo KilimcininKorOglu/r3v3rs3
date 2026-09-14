@@ -127,9 +127,7 @@ fn balanced_http(
 ) -> ProxyKind {
     let servers = urls
         .iter()
-        .map(|url| Server {
-            url: url.as_str().parse().unwrap(),
-        })
+        .map(|url| Server::new(url.as_str().parse().unwrap()))
         .collect();
     http(HttpProxy {
         vhosts: vec!["localhost".parse().unwrap()],
@@ -146,9 +144,7 @@ fn balanced_http(
 fn tcp_servers(ports: &[&TestPort]) -> Vec<UpstreamServer> {
     ports
         .iter()
-        .map(|port| UpstreamServer {
-            addr: port.multiaddr_tcp(),
-        })
+        .map(|port| UpstreamServer::new(port.multiaddr_tcp()))
         .collect()
 }
 
@@ -256,14 +252,14 @@ async fn tcp_connect_timeout_closes_the_client_connection() -> anyhow::Result<()
     let proxy_port = alloc_tcp_port().await?;
 
     let tcp = TcpProxy {
-        upstream_servers: vec![UpstreamServer {
-            addr: format!(
+        upstream_servers: vec![UpstreamServer::new(
+            format!(
                 "/dns/localhost/tcp/{}/tls",
                 upstream_port.socket_addr().port()
             )
             .parse()
             .unwrap(),
-        }],
+        )],
         connect_timeout: Duration::from_millis(300),
         ..Default::default()
     };
@@ -532,9 +528,7 @@ async fn udp_sessions_use_the_servers_in_turn() -> anyhow::Result<()> {
     let udp = UdpProxy {
         upstream_servers: servers
             .iter()
-            .map(|port| UpstreamServer {
-                addr: port.multiaddr_udp(),
-            })
+            .map(|port| UpstreamServer::new(port.multiaddr_udp()))
             .collect(),
         ..Default::default()
     };

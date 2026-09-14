@@ -106,12 +106,7 @@ mod tests {
             .collect::<Vec<_>>();
         let route = Route {
             path: path.into(),
-            servers: vec![],
-            ip_filter: None,
-            rate_limit: None,
-            auth: None,
-            headers: None,
-            timeouts: None,
+            ..Default::default()
         };
         RequestFilter::new(&vhosts, &route)
     }

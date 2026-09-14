@@ -79,6 +79,12 @@ pub struct UpstreamServer {
     pub addr: Multiaddr,
 }
 
+impl UpstreamServer {
+    pub fn new(addr: Multiaddr) -> Self {
+        Self { addr }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PortEntry {
     pub id: ShortId,

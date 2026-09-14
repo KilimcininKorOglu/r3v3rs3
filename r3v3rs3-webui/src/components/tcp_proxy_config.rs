@@ -190,7 +190,7 @@ pub(super) fn parse_servers(
     let mut upstream_servers = Vec::new();
     for (i, server) in servers.iter().enumerate() {
         match server.addr(protocol) {
-            Some(addr) => upstream_servers.push(UpstreamServer { addr }),
+            Some(addr) => upstream_servers.push(UpstreamServer::new(addr)),
             None => {
                 errors.insert(server_key(i), locale.t("proxy_form.invalid_server").into());
             }
@@ -267,7 +267,7 @@ pub(super) mod tests {
         for (form, protocol, expected) in cases {
             let addr = form.addr(protocol).unwrap();
             assert_eq!(addr.to_string(), expected);
-            assert_eq!(ServerForm::new(&UpstreamServer { addr }), form);
+            assert_eq!(ServerForm::new(&UpstreamServer::new(addr)), form);
         }
         assert_eq!(server(" ", 443, false).addr("tcp"), None);
         assert_eq!(server("example.com", 0, false).addr("tcp"), None);

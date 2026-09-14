@@ -131,7 +131,7 @@ impl<'a> Cluster<'a> {
             .map(|(host, port)| {
                 let url = server_url(scheme, host, *port);
                 url.parse()
-                    .map(|url| Server { url })
+                    .map(Server::new)
                     .map_err(|err| format!("invalid endpoint address {url}: {err}"))
             })
             .collect()

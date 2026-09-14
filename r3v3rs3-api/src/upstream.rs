@@ -295,7 +295,7 @@ mod tests {
 
         let route = Route {
             timeouts: Some(zero),
-            ..serde_json::from_str(r#"{"servers":[]}"#).unwrap()
+            ..Default::default()
         };
         let http = HttpProxy {
             routes: vec![route],

@@ -211,11 +211,7 @@ fn route(built: &mut Built, target: &Target, host: &str, rule: PathRule) -> Opti
     Some(Route {
         path: path.to_string(),
         servers,
-        ip_filter: None,
-        rate_limit: None,
-        auth: None,
-        headers: None,
-        timeouts: None,
+        ..Default::default()
     })
 }
 

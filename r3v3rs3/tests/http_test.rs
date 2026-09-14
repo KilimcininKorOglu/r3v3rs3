@@ -110,25 +110,16 @@ async fn http_proxy() -> anyhow::Result<()> {
                     routes: vec![
                         Route {
                             path: "/was/ist/passiert".into(),
-                            servers: vec![r3v3rs3_api::proxy::Server {
-                                url: format!("{}/bye", server.url()).parse().unwrap(),
-                            }],
-                            ip_filter: None,
-                            rate_limit: None,
-                            auth: None,
-                            headers: None,
-                            timeouts: None,
+                            servers: vec![r3v3rs3_api::proxy::Server::new(
+                                format!("{}/bye", server.url()).parse().unwrap(),
+                            )],
+                            ..Default::default()
                         },
                         Route {
-                            path: "/".into(),
-                            servers: vec![r3v3rs3_api::proxy::Server {
-                                url: server.url().parse().unwrap(),
-                            }],
-                            ip_filter: None,
-                            rate_limit: None,
-                            auth: None,
-                            headers: None,
-                            timeouts: None,
+                            servers: vec![r3v3rs3_api::proxy::Server::new(
+                                server.url().parse().unwrap(),
+                            )],
+                            ..Default::default()
                         },
                     ],
                     upgrade_insecure: false,
@@ -283,15 +274,10 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                 kind: ProxyKind::Http(Box::new(HttpProxy {
                     vhosts: vec!["localhost".parse().unwrap()],
                     routes: vec![Route {
-                        path: "/".into(),
-                        servers: vec![r3v3rs3_api::proxy::Server {
-                            url: "https://httpbin.org/".parse().unwrap(),
-                        }],
-                        ip_filter: None,
-                        rate_limit: None,
-                        auth: None,
-                        headers: None,
-                        timeouts: None,
+                        servers: vec![r3v3rs3_api::proxy::Server::new(
+                            "https://httpbin.org/".parse().unwrap(),
+                        )],
+                        ..Default::default()
                     }],
                     upgrade_insecure: true,
                     client_ip: Default::default(),
@@ -370,15 +356,10 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                 kind: ProxyKind::Http(Box::new(HttpProxy {
                     vhosts: vec!["localhost".parse().unwrap()],
                     routes: vec![Route {
-                        path: "/".into(),
-                        servers: vec![r3v3rs3_api::proxy::Server {
-                            url: "https://example.nodomain/".parse().unwrap(),
-                        }],
-                        ip_filter: None,
-                        rate_limit: None,
-                        auth: None,
-                        headers: None,
-                        timeouts: None,
+                        servers: vec![r3v3rs3_api::proxy::Server::new(
+                            "https://example.nodomain/".parse().unwrap(),
+                        )],
+                        ..Default::default()
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),

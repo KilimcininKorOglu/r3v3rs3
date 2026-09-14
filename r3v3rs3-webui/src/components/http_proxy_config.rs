@@ -1433,7 +1433,7 @@ fn parse_route(
         .servers
         .iter()
         .filter_map(|url| match ServerUrl::from_str(url) {
-            Ok(url) => Some(Server { url }),
+            Ok(url) => Some(Server::new(url)),
             Err(err) => {
                 errors.insert(key.into(), locale.error_message(&err));
                 None
@@ -1509,18 +1509,12 @@ mod tests {
     #[test]
     fn route_timeouts_apply_only_when_overridden() {
         let route = Route {
-            path: "/".into(),
-            servers: vec![Server {
-                url: "http://127.0.0.1:9000/".parse().unwrap(),
-            }],
-            ip_filter: None,
-            rate_limit: None,
-            auth: None,
-            headers: None,
+            servers: vec![Server::new("http://127.0.0.1:9000/".parse().unwrap())],
             timeouts: Some(UpstreamTimeouts {
                 connect: Duration::from_secs(3),
                 request: Duration::from_secs(120),
             }),
+            ..Default::default()
         };
         let form = RouteForm::new(&route);
         let mut errors = HashMap::new();

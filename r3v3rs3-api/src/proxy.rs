@@ -237,11 +237,12 @@ impl From<ProxyEntry> for (ShortId, Proxy) {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Route {
     #[schema(example = "/")]
     #[serde(default = "default_route_path")]
     pub path: String,
+    #[serde(default)]
     pub servers: Vec<Server>,
     /// Replaces the proxy client IP filter for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -268,6 +269,12 @@ fn default_route_path() -> String {
 pub struct Server {
     #[schema(value_type = String, example = "https://example.com/api")]
     pub url: ServerUrl,
+}
+
+impl Server {
+    pub fn new(url: ServerUrl) -> Self {
+        Self { url }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]

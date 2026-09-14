@@ -62,15 +62,10 @@ async fn wss_proxy() -> anyhow::Result<()> {
                 kind: ProxyKind::Http(Box::new(HttpProxy {
                     vhosts: vec!["localhost".parse().unwrap()],
                     routes: vec![Route {
-                        path: "/".into(),
-                        servers: vec![r3v3rs3_api::proxy::Server {
-                            url: listen_port.https_url("/").try_into().unwrap(),
-                        }],
-                        ip_filter: None,
-                        rate_limit: None,
-                        auth: None,
-                        headers: None,
-                        timeouts: None,
+                        servers: vec![r3v3rs3_api::proxy::Server::new(
+                            listen_port.https_url("/").try_into().unwrap(),
+                        )],
+                        ..Default::default()
                     }],
                     upgrade_insecure: false,
                     client_ip: Default::default(),
