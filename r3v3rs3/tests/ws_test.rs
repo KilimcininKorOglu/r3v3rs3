@@ -63,6 +63,7 @@ async fn ws_proxy() -> anyhow::Result<()> {
                     retry: Default::default(),
                     sticky: Default::default(),
                     max_body_size: 0,
+                    redirects: Vec::new(),
                     client_cert: None,
                 })),
                 ..Default::default()

@@ -18,6 +18,7 @@ pub mod multiaddr;
 pub mod policy;
 pub mod port;
 pub mod proxy;
+pub mod redirect;
 pub mod rewrite;
 pub mod subject_name;
 pub mod tls;

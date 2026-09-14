@@ -67,6 +67,7 @@ pub(crate) mod hyper_tls;
 mod page;
 pub(crate) mod pool;
 mod rate_limit;
+mod redirect;
 mod rewrite;
 mod rewriter;
 mod route;
@@ -614,7 +615,9 @@ where
         }
     };
 
-    if let Some(redirect) = upgrade_redirect(route, &req, header_host.as_deref(), info.proto) {
+    let redirect = upgrade_redirect(route, &req, header_host.as_deref(), info.proto)
+        .or_else(|| redirect::redirect_rule(&route.redirects, request_host.as_deref(), &req));
+    if let Some(redirect) = redirect {
         return (ProxiedRequest::Respond(redirect), response_rewriter);
     }
 

@@ -14,6 +14,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
+use r3v3rs3_api::redirect::RedirectRule;
 use r3v3rs3_api::rewrite::{PathRegex, PathRewrite};
 use r3v3rs3_api::upstream::{
     CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, StickyCookie,
@@ -63,6 +64,8 @@ struct ProxyForm {
     retry: RetryForm,
     sticky: StickyForm,
     max_body_size: String,
+    /// One redirect rule on each line.
+    redirects: String,
 }
 
 impl ProxyForm {
@@ -91,6 +94,12 @@ impl ProxyForm {
             retry: RetryForm::new(&proxy.retry),
             sticky: StickyForm::new(&proxy.sticky),
             max_body_size: proxy.max_body_size.to_string(),
+            redirects: proxy
+                .redirects
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
         }
     }
 }
@@ -548,6 +557,11 @@ pub fn http_proxy_config(props: &Props) -> Html {
             ) }
             { error_view(errors.get("headers")) }
             <p class={HINT_CLASS}>{locale.t("http_form.header_rules_hint")}</p>
+
+            <label class={SECTION_CLASS}>{locale.t("http_form.redirects")}</label>
+            <textarea rows="3" autocapitalize="off" spellcheck="false" placeholder={"301 ^example\\.com/old/(.*)$ https://example.com/new/${1}"} value={form.redirects.clone()} onchange={state_input(&form, text_area, |form, value| form.redirects = value)} class={classes!(INPUT_CLASS, "font-mono")} />
+            { error_view(errors.get("redirects")) }
+            <p class={HINT_CLASS}>{locale.t("http_form.redirects_hint")}</p>
 
             <label class={SECTION_CLASS}>{locale.t("http_form.compression")}</label>
             { compression_view(locale, &form) }
@@ -1550,6 +1564,16 @@ fn get_proxy(
         "max_body_size",
         &mut errors,
     );
+    let redirects = or_error(
+        parse_lines(
+            locale,
+            &form.redirects,
+            "http_form.redirects_error",
+            RedirectRule::parse_line,
+        ),
+        "redirects",
+        &mut errors,
+    );
 
     if !errors.is_empty() {
         return Err(errors);
@@ -1577,6 +1601,7 @@ fn get_proxy(
         retry,
         sticky,
         max_body_size,
+        redirects,
     })
 }
 
@@ -1781,20 +1806,36 @@ fn parse_header_rules_form(
 ) -> HeaderRules {
     HeaderRules {
         request: or_error(
-            parse_rules(locale, request, "http_form.request_headers_error"),
+            parse_lines(
+                locale,
+                request,
+                "http_form.request_headers_error",
+                HeaderRule::parse_line,
+            ),
             key,
             errors,
         ),
         response: or_error(
-            parse_rules(locale, response, "http_form.response_headers_error"),
+            parse_lines(
+                locale,
+                response,
+                "http_form.response_headers_error",
+                HeaderRule::parse_line,
+            ),
             key,
             errors,
         ),
     }
 }
 
-/// Parses one rule per line like `parse_header_rules`, with a translated error message.
-fn parse_rules(locale: Locale, text: &str, error_key: &str) -> Result<Vec<HeaderRule>, String> {
+/// Parses one item per line and skips empty lines and lines that start with `#`. The translated
+/// error message names the line.
+fn parse_lines<T>(
+    locale: Locale,
+    text: &str,
+    error_key: &str,
+    parse: fn(&str) -> Result<T, Error>,
+) -> Result<Vec<T>, String> {
     text.lines()
         .enumerate()
         .filter(|(_, line)| {
@@ -1802,7 +1843,7 @@ fn parse_rules(locale: Locale, text: &str, error_key: &str) -> Result<Vec<Header
             !line.is_empty() && !line.starts_with('#')
         })
         .map(|(index, line)| {
-            HeaderRule::parse_line(line).map_err(|err| {
+            parse(line).map_err(|err| {
                 locale.tf(
                     error_key,
                     &[
@@ -2093,6 +2134,27 @@ mod tests {
         parse_route(Locale::Tr, &invalid, "routes_0", &mut errors);
         let expected = Locale::Tr.error_message(&Error::InvalidRetryAttempts);
         assert_eq!(errors.get("routes_0"), Some(&expected));
+    }
+
+    #[test]
+    fn redirect_rules_round_trip_and_report_the_line() {
+        let line = r"301 ^a\.test/(.*)$ https://b.test/${1}";
+        let proxy = HttpProxy {
+            redirects: vec![RedirectRule::parse_line(line).unwrap()],
+            ..Default::default()
+        };
+        let form = ProxyForm::new(&proxy);
+        assert_eq!(form.redirects, line);
+        let key = "http_form.redirects_error";
+        let text = format!("# comment\n\n{}", form.redirects);
+        let parsed = parse_lines(Locale::En, &text, key, RedirectRule::parse_line);
+        assert_eq!(parsed, Ok(proxy.redirects));
+
+        let text = "301 ^a$ /b\n303 ^a$ /b";
+        let err = parse_lines(Locale::Tr, text, key, RedirectRule::parse_line).unwrap_err();
+        let message = Locale::Tr.error_message(&Error::InvalidRedirectStatus { status: 303 });
+        let expected = Locale::Tr.tf(key, &[("line", "2"), ("error", &message)]);
+        assert_eq!(err, expected);
     }
 
     #[test]

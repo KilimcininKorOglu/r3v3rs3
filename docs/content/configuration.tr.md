@@ -108,6 +108,29 @@ routes = [
 ]
 ```
 
+## Redirect Kuralları
+
+HTTP / HTTPS proxy'sinin `redirects` değeri request'e bir redirect ile yanıt verir. Bu durumda request upstream sunucuya gitmez. Her kuralın `regex`, `target` ve `status` değerleri vardır:
+
+- `regex`; request'in port'suz host'u, path'i ve query'sinden oluşan değerle eşleşir, örneğin `example.com/old/page?id=1`.
+- `target` response'un `Location` header'ıdır. `${1}` veya `${name}` bir capture group ekler.
+- `status` değeri `301`, `302` (varsayılan), `307` veya `308` olabilir.
+
+Eşleşen ilk kural yanıt verir. r3v3rs3; client IP filtresini, rate limit'i ve `upgrade_insecure` HTTPS redirect'ini kurallardan önce, kimlik doğrulamayı kurallardan sonra uygular. Geçerli bir header değeri oluşturmayan target eşleşme sayılmaz ve r3v3rs3 bir uyarı log'u yazar. r3v3rs3 başka bir status değerini reddeder. Boş olan veya kontrol karakteri içeren target değerini de reddeder.
+
+WebUI'da her satıra bir kuralı `status regex target` biçiminde yazın. Orada regex ve target boşluk içeremez. Regex içinde `\s`, target içinde `%20` kullanın.
+
+```toml
+[my-site]
+protocol = "http"
+vhosts = ["example.com", "www.example.com"]
+redirects = [
+  { regex = "^www\\.example\\.com/(.*)$", target = "https://example.com/${1}", status = 301 },
+  { regex = "^example\\.com/blog/([0-9]+)$", target = "/posts/${1}" },
+]
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:3000/" }] }]
+```
+
 ## UDP Session'ları
 
 UDP proxy her client adresi için ayrı bir session açar. Her session'ın upstream sunucuya giden kendi socket'i vardır. Bu yüzden upstream sunucu her client'ı farklı bir kaynak porttan görür. r3v3rs3 upstream sunucunun yanıtlarını dinlediği porttan client'a geri gönderir.

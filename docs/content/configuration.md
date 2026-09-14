@@ -108,6 +108,29 @@ routes = [
 ]
 ```
 
+## Redirect Rules
+
+`redirects` of an HTTP / HTTPS proxy answers a request with a redirect, so the request does not reach an upstream server. Each rule has a `regex`, a `target` and a `status`:
+
+- `regex` matches the host without the port, the path and the query of the request, e.g. `example.com/old/page?id=1`.
+- `target` is the `Location` header of the response. `${1}` or `${name}` inserts a capture group.
+- `status` is `301`, `302` (default), `307` or `308`.
+
+The first matching rule answers. r3v3rs3 applies the client IP filter, the rate limit and the HTTPS redirect of `upgrade_insecure` before the rules, and authentication after the rules. A target that does not form a valid header value does not match, and r3v3rs3 logs a warning. r3v3rs3 rejects another status, and a target that is empty or that contains a control character.
+
+In the WebUI, write one rule on each line as `status regex target`. There, the regex and the target cannot contain spaces. Use `\s` in the regex and `%20` in the target.
+
+```toml
+[my-site]
+protocol = "http"
+vhosts = ["example.com", "www.example.com"]
+redirects = [
+  { regex = "^www\\.example\\.com/(.*)$", target = "https://example.com/${1}", status = 301 },
+  { regex = "^example\\.com/blog/([0-9]+)$", target = "/posts/${1}" },
+]
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:3000/" }] }]
+```
+
 ## UDP Sessions
 
 A UDP proxy opens one session for each client address. The session has its own socket to the upstream server, so the upstream server sees a different source port for each client. r3v3rs3 sends the replies of the upstream server back to the client from the listening port.

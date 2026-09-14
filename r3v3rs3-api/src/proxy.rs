@@ -5,6 +5,7 @@ use crate::discovery::DiscoverySource;
 use crate::error::Error;
 use crate::header_rules::HeaderRules;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
+use crate::redirect::RedirectRule;
 use crate::rewrite::PathRewrite;
 use crate::upstream::{
     default_connect_timeout, default_session_idle_timeout, default_weight,
@@ -65,7 +66,8 @@ impl ProxyKind {
 
     /// Rejects a zero connect timeout, session idle timeout, fail timeout or check timeout, an
     /// invalid health check path, a server list in which every server has weight 0, an invalid
-    /// circuit breaker, invalid retry attempts, an invalid sticky cookie and an invalid path prefix.
+    /// circuit breaker, invalid retry attempts, an invalid sticky cookie, an invalid path prefix
+    /// and an invalid redirect target.
     pub fn validate_upstream(&self) -> Result<(), Error> {
         match self {
             Self::Tcp(tcp) => {
@@ -83,6 +85,7 @@ impl ProxyKind {
                 http.health_check.validate(true)?;
                 http.circuit_breaker.validate()?;
                 http.sticky.validate()?;
+                http.redirects.iter().try_for_each(RedirectRule::validate)?;
                 http.routes.iter().try_for_each(|route| {
                     validate_weights(route.servers.iter().map(|server| server.weight))?;
                     route.rewrite.validate()
@@ -202,6 +205,9 @@ pub struct HttpProxy {
     /// The largest request body in bytes for every route of this proxy. `0` has no limit.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub max_body_size: u64,
+    /// Redirects that answer the matching requests before authentication.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirects: Vec<RedirectRule>,
 }
 
 fn is_zero(value: &u64) -> bool {

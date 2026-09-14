@@ -1,7 +1,11 @@
 use axum::http::Uri;
 use axum::Router;
+use r3v3rs3_api::cidr::parse_cidr_list;
+use r3v3rs3_api::policy::IpFilter;
 use r3v3rs3_api::proxy::{HttpProxy, Route};
+use r3v3rs3_api::redirect::RedirectRule;
 use r3v3rs3_api::rewrite::PathRewrite;
+use reqwest::redirect::Policy;
 use url::Url;
 
 mod common;
@@ -178,6 +182,68 @@ async fn route_paths_are_rewritten_before_the_server_path() -> anyhow::Result<()
                 "{request}"
             );
         }
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn redirect_rules_answer_after_the_ip_filter() -> anyhow::Result<()> {
+    let app = start_named_upstream("app").await?;
+    let port = alloc_tcp_port().await?;
+    let redirects = [
+        r"301 ^open\.test/old/(.*)$ https://new.test/${1}",
+        r"308 ^open\.test/old/.*$ https://unused.test/",
+        r"307 ^open\.test/temp$ /elsewhere",
+    ]
+    .iter()
+    .map(|line| RedirectRule::parse_line(line))
+    .collect::<Result<Vec<_>, _>>()?;
+    let open = HttpProxy {
+        redirects: redirects.clone(),
+        ..proxy(&["open.test"], vec![http_route("/", app.as_str(), None)])
+    };
+    let local = IpFilter {
+        deny: parse_cidr_list("127.0.0.0/8, ::1")?,
+        ..Default::default()
+    };
+    let closed = HttpProxy {
+        redirects,
+        ..proxy(
+            &["closed.test"],
+            vec![http_route("/", app.as_str(), Some(local))],
+        )
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("redirect", &port)])
+        .proxies(vec![
+            http_proxy_entry("open", "redirect", open),
+            http_proxy_entry("closed", "redirect", closed),
+        ])
+        .build();
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .build()?;
+        let get = |host: &'static str, path: &str| {
+            let request = client.get(port.http_url(path)).header("host", host);
+            async move {
+                let res = request.send().await?;
+                let location = res
+                    .headers()
+                    .get("location")
+                    .map(|value| value.to_str().map(str::to_string))
+                    .transpose()?;
+                anyhow::Ok((res.status().as_u16(), location))
+            }
+        };
+        let moved = Some("https://new.test/a/b?x=1".to_string());
+        assert_eq!(get("open.test", "/old/a/b?x=1").await?, (301, moved));
+        let temporary = Some("/elsewhere".to_string());
+        assert_eq!(get("open.test", "/temp").await?, (307, temporary));
+        assert_eq!(get("open.test", "/other").await?, (200, None));
+        assert_eq!(get("closed.test", "/old/a").await?, (403, None));
         Ok(())
     })
     .await

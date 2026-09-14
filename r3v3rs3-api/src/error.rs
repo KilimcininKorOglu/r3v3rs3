@@ -173,6 +173,15 @@ pub enum Error {
     #[error("path prefix must start with / and cannot contain ? or #: {prefix}")]
     InvalidPathPrefix { prefix: String },
 
+    #[error("invalid redirect rule: {rule}")]
+    InvalidRedirectRule { rule: String },
+
+    #[error("redirect status must be 301, 302, 307 or 308: {status}")]
+    InvalidRedirectStatus { status: u16 },
+
+    #[error("redirect target cannot be empty or contain a control character: {target}")]
+    InvalidRedirectTarget { target: String },
+
     #[error("failed to hash password")]
     FailedToHashPassword,
 

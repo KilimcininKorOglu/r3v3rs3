@@ -79,6 +79,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                     retry: Default::default(),
                     sticky: Default::default(),
                     max_body_size: 0,
+                    redirects: Vec::new(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -200,6 +201,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                     retry: Default::default(),
                     sticky: Default::default(),
                     max_body_size: 0,
+                    redirects: Vec::new(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -302,6 +304,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                     retry: Default::default(),
                     sticky: Default::default(),
                     max_body_size: 0,
+                    redirects: Vec::new(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -419,6 +422,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                     retry: Default::default(),
                     sticky: Default::default(),
                     max_body_size: 0,
+                    redirects: Vec::new(),
                     client_cert: None,
                 })),
                 ..Default::default()

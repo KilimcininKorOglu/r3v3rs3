@@ -9,6 +9,7 @@ use super::rate_limit::{self, ClientRateLimiter};
 use super::rewrite::Rewrite;
 use crate::proxy::health::{self, GroupKey, Probe};
 use hyper::{Request, Uri};
+use r3v3rs3_api::redirect::RedirectRule;
 use r3v3rs3_api::{
     compression::Compression,
     id::ShortId,
@@ -51,6 +52,7 @@ impl Router {
             let proxy_header_rules = Arc::new(CompiledHeaderRules::new(&http.headers));
             let compression = (!http.compression.is_disabled()).then(|| Arc::new(http.compression));
             let proxy_cache = cache_for(id, &http.cache);
+            let redirects: Arc<[RedirectRule]> = http.redirects.clone().into();
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 let base_path: String = filter
@@ -83,6 +85,7 @@ impl Router {
                     https_port,
                     quic_port,
                     upgrade_insecure: http.upgrade_insecure,
+                    redirects: redirects.clone(),
                     client_ip: client_ip.clone(),
                     ip_filter,
                     rate_limiter,
@@ -234,6 +237,8 @@ pub struct FilteredRoute {
     pub https_port: Option<u16>,
     pub quic_port: Option<u16>,
     pub upgrade_insecure: bool,
+    /// The redirect rules of the proxy. Every route of the proxy shares them.
+    pub redirects: Arc<[RedirectRule]>,
     pub client_ip: Arc<ClientIpResolver>,
     pub ip_filter: Arc<IpFilter>,
     pub rate_limiter: Option<Arc<ClientRateLimiter>>,

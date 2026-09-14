@@ -77,6 +77,15 @@ impl PathRegex {
     pub fn replace<'a>(&self, path: &'a str, replacement: &str) -> Cow<'a, str> {
         self.0.replace(path, replacement)
     }
+
+    /// Returns the template with `${1}` or `${name}` replaced by the capture groups of the first
+    /// match, or `None` when the text does not match.
+    pub fn expand(&self, text: &str, template: &str) -> Option<String> {
+        let captures = self.0.captures(text)?;
+        let mut expanded = String::new();
+        captures.expand(template, &mut expanded);
+        Some(expanded)
+    }
 }
 
 impl PartialEq for PathRegex {
