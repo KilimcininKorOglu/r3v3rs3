@@ -764,6 +764,7 @@ A system resolver can return cached answers. If the propagation check fails ofte
 | Porkbun | API Key, Secret API Key | "API Access" is on for the domain in the Porkbun domain management. |
 | OVHcloud | API Endpoint, Application Key, Application Secret, Consumer Key | A consumer key with the rights `GET /domain/zone`, `POST /domain/zone/*` and `DELETE /domain/zone/*`. The endpoint is `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` or `soyoustart-ca`. r3v3rs3 refreshes the zone after it creates the records and after it deletes them. |
 | Webhook | Webhook URL, Bearer Token | A service of your own that creates and deletes the TXT records. See "DNS webhook" below. |
+| Exec | Program Path | A program on the r3v3rs3 host that creates and deletes the TXT records. See "DNS exec" below. |
 
 r3v3rs3 is tested against mock servers of these APIs and against the [Pebble](https://github.com/letsencrypt/pebble) test certificate authority. It is not tested against real provider accounts.
 
@@ -782,6 +783,35 @@ The webhook provider sends the TXT records to a service of your own instead of t
 - A 2xx status is a success. r3v3rs3 waits at most 30 seconds for the response.
 
 The webhook URL must use HTTPS. HTTP is allowed only for a loopback address, for example `http://127.0.0.1:8080/acme`.
+
+## DNS exec
+
+The exec provider runs a program on the r3v3rs3 host for each TXT value:
+
+```
+<program> add <fqdn> <value>
+<program> remove <fqdn> <value>
+```
+
+- r3v3rs3 starts the program directly, without a shell. The program gets an empty environment and no standard input.
+- `fqdn` is the TXT record name without the trailing dot.
+- The program must keep the other TXT values of the name.
+- Exit status 0 is a success. Any other exit status is a failure, and the error message holds the start of the standard error.
+- When an `add` call fails, r3v3rs3 runs `remove` for the values of the name that it added and for the failed value.
+- r3v3rs3 stops the program when the timeout expires, and the call fails.
+
+The program must be in the `[acme_exec]` section of `config.toml`:
+
+```toml
+[acme_exec]
+programs = ["/usr/local/bin/r3v3rs3-dns-hook"]
+timeout = "30s"
+```
+
+- Only the file sets this section. The admin API and the WebUI cannot change it. Restart r3v3rs3 after you edit it.
+- The program of the provider and each entry of `programs` must be absolute paths. r3v3rs3 resolves symbolic links and compares the resolved paths.
+- r3v3rs3 checks the program when you add the ACME entry and before each run.
+- `timeout` is the longest run time of one call. The default is `30s`.
 
 ## Stored data
 
@@ -808,7 +838,7 @@ key_pkcs8 = "<account private key>"
 directory = "https://acme-v02.api.letsencrypt.org/directory"
 ```
 
-The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun`, `ovh`, `azure`, `google_cloud` or `webhook`. Route 53 uses `access_key_id` and `secret_access_key` instead of `api_token`. Porkbun uses `api_key` and `secret_api_key`. OVHcloud uses `endpoint`, `application_key`, `application_secret` and `consumer_key`. Azure DNS uses `tenant_id`, `client_id`, `client_secret` and `subscription_id`. Google Cloud DNS uses `service_account_key` and an optional `project_id`. The webhook uses `url` and an optional `token`. The Vultr API key goes in `api_token`.
+The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun`, `ovh`, `azure`, `google_cloud`, `webhook` or `exec`. Route 53 uses `access_key_id` and `secret_access_key` instead of `api_token`. Porkbun uses `api_key` and `secret_api_key`. OVHcloud uses `endpoint`, `application_key`, `application_secret` and `consumer_key`. Azure DNS uses `tenant_id`, `client_id`, `client_secret` and `subscription_id`. Google Cloud DNS uses `service_account_key` and an optional `project_id`. The webhook uses `url` and an optional `token`. Exec uses `program`. The Vultr API key goes in `api_token`.
 
 # Settings
 

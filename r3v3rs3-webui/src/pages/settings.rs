@@ -752,6 +752,8 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 consul,
                 etcd,
             },
+            // The server keeps the programs of config.toml.
+            acme_exec: Default::default(),
         }),
         _ => Err(errors),
     }

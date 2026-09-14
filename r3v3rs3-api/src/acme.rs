@@ -266,18 +266,25 @@ pub enum LocalProvider {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         token: String,
     },
+    /// A program on the server host, from the `acme_exec` programs of `config.toml`.
+    Exec {
+        #[schema(example = "/usr/local/bin/r3v3rs3-dns-hook")]
+        program: String,
+    },
 }
 
 impl LocalProvider {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Webhook { .. } => "webhook",
+            Self::Exec { .. } => "exec",
         }
     }
 
     fn has_credentials(&self) -> bool {
         match self {
             Self::Webhook { url, .. } => filled(&[url]),
+            Self::Exec { program } => filled(&[program]),
         }
     }
 }
@@ -546,6 +553,7 @@ mod test {
             serde_json::json!({ "provider": "google_cloud", "service_account_key": "{}" }),
             serde_json::json!({ "provider": "webhook", "url": "https://h" }),
             serde_json::json!({ "provider": "webhook", "url": "https://h", "token": "t" }),
+            serde_json::json!({ "provider": "exec", "program": "/usr/local/bin/hook" }),
             serde_json::json!({ "provider": "google_cloud", "service_account_key": "{}", "project_id": "p" }),
         ];
         for value in providers {

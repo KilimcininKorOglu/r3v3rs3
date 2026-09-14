@@ -20,6 +20,7 @@ use instant_acme::{
     ExternalAccountKey, HttpClient, Identifier, NewAccount, NewOrder, Order, OrderStatus,
 };
 use r3v3rs3_api::acme::{AcmeInfo, DnsProvider, DNS_01, HTTP_01, TLS_ALPN_01};
+use r3v3rs3_api::app::AcmeExecConfig;
 use r3v3rs3_api::{
     acme::Acme,
     cert::{CertKind, CertMetadata},
@@ -147,13 +148,14 @@ impl AcmeEntry {
     }
 
     /// Starts an order for the domain names of the target. `dns_resolver` is the DNS server that
-    /// the DNS-01 challenge asks.
+    /// the DNS-01 challenge asks, and `acme_exec` holds the programs of the exec DNS provider.
     pub async fn request(
         &self,
         target: &AcmeTarget,
         dns_resolver: Option<SocketAddr>,
+        acme_exec: &AcmeExecConfig,
     ) -> anyhow::Result<AcmeOrder> {
-        AcmeOrder::new(self, target, dns_resolver).await
+        AcmeOrder::new(self, target, dns_resolver, acme_exec).await
     }
 
     pub fn id(&self) -> ShortId {
@@ -300,6 +302,7 @@ struct DnsChallenge {
     provider: DnsProvider,
     resolver: Option<SocketAddr>,
     names: Vec<TxtName>,
+    acme_exec: AcmeExecConfig,
 }
 
 #[derive(Default)]
@@ -315,6 +318,7 @@ impl AcmeOrder {
         entry: &AcmeEntry,
         target: &AcmeTarget,
         dns_resolver: Option<SocketAddr>,
+        acme_exec: &AcmeExecConfig,
     ) -> anyhow::Result<Self> {
         info!("requesting certificate");
 
@@ -343,6 +347,7 @@ impl AcmeOrder {
                 provider: provider.clone(),
                 resolver: dns_resolver,
                 names: dns::txt_names(challenges.dns),
+                acme_exec: acme_exec.clone(),
             }),
             _ => None,
         };
@@ -382,7 +387,7 @@ impl AcmeOrder {
         let Some(dns) = self.dns.take() else {
             return self.complete().await;
         };
-        let client = dns::client(&dns.provider).await?;
+        let client = dns::client(&dns.provider, &dns.acme_exec).await?;
         let task = async {
             dns::wait_for_propagation(
                 dns.resolver,

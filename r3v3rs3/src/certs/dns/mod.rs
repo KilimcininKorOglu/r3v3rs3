@@ -5,6 +5,7 @@ mod azure;
 mod cloudflare;
 mod desec;
 mod digitalocean;
+mod exec;
 mod gandi;
 mod google;
 mod hetzner;
@@ -17,6 +18,8 @@ mod sigv4;
 mod vultr;
 mod webhook;
 
+pub use exec::check_exec_provider;
+
 use crate::cdn::fetch::HttpClient;
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
@@ -25,8 +28,9 @@ use hickory_resolver::{
     system_conf::read_system_conf,
     TokioAsyncResolver,
 };
-use r3v3rs3_api::acme::{
-    CloudProvider, DnsProvider, KeyedProvider, LocalProvider, TokenApi, TokenProvider,
+use r3v3rs3_api::{
+    acme::{CloudProvider, DnsProvider, KeyedProvider, LocalProvider, TokenApi, TokenProvider},
+    app::AcmeExecConfig,
 };
 use std::{future::Future, net::SocketAddr, time::Duration};
 use tracing::{debug, info, warn};
@@ -132,19 +136,28 @@ impl<T: RecordApi> DnsClient for PerValue<T> {
     }
 }
 
-pub async fn client(provider: &DnsProvider) -> anyhow::Result<Box<dyn DnsClient>> {
+/// `acme_exec` holds the programs that the exec provider can run.
+pub async fn client(
+    provider: &DnsProvider,
+    acme_exec: &AcmeExecConfig,
+) -> anyhow::Result<Box<dyn DnsClient>> {
     let http = crate::cdn::fetch::build_client().await?;
     match provider {
         DnsProvider::Token(provider) => token_client(http, provider),
         DnsProvider::Keyed(provider) => keyed_client(http, provider),
         DnsProvider::Cloud(provider) => cloud_client(http, provider),
-        DnsProvider::Local(provider) => local_client(http, provider),
+        DnsProvider::Local(provider) => local_client(http, provider, acme_exec),
     }
 }
 
-fn local_client(http: HttpClient, provider: &LocalProvider) -> anyhow::Result<Box<dyn DnsClient>> {
+fn local_client(
+    http: HttpClient,
+    provider: &LocalProvider,
+    acme_exec: &AcmeExecConfig,
+) -> anyhow::Result<Box<dyn DnsClient>> {
     let client: Box<dyn DnsClient> = match provider {
         LocalProvider::Webhook { url, token } => Box::new(webhook::Webhook::new(http, url, token)?),
+        LocalProvider::Exec { program } => Box::new(exec::Exec::new(program, acme_exec)?),
     };
     Ok(client)
 }

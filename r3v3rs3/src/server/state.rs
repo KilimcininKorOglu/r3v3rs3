@@ -619,6 +619,7 @@ impl ServerState {
         }
 
         let dns_resolver = self.config.dns_challenge_resolver;
+        let acme_exec = self.config.acme_exec.clone();
         let command = self.command_sender.clone();
         tokio::task::spawn(async move {
             let mut orders = Vec::new();
@@ -632,7 +633,7 @@ impl ServerState {
                     );
                 });
                 match entry
-                    .request(&target, dns_resolver)
+                    .request(&target, dns_resolver, &acme_exec)
                     .instrument(span.clone())
                     .await
                 {
@@ -738,6 +739,7 @@ impl ServerState {
 
     pub async fn set_config(&mut self, mut config: AppConfig) -> Result<(), Error> {
         config.keep_secrets(&self.config);
+        config.keep_file_only(&self.config);
         discovery::validate_config(&config.discovery, &self.certs)?;
         let changed = discovery::changed_providers(&self.config.discovery, &config.discovery);
         self.config.discovery.clone_from(&config.discovery);

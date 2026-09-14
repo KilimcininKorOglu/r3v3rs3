@@ -32,6 +32,28 @@ pub struct AppConfig {
 
     #[serde(default)]
     pub discovery: crate::discovery::DiscoveryConfig,
+
+    /// Only `config.toml` sets this section. An update through the admin API keeps it.
+    #[serde(default)]
+    pub acme_exec: AcmeExecConfig,
+}
+
+/// The programs that the exec DNS provider can run.
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AcmeExecConfig {
+    /// Absolute paths of the programs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>, example = json!(["/usr/local/bin/r3v3rs3-dns-hook"]))]
+    pub programs: Vec<PathBuf>,
+
+    /// Longest run time of one program call.
+    #[serde(with = "humantime_serde", default = "default_acme_exec_timeout")]
+    #[schema(value_type = String, example = "30s")]
+    pub timeout: Duration,
+}
+
+fn default_acme_exec_timeout() -> Duration {
+    Duration::from_secs(30)
 }
 
 impl AppConfig {
@@ -46,6 +68,11 @@ impl AppConfig {
     /// Takes the secrets that an update does not set from the current settings.
     pub fn keep_secrets(&mut self, current: &Self) {
         self.discovery.keep_secrets(&current.discovery);
+    }
+
+    /// Takes the settings that only `config.toml` sets from the current settings.
+    pub fn keep_file_only(&mut self, current: &Self) {
+        self.acme_exec.clone_from(&current.acme_exec);
     }
 }
 

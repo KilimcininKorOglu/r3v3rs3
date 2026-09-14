@@ -228,6 +228,7 @@ mod tests {
             Error::AcmeWildcardNeedsDnsChallenge { identifier: text() },
             Error::AcmeDnsProviderRequired,
             Error::AcmeWebhookUrlInvalid { url: text() },
+            Error::AcmeExecProgramNotAllowed { program: text() },
             Error::Unauthorized,
             Error::FailedToCreateAccount,
             Error::InvalidLoginCredentials,

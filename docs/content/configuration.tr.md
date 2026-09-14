@@ -764,6 +764,7 @@ Sistem resolver'ı cache'teki eski yanıtları döndürebilir. Propagation kontr
 | Porkbun | API Key, Secret API Key | Porkbun domain yönetiminde domain için "API Access" açık olmalıdır. |
 | OVHcloud | API Endpoint, Application Key, Application Secret, Consumer Key | `GET /domain/zone`, `POST /domain/zone/*` ve `DELETE /domain/zone/*` yetkileri olan bir consumer key. Endpoint `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` veya `soyoustart-ca` olabilir. r3v3rs3, kayıtları oluşturduktan sonra ve sildikten sonra zone'u refresh eder. |
 | Webhook | Webhook URL, Bearer Token | TXT kayıtlarını oluşturan ve silen kendi servisiniz. Aşağıdaki "DNS webhook" bölümüne bakın. |
+| Exec | Program Yolu | r3v3rs3 host'unda TXT kayıtlarını oluşturan ve silen bir program. Aşağıdaki "DNS exec" bölümüne bakın. |
 
 r3v3rs3 bu API'lerin mock sunucularıyla ve [Pebble](https://github.com/letsencrypt/pebble) test sertifika otoritesiyle test edilir. Gerçek provider hesaplarıyla test edilmez.
 
@@ -782,6 +783,35 @@ Webhook provider'ı TXT kayıtlarını bir DNS hosting servisinin API'si yerine 
 - 2xx status başarı sayılır. r3v3rs3 yanıt için en fazla 30 saniye bekler.
 
 Webhook URL'i HTTPS kullanmalıdır. HTTP yalnız loopback adresinde kullanılabilir, örneğin `http://127.0.0.1:8080/acme`.
+
+## DNS exec
+
+Exec provider'ı her TXT değeri için r3v3rs3 host'unda bir program çalıştırır:
+
+```
+<program> add <fqdn> <değer>
+<program> remove <fqdn> <değer>
+```
+
+- r3v3rs3 programı shell kullanmadan doğrudan başlatır. Program boş bir environment alır ve standart girdi almaz.
+- `fqdn`, sondaki nokta olmadan TXT kaydının adıdır.
+- Program, adın diğer TXT değerlerini korumalıdır.
+- Exit status 0 başarı sayılır. Diğer her exit status başarısızlıktır ve hata mesajı standart hata çıktısının başını taşır.
+- Bir `add` çağrısı başarısız olursa r3v3rs3, adın eklediği değerleri ve başarısız değer için `remove` çalıştırır.
+- Timeout dolunca r3v3rs3 programı durdurur ve çağrı başarısız olur.
+
+Program, `config.toml` dosyasının `[acme_exec]` bölümünde olmalıdır:
+
+```toml
+[acme_exec]
+programs = ["/usr/local/bin/r3v3rs3-dns-hook"]
+timeout = "30s"
+```
+
+- Bu bölümü yalnız dosya belirler. Admin API ve WebUI bu bölümü değiştiremez. Bölümü düzenledikten sonra r3v3rs3'ü yeniden başlatın.
+- Provider'ın programı ve `programs` listesindeki her giriş mutlak yol olmalıdır. r3v3rs3 sembolik link'leri çözer ve çözülen yolları karşılaştırır.
+- r3v3rs3 programı ACME girişini eklediğinizde ve her çalıştırmadan önce kontrol eder.
+- `timeout`, tek bir çağrının en uzun çalışma süresidir. Varsayılan değer `30s`.
 
 ## Saklanan veriler
 
@@ -808,7 +838,7 @@ key_pkcs8 = "<hesabın private key'i>"
 directory = "https://acme-v02.api.letsencrypt.org/directory"
 ```
 
-`dns_provider` altındaki `provider` değeri `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun`, `ovh`, `azure`, `google_cloud` veya `webhook` olabilir. Route 53, `api_token` yerine `access_key_id` ve `secret_access_key` kullanır. Porkbun, `api_key` ve `secret_api_key` kullanır. OVHcloud, `endpoint`, `application_key`, `application_secret` ve `consumer_key` kullanır. Azure DNS, `tenant_id`, `client_id`, `client_secret` ve `subscription_id` kullanır. Google Cloud DNS, `service_account_key` ve isteğe bağlı `project_id` kullanır. Webhook, `url` ve isteğe bağlı `token` kullanır. Vultr API key'i `api_token` alanına yazılır.
+`dns_provider` altındaki `provider` değeri `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun`, `ovh`, `azure`, `google_cloud`, `webhook` veya `exec` olabilir. Route 53, `api_token` yerine `access_key_id` ve `secret_access_key` kullanır. Porkbun, `api_key` ve `secret_api_key` kullanır. OVHcloud, `endpoint`, `application_key`, `application_secret` ve `consumer_key` kullanır. Azure DNS, `tenant_id`, `client_id`, `client_secret` ve `subscription_id` kullanır. Google Cloud DNS, `service_account_key` ve isteğe bağlı `project_id` kullanır. Webhook, `url` ve isteğe bağlı `token` kullanır. Exec, `program` kullanır. Vultr API key'i `api_token` alanına yazılır.
 
 # Ayarlar
 

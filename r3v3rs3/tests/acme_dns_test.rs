@@ -4,8 +4,13 @@ use axum::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use r3v3rs3::certs::dns::{self, DnsClient, TxtName};
-use r3v3rs3_api::acme::{
-    CloudProvider, DnsProvider, KeyedProvider, LocalProvider, OvhEndpoint, TokenApi, TokenProvider,
+use r3v3rs3_api::{
+    acme::{
+        CloudProvider, DnsProvider, KeyedProvider, LocalProvider, OvhEndpoint, TokenApi,
+        TokenProvider,
+    },
+    app::AcmeExecConfig,
+    error::Error,
 };
 use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
 use rsa::{
@@ -16,7 +21,9 @@ use serde_json::json;
 use sha1::{Digest, Sha1};
 use std::{
     collections::HashMap,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 mod common;
@@ -100,7 +107,8 @@ async fn mock_client(
     provider: impl FnOnce(String) -> DnsProvider,
 ) -> anyhow::Result<(Box<dyn DnsClient>, Calls)> {
     let (url, calls) = start_mock(respond).await?;
-    Ok((dns::client(&provider(url)).await?, calls))
+    let client = dns::client(&provider(url), &AcmeExecConfig::default()).await?;
+    Ok((client, calls))
 }
 
 /// Adds and removes the challenge name through a mock provider API.
@@ -521,7 +529,7 @@ async fn azure_reuses_its_token_follows_the_next_link_and_keeps_other_values() -
         api_url: Some(base.clone()),
         auth_url: Some(base.clone()),
     });
-    let client = dns::client(&provider).await?;
+    let client = dns::client(&provider, &AcmeExecConfig::default()).await?;
     let record = client.add_txt(&challenge_name()).await?;
     client.remove_txt(&record).await?;
 
@@ -670,7 +678,7 @@ async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_othe
     };
 
     let (base, calls) = start_mock(google_missing).await?;
-    let client = dns::client(&provider("", base.clone())).await?;
+    let client = dns::client(&provider("", base.clone()), &AcmeExecConfig::default()).await?;
     let record = client.add_txt(&challenge_name()).await?;
     assert_eq!(
         requests(&calls),
@@ -773,7 +781,155 @@ async fn a_failed_webhook_add_sends_a_remove_and_a_plain_http_host_is_refused() 
         url: "http://dns-hook.example.test/acme".to_string(),
         token: String::new(),
     });
-    assert!(dns::client(&remote).await.is_err());
+    assert!(dns::client(&remote, &AcmeExecConfig::default())
+        .await
+        .is_err());
+    Ok(())
+}
+
+/// Writes an executable shell script under the test target directory, and returns its path
+/// and the path of the log that `$log` names in `body`.
+#[cfg(unix)]
+fn exec_script(name: &str, body: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("acme-exec");
+    std::fs::create_dir_all(&dir)?;
+    let log = dir.join(format!("{name}.log"));
+    if log.exists() {
+        std::fs::remove_file(&log)?;
+    }
+    let script = dir.join(format!("{name}.sh"));
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\nlog='{}'\n{body}\n", log.display()),
+    )?;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
+    Ok((script, log))
+}
+
+#[cfg(unix)]
+fn exec_provider(program: &Path) -> DnsProvider {
+    DnsProvider::Local(LocalProvider::Exec {
+        program: program.display().to_string(),
+    })
+}
+
+#[cfg(unix)]
+fn allowlist(programs: &[&Path], timeout: Duration) -> AcmeExecConfig {
+    AcmeExecConfig {
+        programs: programs
+            .iter()
+            .map(|program| program.to_path_buf())
+            .collect(),
+        timeout,
+    }
+}
+
+#[cfg(unix)]
+fn log_lines(log: &Path) -> anyhow::Result<Vec<String>> {
+    Ok(std::fs::read_to_string(log)?
+        .lines()
+        .map(str::to_string)
+        .collect())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_exec_program_gets_each_value_as_an_argument_without_a_shell_or_environment(
+) -> anyhow::Result<()> {
+    let (script, log) = exec_script(
+        "arguments",
+        r#"echo "$# $1 $2 [$3] ${HOME-unset}" >> "$log""#,
+    )?;
+    let config = allowlist(&[&script], Duration::from_secs(10));
+    let client = dns::client(&exec_provider(&script), &config).await?;
+    let name = TxtName {
+        fqdn: "_acme-challenge.app.example.test".to_string(),
+        values: vec!["$(id)".to_string(), "a; b".to_string()],
+    };
+    let record = client.add_txt(&name).await?;
+    client.remove_txt(&record).await?;
+
+    let fqdn = "_acme-challenge.app.example.test";
+    assert_eq!(
+        log_lines(&log)?,
+        vec![
+            format!("3 add {fqdn} [$(id)] unset"),
+            format!("3 add {fqdn} [a; b] unset"),
+            format!("3 remove {fqdn} [$(id)] unset"),
+            format!("3 remove {fqdn} [a; b] unset"),
+        ]
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_exec_program_outside_the_allowlist_is_refused() -> anyhow::Result<()> {
+    let (allowed, _) = exec_script("allowed", "exit 0")?;
+    let (other, _) = exec_script("other", "exit 0")?;
+    let config = allowlist(&[&allowed], Duration::from_secs(10));
+
+    let link = allowed.with_file_name("allowed-link.sh");
+    if link.symlink_metadata().is_ok() {
+        std::fs::remove_file(&link)?;
+    }
+    std::os::unix::fs::symlink(&allowed, &link)?;
+    assert!(dns::client(&exec_provider(&link), &config).await.is_ok());
+
+    for program in [other.display().to_string(), "allowed.sh".to_string()] {
+        let provider = DnsProvider::Local(LocalProvider::Exec {
+            program: program.clone(),
+        });
+        assert!(dns::client(&provider, &config).await.is_err(), "{program}");
+        assert!(matches!(
+            dns::check_exec_provider(Some(&provider), &config),
+            Err(Error::AcmeExecProgramNotAllowed { program: refused }) if refused == program
+        ));
+    }
+    assert!(dns::check_exec_provider(Some(&exec_provider(&allowed)), &config).is_ok());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failing_exec_program_removes_the_added_values_and_reports_its_stderr(
+) -> anyhow::Result<()> {
+    let (script, log) = exec_script(
+        "failing",
+        r#"echo "$1 $3" >> "$log"
+if [ "$1" = add ] && [ "$3" = v2 ]; then echo "zone is locked" >&2; exit 3; fi"#,
+    )?;
+    let config = allowlist(&[&script], Duration::from_secs(10));
+    let client = dns::client(&exec_provider(&script), &config).await?;
+
+    let Err(err) = client.add_txt(&challenge_name()).await else {
+        anyhow::bail!("add_txt succeeded");
+    };
+    let message = format!("{err:#}");
+    assert!(message.contains("zone is locked"), "{message}");
+    assert!(message.contains('3'), "{message}");
+    assert_eq!(
+        log_lines(&log)?,
+        vec!["add v1", "add v2", "remove v1", "remove v2"]
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_exec_program_is_stopped_when_the_timeout_expires() -> anyhow::Result<()> {
+    let (script, _) = exec_script("slow", "exec /bin/sleep 5")?;
+    let config = allowlist(&[&script], Duration::from_millis(200));
+    let client = dns::client(&exec_provider(&script), &config).await?;
+
+    let started = std::time::Instant::now();
+    let Err(err) = client.add_txt(&challenge_name()).await else {
+        anyhow::bail!("add_txt succeeded");
+    };
+    assert!(format!("{err:#}").contains("did not add"), "{err:#}");
+    assert!(started.elapsed() < Duration::from_secs(3));
     Ok(())
 }
 
@@ -866,7 +1022,7 @@ async fn ovh_signs_each_request_with_the_ovh_clock_and_refreshes_the_zone() -> a
         consumer_key: "consumer-key".to_string(),
         api_url: Some(url.clone()),
     });
-    let client = dns::client(&provider).await?;
+    let client = dns::client(&provider, &AcmeExecConfig::default()).await?;
     let record = client.add_txt(&challenge_name()).await?;
     client.remove_txt(&record).await?;
 

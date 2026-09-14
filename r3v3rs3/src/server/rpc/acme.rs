@@ -1,5 +1,8 @@
 use super::RpcMethod;
-use crate::{certs::acme::AcmeEntry, server::state::ServerState};
+use crate::{
+    certs::{acme::AcmeEntry, dns},
+    server::state::ServerState,
+};
 use r3v3rs3_api::{
     acme::{AcmeConfig, AcmeInfo, AcmeRequest},
     error::Error,
@@ -50,6 +53,10 @@ impl RpcMethod for AddAcme {
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         self.request.acme.validate()?;
+        dns::check_exec_provider(
+            self.request.acme.dns_provider.as_ref(),
+            &state.config().acme_exec,
+        )?;
         let entry = AcmeEntry::new(state.generate_id(), self.request).await?;
         state.acmes.add(entry.clone())?;
         state.storage.save_acme(&entry).await;

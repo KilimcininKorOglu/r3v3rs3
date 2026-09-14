@@ -113,6 +113,9 @@ pub enum Error {
     #[error("the webhook url must use https, or http on a loopback address: {url}")]
     AcmeWebhookUrlInvalid { url: String },
 
+    #[error("the dns exec program is not in the acme_exec programs of config.toml: {program}")]
+    AcmeExecProgramNotAllowed { program: String },
+
     #[error("unauthorized")]
     Unauthorized,
 
