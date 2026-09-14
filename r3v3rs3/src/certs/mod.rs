@@ -70,9 +70,8 @@ impl PartialOrd for Cert {
         Some(
             other
                 .not_before
-                .partial_cmp(&self.not_before)
-                .unwrap()
-                .then_with(|| self.not_after.partial_cmp(&other.not_after).unwrap())
+                .cmp(&self.not_before)
+                .then_with(|| self.not_after.cmp(&other.not_after))
                 .then_with(|| self.fingerprint.cmp(&other.fingerprint)),
         )
     }
