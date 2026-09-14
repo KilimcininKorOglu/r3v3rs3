@@ -32,12 +32,16 @@ pub enum ProxyError {
 
     #[error("the upstream server did not respond in time")]
     UpstreamTimeout,
+
+    #[error("every upstream server of the route has an open circuit")]
+    NoUpstreamAvailable,
 }
 
 impl ProxyError {
     fn code(&self) -> StatusCode {
         match self {
             Self::UpstreamTimeout => StatusCode::GATEWAY_TIMEOUT,
+            Self::NoUpstreamAvailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::DomainFrontingDetected => StatusCode::MISDIRECTED_REQUEST,
             Self::NoRouteFound => StatusCode::BAD_GATEWAY,
             Self::IpNotAllowed => StatusCode::FORBIDDEN,
@@ -94,12 +98,13 @@ fn status_code(code: u16) -> StatusCode {
 }
 
 /// The `error_page.<code>` key of every status code that [`map_error`] returns.
-const ERROR_PAGE_KEYS: [(u16, &str); 9] = [
+const ERROR_PAGE_KEYS: [(u16, &str); 10] = [
     (401, "error_page.401"),
     (403, "error_page.403"),
     (421, "error_page.421"),
     (429, "error_page.429"),
     (502, "error_page.502"),
+    (503, "error_page.503"),
     (504, "error_page.504"),
     (523, "error_page.523"),
     (525, "error_page.525"),
@@ -139,6 +144,7 @@ mod tests {
         assert_eq!(text(StatusCode::GATEWAY_TIMEOUT), "Gateway Timeout");
         assert_eq!(text(StatusCode::MISDIRECTED_REQUEST), "Misdirected Request");
         assert_eq!(text(StatusCode::BAD_GATEWAY), "Bad Gateway");
+        assert_eq!(text(StatusCode::SERVICE_UNAVAILABLE), "Service Unavailable");
         assert_eq!(text(status_code(523)), "Origin Is Unreachable");
         assert_eq!(text(status_code(525)), "SSL Handshake Failed");
         assert_eq!(text(status_code(526)), "Invalid SSL Certificate");

@@ -14,7 +14,9 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
-use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing, UpstreamTimeouts, DEFAULT_WEIGHT};
+use r3v3rs3_api::upstream::{
+    CircuitBreaker, HealthCheck, LoadBalancing, UpstreamTimeouts, DEFAULT_WEIGHT,
+};
 use r3v3rs3_api::vhost::VirtualHost;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -171,6 +173,110 @@ pub(super) fn use_upstream_form(
     use_state(move || UpstreamForm::new(load_balancing, &health_check))
 }
 
+/// The errors of a [`CircuitBreakerForm`] use this key.
+pub(super) const CIRCUIT_BREAKER_KEY: &str = "circuit_breaker";
+
+/// The circuit breaker of an HTTP or TCP proxy.
+#[derive(Clone, PartialEq, Debug)]
+pub(super) struct CircuitBreakerForm {
+    enabled: bool,
+    failure_ratio: String,
+    min_requests: String,
+    window: String,
+    open_duration: String,
+}
+
+impl CircuitBreakerForm {
+    pub(super) fn new(breaker: &CircuitBreaker) -> Self {
+        Self {
+            enabled: breaker.enabled,
+            failure_ratio: breaker.failure_ratio.to_string(),
+            min_requests: breaker.min_requests.to_string(),
+            window: format_seconds(breaker.window),
+            open_duration: format_seconds(breaker.open_duration),
+        }
+    }
+
+    /// Records an error under [`CIRCUIT_BREAKER_KEY`].
+    pub(super) fn parse(
+        &self,
+        locale: Locale,
+        errors: &mut HashMap<String, String>,
+    ) -> CircuitBreaker {
+        let key = CIRCUIT_BREAKER_KEY;
+        let failure_ratio = or_error(
+            parse_percent(locale, &self.failure_ratio, "proxy_form.failure_ratio_name"),
+            key,
+            errors,
+        );
+        let min_requests = or_error(
+            parse_count(locale, &self.min_requests, "proxy_form.min_requests_name"),
+            key,
+            errors,
+        );
+        let mut seconds = |value: &str, name_key: &str| {
+            or_error(parse_seconds(locale, value, name_key, 1), key, errors)
+        };
+        let window = seconds(&self.window, "proxy_form.breaker_window_name");
+        let open_duration = seconds(&self.open_duration, "proxy_form.open_duration_name");
+        let breaker = CircuitBreaker {
+            enabled: self.enabled,
+            failure_ratio,
+            min_requests,
+            window,
+            open_duration,
+        };
+        if let Err(err) = breaker.validate() {
+            errors
+                .entry(key.to_string())
+                .or_insert_with(|| locale.error_message(&err));
+        }
+        breaker
+    }
+}
+
+fn parse_percent(locale: Locale, value: &str, name_key: &str) -> Result<u8, String> {
+    value
+        .trim()
+        .parse::<u8>()
+        .ok()
+        .filter(|percent| (1..=100).contains(percent))
+        .ok_or_else(|| locale.tf("proxy_form.percent_range", &[("name", locale.t(name_key))]))
+}
+
+/// The circuit breaker toggle and its inputs. `hint_key` explains the breaker for the protocol.
+pub(super) fn circuit_breaker_view(
+    locale: Locale,
+    form: &UseStateHandle<CircuitBreakerForm>,
+    errors: &HashMap<String, String>,
+    hint_key: &'static str,
+) -> Html {
+    html! {
+        <>
+            <label class={SECTION_CLASS}>{locale.t("proxy_form.circuit_breaker")}</label>
+            <div>
+                { toggle(state_input(form, checked, |form, value| form.enabled = value), form.enabled, locale.t("proxy_form.enable_circuit_breaker"), "mt-4") }
+            </div>
+            if form.enabled {
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+                    <div>
+                        <label class={LABEL_CLASS}>{locale.t("proxy_form.failure_ratio")}</label>
+                        <input type="number" min="1" max="100" value={form.failure_ratio.clone()} onchange={state_input(form, text, |form, value| form.failure_ratio = value)} class={INPUT_CLASS} />
+                    </div>
+                    <div>
+                        <label class={LABEL_CLASS}>{locale.t("proxy_form.min_requests")}</label>
+                        <input type="number" min="1" value={form.min_requests.clone()} onchange={state_input(form, text, |form, value| form.min_requests = value)} class={INPUT_CLASS} />
+                    </div>
+                    <div>{ seconds_input(locale.t("proxy_form.breaker_window"), &form.window, 1, state_input(form, text, |form, value| form.window = value)) }</div>
+                    <div>{ seconds_input(locale.t("proxy_form.open_duration"), &form.open_duration, 1, state_input(form, text, |form, value| form.open_duration = value)) }</div>
+                </div>
+            }
+            { error_view(errors.get(CIRCUIT_BREAKER_KEY)) }
+            <p class={HINT_CLASS}>{locale.t(hint_key)}</p>
+        </>
+    }
+}
+
 #[derive(Clone, PartialEq)]
 struct CacheForm {
     enabled: bool,
@@ -297,6 +403,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
     let locale = use_locale();
     let form = use_state(|| ProxyForm::new(&props.proxy));
     let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check.clone());
+    let circuit_breaker = use_state(|| CircuitBreakerForm::new(&props.proxy.circuit_breaker));
     let client_certs = use_client_certs();
     let routes = use_state(|| {
         let routes = props
@@ -313,7 +420,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
     });
 
     let errors = use_entry_errors(
-        get_proxy(locale, &form, &routes, &upstream),
+        get_proxy(locale, &form, &routes, &upstream, &circuit_breaker),
         props.onchanged.clone(),
     );
 
@@ -403,6 +510,8 @@ pub fn http_proxy_config(props: &Props) -> Html {
             <p class={HINT_CLASS}>{locale.t("http_form.timeouts_hint")}</p>
 
             { upstream_form_view(locale, &upstream, &errors, true) }
+
+            { circuit_breaker_view(locale, &circuit_breaker, &errors, "proxy_form.circuit_breaker_hint") }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.routes")}</label>
             <p class={HINT_CLASS}>{locale.t("http_form.routes_hint")}</p>
@@ -1127,9 +1236,11 @@ fn get_proxy(
     form: &ProxyForm,
     routes: &[RouteForm],
     upstream: &UpstreamForm,
+    circuit_breaker: &CircuitBreakerForm,
 ) -> Result<HttpProxy, HashMap<String, String>> {
     let mut errors = HashMap::new();
     let (load_balancing, health_check) = upstream.parse(locale, true, &mut errors);
+    let circuit_breaker = circuit_breaker.parse(locale, &mut errors);
     let vhosts = parse_vhosts(locale, &form.vhosts, &mut errors);
     let routes = parse_routes(locale, routes, &mut errors);
     let trusted_proxies = or_error(
@@ -1184,6 +1295,7 @@ fn get_proxy(
         timeouts,
         load_balancing,
         health_check,
+        circuit_breaker,
     })
 }
 

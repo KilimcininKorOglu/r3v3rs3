@@ -1,4 +1,4 @@
-use axum::{http::StatusCode, routing::get, Router};
+use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
 use r3v3rs3::{
     command::ServerCommand,
     server::rpc::{proxies::GetProxyStatus, ErasedRpcMethod, RpcWrapper},
@@ -8,12 +8,16 @@ use r3v3rs3_api::{
     multiaddr::Multiaddr,
     port::UpstreamServer,
     proxy::{HttpProxy, ProxyKind, ProxyStatus, Route, Server, TcpProxy, UdpProxy},
-    upstream::{HealthCheck, LoadBalancing, UpstreamTimeouts},
+    upstream::{CircuitBreaker, HealthCheck, LoadBalancing, UpstreamTimeouts},
 };
 use std::{
     collections::HashMap,
     future::{Future, IntoFuture},
     net::SocketAddr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use tokio::{
@@ -631,6 +635,89 @@ async fn tcp_and_udp_servers_with_weight_zero_get_no_traffic() -> anyhow::Result
             let (size, _) = timeout(Duration::from_secs(5), client.recv_from(&mut buf)).await??;
             assert_eq!(&buf[..size], b"b");
         }
+        Ok(())
+    })
+    .await
+}
+
+/// Starts an HTTP upstream server that answers 503 while `failing` is true, and its name
+/// otherwise.
+async fn start_switchable_upstream(
+    name: &'static str,
+    failing: Arc<AtomicBool>,
+) -> anyhow::Result<Url> {
+    serve_http_upstream(Router::new().fallback(move || {
+        let failing = failing.clone();
+        async move {
+            if failing.load(Ordering::SeqCst) {
+                (StatusCode::SERVICE_UNAVAILABLE, "down").into_response()
+            } else {
+                name.into_response()
+            }
+        }
+    }))
+    .await
+}
+
+#[tokio::test]
+async fn http_circuit_breaker_opens_and_recovers() -> anyhow::Result<()> {
+    let failing = Arc::new(AtomicBool::new(true));
+    let a = start_switchable_upstream("a", failing.clone()).await?;
+    let b = start_named_upstream("b").await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let proxy = http(HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![
+            Route {
+                servers: vec![
+                    Server::new(a.as_str().parse()?),
+                    Server::new(b.as_str().parse()?),
+                ],
+                ..Default::default()
+            },
+            Route {
+                path: "/solo".into(),
+                servers: vec![Server::new(a.as_str().parse()?)],
+                ..Default::default()
+            },
+        ],
+        load_balancing: LoadBalancing::First,
+        health_check: no_passive_check(),
+        circuit_breaker: CircuitBreaker {
+            enabled: true,
+            failure_ratio: 50,
+            min_requests: 2,
+            window: Duration::from_secs(10),
+            open_duration: Duration::from_secs(1),
+        },
+        ..Default::default()
+    });
+    let config = storage(vec![("breaker", proxy_port.multiaddr_http(), proxy)]);
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::new();
+        let get = |path: &str| {
+            let request = client.get(proxy_port.http_url(path));
+            async move {
+                let res = request.send().await?;
+                anyhow::Ok((res.status().as_u16(), res.text().await?))
+            }
+        };
+
+        // Each route has its own circuit. Two 503 answers of a open both circuits.
+        for path in ["/", "/", "/solo", "/solo"] {
+            assert_eq!(get(path).await?, (503, "down".to_string()), "{path}");
+        }
+        assert_eq!(get("/").await?, (200, "b".to_string()));
+        let (status, body) = get("/solo").await?;
+        assert_eq!(status, 503);
+        assert_ne!(body, "down", "the proxy answers without contacting a");
+
+        // After the open duration, a trial request reaches a and closes the circuit.
+        failing.store(false, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        assert_eq!(get("/").await?, (200, "a".to_string()));
+        assert_eq!(get("/").await?, (200, "a".to_string()));
         Ok(())
     })
     .await

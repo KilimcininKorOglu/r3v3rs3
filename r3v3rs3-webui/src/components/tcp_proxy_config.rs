@@ -1,8 +1,8 @@
 use super::http_proxy_config::{
-    client_cert_view, error_view, format_seconds, input_element, item_update, list_buttons,
-    or_error, parse_client_cert, parse_seconds, parse_weight, select_setter, timeout_field_view,
-    toggle, upstream_form_view, use_client_certs, use_entry_errors, use_upstream_form,
-    UpstreamForm, INPUT_CLASS, LABEL_CLASS,
+    circuit_breaker_view, client_cert_view, error_view, format_seconds, input_element, item_update,
+    list_buttons, or_error, parse_client_cert, parse_seconds, parse_weight, select_setter,
+    timeout_field_view, toggle, upstream_form_view, use_client_certs, use_entry_errors,
+    use_upstream_form, CircuitBreakerForm, UpstreamForm, INPUT_CLASS, LABEL_CLASS,
 };
 use crate::i18n::use_locale;
 use r3v3rs3_api::i18n::Locale;
@@ -89,6 +89,7 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
     let client_certs = use_client_certs();
     let connect_timeout = use_state(|| format_seconds(props.proxy.connect_timeout));
     let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check.clone());
+    let circuit_breaker = use_state(|| CircuitBreakerForm::new(&props.proxy.circuit_breaker));
 
     let entry = get_proxy(
         locale,
@@ -96,6 +97,7 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
         *client_cert,
         &connect_timeout,
         &upstream,
+        &circuit_breaker,
     );
     let errors = use_entry_errors(entry, props.onchanged.clone());
 
@@ -104,6 +106,8 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
             { servers_view(locale, &upstream_servers, &errors, true) }
 
             { upstream_form_view(locale, &upstream, &errors, false) }
+
+            { circuit_breaker_view(locale, &circuit_breaker, &errors, "proxy_form.circuit_breaker_tcp_hint") }
 
             { client_cert_view(
                 locale,
@@ -226,10 +230,12 @@ fn get_proxy(
     client_cert: Option<ShortId>,
     connect_timeout: &str,
     upstream: &UpstreamForm,
+    circuit_breaker: &CircuitBreakerForm,
 ) -> Result<TcpProxy, HashMap<String, String>> {
     let mut errors = HashMap::new();
     let upstream_servers = parse_servers(locale, servers, "tcp", &mut errors);
     let (load_balancing, health_check) = upstream.parse(locale, false, &mut errors);
+    let circuit_breaker = circuit_breaker.parse(locale, &mut errors);
     let connect_timeout = or_error(
         parse_seconds(
             locale,
@@ -249,19 +255,19 @@ fn get_proxy(
         connect_timeout,
         load_balancing,
         health_check,
+        circuit_breaker,
     })
 }
 
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing};
+    use r3v3rs3_api::upstream::{CircuitBreaker, HealthCheck, LoadBalancing};
     use std::time::Duration;
 
     pub(in crate::components) fn first_server_policy() -> UpstreamForm {
         UpstreamForm::new(LoadBalancing::First, &HealthCheck::default())
     }
-
     pub(in crate::components) fn server(host: &str, port: u16, tls: bool) -> ServerForm {
         ServerForm {
             host: host.into(),
@@ -306,34 +312,86 @@ pub(super) mod tests {
         let id = "a1b2c3d".parse().unwrap();
         let servers = [server("example.com", 443, true)];
         let upstream = first_server_policy();
-        let proxy = get_proxy(Locale::En, &servers, Some(id), "3", &upstream).unwrap();
+        let breaker = CircuitBreakerForm::new(&CircuitBreaker::default());
+        let proxy = get_proxy(Locale::En, &servers, Some(id), "3", &upstream, &breaker).unwrap();
         assert_eq!(proxy.client_cert, Some(id));
         assert_eq!(proxy.connect_timeout, Duration::from_secs(3));
         assert_eq!(proxy.load_balancing, LoadBalancing::First);
 
         let invalid = [server("", 443, true)];
-        let errors = get_proxy(Locale::En, &invalid, None, "3", &upstream).unwrap_err();
+        let errors = get_proxy(Locale::En, &invalid, None, "3", &upstream, &breaker).unwrap_err();
         assert!(errors.contains_key("upstream_servers_0"));
 
-        let errors = get_proxy(Locale::En, &servers, None, "0", &upstream).unwrap_err();
+        let errors = get_proxy(Locale::En, &servers, None, "0", &upstream, &breaker).unwrap_err();
         assert!(errors.contains_key("connect_timeout"));
+    }
+
+    #[test]
+    fn get_proxy_keeps_the_circuit_breaker_and_reports_invalid_values() {
+        let servers = [server("example.com", 443, true)];
+        let upstream = first_server_policy();
+        let breaker = CircuitBreaker {
+            enabled: true,
+            failure_ratio: 25,
+            min_requests: 5,
+            window: Duration::from_secs(20),
+            open_duration: Duration::from_secs(60),
+        };
+        let form = CircuitBreakerForm::new(&breaker);
+        let proxy = get_proxy(Locale::En, &servers, None, "3", &upstream, &form).unwrap();
+        assert_eq!(proxy.circuit_breaker, breaker);
+
+        let invalid = CircuitBreakerForm::new(&CircuitBreaker {
+            failure_ratio: 0,
+            ..breaker
+        });
+        let errors = get_proxy(Locale::Tr, &servers, None, "3", &upstream, &invalid).unwrap_err();
+        let expected = Locale::Tr.tf(
+            "proxy_form.percent_range",
+            &[("name", Locale::Tr.t("proxy_form.failure_ratio_name"))],
+        );
+        assert_eq!(errors.get("circuit_breaker"), Some(&expected));
+
+        let invalid = CircuitBreakerForm::new(&CircuitBreaker {
+            open_duration: Duration::ZERO,
+            ..breaker
+        });
+        let errors = get_proxy(Locale::En, &servers, None, "3", &upstream, &invalid).unwrap_err();
+        assert!(errors.contains_key("circuit_breaker"));
     }
 
     #[test]
     fn server_forms_carry_the_weight() {
         let upstream = first_server_policy();
+        let breaker = CircuitBreakerForm::new(&CircuitBreaker::default());
         let with_weight = |weight: &str| ServerForm {
             weight: weight.into(),
             ..server("example.com", 443, true)
         };
-        let proxy = get_proxy(Locale::En, &[with_weight(" 0 ")], None, "3", &upstream).unwrap();
+        let proxy = get_proxy(
+            Locale::En,
+            &[with_weight(" 0 ")],
+            None,
+            "3",
+            &upstream,
+            &breaker,
+        )
+        .unwrap();
         assert_eq!(proxy.upstream_servers[0].weight, 0);
         assert_eq!(
             ServerForm::new(&proxy.upstream_servers[0]),
             with_weight("0")
         );
 
-        let errors = get_proxy(Locale::Tr, &[with_weight("x")], None, "3", &upstream).unwrap_err();
+        let errors = get_proxy(
+            Locale::Tr,
+            &[with_weight("x")],
+            None,
+            "3",
+            &upstream,
+            &breaker,
+        )
+        .unwrap_err();
         assert_eq!(
             errors.get("upstream_servers_0"),
             Some(&Locale::Tr.tf("proxy_form.invalid_weight", &[("value", "x")]))

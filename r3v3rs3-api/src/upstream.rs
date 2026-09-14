@@ -10,6 +10,10 @@ pub const DEFAULT_MAX_FAILS: u32 = 1;
 pub const DEFAULT_FAIL_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DEFAULT_WEIGHT: u16 = 1;
+pub const DEFAULT_FAILURE_RATIO: u8 = 50;
+pub const DEFAULT_MIN_REQUESTS: u32 = 20;
+pub const DEFAULT_BREAKER_WINDOW: Duration = Duration::from_secs(10);
+pub const DEFAULT_OPEN_DURATION: Duration = Duration::from_secs(30);
 
 /// Timeouts of the requests that an HTTP proxy sends to its upstream servers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -150,6 +154,86 @@ impl HealthCheck {
     }
 }
 
+/// Stops the traffic to a failing server of an HTTP or TCP proxy for a time. Each server of each
+/// route has its own circuit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CircuitBreaker {
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Percentage of failed requests in a window that opens the circuit, from 1 to 100. An HTTP
+    /// request fails when the connection fails, a timeout expires or the server answers 502, 503
+    /// or 504. A TCP connection fails when it cannot connect.
+    #[serde(default = "default_failure_ratio")]
+    pub failure_ratio: u8,
+
+    /// Requests that a window must have before the failure ratio can open the circuit.
+    #[serde(default = "default_min_requests")]
+    pub min_requests: u32,
+
+    /// Time that one window counts the requests of a server.
+    #[serde(default = "default_breaker_window", with = "humantime_serde")]
+    #[schema(value_type = String, example = "10s")]
+    pub window: Duration,
+
+    /// Time that an open circuit sends no traffic to the server. Then one trial request tests the
+    /// server.
+    #[serde(default = "default_open_duration", with = "humantime_serde")]
+    #[schema(value_type = String, example = "30s")]
+    pub open_duration: Duration,
+}
+
+impl Default for CircuitBreaker {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            failure_ratio: DEFAULT_FAILURE_RATIO,
+            min_requests: DEFAULT_MIN_REQUESTS,
+            window: DEFAULT_BREAKER_WINDOW,
+            open_duration: DEFAULT_OPEN_DURATION,
+        }
+    }
+}
+
+impl CircuitBreaker {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Rejects a failure ratio outside 1 to 100, zero minimum requests, and a zero window or open
+    /// duration.
+    pub fn validate(&self) -> Result<(), Error> {
+        let valid = (1..=100).contains(&self.failure_ratio)
+            && self.min_requests > 0
+            && !self.window.is_zero()
+            && !self.open_duration.is_zero();
+        if valid {
+            Ok(())
+        } else {
+            Err(Error::InvalidCircuitBreaker)
+        }
+    }
+}
+
+/// The circuit of an upstream server.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CircuitState {
+    /// The server gets traffic.
+    #[default]
+    Closed,
+    /// The server gets no traffic.
+    Open,
+    /// One trial request tests the server.
+    HalfOpen,
+}
+
+impl CircuitState {
+    pub fn is_closed(&self) -> bool {
+        *self == Self::Closed
+    }
+}
+
 /// The health of one upstream server of a proxy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct UpstreamHealth {
@@ -162,6 +246,9 @@ pub struct UpstreamHealth {
     /// The error of the last failed connection, request or active check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// The circuit of the server. A closed circuit is not serialized.
+    #[serde(default, skip_serializing_if = "CircuitState::is_closed")]
+    pub circuit: CircuitState,
 }
 
 pub fn default_connect_timeout() -> Duration {
@@ -198,6 +285,22 @@ pub fn is_default_connect_timeout(timeout: &Duration) -> bool {
 
 pub fn is_default_session_idle_timeout(timeout: &Duration) -> bool {
     *timeout == DEFAULT_SESSION_IDLE_TIMEOUT
+}
+
+fn default_failure_ratio() -> u8 {
+    DEFAULT_FAILURE_RATIO
+}
+
+fn default_min_requests() -> u32 {
+    DEFAULT_MIN_REQUESTS
+}
+
+fn default_breaker_window() -> Duration {
+    DEFAULT_BREAKER_WINDOW
+}
+
+fn default_open_duration() -> Duration {
+    DEFAULT_OPEN_DURATION
 }
 
 pub fn default_weight() -> u16 {
@@ -346,6 +449,51 @@ mod tests {
             ..Default::default()
         };
         assert!(ProxyKind::Http(Box::new(http)).validate_upstream().is_err());
+    }
+
+    #[test]
+    fn circuit_breaker_defaults_are_not_serialized_and_invalid_values_are_rejected() {
+        let json = r#"{"circuit_breaker":{"enabled":true,"open_duration":"1m"}}"#;
+        let tcp: TcpProxy = serde_json::from_str(json).unwrap();
+        assert!(tcp.circuit_breaker.enabled);
+        assert_eq!(tcp.circuit_breaker.failure_ratio, DEFAULT_FAILURE_RATIO);
+        assert_eq!(tcp.circuit_breaker.min_requests, DEFAULT_MIN_REQUESTS);
+        assert_eq!(tcp.circuit_breaker.open_duration, Duration::from_secs(60));
+        assert!(ProxyKind::Tcp(tcp).validate_upstream().is_ok());
+        assert_eq!(serde_json::to_string(&TcpProxy::default()).unwrap(), "{}");
+
+        let invalid = [
+            CircuitBreaker {
+                failure_ratio: 0,
+                ..Default::default()
+            },
+            CircuitBreaker {
+                failure_ratio: 101,
+                ..Default::default()
+            },
+            CircuitBreaker {
+                min_requests: 0,
+                ..Default::default()
+            },
+            CircuitBreaker {
+                window: Duration::ZERO,
+                ..Default::default()
+            },
+            CircuitBreaker {
+                open_duration: Duration::ZERO,
+                ..Default::default()
+            },
+        ];
+        for circuit_breaker in invalid {
+            let http = HttpProxy {
+                circuit_breaker,
+                ..Default::default()
+            };
+            assert!(ProxyKind::Http(Box::new(http)).validate_upstream().is_err());
+        }
+
+        let half_open = serde_json::to_string(&CircuitState::HalfOpen).unwrap();
+        assert_eq!(half_open, r#""half_open""#);
     }
 
     #[test]

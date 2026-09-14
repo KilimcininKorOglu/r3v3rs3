@@ -79,6 +79,7 @@ async fn wss_proxy() -> anyhow::Result<()> {
                     timeouts: Default::default(),
                     load_balancing: Default::default(),
                     health_check: Default::default(),
+                    circuit_breaker: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()

@@ -431,6 +431,7 @@ mod tests {
             ("routes.0.path", "/"),
             ("routes.0.servers.0.url", "http://10.0.0.5:8080"),
             ("routes.0.servers.0.weight", "3"),
+            ("circuit_breaker.failure_ratio", "25"),
             ("routes.1.path", "/api"),
             ("routes.1.servers.0.url", "http://10.0.0.6:8080"),
             ("upgrade_insecure", "false"),
@@ -449,6 +450,7 @@ mod tests {
         );
         assert_eq!(http.routes[0].servers[0].weight, 3);
         assert_eq!(http.routes[1].servers[0].weight, 1);
+        assert_eq!(http.circuit_breaker.failure_ratio, 25);
         assert!(!http.upgrade_insecure);
         assert_eq!(http.rate_limit.requests, 100);
         assert_eq!(http.rate_limit.per, RatePeriod::Minute);

@@ -167,6 +167,27 @@ upstream_servers = [
 ]
 ```
 
+## Circuit Breaker
+
+The circuit breaker stops the traffic to a failing upstream server of an HTTP or TCP proxy for a time. It is off by default. Each server of each HTTP route has its own circuit. UDP proxies have no circuit breaker.
+
+- An HTTP request fails when the connection fails, the connect or request timeout expires, or the server answers 502, 503 or 504. A TCP connection fails when it cannot connect.
+- r3v3rs3 counts the requests of each server in windows of `circuit_breaker.window` (default `10s`). When a window has at least `circuit_breaker.min_requests` requests (default `20`) and at least `circuit_breaker.failure_ratio` percent of them failed (default `50`), the circuit opens.
+- An open circuit gets no traffic until `circuit_breaker.open_duration` expires (default `30s`). Then the circuit is half-open, and one trial request goes to the server. A successful trial closes the circuit. A failed trial opens it again.
+- When every server of an HTTP route has an open circuit, the client receives 503 Service Unavailable without a request to a server. A TCP client connection closes.
+
+The passive health check still counts a 5xx response as a success, because the server answered. The status API shows `"circuit": "open"` or `"circuit": "half_open"` for a server whose circuit is not closed. The proxy list of the WebUI counts such a server as not healthy and names the circuit state in the title of the number.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+circuit_breaker = { enabled = true, failure_ratio = 50, min_requests = 20, window = "10s", open_duration = "30s" }
+routes = [
+  { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
+]
+```
+
 ## Client IP
 
 Behind a CDN or a load balancer, the TCP peer of r3v3rs3 is the edge server, not the visitor. r3v3rs3 resolves the real client IP only when the peer is trusted:

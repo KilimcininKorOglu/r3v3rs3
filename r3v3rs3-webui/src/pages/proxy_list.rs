@@ -15,7 +15,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::{ProxyEntry, ProxyKind, ProxyState, ProxyStatus};
-use r3v3rs3_api::upstream::UpstreamHealth;
+use r3v3rs3_api::upstream::{CircuitState, UpstreamHealth};
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
@@ -236,7 +236,7 @@ fn status_cell(locale: Locale, status: &ProxyStatus) -> Html {
     if status.upstreams.is_empty() {
         return badge;
     }
-    let (healthy, unhealthy) = health_summary(&status.upstreams);
+    let (healthy, unhealthy) = health_summary(locale, &status.upstreams);
     let text = locale.tf(
         "proxies.healthy_servers",
         &[
@@ -252,19 +252,35 @@ fn status_cell(locale: Locale, status: &ProxyStatus) -> Html {
     }
 }
 
-/// Returns the number of healthy servers, and one line for each unhealthy server.
-fn health_summary(upstreams: &[UpstreamHealth]) -> (usize, String) {
-    let healthy = upstreams.iter().filter(|server| server.healthy).count();
+/// Returns the number of healthy servers, and one line for each server that is not healthy. A
+/// server whose circuit is not closed is not healthy, and its line names the circuit state.
+fn health_summary(locale: Locale, upstreams: &[UpstreamHealth]) -> (usize, String) {
+    let is_healthy = |server: &&UpstreamHealth| server.healthy && server.circuit.is_closed();
+    let healthy = upstreams.iter().filter(is_healthy).count();
     let unhealthy = upstreams
         .iter()
-        .filter(|server| !server.healthy)
-        .map(|server| match &server.last_error {
-            Some(err) => format!("{}: {err}", server.addr),
-            None => server.addr.clone(),
-        })
+        .filter(|server| !is_healthy(server))
+        .map(|server| unhealthy_line(locale, server))
         .collect::<Vec<_>>()
         .join("\n");
     (healthy, unhealthy)
+}
+
+fn unhealthy_line(locale: Locale, server: &UpstreamHealth) -> String {
+    let circuit = match server.circuit {
+        CircuitState::Closed => None,
+        CircuitState::Open => Some(locale.t("proxies.circuit_open")),
+        CircuitState::HalfOpen => Some(locale.t("proxies.circuit_half_open")),
+    };
+    let details = circuit
+        .into_iter()
+        .chain(server.last_error.as_deref())
+        .collect::<Vec<_>>();
+    if details.is_empty() {
+        server.addr.clone()
+    } else {
+        format!("{}: {}", server.addr, details.join(", "))
+    }
 }
 
 /// Loads the proxies and their statuses into the store.
@@ -376,15 +392,30 @@ mod tests {
             healthy,
             failures: 0,
             last_error: last_error.map(Into::into),
+            circuit: CircuitState::Closed,
         };
         let upstreams = [
             server("http://a", true, Some("old error")),
             server("http://b", false, Some("connection refused")),
             server("http://c", false, None),
+            UpstreamHealth {
+                circuit: CircuitState::Open,
+                ..server("http://d", true, Some("the server answered 503"))
+            },
+            UpstreamHealth {
+                circuit: CircuitState::HalfOpen,
+                ..server("http://e", true, None)
+            },
         ];
         assert_eq!(
-            health_summary(&upstreams),
-            (1, "http://b: connection refused\nhttp://c".to_string())
+            health_summary(Locale::En, &upstreams),
+            (
+                1,
+                "http://b: connection refused\nhttp://c\n\
+                 http://d: circuit breaker is open, the server answered 503\n\
+                 http://e: circuit breaker is half-open"
+                    .to_string()
+            )
         );
     }
 }

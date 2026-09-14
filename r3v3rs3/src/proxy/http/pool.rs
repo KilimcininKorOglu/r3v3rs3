@@ -1,4 +1,4 @@
-use crate::proxy::health::UpstreamGroup;
+use crate::proxy::health::{Permit, UpstreamGroup};
 use crate::proxy::http::error::ProxyError;
 use crate::proxy::http::{hyper_tls::client::HttpsConnector, HTTP2_MAX_FRAME_SIZE};
 use crate::proxy::tls::upstream_client_config;
@@ -207,15 +207,17 @@ impl Upstream {
     /// Selects the upstream server of the request, and sets the request URI and the `Host` header
     /// for that server. A route without a server leaves the request unchanged.
     pub fn select<B>(&self, req: &mut Request<B>, path_segments: Vec<String>) {
+        if self.servers.is_empty() {
+            return;
+        }
         let target = UpstreamTarget {
             candidates: self.group.candidates(),
             path_segments,
             query: req.uri().query().map(str::to_string),
         };
-        let Some(&first) = target.candidates.first() else {
-            return;
-        };
-        self.apply(req, first, &target);
+        if let Some(&first) = target.candidates.first() {
+            self.apply(req, first, &target);
+        }
         req.extensions_mut().insert(target);
     }
 
@@ -241,40 +243,70 @@ impl Upstream {
     }
 
     /// Sends the request to the selected server. When the connection to the server fails and the
-    /// request has no body, the request goes once to the next server.
+    /// request has no body, the request goes once to the next server. When the circuit of every
+    /// server blocks the request, the client receives 503.
     pub async fn request(
         &self,
-        req: Request<ProxyBody>,
+        mut req: Request<ProxyBody>,
     ) -> Result<Response<ProxyBody>, anyhow::Error> {
         let Some(target) = req.extensions().get::<UpstreamTarget>().cloned() else {
             return finish(self.pool.send(req, self.request_timeout).await);
         };
         let copy = replayable_copy(&req);
-        let mut result = self.attempt(req, target.candidates.first().copied()).await;
+        let mut candidates = target.candidates.iter().copied();
+        let Some(permit) = self.claim(&mut req, &target, &mut candidates) else {
+            return finish(Err(SendError::other(ProxyError::NoUpstreamAvailable)));
+        };
+        let mut result = self.attempt(req, permit).await;
         let connect_failed = matches!(&result, Err(err) if err.connect);
-        if let (true, Some(mut req), Some(&next)) = (connect_failed, copy, target.candidates.get(1))
-        {
-            warn!(uri = %req.uri(), "retrying the request on the next upstream server");
-            self.apply(&mut req, next, &target);
-            result = self.attempt(req, Some(next)).await;
+        if let (true, Some(mut req)) = (connect_failed, copy) {
+            if let Some(permit) = self.claim(&mut req, &target, &mut candidates) {
+                warn!(uri = %req.uri(), "retrying the request on the next upstream server");
+                result = self.attempt(req, permit).await;
+            }
         }
         finish(result)
     }
 
-    /// Sends the request and records the result in the health of the server.
+    /// Takes the next candidate whose circuit lets the request through, and points the request at
+    /// that server when `select` chose another server.
+    fn claim<B>(
+        &self,
+        req: &mut Request<B>,
+        target: &UpstreamTarget,
+        candidates: &mut impl Iterator<Item = usize>,
+    ) -> Option<Permit> {
+        let permit = candidates.find_map(|index| self.group.acquire(index))?;
+        if target.candidates.first() != Some(&permit.index()) {
+            self.apply(req, permit.index(), target);
+        }
+        Some(permit)
+    }
+
+    /// Sends the request and records the result in the health and the circuit of the server.
     async fn attempt(
         &self,
         req: Request<ProxyBody>,
-        index: Option<usize>,
+        permit: Permit,
     ) -> Result<Response<ProxyBody>, SendError> {
         let result = self.pool.send(req, self.request_timeout).await;
-        match (&result, index) {
-            (Ok(_), Some(index)) => self.group.report_success(index),
-            (Err(err), Some(index)) => self.group.report_failure(index, &err.error.to_string()),
-            _ => {}
+        match &result {
+            Ok(res) if is_gateway_error(res.status()) => {
+                permit.error_response(&format!("the server answered {}", res.status()))
+            }
+            Ok(_) => permit.success(),
+            Err(err) => permit.failure(&err.error.to_string()),
         }
         result
     }
+}
+
+/// A 502, 503 or 504 response, which the circuit breaker counts as a failure.
+fn is_gateway_error(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT
+    )
 }
 
 /// The URL of a request to a server: the path of the server URL, then the request path segments

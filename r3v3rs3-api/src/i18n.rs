@@ -243,6 +243,7 @@ mod tests {
             Error::InvalidTimeout,
             Error::InvalidHealthCheckPath { path: text() },
             Error::AllServersDrained,
+            Error::InvalidCircuitBreaker,
             Error::FailedToHashPassword,
             Error::FailedToFetchLog,
             Error::FailedToInvokeRpc,

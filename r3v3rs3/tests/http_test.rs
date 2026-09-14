@@ -134,6 +134,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                     timeouts: Default::default(),
                     load_balancing: Default::default(),
                     health_check: Default::default(),
+                    circuit_breaker: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -291,6 +292,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     timeouts: Default::default(),
                     load_balancing: Default::default(),
                     health_check: Default::default(),
+                    circuit_breaker: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()
@@ -373,6 +375,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     timeouts: Default::default(),
                     load_balancing: Default::default(),
                     health_check: Default::default(),
+                    circuit_breaker: Default::default(),
                     client_cert: None,
                 })),
                 ..Default::default()

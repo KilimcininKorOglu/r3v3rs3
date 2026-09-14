@@ -164,6 +164,7 @@ impl TcpUpstream {
             members,
             proxy.load_balancing,
             proxy.health_check.clone(),
+            proxy.circuit_breaker,
             Probe::Connect(Probe::targets(&proxy.upstream_servers)),
         );
         Self {
@@ -173,24 +174,29 @@ impl TcpUpstream {
     }
 
     /// Connects to the selected server. When the connection fails, it connects once to the next
-    /// server.
+    /// server. A server whose circuit blocks the connection is skipped.
     async fn connect(
         &self,
         resolver: &Resolver,
     ) -> anyhow::Result<(SocketAddr, Box<dyn IoStream>)> {
         let mut result = Err(anyhow::anyhow!("the proxy has no upstream server"));
-        for index in self.group.candidates().into_iter().take(2) {
-            let Some(conn) = self.servers.get(index) else {
+        let permits = self
+            .group
+            .candidates()
+            .into_iter()
+            .filter_map(|index| self.group.acquire(index));
+        for permit in permits.take(2) {
+            let Some(conn) = self.servers.get(permit.index()) else {
                 continue;
             };
             result = connect_server(conn, resolver).await;
             match &result {
                 Ok(_) => {
-                    self.group.report_success(index);
+                    permit.success();
                     break;
                 }
                 Err(err) => {
-                    self.group.report_failure(index, &err.to_string());
+                    permit.failure(&err.to_string());
                     warn!(%err, "failed to connect to the upstream server");
                 }
             }

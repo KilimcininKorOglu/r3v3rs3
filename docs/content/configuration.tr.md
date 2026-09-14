@@ -167,6 +167,27 @@ upstream_servers = [
 ]
 ```
 
+## Circuit Breaker
+
+Circuit breaker, HTTP veya TCP proxy'nin hata veren bir upstream sunucusuna giden trafiği bir süre durdurur. Varsayılan olarak kapalıdır. Her HTTP route'undaki her sunucunun kendi circuit'i vardır. UDP proxy'lerde circuit breaker yoktur.
+
+- HTTP request'i şu durumlarda başarısız sayılır: bağlantı kurulamaz, connect veya request timeout dolar ya da sunucu 502, 503 veya 504 döner. TCP bağlantısı, kurulamazsa başarısız sayılır.
+- r3v3rs3 her sunucunun request'lerini `circuit_breaker.window` (varsayılan `10s`) uzunluğundaki window'larda sayar. Bir window en az `circuit_breaker.min_requests` (varsayılan `20`) request içeriyorsa ve bunların en az `circuit_breaker.failure_ratio` (varsayılan `50`) yüzdesi başarısız olduysa circuit açılır.
+- Açık circuit, `circuit_breaker.open_duration` (varsayılan `30s`) dolana kadar trafik almaz. Sonra circuit half-open olur ve sunucuya tek bir deneme request'i gider. Başarılı deneme circuit'i kapatır. Başarısız deneme circuit'i yeniden açar.
+- Bir HTTP route'unun bütün sunucularının circuit'i açıksa client, sunucuya request gitmeden 503 Service Unavailable alır. TCP client bağlantısı kapanır.
+
+Pasif health check 5xx response'u yine başarılı sayar, çünkü sunucu yanıt vermiştir. Status API'si circuit'i kapalı olmayan sunucu için `"circuit": "open"` veya `"circuit": "half_open"` gösterir. WebUI'daki proxy listesi böyle bir sunucuyu sağlıklı saymaz ve sayının title'ında circuit durumunu yazar.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+circuit_breaker = { enabled = true, failure_ratio = 50, min_requests = 20, window = "10s", open_duration = "30s" }
+routes = [
+  { path = "/", servers = [{ url = "http://10.0.0.1:9000/" }, { url = "http://10.0.0.2:9000/" }] },
+]
+```
+
 ## Client IP
 
 CDN veya load balancer arkasında r3v3rs3'ün TCP peer'ı ziyaretçi değil, edge sunucusudur. r3v3rs3 gerçek client IP adresini yalnız peer güvenilirse belirler:

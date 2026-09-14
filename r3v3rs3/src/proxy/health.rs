@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use r3v3rs3_api::{
     id::ShortId,
     port::UpstreamServer,
-    upstream::{HealthCheck, LoadBalancing, UpstreamHealth},
+    upstream::{CircuitBreaker, CircuitState, HealthCheck, LoadBalancing, UpstreamHealth},
 };
 use rand::Rng;
 use std::{
@@ -37,6 +37,10 @@ pub struct UpstreamGroup {
     servers: Vec<Mutex<ServerHealth>>,
     /// The current weight of each server for the smooth weighted round robin.
     current_weights: Mutex<Vec<i64>>,
+    circuit_breaker: CircuitBreaker,
+    /// The circuit of each server. It is separate from the health, because a passed active check
+    /// resets the health.
+    breakers: Vec<Mutex<Breaker>>,
     probe: Mutex<Option<Arc<Probe>>>,
 }
 
@@ -52,6 +56,179 @@ struct ServerHealth {
 impl ServerHealth {
     fn is_healthy(&self, now: Instant) -> bool {
         !self.check_failed && self.unhealthy_until.is_none_or(|until| now >= until)
+    }
+}
+
+#[derive(Debug, Default)]
+enum Circuit {
+    #[default]
+    Closed,
+    /// No traffic goes to the server until the time.
+    Open { until: Instant },
+    /// One trial request tests the server. `trial` is true while the trial request runs.
+    HalfOpen { trial: bool },
+}
+
+/// The circuit of a server, and the requests of the current window of a closed circuit.
+#[derive(Debug, Default)]
+struct Breaker {
+    circuit: Circuit,
+    window_start: Option<Instant>,
+    requests: u32,
+    failures: u32,
+}
+
+impl Breaker {
+    /// True when the circuit lets no traffic through.
+    fn blocks(&self, now: Instant) -> bool {
+        match self.circuit {
+            Circuit::Closed | Circuit::HalfOpen { trial: false } => false,
+            Circuit::Open { until } => now < until,
+            Circuit::HalfOpen { trial: true } => true,
+        }
+    }
+
+    /// Lets a request through. `None` when the circuit blocks it, `Some(true)` for the trial
+    /// request of a half-open circuit.
+    fn admit(&mut self, now: Instant) -> Option<bool> {
+        if self.blocks(now) {
+            return None;
+        }
+        if matches!(self.circuit, Circuit::Closed) {
+            return Some(false);
+        }
+        self.circuit = Circuit::HalfOpen { trial: true };
+        Some(true)
+    }
+
+    /// Records the result of a request, and returns the new state when the circuit changes.
+    fn record(
+        &mut self,
+        config: &CircuitBreaker,
+        trial: bool,
+        failed: bool,
+        now: Instant,
+    ) -> Option<CircuitState> {
+        if trial {
+            return self.finish_trial(config, failed, now);
+        }
+        // A request that started before the circuit opened does not count.
+        if !matches!(self.circuit, Circuit::Closed) {
+            return None;
+        }
+        self.count(config.window, failed, now);
+        let ratio = u64::from(self.failures) * 100;
+        let limit = u64::from(config.failure_ratio) * u64::from(self.requests);
+        if self.requests < config.min_requests || ratio < limit {
+            return None;
+        }
+        self.open(config, now);
+        Some(CircuitState::Open)
+    }
+
+    fn finish_trial(
+        &mut self,
+        config: &CircuitBreaker,
+        failed: bool,
+        now: Instant,
+    ) -> Option<CircuitState> {
+        if !matches!(self.circuit, Circuit::HalfOpen { .. }) {
+            return None;
+        }
+        if failed {
+            self.open(config, now);
+            return Some(CircuitState::Open);
+        }
+        *self = Self::default();
+        Some(CircuitState::Closed)
+    }
+
+    fn count(&mut self, window: Duration, failed: bool, now: Instant) {
+        if self
+            .window_start
+            .is_none_or(|start| now.duration_since(start) >= window)
+        {
+            self.window_start = Some(now);
+            self.requests = 0;
+            self.failures = 0;
+        }
+        self.requests = self.requests.saturating_add(1);
+        if failed {
+            self.failures = self.failures.saturating_add(1);
+        }
+    }
+
+    fn open(&mut self, config: &CircuitBreaker, now: Instant) {
+        *self = Self {
+            circuit: Circuit::Open {
+                until: now + config.open_duration,
+            },
+            ..Self::default()
+        };
+    }
+
+    /// Frees the slot of a trial request that ended without a result.
+    fn release_trial(&mut self) {
+        if matches!(self.circuit, Circuit::HalfOpen { trial: true }) {
+            self.circuit = Circuit::HalfOpen { trial: false };
+        }
+    }
+
+    fn state(&self) -> CircuitState {
+        match self.circuit {
+            Circuit::Closed => CircuitState::Closed,
+            Circuit::Open { .. } => CircuitState::Open,
+            Circuit::HalfOpen { .. } => CircuitState::HalfOpen,
+        }
+    }
+}
+
+/// The right to send one request or to open one connection to a server of a group. Report the
+/// result with [`Permit::success`], [`Permit::failure`] or [`Permit::error_response`]. A permit
+/// that is dropped without a result frees the trial slot of a half-open circuit.
+#[derive(Debug)]
+pub struct Permit {
+    group: Arc<UpstreamGroup>,
+    index: usize,
+    trial: bool,
+    reported: bool,
+}
+
+impl Permit {
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    /// The server answered, or accepted the connection.
+    pub fn success(mut self) {
+        self.group.report_success(self.index);
+        self.record(None);
+    }
+
+    /// The connection failed, or the server did not answer.
+    pub fn failure(mut self, error: &str) {
+        self.group.report_failure(self.index, error);
+        self.record(Some(error));
+    }
+
+    /// The server answered with a gateway error. The passive health check counts the answer as a
+    /// success, and the circuit breaker counts it as a failure.
+    pub fn error_response(mut self, error: &str) {
+        self.group.report_success(self.index);
+        self.record(Some(error));
+    }
+
+    fn record(&mut self, failure: Option<&str>) {
+        self.reported = true;
+        self.group.record_circuit(self.index, self.trial, failure);
+    }
+}
+
+impl Drop for Permit {
+    fn drop(&mut self) {
+        if self.trial && !self.reported {
+            self.group.release_trial(self.index);
+        }
     }
 }
 
@@ -146,6 +323,7 @@ pub fn group(
     members: Vec<GroupServer>,
     policy: LoadBalancing,
     health_check: HealthCheck,
+    circuit_breaker: CircuitBreaker,
     probe: Probe,
 ) -> Arc<UpstreamGroup> {
     let mut registry = REGISTRY.lock().unwrap_or_else(PoisonError::into_inner);
@@ -154,12 +332,15 @@ pub fn group(
         if existing.members == members
             && existing.policy == policy
             && existing.health_check == health_check
+            && existing.circuit_breaker == circuit_breaker
         {
             existing.set_probe(probe);
             return existing;
         }
     }
-    let group = Arc::new(UpstreamGroup::new(members, policy, health_check));
+    let group = Arc::new(
+        UpstreamGroup::new(members, policy, health_check).with_circuit_breaker(circuit_breaker),
+    );
     group.set_probe(probe);
     registry.insert(key, Arc::downgrade(&group));
     spawn_checker(&group);
@@ -211,14 +392,22 @@ impl UpstreamGroup {
     fn new(members: Vec<GroupServer>, policy: LoadBalancing, health_check: HealthCheck) -> Self {
         let servers = members.iter().map(|_| Mutex::default()).collect();
         let current_weights = Mutex::new(vec![0; members.len()]);
+        let breakers = members.iter().map(|_| Mutex::default()).collect();
         Self {
             members,
             policy,
             health_check,
             servers,
             current_weights,
+            circuit_breaker: CircuitBreaker::default(),
+            breakers,
             probe: Mutex::new(None),
         }
+    }
+
+    fn with_circuit_breaker(mut self, circuit_breaker: CircuitBreaker) -> Self {
+        self.circuit_breaker = circuit_breaker;
+        self
     }
 
     fn set_probe(&self, probe: Probe) {
@@ -228,11 +417,11 @@ impl UpstreamGroup {
     /// Returns the server indexes in the order to try: the healthy servers in the order of the
     /// policy, then the unhealthy servers. When every server is unhealthy, the unhealthy servers
     /// use the order of the policy, so the request still goes to a server. A server with weight 0
-    /// is never a candidate.
+    /// and a server whose circuit blocks the traffic are never candidates.
     pub fn candidates(&self) -> Vec<usize> {
         let now = Instant::now();
         let (healthy, unhealthy): (Vec<_>, Vec<_>) = (0..self.members.len())
-            .filter(|&index| self.weight(index) > 0)
+            .filter(|&index| self.weight(index) > 0 && !self.blocked(index, now))
             .partition(|&index| self.health(index).is_some_and(|h| h.is_healthy(now)));
         if healthy.is_empty() {
             return self.order(unhealthy);
@@ -295,6 +484,65 @@ impl UpstreamGroup {
             .collect::<Vec<_>>();
         keyed.sort_by(|a, b| b.0.total_cmp(&a.0));
         keyed.into_iter().map(|(_, index)| index).collect()
+    }
+
+    /// Lets a request or a connection go to the server. `None` when the circuit of the server
+    /// blocks it. A half-open circuit lets one trial request through.
+    pub fn acquire(self: &Arc<Self>, index: usize) -> Option<Permit> {
+        let trial = if self.circuit_breaker.enabled {
+            self.breaker(index)?.admit(Instant::now())?
+        } else {
+            false
+        };
+        Some(Permit {
+            group: self.clone(),
+            index,
+            trial,
+            reported: false,
+        })
+    }
+
+    fn record_circuit(&self, index: usize, trial: bool, failure: Option<&str>) {
+        if !self.circuit_breaker.enabled {
+            return;
+        }
+        let Some(mut breaker) = self.breaker(index) else {
+            return;
+        };
+        let now = Instant::now();
+        match breaker.record(&self.circuit_breaker, trial, failure.is_some(), now) {
+            Some(CircuitState::Open) => warn!(
+                server = self.addr(index),
+                error = failure,
+                "the circuit of the upstream server is open"
+            ),
+            Some(CircuitState::Closed) => info!(
+                server = self.addr(index),
+                "the circuit of the upstream server is closed"
+            ),
+            _ => {}
+        }
+    }
+
+    fn release_trial(&self, index: usize) {
+        if let Some(mut breaker) = self.breaker(index) {
+            breaker.release_trial();
+        }
+    }
+
+    fn blocked(&self, index: usize, now: Instant) -> bool {
+        self.circuit_breaker.enabled && self.breaker(index).is_some_and(|b| b.blocks(now))
+    }
+
+    fn circuit_state(&self, index: usize) -> CircuitState {
+        self.breaker(index)
+            .map_or(CircuitState::Closed, |breaker| breaker.state())
+    }
+
+    fn breaker(&self, index: usize) -> Option<MutexGuard<'_, Breaker>> {
+        self.breakers
+            .get(index)
+            .map(|breaker| breaker.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
     /// Records a successful connection or request. A failed active check stays until the next
@@ -394,10 +642,12 @@ impl UpstreamGroup {
             .iter()
             .enumerate()
             .filter_map(|(index, member)| {
+                let circuit = self.circuit_state(index);
                 let health = self.health(index)?;
                 Some(UpstreamHealth {
                     addr: member.addr.clone(),
                     weight: member.weight,
+                    circuit,
                     healthy: health.is_healthy(now),
                     failures: health.failures,
                     last_error: health.last_error.clone(),
@@ -510,6 +760,76 @@ mod tests {
         assert!((1700..=1900).contains(&first), "{first}");
     }
 
+    fn breaker(min_requests: u32, open_duration: Duration) -> CircuitBreaker {
+        CircuitBreaker {
+            enabled: true,
+            failure_ratio: 50,
+            min_requests,
+            window: Duration::from_secs(10),
+            open_duration,
+        }
+    }
+
+    fn breaker_group(circuit_breaker: CircuitBreaker) -> Arc<UpstreamGroup> {
+        let group = UpstreamGroup::new(members(&[1, 1]), LoadBalancing::First, no_passive_check());
+        Arc::new(group.with_circuit_breaker(circuit_breaker))
+    }
+
+    fn circuit(group: &UpstreamGroup) -> CircuitState {
+        group.upstream_health(Instant::now())[0].circuit
+    }
+
+    #[test]
+    fn the_circuit_opens_at_the_failure_ratio_and_a_trial_closes_it() {
+        let group = breaker_group(breaker(4, Duration::from_millis(50)));
+        group.acquire(0).unwrap().failure("refused");
+        group.acquire(0).unwrap().success();
+        group.acquire(0).unwrap().success();
+        assert_eq!(group.candidates(), [0, 1], "1 of 3 failed");
+
+        // The fourth request makes 2 failures in 4 requests, which is the ratio of 50 percent.
+        group.acquire(0).unwrap().error_response("status 503");
+        assert_eq!(group.candidates(), [1]);
+        assert!(group.acquire(0).is_none());
+        assert_eq!(circuit(&group), CircuitState::Open);
+
+        std::thread::sleep(Duration::from_millis(60));
+        assert_eq!(group.candidates(), [0, 1]);
+        let trial = group.acquire(0).unwrap();
+        assert!(group.acquire(0).is_none(), "one trial at a time");
+        assert_eq!(group.candidates(), [1]);
+        assert_eq!(circuit(&group), CircuitState::HalfOpen);
+
+        trial.success();
+        assert_eq!(group.candidates(), [0, 1]);
+        assert_eq!(circuit(&group), CircuitState::Closed);
+    }
+
+    #[test]
+    fn a_failed_trial_opens_the_circuit_and_an_abandoned_trial_frees_it() {
+        let group = breaker_group(breaker(1, Duration::from_millis(30)));
+        group.acquire(0).unwrap().failure("refused");
+        assert!(group.acquire(0).is_none());
+
+        std::thread::sleep(Duration::from_millis(40));
+        drop(group.acquire(0).unwrap());
+        let trial = group.acquire(0).unwrap();
+        trial.failure("refused");
+        assert!(group.acquire(0).is_none());
+        assert_eq!(circuit(&group), CircuitState::Open);
+    }
+
+    #[test]
+    fn a_disabled_circuit_breaker_never_blocks() {
+        let group = breaker_group(CircuitBreaker::default());
+        for _ in 0..50 {
+            group.acquire(0).unwrap().failure("refused");
+        }
+        assert_eq!(group.candidates(), [0, 1]);
+        assert!(group.acquire(0).is_some());
+        assert_eq!(circuit(&group), CircuitState::Closed);
+    }
+
     #[test]
     fn unhealthy_servers_move_behind_the_healthy_servers() {
         let health_check = HealthCheck {
@@ -563,6 +883,7 @@ mod tests {
             members(&[1, 1]),
             LoadBalancing::First,
             Default::default(),
+            CircuitBreaker::default(),
             probe(),
         );
         let same = group(
@@ -570,6 +891,7 @@ mod tests {
             members(&[1, 1]),
             LoadBalancing::First,
             Default::default(),
+            CircuitBreaker::default(),
             probe(),
         );
         assert!(Arc::ptr_eq(&first, &same));
@@ -579,6 +901,7 @@ mod tests {
             members(&[1, 1]),
             LoadBalancing::Random,
             Default::default(),
+            CircuitBreaker::default(),
             probe(),
         );
         assert!(!Arc::ptr_eq(&first, &changed));
@@ -588,6 +911,7 @@ mod tests {
             members(&[1, 3]),
             LoadBalancing::Random,
             Default::default(),
+            CircuitBreaker::default(),
             probe(),
         );
         assert!(!Arc::ptr_eq(&changed, &reweighted));
@@ -603,6 +927,7 @@ mod tests {
             members(&[1, 2])[1..].to_vec(),
             policy,
             no_passive_check(),
+            CircuitBreaker::default(),
             probe(),
         );
         let first = group(
@@ -610,6 +935,7 @@ mod tests {
             members(&[1]),
             policy,
             no_passive_check(),
+            CircuitBreaker::default(),
             probe(),
         );
         second.record_check(0, Err("status 500".into()));

@@ -37,6 +37,7 @@ fn proxy(routes: Vec<Route>, ip_filter: IpFilter, client_ip: ClientIpConfig) -> 
         timeouts: Default::default(),
         load_balancing: Default::default(),
         health_check: Default::default(),
+        circuit_breaker: Default::default(),
         client_cert: None,
     }
 }

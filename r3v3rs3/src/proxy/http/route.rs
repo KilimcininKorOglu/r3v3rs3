@@ -119,6 +119,7 @@ struct ProxyUpstream {
     timeouts: UpstreamTimeouts,
     load_balancing: LoadBalancing,
     health_check: HealthCheck,
+    circuit_breaker: r3v3rs3_api::upstream::CircuitBreaker,
 }
 
 impl ProxyUpstream {
@@ -128,6 +129,7 @@ impl ProxyUpstream {
             timeouts: http.timeouts,
             load_balancing: http.load_balancing,
             health_check: http.health_check.clone(),
+            circuit_breaker: http.circuit_breaker,
         }
     }
 
@@ -156,6 +158,7 @@ impl ProxyUpstream {
             members,
             self.load_balancing,
             self.health_check.clone(),
+            self.circuit_breaker,
             probe,
         );
         Some(Upstream {

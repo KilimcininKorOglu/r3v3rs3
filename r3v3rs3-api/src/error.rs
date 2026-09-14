@@ -158,6 +158,9 @@ pub enum Error {
     #[error("at least one upstream server must have a weight above 0")]
     AllServersDrained,
 
+    #[error("circuit breaker needs a failure ratio from 1 to 100, at least one request, and a window and an open duration above zero")]
+    InvalidCircuitBreaker,
+
     #[error("failed to hash password")]
     FailedToHashPassword,
 

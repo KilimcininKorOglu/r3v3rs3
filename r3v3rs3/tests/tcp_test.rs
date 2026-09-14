@@ -114,6 +114,7 @@ fn tcp_proxy_to(upstream: &TestPort) -> Proxy {
             connect_timeout: r3v3rs3_api::upstream::DEFAULT_CONNECT_TIMEOUT,
             load_balancing: Default::default(),
             health_check: Default::default(),
+            circuit_breaker: Default::default(),
             upstream_servers: vec![UpstreamServer::new(upstream.multiaddr_tcp())],
         }),
         ..Default::default()

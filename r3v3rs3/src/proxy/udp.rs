@@ -201,6 +201,7 @@ impl UdpUpstream {
                 health::members(&proxy.upstream_servers),
                 proxy.load_balancing,
                 proxy.health_check.clone(),
+                Default::default(),
                 Probe::Resolve(Probe::targets(&proxy.upstream_servers)),
             );
             upstream = Self {

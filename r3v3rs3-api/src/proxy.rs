@@ -8,7 +8,7 @@ use crate::policy::{AuthPolicy, IpFilter, RateLimit};
 use crate::upstream::{
     default_connect_timeout, default_session_idle_timeout, default_weight,
     is_default_connect_timeout, is_default_session_idle_timeout, is_default_weight,
-    validate_timeout, validate_weights, HealthCheck, LoadBalancing, UpstreamHealth,
+    validate_timeout, validate_weights, CircuitBreaker, HealthCheck, LoadBalancing, UpstreamHealth,
     UpstreamTimeouts, DEFAULT_WEIGHT,
 };
 use crate::vhost::VirtualHost;
@@ -69,6 +69,7 @@ impl ProxyKind {
             Self::Tcp(tcp) => {
                 validate_timeout(tcp.connect_timeout)?;
                 validate_weights(tcp.upstream_servers.iter().map(|server| server.weight))?;
+                tcp.circuit_breaker.validate()?;
                 tcp.health_check.validate(false)
             }
             Self::Udp(udp) => {
@@ -78,6 +79,7 @@ impl ProxyKind {
             }
             Self::Http(http) => {
                 http.health_check.validate(true)?;
+                http.circuit_breaker.validate()?;
                 http.routes.iter().try_for_each(|route| {
                     validate_weights(route.servers.iter().map(|server| server.weight))
                 })?;
@@ -112,6 +114,8 @@ pub struct TcpProxy {
     pub load_balancing: LoadBalancing,
     #[serde(default, skip_serializing_if = "HealthCheck::is_default")]
     pub health_check: HealthCheck,
+    #[serde(default, skip_serializing_if = "CircuitBreaker::is_default")]
+    pub circuit_breaker: CircuitBreaker,
 }
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -177,6 +181,9 @@ pub struct HttpProxy {
     /// Health check of the upstream servers in every route of this proxy.
     #[serde(default, skip_serializing_if = "HealthCheck::is_default")]
     pub health_check: HealthCheck,
+    /// Circuit breaker of the upstream servers in every route of this proxy.
+    #[serde(default, skip_serializing_if = "CircuitBreaker::is_default")]
+    pub circuit_breaker: CircuitBreaker,
 }
 
 fn upgrade_insecure_default() -> bool {
