@@ -172,7 +172,7 @@ exposed_by_default = false
 | Setting | Meaning |
 |---|---|
 | `enabled` | Starts the provider. |
-| `endpoint` | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` or `https://<host>:<port>`. The default is `unix:///var/run/docker.sock`. Windows does not support `unix://`. |
+| `endpoint` | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` or `https://<host>:<port>`. The default is `unix:///var/run/docker.sock`. |
 | `client_cert` | The id of a client certificate that r3v3rs3 sends to an `https` endpoint. A system root certificate or a root certificate in r3v3rs3 must sign the server certificate. |
 | `network` | The Docker network of the upstream addresses. Leave it empty when each container is on one network. |
 | `exposed_by_default` | `true` reads every container that has `r3v3rs3.` labels. `false` reads only the containers with `r3v3rs3.enable=true`. |

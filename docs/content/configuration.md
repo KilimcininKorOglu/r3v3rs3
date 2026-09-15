@@ -1012,11 +1012,7 @@ Durations use a human-readable format, for example `30s`, `15m`, `1h`, or `7days
 
 # Configuration Files
 
-r3v3rs3 uses TOML files for storing its configuration. The location of these files varies according to the operating system:
-
-- Linux: `$XDG_CONFIG_HOME/r3v3rs3` or `$HOME/.config/r3v3rs3`
-- macOS: `$HOME/Library/Application Support/r3v3rs3`
-- Windows: `%APPDATA%\r3v3rs3\config`
+r3v3rs3 stores its configuration in TOML files in `$XDG_CONFIG_HOME/r3v3rs3` or `$HOME/.config/r3v3rs3`.
 
 You can override the default location by setting the `R3V3RS3_CONFIG_DIR` environment variable or the `--config-dir` command-line option.
 

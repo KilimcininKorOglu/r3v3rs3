@@ -105,7 +105,7 @@ fn default_tls_alpn_challenge_addr() -> SocketAddr {
 pub struct AppInfo {
     #[schema(example = "0.0.0")]
     pub version: &'static str,
-    #[schema(example = "aarch64-apple-darwin")]
+    #[schema(example = "x86_64-unknown-linux-gnu")]
     pub target: &'static str,
     #[schema(example = "debug")]
     pub profile: &'static str,

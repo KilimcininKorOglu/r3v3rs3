@@ -357,13 +357,7 @@ fn validate_consul(consul: &ConsulDiscoveryConfig) -> Result<(), Error> {
 }
 
 pub fn parse_endpoint(endpoint: &str) -> Result<Endpoint, Error> {
-    let endpoint = endpoint.parse::<Endpoint>()?;
-    if cfg!(not(unix)) && matches!(endpoint, Endpoint::Unix(_)) {
-        return Err(Error::InvalidDiscoveryConfig {
-            reason: "Unix sockets are not available on this platform".to_string(),
-        });
-    }
-    Ok(endpoint)
+    endpoint.parse::<Endpoint>()
 }
 
 /// The providers whose settings differ.

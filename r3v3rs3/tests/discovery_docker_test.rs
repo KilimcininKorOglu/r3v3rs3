@@ -1,5 +1,3 @@
-#![cfg(unix)]
-
 use axum::{routing::get, Router};
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};

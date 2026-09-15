@@ -64,26 +64,22 @@ async fn create_parent(path: &Path) -> anyhow::Result<()> {
 
 /// Writes a file that holds secrets, such as ACME account keys, so only the owner can read it.
 async fn write_private(path: &Path, contents: String) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
     use tokio::io::AsyncWriteExt;
 
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
     options.mode(0o600);
     let mut file = options.open(path).await?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        // The creation mode does not apply to a file that an earlier version created.
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))
-            .await?;
-    }
+    // The creation mode does not apply to a file that an earlier version created.
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .await?;
     file.write_all(contents.as_bytes()).await?;
     file.flush().await?;
     Ok(())
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod private_file_test {
     use super::write_private;
     use std::os::unix::fs::PermissionsExt;
@@ -119,7 +115,7 @@ mod private_file_test {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod secret_files_test {
     use super::FileStorage;
     use crate::config::storage::Storage;

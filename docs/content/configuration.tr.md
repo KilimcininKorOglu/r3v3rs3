@@ -1012,11 +1012,7 @@ Süreleri `30s`, `15m`, `1h` veya `7days` gibi okunabilir bir biçimde yazın.
 
 # Config dosyaları
 
-r3v3rs3 config'ini TOML dosyalarında saklar. Bu dosyaların konumu işletim sistemine göre değişir:
-
-- Linux: `$XDG_CONFIG_HOME/r3v3rs3` veya `$HOME/.config/r3v3rs3`
-- macOS: `$HOME/Library/Application Support/r3v3rs3`
-- Windows: `%APPDATA%\r3v3rs3\config`
+r3v3rs3 config'ini `$XDG_CONFIG_HOME/r3v3rs3` veya `$HOME/.config/r3v3rs3` dizinindeki TOML dosyalarında saklar.
 
 Varsayılan konumu `R3V3RS3_CONFIG_DIR` environment variable'ı veya `--config-dir` komut satırı seçeneğiyle değiştirebilirsiniz.
 

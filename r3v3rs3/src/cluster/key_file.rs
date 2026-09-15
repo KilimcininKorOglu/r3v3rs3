@@ -56,7 +56,6 @@ pub async fn write_new_key_file(path: &Path) -> anyhow::Result<KeyId> {
     let id = parse_key_file(&text)?.id();
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create_new(true);
-    #[cfg(unix)]
     options.mode(0o600);
     let mut file = options
         .open(path)
@@ -70,6 +69,7 @@ pub async fn write_new_key_file(path: &Path) -> anyhow::Result<KeyId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn a_key_file_has_one_base64_key_of_32_bytes() {
@@ -98,12 +98,8 @@ mod tests {
         let id = write_new_key_file(&path).await?;
         let keys = load_keys(std::slice::from_ref(&path)).await?;
         assert_eq!(keys.primary_id(), id);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&path)?.permissions().mode() & 0o777;
-            assert_eq!(mode, 0o600);
-        }
+        let mode = std::fs::metadata(&path)?.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
 
         let again = write_new_key_file(&path).await;
         assert_eq!(

@@ -324,8 +324,6 @@ mod tests {
 
         store.remove_before(5_000).await?;
         assert_eq!(times(store.query(&all).await?), [9_000, 7_000, 5_000]);
-        // Windows refuses to remove a file that an open connection holds.
-        store.pool().await?.close().await;
         std::fs::remove_file(path)?;
         Ok(())
     }

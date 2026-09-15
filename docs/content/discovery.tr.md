@@ -172,7 +172,7 @@ exposed_by_default = false
 | Ayar | Anlamı |
 |---|---|
 | `enabled` | Provider'ı başlatır. |
-| `endpoint` | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` veya `https://<host>:<port>`. Varsayılan değer `unix:///var/run/docker.sock` olur. Windows `unix://` desteklemez. |
+| `endpoint` | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` veya `https://<host>:<port>`. Varsayılan değer `unix:///var/run/docker.sock` olur. |
 | `client_cert` | r3v3rs3'ün `https` endpoint'ine gönderdiği client sertifikasının id'si. Server sertifikasını bir sistem root sertifikası veya r3v3rs3'teki bir root sertifika imzalamalıdır. |
 | `network` | Upstream adreslerinin alındığı Docker network'ü. Her container tek network'e bağlıysa boş bırakın. |
 | `exposed_by_default` | `true`, `r3v3rs3.` label'ı olan her container'ı okur. `false` yalnız `r3v3rs3.enable=true` olan container'ları okur. |

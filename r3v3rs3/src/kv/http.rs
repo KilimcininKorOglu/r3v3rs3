@@ -148,17 +148,11 @@ fn host_header(endpoint: &Endpoint) -> String {
     }
 }
 
-#[cfg(unix)]
 async fn connect_unix(path: &str) -> anyhow::Result<Box<dyn Io>> {
     let stream = tokio::net::UnixStream::connect(path)
         .await
         .with_context(|| format!("failed to connect to {path}"))?;
     Ok(Box::new(stream))
-}
-
-#[cfg(not(unix))]
-async fn connect_unix(_path: &str) -> anyhow::Result<Box<dyn Io>> {
-    bail!("Unix sockets are not available on this platform")
 }
 
 pub async fn read_json<T: DeserializeOwned>(response: Response<Incoming>) -> anyhow::Result<T> {

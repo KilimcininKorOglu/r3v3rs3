@@ -10,6 +10,7 @@ use r3v3rs3_api::{
         TokenProvider,
     },
     app::AcmeExecConfig,
+    error::Error,
 };
 use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
 use rsa::{
@@ -20,15 +21,9 @@ use serde_json::json;
 use sha1::{Digest, Sha1};
 use std::{
     collections::HashMap,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
-};
-#[cfg(unix)]
-use {
-    r3v3rs3_api::error::Error,
-    std::{
-        path::{Path, PathBuf},
-        time::Duration,
-    },
+    time::Duration,
 };
 
 mod common;
@@ -794,7 +789,6 @@ async fn a_failed_webhook_add_sends_a_remove_and_a_plain_http_host_is_refused() 
 
 /// Writes an executable shell script under the test target directory, and returns its path
 /// and the path of the log that `$log` names in `body`.
-#[cfg(unix)]
 fn exec_script(name: &str, body: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -813,14 +807,12 @@ fn exec_script(name: &str, body: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
     Ok((script, log))
 }
 
-#[cfg(unix)]
 fn exec_provider(program: &Path) -> DnsProvider {
     DnsProvider::Local(LocalProvider::Exec {
         program: program.display().to_string(),
     })
 }
 
-#[cfg(unix)]
 fn allowlist(programs: &[&Path], timeout: Duration) -> AcmeExecConfig {
     AcmeExecConfig {
         programs: programs
@@ -831,7 +823,6 @@ fn allowlist(programs: &[&Path], timeout: Duration) -> AcmeExecConfig {
     }
 }
 
-#[cfg(unix)]
 fn log_lines(log: &Path) -> anyhow::Result<Vec<String>> {
     Ok(std::fs::read_to_string(log)?
         .lines()
@@ -839,7 +830,6 @@ fn log_lines(log: &Path) -> anyhow::Result<Vec<String>> {
         .collect())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn an_exec_program_gets_each_value_as_an_argument_without_a_shell_or_environment(
 ) -> anyhow::Result<()> {
@@ -869,7 +859,6 @@ async fn an_exec_program_gets_each_value_as_an_argument_without_a_shell_or_envir
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn an_exec_program_outside_the_allowlist_is_refused() -> anyhow::Result<()> {
     let (allowed, _) = exec_script("allowed", "exit 0")?;
@@ -897,7 +886,6 @@ async fn an_exec_program_outside_the_allowlist_is_refused() -> anyhow::Result<()
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn a_failing_exec_program_removes_the_added_values_and_reports_its_stderr(
 ) -> anyhow::Result<()> {
@@ -922,7 +910,6 @@ if [ "$1" = add ] && [ "$3" = v2 ]; then echo "zone is locked" >&2; exit 3; fi"#
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn an_exec_program_is_stopped_when_the_timeout_expires() -> anyhow::Result<()> {
     let (script, _) = exec_script("slow", "exec /bin/sleep 5")?;
