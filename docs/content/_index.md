@@ -10,15 +10,34 @@ sort_by = "weight"
 
 # Key Features
 
-- Built with Rust for optimal performance and safety, powered by [tokio](https://tokio.rs/) and [hyper](https://hyper.rs/)
-- Supports TCP, UDP, TLS, HTTP1, and HTTP2, including HTTP upgrading and WebSocket functionality
-- Partial HTTP/3 support (incoming QUIC connections only; WebTransport not supported)
-- Easily deployable single binary with a built-in WebUI
-- Allows live configuration updates via a REST API without restarting the service
-- Imports TLS certificates from the GUI or can generate a self-signed certificate
-- Provides Let's Encrypt support (ACME v2 with the HTTP-01 and DNS-01 challenges) for seamless certificate provisioning, including wildcard certificates through the Cloudflare, Route 53, DigitalOcean and Hetzner Cloud DNS APIs
-- Discovers proxies from Docker container labels, Kubernetes Ingress resources, Consul service tags and the Consul and etcd key-value stores, and updates them when the source changes ([Service Discovery](@/discovery.md))
-- Runs several nodes with one shared state in etcd or Consul, with encrypted values, a leader for ACME and shared sessions, rate limits and cache ([Cluster](@/cluster.md))
+## Proxying
+
+- TCP, UDP, TLS, HTTP/1.1 and HTTP/2 proxies, including HTTP upgrades and WebSocket, built with Rust on [tokio](https://tokio.rs/) and [hyper](https://hyper.rs/)
+- Partial HTTP/3 support: incoming QUIC connections only. Upstream connections use HTTP/2 or HTTP/1.1, and WebTransport is not supported
+- Routing by host name (exact, wildcard or regex) and path, with path rewrite, redirect rules and fixed responses such as a redirect host or a 404 host
+- Load balancing, active and passive health checks, a circuit breaker, sticky sessions, retries, upstream timeouts and traffic mirroring
+- The PROXY protocol on incoming connections and toward upstream servers
+
+## Security and traffic control
+
+- IP allow and deny lists, per-client rate limits, a request body size limit and real client IP resolution behind known CDNs and trusted proxies
+- Basic, Bearer, forward and admin session authentication, and shared access lists
+- Request and response header rules, response compression (brotli, zstd and gzip) and an in-memory HTTP cache
+
+## Certificates
+
+- Server, client and root certificates, uploaded or self-signed
+- Mutual TLS: client certificate verification on TLS ports and client certificates toward upstream servers
+- ACME v2 (for example Let's Encrypt) with the HTTP-01, TLS-ALPN-01 and DNS-01 challenges. DNS-01 issues wildcard certificates through 12 DNS provider APIs, a webhook, an exec command or RFC 2136
+- Certificate expiry warnings and webhook notifications
+
+## Operations
+
+- A single binary with a built-in WebUI in English and Turkish. Configuration changes apply without a restart
+- An admin API with an OpenAPI document and a Swagger UI ([Admin API](@/configuration.md#admin-api))
+- Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists and an audit log ([Accounts](@/accounts.md))
+- Service discovery from Docker labels, Kubernetes Ingress and `R3v3rs3Proxy` resources, Consul and etcd ([Service Discovery](@/discovery.md))
+- Cluster mode: several nodes share one encrypted state in etcd or Consul ([Cluster](@/cluster.md))
 
 # Installation
 
@@ -47,10 +66,12 @@ Run the following command to start r3v3rs3 using Docker:
 ```bash
 docker run -d \
   -v r3v3rs3-config:/root/.config/r3v3rs3 \
+  -v r3v3rs3-data:/root/.local/share/r3v3rs3 \
   -p 80:80 \
   -p 443:443 \
   -p 127.0.0.1:46492:46492 \
   --restart unless-stopped \
+  --stop-signal SIGINT \
   --name r3v3rs3 \
   ghcr.io/kilimcininkoroglu/r3v3rs3:latest
 ```
@@ -107,7 +128,7 @@ The package on crates.io comes bundled with the WebUI as a static asset. Thus, y
 $ cargo install r3v3rs3
 ```
 
-## Github Releases
+## GitHub Releases
 
 Alternatively, you can directly download the latest pre-built Linux binaries (x86_64 and aarch64) from the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases).
 

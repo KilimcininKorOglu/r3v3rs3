@@ -10,15 +10,34 @@ sort_by = "weight"
 
 # Temel özellikler
 
-- Performans ve güvenlik için Rust ile yazıldı; [tokio](https://tokio.rs/) ve [hyper](https://hyper.rs/) üzerine kurulu.
-- TCP, UDP, TLS, HTTP1 ve HTTP2 destekler. HTTP upgrade ve WebSocket bağlantıları da buna dahildir.
-- HTTP/3 desteği kısmidir: yalnız gelen QUIC bağlantıları kabul edilir, WebTransport desteği yoktur.
-- WebUI ile birlikte tek bir binary olarak gelir, kurulumu kolaydır.
-- REST API ile yapılan config değişiklikleri servisi yeniden başlatmadan uygulanır.
-- TLS sertifikaları arayüzden içe aktarılabilir veya self-signed sertifika oluşturulabilir.
-- Let's Encrypt ile sertifikalar otomatik alınır (ACME v2, HTTP-01 ve DNS-01 challenge'ları). Wildcard sertifikalar için Cloudflare, Route 53, DigitalOcean ve Hetzner Cloud DNS API'leri kullanılır.
-- Proxy'leri Docker container label'larından, Kubernetes Ingress kaynaklarından, Consul servis tag'lerinden, Consul ve etcd key-value store'larından oluşturur. Kaynak değişince proxy'leri günceller ([Servis keşfi](@/discovery.tr.md)).
-- Birden fazla node'u etcd veya Consul'da paylaşılan tek bir state ile çalıştırır. Değerler şifrelenir, ACME işlerini leader node yapar, session'lar, rate limit ve cache node'lar arasında paylaşılır ([Cluster](@/cluster.tr.md)).
+## Proxy
+
+- TCP, UDP, TLS, HTTP/1.1 ve HTTP/2 proxy'leri. HTTP upgrade ve WebSocket bağlantıları da buna dahildir. Rust ile [tokio](https://tokio.rs/) ve [hyper](https://hyper.rs/) üzerine yazıldı.
+- HTTP/3 desteği kısmidir: yalnız gelen QUIC bağlantıları kabul edilir. Upstream bağlantıları HTTP/2 veya HTTP/1.1 kullanır. WebTransport desteği yoktur.
+- Host adına (tam, wildcard veya regex) ve path'e göre routing. Path rewrite, redirect kuralları ve redirect host ya da 404 host gibi fixed response'lar.
+- Load balancing, aktif ve pasif health check, circuit breaker, sticky session, retry, upstream timeout ve traffic mirroring.
+- Gelen bağlantılarda ve upstream sunuculara giden bağlantılarda PROXY protocol.
+
+## Güvenlik ve trafik kontrolü
+
+- IP allow ve deny listeleri, istemci başına rate limit, request body boyut limiti. Bilinen CDN'lerin ve güvenilen proxy'lerin arkasında gerçek istemci IP'si bulunur.
+- Basic, Bearer, forward ve yönetim paneli session authentication. Proxy'ler arasında paylaşılan erişim listeleri.
+- Request ve response header kuralları, response sıkıştırma (brotli, zstd ve gzip) ve bellekte tutulan HTTP cache.
+
+## Sertifikalar
+
+- Yüklenen veya self-signed server, client ve root sertifikaları.
+- Mutual TLS: TLS portlarında client sertifikası doğrulanır, upstream sunuculara client sertifikası gönderilir.
+- HTTP-01, TLS-ALPN-01 ve DNS-01 challenge'larıyla ACME v2 (örneğin Let's Encrypt). DNS-01, wildcard sertifikaları 12 DNS provider API'si, webhook, exec komutu veya RFC 2136 ile alır.
+- Sertifika süresi uyarıları ve webhook bildirimleri.
+
+## Yönetim
+
+- WebUI'ı içinde taşıyan tek bir binary. WebUI İngilizce ve Türkçedir. Config değişiklikleri yeniden başlatmadan uygulanır.
+- OpenAPI dokümanı ve Swagger UI sunan yönetim API'si ([Yönetim API'si](@/configuration.tr.md#yonetim-api-si)).
+- `admin`, `editor` ve `viewer` rolleri olan hesaplar, hesap başına proxy listesi ve audit log ([Hesaplar](@/accounts.tr.md)).
+- Docker label'ları, Kubernetes Ingress ve `R3v3rs3Proxy` kaynakları, Consul ve etcd ile servis keşfi ([Servis keşfi](@/discovery.tr.md)).
+- Cluster modu: birden fazla node, etcd veya Consul'da şifreli tek bir state paylaşır ([Cluster](@/cluster.tr.md)).
 
 # Kurulum
 
@@ -47,10 +66,12 @@ r3v3rs3'ü Docker ile başlatmak için şu komutu çalıştırın:
 ```bash
 docker run -d \
   -v r3v3rs3-config:/root/.config/r3v3rs3 \
+  -v r3v3rs3-data:/root/.local/share/r3v3rs3 \
   -p 80:80 \
   -p 443:443 \
   -p 127.0.0.1:46492:46492 \
   --restart unless-stopped \
+  --stop-signal SIGINT \
   --name r3v3rs3 \
   ghcr.io/kilimcininkoroglu/r3v3rs3:latest
 ```
@@ -107,7 +128,7 @@ crates.io paketinde WebUI statik asset olarak hazır gelir. Bu yüzden WebUI'ı 
 $ cargo install r3v3rs3
 ```
 
-## Github Releases
+## GitHub Releases
 
 Linux için hazır binary'lerin (x86_64 ve aarch64) son sürümünü doğrudan [releases sayfasından](https://github.com/KilimcininKorOglu/r3v3rs3/releases) da indirebilirsiniz.
 
