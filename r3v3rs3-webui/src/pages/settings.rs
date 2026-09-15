@@ -36,6 +36,7 @@ struct Fields {
     login_attempts_reset: String,
     database_log_retention: String,
     audit_log_retention: String,
+    cert_expiry_warning: String,
     http_challenge_addr: String,
     tls_alpn_challenge_addr: String,
     dns_challenge_resolver: String,
@@ -131,6 +132,7 @@ impl Fields {
             login_attempts_reset: text("/admin/login_attempts_reset"),
             database_log_retention: text("/log/database_log_retention"),
             audit_log_retention: text("/log/audit_log_retention"),
+            cert_expiry_warning: text("/notifications/cert_expiry_warning"),
             http_challenge_addr: text("/http_challenge_addr"),
             tls_alpn_challenge_addr: text("/tls_alpn_challenge_addr"),
             dns_challenge_resolver: text("/dns_challenge_resolver"),
@@ -222,6 +224,8 @@ pub fn settings() -> Html {
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.dns_challenge_resolver_hint")}</p>
             { text_field(&fields, &errors, locale.t("settings.database_log_retention"), "database_log_retention", "3months", |f| &mut f.database_log_retention) }
             { text_field(&fields, &errors, locale.t("settings.audit_log_retention"), "audit_log_retention", "1year", |f| &mut f.audit_log_retention) }
+            { text_field(&fields, &errors, locale.t("settings.cert_expiry_warning"), "cert_expiry_warning", "14days", |f| &mut f.cert_expiry_warning) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.cert_expiry_warning_hint")}</p>
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.duration_hint")}</p>
 
             { docker_section(locale, &fields, &errors, &client_certs) }
@@ -730,6 +734,12 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         invalid_duration,
         json!({ "background_task_interval": fields.background_task_interval.trim() }),
     );
+    let notifications = parse_part::<r3v3rs3_api::app::NotificationConfig>(
+        &mut errors,
+        "cert_expiry_warning",
+        invalid_duration,
+        json!({ "cert_expiry_warning": fields.cert_expiry_warning.trim() }),
+    );
     let addr = parse_addr(
         locale,
         &mut errors,
@@ -753,10 +763,16 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             locale.t("settings.invalid_socket_addr").into(),
         );
     }
-    match (admin, log, interval, (addr, tls_alpn_addr), resolver) {
+    match (
+        admin,
+        (log, notifications),
+        interval,
+        (addr, tls_alpn_addr),
+        resolver,
+    ) {
         (
             Some(admin),
-            Some(log),
+            (Some(log), Some(notifications)),
             Some(interval),
             (Some(addr), Some(tls_alpn_addr)),
             Ok(resolver),
@@ -771,6 +787,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 database_log_retention: log[0].database_log_retention,
                 audit_log_retention: log[1].audit_log_retention,
             },
+            notifications,
             http_challenge_addr: addr,
             tls_alpn_challenge_addr: tls_alpn_addr,
             dns_challenge_resolver: resolver,

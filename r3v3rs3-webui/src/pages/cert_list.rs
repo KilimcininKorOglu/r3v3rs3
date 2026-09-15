@@ -1,9 +1,9 @@
 use crate::auth::use_ensure_auth;
 use crate::components::acme_form::dns_provider_label;
 use crate::components::data_list::{
-    active_toggle, list_card, Column, Row, DANGER_LINK_CLASS, LINK_CLASS,
+    active_toggle, list_card, status_badge, Column, Row, DANGER_LINK_CLASS, LINK_CLASS,
 };
-use crate::format::format_duration;
+use crate::format::{format_duration, unix_now};
 use crate::i18n::use_locale;
 use crate::pages::self_sign::SelfSignQuery;
 use crate::pages::Route;
@@ -11,11 +11,14 @@ use crate::store::{AcmeStore, CertStore, SessionStore};
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::acme::AcmeInfo;
-use r3v3rs3_api::cert::{CertInfo, CertKind, SelfSignedCertKind, UploadQuery};
+use r3v3rs3_api::cert::{
+    expiry_state, CertInfo, CertKind, ExpiryState, SelfSignedCertKind, UploadQuery,
+};
 use r3v3rs3_api::discovery::DiscoverySource;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use serde_derive::{Deserialize, Serialize};
+use std::time::Duration;
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
@@ -145,6 +148,12 @@ pub fn cert_list() -> Html {
     let (acme, acme_dispatcher) = use_store::<AcmeStore>();
     let (session, _) = use_store::<SessionStore>();
     let can_edit = session.can_edit();
+    // Before the session loads, no certificate is marked as expiring.
+    let warning = session
+        .info
+        .as_ref()
+        .map(|info| info.cert_expiry_warning)
+        .unwrap_or_default();
 
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
@@ -202,14 +211,14 @@ pub fn cert_list() -> Html {
         CertsTab::Server | CertsTab::Client => {
             let rows = cert_list
                 .iter()
-                .map(|entry| server_row(locale, entry, can_edit))
+                .map(|entry| server_row(locale, entry, can_edit, warning))
                 .collect::<Vec<_>>();
             list_card(locale, certs.loaded, EMPTY_LIST, &SERVER_COLUMNS, &rows)
         }
         CertsTab::Root => {
             let rows = cert_list
                 .iter()
-                .map(|entry| root_row(locale, entry, can_edit))
+                .map(|entry| root_row(locale, entry, can_edit, warning))
                 .collect::<Vec<_>>();
             list_card(locale, certs.loaded, EMPTY_LIST, &ROOT_COLUMNS, &rows)
         }
@@ -340,7 +349,21 @@ fn discovered_title(locale: Locale, source: &DiscoverySource) -> String {
     locale.tf("certs.discovered_title", &[("resource", &source.resource)])
 }
 
-fn server_row(locale: Locale, entry: &CertInfo, can_edit: bool) -> Row {
+/// The expiry date with a badge when the certificate expires within `warning` or has expired.
+fn expiry_cell(locale: Locale, not_after: i64, warning: Duration) -> Html {
+    let date = format_duration(locale, not_after);
+    match expiry_state(not_after, unix_now(), warning) {
+        ExpiryState::Valid => html! { <>{date}</> },
+        ExpiryState::Expiring => html! {
+            <>{status_badge(locale.t("certs.expiring"), "bg-yellow-400")}<div>{date}</div></>
+        },
+        ExpiryState::Expired => html! {
+            <>{status_badge(locale.t("certs.expired"), "bg-red-500")}<div>{date}</div></>
+        },
+    }
+}
+
+fn server_row(locale: Locale, entry: &CertInfo, can_edit: bool, warning: Duration) -> Row {
     let subject_names = entry
         .san
         .iter()
@@ -353,13 +376,13 @@ fn server_row(locale: Locale, entry: &CertInfo, can_edit: bool) -> Row {
             html! { <>{subject_names}{source_badge(locale, entry)}</> },
             html! { <>{entry.issuer.clone()}</> },
             html! { <>{entry.id.to_string()}</> },
-            html! { <>{format_duration(locale, entry.not_after)}</> },
+            expiry_cell(locale, entry.not_after, warning),
         ],
         actions: cert_actions(locale, entry, true, can_edit),
     }
 }
 
-fn root_row(locale: Locale, entry: &CertInfo, can_edit: bool) -> Row {
+fn root_row(locale: Locale, entry: &CertInfo, can_edit: bool, warning: Duration) -> Row {
     let private_key = if entry.has_private_key {
         "common.yes"
     } else {
@@ -371,7 +394,7 @@ fn root_row(locale: Locale, entry: &CertInfo, can_edit: bool) -> Row {
             html! { <>{entry.issuer.clone()}{source_badge(locale, entry)}</> },
             html! { <>{entry.id.to_string()}</> },
             html! { <>{locale.t(private_key)}</> },
-            html! { <>{format_duration(locale, entry.not_after)}</> },
+            expiry_cell(locale, entry.not_after, warning),
         ],
         actions: cert_actions(locale, entry, entry.has_private_key, can_edit),
     }

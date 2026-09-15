@@ -190,11 +190,22 @@ async fn record_logout(
     operation_id = "get_session",
     responses((status = 200, description = "The account of the session.", body = SessionInfo), ErrorResponses)
 )]
-pub async fn session(Extension(caller): Extension<Caller>) -> Json<SessionInfo> {
+pub async fn session(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Json<SessionInfo> {
+    let cert_expiry_warning = state
+        .data
+        .lock()
+        .await
+        .config
+        .notifications
+        .cert_expiry_warning;
     Json(SessionInfo {
         username: caller.username,
         role: caller.role,
         proxies: caller.proxies,
+        cert_expiry_warning,
     })
 }
 

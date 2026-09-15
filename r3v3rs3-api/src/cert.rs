@@ -53,6 +53,27 @@ pub struct CertInfo {
     pub source: Option<crate::discovery::DiscoverySource>,
 }
 
+/// How close a certificate is to its expiry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpiryState {
+    Valid,
+    /// The certificate expires within the warning time.
+    Expiring,
+    Expired,
+}
+
+/// The expiry state of a certificate at the Unix time `now`.
+pub fn expiry_state(not_after: i64, now: i64, warning: Duration) -> ExpiryState {
+    let warning = i64::try_from(warning.as_secs()).unwrap_or(i64::MAX);
+    if not_after <= now {
+        ExpiryState::Expired
+    } else if not_after <= now.saturating_add(warning) {
+        ExpiryState::Expiring
+    } else {
+        ExpiryState::Valid
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SelfSignedCertRequest {
     #[schema(value_type = [String], example = json!(["localhost"]))]
@@ -128,4 +149,33 @@ pub struct CertPostBody {
     pub chain: String,
     #[schema(format = Binary)]
     pub key: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_certificate_expires_at_its_not_after_time_and_warns_before_it() {
+        let day = Duration::from_secs(24 * 60 * 60);
+        let now = 1_000_000;
+        let one_day = 24 * 60 * 60;
+        assert_eq!(expiry_state(now - 1, now, day), ExpiryState::Expired);
+        assert_eq!(expiry_state(now, now, day), ExpiryState::Expired);
+        assert_eq!(expiry_state(now + 1, now, day), ExpiryState::Expiring);
+        assert_eq!(expiry_state(now + one_day, now, day), ExpiryState::Expiring);
+        assert_eq!(
+            expiry_state(now + one_day + 1, now, day),
+            ExpiryState::Valid
+        );
+        // No warning time marks no certificate as expiring.
+        assert_eq!(
+            expiry_state(now + 1, now, Duration::ZERO),
+            ExpiryState::Valid
+        );
+        assert_eq!(
+            expiry_state(i64::MAX, now, Duration::MAX),
+            ExpiryState::Expiring
+        );
+    }
 }

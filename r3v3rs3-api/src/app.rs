@@ -15,6 +15,9 @@ pub struct AppConfig {
     #[serde(default)]
     pub log: LogConfig,
 
+    #[serde(default)]
+    pub notifications: NotificationConfig,
+
     #[serde(default = "default_http_challenge_addr")]
     #[schema(value_type = String, example = "0.0.0.0:80")]
     pub http_challenge_addr: SocketAddr,
@@ -148,6 +151,18 @@ pub struct LogConfig {
     #[serde(with = "humantime_serde", default = "default_audit_log_retention")]
     #[schema(value_type = String, example = "1year")]
     pub audit_log_retention: Duration,
+}
+
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NotificationConfig {
+    /// The certificate list marks a certificate that expires within this time.
+    #[serde(with = "humantime_serde", default = "default_cert_expiry_warning")]
+    #[schema(value_type = String, example = "14days")]
+    pub cert_expiry_warning: Duration,
+}
+
+fn default_cert_expiry_warning() -> Duration {
+    Duration::from_secs(14 * 24 * 60 * 60)
 }
 
 fn default_database_log_retention() -> Duration {

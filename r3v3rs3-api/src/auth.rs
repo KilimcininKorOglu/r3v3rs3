@@ -119,6 +119,11 @@ pub struct SessionInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<Vec<String>>)]
     pub proxies: Option<BTreeSet<ShortId>>,
+    /// The certificate list marks a certificate that expires within this time. Every role reads
+    /// it, and only an admin reads the settings.
+    #[serde(with = "humantime_serde")]
+    #[schema(value_type = String, example = "14days")]
+    pub cert_expiry_warning: std::time::Duration,
 }
 
 #[derive(Deserialize, Serialize, ToSchema)]

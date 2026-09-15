@@ -87,6 +87,7 @@ mod tests {
                 username: "user".into(),
                 role,
                 proxies,
+                cert_expiry_warning: Default::default(),
             }),
         };
         let restricted = Some(BTreeSet::from(["web".parse().unwrap()]));

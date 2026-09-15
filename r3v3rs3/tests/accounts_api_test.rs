@@ -42,7 +42,7 @@ async fn an_admin_manages_the_accounts_through_the_admin_api() -> anyhow::Result
         assert_eq!(status, 200);
         assert_eq!(
             serde_json::from_str::<Value>(&body)?,
-            json!({"username": "admin", "role": "admin"})
+            json!({"username": "admin", "role": "admin", "cert_expiry_warning": "14days"})
         );
         let (status, _) = send(addr, Method::GET, accounts_path, &viewer, None).await?;
         assert_eq!(status, 403);

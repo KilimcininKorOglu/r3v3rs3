@@ -20,14 +20,19 @@ pub fn format_duration(locale: Locale, unix_time: i64) -> String {
     let time = OffsetDateTime::from_unix_timestamp(unix_time).unwrap_throw();
     let timestamp = time.format(&Rfc3339).unwrap_throw();
     let date = timestamp.split('T').next().unwrap_throw();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
     let remaining = u64::try_from(unix_time)
         .ok()
-        .and_then(|time| time.checked_sub(now));
+        .zip(u64::try_from(unix_now()).ok())
+        .and_then(|(time, now)| time.checked_sub(now));
     format!("{date} ({})", time_left(locale, remaining))
+}
+
+/// The current Unix time in seconds.
+pub fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
+        .unwrap_or_default()
 }
 
 /// Names the remaining time in its largest whole unit.
