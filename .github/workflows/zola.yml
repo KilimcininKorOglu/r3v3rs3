@@ -1,12 +1,10 @@
 name: Deploy Zola site to Pages
 
 on:
-  # The github-pages environment accepts deployments only from main, so a tag push cannot deploy.
+  # The github-pages environment accepts deployments from main and from v* tags.
   push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - ".github/workflows/zola.yml"
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
