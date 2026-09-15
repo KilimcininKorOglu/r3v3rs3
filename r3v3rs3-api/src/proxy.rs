@@ -67,10 +67,20 @@ impl ProxyKind {
         }
     }
 
+    /// The access lists that an HTTP proxy and its routes use.
+    pub fn access_lists(&self) -> Vec<ShortId> {
+        let Self::Http(http) = self else {
+            return Vec::new();
+        };
+        let routes = http.routes.iter().filter_map(|route| route.access_list);
+        http.access_list.into_iter().chain(routes).collect()
+    }
+
     /// Rejects a zero connect timeout, session idle timeout, fail timeout or check timeout, an
     /// invalid health check path, a server list in which every server has weight 0, an invalid
     /// circuit breaker, invalid retry attempts, an invalid sticky cookie, an invalid path prefix,
-    /// an invalid redirect target and an invalid route target.
+    /// an invalid redirect target, an invalid route target and an access list next to the IP
+    /// filter or the authentication that it replaces.
     pub fn validate_upstream(&self) -> Result<(), Error> {
         match self {
             Self::Tcp(tcp) => {
@@ -85,6 +95,7 @@ impl ProxyKind {
                 udp.health_check.validate(false)
             }
             Self::Http(http) => {
+                validate_access_lists(http)?;
                 http.health_check.validate(true)?;
                 http.circuit_breaker.validate()?;
                 http.sticky.validate()?;
@@ -108,6 +119,18 @@ impl ProxyKind {
             }
         }
     }
+}
+
+/// Rejects an access list next to the IP filter or the authentication of the same proxy or route.
+fn validate_access_lists(http: &HttpProxy) -> Result<(), Error> {
+    let proxy_conflict = !http.ip_filter.is_empty() || !http.auth.is_none();
+    let route_conflict = http.routes.iter().any(|route| {
+        route.access_list.is_some() && (route.ip_filter.is_some() || route.auth.is_some())
+    });
+    if (http.access_list.is_some() && proxy_conflict) || route_conflict {
+        return Err(Error::AccessListConflict);
+    }
+    Ok(())
 }
 
 /// Rejects a route with both servers and a fixed response, and an invalid fixed response. A route
@@ -186,6 +209,10 @@ pub struct HttpProxy {
     /// Default authentication for every route of this proxy.
     #[serde(default, skip_serializing_if = "AuthPolicy::is_none")]
     pub auth: AuthPolicy,
+    /// The access list whose IP filter and authentication replace `ip_filter` and `auth`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub access_list: Option<ShortId>,
     /// Default header rules for every route of this proxy.
     #[serde(default, skip_serializing_if = "HeaderRules::is_empty")]
     pub headers: HeaderRules,
@@ -313,6 +340,11 @@ pub struct Route {
     /// Replaces the proxy authentication for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthPolicy>,
+    /// The access list whose IP filter and authentication replace those of the proxy for this
+    /// route. A route with an access list has no `ip_filter` and no `auth`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub access_list: Option<ShortId>,
     /// Replaces the proxy header rules for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<HeaderRules>,

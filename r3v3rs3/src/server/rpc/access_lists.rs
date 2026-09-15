@@ -78,6 +78,13 @@ impl RpcMethod for DeleteAccessList {
     const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        let in_use = state
+            .proxies
+            .entries()
+            .any(|entry| entry.proxy.kind.access_lists().contains(&self.id));
+        if in_use {
+            return Err(Error::AccessListInUse { id: self.id });
+        }
         let mut lists = state.access_lists.clone();
         lists.retain(|list| list.id != self.id);
         if lists.len() == state.access_lists.len() {

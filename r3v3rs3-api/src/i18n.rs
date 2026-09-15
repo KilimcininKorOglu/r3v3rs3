@@ -269,6 +269,13 @@ mod tests {
             Error::InvalidFixedStatus { status: 418 },
             Error::FixedBodyTooLarge { max: 4096 },
             Error::AccessListNameRequired,
+            Error::AccessListConflict,
+            Error::AccessListNotFound {
+                id: "abc".parse().unwrap(),
+            },
+            Error::AccessListInUse {
+                id: "abc".parse().unwrap(),
+            },
             Error::ClusterUnavailable,
             Error::ClusterWriteConflict,
             Error::FailedToHashPassword,

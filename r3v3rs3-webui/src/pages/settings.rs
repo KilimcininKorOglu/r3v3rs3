@@ -1,6 +1,6 @@
 use crate::components::cluster_status::ClusterStatusCard;
 use crate::components::http_proxy_config::{
-    client_cert_label, parse_client_cert, use_client_certs,
+    client_cert_label, parse_optional_id, use_client_certs,
 };
 use crate::{auth::use_ensure_auth, i18n::use_locale, API_ENDPOINT};
 use gloo_net::http::{Request, RequestBuilder, Response};
@@ -462,7 +462,7 @@ fn client_cert_select(
     let onchange = Callback::from(move |event: Event| {
         let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
         let mut updated = (*fields).clone().unwrap_or_default();
-        *select(&mut updated) = parse_client_cert(&target.value());
+        *select(&mut updated) = parse_optional_id(&target.value());
         fields.set(Some(updated));
     });
     html! {

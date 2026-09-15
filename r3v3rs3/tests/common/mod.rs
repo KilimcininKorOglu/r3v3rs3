@@ -407,6 +407,11 @@ impl TestStorageBuilder {
         self
     }
 
+    pub fn access_lists(mut self, lists: Vec<r3v3rs3_api::access_list::AccessListEntry>) -> Self {
+        self.inner.access_lists = lists;
+        self
+    }
+
     pub fn certs(mut self, certs: HashMap<ShortId, Arc<Cert>>) -> Self {
         self.inner.certs = certs;
         self

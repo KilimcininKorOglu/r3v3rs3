@@ -40,6 +40,7 @@ fn proxy(routes: Vec<Route>, ip_filter: IpFilter, client_ip: ClientIpConfig) -> 
         circuit_breaker: Default::default(),
         retry: Default::default(),
         sticky: Default::default(),
+        access_list: None,
         max_body_size: 0,
         redirects: Vec::new(),
         client_cert: None,

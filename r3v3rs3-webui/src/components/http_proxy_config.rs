@@ -1,6 +1,9 @@
 use super::auth_config::{AuthConfig, AuthForm};
 use crate::i18n::use_locale;
 use crate::pages::cert_list::get_cert_list;
+use crate::API_ENDPOINT;
+use gloo_net::http::Request;
+use r3v3rs3_api::access_list::AccessListEntry;
 use r3v3rs3_api::cache::CacheConfig;
 use r3v3rs3_api::cert::{CertInfo, CertKind};
 use r3v3rs3_api::cidr::{format_cidr_list, parse_cidr_list};
@@ -14,7 +17,7 @@ use r3v3rs3_api::header_rules::{format_header_rules, HeaderRule, HeaderRules};
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::mirror::{Mirror, DEFAULT_MIRROR_BODY_SIZE};
-use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
+use r3v3rs3_api::policy::{AuthPolicy, IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
 use r3v3rs3_api::redirect::{RedirectRule, RedirectStatus};
 use r3v3rs3_api::rewrite::{PathRegex, PathRewrite};
@@ -56,6 +59,7 @@ struct ProxyForm {
     deny: String,
     rate_limit: RateLimitForm,
     auth: AuthForm,
+    access_list: Option<ShortId>,
     request_headers: String,
     response_headers: String,
     compression: CompressionForm,
@@ -86,6 +90,7 @@ impl ProxyForm {
             deny: format_cidr_list(&proxy.ip_filter.deny),
             rate_limit: RateLimitForm::new(&proxy.rate_limit),
             auth: AuthForm::new(&proxy.auth),
+            access_list: proxy.access_list,
             request_headers: format_header_rules(&proxy.headers.request),
             response_headers: format_header_rules(&proxy.headers.response),
             compression: CompressionForm::new(&proxy.compression),
@@ -380,6 +385,7 @@ struct RouteForm {
     rate_limit: RateLimitForm,
     override_auth: bool,
     auth: AuthForm,
+    access_list: Option<ShortId>,
     override_headers: bool,
     request_headers: String,
     response_headers: String,
@@ -414,6 +420,7 @@ impl RouteForm {
             rate_limit: RateLimitForm::new(&route.rate_limit.unwrap_or_default()),
             override_auth: route.auth.is_some(),
             auth: AuthForm::new(&route.auth.clone().unwrap_or_default()),
+            access_list: route.access_list,
             override_headers: route.headers.is_some(),
             request_headers: route
                 .headers
@@ -459,6 +466,7 @@ impl RouteForm {
             rate_limit: RateLimitForm::new(&RateLimit::default()),
             override_auth: false,
             auth: AuthForm::new(&Default::default()),
+            access_list: None,
             override_headers: false,
             request_headers: String::new(),
             response_headers: String::new(),
@@ -583,6 +591,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
     let upstream = use_upstream_form(props.proxy.load_balancing, props.proxy.health_check.clone());
     let circuit_breaker = use_state(|| CircuitBreakerForm::new(&props.proxy.circuit_breaker));
     let client_certs = use_client_certs();
+    let access_lists = use_access_lists();
     let routes = use_state(|| {
         let routes = props
             .proxy
@@ -619,15 +628,25 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { error_view(errors.get("trusted_proxies")) }
             <p class={HINT_CLASS}>{locale.t("http_form.trusted_proxies_hint")}</p>
 
-            <label class={LABEL_CLASS}>{locale.t("http_form.allow")}</label>
-            <input type="text" autocapitalize="off" value={form.allow.clone()} onchange={state_input(&form, text, |form, value| form.allow = value)} class={INPUT_CLASS} placeholder="192.168.0.0/16" />
-            { error_view(errors.get("allow")) }
-            <p class={HINT_CLASS}>{locale.t("http_form.allow_hint")}</p>
+            { access_list_view(
+                locale,
+                state_input(&form, select_value, |form, value| form.access_list = parse_optional_id(&value)),
+                form.access_list,
+                &access_lists,
+                "http_form.access_list_hint",
+            ) }
 
-            <label class={LABEL_CLASS}>{locale.t("http_form.deny")}</label>
-            <input type="text" autocapitalize="off" value={form.deny.clone()} onchange={state_input(&form, text, |form, value| form.deny = value)} class={INPUT_CLASS} placeholder="203.0.113.0/24" />
-            { error_view(errors.get("deny")) }
-            <p class={HINT_CLASS}>{locale.t("http_form.deny_hint")}</p>
+            if form.access_list.is_none() {
+                <label class={LABEL_CLASS}>{locale.t("http_form.allow")}</label>
+                <input type="text" autocapitalize="off" value={form.allow.clone()} onchange={state_input(&form, text, |form, value| form.allow = value)} class={INPUT_CLASS} placeholder="192.168.0.0/16" />
+                { error_view(errors.get("allow")) }
+                <p class={HINT_CLASS}>{locale.t("http_form.allow_hint")}</p>
+
+                <label class={LABEL_CLASS}>{locale.t("http_form.deny")}</label>
+                <input type="text" autocapitalize="off" value={form.deny.clone()} onchange={state_input(&form, text, |form, value| form.deny = value)} class={INPUT_CLASS} placeholder="203.0.113.0/24" />
+                { error_view(errors.get("deny")) }
+                <p class={HINT_CLASS}>{locale.t("http_form.deny_hint")}</p>
+            }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.rate_limit")}</label>
             { rate_limit_view(
@@ -640,9 +659,11 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { error_view(errors.get("rate_limit")) }
             <p class={HINT_CLASS}>{locale.t("http_form.rate_limit_hint")}</p>
 
-            <label class={SECTION_CLASS}>{locale.t("http_form.authentication")}</label>
-            <AuthConfig form={form.auth.clone()} onchange={state_update(&form, |form, value| form.auth = value)} />
-            { error_view(errors.get("auth")) }
+            if form.access_list.is_none() {
+                <label class={SECTION_CLASS}>{locale.t("http_form.authentication")}</label>
+                <AuthConfig form={form.auth.clone()} onchange={state_update(&form, |form, value| form.auth = value)} />
+                { error_view(errors.get("auth")) }
+            }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.header_rules")}</label>
             { header_rules_view(
@@ -677,7 +698,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
             <p class={HINT_CLASS}>{locale.t("http_form.h2c_hint")}</p>
             { client_cert_view(
                 locale,
-                state_input(&form, select_value, |form, value| form.client_cert = parse_client_cert(&value)),
+                state_input(&form, select_value, |form, value| form.client_cert = parse_optional_id(&value)),
                 form.client_cert,
                 &client_certs,
             ) }
@@ -715,7 +736,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
             <p class={HINT_CLASS}>{locale.t("http_form.routes_hint")}</p>
 
             { routes.iter().enumerate().map(|(i, route)| {
-                route_view(locale, &routes, i, route, errors.get(&format!("routes_{i}")))
+                route_view(locale, &routes, i, route, &access_lists, errors.get(&format!("routes_{i}")))
             }).collect::<Html>() }
         </>
     }
@@ -726,6 +747,7 @@ fn route_view(
     routes: &UseStateHandle<Vec<RouteForm>>,
     index: usize,
     route: &RouteForm,
+    access_lists: &[AccessListEntry],
     error: Option<&String>,
 ) -> Html {
     html! {
@@ -750,9 +772,14 @@ fn route_view(
                 { route_response_view(locale, routes, index, &route.response) }
             }
 
-            { route_ip_filter_view(locale, routes, index, route) }
+            { route_access_list_view(locale, routes, index, route, access_lists) }
+            if route.access_list.is_none() {
+                { route_ip_filter_view(locale, routes, index, route) }
+            }
             { route_rate_limit_view(locale, routes, index, route) }
-            { route_auth_view(locale, routes, index, route) }
+            if route.access_list.is_none() {
+                { route_auth_view(locale, routes, index, route) }
+            }
             { route_headers_view(locale, routes, index, route) }
             if route.response.kind == RouteKind::Proxy {
                 { route_timeouts_view(locale, routes, index, route) }
@@ -960,6 +987,24 @@ fn route_override_view(
             }
         </>
     }
+}
+
+fn route_access_list_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+    access_lists: &[AccessListEntry],
+) -> Html {
+    access_list_view(
+        locale,
+        route_input(routes, index, select_value, |route, value| {
+            route.access_list = parse_optional_id(&value)
+        }),
+        route.access_list,
+        access_lists,
+        "http_form.route_access_list_hint",
+    )
 }
 
 fn route_ip_filter_view(
@@ -1457,18 +1502,72 @@ fn period_label(locale: Locale, period: RatePeriod) -> String {
 /// Loads the client certificates that have a private key.
 #[hook]
 pub fn use_client_certs() -> UseStateHandle<Vec<CertInfo>> {
-    let certs = use_state(Vec::<CertInfo>::new);
+    use_loaded_list(get_cert_list, is_upstream_client_cert)
+}
+
+/// Loads the access lists.
+#[hook]
+fn use_access_lists() -> UseStateHandle<Vec<AccessListEntry>> {
+    use_loaded_list(get_access_lists, |_| true)
+}
+
+/// Loads a list once with `load` and keeps the items that `keep` accepts. A failed load keeps the
+/// list empty.
+#[hook]
+fn use_loaded_list<T, F>(load: fn() -> F, keep: fn(&T) -> bool) -> UseStateHandle<Vec<T>>
+where
+    T: 'static,
+    F: std::future::Future<Output = Result<Vec<T>, gloo_net::Error>> + 'static,
+{
+    let items = use_state(Vec::<T>::new);
     use_effect_with((), {
-        let certs = certs.clone();
+        let items = items.clone();
         move |_| {
             wasm_bindgen_futures::spawn_local(async move {
-                if let Ok(list) = get_cert_list().await {
-                    certs.set(list.into_iter().filter(is_upstream_client_cert).collect());
+                if let Ok(list) = load().await {
+                    items.set(list.into_iter().filter(keep).collect());
                 }
             });
         }
     });
-    certs
+    items
+}
+
+async fn get_access_lists() -> Result<Vec<AccessListEntry>, gloo_net::Error> {
+    Request::get(&format!("{API_ENDPOINT}/access_lists"))
+        .send()
+        .await?
+        .json()
+        .await
+}
+
+/// The select element of the access list of a proxy or a route. A selected list that `lists` does
+/// not have shows its id.
+fn access_list_view(
+    locale: Locale,
+    onchange: Callback<Event>,
+    selected: Option<ShortId>,
+    lists: &[AccessListEntry],
+    hint_key: &'static str,
+) -> Html {
+    let unknown = selected.filter(|id| lists.iter().all(|entry| entry.id != *id));
+    let options = html! {
+        <>
+            <option value="" selected={selected.is_none()}>{locale.t("http_form.access_list_none")}</option>
+            { for lists.iter().map(|entry| html! {
+                <option value={entry.id.to_string()} selected={selected == Some(entry.id)}>{entry.list.name.clone()}</option>
+            }) }
+            if let Some(id) = unknown {
+                <option value={id.to_string()} selected=true>{id.to_string()}</option>
+            }
+        </>
+    };
+    select_field(
+        locale.t("http_form.access_list"),
+        onchange,
+        options,
+        Some(locale.t(hint_key)),
+    )
 }
 
 fn is_upstream_client_cert(cert: &CertInfo) -> bool {
@@ -1498,9 +1597,9 @@ pub fn client_cert_view(
     )
 }
 
-/// Reads the value of the client certificate select element. The empty value is "None", because
-/// an empty string parses as the zero ID.
-pub fn parse_client_cert(value: &str) -> Option<ShortId> {
+/// Reads the value of a select element of an optional id, such as the client certificate. The
+/// empty value is "None", because an empty string parses as the zero ID.
+pub fn parse_optional_id(value: &str) -> Option<ShortId> {
     if value.is_empty() {
         return None;
     }
@@ -1736,20 +1835,8 @@ fn get_proxy(
         "trusted_proxies",
         &mut errors,
     );
-    let ip_filter = IpFilter {
-        allow: or_error(
-            translated(locale, parse_cidr_list(&form.allow)),
-            "allow",
-            &mut errors,
-        ),
-        deny: or_error(
-            translated(locale, parse_cidr_list(&form.deny)),
-            "deny",
-            &mut errors,
-        ),
-    };
+    let (ip_filter, auth) = parse_proxy_access(locale, form, &mut errors);
     let rate_limit = parse_rate_limit(locale, &form.rate_limit, "rate_limit", &mut errors);
-    let auth = or_error(form.auth.parse(locale), "auth", &mut errors);
     let headers = parse_header_rules_form(
         locale,
         &form.request_headers,
@@ -1792,6 +1879,7 @@ fn get_proxy(
         ip_filter,
         rate_limit,
         auth,
+        access_list: form.access_list,
         headers,
         compression,
         cache,
@@ -1806,6 +1894,30 @@ fn get_proxy(
         max_body_size,
         redirects,
     })
+}
+
+/// The IP filter and the authentication of the proxy. The access list of the proxy replaces both.
+fn parse_proxy_access(
+    locale: Locale,
+    form: &ProxyForm,
+    errors: &mut HashMap<String, String>,
+) -> (IpFilter, AuthPolicy) {
+    if form.access_list.is_some() {
+        return Default::default();
+    }
+    let ip_filter = IpFilter {
+        allow: or_error(
+            translated(locale, parse_cidr_list(&form.allow)),
+            "allow",
+            errors,
+        ),
+        deny: or_error(
+            translated(locale, parse_cidr_list(&form.deny)),
+            "deny",
+            errors,
+        ),
+    };
+    (ip_filter, or_error(form.auth.parse(locale), "auth", errors))
 }
 
 /// The largest timeout that the forms accept, one day.
@@ -2146,7 +2258,9 @@ fn parse_route(
         );
         return None;
     }
-    let ip_filter = route.override_ip_filter.then(|| IpFilter {
+    // The access list of the route replaces its IP filter and its authentication.
+    let own_access = route.access_list.is_none();
+    let ip_filter = (own_access && route.override_ip_filter).then(|| IpFilter {
         allow: or_error(
             translated(locale, parse_cidr_list(&route.allow)),
             key,
@@ -2161,8 +2275,7 @@ fn parse_route(
     let rate_limit = route
         .override_rate_limit
         .then(|| parse_rate_limit(locale, &route.rate_limit, key, errors));
-    let auth = route
-        .override_auth
+    let auth = (own_access && route.override_auth)
         .then(|| or_error(route.auth.parse(locale), key, errors));
     let headers = route.override_headers.then(|| {
         parse_header_rules_form(
@@ -2189,6 +2302,7 @@ fn parse_route(
         ip_filter,
         rate_limit,
         auth,
+        access_list: route.access_list,
         headers,
         ..target
     })
@@ -2357,6 +2471,41 @@ mod tests {
             );
             assert!(errors.is_empty(), "{errors:?}");
         }
+    }
+
+    #[test]
+    fn an_access_list_replaces_the_ip_filter_and_the_authentication() {
+        let office: ShortId = "office".parse().unwrap();
+        let route = RouteForm {
+            servers: vec!["http://127.0.0.1:9000/".into()],
+            access_list: Some(office),
+            override_ip_filter: true,
+            allow: "not a block".into(),
+            override_auth: true,
+            ..RouteForm::empty()
+        };
+        let mut errors = HashMap::new();
+        let parsed = parse_route(Locale::En, &route, "routes_0", &mut errors).unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(parsed.access_list, Some(office));
+        assert_eq!((&parsed.ip_filter, &parsed.auth), (&None, &None));
+        assert_eq!(RouteForm::new(&parsed).access_list, Some(office));
+
+        let proxy = ProxyForm {
+            access_list: Some(office),
+            allow: "not a block".into(),
+            ..ProxyForm::new(&HttpProxy::default())
+        };
+        let (ip_filter, auth) = parse_proxy_access(Locale::En, &proxy, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(ip_filter.is_empty() && auth.is_none());
+        let own = ProxyForm {
+            access_list: None,
+            ..proxy
+        };
+        parse_proxy_access(Locale::En, &own, &mut errors);
+        assert!(errors.contains_key("allow"));
+        assert_eq!(parse_optional_id(""), None);
     }
 
     #[test]

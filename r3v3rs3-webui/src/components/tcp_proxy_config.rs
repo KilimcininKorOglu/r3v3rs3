@@ -1,6 +1,6 @@
 use super::http_proxy_config::{
     circuit_breaker_view, client_cert_view, error_view, format_seconds, input_element, item_update,
-    list_buttons, or_error, parse_client_cert, parse_seconds, parse_weight, select_field,
+    list_buttons, or_error, parse_optional_id, parse_seconds, parse_weight, select_field,
     select_setter, timeout_field_view, toggle, upstream_form_view, use_client_certs,
     use_entry_errors, use_upstream_form, CircuitBreakerForm, UpstreamForm, INPUT_CLASS,
     LABEL_CLASS,
@@ -133,7 +133,7 @@ pub fn tcp_proxy_config(props: &Props) -> Html {
 
             { client_cert_view(
                 locale,
-                select_setter(&client_cert, parse_client_cert),
+                select_setter(&client_cert, parse_optional_id),
                 *client_cert,
                 &client_certs,
             ) }
@@ -346,9 +346,9 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn parse_client_cert_reads_none_as_no_certificate() {
-        assert_eq!(parse_client_cert(""), None);
-        assert_eq!(parse_client_cert("a1b2c3d"), "a1b2c3d".parse().ok());
+    fn parse_optional_id_reads_none_as_no_certificate() {
+        assert_eq!(parse_optional_id(""), None);
+        assert_eq!(parse_optional_id("a1b2c3d"), "a1b2c3d".parse().ok());
     }
 
     #[test]

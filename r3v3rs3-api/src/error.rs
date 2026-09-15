@@ -238,6 +238,15 @@ pub enum Error {
     #[error("an access list needs a name")]
     AccessListNameRequired,
 
+    #[error("an access list replaces the IP filter and the authentication, so they cannot be set together")]
+    AccessListConflict,
+
+    #[error("access list not found: {id}")]
+    AccessListNotFound { id: ShortId },
+
+    #[error("a proxy uses the access list: {id}")]
+    AccessListInUse { id: ShortId },
+
     #[error("the cluster store cannot save changes now")]
     ClusterUnavailable,
 

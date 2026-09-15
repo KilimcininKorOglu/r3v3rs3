@@ -138,6 +138,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                     circuit_breaker: Default::default(),
                     retry: Default::default(),
                     sticky: Default::default(),
+                    access_list: None,
                     max_body_size: 0,
                     redirects: Vec::new(),
                     client_cert: None,
@@ -302,6 +303,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                         circuit_breaker: Default::default(),
                         retry: Default::default(),
                         sticky: Default::default(),
+                        access_list: None,
                         max_body_size: 0,
                         // The HTTPS redirect runs before this rule, which matches every request.
                         redirects: vec![
@@ -392,6 +394,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     circuit_breaker: Default::default(),
                     retry: Default::default(),
                     sticky: Default::default(),
+                    access_list: None,
                     max_body_size: 0,
                     redirects: Vec::new(),
                     client_cert: None,

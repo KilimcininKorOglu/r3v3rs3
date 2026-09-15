@@ -27,7 +27,7 @@ use crate::{
     proxy::{PortContext, PortContextKind, ProxyRegistries},
 };
 use quinn::Incoming;
-use r3v3rs3_api::access_list::AccessListEntry;
+use r3v3rs3_api::access_list::{apply_access_lists, AccessListEntry};
 use r3v3rs3_api::app::{AppConfig, AppInfo};
 use r3v3rs3_api::cluster::ClusterStatus;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryState, DiscoveryStatus};
@@ -35,7 +35,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
-use r3v3rs3_api::proxy::ProxyEntry;
+use r3v3rs3_api::proxy::{ProxyEntry, ProxyKind};
 use rand::seq::SliceRandom;
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -112,6 +112,16 @@ fn manual_proxies(mut proxies: Vec<ProxyEntry>) -> Vec<ProxyEntry> {
         }
     }
     proxies
+}
+
+/// Gives an HTTP proxy the IP filters and the authentication of its access lists.
+fn with_access_lists(mut entry: ProxyEntry, lists: &[AccessListEntry]) -> ProxyEntry {
+    if let ProxyKind::Http(http) = &mut entry.proxy.kind {
+        for list in apply_access_lists(http, lists) {
+            warn!(proxy = %entry.id, access_list = %list, "the access list does not exist, so the proxy rejects every client");
+        }
+    }
+    entry
 }
 
 /// The account directory of the storage. `None` when the storage cannot load the accounts.
@@ -366,7 +376,7 @@ impl ServerState {
             StateKind::Acmes => self.reload_acmes().await,
             StateKind::Ports => self.reload_ports().await,
             StateKind::Proxies => self.reload_manual_proxies().await,
-            StateKind::AccessLists => self.access_lists = self.storage.load_access_lists().await,
+            StateKind::AccessLists => self.reload_access_lists().await,
             StateKind::Cdn => self.reload_cdn_ranges().await,
             StateKind::Challenges => self.reload_challenges().await,
             StateKind::CachePurges => self.reload_cache_purges().await,
@@ -851,11 +861,20 @@ impl ServerState {
         saved
     }
 
-    /// Saves the access lists, and uses them after the storage accepts them.
+    /// Saves the access lists, and applies them to the proxies after the storage accepts them.
     pub async fn commit_access_lists(&mut self, lists: Vec<AccessListEntry>) -> Result<(), Error> {
         self.storage.save_access_lists(&lists).await?;
         self.access_lists = lists;
+        self.reload_proxies().await;
         Ok(())
+    }
+
+    async fn reload_access_lists(&mut self) {
+        let lists = self.storage.load_access_lists().await;
+        if lists != self.access_lists {
+            self.access_lists = lists;
+            self.reload_proxies().await;
+        }
     }
 
     /// Sends the proxy list without the password hashes and the token digests.
@@ -920,7 +939,7 @@ impl ServerState {
                 .filter(|entry: &&ProxyEntry| {
                     entry.proxy.active && entry.proxy.ports.contains(&ctx.entry.id)
                 })
-                .cloned()
+                .map(|entry| with_access_lists(entry.clone(), &self.access_lists))
                 .collect();
             let span = span!(Level::INFO, "port", resource_id = ctx.entry.id.to_string());
             if let Err(err) = ctx

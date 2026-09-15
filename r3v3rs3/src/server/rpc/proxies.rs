@@ -144,6 +144,7 @@ impl RpcMethod for AddProxy {
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         validate_proxy(&self.entry, state)?;
+        ensure_access_lists(&self.entry, state)?;
         let proxy = seal(self.entry).await?;
         let id = state.generate_id();
         // The account gets the id first, so a failed account save adds no proxy that its creator
@@ -182,6 +183,7 @@ impl RpcMethod for UpdateProxy {
             restore_secrets(&mut proxy, &ctx.entry.proxy);
         }
         validate_proxy(&proxy, state)?;
+        ensure_access_lists(&proxy, state)?;
         let proxy = seal(proxy).await?;
         let previous = proxy_entries(state);
         if state.proxies.set((self.entry.id, proxy).into()) {
@@ -215,6 +217,20 @@ fn ensure_manual(state: &ServerState, id: ShortId) -> Result<(), Error> {
     match state.proxies.get(id) {
         Some(ctx) if ctx.entry.is_discovered() => Err(Error::ProxyReadOnly { id }),
         _ => Ok(()),
+    }
+}
+
+/// Rejects a proxy that uses an access list that does not exist. A discovered proxy skips this
+/// check, and its routes with a missing access list reject every client.
+fn ensure_access_lists(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
+    let missing = proxy
+        .kind
+        .access_lists()
+        .into_iter()
+        .find(|id| !state.access_lists.iter().any(|list| list.id == *id));
+    match missing {
+        Some(id) => Err(Error::AccessListNotFound { id }),
+        None => Ok(()),
     }
 }
 
