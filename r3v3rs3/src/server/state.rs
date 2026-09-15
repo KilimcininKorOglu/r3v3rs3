@@ -19,6 +19,7 @@ use crate::config::storage::Storage;
 use crate::discovery::DiscoverySnapshot;
 use crate::kv::http::ApiClient;
 use crate::log::DatabaseLayer;
+use crate::notify::{certificate_notifications, Notification, Notifier};
 use crate::proxy::http::SessionService;
 use crate::proxy::tls::upstream_client_config;
 use crate::sessions::{self, SessionBackend};
@@ -87,6 +88,10 @@ pub struct ServerState {
     created_id: Option<ShortId>,
     /// The day of the last audit log cleanup, in days after the Unix epoch.
     audit_cleaned_day: u64,
+    /// Sends the webhook notifications in the background.
+    notifier: Notifier,
+    /// The keys of the certificate events that the webhook got.
+    sent_notifications: HashSet<String>,
 }
 
 pub enum Received {
@@ -170,6 +175,7 @@ impl ServerState {
         let acmes = storage.load_acmes().await;
         let proxies = manual_proxies(storage.load_proxies().await);
         let access_lists = storage.load_access_lists().await;
+        let sent_notifications = storage.load_sent_notifications().await;
 
         let mut ports = PortList::default();
         for entry in storage.load_ports().await {
@@ -225,6 +231,8 @@ impl ServerState {
             audit,
             created_id: None,
             audit_cleaned_day: 0,
+            notifier: Notifier::spawn(),
+            sent_notifications,
         };
 
         if let Some(exchange) = this.storage.clone().rate_count_exchange() {
@@ -256,12 +264,8 @@ impl ServerState {
             ServerCommand::AddAcmeOrders { orders } => {
                 self.continue_http_challenges(orders).await;
             }
-            ServerCommand::AcmeOrderFinished { target, succeeded } => {
-                self.acme_schedule
-                    .finish(&target, succeeded, Instant::now());
-                if self.acme_schedule.is_idle() {
-                    self.stop_http_challenges().await;
-                }
+            ServerCommand::AcmeOrderFinished { target, error } => {
+                self.finish_acme_order(target, error).await;
             }
             ServerCommand::CallMethod {
                 id,
@@ -310,6 +314,8 @@ impl ServerState {
         self.cluster.leader = leader;
         self.publish_cluster_status();
         if leader {
+            // The previous leader can have sent notifications that this node did not send.
+            self.sent_notifications = self.storage.load_sent_notifications().await;
             self.run_leader_tasks().await;
         }
     }
@@ -319,6 +325,7 @@ impl ServerState {
         self.start_http_challenges().await;
         self.cleanup_audit_log().await;
         self.remove_expired_certs().await;
+        self.notify_certificates().await;
         let expiry = sessions::expiry(&self.config.admin);
         if let Err(err) = self.session_backend.remove_expired(expiry).await {
             error!(%err, "failed to remove the expired sessions");
@@ -354,6 +361,55 @@ impl ServerState {
         {
             Ok(()) => self.audit_cleaned_day = today,
             Err(err) => error!("failed to remove the old audit log entries: {err:#}"),
+        }
+    }
+
+    /// Sends a webhook notification for each certificate that expires within the warning time or
+    /// has expired. Each event of a certificate is sent once.
+    async fn notify_certificates(&mut self) {
+        let Some(webhook) = self.config.notifications.webhook.clone() else {
+            return;
+        };
+        let certs = self
+            .certs
+            .iter()
+            .map(|cert| cert.info())
+            .collect::<Vec<_>>();
+        let now = i64::try_from(unix_ms() / 1000).unwrap_or(i64::MAX);
+        let (notifications, sent) = certificate_notifications(
+            &certs,
+            &self.sent_notifications,
+            now,
+            self.config.notifications.cert_expiry_warning,
+            &self.config.cluster.node_name,
+        );
+        for notification in notifications {
+            self.notifier.send(&webhook, notification);
+        }
+        if sent != self.sent_notifications {
+            log_save_error(self.storage.save_sent_notifications(&sent).await);
+            self.sent_notifications = sent;
+        }
+    }
+
+    /// Ends an ACME order. A failed order waits before the next attempt, and the leader sends a
+    /// webhook notification about it.
+    async fn finish_acme_order(&mut self, target: AcmeTarget, error: Option<String>) {
+        self.acme_schedule
+            .finish(&target, error.is_none(), Instant::now());
+        let webhook = self
+            .config
+            .notifications
+            .webhook
+            .as_ref()
+            .filter(|_| self.leader);
+        if let (Some(webhook), Some(error)) = (webhook, error) {
+            let node = &self.config.cluster.node_name;
+            let notification = Notification::acme_order_failed(node, &target, error);
+            self.notifier.send(webhook, notification);
+        }
+        if self.acme_schedule.is_idle() {
+            self.stop_http_challenges().await;
         }
     }
 
@@ -1077,7 +1133,7 @@ impl ServerState {
                         let _ = command
                             .send(ServerCommand::AcmeOrderFinished {
                                 target,
-                                succeeded: false,
+                                error: Some(format!("{err:#}")),
                             })
                             .await;
                     }
@@ -1109,7 +1165,7 @@ impl ServerState {
                     "acme",
                     resource_id = order.target.acme_id.to_string()
                 );
-                let succeeded = match order.start_challenge().instrument(span.clone()).await {
+                let error = match order.start_challenge().instrument(span.clone()).await {
                     Ok(cert) => {
                         span.in_scope(|| {
                             info!(id = cert.id().to_string(), "acme request completed");
@@ -1119,17 +1175,17 @@ impl ServerState {
                                 cert: Arc::new(cert),
                             })
                             .await;
-                        true
+                        None
                     }
                     Err(err) => {
                         span.in_scope(|| error!(%err, "failed to start challenge"));
-                        false
+                        Some(format!("{err:#}"))
                     }
                 };
                 let _ = command
                     .send(ServerCommand::AcmeOrderFinished {
                         target: order.target,
-                        succeeded,
+                        error,
                     })
                     .await;
             }
@@ -1189,6 +1245,7 @@ impl ServerState {
         config.keep_secrets(&self.config);
         config.keep_file_only(&self.config);
         discovery::validate_config(&config.discovery, &self.certs)?;
+        config.notifications.validate()?;
         self.storage.save_app_config(&config).await?;
         self.apply_config(config).await;
         Ok(())

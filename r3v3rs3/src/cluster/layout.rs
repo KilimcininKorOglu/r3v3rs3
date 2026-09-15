@@ -237,6 +237,12 @@ impl Layout {
         format!("{}{time:013}-{random:08x}", self.audit_day(day))
     }
 
+    /// The keys of the certificate events that the webhook got. Only the leader writes it. It is
+    /// outside the state, so a change does not reload the state of the nodes.
+    pub fn notifications(&self) -> String {
+        format!("{}notify", self.data)
+    }
+
     /// Whether the cluster stores the value of the key without encryption. Every other value is
     /// encrypted.
     pub fn is_plain(&self, key: &str) -> bool {
@@ -351,5 +357,10 @@ mod tests {
         assert_eq!(entry, "r3v3rs3/v1/audit/2026-09-15/0000000000001-000000ff");
         assert_eq!(layout.kind(&entry), None);
         assert!(!layout.is_plain(&entry));
+
+        let sent = layout.notifications();
+        assert_eq!(sent, "r3v3rs3/v1/notify");
+        assert_eq!(layout.kind(&sent), None);
+        assert!(!layout.is_plain(&sent));
     }
 }

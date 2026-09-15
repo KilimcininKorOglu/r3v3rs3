@@ -210,7 +210,9 @@ fn resource_routes() -> OpenApiRouter<AppState> {
         .nest("/audit", OpenApiRouter::new().routes(routes!(audit::list)))
         .nest(
             "/config",
-            OpenApiRouter::new().routes(routes!(config::get, config::put)),
+            OpenApiRouter::new()
+                .routes(routes!(config::get, config::put))
+                .routes(routes!(config::test_notification)),
         )
         .nest(
             "/ports",

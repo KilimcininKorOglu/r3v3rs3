@@ -793,6 +793,31 @@ impl Storage for KvStorage {
         })
     }
 
+    async fn load_sent_notifications(&self) -> std::collections::HashSet<String> {
+        let key = self.layout.notifications();
+        match self.load_value(&key).await {
+            Ok(keys) => keys.unwrap_or_default(),
+            Err(err) => {
+                error!(key, "failed to load: {err:#}");
+                Default::default()
+            }
+        }
+    }
+
+    /// Only the leader writes the key, so the write has no condition.
+    async fn save_sent_notifications(
+        &self,
+        keys: &std::collections::HashSet<String>,
+    ) -> Result<(), Error> {
+        let value = serde_json::to_vec(keys).map_err(|err| {
+            error!("failed to encode the sent notifications: {err}");
+            Error::FailedToSaveConfig
+        })?;
+        self.put_unconditional(self.layout.notifications(), &value, None)
+            .await
+            .map_err(unavailable)
+    }
+
     async fn save_challenges(&self, challenges: &ServedChallenges) -> Result<(), Error> {
         let prefix = self.layout.challenges();
         // An earlier leader can leave keys in the store, so the storage reads them first.

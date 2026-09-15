@@ -1,9 +1,11 @@
 use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
 use crate::accounts::Caller;
-use crate::server::rpc::config::{GetConfig, SetConfig};
+use crate::notify::{self, Notification, NotificationEvent};
+use crate::server::rpc::config::{GetConfig, GetNotificationWebhook, SetConfig};
 use axum::{extract::State, Extension, Json};
 use r3v3rs3_api::app::AppConfig;
+use r3v3rs3_api::error::Error;
 
 /// Returns the application settings.
 #[utoipa::path(
@@ -35,4 +37,27 @@ pub async fn put(
     Json(config): Json<AppConfig>,
 ) -> Result<Json<Box<()>>, AppError> {
     Ok(Json(state.call(&caller, SetConfig { config }).await?))
+}
+
+/// Sends a test notification to the webhook of the saved settings.
+#[utoipa::path(
+    post,
+    path = "/notifications/test",
+    tag = "config",
+    operation_id = "test_notification",
+    responses((status = 200, description = "The webhook accepted the test notification."), ErrorResponses)
+)]
+pub async fn test_notification(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<()>, AppError> {
+    let (webhook, node) = *state.call(&caller, GetNotificationWebhook).await?;
+    let webhook = webhook.ok_or(Error::NotificationWebhookMissing)?;
+    let notification = Notification::new(NotificationEvent::Test, &node);
+    notify::deliver(&webhook, &notification)
+        .await
+        .map_err(|err| Error::NotificationFailed {
+            reason: format!("{err:#}"),
+        })?;
+    Ok(Json(()))
 }

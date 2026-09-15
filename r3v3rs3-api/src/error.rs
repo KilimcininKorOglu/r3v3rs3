@@ -113,6 +113,15 @@ pub enum Error {
     #[error("the webhook url must use https, or http on a loopback address: {url}")]
     AcmeWebhookUrlInvalid { url: String },
 
+    #[error("the notification webhook url must use https, or http on a loopback address: {url}")]
+    NotificationWebhookUrlInvalid { url: String },
+
+    #[error("no notification webhook is set")]
+    NotificationWebhookMissing,
+
+    #[error("the notification webhook failed: {reason}")]
+    NotificationFailed { reason: String },
+
     #[error("the dns exec program is not in the acme_exec programs of config.toml: {program}")]
     AcmeExecProgramNotAllowed { program: String },
 
@@ -278,6 +287,7 @@ impl Error {
             Self::TooManyLoginAttempts => 429,
             Self::ClusterWriteConflict | Self::AccountExists { .. } => 409,
             Self::ClusterUnavailable => 503,
+            Self::NotificationFailed { .. } => 502,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig
             | Self::FailedToInvokeRpc

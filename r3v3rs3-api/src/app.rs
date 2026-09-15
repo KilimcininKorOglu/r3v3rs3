@@ -1,6 +1,8 @@
+use crate::acme::webhook_url_allowed;
+use crate::error::Error;
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{fmt, net::SocketAddr, path::PathBuf, time::Duration};
 use utoipa::ToSchema;
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -67,6 +69,7 @@ impl AppConfig {
     /// A copy without secrets, which the admin API returns.
     pub fn masked(&self) -> Self {
         Self {
+            notifications: self.notifications.masked(),
             discovery: self.discovery.masked(),
             cluster: self.cluster.masked(),
             ..self.clone()
@@ -75,6 +78,7 @@ impl AppConfig {
 
     /// Takes the secrets that an update does not set from the current settings.
     pub fn keep_secrets(&mut self, current: &Self) {
+        self.notifications.keep_secrets(&current.notifications);
         self.discovery.keep_secrets(&current.discovery);
     }
 
@@ -155,14 +159,95 @@ pub struct LogConfig {
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct NotificationConfig {
-    /// The certificate list marks a certificate that expires within this time.
+    /// The certificate list marks a certificate that expires within this time, and the webhook
+    /// gets a notification for it.
     #[serde(with = "humantime_serde", default = "default_cert_expiry_warning")]
     #[schema(value_type = String, example = "14days")]
     pub cert_expiry_warning: Duration,
+
+    /// The webhook that gets the certificate notifications. Without it no notification is sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook: Option<WebhookConfig>,
+}
+
+impl NotificationConfig {
+    /// A copy without the webhook token. `token_set` tells whether a token is set.
+    pub fn masked(&self) -> Self {
+        let mut masked = self.clone();
+        if let Some(webhook) = &mut masked.webhook {
+            webhook.token_set = webhook.token.take().is_some();
+        }
+        masked
+    }
+
+    /// Takes the webhook token that an update does not set from the current settings. An empty
+    /// token removes the token.
+    pub fn keep_secrets(&mut self, current: &Self) {
+        if let Some(webhook) = &mut self.webhook {
+            webhook.token_set = false;
+            let token = current
+                .webhook
+                .as_ref()
+                .and_then(|saved| saved.token.clone());
+            crate::discovery::keep_secret(&mut webhook.token, &token);
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), Error> {
+        match &self.webhook {
+            Some(webhook) if !webhook_url_allowed(&webhook.url) => {
+                Err(Error::NotificationWebhookUrlInvalid {
+                    url: webhook.url.clone(),
+                })
+            }
+            Some(webhook) if webhook.timeout.is_zero() => Err(Error::InvalidTimeout),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// A service of the operator that gets a JSON `POST` request for each notification.
+#[derive(DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WebhookConfig {
+    /// An https URL, or an http URL on a loopback address.
+    #[serde(default)]
+    #[schema(example = "https://hooks.example.com/r3v3rs3")]
+    pub url: String,
+    /// The bearer token of the `Authorization` header. The admin API does not return it. An
+    /// update without a token keeps the current token, and an empty token removes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(write_only)]
+    pub token: Option<String>,
+    /// Whether a token is set.
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schema(read_only)]
+    pub token_set: bool,
+    /// The longest time of one request.
+    #[serde(with = "humantime_serde", default = "default_webhook_timeout")]
+    #[schema(value_type = String, example = "10s")]
+    pub timeout: Duration,
+}
+
+impl fmt::Debug for WebhookConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WebhookConfig")
+            .field("url", &self.url)
+            .field("token", &self.token.as_ref().map(|_| "***"))
+            .field("timeout", &self.timeout)
+            .finish()
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn default_cert_expiry_warning() -> Duration {
     Duration::from_secs(14 * 24 * 60 * 60)
+}
+
+fn default_webhook_timeout() -> Duration {
+    Duration::from_secs(10)
 }
 
 fn default_database_log_retention() -> Duration {
@@ -172,4 +257,55 @@ fn default_database_log_retention() -> Duration {
 /// One year in the duration format: 365.25 days.
 fn default_audit_log_retention() -> Duration {
     Duration::from_secs(31_557_600)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn webhook(url: &str, token: Option<&str>) -> NotificationConfig {
+        NotificationConfig {
+            webhook: Some(WebhookConfig {
+                url: url.into(),
+                token: token.map(str::to_string),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_admin_api_hides_the_webhook_token_and_an_update_keeps_it() {
+        let saved = webhook("https://hooks.example.com/", Some("secret-token"));
+        assert!(!format!("{saved:?}").contains("secret-token"));
+        let masked = saved.masked();
+        let hidden = masked.webhook.clone().unwrap();
+        assert_eq!((hidden.token, hidden.token_set), (None, true));
+
+        let mut update = masked;
+        update.keep_secrets(&saved);
+        assert_eq!(update, saved);
+
+        let mut cleared = webhook("https://hooks.example.com/", Some(""));
+        cleared.keep_secrets(&saved);
+        assert_eq!(cleared.webhook.unwrap().token, None);
+    }
+
+    #[test]
+    fn a_webhook_needs_https_unless_it_is_a_loopback_address() {
+        assert!(NotificationConfig::default().validate().is_ok());
+        assert!(webhook("https://hooks.example.com/", None)
+            .validate()
+            .is_ok());
+        assert!(webhook("http://127.0.0.1:9000/", None).validate().is_ok());
+        assert!(matches!(
+            webhook("http://hooks.example.com/", None).validate(),
+            Err(Error::NotificationWebhookUrlInvalid { .. })
+        ));
+        let mut no_timeout = webhook("https://hooks.example.com/", None);
+        if let Some(webhook) = &mut no_timeout.webhook {
+            webhook.timeout = Duration::ZERO;
+        }
+        assert!(matches!(no_timeout.validate(), Err(Error::InvalidTimeout)));
+    }
 }

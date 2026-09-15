@@ -1,6 +1,6 @@
 //! Publishes the TXT records of the ACME DNS-01 challenge through DNS provider APIs.
 
-mod api;
+pub(crate) mod api;
 mod azure;
 mod cloudflare;
 mod desec;

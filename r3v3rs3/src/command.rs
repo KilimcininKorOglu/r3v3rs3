@@ -22,9 +22,10 @@ pub enum ServerCommand {
     AddAcmeOrders {
         orders: Vec<AcmeOrder>,
     },
+    /// An ACME order ended. `error` describes the failure of a failed order.
     AcmeOrderFinished {
         target: AcmeTarget,
-        succeeded: bool,
+        error: Option<String>,
     },
     CallMethod {
         id: usize,
@@ -63,10 +64,10 @@ impl std::fmt::Debug for ServerCommand {
                 .debug_struct("AddAcmeOrders")
                 .field("orders", &orders.len())
                 .finish(),
-            Self::AcmeOrderFinished { target, succeeded } => f
+            Self::AcmeOrderFinished { target, error } => f
                 .debug_struct("AcmeOrderFinished")
                 .field("target", target)
-                .field("succeeded", succeeded)
+                .field("error", error)
                 .finish(),
             Self::CallMethod { id, caller, .. } => f
                 .debug_struct("CallMethod")

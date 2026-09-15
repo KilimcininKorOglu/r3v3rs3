@@ -756,6 +756,35 @@ impl Storage for FileStorage {
             }
         }
     }
+
+    async fn load_sent_notifications(&self) -> std::collections::HashSet<String> {
+        let path = self.dir.join("notifications.json");
+        let result: anyhow::Result<_> = async {
+            if !fs::try_exists(&path).await? {
+                return Ok(Default::default());
+            }
+            Ok(serde_json::from_slice(&fs::read(&path).await?)?)
+        }
+        .await;
+        result.unwrap_or_else(|err| {
+            warn!(?path, "failed to load: {err}");
+            Default::default()
+        })
+    }
+
+    async fn save_sent_notifications(
+        &self,
+        keys: &std::collections::HashSet<String>,
+    ) -> Result<(), Error> {
+        let path = self.dir.join("notifications.json");
+        let result = async {
+            create_parent(&path).await?;
+            fs::write(&path, serde_json::to_vec(keys)?).await?;
+            Ok(())
+        }
+        .await;
+        saved(&path, result)
+    }
 }
 
 #[cfg(test)]

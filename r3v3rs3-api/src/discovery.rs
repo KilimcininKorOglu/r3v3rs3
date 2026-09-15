@@ -120,7 +120,8 @@ impl DiscoveryConfig {
     }
 }
 
-fn keep_secret(secret: &mut Option<String>, current: &Option<String>) {
+/// Takes the current secret when an update sets none. An empty secret removes the secret.
+pub(crate) fn keep_secret(secret: &mut Option<String>, current: &Option<String>) {
     match secret.as_deref() {
         None => secret.clone_from(current),
         Some("") => *secret = None,

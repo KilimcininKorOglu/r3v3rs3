@@ -5,7 +5,8 @@ use crate::components::http_proxy_config::{
 use crate::{auth::use_ensure_auth, i18n::use_locale, API_ENDPOINT};
 use gloo_net::http::{Request, RequestBuilder, Response};
 use r3v3rs3_api::{
-    app::{AdminConfig, AppConfig, LogConfig},
+    acme::webhook_url_allowed,
+    app::{AdminConfig, AppConfig, LogConfig, NotificationConfig, WebhookConfig},
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
     discovery::{
@@ -37,6 +38,14 @@ struct Fields {
     database_log_retention: String,
     audit_log_retention: String,
     cert_expiry_warning: String,
+    /// Empty means that no webhook is set.
+    webhook_url: String,
+    /// A new token. Empty keeps the saved token.
+    webhook_token: String,
+    webhook_token_set: bool,
+    webhook_clear_token: bool,
+    /// Empty means the default timeout.
+    webhook_timeout: String,
     http_challenge_addr: String,
     tls_alpn_challenge_addr: String,
     dns_challenge_resolver: String,
@@ -94,7 +103,13 @@ impl Fields {
         let kubernetes = &config.discovery.kubernetes;
         let consul = &config.discovery.consul;
         let etcd = &config.discovery.etcd;
+        let webhook = config.notifications.webhook.as_ref();
         Self {
+            webhook_url: webhook.map(|w| w.url.clone()).unwrap_or_default(),
+            webhook_token: String::new(),
+            webhook_token_set: webhook.is_some_and(|w| w.token_set),
+            webhook_clear_token: false,
+            webhook_timeout: text("/notifications/webhook/timeout"),
             docker_enabled: docker.enabled,
             docker_endpoint: docker.endpoint.clone(),
             docker_network: docker.network.clone(),
@@ -153,6 +168,7 @@ pub fn settings() -> Html {
 
     let fields = use_state(|| Option::<Fields>::None);
     let notice = use_state(|| Option::<Notice>::None);
+    let test_notice = use_state(|| Option::<Notice>::None);
     let is_loading = use_state(|| false);
     let client_certs = use_client_certs();
 
@@ -228,6 +244,7 @@ pub fn settings() -> Html {
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.cert_expiry_warning_hint")}</p>
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.duration_hint")}</p>
 
+            { notifications_section(locale, &fields, &errors, &test_notice) }
             { docker_section(locale, &fields, &errors, &client_certs) }
             { kubernetes_section(locale, &fields, &errors) }
             { consul_section(locale, &fields, &errors, &client_certs) }
@@ -389,6 +406,59 @@ fn etcd_section(
             { client_cert_field(locale, fields, certs, "settings.etcd_client_cert", "settings.etcd_client_cert_hint", |f| &mut f.etcd_client_cert) }
         </>
     }
+}
+
+fn notifications_section(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+    test_notice: &UseStateHandle<Option<Notice>>,
+) -> Html {
+    let token = SecretInput {
+        label: "settings.webhook_token",
+        saved: "settings.webhook_token_saved",
+        hint: "settings.webhook_token_hint",
+        clear: "settings.webhook_clear_token",
+        is_set: |f| f.webhook_token_set,
+        value: |f| &mut f.webhook_token,
+        clear_value: |f| &mut f.webhook_clear_token,
+    };
+    html! {
+        <>
+            { section_title(locale.t("settings.notifications_title")) }
+            { text_field(fields, errors, locale.t("settings.webhook_url"), "webhook_url", "https://hooks.example.com/r3v3rs3", |f| &mut f.webhook_url) }
+            <p class={HINT_CLASS}>{locale.t("settings.webhook_url_hint")}</p>
+            { secret_field(locale, fields, token) }
+            { text_field(fields, errors, locale.t("settings.webhook_timeout"), "webhook_timeout", "10s", |f| &mut f.webhook_timeout) }
+            <div class="mt-4">
+                { notice_view(test_notice) }
+                <button type="button" onclick={send_test_notification(locale, test_notice)} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                    {locale.t("settings.notification_test")}
+                </button>
+            </div>
+            <p class={HINT_CLASS}>{locale.t("settings.notification_test_hint")}</p>
+        </>
+    }
+}
+
+/// Asks the server to send a test notification to the webhook of the saved settings.
+fn send_test_notification(
+    locale: Locale,
+    notice: &UseStateHandle<Option<Notice>>,
+) -> Callback<MouseEvent> {
+    let notice = notice.clone();
+    Callback::from(move |_: MouseEvent| {
+        let notice = notice.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let url = format!("{API_ENDPOINT}/config/notifications/test");
+            notice.set(Some(
+                match fetch_json::<()>(locale, Request::post(&url)).await {
+                    Ok(()) => Notice::Success(locale.t("settings.notification_test_sent")),
+                    Err(message) => Notice::Failed(message),
+                },
+            ));
+        });
+    })
 }
 
 /// The locale keys and the fields of a secret that the admin API does not return.
@@ -734,12 +804,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         invalid_duration,
         json!({ "background_task_interval": fields.background_task_interval.trim() }),
     );
-    let notifications = parse_part::<r3v3rs3_api::app::NotificationConfig>(
-        &mut errors,
-        "cert_expiry_warning",
-        invalid_duration,
-        json!({ "cert_expiry_warning": fields.cert_expiry_warning.trim() }),
-    );
+    let notifications = parse_notifications(locale, fields, &mut errors);
     let addr = parse_addr(
         locale,
         &mut errors,
@@ -803,6 +868,57 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         }),
         _ => Err(errors),
     }
+}
+
+fn parse_notifications(
+    locale: Locale,
+    fields: &Fields,
+    errors: &mut HashMap<String, String>,
+) -> Option<NotificationConfig> {
+    let config = parse_part::<NotificationConfig>(
+        errors,
+        "cert_expiry_warning",
+        locale.t("settings.invalid_duration"),
+        json!({ "cert_expiry_warning": fields.cert_expiry_warning.trim() }),
+    );
+    let webhook = parse_webhook(locale, fields, errors);
+    Some(NotificationConfig {
+        webhook: webhook?,
+        ..config?
+    })
+}
+
+/// The webhook of the notifications. `Some(None)` when the URL is empty, and `None` when a field
+/// is invalid.
+fn parse_webhook(
+    locale: Locale,
+    fields: &Fields,
+    errors: &mut HashMap<String, String>,
+) -> Option<Option<WebhookConfig>> {
+    let url = fields.webhook_url.trim();
+    if url.is_empty() {
+        return Some(None);
+    }
+    if !webhook_url_allowed(url) {
+        errors.insert(
+            "webhook_url".into(),
+            locale.t("settings.webhook_url_invalid").into(),
+        );
+    }
+    let timeout = fields.webhook_timeout.trim();
+    let value = if timeout.is_empty() {
+        json!({ "url": url })
+    } else {
+        json!({ "url": url, "timeout": timeout })
+    };
+    let mut webhook = parse_part::<WebhookConfig>(
+        errors,
+        "webhook_timeout",
+        locale.t("settings.invalid_duration"),
+        value,
+    )?;
+    webhook.token = secret_update(&fields.webhook_token, fields.webhook_clear_token);
+    Some(Some(webhook))
 }
 
 /// Parses a required socket address, or records the error under `key`.
@@ -1078,6 +1194,52 @@ mod tests {
         };
         let errors = parse_fields(Locale::En, &invalid).unwrap_err();
         assert!(errors.contains_key("consul_prefix"));
+    }
+
+    #[test]
+    fn the_webhook_needs_a_url_and_its_token_is_sent_only_when_it_changes() {
+        let mut config = AppConfig::default();
+        config.notifications.webhook = Some(WebhookConfig {
+            url: "https://hooks.example.com/".into(),
+            token_set: true,
+            timeout: std::time::Duration::from_secs(5),
+            ..Default::default()
+        });
+        let fields = Fields::from_config(&config);
+        let parsed = parse_fields(Locale::En, &fields).unwrap();
+        if let Some(webhook) = &mut config.notifications.webhook {
+            webhook.token_set = false;
+        }
+        assert_eq!(parsed, config);
+
+        let typed = Fields {
+            webhook_token: " new-token ".into(),
+            ..fields.clone()
+        };
+        let webhook = parse_fields(Locale::En, &typed)
+            .unwrap()
+            .notifications
+            .webhook;
+        assert_eq!(webhook.and_then(|w| w.token).as_deref(), Some("new-token"));
+
+        let removed = Fields {
+            webhook_url: " ".into(),
+            ..fields.clone()
+        };
+        let parsed = parse_fields(Locale::En, &removed).unwrap();
+        assert_eq!(parsed.notifications.webhook, None);
+
+        let invalid = Fields {
+            webhook_url: "http://hooks.example.com/".into(),
+            webhook_timeout: "soon".into(),
+            ..fields
+        };
+        let errors = parse_fields(Locale::En, &invalid).unwrap_err();
+        assert_eq!(
+            errors.get("webhook_url").map(String::as_str),
+            Some(Locale::En.t("settings.webhook_url_invalid"))
+        );
+        assert!(errors.contains_key("webhook_timeout"));
     }
 
     #[test]

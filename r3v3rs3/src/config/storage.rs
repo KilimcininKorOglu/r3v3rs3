@@ -13,7 +13,7 @@ use r3v3rs3_api::{
     port::PortEntry,
     proxy::ProxyEntry,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 #[async_trait::async_trait]
@@ -57,6 +57,17 @@ pub trait Storage: Send + Sync + 'static {
     async fn save_accounts(&self, accounts: &HashMap<String, Account>) -> Result<(), Error>;
     async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error>;
     async fn load_cdn_ranges(&self) -> Option<CdnRanges>;
+
+    /// The keys of the certificate events that the webhook got. A storage without them sends the
+    /// notifications again after a restart.
+    async fn load_sent_notifications(&self) -> HashSet<String> {
+        HashSet::new()
+    }
+
+    /// Replaces the keys of the certificate events that the webhook got. Only the leader calls it.
+    async fn save_sent_notifications(&self, _keys: &HashSet<String>) -> Result<(), Error> {
+        Ok(())
+    }
 
     /// Stores the ACME challenges that every node of a cluster serves. A single server keeps them
     /// in memory only.
