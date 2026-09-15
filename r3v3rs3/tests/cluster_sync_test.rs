@@ -1,6 +1,6 @@
+use r3v3rs3::cluster;
 use r3v3rs3::cluster::crypto::{ClusterKey, ClusterKeys};
 use r3v3rs3::cluster::storage::KvStorage;
-use r3v3rs3::cluster::sync;
 use r3v3rs3::config::new_appinfo;
 use r3v3rs3::server::rpc::cluster::GetClusterStatus;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
@@ -9,7 +9,7 @@ use r3v3rs3::server::rpc::proxies::{AddProxy, GetProxyList};
 use r3v3rs3::server::rpc::RpcMethod;
 use r3v3rs3::server::{Server, ServerChannels};
 use r3v3rs3_api::app::AppConfig;
-use r3v3rs3_api::cluster::{ClusterConfig, ClusterState};
+use r3v3rs3_api::cluster::{ClusterConfig, ClusterState, ClusterStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyKind};
@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 
 mod common;
-use common::kv::MemoryStore;
+use common::kv::{check_locks_and_leases, MemoryStore};
 use common::{alloc_tcp_port, call, http_port_entry, http_route, wait_for_rpc};
 
 struct Node {
@@ -44,7 +44,7 @@ impl Node {
         let storage = Arc::new(KvStorage::new(store.clone(), keys, local));
         let app_info = new_appinfo(Path::new("."), Path::new("."));
         let (server, channels) = Server::new_shared(app_info, storage.clone()).await;
-        sync::spawn(storage, channels.command.clone());
+        cluster::spawn_tasks(storage, channels.command.clone());
         let task = tokio::spawn(server.start());
         Ok(Self { channels, task })
     }
@@ -76,8 +76,7 @@ async fn a_change_on_one_node_reaches_the_other_node() -> anyhow::Result<()> {
     let store = Arc::new(MemoryStore::default());
     let mut a = Node::start(&store, "node-a").await?;
     let mut b = Node::start(&store, "node-b").await?;
-    let synced =
-        |status: &r3v3rs3_api::cluster::ClusterStatus| status.state == ClusterState::Synced;
+    let synced = |status: &ClusterStatus| status.state == ClusterState::Synced;
     let status = b.wait_for(|| GetClusterStatus, synced).await?;
     assert_eq!(status.node_name, "node-b");
 
@@ -115,13 +114,55 @@ async fn a_change_on_one_node_reaches_the_other_node() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn the_memory_store_keeps_locks_and_leases() -> anyhow::Result<()> {
+    check_locks_and_leases(&MemoryStore::default()).await
+}
+
+#[tokio::test]
+async fn one_node_leads_and_another_node_takes_over_when_it_stops() -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let mut nodes = [
+        Node::start(&store, "node-a").await?,
+        Node::start(&store, "node-b").await?,
+    ];
+    let mut leaders = Vec::new();
+    for _ in 0..100 {
+        leaders.clear();
+        for (index, node) in nodes.iter_mut().enumerate() {
+            if node.call(GetClusterStatus).await?.leader {
+                leaders.push(index);
+            }
+        }
+        if !leaders.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(leaders.len(), 1, "{leaders:?}");
+    // The lock of the leader stays, so the other node does not lead after several lock checks.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    for (index, node) in nodes.iter_mut().enumerate() {
+        let leader = node.call(GetClusterStatus).await?.leader;
+        assert_eq!(leader, index == leaders[0], "node {index}");
+    }
+
+    let [first, second] = nodes;
+    let (leader, mut follower) = match leaders[0] {
+        0 => (first, second),
+        _ => (second, first),
+    };
+    leader.stop().await?;
+    let leads = |status: &ClusterStatus| status.leader;
+    follower.wait_for(|| GetClusterStatus, leads).await?;
+    follower.stop().await
+}
+
+#[tokio::test]
 async fn a_node_that_loses_the_store_rejects_changes_until_it_returns() -> anyhow::Result<()> {
     let store = Arc::new(MemoryStore::default());
     let mut a = Node::start(&store, "node-a").await?;
     let mut b = Node::start(&store, "node-b").await?;
-    let state = |expected: ClusterState| {
-        move |status: &r3v3rs3_api::cluster::ClusterStatus| status.state == expected
-    };
+    let state = |expected: ClusterState| move |status: &ClusterStatus| status.state == expected;
     b.wait_for(|| GetClusterStatus, state(ClusterState::Synced))
         .await?;
 

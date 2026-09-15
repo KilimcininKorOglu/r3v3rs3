@@ -112,7 +112,7 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
     let (server, channels) = if local.cluster.enabled {
         let storage = Arc::new(KvStorage::open(local).await?);
         let (server, channels) = Server::new_shared(app_info.clone(), storage.clone()).await;
-        r3v3rs3::cluster::sync::spawn(storage, channels.command.clone());
+        r3v3rs3::cluster::spawn_tasks(storage, channels.command.clone());
         (server, channels)
     } else {
         Server::new(app_info.clone(), FileStorage::new(&config_dir)).await

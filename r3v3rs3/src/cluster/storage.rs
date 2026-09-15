@@ -164,7 +164,9 @@ impl KvStorage {
             .await
     }
 
-    fn encode(&self, key: &str, plaintext: &[u8]) -> anyhow::Result<Vec<u8>> {
+    /// The value to write under a key: sealed, or plain for the keys that the cluster does not
+    /// encrypt.
+    pub fn encode(&self, key: &str, plaintext: &[u8]) -> anyhow::Result<Vec<u8>> {
         if self.layout.is_plain(key) {
             return Ok(plaintext.to_vec());
         }

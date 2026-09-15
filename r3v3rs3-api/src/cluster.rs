@@ -156,6 +156,11 @@ pub struct ClusterStatus {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub node_name: String,
 
+    /// Whether this node holds the leader lock. Only the leader orders ACME certificates, removes
+    /// expired certificates and refreshes the CDN IP ranges.
+    #[serde(default)]
+    pub leader: bool,
+
     /// The store revision of the last applied change.
     #[serde(default)]
     pub revision: u64,

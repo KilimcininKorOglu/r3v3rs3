@@ -9,7 +9,7 @@ use r3v3rs3::kv::{
     Write,
 };
 use r3v3rs3_api::discovery::Endpoint;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
@@ -21,13 +21,61 @@ struct MemoryData {
     items: BTreeMap<String, (Vec<u8>, u64)>,
     /// Every change with the revision of its commit.
     history: Vec<(u64, KvEvent)>,
+    /// The lease of each key that has one.
+    owners: BTreeMap<String, String>,
+    /// The leases that did not end. A lease ends only when it is revoked.
+    leases: BTreeSet<String>,
     revision: u64,
     commits: usize,
     unavailable: bool,
 }
 
-/// A [`KvStore`] in memory with keys, versions, conditional commits and watches, for tests of the
-/// code that reads and writes the store. It has no leases or locks.
+impl MemoryData {
+    fn next_revision(&mut self) -> u64 {
+        self.revision += 1;
+        self.revision
+    }
+
+    fn put(&mut self, key: &str, value: &[u8], revision: u64) {
+        self.items
+            .insert(key.to_string(), (value.to_vec(), revision));
+        let item = KvItem {
+            key: key.to_string(),
+            value: value.to_vec(),
+            version: revision,
+        };
+        self.history.push((revision, KvEvent::Put(item)));
+    }
+
+    fn delete(&mut self, key: &str, revision: u64) {
+        self.items.remove(key);
+        self.owners.remove(key);
+        self.history
+            .push((revision, KvEvent::Delete(key.to_string())));
+    }
+
+    fn apply(&mut self, write: &Write, revision: u64) {
+        match write {
+            Write::Put { key, value, lease } => {
+                self.put(key, value, revision);
+                match lease {
+                    Some(lease) => self.owners.insert(key.clone(), lease.clone()),
+                    None => self.owners.remove(key),
+                };
+            }
+            Write::Update { key, value } => self.put(key, value, revision),
+            Write::Delete(key) => self.delete(key, revision),
+        }
+    }
+
+    fn ensure_lease(&self, lease: &Lease) -> anyhow::Result<()> {
+        anyhow::ensure!(self.leases.contains(&lease.id), "the lease ended");
+        Ok(())
+    }
+}
+
+/// A [`KvStore`] in memory with keys, versions, conditional commits, watches, leases and locks,
+/// for tests of the code that uses the store. A lease ends only when it is revoked.
 pub struct MemoryStore {
     data: Arc<Mutex<MemoryData>>,
     /// Wakes the watchers after a commit or a change of the availability.
@@ -77,7 +125,7 @@ fn holds(data: &MemoryData, condition: &Condition) -> bool {
     match condition {
         Condition::Absent(key) => !data.items.contains_key(key),
         Condition::Version(key, version) => data.items.get(key).map(|(_, v)| v) == Some(version),
-        Condition::LockHeld { .. } => false,
+        Condition::LockHeld { key, lease } => data.owners.get(key) == Some(lease),
     }
 }
 
@@ -163,44 +211,66 @@ impl KvStore for MemoryStore {
         {
             return Ok(TxnOutcome::Conflict);
         }
-        data.revision += 1;
-        let revision = data.revision;
+        let revision = data.next_revision();
         for write in &txn.writes {
-            let event = match write {
-                Write::Put { key, value, .. } | Write::Update { key, value } => {
-                    data.items.insert(key.clone(), (value.clone(), revision));
-                    KvEvent::Put(KvItem {
-                        key: key.clone(),
-                        value: value.clone(),
-                        version: revision,
-                    })
-                }
-                Write::Delete(key) => {
-                    data.items.remove(key);
-                    KvEvent::Delete(key.clone())
-                }
-            };
-            data.history.push((revision, event));
+            data.apply(write, revision);
         }
         drop(data);
         self.changed.send_replace(());
         Ok(TxnOutcome::Committed)
     }
 
-    async fn grant_lease(&self, _ttl: Duration) -> anyhow::Result<Lease> {
-        anyhow::bail!("the memory store has no leases")
+    async fn grant_lease(&self, ttl: Duration) -> anyhow::Result<Lease> {
+        let mut data = self.data()?;
+        let id = data.next_revision().to_string();
+        data.leases.insert(id.clone());
+        Ok(Lease { id, ttl })
     }
 
-    async fn keep_alive(&self, _lease: &Lease) -> anyhow::Result<()> {
-        anyhow::bail!("the memory store has no leases")
+    async fn keep_alive(&self, lease: &Lease) -> anyhow::Result<()> {
+        self.data()?.ensure_lease(lease)
     }
 
-    async fn revoke_lease(&self, _lease: &Lease) -> anyhow::Result<()> {
-        anyhow::bail!("the memory store has no leases")
+    async fn revoke_lease(&self, lease: &Lease) -> anyhow::Result<()> {
+        let mut data = self.data()?;
+        data.leases.remove(&lease.id);
+        let owned = data
+            .owners
+            .iter()
+            .filter(|(_, owner)| **owner == lease.id)
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        if owned.is_empty() {
+            return Ok(());
+        }
+        let revision = data.next_revision();
+        for key in owned {
+            data.delete(&key, revision);
+        }
+        drop(data);
+        self.changed.send_replace(());
+        Ok(())
     }
 
-    async fn try_lock(&self, _key: &str, _value: &[u8], _lease: &Lease) -> anyhow::Result<bool> {
-        anyhow::bail!("the memory store has no locks")
+    async fn try_lock(&self, key: &str, value: &[u8], lease: &Lease) -> anyhow::Result<bool> {
+        let mut data = self.data()?;
+        data.ensure_lease(lease)?;
+        if let Some(owner) = data.owners.get(key) {
+            return Ok(*owner == lease.id);
+        }
+        if data.items.contains_key(key) {
+            return Ok(false);
+        }
+        let revision = data.next_revision();
+        let write = Write::Put {
+            key: key.to_string(),
+            value: value.to_vec(),
+            lease: Some(lease.id.clone()),
+        };
+        data.apply(&write, revision);
+        drop(data);
+        self.changed.send_replace(());
+        Ok(true)
     }
 
     fn watch(&self, prefix: &str, from: &KvList) -> Box<dyn KvWatcher> {

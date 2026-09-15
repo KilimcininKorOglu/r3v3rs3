@@ -88,6 +88,11 @@ impl Layout {
         format!("{}cdn", self.state())
     }
 
+    /// The lock of the leader. Its value is the name of the node that holds it.
+    pub fn leader(&self) -> String {
+        format!("{}lock/leader", self.data)
+    }
+
     /// Whether the cluster stores the value of the key without encryption. Every other value is
     /// encrypted.
     pub fn is_plain(&self, key: &str) -> bool {
@@ -144,7 +149,9 @@ mod tests {
         );
         assert_eq!(layout.kind(&layout.acme(id)), Some(StateKind::Acmes));
         assert_eq!(layout.kind(&layout.account("admin")), None);
-        assert_eq!(layout.kind("r3v3rs3/v1/lock/leader"), None);
+        assert_eq!(layout.leader(), "r3v3rs3/v1/lock/leader");
+        assert_eq!(layout.kind(&layout.leader()), None);
+        assert!(!layout.is_plain(&layout.leader()));
         assert!(!layout.is_plain(&layout.account("admin")));
     }
 }

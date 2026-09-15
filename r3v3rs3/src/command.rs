@@ -43,6 +43,10 @@ pub enum ServerCommand {
     SetClusterStatus {
         status: ClusterStatus,
     },
+    /// This node gained or lost the leader lock.
+    SetLeader {
+        leader: bool,
+    },
 }
 
 impl std::fmt::Debug for ServerCommand {
@@ -82,6 +86,9 @@ impl std::fmt::Debug for ServerCommand {
                 .debug_struct("SetClusterStatus")
                 .field("status", status)
                 .finish(),
+            Self::SetLeader { leader } => {
+                f.debug_struct("SetLeader").field("leader", leader).finish()
+            }
         }
     }
 }

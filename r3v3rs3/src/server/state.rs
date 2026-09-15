@@ -69,6 +69,8 @@ pub struct ServerState {
     discovery: DiscoveryRegistry,
     discovery_tasks: DiscoveryTasks,
     cluster: ClusterStatus,
+    /// Whether this node runs the leader tasks. A server without a cluster always does.
+    leader: bool,
 }
 
 pub enum Received {
@@ -143,6 +145,7 @@ impl ServerState {
         }
 
         let sessions = Arc::new(SessionService::new(storage.clone(), config.admin));
+        let leader = !config.cluster.enabled;
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
             certs: CertList::new(certs).await,
@@ -166,6 +169,7 @@ impl ServerState {
             discovery: DiscoveryRegistry::default(),
             discovery_tasks: DiscoveryTasks::default(),
             cluster: ClusterStatus::default(),
+            leader,
         };
 
         log_save_error(this.update_ports().await);
@@ -202,7 +206,8 @@ impl ServerState {
                 let _ = self.callback_sender.send(RpcCallback { id, result }).await;
             }
             ServerCommand::SetCdnRanges { ranges } => {
-                if crate::cdn::install(ranges.clone()) {
+                // In a cluster the other nodes read the ranges of the leader from the store.
+                if self.leader && crate::cdn::install(ranges.clone()) {
                     log_save_error(self.storage.save_cdn_ranges(&ranges).await);
                 }
             }
@@ -213,12 +218,40 @@ impl ServerState {
                 self.apply_cluster_changes(kinds).await;
             }
             ServerCommand::SetClusterStatus { status } => {
-                self.cluster.clone_from(&status);
-                let _ = self
-                    .br_sender
-                    .send(ServerEvent::ClusterStatusUpdated { status });
+                self.cluster = ClusterStatus {
+                    leader: self.leader,
+                    ..status
+                };
+                self.publish_cluster_status();
+            }
+            ServerCommand::SetLeader { leader } => {
+                self.set_leader(leader).await;
             }
         }
+    }
+
+    fn publish_cluster_status(&self) {
+        let status = self.cluster.clone();
+        let _ = self
+            .br_sender
+            .send(ServerEvent::ClusterStatusUpdated { status });
+    }
+
+    /// A new leader runs the leader tasks at once, so it does not wait for the next background
+    /// run.
+    async fn set_leader(&mut self, leader: bool) {
+        self.leader = leader;
+        self.cluster.leader = leader;
+        self.publish_cluster_status();
+        if leader {
+            self.run_leader_tasks().await;
+        }
+    }
+
+    /// The tasks that only one node of a cluster runs.
+    async fn run_leader_tasks(&mut self) {
+        self.start_http_challenges().await;
+        self.remove_expired_certs().await;
     }
 
     pub fn cluster_status(&self) -> ClusterStatus {
@@ -698,12 +731,13 @@ impl ServerState {
             error!(%err, "failed to cleanup old logs");
         }
 
-        self.start_http_challenges().await;
         self.reload_proxies().await;
-        self.remove_expired_certs();
+        if self.leader {
+            self.run_leader_tasks().await;
+        }
     }
 
-    fn remove_expired_certs(&mut self) {
+    async fn remove_expired_certs(&mut self) {
         let ordered = self
             .acmes
             .entries()
@@ -715,6 +749,8 @@ impl ServerState {
             if let Err(err) = self.certs.delete(*id) {
                 error!(%err, "failed to delete cert");
             }
+            // The other nodes of a cluster remove the certificate after the store change.
+            log_save_error(self.storage.delete_cert(*id).await);
         }
         if !removing_items.is_empty() {
             let _ = self.br_sender.send(ServerEvent::CertsUpdated {
