@@ -533,7 +533,7 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 An access list holds an IP filter and an authentication with a name. Several proxies and routes can use one access list. A change of the list applies to each of them without a restart.
 
-The "Access Lists" page of the WebUI adds, changes and deletes the lists. The "Access List" field of an HTTP / HTTPS proxy selects a list for the proxy. In the admin API and in `proxies.toml`, `access_list` sets the list of a proxy or of a route.
+The "Access Lists" page of the WebUI adds, changes and deletes the lists. The "Access List" field of an HTTP / HTTPS proxy selects a list for the proxy, and the "Access List" field of a route selects a list for the route. In the admin API and in `proxies.toml`, `access_list` sets the list of a proxy or of a route.
 
 - The list of a proxy replaces the "IP Filter" and the "Authentication" of the proxy.
 - The list of a route replaces the IP filter and the authentication of the route.

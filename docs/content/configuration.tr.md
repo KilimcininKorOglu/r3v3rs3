@@ -533,7 +533,7 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 Access list, bir IP filtresini ve bir kimlik doğrulamayı bir adla tutar. Birden fazla proxy ve route aynı access list'i kullanabilir. Liste değişince değişiklik yeniden başlatma olmadan hepsine uygulanır.
 
-WebUI'daki "Access List'ler" sayfası listeleri ekler, değiştirir ve siler. HTTP / HTTPS proxy'nin "Access List" alanı proxy için bir liste seçer. Yönetim API'sinde ve `proxies.toml` dosyasında `access_list` alanı bir proxy'nin veya route'un listesini ayarlar.
+WebUI'daki "Access List'ler" sayfası listeleri ekler, değiştirir ve siler. HTTP / HTTPS proxy'nin "Access List" alanı proxy için bir liste seçer. Route'un "Access List" alanı route için bir liste seçer. Yönetim API'sinde ve `proxies.toml` dosyasında `access_list` alanı bir proxy'nin veya route'un listesini ayarlar.
 
 - Proxy'nin listesi, proxy'nin "IP Filtresi" ve "Kimlik Doğrulama" ayarlarının yerini alır.
 - Route'un listesi, route'un IP filtresinin ve kimlik doğrulamasının yerini alır.
