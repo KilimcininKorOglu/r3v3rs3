@@ -67,6 +67,7 @@ mod compression;
 mod cookie;
 mod error;
 mod filter;
+mod fixed;
 mod header_rules;
 pub(crate) mod hyper_tls;
 mod mirror;
@@ -719,6 +720,10 @@ where
             return (rejected(rejection), response_rewriter);
         }
     };
+    if let Some(response) = &route.response {
+        let response = fixed::respond(response, &req);
+        return (ProxiedRequest::Respond(response), response_rewriter);
+    }
 
     let secure = info.proto != "http";
     let sticky_cookie = upstream.select(&mut req, res.path_segments, client.ip, secure);

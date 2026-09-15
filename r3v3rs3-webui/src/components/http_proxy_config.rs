@@ -9,13 +9,14 @@ use r3v3rs3_api::compression::{
     format_mime_list, parse_mime_list, Compression, CompressionAlgorithm,
 };
 use r3v3rs3_api::error::Error;
+use r3v3rs3_api::fixed_response::{FixedRedirect, FixedResponse, FixedStatus, FIXED_STATUSES};
 use r3v3rs3_api::header_rules::{format_header_rules, HeaderRule, HeaderRules};
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::mirror::{Mirror, DEFAULT_MIRROR_BODY_SIZE};
 use r3v3rs3_api::policy::{IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
-use r3v3rs3_api::redirect::RedirectRule;
+use r3v3rs3_api::redirect::{RedirectRule, RedirectStatus};
 use r3v3rs3_api::rewrite::{PathRegex, PathRewrite};
 use r3v3rs3_api::upstream::{
     CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, StickyCookie,
@@ -370,6 +371,7 @@ impl CompressionForm {
 #[derive(Clone, PartialEq)]
 struct RouteForm {
     path: String,
+    response: ResponseForm,
     servers: Vec<String>,
     override_ip_filter: bool,
     allow: String,
@@ -403,6 +405,7 @@ impl RouteForm {
         let mirror = route.mirror.clone().unwrap_or_default();
         Self {
             path: route.path.clone(),
+            response: ResponseForm::new(route.response.as_ref()),
             servers: route.servers.iter().map(format_server_line).collect(),
             override_ip_filter: route.ip_filter.is_some(),
             allow: format_cidr_list(&ip_filter.allow),
@@ -447,6 +450,7 @@ impl RouteForm {
     fn empty() -> Self {
         Self {
             path: "/".into(),
+            response: ResponseForm::new(None),
             servers: Vec::new(),
             override_ip_filter: false,
             allow: String::new(),
@@ -473,6 +477,85 @@ impl RouteForm {
             mirror_percent: "100".into(),
             mirror_max_body_size: DEFAULT_MIRROR_BODY_SIZE.to_string(),
         }
+    }
+}
+
+/// What answers the requests of a route.
+#[derive(Clone, Copy, Default, PartialEq)]
+enum RouteKind {
+    #[default]
+    Proxy,
+    Redirect,
+    Status,
+}
+
+const ROUTE_KINDS: [(RouteKind, &str, &str); 3] = [
+    (RouteKind::Proxy, "proxy", "http_form.route_kind_proxy"),
+    (
+        RouteKind::Redirect,
+        "redirect",
+        "http_form.route_kind_redirect",
+    ),
+    (RouteKind::Status, "status", "http_form.route_kind_status"),
+];
+
+/// The route type and the fields of the fixed response types.
+#[derive(Clone, PartialEq)]
+struct ResponseForm {
+    kind: RouteKind,
+    redirect_target: String,
+    redirect_status: RedirectStatus,
+    preserve_path: bool,
+    fixed_status: u16,
+    fixed_body: String,
+}
+
+impl ResponseForm {
+    fn new(response: Option<&FixedResponse>) -> Self {
+        let form = Self {
+            kind: RouteKind::Proxy,
+            redirect_target: String::new(),
+            redirect_status: RedirectStatus::default(),
+            preserve_path: true,
+            fixed_status: 404,
+            fixed_body: String::new(),
+        };
+        match response {
+            None => form,
+            Some(FixedResponse::Redirect(redirect)) => Self {
+                kind: RouteKind::Redirect,
+                redirect_target: redirect.target.clone(),
+                redirect_status: redirect.status,
+                preserve_path: redirect.preserve_path,
+                ..form
+            },
+            Some(FixedResponse::Status(status)) => Self {
+                kind: RouteKind::Status,
+                fixed_status: status.status,
+                fixed_body: status.body.clone(),
+                ..form
+            },
+        }
+    }
+
+    /// The fixed response of the route. `None` for a route that proxies to its servers.
+    fn parse(&self, locale: Locale) -> Result<Option<FixedResponse>, String> {
+        let response = match self.kind {
+            RouteKind::Proxy => return Ok(None),
+            RouteKind::Redirect => FixedResponse::Redirect(FixedRedirect {
+                target: self.redirect_target.trim().to_string(),
+                status: self.redirect_status,
+                preserve_path: self.preserve_path,
+            }),
+            RouteKind::Status => FixedResponse::Status(FixedStatus {
+                status: self.fixed_status,
+                body: self.fixed_body.clone(),
+            }),
+        };
+        response
+            .validate()
+            .map_err(|err| locale.error_message(&err))?;
+        Ok(Some(response))
     }
 }
 
@@ -650,24 +733,87 @@ fn route_view(
             <label class="block mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("http_form.path")}</label>
             <input type="text" autocapitalize="off" placeholder="/" onchange={route_input(routes, index, text, |route, value| route.path = value)} value={route.path.clone()} class={INPUT_CLASS} />
 
-            <label class={LABEL_CLASS}>{locale.t("http_form.target")}</label>
-            <textarea rows="2" autocapitalize="off" spellcheck="false" placeholder={"https://a.example.com/backend\nhttps://b.example.com/backend"} value={route.servers.join("\n")} onchange={route_input(routes, index, text_area, |route, value| route.servers = server_lines(&value))} class={INPUT_CLASS} />
-            <p class={HINT_CLASS}>{locale.t("http_form.target_hint")}</p>
+            { select_field(
+                locale.t("http_form.route_kind"),
+                route_input(routes, index, route_kind, |route, value| route.response.kind = value),
+                super::port_config::option_list(locale, &ROUTE_KINDS, route.response.kind),
+                None,
+            ) }
 
-            { route_rewrite_view(locale, routes, index, route) }
+            if route.response.kind == RouteKind::Proxy {
+                <label class={LABEL_CLASS}>{locale.t("http_form.target")}</label>
+                <textarea rows="2" autocapitalize="off" spellcheck="false" placeholder={"https://a.example.com/backend\nhttps://b.example.com/backend"} value={route.servers.join("\n")} onchange={route_input(routes, index, text_area, |route, value| route.servers = server_lines(&value))} class={INPUT_CLASS} />
+                <p class={HINT_CLASS}>{locale.t("http_form.target_hint")}</p>
+
+                { route_rewrite_view(locale, routes, index, route) }
+            } else {
+                { route_response_view(locale, routes, index, &route.response) }
+            }
 
             { route_ip_filter_view(locale, routes, index, route) }
             { route_rate_limit_view(locale, routes, index, route) }
             { route_auth_view(locale, routes, index, route) }
             { route_headers_view(locale, routes, index, route) }
-            { route_timeouts_view(locale, routes, index, route) }
-            { route_retry_view(locale, routes, index, route) }
-            { route_body_limit_view(locale, routes, index, route) }
-            { route_mirror_view(locale, routes, index, route) }
+            if route.response.kind == RouteKind::Proxy {
+                { route_timeouts_view(locale, routes, index, route) }
+                { route_retry_view(locale, routes, index, route) }
+                { route_body_limit_view(locale, routes, index, route) }
+                { route_mirror_view(locale, routes, index, route) }
+            }
             { error_view(error) }
 
             { list_buttons(routes, index, RouteForm::empty) }
         </div>
+    }
+}
+
+/// The fields of a redirect route or a fixed status route.
+fn route_response_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    response: &ResponseForm,
+) -> Html {
+    let redirect_statuses = RedirectStatus::ALL
+        .iter()
+        .map(|status| code_option(status.code(), response.redirect_status.code()))
+        .collect::<Html>();
+    let fixed_statuses = FIXED_STATUSES
+        .iter()
+        .map(|&status| code_option(status, response.fixed_status))
+        .collect::<Html>();
+    html! {
+        <>
+            if response.kind == RouteKind::Redirect {
+                <label class={LABEL_CLASS}>{locale.t("http_form.redirect_target")}</label>
+                <input type="text" autocapitalize="off" placeholder="https://example.com" value={response.redirect_target.clone()} onchange={route_input(routes, index, text, |route, value| route.response.redirect_target = value)} class={INPUT_CLASS} />
+                { select_field(
+                    locale.t("http_form.redirect_status"),
+                    route_input(routes, index, redirect_status, |route, value| route.response.redirect_status = value),
+                    redirect_statuses,
+                    None,
+                ) }
+                <div>
+                    { toggle(route_input(routes, index, checked, |route, value| route.response.preserve_path = value), response.preserve_path, locale.t("http_form.preserve_path"), "mt-4") }
+                </div>
+            } else {
+                { select_field(
+                    locale.t("http_form.fixed_status"),
+                    route_input(routes, index, status_code, |route, value| route.response.fixed_status = value),
+                    fixed_statuses,
+                    None,
+                ) }
+                <label class={LABEL_CLASS}>{locale.t("http_form.fixed_body")}</label>
+                <textarea rows="3" spellcheck="false" value={response.fixed_body.clone()} onchange={route_input(routes, index, text_area, |route, value| route.response.fixed_body = value)} class={INPUT_CLASS} />
+            }
+            <p class={HINT_CLASS}>{locale.t("http_form.fixed_response_hint")}</p>
+        </>
+    }
+}
+
+fn code_option(code: u16, selected: u16) -> Html {
+    html! {
+        <option selected={code == selected} value={code.to_string()}>{code.to_string()}</option>
     }
 }
 
@@ -1506,6 +1652,19 @@ fn period(event: &Event) -> RatePeriod {
     select_option(event, &RatePeriod::ALL, |period| period.as_str())
 }
 
+fn route_kind(event: &Event) -> RouteKind {
+    super::port_config::find_option(&ROUTE_KINDS, &select_value(event))
+}
+
+/// The status code of a select element whose options are only valid codes.
+fn status_code(event: &Event) -> u16 {
+    select_value(event).parse().unwrap_or_default()
+}
+
+fn redirect_status(event: &Event) -> RedirectStatus {
+    RedirectStatus::try_from(status_code(event)).unwrap_or_default()
+}
+
 fn state_update<T, V>(state: &UseStateHandle<T>, update: fn(&mut T, V)) -> Callback<V>
 where
     T: Clone + 'static,
@@ -1987,7 +2146,6 @@ fn parse_route(
         );
         return None;
     }
-    let servers = parse_server_lines(locale, &route.servers, key, errors);
     let ip_filter = route.override_ip_filter.then(|| IpFilter {
         allow: or_error(
             translated(locale, parse_cidr_list(&route.allow)),
@@ -2015,6 +2173,40 @@ fn parse_route(
             errors,
         )
     });
+    let target = match route.response.parse(locale) {
+        Ok(Some(response)) => Route {
+            response: Some(response),
+            ..Default::default()
+        },
+        Ok(None) => parse_upstream_route(locale, route, key, errors),
+        Err(err) => {
+            errors.insert(key.into(), err);
+            Route::default()
+        }
+    };
+    Some(Route {
+        path: route.path.clone(),
+        ip_filter,
+        rate_limit,
+        auth,
+        headers,
+        ..target
+    })
+}
+
+/// Reads the servers and the upstream settings of a route that proxies to its servers.
+fn parse_upstream_route(
+    locale: Locale,
+    route: &RouteForm,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> Route {
+    let servers = parse_server_lines(locale, &route.servers, key, errors);
+    if servers.is_empty() {
+        errors
+            .entry(key.to_string())
+            .or_insert_with(|| locale.t("http_form.servers_required").into());
+    }
     let timeouts = route
         .override_timeouts
         .then(|| parse_timeouts(locale, &route.timeouts, key, errors));
@@ -2025,21 +2217,15 @@ fn parse_route(
         let size = parse_size(locale, &route.max_body_size, "http_form.max_body_size_name");
         or_error(size, key, errors)
     });
-    let rewrite = parse_rewrite(locale, route, key, errors);
-    let mirror = parse_mirror(locale, route, key, errors);
-    (!servers.is_empty()).then(|| Route {
-        path: route.path.clone(),
+    Route {
         servers,
-        ip_filter,
-        rate_limit,
-        auth,
-        headers,
         timeouts,
         retry,
         max_body_size,
-        rewrite,
-        mirror,
-    })
+        rewrite: parse_rewrite(locale, route, key, errors),
+        mirror: parse_mirror(locale, route, key, errors),
+        ..Default::default()
+    }
 }
 
 /// Reads one server from each line. An invalid line records its error under the key.
@@ -2142,6 +2328,59 @@ mod tests {
         assert!(err.starts_with("Connect timeout"), "{err}");
         assert!(parse_seconds(Locale::En, "86401", connect, 1).is_err());
         assert!(parse_seconds(Locale::En, "1.5", connect, 1).is_err());
+    }
+
+    #[test]
+    fn fixed_response_routes_round_trip_without_servers() {
+        let routes = [
+            FixedResponse::Redirect(FixedRedirect {
+                target: "https://example.com".into(),
+                status: RedirectStatus::MovedPermanently,
+                preserve_path: false,
+            }),
+            FixedResponse::Status(FixedStatus {
+                status: 410,
+                body: "gone".into(),
+            }),
+        ]
+        .map(|response| Route {
+            path: "/".into(),
+            response: Some(response),
+            ..Default::default()
+        });
+        for route in routes {
+            let form = RouteForm::new(&route);
+            let mut errors = HashMap::new();
+            assert_eq!(
+                parse_route(Locale::En, &form, "routes_0", &mut errors),
+                Some(route)
+            );
+            assert!(errors.is_empty(), "{errors:?}");
+        }
+    }
+
+    #[test]
+    fn a_route_reports_missing_servers_and_an_empty_redirect_target() {
+        let mut errors = HashMap::new();
+        let proxy = RouteForm::empty();
+        assert!(parse_route(Locale::Tr, &proxy, "routes_0", &mut errors).is_some());
+        let expected = Locale::Tr.t("http_form.servers_required");
+        assert_eq!(errors.get("routes_0").map(String::as_str), Some(expected));
+
+        let redirect = RouteForm {
+            response: ResponseForm {
+                kind: RouteKind::Redirect,
+                ..proxy.response.clone()
+            },
+            ..proxy
+        };
+        let mut errors = HashMap::new();
+        parse_route(Locale::Tr, &redirect, "routes_0", &mut errors);
+        let err = Error::InvalidRedirectTarget {
+            target: String::new(),
+        };
+        let expected = Locale::Tr.error_message(&err);
+        assert_eq!(errors.get("routes_0"), Some(&expected));
     }
 
     #[test]

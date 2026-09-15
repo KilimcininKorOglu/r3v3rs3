@@ -26,12 +26,7 @@ pub struct RedirectRule {
 impl RedirectRule {
     /// Rejects an empty target and a target with a control character.
     pub fn validate(&self) -> Result<(), Error> {
-        if self.target.is_empty() || self.target.chars().any(char::is_control) {
-            return Err(Error::InvalidRedirectTarget {
-                target: self.target.clone(),
-            });
-        }
-        Ok(())
+        validate_target(&self.target)
     }
 
     /// The `Location` for the `host/path?query` of a request, or `None` when the rule does not
@@ -60,6 +55,16 @@ impl RedirectRule {
         rule.validate()?;
         Ok(rule)
     }
+}
+
+/// Rejects an empty redirect target and a target with a control character.
+pub fn validate_target(target: &str) -> Result<(), Error> {
+    if target.is_empty() || target.chars().any(char::is_control) {
+        return Err(Error::InvalidRedirectTarget {
+            target: target.to_string(),
+        });
+    }
+    Ok(())
 }
 
 impl fmt::Display for RedirectRule {

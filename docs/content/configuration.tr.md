@@ -154,6 +154,28 @@ redirects = [
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:3000/" }] }]
 ```
 
+## Sabit Response'lar
+
+HTTP / HTTPS proxy'sindeki bir route, request'i `servers` değerine göndermek yerine `response` ile her request'e kendisi yanıt verebilir. Bir route'ta `servers` veya `response` değerlerinden yalnız biri bulunur. Redirection host veya 404 host için sabit response kullanın.
+
+- `type = "redirect"` değeri `target` adresine bir redirect ile yanıt verir. `status` değeri `301`, `302` (varsayılan), `307` veya `308` olabilir. `preserve_path` (varsayılan `true`) request'in path'ini ve query'sini `target` sonuna ekler. Bu durumda `GET /a?b=1` request'i `https://example.com/a?b=1` adresine gider.
+- `type = "status"` değeri `status` ile ve isteğe bağlı düz metin `body` ile yanıt verir. `body` en fazla 4096 byte olabilir. `status` değeri `200`, `400`, `403`, `404`, `410`, `429`, `451`, `500`, `502` veya `503` olabilir.
+
+r3v3rs3; client IP filtresini, rate limit'i, `upgrade_insecure` HTTPS redirect'ini, redirect kurallarını ve kimlik doğrulamayı sabit response'tan önce uygular. r3v3rs3 hem `servers` hem `response` içeren route'u reddeder. Geçersiz target, status veya body değerini de reddeder.
+
+WebUI'da her route için route tipini seçin. Yeni proxy sayfası "Redirection host" ve "404 host" şablonlarını sunar. Servis keşfi label'ları aynı alanları ayarlar, örneğin `r3v3rs3.http.old.routes.0.response.type=redirect` ve `r3v3rs3.http.old.routes.0.response.target=https://example.com`. `response` içeren route, container port'undan varsayılan server almaz.
+
+```toml
+[old-domain]
+protocol = "http"
+vhosts = ["old.example.com"]
+routes = [{ path = "/", response = { type = "redirect", target = "https://example.com", status = 301 } }]
+
+[catch-all]
+protocol = "http"
+routes = [{ path = "/", response = { type = "status", status = 404, body = "Not found" } }]
+```
+
 ## UDP Session'ları
 
 UDP proxy her client adresi için ayrı bir session açar. Her session'ın upstream sunucuya giden kendi socket'i vardır. Bu yüzden upstream sunucu her client'ı farklı bir kaynak porttan görür. r3v3rs3 upstream sunucunun yanıtlarını dinlediği porttan client'a geri gönderir.

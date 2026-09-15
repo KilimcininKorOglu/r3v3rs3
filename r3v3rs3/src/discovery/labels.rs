@@ -227,11 +227,12 @@ fn expand_http_ports(node: &mut Node, upstream: Upstream<'_>) -> Result<(), Stri
         .into_iter()
         .flat_map(Node::children_mut);
     for route in routes {
-        let has_servers = route.contains("servers");
-        let default_port = upstream.port.filter(|_| !has_servers);
+        // A route with a fixed response answers itself, so it gets no default server.
+        let has_target = route.contains("servers") || route.contains("response");
+        let default_port = upstream.port.filter(|_| !has_target);
         if let Some(url) = take_upstream_url(route, upstream.host, default_port)? {
-            if has_servers {
-                return Err("port cannot be used together with servers".into());
+            if has_target {
+                return Err("port cannot be used together with servers or response".into());
             }
             route.insert(&["servers", "0", "url"], &url);
         }
@@ -471,6 +472,42 @@ mod tests {
         assert!(selects(definition, true));
         assert!(!selects(labels(&[("r3v3rs3.enable", "true")]), true));
         assert!(!is_definition("r3v3rs3x.http.app.ports"));
+    }
+
+    #[test]
+    fn a_route_with_a_fixed_response_gets_no_default_server() {
+        use r3v3rs3_api::fixed_response::FixedResponse;
+        use r3v3rs3_api::redirect::RedirectStatus;
+
+        let upstream = Upstream {
+            host: Some("10.0.0.7"),
+            port: Some(8080),
+        };
+        let parsed = parse_at(
+            labels(&[
+                ("r3v3rs3.http.moved.ports", "http"),
+                ("r3v3rs3.http.moved.routes.0.response.type", "redirect"),
+                (
+                    "r3v3rs3.http.moved.routes.0.response.target",
+                    "https://example.com",
+                ),
+                ("r3v3rs3.http.moved.routes.0.response.status", "301"),
+                (
+                    "r3v3rs3.http.moved.routes.0.response.preserve_path",
+                    "false",
+                ),
+            ]),
+            upstream,
+        );
+        assert_eq!(parsed.issues, Vec::<String>::new());
+        let route = &http(&parsed.definitions[0]).routes[0];
+        assert!(route.servers.is_empty());
+        let Some(FixedResponse::Redirect(redirect)) = &route.response else {
+            panic!("expected a fixed redirect: {route:?}");
+        };
+        assert_eq!(redirect.target, "https://example.com");
+        assert_eq!(redirect.status, RedirectStatus::MovedPermanently);
+        assert!(!redirect.preserve_path);
     }
 
     #[test]

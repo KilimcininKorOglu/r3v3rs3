@@ -154,6 +154,28 @@ redirects = [
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:3000/" }] }]
 ```
 
+## Fixed Responses
+
+A route of an HTTP / HTTPS proxy can answer every request itself with `response`, instead of sending the request to `servers`. A route has either `servers` or `response`. Use a fixed response for a redirection host or a 404 host.
+
+- `type = "redirect"` answers with a redirect to `target`. `status` is `301`, `302` (default), `307` or `308`. `preserve_path` (default `true`) appends the path and the query of the request to `target`, so `GET /a?b=1` goes to `https://example.com/a?b=1`.
+- `type = "status"` answers with `status` and an optional plain text `body` of at most 4096 bytes. `status` is `200`, `400`, `403`, `404`, `410`, `429`, `451`, `500`, `502` or `503`.
+
+r3v3rs3 applies the client IP filter, the rate limit, the HTTPS redirect of `upgrade_insecure`, the redirect rules and authentication before the fixed response. r3v3rs3 rejects a route with both `servers` and `response`, and an invalid target, status or body.
+
+In the WebUI, select the type of each route. The new proxy page offers the "Redirection host" and "404 host" templates. Service discovery labels set the same fields, e.g. `r3v3rs3.http.old.routes.0.response.type=redirect` and `r3v3rs3.http.old.routes.0.response.target=https://example.com`. A route with `response` gets no default server from the container port.
+
+```toml
+[old-domain]
+protocol = "http"
+vhosts = ["old.example.com"]
+routes = [{ path = "/", response = { type = "redirect", target = "https://example.com", status = 301 } }]
+
+[catch-all]
+protocol = "http"
+routes = [{ path = "/", response = { type = "status", status = 404, body = "Not found" } }]
+```
+
 ## UDP Sessions
 
 A UDP proxy opens one session for each client address. The session has its own socket to the upstream server, so the upstream server sees a different source port for each client. r3v3rs3 sends the replies of the upstream server back to the client from the listening port.

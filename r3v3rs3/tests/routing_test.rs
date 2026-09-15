@@ -1,9 +1,10 @@
 use axum::http::Uri;
 use axum::Router;
 use r3v3rs3_api::cidr::parse_cidr_list;
+use r3v3rs3_api::fixed_response::{FixedRedirect, FixedResponse, FixedStatus};
 use r3v3rs3_api::policy::IpFilter;
 use r3v3rs3_api::proxy::{HttpProxy, Route};
-use r3v3rs3_api::redirect::RedirectRule;
+use r3v3rs3_api::redirect::{RedirectRule, RedirectStatus};
 use r3v3rs3_api::rewrite::PathRewrite;
 use reqwest::redirect::Policy;
 use url::Url;
@@ -74,6 +75,71 @@ async fn the_most_specific_host_and_the_longest_path_win() -> anyhow::Result<()>
         assert_eq!(get_name(&port, "other.test", "/about").await?, "default");
         assert_eq!(get_name(&port, "x.example.test", "/api").await?, "wildcard");
         assert_eq!(get_name(&port, "app.example.test", "/api").await?, "app");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn fixed_responses_answer_without_an_upstream_server() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let fixed = |path: &str, response: FixedResponse| Route {
+        path: path.into(),
+        response: Some(response),
+        ..Default::default()
+    };
+    let redirect = |target: &str, status: RedirectStatus, preserve_path: bool| {
+        FixedResponse::Redirect(FixedRedirect {
+            target: target.into(),
+            status,
+            preserve_path,
+        })
+    };
+    let not_found = FixedResponse::Status(FixedStatus {
+        status: 404,
+        body: "not here".into(),
+    });
+    let deny_all = IpFilter {
+        allow: vec![],
+        deny: parse_cidr_list("0.0.0.0/0, ::/0")?,
+    };
+    let routes = vec![
+        fixed(
+            "/old",
+            redirect("https://new.test/", RedirectStatus::MovedPermanently, true),
+        ),
+        fixed(
+            "/landing",
+            redirect("https://new.test/landing", RedirectStatus::Found, false),
+        ),
+        fixed("/gone", not_found.clone()),
+        Route {
+            ip_filter: Some(deny_all),
+            ..fixed("/private", not_found)
+        },
+    ];
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("fixed", &port)])
+        .proxies(vec![http_proxy_entry("fixed", "fixed", proxy(&[], routes))])
+        .build();
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .build()?;
+        let get = |path: &str| client.get(port.http_url(path)).send();
+        let moved = get("/old/a?b=1").await?;
+        assert_eq!(moved.status(), 301);
+        assert_eq!(moved.headers()["location"], "https://new.test/old/a?b=1");
+        let landing = get("/landing/x").await?;
+        assert_eq!(landing.status(), 302);
+        assert_eq!(landing.headers()["location"], "https://new.test/landing");
+        let gone = get("/gone").await?;
+        assert_eq!(gone.status(), 404);
+        assert_eq!(gone.headers()["content-type"], "text/plain; charset=utf-8");
+        assert_eq!(gone.text().await?, "not here");
+        // The IP filter runs before the fixed response.
+        assert_eq!(get("/private").await?.status(), 403);
         Ok(())
     })
     .await

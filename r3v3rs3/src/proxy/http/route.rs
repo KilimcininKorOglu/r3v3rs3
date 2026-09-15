@@ -14,6 +14,7 @@ use hyper::{Request, Uri};
 use r3v3rs3_api::redirect::RedirectRule;
 use r3v3rs3_api::{
     compression::Compression,
+    fixed_response::FixedResponse,
     id::ShortId,
     policy::IpFilter,
     proxy::{HttpProxy, ProxyEntry, ProxyKind, Route, Server},
@@ -103,6 +104,7 @@ impl Router {
                     cache: proxy_cache.clone(),
                     h2c: http.h2c,
                     upstream,
+                    response: route.response.map(Arc::new),
                 });
             }
         }
@@ -268,4 +270,6 @@ pub struct FilteredRoute {
     /// the client certificate of the proxy is invalid, so the route cannot reach its upstream
     /// servers.
     pub upstream: Option<Upstream>,
+    /// The redirect or the status that answers the route instead of an upstream server.
+    pub response: Option<Arc<FixedResponse>>,
 }

@@ -12,6 +12,7 @@ pub mod compression;
 pub mod discovery;
 pub mod error;
 pub mod event;
+pub mod fixed_response;
 pub mod header_rules;
 pub mod i18n;
 pub mod id;

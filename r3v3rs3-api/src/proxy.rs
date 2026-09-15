@@ -3,6 +3,7 @@ use crate::client_ip::ClientIpConfig;
 use crate::compression::Compression;
 use crate::discovery::DiscoverySource;
 use crate::error::Error;
+use crate::fixed_response::FixedResponse;
 use crate::header_rules::HeaderRules;
 use crate::mirror::Mirror;
 use crate::policy::{AuthPolicy, IpFilter, RateLimit};
@@ -68,8 +69,8 @@ impl ProxyKind {
 
     /// Rejects a zero connect timeout, session idle timeout, fail timeout or check timeout, an
     /// invalid health check path, a server list in which every server has weight 0, an invalid
-    /// circuit breaker, invalid retry attempts, an invalid sticky cookie, an invalid path prefix
-    /// and an invalid redirect target.
+    /// circuit breaker, invalid retry attempts, an invalid sticky cookie, an invalid path prefix,
+    /// an invalid redirect target and an invalid route target.
     pub fn validate_upstream(&self) -> Result<(), Error> {
         match self {
             Self::Tcp(tcp) => {
@@ -89,6 +90,7 @@ impl ProxyKind {
                 http.sticky.validate()?;
                 http.redirects.iter().try_for_each(RedirectRule::validate)?;
                 http.routes.iter().try_for_each(|route| {
+                    validate_route_target(route)?;
                     validate_weights(route.servers.iter().map(|server| server.weight))?;
                     route.mirror.iter().try_for_each(Mirror::validate)?;
                     route.rewrite.validate()
@@ -105,6 +107,16 @@ impl ProxyKind {
                     .try_for_each(UpstreamTimeouts::validate)
             }
         }
+    }
+}
+
+/// Rejects a route with both servers and a fixed response, and an invalid fixed response. A route
+/// without servers stays valid, so a discovered backend without endpoints keeps its route.
+fn validate_route_target(route: &Route) -> Result<(), Error> {
+    match &route.response {
+        Some(_) if !route.servers.is_empty() => Err(Error::RouteResponseConflict),
+        Some(response) => response.validate(),
+        None => Ok(()),
     }
 }
 
@@ -319,6 +331,10 @@ pub struct Route {
     /// Sends a copy of the requests of this route to other servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mirror: Option<Mirror>,
+    /// Answers every request of this route with a redirect or a status, instead of sending it to
+    /// `servers`. A route with a fixed response has no servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<FixedResponse>,
 }
 
 fn default_route_path() -> String {

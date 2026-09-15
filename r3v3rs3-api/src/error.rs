@@ -224,6 +224,17 @@ pub enum Error {
     #[error("mirror percent must be from 1 to 100: {percent}")]
     InvalidMirrorPercent { percent: u8 },
 
+    #[error("a route cannot have both servers and a fixed response")]
+    RouteResponseConflict,
+
+    #[error(
+        "fixed response status must be 200, 400, 403, 404, 410, 429, 451, 500, 502 or 503: {status}"
+    )]
+    InvalidFixedStatus { status: u16 },
+
+    #[error("fixed response body cannot be longer than {max} bytes")]
+    FixedBodyTooLarge { max: usize },
+
     #[error("the cluster store cannot save changes now")]
     ClusterUnavailable,
 
