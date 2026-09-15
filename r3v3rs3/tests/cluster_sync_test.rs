@@ -1,7 +1,9 @@
+use r3v3rs3::certs::challenges::ServedChallenges;
 use r3v3rs3::cluster;
 use r3v3rs3::cluster::crypto::{ClusterKey, ClusterKeys};
 use r3v3rs3::cluster::storage::KvStorage;
 use r3v3rs3::config::new_appinfo;
+use r3v3rs3::config::storage::Storage;
 use r3v3rs3::server::rpc::cluster::GetClusterStatus;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
 use r3v3rs3::server::rpc::ports::{AddPort, GetPortList};
@@ -13,6 +15,8 @@ use r3v3rs3_api::cluster::{ClusterConfig, ClusterState, ClusterStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyKind};
+use reqwest::Client;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +26,23 @@ mod common;
 use common::kv::{check_locks_and_leases, MemoryStore};
 use common::{alloc_tcp_port, call, http_port_entry, http_route, wait_for_rpc};
 
+/// The storage of a node with the memory store.
+fn node_storage(store: &Arc<MemoryStore>, name: &str) -> anyhow::Result<KvStorage> {
+    let local = AppConfig {
+        cluster: ClusterConfig {
+            enabled: true,
+            endpoints: vec!["http://127.0.0.1:2379".into()],
+            node_name: name.into(),
+            encryption_key_files: vec!["/etc/r3v3rs3/cluster.key".into()],
+            lock_ttl: Duration::from_secs(1),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let keys = ClusterKeys::new(vec![ClusterKey::new(&[1; 32])?])?;
+    Ok(KvStorage::new(store.clone(), keys, local))
+}
+
 struct Node {
     channels: ServerChannels,
     task: JoinHandle<anyhow::Result<()>>,
@@ -29,19 +50,7 @@ struct Node {
 
 impl Node {
     async fn start(store: &Arc<MemoryStore>, name: &str) -> anyhow::Result<Self> {
-        let local = AppConfig {
-            cluster: ClusterConfig {
-                enabled: true,
-                endpoints: vec!["http://127.0.0.1:2379".into()],
-                node_name: name.into(),
-                encryption_key_files: vec!["/etc/r3v3rs3/cluster.key".into()],
-                lock_ttl: Duration::from_secs(1),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let keys = ClusterKeys::new(vec![ClusterKey::new(&[1; 32])?])?;
-        let storage = Arc::new(KvStorage::new(store.clone(), keys, local));
+        let storage = Arc::new(node_storage(store, name)?);
         let app_info = new_appinfo(Path::new("."), Path::new("."));
         let (server, channels) = Server::new_shared(app_info, storage.clone()).await;
         cluster::spawn_tasks(storage, channels.command.clone());
@@ -111,6 +120,66 @@ async fn a_change_on_one_node_reaches_the_other_node() -> anyhow::Result<()> {
 
     a.stop().await?;
     b.stop().await
+}
+
+#[tokio::test]
+async fn every_node_serves_the_challenges_of_the_store() -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let leader = node_storage(&store, "leader")?;
+    let addr = alloc_tcp_port().await?.socket_addr();
+    let config = AppConfig {
+        http_challenge_addr: addr,
+        ..Default::default()
+    };
+    leader.save_app_config(&config).await?;
+    let mut node = Node::start(&store, "node-b").await?;
+    let synced = |status: &ClusterStatus| status.state == ClusterState::Synced;
+    node.wait_for(|| GetClusterStatus, synced).await?;
+
+    let challenges = ServedChallenges {
+        http: HashMap::from([("token".into(), "token.key".into())]),
+        ..Default::default()
+    };
+    leader.save_challenges(&challenges).await?;
+    let client = Client::new();
+    let url = format!("http://{addr}/.well-known/acme-challenge/token");
+    let mut body = None;
+    for _ in 0..100 {
+        if let Ok(response) = client.get(&url).send().await {
+            body = Some(response.text().await?);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(body.as_deref(), Some("token.key"));
+    assert!(
+        leader
+            .wait_for_nodes(&challenges, Duration::from_secs(5))
+            .await?
+    );
+    // No node serves these challenges, so the wait ends without them.
+    let other = ServedChallenges {
+        http: HashMap::from([("other".into(), "other.key".into())]),
+        ..Default::default()
+    };
+    assert!(
+        !leader
+            .wait_for_nodes(&other, Duration::from_millis(300))
+            .await?
+    );
+
+    leader.save_challenges(&ServedChallenges::default()).await?;
+    // A new connection, because the client keeps its earlier connection open.
+    let mut closed = false;
+    for _ in 0..100 {
+        if tokio::net::TcpStream::connect(addr).await.is_err() {
+            closed = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(closed, "the node still serves the challenge listener");
+    node.stop().await
 }
 
 #[tokio::test]

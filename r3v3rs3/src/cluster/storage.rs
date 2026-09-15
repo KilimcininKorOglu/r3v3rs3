@@ -7,6 +7,8 @@ use super::layout::{last_segment, Layout};
 use super::{key_file, store};
 use crate::cdn::CdnRanges;
 use crate::certs::acme::{AcmeAccount, AcmeEntry};
+use crate::certs::alpn::TlsAlpnChallenge;
+use crate::certs::challenges::ServedChallenges;
 use crate::certs::Cert;
 use crate::config::{account, storage::Storage};
 use crate::kv::{Condition, KvItem, KvStore, Txn, TxnOutcome, Write};
@@ -25,14 +27,19 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use tracing::error;
+use tracing::{error, warn};
 
 /// The changes of one transaction. Each change has a condition, and a Consul transaction has at
 /// most 64 operations.
 const MAX_CHANGES: usize = 32;
 /// The value of the schema key.
 const SCHEMA: &[u8] = b"1";
+/// The longest wait of the leader for the nodes to serve new ACME challenges.
+const CHALLENGE_WAIT: Duration = Duration::from_secs(10);
+/// The interval of the checks for the acks of the nodes.
+const ACK_INTERVAL: Duration = Duration::from_millis(200);
 
 type Digest32 = [u8; 32];
 
@@ -164,6 +171,23 @@ impl KvStorage {
             .await
     }
 
+    /// Writes a key without a condition. Only one node writes such a key, so the write cannot
+    /// replace the change of another node.
+    pub async fn put_unconditional(
+        &self,
+        key: String,
+        plaintext: &[u8],
+        lease: Option<String>,
+    ) -> anyhow::Result<()> {
+        let value = self.encode(&key, plaintext)?;
+        let txn = Txn {
+            conditions: Vec::new(),
+            writes: vec![Write::Put { key, value, lease }],
+        };
+        self.store.commit(&txn).await?;
+        Ok(())
+    }
+
     /// The value to write under a key: sealed, or plain for the keys that the cluster does not
     /// encrypt.
     pub fn encode(&self, key: &str, plaintext: &[u8]) -> anyhow::Result<Vec<u8>> {
@@ -282,16 +306,50 @@ impl KvStorage {
                 json_change(format!("{prefix}{id}"), &Positioned { position, value })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        self.replace_prefix(&prefix, puts).await
+    }
+
+    /// Writes the puts and deletes the remembered keys below `prefix` that the puts do not have.
+    async fn replace_prefix(&self, prefix: &str, puts: Vec<Change>) -> Result<(), Error> {
         let keys = puts.iter().map(Change::key).collect::<HashSet<_>>();
         let stale = self
             .known
             .lock()
             .await
             .keys()
-            .filter(|key| key.starts_with(&prefix) && !keys.contains(key.as_str()))
+            .filter(|key| key.starts_with(prefix) && !keys.contains(key.as_str()))
             .map(|key| Change::Delete(key.clone()))
             .collect::<Vec<_>>();
         self.apply(puts.into_iter().chain(stale).collect()).await
+    }
+
+    /// Waits until every node that is present acknowledged the challenges. False when the time
+    /// ends first.
+    pub async fn wait_for_nodes(
+        &self,
+        challenges: &ServedChallenges,
+        timeout: Duration,
+    ) -> anyhow::Result<bool> {
+        let digest = challenges.digest();
+        let deadline = Instant::now() + timeout;
+        while !self.all_nodes_acked(&digest).await? {
+            if Instant::now() >= deadline {
+                return Ok(false);
+            }
+            tokio::time::sleep(ACK_INTERVAL).await;
+        }
+        Ok(true)
+    }
+
+    async fn all_nodes_acked(&self, digest: &str) -> anyhow::Result<bool> {
+        let nodes = self.store.list(&self.layout.nodes()).await?;
+        for node in nodes.items {
+            let ack = self.store.get(&self.layout.ack_of(&node.key)).await?;
+            if ack.is_none_or(|ack| ack.value != digest.as_bytes()) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Writes the changes whose value differs from the remembered value.
@@ -402,6 +460,41 @@ fn pem_text(key: &str, pem: &[u8]) -> Result<String, Error> {
 fn stored_cert(cert: StoredCert) -> Result<Arc<Cert>, Error> {
     let key = cert.key.map(String::into_bytes);
     Cert::new(cert.kind, cert.chain.into_bytes(), key).map(Arc::new)
+}
+
+fn challenge_changes(layout: &Layout, challenges: &ServedChallenges) -> Vec<Change> {
+    let http = challenges.http.iter().map(|(token, authorization)| {
+        let value = authorization.clone().into_bytes();
+        Change::Put(layout.http_challenge(token), value)
+    });
+    let tls_alpn = challenges.tls_alpn.iter().map(|challenge| {
+        let value = hex::encode(challenge.digest).into_bytes();
+        Change::Put(layout.tls_alpn_challenge(&challenge.domain), value)
+    });
+    http.chain(tls_alpn).collect()
+}
+
+fn read_challenge(
+    layout: &Layout,
+    challenges: &mut ServedChallenges,
+    key: &str,
+    value: Vec<u8>,
+) -> anyhow::Result<()> {
+    if let Some(token) = key.strip_prefix(&layout.http_challenges()) {
+        let token = String::from_utf8(hex::decode(token)?)?;
+        challenges.http.insert(token, String::from_utf8(value)?);
+        return Ok(());
+    }
+    let domain = key
+        .strip_prefix(&layout.tls_alpn_challenges())
+        .context("not a challenge key")?;
+    let digest = <[u8; 32]>::try_from(hex::decode(value)?)
+        .map_err(|_| anyhow::anyhow!("the digest does not have 32 bytes"))?;
+    challenges.tls_alpn.push(TlsAlpnChallenge {
+        domain: String::from_utf8(hex::decode(domain)?)?,
+        digest,
+    });
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -549,5 +642,50 @@ impl Storage for KvStorage {
             error!(key, "failed to load: {err:#}");
             None
         })
+    }
+
+    async fn save_challenges(&self, challenges: &ServedChallenges) -> Result<(), Error> {
+        let prefix = self.layout.challenges();
+        // An earlier leader can leave keys in the store, so the storage reads them first.
+        self.read_prefix(&prefix).await.map_err(unavailable)?;
+        let puts = challenge_changes(&self.layout, challenges);
+        self.replace_prefix(&prefix, puts).await
+    }
+
+    async fn load_challenges(&self) -> Option<ServedChallenges> {
+        let values = match self.read_prefix(&self.layout.challenges()).await {
+            Ok(values) => values,
+            Err(err) => {
+                error!("failed to load the ACME challenges: {err:#}");
+                return None;
+            }
+        };
+        let mut challenges = ServedChallenges::default();
+        for (key, value) in values {
+            if let Err(err) = read_challenge(&self.layout, &mut challenges, &key, value) {
+                error!(key, "invalid ACME challenge: {err:#}");
+            }
+        }
+        Some(challenges)
+    }
+
+    async fn ack_challenges(&self, challenges: &ServedChallenges) -> Result<(), Error> {
+        let key = self.layout.ack(&self.local.cluster.node_name);
+        self.put_unconditional(key, challenges.digest().as_bytes(), None)
+            .await
+            .map_err(unavailable)
+    }
+
+    async fn wait_for_challenges(&self, challenges: &ServedChallenges) {
+        if challenges.is_empty() {
+            return;
+        }
+        match self.wait_for_nodes(challenges, CHALLENGE_WAIT).await {
+            Ok(true) => {}
+            Ok(false) => {
+                warn!("not every node serves the ACME challenges after {CHALLENGE_WAIT:?}")
+            }
+            Err(err) => error!("failed to wait for the nodes to serve the challenges: {err:#}"),
+        }
     }
 }

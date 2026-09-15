@@ -10,6 +10,7 @@ use super::udp::UdpListenerPool;
 use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
 use crate::certs::acme::{AcmeEntry, AcmeOrder, AcmeTarget};
 use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge};
+use crate::certs::challenges::ServedChallenges;
 use crate::cluster::layout::StateKind;
 use crate::config::storage::Storage;
 use crate::discovery::DiscoverySnapshot;
@@ -268,6 +269,7 @@ impl ServerState {
                 StateKind::Ports => self.reload_ports().await,
                 StateKind::Proxies => self.reload_manual_proxies().await,
                 StateKind::Cdn => self.reload_cdn_ranges().await,
+                StateKind::Challenges => self.reload_challenges().await,
             }
         }
     }
@@ -329,6 +331,15 @@ impl ServerState {
         if let Some(ranges) = self.storage.load_cdn_ranges().await {
             crate::cdn::install(ranges);
         }
+    }
+
+    /// Serves the challenges of the store, and tells the leader that this node serves them.
+    async fn reload_challenges(&mut self) {
+        let Some(challenges) = self.storage.load_challenges().await else {
+            return;
+        };
+        self.set_challenges(challenges.clone()).await;
+        log_save_error(self.storage.ack_challenges(&challenges).await);
     }
 
     /// Adds a certificate that an ACME order issued. The server uses the certificate even when the
@@ -851,18 +862,19 @@ impl ServerState {
     }
 
     async fn stop_http_challenges(&mut self) {
-        self.http_challenges = HttpChallenges::default();
-        self.tls_alpn_challenges.clear();
-        self.tls_alpn_challenge = None;
-        self.tcp_pool.set_challenge_addrs(Vec::new());
-        self.tcp_pool.update(self.ports.as_mut_slice()).await;
+        let challenges = ServedChallenges::default();
+        log_save_error(self.storage.save_challenges(&challenges).await);
+        self.set_challenges(challenges).await;
     }
 
     async fn continue_http_challenges(&mut self, orders: Vec<AcmeOrder>) {
-        self.serve_challenges(&orders).await;
+        let challenges = self.serve_challenges(&orders).await;
 
         let command = self.command_sender.clone();
+        let storage = self.storage.clone();
         tokio::task::spawn(async move {
+            // The ACME server can validate a challenge on any node of a cluster.
+            storage.wait_for_challenges(&challenges).await;
             for mut order in orders {
                 let span = span!(
                     Level::INFO,
@@ -896,23 +908,36 @@ impl ServerState {
         });
     }
 
-    /// Serves the HTTP-01 and TLS-ALPN-01 challenges of the orders. Orders of an earlier batch can
-    /// still be running, so their challenges stay served.
-    async fn serve_challenges(&mut self, orders: &[AcmeOrder]) {
-        Arc::make_mut(&mut self.http_challenges).extend(
+    /// Serves the HTTP-01 and TLS-ALPN-01 challenges of the orders, and returns every served
+    /// challenge. Orders of an earlier batch can still be running, so their challenges stay served.
+    async fn serve_challenges(&mut self, orders: &[AcmeOrder]) -> ServedChallenges {
+        let mut challenges = ServedChallenges {
+            http: (*self.http_challenges).clone(),
+            tls_alpn: self.tls_alpn_challenges.clone(),
+        };
+        challenges.http.extend(
             orders
                 .iter()
                 .flat_map(|order| order.http_challenges.clone()),
         );
-        self.tls_alpn_challenges.extend(
+        challenges.tls_alpn.extend(
             orders
                 .iter()
                 .flat_map(|order| order.tls_alpn_challenges.clone()),
         );
+        log_save_error(self.storage.save_challenges(&challenges).await);
+        self.set_challenges(challenges.clone()).await;
+        challenges
+    }
+
+    async fn set_challenges(&mut self, challenges: ServedChallenges) {
+        let previous = self.challenge_addrs();
+        self.http_challenges = Arc::new(challenges.http);
+        self.tls_alpn_challenges = challenges.tls_alpn;
         self.tls_alpn_challenge = tls_alpn_config(&self.tls_alpn_challenges);
         let addrs = self.challenge_addrs();
         // DNS-01 orders need no listener.
-        if !addrs.is_empty() {
+        if !addrs.is_empty() || addrs != previous {
             self.tcp_pool.set_challenge_addrs(addrs);
             self.tcp_pool.update(self.ports.as_mut_slice()).await;
         }

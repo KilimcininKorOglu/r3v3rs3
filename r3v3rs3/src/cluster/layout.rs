@@ -13,16 +13,18 @@ pub enum StateKind {
     Ports,
     Proxies,
     Cdn,
+    Challenges,
 }
 
 impl StateKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Config,
         Self::Certs,
         Self::Acmes,
         Self::Ports,
         Self::Proxies,
         Self::Cdn,
+        Self::Challenges,
     ];
 }
 
@@ -79,9 +81,8 @@ impl Layout {
         format!("{}{id}", self.acmes())
     }
 
-    /// The account key holds the user name in hex, so any name is one key segment.
     pub fn account(&self, name: &str) -> String {
-        format!("{}accounts/{}", self.state(), hex::encode(name))
+        hex_key(format!("{}accounts/", self.state()), name)
     }
 
     pub fn cdn(&self) -> String {
@@ -93,10 +94,58 @@ impl Layout {
         format!("{}lock/leader", self.data)
     }
 
+    /// The ACME challenges that every node serves. The ACME server publishes their values, so
+    /// they are not encrypted.
+    pub fn challenges(&self) -> String {
+        format!("{}challenges/", self.state())
+    }
+
+    pub fn http_challenges(&self) -> String {
+        format!("{}http/", self.challenges())
+    }
+
+    pub fn tls_alpn_challenges(&self) -> String {
+        format!("{}tls-alpn/", self.challenges())
+    }
+
+    pub fn http_challenge(&self, token: &str) -> String {
+        hex_key(self.http_challenges(), token)
+    }
+
+    pub fn tls_alpn_challenge(&self, domain: &str) -> String {
+        hex_key(self.tls_alpn_challenges(), domain)
+    }
+
+    /// The presence keys of the nodes. Each node attaches its key to its lease.
+    pub fn nodes(&self) -> String {
+        format!("{}nodes/", self.data)
+    }
+
+    pub fn node(&self, name: &str) -> String {
+        hex_key(self.nodes(), name)
+    }
+
+    /// The keys where the nodes write the digest of the challenges that they serve.
+    pub fn acks(&self) -> String {
+        format!("{}acks/", self.data)
+    }
+
+    pub fn ack(&self, name: &str) -> String {
+        hex_key(self.acks(), name)
+    }
+
+    /// The ack key of the node with this presence key.
+    pub fn ack_of(&self, node_key: &str) -> String {
+        format!("{}{}", self.acks(), last_segment(node_key))
+    }
+
     /// Whether the cluster stores the value of the key without encryption. Every other value is
     /// encrypted.
     pub fn is_plain(&self, key: &str) -> bool {
-        key.starts_with(&self.ports()) || key == self.cdn() || key == self.schema()
+        let plain_prefixes = [self.ports(), self.challenges(), self.nodes(), self.acks()];
+        plain_prefixes.iter().any(|prefix| key.starts_with(prefix))
+            || key == self.cdn()
+            || key == self.schema()
     }
 
     /// The part of the state of a key. Accounts and the keys outside the state have none.
@@ -110,9 +159,15 @@ impl Layout {
             "ports" => Some(StateKind::Ports),
             "proxies" => Some(StateKind::Proxies),
             "cdn" => Some(StateKind::Cdn),
+            "challenges" => Some(StateKind::Challenges),
             _ => None,
         }
     }
+}
+
+/// A key below `prefix` whose last segment holds the name in hex, so any name is one key segment.
+fn hex_key(prefix: String, name: &str) -> String {
+    format!("{prefix}{}", hex::encode(name))
 }
 
 /// The last segment of a key.
@@ -152,6 +207,18 @@ mod tests {
         assert_eq!(layout.leader(), "r3v3rs3/v1/lock/leader");
         assert_eq!(layout.kind(&layout.leader()), None);
         assert!(!layout.is_plain(&layout.leader()));
+
+        let token = layout.http_challenge("a/b");
+        assert_eq!(token, "r3v3rs3/v1/state/challenges/http/612f62");
+        assert_eq!(layout.kind(&token), Some(StateKind::Challenges));
+        assert!(layout.is_plain(&token));
+        assert!(layout.is_plain(&layout.tls_alpn_challenge("example.com")));
+        let node = layout.node("node-a");
+        assert_eq!(node, "r3v3rs3/v1/nodes/6e6f64652d61");
+        assert_eq!(layout.ack_of(&node), layout.ack("node-a"));
+        assert!(layout.is_plain(&node));
+        assert!(layout.is_plain(&layout.ack("node-a")));
+        assert_eq!(layout.kind(&node), None);
         assert!(!layout.is_plain(&layout.account("admin")));
     }
 }

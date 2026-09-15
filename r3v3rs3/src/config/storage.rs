@@ -1,5 +1,5 @@
 use crate::cdn::CdnRanges;
-use crate::certs::{acme::AcmeEntry, Cert};
+use crate::certs::{acme::AcmeEntry, challenges::ServedChallenges, Cert};
 use r3v3rs3_api::{
     app::AppConfig,
     auth::{Account, LoginRequest, LoginResponse},
@@ -34,4 +34,23 @@ pub trait Storage: Send + Sync + 'static {
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error>;
     async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error>;
     async fn load_cdn_ranges(&self) -> Option<CdnRanges>;
+
+    /// Stores the ACME challenges that every node of a cluster serves. A single server keeps them
+    /// in memory only.
+    async fn save_challenges(&self, _challenges: &ServedChallenges) -> Result<(), Error> {
+        Ok(())
+    }
+
+    /// The challenges in the storage. `None` when the storage keeps no challenges.
+    async fn load_challenges(&self) -> Option<ServedChallenges> {
+        None
+    }
+
+    /// Records that this node serves the challenges.
+    async fn ack_challenges(&self, _challenges: &ServedChallenges) -> Result<(), Error> {
+        Ok(())
+    }
+
+    /// Waits until the other nodes serve the challenges.
+    async fn wait_for_challenges(&self, _challenges: &ServedChallenges) {}
 }

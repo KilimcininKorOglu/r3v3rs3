@@ -58,6 +58,10 @@ impl Candidate {
 
     /// Keeps the lease and tries to take the lock until the lease fails or the server stops.
     async fn hold(&mut self, lease: &Lease) {
+        if let Err(err) = self.register(lease).await {
+            error!("failed to register the node: {err:#}");
+            return;
+        }
         let mut ticks = tokio::time::interval(self.interval());
         loop {
             ticks.tick().await;
@@ -73,6 +77,17 @@ impl Candidate {
                 }
             }
         }
+    }
+
+    /// Marks this node as present while its lease lives. The leader waits for the present nodes
+    /// before the ACME server validates a challenge.
+    async fn register(&self, lease: &Lease) -> anyhow::Result<()> {
+        let node = &self.storage.cluster_config().node_name;
+        let key = self.storage.layout().node(node);
+        let lease = Some(lease.id.clone());
+        self.storage
+            .put_unconditional(key, node.as_bytes(), lease)
+            .await
     }
 
     async fn try_lock(&self, lease: &Lease) -> anyhow::Result<bool> {
