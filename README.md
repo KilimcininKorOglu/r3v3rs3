@@ -127,7 +127,7 @@ $ cargo install r3v3rs3
 
 ### Github Releases
 
-Alternatively, you can directly download the latest pre-built Linux binaries (x86_64, aarch64 and armv7) from the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases).
+Alternatively, you can directly download the latest pre-built Linux binaries (x86_64 and aarch64) from the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases).
 
 You simply put the extracted binary somewhere in your `$PATH` and you're good to go.
 
