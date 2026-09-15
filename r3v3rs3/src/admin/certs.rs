@@ -7,7 +7,7 @@ use crate::{
 };
 use axum::{
     extract::{Multipart, Path, Query, State},
-    http::HeaderMap,
+    http::header::{CONTENT_DISPOSITION, CONTENT_TYPE},
     response::IntoResponse,
     Extension, Json,
 };
@@ -151,13 +151,12 @@ pub async fn download(
     Path(id): Path<ShortId>,
 ) -> Result<impl IntoResponse, AppError> {
     let file = state.call(&caller, DownloadCert { id }).await?;
-    let mut headers = HeaderMap::new();
-    headers.insert("Content-Type", "application/gzip".parse().unwrap());
-    headers.insert(
-        "Content-Disposition",
-        format!("attachment; filename=\"{}.tar.gz\"", id)
-            .parse()
-            .unwrap(),
-    );
+    let headers = [
+        (CONTENT_TYPE, "application/gzip".to_string()),
+        (
+            CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{id}.tar.gz\""),
+        ),
+    ];
     Ok((headers, file.deref().clone()))
 }
