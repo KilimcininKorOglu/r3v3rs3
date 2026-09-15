@@ -4,13 +4,15 @@ use clap::Parser;
 use directories::ProjectDirs;
 use r3v3rs3::args::StartArgs;
 use r3v3rs3::args::{ClusterArgs, ClusterCommand, Command};
+use r3v3rs3::cluster::storage::KvStorage;
 use r3v3rs3::config::file::FileStorage;
 use r3v3rs3::config::new_appinfo;
 use r3v3rs3::config::storage::Storage;
 use r3v3rs3::log::DatabaseLayer;
 use r3v3rs3::server::Server;
+use r3v3rs3_api::app::AppConfig;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{error, info};
 use tracing_subscriber::filter::{self, FilterExt};
 use tracing_subscriber::prelude::*;
@@ -50,8 +52,25 @@ async fn cluster(args: ClusterArgs) -> anyhow::Result<()> {
                 report.resealed, report.current, report.plain, report.deleted
             );
         }
+        ClusterCommand::Import(args) => {
+            let config_dir = get_config_dir(args.config_dir)?;
+            let report = r3v3rs3::cluster::import::run(&config_dir).await?;
+            println!(
+                "Imported the config, {} ports, {} proxies, {} certificates, {} ACME entries and {} accounts.",
+                report.ports, report.proxies, report.certs, report.acmes, report.accounts
+            );
+        }
     }
     Ok(())
+}
+
+/// Reads `config.toml`. A missing file gives the default config. An invalid file is an error, so
+/// a node of a cluster does not start with its local files.
+async fn read_local_config(config_dir: &Path) -> anyhow::Result<AppConfig> {
+    if !config_dir.join("config.toml").try_exists()? {
+        return Ok(AppConfig::default());
+    }
+    FileStorage::new(config_dir).read_app_config().await
 }
 
 async fn start(args: StartArgs) -> anyhow::Result<()> {
@@ -86,10 +105,15 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
     let config_dir = get_config_dir(args.config_dir)?;
     fs::create_dir_all(&config_dir)?;
 
-    let config = FileStorage::new(&config_dir);
     let app_info = new_appinfo(&config_dir, &log_dir);
+    let local = read_local_config(&config_dir).await?;
 
-    let (server, channels) = Server::new(app_info.clone(), config).await;
+    let (server, channels) = if local.cluster.enabled {
+        let storage = KvStorage::open(local).await?;
+        Server::new(app_info.clone(), storage).await
+    } else {
+        Server::new(app_info.clone(), FileStorage::new(&config_dir)).await
+    };
     r3v3rs3::cdn::fetch::spawn_refresh_task(channels.command.clone());
     let server_task = tokio::spawn(server.start());
     let event_send = channels.event.clone();
@@ -114,13 +138,21 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
 
 async fn add_user(args: r3v3rs3::args::AddUserArgs) -> anyhow::Result<()> {
     let config_dir = get_config_dir(args.config_dir)?;
-    let config = FileStorage::new(&config_dir);
+    let local = read_local_config(&config_dir).await?;
     let password = if let Some(password) = args.password {
         password
     } else {
         rpassword::prompt_password("password?: ")?
     };
-    let account = config.add_account(&args.name, &password, args.totp).await?;
+    let account = if local.cluster.enabled {
+        let storage = KvStorage::open(local).await?;
+        storage
+            .add_account(&args.name, &password, args.totp)
+            .await?
+    } else {
+        let files = FileStorage::new(&config_dir);
+        files.add_account(&args.name, &password, args.totp).await?
+    };
     if let Some(totp) = account.totp {
         println!("\nUse this code to setup your TOTP client:\n{totp}\n");
     }

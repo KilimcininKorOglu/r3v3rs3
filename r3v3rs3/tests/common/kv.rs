@@ -5,13 +5,148 @@ use r3v3rs3::cluster::data_prefix;
 use r3v3rs3::cluster::rekey::rekey;
 use r3v3rs3::kv::http::ApiClient;
 use r3v3rs3::kv::{
-    Condition, KvEvent, KvItem, KvList, KvStore, KvWatcher, Txn, TxnOutcome, WatchBatch, Write,
+    Condition, KvEvent, KvItem, KvList, KvStore, KvWatcher, Lease, Txn, TxnOutcome, WatchBatch,
+    Write,
 };
 use r3v3rs3_api::discovery::Endpoint;
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use url::Url;
+
+#[derive(Default)]
+struct MemoryData {
+    /// The value and the version of each key.
+    items: BTreeMap<String, (Vec<u8>, u64)>,
+    revision: u64,
+    commits: usize,
+    unavailable: bool,
+}
+
+/// A [`KvStore`] in memory with keys, versions and conditional commits, for tests of the code that
+/// reads and writes the store. It has no leases, locks or watches.
+#[derive(Default)]
+pub struct MemoryStore {
+    data: Mutex<MemoryData>,
+}
+
+impl MemoryStore {
+    /// The commits that reached the store.
+    pub fn commits(&self) -> usize {
+        self.data.lock().unwrap().commits
+    }
+
+    /// An unavailable store fails every call.
+    pub fn set_unavailable(&self, unavailable: bool) {
+        self.data.lock().unwrap().unavailable = unavailable;
+    }
+
+    pub fn value(&self, key: &str) -> anyhow::Result<Vec<u8>> {
+        let data = self.data.lock().unwrap();
+        let item = data.items.get(key);
+        item.map(|(value, _)| value.clone())
+            .ok_or_else(|| anyhow::anyhow!("{key} is missing"))
+    }
+
+    fn data(&self) -> anyhow::Result<MutexGuard<'_, MemoryData>> {
+        let data = self.data.lock().unwrap();
+        anyhow::ensure!(!data.unavailable, "the store is unavailable");
+        Ok(data)
+    }
+}
+
+fn holds(data: &MemoryData, condition: &Condition) -> bool {
+    match condition {
+        Condition::Absent(key) => !data.items.contains_key(key),
+        Condition::Version(key, version) => data.items.get(key).map(|(_, v)| v) == Some(version),
+        Condition::LockHeld { .. } => false,
+    }
+}
+
+struct NoWatch;
+
+#[async_trait::async_trait]
+impl KvWatcher for NoWatch {
+    async fn next(&mut self) -> anyhow::Result<WatchBatch> {
+        anyhow::bail!("the memory store has no watches")
+    }
+}
+
+#[async_trait::async_trait]
+impl KvStore for MemoryStore {
+    async fn list(&self, prefix: &str) -> anyhow::Result<KvList> {
+        let data = self.data()?;
+        let items = data
+            .items
+            .iter()
+            .filter(|(key, _)| key.starts_with(prefix))
+            .map(|(key, (value, version))| KvItem {
+                key: key.clone(),
+                value: value.clone(),
+                version: *version,
+            })
+            .collect();
+        Ok(KvList {
+            items,
+            revision: data.revision,
+        })
+    }
+
+    async fn get(&self, key: &str) -> anyhow::Result<Option<KvItem>> {
+        let data = self.data()?;
+        Ok(data.items.get(key).map(|(value, version)| KvItem {
+            key: key.to_string(),
+            value: value.clone(),
+            version: *version,
+        }))
+    }
+
+    async fn commit(&self, txn: &Txn) -> anyhow::Result<TxnOutcome> {
+        let mut data = self.data()?;
+        data.commits += 1;
+        if !txn
+            .conditions
+            .iter()
+            .all(|condition| holds(&data, condition))
+        {
+            return Ok(TxnOutcome::Conflict);
+        }
+        data.revision += 1;
+        let revision = data.revision;
+        for write in &txn.writes {
+            match write {
+                Write::Put { key, value, .. } | Write::Update { key, value } => {
+                    data.items.insert(key.clone(), (value.clone(), revision));
+                }
+                Write::Delete(key) => {
+                    data.items.remove(key);
+                }
+            }
+        }
+        Ok(TxnOutcome::Committed)
+    }
+
+    async fn grant_lease(&self, _ttl: Duration) -> anyhow::Result<Lease> {
+        anyhow::bail!("the memory store has no leases")
+    }
+
+    async fn keep_alive(&self, _lease: &Lease) -> anyhow::Result<()> {
+        anyhow::bail!("the memory store has no leases")
+    }
+
+    async fn revoke_lease(&self, _lease: &Lease) -> anyhow::Result<()> {
+        anyhow::bail!("the memory store has no leases")
+    }
+
+    async fn try_lock(&self, _key: &str, _value: &[u8], _lease: &Lease) -> anyhow::Result<bool> {
+        anyhow::bail!("the memory store has no locks")
+    }
+
+    fn watch(&self, _prefix: &str, _from: &KvList) -> Box<dyn KvWatcher> {
+        Box::new(NoWatch)
+    }
+}
 
 pub fn api_client(url: &Url) -> anyhow::Result<ApiClient> {
     let host = url.host_str().unwrap_or_default();

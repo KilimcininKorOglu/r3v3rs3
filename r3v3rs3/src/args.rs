@@ -30,7 +30,9 @@ pub enum ClusterCommand {
     /// Write a new value encryption key to a file
     Keygen(KeygenArgs),
     /// Encrypt every value of the cluster store with the first key of `cluster.encryption_key_files`
-    Rekey(RekeyArgs),
+    Rekey(ClusterConfigArgs),
+    /// Copy the configuration files into an empty cluster store
+    Import(ClusterConfigArgs),
 }
 
 #[derive(Args)]
@@ -40,7 +42,7 @@ pub struct KeygenArgs {
 }
 
 #[derive(Args)]
-pub struct RekeyArgs {
+pub struct ClusterConfigArgs {
     #[clap(long, short, value_name = "DIR", env = "R3V3RS3_CONFIG_DIR")]
     pub config_dir: Option<PathBuf>,
 }

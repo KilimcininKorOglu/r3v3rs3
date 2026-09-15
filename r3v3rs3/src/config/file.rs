@@ -1,14 +1,14 @@
-use super::{build_info, storage::Storage};
+use super::{account, build_info, storage::Storage};
 use crate::cdn::CdnRanges;
 use crate::certs::{
     acme::{AcmeAccount, AcmeEntry},
     Cert,
 };
-use argon2::{password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+use anyhow::Context as _;
 use indexmap::map::IndexMap;
 use r3v3rs3_api::{
     app::AppConfig,
-    auth::{Account, LoginMethod, LoginRequest, LoginResponse},
+    auth::{Account, LoginRequest, LoginResponse},
     cert::CertKind,
     id::ShortId,
 };
@@ -26,7 +26,6 @@ use std::{
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use toml_edit::DocumentMut;
-use totp_rs::{Secret, TOTP};
 use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -373,21 +372,7 @@ impl FileStorage {
             Err(_) => DocumentMut::default(),
         };
 
-        let salt = SaltString::generate(rand::thread_rng());
-        let argon2 = Argon2::default();
-        let password_hash = argon2
-            .hash_password(password.as_bytes(), &salt)
-            .map_err(|_| anyhow::anyhow!("failed to hash password"))?
-            .to_string();
-
-        let account = Account {
-            password: password_hash,
-            totp: if totp {
-                Some(TOTP::default().get_secret_base32())
-            } else {
-                None
-            },
-        };
+        let account = account::new_account(password, totp)?;
         doc[name].clone_from(toml_edit::ser::to_document(&account)?.as_item());
 
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
@@ -403,81 +388,51 @@ impl FileStorage {
         Ok(accounts.data)
     }
 
-    async fn verify_password(&self, name: &str, password: &str) -> Result<LoginResponse, Error> {
-        let accounts = match self.load_accounts().await {
-            Ok(accounts) => accounts,
-            Err(err) => {
-                error!(%err, "failed to load accounts: {err}");
-                return Err(Error::InvalidLoginCredentials);
-            }
-        };
-
-        let account = match accounts.get(name) {
-            Some(account) => account,
-            None => {
-                error!(%name, "account not found: {name}");
-                return Err(Error::InvalidLoginCredentials);
-            }
-        };
-
-        let parsed_hash = match PasswordHash::new(&account.password) {
-            Ok(parsed_hash) => parsed_hash,
-            Err(err) => {
-                error!(%err, "failed to parse password hash: {err}");
-                return Err(Error::InvalidLoginCredentials);
-            }
-        };
-
-        let argon2 = Argon2::default();
-        if let Err(err) = argon2.verify_password(password.as_bytes(), &parsed_hash) {
-            error!(%err, "failed to verify password: {err}");
-            return Err(Error::InvalidLoginCredentials);
-        }
-
-        if account.totp.is_some() {
-            return Ok(LoginResponse::TotpRequired);
-        }
-
-        Ok(LoginResponse::Success)
+    /// Reads every file. A missing file is empty, but a file that cannot be read is an error, and
+    /// `config.toml` must exist.
+    pub async fn read_state(&self) -> anyhow::Result<FileState> {
+        let ports = self.dir.join("ports.toml");
+        let proxies = self.dir.join("proxies.toml");
+        let acmes = self.dir.join("acme.toml");
+        let accounts = self.dir.join("accounts.toml");
+        let cdn = self.dir.join("cdn-ranges.json");
+        Ok(FileState {
+            config: self.read_app_config().await?,
+            ports: if_exists(&ports, self.load_ports_impl(&ports)).await?,
+            proxies: if_exists(&proxies, self.load_proxies_impl(&proxies)).await?,
+            certs: self.load_certs().await,
+            acmes: if_exists(&acmes, self.load_acmes_impl(&acmes)).await?,
+            accounts: if_exists(&accounts, self.load_accounts()).await?,
+            cdn_ranges: if_exists(&cdn, async {
+                self.load_cdn_ranges_impl(&cdn).await.map(Some)
+            })
+            .await?,
+        })
     }
+}
 
-    async fn verify_totp(&self, name: &str, token: &str) -> Result<LoginResponse, Error> {
-        let accounts = match self.load_accounts().await {
-            Ok(accounts) => accounts,
-            Err(err) => {
-                error!(%err, "failed to load accounts: {err}");
-                return Err(Error::InvalidLoginCredentials);
-            }
-        };
+/// The state that the files of a node store.
+#[derive(Default)]
+pub struct FileState {
+    pub config: AppConfig,
+    pub ports: Vec<PortEntry>,
+    pub proxies: Vec<ProxyEntry>,
+    pub certs: Vec<Arc<Cert>>,
+    pub acmes: Vec<AcmeEntry>,
+    pub accounts: HashMap<String, Account>,
+    pub cdn_ranges: Option<CdnRanges>,
+}
 
-        let account = match accounts.get(name) {
-            Some(account) => account,
-            None => {
-                error!(%name, "account not found: {name}");
-                return Err(Error::InvalidLoginCredentials);
-            }
-        };
-
-        let secret = match &account.totp {
-            Some(totp) => Secret::Encoded(totp.clone())
-                .to_bytes()
-                .map_err(|_| Error::InvalidLoginCredentials)?,
-            None => {
-                error!(%name, "totp not found: {name}");
-                return Err(Error::InvalidLoginCredentials);
-            }
-        };
-
-        let totp = TOTP {
-            secret,
-            ..Default::default()
-        };
-
-        if totp.check_current(token).unwrap_or_default() {
-            return Ok(LoginResponse::Success);
-        }
-        Err(Error::InvalidLoginCredentials)
+/// Reads a file when it exists. A missing file gives the default value.
+async fn if_exists<T: Default>(
+    path: &Path,
+    read: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> anyhow::Result<T> {
+    if !fs::try_exists(path).await? {
+        return Ok(T::default());
     }
+    read.await
+        .with_context(|| format!("failed to read {}", path.display()))
 }
 
 #[async_trait::async_trait]
@@ -599,12 +554,12 @@ impl Storage for FileStorage {
     }
 
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error> {
-        match request.method {
-            LoginMethod::Password { password } => {
-                self.verify_password(&request.username, &password).await
-            }
-            LoginMethod::Totp { token } => self.verify_totp(&request.username, &token).await,
-        }
+        let accounts = self.load_accounts().await.map_err(|err| {
+            error!(%err, "failed to load accounts: {err}");
+            Error::InvalidLoginCredentials
+        })?;
+        let account = accounts.get(&request.username).cloned();
+        account::verify(account.as_ref(), request)
     }
 
     async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error> {

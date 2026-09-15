@@ -1,6 +1,7 @@
 use r3v3rs3_api::app::AppInfo;
 use std::path::Path;
 
+pub mod account;
 pub mod file;
 pub mod storage;
 
