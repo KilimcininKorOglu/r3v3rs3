@@ -1,9 +1,9 @@
+name: Upload Release Assets
+
 on:
   push:
     tags:
       - "v*"
-
-name: Upload Release Assets
 
 permissions:
   contents: write
@@ -12,98 +12,73 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release-linux:
-    name: Upload Release Assets (Linux)
-    runs-on: ubuntu-latest
+  # The WebUI is WebAssembly, so one build serves every target. This job also creates the draft
+  # release once, before the binary jobs upload to it.
+  webui:
+    name: Build WebUI and create release
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
-      - uses: actions/cache@v3
-        continue-on-error: true
+        uses: actions/checkout@v7
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-stable-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - uses: rui314/setup-mold@v1
+          targets: wasm32-unknown-unknown
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@v1.23.0
       - name: Install trunk
-        run: cargo binstall trunk --force -y
-      - name: Add toolchain
-        run: rustup target add wasm32-unknown-unknown
+        run: cargo binstall trunk@0.21.14 --force -y
       - name: Build webui
         run: cd r3v3rs3-webui && trunk build --cargo-profile web-release --release
-      - name: Build project
-        run: cargo b --bin r3v3rs3 --release
-      - name: Make archive
-        run: tar -C target/release -Jcvf r3v3rs3-x86_64-unknown-linux-gnu.tar.xz r3v3rs3
+      - name: Upload webui
+        uses: actions/upload-artifact@v7
+        with:
+          name: webui
+          path: r3v3rs3/dist/webui
+          if-no-files-found: error
+          retention-days: 1
       - name: Create release
-        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           v="${GITHUB_REF_NAME#v}"
           awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
           test -s relnotes.md
-          gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
-        continue-on-error: true
-      - name: Upload archive
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.ref_name }} *.tar.*
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
 
-  release-cross:
+  # Each target builds on a native runner. Ubuntu 22.04 keeps the required glibc at 2.35.
+  binary:
+    name: Upload Release Assets (${{ matrix.target }})
+    needs: webui
     strategy:
       matrix:
-        toolchain:
-          [
-            aarch64-unknown-linux-gnu,
-            armv7-unknown-linux-gnueabihf,
-          ]
-    name: Upload Release Assets
-    runs-on: ubuntu-latest
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
-      - uses: actions/cache@v3
-        continue-on-error: true
+        uses: actions/checkout@v7
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Check host target
+        run: test "$(rustc -vV | awk '/^host:/{print $2}')" = "${{ matrix.target }}"
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-${{ matrix.toolchain }}-stable-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@v1.23.0
-      - name: Install trunk
-        run: cargo binstall trunk --force -y
-      - name: Install cross
-        run: cargo binstall cross --force -y
-      - name: Add toolchain
-        run: rustup target add wasm32-unknown-unknown
-      - name: Build webui
-        run: cd r3v3rs3-webui && trunk build --cargo-profile web-release --release && cargo clean
+          key: ${{ matrix.target }}
+      - name: Download webui
+        uses: actions/download-artifact@v8
+        with:
+          name: webui
+          path: r3v3rs3/dist/webui
       - name: Build project
-        run: cross build -p r3v3rs3 --release --target ${{ matrix.toolchain }}
+        run: cargo build --release --locked -p r3v3rs3
       - name: Make archive
-        run: tar -C target/${{ matrix.toolchain }}/release -Jcvf r3v3rs3-${{ matrix.toolchain }}.tar.xz r3v3rs3
-      - name: Create release
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          v="${GITHUB_REF_NAME#v}"
-          awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
-          test -s relnotes.md
-          gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
-        continue-on-error: true
+        run: tar -C target/release -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
       - name: Upload archive
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.ref_name }} *.tar.*
+        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz
