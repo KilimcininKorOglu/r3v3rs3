@@ -1,5 +1,6 @@
 use crate::cdn::CdnRanges;
 use crate::certs::{acme::AcmeEntry, challenges::ServedChallenges, Cert};
+use crate::proxy::http::cache_share::SharedCacheStore;
 use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::{LocalSessions, SessionBackend};
 use r3v3rs3_api::{
@@ -10,6 +11,7 @@ use r3v3rs3_api::{
     port::PortEntry,
     proxy::ProxyEntry,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[async_trait::async_trait]
@@ -66,4 +68,24 @@ pub trait Storage: Send + Sync + 'static {
     fn rate_count_exchange(self: Arc<Self>) -> Option<Arc<dyn RateCountExchange>> {
         None
     }
+
+    /// The store of the cached responses that the nodes share. `None` without a cluster, and when
+    /// `cluster.share_cache` is off.
+    fn shared_cache_store(self: Arc<Self>) -> Option<Arc<dyn SharedCacheStore>> {
+        None
+    }
+
+    /// Purges the cache of the proxy on the other nodes. `at` is the purge time in Unix
+    /// milliseconds.
+    async fn purge_shared_cache(&self, _proxy: ShortId, _at: u64) -> Result<(), Error> {
+        Ok(())
+    }
+
+    /// The last cache purge time of each proxy.
+    async fn load_cache_purges(&self) -> HashMap<ShortId, u64> {
+        HashMap::new()
+    }
+
+    /// Deletes the shared responses that expired. Only the leader calls it.
+    async fn remove_expired_shared_responses(&self) {}
 }

@@ -1,5 +1,6 @@
 use r3v3rs3::admin::start_admin;
 use r3v3rs3::certs::challenges::ServedChallenges;
+use r3v3rs3::clock;
 use r3v3rs3::cluster;
 use r3v3rs3::cluster::crypto::{ClusterKey, ClusterKeys};
 use r3v3rs3::cluster::storage::KvStorage;
@@ -8,7 +9,7 @@ use r3v3rs3::config::storage::Storage;
 use r3v3rs3::kv::KvStore;
 use r3v3rs3::log::DatabaseLayer;
 use r3v3rs3::proxy::http::rate_share::{
-    self, ClientCount, LimiterCounts, NodeCounts, RateCountExchange, WindowCount,
+    ClientCount, LimiterCounts, NodeCounts, RateCountExchange, WindowCount,
 };
 use r3v3rs3::server::rpc::cluster::GetClusterStatus;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
@@ -18,12 +19,13 @@ use r3v3rs3::server::rpc::RpcMethod;
 use r3v3rs3::server::{Server, ServerChannels};
 use r3v3rs3::sessions::{SessionBackend, SessionScope};
 use r3v3rs3_api::app::AppConfig;
+use r3v3rs3_api::cache::CacheConfig;
 use r3v3rs3_api::cluster::{ClusterConfig, ClusterState, ClusterStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::policy::{RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyKind};
-use reqwest::Client;
+use reqwest::{Client, Url};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -37,7 +39,7 @@ mod common;
 use common::kv::{check_locks_and_leases, MemoryStore};
 use common::{
     admin_session_cookie, alloc_tcp_port, call, http_port_entry, http_route, wait_for_listener,
-    wait_for_rpc,
+    wait_for_rpc, wait_until,
 };
 
 const SYNC_INTERVAL: Duration = Duration::from_millis(100);
@@ -52,6 +54,7 @@ fn node_storage(store: &Arc<MemoryStore>, name: &str) -> anyhow::Result<KvStorag
             encryption_key_files: vec!["/etc/r3v3rs3/cluster.key".into()],
             lock_ttl: Duration::from_secs(1),
             rate_limit_sync_interval: SYNC_INTERVAL,
+            share_cache: true,
             ..Default::default()
         },
         ..Default::default()
@@ -305,7 +308,7 @@ async fn a_client_that_used_its_limit_on_another_node_is_limited() -> anyhow::Re
     let client = ClientCount {
         ip: "127.0.0.1".parse()?,
         count: WindowCount {
-            window: rate_share::unix_ms() / 3_600_000,
+            window: clock::unix_ms() / 3_600_000,
             current: 3,
             previous: 0,
         },
@@ -318,7 +321,7 @@ async fn a_client_that_used_its_limit_on_another_node_is_limited() -> anyhow::Re
     let publish = async {
         loop {
             let counts = NodeCounts {
-                published_at: rate_share::unix_ms(),
+                published_at: clock::unix_ms(),
                 limiters: vec![limiter.clone()],
             };
             if let Err(err) = b.exchange(&counts).await {
@@ -343,6 +346,92 @@ async fn a_client_that_used_its_limit_on_another_node_is_limited() -> anyhow::Re
     };
     assert_eq!(status, 429);
     a.stop().await
+}
+
+/// Sends a request until the node accepts the connection. Returns the `x-cache` header and the body.
+async fn cached_get(url: &Url) -> anyhow::Result<(String, String)> {
+    for _ in 0..100 {
+        if let Ok(response) = Client::new().get(url.clone()).send().await {
+            let cache = response
+                .headers()
+                .get("x-cache")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            return Ok((cache, response.text().await?));
+        }
+        tokio::time::sleep(SYNC_INTERVAL).await;
+    }
+    anyhow::bail!("the proxy port did not accept connections")
+}
+
+async fn wait_for_keys(store: &MemoryStore, prefix: &str) -> anyhow::Result<()> {
+    let written = || async { Ok(!store.list(prefix).await?.items.is_empty()) };
+    wait_until(written, &format!("the store has no key below {prefix}")).await
+}
+
+#[tokio::test]
+async fn a_cached_response_of_one_node_serves_another_node() -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let mut upstream = mockito::Server::new_async().await;
+    let mock = upstream
+        .mock("GET", "/page")
+        .with_header("cache-control", "max-age=600")
+        .with_body("page")
+        .expect(2)
+        .create_async()
+        .await;
+    let mut a = Node::start(&store, "node-a").await?;
+    let port = alloc_tcp_port().await?;
+    a.call(AddPort {
+        entry: http_port_entry("web", &port).port,
+    })
+    .await?;
+    let ports = a.call(GetPortList).await?;
+    let proxy = Proxy {
+        ports: vec![ports[0].id],
+        kind: ProxyKind::Http(Box::new(HttpProxy {
+            vhosts: vec!["localhost".parse()?],
+            routes: vec![http_route("/", &upstream.url(), None)],
+            upgrade_insecure: false,
+            cache: CacheConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    a.call(AddProxy { entry: proxy }).await?;
+    let id = a.call(GetProxyList).await?[0].id;
+    let url = port.http_url("/page");
+    let responses = "r3v3rs3/v1/cache/";
+    let miss = ("MISS".to_string(), "page".to_string());
+    assert_eq!(cached_get(&url).await?, miss);
+    wait_for_keys(&store, responses).await?;
+
+    // A purge on another node purges the cache of this node.
+    let other = node_storage(&store, "node-b")?;
+    other.purge_shared_cache(id, clock::unix_ms()).await?;
+    let mut purged = false;
+    for _ in 0..50 {
+        if cached_get(&url).await? == miss {
+            purged = true;
+            break;
+        }
+        tokio::time::sleep(SYNC_INTERVAL).await;
+    }
+    assert!(purged, "the node did not purge its cache");
+    wait_for_keys(&store, responses).await?;
+    a.stop().await?;
+
+    // Node B has no response of its own, so it serves the response of node A.
+    let b = Node::start(&store, "node-b").await?;
+    let hit = ("HIT".to_string(), "page".to_string());
+    assert_eq!(cached_get(&url).await?, hit);
+    b.stop().await?;
+    mock.assert_async().await;
+    Ok(())
 }
 
 #[tokio::test]

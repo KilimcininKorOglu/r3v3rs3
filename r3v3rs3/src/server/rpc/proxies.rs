@@ -72,8 +72,8 @@ impl RpcMethod for PurgeProxyCache {
                 id: self.id.to_string(),
             });
         }
-        state.registries.caches.purge(self.id);
-        Ok(())
+        let at = state.registries.caches.purge(self.id);
+        state.storage.purge_shared_cache(self.id, at).await
     }
 }
 

@@ -60,19 +60,12 @@ impl SessionBackend for KvStorage {
     /// Also removes the sessions that do not open.
     async fn remove_expired(&self, expiry: Duration) -> Result<(), Error> {
         let prefix = self.layout().sessions();
-        let list = self.store().list(&prefix).await.map_err(unavailable)?;
-        let expired = list
-            .items
-            .iter()
-            .filter(|item| {
-                !self
-                    .decode_json::<SessionRecord>(item)
-                    .is_ok_and(|record| record.is_active(expiry))
-            })
-            .map(|item| item.key.clone())
-            .collect();
-        self.delete_unconditional(expired)
-            .await
-            .map_err(unavailable)
+        self.delete_stale(&prefix, |item| {
+            !self
+                .decode_json::<SessionRecord>(item)
+                .is_ok_and(|record| record.is_active(expiry))
+        })
+        .await
+        .map_err(unavailable)
     }
 }

@@ -2,6 +2,7 @@ pub mod admin;
 pub mod args;
 pub mod cdn;
 pub mod certs;
+pub mod clock;
 pub mod cluster;
 pub mod command;
 pub mod config;

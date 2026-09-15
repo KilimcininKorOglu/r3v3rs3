@@ -3,6 +3,7 @@
 use crate::sessions::SessionScope;
 use r3v3rs3_api::cert::CertKind;
 use r3v3rs3_api::id::ShortId;
+use sha2::{Digest, Sha256};
 
 /// The parts of the state that a node reads again after a change in the store, in the order that
 /// the node applies them.
@@ -15,10 +16,11 @@ pub enum StateKind {
     Proxies,
     Cdn,
     Challenges,
+    CachePurges,
 }
 
 impl StateKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Config,
         Self::Certs,
         Self::Acmes,
@@ -26,6 +28,7 @@ impl StateKind {
         Self::Proxies,
         Self::Cdn,
         Self::Challenges,
+        Self::CachePurges,
     ];
 }
 
@@ -160,10 +163,42 @@ impl Layout {
         hex_key(self.rate_limits(), node)
     }
 
+    /// The cached responses that the nodes share. They are outside the state, so a new response
+    /// does not reload the state of the nodes.
+    pub fn caches(&self) -> String {
+        format!("{}cache/", self.data)
+    }
+
+    pub fn cache(&self, proxy: ShortId) -> String {
+        format!("{}{proxy}/", self.caches())
+    }
+
+    /// The key holds the SHA-256 digest of the cache key, so a long URL fits in one key segment.
+    pub fn cached_response(&self, proxy: ShortId, cache_key: &str) -> String {
+        let digest = hex::encode(Sha256::digest(cache_key.as_bytes()));
+        format!("{}{digest}", self.cache(proxy))
+    }
+
+    /// The Unix time in milliseconds of the last cache purge of each proxy. A change purges the
+    /// cache of the proxy on every node.
+    pub fn cache_purges(&self) -> String {
+        format!("{}cache-purges/", self.state())
+    }
+
+    pub fn cache_purge(&self, proxy: ShortId) -> String {
+        format!("{}{proxy}", self.cache_purges())
+    }
+
     /// Whether the cluster stores the value of the key without encryption. Every other value is
     /// encrypted.
     pub fn is_plain(&self, key: &str) -> bool {
-        let plain_prefixes = [self.ports(), self.challenges(), self.nodes(), self.acks()];
+        let plain_prefixes = [
+            self.ports(),
+            self.challenges(),
+            self.nodes(),
+            self.acks(),
+            self.cache_purges(),
+        ];
         plain_prefixes.iter().any(|prefix| key.starts_with(prefix))
             || key == self.cdn()
             || key == self.schema()
@@ -181,6 +216,7 @@ impl Layout {
             "proxies" => Some(StateKind::Proxies),
             "cdn" => Some(StateKind::Cdn),
             "challenges" => Some(StateKind::Challenges),
+            "cache-purges" => Some(StateKind::CachePurges),
             _ => None,
         }
     }
@@ -251,5 +287,15 @@ mod tests {
         assert_eq!(counts, "r3v3rs3/v1/ratelimit/6e6f64652d61");
         assert_eq!(layout.kind(&counts), None);
         assert!(!layout.is_plain(&counts));
+
+        let response = layout.cached_response(id, "localhost /");
+        assert!(response.starts_with("r3v3rs3/v1/cache/web/"));
+        assert_eq!(last_segment(&response).len(), 64);
+        assert_eq!(layout.kind(&response), None);
+        assert!(!layout.is_plain(&response));
+        let purge = layout.cache_purge(id);
+        assert_eq!(purge, "r3v3rs3/v1/state/cache-purges/web");
+        assert_eq!(layout.kind(&purge), Some(StateKind::CachePurges));
+        assert!(layout.is_plain(&purge));
     }
 }

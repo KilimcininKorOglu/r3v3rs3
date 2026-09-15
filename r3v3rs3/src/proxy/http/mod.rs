@@ -61,6 +61,7 @@ mod affinity;
 mod auth;
 mod body_limit;
 pub(crate) mod cache;
+pub mod cache_share;
 pub(crate) mod client_ip;
 mod compression;
 mod cookie;

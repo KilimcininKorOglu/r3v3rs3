@@ -1,5 +1,7 @@
+use super::cache_share::{CacheShare, SharedCacheStore, SharedResponse};
 use super::compression::{header_items, header_number};
 use super::pool::Upstream;
+use crate::clock::unix_ms;
 use crate::proxy::registry::WeakRegistry;
 use bytes::{Bytes, BytesMut};
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
@@ -16,12 +18,14 @@ use moka::{sync::Cache, Expiry};
 use pin_project_lite::pin_project;
 use r3v3rs3_api::{cache::CacheConfig, id::ShortId};
 use std::{
+    collections::HashMap,
     fmt,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError},
     task::{ready, Context, Poll},
     time::{Duration, Instant, SystemTime},
 };
+use tracing::{debug, warn};
 
 type ProxyBody = BoxBody<Bytes, anyhow::Error>;
 
@@ -37,6 +41,8 @@ const CACHEABLE_STATUSES: [u16; 11] = [200, 203, 204, 300, 301, 308, 404, 405, 4
 pub struct HttpCache {
     config: CacheConfig,
     entries: Cache<String, Arc<CachedResponse>>,
+    /// The responses that the nodes of a cluster share.
+    share: Option<CacheShare>,
 }
 
 impl fmt::Debug for HttpCache {
@@ -44,12 +50,13 @@ impl fmt::Debug for HttpCache {
         f.debug_struct("HttpCache")
             .field("config", &self.config)
             .field("entries", &self.entries.entry_count())
+            .field("share", &self.share)
             .finish()
     }
 }
 
 impl HttpCache {
-    fn new(config: CacheConfig) -> Self {
+    fn new(config: CacheConfig, share: Option<CacheShare>) -> Self {
         let entries = Cache::builder()
             .weigher(|key: &String, entry: &Arc<CachedResponse>| {
                 u32::try_from(key.len() + entry.weight()).unwrap_or(u32::MAX)
@@ -57,14 +64,30 @@ impl HttpCache {
             .max_capacity(config.max_size)
             .expire_after(EntryExpiry)
             .build();
-        Self { config, entries }
+        Self {
+            config,
+            entries,
+            share,
+        }
     }
 }
 
 /// The HTTP caches of one server.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct CacheRegistry {
     caches: WeakRegistry<ShortId, HttpCache>,
+    store: OnceLock<Arc<dyn SharedCacheStore>>,
+    /// The Unix time in milliseconds of the last purge of each proxy.
+    purges: Mutex<HashMap<ShortId, u64>>,
+}
+
+impl fmt::Debug for CacheRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CacheRegistry")
+            .field("caches", &self.caches)
+            .field("shared", &self.store.get().is_some())
+            .finish()
+    }
 }
 
 impl CacheRegistry {
@@ -74,19 +97,63 @@ impl CacheRegistry {
         if config.is_disabled() {
             return None;
         }
+        let store = self.store.get();
         Some(self.caches.get_or_create(
             id,
-            |existing| existing.config == *config,
-            || Arc::new(HttpCache::new(config.clone())),
+            |existing| existing.config == *config && existing.share.is_some() == store.is_some(),
+            || {
+                let share =
+                    store.map(|store| CacheShare::new(id, store.clone(), self.purged_at(id)));
+                Arc::new(HttpCache::new(config.clone(), share))
+            },
         ))
     }
 
-    /// Removes every stored response of the proxy.
-    pub fn purge(&self, id: ShortId) {
-        if let Some(cache) = self.caches.get(&id) {
-            cache.entries.invalidate_all();
+    /// Shares the stored responses with the other nodes of a cluster. Call it before the first
+    /// cache is created, because a cache keeps the mode that it started with.
+    pub fn start_sharing(&self, store: Arc<dyn SharedCacheStore>) {
+        if self.store.set(store).is_err() {
+            debug!("the HTTP caches already share their responses");
         }
     }
+
+    /// Removes every stored response of the proxy. Returns the purge time in Unix milliseconds.
+    pub fn purge(&self, id: ShortId) -> u64 {
+        let at = unix_ms();
+        self.purge_at(id, at);
+        at
+    }
+
+    /// Purges the cache of each proxy with a later purge than the last purge on this server.
+    pub fn apply_purges(&self, purges: HashMap<ShortId, u64>) {
+        for (id, at) in purges {
+            if self.purged_at(id) < at {
+                self.purge_at(id, at);
+            }
+        }
+    }
+
+    fn purge_at(&self, id: ShortId, at: u64) {
+        {
+            let mut purges = lock(&self.purges);
+            let last = purges.entry(id).or_default();
+            *last = (*last).max(at);
+        }
+        if let Some(cache) = self.caches.get(&id) {
+            cache.entries.invalidate_all();
+            if let Some(share) = &cache.share {
+                share.purge(at);
+            }
+        }
+    }
+
+    fn purged_at(&self, id: ShortId) -> u64 {
+        lock(&self.purges).get(&id).copied().unwrap_or_default()
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +198,65 @@ impl CachedResponse {
             .vary
             .iter()
             .all(|(name, value)| request.get(name) == value.as_ref())
+    }
+
+    /// The response in the form that the store keeps. `None` when a header value is not text.
+    fn to_shared(&self, stored_at: u64) -> Option<SharedResponse> {
+        let headers = self
+            .head
+            .headers
+            .iter()
+            .map(|(name, value)| Some((name.to_string(), value.to_str().ok()?.to_string())))
+            .collect::<Option<_>>()?;
+        let vary = self
+            .head
+            .vary
+            .iter()
+            .map(|(name, value)| {
+                let value = value.as_ref().map(HeaderValue::to_str).transpose().ok()?;
+                Some((name.to_string(), value.map(str::to_string)))
+            })
+            .collect::<Option<_>>()?;
+        Some(SharedResponse {
+            status: self.head.status.as_u16(),
+            headers,
+            vary,
+            initial_age: self.head.initial_age.as_secs(),
+            freshness: self.head.freshness.as_secs(),
+            stored_at,
+            body: SharedResponse::encode_body(&self.body),
+        })
+    }
+
+    /// A response that another node stored. Its age includes the time since that node stored it.
+    fn from_shared(shared: &SharedResponse, now_ms: u64) -> anyhow::Result<Self> {
+        let mut headers = HeaderMap::new();
+        for (name, value) in &shared.headers {
+            headers.append(
+                HeaderName::from_bytes(name.as_bytes())?,
+                HeaderValue::from_str(value)?,
+            );
+        }
+        let vary = shared
+            .vary
+            .iter()
+            .map(|(name, value)| -> anyhow::Result<_> {
+                let value = value.as_deref().map(HeaderValue::from_str).transpose()?;
+                Ok((HeaderName::from_bytes(name.as_bytes())?, value))
+            })
+            .collect::<anyhow::Result<_>>()?;
+        let elapsed = Duration::from_millis(now_ms.saturating_sub(shared.stored_at));
+        Ok(Self {
+            head: StoredHead {
+                status: StatusCode::from_u16(shared.status)?,
+                headers,
+                vary,
+                initial_age: Duration::from_secs(shared.initial_age) + elapsed,
+                freshness: Duration::from_secs(shared.freshness),
+            },
+            body: Bytes::from(shared.decode_body()?),
+            stored_at: Instant::now(),
+        })
     }
 }
 
@@ -217,6 +343,26 @@ impl CacheRequest {
             .entries
             .get(&self.key)
             .filter(|entry| entry.matches(&self.headers))
+    }
+
+    /// The response of another node after a local miss. This node stores the response too.
+    async fn shared(&self) -> Option<Arc<CachedResponse>> {
+        if !self.lookup {
+            return None;
+        }
+        let shared = self.cache.share.as_ref()?.lookup(&self.key).await?;
+        let entry = match CachedResponse::from_shared(&shared, unix_ms()) {
+            Ok(entry) => Arc::new(entry),
+            Err(err) => {
+                warn!("invalid shared response: {err:#}");
+                return None;
+            }
+        };
+        if !entry.matches(&self.headers) {
+            return None;
+        }
+        self.cache.entries.insert(self.key.clone(), entry.clone());
+        Some(entry)
     }
 
     /// Sends a stored response. A client with a matching validator receives 304 Not Modified.
@@ -315,7 +461,10 @@ pub async fn fetch(
     let Some(cache) = cache else {
         return upstream.request(req).await;
     };
-    let stored = cache.stored();
+    let stored = match cache.stored() {
+        Some(entry) => Some(entry),
+        None => cache.shared().await,
+    };
     if let Some(entry) = stored.as_ref().filter(|entry| entry.is_fresh()) {
         return Ok(cache.respond(entry));
     }
@@ -523,14 +672,27 @@ impl Recorder {
         {
             return;
         }
-        let entry = CachedResponse {
+        let entry = Arc::new(CachedResponse {
             head,
             body: std::mem::take(&mut self.buffer).freeze(),
             stored_at: Instant::now(),
-        };
-        self.cache
-            .entries
-            .insert(std::mem::take(&mut self.key), Arc::new(entry));
+        });
+        let key = std::mem::take(&mut self.key);
+        if let Some(share) = &self.cache.share {
+            share_response(share, &key, &entry);
+        }
+        self.cache.entries.insert(key, entry);
+    }
+}
+
+/// Queues a stored response for the other nodes of a cluster.
+fn share_response(share: &CacheShare, key: &str, entry: &CachedResponse) {
+    let remaining = entry.head.freshness.saturating_sub(entry.head.initial_age);
+    if !share.accepts(remaining, entry.body.len()) {
+        return;
+    }
+    if let Some(shared) = entry.to_shared(unix_ms()) {
+        share.offer(key, shared);
     }
 }
 
@@ -696,22 +858,54 @@ mod tests {
         let other = CacheRegistry::default();
         assert!(!Arc::ptr_eq(&cache, &other.cache_for(id, &config).unwrap()));
 
-        let entry = CachedResponse {
-            head: StoredHead {
-                status: StatusCode::OK,
-                headers: HeaderMap::new(),
-                vary: vec![],
-                initial_age: Duration::ZERO,
-                freshness: Duration::from_secs(60),
-            },
-            body: Bytes::from_static(b"body"),
-            stored_at: Instant::now(),
-        };
-        cache.entries.insert("key".into(), Arc::new(entry));
+        cache.entries.insert("key".into(), Arc::new(stored_entry()));
         assert!(cache.entries.get("key").is_some());
         other.purge(id);
         assert!(cache.entries.get("key").is_some());
-        registry.purge(id);
+        let at = registry.purge(id);
         assert!(cache.entries.get("key").is_none());
+
+        // A purge that this server already applied does not purge again.
+        cache.entries.insert("key".into(), Arc::new(stored_entry()));
+        registry.apply_purges(HashMap::from([(id, at)]));
+        assert!(cache.entries.get("key").is_some());
+        registry.apply_purges(HashMap::from([(id, at + 1)]));
+        assert!(cache.entries.get("key").is_none());
+    }
+
+    fn stored_entry() -> CachedResponse {
+        CachedResponse {
+            head: StoredHead {
+                status: StatusCode::OK,
+                headers: headers(&[("etag", "\"v1\""), ("cache-control", "max-age=90")]),
+                vary: vec![
+                    (HeaderName::from_static("x-lang"), Some(value("en"))),
+                    (HeaderName::from_static("origin"), None),
+                ],
+                initial_age: Duration::from_secs(10),
+                freshness: Duration::from_secs(90),
+            },
+            body: Bytes::from_static(b"body"),
+            stored_at: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn a_shared_response_keeps_its_head_and_body() {
+        let entry = stored_entry();
+        let shared = entry.to_shared(1_000).unwrap();
+        let restored = CachedResponse::from_shared(&shared, 3_000).unwrap();
+        assert_eq!(restored.head.status, StatusCode::OK);
+        assert_eq!(restored.head.headers, entry.head.headers);
+        assert_eq!(restored.head.vary, entry.head.vary);
+        assert_eq!(restored.head.initial_age, Duration::from_secs(12));
+        assert_eq!(restored.head.freshness, entry.head.freshness);
+        assert_eq!(restored.body, entry.body);
+
+        let invalid = SharedResponse {
+            status: 1000,
+            ..shared
+        };
+        assert!(CachedResponse::from_shared(&invalid, 3_000).is_err());
     }
 }

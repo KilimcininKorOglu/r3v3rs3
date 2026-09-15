@@ -185,6 +185,9 @@ impl ServerState {
             let interval = this.config.cluster.rate_limit_sync_interval;
             this.registries.limiters.start_sharing(exchange, interval);
         }
+        if let Some(store) = this.storage.clone().shared_cache_store() {
+            this.registries.caches.start_sharing(store);
+        }
         log_save_error(this.update_ports().await);
         this.update_certs().await;
         log_save_error(this.update_proxies().await);
@@ -269,6 +272,7 @@ impl ServerState {
         if let Err(err) = self.session_backend.remove_expired(expiry).await {
             error!(%err, "failed to remove the expired sessions");
         }
+        self.storage.remove_expired_shared_responses().await;
     }
 
     pub fn cluster_status(&self) -> ClusterStatus {
@@ -290,6 +294,7 @@ impl ServerState {
                 StateKind::Proxies => self.reload_manual_proxies().await,
                 StateKind::Cdn => self.reload_cdn_ranges().await,
                 StateKind::Challenges => self.reload_challenges().await,
+                StateKind::CachePurges => self.reload_cache_purges().await,
             }
         }
     }
@@ -360,6 +365,12 @@ impl ServerState {
         };
         self.set_challenges(challenges.clone()).await;
         log_save_error(self.storage.ack_challenges(&challenges).await);
+    }
+
+    /// Purges the caches that another node purged.
+    async fn reload_cache_purges(&mut self) {
+        let purges = self.storage.load_cache_purges().await;
+        self.registries.caches.apply_purges(purges);
     }
 
     /// Adds a certificate that an ACME order issued. The server uses the certificate even when the

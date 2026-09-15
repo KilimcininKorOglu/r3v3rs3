@@ -1,7 +1,7 @@
 //! Downloads the published edge IP ranges of known CDNs.
 
 use super::{set_last_errors, table, CdnRanges};
-use crate::proxy::http::rate_share::unix_ms;
+use crate::clock::unix_ms;
 use crate::{command::ServerCommand, proxy::http::hyper_tls::client::HttpsConnector};
 use anyhow::{anyhow, bail};
 use bytes::Bytes;

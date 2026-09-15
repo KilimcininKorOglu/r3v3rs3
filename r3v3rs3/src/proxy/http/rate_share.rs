@@ -4,13 +4,14 @@
 //! limit on each node. The counts of the other nodes are one interval old, so a limit with a
 //! short period divides its quota between the nodes instead.
 
+use crate::clock::unix_ms;
 use serde_derive::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// The most client counts that a node publishes.
 pub const MAX_PUBLISHED_COUNTS: usize = 2048;
@@ -225,13 +226,6 @@ impl SharedWindow {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-pub fn unix_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis() as u64)
-        .unwrap_or_default()
 }
 
 /// The counts that this node publishes: the largest counts of all limiters.

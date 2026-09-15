@@ -53,13 +53,27 @@ where
 
 /// Waits until a TCP listener accepts connections on the address.
 pub async fn wait_for_listener(addr: SocketAddr) -> anyhow::Result<()> {
+    let listening = || async move { Ok(tokio::net::TcpStream::connect(addr).await.is_ok()) };
+    wait_until(
+        listening,
+        &format!("server did not start listening on {addr}"),
+    )
+    .await
+}
+
+/// Checks every 100 ms until `ready` returns true. Fails with `failure` after 50 checks.
+pub async fn wait_until<F, Fut>(mut ready: F, failure: &str) -> anyhow::Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<bool>>,
+{
     for _ in 0..50 {
-        if tokio::net::TcpStream::connect(addr).await.is_ok() {
+        if ready().await? {
             return Ok(());
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    anyhow::bail!("server did not start listening on {addr}")
+    anyhow::bail!("{failure}")
 }
 
 /// Calls an RPC method through the server command channel and returns its result.

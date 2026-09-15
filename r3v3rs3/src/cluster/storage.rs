@@ -12,6 +12,7 @@ use crate::certs::challenges::ServedChallenges;
 use crate::certs::Cert;
 use crate::config::{account, storage::Storage};
 use crate::kv::{Condition, KvItem, KvStore, Txn, TxnOutcome, Write};
+use crate::proxy::http::cache_share::SharedCacheStore;
 use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::SessionBackend;
 use anyhow::Context as _;
@@ -190,6 +191,22 @@ impl KvStorage {
     pub async fn delete_unconditional(&self, keys: Vec<String>) -> anyhow::Result<()> {
         let deletes = keys.into_iter().map(Write::Delete).collect();
         self.commit_unconditional(deletes).await
+    }
+
+    /// Deletes the keys below `prefix` whose items `stale` selects, without a condition.
+    pub async fn delete_stale(
+        &self,
+        prefix: &str,
+        stale: impl Fn(&KvItem) -> bool,
+    ) -> anyhow::Result<()> {
+        let list = self.store.list(prefix).await?;
+        let keys = list
+            .items
+            .into_iter()
+            .filter(|item| stale(item))
+            .map(|item| item.key)
+            .collect();
+        self.delete_unconditional(keys).await
     }
 
     async fn commit_unconditional(&self, writes: Vec<Write>) -> anyhow::Result<()> {
@@ -715,5 +732,33 @@ impl Storage for KvStorage {
 
     fn rate_count_exchange(self: Arc<Self>) -> Option<Arc<dyn RateCountExchange>> {
         Some(self)
+    }
+
+    fn shared_cache_store(self: Arc<Self>) -> Option<Arc<dyn SharedCacheStore>> {
+        if self.local.cluster.share_cache {
+            Some(self)
+        } else {
+            None
+        }
+    }
+
+    async fn purge_shared_cache(&self, proxy: ShortId, at: u64) -> Result<(), Error> {
+        self.purge_cache(proxy, at).await.map_err(unavailable)
+    }
+
+    async fn load_cache_purges(&self) -> HashMap<ShortId, u64> {
+        self.cache_purges().await.unwrap_or_else(|err| {
+            error!("failed to load the cache purges: {err:#}");
+            HashMap::new()
+        })
+    }
+
+    async fn remove_expired_shared_responses(&self) {
+        if !self.local.cluster.share_cache {
+            return;
+        }
+        if let Err(err) = self.remove_expired_responses(crate::clock::unix_ms()).await {
+            error!("failed to remove the expired shared responses: {err:#}");
+        }
     }
 }

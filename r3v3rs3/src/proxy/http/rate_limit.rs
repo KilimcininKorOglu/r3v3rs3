@@ -142,12 +142,12 @@ async fn share_counts(
                 Some((format!("{id}/{route}"), limiter.shared.as_ref()?))
             })
             .collect();
-        let now = rate_share::unix_ms();
+        let now = crate::clock::unix_ms();
         match exchange.exchange(&rate_share::collect(&windows, now)).await {
             Ok(remote) => {
                 share.set_state(Some(remote.nodes), true);
                 let oldest = share.oldest_fresh(now);
-                rate_share::apply(&windows, &remote.counts, oldest, rate_share::unix_ms());
+                rate_share::apply(&windows, &remote.counts, oldest, crate::clock::unix_ms());
             }
             Err(err) => {
                 warn!("failed to share the rate limit counts: {err:#}");

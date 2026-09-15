@@ -1,6 +1,6 @@
 //! Sign-in sessions of the admin API and of the session authentication of the proxies.
 
-use crate::proxy::http::rate_share::unix_ms;
+use crate::clock::unix_ms;
 use r3v3rs3_api::app::AdminConfig;
 use r3v3rs3_api::error::Error;
 use rand::distributions::{Alphanumeric, DistString};
