@@ -1,5 +1,5 @@
 use crate::{
-    store::{AcmeStore, CertStore, DiscoveryStore, PortStore, ProxyStore},
+    store::{AcmeStore, CertStore, ClusterStore, DiscoveryStore, PortStore, ProxyStore},
     API_ENDPOINT,
 };
 use futures::StreamExt;
@@ -24,6 +24,7 @@ struct Dispatchers {
     acme: Dispatch<AcmeStore>,
     proxies: Dispatch<ProxyStore>,
     discovery: Dispatch<DiscoveryStore>,
+    cluster: Dispatch<ClusterStore>,
 }
 
 #[hook]
@@ -35,6 +36,7 @@ pub fn use_event_subscriber() {
         acme: use_store::<AcmeStore>().1,
         proxies: use_store::<ProxyStore>().1,
         discovery: use_store::<DiscoveryStore>().1,
+        cluster: use_store::<ClusterStore>().1,
     };
     if !event.active {
         let mut es = EventSource::new(&format!("{API_ENDPOINT}/events")).unwrap();
@@ -110,6 +112,9 @@ fn apply_event(stores: &Dispatchers, event: ServerEvent) {
         }
         ServerEvent::DiscoveryStatusUpdated { entries } => {
             stores.discovery.set(DiscoveryStore { entries });
+        }
+        ServerEvent::ClusterStatusUpdated { status } => {
+            stores.cluster.set(ClusterStore { status });
         }
         _ => (),
     }

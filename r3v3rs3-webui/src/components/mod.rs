@@ -1,6 +1,7 @@
 pub mod acme_form;
 pub mod acme_provider;
 pub mod auth_config;
+pub mod cluster_status;
 pub mod custom_acme;
 pub mod data_list;
 pub mod discovery_status;

@@ -1,5 +1,6 @@
 #![recursion_limit = "1024"]
 
+use components::cluster_status::ClusterBanner;
 use components::footer::Footer;
 use components::navbar::Navbar;
 use console_error_panic_hook::set_once as set_panic_hook;
@@ -26,6 +27,7 @@ pub fn app() -> Html {
             <div class="min-h-screen flex flex-col">
                 <Navbar />
                 <div class="w-full max-w-6xl mx-auto px-4 sm:px-6 py-4 flex-1">
+                    <ClusterBanner />
                     <Switch<pages::Route> render={pages::switch} />
                 </div>
                 <Footer />

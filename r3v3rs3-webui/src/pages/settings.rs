@@ -1,3 +1,4 @@
+use crate::components::cluster_status::ClusterStatusCard;
 use crate::components::http_proxy_config::{
     client_cert_label, parse_client_cert, use_client_certs,
 };
@@ -231,6 +232,7 @@ pub fn settings() -> Html {
                 </button>
             </div>
         </form>
+        <ClusterStatusCard />
         <CdnStatusCard />
         </>
     }
