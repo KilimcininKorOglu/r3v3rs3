@@ -9,7 +9,7 @@ image:
 
 tasks:
   - before: cd r3v3rs3
-    init: cargo r add-user admin -p admin
+    init: cargo r add-user admin -p r3v3rs3-dev
     command: cargo r start
   - before: cd r3v3rs3-webui
     init: trunk build
