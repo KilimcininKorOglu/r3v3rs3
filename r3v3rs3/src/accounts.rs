@@ -5,6 +5,7 @@
 use crate::sessions::SessionRecord;
 use r3v3rs3_api::auth::{Account, Role};
 use r3v3rs3_api::error::Error;
+use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
 use std::collections::{BTreeSet, HashMap};
 
@@ -44,6 +45,36 @@ impl Caller {
             Ok(())
         } else {
             Err(Error::Forbidden)
+        }
+    }
+
+    pub fn can_see(&self, proxy: ShortId) -> bool {
+        self.proxies
+            .as_ref()
+            .is_none_or(|proxies| proxies.contains(&proxy))
+    }
+
+    /// A proxy that the account does not see does not exist for the account.
+    pub fn ensure_visible(&self, proxy: ShortId) -> Result<(), Error> {
+        if self.can_see(proxy) {
+            Ok(())
+        } else {
+            Err(Error::IdNotFound {
+                id: proxy.to_string(),
+            })
+        }
+    }
+
+    /// The part of a server event that the account sees. Only an admin gets the settings.
+    pub fn visible_event(&self, event: ServerEvent) -> Option<ServerEvent> {
+        match event {
+            ServerEvent::AppConfigUpdated { .. } if !self.role.is_admin() => None,
+            ServerEvent::ProxiesUpdated { mut entries } => {
+                entries.retain(|entry| self.can_see(entry.id));
+                Some(ServerEvent::ProxiesUpdated { entries })
+            }
+            ServerEvent::ProxyStatusUpdated { id, .. } if !self.can_see(id) => None,
+            event => Some(event),
         }
     }
 
@@ -154,6 +185,40 @@ mod tests {
         assert_eq!(directory.caller(&session("viewer", 100)), Some(expected));
         assert_eq!(directory.caller(&session("viewer", 99)), None);
         assert_eq!(directory.caller(&session("removed", 100)), None);
+    }
+
+    #[test]
+    fn an_account_with_a_proxy_list_gets_only_the_events_of_its_proxies() {
+        let web = "web".parse::<ShortId>().unwrap();
+        let other = "other".parse::<ShortId>().unwrap();
+        let entry = |id| r3v3rs3_api::proxy::ProxyEntry {
+            id,
+            proxy: Default::default(),
+            source: None,
+        };
+        let viewer = Caller {
+            username: "viewer".to_string(),
+            role: Role::Viewer,
+            proxies: Some(BTreeSet::from([web])),
+        };
+        let config = ServerEvent::AppConfigUpdated {
+            config: Default::default(),
+        };
+        assert!(viewer.visible_event(config.clone()).is_none());
+        assert!(Caller::system().visible_event(config).is_some());
+
+        let proxies = ServerEvent::ProxiesUpdated {
+            entries: vec![entry(web), entry(other)],
+        };
+        let Some(ServerEvent::ProxiesUpdated { entries }) = viewer.visible_event(proxies) else {
+            panic!("the proxy list event is missing");
+        };
+        assert_eq!(entries, vec![entry(web)]);
+        assert!(viewer.ensure_visible(web).is_ok());
+        assert!(matches!(
+            viewer.ensure_visible(other),
+            Err(Error::IdNotFound { .. })
+        ));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use super::state::ServerState;
-use crate::accounts::Permission;
+use crate::accounts::{Caller, Permission};
 use r3v3rs3_api::error::Error;
+use r3v3rs3_api::id::ShortId;
 use std::any::Any;
 
 pub mod acme;
@@ -26,6 +27,17 @@ pub trait RpcMethod: Any + Send + Sync {
         Permission::Read
     };
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error>;
+
+    /// The proxy that the method reads or changes. The method fails with `IdNotFound` for a caller
+    /// that does not see the proxy.
+    fn proxy_scope(&self) -> Option<ShortId> {
+        None
+    }
+
+    /// Removes the parts of the output that the caller does not see.
+    fn restrict(output: Self::Output, _caller: &Caller) -> Self::Output {
+        output
+    }
 }
 
 pub struct RpcWrapper<T: RpcMethod> {
@@ -46,11 +58,15 @@ impl<T> ErasedRpcMethod for RpcWrapper<T>
 where
     T: RpcMethod,
 {
-    async fn call(&mut self, state: &mut ServerState) -> Result<Box<dyn Any + Send + Sync>, Error> {
+    async fn call(
+        &mut self,
+        state: &mut ServerState,
+        caller: &Caller,
+    ) -> Result<Box<dyn Any + Send + Sync>, Error> {
         let this = self.inner.take().ok_or(Error::FailedToInvokeRpc)?;
         <T as RpcMethod>::call(this, state)
             .await
-            .map(|r| Box::new(r) as Box<dyn Any + Send + Sync>)
+            .map(|output| Box::new(T::restrict(output, caller)) as Box<dyn Any + Send + Sync>)
     }
 
     fn mutates(&self) -> bool {
@@ -60,15 +76,25 @@ where
     fn permission(&self) -> Permission {
         T::PERMISSION
     }
+
+    fn proxy_scope(&self) -> Option<ShortId> {
+        self.inner.as_ref().and_then(RpcMethod::proxy_scope)
+    }
 }
 
 #[async_trait::async_trait]
 pub trait ErasedRpcMethod: Any + Send + Sync {
-    async fn call(&mut self, state: &mut ServerState) -> Result<Box<dyn Any + Send + Sync>, Error>;
+    async fn call(
+        &mut self,
+        state: &mut ServerState,
+        caller: &Caller,
+    ) -> Result<Box<dyn Any + Send + Sync>, Error>;
 
     fn mutates(&self) -> bool;
 
     fn permission(&self) -> Permission;
+
+    fn proxy_scope(&self) -> Option<ShortId>;
 }
 
 pub struct RpcCallback {

@@ -107,7 +107,11 @@ async fn a_change_on_one_node_reaches_the_other_node() -> anyhow::Result<()> {
         })),
         ..Default::default()
     };
-    a.call(AddProxy { entry: proxy }).await?;
+    a.call(AddProxy {
+        entry: proxy,
+        owner: None,
+    })
+    .await?;
     let proxies = b
         .wait_for(|| GetProxyList, |proxies| proxies.len() == 1)
         .await?;
@@ -269,7 +273,11 @@ async fn a_client_that_used_its_limit_on_another_node_is_limited() -> anyhow::Re
         })),
         ..Default::default()
     };
-    a.call(AddProxy { entry: proxy }).await?;
+    a.call(AddProxy {
+        entry: proxy,
+        owner: None,
+    })
+    .await?;
     let id = a.call(GetProxyList).await?[0].id;
 
     // Node B already served the limit of the client.
@@ -371,7 +379,11 @@ async fn a_cached_response_of_one_node_serves_another_node() -> anyhow::Result<(
         })),
         ..Default::default()
     };
-    a.call(AddProxy { entry: proxy }).await?;
+    a.call(AddProxy {
+        entry: proxy,
+        owner: None,
+    })
+    .await?;
     let id = a.call(GetProxyList).await?[0].id;
     let url = port.http_url("/page");
     let responses = "r3v3rs3/v1/cache/";

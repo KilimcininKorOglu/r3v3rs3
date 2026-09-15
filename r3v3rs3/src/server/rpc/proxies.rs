@@ -1,5 +1,5 @@
 use super::RpcMethod;
-use crate::accounts::Permission;
+use crate::accounts::{Caller, Permission};
 use crate::proxy::tls::upstream_client_config;
 use crate::server::credentials::seal;
 use crate::server::state::ServerState;
@@ -15,6 +15,11 @@ impl RpcMethod for GetProxyList {
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         Ok(state.proxies.entries().cloned().collect())
+    }
+
+    fn restrict(mut output: Self::Output, caller: &Caller) -> Self::Output {
+        output.retain(|entry| caller.can_see(entry.id));
+        output
     }
 }
 
@@ -34,6 +39,10 @@ impl RpcMethod for GetProxy {
             .ok_or(Error::IdNotFound {
                 id: self.id.to_string(),
             })
+    }
+
+    fn proxy_scope(&self) -> Option<ShortId> {
+        Some(self.id)
     }
 }
 
@@ -57,6 +66,10 @@ impl RpcMethod for GetProxyStatus {
                 id: self.id.to_string(),
             })
     }
+
+    fn proxy_scope(&self) -> Option<ShortId> {
+        Some(self.id)
+    }
 }
 
 pub struct PurgeProxyCache {
@@ -77,6 +90,10 @@ impl RpcMethod for PurgeProxyCache {
         let at = state.registries.caches.purge(self.id);
         state.storage.purge_shared_cache(self.id, at).await
     }
+
+    fn proxy_scope(&self) -> Option<ShortId> {
+        Some(self.id)
+    }
 }
 
 pub struct DeleteProxy {
@@ -89,16 +106,24 @@ impl RpcMethod for DeleteProxy {
     const MUTATES: bool = true;
     const PERMISSION: Permission = Permission::EditProxies;
 
+    /// Removes the proxy from the proxy lists of the accounts after the deletion.
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         ensure_manual(state, self.id)?;
         let previous = proxy_entries(state);
         state.proxies.delete(self.id)?;
-        state.commit_proxies(previous).await
+        state.commit_proxies(previous).await?;
+        state.revoke_proxy(self.id).await
+    }
+
+    fn proxy_scope(&self) -> Option<ShortId> {
+        Some(self.id)
     }
 }
 
 pub struct AddProxy {
     pub entry: Proxy,
+    /// The account whose proxy list gets the new proxy.
+    pub owner: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -110,8 +135,14 @@ impl RpcMethod for AddProxy {
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         validate_proxy(&self.entry, state)?;
         let proxy = seal(self.entry).await?;
+        let id = state.generate_id();
+        // The account gets the id first, so a failed account save adds no proxy that its creator
+        // cannot see.
+        if let Some(owner) = &self.owner {
+            state.grant_proxy(owner, id).await?;
+        }
         let previous = proxy_entries(state);
-        if state.proxies.set((state.generate_id(), proxy).into()) {
+        if state.proxies.set((id, proxy).into()) {
             state.commit_proxies(previous).await?;
         }
         Ok(())
@@ -137,6 +168,10 @@ impl RpcMethod for UpdateProxy {
             state.commit_proxies(previous).await?;
         }
         Ok(())
+    }
+
+    fn proxy_scope(&self) -> Option<ShortId> {
+        Some(self.entry.id)
     }
 }
 

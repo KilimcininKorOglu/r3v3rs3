@@ -1,4 +1,4 @@
-use crate::accounts::{AccountDirectory, Caller};
+use crate::accounts::{AccountDirectory, AccountEntry, Caller};
 use crate::command::ServerCommand;
 use crate::server::rpc::auth::GetSessionBackend;
 use crate::server::rpc::config::GetConfig;
@@ -8,7 +8,7 @@ use auth::LoginAttempts;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{middleware, Json};
+use axum::{middleware, Extension, Json};
 use axum::{
     response::{
         sse::{Event, KeepAlive},
@@ -16,7 +16,7 @@ use axum::{
     },
     Router,
 };
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, StreamExt};
 use logs::LogReader;
 use openapi::{ApiDoc, ErrorResponses, DOCS_PATH, OPENAPI_PATH};
 use r3v3rs3_api::app::{AppConfig, AppInfo};
@@ -31,12 +31,12 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Mutex};
-use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
+use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::{GovernorError, GovernorLayer};
 use tracing::{trace, warn};
@@ -250,17 +250,28 @@ fn resource_routes() -> OpenApiRouter<AppState> {
         ErrorResponses
     )
 )]
-async fn events(State(state): State<AppState>) -> Sse<StreamWrapper> {
+async fn events(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Sse<StreamWrapper> {
     let stream = StreamWrapper::new(
         BroadcastStream::new(state.event.subscribe()),
         state.event_listener_counter.clone(),
         state.sender.clone(),
+        caller,
+        state.accounts.clone(),
     );
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+/// The server events that the account of the stream sees. The stream ends when the account
+/// changes or is removed.
 struct StreamWrapper {
     inner: BroadcastStream<ServerEvent>,
+    accounts: WatchStream<Arc<AccountDirectory>>,
+    caller: Caller,
+    /// The account at the start of the stream.
+    account: Option<AccountEntry>,
     counter: Arc<AtomicUsize>,
     sender: Sender<ServerCommand>,
 }
@@ -270,29 +281,53 @@ impl StreamWrapper {
         stream: BroadcastStream<ServerEvent>,
         counter: Arc<AtomicUsize>,
         sender: Sender<ServerCommand>,
+        caller: Caller,
+        accounts: watch::Receiver<Arc<AccountDirectory>>,
     ) -> Self {
         if counter.fetch_add(1, Ordering::Relaxed) == 0 {
             let _ = sender.try_send(ServerCommand::SetBroadcastEvents { enabled: true });
         }
+        let account = accounts.borrow().get(&caller.username).cloned();
         Self {
             inner: stream,
+            accounts: WatchStream::new(accounts),
+            caller,
+            account,
             counter,
             sender,
         }
     }
+
+    fn account_changed(&mut self, cx: &mut Context<'_>) -> bool {
+        while let Poll::Ready(directory) = self.accounts.poll_next_unpin(cx) {
+            let Some(directory) = directory else {
+                return true;
+            };
+            if directory.get(&self.caller.username) != self.account.as_ref() {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl Stream for StreamWrapper {
-    type Item = Result<Event, BroadcastStreamRecvError>;
+    type Item = Result<Event, axum::Error>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.inner.try_poll_next_unpin(cx) {
-            Poll::Ready(Some(Ok(event))) => {
-                Poll::Ready(Some(Ok(Event::default().json_data(event).unwrap())))
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        if this.account_changed(cx) {
+            return Poll::Ready(None);
+        }
+        loop {
+            let event = match ready!(this.inner.poll_next_unpin(cx)) {
+                Some(Ok(event)) => event,
+                Some(Err(err)) => return Poll::Ready(Some(Err(axum::Error::new(err)))),
+                None => return Poll::Ready(None),
+            };
+            if let Some(event) = this.caller.visible_event(event) {
+                return Poll::Ready(Some(Event::default().json_data(event)));
             }
-            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err))),
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
         }
     }
 }

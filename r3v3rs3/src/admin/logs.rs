@@ -1,11 +1,14 @@
-use super::openapi::ErrorResponses;
+use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
+use crate::accounts::Caller;
+use crate::server::rpc::proxies::GetProxy;
 use axum::{
     extract::{Path, Query, State},
-    Json,
+    Extension, Json,
 };
 use r3v3rs3_api::{
     error::Error,
+    id::ShortId,
     log::{LogLevel, LogQuery, SystemLogRow},
 };
 use sqlx::ConnectOptions;
@@ -28,18 +31,36 @@ const REQUEST_DEFAULT_LIMIT: u32 = 100;
         ("id" = String, Path, description = "Id of the port, the proxy or the certificate."),
         LogQuery
     ),
-    responses((status = 200, description = "The log rows.", body = Vec<SystemLogRow>), ErrorResponses)
+    responses((status = 200, description = "The log rows.", body = Vec<SystemLogRow>), NotFoundResponse, ErrorResponses)
 )]
 pub async fn get(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<String>,
     Query(query): Query<LogQuery>,
 ) -> Result<Json<Vec<SystemLogRow>>, AppError> {
+    ensure_visible(&state, &caller, &id).await?;
     let log = state.data.lock().await.log.clone();
     let rows = log
         .fetch_system_log(&id, query.since, query.until, query.limit)
         .await?;
     Ok(Json(rows))
+}
+
+/// Rejects the log of a proxy that the account does not see. Every account sees the logs of the
+/// ports and the certificates.
+async fn ensure_visible(state: &AppState, caller: &Caller, id: &str) -> Result<(), Error> {
+    let Ok(proxy) = id.parse::<ShortId>() else {
+        return Ok(());
+    };
+    if caller.can_see(proxy) {
+        return Ok(());
+    }
+    match state.call_system(GetProxy { id: proxy }).await {
+        Ok(_) => Err(Error::IdNotFound { id: id.to_string() }),
+        Err(Error::IdNotFound { .. }) => Ok(()),
+        Err(err) => Err(err),
+    }
 }
 
 pub struct LogReader {

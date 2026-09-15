@@ -110,7 +110,9 @@ pub async fn add(
     Extension(caller): Extension<Caller>,
     Json(entry): Json<Proxy>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(&caller, AddProxy { entry }).await?))
+    // An account with a proxy list sees the new proxy through its list.
+    let owner = caller.proxies.is_some().then(|| caller.username.clone());
+    Ok(Json(state.call(&caller, AddProxy { entry, owner }).await?))
 }
 
 /// Replaces the config of a proxy.

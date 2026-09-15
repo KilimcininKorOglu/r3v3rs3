@@ -331,6 +331,47 @@ impl ServerState {
         }
     }
 
+    /// Adds a new proxy to the proxy list of the account that created it. An account without a
+    /// proxy list already sees every proxy.
+    pub async fn grant_proxy(
+        &mut self,
+        username: &str,
+        proxy: r3v3rs3_api::id::ShortId,
+    ) -> Result<(), Error> {
+        self.edit_accounts(|accounts| {
+            let proxies = accounts
+                .get_mut(username)
+                .and_then(|account| account.proxies.as_mut());
+            proxies.is_some_and(|proxies| proxies.insert(proxy))
+        })
+        .await
+    }
+
+    /// Removes a deleted proxy from the proxy lists of the accounts.
+    pub async fn revoke_proxy(&mut self, proxy: r3v3rs3_api::id::ShortId) -> Result<(), Error> {
+        self.edit_accounts(|accounts| {
+            accounts
+                .values_mut()
+                .filter_map(|account| account.proxies.as_mut())
+                .fold(false, |changed, proxies| proxies.remove(&proxy) || changed)
+        })
+        .await
+    }
+
+    /// Saves the accounts when `edit` changes them, and reads the directory again.
+    async fn edit_accounts(
+        &mut self,
+        edit: impl FnOnce(&mut std::collections::HashMap<String, r3v3rs3_api::auth::Account>) -> bool
+            + Send,
+    ) -> Result<(), Error> {
+        let mut accounts = self.storage.load_accounts().await?;
+        if edit(&mut accounts) {
+            self.storage.save_accounts(&accounts).await?;
+            self.reload_accounts().await;
+        }
+        Ok(())
+    }
+
     /// Reads the accounts again. A failed read keeps the directory.
     pub async fn reload_accounts(&mut self) {
         let Some(directory) = load_account_directory(self.storage.as_ref()).await else {
@@ -436,10 +477,13 @@ impl ServerState {
         method: &mut dyn super::rpc::ErasedRpcMethod,
     ) -> Result<Box<dyn std::any::Any + Send + Sync>, Error> {
         caller.authorize(method.permission())?;
+        if let Some(proxy) = method.proxy_scope() {
+            caller.ensure_visible(proxy)?;
+        }
         if method.mutates() {
             self.storage.ensure_writable().await?;
         }
-        method.call(self).await
+        method.call(self, caller).await
     }
 
     /// Stops the task of the provider, removes its proxies and starts it again with the current
