@@ -39,6 +39,7 @@ pub struct AddCert {
 #[async_trait::async_trait]
 impl RpcMethod for AddCert {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         state.certs.add(self.cert.clone());
@@ -56,6 +57,7 @@ pub struct DeleteCert {
 #[async_trait::async_trait]
 impl RpcMethod for DeleteCert {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         if state

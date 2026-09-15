@@ -21,6 +21,7 @@ pub struct SetConfig {
 #[async_trait::async_trait]
 impl RpcMethod for SetConfig {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         state.set_config(self.config).await

@@ -84,6 +84,7 @@ pub struct DeleteProxy {
 #[async_trait::async_trait]
 impl RpcMethod for DeleteProxy {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         ensure_manual(state, self.id)?;
@@ -101,6 +102,7 @@ pub struct AddProxy {
 #[async_trait::async_trait]
 impl RpcMethod for AddProxy {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         validate_proxy(&self.entry, state)?;
@@ -120,6 +122,7 @@ pub struct UpdateProxy {
 #[async_trait::async_trait]
 impl RpcMethod for UpdateProxy {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         ensure_manual(state, self.entry.id)?;

@@ -12,6 +12,12 @@ use std::sync::Arc;
 
 #[async_trait::async_trait]
 pub trait Storage: Send + Sync + 'static {
+    /// Fails when the storage cannot save a change now. The server calls it before a change
+    /// through the admin API, so a change that cannot be saved is not applied.
+    async fn ensure_writable(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
     async fn save_app_config(&self, config: &AppConfig);
     async fn load_app_config(&self) -> AppConfig;
     async fn save_ports(&self, entries: &[PortEntry]);

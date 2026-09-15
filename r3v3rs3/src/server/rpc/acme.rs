@@ -50,6 +50,7 @@ pub struct AddAcme {
 #[async_trait::async_trait]
 impl RpcMethod for AddAcme {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         self.request.acme.validate()?;
@@ -73,6 +74,7 @@ pub struct UpdateAcme {
 #[async_trait::async_trait]
 impl RpcMethod for UpdateAcme {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         let entry = state.acmes.update(self.id, self.config)?;
@@ -89,6 +91,7 @@ pub struct DeleteAcme {
 #[async_trait::async_trait]
 impl RpcMethod for DeleteAcme {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         state.acmes.delete(self.id)?;

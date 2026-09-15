@@ -166,16 +166,29 @@ struct Inner {
     pub acems: HashMap<ShortId, AcmeEntry>,
     pub accounts: HashMap<String, String>,
     pub cdn_ranges: Option<CdnRanges>,
+    /// The error of `ensure_writable`.
+    pub write_error: Option<Error>,
 }
 
 impl TestStorage {
     pub fn builder() -> TestStorageBuilder {
         TestStorageBuilder::new()
     }
+
+    pub async fn set_write_error(&self, error: Option<Error>) {
+        self.inner.lock().await.write_error = error;
+    }
 }
 
 #[async_trait::async_trait]
 impl Storage for TestStorage {
+    async fn ensure_writable(&self) -> Result<(), Error> {
+        match &self.inner.lock().await.write_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
+    }
+
     async fn save_app_config(&self, config: &AppConfig) {
         self.inner.lock().await.config.clone_from(config);
     }

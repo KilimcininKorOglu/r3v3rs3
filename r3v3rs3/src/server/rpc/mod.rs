@@ -13,6 +13,9 @@ pub mod proxies;
 #[async_trait::async_trait]
 pub trait RpcMethod: Any + Send + Sync {
     type Output: Any + Send + Sync;
+    /// Whether the method changes the stored state. Such a method runs only when the storage can
+    /// write.
+    const MUTATES: bool = false;
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error>;
 }
 
@@ -40,11 +43,17 @@ where
             .await
             .map(|r| Box::new(r) as Box<dyn Any + Send + Sync>)
     }
+
+    fn mutates(&self) -> bool {
+        T::MUTATES
+    }
 }
 
 #[async_trait::async_trait]
 pub trait ErasedRpcMethod: Any + Send + Sync {
     async fn call(&mut self, state: &mut ServerState) -> Result<Box<dyn Any + Send + Sync>, Error>;
+
+    fn mutates(&self) -> bool;
 }
 
 pub struct RpcCallback {

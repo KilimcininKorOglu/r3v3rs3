@@ -185,7 +185,7 @@ impl ServerState {
                 }
             }
             ServerCommand::CallMethod { id, mut arg } => {
-                let result = arg.call(self).await;
+                let result = self.call_method(arg.as_mut()).await;
                 let _ = self.callback_sender.send(RpcCallback { id, result }).await;
             }
             ServerCommand::SetCdnRanges { ranges } => {
@@ -197,6 +197,18 @@ impl ServerState {
                 self.set_discovery(snapshot).await;
             }
         }
+    }
+
+    /// Runs an RPC method. A method that changes the stored state fails before it changes anything
+    /// when the storage cannot write.
+    async fn call_method(
+        &mut self,
+        method: &mut dyn super::rpc::ErasedRpcMethod,
+    ) -> Result<Box<dyn std::any::Any + Send + Sync>, Error> {
+        if method.mutates() {
+            self.storage.ensure_writable().await?;
+        }
+        method.call(self).await
     }
 
     /// Stops the task of the provider, removes its proxies and starts it again with the current

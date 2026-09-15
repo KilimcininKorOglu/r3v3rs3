@@ -257,6 +257,8 @@ mod tests {
             Error::InvalidRedirectStatus { status: 303 },
             Error::InvalidRedirectTarget { target: text() },
             Error::InvalidMirrorPercent { percent: 0 },
+            Error::ClusterUnavailable,
+            Error::ClusterWriteConflict,
             Error::FailedToHashPassword,
             Error::FailedToFetchLog,
             Error::FailedToInvokeRpc,

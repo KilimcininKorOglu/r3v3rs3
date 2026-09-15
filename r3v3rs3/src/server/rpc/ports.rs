@@ -62,6 +62,7 @@ pub struct DeletePort {
 #[async_trait::async_trait]
 impl RpcMethod for DeletePort {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         if state.ports.delete(self.id) {
@@ -83,6 +84,7 @@ pub struct AddPort {
 #[async_trait::async_trait]
 impl RpcMethod for AddPort {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         let entry: PortEntry = (state.generate_id(), self.entry).into();
@@ -111,6 +113,7 @@ pub struct UpdatePort {
 #[async_trait::async_trait]
 impl RpcMethod for UpdatePort {
     type Output = ();
+    const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         if state.ports.get(self.entry.id).is_some() {

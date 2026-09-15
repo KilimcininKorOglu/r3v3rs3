@@ -143,6 +143,8 @@
   "error.certificate_in_use": "Certificate is in use: {id}",
   "error.certificate_read_only": "The certificate comes from service discovery and cannot be deleted here: {id}",
   "error.client_ca_certs_missing": "Client authentication needs at least one root certificate.",
+  "error.cluster_unavailable": "The cluster store cannot save changes now. Try again when the node is connected to the store.",
+  "error.cluster_write_conflict": "Another node changed the same data. Load the page again and repeat the change.",
   "error.duplicate_compression_algorithm": "Compression algorithm is listed more than once: {algorithm}",
   "error.failed_to_create_account": "Failed to create the account.",
   "error.failed_to_fetch_log": "Failed to fetch the log.",

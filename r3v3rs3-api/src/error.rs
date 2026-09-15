@@ -200,6 +200,12 @@ pub enum Error {
     #[error("mirror percent must be from 1 to 100: {percent}")]
     InvalidMirrorPercent { percent: u8 },
 
+    #[error("the cluster store cannot save changes now")]
+    ClusterUnavailable,
+
+    #[error("another node changed the same data, load it again and retry")]
+    ClusterWriteConflict,
+
     #[error("failed to hash password")]
     FailedToHashPassword,
 
@@ -220,6 +226,8 @@ impl Error {
             Self::Unauthorized => 401,
             Self::ProxyReadOnly { .. } | Self::CertificateReadOnly { .. } => 403,
             Self::TooManyLoginAttempts => 429,
+            Self::ClusterWriteConflict => 409,
+            Self::ClusterUnavailable => 503,
             Self::FailedToFetchLog | Self::FailedToInvokeRpc | Self::FailedToHashPassword => 500,
             _ => 400,
         }

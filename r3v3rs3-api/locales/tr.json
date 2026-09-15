@@ -143,6 +143,8 @@
   "error.certificate_in_use": "Sertifika kullanımda: {id}",
   "error.certificate_read_only": "Bu sertifika servis keşfinden geliyor ve burada silinemez: {id}",
   "error.client_ca_certs_missing": "Client authentication için en az bir root sertifika seçilmelidir.",
+  "error.cluster_unavailable": "Cluster store şu anda değişiklikleri kaydedemiyor. Node store'a bağlanınca tekrar deneyin.",
+  "error.cluster_write_conflict": "Başka bir node aynı veriyi değiştirdi. Sayfayı yeniden yükleyin ve değişikliği tekrarlayın.",
   "error.duplicate_compression_algorithm": "Compression algoritması birden fazla kez seçildi: {algorithm}",
   "error.failed_to_create_account": "Hesap oluşturulamadı.",
   "error.failed_to_fetch_log": "Log alınamadı.",
