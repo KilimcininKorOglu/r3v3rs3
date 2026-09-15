@@ -10,7 +10,6 @@ use r3v3rs3_api::{
         TokenProvider,
     },
     app::AcmeExecConfig,
-    error::Error,
 };
 use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
 use rsa::{
@@ -21,9 +20,15 @@ use serde_json::json;
 use sha1::{Digest, Sha1};
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Duration,
+};
+#[cfg(unix)]
+use {
+    r3v3rs3_api::error::Error,
+    std::{
+        path::{Path, PathBuf},
+        time::Duration,
+    },
 };
 
 mod common;
