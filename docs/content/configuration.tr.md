@@ -968,7 +968,7 @@ r3v3rs3, ACME kayıtlarını config dizinindeki `acme.toml` dosyasında saklar. 
 ACME kayıtlarını WebUI'dan oluşturun. r3v3rs3, ACME hesabını kayıt eklendiğinde oluşturur. `acme.toml` içindeki bir kayıt şöyle görünür:
 
 ```toml
-version = "1.0.0"
+version = "1.0.1"
 
 [acme1]
 provider = "Let's Encrypt"

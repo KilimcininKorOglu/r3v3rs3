@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-09-15
+
+### Changed
+- The Docker image uses a distroless runtime and ships for `linux/amd64` and `linux/arm64`. The image is 73 MB on amd64 and 80 MB on arm64, down from 136 MB.
+- GitHub releases ship Linux binaries for x86_64 and aarch64 only. armv7 binaries are no longer built.
+- Release binaries and Docker images build on native amd64 and arm64 runners. A manual workflow run builds them without publishing.
+- GitHub Actions use current action versions, and the docs site deploys from `main` when the docs change.
+- The code and docs no longer contain macOS and Windows specific branches.
+
+### Fixed
+- The demo image builds and starts again. It uses the same Debian release as the builder and a baked admin password of at least 8 characters.
+
 ## [1.0.0] - 2026-09-15
 
 ### Added
