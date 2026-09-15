@@ -1,0 +1,9 @@
+target
+**/dist
+docs
+.git
+.github
+.claude
+.playwright-mcp
+helper-project
+helper-projects
