@@ -1,10 +1,16 @@
-use r3v3rs3_api::{app::AppConfig, i18n::Locale, policy::AuthPolicy, proxy::HttpProxy};
+use r3v3rs3::{cluster::layout::StateKind, command::ServerCommand, config::storage::Storage};
+use r3v3rs3_api::{
+    app::AppConfig, auth::Role, i18n::Locale, id::ShortId, policy::AuthPolicy, proxy::HttpProxy,
+};
 use reqwest::{
     header::{COOKIE, HOST, LOCATION, SET_COOKIE},
     redirect::Policy,
     StatusCode,
 };
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    time::Duration,
+};
 
 mod common;
 use common::{
@@ -175,4 +181,86 @@ async fn session_auth_signs_clients_in_with_panel_accounts() -> anyhow::Result<(
 
     mock_private.assert_async().await;
     Ok(())
+}
+
+#[tokio::test]
+async fn only_the_accounts_that_see_the_proxy_keep_a_session() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let mut upstream = mockito::Server::new_async().await;
+    upstream
+        .mock("GET", "/")
+        .with_body("private")
+        .create_async()
+        .await;
+
+    let proxy = |id: &str| -> anyhow::Result<Option<BTreeSet<ShortId>>> {
+        Ok(Some(BTreeSet::from([id.parse()?])))
+    };
+    let storage = TestStorage::builder()
+        .account("outsider", "outsider-secret", Role::Viewer, proxy("other")?)
+        .account("member", "member-secret", Role::Viewer, proxy("proxy1")?)
+        .ports(vec![http_port_entry("session", &port)])
+        .proxies(vec![http_proxy_entry(
+            "proxy1",
+            "session",
+            HttpProxy {
+                routes: vec![http_route("/", &upstream.url(), None)],
+                upgrade_insecure: false,
+                auth: AuthPolicy::Session,
+                ..Default::default()
+            },
+        )])
+        .build();
+
+    with_server(storage.clone(), |channels| async move {
+        let client = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .build()?;
+        let login_url = port.http_url("/.r3v3rs3/auth/login");
+        let sign_in = |username: &'static str, password: &'static str| {
+            client
+                .post(login_url.clone())
+                .form(&[("username", username), ("password", password)])
+                .send()
+        };
+
+        // The password is correct, but the account does not see the proxy.
+        let resp = sign_in("outsider", "outsider-secret").await?;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(resp.headers().get(SET_COOKIE).is_none());
+
+        let resp = sign_in("member", "member-secret").await?;
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let set_cookie = resp.headers()[SET_COOKIE].to_str()?;
+        let session = set_cookie.split(';').next().unwrap_or_default().to_string();
+        let private = || {
+            client
+                .get(port.http_url("/"))
+                .header(COOKIE, session.clone())
+                .send()
+        };
+        assert_eq!(private().await?.status(), StatusCode::OK);
+
+        // The session ends when the proxy leaves the proxy list of the account.
+        let mut accounts = storage.load_accounts().await?;
+        if let Some(member) = accounts.get_mut("member") {
+            member.proxies = proxy("other")?;
+        }
+        storage.save_accounts(&accounts).await?;
+        let kinds = vec![StateKind::Accounts];
+        channels
+            .command
+            .send(ServerCommand::ClusterChanged { kinds })
+            .await?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while private().await?.status() != StatusCode::FOUND {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            anyhow::Ok(())
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("the session is still valid"))??;
+        Ok(())
+    })
+    .await
 }

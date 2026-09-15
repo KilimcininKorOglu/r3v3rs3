@@ -126,9 +126,19 @@ impl AccountDirectory {
     /// The caller of an admin session. A session of a removed account, or a session that started
     /// before the last change of the account, has none.
     pub fn caller(&self, session: &SessionRecord) -> Option<Caller> {
-        let entry = self.get(&session.subject)?;
-        (session.started_at >= entry.credentials_changed_at).then(|| Caller {
-            username: session.subject.clone(),
+        self.account_caller(&session.subject, session.started_at)
+    }
+
+    /// True when the account sees the proxy and did not change after `started_at`.
+    pub fn can_open(&self, username: &str, started_at: u64, proxy: ShortId) -> bool {
+        self.account_caller(username, started_at)
+            .is_some_and(|caller| caller.can_see(proxy))
+    }
+
+    fn account_caller(&self, username: &str, started_at: u64) -> Option<Caller> {
+        let entry = self.get(username)?;
+        (started_at >= entry.credentials_changed_at).then(|| Caller {
+            username: username.to_string(),
             role: entry.role,
             proxies: entry.proxies.clone(),
         })
@@ -176,6 +186,7 @@ mod tests {
         let session = |subject: &str, started_at| SessionRecord {
             subject: subject.to_string(),
             started_at,
+            account: None,
         };
         let expected = Caller {
             username: "viewer".to_string(),

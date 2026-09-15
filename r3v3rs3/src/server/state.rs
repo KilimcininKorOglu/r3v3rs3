@@ -161,16 +161,17 @@ impl ServerState {
             };
         }
 
+        // Without the accounts the directory is empty, so no account passes until a reload.
+        let directory = load_account_directory(storage.as_ref()).await;
+        let accounts = watch::Sender::new(Arc::new(directory.unwrap_or_default()));
         let session_backend = storage.clone().session_backend();
         let sessions = Arc::new(SessionService::new(
             storage.clone(),
             session_backend.clone(),
+            accounts.subscribe(),
             config.admin,
         ));
         let leader = !config.cluster.enabled;
-        // Without the accounts the directory is empty, so no account passes until a reload.
-        let directory = load_account_directory(storage.as_ref()).await;
-        let accounts = watch::Sender::new(Arc::new(directory.unwrap_or_default()));
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
             certs: CertList::new(certs).await,

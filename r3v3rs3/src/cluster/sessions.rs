@@ -21,11 +21,11 @@ impl SessionBackend for KvStorage {
     async fn create(
         &self,
         scope: SessionScope,
-        subject: &str,
+        record: SessionRecord,
         _expiry: Duration,
     ) -> Result<String, Error> {
         let token = new_token();
-        let record = serde_json::to_vec(&SessionRecord::new(subject)).map_err(|err| {
+        let record = serde_json::to_vec(&record).map_err(|err| {
             error!("failed to encode the session: {err}");
             Error::FailedToSaveConfig
         })?;

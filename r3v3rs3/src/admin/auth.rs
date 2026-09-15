@@ -1,7 +1,7 @@
 use super::{AppError, AppState};
 use crate::accounts::Caller;
 use crate::server::rpc::auth::VerifyAccount;
-use crate::sessions::{self, SessionBackend, SessionScope};
+use crate::sessions::{self, SessionBackend, SessionRecord, SessionScope};
 use axum::{
     extract::{ConnectInfo, Request, State},
     middleware::Next,
@@ -76,7 +76,9 @@ pub async fn login(
     };
 
     let (backend, expiry) = session_backend(&state).await;
-    let token = backend.create(scope, &username, expiry).await?;
+    let token = backend
+        .create(scope, SessionRecord::new(&username), expiry)
+        .await?;
 
     let cookie = Cookie::build(("token", token))
         .http_only(true)

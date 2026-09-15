@@ -1,9 +1,10 @@
 use super::super::cookie::{cookie_values, remove_cookie};
 use super::super::page::PagePreferences;
 use super::{AuthContext, AuthRejection};
+use crate::accounts::AccountDirectory;
 use crate::admin::auth::{LoginAttemptKey, LoginAttempts};
 use crate::config::storage::Storage;
-use crate::sessions::{self, SessionBackend, SessionScope};
+use crate::sessions::{self, SessionBackend, SessionRecord, SessionScope};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
@@ -18,6 +19,7 @@ use r3v3rs3_api::{
     app::AdminConfig,
     auth::{LoginMethod, LoginRequest, LoginResponse},
     error::Error,
+    id::ShortId,
 };
 use sailfish::TemplateOnce;
 use std::{
@@ -26,6 +28,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant},
 };
+use tokio::sync::watch;
 use tracing::{error, warn};
 use url::form_urlencoded;
 
@@ -50,6 +53,7 @@ const TOO_MANY_ATTEMPTS: &str = "login.too_many_attempts";
 pub struct SessionService {
     storage: Arc<dyn Storage>,
     backend: Arc<dyn SessionBackend>,
+    accounts: watch::Receiver<Arc<AccountDirectory>>,
     state: Mutex<SessionState>,
 }
 
@@ -80,11 +84,13 @@ impl SessionService {
     pub fn new(
         storage: Arc<dyn Storage>,
         backend: Arc<dyn SessionBackend>,
+        accounts: watch::Receiver<Arc<AccountDirectory>>,
         config: AdminConfig,
     ) -> Self {
         Self {
             storage,
             backend,
+            accounts,
             state: Mutex::new(SessionState {
                 config,
                 attempts: LoginAttempts::default(),
@@ -100,12 +106,15 @@ impl SessionService {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Returns true when the token belongs to an unexpired session of the host.
-    async fn is_valid(&self, token: &str, host: &str) -> bool {
+    /// Returns true when the token belongs to an unexpired session of the host, and the account
+    /// of the session still sees the proxy.
+    async fn is_valid(&self, token: &str, host: &str, proxy: ShortId) -> bool {
         let expiry = self.state().expiry();
         match self.backend.get(SessionScope::Proxy, token).await {
             Ok(record) => record.is_some_and(|record| {
-                record.is_active(expiry) && record.subject.eq_ignore_ascii_case(host)
+                record.is_active(expiry)
+                    && record.subject.eq_ignore_ascii_case(host)
+                    && self.can_open(&record, proxy)
             }),
             Err(err) => {
                 warn!(%err, "failed to read the session");
@@ -114,12 +123,22 @@ impl SessionService {
         }
     }
 
-    /// Starts a session for the host and returns its token and lifetime.
-    async fn create_session(&self, host: &str) -> Result<(String, Duration), Error> {
+    /// True when the account of the session sees the proxy and did not change after the start of
+    /// the session.
+    fn can_open(&self, record: &SessionRecord, proxy: ShortId) -> bool {
+        record.account.as_deref().is_some_and(|account| {
+            self.accounts
+                .borrow()
+                .can_open(account, record.started_at, proxy)
+        })
+    }
+
+    /// Starts the session and returns its token and lifetime.
+    async fn create_session(&self, record: SessionRecord) -> Result<(String, Duration), Error> {
         let expiry = self.state().expiry();
         let token = self
             .backend
-            .create(SessionScope::Proxy, host, expiry)
+            .create(SessionScope::Proxy, record, expiry)
             .await?;
         Ok((token, expiry))
     }
@@ -199,6 +218,7 @@ impl SessionService {
 #[derive(Debug)]
 pub struct SessionAuthenticator {
     service: Arc<SessionService>,
+    proxy: ShortId,
 }
 
 enum Action {
@@ -210,8 +230,8 @@ enum Action {
 }
 
 impl SessionAuthenticator {
-    pub fn new(service: Arc<SessionService>) -> Self {
-        Self { service }
+    pub fn new(service: Arc<SessionService>, proxy: ShortId) -> Self {
+        Self { service, proxy }
     }
 
     /// Serves the sign-in endpoints below the route path. Other requests continue.
@@ -255,7 +275,7 @@ impl SessionAuthenticator {
     ) -> Result<(), AuthRejection> {
         let host = ctx.host.unwrap_or_default();
         let signed_in = match session_token(req.headers()) {
-            Some(token) => self.service.is_valid(token, host).await,
+            Some(token) => self.service.is_valid(token, host, self.proxy).await,
             None => false,
         };
         if !signed_in {
@@ -290,11 +310,17 @@ impl SessionAuthenticator {
             warn!(client = %ctx.client, username = %form.username, "sign-in blocked after too many failed attempts");
             return page(TOO_MANY_ATTEMPTS, false, StatusCode::TOO_MANY_REQUESTS);
         }
-        match self.service.verify(&form).await {
+        let record = SessionRecord::proxy(ctx.host.unwrap_or_default(), &form.username);
+        let verification = match self.service.verify(&form).await {
+            Verification::Failed => Verification::Failed,
+            // An account that does not see the proxy gets the answer of a wrong password.
+            _ if !self.service.can_open(&record, self.proxy) => Verification::Failed,
+            verification => verification,
+        };
+        match verification {
             Verification::Success => {
                 self.service.clear_failures(&key);
-                let host = ctx.host.unwrap_or_default();
-                let (token, expiry) = match self.service.create_session(host).await {
+                let (token, expiry) = match self.service.create_session(record).await {
                     Ok(session) => session,
                     Err(err) => {
                         error!(%err, "failed to start the session");

@@ -486,6 +486,8 @@ Bu kimlik doğrulamayı kullanan her route, kendi path'inin altında şu endpoin
 
 TOTP kodu yalnız TOTP'si açık hesaplarda istenir. `r3v3rs3_session` cookie'si `HttpOnly` ve `SameSite=Lax` attribute'larını taşır; HTTPS ve HTTP/3 bağlantılarında `Secure` attribute'u da eklenir. Cookie'nin `Domain` attribute'u yoktur ve r3v3rs3 bir session'ı yalnız client'ın giriş yaptığı host'ta kabul eder. r3v3rs3, request'i upstream sunucuya göndermeden önce session cookie'sini siler.
 
+Yalnız proxy'yi görebilen hesaplar giriş yapar. Proxy listesi olan bir hesap yalnız listesindeki proxy'leri görür. r3v3rs3 hesabı her request'te kontrol eder. Hesap silinirse, hesap değişirse veya proxy hesabın listesinden çıkarılırsa session sona erer. r3v3rs3 session'ın hesabını kaydetmeye başlamadan önce açılan session'lar geçersizdir. Bu durumda client yeniden giriş yapar.
+
 `config.toml` dosyasındaki `[admin]` ayarları bu session'lara da uygulanır:
 
 - `session_expiry`: Session'ın geçerlilik süresi. En az 5 dakika olabilir.

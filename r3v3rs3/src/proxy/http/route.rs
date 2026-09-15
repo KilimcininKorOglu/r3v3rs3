@@ -51,7 +51,7 @@ impl Router {
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
             let proxy_rate_limiter = registries.limiters.limiter((id, None), http.rate_limit);
-            let proxy_auth = Authenticator::new(http.auth, &tls_client_config, sessions);
+            let proxy_auth = Authenticator::new(http.auth, &tls_client_config, sessions, id);
             let proxy_header_rules = Arc::new(CompiledHeaderRules::new(&http.headers));
             let compression = (!http.compression.is_disabled()).then(|| Arc::new(http.compression));
             let proxy_cache = registries.caches.cache_for(id, &http.cache);
@@ -80,7 +80,7 @@ impl Router {
                 };
                 let auth = route.auth.map_or_else(
                     || proxy_auth.clone(),
-                    |policy| Authenticator::new(policy, &tls_client_config, sessions),
+                    |policy| Authenticator::new(policy, &tls_client_config, sessions, id),
                 );
                 let header_rules = route.headers.as_ref().map_or_else(
                     || proxy_header_rules.clone(),

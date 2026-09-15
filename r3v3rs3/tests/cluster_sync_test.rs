@@ -20,7 +20,7 @@ use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
 use r3v3rs3::server::rpc::ports::{AddPort, GetPortList};
 use r3v3rs3::server::rpc::proxies::{AddProxy, GetProxyList};
 use r3v3rs3::server::Server;
-use r3v3rs3::sessions::{SessionBackend, SessionScope};
+use r3v3rs3::sessions::{SessionBackend, SessionRecord, SessionScope};
 use r3v3rs3_api::acme::{Acme, AcmeConfig, HTTP_01};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::auth::Role;
@@ -421,13 +421,10 @@ async fn the_store_keeps_sessions_until_they_expire() -> anyhow::Result<()> {
     let a = node_storage(&store, "node-a")?;
     let b = node_storage(&store, "node-b")?;
     let hour = Duration::from_secs(3600);
-    let token = a.create(SessionScope::Proxy, "example.com", hour).await?;
+    let record = SessionRecord::proxy("example.com", "admin");
+    let token = a.create(SessionScope::Proxy, record.clone(), hour).await?;
 
-    let record = b.get(SessionScope::Proxy, &token).await?;
-    assert_eq!(
-        record.map(|record| record.subject).as_deref(),
-        Some("example.com")
-    );
+    assert_eq!(b.get(SessionScope::Proxy, &token).await?, Some(record));
     assert_eq!(b.get(SessionScope::Admin, &token).await?, None);
     let keys = store.list("").await?.items;
     assert!(keys.iter().all(|item| !item.key.contains(&token)));

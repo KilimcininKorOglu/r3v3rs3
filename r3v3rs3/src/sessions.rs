@@ -45,6 +45,9 @@ pub struct SessionRecord {
     /// The start of the session in seconds since the Unix epoch. The nodes of a cluster share the
     /// record, so the start is a wall-clock time.
     pub started_at: u64,
+    /// The account that started a proxy session. A proxy session without an account is invalid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 impl SessionRecord {
@@ -52,6 +55,15 @@ impl SessionRecord {
         Self {
             subject: subject.to_string(),
             started_at: unix_now(),
+            account: None,
+        }
+    }
+
+    /// A session that the account starts on the host of a proxy.
+    pub fn proxy(host: &str, account: &str) -> Self {
+        Self {
+            account: Some(account.to_string()),
+            ..Self::new(host)
         }
     }
 
@@ -74,7 +86,7 @@ pub trait SessionBackend: Send + Sync {
     async fn create(
         &self,
         scope: SessionScope,
-        subject: &str,
+        record: SessionRecord,
         expiry: Duration,
     ) -> Result<String, Error>;
 
@@ -106,13 +118,13 @@ impl SessionBackend for LocalSessions {
     async fn create(
         &self,
         scope: SessionScope,
-        subject: &str,
+        record: SessionRecord,
         expiry: Duration,
     ) -> Result<String, Error> {
         let token = new_token();
         let mut sessions = self.sessions();
         sessions.retain(|_, record| record.is_active(expiry));
-        sessions.insert((scope, token.clone()), SessionRecord::new(subject));
+        sessions.insert((scope, token.clone()), record);
         Ok(token)
     }
 
@@ -140,7 +152,9 @@ mod tests {
     #[tokio::test]
     async fn a_session_is_found_only_in_its_scope_until_it_is_removed() -> Result<(), Error> {
         let sessions = LocalSessions::default();
-        let token = sessions.create(SessionScope::Admin, "admin", HOUR).await?;
+        let token = sessions
+            .create(SessionScope::Admin, SessionRecord::new("admin"), HOUR)
+            .await?;
 
         let record = sessions.get(SessionScope::Admin, &token).await?;
         assert_eq!(
@@ -158,9 +172,8 @@ mod tests {
     #[tokio::test]
     async fn expired_sessions_are_removed() -> Result<(), Error> {
         let sessions = LocalSessions::default();
-        let token = sessions
-            .create(SessionScope::Proxy, "example.com", HOUR)
-            .await?;
+        let record = SessionRecord::proxy("example.com", "admin");
+        let token = sessions.create(SessionScope::Proxy, record, HOUR).await?;
         sessions.remove_expired(HOUR).await?;
         assert!(sessions.get(SessionScope::Proxy, &token).await?.is_some());
         sessions.remove_expired(Duration::ZERO).await?;
@@ -173,6 +186,7 @@ mod tests {
         let old = SessionRecord {
             subject: "admin".into(),
             started_at: unix_now() - 120,
+            account: None,
         };
         assert!(old.is_active(Duration::from_secs(180)));
         assert!(!old.is_active(Duration::from_secs(60)));

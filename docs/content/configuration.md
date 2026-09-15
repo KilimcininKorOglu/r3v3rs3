@@ -486,6 +486,8 @@ Each route with this authentication serves these endpoints below its path. For t
 
 The TOTP code is required only for accounts with TOTP. The session cookie `r3v3rs3_session` has the `HttpOnly` and `SameSite=Lax` attributes, and the `Secure` attribute on HTTPS and HTTP/3. It has no `Domain` attribute, and r3v3rs3 accepts a session only on the host where the client signed in. r3v3rs3 removes the session cookie before it sends the request to the upstream server.
 
+Only an account that sees the proxy can sign in. An account with a proxy list sees only the proxies of its list. r3v3rs3 checks the account on each request, so a session ends when the account is removed, when the account changes, or when the proxy leaves the proxy list of the account. A session that started before r3v3rs3 recorded the account of each session is not valid, and the client signs in again.
+
 The `[admin]` settings in `config.toml` apply to these sessions too:
 
 - `session_expiry`: The lifetime of a session. The minimum is 5 minutes.

@@ -3,7 +3,7 @@ use super::page::PagePreferences;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{body::Body, Request, Response};
-use r3v3rs3_api::policy::AuthPolicy;
+use r3v3rs3_api::{id::ShortId, policy::AuthPolicy};
 use std::{error::Error, fmt, net::IpAddr, ops::ControlFlow, sync::Arc};
 use tokio_rustls::rustls::ClientConfig;
 
@@ -65,11 +65,13 @@ impl fmt::Display for AuthRejection {
 }
 
 impl Authenticator {
-    /// Returns `None` when the policy does not require authentication.
+    /// Returns `None` when the policy does not require authentication. The session policy signs in
+    /// only the accounts that see `proxy`.
     pub fn new(
         policy: AuthPolicy,
         tls_client_config: &Arc<ClientConfig>,
         sessions: &Arc<SessionService>,
+        proxy: ShortId,
     ) -> Option<Arc<Self>> {
         let authenticator = match policy {
             AuthPolicy::None => return None,
@@ -79,7 +81,9 @@ impl Authenticator {
                 *forward,
                 tls_client_config.clone(),
             ))),
-            AuthPolicy::Session => Self::Session(SessionAuthenticator::new(sessions.clone())),
+            AuthPolicy::Session => {
+                Self::Session(SessionAuthenticator::new(sessions.clone(), proxy))
+            }
         };
         Some(Arc::new(authenticator))
     }
