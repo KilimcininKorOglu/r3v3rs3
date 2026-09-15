@@ -14,6 +14,7 @@ use anyhow::Context as _;
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::auth::{Account, LoginRequest, LoginResponse};
 use r3v3rs3_api::cert::CertKind;
+use r3v3rs3_api::cluster::ClusterConfig;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::{Port, PortEntry};
@@ -22,6 +23,7 @@ use serde::de::DeserializeOwned;
 use serde_derive::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::error;
@@ -76,6 +78,8 @@ pub struct KvStorage {
     /// The settings of `config.toml`. The settings that only the file sets come from here.
     local: AppConfig,
     known: Mutex<HashMap<String, Known>>,
+    /// False while the node lost the store. The storage then rejects changes.
+    healthy: AtomicBool,
 }
 
 impl KvStorage {
@@ -86,7 +90,16 @@ impl KvStorage {
             layout: Layout::new(&local.cluster.prefix),
             local,
             known: Mutex::default(),
+            healthy: AtomicBool::new(true),
         }
+    }
+
+    pub fn cluster_config(&self) -> &ClusterConfig {
+        &self.local.cluster
+    }
+
+    pub fn set_healthy(&self, healthy: bool) {
+        self.healthy.store(healthy, Ordering::Relaxed);
     }
 
     /// Connects to the store that `config.toml` names, without a check of the data.
@@ -391,6 +404,13 @@ fn stored_cert(cert: StoredCert) -> Result<Arc<Cert>, Error> {
 
 #[async_trait::async_trait]
 impl Storage for KvStorage {
+    async fn ensure_writable(&self) -> Result<(), Error> {
+        if self.healthy.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        Err(Error::ClusterUnavailable)
+    }
+
     async fn save_app_config(&self, config: &AppConfig) -> Result<(), Error> {
         let mut shared = config.clone();
         shared.keep_file_only(&AppConfig::default());

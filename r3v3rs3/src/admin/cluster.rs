@@ -1,0 +1,17 @@
+use super::openapi::ErrorResponses;
+use super::{AppError, AppState};
+use crate::server::rpc::cluster::GetClusterStatus;
+use axum::{extract::State, Json};
+use r3v3rs3_api::cluster::ClusterStatus;
+
+/// Shows how this node follows the cluster store.
+#[utoipa::path(
+    get,
+    path = "/status",
+    tag = "cluster",
+    operation_id = "get_cluster_status",
+    responses((status = 200, description = "The cluster status of this node.", body = ClusterStatus), ErrorResponses)
+)]
+pub async fn status(State(state): State<AppState>) -> Result<Json<Box<ClusterStatus>>, AppError> {
+    Ok(Json(state.call(GetClusterStatus).await?))
+}

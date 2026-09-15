@@ -10,6 +10,7 @@ use super::udp::UdpListenerPool;
 use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
 use crate::certs::acme::{AcmeEntry, AcmeOrder, AcmeTarget};
 use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge};
+use crate::cluster::layout::StateKind;
 use crate::config::storage::Storage;
 use crate::discovery::DiscoverySnapshot;
 use crate::kv::http::ApiClient;
@@ -22,6 +23,7 @@ use crate::{
 };
 use quinn::Incoming;
 use r3v3rs3_api::app::{AppConfig, AppInfo};
+use r3v3rs3_api::cluster::ClusterStatus;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
@@ -66,6 +68,7 @@ pub struct ServerState {
     broadcast_events: bool,
     discovery: DiscoveryRegistry,
     discovery_tasks: DiscoveryTasks,
+    cluster: ClusterStatus,
 }
 
 pub enum Received {
@@ -79,6 +82,18 @@ fn log_save_error(result: Result<(), Error>) {
     if let Err(err) = result {
         error!(%err, "failed to save the server state");
     }
+}
+
+/// The proxies that the storage keeps, with sealed credentials. Discovered proxies are not saved,
+/// so a source in the storage comes from a manual edit and is removed.
+fn manual_proxies(mut proxies: Vec<ProxyEntry>) -> Vec<ProxyEntry> {
+    proxies.retain(|entry| !entry.is_discovered());
+    for entry in &mut proxies {
+        if let Err(err) = super::credentials::seal_proxy(&mut entry.proxy) {
+            error!(id = %entry.id, %err, "invalid proxy credentials");
+        }
+    }
+    proxies
 }
 
 /// The TLS config that answers the TLS-ALPN-01 challenges. `None` without a challenge.
@@ -97,7 +112,7 @@ fn tls_alpn_config(challenges: &[TlsAlpnChallenge]) -> Option<Arc<ServerConfig>>
 
 impl ServerState {
     pub async fn new(
-        storage: impl Storage,
+        storage: Arc<dyn Storage>,
         command_sender: mpsc::Sender<ServerCommand>,
         callback_sender: mpsc::Sender<RpcCallback>,
         br_sender: broadcast::Sender<ServerEvent>,
@@ -113,14 +128,7 @@ impl ServerState {
 
         let certs = storage.load_certs().await;
         let acmes = storage.load_acmes().await;
-        let mut proxies = storage.load_proxies().await;
-        // Discovered proxies are not saved. A source in the file comes from a manual edit.
-        proxies.retain(|entry| !entry.is_discovered());
-        for entry in &mut proxies {
-            if let Err(err) = super::credentials::seal_proxy(&mut entry.proxy) {
-                error!(id = %entry.id, %err, "invalid proxy credentials");
-            }
-        }
+        let proxies = manual_proxies(storage.load_proxies().await);
 
         let mut ports = PortList::default();
         for entry in storage.load_ports().await {
@@ -134,7 +142,6 @@ impl ServerState {
             };
         }
 
-        let storage: Arc<dyn Storage> = Arc::new(storage);
         let sessions = Arc::new(SessionService::new(storage.clone(), config.admin));
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
@@ -158,6 +165,7 @@ impl ServerState {
             broadcast_events: false,
             discovery: DiscoveryRegistry::default(),
             discovery_tasks: DiscoveryTasks::default(),
+            cluster: ClusterStatus::default(),
         };
 
         log_save_error(this.update_ports().await);
@@ -201,6 +209,92 @@ impl ServerState {
             ServerCommand::SetDiscovery { snapshot } => {
                 self.set_discovery(snapshot).await;
             }
+            ServerCommand::ClusterChanged { kinds } => {
+                self.apply_cluster_changes(kinds).await;
+            }
+            ServerCommand::SetClusterStatus { status } => {
+                self.cluster.clone_from(&status);
+                let _ = self
+                    .br_sender
+                    .send(ServerEvent::ClusterStatusUpdated { status });
+            }
+        }
+    }
+
+    pub fn cluster_status(&self) -> ClusterStatus {
+        self.cluster.clone()
+    }
+
+    /// Reads the parts of the state that the cluster store changed again, and applies them.
+    async fn apply_cluster_changes(&mut self, kinds: Vec<StateKind>) {
+        for kind in kinds {
+            match kind {
+                StateKind::Config => self.reload_config().await,
+                StateKind::Certs => self.reload_certs().await,
+                StateKind::Acmes => self.reload_acmes().await,
+                StateKind::Ports => self.reload_ports().await,
+                StateKind::Proxies => self.reload_manual_proxies().await,
+                StateKind::Cdn => self.reload_cdn_ranges().await,
+            }
+        }
+    }
+
+    async fn reload_config(&mut self) {
+        let config = self.storage.load_app_config().await;
+        if config != self.config {
+            self.apply_config(config).await;
+        }
+    }
+
+    async fn reload_certs(&mut self) {
+        let certs = self.storage.load_certs().await;
+        if self.certs.replace_stored(certs) {
+            self.update_certs().await;
+            self.reload_proxies().await;
+        }
+    }
+
+    async fn reload_acmes(&mut self) {
+        self.acmes = self.storage.load_acmes().await.into_iter().collect();
+        self.update_acmes().await;
+    }
+
+    async fn reload_ports(&mut self) {
+        let entries = self.storage.load_ports().await;
+        let ids = entries.iter().map(|entry| entry.id).collect::<HashSet<_>>();
+        let removed = self
+            .ports
+            .entries()
+            .map(|entry| entry.id)
+            .filter(|id| !ids.contains(id))
+            .collect::<Vec<_>>();
+        let mut changed = false;
+        for id in removed {
+            changed |= self.ports.delete(id);
+        }
+        for entry in entries {
+            match PortContext::new(entry) {
+                Ok(ctx) => changed |= self.ports.update(ctx),
+                Err(err) => error!(%err, "failed to create proxy state"),
+            }
+        }
+        if changed {
+            log_save_error(self.update_ports().await);
+            self.reload_proxies().await;
+        }
+    }
+
+    async fn reload_manual_proxies(&mut self) {
+        let entries = manual_proxies(self.storage.load_proxies().await);
+        if self.proxies.replace_manual(entries) {
+            self.publish_proxies();
+            self.reload_proxies().await;
+        }
+    }
+
+    async fn reload_cdn_ranges(&mut self) {
+        if let Some(ranges) = self.storage.load_cdn_ranges().await {
+            crate::cdn::install(ranges);
         }
     }
 
@@ -807,6 +901,12 @@ impl ServerState {
         config.keep_file_only(&self.config);
         discovery::validate_config(&config.discovery, &self.certs)?;
         self.storage.save_app_config(&config).await?;
+        self.apply_config(config).await;
+        Ok(())
+    }
+
+    /// Applies a config that the storage already keeps.
+    async fn apply_config(&mut self, config: AppConfig) {
         let changed = discovery::changed_providers(&self.config.discovery, &config.discovery);
         self.config.discovery.clone_from(&config.discovery);
         for provider in changed {
@@ -817,7 +917,6 @@ impl ServerState {
         let _ = self.br_sender.send(ServerEvent::AppConfigUpdated {
             config: Box::new(config.masked()),
         });
-        Ok(())
     }
 
     pub fn generate_id(&self) -> ShortId {

@@ -93,15 +93,28 @@ pub async fn wait_for_discovery(
     channels: &mut ServerChannels,
     done: impl Fn(&[DiscoveryStatus]) -> bool,
 ) -> anyhow::Result<Vec<DiscoveryStatus>> {
-    let mut statuses = Vec::new();
-    for _ in 0..50 {
-        statuses = call(channels, GetDiscoveryStatus).await??;
-        if done(&statuses) {
-            return Ok(statuses);
+    wait_for_rpc(channels, || GetDiscoveryStatus, |statuses| done(statuses)).await
+}
+
+/// Calls the method until its output passes the check.
+pub async fn wait_for_rpc<M>(
+    channels: &mut ServerChannels,
+    method: impl Fn() -> M,
+    done: impl Fn(&M::Output) -> bool,
+) -> anyhow::Result<M::Output>
+where
+    M: RpcMethod + 'static,
+    M::Output: std::fmt::Debug,
+{
+    let mut output = call(channels, method()).await??;
+    for _ in 0..100 {
+        if done(&output) {
+            return Ok(output);
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        output = call(channels, method()).await??;
     }
-    anyhow::bail!("unexpected discovery status: {statuses:?}")
+    anyhow::bail!("unexpected output: {output:?}")
 }
 
 /// Sends requests until the proxy answers with the expected status.

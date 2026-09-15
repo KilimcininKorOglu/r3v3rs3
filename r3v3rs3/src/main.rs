@@ -13,6 +13,7 @@ use r3v3rs3::server::Server;
 use r3v3rs3_api::app::AppConfig;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::{error, info};
 use tracing_subscriber::filter::{self, FilterExt};
 use tracing_subscriber::prelude::*;
@@ -109,8 +110,10 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
     let local = read_local_config(&config_dir).await?;
 
     let (server, channels) = if local.cluster.enabled {
-        let storage = KvStorage::open(local).await?;
-        Server::new(app_info.clone(), storage).await
+        let storage = Arc::new(KvStorage::open(local).await?);
+        let (server, channels) = Server::new_shared(app_info.clone(), storage.clone()).await;
+        r3v3rs3::cluster::sync::spawn(storage, channels.command.clone());
+        (server, channels)
     } else {
         Server::new(app_info.clone(), FileStorage::new(&config_dir)).await
     };

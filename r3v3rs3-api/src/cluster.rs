@@ -132,6 +132,39 @@ impl fmt::Debug for ClusterConfig {
     }
 }
 
+/// How a node follows the cluster store.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClusterState {
+    /// The node does not use a cluster store.
+    #[default]
+    Disabled,
+    /// The node reads the store for the first time.
+    Syncing,
+    /// The node applies the changes of the store.
+    Synced,
+    /// The node lost the store for longer than `lock_ttl`. It serves the last state and rejects
+    /// changes.
+    Degraded,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ClusterStatus {
+    pub state: ClusterState,
+
+    /// The name of this node.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub node_name: String,
+
+    /// The store revision of the last applied change.
+    #[serde(default)]
+    pub revision: u64,
+
+    /// The last error of the store connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// The TLS files of the store connection. Without `ca_file`, the system root certificates verify
 /// the store.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

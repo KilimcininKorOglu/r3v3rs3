@@ -81,6 +81,15 @@ pub enum KvEvent {
     Delete(String),
 }
 
+impl KvEvent {
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Put(item) => &item.key,
+            Self::Delete(key) => key,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WatchBatch {
     /// The changes after the previous batch. `revision` is the revision of the last change.

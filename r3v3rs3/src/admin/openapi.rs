@@ -42,6 +42,7 @@ const SESSION_COOKIE: &str = "token";
         (name = "app_info", description = "Build and path information of the server."),
         (name = "cdn", description = "CDN IP ranges for the client IP resolution."),
         (name = "discovery", description = "Service discovery providers."),
+        (name = "cluster", description = "The cluster store that the nodes share."),
     )
 )]
 pub struct ApiDoc;

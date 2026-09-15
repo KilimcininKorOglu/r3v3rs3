@@ -110,6 +110,23 @@ impl ProxyList {
         }
     }
 
+    /// Replaces the manual proxies and keeps the discovered proxies. Returns true when the list
+    /// changed.
+    pub fn replace_manual(&mut self, entries: Vec<ProxyEntry>) -> bool {
+        let unchanged = self
+            .entries()
+            .filter(|entry| !entry.is_discovered())
+            .eq(entries.iter());
+        if unchanged {
+            return false;
+        }
+        self.entries.retain(|_, ctx| ctx.entry.is_discovered());
+        for entry in entries {
+            self.entries.insert(entry.id, ProxyContext::new(entry));
+        }
+        true
+    }
+
     pub fn remove_incompatible_ports(&mut self, ports: &[PortEntry]) -> bool {
         let mut changed = false;
         for ctx in self.entries.values_mut() {

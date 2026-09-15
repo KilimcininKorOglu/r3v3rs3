@@ -5,6 +5,7 @@ use crate::config::storage::Storage;
 use r3v3rs3_api::app::AppInfo;
 use r3v3rs3_api::event::ServerEvent;
 use state::Received;
+use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
@@ -35,11 +36,19 @@ impl Server {
     where
         S: Storage,
     {
+        Self::new_shared(app_info, Arc::new(config)).await
+    }
+
+    /// A server with a storage that other tasks also use.
+    pub async fn new_shared(
+        app_info: AppInfo,
+        storage: Arc<dyn Storage>,
+    ) -> (Self, ServerChannels) {
         let (command_send, command_recv) = mpsc::channel(1);
         let (callback_send, callback_recv) = mpsc::channel(16);
         let (event_send, _) = broadcast::channel(16);
         let server_state = ServerState::new(
-            config,
+            storage,
             command_send.clone(),
             callback_send,
             event_send.clone(),

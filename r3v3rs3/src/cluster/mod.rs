@@ -7,6 +7,7 @@ pub mod layout;
 pub mod rekey;
 pub mod storage;
 pub mod store;
+pub mod sync;
 
 /// The prefix of every key of the cluster data, with its schema version.
 pub fn data_prefix(prefix: &str) -> String {

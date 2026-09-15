@@ -4,9 +4,11 @@ use crate::{
         acme::{AcmeOrder, AcmeTarget},
         Cert,
     },
+    cluster::layout::StateKind,
     discovery::DiscoverySnapshot,
     server::rpc::ErasedRpcMethod,
 };
+use r3v3rs3_api::cluster::ClusterStatus;
 use std::sync::Arc;
 
 pub enum ServerCommand {
@@ -33,6 +35,13 @@ pub enum ServerCommand {
     /// Replaces the state and the proxies of a discovery provider.
     SetDiscovery {
         snapshot: DiscoverySnapshot,
+    },
+    /// The cluster store changed these parts of the state.
+    ClusterChanged {
+        kinds: Vec<StateKind>,
+    },
+    SetClusterStatus {
+        status: ClusterStatus,
     },
 }
 
@@ -64,6 +73,14 @@ impl std::fmt::Debug for ServerCommand {
                 .field("provider", &snapshot.provider)
                 .field("state", &snapshot.state)
                 .field("proxies", &snapshot.proxies.as_ref().map(Vec::len))
+                .finish(),
+            Self::ClusterChanged { kinds } => f
+                .debug_struct("ClusterChanged")
+                .field("kinds", kinds)
+                .finish(),
+            Self::SetClusterStatus { status } => f
+                .debug_struct("SetClusterStatus")
+                .field("status", status)
                 .finish(),
         }
     }

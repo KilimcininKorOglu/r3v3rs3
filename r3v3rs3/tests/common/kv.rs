@@ -19,16 +19,28 @@ use url::Url;
 struct MemoryData {
     /// The value and the version of each key.
     items: BTreeMap<String, (Vec<u8>, u64)>,
+    /// Every change with the revision of its commit.
+    history: Vec<(u64, KvEvent)>,
     revision: u64,
     commits: usize,
     unavailable: bool,
 }
 
-/// A [`KvStore`] in memory with keys, versions and conditional commits, for tests of the code that
-/// reads and writes the store. It has no leases, locks or watches.
-#[derive(Default)]
+/// A [`KvStore`] in memory with keys, versions, conditional commits and watches, for tests of the
+/// code that reads and writes the store. It has no leases or locks.
 pub struct MemoryStore {
-    data: Mutex<MemoryData>,
+    data: Arc<Mutex<MemoryData>>,
+    /// Wakes the watchers after a commit or a change of the availability.
+    changed: tokio::sync::watch::Sender<()>,
+}
+
+impl Default for MemoryStore {
+    fn default() -> Self {
+        Self {
+            data: Arc::default(),
+            changed: tokio::sync::watch::Sender::new(()),
+        }
+    }
 }
 
 impl MemoryStore {
@@ -40,6 +52,7 @@ impl MemoryStore {
     /// An unavailable store fails every call.
     pub fn set_unavailable(&self, unavailable: bool) {
         self.data.lock().unwrap().unavailable = unavailable;
+        self.changed.send_replace(());
     }
 
     pub fn value(&self, key: &str) -> anyhow::Result<Vec<u8>> {
@@ -50,10 +63,14 @@ impl MemoryStore {
     }
 
     fn data(&self) -> anyhow::Result<MutexGuard<'_, MemoryData>> {
-        let data = self.data.lock().unwrap();
-        anyhow::ensure!(!data.unavailable, "the store is unavailable");
-        Ok(data)
+        available(&self.data)
     }
+}
+
+fn available(data: &Mutex<MemoryData>) -> anyhow::Result<MutexGuard<'_, MemoryData>> {
+    let data = data.lock().unwrap();
+    anyhow::ensure!(!data.unavailable, "the store is unavailable");
+    Ok(data)
 }
 
 fn holds(data: &MemoryData, condition: &Condition) -> bool {
@@ -64,12 +81,46 @@ fn holds(data: &MemoryData, condition: &Condition) -> bool {
     }
 }
 
-struct NoWatch;
+struct MemoryWatcher {
+    data: Arc<Mutex<MemoryData>>,
+    changed: tokio::sync::watch::Receiver<()>,
+    prefix: String,
+    /// The revision of the last reported change.
+    after: u64,
+}
+
+impl MemoryWatcher {
+    /// The changes under the prefix after the last reported revision.
+    fn pending(&mut self) -> anyhow::Result<Option<WatchBatch>> {
+        let data = available(&self.data)?;
+        let events = data
+            .history
+            .iter()
+            .filter(|(revision, event)| {
+                *revision > self.after && event.key().starts_with(&self.prefix)
+            })
+            .map(|(_, event)| event.clone())
+            .collect::<Vec<_>>();
+        let revision = data.revision;
+        drop(data);
+        if events.is_empty() {
+            return Ok(None);
+        }
+        self.after = revision;
+        Ok(Some(WatchBatch::Events { events, revision }))
+    }
+}
 
 #[async_trait::async_trait]
-impl KvWatcher for NoWatch {
+impl KvWatcher for MemoryWatcher {
     async fn next(&mut self) -> anyhow::Result<WatchBatch> {
-        anyhow::bail!("the memory store has no watches")
+        loop {
+            self.changed.mark_unchanged();
+            if let Some(batch) = self.pending()? {
+                return Ok(batch);
+            }
+            self.changed.changed().await?;
+        }
     }
 }
 
@@ -115,15 +166,24 @@ impl KvStore for MemoryStore {
         data.revision += 1;
         let revision = data.revision;
         for write in &txn.writes {
-            match write {
+            let event = match write {
                 Write::Put { key, value, .. } | Write::Update { key, value } => {
                     data.items.insert(key.clone(), (value.clone(), revision));
+                    KvEvent::Put(KvItem {
+                        key: key.clone(),
+                        value: value.clone(),
+                        version: revision,
+                    })
                 }
                 Write::Delete(key) => {
                     data.items.remove(key);
+                    KvEvent::Delete(key.clone())
                 }
-            }
+            };
+            data.history.push((revision, event));
         }
+        drop(data);
+        self.changed.send_replace(());
         Ok(TxnOutcome::Committed)
     }
 
@@ -143,8 +203,13 @@ impl KvStore for MemoryStore {
         anyhow::bail!("the memory store has no locks")
     }
 
-    fn watch(&self, _prefix: &str, _from: &KvList) -> Box<dyn KvWatcher> {
-        Box::new(NoWatch)
+    fn watch(&self, prefix: &str, from: &KvList) -> Box<dyn KvWatcher> {
+        Box::new(MemoryWatcher {
+            data: self.data.clone(),
+            changed: self.changed.subscribe(),
+            prefix: prefix.to_string(),
+            after: from.revision,
+        })
     }
 }
 

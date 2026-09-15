@@ -3,6 +3,29 @@
 use r3v3rs3_api::cert::CertKind;
 use r3v3rs3_api::id::ShortId;
 
+/// The parts of the state that a node reads again after a change in the store, in the order that
+/// the node applies them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StateKind {
+    Config,
+    Certs,
+    Acmes,
+    Ports,
+    Proxies,
+    Cdn,
+}
+
+impl StateKind {
+    pub const ALL: [Self; 6] = [
+        Self::Config,
+        Self::Certs,
+        Self::Acmes,
+        Self::Ports,
+        Self::Proxies,
+        Self::Cdn,
+    ];
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
     data: String,
@@ -70,6 +93,21 @@ impl Layout {
     pub fn is_plain(&self, key: &str) -> bool {
         key.starts_with(&self.ports()) || key == self.cdn() || key == self.schema()
     }
+
+    /// The part of the state of a key. Accounts and the keys outside the state have none.
+    pub fn kind(&self, key: &str) -> Option<StateKind> {
+        let rest = key.strip_prefix(&self.state())?;
+        let part = rest.split('/').next().unwrap_or(rest);
+        match part {
+            "config" => Some(StateKind::Config),
+            "certs" => Some(StateKind::Certs),
+            "acme" => Some(StateKind::Acmes),
+            "ports" => Some(StateKind::Ports),
+            "proxies" => Some(StateKind::Proxies),
+            "cdn" => Some(StateKind::Cdn),
+            _ => None,
+        }
+    }
 }
 
 /// The last segment of a key.
@@ -98,6 +136,15 @@ mod tests {
         assert!(layout.is_plain(&layout.cdn()));
         assert!(!layout.is_plain(&layout.config()));
         assert!(!layout.is_plain("r3v3rs3/v1/state/proxies/web"));
+
+        assert_eq!(layout.kind(&layout.config()), Some(StateKind::Config));
+        assert_eq!(
+            layout.kind("r3v3rs3/v1/state/ports/web"),
+            Some(StateKind::Ports)
+        );
+        assert_eq!(layout.kind(&layout.acme(id)), Some(StateKind::Acmes));
+        assert_eq!(layout.kind(&layout.account("admin")), None);
+        assert_eq!(layout.kind("r3v3rs3/v1/lock/leader"), None);
         assert!(!layout.is_plain(&layout.account("admin")));
     }
 }

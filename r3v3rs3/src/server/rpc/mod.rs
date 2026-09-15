@@ -5,6 +5,7 @@ use std::any::Any;
 pub mod acme;
 pub mod auth;
 pub mod certs;
+pub mod cluster;
 pub mod config;
 pub mod discovery;
 pub mod ports;

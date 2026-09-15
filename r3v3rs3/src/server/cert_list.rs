@@ -131,6 +131,26 @@ impl CertList {
         }
     }
 
+    /// Replaces the certificates that the storage keeps and keeps the discovered certificates.
+    /// Returns true when the list changed.
+    pub fn replace_stored(&mut self, certs: Vec<Arc<Cert>>) -> bool {
+        let fingerprints = |certs: &mut dyn Iterator<Item = &Arc<Cert>>| {
+            certs
+                .map(|cert| (cert.id, cert.fingerprint.clone()))
+                .collect::<HashMap<_, _>>()
+        };
+        let current = fingerprints(&mut self.certs.values().filter(|cert| cert.source.is_none()));
+        if current == fingerprints(&mut certs.iter()) {
+            return false;
+        }
+        self.certs.retain(|_, cert| cert.source.is_some());
+        self.certs
+            .extend(certs.into_iter().map(|cert| (cert.id, cert)));
+        sort_certs(&mut self.certs);
+        self.update_root_certs();
+        true
+    }
+
     /// Replaces the certificates of a discovery provider. A certificate that is already in the
     /// list without this provider as its source is skipped. Returns true when the list changed.
     pub fn replace_discovered(
