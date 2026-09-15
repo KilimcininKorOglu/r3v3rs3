@@ -2,6 +2,7 @@
 
 use super::layout::StateKind;
 use super::storage::KvStorage;
+use super::{answer_within, check_interval};
 use crate::command::ServerCommand;
 use crate::kv::{KvList, KvWatcher, WatchBatch};
 use r3v3rs3_api::cluster::{ClusterState, ClusterStatus};
@@ -28,6 +29,7 @@ pub fn spawn(storage: Arc<KvStorage>, command: mpsc::Sender<ServerCommand>) -> J
         storage,
         command,
         status,
+        last_success: Instant::now(),
         failing_since: None,
     };
     tokio::spawn(follower.run())
@@ -37,7 +39,9 @@ struct Follower {
     storage: Arc<KvStorage>,
     command: mpsc::Sender<ServerCommand>,
     status: ClusterStatus,
-    /// The time of the first failure since the last successful read.
+    /// The time of the last successful read.
+    last_success: Instant,
+    /// The time of the last successful read before the current failure.
     failing_since: Option<Instant>,
 }
 
@@ -77,32 +81,54 @@ impl Follower {
     /// after [`RETRY_DELAY`], so the node sees that the store is back without a change. False
     /// when the server stopped.
     async fn step(&mut self, watcher: &mut dyn KvWatcher) -> bool {
-        let next = if self.failing_since.is_some() {
-            tokio::time::timeout(RETRY_DELAY, watcher.next()).await
-        } else {
-            Ok(watcher.next().await)
-        };
-        match next {
-            Ok(Ok(batch)) => {
-                let (kinds, revision) = self.kinds(batch);
-                self.changed(kinds, revision).await
-            }
-            Ok(Err(err)) => {
-                let running = self.failed(&err).await;
-                tokio::time::sleep(RETRY_DELAY).await;
-                running
-            }
+        if self.failing_since.is_none() {
+            return self.watch_healthy(watcher).await;
+        }
+        match tokio::time::timeout(RETRY_DELAY, watcher.next()).await {
+            Ok(next) => self.received(next).await,
             Err(_) => self.check_store().await,
         }
     }
 
+    /// Waits for the next changes and checks the store three times in each `lock_ttl`, so a store
+    /// that stops answering without an error marks the node as degraded. The watch stays open
+    /// while the store answers the checks, and a failed check drops it.
+    async fn watch_healthy(&mut self, watcher: &mut dyn KvWatcher) -> bool {
+        let interval = check_interval(&self.storage);
+        let mut checks = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
+        let next = watcher.next();
+        tokio::pin!(next);
+        loop {
+            tokio::select! {
+                result = &mut next => return self.received(result).await,
+                _ = checks.tick() => {
+                    let running = self.check_store().await;
+                    if !running || self.failing_since.is_some() {
+                        return running;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn received(&mut self, next: anyhow::Result<WatchBatch>) -> bool {
+        match next {
+            Ok(batch) => {
+                let (kinds, revision) = self.kinds(batch);
+                self.changed(kinds, revision).await
+            }
+            Err(err) => {
+                let running = self.failed(&err).await;
+                tokio::time::sleep(RETRY_DELAY).await;
+                running
+            }
+        }
+    }
+
     async fn check_store(&mut self) -> bool {
-        match self
-            .storage
-            .store()
-            .get(&self.storage.layout().schema())
-            .await
-        {
+        let schema = self.storage.layout().schema();
+        let read = self.storage.store().get(&schema);
+        match answer_within(check_interval(&self.storage), read).await {
             Ok(_) => {
                 let revision = self.status.revision;
                 self.changed(Vec::new(), revision).await
@@ -133,6 +159,7 @@ impl Follower {
             None => kinds,
         };
         self.storage.set_healthy(true);
+        self.last_success = Instant::now();
         let recovered = self.status.state != ClusterState::Synced || self.status.error.is_some();
         self.status.state = ClusterState::Synced;
         self.status.revision = revision;
@@ -149,11 +176,11 @@ impl Follower {
         self.publish().await
     }
 
-    /// Records a failure. A failure that lasts `lock_ttl` marks the node as degraded, and the
-    /// storage rejects changes until the store is back.
+    /// Records a failure. A store without a successful read for `lock_ttl` marks the node as
+    /// degraded, and the storage rejects changes until the store is back.
     async fn failed(&mut self, err: &anyhow::Error) -> bool {
         error!("the cluster store failed: {err:#}");
-        let since = *self.failing_since.get_or_insert_with(Instant::now);
+        let since = *self.failing_since.get_or_insert(self.last_success);
         if since.elapsed() >= self.storage.cluster_config().lock_ttl {
             self.storage.set_healthy(false);
             self.status.state = ClusterState::Degraded;

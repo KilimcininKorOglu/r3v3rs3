@@ -540,3 +540,26 @@ async fn a_node_that_loses_the_store_rejects_changes_until_it_returns() -> anyho
     a.stop().await?;
     b.stop().await
 }
+
+#[tokio::test]
+async fn a_node_whose_store_stops_answering_becomes_degraded_and_stops_leading(
+) -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let mut node = Node::start(&store, "node-a").await?;
+    let leading = |status: &ClusterStatus| status.state == ClusterState::Synced && status.leader;
+    node.wait_for(|| GetClusterStatus, leading).await?;
+
+    // The calls wait without an error, so only the checks of the node find the lost store.
+    store.set_unresponsive(true);
+    let degraded =
+        |status: &ClusterStatus| status.state == ClusterState::Degraded && !status.leader;
+    let status = node.wait_for(|| GetClusterStatus, degraded).await?;
+    assert!(status.error.is_some());
+
+    // The memory store keeps the lock of the lease that the node could not revoke, so the node
+    // only syncs again.
+    store.set_unresponsive(false);
+    let synced = |status: &ClusterStatus| status.state == ClusterState::Synced;
+    node.wait_for(|| GetClusterStatus, synced).await?;
+    node.stop().await
+}

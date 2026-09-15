@@ -1,6 +1,7 @@
 //! Holds the leader lock of the cluster. Only one node runs the tasks that must not run twice.
 
 use super::storage::KvStorage;
+use super::{answer_within, check_interval};
 use crate::command::ServerCommand;
 use crate::kv::Lease;
 use std::sync::Arc;
@@ -28,17 +29,21 @@ struct Candidate {
 
 impl Candidate {
     /// Checks the lease and the lock three times in each `lock_ttl`, so the lease does not end
-    /// while the store answers.
+    /// while the store answers. A store call waits one interval at most, so the node stops leading
+    /// before its lease can end on a store that does not answer.
     fn interval(&self) -> Duration {
-        self.storage.cluster_config().lock_ttl / 3
+        check_interval(&self.storage)
     }
 
     async fn run(mut self) {
         while !self.command.is_closed() {
-            match self.storage.store().grant_lease(self.ttl()).await {
+            let store = self.storage.store();
+            match answer_within(self.interval(), store.grant_lease(self.ttl())).await {
                 Ok(lease) => {
                     self.hold(&lease).await;
-                    if let Err(err) = self.storage.store().revoke_lease(&lease).await {
+                    let store = self.storage.store();
+                    let revoked = answer_within(self.interval(), store.revoke_lease(&lease)).await;
+                    if let Err(err) = revoked {
                         error!("failed to revoke the leader lease: {err:#}");
                     }
                 }
@@ -85,18 +90,20 @@ impl Candidate {
         let node = &self.storage.cluster_config().node_name;
         let key = self.storage.layout().node(node);
         let lease = Some(lease.id.clone());
-        self.storage
-            .put_unconditional(key, node.as_bytes(), lease)
-            .await
+        let put = self.storage.put_unconditional(key, node.as_bytes(), lease);
+        answer_within(self.interval(), put).await
     }
 
     async fn try_lock(&self, lease: &Lease) -> anyhow::Result<bool> {
         let store = self.storage.store();
-        store.keep_alive(lease).await?;
         let key = self.storage.layout().leader();
         let node = &self.storage.cluster_config().node_name;
         let value = self.storage.encode(&key, node.as_bytes())?;
-        store.try_lock(&key, &value, lease).await
+        let locked = async {
+            store.keep_alive(lease).await?;
+            store.try_lock(&key, &value, lease).await
+        };
+        answer_within(self.interval(), locked).await
     }
 
     /// Tells the server about a change of the leadership. False when the server stopped.

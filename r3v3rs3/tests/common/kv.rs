@@ -28,6 +28,8 @@ struct MemoryData {
     revision: u64,
     commits: usize,
     unavailable: bool,
+    /// Every call waits, and a watcher reports nothing, like a store behind a lost network path.
+    unresponsive: bool,
 }
 
 impl MemoryData {
@@ -99,7 +101,17 @@ impl MemoryStore {
 
     /// An unavailable store fails every call.
     pub fn set_unavailable(&self, unavailable: bool) {
-        self.data.lock().unwrap().unavailable = unavailable;
+        self.set_state(|data| data.unavailable = unavailable);
+    }
+
+    /// An unresponsive store holds every call until it responds again.
+    pub fn set_unresponsive(&self, unresponsive: bool) {
+        self.set_state(|data| data.unresponsive = unresponsive);
+    }
+
+    /// Changes the availability and wakes the waiting calls and watchers.
+    fn set_state(&self, change: impl FnOnce(&mut MemoryData)) {
+        change(&mut self.data.lock().unwrap());
         self.changed.send_replace(());
     }
 
@@ -110,7 +122,15 @@ impl MemoryStore {
             .ok_or_else(|| anyhow::anyhow!("{key} is missing"))
     }
 
-    fn data(&self) -> anyhow::Result<MutexGuard<'_, MemoryData>> {
+    fn is_unresponsive(&self) -> bool {
+        self.data.lock().unwrap().unresponsive
+    }
+
+    async fn data(&self) -> anyhow::Result<MutexGuard<'_, MemoryData>> {
+        let mut changed = self.changed.subscribe();
+        while self.is_unresponsive() {
+            changed.changed().await?;
+        }
         available(&self.data)
     }
 }
@@ -141,6 +161,9 @@ impl MemoryWatcher {
     /// The changes under the prefix after the last reported revision.
     fn pending(&mut self) -> anyhow::Result<Option<WatchBatch>> {
         let data = available(&self.data)?;
+        if data.unresponsive {
+            return Ok(None);
+        }
         let events = data
             .history
             .iter()
@@ -175,7 +198,7 @@ impl KvWatcher for MemoryWatcher {
 #[async_trait::async_trait]
 impl KvStore for MemoryStore {
     async fn list(&self, prefix: &str) -> anyhow::Result<KvList> {
-        let data = self.data()?;
+        let data = self.data().await?;
         let items = data
             .items
             .iter()
@@ -193,7 +216,7 @@ impl KvStore for MemoryStore {
     }
 
     async fn get(&self, key: &str) -> anyhow::Result<Option<KvItem>> {
-        let data = self.data()?;
+        let data = self.data().await?;
         Ok(data.items.get(key).map(|(value, version)| KvItem {
             key: key.to_string(),
             value: value.clone(),
@@ -202,7 +225,7 @@ impl KvStore for MemoryStore {
     }
 
     async fn commit(&self, txn: &Txn) -> anyhow::Result<TxnOutcome> {
-        let mut data = self.data()?;
+        let mut data = self.data().await?;
         data.commits += 1;
         if !txn
             .conditions
@@ -221,18 +244,18 @@ impl KvStore for MemoryStore {
     }
 
     async fn grant_lease(&self, ttl: Duration) -> anyhow::Result<Lease> {
-        let mut data = self.data()?;
+        let mut data = self.data().await?;
         let id = data.next_revision().to_string();
         data.leases.insert(id.clone());
         Ok(Lease { id, ttl })
     }
 
     async fn keep_alive(&self, lease: &Lease) -> anyhow::Result<()> {
-        self.data()?.ensure_lease(lease)
+        self.data().await?.ensure_lease(lease)
     }
 
     async fn revoke_lease(&self, lease: &Lease) -> anyhow::Result<()> {
-        let mut data = self.data()?;
+        let mut data = self.data().await?;
         data.leases.remove(&lease.id);
         let owned = data
             .owners
@@ -253,7 +276,7 @@ impl KvStore for MemoryStore {
     }
 
     async fn try_lock(&self, key: &str, value: &[u8], lease: &Lease) -> anyhow::Result<bool> {
-        let mut data = self.data()?;
+        let mut data = self.data().await?;
         data.ensure_lease(lease)?;
         if let Some(owner) = data.owners.get(key) {
             return Ok(*owner == lease.id);
