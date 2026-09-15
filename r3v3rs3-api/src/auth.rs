@@ -1,6 +1,7 @@
 use crate::id::ShortId;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::fmt;
 use utoipa::ToSchema;
 
 /// What an account can change through the admin API.
@@ -25,6 +26,9 @@ impl Role {
     }
 }
 
+/// The shortest password that a new account or a password change accepts.
+pub const MIN_PASSWORD_LENGTH: usize = 8;
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Account {
     pub password: String,
@@ -44,6 +48,19 @@ pub struct Account {
     /// that started earlier is not valid.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub credentials_changed_at: u64,
+}
+
+impl fmt::Debug for Account {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The password hash and the TOTP secret are secrets.
+        f.debug_struct("Account")
+            .field("password", &"***")
+            .field("totp", &self.totp.as_ref().map(|_| "***"))
+            .field("role", &self.role)
+            .field("proxies", &self.proxies)
+            .field("credentials_changed_at", &self.credentials_changed_at)
+            .finish()
+    }
 }
 
 /// An account without its secrets, which the admin API returns.
@@ -152,6 +169,7 @@ mod tests {
         assert_eq!(account.role, Role::Admin);
         assert_eq!(account.proxies, None);
         assert_eq!(account.credentials_changed_at, 0);
+        assert!(!format!("{account:?}").contains("argon2"));
 
         // An admin account keeps the stored form of older versions.
         assert_eq!(

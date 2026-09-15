@@ -120,7 +120,7 @@ Please refer to the [Development](@/development.md) section for details.
 
 # First setup
 
-First, you need to create a user to access the admin panel. You will be prompted for a password.
+First, you need to create a user to access the admin panel. You will be prompted for a password. The password needs at least 8 characters.
 
 ```bash
 # Create a user

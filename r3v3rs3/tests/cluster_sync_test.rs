@@ -22,6 +22,7 @@ use r3v3rs3::server::Server;
 use r3v3rs3::sessions::{SessionBackend, SessionScope};
 use r3v3rs3_api::acme::{Acme, AcmeConfig, HTTP_01};
 use r3v3rs3_api::app::AppConfig;
+use r3v3rs3_api::auth::Role;
 use r3v3rs3_api::cache::CacheConfig;
 use r3v3rs3_api::cluster::{ClusterConfig, ClusterState, ClusterStatus};
 use r3v3rs3_api::error::Error;
@@ -225,7 +226,7 @@ async fn a_session_of_one_node_is_valid_on_the_other_node_until_logout() -> anyh
     DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
     let store = Arc::new(MemoryStore::default());
     node_storage(&store, "import")?
-        .add_account("admin", "secret", false)
+        .add_account("admin", "secret", false, Role::Admin)
         .await?;
     let a = AdminNode::start(&store, "node-a", &dir).await?;
     let b = AdminNode::start(&store, "node-b", &dir).await?;

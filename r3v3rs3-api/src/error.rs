@@ -125,6 +125,9 @@ pub enum Error {
     #[error("failed to create account")]
     FailedToCreateAccount,
 
+    #[error("failed to load the accounts")]
+    FailedToLoadAccounts,
+
     #[error("invalid login credentials")]
     InvalidLoginCredentials,
 
@@ -234,7 +237,8 @@ impl Error {
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig
             | Self::FailedToInvokeRpc
-            | Self::FailedToHashPassword => 500,
+            | Self::FailedToHashPassword
+            | Self::FailedToLoadAccounts => 500,
             _ => 400,
         }
     }

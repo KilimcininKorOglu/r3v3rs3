@@ -160,6 +160,7 @@
   "error.failed_to_hash_password": "Failed to hash the password.",
   "error.failed_to_invoke_rpc": "Failed to invoke the RPC.",
   "error.failed_to_list_network_interfaces": "Failed to list the network interfaces.",
+  "error.failed_to_load_accounts": "Failed to load the accounts.",
   "error.failed_to_read_certificate": "Failed to read the certificate.",
   "error.failed_to_read_private_key": "Failed to read the private key.",
   "error.failed_to_refresh_cdn_ranges": "Failed to refresh the CDN IP ranges.",

@@ -160,6 +160,7 @@
   "error.failed_to_hash_password": "Parola hash'lenemedi.",
   "error.failed_to_invoke_rpc": "RPC çağrılamadı.",
   "error.failed_to_list_network_interfaces": "Network interface listesi alınamadı.",
+  "error.failed_to_load_accounts": "Hesaplar yüklenemedi.",
   "error.failed_to_read_certificate": "Sertifika okunamadı.",
   "error.failed_to_read_private_key": "Private key okunamadı.",
   "error.failed_to_refresh_cdn_ranges": "CDN IP aralıkları yenilenemedi.",

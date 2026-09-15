@@ -85,8 +85,12 @@ impl Layout {
         format!("{}{id}", self.acmes())
     }
 
+    pub fn accounts(&self) -> String {
+        format!("{}accounts/", self.state())
+    }
+
     pub fn account(&self, name: &str) -> String {
-        hex_key(format!("{}accounts/", self.state()), name)
+        hex_key(self.accounts(), name)
     }
 
     pub fn cdn(&self) -> String {

@@ -19,7 +19,7 @@ use r3v3rs3::{
 };
 use r3v3rs3_api::{
     app::AppConfig,
-    auth::{Account, LoginMethod, LoginRequest, LoginResponse},
+    auth::{Account, LoginMethod, LoginRequest, LoginResponse, Role},
     discovery::DiscoveryStatus,
     error::Error,
     id::ShortId,
@@ -193,7 +193,7 @@ struct Inner {
     pub proxies: Vec<ProxyEntry>,
     pub certs: HashMap<ShortId, Arc<Cert>>,
     pub acems: HashMap<ShortId, AcmeEntry>,
-    pub accounts: HashMap<String, String>,
+    pub accounts: HashMap<String, Account>,
     pub cdn_ranges: Option<CdnRanges>,
     /// The error of `ensure_writable`.
     pub write_error: Option<Error>,
@@ -294,16 +294,25 @@ impl Storage for TestStorage {
         self.inner.lock().await.certs.values().cloned().collect()
     }
 
-    async fn add_account(&self, name: &str, password: &str, _totp: bool) -> Result<Account, Error> {
+    async fn add_account(
+        &self,
+        name: &str,
+        password: &str,
+        _totp: bool,
+        role: Role,
+    ) -> Result<Account, Error> {
+        // The test storage keeps the password itself instead of a hash.
+        let account = Account {
+            password: password.to_string(),
+            role,
+            ..Default::default()
+        };
         self.inner
             .lock()
             .await
             .accounts
-            .insert(name.to_string(), password.to_string());
-        Ok(Account {
-            password: password.to_string(),
-            ..Default::default()
-        })
+            .insert(name.to_string(), account.clone());
+        Ok(account)
     }
 
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error> {
@@ -312,12 +321,20 @@ impl Storage for TestStorage {
             _ => return Err(Error::InvalidLoginCredentials),
         };
         let inner = self.inner.lock().await;
-        if let Some(p) = inner.accounts.get(&request.username) {
-            if *p == password {
+        if let Some(account) = inner.accounts.get(&request.username) {
+            if account.password == password {
                 return Ok(LoginResponse::Success);
             }
         }
         Err(Error::InvalidLoginCredentials)
+    }
+
+    async fn load_accounts(&self) -> Result<HashMap<String, Account>, Error> {
+        Ok(self.inner.lock().await.accounts.clone())
+    }
+
+    async fn save_accounts(&self, accounts: &HashMap<String, Account>) -> Result<(), Error> {
+        self.save(|inner| inner.accounts = accounts.clone()).await
     }
 
     async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error> {
@@ -367,8 +384,18 @@ impl TestStorageBuilder {
         self
     }
 
+    /// Admin accounts with their passwords.
     pub fn accounts(mut self, accounts: HashMap<String, String>) -> Self {
-        self.inner.accounts = accounts;
+        self.inner.accounts = accounts
+            .into_iter()
+            .map(|(name, password)| {
+                let account = Account {
+                    password,
+                    ..Default::default()
+                };
+                (name, account)
+            })
+            .collect();
         self
     }
 

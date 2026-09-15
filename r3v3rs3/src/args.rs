@@ -113,4 +113,13 @@ pub struct AddUserArgs {
 
     #[clap(long)]
     pub totp: bool,
+
+    /// The role of the account: admin, editor or viewer.
+    #[clap(long, value_name = "ROLE", default_value = "admin", value_parser = parse_role)]
+    pub role: r3v3rs3_api::auth::Role,
+}
+
+fn parse_role(value: &str) -> Result<r3v3rs3_api::auth::Role, String> {
+    serde_json::from_value(serde_json::Value::String(value.to_string()))
+        .map_err(|_| format!("unknown role {value}, use admin, editor or viewer"))
 }

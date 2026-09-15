@@ -11,6 +11,7 @@ use r3v3rs3::config::storage::Storage;
 use r3v3rs3::log::DatabaseLayer;
 use r3v3rs3::server::Server;
 use r3v3rs3_api::app::AppConfig;
+use r3v3rs3_api::auth::MIN_PASSWORD_LENGTH;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -147,14 +148,19 @@ async fn add_user(args: r3v3rs3::args::AddUserArgs) -> anyhow::Result<()> {
     } else {
         rpassword::prompt_password("password?: ")?
     };
+    if password.chars().count() < MIN_PASSWORD_LENGTH {
+        anyhow::bail!("the password needs at least {MIN_PASSWORD_LENGTH} characters");
+    }
     let account = if local.cluster.enabled {
         let storage = KvStorage::open(local).await?;
         storage
-            .add_account(&args.name, &password, args.totp)
+            .add_account(&args.name, &password, args.totp, args.role)
             .await?
     } else {
         let files = FileStorage::new(&config_dir);
-        files.add_account(&args.name, &password, args.totp).await?
+        files
+            .add_account(&args.name, &password, args.totp, args.role)
+            .await?
     };
     if let Some(totp) = account.totp {
         println!("\nUse this code to setup your TOTP client:\n{totp}\n");

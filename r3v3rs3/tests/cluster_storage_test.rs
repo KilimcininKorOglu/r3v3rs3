@@ -6,7 +6,7 @@ use r3v3rs3::config::file::{FileState, FileStorage};
 use r3v3rs3::config::storage::Storage;
 use r3v3rs3::kv::{KvStore, Txn, Write};
 use r3v3rs3_api::app::AppConfig;
-use r3v3rs3_api::auth::{LoginMethod, LoginRequest, LoginResponse};
+use r3v3rs3_api::auth::{LoginMethod, LoginRequest, LoginResponse, Role};
 use r3v3rs3_api::cluster::ClusterConfig;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::proxy::HttpProxy;
@@ -54,7 +54,9 @@ async fn read_files(files: &FileStorage) -> anyhow::Result<(FileState, Cert)> {
         .await?;
     let ca = Cert::new_ca()?;
     files.save_cert(&ca).await?;
-    files.add_account("admin", "passw0rd", false).await?;
+    files
+        .add_account("admin", "passw0rd", false, Role::Admin)
+        .await?;
     Ok((files.read_state().await?, ca))
 }
 
@@ -154,6 +156,44 @@ async fn a_save_writes_only_changed_keys_and_reports_conflicts() -> anyhow::Resu
         matches!(unavailable, Err(Error::ClusterUnavailable)),
         "{unavailable:?}"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_account_save_conflicts_with_a_change_of_another_account() -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let first = node(&store, "node-a")?;
+    first
+        .add_account("one", "passw0rd", false, Role::Admin)
+        .await?;
+    first
+        .add_account("two", "passw0rd", false, Role::Admin)
+        .await?;
+    let second = node(&store, "node-b")?;
+    let mut mine = first.load_accounts().await?;
+    let mut theirs = second.load_accounts().await?;
+    assert_eq!(mine.len(), 2);
+
+    // Each node demotes a different admin. One save must fail, so an admin stays.
+    let missing = || anyhow::anyhow!("the account is missing");
+    theirs.get_mut("two").ok_or_else(missing)?.role = Role::Viewer;
+    second.save_accounts(&theirs).await?;
+    mine.get_mut("one").ok_or_else(missing)?.role = Role::Viewer;
+    let conflict = first.save_accounts(&mine).await;
+    assert!(
+        matches!(conflict, Err(Error::ClusterWriteConflict)),
+        "{conflict:?}"
+    );
+
+    let mut accounts = first.load_accounts().await?;
+    assert_eq!(accounts["one"].role, Role::Admin);
+    assert_eq!(accounts["two"].role, Role::Viewer);
+
+    // The save after the load deletes the account that the map does not have.
+    accounts.remove("one");
+    first.save_accounts(&accounts).await?;
+    let left = second.load_accounts().await?;
+    assert_eq!(left.keys().collect::<Vec<_>>(), ["two"]);
     Ok(())
 }
 

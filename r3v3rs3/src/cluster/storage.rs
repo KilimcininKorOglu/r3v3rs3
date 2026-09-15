@@ -17,7 +17,7 @@ use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::SessionBackend;
 use anyhow::Context as _;
 use r3v3rs3_api::app::AppConfig;
-use r3v3rs3_api::auth::{Account, LoginRequest, LoginResponse};
+use r3v3rs3_api::auth::{Account, LoginRequest, LoginResponse, Role};
 use r3v3rs3_api::cert::CertKind;
 use r3v3rs3_api::cluster::ClusterConfig;
 use r3v3rs3_api::error::Error;
@@ -348,16 +348,54 @@ impl KvStorage {
 
     /// Writes the puts and deletes the remembered keys below `prefix` that the puts do not have.
     async fn replace_prefix(&self, prefix: &str, puts: Vec<Change>) -> Result<(), Error> {
-        let keys = puts.iter().map(Change::key).collect::<HashSet<_>>();
-        let stale = self
-            .known
-            .lock()
-            .await
-            .keys()
-            .filter(|key| key.starts_with(prefix) && !keys.contains(key.as_str()))
-            .map(|key| Change::Delete(key.clone()))
-            .collect::<Vec<_>>();
-        self.apply(puts.into_iter().chain(stale).collect()).await
+        let changes = prefix_changes(&*self.known.lock().await, prefix, puts);
+        self.apply(changes).await
+    }
+
+    /// Replaces the keys below `prefix` in one transaction. Each remembered key below the prefix is
+    /// a condition, also when it does not change, so a change of another node since the last read
+    /// is a conflict.
+    async fn replace_guarded(&self, prefix: &str, puts: Vec<Change>) -> Result<(), Error> {
+        let known = self.known.lock().await;
+        let changes = prefix_changes(&known, prefix, puts);
+        if changes.is_empty() {
+            return Ok(());
+        }
+        let txn = self.guarded_txn(&known, prefix, &changes)?;
+        drop(known);
+        let outcome = self.store.commit(&txn).await.map_err(unavailable)?;
+        self.read_prefix(prefix).await.map_err(unavailable)?;
+        match outcome {
+            TxnOutcome::Committed => Ok(()),
+            TxnOutcome::Conflict => Err(Error::ClusterWriteConflict),
+        }
+    }
+
+    fn guarded_txn(
+        &self,
+        known: &HashMap<String, Known>,
+        prefix: &str,
+        changes: &[Change],
+    ) -> Result<Txn, Error> {
+        let mut txn = self.txn(known, changes).map_err(|err| {
+            error!("failed to encrypt the cluster data: {err:#}");
+            Error::FailedToSaveConfig
+        })?;
+        let changed = changes.iter().map(Change::key).collect::<HashSet<_>>();
+        let unchanged = known
+            .iter()
+            .filter(|(key, _)| key.starts_with(prefix) && !changed.contains(key.as_str()))
+            .map(|(key, known)| Condition::Version(key.clone(), known.version));
+        txn.conditions.extend(unchanged);
+        // A Consul transaction holds at most 64 operations, and this change cannot be split.
+        if txn.conditions.len() + txn.writes.len() > 2 * MAX_CHANGES {
+            error!(
+                prefix,
+                "the change needs more operations than one transaction holds"
+            );
+            return Err(Error::FailedToSaveConfig);
+        }
+        Ok(txn)
     }
 
     /// Waits until every node that is present acknowledged the challenges. False when the time
@@ -469,6 +507,42 @@ fn is_needed(known: &HashMap<String, Known>, change: &Change) -> bool {
             .get(key)
             .is_none_or(|known| known.digest != digest(plaintext)),
         Change::Delete(key) => known.contains_key(key),
+    }
+}
+
+/// The puts and the deletes of the remembered keys below `prefix` that the puts do not have,
+/// without the changes that keep the remembered value.
+fn prefix_changes(known: &HashMap<String, Known>, prefix: &str, puts: Vec<Change>) -> Vec<Change> {
+    let keys = puts
+        .iter()
+        .map(|change| change.key().to_string())
+        .collect::<HashSet<_>>();
+    let stale = known
+        .keys()
+        .filter(|key| key.starts_with(prefix) && !keys.contains(key.as_str()))
+        .map(|key| Change::Delete(key.clone()))
+        .collect::<Vec<_>>();
+    puts.into_iter()
+        .chain(stale)
+        .filter(|change| is_needed(known, change))
+        .collect()
+}
+
+/// The user name and the account of an account key. An invalid key or value is left out.
+fn stored_account(key: &str, bytes: &[u8]) -> Option<(String, Account)> {
+    let name = hex::decode(last_segment(key))
+        .ok()
+        .and_then(|name| String::from_utf8(name).ok());
+    match (name, serde_json::from_slice::<Account>(bytes)) {
+        (Some(name), Ok(account)) => Some((name, account)),
+        (None, _) => {
+            error!(key, "invalid account key");
+            None
+        }
+        (_, Err(err)) => {
+            error!(key, "failed to load: {err}");
+            None
+        }
     }
 }
 
@@ -652,11 +726,37 @@ impl Storage for KvStorage {
             .collect()
     }
 
-    async fn add_account(&self, name: &str, password: &str, totp: bool) -> Result<Account, Error> {
-        let account =
+    async fn add_account(
+        &self,
+        name: &str,
+        password: &str,
+        totp: bool,
+        role: Role,
+    ) -> Result<Account, Error> {
+        let mut account =
             account::new_account(password, totp).map_err(|_| Error::FailedToCreateAccount)?;
+        account.role = role;
         self.put_account(name, &account).await?;
         Ok(account)
+    }
+
+    async fn load_accounts(&self) -> Result<HashMap<String, Account>, Error> {
+        let values = self
+            .read_prefix(&self.layout.accounts())
+            .await
+            .map_err(unavailable)?;
+        Ok(values
+            .into_iter()
+            .filter_map(|(key, bytes)| stored_account(&key, &bytes))
+            .collect())
+    }
+
+    async fn save_accounts(&self, accounts: &HashMap<String, Account>) -> Result<(), Error> {
+        let puts = accounts
+            .iter()
+            .map(|(name, account)| json_change(self.layout.account(name), account))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.replace_guarded(&self.layout.accounts(), puts).await
     }
 
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error> {

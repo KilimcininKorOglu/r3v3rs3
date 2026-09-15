@@ -120,7 +120,7 @@ Ayrıntılar için [Geliştirme](@/development.tr.md) bölümüne bakın.
 
 # İlk kurulum
 
-Yönetim paneline erişmek için önce bir kullanıcı oluşturmanız gerekir. Komut sizden bir parola ister.
+Yönetim paneline erişmek için önce bir kullanıcı oluşturmanız gerekir. Komut sizden bir parola ister. Parola en az 8 karakter olmalıdır.
 
 ```bash
 # Create a user

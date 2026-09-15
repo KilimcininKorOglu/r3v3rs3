@@ -8,7 +8,7 @@ use anyhow::Context as _;
 use indexmap::map::IndexMap;
 use r3v3rs3_api::{
     app::AppConfig,
-    auth::{Account, LoginRequest, LoginResponse},
+    auth::{Account, LoginRequest, LoginResponse, Role},
     cert::CertKind,
     id::ShortId,
 };
@@ -19,7 +19,7 @@ use r3v3rs3_api::{
 };
 use serde_derive::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -105,6 +105,43 @@ mod private_file_test {
         let mode = std::fs::metadata(&path)?.permissions().mode() & 0o777;
         std::fs::remove_file(&path)?;
         assert_eq!(mode, 0o600);
+        Ok(())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod accounts_file_test {
+    use super::FileStorage;
+    use r3v3rs3_api::auth::{Account, Role};
+    use std::collections::{BTreeSet, HashMap};
+    use std::os::unix::fs::PermissionsExt;
+
+    #[tokio::test]
+    async fn accounts_keep_their_roles_in_an_owner_only_file() -> anyhow::Result<()> {
+        let dir = std::env::temp_dir().join(format!(
+            "r3v3rs3-accounts-{}",
+            hex::encode(rand::random::<[u8; 8]>())
+        ));
+        let files = FileStorage::new(&dir);
+        let editor = Account {
+            password: "$argon2id$hash".into(),
+            role: Role::Editor,
+            proxies: Some(BTreeSet::from(["web".parse()?])),
+            ..Default::default()
+        };
+        let accounts = HashMap::from([("editor".to_string(), editor)]);
+
+        let saved = files.save_accounts_impl(&accounts).await;
+        let mode = std::fs::metadata(dir.join("accounts.toml"))
+            .map(|metadata| metadata.permissions().mode() & 0o777);
+        let loaded = files.read_accounts().await;
+        std::fs::remove_dir_all(&dir)?;
+
+        saved?;
+        assert_eq!(mode?, 0o600);
+        let loaded = loaded?;
+        assert_eq!(loaded["editor"].role, Role::Editor);
+        assert_eq!(loaded["editor"].proxies, accounts["editor"].proxies);
         Ok(())
     }
 }
@@ -362,6 +399,7 @@ impl FileStorage {
         name: &str,
         password: &str,
         totp: bool,
+        role: Role,
     ) -> anyhow::Result<Account> {
         fs::create_dir_all(&self.dir).await?;
         let path = self.dir.join("accounts.toml");
@@ -372,20 +410,34 @@ impl FileStorage {
             Err(_) => DocumentMut::default(),
         };
 
-        let account = account::new_account(password, totp)?;
+        let mut account = account::new_account(password, totp)?;
+        account.role = role;
         doc[name].clone_from(toml_edit::ser::to_document(&account)?.as_item());
 
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        fs::write(&path, doc.to_string()).await?;
+        write_private(&path, doc.to_string()).await?;
         Ok(account)
     }
 
-    async fn load_accounts(&self) -> anyhow::Result<HashMap<String, Account>> {
+    async fn read_accounts(&self) -> anyhow::Result<HashMap<String, Account>> {
         let path = self.dir.join("accounts.toml");
         info!(?path, "load accounts");
         let content = fs::read_to_string(&path).await?;
         let accounts: Versioned<HashMap<String, Account>> = toml::from_str(&content)?;
         Ok(accounts.data)
+    }
+
+    /// Writes every account. The file holds password hashes and TOTP secrets, so only the owner
+    /// can read it.
+    async fn save_accounts_impl(&self, accounts: &HashMap<String, Account>) -> anyhow::Result<()> {
+        fs::create_dir_all(&self.dir).await?;
+        let path = self.dir.join("accounts.toml");
+        info!(?path, "save accounts");
+        let table = Versioned {
+            version: default_version(),
+            data: accounts.iter().collect::<BTreeMap<_, _>>(),
+        };
+        write_private(&path, toml::to_string(&table)?).await
     }
 
     /// Reads every file. A missing file is empty, but a file that cannot be read is an error, and
@@ -402,7 +454,7 @@ impl FileStorage {
             proxies: if_exists(&proxies, self.load_proxies_impl(&proxies)).await?,
             certs: self.load_certs().await,
             acmes: if_exists(&acmes, self.load_acmes_impl(&acmes)).await?,
-            accounts: if_exists(&accounts, self.load_accounts()).await?,
+            accounts: if_exists(&accounts, self.read_accounts()).await?,
             cdn_ranges: if_exists(&cdn, async {
                 self.load_cdn_ranges_impl(&cdn).await.map(Some)
             })
@@ -547,14 +599,34 @@ impl Storage for FileStorage {
         certs
     }
 
-    async fn add_account(&self, name: &str, password: &str, totp: bool) -> Result<Account, Error> {
-        self.add_account_impl(name, password, totp)
+    async fn add_account(
+        &self,
+        name: &str,
+        password: &str,
+        totp: bool,
+        role: Role,
+    ) -> Result<Account, Error> {
+        self.add_account_impl(name, password, totp, role)
             .await
             .map_err(|_| Error::FailedToCreateAccount)
     }
 
+    async fn load_accounts(&self) -> Result<HashMap<String, Account>, Error> {
+        let path = self.dir.join("accounts.toml");
+        if_exists(&path, self.read_accounts()).await.map_err(|err| {
+            error!(?path, "failed to load: {err:#}");
+            Error::FailedToLoadAccounts
+        })
+    }
+
+    async fn save_accounts(&self, accounts: &HashMap<String, Account>) -> Result<(), Error> {
+        let path = self.dir.join("accounts.toml");
+        let result = self.save_accounts_impl(accounts).await;
+        saved(&path, result)
+    }
+
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error> {
-        let accounts = self.load_accounts().await.map_err(|err| {
+        let accounts = self.read_accounts().await.map_err(|err| {
             error!(%err, "failed to load accounts: {err}");
             Error::InvalidLoginCredentials
         })?;

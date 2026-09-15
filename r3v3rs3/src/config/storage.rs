@@ -5,7 +5,7 @@ use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::{LocalSessions, SessionBackend};
 use r3v3rs3_api::{
     app::AppConfig,
-    auth::{Account, LoginRequest, LoginResponse},
+    auth::{Account, LoginRequest, LoginResponse, Role},
     error::Error,
     id::ShortId,
     port::PortEntry,
@@ -34,8 +34,21 @@ pub trait Storage: Send + Sync + 'static {
     async fn delete_cert(&self, id: ShortId) -> Result<(), Error>;
     async fn load_acmes(&self) -> Vec<AcmeEntry>;
     async fn load_certs(&self) -> Vec<Arc<Cert>>;
-    async fn add_account(&self, name: &str, password: &str, totp: bool) -> Result<Account, Error>;
+    async fn add_account(
+        &self,
+        name: &str,
+        password: &str,
+        totp: bool,
+        role: Role,
+    ) -> Result<Account, Error>;
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error>;
+
+    /// Every account by its user name.
+    async fn load_accounts(&self) -> Result<HashMap<String, Account>, Error>;
+
+    /// Replaces every account. In a cluster the save is a conflict when another node changed an
+    /// account after the last load, so a check of the loaded accounts holds for the saved ones.
+    async fn save_accounts(&self, accounts: &HashMap<String, Account>) -> Result<(), Error>;
     async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error>;
     async fn load_cdn_ranges(&self) -> Option<CdnRanges>;
 

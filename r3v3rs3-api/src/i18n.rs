@@ -232,6 +232,7 @@ mod tests {
             Error::AcmeDnsProviderInvalid { field: text() },
             Error::Unauthorized,
             Error::FailedToCreateAccount,
+            Error::FailedToLoadAccounts,
             Error::InvalidLoginCredentials,
             Error::TooManyLoginAttempts,
             Error::InvalidUsername { username: text() },
