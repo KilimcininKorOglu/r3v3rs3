@@ -113,6 +113,13 @@ impl FileStorage {
         }
     }
 
+    /// Reads `config.toml`. Unlike [`Storage::load_app_config`], a missing or invalid file is an
+    /// error.
+    pub async fn read_app_config(&self) -> anyhow::Result<AppConfig> {
+        self.load_app_config_impl(&self.dir.join("config.toml"))
+            .await
+    }
+
     async fn save_cdn_ranges_impl(&self, path: &Path, ranges: &CdnRanges) -> anyhow::Result<()> {
         fs::create_dir_all(&self.dir).await?;
         info!(?path, "save CDN IP ranges");

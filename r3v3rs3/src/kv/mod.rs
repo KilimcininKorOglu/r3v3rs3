@@ -53,6 +53,11 @@ pub enum Write {
         value: Vec<u8>,
         lease: Option<String>,
     },
+    /// Changes the value and keeps the lease of the key.
+    Update {
+        key: String,
+        value: Vec<u8>,
+    },
     Delete(String),
 }
 

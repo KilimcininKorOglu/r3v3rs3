@@ -1,8 +1,11 @@
 //! Checks that every [`KvStore`] must pass.
 
+use r3v3rs3::cluster::crypto::{sealed_key_id, ClusterKey, ClusterKeys};
+use r3v3rs3::cluster::data_prefix;
+use r3v3rs3::cluster::rekey::rekey;
 use r3v3rs3::kv::http::ApiClient;
 use r3v3rs3::kv::{
-    Condition, KvEvent, KvList, KvStore, KvWatcher, Txn, TxnOutcome, WatchBatch, Write,
+    Condition, KvEvent, KvItem, KvList, KvStore, KvWatcher, Txn, TxnOutcome, WatchBatch, Write,
 };
 use r3v3rs3_api::discovery::Endpoint;
 use std::sync::Arc;
@@ -71,6 +74,62 @@ pub async fn check_watch_changes(
     commit(store, vec![], vec![Write::Delete("w/a".into())]).await?;
     assert_eq!(next_changes(watcher.as_mut()).await?, ["delete w/a"]);
     Ok((from, watcher))
+}
+
+/// Rekey encrypts the values of an older key with the first key and keeps the lease of a key.
+pub async fn check_rekey(store: &dyn KvStore) -> anyhow::Result<()> {
+    let key = |byte: u8| ClusterKey::new(&[byte; 32]);
+    let old = ClusterKeys::new(vec![key(1)?])?;
+    let rotated = ClusterKeys::new(vec![key(2)?, key(1)?])?;
+    let prefix = data_prefix("r3v3rs3");
+    let config = format!("{prefix}state/config");
+    let leader = format!("{prefix}lock/leader");
+    let sealed = |key: &str, value: &str| -> anyhow::Result<Write> {
+        Ok(Write::Put {
+            key: key.to_string(),
+            value: old.seal(key, value.as_bytes())?,
+            lease: None,
+        })
+    };
+
+    let writes = vec![
+        sealed(&config, "config")?,
+        put(&format!("{prefix}state/ports/web"), "{}"),
+        sealed("other/state", "other")?,
+    ];
+    commit(store, vec![], writes).await?;
+    let lease = store.grant_lease(Duration::from_secs(30)).await?;
+    assert!(
+        store
+            .try_lock(&leader, &old.seal(&leader, b"node-a")?, &lease)
+            .await?
+    );
+
+    let report = rekey(store, &rotated, &prefix).await?;
+    assert_eq!((report.resealed, report.plain, report.current), (2, 1, 0));
+    let new_only = ClusterKeys::new(vec![key(2)?])?;
+    let open = |item: Option<KvItem>, key: &str| -> anyhow::Result<Vec<u8>> {
+        let item = item.ok_or_else(|| anyhow::anyhow!("{key} is missing"))?;
+        new_only.open(key, &item.value)
+    };
+    assert_eq!(open(store.get(&config).await?, &config)?, b"config");
+    assert_eq!(open(store.get(&leader).await?, &leader)?, b"node-a");
+    // The lease still holds the lock. A second `try_lock` would write a plain value on Consul.
+    let held = vec![Condition::LockHeld {
+        key: leader.clone(),
+        lease: lease.id.clone(),
+    }];
+    let fenced = commit(store, held, vec![put(&format!("{prefix}state/cdn"), "{}")]).await?;
+    assert_eq!(fenced, TxnOutcome::Committed);
+    let outside = store.get("other/state").await?.map(|item| item.value);
+    assert_eq!(
+        outside.as_deref().and_then(sealed_key_id),
+        Some(old.primary_id())
+    );
+
+    let again = rekey(store, &rotated, &prefix).await?;
+    assert_eq!((again.resealed, again.current, again.plain), (0, 2, 2));
+    Ok(())
 }
 
 /// A write with a stale version or on an existing key changes nothing.

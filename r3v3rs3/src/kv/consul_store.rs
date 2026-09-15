@@ -130,6 +130,10 @@ fn write_operation(write: &Write) -> Value {
         } => {
             json!({"Verb": "lock", "Key": key, "Value": BASE64_STANDARD.encode(value), "Session": lease})
         }
+        // A `set` keeps the session that locks the key.
+        Write::Update { key, value } => {
+            json!({"Verb": "set", "Key": key, "Value": BASE64_STANDARD.encode(value)})
+        }
         Write::Delete(key) => json!({"Verb": "delete", "Key": key}),
     };
     json!({ "KV": kv })

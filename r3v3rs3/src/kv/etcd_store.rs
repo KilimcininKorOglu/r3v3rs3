@@ -107,6 +107,11 @@ fn request_op(write: &Write) -> Value {
             }
             json!({ "request_put": put })
         }
+        Write::Update { key, value } => json!({"request_put": {
+            "key": encode(key),
+            "value": encode(value),
+            "ignore_lease": true,
+        }}),
         Write::Delete(key) => json!({"request_delete_range": {"key": encode(key)}}),
     }
 }

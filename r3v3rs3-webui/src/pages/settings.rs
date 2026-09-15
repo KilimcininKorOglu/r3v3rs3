@@ -752,8 +752,9 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 consul,
                 etcd,
             },
-            // The server keeps the programs of config.toml.
+            // The server keeps the programs and the cluster settings of config.toml.
             acme_exec: Default::default(),
+            cluster: Default::default(),
         }),
         _ => Err(errors),
     }

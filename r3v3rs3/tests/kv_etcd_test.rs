@@ -20,8 +20,8 @@ use tokio::sync::watch;
 
 mod common;
 use common::kv::{
-    api_client, check_conditional_commits, check_locks_and_leases, check_watch_changes, commit,
-    next_changes, put,
+    api_client, check_conditional_commits, check_locks_and_leases, check_rekey,
+    check_watch_changes, commit, next_changes, put,
 };
 use common::serve_http_upstream;
 
@@ -192,12 +192,18 @@ fn holds(data: &Data, compare: &Value) -> bool {
 fn apply(data: &mut Data, op: &Value, revision: i64) -> (Value, bool) {
     if let Some(put) = op.get("request_put") {
         let key = bytes(&put["key"]);
-        let create = data.kv.get(&key).map_or(revision, |entry| entry.create);
+        let current = data.kv.get(&key);
+        let create = current.map_or(revision, |entry| entry.create);
+        let lease = if put["ignore_lease"] == true {
+            current.map_or(0, |entry| entry.lease)
+        } else {
+            number(&put["lease"])
+        };
         let entry = Entry {
             value: put["value"].as_str().unwrap_or_default().to_string(),
             create,
             modified: revision,
-            lease: number(&put["lease"]),
+            lease,
         };
         data.history
             .push((revision, key.clone(), Some(entry.clone())));
@@ -417,6 +423,11 @@ async fn etcd_commit_applies_writes_only_when_the_conditions_hold() -> anyhow::R
 #[tokio::test]
 async fn etcd_lock_belongs_to_one_lease_until_the_lease_is_revoked() -> anyhow::Result<()> {
     check_locks_and_leases(&connect(&MockEtcd::new()).await?).await
+}
+
+#[tokio::test]
+async fn etcd_rekey_encrypts_old_values_with_the_first_key() -> anyhow::Result<()> {
+    check_rekey(&connect(&MockEtcd::new()).await?).await
 }
 
 #[tokio::test]

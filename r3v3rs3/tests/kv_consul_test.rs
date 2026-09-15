@@ -15,8 +15,8 @@ use tokio::sync::watch;
 
 mod common;
 use common::kv::{
-    api_client, check_conditional_commits, check_locks_and_leases, check_watch_changes, commit,
-    next_changes, put,
+    api_client, check_conditional_commits, check_locks_and_leases, check_rekey,
+    check_watch_changes, commit, next_changes, put,
 };
 use common::serve_http_upstream;
 
@@ -295,6 +295,11 @@ async fn consul_lock_belongs_to_one_session_until_the_session_is_destroyed() -> 
     let short = store.grant_lease(Duration::from_secs(5)).await;
     assert!(short.is_err(), "{short:?}");
     check_locks_and_leases(&store).await
+}
+
+#[tokio::test]
+async fn consul_rekey_encrypts_old_values_with_the_first_key() -> anyhow::Result<()> {
+    check_rekey(&connect(&MockConsul::new()).await?).await
 }
 
 #[tokio::test]

@@ -36,6 +36,10 @@ pub struct AppConfig {
     /// Only `config.toml` sets this section. An update through the admin API keeps it.
     #[serde(default)]
     pub acme_exec: AcmeExecConfig,
+
+    /// Only `config.toml` sets this section. An update through the admin API keeps it.
+    #[serde(default)]
+    pub cluster: crate::cluster::ClusterConfig,
 }
 
 /// The programs that the exec DNS provider can run.
@@ -61,6 +65,7 @@ impl AppConfig {
     pub fn masked(&self) -> Self {
         Self {
             discovery: self.discovery.masked(),
+            cluster: self.cluster.masked(),
             ..self.clone()
         }
     }
@@ -73,6 +78,7 @@ impl AppConfig {
     /// Takes the settings that only `config.toml` sets from the current settings.
     pub fn keep_file_only(&mut self, current: &Self) {
         self.acme_exec.clone_from(&current.acme_exec);
+        self.cluster.clone_from(&current.cluster);
     }
 }
 

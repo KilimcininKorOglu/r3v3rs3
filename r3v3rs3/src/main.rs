@@ -2,8 +2,8 @@
 
 use clap::Parser;
 use directories::ProjectDirs;
-use r3v3rs3::args::Command;
 use r3v3rs3::args::StartArgs;
+use r3v3rs3::args::{ClusterArgs, ClusterCommand, Command};
 use r3v3rs3::config::file::FileStorage;
 use r3v3rs3::config::new_appinfo;
 use r3v3rs3::config::storage::Storage;
@@ -22,8 +22,35 @@ async fn main() -> anyhow::Result<()> {
     match args.command {
         Command::Start(args) => start(args).await?,
         Command::AddUser(args) => add_user(args).await?,
+        Command::Cluster(args) => cluster(args).await?,
     }
 
+    Ok(())
+}
+
+async fn cluster(args: ClusterArgs) -> anyhow::Result<()> {
+    match args.command {
+        ClusterCommand::Keygen(args) => {
+            let id = r3v3rs3::cluster::key_file::write_new_key_file(&args.file).await?;
+            println!(
+                "Wrote the encryption key {} to {}.",
+                hex::encode(id),
+                args.file.display()
+            );
+            eprintln!(
+                "Keep a copy of the key file. The cluster data cannot be decrypted when every key file is lost."
+            );
+        }
+        ClusterCommand::Rekey(args) => {
+            let config_dir = get_config_dir(args.config_dir)?;
+            let config = FileStorage::new(&config_dir).read_app_config().await?;
+            let report = r3v3rs3::cluster::rekey::run(&config.cluster).await?;
+            println!(
+                "Encrypted {} values with the first key. {} values already used it, {} values are not encrypted and {} values were deleted during the run.",
+                report.resealed, report.current, report.plain, report.deleted
+            );
+        }
+    }
     Ok(())
 }
 
