@@ -513,6 +513,24 @@ pub async fn session_cookie(
     Ok(cookie.to_string())
 }
 
+/// Sends a request to the admin API and returns the status and the body.
+pub async fn send(
+    addr: SocketAddr,
+    method: reqwest::Method,
+    path: &str,
+    cookie: &str,
+    body: Option<serde_json::Value>,
+) -> anyhow::Result<(u16, String)> {
+    let mut request = reqwest::Client::new()
+        .request(method, format!("http://{addr}{path}"))
+        .header(reqwest::header::COOKIE, cookie);
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+    let response = request.send().await?;
+    Ok((response.status().as_u16(), response.text().await?))
+}
+
 /// Signs in again after the rate limit of the sign-in endpoint allows another request.
 pub async fn login_when_allowed(
     addr: SocketAddr,

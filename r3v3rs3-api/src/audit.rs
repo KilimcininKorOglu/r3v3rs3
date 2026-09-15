@@ -33,6 +33,9 @@ pub enum AuditAction {
     UpdateProxy,
     DeleteProxy,
     PurgeProxyCache,
+    AddAccessList,
+    UpdateAccessList,
+    DeleteAccessList,
     AddCert,
     DeleteCert,
     AddAcme,
@@ -41,7 +44,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 21] = [
+    pub const ALL: [AuditAction; 24] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -58,6 +61,9 @@ impl AuditAction {
         Self::UpdateProxy,
         Self::DeleteProxy,
         Self::PurgeProxyCache,
+        Self::AddAccessList,
+        Self::UpdateAccessList,
+        Self::DeleteAccessList,
         Self::AddCert,
         Self::DeleteCert,
         Self::AddAcme,

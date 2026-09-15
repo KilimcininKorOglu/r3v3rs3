@@ -46,6 +46,7 @@ use utoipa_axum::router::{OpenApiRouter, UtoipaMethodRouterExt};
 use utoipa_axum::routes;
 use utoipa_swagger_ui::SwaggerUi;
 
+mod access_lists;
 mod accounts;
 mod acme;
 mod app_info;
@@ -227,6 +228,12 @@ fn resource_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(proxies::get, proxies::put, proxies::delete))
                 .routes(routes!(proxies::status))
                 .routes(routes!(proxies::purge_cache)),
+        )
+        .nest(
+            "/access_lists",
+            OpenApiRouter::new()
+                .routes(routes!(access_lists::list, access_lists::add))
+                .routes(routes!(access_lists::put, access_lists::delete)),
         )
         .nest(
             "/certs",

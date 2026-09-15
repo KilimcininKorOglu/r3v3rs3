@@ -1,7 +1,11 @@
-use super::settings::{failure_box, send_json, send_request, success_box};
+use super::resource_page::{
+    delete_on_click, form_card, get_json, load, notice_view, reload_callback, row_actions,
+    save_result, set_on_click, submit_callback, text_input, FormCard, Notice,
+};
+use super::settings::{send_json, send_request};
 use super::Route;
 use crate::auth::use_ensure_auth;
-use crate::components::data_list::{list_card, Column, Row, DANGER_LINK_CLASS, LINK_CLASS};
+use crate::components::data_list::{list_card, Column, Row};
 use crate::i18n::use_locale;
 use crate::store::{ProxyStore, SessionStore};
 use crate::API_ENDPOINT;
@@ -26,7 +30,8 @@ pub(super) const LABEL_CLASS: &str =
 pub(super) const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500 dark:text-neutral-400";
 const CHECKBOX_CLASS: &str =
     "flex items-center mt-4 text-sm font-medium text-neutral-900 dark:text-neutral-200";
-const BUTTON_CLASS: &str = "inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2";
+
+const PATH: &str = "/accounts";
 
 const COLUMNS: [Column; 4] = [
     Column {
@@ -55,6 +60,9 @@ const ROLES: [(Role, &str, &str); 3] = [
 ];
 
 type AccountList = UseStateHandle<Option<Vec<AccountInfo>>>;
+
+/// A saved account. A new account with TOTP shows its secret once.
+type AccountNotice = UseStateHandle<Option<Notice<Option<String>>>>;
 
 #[derive(Clone, PartialEq, Default)]
 struct Form {
@@ -93,13 +101,6 @@ enum Change {
     },
 }
 
-#[derive(Clone, PartialEq)]
-enum Notice {
-    /// The account is saved. A new account with TOTP shows its secret once.
-    Saved(Option<String>),
-    Failed(String),
-}
-
 #[function_component(Accounts)]
 pub fn accounts() -> Html {
     use_ensure_auth();
@@ -108,13 +109,13 @@ pub fn accounts() -> Html {
     let (proxies, proxies_dispatch) = use_store::<ProxyStore>();
     let accounts = use_state(|| Option::<Vec<AccountInfo>>::None);
     let form = use_state(Form::default);
-    let notice = use_state(|| Option::<Notice>::None);
+    let notice = use_state(|| Option::<Notice<Option<String>>>::None);
 
     let accounts_cloned = accounts.clone();
     use_effect_with((), move |_| {
-        reload(accounts_cloned);
+        load(accounts_cloned, PATH);
         spawn_local(async move {
-            if let Ok(entries) = get_proxies().await {
+            if let Ok(entries) = get_json::<Vec<ProxyEntry>>("/proxies").await {
                 proxies_dispatch.reduce(|state| {
                     ProxyStore {
                         entries,
@@ -142,7 +143,7 @@ pub fn accounts() -> Html {
         .iter()
         .map(|info| account_row(locale, info, &proxies.entries, &own, &form, &accounts))
         .collect::<Vec<_>>();
-    let onsubmit = submit_callback(locale, &form, &notice, &accounts);
+    let onsubmit = submit(locale, &form, &notice, &accounts);
     html! {
         <>
             { list_card(locale, accounts.is_some(), "accounts.empty", &COLUMNS, &rows) }
@@ -151,34 +152,19 @@ pub fn accounts() -> Html {
     }
 }
 
-fn submit_callback(
+fn submit(
     locale: Locale,
     form: &UseStateHandle<Form>,
-    notice: &UseStateHandle<Option<Notice>>,
+    notice: &AccountNotice,
     accounts: &AccountList,
 ) -> Callback<SubmitEvent> {
+    let done = save_result(form, notice, reload_callback(accounts, PATH));
     let form = form.clone();
-    let notice = notice.clone();
-    let accounts = accounts.clone();
-    Callback::from(move |event: SubmitEvent| {
-        event.prevent_default();
-        let Ok(change) = parse_form(locale, &form) else {
-            return;
-        };
-        let form = form.clone();
-        let notice = notice.clone();
-        let accounts = accounts.clone();
-        spawn_local(async move {
-            match save(locale, change).await {
-                Ok(secret) => {
-                    form.set(Form::default());
-                    notice.set(Some(Notice::Saved(secret)));
-                    reload(accounts);
-                }
-                Err(message) => notice.set(Some(Notice::Failed(message))),
-            }
-        });
-    })
+    submit_callback(
+        move || parse_form(locale, &form).ok(),
+        move |change| save(locale, change),
+        done,
+    )
 }
 
 fn account_row(
@@ -189,33 +175,12 @@ fn account_row(
     form: &UseStateHandle<Form>,
     accounts: &AccountList,
 ) -> Row {
-    let edit_onclick = {
-        let form = form.clone();
-        let edited = Form::edit(info);
-        Callback::from(move |event: MouseEvent| {
-            event.prevent_default();
-            form.set(edited.clone());
-        })
-    };
-    let delete_onclick = {
-        let username = info.username.clone();
-        let accounts = accounts.clone();
-        Callback::from(move |event: MouseEvent| {
-            event.prevent_default();
-            let question = locale.tf("accounts.confirm_delete", &[("username", &username)]);
-            if !gloo_dialogs::confirm(&question) {
-                return;
-            }
-            let username = username.clone();
-            let accounts = accounts.clone();
-            spawn_local(async move {
-                match delete_account(locale, &username).await {
-                    Ok(()) => reload(accounts),
-                    Err(message) => gloo_dialogs::alert(&message),
-                }
-            });
-        })
-    };
+    // An admin cannot delete its own account.
+    let delete = (info.username != own).then(|| {
+        let question = locale.tf("accounts.confirm_delete", &[("username", &info.username)]);
+        let path = format!("{PATH}/{}", path_segment(&info.username));
+        delete_on_click(locale, question, path, reload_callback(accounts, PATH))
+    });
     let totp = if info.totp { "common.yes" } else { "common.no" };
     Row {
         key: info.username.clone(),
@@ -225,21 +190,14 @@ fn account_row(
             html! { <>{proxies_label(locale, info.proxies.as_ref(), proxies)}</> },
             html! { <>{locale.t(totp)}</> },
         ],
-        actions: html! {
-            <>
-                <a class={LINK_CLASS} onclick={edit_onclick}>{locale.t("common.edit")}</a>
-                if info.username != own {
-                    <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
-                }
-            </>
-        },
+        actions: row_actions(locale, set_on_click(form, Form::edit(info)), delete),
     }
 }
 
 fn form_view(
     locale: Locale,
     form: &UseStateHandle<Form>,
-    notice: &UseStateHandle<Option<Notice>>,
+    notice: &AccountNotice,
     proxies: &[ProxyEntry],
     own: &str,
     onsubmit: Callback<SubmitEvent>,
@@ -251,22 +209,15 @@ fn form_view(
         None => locale.t("accounts.add_title").to_string(),
     };
     let touched = editing.is_some() || !form.username.is_empty() || !form.password.is_empty();
-    let error = parsed.as_ref().err().filter(|_| touched).cloned();
     let password_label = if editing.is_some() {
         "accounts.new_password"
     } else {
         "accounts.password"
     };
-    let cancel_onclick = {
-        let form = form.clone();
-        Callback::from(move |_: MouseEvent| form.set(Form::default()))
-    };
     // An admin cannot lower its own role.
     let own_account = editing.as_deref() == Some(own);
-    html! {
-        <form {onsubmit} class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
-            { notice_view(locale, notice) }
-            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{title}</h2>
+    let fields = html! {
+        <>
             <label class={LABEL_CLASS}>{locale.t("accounts.username")}</label>
             <input type="text" autocapitalize="off" autocomplete="off" value={form.username.clone()} oninput={text_input(form, |f| &mut f.username)} disabled={editing.is_some()} class={INPUT_CLASS} />
             <label class={LABEL_CLASS}>{locale.t(password_label)}</label>
@@ -283,45 +234,30 @@ fn form_view(
             if editing.is_none() {
                 { checkbox(form, locale.t("accounts.totp_enable"), |f| &mut f.totp) }
             }
-            if let Some(error) = error {
-                <p class="mt-2 text-sm text-red-600 dark:text-red-500">{error}</p>
-            }
-            <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
-                if editing.is_some() {
-                    <button type="button" onclick={cancel_onclick} class={BUTTON_CLASS}>{locale.t("common.cancel")}</button>
-                }
-                <button type="submit" disabled={parsed.is_err()} class={BUTTON_CLASS}>{locale.t("accounts.save")}</button>
-            </div>
-        </form>
-    }
-}
-
-fn notice_view(locale: Locale, notice: &UseStateHandle<Option<Notice>>) -> Html {
-    match &**notice {
-        Some(Notice::Saved(secret)) => success_box(html! {
+        </>
+    };
+    let notice = notice_view(notice, |secret: &Option<String>| {
+        html! {
             <>
                 <p>{locale.t("accounts.saved")}</p>
                 if let Some(secret) = secret {
                     <p class="mt-2 break-all">{locale.tf("accounts.totp_secret", &[("secret", secret)])}</p>
                 }
             </>
-        }),
-        Some(Notice::Failed(message)) => failure_box(message),
-        None => html! {},
-    }
-}
-
-fn text_input(
-    form: &UseStateHandle<Form>,
-    select: fn(&mut Form) -> &mut String,
-) -> Callback<InputEvent> {
-    let form = form.clone();
-    Callback::from(move |event: InputEvent| {
-        let input: HtmlInputElement = event.target_unchecked_into();
-        let mut updated = (*form).clone();
-        *select(&mut updated) = input.value();
-        form.set(updated);
-    })
+        }
+    });
+    let card = FormCard {
+        title,
+        notice,
+        fields,
+        error: parsed.as_ref().err().filter(|_| touched).cloned(),
+        cancel: editing
+            .is_some()
+            .then(|| set_on_click(form, Form::default())),
+        save_label: "accounts.save",
+        can_save: parsed.is_ok(),
+    };
+    form_card(locale, card, onsubmit)
 }
 
 fn checkbox(
@@ -491,19 +427,11 @@ fn path_segment(value: &str) -> String {
         .collect()
 }
 
-fn reload(accounts: AccountList) {
-    spawn_local(async move {
-        if let Ok(list) = get_accounts().await {
-            accounts.set(Some(list));
-        }
-    });
-}
-
 /// Sends the change. A new account with TOTP returns its secret.
 async fn save(locale: Locale, change: Change) -> Result<Option<String>, String> {
     match change {
         Change::Add(account) => {
-            let request = Request::post(&format!("{API_ENDPOINT}/accounts"))
+            let request = Request::post(&format!("{API_ENDPOINT}{PATH}"))
                 .json(&account)
                 .map_err(|err| err.to_string())?;
             let created: AccountCreated = send_request(locale, request)
@@ -514,36 +442,12 @@ async fn save(locale: Locale, change: Change) -> Result<Option<String>, String> 
             Ok(created.totp_secret)
         }
         Change::Update { username, update } => {
-            let url = format!("{API_ENDPOINT}/accounts/{}", path_segment(&username));
+            let url = format!("{API_ENDPOINT}{PATH}/{}", path_segment(&username));
             send_json(locale, Request::put(&url), &update)
                 .await
                 .map(|()| None)
         }
     }
-}
-
-async fn delete_account(locale: Locale, username: &str) -> Result<(), String> {
-    let url = format!("{API_ENDPOINT}/accounts/{}", path_segment(username));
-    let request = Request::delete(&url)
-        .build()
-        .map_err(|err| err.to_string())?;
-    send_request(locale, request).await.map(|_| ())
-}
-
-async fn get_accounts() -> Result<Vec<AccountInfo>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/accounts"))
-        .send()
-        .await?
-        .json()
-        .await
-}
-
-async fn get_proxies() -> Result<Vec<ProxyEntry>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/proxies"))
-        .send()
-        .await?
-        .json()
-        .await
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ use serde_derive::{Deserialize, Serialize};
 use yew::prelude::*;
 use yew_router::prelude::*;
 
+mod access_lists;
 mod accounts;
 mod audit;
 pub mod cert_list;
@@ -16,6 +17,7 @@ mod port_list;
 mod port_view;
 mod proxy_list;
 mod proxy_view;
+mod resource_page;
 mod self_sign;
 mod settings;
 mod upload;
@@ -55,6 +57,8 @@ pub enum Route {
     NewProxy,
     #[at("/proxies/:id")]
     ProxyView { id: ShortId },
+    #[at("/access_lists")]
+    AccessLists,
     #[at("/settings")]
     Settings,
     #[at("/accounts")]
@@ -82,7 +86,9 @@ impl Route {
             | Route::NewProxy
             | Route::ProxyView { .. }
             | Route::ProxyLogView { .. } => Some(Route::Proxies),
-            Route::Settings | Route::Accounts | Route::Audit => Some(self.clone()),
+            Route::AccessLists | Route::Settings | Route::Accounts | Route::Audit => {
+                Some(self.clone())
+            }
             _ => None,
         }
     }
@@ -101,6 +107,7 @@ pub fn switch(routes: Route) -> Html {
         Route::ProxyLogView { id } => html! { <log_view::LogView id={id.to_string()} /> },
         Route::ProxyView { id } => html! { <proxy_view::ProxyView {id} /> },
         Route::NewProxy => html! { <new_proxy::NewProxy /> },
+        Route::AccessLists => html! { <access_lists::AccessLists /> },
         Route::Certs => html! { <cert_list::CertList /> },
         Route::SelfSign => html! { <self_sign::SelfSign /> },
         Route::NewAcme => html! { <new_acme::NewAcme /> },

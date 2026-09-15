@@ -27,6 +27,7 @@ use crate::{
     proxy::{PortContext, PortContextKind, ProxyRegistries},
 };
 use quinn::Incoming;
+use r3v3rs3_api::access_list::AccessListEntry;
 use r3v3rs3_api::app::{AppConfig, AppInfo};
 use r3v3rs3_api::cluster::ClusterStatus;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryState, DiscoveryStatus};
@@ -52,6 +53,8 @@ use x509_parser::time::ASN1Time;
 
 pub struct ServerState {
     pub proxies: ProxyList,
+    /// The access lists with the hashes of their secrets.
+    pub access_lists: Vec<AccessListEntry>,
     pub certs: CertList,
     pub acmes: AcmeList,
     pub ports: PortList,
@@ -156,6 +159,7 @@ impl ServerState {
         let certs = storage.load_certs().await;
         let acmes = storage.load_acmes().await;
         let proxies = manual_proxies(storage.load_proxies().await);
+        let access_lists = storage.load_access_lists().await;
 
         let mut ports = PortList::default();
         for entry in storage.load_ports().await {
@@ -183,6 +187,7 @@ impl ServerState {
         let audit = Arc::new(AuditLog::new(audit_store, config.cluster.node_name.clone()));
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
+            access_lists,
             certs: CertList::new(certs).await,
             acmes: acmes.into_iter().collect(),
             ports,
@@ -360,7 +365,8 @@ impl ServerState {
             StateKind::Certs => self.reload_certs().await,
             StateKind::Acmes => self.reload_acmes().await,
             StateKind::Ports => self.reload_ports().await,
-            StateKind::Proxies | StateKind::AccessLists => self.reload_manual_proxies().await,
+            StateKind::Proxies => self.reload_manual_proxies().await,
+            StateKind::AccessLists => self.access_lists = self.storage.load_access_lists().await,
             StateKind::Cdn => self.reload_cdn_ranges().await,
             StateKind::Challenges => self.reload_challenges().await,
             StateKind::CachePurges => self.reload_cache_purges().await,
@@ -845,6 +851,13 @@ impl ServerState {
         saved
     }
 
+    /// Saves the access lists, and uses them after the storage accepts them.
+    pub async fn commit_access_lists(&mut self, lists: Vec<AccessListEntry>) -> Result<(), Error> {
+        self.storage.save_access_lists(&lists).await?;
+        self.access_lists = lists;
+        Ok(())
+    }
+
     /// Sends the proxy list without the password hashes and the token digests.
     fn publish_proxies(&self) {
         let entries = self
@@ -1176,8 +1189,8 @@ impl ServerState {
         });
     }
 
-    /// A new id that no ACME entry, port or proxy uses. The audit log entry of the running RPC
-    /// method gets the id.
+    /// A new id that no ACME entry, port, proxy or access list uses. The audit log entry of the
+    /// running RPC method gets the id.
     pub fn generate_id(&mut self) -> ShortId {
         const TABLE: &[u8] = b"bcdfghjklmnpqrstvwxyz";
 
@@ -1187,6 +1200,7 @@ impl ServerState {
             .map(|acme| acme.id)
             .chain(self.ports.entries().map(|port| port.id))
             .chain(self.proxies.entries().map(|site| site.id))
+            .chain(self.access_lists.iter().map(|list| list.id))
             .collect::<HashSet<_>>();
 
         let mut rng = rand::thread_rng();

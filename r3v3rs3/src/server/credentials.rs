@@ -23,14 +23,9 @@ pub fn seal_proxy(proxy: &mut Proxy) -> Result<(), Error> {
         .routes
         .iter_mut()
         .filter_map(|route| route.auth.as_mut());
-    for policy in std::iter::once(&mut http.auth).chain(route_policies) {
-        match policy {
-            AuthPolicy::None | AuthPolicy::Session => {}
-            AuthPolicy::Basic(basic) => seal_basic_auth(basic)?,
-            AuthPolicy::Bearer(bearer) => seal_bearer_auth(bearer)?,
-            AuthPolicy::Forward(forward) => validate_forward_auth(forward)?,
-        }
-    }
+    std::iter::once(&mut http.auth)
+        .chain(route_policies)
+        .try_for_each(seal_policy)?;
     http.compression.validate()?;
     http.cache.validate()?;
     let route_rules = http
@@ -42,9 +37,27 @@ pub fn seal_proxy(proxy: &mut Proxy) -> Result<(), Error> {
         .try_for_each(HeaderRules::validate)
 }
 
-/// Runs [`seal_proxy`] on a blocking thread, because hashing a password takes CPU time.
-pub async fn seal(mut proxy: Proxy) -> Result<Proxy, Error> {
-    tokio::task::spawn_blocking(move || seal_proxy(&mut proxy).map(|()| proxy))
+/// Replaces the plain text passwords and tokens of a policy with hashes and validates the policy.
+pub fn seal_policy(policy: &mut AuthPolicy) -> Result<(), Error> {
+    match policy {
+        AuthPolicy::None | AuthPolicy::Session => Ok(()),
+        AuthPolicy::Basic(basic) => seal_basic_auth(basic),
+        AuthPolicy::Bearer(bearer) => seal_bearer_auth(bearer),
+        AuthPolicy::Forward(forward) => validate_forward_auth(forward),
+    }
+}
+
+/// Runs [`seal_proxy`] on a blocking thread.
+pub async fn seal(proxy: Proxy) -> Result<Proxy, Error> {
+    seal_blocking(proxy, seal_proxy).await
+}
+
+/// Runs `seal` on a blocking thread, because hashing a password takes CPU time.
+pub async fn seal_blocking<T: Send + 'static>(
+    mut value: T,
+    seal: fn(&mut T) -> Result<(), Error>,
+) -> Result<T, Error> {
+    tokio::task::spawn_blocking(move || seal(&mut value).map(|()| value))
         .await
         .map_err(|_| Error::FailedToHashPassword)?
 }
@@ -80,17 +93,23 @@ fn policies_mut(proxy: &mut Proxy) -> Vec<(Option<&str>, &mut AuthPolicy)> {
 /// users and the tokens that have a secret.
 pub fn mask_proxy(proxy: &mut Proxy) {
     for (_, policy) in policies_mut(proxy) {
-        match policy {
-            AuthPolicy::Basic(basic) => basic.users.iter_mut().for_each(|user| {
-                user.password_set = !user.password_hash.is_empty();
-                user.password_hash.clear();
-            }),
-            AuthPolicy::Bearer(bearer) => bearer.tokens.iter_mut().for_each(|token| {
-                token.token_set = !token.token_hash.is_empty();
-                token.token_hash.clear();
-            }),
-            _ => {}
-        }
+        mask_policy(policy);
+    }
+}
+
+/// Removes the password hashes and the token digests of a policy, and marks the users and the
+/// tokens that have a secret.
+pub fn mask_policy(policy: &mut AuthPolicy) {
+    match policy {
+        AuthPolicy::Basic(basic) => basic.users.iter_mut().for_each(|user| {
+            user.password_set = !user.password_hash.is_empty();
+            user.password_hash.clear();
+        }),
+        AuthPolicy::Bearer(bearer) => bearer.tokens.iter_mut().for_each(|token| {
+            token.token_set = !token.token_hash.is_empty();
+            token.token_hash.clear();
+        }),
+        _ => {}
     }
 }
 
@@ -100,19 +119,24 @@ pub fn restore_secrets(proxy: &mut Proxy, current: &Proxy) {
     let mut current = current.clone();
     let mut previous = policies_mut(&mut current);
     for (path, policy) in policies_mut(proxy) {
-        let old = previous
-            .iter_mut()
-            .find(|(other, _)| *other == path)
-            .map(|(_, old)| &mut **old);
-        match (policy, old) {
-            (AuthPolicy::Basic(basic), Some(AuthPolicy::Basic(old))) => {
-                restore(&mut basic.users, &mut old.users, user_secret)
-            }
-            (AuthPolicy::Bearer(bearer), Some(AuthPolicy::Bearer(old))) => {
-                restore(&mut bearer.tokens, &mut old.tokens, token_secret)
-            }
-            _ => {}
+        let old = previous.iter_mut().find(|(other, _)| *other == path);
+        if let Some((_, old)) = old {
+            restore_policy(policy, old);
         }
+    }
+}
+
+/// Gives the users and the tokens of `policy` without a secret the hashes of the users and the
+/// tokens with the same names in `previous`.
+pub fn restore_policy(policy: &mut AuthPolicy, previous: &mut AuthPolicy) {
+    match (policy, previous) {
+        (AuthPolicy::Basic(basic), AuthPolicy::Basic(old)) => {
+            restore(&mut basic.users, &mut old.users, user_secret)
+        }
+        (AuthPolicy::Bearer(bearer), AuthPolicy::Bearer(old)) => {
+            restore(&mut bearer.tokens, &mut old.tokens, token_secret)
+        }
+        _ => {}
     }
 }
 

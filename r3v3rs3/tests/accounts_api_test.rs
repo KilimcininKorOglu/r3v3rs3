@@ -1,32 +1,15 @@
 use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
 use r3v3rs3_api::auth::Role;
-use reqwest::{header::COOKIE, Client, Method};
+use reqwest::Method;
 use serde_json::{json, Value};
-use std::{net::SocketAddr, time::Duration};
+use std::time::Duration;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
 use common::{
-    alloc_tcp_port, login_when_allowed, session_cookie, wait_for_listener, with_server, TestStorage,
+    alloc_tcp_port, login_when_allowed, send, session_cookie, wait_for_listener, with_server,
+    TestStorage,
 };
-
-/// Sends a request to the admin API and returns the status and the body.
-async fn send(
-    addr: SocketAddr,
-    method: Method,
-    path: &str,
-    cookie: &str,
-    body: Option<Value>,
-) -> anyhow::Result<(u16, String)> {
-    let mut request = Client::new()
-        .request(method, format!("http://{addr}{path}"))
-        .header(COOKIE, cookie);
-    if let Some(body) = body {
-        request = request.json(&body);
-    }
-    let response = request.send().await?;
-    Ok((response.status().as_u16(), response.text().await?))
-}
 
 #[tokio::test]
 async fn an_admin_manages_the_accounts_through_the_admin_api() -> anyhow::Result<()> {

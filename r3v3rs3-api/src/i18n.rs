@@ -268,6 +268,7 @@ mod tests {
             Error::RouteResponseConflict,
             Error::InvalidFixedStatus { status: 418 },
             Error::FixedBodyTooLarge { max: 4096 },
+            Error::AccessListNameRequired,
             Error::ClusterUnavailable,
             Error::ClusterWriteConflict,
             Error::FailedToHashPassword,

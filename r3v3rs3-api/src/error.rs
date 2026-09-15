@@ -235,6 +235,9 @@ pub enum Error {
     #[error("fixed response body cannot be longer than {max} bytes")]
     FixedBodyTooLarge { max: usize },
 
+    #[error("an access list needs a name")]
+    AccessListNameRequired,
+
     #[error("the cluster store cannot save changes now")]
     ClusterUnavailable,
 

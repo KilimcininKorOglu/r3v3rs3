@@ -33,6 +33,16 @@ impl AuthKind {
         AuthKind::Session,
     ];
 
+    pub fn of(policy: &AuthPolicy) -> Self {
+        match policy {
+            AuthPolicy::None => Self::None,
+            AuthPolicy::Basic(_) => Self::Basic,
+            AuthPolicy::Bearer(_) => Self::Bearer,
+            AuthPolicy::Forward(_) => Self::Forward,
+            AuthPolicy::Session => Self::Session,
+        }
+    }
+
     fn value(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -43,7 +53,7 @@ impl AuthKind {
         }
     }
 
-    fn label(self, locale: Locale) -> &'static str {
+    pub fn label(self, locale: Locale) -> &'static str {
         locale.t(match self {
             Self::None => "auth.kind_none",
             Self::Basic => "auth.kind_basic",
@@ -84,7 +94,7 @@ struct TokenForm {
 impl AuthForm {
     pub fn new(policy: &AuthPolicy) -> Self {
         let mut form = Self {
-            kind: AuthKind::None,
+            kind: AuthKind::of(policy),
             realm: String::new(),
             users: vec![UserForm::default()],
             tokens: vec![TokenForm::default()],
@@ -93,23 +103,19 @@ impl AuthForm {
             forward_timeout: DEFAULT_FORWARD_AUTH_TIMEOUT.as_secs().to_string(),
         };
         match policy {
-            AuthPolicy::None => {}
+            AuthPolicy::None | AuthPolicy::Session => {}
             AuthPolicy::Basic(basic) => {
-                form.kind = AuthKind::Basic;
                 form.realm = basic.realm.clone();
                 form.users = basic.users.iter().map(UserForm::new).collect();
             }
             AuthPolicy::Bearer(bearer) => {
-                form.kind = AuthKind::Bearer;
                 form.tokens = bearer.tokens.iter().map(TokenForm::new).collect();
             }
             AuthPolicy::Forward(forward) => {
-                form.kind = AuthKind::Forward;
                 form.forward_url = forward.url.to_string();
                 form.forward_headers = forward.response_headers.join(", ");
                 form.forward_timeout = forward.timeout.as_secs().max(1).to_string();
             }
-            AuthPolicy::Session => form.kind = AuthKind::Session,
         }
         form
     }

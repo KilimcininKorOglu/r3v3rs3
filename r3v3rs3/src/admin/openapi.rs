@@ -38,6 +38,7 @@ const SESSION_COOKIE: &str = "token";
         (name = "config", description = "Application settings."),
         (name = "ports", description = "Listening ports."),
         (name = "proxies", description = "Proxies that route traffic from ports to upstream servers."),
+        (name = "access_lists", description = "IP filters and authentication policies that proxies and routes share."),
         (name = "certs", description = "Server and root certificates."),
         (name = "acme", description = "ACME certificate requests."),
         (name = "logs", description = "Logs of ports, proxies and certificates."),

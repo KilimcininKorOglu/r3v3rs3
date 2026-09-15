@@ -32,6 +32,12 @@ const ITEMS: &[MenuItem] = {
             admin_only: false,
         },
         MenuItem {
+            name: "nav.access_lists",
+            icon: "/assets/icons/shield-checkmark.svg",
+            route: Route::AccessLists,
+            admin_only: false,
+        },
+        MenuItem {
             name: "nav.certificates",
             icon: "/assets/icons/ribbon.svg",
             route: Route::Certs,
