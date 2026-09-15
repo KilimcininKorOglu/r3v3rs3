@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*"
+  # A manual run builds both platforms and publishes nothing.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -49,15 +51,17 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ github.event_name == 'push' }}
           cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
           cache-to: type=gha,mode=max,scope=${{ env.PLATFORM_PAIR }}
       - name: Export digest
+        if: github.event_name == 'push'
         run: |
           mkdir -p "${{ runner.temp }}/digests"
           digest="${{ steps.build.outputs.digest }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
       - name: Upload digest
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: digests-${{ env.PLATFORM_PAIR }}
@@ -67,6 +71,7 @@ jobs:
 
   merge:
     name: Publish multi-platform image
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     needs: build
     steps:
