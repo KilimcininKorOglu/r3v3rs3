@@ -2,7 +2,7 @@
 FROM rust:latest as builder
 
 # Install trunk
-RUN cargo install trunk
+RUN cargo install trunk --locked
 RUN rustup target add wasm32-unknown-unknown
 
 # Set the working directory
