@@ -6,11 +6,14 @@ use r3v3rs3::cluster::storage::KvStorage;
 use r3v3rs3::config::file::{FileState, FileStorage};
 use r3v3rs3::config::storage::Storage;
 use r3v3rs3::kv::{KvStore, Txn, Write};
+use r3v3rs3_api::access_list::{AccessList, AccessListEntry};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::audit::{AuditAction, AuditEntry};
 use r3v3rs3_api::auth::{LoginMethod, LoginRequest, LoginResponse, Role};
+use r3v3rs3_api::cidr::parse_cidr_list;
 use r3v3rs3_api::cluster::ClusterConfig;
 use r3v3rs3_api::error::Error;
+use r3v3rs3_api::policy::IpFilter;
 use r3v3rs3_api::proxy::HttpProxy;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -114,6 +117,19 @@ async fn read_files(files: &FileStorage) -> anyhow::Result<(FileState, Cert)> {
     files
         .save_proxies(&[http_proxy_entry("manual", "test", proxy)])
         .await?;
+    let office = AccessList {
+        name: "Office".into(),
+        ip_filter: IpFilter {
+            allow: parse_cidr_list("10.0.0.0/8")?,
+            deny: Vec::new(),
+        },
+        ..Default::default()
+    };
+    let entry = AccessListEntry {
+        id: "office".parse()?,
+        list: office,
+    };
+    files.save_access_lists(&[entry]).await?;
     let ca = Cert::new_ca()?;
     files.save_cert(&ca).await?;
     files
@@ -133,6 +149,7 @@ async fn an_import_copies_the_files_and_another_node_reads_them() -> anyhow::Res
     std::fs::remove_dir_all(&dir)?;
     let (state, ca) = read?;
     let (ports, proxies) = (state.ports.clone(), state.proxies.clone());
+    let lists = state.access_lists.clone();
 
     let store = Arc::new(MemoryStore::default());
     let first = node(&store, "node-a")?;
@@ -142,6 +159,7 @@ async fn an_import_copies_the_files_and_another_node_reads_them() -> anyhow::Res
         (report.ports, report.proxies, report.certs, report.accounts),
         (1, 1, 1, 1)
     );
+    assert_eq!(report.access_lists, 1);
     assert!(first.is_imported().await?);
 
     // The config is encrypted and the ports are not.
@@ -149,6 +167,8 @@ async fn an_import_copies_the_files_and_another_node_reads_them() -> anyhow::Res
     assert!(sealed_key_id(&config).is_some());
     let port = store.value(&format!("r3v3rs3/v1/state/ports/{}", ports[0].id))?;
     assert!(sealed_key_id(&port).is_none());
+    let list = store.value(&first.layout().access_list(lists[0].id))?;
+    assert!(sealed_key_id(&list).is_some());
 
     // The other node keeps its own cluster settings.
     let second = node(&store, "node-b")?;
@@ -157,6 +177,7 @@ async fn an_import_copies_the_files_and_another_node_reads_them() -> anyhow::Res
     assert_eq!(loaded.cluster, local_config("node-b").cluster);
     assert_eq!(second.load_ports().await, ports);
     assert_eq!(second.load_proxies().await, proxies);
+    assert_eq!(second.load_access_lists().await, lists);
     let certs = second.load_certs().await;
     assert_eq!(certs.len(), 1);
     assert_eq!(certs[0].fingerprint, ca.fingerprint);

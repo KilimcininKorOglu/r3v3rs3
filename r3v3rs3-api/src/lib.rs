@@ -1,3 +1,4 @@
+pub mod access_list;
 pub mod acme;
 pub mod app;
 pub mod audit;

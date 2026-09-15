@@ -207,6 +207,7 @@ struct Inner {
     pub config: AppConfig,
     pub ports: Vec<PortEntry>,
     pub proxies: Vec<ProxyEntry>,
+    pub access_lists: Vec<r3v3rs3_api::access_list::AccessListEntry>,
     pub certs: HashMap<ShortId, Arc<Cert>>,
     pub acems: HashMap<ShortId, AcmeEntry>,
     pub accounts: HashMap<String, Account>,
@@ -281,6 +282,17 @@ impl Storage for TestStorage {
 
     async fn save_proxies(&self, proxies: &[ProxyEntry]) -> Result<(), Error> {
         self.save(|inner| inner.proxies = proxies.to_vec()).await
+    }
+
+    async fn load_access_lists(&self) -> Vec<r3v3rs3_api::access_list::AccessListEntry> {
+        self.inner.lock().await.access_lists.clone()
+    }
+
+    async fn save_access_lists(
+        &self,
+        lists: &[r3v3rs3_api::access_list::AccessListEntry],
+    ) -> Result<(), Error> {
+        self.save(|inner| inner.access_lists = lists.to_vec()).await
     }
 
     async fn save_cert(&self, cert: &Cert) -> Result<(), Error> {

@@ -5,6 +5,7 @@ use crate::proxy::http::cache_share::SharedCacheStore;
 use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::{LocalSessions, SessionBackend};
 use r3v3rs3_api::{
+    access_list::AccessListEntry,
     app::AppConfig,
     auth::{Account, LoginRequest, LoginResponse, Role},
     error::Error,
@@ -29,6 +30,10 @@ pub trait Storage: Send + Sync + 'static {
     async fn load_ports(&self) -> Vec<PortEntry>;
     async fn load_proxies(&self) -> Vec<ProxyEntry>;
     async fn save_proxies(&self, proxies: &[ProxyEntry]) -> Result<(), Error>;
+
+    /// The access lists in their saved order. A list that cannot be loaded is left out.
+    async fn load_access_lists(&self) -> Vec<AccessListEntry>;
+    async fn save_access_lists(&self, lists: &[AccessListEntry]) -> Result<(), Error>;
     async fn save_cert(&self, cert: &Cert) -> Result<(), Error>;
     async fn save_acme(&self, acme: &AcmeEntry) -> Result<(), Error>;
     async fn delete_acme(&self, id: ShortId) -> Result<(), Error>;

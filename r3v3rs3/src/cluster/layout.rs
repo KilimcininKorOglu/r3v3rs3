@@ -13,6 +13,7 @@ pub enum StateKind {
     Certs,
     Acmes,
     Ports,
+    AccessLists,
     Proxies,
     Cdn,
     Challenges,
@@ -21,11 +22,12 @@ pub enum StateKind {
 }
 
 impl StateKind {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Config,
         Self::Certs,
         Self::Acmes,
         Self::Ports,
+        Self::AccessLists,
         Self::Proxies,
         Self::Cdn,
         Self::Challenges,
@@ -35,11 +37,12 @@ impl StateKind {
 }
 
 /// The first key segment below `state/` of each part.
-const STATE_PARTS: [(&str, StateKind); 9] = [
+const STATE_PARTS: [(&str, StateKind); 10] = [
     ("config", StateKind::Config),
     ("certs", StateKind::Certs),
     ("acme", StateKind::Acmes),
     ("ports", StateKind::Ports),
+    ("access-lists", StateKind::AccessLists),
     ("proxies", StateKind::Proxies),
     ("cdn", StateKind::Cdn),
     ("challenges", StateKind::Challenges),
@@ -82,6 +85,15 @@ impl Layout {
 
     pub fn proxies(&self) -> String {
         format!("{}proxies/", self.state())
+    }
+
+    /// The access lists. They hold password hashes and token digests, so they are encrypted.
+    pub fn access_lists(&self) -> String {
+        format!("{}access-lists/", self.state())
+    }
+
+    pub fn access_list(&self, id: ShortId) -> String {
+        format!("{}{id}", self.access_lists())
     }
 
     pub fn certs(&self) -> String {
@@ -289,6 +301,10 @@ mod tests {
             Some(StateKind::Ports)
         );
         assert_eq!(layout.kind(&layout.acme(id)), Some(StateKind::Acmes));
+        let list = layout.access_list(id);
+        assert_eq!(list, "r3v3rs3/v1/state/access-lists/web");
+        assert_eq!(layout.kind(&list), Some(StateKind::AccessLists));
+        assert!(!layout.is_plain(&list));
         assert_eq!(
             layout.kind(&layout.account("admin")),
             Some(StateKind::Accounts)

@@ -360,7 +360,7 @@ impl ServerState {
             StateKind::Certs => self.reload_certs().await,
             StateKind::Acmes => self.reload_acmes().await,
             StateKind::Ports => self.reload_ports().await,
-            StateKind::Proxies => self.reload_manual_proxies().await,
+            StateKind::Proxies | StateKind::AccessLists => self.reload_manual_proxies().await,
             StateKind::Cdn => self.reload_cdn_ranges().await,
             StateKind::Challenges => self.reload_challenges().await,
             StateKind::CachePurges => self.reload_cache_purges().await,

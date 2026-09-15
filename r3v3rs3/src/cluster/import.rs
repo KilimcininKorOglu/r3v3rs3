@@ -9,6 +9,7 @@ use std::path::Path;
 pub struct ImportReport {
     pub ports: usize,
     pub proxies: usize,
+    pub access_lists: usize,
     pub certs: usize,
     pub acmes: usize,
     pub accounts: usize,
@@ -27,6 +28,7 @@ pub async fn import(storage: &KvStorage, state: FileState) -> anyhow::Result<Imp
     storage.save_app_config(&state.config).await?;
     storage.save_ports(&state.ports).await?;
     storage.save_proxies(&state.proxies).await?;
+    storage.save_access_lists(&state.access_lists).await?;
     let certs = state
         .certs
         .iter()
@@ -48,6 +50,7 @@ pub async fn import(storage: &KvStorage, state: FileState) -> anyhow::Result<Imp
     Ok(ImportReport {
         ports: state.ports.len(),
         proxies: state.proxies.len(),
+        access_lists: state.access_lists.len(),
         certs: certs.len(),
         acmes: state.acmes.len(),
         accounts: state.accounts.len(),

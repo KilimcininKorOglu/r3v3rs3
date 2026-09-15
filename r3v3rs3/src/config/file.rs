@@ -7,6 +7,7 @@ use crate::certs::{
 use anyhow::Context as _;
 use indexmap::map::IndexMap;
 use r3v3rs3_api::{
+    access_list::{AccessList, AccessListEntry},
     app::AppConfig,
     auth::{Account, LoginRequest, LoginResponse, Role},
     cert::CertKind,
@@ -110,19 +111,34 @@ mod private_file_test {
 }
 
 #[cfg(all(test, unix))]
-mod accounts_file_test {
+mod secret_files_test {
     use super::FileStorage;
+    use crate::config::storage::Storage;
+    use r3v3rs3_api::access_list::{AccessList, AccessListEntry};
     use r3v3rs3_api::auth::{Account, Role};
+    use r3v3rs3_api::cidr::parse_cidr_list;
+    use r3v3rs3_api::policy::IpFilter;
     use std::collections::{BTreeSet, HashMap};
     use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
 
-    #[tokio::test]
-    async fn accounts_keep_their_roles_in_an_owner_only_file() -> anyhow::Result<()> {
+    /// A storage in a new temporary directory.
+    fn temp_storage(name: &str) -> (PathBuf, FileStorage) {
         let dir = std::env::temp_dir().join(format!(
-            "r3v3rs3-accounts-{}",
+            "r3v3rs3-{name}-{}",
             hex::encode(rand::random::<[u8; 8]>())
         ));
         let files = FileStorage::new(&dir);
+        (dir, files)
+    }
+
+    fn mode(path: &Path) -> std::io::Result<u32> {
+        std::fs::metadata(path).map(|metadata| metadata.permissions().mode() & 0o777)
+    }
+
+    #[tokio::test]
+    async fn accounts_keep_their_roles_in_an_owner_only_file() -> anyhow::Result<()> {
+        let (dir, files) = temp_storage("accounts");
         let editor = Account {
             password: "$argon2id$hash".into(),
             role: Role::Editor,
@@ -132,8 +148,7 @@ mod accounts_file_test {
         let accounts = HashMap::from([("editor".to_string(), editor)]);
 
         let saved = files.save_accounts_impl(&accounts).await;
-        let mode = std::fs::metadata(dir.join("accounts.toml"))
-            .map(|metadata| metadata.permissions().mode() & 0o777);
+        let mode = mode(&dir.join("accounts.toml"));
         let loaded = files.read_accounts().await;
         std::fs::remove_dir_all(&dir)?;
 
@@ -142,6 +157,40 @@ mod accounts_file_test {
         let loaded = loaded?;
         assert_eq!(loaded["editor"].role, Role::Editor);
         assert_eq!(loaded["editor"].proxies, accounts["editor"].proxies);
+        Ok(())
+    }
+
+    fn entry(id: &str, name: &str) -> anyhow::Result<AccessListEntry> {
+        let ip_filter = IpFilter {
+            allow: parse_cidr_list("10.0.0.0/8")?,
+            deny: Vec::new(),
+        };
+        let list = AccessList {
+            name: name.into(),
+            ip_filter,
+            ..Default::default()
+        };
+        Ok(AccessListEntry {
+            id: id.parse()?,
+            list,
+        })
+    }
+
+    #[tokio::test]
+    async fn access_lists_keep_their_order_in_an_owner_only_file() -> anyhow::Result<()> {
+        let (dir, files) = temp_storage("access-lists");
+        let lists = vec![entry("office", "Office")?, entry("home", "Home")?];
+
+        let missing = files.load_access_lists().await;
+        let saved = files.save_access_lists(&lists).await;
+        let mode = mode(&dir.join("access_lists.toml"));
+        let loaded = files.load_access_lists().await;
+        std::fs::remove_dir_all(&dir)?;
+
+        assert!(missing.is_empty());
+        saved?;
+        assert_eq!(mode?, 0o600);
+        assert_eq!(loaded, lists);
         Ok(())
     }
 }
@@ -241,18 +290,56 @@ impl FileStorage {
         Ok(content.parse::<DocumentMut>()?)
     }
 
-    async fn load_ports_impl(&self, path: &Path) -> anyhow::Result<Vec<PortEntry>> {
+    /// Reads a versioned table of entries by their ids, in the order of the file.
+    async fn read_entries<T, E>(&self, path: &Path) -> anyhow::Result<Vec<E>>
+    where
+        T: serde::de::DeserializeOwned,
+        E: From<(ShortId, T)>,
+    {
         info!(?path, "load config");
         let content = fs::read_to_string(path).await?;
-        let table: Versioned<IndexMap<ShortId, Port>> = toml::from_str(&content)?;
-        Ok(table.data.into_iter().map(|entry| entry.into()).collect())
+        let table: Versioned<IndexMap<ShortId, T>> = toml::from_str(&content)?;
+        Ok(table.data.into_iter().map(E::from).collect())
+    }
+
+    /// Writes a versioned table to a file that only the owner can read, because it holds secrets.
+    async fn write_private_table<T: serde::Serialize>(
+        &self,
+        path: &Path,
+        data: T,
+    ) -> anyhow::Result<()> {
+        fs::create_dir_all(&self.dir).await?;
+        info!(?path, "save config");
+        let table = Versioned {
+            version: default_version(),
+            data,
+        };
+        write_private(path, toml::to_string(&table)?).await
+    }
+
+    async fn load_ports_impl(&self, path: &Path) -> anyhow::Result<Vec<PortEntry>> {
+        self.read_entries::<Port, _>(path).await
     }
 
     async fn load_proxies_impl(&self, path: &Path) -> anyhow::Result<Vec<ProxyEntry>> {
-        info!(?path, "load proxies");
-        let content = fs::read_to_string(path).await?;
-        let table: Versioned<IndexMap<ShortId, Proxy>> = toml::from_str(&content)?;
-        Ok(table.data.into_iter().map(|entry| entry.into()).collect())
+        self.read_entries::<Proxy, _>(path).await
+    }
+
+    async fn read_access_lists(&self, path: &Path) -> anyhow::Result<Vec<AccessListEntry>> {
+        self.read_entries::<AccessList, _>(path).await
+    }
+
+    /// Writes every access list. The file holds password hashes and token digests.
+    async fn save_access_lists_impl(
+        &self,
+        path: &Path,
+        lists: &[AccessListEntry],
+    ) -> anyhow::Result<()> {
+        let data = lists
+            .iter()
+            .map(|entry| (entry.id, &entry.list))
+            .collect::<IndexMap<_, _>>();
+        self.write_private_table(path, data).await
     }
 
     async fn save_proxies_impl(&self, path: &Path, proxies: &[ProxyEntry]) -> anyhow::Result<()> {
@@ -388,10 +475,7 @@ impl FileStorage {
     }
 
     pub async fn load_acmes_impl(&self, path: &Path) -> anyhow::Result<Vec<AcmeEntry>> {
-        info!(?path, "load acmes");
-        let content = fs::read_to_string(path).await?;
-        let table: Versioned<IndexMap<ShortId, AcmeAccount>> = toml::from_str(&content)?;
-        Ok(table.data.into_iter().map(|entry| entry.into()).collect())
+        self.read_entries::<AcmeAccount, _>(path).await
     }
 
     async fn add_account_impl(
@@ -427,17 +511,11 @@ impl FileStorage {
         Ok(accounts.data)
     }
 
-    /// Writes every account. The file holds password hashes and TOTP secrets, so only the owner
-    /// can read it.
+    /// Writes every account. The file holds password hashes and TOTP secrets.
     async fn save_accounts_impl(&self, accounts: &HashMap<String, Account>) -> anyhow::Result<()> {
-        fs::create_dir_all(&self.dir).await?;
         let path = self.dir.join("accounts.toml");
-        info!(?path, "save accounts");
-        let table = Versioned {
-            version: default_version(),
-            data: accounts.iter().collect::<BTreeMap<_, _>>(),
-        };
-        write_private(&path, toml::to_string(&table)?).await
+        let data = accounts.iter().collect::<BTreeMap<_, _>>();
+        self.write_private_table(&path, data).await
     }
 
     /// Reads every file. A missing file is empty, but a file that cannot be read is an error, and
@@ -445,6 +523,7 @@ impl FileStorage {
     pub async fn read_state(&self) -> anyhow::Result<FileState> {
         let ports = self.dir.join("ports.toml");
         let proxies = self.dir.join("proxies.toml");
+        let access_lists = self.dir.join("access_lists.toml");
         let acmes = self.dir.join("acme.toml");
         let accounts = self.dir.join("accounts.toml");
         let cdn = self.dir.join("cdn-ranges.json");
@@ -452,6 +531,7 @@ impl FileStorage {
             config: self.read_app_config().await?,
             ports: if_exists(&ports, self.load_ports_impl(&ports)).await?,
             proxies: if_exists(&proxies, self.load_proxies_impl(&proxies)).await?,
+            access_lists: if_exists(&access_lists, self.read_access_lists(&access_lists)).await?,
             certs: self.load_certs().await,
             acmes: if_exists(&acmes, self.load_acmes_impl(&acmes)).await?,
             accounts: if_exists(&accounts, self.read_accounts()).await?,
@@ -469,6 +549,7 @@ pub struct FileState {
     pub config: AppConfig,
     pub ports: Vec<PortEntry>,
     pub proxies: Vec<ProxyEntry>,
+    pub access_lists: Vec<AccessListEntry>,
     pub certs: Vec<Arc<Cert>>,
     pub acmes: Vec<AcmeEntry>,
     pub accounts: HashMap<String, Account>,
@@ -541,6 +622,22 @@ impl Storage for FileStorage {
                 Default::default()
             }
         }
+    }
+
+    async fn load_access_lists(&self) -> Vec<AccessListEntry> {
+        let path = self.dir.join("access_lists.toml");
+        if_exists(&path, self.read_access_lists(&path))
+            .await
+            .unwrap_or_else(|err| {
+                error!(?path, "failed to load: {err:#}");
+                Vec::new()
+            })
+    }
+
+    async fn save_access_lists(&self, lists: &[AccessListEntry]) -> Result<(), Error> {
+        let path = self.dir.join("access_lists.toml");
+        let result = self.save_access_lists_impl(&path, lists).await;
+        saved(&path, result)
     }
 
     async fn save_cert(&self, cert: &Cert) -> Result<(), Error> {

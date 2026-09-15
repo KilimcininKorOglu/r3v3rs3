@@ -58,8 +58,13 @@ async fn cluster(args: ClusterArgs) -> anyhow::Result<()> {
             let config_dir = get_config_dir(args.config_dir)?;
             let report = r3v3rs3::cluster::import::run(&config_dir).await?;
             println!(
-                "Imported the config, {} ports, {} proxies, {} certificates, {} ACME entries and {} accounts.",
-                report.ports, report.proxies, report.certs, report.acmes, report.accounts
+                "Imported the config, {} ports, {} proxies, {} access lists, {} certificates, {} ACME entries and {} accounts.",
+                report.ports,
+                report.proxies,
+                report.access_lists,
+                report.certs,
+                report.acmes,
+                report.accounts
             );
         }
     }

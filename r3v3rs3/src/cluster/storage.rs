@@ -17,6 +17,7 @@ use crate::proxy::http::cache_share::SharedCacheStore;
 use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::SessionBackend;
 use anyhow::Context as _;
+use r3v3rs3_api::access_list::{AccessList, AccessListEntry};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::auth::{Account, LoginRequest, LoginResponse, Role};
 use r3v3rs3_api::cert::CertKind;
@@ -662,6 +663,16 @@ impl Storage for KvStorage {
             .map(|entry| (entry.id, &entry.proxy))
             .collect();
         self.save_list(self.layout.proxies(), proxies).await
+    }
+
+    async fn load_access_lists(&self) -> Vec<AccessListEntry> {
+        self.load_list::<AccessList, _>(&self.layout.access_lists())
+            .await
+    }
+
+    async fn save_access_lists(&self, lists: &[AccessListEntry]) -> Result<(), Error> {
+        let lists = lists.iter().map(|entry| (entry.id, &entry.list)).collect();
+        self.save_list(self.layout.access_lists(), lists).await
     }
 
     async fn save_cert(&self, cert: &Cert) -> Result<(), Error> {
