@@ -302,7 +302,7 @@ impl Storage for TestStorage {
             .insert(name.to_string(), password.to_string());
         Ok(Account {
             password: password.to_string(),
-            totp: None,
+            ..Default::default()
         })
     }
 

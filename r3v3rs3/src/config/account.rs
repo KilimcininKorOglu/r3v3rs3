@@ -15,6 +15,7 @@ pub fn new_account(password: &str, totp: bool) -> anyhow::Result<Account> {
     Ok(Account {
         password,
         totp: totp.then(|| TOTP::default().get_secret_base32()),
+        ..Default::default()
     })
 }
 
