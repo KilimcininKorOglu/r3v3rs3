@@ -1,0 +1,25 @@
+# Runs r3v3rs3 from the published image: docker compose up -d
+#
+# Host networking lets every port that you add in the WebUI listen without a change to this file.
+# Host networking works only on a Linux Docker host.
+services:
+  r3v3rs3:
+    image: ghcr.io/kilimcininkoroglu/r3v3rs3:${R3V3RS3_VERSION:-latest}
+    container_name: r3v3rs3
+    network_mode: host
+    entrypoint: ["/usr/bin/r3v3rs3", "start"]
+    environment:
+      # The admin WebUI address. Set R3V3RS3_WEBUI=0.0.0.0:46492 in .env to open it to other hosts.
+      R3V3RS3_WEBUI: ${R3V3RS3_WEBUI:-127.0.0.1:46492}
+    volumes:
+      - r3v3rs3-config:/root/.config/r3v3rs3
+      - r3v3rs3-data:/root/.local/share/r3v3rs3
+      # Uncomment to discover proxies from Docker labels.
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+    # The server shuts down gracefully on SIGINT.
+    stop_signal: SIGINT
+    restart: unless-stopped
+
+volumes:
+  r3v3rs3-config:
+  r3v3rs3-data:

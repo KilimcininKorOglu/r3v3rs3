@@ -41,6 +41,22 @@ r3v3rs3 is currently in early development. Please be aware that breaking changes
 
 There are multiple ways to install r3v3rs3.
 
+### Linux server
+
+`install.sh` installs the latest release binary (x86_64 or aarch64) with its sha256 check, creates the admin account and runs r3v3rs3 as a systemd service:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
+```
+
+The script asks for the admin WebUI address. The default is `127.0.0.1:46492`. To install a specific release or to skip the question, pass the options:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --version 1.0.1 --webui 0.0.0.0:46492
+```
+
+The config is in `/etc/r3v3rs3` and the logs are in `/var/log/r3v3rs3`. Run the script again to upgrade.
+
 ## Docker
 
 Run the following command to start r3v3rs3 using Docker:
@@ -65,39 +81,22 @@ password?: ******
 
 ### Docker Compose
 
-Create a file named `docker-compose.yml` with the following content:
-
-```yaml
-version: "3"
-services:
-  r3v3rs3:
-    image: ghcr.io/kilimcininkoroglu/r3v3rs3:latest
-    container_name: r3v3rs3
-    volumes:
-      - r3v3rs3-config:/root/.config/r3v3rs3
-      # Uncomment to discover proxies from Docker labels
-      # - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      # Add ports here if you want to expose them to the host
-      - 80:80
-      - 443:443
-      - 127.0.0.1:46492:46492 # Admin panel
-    restart: unless-stopped
-
-volumes:
-  r3v3rs3-config:
-```
-
-Run the following command to start r3v3rs3:
+Download [`docker-compose.yml`](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/docker-compose.yml) and start r3v3rs3:
 
 ```bash
-$ docker-compose up -d
+$ curl -fsSLO https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/docker-compose.yml
+$ docker compose up -d
 ```
+
+The file uses host networking, so every port that you add in the WebUI listens without a change to the file. Host networking works only on a Linux Docker host. Set these variables in a `.env` file next to it:
+
+- `R3V3RS3_WEBUI`: the admin WebUI address. The default is `127.0.0.1:46492`.
+- `R3V3RS3_VERSION`: the image tag. The default is `latest`.
 
 To log in to the admin panel, you'll first need to create a user. Follow the steps below to create an admin user:
 
 ```bash
-$ docker-compose exec r3v3rs3 r3v3rs3 add-user admin
+$ docker compose exec r3v3rs3 r3v3rs3 add-user admin
 password?: ******
 ```
 

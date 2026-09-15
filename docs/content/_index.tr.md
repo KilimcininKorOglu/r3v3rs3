@@ -24,6 +24,22 @@ sort_by = "weight"
 
 r3v3rs3'ü birkaç yolla kurabilirsiniz.
 
+## Linux sunucu
+
+`install.sh`, son release binary'sini (x86_64 veya aarch64) sha256 kontrolüyle kurar, admin hesabını oluşturur ve r3v3rs3'ü systemd servisi olarak çalıştırır:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
+```
+
+Script, yönetim paneli WebUI adresini sorar. Varsayılan adres `127.0.0.1:46492`. Belirli bir release kurmak veya soruyu atlamak için seçenekleri verin:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --version 1.0.1 --webui 0.0.0.0:46492
+```
+
+Config `/etc/r3v3rs3`, log dosyaları `/var/log/r3v3rs3` dizinindedir. Güncellemek için script'i yeniden çalıştırın.
+
 ## Docker
 
 r3v3rs3'ü Docker ile başlatmak için şu komutu çalıştırın:
@@ -48,39 +64,22 @@ password?: ******
 
 ## Docker Compose
 
-Aşağıdaki içerikle `docker-compose.yml` adında bir dosya oluşturun:
-
-```yaml
-version: "3"
-services:
-  r3v3rs3:
-    image: ghcr.io/kilimcininkoroglu/r3v3rs3:latest
-    container_name: r3v3rs3
-    volumes:
-      - r3v3rs3-config:/root/.config/r3v3rs3
-      # Uncomment to discover proxies from Docker labels
-      # - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      # Add ports here if you want to expose them to the host
-      - 80:80
-      - 443:443
-      - 127.0.0.1:46492:46492 # Admin panel
-    restart: unless-stopped
-
-volumes:
-  r3v3rs3-config:
-```
-
-r3v3rs3'ü başlatmak için şu komutu çalıştırın:
+[`docker-compose.yml`](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/docker-compose.yml) dosyasını indirip r3v3rs3'ü başlatın:
 
 ```bash
-$ docker-compose up -d
+$ curl -fsSLO https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/docker-compose.yml
+$ docker compose up -d
 ```
+
+Dosya host networking kullanır. Bu yüzden WebUI'da eklediğiniz her port, dosyayı değiştirmeden dinlenir. Host networking yalnız Linux Docker host'unda çalışır. Şu değişkenleri dosyanın yanındaki `.env` dosyasında ayarlayın:
+
+- `R3V3RS3_WEBUI`: yönetim paneli WebUI adresi. Varsayılan `127.0.0.1:46492`.
+- `R3V3RS3_VERSION`: image tag'i. Varsayılan `latest`.
 
 Yönetim paneline giriş yapmak için önce bir kullanıcı oluşturmanız gerekir. Admin kullanıcısını şu komutla oluşturun:
 
 ```bash
-$ docker-compose exec r3v3rs3 r3v3rs3 add-user admin
+$ docker compose exec r3v3rs3 r3v3rs3 add-user admin
 password?: ******
 ```
 
