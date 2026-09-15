@@ -944,6 +944,20 @@ The "Audit Log Retention" setting sets how long an entry stays. The default is `
 
 A failed write to the audit log does not undo the change. r3v3rs3 logs the error.
 
+The Audit Log page of the WebUI lists the entries, starting with the newest. Only an admin opens the page. The page filters the entries by account, resource and period, and shows at most 500 entries.
+
+`GET /api/audit` returns the same entries. Only an admin account can call it. Each query parameter is optional:
+
+| Parameter | Description |
+|---|---|
+| `since` | The earliest time in Unix milliseconds. The default is 31 days before `until`. |
+| `until` | The latest time in Unix milliseconds. The default is the current time. |
+| `username` | The account of the entries. |
+| `resource_id` | The id of the changed resource, or the changed username. |
+| `limit` | The most entries in the response. The default is `100` and the maximum is `500`. |
+
+A cluster reads at most 31 days before `until`, so a longer period does not return older entries.
+
 # Logging
 
 r3v3rs3 logs to the standard output as its default setting. You can change this behavior by setting the `R3V3RS3_LOG`, `R3V3RS3_ACCESS_LOG` environment variable or using the `--log`, `--access-log` command-line option.

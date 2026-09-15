@@ -33,6 +33,7 @@ const SESSION_COOKIE: &str = "token";
     tags(
         (name = "auth", description = "Sign in, sign out and the account of the session."),
         (name = "accounts", description = "Panel accounts with their roles and proxy lists."),
+        (name = "audit", description = "The changes and the sign-ins of the accounts."),
         (name = "events", description = "Server events."),
         (name = "config", description = "Application settings."),
         (name = "ports", description = "Listening ports."),

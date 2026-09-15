@@ -44,6 +44,12 @@ const ITEMS: &[MenuItem] = {
             admin_only: true,
         },
         MenuItem {
+            name: "nav.audit",
+            icon: "/assets/icons/document-text.svg",
+            route: Route::Audit,
+            admin_only: true,
+        },
+        MenuItem {
             name: "nav.settings",
             icon: "/assets/icons/settings.svg",
             route: Route::Settings,

@@ -3,10 +3,16 @@
 
 use serde_derive::{Deserialize, Serialize};
 use std::net::IpAddr;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 /// The longest summary of an entry in bytes.
 pub const MAX_SUMMARY_LENGTH: usize = 512;
+
+/// The entries of a query without `limit`.
+pub const DEFAULT_QUERY_LIMIT: u32 = 100;
+
+/// The most entries of a query.
+pub const MAX_QUERY_LIMIT: u32 = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -34,6 +40,32 @@ pub enum AuditAction {
     DeleteAcme,
 }
 
+impl AuditAction {
+    pub const ALL: [AuditAction; 21] = [
+        Self::Login,
+        Self::LoginFailed,
+        Self::Logout,
+        Self::AddAccount,
+        Self::UpdateAccount,
+        Self::DeleteAccount,
+        Self::UpdateConfig,
+        Self::RefreshCdnRanges,
+        Self::AddPort,
+        Self::UpdatePort,
+        Self::DeletePort,
+        Self::ResetPort,
+        Self::AddProxy,
+        Self::UpdateProxy,
+        Self::DeleteProxy,
+        Self::PurgeProxyCache,
+        Self::AddCert,
+        Self::DeleteCert,
+        Self::AddAcme,
+        Self::UpdateAcme,
+        Self::DeleteAcme,
+    ];
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AuditEntry {
     /// The Unix time in milliseconds.
@@ -54,4 +86,20 @@ pub struct AuditEntry {
     /// The cluster node that recorded the entry. Empty without a cluster.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub node: String,
+}
+
+/// The filter of an audit log query. Each field is optional.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct AuditQuery {
+    /// The earliest time in Unix milliseconds. The default is 31 days before `until`.
+    pub since: Option<u64>,
+    /// The latest time in Unix milliseconds. The default is the current time.
+    pub until: Option<u64>,
+    /// The account of the entries.
+    pub username: Option<String>,
+    /// The id of the changed resource, or the changed username.
+    pub resource_id: Option<String>,
+    /// The most entries in the response: 100 by default, at most 500.
+    pub limit: Option<u32>,
 }

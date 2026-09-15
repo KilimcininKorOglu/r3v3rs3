@@ -16,7 +16,9 @@ use serde_json::json;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::{alloc_tcp_port, session_cookie, wait_for_listener, wait_until, TestStorage};
+use common::{
+    alloc_tcp_port, login_when_allowed, session_cookie, wait_for_listener, wait_until, TestStorage,
+};
 
 /// The action, the account, the resource id and the summary of each entry.
 fn rows(entries: &[AuditEntry]) -> Vec<(AuditAction, &str, Option<&str>, &str)> {
@@ -93,6 +95,7 @@ async fn the_audit_log_records_the_changes_and_the_sign_ins_of_an_account() -> a
         since: started,
         until: u64::MAX,
         username: None,
+        resource_id: None,
         limit: 100,
     };
     let (store, filter) = (&store, &filter);
@@ -103,8 +106,8 @@ async fn the_audit_log_records_the_changes_and_the_sign_ins_of_an_account() -> a
     .await?;
 
     let entries = store.query(filter).await?;
-    let rows = rows(&entries);
-    assert_eq!(rows.len(), 4, "{rows:?}");
+    let found = rows(&entries);
+    assert_eq!(found.len(), 4, "{found:?}");
     let expected = [
         (AuditAction::Login, "admin", None, ""),
         (
@@ -117,12 +120,44 @@ async fn the_audit_log_records_the_changes_and_the_sign_ins_of_an_account() -> a
         (AuditAction::Logout, "admin", None, ""),
     ];
     for row in expected {
-        assert!(rows.contains(&row), "{row:?} is missing in {rows:?}");
+        assert!(found.contains(&row), "{row:?} is missing in {found:?}");
     }
     assert!(entries
         .iter()
         .all(|entry| entry.client.is_some_and(|ip| ip.is_loopback())));
     assert!(!serde_json::to_string(&entries)?.contains("viewer-secret"));
+
+    // The admin API returns the entries to an admin, newest first.
+    let cookie = login_when_allowed(addr, "admin", "secret").await?;
+    let audit = |query: &str, cookie: &str| {
+        client
+            .get(format!("http://{addr}/api/audit{query}"))
+            .header(COOKIE, cookie)
+            .send()
+    };
+    let newest: Vec<AuditEntry> = audit("?username=admin&limit=2", &cookie)
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(newest.len(), 2);
+    assert!(newest[0].time >= newest[1].time);
+    let added: Vec<AuditEntry> = audit("?resource_id=viewer", &cookie)
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(
+        rows(&added),
+        [(
+            AuditAction::AddAccount,
+            "admin",
+            Some("viewer"),
+            "role=viewer"
+        )]
+    );
+    let viewer = login_when_allowed(addr, "viewer", "viewer-secret").await?;
+    assert_eq!(audit("", &viewer).await?.status(), 403);
 
     event.send(ServerEvent::Shutdown)?;
     task.await??;

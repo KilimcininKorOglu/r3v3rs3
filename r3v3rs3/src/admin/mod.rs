@@ -49,6 +49,7 @@ use utoipa_swagger_ui::SwaggerUi;
 mod accounts;
 mod acme;
 mod app_info;
+mod audit;
 pub(crate) mod auth;
 mod cdn;
 mod certs;
@@ -205,6 +206,7 @@ fn resource_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(accounts::list, accounts::add))
                 .routes(routes!(accounts::put, accounts::delete)),
         )
+        .nest("/audit", OpenApiRouter::new().routes(routes!(audit::list)))
         .nest(
             "/config",
             OpenApiRouter::new().routes(routes!(config::get, config::put)),

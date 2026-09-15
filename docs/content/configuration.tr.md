@@ -944,6 +944,20 @@ Bir kaydın ne kadar tutulacağını "Audit Log Saklama Süresi" ayarı belirler
 
 Audit log'a yazma başarısız olursa değişiklik geri alınmaz. r3v3rs3 hatayı log'a yazar.
 
+WebUI'daki Audit Log sayfası kayıtları en yeni kayıttan başlayarak listeler. Bu sayfayı yalnız admin hesabı açar. Sayfa kayıtları hesaba, kaynağa ve döneme göre filtreler. Sayfada en fazla 500 kayıt görünür.
+
+`GET /api/audit` aynı kayıtları döner. Bu endpoint'i yalnız admin hesabı çağırabilir. Query parametrelerinin hepsi isteğe bağlıdır:
+
+| Parametre | Açıklama |
+|---|---|
+| `since` | Unix milisaniye cinsinden en erken zaman. Varsayılan değer, `until` değerinden 31 gün öncesidir. |
+| `until` | Unix milisaniye cinsinden en geç zaman. Varsayılan değer şu andır. |
+| `username` | Kayıtların ait olduğu hesap. |
+| `resource_id` | Değişen kaynağın id'si veya değişen kullanıcı adı. |
+| `limit` | Yanıttaki en fazla kayıt sayısı. Varsayılan değer `100`, en yüksek değer `500` olur. |
+
+Cluster, `until` değerinden en fazla 31 gün geriye okur. Bu yüzden daha uzun bir dönem daha eski kayıtları döndürmez.
+
 # Log
 
 r3v3rs3 varsayılan olarak log'ları standart çıktıya yazar. Bunu `R3V3RS3_LOG`, `R3V3RS3_ACCESS_LOG` environment variable'larıyla veya `--log`, `--access-log` komut satırı seçenekleriyle değiştirebilirsiniz.

@@ -3,7 +3,9 @@
 
 use crate::clock::unix_ms;
 use crate::log::open_database;
-use r3v3rs3_api::audit::{AuditAction, AuditEntry, MAX_SUMMARY_LENGTH};
+use r3v3rs3_api::audit::{
+    AuditAction, AuditEntry, AuditQuery, DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT, MAX_SUMMARY_LENGTH,
+};
 use sqlx::{Row, SqlitePool};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -13,6 +15,10 @@ use tracing::error;
 
 /// One day in milliseconds.
 pub const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+
+/// The days of a query without `since`. The cluster store also reads at most these days before
+/// `until`, because it lists the keys of each day separately.
+pub const MAX_QUERY_DAYS: u64 = 31;
 
 /// The longest username of an entry in bytes. A failed sign-in keeps the typed username.
 const MAX_USERNAME_LENGTH: usize = 128;
@@ -25,16 +31,38 @@ pub struct AuditFilter {
     /// The latest time in Unix milliseconds.
     pub until: u64,
     pub username: Option<String>,
+    pub resource_id: Option<String>,
     pub limit: usize,
 }
 
 impl AuditFilter {
+    /// The filter of an admin API query at `now` in Unix milliseconds.
+    pub fn new(query: &AuditQuery, now: u64) -> Self {
+        let until = query.until.unwrap_or(now);
+        let since = until.saturating_sub(MAX_QUERY_DAYS * DAY_MS);
+        let limit = query
+            .limit
+            .unwrap_or(DEFAULT_QUERY_LIMIT)
+            .min(MAX_QUERY_LIMIT);
+        Self {
+            since: query.since.unwrap_or(since),
+            until,
+            username: query.username.clone(),
+            resource_id: query.resource_id.clone(),
+            limit: limit as usize,
+        }
+    }
+
     pub fn matches(&self, entry: &AuditEntry) -> bool {
         (self.since..=self.until).contains(&entry.time)
             && self
                 .username
                 .as_ref()
                 .is_none_or(|username| *username == entry.username)
+            && self
+                .resource_id
+                .as_ref()
+                .is_none_or(|id| entry.resource_id.as_ref() == Some(id))
     }
 }
 
@@ -107,6 +135,11 @@ impl AuditLog {
                 error!(action = ?entry.action, "failed to record the audit entry: {err:#}");
             }
         });
+    }
+
+    /// The entries that the filter matches, newest first.
+    pub async fn query(&self, filter: &AuditFilter) -> anyhow::Result<Vec<AuditEntry>> {
+        self.store.query(filter).await
     }
 
     pub async fn remove_before(&self, time: u64) -> anyhow::Result<()> {
@@ -182,12 +215,14 @@ impl AuditStore for SqliteAuditStore {
         let rows = sqlx::query(
             "SELECT entry FROM audit_log
             WHERE time BETWEEN ?1 AND ?2 AND (?3 IS NULL OR username = ?3)
+            AND (?5 IS NULL OR json_extract(entry, '$.resource_id') = ?5)
             ORDER BY time DESC LIMIT ?4",
         )
         .bind(sql_int(filter.since))
         .bind(sql_int(filter.until))
         .bind(filter.username.as_deref())
         .bind(sql_int(filter.limit as u64))
+        .bind(filter.resource_id.as_deref())
         .fetch_all(self.pool().await?)
         .await?;
         rows.iter()
@@ -227,6 +262,23 @@ mod tests {
     }
 
     #[test]
+    fn a_query_without_a_period_covers_31_days_and_at_most_500_entries() {
+        let now = 100 * DAY_MS;
+        let filter = AuditFilter::new(&AuditQuery::default(), now);
+        assert_eq!(
+            (filter.since, filter.until, filter.limit),
+            (69 * DAY_MS, now, 100)
+        );
+        let query = AuditQuery {
+            since: Some(5),
+            limit: Some(10_000),
+            ..Default::default()
+        };
+        let filter = AuditFilter::new(&query, now);
+        assert_eq!((filter.since, filter.limit), (5, 500));
+    }
+
+    #[test]
     fn a_long_text_is_cut_at_a_character_boundary() {
         assert_eq!(truncate("abc", 5), "abc");
         assert_eq!(truncate("aç", 2), "a");
@@ -249,6 +301,7 @@ mod tests {
             since: 0,
             until: u64::MAX,
             username: None,
+            resource_id: None,
             limit: 10,
         };
         assert_eq!(times(store.query(&all).await?), [9_000, 5_000, 1_000]);
@@ -258,9 +311,19 @@ mod tests {
             ..all.clone()
         };
         assert_eq!(times(store.query(&admin).await?), [5_000]);
+        let web = AuditEntry {
+            resource_id: Some("web".into()),
+            ..entry(7_000, "editor")
+        };
+        store.append(&web).await?;
+        let resource = AuditFilter {
+            resource_id: Some("web".into()),
+            ..all.clone()
+        };
+        assert_eq!(times(store.query(&resource).await?), [7_000]);
 
         store.remove_before(5_000).await?;
-        assert_eq!(times(store.query(&all).await?), [9_000, 5_000]);
+        assert_eq!(times(store.query(&all).await?), [9_000, 7_000, 5_000]);
         std::fs::remove_file(path)?;
         Ok(())
     }

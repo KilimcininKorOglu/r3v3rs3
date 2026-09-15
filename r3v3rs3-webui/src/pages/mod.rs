@@ -4,6 +4,7 @@ use yew::prelude::*;
 use yew_router::prelude::*;
 
 mod accounts;
+mod audit;
 pub mod cert_list;
 mod log_view;
 mod login;
@@ -58,6 +59,8 @@ pub enum Route {
     Settings,
     #[at("/accounts")]
     Accounts,
+    #[at("/audit")]
+    Audit,
     #[not_found]
     #[at("/404")]
     NotFound,
@@ -79,7 +82,7 @@ impl Route {
             | Route::NewProxy
             | Route::ProxyView { .. }
             | Route::ProxyLogView { .. } => Some(Route::Proxies),
-            Route::Settings | Route::Accounts => Some(self.clone()),
+            Route::Settings | Route::Accounts | Route::Audit => Some(self.clone()),
             _ => None,
         }
     }
@@ -105,6 +108,7 @@ pub fn switch(routes: Route) -> Html {
         Route::Upload => html! { <upload::Upload /> },
         Route::Settings => html! { <settings::Settings /> },
         Route::Accounts => html! { <accounts::Accounts /> },
+        Route::Audit => html! { <audit::AuditLog /> },
         Route::NotFound => html! { <Redirect<Route> to={Route::Home}/> },
     }
 }

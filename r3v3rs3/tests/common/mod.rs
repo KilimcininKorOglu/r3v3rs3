@@ -501,6 +501,26 @@ pub async fn session_cookie(
     Ok(cookie.to_string())
 }
 
+/// Signs in again after the rate limit of the sign-in endpoint allows another request.
+pub async fn login_when_allowed(
+    addr: SocketAddr,
+    username: &str,
+    password: &str,
+) -> anyhow::Result<String> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            match session_cookie(addr, username, password).await {
+                Err(err) if err.to_string().contains("429") => {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+                result => return result,
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("the sign-in stayed rate limited"))?
+}
+
 pub fn proxy_entry(id: &str, port_id: &str, kind: ProxyKind) -> ProxyEntry {
     ProxyEntry {
         id: id.parse().unwrap(),

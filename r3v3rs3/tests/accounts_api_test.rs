@@ -6,7 +6,9 @@ use std::{net::SocketAddr, time::Duration};
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::{alloc_tcp_port, session_cookie, wait_for_listener, with_server, TestStorage};
+use common::{
+    alloc_tcp_port, login_when_allowed, session_cookie, wait_for_listener, with_server, TestStorage,
+};
 
 /// Sends a request to the admin API and returns the status and the body.
 async fn send(
@@ -24,26 +26,6 @@ async fn send(
     }
     let response = request.send().await?;
     Ok((response.status().as_u16(), response.text().await?))
-}
-
-/// Signs in again after the rate limit of the sign-in endpoint allows another request.
-async fn login_when_allowed(
-    addr: SocketAddr,
-    username: &str,
-    password: &str,
-) -> anyhow::Result<String> {
-    tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            match session_cookie(addr, username, password).await {
-                Err(err) if err.to_string().contains("429") => {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                result => return result,
-            }
-        }
-    })
-    .await
-    .map_err(|_| anyhow::anyhow!("the sign-in stayed rate limited"))?
 }
 
 #[tokio::test]

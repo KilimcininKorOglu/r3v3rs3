@@ -72,6 +72,7 @@ async fn the_nodes_share_an_encrypted_audit_log_and_the_leader_deletes_the_old_d
         since: now - 60 * DAY_MS,
         until: now,
         username: None,
+        resource_id: None,
         limit: 10,
     };
     // A query reads 31 days back from `until`, so the entry of 40 days ago is outside.

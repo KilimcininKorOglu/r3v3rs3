@@ -2,15 +2,12 @@
 //! the leader deletes the days that passed the retention.
 
 use super::storage::KvStorage;
-use crate::audit::{AuditFilter, AuditStore, DAY_MS};
+use crate::audit::{AuditFilter, AuditStore, DAY_MS, MAX_QUERY_DAYS};
 use crate::kv::KvItem;
 use anyhow::Context as _;
 use r3v3rs3_api::audit::AuditEntry;
 use time::OffsetDateTime;
 use tracing::warn;
-
-/// The most days that a query reads. The store lists the keys of each day separately.
-pub const MAX_QUERY_DAYS: u64 = 31;
 
 #[async_trait::async_trait]
 impl AuditStore for KvStorage {
@@ -98,6 +95,7 @@ mod tests {
             since,
             until,
             username: None,
+            resource_id: None,
             limit: 10,
         };
         assert_eq!(
