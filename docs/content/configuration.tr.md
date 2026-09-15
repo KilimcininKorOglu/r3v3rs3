@@ -899,6 +899,8 @@ Varsayılan konumu `R3V3RS3_CONFIG_DIR` environment variable'ı veya `--config-d
 
 Bu dosyaları elle de düzenleyebilirsiniz. Ancak r3v3rs3 config dosyalarındaki değişiklikleri kendiliğinden algılamaz. Değişikliklerin geçerli olması için dosyayı düzenledikten sonra sunucuyu yeniden başlatın.
 
+Cluster'daki bir node yalnız `config.toml` dosyasını okur. State'in geri kalanı etcd veya Consul'dadır. Ayrıntılar için [Cluster](@/cluster.tr.md) sayfasına bakın.
+
 # WebUI
 
 r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak localhost:46492 adresinde çalışır. Portu `R3V3RS3_WEBUI` environment variable'ı veya `--webui` komut satırı seçeneğiyle değiştirebilirsiniz. WebUI'ı kapatmak için `R3V3RS3_NO_WEBUI=1` environment variable'ını ayarlayın veya `--no-webui` komut satırı seçeneğini kullanın.

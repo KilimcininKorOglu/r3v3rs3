@@ -15,8 +15,7 @@ use r3v3rs3::server::rpc::cluster::GetClusterStatus;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
 use r3v3rs3::server::rpc::ports::{AddPort, GetPortList};
 use r3v3rs3::server::rpc::proxies::{AddProxy, GetProxyList};
-use r3v3rs3::server::rpc::RpcMethod;
-use r3v3rs3::server::{Server, ServerChannels};
+use r3v3rs3::server::Server;
 use r3v3rs3::sessions::{SessionBackend, SessionScope};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::cache::CacheConfig;
@@ -36,10 +35,11 @@ use tokio::task::JoinHandle;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
+use common::cluster::{stop_server, Node};
 use common::kv::{check_locks_and_leases, MemoryStore};
 use common::{
     admin_session_cookie, alloc_tcp_port, call, http_port_entry, http_route, wait_for_listener,
-    wait_for_rpc, wait_until,
+    wait_until,
 };
 
 const SYNC_INTERVAL: Duration = Duration::from_millis(100);
@@ -63,47 +63,15 @@ fn node_storage(store: &Arc<MemoryStore>, name: &str) -> anyhow::Result<KvStorag
     Ok(KvStorage::new(store.clone(), keys, local))
 }
 
-struct Node {
-    channels: ServerChannels,
-    task: JoinHandle<anyhow::Result<()>>,
-}
-
-impl Node {
-    async fn start(store: &Arc<MemoryStore>, name: &str) -> anyhow::Result<Self> {
-        let storage = Arc::new(node_storage(store, name)?);
-        let app_info = new_appinfo(Path::new("."), Path::new("."));
-        let (server, channels) = Server::new_shared(app_info, storage.clone()).await;
-        cluster::spawn_tasks(storage, channels.command.clone());
-        let task = tokio::spawn(server.start());
-        Ok(Self { channels, task })
-    }
-
-    async fn call<M: RpcMethod + 'static>(&mut self, method: M) -> anyhow::Result<M::Output> {
-        Ok(call(&mut self.channels, method).await??)
-    }
-
-    async fn wait_for<M>(
-        &mut self,
-        method: impl Fn() -> M,
-        done: impl Fn(&M::Output) -> bool,
-    ) -> anyhow::Result<M::Output>
-    where
-        M: RpcMethod + 'static,
-        M::Output: std::fmt::Debug,
-    {
-        wait_for_rpc(&mut self.channels, method, done).await
-    }
-
-    async fn stop(self) -> anyhow::Result<()> {
-        stop_server(&self.channels.event, self.task).await
-    }
+async fn start_node(store: &Arc<MemoryStore>, name: &str) -> anyhow::Result<Node> {
+    Node::start(node_storage(store, name)?).await
 }
 
 #[tokio::test]
 async fn a_change_on_one_node_reaches_the_other_node() -> anyhow::Result<()> {
     let store = Arc::new(MemoryStore::default());
-    let mut a = Node::start(&store, "node-a").await?;
-    let mut b = Node::start(&store, "node-b").await?;
+    let mut a = start_node(&store, "node-a").await?;
+    let mut b = start_node(&store, "node-b").await?;
     let synced = |status: &ClusterStatus| status.state == ClusterState::Synced;
     let status = b.wait_for(|| GetClusterStatus, synced).await?;
     assert_eq!(status.node_name, "node-b");
@@ -151,7 +119,7 @@ async fn every_node_serves_the_challenges_of_the_store() -> anyhow::Result<()> {
         ..Default::default()
     };
     leader.save_app_config(&config).await?;
-    let mut node = Node::start(&store, "node-b").await?;
+    let mut node = start_node(&store, "node-b").await?;
     let synced = |status: &ClusterStatus| status.state == ClusterState::Synced;
     node.wait_for(|| GetClusterStatus, synced).await?;
 
@@ -244,14 +212,6 @@ impl AdminNode {
     }
 }
 
-async fn stop_server(
-    event: &broadcast::Sender<ServerEvent>,
-    task: JoinHandle<anyhow::Result<()>>,
-) -> anyhow::Result<()> {
-    event.send(ServerEvent::Shutdown)?;
-    task.await?
-}
-
 #[tokio::test]
 async fn a_session_of_one_node_is_valid_on_the_other_node_until_logout() -> anyhow::Result<()> {
     let dir = std::env::temp_dir().join(format!("r3v3rs3-cluster-session-{}", std::process::id()));
@@ -279,7 +239,7 @@ async fn a_session_of_one_node_is_valid_on_the_other_node_until_logout() -> anyh
 #[tokio::test]
 async fn a_client_that_used_its_limit_on_another_node_is_limited() -> anyhow::Result<()> {
     let store = Arc::new(MemoryStore::default());
-    let mut a = Node::start(&store, "node-a").await?;
+    let mut a = start_node(&store, "node-a").await?;
     let port = alloc_tcp_port().await?;
     let addr = port.socket_addr();
     a.call(AddPort {
@@ -381,7 +341,7 @@ async fn a_cached_response_of_one_node_serves_another_node() -> anyhow::Result<(
         .expect(2)
         .create_async()
         .await;
-    let mut a = Node::start(&store, "node-a").await?;
+    let mut a = start_node(&store, "node-a").await?;
     let port = alloc_tcp_port().await?;
     a.call(AddPort {
         entry: http_port_entry("web", &port).port,
@@ -426,7 +386,7 @@ async fn a_cached_response_of_one_node_serves_another_node() -> anyhow::Result<(
     a.stop().await?;
 
     // Node B has no response of its own, so it serves the response of node A.
-    let b = Node::start(&store, "node-b").await?;
+    let b = start_node(&store, "node-b").await?;
     let hit = ("HIT".to_string(), "page".to_string());
     assert_eq!(cached_get(&url).await?, hit);
     b.stop().await?;
@@ -467,8 +427,8 @@ async fn the_memory_store_keeps_locks_and_leases() -> anyhow::Result<()> {
 async fn one_node_leads_and_another_node_takes_over_when_it_stops() -> anyhow::Result<()> {
     let store = Arc::new(MemoryStore::default());
     let mut nodes = [
-        Node::start(&store, "node-a").await?,
-        Node::start(&store, "node-b").await?,
+        start_node(&store, "node-a").await?,
+        start_node(&store, "node-b").await?,
     ];
     let mut leaders = Vec::new();
     for _ in 0..100 {
@@ -505,8 +465,8 @@ async fn one_node_leads_and_another_node_takes_over_when_it_stops() -> anyhow::R
 #[tokio::test]
 async fn a_node_that_loses_the_store_rejects_changes_until_it_returns() -> anyhow::Result<()> {
     let store = Arc::new(MemoryStore::default());
-    let mut a = Node::start(&store, "node-a").await?;
-    let mut b = Node::start(&store, "node-b").await?;
+    let mut a = start_node(&store, "node-a").await?;
+    let mut b = start_node(&store, "node-b").await?;
     let state = |expected: ClusterState| move |status: &ClusterStatus| status.state == expected;
     b.wait_for(|| GetClusterStatus, state(ClusterState::Synced))
         .await?;
@@ -545,7 +505,7 @@ async fn a_node_that_loses_the_store_rejects_changes_until_it_returns() -> anyho
 async fn a_node_whose_store_stops_answering_becomes_degraded_and_stops_leading(
 ) -> anyhow::Result<()> {
     let store = Arc::new(MemoryStore::default());
-    let mut node = Node::start(&store, "node-a").await?;
+    let mut node = start_node(&store, "node-a").await?;
     let leading = |status: &ClusterStatus| status.state == ClusterState::Synced && status.leader;
     node.wait_for(|| GetClusterStatus, leading).await?;
 

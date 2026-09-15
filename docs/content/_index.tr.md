@@ -18,6 +18,7 @@ sort_by = "weight"
 - TLS sertifikaları arayüzden içe aktarılabilir veya self-signed sertifika oluşturulabilir.
 - Let's Encrypt ile sertifikalar otomatik alınır (ACME v2, HTTP-01 ve DNS-01 challenge'ları). Wildcard sertifikalar için Cloudflare, Route 53, DigitalOcean ve Hetzner Cloud DNS API'leri kullanılır.
 - Proxy'leri Docker container label'larından, Kubernetes Ingress kaynaklarından, Consul servis tag'lerinden, Consul ve etcd key-value store'larından oluşturur. Kaynak değişince proxy'leri günceller ([Servis keşfi](@/discovery.tr.md)).
+- Birden fazla node'u etcd veya Consul'da paylaşılan tek bir state ile çalıştırır. Değerler şifrelenir, ACME işlerini leader node yapar, session'lar, rate limit ve cache node'lar arasında paylaşılır ([Cluster](@/cluster.tr.md)).
 
 # Kurulum
 

@@ -899,6 +899,8 @@ You can override the default location by setting the `R3V3RS3_CONFIG_DIR` enviro
 
 If needed, these files can be edited manually. Note, however, that r3v3rs3 does not automatically detect changes made to the configuration files. To ensure any changes take effect, you must restart the server after editing a configuration file.
 
+A node of a cluster reads only `config.toml`. The rest of its state is in etcd or Consul. See [Cluster](@/cluster.md).
+
 # WebUI
 
 r3v3rs3 includes a built-in WebUI. By default, it is served on localhost:46492. However, you can customize the port using the `R3V3RS3_WEBUI` environment variable or the `--webui` command-line option. If you wish to disable the WebUI, set the `R3V3RS3_NO_WEBUI=1` environment variable or use the `--no-webui` command-line option.

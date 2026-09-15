@@ -1,4 +1,4 @@
-.PHONY: all build release webui webui-release test test-api test-server test-acme-pebble test-discovery-e2e lint fmt fmt-check check run clean cdn-snapshot
+.PHONY: all build release webui webui-release test test-api test-server test-acme-pebble test-discovery-e2e test-cluster-e2e lint fmt fmt-check check run clean cdn-snapshot
 
 CARGO ?= cargo
 TRUNK ?= trunk
@@ -53,6 +53,13 @@ test-discovery-e2e:
 		$(DISCOVERY_COMPOSE) exec -T k3s cat /etc/rancher/k3s/k3s.yaml > $(DISCOVERY_DIR)/admin.yaml && \
 		$(DISCOVERY_KUBECTL) -n r3v3rs3 create token r3v3rs3 > $(DISCOVERY_DIR)/token && \
 		R3V3RS3_E2E_DIR=$(CURDIR)/$(DISCOVERY_DIR) CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test discovery_e2e_test -- --ignored; \
+		status=$$?; $(DISCOVERY_COMPOSE) down -v; exit $$status
+
+# Runs the cluster end-to-end tests against etcd and Consul in Docker, then removes the containers.
+# The nodes use a restricted etcd user and a restricted Consul token, like the cluster guide.
+test-cluster-e2e:
+	$(DISCOVERY_COMPOSE) up -d --wait consul etcd && \
+		CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test cluster_e2e_test -- --ignored; \
 		status=$$?; $(DISCOVERY_COMPOSE) down -v; exit $$status
 
 lint:

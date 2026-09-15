@@ -27,15 +27,12 @@ use std::process::Command;
 use std::time::Duration;
 
 mod common;
+use common::e2e::{consul_put, etcd_post, etcd_token, CONSUL, CONSUL_TOKEN, ETCD, ETCD_PASSWORD};
 use common::{
     alloc_tcp_port, call, http_port_entry, wait_for_host_body, wait_for_host_status, with_server,
     TestStorage,
 };
 
-const CONSUL: &str = "http://127.0.0.1:8480";
-const CONSUL_TOKEN: &str = "e2e-consul-token";
-const ETCD: &str = "http://127.0.0.1:8481";
-const ETCD_PASSWORD: &str = "e2e-etcd-password";
 const K3S: &str = "https://127.0.0.1:8482";
 const WHOAMI: &str = "r3v3rs3-e2e-whoami";
 
@@ -94,17 +91,6 @@ async fn wait_for_proxies(
     anyhow::bail!("{provider} did not add {proxies} proxies: {statuses:?}")
 }
 
-async fn consul_put(path: &str, body: String) -> anyhow::Result<()> {
-    reqwest::Client::new()
-        .put(format!("{CONSUL}{path}"))
-        .header("X-Consul-Token", CONSUL_TOKEN)
-        .body(body)
-        .send()
-        .await?
-        .error_for_status()?;
-    Ok(())
-}
-
 #[tokio::test]
 #[ignore = "needs the discovery containers, run it with make test-discovery-e2e"]
 async fn consul_services_and_keys_define_proxies() -> anyhow::Result<()> {
@@ -150,38 +136,6 @@ async fn consul_services_and_keys_define_proxies() -> anyhow::Result<()> {
         Ok(())
     })
     .await
-}
-
-async fn etcd_post(path: &str, body: Value, token: Option<&str>) -> anyhow::Result<Value> {
-    let mut request = reqwest::Client::new()
-        .post(format!("{ETCD}{path}"))
-        .json(&body);
-    if let Some(token) = token {
-        request = request.header("Authorization", token);
-    }
-    let response = request.send().await?;
-    let status = response.status();
-    let body = response.json::<Value>().await?;
-    anyhow::ensure!(status.is_success(), "etcd {path}: {status} {body}");
-    Ok(body)
-}
-
-/// Adds the `root` user, enables authentication and returns a token. A cluster whose
-/// authentication is already on only returns the token.
-async fn etcd_token() -> anyhow::Result<String> {
-    let credentials = json!({"name": "root", "password": ETCD_PASSWORD});
-    let status = etcd_post("/v3/auth/status", json!({}), None).await?;
-    if status["enabled"] != json!(true) {
-        etcd_post("/v3/auth/user/add", credentials.clone(), None).await?;
-        let grant = json!({"user": "root", "role": "root"});
-        etcd_post("/v3/auth/user/grant", grant, None).await?;
-        etcd_post("/v3/auth/enable", json!({}), None).await?;
-    }
-    let body = etcd_post("/v3/auth/authenticate", credentials, None).await?;
-    body["token"]
-        .as_str()
-        .map(String::from)
-        .ok_or_else(|| anyhow::anyhow!("etcd returned no token: {body}"))
 }
 
 async fn etcd_put(token: &str, key: &str, value: &str) -> anyhow::Result<()> {
