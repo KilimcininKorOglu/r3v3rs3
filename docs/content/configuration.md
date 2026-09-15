@@ -529,6 +529,50 @@ auth = { type = "session" }
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+## Access Lists
+
+An access list holds an IP filter and an authentication with a name. Several proxies and routes can use one access list. A change of the list applies to each of them without a restart.
+
+The "Access Lists" page of the WebUI adds, changes and deletes the lists. The "Access List" field of an HTTP / HTTPS proxy selects a list for the proxy. In the admin API and in `proxies.toml`, `access_list` sets the list of a proxy or of a route.
+
+- The list of a proxy replaces the "IP Filter" and the "Authentication" of the proxy.
+- The list of a route replaces the IP filter and the authentication of the route.
+- A route without its own list or override uses the settings of the proxy, including the list of the proxy.
+- A proxy or a route with a list cannot also set its own IP filter or authentication. The admin API answers `400 access_list_conflict`.
+- A proxy that names an unknown list gets `400 access_list_not_found`. When the list is missing at runtime, for example in a cluster that has not synced yet, the proxy or the route answers every client with `403 Forbidden`.
+- A list that a proxy or a route uses cannot be deleted. The admin API answers `400 access_list_in_use`.
+
+`access_lists.toml` in the configuration directory holds the lists. r3v3rs3 writes the file with mode `0600`, because it holds the password hashes and the token digests. The admin API does not return the hashes, like the proxy authentication.
+
+```toml
+# access_lists.toml
+[office]
+name = "Office"
+ip_filter = { allow = ["192.168.0.0/16"] }
+auth = { type = "basic", realm = "Office", users = [{ username = "alice", password_hash = "$argon2id$v=19$m=19456,t=2,p=1$..." }] }
+```
+
+```toml
+# proxies.toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+access_list = "office"
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] },
+  { path = "/health", servers = [{ url = "http://127.0.0.1:9000/health" }], ip_filter = {}, auth = { type = "none" } },
+]
+```
+
+| Endpoint | Action |
+|---|---|
+| `GET /api/access_lists` | Lists the access lists. |
+| `POST /api/access_lists` | Adds an access list. |
+| `PUT /api/access_lists/{id}` | Changes an access list. A user or a token without a new secret keeps its hash. |
+| `DELETE /api/access_lists/{id}` | Deletes an access list. |
+
+Every account reads the lists. Only an admin or an editor without a proxy list changes them. See [Accounts](@/accounts.md).
+
 ## Header Rules
 
 You can change the headers of proxied requests and responses in the "Header Rules" section. A route can replace the proxy rules with "Override Header Rules for This Route".
@@ -741,6 +785,56 @@ If your upstream server uses certificates not trusted by the system, you will ne
 
 Also, if you generate a self-signed certificate, r3v3rs3 will automatically generate a CA certificate and add it to the root certificate store.
 
+## Expiry Warnings
+
+The certificate list marks a certificate that expires within "Certificate Expiry Warning" (default `14days`) with "Expiring soon", and an expired certificate with "Expired".
+
+## Notifications
+
+r3v3rs3 sends a JSON `POST` request to the notification webhook for these events:
+
+| Event | When |
+|---|---|
+| `certificate_expiring` | A certificate expires within "Certificate Expiry Warning". |
+| `certificate_expired` | A certificate has expired. |
+| `acme_order_failed` | An ACME order failed. Each failed order sends an event. |
+| `test` | An admin sent a test notification. |
+
+```json
+{"event": "certificate_expiring", "time": 1757894400, "node": "proxy-1", "certificate": {"id": "a1b2c3d", "san": ["example.com"], "not_after": 1759104000}}
+```
+
+- `time` is the Unix time in seconds. `node` is the name of the cluster node, and it is absent without a cluster. `certificate` names the certificate of a certificate event. `acme` holds the `id` and the `identifiers` of the ACME entry, and `error` describes the failure of an `acme_order_failed` event.
+- With a token, the request has the header `Authorization: Bearer <token>`. The admin API does not return the token.
+- A 2xx status is a success. r3v3rs3 sends a failed request at most three times: again after 1 second, and again 2 seconds later. "Webhook Timeout" (default `10s`) limits each try.
+- The leader checks the certificates at each "Background Task Interval". Each event of a certificate is sent once. A renewed certificate has a new fingerprint, so its events are sent again. r3v3rs3 keeps the sent events in `notifications.json` in the configuration directory, or in the cluster store.
+- r3v3rs3 sends the notifications in the background. The queue holds at most 64 notifications. When the queue is full, r3v3rs3 drops the notification and logs an error.
+- The webhook URL must use HTTPS. HTTP is allowed only for a loopback address.
+
+Set the webhook in the "Notifications" section of the "Settings" page. "Send Test Notification" sends a `test` event to the webhook of the saved settings. `POST /api/config/notifications/test` does the same, and only an admin account can call it. The response is `400 notification_webhook_missing` without a webhook, and `502 notification_failed` when the webhook request fails.
+
+```toml
+[notifications]
+cert_expiry_warning = "14days"
+webhook = { url = "https://hooks.example.com/r3v3rs3", token = "<token>", timeout = "10s" }
+```
+
+`config.toml` holds the token in plain text.
+
+## Deleting Several Certificates
+
+Select the certificates with the checkboxes of the list, then click "Delete Selected". `POST /api/certs/delete` with the body `{"ids": [...]}` does the same for at most 200 ids. The response holds one result for each id, in the order of the request:
+
+| Result | Meaning |
+|---|---|
+| `deleted` | r3v3rs3 deleted the certificate. |
+| `in_use` | A port, a proxy or a discovery provider uses the certificate, so it stays. |
+| `read_only` | Service discovery manages the certificate, so it stays. |
+| `not_found` | No certificate has the id. |
+| `failed` | The storage did not delete the certificate. The server log names the cause. |
+
+An id that the request repeats gets one result.
+
 # ACME
 
 r3v3rs3 supports automatic certificate provisioning using [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment). ACME is supported by many certificate authorities, such as Let's Encrypt, ZeroSSL, and Google Trust Services.
@@ -909,6 +1003,10 @@ The "Settings" section of the WebUI edits the server-wide options stored in `con
 | DNS Challenge Resolver | empty | DNS server, for example `1.1.1.1:53`, that r3v3rs3 asks until the TXT records of a DNS-01 challenge are visible. Empty uses the system resolver. |
 | Database Log Retention | `3months` | How long logs are kept in the log database. |
 | Audit Log Retention | `1year` | How long the audit log keeps an entry. See [Audit Log](#audit-log). |
+| Certificate Expiry Warning | `14days` | The certificate list marks a certificate that expires within this time, and the webhook gets a notification for it. See [Notifications](#notifications). |
+| Webhook URL | empty | The notification webhook. Empty sends no notification. |
+| Webhook Token | empty | The bearer token of the webhook requests. The admin API does not return it. |
+| Webhook Timeout | `10s` | The longest time of one webhook request. |
 
 Durations use a human-readable format, for example `30s`, `15m`, `1h`, or `7days`.
 
@@ -956,7 +1054,7 @@ $ curl -b cookies.txt http://localhost:46492/api/ports
 
 # Audit Log
 
-r3v3rs3 records the changes that an account makes through the WebUI or the admin API: ports, proxies, certificates, ACME entries, settings, CDN IP range refreshes and accounts. It also records each sign-in, failed sign-in and sign-out of the admin panel. The changes that r3v3rs3 makes by itself, for example a certificate renewal or a discovered proxy, are not recorded.
+r3v3rs3 records the changes that an account makes through the WebUI or the admin API: ports, proxies, access lists, certificates, ACME entries, settings, CDN IP range refreshes and accounts. It also records each sign-in, failed sign-in and sign-out of the admin panel. The changes that r3v3rs3 makes by itself, for example a certificate renewal or a discovered proxy, are not recorded.
 
 Each entry holds the time, the account, the client IP address, the action, the id of the changed resource and a short summary. The summary holds names, addresses and roles. It never holds a password, a token or a key.
 

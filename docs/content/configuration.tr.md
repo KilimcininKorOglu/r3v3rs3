@@ -529,6 +529,50 @@ auth = { type = "session" }
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+## Access list'ler
+
+Access list, bir IP filtresini ve bir kimlik doğrulamayı bir adla tutar. Birden fazla proxy ve route aynı access list'i kullanabilir. Liste değişince değişiklik yeniden başlatma olmadan hepsine uygulanır.
+
+WebUI'daki "Access List'ler" sayfası listeleri ekler, değiştirir ve siler. HTTP / HTTPS proxy'nin "Access List" alanı proxy için bir liste seçer. Yönetim API'sinde ve `proxies.toml` dosyasında `access_list` alanı bir proxy'nin veya route'un listesini ayarlar.
+
+- Proxy'nin listesi, proxy'nin "IP Filtresi" ve "Kimlik Doğrulama" ayarlarının yerini alır.
+- Route'un listesi, route'un IP filtresinin ve kimlik doğrulamasının yerini alır.
+- Kendi listesi veya override'ı olmayan route, proxy'nin ayarlarını kullanır. Proxy'nin listesi de bu ayarlara dahildir.
+- Listesi olan proxy veya route kendi IP filtresini veya kimlik doğrulamasını ayarlayamaz. Yönetim API'si `400 access_list_conflict` döndürür.
+- Bilinmeyen bir listeyi kullanan proxy `400 access_list_not_found` alır. Liste runtime'da yoksa, örneğin henüz sync olmamış bir cluster'da, proxy veya route her client'a `403 Forbidden` döndürür.
+- Bir proxy'nin veya route'un kullandığı liste silinemez. Yönetim API'si `400 access_list_in_use` döndürür.
+
+Config dizinindeki `access_lists.toml` dosyası listeleri tutar. Dosya parola hash'lerini ve token digest'lerini taşır. Bu yüzden r3v3rs3 dosyayı `0600` moduyla yazar. Yönetim API'si, proxy kimlik doğrulamasında olduğu gibi hash'leri döndürmez.
+
+```toml
+# access_lists.toml
+[office]
+name = "Office"
+ip_filter = { allow = ["192.168.0.0/16"] }
+auth = { type = "basic", realm = "Office", users = [{ username = "alice", password_hash = "$argon2id$v=19$m=19456,t=2,p=1$..." }] }
+```
+
+```toml
+# proxies.toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+access_list = "office"
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] },
+  { path = "/health", servers = [{ url = "http://127.0.0.1:9000/health" }], ip_filter = {}, auth = { type = "none" } },
+]
+```
+
+| Endpoint | İşlem |
+|---|---|
+| `GET /api/access_lists` | Access list'leri listeler. |
+| `POST /api/access_lists` | Bir access list ekler. |
+| `PUT /api/access_lists/{id}` | Bir access list'i değiştirir. Yeni secret'ı olmayan kullanıcı veya token hash'ini korur. |
+| `DELETE /api/access_lists/{id}` | Bir access list'i siler. |
+
+Her hesap listeleri okur. Listeleri yalnız admin veya proxy listesi olmayan editör değiştirir. Ayrıntılar için [Hesaplar](@/accounts.tr.md) sayfasına bakın.
+
 ## Header kuralları
 
 Proxy'den geçen request ve response'ların header'larını "Header Kuralları" bölümünden değiştirebilirsiniz. Bir route, "Bu Route için Header Kurallarını Değiştir" seçeneğiyle proxy kuralları yerine kendi kurallarını kullanabilir.
@@ -741,6 +785,56 @@ Upstream sunucunuz sistemin güvenmediği sertifikalar kullanıyorsa bu sertifik
 
 Self-signed bir sertifika oluşturduğunuzda r3v3rs3 bir CA sertifikası da oluşturur ve onu root sertifika deposuna ekler.
 
+## Süre uyarıları
+
+Sertifika listesi, "Sertifika Süre Uyarısı" (varsayılan `14days`) süresi içinde sona erecek sertifikayı "Süresi yaklaşıyor" ile işaretler. Süresi dolmuş sertifikayı "Süresi doldu" ile işaretler.
+
+## Bildirimler
+
+r3v3rs3 şu olaylar için bildirim webhook'una bir JSON `POST` isteği gönderir:
+
+| Olay | Ne zaman |
+|---|---|
+| `certificate_expiring` | Bir sertifika "Sertifika Süre Uyarısı" süresi içinde sona erer. |
+| `certificate_expired` | Bir sertifikanın süresi dolmuştur. |
+| `acme_order_failed` | Bir ACME order başarısız olmuştur. Başarısız her order bir olay gönderir. |
+| `test` | Bir admin test bildirimi göndermiştir. |
+
+```json
+{"event": "certificate_expiring", "time": 1757894400, "node": "proxy-1", "certificate": {"id": "a1b2c3d", "san": ["example.com"], "not_after": 1759104000}}
+```
+
+- `time` saniye cinsinden Unix zamanıdır. `node` cluster node'unun adıdır. Cluster yoksa bu alan bulunmaz. `certificate` alanı sertifika olayının sertifikasını gösterir. `acme` alanı ACME kaydının `id` ve `identifiers` değerlerini taşır. `error` alanı `acme_order_failed` olayının hatasını açıklar.
+- Token varsa istek `Authorization: Bearer <token>` header'ını taşır. Admin API token'ı döndürmez.
+- 2xx status başarı sayılır. r3v3rs3 başarısız isteği en fazla üç kez gönderir: 1 saniye sonra bir kez daha, 2 saniye sonra bir kez daha. "Webhook Timeout" (varsayılan `10s`) her denemeyi sınırlar.
+- Leader sertifikaları her "Arka Plan Görevi Aralığı" süresinde kontrol eder. Bir sertifikanın her olayı bir kez gönderilir. Yenilenen sertifikanın fingerprint'i değişir. Bu yüzden onun olayları yeniden gönderilir. r3v3rs3 gönderilen olayları config dizinindeki `notifications.json` dosyasında veya cluster store'da tutar.
+- r3v3rs3 bildirimleri arka planda gönderir. Kuyruk en fazla 64 bildirim tutar. Kuyruk doluysa r3v3rs3 bildirimi göndermez ve bir hata log'u yazar.
+- Webhook URL'i HTTPS kullanmalıdır. HTTP yalnız loopback adresinde kullanılabilir.
+
+Webhook'u "Ayarlar" sayfasının "Bildirimler" bölümünde ayarlayın. "Test Bildirimi Gönder" butonu kayıtlı ayarlardaki webhook'a bir `test` olayı gönderir. `POST /api/config/notifications/test` aynı işi yapar. Bu endpoint'i yalnız admin hesabı çağırabilir. Webhook ayarlı değilse yanıt `400 notification_webhook_missing` olur. Webhook isteği başarısız olursa yanıt `502 notification_failed` olur.
+
+```toml
+[notifications]
+cert_expiry_warning = "14days"
+webhook = { url = "https://hooks.example.com/r3v3rs3", token = "<token>", timeout = "10s" }
+```
+
+`config.toml` dosyası token'ı düz metin olarak tutar.
+
+## Birden fazla sertifikayı silme
+
+Listedeki checkbox'larla sertifikaları seçin ve "Seçilenleri Sil" butonuna tıklayın. `{"ids": [...]}` body'si ile gönderilen `POST /api/certs/delete` isteği en fazla 200 id için aynı işi yapar. Yanıt, istekteki sırayla her id için bir sonuç taşır:
+
+| Sonuç | Anlamı |
+|---|---|
+| `deleted` | r3v3rs3 sertifikayı sildi. |
+| `in_use` | Bir port, proxy veya discovery provider sertifikayı kullanıyor. Sertifika kalır. |
+| `read_only` | Sertifikayı servis keşfi yönetiyor. Sertifika kalır. |
+| `not_found` | Bu id'ye sahip sertifika yok. |
+| `failed` | Storage sertifikayı silmedi. Sunucu log'u nedeni yazar. |
+
+İstekte tekrar eden bir id tek bir sonuç alır.
+
 # ACME
 
 r3v3rs3, sertifikaları [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment) ile otomatik alabilir. Let's Encrypt, ZeroSSL ve Google Trust Services gibi birçok sertifika otoritesi ACME'yi destekler.
@@ -909,6 +1003,10 @@ WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütü
 | DNS Challenge Resolver | boş | r3v3rs3'ün DNS-01 challenge'ının TXT kayıtları görünene kadar sorguladığı DNS sunucusu, örneğin `1.1.1.1:53`. Boş bırakılırsa sistem resolver'ı kullanılır. |
 | Veritabanı Log Saklama Süresi | `3months` | Log'ların log veritabanında ne kadar tutulacağı. |
 | Audit Log Saklama Süresi | `1year` | Audit log'daki bir kaydın ne kadar tutulacağı. Ayrıntılar için [Audit log](#audit-log) bölümüne bakın. |
+| Sertifika Süre Uyarısı | `14days` | Sertifika listesi bu süre içinde sona erecek sertifikayı işaretler. Webhook bu sertifika için bildirim alır. Ayrıntılar için [Bildirimler](#bildirimler) bölümüne bakın. |
+| Webhook URL | boş | Bildirim webhook'u. Boşsa bildirim gönderilmez. |
+| Webhook Token | boş | Webhook isteklerinin bearer token'ı. Admin API bu değeri döndürmez. |
+| Webhook Timeout | `10s` | Tek bir webhook isteğinin en uzun süresi. |
 
 Süreleri `30s`, `15m`, `1h` veya `7days` gibi okunabilir bir biçimde yazın.
 
@@ -956,7 +1054,7 @@ $ curl -b cookies.txt http://localhost:46492/api/ports
 
 # Audit log
 
-r3v3rs3, bir hesabın WebUI veya yönetim API'si ile yaptığı değişiklikleri kaydeder: portlar, proxy'ler, sertifikalar, ACME kayıtları, ayarlar, CDN IP aralığı yenilemeleri ve hesaplar. Yönetim paneline her giriş, her başarısız giriş denemesi ve her çıkış da kaydedilir. r3v3rs3'ün kendi yaptığı değişiklikler kaydedilmez. Sertifika yenileme ve keşfedilen proxy'ler buna örnektir.
+r3v3rs3, bir hesabın WebUI veya yönetim API'si ile yaptığı değişiklikleri kaydeder: portlar, proxy'ler, access list'ler, sertifikalar, ACME kayıtları, ayarlar, CDN IP aralığı yenilemeleri ve hesaplar. Yönetim paneline her giriş, her başarısız giriş denemesi ve her çıkış da kaydedilir. r3v3rs3'ün kendi yaptığı değişiklikler kaydedilmez. Sertifika yenileme ve keşfedilen proxy'ler buna örnektir.
 
 Her kayıtta zaman, hesap, client IP adresi, işlem, değişen kaynağın id'si ve kısa bir özet bulunur. Özet isimleri, adresleri ve rolleri içerir. Parola, token veya key içermez.
 

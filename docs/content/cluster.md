@@ -6,15 +6,15 @@ weight = 0
 
 # Cluster
 
-Several r3v3rs3 nodes can share one state in etcd or in the key-value store of Consul. Each node serves traffic with the same ports, proxies, certificates, ACME entries, admin accounts and settings. A change on one node reaches the other nodes without a restart.
+Several r3v3rs3 nodes can share one state in etcd or in the key-value store of Consul. Each node serves traffic with the same ports, proxies, access lists, certificates, ACME entries, admin accounts and settings. A change on one node reaches the other nodes without a restart.
 
 ## Architecture
 
 - `config.toml` of each node holds the `[cluster]` section. The admin API and the WebUI do not change it, and the store does not hold it.
-- The store holds the rest of the state: the settings, the ports, the proxies, the certificates, the ACME entries, the admin accounts and the CDN IP ranges. A node with the cluster on does not read `ports.toml`, `proxies.toml`, `acme.toml`, `accounts.toml` or the certificate files.
+- The store holds the rest of the state: the settings, the ports, the proxies, the access lists, the certificates, the ACME entries, the admin accounts and the CDN IP ranges. It also holds the audit log and the sent certificate notifications. A node with the cluster on does not read `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `accounts.toml`, `notifications.json` or the certificate files.
 - Each node watches the store and applies every change. A change through the admin API of a node goes to the store first. A write that finds a newer value fails with `409 cluster_write_conflict`, and the node gets the newer value from the store.
 - The nodes share the admin sessions, the proxy sessions, the rate limit counts and, when `share_cache` is on, the cached responses.
-- One node is the leader. Only the leader orders ACME certificates, removes expired certificates, saves the downloaded CDN IP ranges to the store and removes the expired sessions and shared responses. The leader runs these tasks when it takes the lead and then at each `background_task_interval`.
+- One node is the leader. Only the leader orders ACME certificates, sends the certificate notifications, removes expired certificates and old audit log entries, saves the downloaded CDN IP ranges to the store and removes the expired sessions and shared responses. The leader runs these tasks when it takes the lead and then at each `background_task_interval`.
 - A load balancer in front of the nodes can send each request to any node.
 
 The **Settings** page of the WebUI shows the state, the role and the applied revision of the node. `GET /api/cluster/status` returns the same data.
@@ -94,6 +94,7 @@ Every key starts with `<prefix>/v1/`.
 | `state/config` | The settings. | yes |
 | `state/ports/<id>` | The ports. | no |
 | `state/proxies/<id>` | The proxies. | yes |
+| `state/access-lists/<id>` | The access lists with their password hashes and token digests. | yes |
 | `state/certs/<kind>/<id>` | The certificates and their private keys. | yes |
 | `state/acme/<id>` | The ACME entries with the account keys and the DNS provider credentials. | yes |
 | `state/accounts/<hex name>` | The admin accounts. | yes |
@@ -106,6 +107,8 @@ Every key starts with `<prefix>/v1/`.
 | `sessions/<scope>/<SHA-256 of the token>` | The admin and proxy sessions. The store never holds a token. | yes |
 | `ratelimit/<hex name>` | The rate limit counts of a node, with client IP addresses. | yes |
 | `cache/<proxy id>/<SHA-256 of the cache key>` | A shared cached response. | yes |
+| `audit/<YYYY-MM-DD>/<Unix ms>-<random>` | An audit log entry, below the key of its day. | yes |
+| `notify` | The certificate events that the webhook got. Only the leader writes it. | yes |
 
 ## Encryption
 
