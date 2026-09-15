@@ -837,7 +837,12 @@ impl ServerState {
         renewals
     }
 
+    /// Orders the due certificates. In a cluster only the leader orders, and a node that takes the
+    /// lead orders the due certificates at once.
     async fn start_http_challenges(&mut self) {
+        if !self.leader {
+            return;
+        }
         let now = Instant::now();
         let targets = self
             .acme_renewals()

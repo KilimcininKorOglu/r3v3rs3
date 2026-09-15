@@ -1,4 +1,6 @@
+use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use r3v3rs3::admin::start_admin;
+use r3v3rs3::certs::acme::AcmeEntry;
 use r3v3rs3::certs::challenges::ServedChallenges;
 use r3v3rs3::clock;
 use r3v3rs3::cluster;
@@ -11,23 +13,27 @@ use r3v3rs3::log::DatabaseLayer;
 use r3v3rs3::proxy::http::rate_share::{
     ClientCount, LimiterCounts, NodeCounts, RateCountExchange, WindowCount,
 };
+use r3v3rs3::server::rpc::acme::GetAcmeList;
 use r3v3rs3::server::rpc::cluster::GetClusterStatus;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
 use r3v3rs3::server::rpc::ports::{AddPort, GetPortList};
 use r3v3rs3::server::rpc::proxies::{AddProxy, GetProxyList};
 use r3v3rs3::server::Server;
 use r3v3rs3::sessions::{SessionBackend, SessionScope};
+use r3v3rs3_api::acme::{Acme, AcmeConfig, HTTP_01};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::cache::CacheConfig;
 use r3v3rs3_api::cluster::{ClusterConfig, ClusterState, ClusterStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
+use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::{RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyKind};
 use reqwest::{Client, Url};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -459,6 +465,74 @@ async fn one_node_leads_and_another_node_takes_over_when_it_stops() -> anyhow::R
     leader.stop().await?;
     let leads = |status: &ClusterStatus| status.leader;
     follower.wait_for(|| GetClusterStatus, leads).await?;
+    follower.stop().await
+}
+
+/// An HTTP-01 entry whose ACME directory is `directory`. The order of the entry connects to it
+/// first.
+fn acme_entry(directory: &str) -> anyhow::Result<AcmeEntry> {
+    let key = rcgen::KeyPair::generate()?;
+    let credentials: instant_acme::AccountCredentials =
+        serde_json::from_value(serde_json::json!({
+            "id": format!("{directory}/account"),
+            "key_pkcs8": BASE64_URL_SAFE_NO_PAD.encode(key.serialize_der()),
+            "directory": directory,
+        }))?;
+    Ok(AcmeEntry {
+        id: ShortId::from([1; 7]),
+        acme: Acme {
+            config: AcmeConfig::default(),
+            identifiers: vec!["example.com".parse()?],
+            challenge_type: HTTP_01.to_string(),
+            dns_provider: None,
+        },
+        account: Arc::new(credentials),
+    })
+}
+
+#[tokio::test]
+async fn only_the_leader_orders_certificates() -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let keys = ClusterKeys::new(vec![ClusterKey::new(&[1; 32])?])?;
+    let lock = format!("{}lock/leader", cluster::data_prefix("r3v3rs3"));
+    let lease = store.grant_lease(Duration::from_secs(60)).await?;
+    assert!(
+        store
+            .try_lock(&lock, &keys.seal(&lock, b"other")?, &lease)
+            .await?
+    );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    // ACME requests need https. The client connects over TCP before the TLS handshake, so the
+    // listener counts the order without a TLS server.
+    let directory = format!("https://{}/directory", listener.local_addr()?);
+    let connections = Arc::new(AtomicUsize::new(0));
+    let counter = connections.clone();
+    let acceptor = tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            counter.fetch_add(1, Ordering::SeqCst);
+            drop(stream);
+        }
+    });
+
+    let mut follower = start_node(&store, "node-b").await?;
+    node_storage(&store, "writer")?
+        .save_acme(&acme_entry(&directory)?)
+        .await?;
+    follower
+        .wait_for(|| GetAcmeList, |list| list.len() == 1)
+        .await?;
+    // The follower applied the entry. It must not order during several lock checks.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(connections.load(Ordering::SeqCst), 0);
+
+    store.revoke_lease(&lease).await?;
+    let ordered = || {
+        let connections = connections.clone();
+        async move { Ok(connections.load(Ordering::SeqCst) > 0) }
+    };
+    wait_until(ordered, "the new leader did not order the certificate").await?;
+    acceptor.abort();
     follower.stop().await
 }
 
