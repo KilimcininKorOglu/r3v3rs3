@@ -1,5 +1,6 @@
 use super::{AppError, AppState};
 use crate::server::rpc::auth::VerifyAccount;
+use crate::sessions::{self, SessionBackend, SessionScope};
 use axum::{
     extract::{ConnectInfo, Request, State},
     middleware::Next,
@@ -14,15 +15,13 @@ use r3v3rs3_api::{
     auth::{LoginMethod, LoginRequest, LoginResponse},
     error::{Error, ErrorMessage},
 };
-use rand::distributions::{Alphanumeric, DistString};
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
+    sync::Arc,
     time::{Duration, Instant},
 };
-
-pub const MINIMUM_SESSION_EXPIRY: Duration = Duration::from_secs(60 * 5); // 5 minutes
-const SESSION_TOKEN_LENGTH: usize = 32;
+use tracing::warn;
 
 /// Signs in and sets the `token` session cookie. An account with TOTP returns `totp_required`
 /// first, and a second request with the TOTP code completes the sign-in.
@@ -67,20 +66,16 @@ pub async fn login(
         }
     };
 
-    let session = match *result {
+    let scope = match *result {
         LoginResponse::Success => {
             state.data.lock().await.login_attempts.clear(&attempt_key);
-            SessionKind::Admin
+            SessionScope::Admin
         }
-        _ => SessionKind::Login,
+        _ => SessionScope::Login,
     };
 
-    let token = state
-        .data
-        .lock()
-        .await
-        .sessions
-        .new_token(session, &username);
+    let (backend, expiry) = session_backend(&state).await;
+    let token = backend.create(scope, &username, expiry).await?;
 
     let cookie = Cookie::build(("token", token))
         .http_only(true)
@@ -89,6 +84,13 @@ pub async fn login(
         .build();
 
     Ok((jar.add(cookie), Json(result)))
+}
+
+/// The sessions and their lifetime. The lock is released before the sessions are used, because
+/// the sessions of a cluster wait for the store.
+async fn session_backend(state: &AppState) -> (Arc<dyn SessionBackend>, Duration) {
+    let data = state.data.lock().await;
+    (data.sessions.clone(), sessions::expiry(&data.config.admin))
 }
 
 async fn ensure_login_allowed(state: &AppState, key: &LoginAttemptKey) -> Result<(), Error> {
@@ -112,11 +114,16 @@ async fn record_login_failure(state: &AppState, key: LoginAttemptKey) {
 }
 
 async fn verify_login_session(state: &AppState, token: &str, username: &str) -> bool {
-    let mut data = state.data.lock().await;
-    let expiry = data.config.admin.session_expiry;
-    data.sessions
-        .verify(SessionKind::Login, token, expiry)
-        .is_some_and(|session| session.username == username)
+    let (backend, expiry) = session_backend(state).await;
+    match backend.get(SessionScope::Login, token).await {
+        Ok(record) => {
+            record.is_some_and(|record| record.is_active(expiry) && record.subject == username)
+        }
+        Err(err) => {
+            warn!(%err, "failed to read the sign-in session");
+            false
+        }
+    }
 }
 
 /// Ends the session and removes the `token` cookie.
@@ -130,7 +137,12 @@ async fn verify_login_session(state: &AppState, token: &str, username: &str) -> 
 )]
 pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     if let Some(token) = jar.get("token") {
-        state.data.lock().await.sessions.remove(token.value());
+        let (backend, _) = session_backend(&state).await;
+        for scope in [SessionScope::Admin, SessionScope::Login] {
+            if let Err(err) = backend.remove(scope, token.value()).await {
+                warn!(%err, "failed to end the session");
+            }
+        }
     }
     jar.remove("token")
 }
@@ -141,68 +153,14 @@ pub async fn verify(
     request: Request,
     next: Next,
 ) -> Response {
-    if let Some(token) = jar.get("token") {
-        let mut data = state.data.lock().await;
-        let expiry = data.config.admin.session_expiry;
-        if data
-            .sessions
-            .verify(SessionKind::Admin, token.value(), expiry)
-            .is_some()
-        {
-            std::mem::drop(data);
-            let response = next.run(request).await;
-            return response;
-        }
-    }
-    AppError::R3v3rs3(Error::Unauthorized).into_response()
-}
-
-#[derive(Debug, Clone)]
-pub struct Session {
-    pub kind: SessionKind,
-    pub username: String,
-    pub started_at: Instant,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionKind {
-    Login,
-    Admin,
-}
-
-#[derive(Default)]
-pub struct SessionStore {
-    tokens: HashMap<String, Session>,
-}
-
-impl SessionStore {
-    pub fn new_token(&mut self, kind: SessionKind, username: &str) -> String {
-        let token = Alphanumeric.sample_string(&mut rand::thread_rng(), SESSION_TOKEN_LENGTH);
-        self.tokens.insert(
-            token.clone(),
-            Session {
-                kind,
-                username: username.to_string(),
-                started_at: Instant::now(),
-            },
-        );
-        token
-    }
-
-    pub fn verify(&mut self, kind: SessionKind, token: &str, expiry: Duration) -> Option<&Session> {
-        let expiry = expiry.max(MINIMUM_SESSION_EXPIRY);
-        self.tokens = self
-            .tokens
-            .drain()
-            .filter(|(_, t)| t.started_at.elapsed() < expiry)
-            .collect();
-        self.tokens
-            .get(token)
-            .filter(|session| session.kind == kind)
-    }
-
-    pub fn remove(&mut self, token: &str) {
-        self.tokens.remove(token);
+    let Some(token) = jar.get("token") else {
+        return AppError::R3v3rs3(Error::Unauthorized).into_response();
+    };
+    let (backend, expiry) = session_backend(&state).await;
+    match backend.get(SessionScope::Admin, token.value()).await {
+        Ok(Some(record)) if record.is_active(expiry) => next.run(request).await,
+        Ok(_) => AppError::R3v3rs3(Error::Unauthorized).into_response(),
+        Err(err) => AppError::R3v3rs3(err).into_response(),
     }
 }
 

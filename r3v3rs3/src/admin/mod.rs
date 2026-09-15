@@ -1,7 +1,9 @@
 use crate::command::ServerCommand;
+use crate::server::rpc::auth::GetSessionBackend;
 use crate::server::rpc::config::GetConfig;
 use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
-use auth::{LoginAttempts, SessionStore};
+use crate::sessions::{LocalSessions, SessionBackend};
+use auth::LoginAttempts;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -89,6 +91,11 @@ pub async fn start_admin(
         .await
         .map_err(|err| anyhow::anyhow!("failed to load app config: {err}"))?;
     data.lock().await.config = *config;
+    let sessions = app_state
+        .call(GetSessionBackend)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to load the sessions: {err}"))?;
+    data.lock().await.sessions = *sessions;
 
     let mut event_recv = event.subscribe();
     tokio::spawn(async move {
@@ -382,7 +389,8 @@ pub type CallbackData = Result<Box<dyn Any + Send + Sync>, Error>;
 pub struct Data {
     pub app_info: AppInfo,
     pub config: AppConfig,
-    pub sessions: SessionStore,
+    /// The server replaces these sessions with its own sessions at the start of the admin API.
+    pub sessions: Arc<dyn SessionBackend>,
     pub login_attempts: LoginAttempts,
     pub log: Arc<LogReader>,
 
@@ -396,7 +404,7 @@ impl Data {
         Ok(Self {
             app_info,
             config: AppConfig::default(),
-            sessions: Default::default(),
+            sessions: Arc::new(LocalSessions::default()),
             login_attempts: Default::default(),
             log: Arc::new(LogReader::new(&log).await?),
             rpc_counter: 0,

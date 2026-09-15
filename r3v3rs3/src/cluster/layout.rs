@@ -1,5 +1,6 @@
 //! The keys of the cluster data below `{prefix}/v1/`.
 
+use crate::sessions::SessionScope;
 use r3v3rs3_api::cert::CertKind;
 use r3v3rs3_api::id::ShortId;
 
@@ -139,6 +140,16 @@ impl Layout {
         format!("{}{}", self.acks(), last_segment(node_key))
     }
 
+    /// The sessions of the admin API and the proxies. They are outside the state, so a new
+    /// session does not reload the state of the nodes.
+    pub fn sessions(&self) -> String {
+        format!("{}sessions/", self.data)
+    }
+
+    pub fn session(&self, scope: SessionScope, token_digest: &str) -> String {
+        format!("{}{}/{token_digest}", self.sessions(), scope.as_str())
+    }
+
     /// Whether the cluster stores the value of the key without encryption. Every other value is
     /// encrypted.
     pub fn is_plain(&self, key: &str) -> bool {
@@ -219,6 +230,11 @@ mod tests {
         assert!(layout.is_plain(&node));
         assert!(layout.is_plain(&layout.ack("node-a")));
         assert_eq!(layout.kind(&node), None);
+
+        let session = layout.session(SessionScope::Proxy, "ab12");
+        assert_eq!(session, "r3v3rs3/v1/sessions/proxy/ab12");
+        assert_eq!(layout.kind(&session), None);
+        assert!(!layout.is_plain(&session));
         assert!(!layout.is_plain(&layout.account("admin")));
     }
 }

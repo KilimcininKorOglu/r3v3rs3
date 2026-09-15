@@ -1,5 +1,6 @@
 use crate::cdn::CdnRanges;
 use crate::certs::{acme::AcmeEntry, challenges::ServedChallenges, Cert};
+use crate::sessions::{LocalSessions, SessionBackend};
 use r3v3rs3_api::{
     app::AppConfig,
     auth::{Account, LoginRequest, LoginResponse},
@@ -53,4 +54,10 @@ pub trait Storage: Send + Sync + 'static {
 
     /// Waits until the other nodes serve the challenges.
     async fn wait_for_challenges(&self, _challenges: &ServedChallenges) {}
+
+    /// The sessions of the admin API and the proxies. A cluster storage shares them between the
+    /// nodes.
+    fn session_backend(self: Arc<Self>) -> Arc<dyn SessionBackend> {
+        Arc::new(LocalSessions::default())
+    }
 }

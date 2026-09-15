@@ -12,6 +12,7 @@ use crate::certs::challenges::ServedChallenges;
 use crate::certs::Cert;
 use crate::config::{account, storage::Storage};
 use crate::kv::{Condition, KvItem, KvStore, Txn, TxnOutcome, Write};
+use crate::sessions::SessionBackend;
 use anyhow::Context as _;
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::auth::{Account, LoginRequest, LoginResponse};
@@ -180,11 +181,24 @@ impl KvStorage {
         lease: Option<String>,
     ) -> anyhow::Result<()> {
         let value = self.encode(&key, plaintext)?;
-        let txn = Txn {
-            conditions: Vec::new(),
-            writes: vec![Write::Put { key, value, lease }],
-        };
-        self.store.commit(&txn).await?;
+        self.commit_unconditional(vec![Write::Put { key, value, lease }])
+            .await
+    }
+
+    /// Deletes keys without a condition.
+    pub async fn delete_unconditional(&self, keys: Vec<String>) -> anyhow::Result<()> {
+        let deletes = keys.into_iter().map(Write::Delete).collect();
+        self.commit_unconditional(deletes).await
+    }
+
+    async fn commit_unconditional(&self, writes: Vec<Write>) -> anyhow::Result<()> {
+        for chunk in writes.chunks(MAX_CHANGES) {
+            let txn = Txn {
+                conditions: Vec::new(),
+                writes: chunk.to_vec(),
+            };
+            self.store.commit(&txn).await?;
+        }
         Ok(())
     }
 
@@ -199,7 +213,7 @@ impl KvStorage {
 
     /// An unencrypted value under a key that the cluster encrypts is an error, so a writer without
     /// the encryption key cannot set it.
-    fn decode(&self, item: &KvItem) -> anyhow::Result<Vec<u8>> {
+    pub fn decode(&self, item: &KvItem) -> anyhow::Result<Vec<u8>> {
         if self.layout.is_plain(&item.key) {
             return Ok(item.value.clone());
         }
@@ -445,7 +459,7 @@ fn json_change<T: serde::Serialize + ?Sized>(key: String, value: &T) -> Result<C
     }
 }
 
-fn unavailable(err: anyhow::Error) -> Error {
+pub(super) fn unavailable(err: anyhow::Error) -> Error {
     error!("the cluster store failed: {err:#}");
     Error::ClusterUnavailable
 }
@@ -687,5 +701,9 @@ impl Storage for KvStorage {
             }
             Err(err) => error!("failed to wait for the nodes to serve the challenges: {err:#}"),
         }
+    }
+
+    fn session_backend(self: Arc<Self>) -> Arc<dyn SessionBackend> {
+        self
     }
 }

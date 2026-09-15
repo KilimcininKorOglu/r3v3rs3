@@ -6,6 +6,7 @@ pub mod key_file;
 pub mod layout;
 pub mod leader;
 pub mod rekey;
+pub mod sessions;
 pub mod storage;
 pub mod store;
 pub mod sync;

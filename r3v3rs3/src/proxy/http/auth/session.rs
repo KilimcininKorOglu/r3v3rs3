@@ -1,8 +1,9 @@
 use super::super::cookie::{cookie_values, remove_cookie};
 use super::super::page::PagePreferences;
 use super::{AuthContext, AuthRejection};
-use crate::admin::auth::{LoginAttemptKey, LoginAttempts, MINIMUM_SESSION_EXPIRY};
+use crate::admin::auth::{LoginAttemptKey, LoginAttempts};
 use crate::config::storage::Storage;
+use crate::sessions::{self, SessionBackend, SessionScope};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
@@ -18,10 +19,8 @@ use r3v3rs3_api::{
     auth::{LoginMethod, LoginRequest, LoginResponse},
     error::Error,
 };
-use rand::distributions::{Alphanumeric, DistString};
 use sailfish::TemplateOnce;
 use std::{
-    collections::HashMap,
     fmt,
     ops::ControlFlow,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
@@ -39,7 +38,6 @@ const ENDPOINT_PREFIX: [&str; 2] = [".r3v3rs3", "auth"];
 
 const MAX_FORM_SIZE: usize = 8 * 1024;
 const MAX_REDIRECT_LENGTH: usize = 2048;
-const TOKEN_LENGTH: usize = 32;
 
 const CONTENT_SECURITY: &str =
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'";
@@ -51,18 +49,13 @@ const TOO_MANY_ATTEMPTS: &str = "login.too_many_attempts";
 /// instance for all proxies, so the sessions survive a proxy reload.
 pub struct SessionService {
     storage: Arc<dyn Storage>,
+    backend: Arc<dyn SessionBackend>,
     state: Mutex<SessionState>,
 }
 
 struct SessionState {
     config: AdminConfig,
-    sessions: HashMap<String, Session>,
     attempts: LoginAttempts,
-}
-
-struct Session {
-    host: String,
-    started_at: Instant,
 }
 
 enum Verification {
@@ -79,17 +72,21 @@ impl fmt::Debug for SessionService {
 
 impl SessionState {
     fn expiry(&self) -> Duration {
-        self.config.session_expiry.max(MINIMUM_SESSION_EXPIRY)
+        sessions::expiry(&self.config)
     }
 }
 
 impl SessionService {
-    pub fn new(storage: Arc<dyn Storage>, config: AdminConfig) -> Self {
+    pub fn new(
+        storage: Arc<dyn Storage>,
+        backend: Arc<dyn SessionBackend>,
+        config: AdminConfig,
+    ) -> Self {
         Self {
             storage,
+            backend,
             state: Mutex::new(SessionState {
                 config,
-                sessions: HashMap::new(),
                 attempts: LoginAttempts::default(),
             }),
         }
@@ -104,35 +101,33 @@ impl SessionService {
     }
 
     /// Returns true when the token belongs to an unexpired session of the host.
-    fn is_valid(&self, token: &str, host: &str) -> bool {
-        let state = self.state();
-        let expiry = state.expiry();
-        state.sessions.get(token).is_some_and(|session| {
-            session.started_at.elapsed() < expiry && session.host.eq_ignore_ascii_case(host)
-        })
+    async fn is_valid(&self, token: &str, host: &str) -> bool {
+        let expiry = self.state().expiry();
+        match self.backend.get(SessionScope::Proxy, token).await {
+            Ok(record) => record.is_some_and(|record| {
+                record.is_active(expiry) && record.subject.eq_ignore_ascii_case(host)
+            }),
+            Err(err) => {
+                warn!(%err, "failed to read the session");
+                false
+            }
+        }
     }
 
-    /// Starts a session for the host and returns its token and lifetime. Expired sessions are
-    /// dropped.
-    fn create_session(&self, host: &str) -> (String, Duration) {
-        let token = Alphanumeric.sample_string(&mut rand::thread_rng(), TOKEN_LENGTH);
-        let mut state = self.state();
-        let expiry = state.expiry();
-        state
-            .sessions
-            .retain(|_, session| session.started_at.elapsed() < expiry);
-        state.sessions.insert(
-            token.clone(),
-            Session {
-                host: host.to_string(),
-                started_at: Instant::now(),
-            },
-        );
-        (token, expiry)
+    /// Starts a session for the host and returns its token and lifetime.
+    async fn create_session(&self, host: &str) -> Result<(String, Duration), Error> {
+        let expiry = self.state().expiry();
+        let token = self
+            .backend
+            .create(SessionScope::Proxy, host, expiry)
+            .await?;
+        Ok((token, expiry))
     }
 
-    fn remove_session(&self, token: &str) {
-        self.state().sessions.remove(token);
+    async fn remove_session(&self, token: &str) {
+        if let Err(err) = self.backend.remove(SessionScope::Proxy, token).await {
+            warn!(%err, "failed to end the session");
+        }
     }
 
     fn is_blocked(&self, key: &LoginAttemptKey) -> bool {
@@ -245,7 +240,7 @@ impl SessionAuthenticator {
                 StatusCode::OK,
             ),
             Action::Login => self.login(req, ctx).await,
-            Action::Logout => self.logout(req.headers(), ctx),
+            Action::Logout => self.logout(req.headers(), ctx).await,
             Action::NotAllowed(allow) => method_not_allowed(allow),
             Action::NotFound => text_response(StatusCode::NOT_FOUND, "Not Found"),
         };
@@ -253,14 +248,16 @@ impl SessionAuthenticator {
     }
 
     /// Lets a request with a valid session through and removes the session cookie from it.
-    pub fn authorize<B>(
+    pub async fn authorize<B>(
         &self,
         req: &mut Request<B>,
         ctx: &AuthContext<'_>,
     ) -> Result<(), AuthRejection> {
         let host = ctx.host.unwrap_or_default();
-        let signed_in =
-            session_token(req.headers()).is_some_and(|token| self.service.is_valid(token, host));
+        let signed_in = match session_token(req.headers()) {
+            Some(token) => self.service.is_valid(token, host).await,
+            None => false,
+        };
         if !signed_in {
             return Err(AuthRejection::Response(Box::new(sign_in_required(
                 req, ctx,
@@ -296,7 +293,17 @@ impl SessionAuthenticator {
         match self.service.verify(&form).await {
             Verification::Success => {
                 self.service.clear_failures(&key);
-                let (token, expiry) = self.service.create_session(ctx.host.unwrap_or_default());
+                let host = ctx.host.unwrap_or_default();
+                let (token, expiry) = match self.service.create_session(host).await {
+                    Ok(session) => session,
+                    Err(err) => {
+                        error!(%err, "failed to start the session");
+                        return text_response(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "Service Unavailable",
+                        );
+                    }
+                };
                 let cookie = format!(
                     "{COOKIE_NAME}={token}; Path=/; Max-Age={}; HttpOnly; SameSite=Lax{}",
                     expiry.as_secs(),
@@ -313,9 +320,9 @@ impl SessionAuthenticator {
         }
     }
 
-    fn logout(&self, headers: &HeaderMap, ctx: &AuthContext<'_>) -> Response<Full<Bytes>> {
+    async fn logout(&self, headers: &HeaderMap, ctx: &AuthContext<'_>) -> Response<Full<Bytes>> {
         if let Some(token) = session_token(headers) {
-            self.service.remove_session(token);
+            self.service.remove_session(token).await;
         }
         let cookie = format!(
             "{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax{}",

@@ -112,7 +112,7 @@ impl Authenticator {
             Self::Basic(basic) => Ok(basic.authorize(req.headers_mut()).await?),
             Self::Bearer(bearer) => Ok(bearer.authorize(req.headers_mut())?),
             Self::Forward(forward) => forward.authorize(req, ctx).await,
-            Self::Session(session) => session.authorize(req, ctx),
+            Self::Session(session) => session.authorize(req, ctx).await,
         }
     }
 }

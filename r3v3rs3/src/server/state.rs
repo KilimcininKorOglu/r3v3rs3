@@ -18,6 +18,7 @@ use crate::kv::http::ApiClient;
 use crate::log::DatabaseLayer;
 use crate::proxy::http::SessionService;
 use crate::proxy::tls::upstream_client_config;
+use crate::sessions::{self, SessionBackend};
 use crate::{
     command::ServerCommand,
     proxy::{PortContext, PortContextKind, ProxyRegistries},
@@ -72,6 +73,7 @@ pub struct ServerState {
     cluster: ClusterStatus,
     /// Whether this node runs the leader tasks. A server without a cluster always does.
     leader: bool,
+    session_backend: Arc<dyn SessionBackend>,
 }
 
 pub enum Received {
@@ -145,7 +147,12 @@ impl ServerState {
             };
         }
 
-        let sessions = Arc::new(SessionService::new(storage.clone(), config.admin));
+        let session_backend = storage.clone().session_backend();
+        let sessions = Arc::new(SessionService::new(
+            storage.clone(),
+            session_backend.clone(),
+            config.admin,
+        ));
         let leader = !config.cluster.enabled;
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
@@ -171,6 +178,7 @@ impl ServerState {
             discovery_tasks: DiscoveryTasks::default(),
             cluster: ClusterStatus::default(),
             leader,
+            session_backend,
         };
 
         log_save_error(this.update_ports().await);
@@ -253,10 +261,18 @@ impl ServerState {
     async fn run_leader_tasks(&mut self) {
         self.start_http_challenges().await;
         self.remove_expired_certs().await;
+        let expiry = sessions::expiry(&self.config.admin);
+        if let Err(err) = self.session_backend.remove_expired(expiry).await {
+            error!(%err, "failed to remove the expired sessions");
+        }
     }
 
     pub fn cluster_status(&self) -> ClusterStatus {
         self.cluster.clone()
+    }
+
+    pub fn session_backend(&self) -> Arc<dyn SessionBackend> {
+        self.session_backend.clone()
     }
 
     /// Reads the parts of the state that the cluster store changed again, and applies them.

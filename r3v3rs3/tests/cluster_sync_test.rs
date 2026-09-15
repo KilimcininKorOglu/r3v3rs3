@@ -1,15 +1,19 @@
+use r3v3rs3::admin::start_admin;
 use r3v3rs3::certs::challenges::ServedChallenges;
 use r3v3rs3::cluster;
 use r3v3rs3::cluster::crypto::{ClusterKey, ClusterKeys};
 use r3v3rs3::cluster::storage::KvStorage;
 use r3v3rs3::config::new_appinfo;
 use r3v3rs3::config::storage::Storage;
+use r3v3rs3::kv::KvStore;
+use r3v3rs3::log::DatabaseLayer;
 use r3v3rs3::server::rpc::cluster::GetClusterStatus;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
 use r3v3rs3::server::rpc::ports::{AddPort, GetPortList};
 use r3v3rs3::server::rpc::proxies::{AddProxy, GetProxyList};
 use r3v3rs3::server::rpc::RpcMethod;
 use r3v3rs3::server::{Server, ServerChannels};
+use r3v3rs3::sessions::{SessionBackend, SessionScope};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::cluster::{ClusterConfig, ClusterState, ClusterStatus};
 use r3v3rs3_api::error::Error;
@@ -17,14 +21,20 @@ use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyKind};
 use reqwest::Client;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
+use tracing_subscriber::filter::LevelFilter;
 
 mod common;
 use common::kv::{check_locks_and_leases, MemoryStore};
-use common::{alloc_tcp_port, call, http_port_entry, http_route, wait_for_rpc};
+use common::{
+    admin_session_cookie, alloc_tcp_port, call, http_port_entry, http_route, wait_for_listener,
+    wait_for_rpc,
+};
 
 /// The storage of a node with the memory store.
 fn node_storage(store: &Arc<MemoryStore>, name: &str) -> anyhow::Result<KvStorage> {
@@ -75,8 +85,7 @@ impl Node {
     }
 
     async fn stop(self) -> anyhow::Result<()> {
-        self.channels.event.send(ServerEvent::Shutdown)?;
-        self.task.await?
+        stop_server(&self.channels.event, self.task).await
     }
 }
 
@@ -180,6 +189,105 @@ async fn every_node_serves_the_challenges_of_the_store() -> anyhow::Result<()> {
     }
     assert!(closed, "the node still serves the challenge listener");
     node.stop().await
+}
+
+/// A node that serves the admin API instead of answering the calls of the test.
+struct AdminNode {
+    addr: SocketAddr,
+    event: broadcast::Sender<ServerEvent>,
+    task: JoinHandle<anyhow::Result<()>>,
+}
+
+impl AdminNode {
+    async fn start(store: &Arc<MemoryStore>, name: &str, dir: &Path) -> anyhow::Result<Self> {
+        let storage = Arc::new(node_storage(store, name)?);
+        let (server, channels) = Server::new_shared(new_appinfo(dir, dir), storage.clone()).await;
+        cluster::spawn_tasks(storage, channels.command.clone());
+        let task = tokio::spawn(server.start());
+        let addr = alloc_tcp_port().await?.socket_addr();
+        tokio::spawn(start_admin(
+            new_appinfo(dir, dir),
+            addr,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+        ));
+        wait_for_listener(addr).await?;
+        Ok(Self {
+            addr,
+            event: channels.event,
+            task,
+        })
+    }
+
+    async fn status(&self, path: &str, cookie: &str) -> anyhow::Result<u16> {
+        let res = Client::new()
+            .get(format!("http://{}{path}", self.addr))
+            .header(reqwest::header::COOKIE, cookie)
+            .send()
+            .await?;
+        Ok(res.status().as_u16())
+    }
+
+    async fn stop(self) -> anyhow::Result<()> {
+        stop_server(&self.event, self.task).await
+    }
+}
+
+async fn stop_server(
+    event: &broadcast::Sender<ServerEvent>,
+    task: JoinHandle<anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    event.send(ServerEvent::Shutdown)?;
+    task.await?
+}
+
+#[tokio::test]
+async fn a_session_of_one_node_is_valid_on_the_other_node_until_logout() -> anyhow::Result<()> {
+    let dir = std::env::temp_dir().join(format!("r3v3rs3-cluster-session-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
+    let store = Arc::new(MemoryStore::default());
+    node_storage(&store, "import")?
+        .add_account("admin", "secret", false)
+        .await?;
+    let a = AdminNode::start(&store, "node-a", &dir).await?;
+    let b = AdminNode::start(&store, "node-b", &dir).await?;
+
+    let cookie = admin_session_cookie(a.addr).await?;
+    assert_eq!(b.status("/api/ports", &cookie).await?, 200);
+    assert_eq!(a.status("/api/logout", &cookie).await?, 200);
+    assert_eq!(b.status("/api/ports", &cookie).await?, 401);
+    assert_eq!(a.status("/api/ports", &cookie).await?, 401);
+
+    a.stop().await?;
+    b.stop().await?;
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_store_keeps_sessions_until_they_expire() -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let a = node_storage(&store, "node-a")?;
+    let b = node_storage(&store, "node-b")?;
+    let hour = Duration::from_secs(3600);
+    let token = a.create(SessionScope::Proxy, "example.com", hour).await?;
+
+    let record = b.get(SessionScope::Proxy, &token).await?;
+    assert_eq!(
+        record.map(|record| record.subject).as_deref(),
+        Some("example.com")
+    );
+    assert_eq!(b.get(SessionScope::Admin, &token).await?, None);
+    let keys = store.list("").await?.items;
+    assert!(keys.iter().all(|item| !item.key.contains(&token)));
+
+    b.remove_expired(hour).await?;
+    assert!(a.get(SessionScope::Proxy, &token).await?.is_some());
+    b.remove_expired(Duration::ZERO).await?;
+    assert_eq!(a.get(SessionScope::Proxy, &token).await?, None);
+    Ok(())
 }
 
 #[tokio::test]
