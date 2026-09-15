@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A Makefile for build, test, lint and WebUI targets.
 
 ### Changed
+- GitHub releases ship only Linux binaries (x86_64, aarch64 and armv7) and the Docker image. CI tests run only on Linux.
 - Turkish translations use "erişim listesi" for access lists, and the Turkish WebUI and docs texts read as native Turkish.
 - Rate limiters, caches and health groups belong to each server instance.
 - The etcd and Consul clients are shared between discovery and cluster mode.

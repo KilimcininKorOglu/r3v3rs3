@@ -110,7 +110,7 @@ $ cargo install r3v3rs3
 
 ## Github Releases
 
-Hazır binary'lerin son sürümünü doğrudan [releases sayfasından](https://github.com/KilimcininKorOglu/r3v3rs3/releases) da indirebilirsiniz.
+Linux için hazır binary'lerin (x86_64, aarch64 ve armv7) son sürümünü doğrudan [releases sayfasından](https://github.com/KilimcininKorOglu/r3v3rs3/releases) da indirebilirsiniz.
 
 Arşivden çıkan binary'yi `$PATH` içindeki bir dizine koymanız yeterlidir.
 
