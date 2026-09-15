@@ -6,12 +6,12 @@ weight = 0
 
 # Cluster
 
-Birden fazla r3v3rs3 node'u etcd'de veya Consul'un key-value store'unda tek bir state paylaşabilir. Her node aynı portlar, proxy'ler, access list'ler, sertifikalar, ACME kayıtları, admin hesapları ve ayarlarla trafik alır. Bir node'daki değişiklik restart olmadan diğer node'lara ulaşır.
+Birden fazla r3v3rs3 node'u etcd'de veya Consul'un key-value store'unda tek bir state paylaşabilir. Her node aynı portlar, proxy'ler, erişim listeleri, sertifikalar, ACME kayıtları, admin hesapları ve ayarlarla trafik alır. Bir node'daki değişiklik restart olmadan diğer node'lara ulaşır.
 
 ## Mimari
 
 - `[cluster]` bölümü her node'un `config.toml` dosyasında durur. Admin API ve WebUI bu bölümü değiştirmez. Store bu bölümü tutmaz.
-- State'in geri kalanı store'da durur: ayarlar, portlar, proxy'ler, access list'ler, sertifikalar, ACME kayıtları, admin hesapları ve CDN IP aralıkları. Audit log ve gönderilen sertifika bildirimleri de store'da durur. Cluster açık olan node `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `accounts.toml`, `notifications.json` ve sertifika dosyalarını okumaz.
+- State'in geri kalanı store'da durur: ayarlar, portlar, proxy'ler, erişim listeleri, sertifikalar, ACME kayıtları, admin hesapları ve CDN IP aralıkları. Audit log ve gönderilen sertifika bildirimleri de store'da durur. Cluster açık olan node `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `accounts.toml`, `notifications.json` ve sertifika dosyalarını okumaz.
 - Her node store'u izler ve her değişikliği uygular. Bir node'un admin API'sinden gelen değişiklik önce store'a yazılır. Daha yeni bir değer bulan yazma `409 cluster_write_conflict` ile başarısız olur ve node yeni değeri store'dan alır.
 - Node'lar admin session'larını, proxy session'larını, rate limit sayılarını ve `share_cache` açıksa cache'lenen response'ları paylaşır.
 - Node'lardan biri leader'dır. ACME sertifikalarını yalnız leader order eder. Sertifika bildirimlerini yalnız leader gönderir. Eski audit log kayıtlarını, süresi dolan sertifikaları, süresi dolan session'ları ve paylaşılan response'ları yalnız leader siler. İndirilen CDN IP aralıklarını store'a yalnız leader yazar. Leader bu işleri leader olduğu anda ve sonra her `background_task_interval` sürede çalıştırır.
@@ -94,7 +94,7 @@ Her key `<prefix>/v1/` ile başlar.
 | `state/config` | Ayarlar. | evet |
 | `state/ports/<id>` | Portlar. | hayır |
 | `state/proxies/<id>` | Proxy'ler. | evet |
-| `state/access-lists/<id>` | Parola hash'leri ve token digest'leriyle access list'ler. | evet |
+| `state/access-lists/<id>` | Parola hash'leri ve token digest'leriyle erişim listeleri. | evet |
 | `state/certs/<kind>/<id>` | Sertifikalar ve private key'leri. | evet |
 | `state/acme/<id>` | Account key'leri ve DNS provider credential'larıyla ACME kayıtları. | evet |
 | `state/accounts/<hex ad>` | Admin hesapları. | evet |

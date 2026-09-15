@@ -53,7 +53,7 @@ tls_termination = { server_names = ["example.com"], client_auth = "required", cl
 
 r3v3rs3 önündeki bir load balancer, client adresini PROXY protocol header'ı (versiyon 1 veya 2) ile gönderebilir. TCP, TLS üzerinden TCP, HTTP ve HTTPS portları bu header'ı okuyabilir. UDP ve QUIC üzerinden HTTP portları okuyamaz.
 
-"PROXY Protocol Al" seçeneğini açın. Load balancer'ların IP adreslerini veya CIDR bloklarını "Güvenilen Load Balancer'lar" alanına yazın:
+"PROXY Protocol Kabul Et" seçeneğini açın. Load balancer'ların IP adreslerini veya CIDR bloklarını "Güvenilen Load Balancer'lar" alanına yazın:
 
 - Güvenilen bir adresten gelen bağlantı geçerli bir header ile başlamalıdır. Header geçersizse, versiyonu "Kabul Edilen Versiyonlar" içinde yoksa veya header "Header Timeout" süresinde gelmezse r3v3rs3 bağlantıyı kapatır. Varsayılan timeout 5 saniyedir.
 - r3v3rs3 diğer adreslerden header okumaz. Bu bağlantıların client adresi peer adresidir.
@@ -156,14 +156,14 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:3000/" }] }]
 
 ## Sabit Response'lar
 
-HTTP / HTTPS proxy'sindeki bir route, request'i `servers` değerine göndermek yerine `response` ile her request'e kendisi yanıt verebilir. Bir route'ta `servers` veya `response` değerlerinden yalnız biri bulunur. Redirection host veya 404 host için sabit response kullanın.
+HTTP / HTTPS proxy'sindeki bir route, request'i `servers` değerine göndermek yerine `response` ile her request'e kendisi yanıt verebilir. Bir route'ta `servers` veya `response` değerlerinden yalnız biri bulunur. Redirect host veya 404 host için sabit response kullanın.
 
 - `type = "redirect"` değeri `target` adresine bir redirect ile yanıt verir. `status` değeri `301`, `302` (varsayılan), `307` veya `308` olabilir. `preserve_path` (varsayılan `true`) request'in path'ini ve query'sini `target` sonuna ekler. Bu durumda `GET /a?b=1` request'i `https://example.com/a?b=1` adresine gider.
 - `type = "status"` değeri `status` ile ve isteğe bağlı düz metin `body` ile yanıt verir. `body` en fazla 4096 byte olabilir. `status` değeri `200`, `400`, `403`, `404`, `410`, `429`, `451`, `500`, `502` veya `503` olabilir.
 
 r3v3rs3; client IP filtresini, rate limit'i, `upgrade_insecure` HTTPS redirect'ini, redirect kurallarını ve kimlik doğrulamayı sabit response'tan önce uygular. r3v3rs3 hem `servers` hem `response` içeren route'u reddeder. Geçersiz target, status veya body değerini de reddeder.
 
-WebUI'da her route için route tipini seçin. Yeni proxy sayfası "Redirection host" ve "404 host" şablonlarını sunar. Servis keşfi label'ları aynı alanları ayarlar, örneğin `r3v3rs3.http.old.routes.0.response.type=redirect` ve `r3v3rs3.http.old.routes.0.response.target=https://example.com`. `response` içeren route, container port'undan varsayılan server almaz.
+WebUI'da her route için route tipini seçin. Yeni proxy sayfası "Redirect host" ve "404 host" şablonlarını sunar. Servis keşfi label'ları aynı alanları ayarlar, örneğin `r3v3rs3.http.old.routes.0.response.type=redirect` ve `r3v3rs3.http.old.routes.0.response.target=https://example.com`. `response` içeren route, container port'undan varsayılan server almaz.
 
 ```toml
 [old-domain]
@@ -376,7 +376,7 @@ Her HTTP / HTTPS proxy'sinde client'ları IP adresine göre engelleyebilir veya 
 
 Bir adres iki listeye de uyuyorsa engellenir.
 
-Bir route, "Bu Route için IP Filtresini Değiştir" seçeneğiyle proxy listeleri yerine yalnız kendi listelerini kullanır. Route'un iki listesi de boşsa bu route'a her client erişebilir.
+Bir route, "Bu Route için Ayrı IP Filtresi Kullan" seçeneğiyle proxy listeleri yerine yalnız kendi listelerini kullanır. Route'un iki listesi de boşsa bu route'a her client erişebilir.
 
 ```toml
 [my-proxy]
@@ -399,7 +399,7 @@ Her HTTP / HTTPS proxy'sinde bir client IP adresinin gönderebileceği request s
 
 Limiti aşan client, `Retry-After` header'ıyla birlikte `429 Too Many Requests` alır.
 
-Bir route, "Bu Route için Rate Limit'i Değiştir" seçeneğiyle proxy limiti yerine kendi limitini kullanabilir. Bu seçeneği açmayan route'lar her client için ortak bir sayaç kullanır. Route ayarında request değeri `0` ise o route'ta limit uygulanmaz.
+Bir route, "Bu Route için Ayrı Rate Limit Kullan" seçeneğiyle proxy limiti yerine kendi limitini kullanabilir. Bu seçeneği açmayan route'lar her client için ortak bir sayaç kullanır. Route ayarında request değeri `0` ise o route'ta limit uygulanmaz.
 
 r3v3rs3 sayaçları memory'de tutar. Config değiştiğinde sayaçlar korunur; yalnız limitin kendisi değişirse sıfırlanır. Sunucuyu yeniden başlatmak da sayaçları sıfırlar.
 
@@ -416,7 +416,7 @@ routes = [
 
 ## Kimlik doğrulama
 
-Her HTTP / HTTPS proxy'sinde "Kimlik Doğrulama" bölümünden kimlik doğrulamayı zorunlu hale getirebilirsiniz. Bir route, "Bu Route için Kimlik Doğrulamayı Değiştir" seçeneğiyle proxy ayarı yerine kendi ayarını kullanabilir. O route'u bütün client'lara açmak için "Yok" seçin.
+Her HTTP / HTTPS proxy'sinde "Kimlik Doğrulama" bölümünden kimlik doğrulamayı zorunlu hale getirebilirsiniz. Bir route, "Bu Route için Ayrı Kimlik Doğrulama Kullan" seçeneğiyle proxy ayarı yerine kendi ayarını kullanabilir. O route'u bütün client'lara açmak için "Yok" seçin.
 
 r3v3rs3 kimlik doğrulamayı IP filtresinden, rate limit'ten ve HTTPS redirect'inden sonra yapar. Bu sayede "HTTP'yi Otomatik Olarak HTTPS'e Yönlendir" seçeneği açıksa tarayıcı kimlik bilgilerini şifreli bağlantı üzerinden gönderir.
 
@@ -529,11 +529,11 @@ auth = { type = "session" }
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
-## Access list'ler
+## Erişim listeleri
 
-Access list, bir IP filtresini ve bir kimlik doğrulamayı bir adla tutar. Birden fazla proxy ve route aynı access list'i kullanabilir. Liste değişince değişiklik yeniden başlatma olmadan hepsine uygulanır.
+Erişim listesi, bir IP filtresini ve bir kimlik doğrulamayı bir adla tutar. Birden fazla proxy ve route aynı erişim listesini kullanabilir. Liste değişince değişiklik yeniden başlatma olmadan hepsine uygulanır.
 
-WebUI'daki "Access List'ler" sayfası listeleri ekler, değiştirir ve siler. HTTP / HTTPS proxy'nin "Access List" alanı proxy için bir liste seçer. Route'un "Access List" alanı route için bir liste seçer. Yönetim API'sinde ve `proxies.toml` dosyasında `access_list` alanı bir proxy'nin veya route'un listesini ayarlar.
+WebUI'daki "Erişim Listeleri" sayfası listeleri ekler, değiştirir ve siler. HTTP / HTTPS proxy'nin "Erişim Listesi" alanı proxy için bir liste seçer. Route'un "Erişim Listesi" alanı route için bir liste seçer. Yönetim API'sinde ve `proxies.toml` dosyasında `access_list` alanı bir proxy'nin veya route'un listesini ayarlar.
 
 - Proxy'nin listesi, proxy'nin "IP Filtresi" ve "Kimlik Doğrulama" ayarlarının yerini alır.
 - Route'un listesi, route'un IP filtresinin ve kimlik doğrulamasının yerini alır.
@@ -566,16 +566,16 @@ routes = [
 
 | Endpoint | İşlem |
 |---|---|
-| `GET /api/access_lists` | Access list'leri listeler. |
-| `POST /api/access_lists` | Bir access list ekler. |
-| `PUT /api/access_lists/{id}` | Bir access list'i değiştirir. Yeni secret'ı olmayan kullanıcı veya token hash'ini korur. |
-| `DELETE /api/access_lists/{id}` | Bir access list'i siler. |
+| `GET /api/access_lists` | Erişim listelerini listeler. |
+| `POST /api/access_lists` | Bir erişim listesi ekler. |
+| `PUT /api/access_lists/{id}` | Bir erişim listesini değiştirir. Yeni secret'ı olmayan kullanıcı veya token hash'ini korur. |
+| `DELETE /api/access_lists/{id}` | Bir erişim listesini siler. |
 
 Her hesap listeleri okur. Listeleri yalnız admin veya proxy listesi olmayan editör değiştirir. Ayrıntılar için [Hesaplar](@/accounts.tr.md) sayfasına bakın.
 
 ## Header kuralları
 
-Proxy'den geçen request ve response'ların header'larını "Header Kuralları" bölümünden değiştirebilirsiniz. Bir route, "Bu Route için Header Kurallarını Değiştir" seçeneğiyle proxy kuralları yerine kendi kurallarını kullanabilir.
+Proxy'den geçen request ve response'ların header'larını "Header Kuralları" bölümünden değiştirebilirsiniz. Bir route, "Bu Route için Ayrı Header Kuralları Kullan" seçeneğiyle proxy kuralları yerine kendi kurallarını kullanabilir.
 
 Her satıra bir kural yazın:
 
@@ -787,7 +787,7 @@ Self-signed bir sertifika oluşturduğunuzda r3v3rs3 bir CA sertifikası da olu�
 
 ## Süre uyarıları
 
-Sertifika listesi, "Sertifika Süre Uyarısı" (varsayılan `14days`) süresi içinde sona erecek sertifikayı "Süresi yaklaşıyor" ile işaretler. Süresi dolmuş sertifikayı "Süresi doldu" ile işaretler.
+Sertifika listesi, "Sertifika Süre Uyarısı" (varsayılan `14days`) süresi içinde sona erecek sertifikayı "Süresi dolmak üzere" ile işaretler. Süresi dolmuş sertifikayı "Süresi doldu" ile işaretler.
 
 ## Bildirimler
 
@@ -996,7 +996,7 @@ WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütü
 |---|---|---|
 | Session Süresi | `1h` | Yönetim paneli session'ının geçerlilik süresi. En az 5 dakika olabilir. |
 | Maksimum Giriş Denemesi | `10` | Her client IP adresi ve kullanıcı adı için izin verilen başarısız giriş sayısı. |
-| Giriş Denemesi Sıfırlama | `15m` | Limite ulaşıldıktan sonraki bekleme süresi. |
+| Giriş Denemesi Sıfırlama Süresi | `15m` | Limite ulaşıldıktan sonraki bekleme süresi. |
 | Arka Plan Görevi Aralığı | `1h` | Sertifika yenileme ve log temizleme görevlerinin çalışma aralığı. |
 | HTTP Challenge Adresi | `0.0.0.0:80` | ACME HTTP challenge'larının dinlendiği adres. |
 | TLS-ALPN Challenge Adresi | `0.0.0.0:443` | Hiçbir port bu portu kullanmıyorsa ACME TLS-ALPN-01 challenge'larının dinlendiği adres. |
@@ -1054,7 +1054,7 @@ $ curl -b cookies.txt http://localhost:46492/api/ports
 
 # Audit log
 
-r3v3rs3, bir hesabın WebUI veya yönetim API'si ile yaptığı değişiklikleri kaydeder: portlar, proxy'ler, access list'ler, sertifikalar, ACME kayıtları, ayarlar, CDN IP aralığı yenilemeleri ve hesaplar. Yönetim paneline her giriş, her başarısız giriş denemesi ve her çıkış da kaydedilir. r3v3rs3'ün kendi yaptığı değişiklikler kaydedilmez. Sertifika yenileme ve keşfedilen proxy'ler buna örnektir.
+r3v3rs3, bir hesabın WebUI veya yönetim API'si ile yaptığı değişiklikleri kaydeder: portlar, proxy'ler, erişim listeleri, sertifikalar, ACME kayıtları, ayarlar, CDN IP aralığı yenilemeleri ve hesaplar. Yönetim paneline her giriş, her başarısız giriş denemesi ve her çıkış da kaydedilir. r3v3rs3'ün kendi yaptığı değişiklikler kaydedilmez. Sertifika yenileme ve keşfedilen proxy'ler buna örnektir.
 
 Her kayıtta zaman, hesap, client IP adresi, işlem, değişen kaynağın id'si ve kısa bir özet bulunur. Özet isimleri, adresleri ve rolleri içerir. Parola, token veya key içermez.
 

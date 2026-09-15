@@ -15,15 +15,15 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 | Proxy'leri okuma | bütün proxy'ler | bütün proxy'ler | listesindeki proxy'ler | bütün proxy'ler veya listesindeki proxy'ler |
 | Proxy ekleme | evet | evet | evet, yeni proxy listesine eklenir | hayır |
 | Proxy'yi değiştirme, silme, cache'ini temizleme | evet | evet | listesindeki proxy'ler | hayır |
-| Portları, sertifikaları, ACME kayıtlarını ve access list'leri okuma | evet | evet | evet | evet |
-| Portları, sertifikaları, ACME kayıtlarını ve access list'leri değiştirme, sertifika indirme, CDN IP aralıklarını yenileme | evet | evet | hayır | hayır |
+| Portları, sertifikaları, ACME kayıtlarını ve erişim listelerini okuma | evet | evet | evet | evet |
+| Portları, sertifikaları, ACME kayıtlarını ve erişim listelerini değiştirme, sertifika indirme, CDN IP aralıklarını yenileme | evet | evet | hayır | hayır |
 | Ayarları ve hesapları okuma veya değiştirme, audit log'u okuma | evet | hayır | hayır | hayır |
 
 - Proxy listesi olmayan hesap bütün proxy'leri görür. Admin her zaman bütün proxy'leri görür. Bu yüzden admin hesabının proxy listesi olamaz.
 - Hesabın listesinde olmayan proxy, bu hesap için yoktur. Yönetim API'si `404 id_not_found` döndürür.
 - Rolün izin vermediği işlem `403 forbidden` alır.
 - WebUI, rolün açamadığı sayfaları gizler.
-- Proxy listesi olan editör, kendi proxy'leri için bir access list seçebilir. Access list'in içeriğini yalnız access list'leri değiştirebilen hesap değiştirir.
+- Proxy listesi olan editör, kendi proxy'leri için bir erişim listesi seçebilir. Erişim listesinin içeriğini yalnız erişim listelerini değiştirebilen hesap değiştirir.
 - Bir hesap proxy'yi silince r3v3rs3 proxy'yi her hesabın proxy listesinden kaldırır.
 
 ## Kurallar
