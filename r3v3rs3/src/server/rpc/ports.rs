@@ -65,15 +65,19 @@ impl RpcMethod for DeletePort {
     const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        if state.ports.delete(self.id) {
-            state.update_ports().await;
-            state.reload_proxies().await;
-            Ok(())
-        } else {
-            Err(Error::IdNotFound {
+        if state.ports.get(self.id).is_none() {
+            return Err(Error::IdNotFound {
                 id: self.id.to_string(),
-            })
+            });
         }
+        let id = self.id;
+        state
+            .save_ports_with(|entries| entries.retain(|entry| entry.id != id))
+            .await?;
+        state.ports.delete(self.id);
+        let saved = state.update_ports().await;
+        state.reload_proxies().await;
+        saved
     }
 }
 
@@ -92,8 +96,9 @@ impl RpcMethod for AddPort {
             Err(Error::IdAlreadyExists { id: entry.id })
         } else {
             validate_port(&entry.port, state)?;
-            state.update_port(PortContext::new(entry)?).await;
-            Ok(())
+            let ctx = PortContext::new(entry)?;
+            save_port(state, &ctx).await?;
+            state.update_port(ctx).await
         }
     }
 }
@@ -104,6 +109,19 @@ fn validate_port(port: &Port, state: &ServerState) -> Result<(), Error> {
         Some(tls) => validate_client_auth(tls, &state.certs),
         None => Ok(()),
     }
+}
+
+/// Saves the port list with the port of `ctx` added or replaced.
+async fn save_port(state: &ServerState, ctx: &PortContext) -> Result<(), Error> {
+    let entry = ctx.entry();
+    state
+        .save_ports_with(|entries| {
+            match entries.iter_mut().find(|current| current.id == entry.id) {
+                Some(current) => current.clone_from(entry),
+                None => entries.push(entry.clone()),
+            }
+        })
+        .await
 }
 
 pub struct UpdatePort {
@@ -118,8 +136,9 @@ impl RpcMethod for UpdatePort {
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         if state.ports.get(self.entry.id).is_some() {
             validate_port(&self.entry.port, state)?;
-            state.update_port(PortContext::new(self.entry)?).await;
-            Ok(())
+            let ctx = PortContext::new(self.entry)?;
+            save_port(state, &ctx).await?;
+            state.update_port(ctx).await
         } else {
             Err(Error::IdNotFound {
                 id: self.entry.id.to_string(),

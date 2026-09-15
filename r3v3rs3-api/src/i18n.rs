@@ -261,6 +261,7 @@ mod tests {
             Error::ClusterWriteConflict,
             Error::FailedToHashPassword,
             Error::FailedToFetchLog,
+            Error::FailedToSaveConfig,
             Error::FailedToInvokeRpc,
             Error::FailedToListNetworkInterfaces,
         ]

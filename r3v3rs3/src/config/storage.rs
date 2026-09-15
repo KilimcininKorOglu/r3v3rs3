@@ -18,20 +18,20 @@ pub trait Storage: Send + Sync + 'static {
         Ok(())
     }
 
-    async fn save_app_config(&self, config: &AppConfig);
+    async fn save_app_config(&self, config: &AppConfig) -> Result<(), Error>;
     async fn load_app_config(&self) -> AppConfig;
-    async fn save_ports(&self, entries: &[PortEntry]);
+    async fn save_ports(&self, entries: &[PortEntry]) -> Result<(), Error>;
     async fn load_ports(&self) -> Vec<PortEntry>;
     async fn load_proxies(&self) -> Vec<ProxyEntry>;
-    async fn save_proxies(&self, proxies: &[ProxyEntry]);
-    async fn save_cert(&self, cert: &Cert);
-    async fn save_acme(&self, acme: &AcmeEntry);
-    async fn delete_acme(&self, id: ShortId);
-    async fn delete_cert(&self, id: ShortId);
+    async fn save_proxies(&self, proxies: &[ProxyEntry]) -> Result<(), Error>;
+    async fn save_cert(&self, cert: &Cert) -> Result<(), Error>;
+    async fn save_acme(&self, acme: &AcmeEntry) -> Result<(), Error>;
+    async fn delete_acme(&self, id: ShortId) -> Result<(), Error>;
+    async fn delete_cert(&self, id: ShortId) -> Result<(), Error>;
     async fn load_acmes(&self) -> Vec<AcmeEntry>;
     async fn load_certs(&self) -> Vec<Arc<Cert>>;
     async fn add_account(&self, name: &str, password: &str, totp: bool) -> Result<Account, Error>;
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error>;
-    async fn save_cdn_ranges(&self, ranges: &CdnRanges);
+    async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error>;
     async fn load_cdn_ranges(&self) -> Option<CdnRanges>;
 }

@@ -26,6 +26,7 @@ use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryState, DiscoveryStatus}
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::ProxyEntry;
 use rand::seq::SliceRandom;
 use std::collections::HashSet;
@@ -71,6 +72,13 @@ pub enum Received {
     Tcp(usize, TcpStream),
     Udp(usize, usize, SocketAddr, Vec<u8>),
     Quic(usize, Box<Incoming>),
+}
+
+/// Logs a write that the server cannot report to a caller.
+fn log_save_error(result: Result<(), Error>) {
+    if let Err(err) = result {
+        error!(%err, "failed to save the server state");
+    }
 }
 
 /// The TLS config that answers the TLS-ALPN-01 challenges. `None` without a challenge.
@@ -152,9 +160,9 @@ impl ServerState {
             discovery_tasks: DiscoveryTasks::default(),
         };
 
-        this.update_ports().await;
+        log_save_error(this.update_ports().await);
         this.update_certs().await;
-        this.update_proxies().await;
+        log_save_error(this.update_proxies().await);
         this.update_acmes().await;
         this.reload_proxies().await;
         for provider in DiscoveryProvider::ALL {
@@ -166,10 +174,7 @@ impl ServerState {
     pub async fn handle_command(&mut self, cmd: ServerCommand) {
         match cmd {
             ServerCommand::AddCert { cert } => {
-                self.certs.add(cert.clone());
-                self.update_certs().await;
-                self.reload_proxies().await;
-                self.storage.save_cert(&cert).await;
+                self.add_issued_cert(cert).await;
             }
             ServerCommand::SetBroadcastEvents { enabled } => {
                 self.broadcast_events = enabled;
@@ -190,13 +195,22 @@ impl ServerState {
             }
             ServerCommand::SetCdnRanges { ranges } => {
                 if crate::cdn::install(ranges.clone()) {
-                    self.storage.save_cdn_ranges(&ranges).await;
+                    log_save_error(self.storage.save_cdn_ranges(&ranges).await);
                 }
             }
             ServerCommand::SetDiscovery { snapshot } => {
                 self.set_discovery(snapshot).await;
             }
         }
+    }
+
+    /// Adds a certificate that an ACME order issued. The server uses the certificate even when the
+    /// storage cannot save it.
+    async fn add_issued_cert(&mut self, cert: Arc<crate::certs::Cert>) {
+        log_save_error(self.storage.save_cert(&cert).await);
+        self.certs.add(cert);
+        self.update_certs().await;
+        self.reload_proxies().await;
     }
 
     /// Runs an RPC method. A method that changes the stored state fails before it changes anything
@@ -437,7 +451,9 @@ impl ServerState {
         }
     }
 
-    pub async fn update_ports(&mut self) {
+    /// Applies the port list to the listeners. The callers save the ports before they change the
+    /// list. An error means that the proxies without the removed ports were not saved.
+    pub async fn update_ports(&mut self) -> Result<(), Error> {
         let entries = self.ports.entries().cloned().collect::<Vec<_>>();
         self.tcp_pool
             .remove_unused_ports(self.ports.as_slice())
@@ -451,10 +467,11 @@ impl ServerState {
         self.tcp_pool.update(self.ports.as_mut_slice()).await;
         self.udp_pool.update(self.ports.as_mut_slice()).await;
         self.quic_pool.update(self.ports.as_mut_slice()).await;
-        self.storage.save_ports(&entries).await;
-        if self.proxies.remove_incompatible_ports(&entries) {
-            self.update_proxies().await;
-        }
+        let saved = if self.proxies.remove_incompatible_ports(&entries) {
+            self.update_proxies().await
+        } else {
+            Ok(())
+        };
         if self.refresh_discovery().await {
             self.publish_proxies();
         }
@@ -469,18 +486,43 @@ impl ServerState {
                 });
             }
         }
+        saved
+    }
+
+    /// Saves the port list after `edit` changes a copy of it. The callers save before they change
+    /// the list, so a port list that cannot be saved is not applied.
+    pub async fn save_ports_with(
+        &self,
+        edit: impl FnOnce(&mut Vec<PortEntry>) + Send,
+    ) -> Result<(), Error> {
+        let mut entries = self.ports.entries().cloned().collect::<Vec<_>>();
+        edit(&mut entries);
+        self.storage.save_ports(&entries).await
     }
 
     /// Saves the manual proxies and sends the proxy list to the event subscribers.
-    pub async fn update_proxies(&mut self) {
+    pub async fn update_proxies(&mut self) -> Result<(), Error> {
         let manual = self
             .proxies
             .entries()
             .filter(|entry| !entry.is_discovered())
             .cloned()
             .collect::<Vec<_>>();
-        self.storage.save_proxies(&manual).await;
+        self.storage.save_proxies(&manual).await?;
         self.publish_proxies();
+        Ok(())
+    }
+
+    /// Saves a changed proxy list and applies it to the ports. When the storage fails, the list
+    /// returns to `previous`.
+    pub async fn commit_proxies(&mut self, previous: Vec<ProxyEntry>) -> Result<(), Error> {
+        let saved = self.update_proxies().await;
+        if saved.is_err() {
+            self.proxies = previous.into_iter().collect();
+            self.publish_proxies();
+        }
+        self.reload_proxies().await;
+        saved
     }
 
     fn publish_proxies(&self) {
@@ -518,11 +560,13 @@ impl ServerState {
         self.start_http_challenges().await;
     }
 
-    pub async fn update_port(&mut self, ctx: PortContext) {
-        if self.ports.update(ctx) {
-            self.update_ports().await;
-            self.reload_proxies().await;
+    pub async fn update_port(&mut self, ctx: PortContext) -> Result<(), Error> {
+        if !self.ports.update(ctx) {
+            return Ok(());
         }
+        let saved = self.update_ports().await;
+        self.reload_proxies().await;
+        saved
     }
 
     pub async fn reload_proxies(&mut self) {
@@ -762,6 +806,7 @@ impl ServerState {
         config.keep_secrets(&self.config);
         config.keep_file_only(&self.config);
         discovery::validate_config(&config.discovery, &self.certs)?;
+        self.storage.save_app_config(&config).await?;
         let changed = discovery::changed_providers(&self.config.discovery, &config.discovery);
         self.config.discovery.clone_from(&config.discovery);
         for provider in changed {
@@ -769,7 +814,6 @@ impl ServerState {
         }
         self.config.clone_from(&config);
         self.sessions.set_config(config.admin);
-        self.storage.save_app_config(&config).await;
         let _ = self.br_sender.send(ServerEvent::AppConfigUpdated {
             config: Box::new(config.masked()),
         });

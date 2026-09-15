@@ -212,6 +212,9 @@ pub enum Error {
     #[error("failed to fetch log")]
     FailedToFetchLog,
 
+    #[error("failed to save the configuration")]
+    FailedToSaveConfig,
+
     #[error("failed to invoke rpc")]
     FailedToInvokeRpc,
 
@@ -228,7 +231,10 @@ impl Error {
             Self::TooManyLoginAttempts => 429,
             Self::ClusterWriteConflict => 409,
             Self::ClusterUnavailable => 503,
-            Self::FailedToFetchLog | Self::FailedToInvokeRpc | Self::FailedToHashPassword => 500,
+            Self::FailedToFetchLog
+            | Self::FailedToSaveConfig
+            | Self::FailedToInvokeRpc
+            | Self::FailedToHashPassword => 500,
             _ => 400,
         }
     }

@@ -45,6 +45,14 @@ fn default_version() -> String {
     build_info::PKG_VERSION.to_owned()
 }
 
+/// Logs a failed write with its path. The caller gets an error without the path.
+fn saved(path: &Path, result: anyhow::Result<()>) -> Result<(), Error> {
+    result.map_err(|err| {
+        error!(?path, "failed to save: {err}");
+        Error::FailedToSaveConfig
+    })
+}
+
 /// Writes a file that holds secrets, such as ACME account keys, so only the owner can read it.
 async fn write_private(path: &Path, contents: String) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
@@ -118,6 +126,19 @@ impl FileStorage {
     pub async fn read_app_config(&self) -> anyhow::Result<AppConfig> {
         self.load_app_config_impl(&self.dir.join("config.toml"))
             .await
+    }
+
+    /// Removes the directory of the certificate below each kind directory.
+    async fn delete_cert_impl(&self, certs: &Path, id: ShortId) -> anyhow::Result<()> {
+        if !fs::try_exists(certs).await? {
+            return Ok(());
+        }
+        let pattern = format!("*/{id}");
+        let walker = globwalk::GlobWalkerBuilder::from_patterns(certs, &[&pattern]).build()?;
+        for entry in walker {
+            fs::remove_dir_all(entry?.path()).await?;
+        }
+        Ok(())
     }
 
     async fn save_cdn_ranges_impl(&self, path: &Path, ranges: &CdnRanges) -> anyhow::Result<()> {
@@ -461,12 +482,10 @@ impl FileStorage {
 
 #[async_trait::async_trait]
 impl Storage for FileStorage {
-    async fn save_app_config(&self, config: &AppConfig) {
-        let dir = &self.dir;
-        let path = dir.join("config.toml");
-        if let Err(err) = self.save_app_config_impl(&path, config).await {
-            error!(?path, "failed to save: {err}");
-        }
+    async fn save_app_config(&self, config: &AppConfig) -> Result<(), Error> {
+        let path = self.dir.join("config.toml");
+        let result = self.save_app_config_impl(&path, config).await;
+        saved(&path, result)
     }
 
     async fn load_app_config(&self) -> AppConfig {
@@ -481,12 +500,10 @@ impl Storage for FileStorage {
         }
     }
 
-    async fn save_ports(&self, entries: &[PortEntry]) {
-        let dir = &self.dir;
-        let path = dir.join("ports.toml");
-        if let Err(err) = self.save_ports_impl(&path, entries).await {
-            error!(?path, "failed to save: {err}");
-        }
+    async fn save_ports(&self, entries: &[PortEntry]) -> Result<(), Error> {
+        let path = self.dir.join("ports.toml");
+        let result = self.save_ports_impl(&path, entries).await;
+        saved(&path, result)
     }
 
     async fn load_ports(&self) -> Vec<PortEntry> {
@@ -501,12 +518,10 @@ impl Storage for FileStorage {
         }
     }
 
-    async fn save_proxies(&self, proxies: &[ProxyEntry]) {
-        let dir = &self.dir;
-        let path = dir.join("proxies.toml");
-        if let Err(err) = self.save_proxies_impl(&path, proxies).await {
-            error!(?path, "failed to save: {err}");
-        }
+    async fn save_proxies(&self, proxies: &[ProxyEntry]) -> Result<(), Error> {
+        let path = self.dir.join("proxies.toml");
+        let result = self.save_proxies_impl(&path, proxies).await;
+        saved(&path, result)
     }
 
     async fn load_proxies(&self) -> Vec<ProxyEntry> {
@@ -521,44 +536,32 @@ impl Storage for FileStorage {
         }
     }
 
-    async fn save_cert(&self, cert: &Cert) {
-        let dir = &self.dir;
-        let path = dir
+    async fn save_cert(&self, cert: &Cert) -> Result<(), Error> {
+        let path = self
+            .dir
             .join("certs")
             .join(cert.kind.to_string())
             .join(cert.id().to_string());
-        if let Err(err) = self.save_cert_impl(&path, cert).await {
-            error!(?path, "failed to save: {err}");
-        }
+        let result = self.save_cert_impl(&path, cert).await;
+        saved(&path, result)
     }
 
-    async fn save_acme(&self, acme: &AcmeEntry) {
+    async fn save_acme(&self, acme: &AcmeEntry) -> Result<(), Error> {
         let path = self.dir.join("acme.toml");
-        if let Err(err) = self.save_acme_impl(&path, acme).await {
-            error!(?path, "failed to save: {err}");
-        }
+        let result = self.save_acme_impl(&path, acme).await;
+        saved(&path, result)
     }
 
-    async fn delete_acme(&self, id: ShortId) {
+    async fn delete_acme(&self, id: ShortId) -> Result<(), Error> {
         let path = self.dir.join("acme.toml");
-        if let Err(err) = self.delete_acme_impl(&path, id).await {
-            error!(?path, "failed to delete: {err}");
-        }
+        let result = self.delete_acme_impl(&path, id).await;
+        saved(&path, result)
     }
 
-    async fn delete_cert(&self, id: ShortId) {
-        let dir = &self.dir;
-
-        if let Ok(walker) =
-            globwalk::GlobWalkerBuilder::from_patterns(dir.join("certs"), &[&format!("*/{id}")])
-                .build()
-        {
-            for entry in walker.filter_map(Result::ok) {
-                if let Err(err) = fs::remove_dir_all(entry.path()).await {
-                    error!(path = ?entry.path(), "failed to delete: {err}");
-                }
-            }
-        }
+    async fn delete_cert(&self, id: ShortId) -> Result<(), Error> {
+        let path = self.dir.join("certs");
+        let result = self.delete_cert_impl(&path, id).await;
+        saved(&path, result)
     }
 
     async fn load_acmes(&self) -> Vec<AcmeEntry> {
@@ -604,11 +607,10 @@ impl Storage for FileStorage {
         }
     }
 
-    async fn save_cdn_ranges(&self, ranges: &CdnRanges) {
+    async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error> {
         let path = self.dir.join("cdn-ranges.json");
-        if let Err(err) = self.save_cdn_ranges_impl(&path, ranges).await {
-            error!(?path, "failed to save: {err}");
-        }
+        let result = self.save_cdn_ranges_impl(&path, ranges).await;
+        saved(&path, result)
     }
 
     async fn load_cdn_ranges(&self) -> Option<CdnRanges> {
@@ -637,7 +639,7 @@ mod test {
         let server = Cert::new_self_signed(&san, &ca).unwrap();
         let client = Cert::new_client(&san, &ca).unwrap();
         for cert in [&ca, &server, &client] {
-            storage.save_cert(cert).await;
+            storage.save_cert(cert).await.unwrap();
         }
 
         let loaded = storage.load_certs().await;

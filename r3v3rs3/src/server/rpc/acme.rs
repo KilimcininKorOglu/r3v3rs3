@@ -33,14 +33,15 @@ impl RpcMethod for GetAcme {
     type Output = AcmeInfo;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        state
-            .acmes
-            .get(self.id)
-            .map(|acme| acme.info(&state.certs))
-            .ok_or(Error::IdNotFound {
-                id: self.id.to_string(),
-            })
+        get_entry(state, self.id).map(|acme| acme.info(&state.certs))
     }
+}
+
+fn get_entry(state: &ServerState, id: ShortId) -> Result<&AcmeEntry, Error> {
+    state
+        .acmes
+        .get(id)
+        .ok_or_else(|| Error::IdNotFound { id: id.to_string() })
 }
 
 pub struct AddAcme {
@@ -59,8 +60,8 @@ impl RpcMethod for AddAcme {
             &state.config().acme_exec,
         )?;
         let entry = AcmeEntry::new(state.generate_id(), self.request).await?;
-        state.acmes.add(entry.clone())?;
-        state.storage.save_acme(&entry).await;
+        state.storage.save_acme(&entry).await?;
+        state.acmes.add(entry)?;
         state.update_acmes().await;
         Ok(())
     }
@@ -77,8 +78,10 @@ impl RpcMethod for UpdateAcme {
     const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        let entry = state.acmes.update(self.id, self.config)?;
-        state.storage.save_acme(&entry).await;
+        let mut entry = get_entry(state, self.id)?.clone();
+        entry.acme.config = self.config;
+        state.storage.save_acme(&entry).await?;
+        state.acmes.update(self.id, entry.acme.config)?;
         state.update_acmes().await;
         Ok(())
     }
@@ -94,9 +97,10 @@ impl RpcMethod for DeleteAcme {
     const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        get_entry(state, self.id)?;
+        state.storage.delete_acme(self.id).await?;
         state.acmes.delete(self.id)?;
         state.update_acmes().await;
-        state.storage.delete_acme(self.id).await;
         Ok(())
     }
 }

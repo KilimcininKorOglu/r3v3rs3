@@ -42,10 +42,10 @@ impl RpcMethod for AddCert {
     const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        state.certs.add(self.cert.clone());
+        state.storage.save_cert(&self.cert).await?;
+        state.certs.add(self.cert);
         state.update_certs().await;
         state.reload_proxies().await;
-        state.storage.save_cert(&self.cert).await;
         Ok(())
     }
 }
@@ -60,18 +60,17 @@ impl RpcMethod for DeleteCert {
     const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        if state
-            .certs
-            .get(self.id)
-            .is_some_and(|cert| cert.source.is_some())
-        {
+        let cert = state.certs.get(self.id).ok_or_else(|| Error::IdNotFound {
+            id: self.id.to_string(),
+        })?;
+        if cert.source.is_some() {
             return Err(Error::CertificateReadOnly { id: self.id });
         }
         ensure_unused(state, self.id)?;
+        state.storage.delete_cert(self.id).await?;
         state.certs.delete(self.id)?;
         state.update_certs().await;
         state.reload_proxies().await;
-        state.storage.delete_cert(self.id).await;
         Ok(())
     }
 }

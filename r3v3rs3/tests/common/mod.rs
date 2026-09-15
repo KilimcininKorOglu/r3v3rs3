@@ -168,6 +168,12 @@ struct Inner {
     pub cdn_ranges: Option<CdnRanges>,
     /// The error of `ensure_writable`.
     pub write_error: Option<Error>,
+    /// The error of every save and delete.
+    pub save_error: Option<Error>,
+}
+
+fn fail_with(error: &Option<Error>) -> Result<(), Error> {
+    error.clone().map_or(Ok(()), Err)
 }
 
 impl TestStorage {
@@ -175,30 +181,39 @@ impl TestStorage {
         TestStorageBuilder::new()
     }
 
+    /// Applies `change` unless a save error is set.
+    async fn save(&self, change: impl FnOnce(&mut Inner) + Send) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+        fail_with(&inner.save_error)?;
+        change(&mut inner);
+        Ok(())
+    }
+
     pub async fn set_write_error(&self, error: Option<Error>) {
         self.inner.lock().await.write_error = error;
+    }
+
+    pub async fn set_save_error(&self, error: Option<Error>) {
+        self.inner.lock().await.save_error = error;
     }
 }
 
 #[async_trait::async_trait]
 impl Storage for TestStorage {
     async fn ensure_writable(&self) -> Result<(), Error> {
-        match &self.inner.lock().await.write_error {
-            Some(error) => Err(error.clone()),
-            None => Ok(()),
-        }
+        fail_with(&self.inner.lock().await.write_error)
     }
 
-    async fn save_app_config(&self, config: &AppConfig) {
-        self.inner.lock().await.config.clone_from(config);
+    async fn save_app_config(&self, config: &AppConfig) -> Result<(), Error> {
+        self.save(|inner| inner.config.clone_from(config)).await
     }
 
     async fn load_app_config(&self) -> AppConfig {
         self.inner.lock().await.config.clone()
     }
 
-    async fn save_ports(&self, entries: &[PortEntry]) {
-        self.inner.lock().await.ports = entries.to_vec();
+    async fn save_ports(&self, entries: &[PortEntry]) -> Result<(), Error> {
+        self.save(|inner| inner.ports = entries.to_vec()).await
     }
 
     async fn load_ports(&self) -> Vec<PortEntry> {
@@ -209,32 +224,37 @@ impl Storage for TestStorage {
         self.inner.lock().await.proxies.clone()
     }
 
-    async fn save_proxies(&self, proxies: &[ProxyEntry]) {
-        self.inner.lock().await.proxies = proxies.to_vec();
+    async fn save_proxies(&self, proxies: &[ProxyEntry]) -> Result<(), Error> {
+        self.save(|inner| inner.proxies = proxies.to_vec()).await
     }
 
-    async fn save_cert(&self, cert: &Cert) {
-        self.inner
-            .lock()
-            .await
-            .certs
-            .insert(cert.id(), Arc::new(cert.clone()));
+    async fn save_cert(&self, cert: &Cert) -> Result<(), Error> {
+        let cert = Arc::new(cert.clone());
+        self.save(|inner| {
+            inner.certs.insert(cert.id(), cert);
+        })
+        .await
     }
 
-    async fn save_acme(&self, acme: &AcmeEntry) {
-        self.inner
-            .lock()
-            .await
-            .acems
-            .insert(acme.id(), acme.clone());
+    async fn save_acme(&self, acme: &AcmeEntry) -> Result<(), Error> {
+        self.save(|inner| {
+            inner.acems.insert(acme.id(), acme.clone());
+        })
+        .await
     }
 
-    async fn delete_acme(&self, id: ShortId) {
-        self.inner.lock().await.acems.remove(&id);
+    async fn delete_acme(&self, id: ShortId) -> Result<(), Error> {
+        self.save(|inner| {
+            inner.acems.remove(&id);
+        })
+        .await
     }
 
-    async fn delete_cert(&self, id: ShortId) {
-        self.inner.lock().await.certs.remove(&id);
+    async fn delete_cert(&self, id: ShortId) -> Result<(), Error> {
+        self.save(|inner| {
+            inner.certs.remove(&id);
+        })
+        .await
     }
 
     async fn load_acmes(&self) -> Vec<AcmeEntry> {
@@ -271,8 +291,9 @@ impl Storage for TestStorage {
         Err(Error::InvalidLoginCredentials)
     }
 
-    async fn save_cdn_ranges(&self, ranges: &CdnRanges) {
-        self.inner.lock().await.cdn_ranges = Some(ranges.clone());
+    async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error> {
+        self.save(|inner| inner.cdn_ranges = Some(ranges.clone()))
+            .await
     }
 
     async fn load_cdn_ranges(&self) -> Option<CdnRanges> {

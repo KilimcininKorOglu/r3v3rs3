@@ -88,10 +88,9 @@ impl RpcMethod for DeleteProxy {
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         ensure_manual(state, self.id)?;
+        let previous = proxy_entries(state);
         state.proxies.delete(self.id)?;
-        state.update_proxies().await;
-        state.reload_proxies().await;
-        Ok(())
+        state.commit_proxies(previous).await
     }
 }
 
@@ -107,9 +106,9 @@ impl RpcMethod for AddProxy {
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         validate_proxy(&self.entry, state)?;
         let proxy = seal(self.entry).await?;
+        let previous = proxy_entries(state);
         if state.proxies.set((state.generate_id(), proxy).into()) {
-            state.update_proxies().await;
-            state.reload_proxies().await;
+            state.commit_proxies(previous).await?;
         }
         Ok(())
     }
@@ -128,12 +127,16 @@ impl RpcMethod for UpdateProxy {
         ensure_manual(state, self.entry.id)?;
         validate_proxy(&self.entry.proxy, state)?;
         let proxy = seal(self.entry.proxy).await?;
+        let previous = proxy_entries(state);
         if state.proxies.set((self.entry.id, proxy).into()) {
-            state.update_proxies().await;
-            state.reload_proxies().await;
+            state.commit_proxies(previous).await?;
         }
         Ok(())
     }
+}
+
+fn proxy_entries(state: &ServerState) -> Vec<ProxyEntry> {
+    state.proxies.entries().cloned().collect()
 }
 
 /// Service discovery owns a discovered proxy, so the API cannot change or delete it.
