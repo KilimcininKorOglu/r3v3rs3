@@ -150,6 +150,16 @@ impl Layout {
         format!("{}{}/{token_digest}", self.sessions(), scope.as_str())
     }
 
+    /// The rate limit counts that each node publishes. They hold client IP addresses, so they are
+    /// encrypted.
+    pub fn rate_limits(&self) -> String {
+        format!("{}ratelimit/", self.data)
+    }
+
+    pub fn rate_limit(&self, node: &str) -> String {
+        hex_key(self.rate_limits(), node)
+    }
+
     /// Whether the cluster stores the value of the key without encryption. Every other value is
     /// encrypted.
     pub fn is_plain(&self, key: &str) -> bool {
@@ -236,5 +246,10 @@ mod tests {
         assert_eq!(layout.kind(&session), None);
         assert!(!layout.is_plain(&session));
         assert!(!layout.is_plain(&layout.account("admin")));
+
+        let counts = layout.rate_limit("node-a");
+        assert_eq!(counts, "r3v3rs3/v1/ratelimit/6e6f64652d61");
+        assert_eq!(layout.kind(&counts), None);
+        assert!(!layout.is_plain(&counts));
     }
 }

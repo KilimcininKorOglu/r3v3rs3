@@ -1,6 +1,7 @@
 //! Downloads the published edge IP ranges of known CDNs.
 
 use super::{set_last_errors, table, CdnRanges};
+use crate::proxy::http::rate_share::unix_ms;
 use crate::{command::ServerCommand, proxy::http::hyper_tls::client::HttpsConnector};
 use anyhow::{anyhow, bail};
 use bytes::Bytes;
@@ -15,7 +16,7 @@ use r3v3rs3_api::{cdn::CdnProvider, cidr::parse_cidr};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 use tokio::sync::mpsc;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
@@ -201,10 +202,7 @@ fn initial_wait(updated_at: i64) -> Duration {
 }
 
 fn unix_now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or_default()
+    i64::try_from(unix_ms() / 1000).unwrap_or(i64::MAX)
 }
 
 fn google_cloud_ranges() -> anyhow::Result<Vec<IpNet>> {

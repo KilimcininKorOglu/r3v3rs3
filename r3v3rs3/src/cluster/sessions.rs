@@ -1,7 +1,6 @@
 //! Sessions in the cluster store, so a session that one node starts is valid on every node.
 
 use super::storage::{unavailable, KvStorage};
-use crate::kv::KvItem;
 use crate::sessions::{new_token, SessionBackend, SessionRecord, SessionScope};
 use r3v3rs3_api::error::Error;
 use sha2::{Digest, Sha256};
@@ -13,10 +12,6 @@ impl KvStorage {
     fn session_key(&self, scope: SessionScope, token: &str) -> String {
         let digest = hex::encode(Sha256::digest(token.as_bytes()));
         self.layout().session(scope, &digest)
-    }
-
-    fn session_record(&self, item: &KvItem) -> anyhow::Result<SessionRecord> {
-        Ok(serde_json::from_slice(&self.decode(item)?)?)
     }
 }
 
@@ -46,7 +41,7 @@ impl SessionBackend for KvStorage {
         let Some(item) = self.store().get(&key).await.map_err(unavailable)? else {
             return Ok(None);
         };
-        match self.session_record(&item) {
+        match self.decode_json::<SessionRecord>(&item) {
             Ok(record) => Ok(Some(record)),
             Err(err) => {
                 error!(key, "invalid session: {err:#}");
@@ -71,7 +66,7 @@ impl SessionBackend for KvStorage {
             .iter()
             .filter(|item| {
                 !self
-                    .session_record(item)
+                    .decode_json::<SessionRecord>(item)
                     .is_ok_and(|record| record.is_active(expiry))
             })
             .map(|item| item.key.clone())

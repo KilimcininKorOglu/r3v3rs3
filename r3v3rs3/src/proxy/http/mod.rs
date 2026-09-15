@@ -72,6 +72,7 @@ mod mirror;
 mod page;
 pub(crate) mod pool;
 pub(crate) mod rate_limit;
+pub mod rate_share;
 mod redirect;
 mod rewrite;
 mod rewriter;

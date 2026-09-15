@@ -7,6 +7,9 @@ use r3v3rs3::config::new_appinfo;
 use r3v3rs3::config::storage::Storage;
 use r3v3rs3::kv::KvStore;
 use r3v3rs3::log::DatabaseLayer;
+use r3v3rs3::proxy::http::rate_share::{
+    self, ClientCount, LimiterCounts, NodeCounts, RateCountExchange, WindowCount,
+};
 use r3v3rs3::server::rpc::cluster::GetClusterStatus;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
 use r3v3rs3::server::rpc::ports::{AddPort, GetPortList};
@@ -18,6 +21,7 @@ use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::cluster::{ClusterConfig, ClusterState, ClusterStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
+use r3v3rs3_api::policy::{RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyKind};
 use reqwest::Client;
 use std::collections::HashMap;
@@ -36,6 +40,8 @@ use common::{
     wait_for_rpc,
 };
 
+const SYNC_INTERVAL: Duration = Duration::from_millis(100);
+
 /// The storage of a node with the memory store.
 fn node_storage(store: &Arc<MemoryStore>, name: &str) -> anyhow::Result<KvStorage> {
     let local = AppConfig {
@@ -45,6 +51,7 @@ fn node_storage(store: &Arc<MemoryStore>, name: &str) -> anyhow::Result<KvStorag
             node_name: name.into(),
             encryption_key_files: vec!["/etc/r3v3rs3/cluster.key".into()],
             lock_ttl: Duration::from_secs(1),
+            rate_limit_sync_interval: SYNC_INTERVAL,
             ..Default::default()
         },
         ..Default::default()
@@ -264,6 +271,78 @@ async fn a_session_of_one_node_is_valid_on_the_other_node_until_logout() -> anyh
     b.stop().await?;
     std::fs::remove_dir_all(&dir)?;
     Ok(())
+}
+
+#[tokio::test]
+async fn a_client_that_used_its_limit_on_another_node_is_limited() -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let mut a = Node::start(&store, "node-a").await?;
+    let port = alloc_tcp_port().await?;
+    let addr = port.socket_addr();
+    a.call(AddPort {
+        entry: http_port_entry("web", &port).port,
+    })
+    .await?;
+    let ports = a.call(GetPortList).await?;
+    let proxy = Proxy {
+        ports: vec![ports[0].id],
+        kind: ProxyKind::Http(Box::new(HttpProxy {
+            routes: vec![http_route("/", "http://127.0.0.1:1/", None)],
+            rate_limit: RateLimit {
+                requests: 3,
+                per: RatePeriod::Hour,
+                burst: 0,
+            },
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    a.call(AddProxy { entry: proxy }).await?;
+    let id = a.call(GetProxyList).await?[0].id;
+
+    // Node B already served the limit of the client.
+    let b = node_storage(&store, "node-b")?;
+    let client = ClientCount {
+        ip: "127.0.0.1".parse()?,
+        count: WindowCount {
+            window: rate_share::unix_ms() / 3_600_000,
+            current: 3,
+            previous: 0,
+        },
+    };
+    let limiter = LimiterCounts {
+        key: format!("{id}/-"),
+        period_ms: 3_600_000,
+        counts: vec![client],
+    };
+    let publish = async {
+        loop {
+            let counts = NodeCounts {
+                published_at: rate_share::unix_ms(),
+                limiters: vec![limiter.clone()],
+            };
+            if let Err(err) = b.exchange(&counts).await {
+                return err;
+            }
+            tokio::time::sleep(SYNC_INTERVAL).await;
+        }
+    };
+    let request = async {
+        tokio::time::sleep(SYNC_INTERVAL * 10).await;
+        for _ in 0..100 {
+            if let Ok(response) = Client::new().get(format!("http://{addr}/")).send().await {
+                return Ok(response.status().as_u16());
+            }
+            tokio::time::sleep(SYNC_INTERVAL).await;
+        }
+        anyhow::bail!("the proxy port did not accept connections")
+    };
+    let status = tokio::select! {
+        err = publish => return Err(err),
+        status = request => status?,
+    };
+    assert_eq!(status, 429);
+    a.stop().await
 }
 
 #[tokio::test]

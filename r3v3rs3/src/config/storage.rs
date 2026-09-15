@@ -1,5 +1,6 @@
 use crate::cdn::CdnRanges;
 use crate::certs::{acme::AcmeEntry, challenges::ServedChallenges, Cert};
+use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::{LocalSessions, SessionBackend};
 use r3v3rs3_api::{
     app::AppConfig,
@@ -59,5 +60,10 @@ pub trait Storage: Send + Sync + 'static {
     /// nodes.
     fn session_backend(self: Arc<Self>) -> Arc<dyn SessionBackend> {
         Arc::new(LocalSessions::default())
+    }
+
+    /// The exchange of rate limit counts with the other nodes. `None` without a cluster.
+    fn rate_count_exchange(self: Arc<Self>) -> Option<Arc<dyn RateCountExchange>> {
+        None
     }
 }

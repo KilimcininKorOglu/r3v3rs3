@@ -1,3 +1,4 @@
+use super::rate_share::{self, RateCountExchange, RateShare, SharedWindow};
 use crate::proxy::registry::WeakRegistry;
 use governor::{clock::Clock, DefaultKeyedRateLimiter, Quota, RateLimiter};
 use r3v3rs3_api::{id::ShortId, policy::RateLimit};
@@ -5,10 +6,10 @@ use std::{
     fmt,
     net::IpAddr,
     num::NonZeroU32,
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock, Weak},
     time::Duration,
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -19,6 +20,8 @@ pub type LimiterKey = (ShortId, Option<usize>);
 pub struct ClientRateLimiter {
     config: RateLimit,
     limiter: DefaultKeyedRateLimiter<IpAddr>,
+    /// The counts of the other nodes of a cluster.
+    shared: Option<SharedWindow>,
 }
 
 impl fmt::Debug for ClientRateLimiter {
@@ -40,9 +43,14 @@ impl ClientRateLimiter {
 
     /// Records a request of the client. Returns the time to wait when the client is over the limit.
     pub fn check(&self, ip: IpAddr) -> Result<(), Duration> {
+        let ip = ip.to_canonical();
         self.limiter
-            .check_key(&ip.to_canonical())
-            .map_err(|not_until| not_until.wait_time_from(self.limiter.clock().now()))
+            .check_key(&ip)
+            .map_err(|not_until| not_until.wait_time_from(self.limiter.clock().now()))?;
+        match &self.shared {
+            Some(shared) => shared.check(ip),
+            None => Ok(()),
+        }
     }
 }
 
@@ -53,6 +61,7 @@ type Limiters = WeakRegistry<LimiterKey, ClientRateLimiter>;
 pub struct LimiterRegistry {
     limiters: Arc<Limiters>,
     cleanup_task: OnceLock<()>,
+    share: OnceLock<Arc<RateShare>>,
 }
 
 impl LimiterRegistry {
@@ -62,16 +71,32 @@ impl LimiterRegistry {
     pub fn limiter(&self, key: LimiterKey, config: RateLimit) -> Option<Arc<ClientRateLimiter>> {
         let quota = ClientRateLimiter::quota(config)?;
         self.start_cleanup_task();
+        let share = self.share.get();
         Some(self.limiters.get_or_create(
             key,
-            |existing| existing.config == config,
+            |existing| existing.config == config && existing.shared.is_some() == share.is_some(),
             || {
+                let limit = config.burst_size().max(config.requests);
+                let shared = share
+                    .map(|share| SharedWindow::new(share.clone(), limit, config.per.duration()));
                 Arc::new(ClientRateLimiter {
                     config,
                     limiter: RateLimiter::keyed(quota),
+                    shared,
                 })
             },
         ))
+    }
+
+    /// Shares the counts of the limiters with the other nodes of a cluster. Call it before the
+    /// first limiter is created, because a limiter keeps the mode that it started with.
+    pub fn start_sharing(&self, exchange: Arc<dyn RateCountExchange>, interval: Duration) {
+        let share = Arc::new(RateShare::new(interval));
+        if self.share.set(share.clone()).is_err() {
+            return;
+        }
+        let limiters = Arc::downgrade(&self.limiters);
+        tokio::spawn(share_counts(limiters, share, exchange));
     }
 
     /// Starts the cleanup task once. The task stops when the registry is dropped.
@@ -92,6 +117,43 @@ impl LimiterRegistry {
                 }
             });
         });
+    }
+}
+
+/// Publishes the counts of the limiters and reads the counts of the other nodes at each interval.
+/// The task stops when the registry is dropped.
+async fn share_counts(
+    limiters: Weak<Limiters>,
+    share: Arc<RateShare>,
+    exchange: Arc<dyn RateCountExchange>,
+) {
+    let mut ticks = tokio::time::interval(share.interval());
+    loop {
+        ticks.tick().await;
+        let Some(registry) = limiters.upgrade() else {
+            break;
+        };
+        let live = registry.live();
+        drop(registry);
+        let windows: Vec<(String, &SharedWindow)> = live
+            .iter()
+            .filter_map(|((id, route), limiter)| {
+                let route = route.map_or_else(|| "-".to_string(), |index| index.to_string());
+                Some((format!("{id}/{route}"), limiter.shared.as_ref()?))
+            })
+            .collect();
+        let now = rate_share::unix_ms();
+        match exchange.exchange(&rate_share::collect(&windows, now)).await {
+            Ok(remote) => {
+                share.set_state(Some(remote.nodes), true);
+                let oldest = share.oldest_fresh(now);
+                rate_share::apply(&windows, &remote.counts, oldest, rate_share::unix_ms());
+            }
+            Err(err) => {
+                warn!("failed to share the rate limit counts: {err:#}");
+                share.set_state(None, false);
+            }
+        }
     }
 }
 

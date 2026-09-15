@@ -12,6 +12,7 @@ use crate::certs::challenges::ServedChallenges;
 use crate::certs::Cert;
 use crate::config::{account, storage::Storage};
 use crate::kv::{Condition, KvItem, KvStore, Txn, TxnOutcome, Write};
+use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::SessionBackend;
 use anyhow::Context as _;
 use r3v3rs3_api::app::AppConfig;
@@ -213,6 +214,11 @@ impl KvStorage {
 
     /// An unencrypted value under a key that the cluster encrypts is an error, so a writer without
     /// the encryption key cannot set it.
+    /// The JSON value of an item.
+    pub fn decode_json<T: DeserializeOwned>(&self, item: &KvItem) -> anyhow::Result<T> {
+        Ok(serde_json::from_slice(&self.decode(item)?)?)
+    }
+
     pub fn decode(&self, item: &KvItem) -> anyhow::Result<Vec<u8>> {
         if self.layout.is_plain(&item.key) {
             return Ok(item.value.clone());
@@ -705,5 +711,9 @@ impl Storage for KvStorage {
 
     fn session_backend(self: Arc<Self>) -> Arc<dyn SessionBackend> {
         self
+    }
+
+    fn rate_count_exchange(self: Arc<Self>) -> Option<Arc<dyn RateCountExchange>> {
+        Some(self)
     }
 }

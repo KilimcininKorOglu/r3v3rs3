@@ -5,6 +5,7 @@ pub mod import;
 pub mod key_file;
 pub mod layout;
 pub mod leader;
+pub mod rate_limit;
 pub mod rekey;
 pub mod sessions;
 pub mod storage;

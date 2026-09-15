@@ -181,6 +181,10 @@ impl ServerState {
             session_backend,
         };
 
+        if let Some(exchange) = this.storage.clone().rate_count_exchange() {
+            let interval = this.config.cluster.rate_limit_sync_interval;
+            this.registries.limiters.start_sharing(exchange, interval);
+        }
         log_save_error(this.update_ports().await);
         this.update_certs().await;
         log_save_error(this.update_proxies().await);

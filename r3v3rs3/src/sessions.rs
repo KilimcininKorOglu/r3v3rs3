@@ -1,12 +1,13 @@
 //! Sign-in sessions of the admin API and of the session authentication of the proxies.
 
+use crate::proxy::http::rate_share::unix_ms;
 use r3v3rs3_api::app::AdminConfig;
 use r3v3rs3_api::error::Error;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// The shortest session lifetime. A shorter `session_expiry` uses this lifetime.
 pub const MINIMUM_SESSION_EXPIRY: Duration = Duration::from_secs(5 * 60);
@@ -64,10 +65,7 @@ pub fn new_token() -> String {
 }
 
 fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
-        .unwrap_or_default()
+    unix_ms() / 1000
 }
 
 #[async_trait::async_trait]
