@@ -62,7 +62,7 @@ pub struct ClusterConfig {
     #[schema(example = "r3v3rs3")]
     pub prefix: String,
 
-    /// The name of this node. Empty uses the host name.
+    /// The name of this node. Each node of a cluster needs its own name.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub node_name: String,
 
@@ -157,7 +157,7 @@ pub struct ClusterStatus {
     pub node_name: String,
 
     /// Whether this node holds the leader lock. Only the leader orders ACME certificates, removes
-    /// expired certificates and refreshes the CDN IP ranges.
+    /// expired certificates and saves the CDN IP ranges to the store.
     #[serde(default)]
     pub leader: bool,
 

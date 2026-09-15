@@ -23,6 +23,11 @@ pub fn validate(config: &ClusterConfig) -> anyhow::Result<()> {
     if config.prefix.trim_matches('/').is_empty() {
         anyhow::bail!("cluster.prefix is empty");
     }
+    // The presence key, the lock value, the challenge ack and the rate limit counts of a node use
+    // its name, so every node needs its own name.
+    if config.node_name.trim().is_empty() {
+        anyhow::bail!("cluster.node_name is empty");
+    }
     if config.encryption_key_files.is_empty() {
         anyhow::bail!("cluster.encryption_key_files is empty");
     }
@@ -123,6 +128,7 @@ mod tests {
         ClusterConfig {
             enabled: true,
             endpoints: vec!["http://127.0.0.1:2379".into()],
+            node_name: "node-a".into(),
             encryption_key_files: vec!["/etc/r3v3rs3/cluster.key".into()],
             ..Default::default()
         }
@@ -139,6 +145,10 @@ mod tests {
             },
             ClusterConfig {
                 prefix: "/".into(),
+                ..config()
+            },
+            ClusterConfig {
+                node_name: " ".into(),
                 ..config()
             },
             ClusterConfig {
