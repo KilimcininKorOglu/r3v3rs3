@@ -3,7 +3,7 @@
 
 # r3v3rs3
 
-**Every Protocol, One Binary**
+**Reverse everything.**
 
 A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, written in Rust.
 

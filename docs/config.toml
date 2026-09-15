@@ -1,7 +1,7 @@
 # The URL the site will be built for
 base_url = "https://kilimcininkoroglu.github.io/r3v3rs3"
 
-title = "r3v3rs3: Every Protocol, One Binary"
+title = "r3v3rs3: Reverse everything."
 
 # English pages are at the root URL, the other languages below their language code
 default_language = "en"
@@ -24,15 +24,15 @@ highlight_code = true
 language_name = "English"
 flag = "gb"
 language = "Language"
-heading = "Every Protocol, One Binary"
-tagline = "A reverse proxy server with built-in WebUI."
+heading = "Reverse everything."
+tagline = "A reverse proxy server with a built-in WebUI."
 getting_started = "Getting Started"
 overview = "Overview"
-description = "A reverse proxy server with built-in WebUI, supporting TCP/UDP/HTTP/TLS/WebSocket, written in Rust."
+description = "A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, written in Rust."
 theme_by = "Zola theme by"
 
 [languages.tr]
-title = "r3v3rs3: Her Protokol, Tek Binary"
+title = "r3v3rs3: Reverse everything."
 # The search index does not support Turkish, and the theme has no search
 build_search_index = false
 
@@ -40,11 +40,11 @@ build_search_index = false
 language_name = "Türkçe"
 flag = "tr"
 language = "Dil"
-heading = "Her Protokol, Tek Binary"
+heading = "Reverse everything."
 tagline = "WebUI ile birlikte gelen bir reverse proxy sunucusu."
 getting_started = "Başlarken"
 overview = "Genel Bakış"
-description = "Rust ile yazılmış, WebUI ile birlikte gelen ve TCP, UDP, HTTP, TLS ve WebSocket destekleyen bir reverse proxy sunucusu."
+description = "Rust ile yazılmış, WebUI ile birlikte gelen ve TCP, UDP, TLS, HTTP, WebSocket ve HTTP/3 destekleyen bir reverse proxy sunucusu."
 theme_by = "Zola teması:"
 
 [extra]
@@ -52,6 +52,6 @@ theme_by = "Zola teması:"
 juice_logo_name = ""
 juice_logo_path = "logo.svg"
 juice_extra_menu = [
-    { title = "Github", link = "https://github.com/KilimcininKorOglu/r3v3rs3"}
+    { title = "GitHub", link = "https://github.com/KilimcininKorOglu/r3v3rs3"}
 ]
 repository_url = "https://github.com/KilimcininKorOglu/r3v3rs3"
