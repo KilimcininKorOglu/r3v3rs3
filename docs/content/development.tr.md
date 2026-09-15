@@ -22,7 +22,7 @@ git clone https://github.com/KilimcininKorOglu/r3v3rs3
 
 # Start the server
 cd r3v3rs3
-cargo run
+make run
 
 # In a separate terminal, start `trunk serve` for the WebUI
 cd r3v3rs3-webui
