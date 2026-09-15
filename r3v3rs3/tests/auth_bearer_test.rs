@@ -36,6 +36,7 @@ async fn bearer_auth_protects_routes() -> anyhow::Result<()> {
                 name: "ci".into(),
                 token: String::new(),
                 token_hash: hex::encode(Sha256::digest(TOKEN)),
+                token_set: false,
             }],
         }),
         ..Default::default()

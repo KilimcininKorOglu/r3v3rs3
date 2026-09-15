@@ -405,7 +405,7 @@ Geçerli kullanıcı adı ve parola göndermeyen client'lar `WWW-Authenticate: B
 - **Realm**: Tarayıcının giriş penceresinde gösterdiği ad. Boş bırakılırsa `r3v3rs3` kullanılır.
 - **Kullanıcılar**: Kullanıcı adları ve parolalar. Kullanıcı adında iki nokta üst üste bulunamaz.
 
-r3v3rs3 parolaları argon2 hash olarak saklar; düz metin parolayı hiçbir zaman kaydetmez. Parolayı değiştirmek istemiyorsanız parola alanını boş bırakın. r3v3rs3, request'i upstream sunucuya göndermeden önce `Authorization` header'ını siler.
+r3v3rs3 parolaları argon2 hash olarak saklar; düz metin parolayı hiçbir zaman kaydetmez. Admin API hash'i döndürmez. Parolası olan kullanıcı için `password_set: true` döndürür. Parolayı değiştirmek istemiyorsanız parola alanını boş bırakın. r3v3rs3, request'i upstream sunucuya göndermeden önce `Authorization` header'ını siler.
 
 Argon2 kasıtlı olarak CPU harcar. r3v3rs3 her kimlik bilgisini bir kez doğrular ve sonucu config değişene kadar memory'de tutar. Parola denemelerini sınırlamak için rate limit kullanın.
 
@@ -429,7 +429,7 @@ Client, proxy'de tanımlı token'lardan birini `Authorization: Bearer <token>` h
 - **Ad**: Token'ı tanımak için verdiğiniz ad.
 - **Token**: En az 16 karakterlik rastgele bir değer. Örneğin `openssl rand -hex 32` komutuyla üretebilirsiniz.
 
-r3v3rs3 her token'ın SHA-256 digest'ini saklar; düz metin token'ı hiçbir zaman kaydetmez. Digest'leri sabit sürede karşılaştırır. Token'ı değiştirmek istemiyorsanız token alanını boş bırakın. r3v3rs3, request'i upstream sunucuya göndermeden önce `Authorization` header'ını siler. Bu yüzden bearer kimlik doğrulaması kullanan bir route'ta upstream sunucuya kendi bearer token'ı ulaşmaz.
+r3v3rs3 her token'ın SHA-256 digest'ini saklar; düz metin token'ı hiçbir zaman kaydetmez. Digest'leri sabit sürede karşılaştırır. Admin API digest'i döndürmez. Değeri olan token için `token_set: true` döndürür. Token'ı değiştirmek istemiyorsanız token alanını boş bırakın. r3v3rs3, request'i upstream sunucuya göndermeden önce `Authorization` header'ını siler. Bu yüzden bearer kimlik doğrulaması kullanan bir route'ta upstream sunucuya kendi bearer token'ı ulaşmaz.
 
 `proxies.toml` dosyasında `token_hash` yerine `token` yazabilirsiniz. r3v3rs3 başlarken bu değeri digest'e çevirir.
 

@@ -138,9 +138,14 @@ pub struct BasicAuthUser {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub password: String,
 
-    /// Argon2 PHC string of the password.
+    /// Argon2 PHC string of the password. The admin API does not return it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub password_hash: String,
+
+    /// Set by the admin API when the user has a password. An update without `password` and
+    /// `password_hash` keeps the password of the user with the same name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub password_set: bool,
 }
 
 impl BasicAuthUser {
@@ -174,9 +179,14 @@ pub struct BearerToken {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub token: String,
 
-    /// Lowercase hex SHA-256 digest of the token.
+    /// Lowercase hex SHA-256 digest of the token. The admin API does not return it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub token_hash: String,
+
+    /// Set by the admin API when the token has a value. An update without `token` and
+    /// `token_hash` keeps the value of the token with the same name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub token_set: bool,
 }
 
 impl BearerToken {

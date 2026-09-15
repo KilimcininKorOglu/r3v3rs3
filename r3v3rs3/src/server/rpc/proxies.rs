@@ -1,7 +1,7 @@
 use super::RpcMethod;
 use crate::accounts::{Caller, Permission};
 use crate::proxy::tls::upstream_client_config;
-use crate::server::credentials::seal;
+use crate::server::credentials::{mask_proxy, restore_secrets, seal};
 use crate::server::state::ServerState;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
@@ -14,7 +14,7 @@ impl RpcMethod for GetProxyList {
     type Output = Vec<ProxyEntry>;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        Ok(state.proxies.entries().cloned().collect())
+        Ok(state.proxies.entries().cloned().map(masked).collect())
     }
 
     fn restrict(mut output: Self::Output, caller: &Caller) -> Self::Output {
@@ -35,7 +35,7 @@ impl RpcMethod for GetProxy {
         state
             .proxies
             .get(self.id)
-            .map(|ctx| ctx.entry.clone())
+            .map(|ctx| masked(ctx.entry.clone()))
             .ok_or(Error::IdNotFound {
                 id: self.id.to_string(),
             })
@@ -159,10 +159,15 @@ impl RpcMethod for UpdateProxy {
     const MUTATES: bool = true;
     const PERMISSION: Permission = Permission::EditProxies;
 
+    /// A user or a token without a new secret keeps its current hash.
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         ensure_manual(state, self.entry.id)?;
-        validate_proxy(&self.entry.proxy, state)?;
-        let proxy = seal(self.entry.proxy).await?;
+        let mut proxy = self.entry.proxy;
+        if let Some(ctx) = state.proxies.get(self.entry.id) {
+            restore_secrets(&mut proxy, &ctx.entry.proxy);
+        }
+        validate_proxy(&proxy, state)?;
+        let proxy = seal(proxy).await?;
         let previous = proxy_entries(state);
         if state.proxies.set((self.entry.id, proxy).into()) {
             state.commit_proxies(previous).await?;
@@ -173,6 +178,12 @@ impl RpcMethod for UpdateProxy {
     fn proxy_scope(&self) -> Option<ShortId> {
         Some(self.entry.id)
     }
+}
+
+/// The entry without the password hashes and the token digests.
+fn masked(mut entry: ProxyEntry) -> ProxyEntry {
+    mask_proxy(&mut entry.proxy);
+    entry
 }
 
 fn proxy_entries(state: &ServerState) -> Vec<ProxyEntry> {

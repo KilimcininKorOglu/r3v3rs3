@@ -62,7 +62,90 @@ fn seal_basic_auth(basic: &mut BasicAuth) -> Result<(), Error> {
     Ok(())
 }
 
+/// The auth policies of an HTTP proxy with the path of their route. The proxy policy has no path.
+fn policies_mut(proxy: &mut Proxy) -> Vec<(Option<&str>, &mut AuthPolicy)> {
+    let ProxyKind::Http(http) = &mut proxy.kind else {
+        return Vec::new();
+    };
+    let routes = http
+        .routes
+        .iter_mut()
+        .filter_map(|route| Some((Some(route.path.as_str()), route.auth.as_mut()?)));
+    std::iter::once((None, &mut http.auth))
+        .chain(routes)
+        .collect()
+}
+
+/// Removes the password hashes and the token digests that the admin API returns, and marks the
+/// users and the tokens that have a secret.
+pub fn mask_proxy(proxy: &mut Proxy) {
+    for (_, policy) in policies_mut(proxy) {
+        match policy {
+            AuthPolicy::Basic(basic) => basic.users.iter_mut().for_each(|user| {
+                user.password_set = !user.password_hash.is_empty();
+                user.password_hash.clear();
+            }),
+            AuthPolicy::Bearer(bearer) => bearer.tokens.iter_mut().for_each(|token| {
+                token.token_set = !token.token_hash.is_empty();
+                token.token_hash.clear();
+            }),
+            _ => {}
+        }
+    }
+}
+
+/// Gives the users and the tokens of an update without a secret the hashes of the current proxy.
+/// A user or a token matches by its name and the path of its route.
+pub fn restore_secrets(proxy: &mut Proxy, current: &Proxy) {
+    let mut current = current.clone();
+    let mut previous = policies_mut(&mut current);
+    for (path, policy) in policies_mut(proxy) {
+        let old = previous
+            .iter_mut()
+            .find(|(other, _)| *other == path)
+            .map(|(_, old)| &mut **old);
+        match (policy, old) {
+            (AuthPolicy::Basic(basic), Some(AuthPolicy::Basic(old))) => {
+                restore(&mut basic.users, &mut old.users, user_secret)
+            }
+            (AuthPolicy::Bearer(bearer), Some(AuthPolicy::Bearer(old))) => {
+                restore(&mut bearer.tokens, &mut old.tokens, token_secret)
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The name, the new plain text secret and the hash of a user or a token.
+type SecretParts<T> = fn(&mut T) -> (&str, &str, &mut String);
+
+fn user_secret(user: &mut BasicAuthUser) -> (&str, &str, &mut String) {
+    (&user.username, &user.password, &mut user.password_hash)
+}
+
+fn token_secret(token: &mut BearerToken) -> (&str, &str, &mut String) {
+    (&token.name, &token.token, &mut token.token_hash)
+}
+
+/// Copies the hash of the previous item with the same name to each item without a secret.
+fn restore<T>(items: &mut [T], previous: &mut [T], parts: SecretParts<T>) {
+    for item in items.iter_mut() {
+        let (name, secret, hash) = parts(item);
+        if !secret.is_empty() || !hash.is_empty() {
+            continue;
+        }
+        let old = previous
+            .iter_mut()
+            .map(parts)
+            .find(|(old_name, _, _)| *old_name == name);
+        if let Some((_, _, old_hash)) = old {
+            hash.clone_from(old_hash);
+        }
+    }
+}
+
 fn seal_user(user: &mut BasicAuthUser) -> Result<(), Error> {
+    user.password_set = false;
     if !user.password.is_empty() {
         user.password_hash = hash_password(&user.password)?;
         user.password.clear();
@@ -89,6 +172,7 @@ fn seal_bearer_auth(bearer: &mut BearerAuth) -> Result<(), Error> {
 }
 
 fn seal_token(token: &mut BearerToken) -> Result<(), Error> {
+    token.token_set = false;
     let invalid = || Error::InvalidToken {
         name: token.name.clone(),
     };
@@ -140,6 +224,7 @@ mod tests {
             username: username.into(),
             password: password.into(),
             password_hash: password_hash.into(),
+            password_set: false,
         }
     }
 
@@ -189,6 +274,51 @@ mod tests {
     }
 
     #[test]
+    fn a_masked_update_keeps_the_hashes_of_the_same_names() {
+        let mut current = proxy(vec![user("alice", "", "$argon2id$alice")]);
+        let ProxyKind::Http(http) = &mut current.kind else {
+            panic!("expected an HTTP proxy");
+        };
+        let mut route = r3v3rs3_api::proxy::Route {
+            path: "/api".into(),
+            ..Default::default()
+        };
+        route.auth = Some(AuthPolicy::Bearer(BearerAuth {
+            tokens: vec![BearerToken {
+                name: "ci".into(),
+                token_hash: "digest".into(),
+                ..Default::default()
+            }],
+        }));
+        http.routes.push(route);
+
+        let mut masked = current.clone();
+        mask_proxy(&mut masked);
+        assert!(users(&masked)[0].password_hash.is_empty());
+        assert!(users(&masked)[0].password_set);
+        let ProxyKind::Http(http) = &masked.kind else {
+            panic!("expected an HTTP proxy");
+        };
+        let Some(AuthPolicy::Bearer(bearer)) = &http.routes[0].auth else {
+            panic!("expected bearer auth");
+        };
+        assert!(bearer.tokens[0].token_hash.is_empty());
+        assert!(bearer.tokens[0].token_set);
+
+        let mut update = masked.clone();
+        restore_secrets(&mut update, &current);
+        mask_proxy(&mut update);
+        assert_eq!(update, masked);
+        let mut update = masked;
+        restore_secrets(&mut update, &current);
+        assert_eq!(users(&update)[0].password_hash, "$argon2id$alice");
+
+        let mut renamed = proxy(vec![user("bob", "", "")]);
+        restore_secrets(&mut renamed, &current);
+        assert!(users(&renamed)[0].password_hash.is_empty());
+    }
+
+    #[test]
     fn user_without_password_is_rejected() {
         let mut missing = proxy(vec![user("alice", "", "")]);
         assert!(matches!(
@@ -214,6 +344,7 @@ mod tests {
             name: name.into(),
             token: token.into(),
             token_hash: String::new(),
+            token_set: false,
         };
 
         let mut proxy = bearer(vec![token("ci", "0123456789abcdef")]);

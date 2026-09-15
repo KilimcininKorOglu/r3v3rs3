@@ -87,6 +87,7 @@ mod tests {
             name: name.into(),
             token: String::new(),
             token_hash,
+            token_set: false,
         };
         BearerAuthenticator::new(BearerAuth {
             tokens: vec![

@@ -405,7 +405,7 @@ Clients without a valid username and password receive `401 Unauthorized` with a 
 - **Realm**: The name that the browser shows in the login dialog. Empty uses `r3v3rs3`.
 - **Users**: Usernames and passwords. A username must not contain a colon.
 
-r3v3rs3 stores each password as an argon2 hash and never saves the plain text password. Leave the password field empty to keep the current password. r3v3rs3 removes the `Authorization` header before it sends the request to the upstream server.
+r3v3rs3 stores each password as an argon2 hash and never saves the plain text password. The admin API does not return the hash. It returns `password_set: true` for a user with a password. Leave the password field empty to keep the current password. r3v3rs3 removes the `Authorization` header before it sends the request to the upstream server.
 
 Argon2 takes CPU time on purpose. r3v3rs3 verifies each credential once and keeps the result in memory until the configuration changes. Use a rate limit to limit password guessing.
 
@@ -429,7 +429,7 @@ Clients must send `Authorization: Bearer <token>` with one of the tokens of the 
 - **Name**: A label that identifies the token.
 - **Token**: A random value of at least 16 characters. For example, create one with `openssl rand -hex 32`.
 
-r3v3rs3 stores the SHA-256 digest of each token and never saves the plain text token. It compares the digests in constant time. Leave the token field empty to keep the current token. r3v3rs3 removes the `Authorization` header before it sends the request to the upstream server, so the upstream server cannot receive its own bearer token on a route with bearer authentication.
+r3v3rs3 stores the SHA-256 digest of each token and never saves the plain text token. It compares the digests in constant time. The admin API does not return the digest. It returns `token_set: true` for a token with a value. Leave the token field empty to keep the current token. r3v3rs3 removes the `Authorization` header before it sends the request to the upstream server, so the upstream server cannot receive its own bearer token on a route with bearer authentication.
 
 In `proxies.toml`, you can write a `token` instead of a `token_hash`. r3v3rs3 replaces it with a digest at startup.
 

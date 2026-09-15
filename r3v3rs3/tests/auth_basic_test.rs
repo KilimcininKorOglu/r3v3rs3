@@ -23,6 +23,7 @@ fn basic_auth(realm: &str, username: &str, password: &str) -> AuthPolicy {
             username: username.into(),
             password: String::new(),
             password_hash,
+            password_set: false,
         }],
     })
 }

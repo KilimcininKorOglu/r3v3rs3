@@ -196,11 +196,13 @@ mod tests {
                     username: "alice".into(),
                     password: String::new(),
                     password_hash: hash,
+                    password_set: false,
                 },
                 BasicAuthUser {
                     username: "broken".into(),
                     password: String::new(),
                     password_hash: "not-a-hash".into(),
+                    password_set: false,
                 },
             ],
         })

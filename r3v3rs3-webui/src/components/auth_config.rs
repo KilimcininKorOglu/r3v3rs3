@@ -69,14 +69,16 @@ pub struct AuthForm {
 struct UserForm {
     username: String,
     password: String,
-    password_hash: String,
+    /// The server keeps the current password when the form sends no new one.
+    password_set: bool,
 }
 
 #[derive(Clone, Default, PartialEq)]
 struct TokenForm {
     name: String,
     token: String,
-    token_hash: String,
+    /// The server keeps the current token when the form sends no new one.
+    token_set: bool,
 }
 
 impl AuthForm {
@@ -201,7 +203,7 @@ impl TokenForm {
         Self {
             name: token.name.clone(),
             token: String::new(),
-            token_hash: token.token_hash.clone(),
+            token_set: token.token_set || !token.token_hash.is_empty(),
         }
     }
 
@@ -209,12 +211,13 @@ impl TokenForm {
         let token = BearerToken {
             name: self.name.trim().into(),
             token: self.token.trim().into(),
-            token_hash: self.token_hash.clone(),
+            token_hash: String::new(),
+            token_set: self.token_set,
         };
         if token.name.is_empty() {
             return Err(locale.t("auth.token_name_required").into());
         }
-        if token.token.is_empty() && token.token_hash.is_empty() {
+        if token.token.is_empty() && !token.token_set {
             return Err(locale.tf("auth.token_required", &[("name", &token.name)]));
         }
         if !token.token.is_empty() && token.token.len() < BearerToken::MIN_LENGTH {
@@ -235,7 +238,7 @@ impl UserForm {
         Self {
             username: user.username.clone(),
             password: String::new(),
-            password_hash: user.password_hash.clone(),
+            password_set: user.password_set || !user.password_hash.is_empty(),
         }
     }
 
@@ -243,12 +246,13 @@ impl UserForm {
         let user = BasicAuthUser {
             username: self.username.trim().into(),
             password: self.password.clone(),
-            password_hash: self.password_hash.clone(),
+            password_hash: String::new(),
+            password_set: self.password_set,
         };
         if let Some(err) = user.username_error() {
             return Err(username_error_message(locale, err).into());
         }
-        if user.password.is_empty() && user.password_hash.is_empty() {
+        if user.password.is_empty() && !user.password_set {
             return Err(locale.tf("auth.password_required", &[("username", &user.username)]));
         }
         Ok(user)
@@ -320,7 +324,7 @@ fn user_view(locale: Locale, props: &Props, index: usize, user: &UserForm) -> Ht
         <input type="text" autocapitalize="off" autocomplete="off" placeholder={locale.t("login.username")} value={user.username.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.users, index, |user| user.username = value))} class={INPUT_CLASS} />
     };
     let secret = html! {
-        <input type="password" autocomplete="new-password" placeholder={secret_placeholder(locale, &user.password_hash, "login.password")} value={user.password.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.users, index, |user| user.password = value))} class={INPUT_CLASS} />
+        <input type="password" autocomplete="new-password" placeholder={secret_placeholder(locale, user.password_set, "login.password")} value={user.password.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.users, index, |user| user.password = value))} class={INPUT_CLASS} />
     };
     let remove = form_update(props, move |form, _: MouseEvent| {
         remove_item(&mut form.users, index)
@@ -333,7 +337,7 @@ fn token_view(locale: Locale, props: &Props, index: usize, token: &TokenForm) ->
         <input type="text" autocapitalize="off" autocomplete="off" placeholder={locale.t("common.name")} value={token.name.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.tokens, index, |token| token.name = value))} class={INPUT_CLASS} />
     };
     let secret = html! {
-        <input type="password" autocomplete="off" placeholder={secret_placeholder(locale, &token.token_hash, "auth.token")} value={token.token.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.tokens, index, |token| token.token = value))} class={INPUT_CLASS} />
+        <input type="password" autocomplete="off" placeholder={secret_placeholder(locale, token.token_set, "auth.token")} value={token.token.clone()} onchange={form_input(props, move |form, value| update_item(&mut form.tokens, index, |token| token.token = value))} class={INPUT_CLASS} />
     };
     let remove = form_update(props, move |form, _: MouseEvent| {
         remove_item(&mut form.tokens, index)
@@ -353,11 +357,11 @@ fn credential_row(name: Html, secret: Html, remove: Callback<MouseEvent>, rows: 
     }
 }
 
-fn secret_placeholder(locale: Locale, hash: &str, label_key: &'static str) -> &'static str {
-    if hash.is_empty() {
-        locale.t(label_key)
-    } else {
+fn secret_placeholder(locale: Locale, set: bool, label_key: &'static str) -> &'static str {
+    if set {
         locale.t("auth.unchanged")
+    } else {
+        locale.t(label_key)
     }
 }
 
@@ -465,13 +469,13 @@ mod tests {
             tokens,
             ..AuthForm::new(&AuthPolicy::None)
         };
-        let token = |name: &str, token: &str, token_hash: &str| TokenForm {
+        let token = |name: &str, token: &str, token_set: bool| TokenForm {
             name: name.into(),
             token: token.into(),
-            token_hash: token_hash.into(),
+            token_set,
         };
 
-        let AuthPolicy::Bearer(bearer) = form(vec![token(" ci ", "0123456789abcdef", "")])
+        let AuthPolicy::Bearer(bearer) = form(vec![token(" ci ", "0123456789abcdef", false)])
             .parse(Locale::En)
             .unwrap()
         else {
@@ -479,17 +483,19 @@ mod tests {
         };
         assert_eq!(bearer.tokens[0].name, "ci");
         assert_eq!(bearer.tokens[0].token, "0123456789abcdef");
-        assert!(form(vec![token("ci", "", "abc")]).parse(Locale::En).is_ok());
+        assert!(form(vec![token("ci", "", true)]).parse(Locale::En).is_ok());
 
         assert!(form(vec![]).parse(Locale::En).is_err());
-        assert!(form(vec![token("", "0123456789abcdef", "")])
+        assert!(form(vec![token("", "0123456789abcdef", false)])
             .parse(Locale::En)
             .is_err());
-        assert!(form(vec![token("ci", "", "")]).parse(Locale::En).is_err());
-        assert!(form(vec![token("ci", "short", "")])
+        assert!(form(vec![token("ci", "", false)])
             .parse(Locale::En)
             .is_err());
-        assert!(form(vec![token("ci", "", "a"), token("ci", "", "b")])
+        assert!(form(vec![token("ci", "short", false)])
+            .parse(Locale::En)
+            .is_err());
+        assert!(form(vec![token("ci", "", true), token("ci", "", true)])
             .parse(Locale::En)
             .is_err());
     }
@@ -501,17 +507,17 @@ mod tests {
         assert_eq!(form.parse(Locale::En).unwrap(), AuthPolicy::Session);
     }
 
-    fn user(username: &str, password: &str, password_hash: &str) -> UserForm {
+    fn user(username: &str, password: &str) -> UserForm {
         UserForm {
             username: username.into(),
             password: password.into(),
-            password_hash: password_hash.into(),
+            password_set: false,
         }
     }
 
     #[test]
     fn basic_form_round_trips_without_the_password() {
-        let form = basic_form(vec![user(" alice ", "secret", "")]);
+        let form = basic_form(vec![user(" alice ", "secret")]);
         let AuthPolicy::Basic(basic) = form.parse(Locale::En).unwrap() else {
             panic!("expected basic auth");
         };
@@ -519,9 +525,10 @@ mod tests {
         assert_eq!(basic.users[0].username, "alice");
         assert_eq!(basic.users[0].password, "secret");
 
+        // The admin API returns a user with a password without its hash.
         let sealed = BasicAuthUser {
             password: String::new(),
-            password_hash: "$argon2id$hash".into(),
+            password_set: true,
             ..basic.users[0].clone()
         };
         let form = AuthForm::new(&AuthPolicy::Basic(BasicAuth {
@@ -538,17 +545,15 @@ mod tests {
     #[test]
     fn basic_form_rejects_invalid_users() {
         assert!(basic_form(vec![]).parse(Locale::En).is_err());
-        assert!(basic_form(vec![user("", "secret", "")])
+        assert!(basic_form(vec![user("", "secret")])
             .parse(Locale::En)
             .is_err());
-        assert!(basic_form(vec![user("alice", "", "")])
+        assert!(basic_form(vec![user("alice", "")])
             .parse(Locale::En)
             .is_err());
-        assert!(
-            basic_form(vec![user("alice", "a", ""), user("alice", "b", "")])
-                .parse(Locale::En)
-                .is_err()
-        );
+        assert!(basic_form(vec![user("alice", "a"), user("alice", "b")])
+            .parse(Locale::En)
+            .is_err());
         assert!(AuthForm::new(&AuthPolicy::None)
             .parse(Locale::En)
             .unwrap()
@@ -563,7 +568,7 @@ mod tests {
             ("al\u{7}ice", "auth.username_control"),
         ] {
             assert_eq!(
-                basic_form(vec![user(username, "secret", "")]).parse(Locale::Tr),
+                basic_form(vec![user(username, "secret")]).parse(Locale::Tr),
                 Err(Locale::Tr.t(key).to_string()),
                 "username {username:?}"
             );

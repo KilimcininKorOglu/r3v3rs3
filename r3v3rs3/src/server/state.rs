@@ -786,8 +786,17 @@ impl ServerState {
         saved
     }
 
+    /// Sends the proxy list without the password hashes and the token digests.
     fn publish_proxies(&self) {
-        let entries = self.proxies.entries().cloned().collect::<Vec<_>>();
+        let entries = self
+            .proxies
+            .entries()
+            .cloned()
+            .map(|mut entry| {
+                super::credentials::mask_proxy(&mut entry.proxy);
+                entry
+            })
+            .collect::<Vec<_>>();
         let _ = self.br_sender.send(ServerEvent::ProxiesUpdated { entries });
         if self.broadcast_events {
             for ctx in self.proxies.contexts() {
