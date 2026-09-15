@@ -968,7 +968,7 @@ r3v3rs3 stores ACME entries in `acme.toml` in the configuration directory. The f
 Create ACME entries in the WebUI, because r3v3rs3 creates the ACME account when you add an entry. An entry in `acme.toml` looks like this:
 
 ```toml
-version = "0.3.40"
+version = "1.0.0"
 
 [acme1]
 provider = "Let's Encrypt"
