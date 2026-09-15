@@ -39,9 +39,14 @@ jobs:
       - name: Make archive
         run: tar -C target/release -Jcvf r3v3rs3-x86_64-unknown-linux-gnu.tar.xz r3v3rs3
       - name: Create release
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create ${{ github.ref_name }} --generate-notes --draft
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
+          test -s relnotes.md
+          gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
         continue-on-error: true
       - name: Upload archive
         env:
@@ -80,9 +85,14 @@ jobs:
       - name: Make archive
         run: msys2 -c 'cp target/release/r3v3rs3.exe . && tar cf r3v3rs3-x86_64-pc-windows-msvc.tar r3v3rs3.exe && xz *.tar'
       - name: Create release
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create ${{ github.ref_name }} --generate-notes --draft
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
+          test -s relnotes.md
+          gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
         continue-on-error: true
       - name: Upload archive
         env:
@@ -118,9 +128,14 @@ jobs:
       - name: Make archive
         run: tar -C target/release -Jcvf r3v3rs3-x86_64-apple-darwin.tar.xz r3v3rs3
       - name: Create release
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create ${{ github.ref_name }} --generate-notes --draft
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
+          test -s relnotes.md
+          gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
         continue-on-error: true
       - name: Upload archive
         env:
@@ -161,9 +176,14 @@ jobs:
       - name: Make archive
         run: tar -C target/${{ matrix.toolchain }}/release -Jcvf r3v3rs3-${{ matrix.toolchain }}.tar.xz r3v3rs3
       - name: Create release
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create ${{ github.ref_name }} --generate-notes --draft
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
+          test -s relnotes.md
+          gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
         continue-on-error: true
       - name: Upload archive
         env:
@@ -208,9 +228,14 @@ jobs:
       - name: Make archive
         run: tar -C target/${{ matrix.toolchain }}/release -Jcvf r3v3rs3-${{ matrix.toolchain }}.tar.xz r3v3rs3
       - name: Create release
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create ${{ github.ref_name }} --generate-notes --draft
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
+          test -s relnotes.md
+          gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
         continue-on-error: true
       - name: Upload archive
         env:
@@ -254,9 +279,14 @@ jobs:
           tar -C target/release -Jcvf r3v3rs3-x86_64-unknown-freebsd.tar.xz r3v3rs3
           cargo clean
     - name: Create release
+      shell: bash
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: gh release create ${{ github.ref_name }} --generate-notes --draft
+      run: |
+        v="${GITHUB_REF_NAME#v}"
+        awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
+        test -s relnotes.md
+        gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
       continue-on-error: true
     - name: Upload archive
       env:
