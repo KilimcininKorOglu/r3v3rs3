@@ -53,6 +53,15 @@ fn saved(path: &Path, result: anyhow::Result<()>) -> Result<(), Error> {
     })
 }
 
+/// Creates the directory of the file.
+async fn create_parent(path: &Path) -> anyhow::Result<()> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("the path has no directory: {}", path.display()))?;
+    fs::create_dir_all(dir).await?;
+    Ok(())
+}
+
 /// Writes a file that holds secrets, such as ACME account keys, so only the owner can read it.
 async fn write_private(path: &Path, contents: String) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
@@ -239,7 +248,7 @@ impl FileStorage {
     }
 
     async fn save_app_config_impl(&self, path: &Path, config: &AppConfig) -> anyhow::Result<()> {
-        fs::create_dir_all(path.parent().unwrap()).await?;
+        create_parent(path).await?;
         info!(?path, "save config");
         let mut doc = toml_edit::ser::to_document(&config)?;
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
@@ -254,7 +263,7 @@ impl FileStorage {
     }
 
     async fn save_ports_impl(&self, path: &Path, ports: &[PortEntry]) -> anyhow::Result<()> {
-        fs::create_dir_all(path.parent().unwrap()).await?;
+        create_parent(path).await?;
         info!(?path, "save config");
         let mut doc = match self.load_document(path).await {
             Ok(doc) => doc,
@@ -343,7 +352,7 @@ impl FileStorage {
     }
 
     async fn save_proxies_impl(&self, path: &Path, proxies: &[ProxyEntry]) -> anyhow::Result<()> {
-        fs::create_dir_all(path.parent().unwrap()).await?;
+        create_parent(path).await?;
         info!(?path, "save config");
         let mut doc = match self.load_document(path).await {
             Ok(doc) => doc,
@@ -384,7 +393,7 @@ impl FileStorage {
     }
 
     async fn save_acme_impl(&self, path: &Path, acme: &AcmeEntry) -> anyhow::Result<()> {
-        fs::create_dir_all(path.parent().unwrap()).await?;
+        create_parent(path).await?;
         info!(?path, "save config");
         let mut doc = match self.load_document(path).await {
             Ok(doc) => doc,
@@ -434,7 +443,7 @@ impl FileStorage {
         let mut certs = Vec::new();
         for pem in walker {
             let chain = pem.path();
-            let key = pem.path().parent().unwrap().join("key.pem");
+            let key = chain.with_file_name("key.pem");
             let mut chain_data = Vec::new();
             let mut key_data = Vec::new();
 
