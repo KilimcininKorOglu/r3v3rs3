@@ -5,6 +5,7 @@
 use super::crypto::ClusterKeys;
 use super::layout::{last_segment, Layout};
 use super::{key_file, store};
+use crate::audit::AuditStore;
 use crate::cdn::CdnRanges;
 use crate::certs::acme::{AcmeAccount, AcmeEntry};
 use crate::certs::alpn::TlsAlpnChallenge;
@@ -840,6 +841,10 @@ impl Storage for KvStorage {
         } else {
             None
         }
+    }
+
+    fn audit_store(self: Arc<Self>) -> Option<Arc<dyn AuditStore>> {
+        Some(self)
     }
 
     async fn purge_shared_cache(&self, proxy: ShortId, at: u64) -> Result<(), Error> {

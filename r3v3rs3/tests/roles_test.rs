@@ -34,6 +34,7 @@ fn caller(role: Role, proxies: Option<BTreeSet<ShortId>>) -> Caller {
         username: "editor".to_string(),
         role,
         proxies,
+        client: None,
     }
 }
 

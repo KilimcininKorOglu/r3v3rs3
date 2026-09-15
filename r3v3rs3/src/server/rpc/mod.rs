@@ -1,5 +1,6 @@
 use super::state::ServerState;
 use crate::accounts::{Caller, Permission};
+use crate::audit::AuditRecord;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use std::any::Any;
@@ -32,6 +33,11 @@ pub trait RpcMethod: Any + Send + Sync {
     /// The proxy that the method reads or changes. The method fails with `IdNotFound` for a caller
     /// that does not see the proxy.
     fn proxy_scope(&self) -> Option<ShortId> {
+        None
+    }
+
+    /// The audit log entry of a successful call. A method that changes nothing has none.
+    fn audit(&self) -> Option<AuditRecord> {
         None
     }
 
@@ -81,6 +87,10 @@ where
     fn proxy_scope(&self) -> Option<ShortId> {
         self.inner.as_ref().and_then(RpcMethod::proxy_scope)
     }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        self.inner.as_ref().and_then(RpcMethod::audit)
+    }
 }
 
 #[async_trait::async_trait]
@@ -96,6 +106,8 @@ pub trait ErasedRpcMethod: Any + Send + Sync {
     fn permission(&self) -> Permission;
 
     fn proxy_scope(&self) -> Option<ShortId>;
+
+    fn audit(&self) -> Option<AuditRecord>;
 }
 
 pub struct RpcCallback {

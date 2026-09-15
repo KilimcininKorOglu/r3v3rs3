@@ -1,8 +1,10 @@
 use super::RpcMethod;
 use crate::accounts::{Caller, Permission};
+use crate::audit::AuditRecord;
 use crate::proxy::tls::upstream_client_config;
 use crate::server::credentials::{mask_proxy, restore_secrets, seal};
 use crate::server::state::ServerState;
+use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyStatus};
@@ -94,6 +96,10 @@ impl RpcMethod for PurgeProxyCache {
     fn proxy_scope(&self) -> Option<ShortId> {
         Some(self.id)
     }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::PurgeProxyCache).id(self.id))
+    }
 }
 
 pub struct DeleteProxy {
@@ -117,6 +123,10 @@ impl RpcMethod for DeleteProxy {
 
     fn proxy_scope(&self) -> Option<ShortId> {
         Some(self.id)
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::DeleteProxy).id(self.id))
     }
 }
 
@@ -146,6 +156,11 @@ impl RpcMethod for AddProxy {
             state.commit_proxies(previous).await?;
         }
         Ok(())
+    }
+
+    /// The server adds the generated id to the entry.
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::AddProxy).summary(self.entry.name.clone()))
     }
 }
 
@@ -177,6 +192,11 @@ impl RpcMethod for UpdateProxy {
 
     fn proxy_scope(&self) -> Option<ShortId> {
         Some(self.entry.id)
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        let record = AuditRecord::new(AuditAction::UpdateProxy).id(self.entry.id);
+        Some(record.summary(self.entry.proxy.name.clone()))
     }
 }
 

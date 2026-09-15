@@ -1,6 +1,7 @@
 use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
 use crate::accounts::Caller;
+use crate::audit::AuditRecord;
 use crate::server::rpc::auth::VerifyAccount;
 use crate::sessions::{self, SessionBackend, SessionRecord, SessionScope};
 use axum::{
@@ -14,6 +15,7 @@ use axum_extra::extract::{
     CookieJar,
 };
 use r3v3rs3_api::{
+    audit::AuditAction,
     auth::{LoginMethod, LoginRequest, LoginResponse, SessionInfo},
     error::{Error, ErrorMessage},
 };
@@ -71,6 +73,8 @@ pub async fn login(
     let scope = match *result {
         LoginResponse::Success => {
             state.data.lock().await.login_attempts.clear(&attempt_key);
+            let record = AuditRecord::new(AuditAction::Login);
+            state.record_audit(&username, Some(peer.ip()), record).await;
             SessionScope::Admin
         }
         _ => SessionScope::Login,
@@ -106,7 +110,10 @@ async fn ensure_login_allowed(state: &AppState, key: &LoginAttemptKey) -> Result
     Ok(())
 }
 
+/// Counts a failed sign-in and records it in the audit log.
 async fn record_login_failure(state: &AppState, key: LoginAttemptKey) {
+    let record = AuditRecord::new(AuditAction::LoginFailed);
+    state.record_audit(&key.1, Some(key.0), record).await;
     let mut data = state.data.lock().await;
     let admin = data.config.admin;
     data.login_attempts.record_failure(
@@ -139,9 +146,14 @@ async fn verify_login_session(state: &AppState, token: &str, username: &str) -> 
     security(()),
     responses((status = 200, description = "The session is ended."))
 )]
-pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+pub async fn logout(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    jar: CookieJar,
+) -> impl IntoResponse {
     if let Some(token) = jar.get("token") {
         let (backend, _) = session_backend(&state).await;
+        record_logout(&state, backend.as_ref(), token.value(), peer).await;
         for scope in [SessionScope::Admin, SessionScope::Login] {
             if let Err(err) = backend.remove(scope, token.value()).await {
                 warn!(%err, "failed to end the session");
@@ -149,6 +161,25 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
         }
     }
     jar.remove("token")
+}
+
+/// Records the sign-out of the account of an admin session.
+async fn record_logout(
+    state: &AppState,
+    backend: &dyn SessionBackend,
+    token: &str,
+    peer: SocketAddr,
+) {
+    match backend.get(SessionScope::Admin, token).await {
+        Ok(Some(record)) => {
+            let audit = AuditRecord::new(AuditAction::Logout);
+            state
+                .record_audit(&record.subject, Some(peer.ip()), audit)
+                .await;
+        }
+        Ok(None) => {}
+        Err(err) => warn!(%err, "failed to read the session"),
+    }
 }
 
 /// Returns the account of the current session, so the WebUI shows only the pages of its role.
@@ -178,7 +209,11 @@ pub async fn verify(
         return AppError::R3v3rs3(Error::Unauthorized).into_response();
     };
     match session_caller(&state, token.value()).await {
-        Ok(caller) => {
+        Ok(mut caller) => {
+            caller.client = request
+                .extensions()
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|info| info.0.ip());
             request.extensions_mut().insert(caller);
             next.run(request).await
         }

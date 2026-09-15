@@ -1,10 +1,12 @@
 use super::RpcMethod;
 use crate::{
+    audit::AuditRecord,
     certs::{acme::AcmeEntry, dns},
     server::state::ServerState,
 };
 use r3v3rs3_api::{
     acme::{AcmeConfig, AcmeInfo, AcmeRequest},
+    audit::AuditAction,
     error::Error,
     id::ShortId,
 };
@@ -65,6 +67,18 @@ impl RpcMethod for AddAcme {
         state.update_acmes().await;
         Ok(())
     }
+
+    /// The server adds the generated id to the entry.
+    fn audit(&self) -> Option<AuditRecord> {
+        let names = self
+            .request
+            .acme
+            .identifiers
+            .iter()
+            .map(ToString::to_string);
+        let summary = names.collect::<Vec<_>>().join(", ");
+        Some(AuditRecord::new(AuditAction::AddAcme).summary(summary))
+    }
 }
 
 pub struct UpdateAcme {
@@ -85,6 +99,10 @@ impl RpcMethod for UpdateAcme {
         state.update_acmes().await;
         Ok(())
     }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::UpdateAcme).id(self.id))
+    }
 }
 
 pub struct DeleteAcme {
@@ -102,5 +120,9 @@ impl RpcMethod for DeleteAcme {
         state.acmes.delete(self.id)?;
         state.update_acmes().await;
         Ok(())
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::DeleteAcme).id(self.id))
     }
 }

@@ -886,6 +886,7 @@ The "Settings" section of the WebUI edits the server-wide options stored in `con
 | TLS-ALPN Challenge Address | `0.0.0.0:443` | Listening address for ACME TLS-ALPN-01 challenges when no port uses its port. |
 | DNS Challenge Resolver | empty | DNS server, for example `1.1.1.1:53`, that r3v3rs3 asks until the TXT records of a DNS-01 challenge are visible. Empty uses the system resolver. |
 | Database Log Retention | `3months` | How long logs are kept in the log database. |
+| Audit Log Retention | `1year` | How long the audit log keeps an entry. See [Audit Log](#audit-log). |
 
 Durations use a human-readable format, for example `30s`, `15m`, `1h`, or `7days`.
 
@@ -930,6 +931,18 @@ $ curl -b cookies.txt http://localhost:46492/api/ports
 ```
 
 `"insecure": true` removes the `Secure` attribute from the cookie. Use it when the admin panel uses plain HTTP.
+
+# Audit Log
+
+r3v3rs3 records the changes that an account makes through the WebUI or the admin API: ports, proxies, certificates, ACME entries, settings, CDN IP range refreshes and accounts. It also records each sign-in, failed sign-in and sign-out of the admin panel. The changes that r3v3rs3 makes by itself, for example a certificate renewal or a discovered proxy, are not recorded.
+
+Each entry holds the time, the account, the client IP address, the action, the id of the changed resource and a short summary. The summary holds names, addresses and roles. It never holds a password, a token or a key.
+
+A single server keeps the audit log in the `audit_log` table of `log.db` in the log directory. A cluster keeps the audit log encrypted in the cluster store, so each node reads the entries of every node. An entry of a cluster also names the node that recorded it.
+
+The "Audit Log Retention" setting sets how long an entry stays. The default is `1year`. A cluster deletes the entries of a day together, after that day passes the retention.
+
+A failed write to the audit log does not undo the change. r3v3rs3 logs the error.
 
 # Logging
 

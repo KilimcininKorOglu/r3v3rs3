@@ -1,3 +1,4 @@
+use crate::audit::AuditStore;
 use crate::cdn::CdnRanges;
 use crate::certs::{acme::AcmeEntry, challenges::ServedChallenges, Cert};
 use crate::proxy::http::cache_share::SharedCacheStore;
@@ -85,6 +86,12 @@ pub trait Storage: Send + Sync + 'static {
     /// The store of the cached responses that the nodes share. `None` without a cluster, and when
     /// `cluster.share_cache` is off.
     fn shared_cache_store(self: Arc<Self>) -> Option<Arc<dyn SharedCacheStore>> {
+        None
+    }
+
+    /// The audit log that the nodes of a cluster share. `None` keeps the audit log in the log
+    /// database of the server.
+    fn audit_store(self: Arc<Self>) -> Option<Arc<dyn AuditStore>> {
         None
     }
 

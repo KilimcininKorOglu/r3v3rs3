@@ -208,6 +208,23 @@ impl Layout {
         format!("{}{proxy}", self.cache_purges())
     }
 
+    /// The audit log. It is outside the state, so a new entry does not reload the state of the
+    /// nodes.
+    pub fn audit(&self) -> String {
+        format!("{}audit/", self.data)
+    }
+
+    /// The entries of a day in `YYYY-MM-DD` form.
+    pub fn audit_day(&self, day: &str) -> String {
+        format!("{}{day}/", self.audit())
+    }
+
+    /// The key of an entry. The time sorts the entries, and the random part keeps two entries of
+    /// the same millisecond apart.
+    pub fn audit_entry(&self, day: &str, time: u64, random: u32) -> String {
+        format!("{}{time:013}-{random:08x}", self.audit_day(day))
+    }
+
     /// Whether the cluster stores the value of the key without encryption. Every other value is
     /// encrypted.
     pub fn is_plain(&self, key: &str) -> bool {
@@ -313,5 +330,10 @@ mod tests {
         assert_eq!(purge, "r3v3rs3/v1/state/cache-purges/web");
         assert_eq!(layout.kind(&purge), Some(StateKind::CachePurges));
         assert!(layout.is_plain(&purge));
+
+        let entry = layout.audit_entry("2026-09-15", 1, 255);
+        assert_eq!(entry, "r3v3rs3/v1/audit/2026-09-15/0000000000001-000000ff");
+        assert_eq!(layout.kind(&entry), None);
+        assert!(!layout.is_plain(&entry));
     }
 }

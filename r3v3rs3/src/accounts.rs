@@ -8,6 +8,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
 use std::collections::{BTreeSet, HashMap};
+use std::net::IpAddr;
 
 /// What an RPC method needs from the account that calls it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +29,8 @@ pub struct Caller {
     pub role: Role,
     /// The proxies that the account sees. `None` means every proxy.
     pub proxies: Option<BTreeSet<ShortId>>,
+    /// The IP address of the client of the request, for the audit log.
+    pub client: Option<IpAddr>,
 }
 
 impl Caller {
@@ -37,6 +40,7 @@ impl Caller {
             username: String::new(),
             role: Role::Admin,
             proxies: None,
+            client: None,
         }
     }
 
@@ -141,6 +145,7 @@ impl AccountDirectory {
             username: username.to_string(),
             role: entry.role,
             proxies: entry.proxies.clone(),
+            client: None,
         })
     }
 }
@@ -192,6 +197,7 @@ mod tests {
             username: "viewer".to_string(),
             role: Role::Viewer,
             proxies: None,
+            client: None,
         };
         assert_eq!(directory.caller(&session("viewer", 100)), Some(expected));
         assert_eq!(directory.caller(&session("viewer", 99)), None);
@@ -211,6 +217,7 @@ mod tests {
             username: "viewer".to_string(),
             role: Role::Viewer,
             proxies: Some(BTreeSet::from([web])),
+            client: None,
         };
         let config = ServerEvent::AppConfigUpdated {
             config: Default::default(),
@@ -238,6 +245,7 @@ mod tests {
             username: "user".to_string(),
             role,
             proxies,
+            client: None,
         };
         let restricted = Some(BTreeSet::from(["web".parse::<ShortId>().unwrap()]));
         let cases = [

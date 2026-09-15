@@ -2,9 +2,11 @@
 
 use super::RpcMethod;
 use crate::accounts::Permission;
+use crate::audit::AuditRecord;
 use crate::clock::unix_ms;
 use crate::config::account::new_account;
 use crate::server::state::ServerState;
+use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::auth::{
     Account, AccountCreated, AccountInfo, AccountUpdate, NewAccount, Role, MIN_PASSWORD_LENGTH,
 };
@@ -76,6 +78,16 @@ impl RpcMethod for AddAccount {
             .await?;
         Ok(AccountCreated { totp_secret })
     }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        let account = &self.account;
+        let summary = scope_summary(account.role, account.proxies.as_ref());
+        Some(account_record(
+            AuditAction::AddAccount,
+            &account.username,
+            summary,
+        ))
+    }
 }
 
 pub struct UpdateAccount {
@@ -120,6 +132,19 @@ impl RpcMethod for UpdateAccount {
             })
             .await
     }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        let update = &self.update;
+        let mut summary = scope_summary(update.role, update.proxies.as_ref());
+        if update.password.is_some() {
+            summary.push_str(" password=changed");
+        }
+        Some(account_record(
+            AuditAction::UpdateAccount,
+            &self.username,
+            summary,
+        ))
+    }
 }
 
 pub struct DeleteAccount {
@@ -148,6 +173,26 @@ impl RpcMethod for DeleteAccount {
                 Ok(true)
             })
             .await
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::DeleteAccount).id(&self.username))
+    }
+}
+
+fn account_record(action: AuditAction, username: &str, summary: String) -> AuditRecord {
+    AuditRecord::new(action).id(username).summary(summary)
+}
+
+/// The role and the proxy list of an account for the audit log.
+fn scope_summary(role: Role, proxies: Option<&BTreeSet<ShortId>>) -> String {
+    let role = format!("{role:?}").to_lowercase();
+    match proxies {
+        Some(proxies) => {
+            let ids = proxies.iter().map(ToString::to_string).collect::<Vec<_>>();
+            format!("role={role} proxies={}", ids.join(","))
+        }
+        None => format!("role={role}"),
     }
 }
 

@@ -1,5 +1,6 @@
 use super::RpcMethod;
 use crate::accounts::Permission;
+use crate::audit::AuditLog;
 use crate::server::state::ServerState;
 use crate::sessions::SessionBackend;
 use r3v3rs3_api::{
@@ -18,6 +19,19 @@ impl RpcMethod for GetSessionBackend {
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         Ok(state.session_backend())
+    }
+}
+
+/// The audit log, for the sign-ins and the other changes of the admin API outside the RPC methods.
+pub struct GetAuditLog;
+
+#[async_trait::async_trait]
+impl RpcMethod for GetAuditLog {
+    type Output = Arc<AuditLog>;
+    const PERMISSION: Permission = Permission::Admin;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        Ok(state.audit_log())
     }
 }
 

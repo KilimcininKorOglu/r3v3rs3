@@ -466,6 +466,7 @@
   "proxy_form.upstream_server": "Upstream Server",
   "proxy_form.weight": "Weight",
   "settings.admin": "Admin",
+  "settings.audit_log_retention": "Audit Log Retention",
   "settings.background_task_interval": "Background Task Interval",
   "settings.cdn_downloaded": "downloaded",
   "settings.cdn_embedded": "built-in snapshot",

@@ -1,6 +1,7 @@
 use self::rpc::RpcCallback;
 use self::state::ServerState;
 use crate::accounts::AccountDirectory;
+use crate::audit::{AuditStore, SqliteAuditStore};
 use crate::command::ServerCommand;
 use crate::config::storage::Storage;
 use r3v3rs3_api::app::AppInfo;
@@ -48,8 +49,13 @@ impl Server {
         let (command_send, command_recv) = mpsc::channel(1);
         let (callback_send, callback_recv) = mpsc::channel(16);
         let (event_send, _) = broadcast::channel(16);
+        // A cluster keeps the audit log in its store, and a single server in its log database.
+        let audit_store = storage.clone().audit_store().unwrap_or_else(|| {
+            Arc::new(SqliteAuditStore::new(app_info.log_path.join("log.db"))) as Arc<dyn AuditStore>
+        });
         let server_state = ServerState::new(
             storage,
+            audit_store,
             command_send.clone(),
             callback_send,
             event_send.clone(),

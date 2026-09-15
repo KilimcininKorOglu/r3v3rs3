@@ -35,6 +35,7 @@ struct Fields {
     max_login_attempts: String,
     login_attempts_reset: String,
     database_log_retention: String,
+    audit_log_retention: String,
     http_challenge_addr: String,
     tls_alpn_challenge_addr: String,
     dns_challenge_resolver: String,
@@ -129,6 +130,7 @@ impl Fields {
             max_login_attempts: text("/admin/max_login_attempts"),
             login_attempts_reset: text("/admin/login_attempts_reset"),
             database_log_retention: text("/log/database_log_retention"),
+            audit_log_retention: text("/log/audit_log_retention"),
             http_challenge_addr: text("/http_challenge_addr"),
             tls_alpn_challenge_addr: text("/tls_alpn_challenge_addr"),
             dns_challenge_resolver: text("/dns_challenge_resolver"),
@@ -219,6 +221,7 @@ pub fn settings() -> Html {
             { text_field(&fields, &errors, locale.t("settings.dns_challenge_resolver"), "dns_challenge_resolver", "1.1.1.1:53", |f| &mut f.dns_challenge_resolver) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.dns_challenge_resolver_hint")}</p>
             { text_field(&fields, &errors, locale.t("settings.database_log_retention"), "database_log_retention", "3months", |f| &mut f.database_log_retention) }
+            { text_field(&fields, &errors, locale.t("settings.audit_log_retention"), "audit_log_retention", "1year", |f| &mut f.audit_log_retention) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.duration_hint")}</p>
 
             { docker_section(locale, &fields, &errors, &client_certs) }
@@ -680,6 +683,18 @@ fn parse_part<T: DeserializeOwned>(
         .ok()
 }
 
+/// Parses each duration field as a part of the config. `None` when one of them is invalid.
+fn parse_durations<T: DeserializeOwned>(
+    errors: &mut HashMap<String, String>,
+    message: &str,
+    durations: [(&str, &String); 2],
+) -> Option<Vec<T>> {
+    durations
+        .into_iter()
+        .map(|(key, value)| parse_part::<T>(errors, key, message, json!({ key: value.trim() })))
+        .collect()
+}
+
 fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<String, String>> {
     let mut errors = HashMap::new();
     let invalid_duration = locale.t("settings.invalid_duration");
@@ -693,25 +708,21 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         }
         Ok(n) => n,
     };
-    let admin = [
-        ("session_expiry", &fields.session_expiry),
-        ("login_attempts_reset", &fields.login_attempts_reset),
-    ]
-    .into_iter()
-    .map(|(key, value)| {
-        parse_part::<AdminConfig>(
-            &mut errors,
-            key,
-            invalid_duration,
-            json!({ key: value.trim() }),
-        )
-    })
-    .collect::<Option<Vec<_>>>();
-    let log = parse_part::<LogConfig>(
+    let admin = parse_durations::<AdminConfig>(
         &mut errors,
-        "database_log_retention",
         invalid_duration,
-        json!({ "database_log_retention": fields.database_log_retention.trim() }),
+        [
+            ("session_expiry", &fields.session_expiry),
+            ("login_attempts_reset", &fields.login_attempts_reset),
+        ],
+    );
+    let log = parse_durations::<LogConfig>(
+        &mut errors,
+        invalid_duration,
+        [
+            ("database_log_retention", &fields.database_log_retention),
+            ("audit_log_retention", &fields.audit_log_retention),
+        ],
     );
     let interval = parse_part::<AppConfig>(
         &mut errors,
@@ -756,7 +767,10 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 max_login_attempts,
                 login_attempts_reset: admin[1].login_attempts_reset,
             },
-            log,
+            log: LogConfig {
+                database_log_retention: log[0].database_log_retention,
+                audit_log_retention: log[1].audit_log_retention,
+            },
             http_challenge_addr: addr,
             tls_alpn_challenge_addr: tls_alpn_addr,
             dns_challenge_resolver: resolver,

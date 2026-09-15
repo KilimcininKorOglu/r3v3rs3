@@ -1,3 +1,4 @@
+use r3v3rs3::audit::{AuditFilter, AuditStore, DAY_MS};
 use r3v3rs3::certs::Cert;
 use r3v3rs3::cluster::crypto::{sealed_key_id, ClusterKey, ClusterKeys};
 use r3v3rs3::cluster::import::import;
@@ -6,10 +7,12 @@ use r3v3rs3::config::file::{FileState, FileStorage};
 use r3v3rs3::config::storage::Storage;
 use r3v3rs3::kv::{KvStore, Txn, Write};
 use r3v3rs3_api::app::AppConfig;
+use r3v3rs3_api::audit::{AuditAction, AuditEntry};
 use r3v3rs3_api::auth::{LoginMethod, LoginRequest, LoginResponse, Role};
 use r3v3rs3_api::cluster::ClusterConfig;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::proxy::HttpProxy;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,6 +40,64 @@ fn local_config(node_name: &str) -> AppConfig {
 /// A node with the memory store.
 fn node(store: &Arc<MemoryStore>, name: &str) -> anyhow::Result<KvStorage> {
     Ok(KvStorage::new(store.clone(), keys()?, local_config(name)))
+}
+
+fn audit_entry(time: u64, username: &str) -> AuditEntry {
+    AuditEntry {
+        time,
+        username: username.to_string(),
+        client: None,
+        action: AuditAction::AddProxy,
+        resource_id: Some("web".into()),
+        summary: "Web".into(),
+        node: String::new(),
+    }
+}
+
+fn usernames(entries: Vec<AuditEntry>) -> BTreeSet<String> {
+    entries.into_iter().map(|entry| entry.username).collect()
+}
+
+#[tokio::test]
+async fn the_nodes_share_an_encrypted_audit_log_and_the_leader_deletes_the_old_days(
+) -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let (a, b) = (node(&store, "node-a")?, node(&store, "node-b")?);
+    let now = r3v3rs3::clock::unix_ms();
+    a.append(&audit_entry(now - 40 * DAY_MS, "old")).await?;
+    a.append(&audit_entry(now, "admin")).await?;
+    b.append(&audit_entry(now, "editor")).await?;
+
+    let recent = AuditFilter {
+        since: now - 60 * DAY_MS,
+        until: now,
+        username: None,
+        limit: 10,
+    };
+    // A query reads 31 days back from `until`, so the entry of 40 days ago is outside.
+    let both = BTreeSet::from(["admin".to_string(), "editor".to_string()]);
+    assert_eq!(usernames(b.query(&recent).await?), both);
+    let old = AuditFilter {
+        since: now - 41 * DAY_MS,
+        until: now - 39 * DAY_MS,
+        ..recent.clone()
+    };
+    assert_eq!(
+        usernames(a.query(&old).await?),
+        BTreeSet::from(["old".to_string()])
+    );
+
+    let list = store.list(&a.layout().audit()).await?;
+    assert_eq!(list.items.len(), 3);
+    assert!(list
+        .items
+        .iter()
+        .all(|item| !String::from_utf8_lossy(&item.value).contains("Web")));
+
+    a.remove_before(now - 30 * DAY_MS).await?;
+    assert!(usernames(a.query(&old).await?).is_empty());
+    assert_eq!(usernames(a.query(&recent).await?), both);
+    Ok(())
 }
 
 async fn read_files(files: &FileStorage) -> anyhow::Result<(FileState, Cert)> {

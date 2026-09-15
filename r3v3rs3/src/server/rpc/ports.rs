@@ -1,8 +1,10 @@
 use super::RpcMethod;
 use crate::accounts::Permission;
+use crate::audit::AuditRecord;
 use crate::proxy::{tls::validate_client_auth, PortContext};
 use crate::server::state::ServerState;
 use network_interface::NetworkInterfaceConfig;
+use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::{NetworkAddr, NetworkInterface, Port, PortEntry, PortStatus};
@@ -80,6 +82,10 @@ impl RpcMethod for DeletePort {
         state.reload_proxies().await;
         saved
     }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::DeletePort).id(self.id))
+    }
 }
 
 pub struct AddPort {
@@ -102,6 +108,11 @@ impl RpcMethod for AddPort {
             state.update_port(ctx).await
         }
     }
+
+    /// The server adds the generated id to the entry.
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::AddPort).summary(port_summary(&self.entry)))
+    }
 }
 
 /// Checks the parts of the port config that depend on the certificates.
@@ -110,6 +121,11 @@ fn validate_port(port: &Port, state: &ServerState) -> Result<(), Error> {
         Some(tls) => validate_client_auth(tls, &state.certs),
         None => Ok(()),
     }
+}
+
+/// The name and the listening address of a port for the audit log.
+fn port_summary(port: &Port) -> String {
+    format!("{} {}", port.name, port.listen).trim().to_string()
 }
 
 /// Saves the port list with the port of `ctx` added or replaced.
@@ -146,6 +162,11 @@ impl RpcMethod for UpdatePort {
             })
         }
     }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        let record = AuditRecord::new(AuditAction::UpdatePort).id(self.entry.id);
+        Some(record.summary(port_summary(&self.entry.port)))
+    }
 }
 
 pub struct ResetPort {
@@ -165,6 +186,10 @@ impl RpcMethod for ResetPort {
                 id: self.id.to_string(),
             })
         }
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::ResetPort).id(self.id))
     }
 }
 

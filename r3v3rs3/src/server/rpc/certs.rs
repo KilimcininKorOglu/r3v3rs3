@@ -1,8 +1,8 @@
 use super::RpcMethod;
-use crate::{accounts::Permission, certs::Cert, server::state::ServerState};
+use crate::{accounts::Permission, audit::AuditRecord, certs::Cert, server::state::ServerState};
 use flate2::{write::GzEncoder, Compression};
 use hyper::body::Bytes;
-use r3v3rs3_api::{cert::CertInfo, error::Error, id::ShortId};
+use r3v3rs3_api::{audit::AuditAction, cert::CertInfo, error::Error, id::ShortId};
 use std::{sync::Arc, time::SystemTime};
 use tar::Header;
 
@@ -48,6 +48,12 @@ impl RpcMethod for AddCert {
         state.reload_proxies().await;
         Ok(())
     }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        let names = self.cert.san.iter().map(ToString::to_string);
+        let record = AuditRecord::new(AuditAction::AddCert).id(self.cert.id);
+        Some(record.summary(names.collect::<Vec<_>>().join(", ")))
+    }
 }
 
 pub struct DeleteCert {
@@ -72,6 +78,10 @@ impl RpcMethod for DeleteCert {
         state.update_certs().await;
         state.reload_proxies().await;
         Ok(())
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::DeleteCert).id(self.id))
     }
 }
 

@@ -886,6 +886,7 @@ WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütü
 | TLS-ALPN Challenge Adresi | `0.0.0.0:443` | Hiçbir port bu portu kullanmıyorsa ACME TLS-ALPN-01 challenge'larının dinlendiği adres. |
 | DNS Challenge Resolver | boş | r3v3rs3'ün DNS-01 challenge'ının TXT kayıtları görünene kadar sorguladığı DNS sunucusu, örneğin `1.1.1.1:53`. Boş bırakılırsa sistem resolver'ı kullanılır. |
 | Veritabanı Log Saklama Süresi | `3months` | Log'ların log veritabanında ne kadar tutulacağı. |
+| Audit Log Saklama Süresi | `1year` | Audit log'daki bir kaydın ne kadar tutulacağı. Ayrıntılar için [Audit log](#audit-log) bölümüne bakın. |
 
 Süreleri `30s`, `15m`, `1h` veya `7days` gibi okunabilir bir biçimde yazın.
 
@@ -930,6 +931,18 @@ $ curl -b cookies.txt http://localhost:46492/api/ports
 ```
 
 `"insecure": true` değeri cookie'den `Secure` özelliğini kaldırır. Yönetim paneli düz HTTP kullanıyorsa bu değeri gönderin.
+
+# Audit log
+
+r3v3rs3, bir hesabın WebUI veya yönetim API'si ile yaptığı değişiklikleri kaydeder: portlar, proxy'ler, sertifikalar, ACME kayıtları, ayarlar, CDN IP aralığı yenilemeleri ve hesaplar. Yönetim paneline her giriş, her başarısız giriş denemesi ve her çıkış da kaydedilir. r3v3rs3'ün kendi yaptığı değişiklikler kaydedilmez. Sertifika yenileme ve keşfedilen proxy'ler buna örnektir.
+
+Her kayıtta zaman, hesap, client IP adresi, işlem, değişen kaynağın id'si ve kısa bir özet bulunur. Özet isimleri, adresleri ve rolleri içerir. Parola, token veya key içermez.
+
+Tek sunucu audit log'u log dizinindeki `log.db` dosyasının `audit_log` tablosunda tutar. Cluster audit log'u cluster store'da şifreli tutar. Böylece her node bütün node'ların kayıtlarını okur. Cluster'daki bir kayıt, onu yazan node'un adını da içerir.
+
+Bir kaydın ne kadar tutulacağını "Audit Log Saklama Süresi" ayarı belirler. Varsayılan değer `1year` olur. Cluster bir günün kayıtlarını birlikte siler. Silme, o gün saklama süresini geçtikten sonra yapılır.
+
+Audit log'a yazma başarısız olursa değişiklik geri alınmaz. r3v3rs3 hatayı log'a yazar.
 
 # Log
 

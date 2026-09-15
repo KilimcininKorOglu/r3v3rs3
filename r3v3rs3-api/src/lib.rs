@@ -1,5 +1,6 @@
 pub mod acme;
 pub mod app;
+pub mod audit;
 pub mod auth;
 pub mod cache;
 pub mod cdn;

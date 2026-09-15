@@ -44,7 +44,10 @@ where
     F: FnOnce(ServerChannels) -> O,
     O: Future<Output = anyhow::Result<()>> + Send + 'static,
 {
-    let app_info = new_appinfo(Path::new("."), Path::new("."));
+    // The server writes its audit log in the log directory, so the tests use a temporary one.
+    let log_dir = std::env::temp_dir().join(format!("r3v3rs3-test-logs-{}", std::process::id()));
+    std::fs::create_dir_all(&log_dir)?;
+    let app_info = new_appinfo(Path::new("."), &log_dir);
     let (server, channels) = Server::new(app_info, s).await;
     let event_send = channels.event.clone();
     let task = tokio::spawn(server.start());

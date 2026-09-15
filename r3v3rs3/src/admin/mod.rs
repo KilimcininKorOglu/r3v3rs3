@@ -1,6 +1,7 @@
 use crate::accounts::{AccountDirectory, AccountEntry, Caller};
+use crate::audit::{AuditLog, AuditRecord};
 use crate::command::ServerCommand;
-use crate::server::rpc::auth::GetSessionBackend;
+use crate::server::rpc::auth::{GetAuditLog, GetSessionBackend};
 use crate::server::rpc::config::GetConfig;
 use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
 use crate::sessions::{LocalSessions, SessionBackend};
@@ -25,7 +26,7 @@ use r3v3rs3_api::event::ServerEvent;
 use std::any::Any;
 use std::collections::HashMap;
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -88,18 +89,7 @@ pub async fn start_admin(
         }
     });
 
-    // The server broadcasts its initial config before this listener subscribes,
-    // so fetch it explicitly.
-    let config = app_state
-        .call_system(GetConfig)
-        .await
-        .map_err(|err| anyhow::anyhow!("failed to load app config: {err}"))?;
-    data.lock().await.config = *config;
-    let sessions = app_state
-        .call_system(GetSessionBackend)
-        .await
-        .map_err(|err| anyhow::anyhow!("failed to load the sessions: {err}"))?;
-    data.lock().await.sessions = *sessions;
+    load_server_state(&app_state).await?;
 
     let mut event_recv = event.subscribe();
     tokio::spawn(async move {
@@ -141,6 +131,28 @@ pub async fn start_admin(
         }
     })
     .await?;
+    Ok(())
+}
+
+/// Reads the config, the sessions and the audit log of the server. The server broadcasts its
+/// initial config before the admin API subscribes, so the admin API reads it explicitly.
+async fn load_server_state(app_state: &AppState) -> anyhow::Result<()> {
+    let config = app_state
+        .call_system(GetConfig)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to load app config: {err}"))?;
+    let sessions = app_state
+        .call_system(GetSessionBackend)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to load the sessions: {err}"))?;
+    let audit = app_state
+        .call_system(GetAuditLog)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to load the audit log: {err}"))?;
+    let mut data = app_state.data.lock().await;
+    data.config = *config;
+    data.sessions = *sessions;
+    data.audit = Some(*audit);
     Ok(())
 }
 
@@ -446,6 +458,14 @@ impl AppState {
     {
         self.call(&Caller::system(), method).await
     }
+
+    /// Records a change that the admin API makes outside the RPC methods, for example a sign-in.
+    pub async fn record_audit(&self, username: &str, client: Option<IpAddr>, record: AuditRecord) {
+        let audit = self.data.lock().await.audit.clone();
+        if let Some(audit) = audit {
+            audit.record(username, client, record);
+        }
+    }
 }
 
 pub type CallbackData = Result<Box<dyn Any + Send + Sync>, Error>;
@@ -457,6 +477,8 @@ pub struct Data {
     pub sessions: Arc<dyn SessionBackend>,
     pub login_attempts: LoginAttempts,
     pub log: Arc<LogReader>,
+    /// The audit log of the server. The admin API reads it at its start.
+    pub audit: Option<Arc<AuditLog>>,
 
     pub rpc_counter: usize,
     pub rpc_callbacks: HashMap<usize, oneshot::Sender<CallbackData>>,
@@ -471,6 +493,7 @@ impl Data {
             sessions: Arc::new(LocalSessions::default()),
             login_attempts: Default::default(),
             log: Arc::new(LogReader::new(&log).await?),
+            audit: None,
             rpc_counter: 0,
             rpc_callbacks: HashMap::new(),
         })

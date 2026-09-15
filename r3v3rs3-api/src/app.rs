@@ -143,8 +143,18 @@ pub struct LogConfig {
     #[serde(with = "humantime_serde", default = "default_database_log_retention")]
     #[schema(value_type = String, example = "3months")]
     pub database_log_retention: Duration,
+
+    /// How long the audit log keeps an entry.
+    #[serde(with = "humantime_serde", default = "default_audit_log_retention")]
+    #[schema(value_type = String, example = "1year")]
+    pub audit_log_retention: Duration,
 }
 
 fn default_database_log_retention() -> Duration {
     Duration::from_secs(60 * 60 * 24 * 30 * 3)
+}
+
+/// One year in the duration format: 365.25 days.
+fn default_audit_log_retention() -> Duration {
+    Duration::from_secs(31_557_600)
 }

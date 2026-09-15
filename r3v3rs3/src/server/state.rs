@@ -9,9 +9,11 @@ use super::rpc::proxies::validate_proxy;
 use super::udp::UdpListenerPool;
 use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
 use crate::accounts::{AccountDirectory, Caller};
+use crate::audit::{AuditLog, AuditRecord, AuditStore, DAY_MS};
 use crate::certs::acme::{AcmeEntry, AcmeOrder, AcmeTarget};
 use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge};
 use crate::certs::challenges::ServedChallenges;
+use crate::clock::unix_ms;
 use crate::cluster::layout::StateKind;
 use crate::config::storage::Storage;
 use crate::discovery::DiscoverySnapshot;
@@ -77,6 +79,11 @@ pub struct ServerState {
     session_backend: Arc<dyn SessionBackend>,
     /// The accounts without their secrets, for the admin API and the proxy authentication.
     accounts: watch::Sender<Arc<AccountDirectory>>,
+    audit: Arc<AuditLog>,
+    /// The id that the running RPC method generated, for its audit log entry.
+    created_id: Option<ShortId>,
+    /// The day of the last audit log cleanup, in days after the Unix epoch.
+    audit_cleaned_day: u64,
 }
 
 pub enum Received {
@@ -132,6 +139,7 @@ fn tls_alpn_config(challenges: &[TlsAlpnChallenge]) -> Option<Arc<ServerConfig>>
 impl ServerState {
     pub async fn new(
         storage: Arc<dyn Storage>,
+        audit_store: Arc<dyn AuditStore>,
         command_sender: mpsc::Sender<ServerCommand>,
         callback_sender: mpsc::Sender<RpcCallback>,
         br_sender: broadcast::Sender<ServerEvent>,
@@ -172,6 +180,7 @@ impl ServerState {
             config.admin,
         ));
         let leader = !config.cluster.enabled;
+        let audit = Arc::new(AuditLog::new(audit_store, config.cluster.node_name.clone()));
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
             certs: CertList::new(certs).await,
@@ -198,6 +207,9 @@ impl ServerState {
             leader,
             session_backend,
             accounts,
+            audit,
+            created_id: None,
+            audit_cleaned_day: 0,
         };
 
         if let Some(exchange) = this.storage.clone().rate_count_exchange() {
@@ -290,6 +302,7 @@ impl ServerState {
     /// The tasks that only one node of a cluster runs.
     async fn run_leader_tasks(&mut self) {
         self.start_http_challenges().await;
+        self.cleanup_audit_log().await;
         self.remove_expired_certs().await;
         let expiry = sessions::expiry(&self.config.admin);
         if let Err(err) = self.session_backend.remove_expired(expiry).await {
@@ -304,6 +317,29 @@ impl ServerState {
 
     pub fn session_backend(&self) -> Arc<dyn SessionBackend> {
         self.session_backend.clone()
+    }
+
+    pub fn audit_log(&self) -> Arc<AuditLog> {
+        self.audit.clone()
+    }
+
+    /// Deletes the audit log entries after the retention, once a day.
+    async fn cleanup_audit_log(&mut self) {
+        let now = unix_ms();
+        let today = now / DAY_MS;
+        if self.audit_cleaned_day == today {
+            return;
+        }
+        let retention = self.config.log.audit_log_retention.as_millis();
+        let retention = u64::try_from(retention).unwrap_or(u64::MAX);
+        match self
+            .audit
+            .remove_before(now.saturating_sub(retention))
+            .await
+        {
+            Ok(()) => self.audit_cleaned_day = today,
+            Err(err) => error!("failed to remove the old audit log entries: {err:#}"),
+        }
     }
 
     /// The accounts without their secrets. The value changes when an account changes.
@@ -474,7 +510,8 @@ impl ServerState {
     }
 
     /// Runs an RPC method when the role of the caller allows it. A method that changes the stored
-    /// state fails before it changes anything when the storage cannot write.
+    /// state fails before it changes anything when the storage cannot write. A successful call
+    /// adds the audit log entry of the method.
     async fn call_method(
         &mut self,
         caller: &Caller,
@@ -487,7 +524,25 @@ impl ServerState {
         if method.mutates() {
             self.storage.ensure_writable().await?;
         }
-        method.call(self, caller).await
+        let record = method.audit();
+        self.created_id = None;
+        let output = method.call(self, caller).await?;
+        if let Some(record) = record {
+            self.record_audit(caller, record);
+        }
+        Ok(output)
+    }
+
+    /// Records a change of an account. The calls of the admin API itself have no account, so they
+    /// are not recorded.
+    fn record_audit(&self, caller: &Caller, mut record: AuditRecord) {
+        if caller.username.is_empty() {
+            return;
+        }
+        if record.resource_id.is_none() {
+            record.resource_id = self.created_id.map(|id| id.to_string());
+        }
+        self.audit.record(&caller.username, caller.client, record);
     }
 
     /// Stops the task of the provider, removes its proxies and starts it again with the current
@@ -1121,7 +1176,9 @@ impl ServerState {
         });
     }
 
-    pub fn generate_id(&self) -> ShortId {
+    /// A new id that no ACME entry, port or proxy uses. The audit log entry of the running RPC
+    /// method gets the id.
+    pub fn generate_id(&mut self) -> ShortId {
         const TABLE: &[u8] = b"bcdfghjklmnpqrstvwxyz";
 
         let used_ids = self
@@ -1146,6 +1203,7 @@ impl ServerState {
             .parse()
             .unwrap();
             if !used_ids.contains(&id) {
+                self.created_id = Some(id);
                 return id;
             }
         }

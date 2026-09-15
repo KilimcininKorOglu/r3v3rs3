@@ -466,6 +466,7 @@
   "proxy_form.upstream_server": "Upstream Sunucu",
   "proxy_form.weight": "Weight",
   "settings.admin": "Yönetim",
+  "settings.audit_log_retention": "Audit Log Saklama Süresi",
   "settings.background_task_interval": "Arka Plan Görevi Aralığı",
   "settings.cdn_downloaded": "indirilen liste",
   "settings.cdn_embedded": "binary'deki liste",

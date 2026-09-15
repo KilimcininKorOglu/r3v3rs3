@@ -104,13 +104,18 @@ pub struct DatabaseLayer {
     level_filter: LevelFilter,
 }
 
+/// Opens the log database and creates it when it does not exist.
+pub async fn open_database(path: &Path) -> anyhow::Result<SqlitePool> {
+    let opt = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .log_statements(log::LevelFilter::Trace);
+    Ok(SqlitePool::connect_with(opt).await?)
+}
+
 impl DatabaseLayer {
     pub async fn new(path: &Path, level_filter: LevelFilter) -> anyhow::Result<Self> {
-        let opt = SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true)
-            .log_statements(log::LevelFilter::Trace);
-        let pool = SqlitePool::connect_with(opt).await?;
+        let pool = open_database(path).await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS system_log

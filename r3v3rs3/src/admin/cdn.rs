@@ -2,11 +2,13 @@ use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
 use crate::{
     accounts::{Caller, Permission},
+    audit::AuditRecord,
     cdn,
     command::ServerCommand,
 };
 use axum::{extract::State, Extension, Json};
 use r3v3rs3_api::{
+    audit::AuditAction,
     cdn::{CdnRangesSource, CdnStatus},
     error::Error,
 };
@@ -56,5 +58,9 @@ pub async fn refresh(
         })
         .await
         .map_err(|_| Error::FailedToInvokeRpc)?;
+    let record = AuditRecord::new(AuditAction::RefreshCdnRanges);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
     Ok(Json(status))
 }
