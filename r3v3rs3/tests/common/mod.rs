@@ -340,7 +340,7 @@ impl Storage for TestStorage {
         };
         let inner = self.inner.lock().await;
         if let Some(account) = inner.accounts.get(&request.username) {
-            if account.password == password {
+            if password_matches(&account.password, &password) {
                 return Ok(LoginResponse::Success);
             }
         }
@@ -451,6 +451,19 @@ pub fn port_entry(id: &str, listen: Multiaddr) -> PortEntry {
 
 pub fn http_port_entry(id: &str, port: &TestPort) -> PortEntry {
     port_entry(id, port.multiaddr_http())
+}
+
+/// The builder stores plain passwords, and the admin API stores Argon2 hashes.
+fn password_matches(stored: &str, password: &str) -> bool {
+    match argon2::PasswordHash::new(stored) {
+        Ok(hash) => argon2::PasswordVerifier::verify_password(
+            &argon2::Argon2::default(),
+            password.as_bytes(),
+            &hash,
+        )
+        .is_ok(),
+        Err(_) => stored == password,
+    }
 }
 
 /// Signs in to the admin API as `admin` with the password `secret` and returns the session cookie.

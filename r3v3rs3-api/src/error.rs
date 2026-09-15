@@ -143,6 +143,24 @@ pub enum Error {
     #[error("password is required for user: {username}")]
     PasswordRequired { username: String },
 
+    #[error("the password needs at least {min} characters")]
+    PasswordTooShort { min: usize },
+
+    #[error("an account with this username already exists: {username}")]
+    AccountExists { username: String },
+
+    #[error("account not found: {username}")]
+    AccountNotFound { username: String },
+
+    #[error("an account cannot delete itself or change its own role")]
+    CannotChangeOwnAccount,
+
+    #[error("an admin account sees every proxy and cannot have a proxy list")]
+    InvalidAccountScope,
+
+    #[error("at least one admin account must remain")]
+    LastAdmin,
+
     #[error("invalid token name: {name}")]
     InvalidTokenName { name: String },
 
@@ -231,11 +249,11 @@ pub enum Error {
 impl Error {
     pub fn status_code(&self) -> u16 {
         match self {
-            Self::IdNotFound { .. } => 404,
+            Self::IdNotFound { .. } | Self::AccountNotFound { .. } => 404,
             Self::Unauthorized => 401,
             Self::Forbidden | Self::ProxyReadOnly { .. } | Self::CertificateReadOnly { .. } => 403,
             Self::TooManyLoginAttempts => 429,
-            Self::ClusterWriteConflict => 409,
+            Self::ClusterWriteConflict | Self::AccountExists { .. } => 409,
             Self::ClusterUnavailable => 503,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig

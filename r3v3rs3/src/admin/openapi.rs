@@ -31,7 +31,8 @@ const SESSION_COOKIE: &str = "token";
     security(("session" = [])),
     components(schemas(ErrorMessage)),
     tags(
-        (name = "auth", description = "Sign in and sign out."),
+        (name = "auth", description = "Sign in, sign out and the account of the session."),
+        (name = "accounts", description = "Panel accounts with their roles and proxy lists."),
         (name = "events", description = "Server events."),
         (name = "config", description = "Application settings."),
         (name = "ports", description = "Listening ports."),

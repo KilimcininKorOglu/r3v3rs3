@@ -1,3 +1,4 @@
+use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
 use crate::accounts::Caller;
 use crate::server::rpc::auth::VerifyAccount;
@@ -6,14 +7,14 @@ use axum::{
     extract::{ConnectInfo, Request, State},
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
 use axum_extra::extract::{
     cookie::{Cookie, SameSite},
     CookieJar,
 };
 use r3v3rs3_api::{
-    auth::{LoginMethod, LoginRequest, LoginResponse},
+    auth::{LoginMethod, LoginRequest, LoginResponse, SessionInfo},
     error::{Error, ErrorMessage},
 };
 use std::{
@@ -148,6 +149,22 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
         }
     }
     jar.remove("token")
+}
+
+/// Returns the account of the current session, so the WebUI shows only the pages of its role.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "auth",
+    operation_id = "get_session",
+    responses((status = 200, description = "The account of the session.", body = SessionInfo), ErrorResponses)
+)]
+pub async fn session(Extension(caller): Extension<Caller>) -> Json<SessionInfo> {
+    Json(SessionInfo {
+        username: caller.username,
+        role: caller.role,
+        proxies: caller.proxies,
+    })
 }
 
 /// Accepts a request with an active admin session and adds its `Caller` to the request.

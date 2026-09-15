@@ -4,6 +4,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use std::any::Any;
 
+pub mod accounts;
 pub mod acme;
 pub mod auth;
 pub mod certs;

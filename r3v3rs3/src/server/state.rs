@@ -343,7 +343,7 @@ impl ServerState {
             let proxies = accounts
                 .get_mut(username)
                 .and_then(|account| account.proxies.as_mut());
-            proxies.is_some_and(|proxies| proxies.insert(proxy))
+            Ok(proxies.is_some_and(|proxies| proxies.insert(proxy)))
         })
         .await
     }
@@ -351,22 +351,25 @@ impl ServerState {
     /// Removes a deleted proxy from the proxy lists of the accounts.
     pub async fn revoke_proxy(&mut self, proxy: r3v3rs3_api::id::ShortId) -> Result<(), Error> {
         self.edit_accounts(|accounts| {
-            accounts
+            Ok(accounts
                 .values_mut()
                 .filter_map(|account| account.proxies.as_mut())
-                .fold(false, |changed, proxies| proxies.remove(&proxy) || changed)
+                .fold(false, |changed, proxies| proxies.remove(&proxy) || changed))
         })
         .await
     }
 
-    /// Saves the accounts when `edit` changes them, and reads the directory again.
-    async fn edit_accounts(
+    /// Saves the accounts when `edit` changes them, and reads the directory again. An error of
+    /// `edit` saves nothing.
+    pub async fn edit_accounts(
         &mut self,
-        edit: impl FnOnce(&mut std::collections::HashMap<String, r3v3rs3_api::auth::Account>) -> bool
+        edit: impl FnOnce(
+                &mut std::collections::HashMap<String, r3v3rs3_api::auth::Account>,
+            ) -> Result<bool, Error>
             + Send,
     ) -> Result<(), Error> {
         let mut accounts = self.storage.load_accounts().await?;
-        if edit(&mut accounts) {
+        if edit(&mut accounts)? {
             self.storage.save_accounts(&accounts).await?;
             self.reload_accounts().await;
         }

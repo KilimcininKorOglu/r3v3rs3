@@ -45,6 +45,7 @@ use utoipa_axum::router::{OpenApiRouter, UtoipaMethodRouterExt};
 use utoipa_axum::routes;
 use utoipa_swagger_ui::SwaggerUi;
 
+mod accounts;
 mod acme;
 mod app_info;
 pub(crate) mod auth;
@@ -182,6 +183,16 @@ fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
 fn resource_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .nest("/events", OpenApiRouter::new().routes(routes!(events)))
+        .nest(
+            "/session",
+            OpenApiRouter::new().routes(routes!(auth::session)),
+        )
+        .nest(
+            "/accounts",
+            OpenApiRouter::new()
+                .routes(routes!(accounts::list, accounts::add))
+                .routes(routes!(accounts::put, accounts::delete)),
+        )
         .nest(
             "/config",
             OpenApiRouter::new().routes(routes!(config::get, config::put)),
