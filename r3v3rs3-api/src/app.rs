@@ -250,8 +250,9 @@ fn default_webhook_timeout() -> Duration {
     Duration::from_secs(10)
 }
 
+/// Three months in the duration format: 30.44 days each.
 fn default_database_log_retention() -> Duration {
-    Duration::from_secs(60 * 60 * 24 * 30 * 3)
+    Duration::from_secs(3 * 2_630_016)
 }
 
 /// One year in the duration format: 365.25 days.
@@ -307,5 +308,12 @@ mod tests {
             webhook.timeout = Duration::ZERO;
         }
         assert!(matches!(no_timeout.validate(), Err(Error::InvalidTimeout)));
+    }
+
+    #[test]
+    fn the_default_log_retentions_keep_their_documented_text() {
+        let value = serde_json::to_value(LogConfig::default()).unwrap();
+        assert_eq!(value["database_log_retention"], "3months");
+        assert_eq!(value["audit_log_retention"], "1year");
     }
 }
