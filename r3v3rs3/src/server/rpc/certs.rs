@@ -162,7 +162,7 @@ fn cert_to_tar_gz(cert: &Cert) -> anyhow::Result<Bytes> {
             let mut header = Header::new_old();
             header.set_size(key.len() as _);
             header.set_mtime(mtime);
-            header.set_mode(0o644);
+            header.set_mode(0o600);
             header.set_cksum();
             tar.append_data(&mut header, "key.pem", &mut key)?;
         }
@@ -180,15 +180,25 @@ mod tests {
     use flate2::read::GzDecoder;
 
     #[test]
-    fn the_archive_holds_the_chain_and_the_private_key() {
+    fn the_archive_holds_the_chain_and_a_private_key_that_only_the_owner_reads() {
         let cert = Cert::new_ca().unwrap();
         let archive = cert_to_tar_gz(&cert).unwrap();
         let mut tar = tar::Archive::new(GzDecoder::new(archive.as_ref()));
-        let names = tar
+        let files = tar
             .entries()
             .unwrap()
-            .map(|entry| entry.unwrap().path().unwrap().display().to_string())
+            .map(|entry| {
+                let entry = entry.unwrap();
+                let path = entry.path().unwrap().display().to_string();
+                (path, entry.header().mode().unwrap())
+            })
             .collect::<Vec<_>>();
-        assert_eq!(names, ["chain.pem", "key.pem"]);
+        assert_eq!(
+            files,
+            [
+                ("chain.pem".to_string(), 0o644),
+                ("key.pem".to_string(), 0o600)
+            ]
+        );
     }
 }
