@@ -235,6 +235,7 @@
   "error.cluster_write_conflict": "Another node changed the same data. Load the page again and repeat the change.",
   "error.duplicate_compression_algorithm": "Compression algorithm is listed more than once: {algorithm}",
   "error.failed_to_create_account": "Failed to create the account.",
+  "error.failed_to_create_certificate_archive": "Failed to create the certificate archive.",
   "error.failed_to_fetch_log": "Failed to fetch the log.",
   "error.failed_to_generate_self_signed_certificate": "Failed to generate the self-signed certificate.",
   "error.failed_to_hash_password": "Failed to hash the password.",

@@ -286,6 +286,7 @@ mod tests {
             Error::FailedToSaveConfig,
             Error::FailedToInvokeRpc,
             Error::FailedToListNetworkInterfaces,
+            Error::FailedToCreateCertificateArchive,
         ]
     }
 

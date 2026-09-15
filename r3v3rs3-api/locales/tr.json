@@ -235,6 +235,7 @@
   "error.cluster_write_conflict": "Başka bir node aynı veriyi değiştirdi. Sayfayı yeniden yükleyin ve değişikliği tekrarlayın.",
   "error.duplicate_compression_algorithm": "Compression algoritması birden fazla kez seçildi: {algorithm}",
   "error.failed_to_create_account": "Hesap oluşturulamadı.",
+  "error.failed_to_create_certificate_archive": "Sertifika arşivi oluşturulamadı.",
   "error.failed_to_fetch_log": "Log alınamadı.",
   "error.failed_to_generate_self_signed_certificate": "Self-signed sertifika oluşturulamadı.",
   "error.failed_to_hash_password": "Parola hash'lenemedi.",

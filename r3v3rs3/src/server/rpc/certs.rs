@@ -5,6 +5,7 @@ use hyper::body::Bytes;
 use r3v3rs3_api::{audit::AuditAction, cert::CertInfo, error::Error, id::ShortId};
 use std::{sync::Arc, time::SystemTime};
 use tar::Header;
+use tracing::error;
 
 pub struct GetCertList;
 
@@ -125,13 +126,13 @@ impl RpcMethod for DownloadCert {
     const PERMISSION: Permission = Permission::Edit;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        state
-            .certs
-            .get(self.id)
-            .map(|cert| cert_to_tar_gz(cert).unwrap())
-            .ok_or(Error::IdNotFound {
-                id: self.id.to_string(),
-            })
+        let cert = state.certs.get(self.id).ok_or_else(|| Error::IdNotFound {
+            id: self.id.to_string(),
+        })?;
+        cert_to_tar_gz(cert).map_err(|err| {
+            error!(id = %self.id, "failed to create the certificate archive: {err:#}");
+            Error::FailedToCreateCertificateArchive
+        })
     }
 }
 
@@ -166,8 +167,28 @@ fn cert_to_tar_gz(cert: &Cert) -> anyhow::Result<Bytes> {
             tar.append_data(&mut header, "key.pem", &mut key)?;
         }
 
-        tar.finish()?;
+        // Dropping the encoder writes the gzip trailer without reporting a write error.
+        tar.into_inner()?.finish()?;
     }
 
     Ok(buf.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::read::GzDecoder;
+
+    #[test]
+    fn the_archive_holds_the_chain_and_the_private_key() {
+        let cert = Cert::new_ca().unwrap();
+        let archive = cert_to_tar_gz(&cert).unwrap();
+        let mut tar = tar::Archive::new(GzDecoder::new(archive.as_ref()));
+        let names = tar
+            .entries()
+            .unwrap()
+            .map(|entry| entry.unwrap().path().unwrap().display().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["chain.pem", "key.pem"]);
+    }
 }

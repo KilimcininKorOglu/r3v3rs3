@@ -276,6 +276,9 @@ pub enum Error {
 
     #[error("failed to list network interfaces")]
     FailedToListNetworkInterfaces,
+
+    #[error("failed to create the certificate archive")]
+    FailedToCreateCertificateArchive,
 }
 
 impl Error {
@@ -292,7 +295,8 @@ impl Error {
             | Self::FailedToSaveConfig
             | Self::FailedToInvokeRpc
             | Self::FailedToHashPassword
-            | Self::FailedToLoadAccounts => 500,
+            | Self::FailedToLoadAccounts
+            | Self::FailedToCreateCertificateArchive => 500,
             _ => 400,
         }
     }
