@@ -1,5 +1,5 @@
 # Use the official Rust image as the base image for the builder stage
-FROM rust:latest as builder
+FROM rust:1-trixie AS builder
 
 # Install trunk
 RUN cargo install trunk --locked
@@ -23,7 +23,7 @@ WORKDIR /usr/src/app
 RUN cargo build --release
 
 # Prepare the final image
-FROM debian:bookworm-slim as runtime
+FROM debian:trixie-slim AS runtime
 
 # Install dependencies for the Rust binary
 RUN apt-get update && \
