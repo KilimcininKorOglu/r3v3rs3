@@ -1,5 +1,6 @@
 use self::rpc::RpcCallback;
 use self::state::ServerState;
+use crate::accounts::AccountDirectory;
 use crate::command::ServerCommand;
 use crate::config::storage::Storage;
 use r3v3rs3_api::app::AppInfo;
@@ -7,7 +8,7 @@ use r3v3rs3_api::event::ServerEvent;
 use state::Received;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 use tracing::{info, warn};
 
 mod acme_list;
@@ -54,6 +55,7 @@ impl Server {
             event_send.clone(),
         )
         .await;
+        let accounts = server_state.account_directory();
         let server = Self {
             app_info,
             server_state,
@@ -64,6 +66,7 @@ impl Server {
             command: command_send,
             callback: callback_recv,
             event: event_send,
+            accounts,
         };
         (server, channels)
     }
@@ -83,6 +86,8 @@ pub struct ServerChannels {
     pub command: mpsc::Sender<ServerCommand>,
     pub callback: mpsc::Receiver<RpcCallback>,
     pub event: broadcast::Sender<ServerEvent>,
+    /// The accounts without their secrets. The value changes when an account changes.
+    pub accounts: watch::Receiver<Arc<AccountDirectory>>,
 }
 
 impl ServerChannels {

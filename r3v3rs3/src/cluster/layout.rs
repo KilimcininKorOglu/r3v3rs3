@@ -17,10 +17,11 @@ pub enum StateKind {
     Cdn,
     Challenges,
     CachePurges,
+    Accounts,
 }
 
 impl StateKind {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Config,
         Self::Certs,
         Self::Acmes,
@@ -29,8 +30,22 @@ impl StateKind {
         Self::Cdn,
         Self::Challenges,
         Self::CachePurges,
+        Self::Accounts,
     ];
 }
+
+/// The first key segment below `state/` of each part.
+const STATE_PARTS: [(&str, StateKind); 9] = [
+    ("config", StateKind::Config),
+    ("certs", StateKind::Certs),
+    ("acme", StateKind::Acmes),
+    ("ports", StateKind::Ports),
+    ("proxies", StateKind::Proxies),
+    ("cdn", StateKind::Cdn),
+    ("challenges", StateKind::Challenges),
+    ("cache-purges", StateKind::CachePurges),
+    ("accounts", StateKind::Accounts),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
@@ -208,21 +223,14 @@ impl Layout {
             || key == self.schema()
     }
 
-    /// The part of the state of a key. Accounts and the keys outside the state have none.
+    /// The part of the state of a key. The keys outside the state have none.
     pub fn kind(&self, key: &str) -> Option<StateKind> {
         let rest = key.strip_prefix(&self.state())?;
         let part = rest.split('/').next().unwrap_or(rest);
-        match part {
-            "config" => Some(StateKind::Config),
-            "certs" => Some(StateKind::Certs),
-            "acme" => Some(StateKind::Acmes),
-            "ports" => Some(StateKind::Ports),
-            "proxies" => Some(StateKind::Proxies),
-            "cdn" => Some(StateKind::Cdn),
-            "challenges" => Some(StateKind::Challenges),
-            "cache-purges" => Some(StateKind::CachePurges),
-            _ => None,
-        }
+        STATE_PARTS
+            .iter()
+            .find(|(name, _)| *name == part)
+            .map(|(_, kind)| *kind)
     }
 }
 
@@ -264,7 +272,11 @@ mod tests {
             Some(StateKind::Ports)
         );
         assert_eq!(layout.kind(&layout.acme(id)), Some(StateKind::Acmes));
-        assert_eq!(layout.kind(&layout.account("admin")), None);
+        assert_eq!(
+            layout.kind(&layout.account("admin")),
+            Some(StateKind::Accounts)
+        );
+        assert_eq!(layout.kind("r3v3rs3/v1/state/unknown/web"), None);
         assert_eq!(layout.leader(), "r3v3rs3/v1/lock/leader");
         assert_eq!(layout.kind(&layout.leader()), None);
         assert!(!layout.is_plain(&layout.leader()));

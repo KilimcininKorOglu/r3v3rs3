@@ -8,6 +8,7 @@ use super::quic::QuicListenerPool;
 use super::rpc::proxies::validate_proxy;
 use super::udp::UdpListenerPool;
 use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
+use crate::accounts::AccountDirectory;
 use crate::certs::acme::{AcmeEntry, AcmeOrder, AcmeTarget};
 use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge};
 use crate::certs::challenges::ServedChallenges;
@@ -41,7 +42,7 @@ use std::time::{Instant, SystemTime};
 use tokio::select;
 use tokio::{
     net::TcpStream,
-    sync::{broadcast, mpsc},
+    sync::{broadcast, mpsc, watch},
 };
 use tokio_rustls::rustls::ServerConfig;
 use tracing::{error, info, span, warn, Instrument, Level};
@@ -74,6 +75,8 @@ pub struct ServerState {
     /// Whether this node runs the leader tasks. A server without a cluster always does.
     leader: bool,
     session_backend: Arc<dyn SessionBackend>,
+    /// The accounts without their secrets, for the admin API and the proxy authentication.
+    accounts: watch::Sender<Arc<AccountDirectory>>,
 }
 
 pub enum Received {
@@ -99,6 +102,17 @@ fn manual_proxies(mut proxies: Vec<ProxyEntry>) -> Vec<ProxyEntry> {
         }
     }
     proxies
+}
+
+/// The account directory of the storage. `None` when the storage cannot load the accounts.
+async fn load_account_directory(storage: &dyn Storage) -> Option<AccountDirectory> {
+    match storage.load_accounts().await {
+        Ok(accounts) => Some(AccountDirectory::new(&accounts)),
+        Err(err) => {
+            error!(%err, "failed to load the accounts");
+            None
+        }
+    }
 }
 
 /// The TLS config that answers the TLS-ALPN-01 challenges. `None` without a challenge.
@@ -154,6 +168,9 @@ impl ServerState {
             config.admin,
         ));
         let leader = !config.cluster.enabled;
+        // Without the accounts the directory is empty, so no account passes until a reload.
+        let directory = load_account_directory(storage.as_ref()).await;
+        let accounts = watch::Sender::new(Arc::new(directory.unwrap_or_default()));
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
             certs: CertList::new(certs).await,
@@ -179,6 +196,7 @@ impl ServerState {
             cluster: ClusterStatus::default(),
             leader,
             session_backend,
+            accounts,
         };
 
         if let Some(exchange) = this.storage.clone().rate_count_exchange() {
@@ -283,20 +301,44 @@ impl ServerState {
         self.session_backend.clone()
     }
 
+    /// The accounts without their secrets. The value changes when an account changes.
+    pub fn account_directory(&self) -> watch::Receiver<Arc<AccountDirectory>> {
+        self.accounts.subscribe()
+    }
+
     /// Reads the parts of the state that the cluster store changed again, and applies them.
     async fn apply_cluster_changes(&mut self, kinds: Vec<StateKind>) {
         for kind in kinds {
-            match kind {
-                StateKind::Config => self.reload_config().await,
-                StateKind::Certs => self.reload_certs().await,
-                StateKind::Acmes => self.reload_acmes().await,
-                StateKind::Ports => self.reload_ports().await,
-                StateKind::Proxies => self.reload_manual_proxies().await,
-                StateKind::Cdn => self.reload_cdn_ranges().await,
-                StateKind::Challenges => self.reload_challenges().await,
-                StateKind::CachePurges => self.reload_cache_purges().await,
-            }
+            self.reload_kind(kind).await;
         }
+    }
+
+    async fn reload_kind(&mut self, kind: StateKind) {
+        match kind {
+            StateKind::Config => self.reload_config().await,
+            StateKind::Certs => self.reload_certs().await,
+            StateKind::Acmes => self.reload_acmes().await,
+            StateKind::Ports => self.reload_ports().await,
+            StateKind::Proxies => self.reload_manual_proxies().await,
+            StateKind::Cdn => self.reload_cdn_ranges().await,
+            StateKind::Challenges => self.reload_challenges().await,
+            StateKind::CachePurges => self.reload_cache_purges().await,
+            StateKind::Accounts => self.reload_accounts().await,
+        }
+    }
+
+    /// Reads the accounts again. A failed read keeps the directory.
+    async fn reload_accounts(&mut self) {
+        let Some(directory) = load_account_directory(self.storage.as_ref()).await else {
+            return;
+        };
+        self.accounts.send_if_modified(|current| {
+            if **current == directory {
+                return false;
+            }
+            *current = Arc::new(directory);
+            true
+        });
     }
 
     async fn reload_config(&mut self) {

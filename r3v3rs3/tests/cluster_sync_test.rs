@@ -1,4 +1,5 @@
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+use r3v3rs3::accounts::AccountDirectory;
 use r3v3rs3::admin::start_admin;
 use r3v3rs3::certs::acme::AcmeEntry;
 use r3v3rs3::certs::challenges::ServedChallenges;
@@ -535,6 +536,29 @@ async fn only_the_leader_orders_certificates() -> anyhow::Result<()> {
     wait_until(ordered, "the new leader did not order the certificate").await?;
     acceptor.abort();
     follower.stop().await
+}
+
+#[tokio::test]
+async fn an_account_change_reaches_the_account_directory_of_a_node() -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let writer = node_storage(&store, "writer")?;
+    writer
+        .add_account("admin", "passw0rd", false, Role::Admin)
+        .await?;
+    let node = start_node(&store, "node-b").await?;
+    let mut directory = node.channels.accounts.clone();
+    let role = |directory: &AccountDirectory| directory.get("admin").map(|entry| entry.role);
+    assert_eq!(role(&directory.borrow()), Some(Role::Admin));
+
+    let mut accounts = writer.load_accounts().await?;
+    let admin = accounts
+        .get_mut("admin")
+        .ok_or_else(|| anyhow::anyhow!("the account is missing"))?;
+    admin.role = Role::Viewer;
+    writer.save_accounts(&accounts).await?;
+    let changed = directory.wait_for(|directory| role(directory) == Some(Role::Viewer));
+    tokio::time::timeout(Duration::from_secs(5), changed).await??;
+    node.stop().await
 }
 
 #[tokio::test]
