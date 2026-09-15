@@ -165,6 +165,7 @@
   "error.failed_to_read_private_key": "Failed to read the private key.",
   "error.failed_to_refresh_cdn_ranges": "Failed to refresh the CDN IP ranges.",
   "error.failed_to_save_config": "Failed to save the configuration. The change is not applied.",
+  "error.forbidden": "The role of your account does not allow this action.",
   "error.id_already_exists": "ID already exists: {id}",
   "error.id_not_found": "ID not found: {id}",
   "error.invalid_cache_size": "Maximum response size must be from 1 byte to the memory limit.",

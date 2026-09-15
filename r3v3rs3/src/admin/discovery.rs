@@ -1,7 +1,8 @@
 use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
+use crate::accounts::Caller;
 use crate::server::rpc::discovery::GetDiscoveryStatus;
-use axum::{extract::State, Json};
+use axum::{extract::State, Extension, Json};
 use r3v3rs3_api::discovery::DiscoveryStatus;
 
 /// Lists the state, the proxy count and the issues of each discovery provider that has sent a
@@ -15,6 +16,7 @@ use r3v3rs3_api::discovery::DiscoveryStatus;
 )]
 pub async fn list(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
 ) -> Result<Json<Box<Vec<DiscoveryStatus>>>, AppError> {
-    Ok(Json(state.call(GetDiscoveryStatus).await?))
+    Ok(Json(state.call(&caller, GetDiscoveryStatus).await?))
 }

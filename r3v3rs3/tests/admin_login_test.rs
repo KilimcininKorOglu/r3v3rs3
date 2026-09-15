@@ -57,6 +57,7 @@ async fn login_is_blocked_after_max_attempts() -> anyhow::Result<()> {
             channels.command,
             channels.callback,
             channels.event.clone(),
+            channels.accounts.clone(),
         ));
         wait_for_listener(addr).await?;
 

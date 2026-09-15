@@ -8,6 +8,7 @@ use futures::Future;
 use hickory_resolver::{config::LookupIpStrategy, system_conf::read_system_conf, AsyncResolver};
 use net2::{TcpBuilder, UdpBuilder};
 use r3v3rs3::{
+    accounts::Caller,
     cdn::CdnRanges,
     certs::{acme::AcmeEntry, Cert},
     command::ServerCommand,
@@ -29,7 +30,7 @@ use r3v3rs3_api::{
     proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route, Server as UpstreamUrl},
 };
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     net::{SocketAddr, ToSocketAddrs},
     path::Path,
     sync::Arc,
@@ -86,10 +87,22 @@ pub async fn call<M>(
 where
     M: RpcMethod + 'static,
 {
+    call_as(channels, Caller::system(), method).await
+}
+
+/// Calls an RPC method for an account and returns its result.
+pub async fn call_as<M>(
+    channels: &mut ServerChannels,
+    caller: Caller,
+    method: M,
+) -> anyhow::Result<Result<M::Output, Error>>
+where
+    M: RpcMethod + 'static,
+{
     let arg = Box::new(RpcWrapper::new(method)) as Box<dyn ErasedRpcMethod>;
     channels
         .command
-        .send(ServerCommand::CallMethod { id: 1, arg })
+        .send(ServerCommand::CallMethod { id: 1, arg, caller })
         .await?;
     let callback = channels
         .callback
@@ -205,6 +218,16 @@ fn fail_with(error: &Option<Error>) -> Result<(), Error> {
     error.clone().map_or(Ok(()), Err)
 }
 
+/// An account that keeps the password itself instead of a hash.
+fn plain_account(password: &str, role: Role, proxies: Option<BTreeSet<ShortId>>) -> Account {
+    Account {
+        password: password.to_string(),
+        role,
+        proxies,
+        ..Default::default()
+    }
+}
+
 impl TestStorage {
     pub fn builder() -> TestStorageBuilder {
         TestStorageBuilder::new()
@@ -301,12 +324,7 @@ impl Storage for TestStorage {
         _totp: bool,
         role: Role,
     ) -> Result<Account, Error> {
-        // The test storage keeps the password itself instead of a hash.
-        let account = Account {
-            password: password.to_string(),
-            role,
-            ..Default::default()
-        };
+        let account = plain_account(password, role, None);
         self.inner
             .lock()
             .await
@@ -399,6 +417,19 @@ impl TestStorageBuilder {
         self
     }
 
+    /// Adds an account with a role and an optional proxy list.
+    pub fn account(
+        mut self,
+        name: &str,
+        password: &str,
+        role: Role,
+        proxies: Option<BTreeSet<ShortId>>,
+    ) -> Self {
+        let account = plain_account(password, role, proxies);
+        self.inner.accounts.insert(name.to_string(), account);
+        self
+    }
+
     pub fn build(self) -> TestStorage {
         TestStorage {
             inner: Arc::new(Mutex::new(self.inner)),
@@ -424,12 +455,21 @@ pub fn http_port_entry(id: &str, port: &TestPort) -> PortEntry {
 
 /// Signs in to the admin API as `admin` with the password `secret` and returns the session cookie.
 pub async fn admin_session_cookie(addr: SocketAddr) -> anyhow::Result<String> {
+    session_cookie(addr, "admin", "secret").await
+}
+
+/// Signs in to the admin API and returns the session cookie.
+pub async fn session_cookie(
+    addr: SocketAddr,
+    username: &str,
+    password: &str,
+) -> anyhow::Result<String> {
     let res = reqwest::Client::new()
         .post(format!("http://{addr}/api/login"))
         .json(&LoginRequest {
-            username: "admin".to_string(),
+            username: username.to_string(),
             method: LoginMethod::Password {
-                password: "secret".to_string(),
+                password: password.to_string(),
             },
             insecure: true,
         })

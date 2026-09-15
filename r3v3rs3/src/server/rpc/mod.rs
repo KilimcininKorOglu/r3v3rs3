@@ -1,4 +1,5 @@
 use super::state::ServerState;
+use crate::accounts::Permission;
 use r3v3rs3_api::error::Error;
 use std::any::Any;
 
@@ -17,6 +18,13 @@ pub trait RpcMethod: Any + Send + Sync {
     /// Whether the method changes the stored state. Such a method runs only when the storage can
     /// write.
     const MUTATES: bool = false;
+    /// What the caller needs to run the method. A method that changes the stored state needs
+    /// `Edit` unless it sets another permission.
+    const PERMISSION: Permission = if Self::MUTATES {
+        Permission::Edit
+    } else {
+        Permission::Read
+    };
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error>;
 }
 
@@ -48,6 +56,10 @@ where
     fn mutates(&self) -> bool {
         T::MUTATES
     }
+
+    fn permission(&self) -> Permission {
+        T::PERMISSION
+    }
 }
 
 #[async_trait::async_trait]
@@ -55,6 +67,8 @@ pub trait ErasedRpcMethod: Any + Send + Sync {
     async fn call(&mut self, state: &mut ServerState) -> Result<Box<dyn Any + Send + Sync>, Error>;
 
     fn mutates(&self) -> bool;
+
+    fn permission(&self) -> Permission;
 }
 
 pub struct RpcCallback {

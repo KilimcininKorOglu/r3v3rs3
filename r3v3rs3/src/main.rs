@@ -124,7 +124,7 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
 
     let webui_enabled = !args.no_webui;
     tokio::select! {
-        r = r3v3rs3::admin::start_admin(app_info, args.webui, channels.command, channels.callback, channels.event), if webui_enabled => {
+        r = r3v3rs3::admin::start_admin(app_info, args.webui, channels.command, channels.callback, channels.event, channels.accounts), if webui_enabled => {
             if let Err(err) = r {
                 error!("admin error: {}", err);
             }

@@ -1,4 +1,5 @@
 use super::RpcMethod;
+use crate::accounts::Permission;
 use crate::proxy::{tls::validate_client_auth, PortContext};
 use crate::server::state::ServerState;
 use network_interface::NetworkInterfaceConfig;
@@ -154,6 +155,7 @@ pub struct ResetPort {
 #[async_trait::async_trait]
 impl RpcMethod for ResetPort {
     type Output = ();
+    const PERMISSION: Permission = Permission::Edit;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         if state.ports.reset(self.id) {

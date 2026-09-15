@@ -165,6 +165,7 @@
   "error.failed_to_read_private_key": "Private key okunamadı.",
   "error.failed_to_refresh_cdn_ranges": "CDN IP aralıkları yenilenemedi.",
   "error.failed_to_save_config": "Yapılandırma kaydedilemedi. Değişiklik uygulanmadı.",
+  "error.forbidden": "Hesabınızın rolü bu işleme izin vermiyor.",
   "error.id_already_exists": "Bu ID zaten kullanılıyor: {id}",
   "error.id_not_found": "ID bulunamadı: {id}",
   "error.invalid_cache_size": "Maksimum response boyutu 1 byte ile memory limiti arasında olmalıdır.",

@@ -8,7 +8,7 @@ use super::quic::QuicListenerPool;
 use super::rpc::proxies::validate_proxy;
 use super::udp::UdpListenerPool;
 use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
-use crate::accounts::AccountDirectory;
+use crate::accounts::{AccountDirectory, Caller};
 use crate::certs::acme::{AcmeEntry, AcmeOrder, AcmeTarget};
 use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge};
 use crate::certs::challenges::ServedChallenges;
@@ -235,8 +235,12 @@ impl ServerState {
                     self.stop_http_challenges().await;
                 }
             }
-            ServerCommand::CallMethod { id, mut arg } => {
-                let result = self.call_method(arg.as_mut()).await;
+            ServerCommand::CallMethod {
+                id,
+                mut arg,
+                caller,
+            } => {
+                let result = self.call_method(&caller, arg.as_mut()).await;
                 let _ = self.callback_sender.send(RpcCallback { id, result }).await;
             }
             ServerCommand::SetCdnRanges { ranges } => {
@@ -328,7 +332,7 @@ impl ServerState {
     }
 
     /// Reads the accounts again. A failed read keeps the directory.
-    async fn reload_accounts(&mut self) {
+    pub async fn reload_accounts(&mut self) {
         let Some(directory) = load_account_directory(self.storage.as_ref()).await else {
             return;
         };
@@ -424,12 +428,14 @@ impl ServerState {
         self.reload_proxies().await;
     }
 
-    /// Runs an RPC method. A method that changes the stored state fails before it changes anything
-    /// when the storage cannot write.
+    /// Runs an RPC method when the role of the caller allows it. A method that changes the stored
+    /// state fails before it changes anything when the storage cannot write.
     async fn call_method(
         &mut self,
+        caller: &Caller,
         method: &mut dyn super::rpc::ErasedRpcMethod,
     ) -> Result<Box<dyn std::any::Any + Send + Sync>, Error> {
+        caller.authorize(method.permission())?;
         if method.mutates() {
             self.storage.ensure_writable().await?;
         }

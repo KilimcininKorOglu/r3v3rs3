@@ -1,4 +1,5 @@
 use r3v3rs3::{
+    accounts::Caller,
     command::ServerCommand,
     server::rpc::{acme::AddAcme, ErasedRpcMethod, RpcWrapper},
 };
@@ -39,7 +40,11 @@ async fn add_acme(request: AcmeRequest) -> anyhow::Result<Result<(), Error>> {
         let arg = Box::new(RpcWrapper::new(AddAcme { request })) as Box<dyn ErasedRpcMethod>;
         channels
             .command
-            .send(ServerCommand::CallMethod { id: 1, arg })
+            .send(ServerCommand::CallMethod {
+                id: 1,
+                arg,
+                caller: Caller::system(),
+            })
             .await?;
         let callback = channels
             .callback

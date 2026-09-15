@@ -69,6 +69,7 @@ impl IntoResponses for ErrorResponses {
         error_responses(&[
             ("400", "The request is not valid."),
             ("401", "The session cookie is missing or expired."),
+            ("403", "The role of the account does not allow the request."),
             ("500", "The server failed to handle the request."),
         ])
     }

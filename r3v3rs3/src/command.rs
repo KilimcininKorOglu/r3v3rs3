@@ -1,4 +1,5 @@
 use crate::{
+    accounts::Caller,
     cdn::CdnRanges,
     certs::{
         acme::{AcmeOrder, AcmeTarget},
@@ -28,6 +29,7 @@ pub enum ServerCommand {
     CallMethod {
         id: usize,
         arg: Box<dyn ErasedRpcMethod>,
+        caller: Caller,
     },
     SetCdnRanges {
         ranges: CdnRanges,
@@ -66,7 +68,11 @@ impl std::fmt::Debug for ServerCommand {
                 .field("target", target)
                 .field("succeeded", succeeded)
                 .finish(),
-            Self::CallMethod { id, .. } => f.debug_struct("CallMethod").field("id", id).finish(),
+            Self::CallMethod { id, caller, .. } => f
+                .debug_struct("CallMethod")
+                .field("id", id)
+                .field("caller", &caller.username)
+                .finish(),
             Self::SetCdnRanges { ranges } => f
                 .debug_struct("SetCdnRanges")
                 .field("updated_at", &ranges.updated_at)

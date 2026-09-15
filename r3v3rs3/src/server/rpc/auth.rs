@@ -1,4 +1,5 @@
 use super::RpcMethod;
+use crate::accounts::Permission;
 use crate::server::state::ServerState;
 use crate::sessions::SessionBackend;
 use r3v3rs3_api::{
@@ -13,6 +14,7 @@ pub struct GetSessionBackend;
 #[async_trait::async_trait]
 impl RpcMethod for GetSessionBackend {
     type Output = Arc<dyn SessionBackend>;
+    const PERMISSION: Permission = Permission::Admin;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         Ok(state.session_backend())
@@ -26,8 +28,13 @@ pub struct VerifyAccount {
 #[async_trait::async_trait]
 impl RpcMethod for VerifyAccount {
     type Output = LoginResponse;
+    const PERMISSION: Permission = Permission::Admin;
 
+    /// A valid sign-in reads the accounts again, so an account that `add-user` created while the
+    /// server runs gets a session.
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        state.storage.verify_account(self.request).await
+        let response = state.storage.verify_account(self.request).await?;
+        state.reload_accounts().await;
+        Ok(response)
     }
 }

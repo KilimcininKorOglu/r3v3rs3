@@ -1,9 +1,10 @@
 use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
+use crate::accounts::Caller;
 use crate::server::rpc::acme::{AddAcme, DeleteAcme, GetAcme, GetAcmeList, UpdateAcme};
 use axum::{
     extract::{Path, State},
-    Json,
+    Extension, Json,
 };
 use r3v3rs3_api::{
     acme::{AcmeConfig, AcmeInfo, AcmeRequest},
@@ -18,8 +19,11 @@ use r3v3rs3_api::{
     operation_id = "list_acme",
     responses((status = 200, description = "The ACME requests.", body = Vec<AcmeInfo>), ErrorResponses)
 )]
-pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<AcmeInfo>>>, AppError> {
-    Ok(Json(state.call(GetAcmeList).await?))
+pub async fn list(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Box<Vec<AcmeInfo>>>, AppError> {
+    Ok(Json(state.call(&caller, GetAcmeList).await?))
 }
 
 /// Returns one ACME request.
@@ -33,9 +37,10 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<AcmeInfo
 )]
 pub async fn get(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<AcmeInfo>>, AppError> {
-    Ok(Json(state.call(GetAcme { id }).await?))
+    Ok(Json(state.call(&caller, GetAcme { id }).await?))
 }
 
 /// Creates an ACME account and adds the request.
@@ -49,9 +54,10 @@ pub async fn get(
 )]
 pub async fn add(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Json(request): Json<AcmeRequest>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(AddAcme { request }).await?))
+    Ok(Json(state.call(&caller, AddAcme { request }).await?))
 }
 
 /// Replaces the config of an ACME request.
@@ -66,10 +72,11 @@ pub async fn add(
 )]
 pub async fn put(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
     Json(config): Json<AcmeConfig>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(UpdateAcme { id, config }).await?))
+    Ok(Json(state.call(&caller, UpdateAcme { id, config }).await?))
 }
 
 /// Deletes an ACME request.
@@ -83,7 +90,8 @@ pub async fn put(
 )]
 pub async fn delete(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(DeleteAcme { id }).await?))
+    Ok(Json(state.call(&caller, DeleteAcme { id }).await?))
 }

@@ -231,6 +231,7 @@ mod tests {
             Error::AcmeExecProgramNotAllowed { program: text() },
             Error::AcmeDnsProviderInvalid { field: text() },
             Error::Unauthorized,
+            Error::Forbidden,
             Error::FailedToCreateAccount,
             Error::FailedToLoadAccounts,
             Error::InvalidLoginCredentials,

@@ -26,6 +26,7 @@ async fn self_sign_creates_a_client_certificate() -> anyhow::Result<()> {
             channels.command,
             channels.callback,
             channels.event.clone(),
+            channels.accounts.clone(),
         ));
         wait_for_listener(addr).await?;
         let cookie = admin_session_cookie(addr).await?;

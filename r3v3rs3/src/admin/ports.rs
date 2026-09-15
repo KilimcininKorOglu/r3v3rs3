@@ -1,12 +1,13 @@
 use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
+use crate::accounts::Caller;
 use crate::server::rpc::ports::{
     AddPort, DeletePort, GetNetworkInterfaceList, GetPort, GetPortList, GetPortStatus, ResetPort,
     UpdatePort,
 };
 use axum::{
     extract::{Path, State},
-    Json,
+    Extension, Json,
 };
 use r3v3rs3_api::{
     id::ShortId,
@@ -21,8 +22,11 @@ use r3v3rs3_api::{
     operation_id = "list_ports",
     responses((status = 200, description = "The ports.", body = Vec<PortEntry>), ErrorResponses)
 )]
-pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<PortEntry>>>, AppError> {
-    Ok(Json(state.call(GetPortList).await?))
+pub async fn list(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Box<Vec<PortEntry>>>, AppError> {
+    Ok(Json(state.call(&caller, GetPortList).await?))
 }
 
 /// Returns one port.
@@ -36,9 +40,10 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<PortEntr
 )]
 pub async fn get(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<PortEntry>>, AppError> {
-    Ok(Json(state.call(GetPort { id }).await?))
+    Ok(Json(state.call(&caller, GetPort { id }).await?))
 }
 
 /// Returns the socket and TLS state of a port.
@@ -52,9 +57,10 @@ pub async fn get(
 )]
 pub async fn status(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<PortStatus>>, AppError> {
-    Ok(Json(state.call(GetPortStatus { id }).await?))
+    Ok(Json(state.call(&caller, GetPortStatus { id }).await?))
 }
 
 /// Deletes a port.
@@ -68,9 +74,10 @@ pub async fn status(
 )]
 pub async fn delete(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(DeletePort { id }).await?))
+    Ok(Json(state.call(&caller, DeletePort { id }).await?))
 }
 
 /// Adds a port.
@@ -84,9 +91,10 @@ pub async fn delete(
 )]
 pub async fn add(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Json(entry): Json<Port>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(AddPort { entry }).await?))
+    Ok(Json(state.call(&caller, AddPort { entry }).await?))
 }
 
 /// Replaces the config of a port.
@@ -101,11 +109,12 @@ pub async fn add(
 )]
 pub async fn put(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
     Json(entry): Json<Port>,
 ) -> Result<Json<Box<()>>, AppError> {
     let entry = (id, entry).into();
-    Ok(Json(state.call(UpdatePort { entry }).await?))
+    Ok(Json(state.call(&caller, UpdatePort { entry }).await?))
 }
 
 /// Closes and opens the listener of a port again.
@@ -119,9 +128,10 @@ pub async fn put(
 )]
 pub async fn reset(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(ResetPort { id }).await?))
+    Ok(Json(state.call(&caller, ResetPort { id }).await?))
 }
 
 /// Lists the network interfaces that a port can listen on.
@@ -134,6 +144,7 @@ pub async fn reset(
 )]
 pub async fn interfaces(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
 ) -> Result<Json<Box<Vec<NetworkInterface>>>, AppError> {
-    Ok(Json(state.call(GetNetworkInterfaceList).await?))
+    Ok(Json(state.call(&caller, GetNetworkInterfaceList).await?))
 }

@@ -1,7 +1,11 @@
 use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
-use crate::{cdn, command::ServerCommand};
-use axum::{extract::State, Json};
+use crate::{
+    accounts::{Caller, Permission},
+    cdn,
+    command::ServerCommand,
+};
+use axum::{extract::State, Extension, Json};
 use r3v3rs3_api::{
     cdn::{CdnRangesSource, CdnStatus},
     error::Error,
@@ -28,7 +32,11 @@ pub async fn get() -> Json<CdnStatus> {
     operation_id = "refresh_cdn_ranges",
     responses((status = 200, description = "The new CDN IP range status.", body = CdnStatus), ErrorResponses)
 )]
-pub async fn refresh(State(state): State<AppState>) -> Result<Json<CdnStatus>, AppError> {
+pub async fn refresh(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<CdnStatus>, AppError> {
+    caller.authorize(Permission::Edit)?;
     let previous = cdn::table().ranges().clone();
     let result = match cdn::fetch::fetch_all(&previous).await {
         Ok(result) => result,

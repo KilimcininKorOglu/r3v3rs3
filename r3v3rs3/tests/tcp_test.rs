@@ -80,6 +80,7 @@ async fn tcp_proxy_uses_updated_upstream() -> anyhow::Result<()> {
             channels.command,
             channels.callback,
             channels.event.clone(),
+            channels.accounts.clone(),
         ));
         wait_for_listener(admin_addr).await?;
 

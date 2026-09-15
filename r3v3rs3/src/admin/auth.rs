@@ -1,4 +1,5 @@
 use super::{AppError, AppState};
+use crate::accounts::Caller;
 use crate::server::rpc::auth::VerifyAccount;
 use crate::sessions::{self, SessionBackend, SessionScope};
 use axum::{
@@ -58,7 +59,7 @@ pub async fn login(
     }
 
     let insecure = request.insecure;
-    let result = match state.call(VerifyAccount { request }).await {
+    let result = match state.call_system(VerifyAccount { request }).await {
         Ok(result) => result,
         Err(err) => {
             record_login_failure(&state, attempt_key).await;
@@ -147,21 +148,36 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
     jar.remove("token")
 }
 
+/// Accepts a request with an active admin session and adds its `Caller` to the request.
 pub async fn verify(
     State(state): State<AppState>,
     jar: CookieJar,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
     let Some(token) = jar.get("token") else {
         return AppError::R3v3rs3(Error::Unauthorized).into_response();
     };
-    let (backend, expiry) = session_backend(&state).await;
-    match backend.get(SessionScope::Admin, token.value()).await {
-        Ok(Some(record)) if record.is_active(expiry) => next.run(request).await,
-        Ok(_) => AppError::R3v3rs3(Error::Unauthorized).into_response(),
+    match session_caller(&state, token.value()).await {
+        Ok(caller) => {
+            request.extensions_mut().insert(caller);
+            next.run(request).await
+        }
         Err(err) => AppError::R3v3rs3(err).into_response(),
     }
+}
+
+/// The account of an active admin session. The account must exist, and its last change must not
+/// be later than the start of the session.
+async fn session_caller(state: &AppState, token: &str) -> Result<Caller, Error> {
+    let (backend, expiry) = session_backend(state).await;
+    let record = backend
+        .get(SessionScope::Admin, token)
+        .await?
+        .filter(|record| record.is_active(expiry))
+        .ok_or(Error::Unauthorized)?;
+    let caller = state.accounts.borrow().caller(&record);
+    caller.ok_or(Error::Unauthorized)
 }
 
 pub type LoginAttemptKey = (IpAddr, String);

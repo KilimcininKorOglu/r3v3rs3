@@ -1,11 +1,12 @@
 use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
+use crate::accounts::Caller;
 use crate::server::rpc::proxies::{
     AddProxy, DeleteProxy, GetProxy, GetProxyList, GetProxyStatus, PurgeProxyCache, UpdateProxy,
 };
 use axum::{
     extract::{Path, State},
-    Json,
+    Extension, Json,
 };
 use r3v3rs3_api::{
     id::ShortId,
@@ -20,8 +21,11 @@ use r3v3rs3_api::{
     operation_id = "list_proxies",
     responses((status = 200, description = "The proxies.", body = Vec<ProxyEntry>), ErrorResponses)
 )]
-pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<ProxyEntry>>>, AppError> {
-    Ok(Json(state.call(GetProxyList).await?))
+pub async fn list(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Box<Vec<ProxyEntry>>>, AppError> {
+    Ok(Json(state.call(&caller, GetProxyList).await?))
 }
 
 /// Returns one proxy.
@@ -35,9 +39,10 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<ProxyEnt
 )]
 pub async fn get(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<ProxyEntry>>, AppError> {
-    Ok(Json(state.call(GetProxy { id }).await?))
+    Ok(Json(state.call(&caller, GetProxy { id }).await?))
 }
 
 /// Returns the state of a proxy.
@@ -51,9 +56,10 @@ pub async fn get(
 )]
 pub async fn status(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<ProxyStatus>>, AppError> {
-    Ok(Json(state.call(GetProxyStatus { id }).await?))
+    Ok(Json(state.call(&caller, GetProxyStatus { id }).await?))
 }
 
 /// Deletes a proxy.
@@ -67,9 +73,10 @@ pub async fn status(
 )]
 pub async fn delete(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(DeleteProxy { id }).await?))
+    Ok(Json(state.call(&caller, DeleteProxy { id }).await?))
 }
 
 /// Removes the stored responses from the HTTP cache of a proxy.
@@ -83,9 +90,10 @@ pub async fn delete(
 )]
 pub async fn purge_cache(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(PurgeProxyCache { id }).await?))
+    Ok(Json(state.call(&caller, PurgeProxyCache { id }).await?))
 }
 
 /// Adds a proxy.
@@ -99,9 +107,10 @@ pub async fn purge_cache(
 )]
 pub async fn add(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Json(entry): Json<Proxy>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(AddProxy { entry }).await?))
+    Ok(Json(state.call(&caller, AddProxy { entry }).await?))
 }
 
 /// Replaces the config of a proxy.
@@ -116,9 +125,10 @@ pub async fn add(
 )]
 pub async fn put(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
     Json(entry): Json<Proxy>,
 ) -> Result<Json<Box<()>>, AppError> {
     let entry = (id, entry).into();
-    Ok(Json(state.call(UpdateProxy { entry }).await?))
+    Ok(Json(state.call(&caller, UpdateProxy { entry }).await?))
 }

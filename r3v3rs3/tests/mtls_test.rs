@@ -396,6 +396,7 @@ async fn admin_api_checks_certificates() -> anyhow::Result<()> {
             channels.command,
             channels.callback,
             channels.event.clone(),
+            channels.accounts.clone(),
         ));
         wait_for_listener(addr).await?;
         let cookie = admin_session_cookie(addr).await?;

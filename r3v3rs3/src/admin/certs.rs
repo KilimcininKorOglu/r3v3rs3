@@ -1,6 +1,7 @@
 use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
 use crate::{
+    accounts::Caller,
     certs::Cert,
     server::rpc::certs::{AddCert, DeleteCert, DownloadCert, GetCert, GetCertList},
 };
@@ -8,7 +9,7 @@ use axum::{
     extract::{Multipart, Path, Query, State},
     http::HeaderMap,
     response::IntoResponse,
-    Json,
+    Extension, Json,
 };
 use r3v3rs3_api::{
     cert::{CertInfo, CertPostBody, SelfSignedCertKind, SelfSignedCertRequest, UploadQuery},
@@ -25,8 +26,11 @@ use std::{ops::Deref, sync::Arc};
     operation_id = "list_certs",
     responses((status = 200, description = "The certificates.", body = Vec<CertInfo>), ErrorResponses)
 )]
-pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<CertInfo>>>, AppError> {
-    Ok(Json(state.call(GetCertList).await?))
+pub async fn list(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Box<Vec<CertInfo>>>, AppError> {
+    Ok(Json(state.call(&caller, GetCertList).await?))
 }
 
 /// Returns one certificate.
@@ -40,9 +44,10 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Box<Vec<CertInfo
 )]
 pub async fn get(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<CertInfo>>, AppError> {
-    let cert = state.call(GetCert { id }).await?;
+    let cert = state.call(&caller, GetCert { id }).await?;
     Ok(Json(Box::new(cert.info())))
 }
 
@@ -57,18 +62,19 @@ pub async fn get(
 )]
 pub async fn self_sign(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Json(request): Json<SelfSignedCertRequest>,
 ) -> Result<Json<Box<()>>, AppError> {
     let cert = if let Some(ca_cert) = request.ca_cert {
-        let ca = state.call(GetCert { id: ca_cert }).await?;
+        let ca = state.call(&caller, GetCert { id: ca_cert }).await?;
         sign(&request, &ca)?
     } else {
         let ca = Arc::new(Cert::new_ca()?);
-        state.call(AddCert { cert: ca.clone() }).await?;
+        state.call(&caller, AddCert { cert: ca.clone() }).await?;
         sign(&request, &ca)?
     };
     let cert = Arc::new(cert);
-    Ok(Json(state.call(AddCert { cert }).await?))
+    Ok(Json(state.call(&caller, AddCert { cert }).await?))
 }
 
 fn sign(request: &SelfSignedCertRequest, ca: &Cert) -> Result<Cert, Error> {
@@ -90,6 +96,7 @@ fn sign(request: &SelfSignedCertRequest, ca: &Cert) -> Result<Cert, Error> {
 )]
 pub async fn upload(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Query(query): Query<UploadQuery>,
     mut multipart: Multipart,
 ) -> Result<Json<Box<()>>, AppError> {
@@ -109,7 +116,7 @@ pub async fn upload(
 
     let key = if key.is_empty() { None } else { Some(key) };
     let cert = Arc::new(Cert::new(query.kind, chain, key)?);
-    Ok(Json(state.call(AddCert { cert }).await?))
+    Ok(Json(state.call(&caller, AddCert { cert }).await?))
 }
 
 /// Deletes a certificate.
@@ -123,9 +130,10 @@ pub async fn upload(
 )]
 pub async fn delete(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(DeleteCert { id }).await?))
+    Ok(Json(state.call(&caller, DeleteCert { id }).await?))
 }
 
 /// Downloads the certificate chain and the private key as a `tar.gz` archive.
@@ -139,9 +147,10 @@ pub async fn delete(
 )]
 pub async fn download(
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
 ) -> Result<impl IntoResponse, AppError> {
-    let file = state.call(DownloadCert { id }).await?;
+    let file = state.call(&caller, DownloadCert { id }).await?;
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/gzip".parse().unwrap());
     headers.insert(

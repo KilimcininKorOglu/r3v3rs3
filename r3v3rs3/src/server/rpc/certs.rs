@@ -1,5 +1,5 @@
 use super::RpcMethod;
-use crate::{certs::Cert, server::state::ServerState};
+use crate::{accounts::Permission, certs::Cert, server::state::ServerState};
 use flate2::{write::GzEncoder, Compression};
 use hyper::body::Bytes;
 use r3v3rs3_api::{cert::CertInfo, error::Error, id::ShortId};
@@ -111,6 +111,8 @@ pub struct DownloadCert {
 #[async_trait::async_trait]
 impl RpcMethod for DownloadCert {
     type Output = Bytes;
+    /// The archive holds the private key.
+    const PERMISSION: Permission = Permission::Edit;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         state

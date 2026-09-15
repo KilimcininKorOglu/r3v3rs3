@@ -44,8 +44,8 @@ pub struct Account {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxies: Option<BTreeSet<ShortId>>,
 
-    /// The Unix time of the last change of the role, the proxy list or the password. A session
-    /// that started earlier is not valid.
+    /// The Unix time in seconds of the last change of the role, the proxy list or the password. A
+    /// session that started earlier is not valid.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub credentials_changed_at: u64,
 }

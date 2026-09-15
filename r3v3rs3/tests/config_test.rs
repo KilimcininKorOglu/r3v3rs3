@@ -1,4 +1,5 @@
 use r3v3rs3::{
+    accounts::Caller,
     command::ServerCommand,
     config::storage::Storage,
     server::rpc::{config::SetConfig, ErasedRpcMethod, RpcWrapper},
@@ -23,7 +24,11 @@ async fn set_config_persists_to_storage() -> anyhow::Result<()> {
         let arg = Box::new(RpcWrapper::new(SetConfig { config })) as Box<dyn ErasedRpcMethod>;
         channels
             .command
-            .send(ServerCommand::CallMethod { id: 1, arg })
+            .send(ServerCommand::CallMethod {
+                id: 1,
+                arg,
+                caller: Caller::system(),
+            })
             .await?;
         let callback = channels
             .callback
@@ -60,7 +65,11 @@ async fn set_config_keeps_the_exec_programs_of_the_file() -> anyhow::Result<()> 
         let arg = Box::new(RpcWrapper::new(SetConfig { config })) as Box<dyn ErasedRpcMethod>;
         channels
             .command
-            .send(ServerCommand::CallMethod { id: 1, arg })
+            .send(ServerCommand::CallMethod {
+                id: 1,
+                arg,
+                caller: Caller::system(),
+            })
             .await?;
         let callback = channels
             .callback

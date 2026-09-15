@@ -1,3 +1,4 @@
+use crate::accounts::{AccountDirectory, Caller};
 use crate::command::ServerCommand;
 use crate::server::rpc::auth::GetSessionBackend;
 use crate::server::rpc::config::GetConfig;
@@ -34,7 +35,7 @@ use std::{
 };
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
+use tokio::sync::{broadcast, mpsc, oneshot, watch, Mutex};
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::{GovernorError, GovernorLayer};
@@ -64,6 +65,7 @@ pub async fn start_admin(
     command: mpsc::Sender<ServerCommand>,
     mut callback: mpsc::Receiver<RpcCallback>,
     event: broadcast::Sender<ServerEvent>,
+    accounts: watch::Receiver<Arc<AccountDirectory>>,
 ) -> anyhow::Result<()> {
     let data = Data::new(app_info).await?;
     let data = Arc::new(Mutex::new(data));
@@ -71,6 +73,7 @@ pub async fn start_admin(
         sender: command,
         event: event.clone(),
         event_listener_counter: Arc::new(AtomicUsize::new(0)),
+        accounts,
         data: data.clone(),
     };
 
@@ -87,12 +90,12 @@ pub async fn start_admin(
     // The server broadcasts its initial config before this listener subscribes,
     // so fetch it explicitly.
     let config = app_state
-        .call(GetConfig)
+        .call_system(GetConfig)
         .await
         .map_err(|err| anyhow::anyhow!("failed to load app config: {err}"))?;
     data.lock().await.config = *config;
     let sessions = app_state
-        .call(GetSessionBackend)
+        .call_system(GetSessionBackend)
         .await
         .map_err(|err| anyhow::anyhow!("failed to load the sessions: {err}"))?;
     data.lock().await.sessions = *sessions;
@@ -352,11 +355,14 @@ pub struct AppState {
     pub sender: mpsc::Sender<ServerCommand>,
     pub event: broadcast::Sender<ServerEvent>,
     pub event_listener_counter: Arc<AtomicUsize>,
+    /// The accounts that the sessions belong to.
+    pub accounts: watch::Receiver<Arc<AccountDirectory>>,
     pub data: Arc<Mutex<Data>>,
 }
 
 impl AppState {
-    pub async fn call<T>(&self, method: T) -> Result<Box<T::Output>, Error>
+    /// Runs an RPC method for the account of a request.
+    pub async fn call<T>(&self, caller: &Caller, method: T) -> Result<Box<T::Output>, Error>
     where
         T: RpcMethod,
     {
@@ -371,7 +377,11 @@ impl AppState {
         let arg = Box::new(RpcWrapper::new(method)) as Box<dyn ErasedRpcMethod>;
         let _ = self
             .sender
-            .send(ServerCommand::CallMethod { id, arg })
+            .send(ServerCommand::CallMethod {
+                id,
+                arg,
+                caller: caller.clone(),
+            })
             .await;
 
         match rx.await {
@@ -381,6 +391,14 @@ impl AppState {
             },
             Err(_) => Err(Error::FailedToInvokeRpc),
         }
+    }
+
+    /// Runs an RPC method for the admin API itself, outside the request of an account.
+    pub async fn call_system<T>(&self, method: T) -> Result<Box<T::Output>, Error>
+    where
+        T: RpcMethod,
+    {
+        self.call(&Caller::system(), method).await
     }
 }
 

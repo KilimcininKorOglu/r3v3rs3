@@ -1,4 +1,5 @@
 use super::RpcMethod;
+use crate::accounts::Permission;
 use crate::proxy::tls::upstream_client_config;
 use crate::server::credentials::seal;
 use crate::server::state::ServerState;
@@ -65,6 +66,7 @@ pub struct PurgeProxyCache {
 #[async_trait::async_trait]
 impl RpcMethod for PurgeProxyCache {
     type Output = ();
+    const PERMISSION: Permission = Permission::EditProxies;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         if state.proxies.get(self.id).is_none() {
@@ -85,6 +87,7 @@ pub struct DeleteProxy {
 impl RpcMethod for DeleteProxy {
     type Output = ();
     const MUTATES: bool = true;
+    const PERMISSION: Permission = Permission::EditProxies;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         ensure_manual(state, self.id)?;
@@ -102,6 +105,7 @@ pub struct AddProxy {
 impl RpcMethod for AddProxy {
     type Output = ();
     const MUTATES: bool = true;
+    const PERMISSION: Permission = Permission::EditProxies;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         validate_proxy(&self.entry, state)?;
@@ -122,6 +126,7 @@ pub struct UpdateProxy {
 impl RpcMethod for UpdateProxy {
     type Output = ();
     const MUTATES: bool = true;
+    const PERMISSION: Permission = Permission::EditProxies;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         ensure_manual(state, self.entry.id)?;

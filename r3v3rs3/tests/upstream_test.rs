@@ -404,7 +404,11 @@ async fn active_health_check_marks_a_failing_server_unhealthy() -> anyhow::Resul
         let arg = Box::new(RpcWrapper::new(GetProxyStatus { id })) as Box<dyn ErasedRpcMethod>;
         channels
             .command
-            .send(ServerCommand::CallMethod { id: 1, arg })
+            .send(ServerCommand::CallMethod {
+                id: 1,
+                arg,
+                caller: r3v3rs3::accounts::Caller::system(),
+            })
             .await?;
         let callback = channels
             .callback

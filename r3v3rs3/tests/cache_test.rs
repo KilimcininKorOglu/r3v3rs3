@@ -145,7 +145,11 @@ async fn cache_serves_fresh_responses_and_revalidates_stale_ones() -> anyhow::Re
         })) as Box<dyn ErasedRpcMethod>;
         channels
             .command
-            .send(ServerCommand::CallMethod { id: 1, arg })
+            .send(ServerCommand::CallMethod {
+                id: 1,
+                arg,
+                caller: r3v3rs3::accounts::Caller::system(),
+            })
             .await?;
         let callback = channels
             .callback

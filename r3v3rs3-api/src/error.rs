@@ -122,6 +122,9 @@ pub enum Error {
     #[error("unauthorized")]
     Unauthorized,
 
+    #[error("the role of the account does not allow this action")]
+    Forbidden,
+
     #[error("failed to create account")]
     FailedToCreateAccount,
 
@@ -230,7 +233,7 @@ impl Error {
         match self {
             Self::IdNotFound { .. } => 404,
             Self::Unauthorized => 401,
-            Self::ProxyReadOnly { .. } | Self::CertificateReadOnly { .. } => 403,
+            Self::Forbidden | Self::ProxyReadOnly { .. } | Self::CertificateReadOnly { .. } => 403,
             Self::TooManyLoginAttempts => 429,
             Self::ClusterWriteConflict => 409,
             Self::ClusterUnavailable => 503,

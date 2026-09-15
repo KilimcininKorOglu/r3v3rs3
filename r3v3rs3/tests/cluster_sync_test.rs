@@ -197,6 +197,7 @@ impl AdminNode {
             channels.command,
             channels.callback,
             channels.event.clone(),
+            channels.accounts.clone(),
         ));
         wait_for_listener(addr).await?;
         Ok(Self {

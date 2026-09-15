@@ -71,6 +71,7 @@ async fn openapi_document_and_swagger_ui_require_a_session() -> anyhow::Result<(
             channels.command,
             channels.callback,
             channels.event.clone(),
+            channels.accounts.clone(),
         ));
         wait_for_listener(addr).await?;
         let client = Client::new();
