@@ -243,6 +243,7 @@ fn resource_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(certs::list))
                 .routes(routes!(certs::self_sign))
                 .routes(routes!(certs::upload))
+                .routes(routes!(certs::delete_many))
                 .routes(routes!(certs::get, certs::delete))
                 .routes(routes!(certs::download)),
         )

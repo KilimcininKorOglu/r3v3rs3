@@ -113,6 +113,37 @@ fn default_cert_kind() -> CertKind {
     CertKind::Server
 }
 
+/// The most certificates that one request deletes.
+pub const MAX_DELETE_CERTS: usize = 200;
+
+/// The certificates to delete.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DeleteCertsRequest {
+    #[schema(example = json!(["a13e1ecc080e42cfcdd5"]))]
+    pub ids: Vec<ShortId>,
+}
+
+/// What happened to one certificate of a delete request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeleteCertStatus {
+    Deleted,
+    /// A port, a proxy or a discovery provider uses the certificate.
+    InUse,
+    /// Service discovery manages the certificate.
+    ReadOnly,
+    NotFound,
+    /// The storage did not delete the certificate. The server log names the cause.
+    Failed,
+}
+
+/// The result of one certificate of a delete request, in the order of the request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DeleteCertResult {
+    pub id: ShortId,
+    pub status: DeleteCertStatus,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 pub struct CertMetadata {
     pub acme_id: ShortId,

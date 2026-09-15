@@ -199,6 +199,7 @@ mod tests {
             Error::CertificateInUse {
                 id: "abc".parse().unwrap(),
             },
+            Error::TooManyCertificates { max: 200 },
             Error::InvalidClientCaCert {
                 id: "abc".parse().unwrap(),
             },

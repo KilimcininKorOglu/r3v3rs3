@@ -3,7 +3,7 @@ use super::{AppError, AppState};
 use crate::{
     accounts::Caller,
     certs::Cert,
-    server::rpc::certs::{AddCert, DeleteCert, DownloadCert, GetCert, GetCertList},
+    server::rpc::certs::{AddCert, DeleteCert, DeleteCerts, DownloadCert, GetCert, GetCertList},
 };
 use axum::{
     extract::{Multipart, Path, Query, State},
@@ -12,7 +12,10 @@ use axum::{
     Extension, Json,
 };
 use r3v3rs3_api::{
-    cert::{CertInfo, CertPostBody, SelfSignedCertKind, SelfSignedCertRequest, UploadQuery},
+    cert::{
+        CertInfo, CertPostBody, DeleteCertResult, DeleteCertsRequest, SelfSignedCertKind,
+        SelfSignedCertRequest, UploadQuery,
+    },
     error::Error,
     id::ShortId,
 };
@@ -134,6 +137,25 @@ pub async fn delete(
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<()>>, AppError> {
     Ok(Json(state.call(&caller, DeleteCert { id }).await?))
+}
+
+/// Deletes each listed certificate that nothing uses. A certificate that a port, a proxy or a
+/// discovery provider uses stays, and the response tells what happened to each id.
+#[utoipa::path(
+    post,
+    path = "/delete",
+    tag = "certs",
+    operation_id = "delete_certs",
+    request_body = DeleteCertsRequest,
+    responses((status = 200, description = "The result of each certificate.", body = Vec<DeleteCertResult>), ErrorResponses)
+)]
+pub async fn delete_many(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<DeleteCertsRequest>,
+) -> Result<Json<Box<Vec<DeleteCertResult>>>, AppError> {
+    let ids = request.ids;
+    Ok(Json(state.call(&caller, DeleteCerts { ids }).await?))
 }
 
 /// Downloads the certificate chain and the private key as a `tar.gz` archive.

@@ -6,19 +6,21 @@ use crate::components::data_list::{
 use crate::format::{format_duration, unix_now};
 use crate::i18n::use_locale;
 use crate::pages::self_sign::SelfSignQuery;
+use crate::pages::settings::{failure_box, send_request, success_box};
 use crate::pages::Route;
 use crate::store::{AcmeStore, CertStore, SessionStore};
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::acme::AcmeInfo;
 use r3v3rs3_api::cert::{
-    expiry_state, CertInfo, CertKind, ExpiryState, SelfSignedCertKind, UploadQuery,
+    expiry_state, CertInfo, CertKind, DeleteCertResult, DeleteCertStatus, DeleteCertsRequest,
+    ExpiryState, SelfSignedCertKind, UploadQuery,
 };
 use r3v3rs3_api::discovery::DiscoverySource;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use serde_derive::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
@@ -154,6 +156,8 @@ pub fn cert_list() -> Html {
         .as_ref()
         .map(|info| info.cert_expiry_warning)
         .unwrap_or_default();
+    let selected = use_state(HashSet::<ShortId>::new);
+    let notice = use_state(|| Option::<Result<String, String>>::None);
 
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
@@ -207,18 +211,31 @@ pub fn cert_list() -> Html {
         .iter()
         .filter(|cert| Some(cert.kind) == kind)
         .collect::<Vec<_>>();
+    // A deleted certificate or a certificate of another tab is no longer selected.
+    let chosen = cert_list
+        .iter()
+        .map(|cert| cert.id)
+        .filter(|id| selected.contains(id))
+        .collect::<Vec<_>>();
+    let delete_selected = delete_selected_onclick(locale, chosen.clone(), &selected, &notice);
     let body = match *tab {
         CertsTab::Server | CertsTab::Client => {
             let rows = cert_list
                 .iter()
-                .map(|entry| server_row(locale, entry, can_edit, warning))
+                .map(|entry| {
+                    let select = select_box(locale, entry, &selected, can_edit);
+                    server_row(locale, entry, can_edit, warning, select)
+                })
                 .collect::<Vec<_>>();
             list_card(locale, certs.loaded, EMPTY_LIST, &SERVER_COLUMNS, &rows)
         }
         CertsTab::Root => {
             let rows = cert_list
                 .iter()
-                .map(|entry| root_row(locale, entry, can_edit, warning))
+                .map(|entry| {
+                    let select = select_box(locale, entry, &selected, can_edit);
+                    root_row(locale, entry, can_edit, warning, select)
+                })
                 .collect::<Vec<_>>();
             list_card(locale, certs.loaded, EMPTY_LIST, &ROOT_COLUMNS, &rows)
         }
@@ -243,9 +260,13 @@ pub fn cert_list() -> Html {
                         let active_index = active_index.clone();
                         let is_active = item == *tab;
                         let tab = tab.clone();
+                        let selected = selected.clone();
+                        let notice = notice.clone();
                         let onclick = Callback::from(move |_|  {
                             tab.set(item);
                             active_index.set(-1);
+                            selected.set(HashSet::new());
+                            notice.set(None);
                             let _ = navigator.push_with_query(&Route::Certs, &CertsQuery { tab: item });
                         });
                         let class = if is_active {
@@ -263,7 +284,15 @@ pub fn cert_list() -> Html {
                 </ul>
             </div>
         </div>
+            { delete_notice(&notice) }
             { body }
+            if can_edit && !chosen.is_empty() {
+            <div class="flex justify-end mt-4">
+                <button onclick={delete_selected} class="inline-flex items-center px-4 py-2 text-sm font-medium text-red-600 dark:text-red-500 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
+                    {locale.tf("certs.delete_selected", &[("count", &chosen.len().to_string())])}
+                </button>
+            </div>
+            }
             if can_edit {
             <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
                 if matches!(*tab, CertsTab::Server | CertsTab::Client) {
@@ -301,6 +330,113 @@ fn delete_cert_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
             });
         }
     })
+}
+
+/// The checkbox that selects a certificate for deletion. A certificate that service discovery
+/// manages, or an account that cannot change the certificates, gets none.
+fn select_box(
+    locale: Locale,
+    entry: &CertInfo,
+    selected: &UseStateHandle<HashSet<ShortId>>,
+    can_edit: bool,
+) -> Html {
+    if !can_edit || entry.source.is_some() {
+        return html! {};
+    }
+    let id = entry.id;
+    let checked = selected.contains(&id);
+    let selected = selected.clone();
+    let onchange = Callback::from(move |_: Event| {
+        let mut ids = (*selected).clone();
+        if !ids.remove(&id) {
+            ids.insert(id);
+        }
+        selected.set(ids);
+    });
+    html! {
+        <input type="checkbox" {checked} {onchange} aria-label={locale.t("certs.select")} class="w-4 h-4 mr-2 rounded align-middle" />
+    }
+}
+
+/// Deletes the selected certificates after a confirmation and shows what happened to each one.
+fn delete_selected_onclick(
+    locale: Locale,
+    ids: Vec<ShortId>,
+    selected: &UseStateHandle<HashSet<ShortId>>,
+    notice: &UseStateHandle<Option<Result<String, String>>>,
+) -> Callback<MouseEvent> {
+    let selected = selected.clone();
+    let notice = notice.clone();
+    Callback::from(move |_: MouseEvent| {
+        let count = ids.len().to_string();
+        if !gloo_dialogs::confirm(&locale.tf("certs.confirm_delete_selected", &[("count", &count)]))
+        {
+            return;
+        }
+        let ids = ids.clone();
+        let selected = selected.clone();
+        let notice = notice.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = delete_certs(locale, ids).await;
+            selected.set(HashSet::new());
+            notice.set(Some(
+                result.and_then(|results| delete_summary(locale, &results)),
+            ));
+        });
+    })
+}
+
+fn delete_notice(notice: &Option<Result<String, String>>) -> Html {
+    match notice {
+        Some(Ok(message)) => {
+            success_box(html! { <span class="block sm:inline">{message.clone()}</span> })
+        }
+        Some(Err(message)) => failure_box(message),
+        None => html! {},
+    }
+}
+
+/// The message of a delete request. It is an error when a certificate is not deleted, and it
+/// names each such certificate with the cause.
+fn delete_summary(locale: Locale, results: &[DeleteCertResult]) -> Result<String, String> {
+    let deleted = results
+        .iter()
+        .filter(|result| result.status == DeleteCertStatus::Deleted)
+        .count()
+        .to_string();
+    let kept = results
+        .iter()
+        .filter(|result| result.status != DeleteCertStatus::Deleted)
+        .map(|result| format!("{} ({})", result.id, locale.t(status_key(result.status))))
+        .collect::<Vec<_>>();
+    if kept.is_empty() {
+        return Ok(locale.tf("certs.deleted_selected", &[("count", &deleted)]));
+    }
+    Err(locale.tf(
+        "certs.kept_selected",
+        &[("count", &deleted), ("kept", &kept.join(", "))],
+    ))
+}
+
+fn status_key(status: DeleteCertStatus) -> &'static str {
+    match status {
+        DeleteCertStatus::Deleted => "certs.status_deleted",
+        DeleteCertStatus::InUse => "certs.status_in_use",
+        DeleteCertStatus::ReadOnly => "certs.status_read_only",
+        DeleteCertStatus::NotFound => "certs.status_not_found",
+        DeleteCertStatus::Failed => "certs.status_failed",
+    }
+}
+
+async fn delete_certs(locale: Locale, ids: Vec<ShortId>) -> Result<Vec<DeleteCertResult>, String> {
+    let request = Request::post(&format!("{API_ENDPOINT}/certs/delete"))
+        .json(&DeleteCertsRequest { ids })
+        .map_err(|err| err.to_string())?;
+    send_request(locale, request)
+        .await?
+        .json()
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Downloads the certificate. A file with a private key needs a confirmation first.
@@ -363,7 +499,13 @@ fn expiry_cell(locale: Locale, not_after: i64, warning: Duration) -> Html {
     }
 }
 
-fn server_row(locale: Locale, entry: &CertInfo, can_edit: bool, warning: Duration) -> Row {
+fn server_row(
+    locale: Locale,
+    entry: &CertInfo,
+    can_edit: bool,
+    warning: Duration,
+    select: Html,
+) -> Row {
     let subject_names = entry
         .san
         .iter()
@@ -373,7 +515,7 @@ fn server_row(locale: Locale, entry: &CertInfo, can_edit: bool, warning: Duratio
     Row {
         key: entry.id.to_string(),
         cells: vec![
-            html! { <>{subject_names}{source_badge(locale, entry)}</> },
+            html! { <>{select}{subject_names}{source_badge(locale, entry)}</> },
             html! { <>{entry.issuer.clone()}</> },
             html! { <>{entry.id.to_string()}</> },
             expiry_cell(locale, entry.not_after, warning),
@@ -382,7 +524,13 @@ fn server_row(locale: Locale, entry: &CertInfo, can_edit: bool, warning: Duratio
     }
 }
 
-fn root_row(locale: Locale, entry: &CertInfo, can_edit: bool, warning: Duration) -> Row {
+fn root_row(
+    locale: Locale,
+    entry: &CertInfo,
+    can_edit: bool,
+    warning: Duration,
+    select: Html,
+) -> Row {
     let private_key = if entry.has_private_key {
         "common.yes"
     } else {
@@ -391,7 +539,7 @@ fn root_row(locale: Locale, entry: &CertInfo, can_edit: bool, warning: Duration)
     Row {
         key: entry.id.to_string(),
         cells: vec![
-            html! { <>{entry.issuer.clone()}{source_badge(locale, entry)}</> },
+            html! { <>{select}{entry.issuer.clone()}{source_badge(locale, entry)}</> },
             html! { <>{entry.id.to_string()}</> },
             html! { <>{locale.t(private_key)}</> },
             expiry_cell(locale, entry.not_after, warning),
@@ -538,6 +686,30 @@ mod tests {
         assert_eq!(
             discovered_title(Locale::Tr, &source),
             "Bu sertifikayı servis keşfi yönetir: secret default/app-tls"
+        );
+    }
+
+    #[test]
+    fn the_summary_of_a_delete_request_names_each_certificate_that_stays() {
+        let result = |id: &str, status| DeleteCertResult {
+            id: id.parse().unwrap(),
+            status,
+        };
+        assert_eq!(
+            delete_summary(Locale::En, &[result("abc", DeleteCertStatus::Deleted)]),
+            Ok("Deleted certificates: 1.".to_string())
+        );
+        let results = [
+            result("abc", DeleteCertStatus::Deleted),
+            result("abd", DeleteCertStatus::InUse),
+            result("abe", DeleteCertStatus::ReadOnly),
+        ];
+        assert_eq!(
+            delete_summary(Locale::En, &results),
+            Err(
+                "Deleted certificates: 1. Not deleted: abd (in use), abe (managed by service discovery)"
+                    .to_string()
+            )
         );
     }
 

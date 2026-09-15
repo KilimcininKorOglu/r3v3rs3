@@ -2,8 +2,13 @@ use super::RpcMethod;
 use crate::{accounts::Permission, audit::AuditRecord, certs::Cert, server::state::ServerState};
 use flate2::{write::GzEncoder, Compression};
 use hyper::body::Bytes;
-use r3v3rs3_api::{audit::AuditAction, cert::CertInfo, error::Error, id::ShortId};
-use std::{sync::Arc, time::SystemTime};
+use r3v3rs3_api::{
+    audit::AuditAction,
+    cert::{CertInfo, DeleteCertResult, DeleteCertStatus, MAX_DELETE_CERTS},
+    error::Error,
+    id::ShortId,
+};
+use std::{collections::HashSet, sync::Arc, time::SystemTime};
 use tar::Header;
 use tracing::error;
 
@@ -67,15 +72,7 @@ impl RpcMethod for DeleteCert {
     const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        let cert = state.certs.get(self.id).ok_or_else(|| Error::IdNotFound {
-            id: self.id.to_string(),
-        })?;
-        if cert.source.is_some() {
-            return Err(Error::CertificateReadOnly { id: self.id });
-        }
-        ensure_unused(state, self.id)?;
-        state.storage.delete_cert(self.id).await?;
-        state.certs.delete(self.id)?;
+        remove_cert(state, self.id).await?;
         state.update_certs().await;
         state.reload_proxies().await;
         Ok(())
@@ -83,6 +80,75 @@ impl RpcMethod for DeleteCert {
 
     fn audit(&self) -> Option<AuditRecord> {
         Some(AuditRecord::new(AuditAction::DeleteCert).id(self.id))
+    }
+}
+
+/// Deletes each certificate that nothing uses. The output tells what happened to each id, once
+/// for each id.
+pub struct DeleteCerts {
+    pub ids: Vec<ShortId>,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for DeleteCerts {
+    type Output = Vec<DeleteCertResult>;
+    const MUTATES: bool = true;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        if self.ids.len() > MAX_DELETE_CERTS {
+            return Err(Error::TooManyCertificates {
+                max: MAX_DELETE_CERTS,
+            });
+        }
+        let mut seen = HashSet::new();
+        let mut results = Vec::new();
+        for id in self.ids.into_iter().filter(|id| seen.insert(*id)) {
+            let status = delete_status(id, remove_cert(state, id).await);
+            results.push(DeleteCertResult { id, status });
+        }
+        if results
+            .iter()
+            .any(|r| r.status == DeleteCertStatus::Deleted)
+        {
+            state.update_certs().await;
+            state.reload_proxies().await;
+        }
+        Ok(results)
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        let ids = self.ids.iter().map(ToString::to_string);
+        let record = AuditRecord::new(AuditAction::DeleteCert);
+        Some(record.summary(ids.collect::<Vec<_>>().join(", ")))
+    }
+}
+
+/// Removes a certificate from the storage and the state. The caller updates the certificates of
+/// the ports and the proxies.
+async fn remove_cert(state: &mut ServerState, id: ShortId) -> Result<(), Error> {
+    let cert = state
+        .certs
+        .get(id)
+        .ok_or_else(|| Error::IdNotFound { id: id.to_string() })?;
+    if cert.source.is_some() {
+        return Err(Error::CertificateReadOnly { id });
+    }
+    ensure_unused(state, id)?;
+    state.storage.delete_cert(id).await?;
+    state.certs.delete(id)?;
+    Ok(())
+}
+
+fn delete_status(id: ShortId, result: Result<(), Error>) -> DeleteCertStatus {
+    match result {
+        Ok(()) => DeleteCertStatus::Deleted,
+        Err(Error::IdNotFound { .. }) => DeleteCertStatus::NotFound,
+        Err(Error::CertificateInUse { .. }) => DeleteCertStatus::InUse,
+        Err(Error::CertificateReadOnly { .. }) => DeleteCertStatus::ReadOnly,
+        Err(err) => {
+            error!(%id, "failed to delete the certificate: {err}");
+            DeleteCertStatus::Failed
+        }
     }
 }
 

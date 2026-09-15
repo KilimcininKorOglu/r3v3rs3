@@ -56,6 +56,9 @@ pub enum Error {
     #[error("certificate is in use: {id}")]
     CertificateInUse { id: ShortId },
 
+    #[error("a request can delete at most {max} certificates")]
+    TooManyCertificates { max: usize },
+
     #[error("client CA certificate must be a root certificate: {id}")]
     InvalidClientCaCert { id: ShortId },
 
