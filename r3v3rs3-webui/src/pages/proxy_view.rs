@@ -1,6 +1,10 @@
 use crate::{
-    auth::use_ensure_auth, components::proxy_config::ProxyConfig, i18n::use_locale, pages::Route,
-    store::ProxyStore, API_ENDPOINT,
+    auth::use_ensure_auth,
+    components::proxy_config::ProxyConfig,
+    i18n::use_locale,
+    pages::Route,
+    store::{ProxyStore, SessionStore},
+    API_ENDPOINT,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::{
@@ -23,6 +27,8 @@ pub fn proxy_view(props: &Props) -> Html {
     let locale = use_locale();
 
     let (proxies, _) = use_store::<ProxyStore>();
+    let (session, _) = use_store::<SessionStore>();
+    let can_edit = session.can_edit_proxies();
     let site = use_state(|| proxies.entries.iter().find(|e| e.id == props.id).cloned());
     let id = props.id;
     let proxy_cloned = site.clone();
@@ -80,15 +86,15 @@ pub fn proxy_view(props: &Props) -> Html {
                             {locale.tf("proxies.read_only_notice", &[("provider", source.provider.name()), ("resource", &source.resource)])}
                         </p>
                     }
-                    <fieldset disabled={proxy_entry.is_discovered()}>
+                    <fieldset disabled={proxy_entry.is_discovered() || !can_edit}>
                         <ProxyConfig proxy={proxy_entry.proxy.clone()} {onchanged} />
                     </fieldset>
 
                     <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
                         <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                            {locale.t(if proxy_entry.is_discovered() { "common.back" } else { "common.cancel" })}
+                            {locale.t(if proxy_entry.is_discovered() || !can_edit { "common.back" } else { "common.cancel" })}
                         </button>
-                        if !proxy_entry.is_discovered() {
+                        if !proxy_entry.is_discovered() && can_edit {
                             <button type="submit" disabled={entry.is_err()} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
                                 {locale.t("common.update")}
                             </button>

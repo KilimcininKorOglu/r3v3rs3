@@ -7,7 +7,7 @@ use crate::components::data_list::{
 use crate::components::discovery_status::DiscoveryStatusCard;
 use crate::i18n::use_locale;
 use crate::pages::Route;
-use crate::store::{PortStore, ProxyStore};
+use crate::store::{PortStore, ProxyStore, SessionStore};
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
@@ -53,6 +53,8 @@ pub fn proxy_list() -> Html {
 
     let (ports, ports_dispatcher) = use_store::<PortStore>();
     let (proxies, proxies_dispatcher) = use_store::<ProxyStore>();
+    let (session, _) = use_store::<SessionStore>();
+    let can_edit = session.can_edit_proxies();
 
     use_effect_with((), move |_| {
         let load = move || load_proxies(proxies_dispatcher.clone());
@@ -84,30 +86,35 @@ pub fn proxy_list() -> Html {
     let rows = proxies
         .entries
         .iter()
-        .map(|entry| proxy_row(locale, entry, &proxies, &ports, &navigator))
+        .map(|entry| proxy_row(locale, entry, &proxies, &ports, &navigator, can_edit))
         .collect::<Vec<_>>();
     html! {
         <>
             <DiscoveryStatusCard />
             { list_card(locale, proxies.loaded, "proxies.empty", &COLUMNS, &rows) }
-            <div class="flex items-center justify-end my-4">
-                <div>
-                    <button onclick={new_proxy_onclick} class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2" type="button">
-                        <img src="/assets/icons/add.svg" class="w-4 h-4 mr-1" />
-                        {locale.t("common.add")}
-                    </button>
+            if can_edit {
+                <div class="flex items-center justify-end my-4">
+                    <div>
+                        <button onclick={new_proxy_onclick} class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2" type="button">
+                            <img src="/assets/icons/add.svg" class="w-4 h-4 mr-1" />
+                            {locale.t("common.add")}
+                        </button>
+                    </div>
                 </div>
-            </div>
+            }
         </>
     }
 }
 
+/// A proxy row. A discovered proxy, or an account that cannot change the proxies, gets only the
+/// read actions.
 fn proxy_row(
     locale: Locale,
     entry: &ProxyEntry,
     proxies: &ProxyStore,
     ports: &PortStore,
     navigator: &Navigator,
+    can_edit: bool,
 ) -> Row {
     let id = entry.id;
 
@@ -175,8 +182,8 @@ fn proxy_row(
     };
 
     let status = proxies.statuses.get(&id).cloned().unwrap_or_default();
-    let discovered = entry.is_discovered();
-    let config_label = if discovered {
+    let read_only = entry.is_discovered() || !can_edit;
+    let config_label = if read_only {
         "common.view"
     } else {
         "common.edit"
@@ -189,16 +196,16 @@ fn proxy_row(
             source_cell(locale, entry),
             html! { <>{port_names}</> },
             status_cell(locale, &status),
-            active_toggle(entry.proxy.active, discovered, onchange),
+            active_toggle(entry.proxy.active, read_only, onchange),
         ],
         actions: html! {
             <>
                 <a class={LINK_CLASS} onclick={config_onclick}>{locale.t(config_label)}</a>
                 <a class={LINK_CLASS} onclick={log_onclick}>{locale.t("common.log")}</a>
-                if cache_enabled {
+                if cache_enabled && can_edit {
                     <a class={LINK_CLASS} onclick={purge_onclick}>{locale.t("proxies.purge")}</a>
                 }
-                if !discovered {
+                if !read_only {
                     <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
                 }
             </>

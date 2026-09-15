@@ -3,6 +3,7 @@ use serde_derive::{Deserialize, Serialize};
 use yew::prelude::*;
 use yew_router::prelude::*;
 
+mod accounts;
 pub mod cert_list;
 mod log_view;
 mod login;
@@ -55,6 +56,8 @@ pub enum Route {
     ProxyView { id: ShortId },
     #[at("/settings")]
     Settings,
+    #[at("/accounts")]
+    Accounts,
     #[not_found]
     #[at("/404")]
     NotFound,
@@ -76,7 +79,7 @@ impl Route {
             | Route::NewProxy
             | Route::ProxyView { .. }
             | Route::ProxyLogView { .. } => Some(Route::Proxies),
-            Route::Settings => Some(Route::Settings),
+            Route::Settings | Route::Accounts => Some(self.clone()),
             _ => None,
         }
     }
@@ -101,6 +104,7 @@ pub fn switch(routes: Route) -> Html {
         Route::CertLogView { id } => html! { <log_view::LogView {id} /> },
         Route::Upload => html! { <upload::Upload /> },
         Route::Settings => html! { <settings::Settings /> },
+        Route::Accounts => html! { <accounts::Accounts /> },
         Route::NotFound => html! { <Redirect<Route> to={Route::Home}/> },
     }
 }

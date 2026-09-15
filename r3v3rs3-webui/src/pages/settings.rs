@@ -240,17 +240,29 @@ pub fn settings() -> Html {
 
 fn notice_view(notice: &UseStateHandle<Option<Notice>>) -> Html {
     match &**notice {
-        Some(Notice::Success(message)) => html! {
-            <div class="bg-green-100 border border-green-400 text-green-700 dark:bg-green-950 dark:border-green-800 dark:text-green-300 px-4 py-3 rounded relative mb-4" role="status">
-                <span class="block sm:inline">{*message}</span>
-            </div>
-        },
-        Some(Notice::Failed(message)) => html! {
-            <div class="bg-red-100 border border-red-400 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300 px-4 py-3 rounded relative mb-4" role="alert">
-                <span class="block sm:inline">{message}</span>
-            </div>
-        },
+        Some(Notice::Success(message)) => {
+            success_box(html! { <span class="block sm:inline">{*message}</span> })
+        }
+        Some(Notice::Failed(message)) => failure_box(message),
         None => html! {},
+    }
+}
+
+/// A green status box around `content`.
+pub fn success_box(content: Html) -> Html {
+    html! {
+        <div class="bg-green-100 border border-green-400 text-green-700 dark:bg-green-950 dark:border-green-800 dark:text-green-300 px-4 py-3 rounded relative mb-4" role="status">
+            {content}
+        </div>
+    }
+}
+
+/// A red alert box with the message of a failure.
+pub fn failure_box(message: &str) -> Html {
+    html! {
+        <div class="bg-red-100 border border-red-400 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300 px-4 py-3 rounded relative mb-4" role="alert">
+            <span class="block sm:inline">{message.to_string()}</span>
+        </div>
     }
 }
 
@@ -812,9 +824,15 @@ pub async fn send_json(
     body: &impl Serialize,
 ) -> Result<(), String> {
     let request = builder.json(body).map_err(|err| err.to_string())?;
+    send_request(locale, request).await.map(|_| ())
+}
+
+/// Sends the request and returns a successful response. The error is the message of the failure
+/// in the selected language.
+pub async fn send_request(locale: Locale, request: Request) -> Result<Response, String> {
     let response = request.send().await.map_err(|err| err.to_string())?;
     if response.ok() {
-        return Ok(());
+        return Ok(response);
     }
     Err(error_message(locale, response).await)
 }
@@ -1096,12 +1114,12 @@ mod tests {
 }
 
 async fn refresh_cdn_ranges(locale: Locale) -> Result<CdnStatus, String> {
-    let response = Request::post(&format!("{API_ENDPOINT}/cdn/refresh"))
-        .send()
-        .await
+    let request = Request::post(&format!("{API_ENDPOINT}/cdn/refresh"))
+        .build()
         .map_err(|err| err.to_string())?;
-    if response.ok() {
-        return response.json().await.map_err(|err| err.to_string());
-    }
-    Err(error_message(locale, response).await)
+    send_request(locale, request)
+        .await?
+        .json()
+        .await
+        .map_err(|err| err.to_string())
 }

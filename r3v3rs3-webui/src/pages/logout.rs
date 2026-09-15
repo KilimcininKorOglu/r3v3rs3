@@ -1,15 +1,18 @@
-use crate::{pages::Route, API_ENDPOINT};
+use crate::{pages::Route, store::SessionStore, API_ENDPOINT};
 use gloo_net::http::Request;
 use yew::prelude::*;
 use yew_router::prelude::*;
+use yewdux::prelude::*;
 
 #[function_component(Logout)]
 pub fn logout() -> Html {
+    let (_, session) = use_store::<SessionStore>();
     wasm_bindgen_futures::spawn_local(async move {
         Request::get(&format!("{API_ENDPOINT}/logout"))
             .send()
             .await
             .unwrap();
+        session.set(SessionStore::default());
     });
 
     html! {

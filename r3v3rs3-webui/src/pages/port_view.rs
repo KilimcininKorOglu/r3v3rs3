@@ -1,8 +1,12 @@
 use std::collections::HashMap;
 
 use crate::{
-    auth::use_ensure_auth, components::port_config::PortConfig, i18n::use_locale, pages::Route,
-    store::PortStore, API_ENDPOINT,
+    auth::use_ensure_auth,
+    components::port_config::PortConfig,
+    i18n::use_locale,
+    pages::Route,
+    store::{PortStore, SessionStore},
+    API_ENDPOINT,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::{
@@ -24,6 +28,8 @@ pub fn port_view(props: &Props) -> Html {
     let locale = use_locale();
 
     let (ports, _) = use_store::<PortStore>();
+    let (session, _) = use_store::<SessionStore>();
+    let can_edit = session.can_edit();
     let port = use_state(|| ports.entries.iter().find(|e| e.id == props.id).cloned());
     let id = props.id;
     let port_cloned = port.clone();
@@ -76,15 +82,19 @@ pub fn port_view(props: &Props) -> Html {
         <>
             if let Some(port_entry) = &*port {
                 <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
-                    <PortConfig port={port_entry.port.clone()} {onchanged} />
+                    <fieldset disabled={!can_edit}>
+                        <PortConfig port={port_entry.port.clone()} {onchanged} />
+                    </fieldset>
 
                     <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
                         <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                            {locale.t("common.cancel")}
+                            {locale.t(if can_edit { "common.cancel" } else { "common.back" })}
                         </button>
-                        <button type="submit" disabled={entry.is_err()} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                            {locale.t("common.update")}
-                        </button>
+                        if can_edit {
+                            <button type="submit" disabled={entry.is_err()} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                                {locale.t("common.update")}
+                            </button>
+                        }
                     </div>
                 </form>
             } else {

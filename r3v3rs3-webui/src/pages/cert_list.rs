@@ -7,7 +7,7 @@ use crate::format::format_duration;
 use crate::i18n::use_locale;
 use crate::pages::self_sign::SelfSignQuery;
 use crate::pages::Route;
-use crate::store::{AcmeStore, CertStore};
+use crate::store::{AcmeStore, CertStore, SessionStore};
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::acme::AcmeInfo;
@@ -143,6 +143,8 @@ pub fn cert_list() -> Html {
 
     let (certs, certs_dispatcher) = use_store::<CertStore>();
     let (acme, acme_dispatcher) = use_store::<AcmeStore>();
+    let (session, _) = use_store::<SessionStore>();
+    let can_edit = session.can_edit();
 
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
@@ -200,14 +202,14 @@ pub fn cert_list() -> Html {
         CertsTab::Server | CertsTab::Client => {
             let rows = cert_list
                 .iter()
-                .map(|entry| server_row(locale, entry))
+                .map(|entry| server_row(locale, entry, can_edit))
                 .collect::<Vec<_>>();
             list_card(locale, certs.loaded, EMPTY_LIST, &SERVER_COLUMNS, &rows)
         }
         CertsTab::Root => {
             let rows = cert_list
                 .iter()
-                .map(|entry| root_row(locale, entry))
+                .map(|entry| root_row(locale, entry, can_edit))
                 .collect::<Vec<_>>();
             list_card(locale, certs.loaded, EMPTY_LIST, &ROOT_COLUMNS, &rows)
         }
@@ -215,7 +217,7 @@ pub fn cert_list() -> Html {
             let rows = acme
                 .entries
                 .iter()
-                .map(|entry| acme_row(locale, entry, &navigator))
+                .map(|entry| acme_row(locale, entry, &navigator, can_edit))
                 .collect::<Vec<_>>();
             list_card(locale, acme.loaded, EMPTY_LIST, &ACME_COLUMNS, &rows)
         }
@@ -253,6 +255,7 @@ pub fn cert_list() -> Html {
             </div>
         </div>
             { body }
+            if can_edit {
             <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
                 if matches!(*tab, CertsTab::Server | CertsTab::Client) {
                     <button onclick={self_sign_onclick} class="inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-l-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
@@ -275,6 +278,7 @@ pub fn cert_list() -> Html {
                     </button>
                 }
             </div>
+            }
         </>
     }
 }
@@ -305,8 +309,11 @@ fn download_onclick(locale: Locale, id: ShortId, has_private_key: bool) -> Callb
 }
 
 /// The download action, and the delete action of a certificate that service discovery does not
-/// manage.
-fn cert_actions(locale: Locale, entry: &CertInfo, has_private_key: bool) -> Html {
+/// manage. An account that cannot change the certificates gets no action.
+fn cert_actions(locale: Locale, entry: &CertInfo, has_private_key: bool, can_edit: bool) -> Html {
+    if !can_edit {
+        return html! {};
+    }
     html! {
         <>
             <a class={LINK_CLASS} onclick={download_onclick(locale, entry.id, has_private_key)}>{locale.t("certs.download")}</a>
@@ -333,7 +340,7 @@ fn discovered_title(locale: Locale, source: &DiscoverySource) -> String {
     locale.tf("certs.discovered_title", &[("resource", &source.resource)])
 }
 
-fn server_row(locale: Locale, entry: &CertInfo) -> Row {
+fn server_row(locale: Locale, entry: &CertInfo, can_edit: bool) -> Row {
     let subject_names = entry
         .san
         .iter()
@@ -348,11 +355,11 @@ fn server_row(locale: Locale, entry: &CertInfo) -> Row {
             html! { <>{entry.id.to_string()}</> },
             html! { <>{format_duration(locale, entry.not_after)}</> },
         ],
-        actions: cert_actions(locale, entry, true),
+        actions: cert_actions(locale, entry, true, can_edit),
     }
 }
 
-fn root_row(locale: Locale, entry: &CertInfo) -> Row {
+fn root_row(locale: Locale, entry: &CertInfo, can_edit: bool) -> Row {
     let private_key = if entry.has_private_key {
         "common.yes"
     } else {
@@ -366,11 +373,11 @@ fn root_row(locale: Locale, entry: &CertInfo) -> Row {
             html! { <>{locale.t(private_key)}</> },
             html! { <>{format_duration(locale, entry.not_after)}</> },
         ],
-        actions: cert_actions(locale, entry, entry.has_private_key),
+        actions: cert_actions(locale, entry, entry.has_private_key, can_edit),
     }
 }
 
-fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator) -> Row {
+fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator, can_edit: bool) -> Row {
     let id = entry.id;
     let delete_onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
@@ -403,12 +410,14 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator) -> Row {
             html! { <>{entry.identifiers.join(", ")}</> },
             html! { <>{acme_provider_text(entry)}</> },
             html! { <>{renewal}</> },
-            active_toggle(entry.config.active, false, onchange),
+            active_toggle(entry.config.active, !can_edit, onchange),
         ],
         actions: html! {
             <>
                 <a class={LINK_CLASS} onclick={log_onclick}>{locale.t("common.log")}</a>
-                <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
+                if can_edit {
+                    <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
+                }
             </>
         },
     }

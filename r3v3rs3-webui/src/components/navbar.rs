@@ -2,15 +2,19 @@ use super::language_menu::LanguageMenu;
 use super::theme_menu::ThemeMenu;
 use crate::i18n::use_locale;
 use crate::pages::Route;
+use crate::store::SessionStore;
 use r3v3rs3_api::i18n::Locale;
 use yew::prelude::*;
 use yew_router::prelude::*;
+use yewdux::prelude::*;
 
 struct MenuItem {
     /// The translation key of the name.
     name: &'static str,
     icon: &'static str,
     route: Route,
+    /// Only an admin reads the page.
+    admin_only: bool,
 }
 
 const ITEMS: &[MenuItem] = {
@@ -19,21 +23,31 @@ const ITEMS: &[MenuItem] = {
             name: "nav.ports",
             icon: "/assets/icons/wifi.svg",
             route: Route::Ports,
+            admin_only: false,
         },
         MenuItem {
             name: "nav.proxies",
             icon: "/assets/icons/swap-horizontal.svg",
             route: Route::Proxies,
+            admin_only: false,
         },
         MenuItem {
             name: "nav.certificates",
             icon: "/assets/icons/ribbon.svg",
             route: Route::Certs,
+            admin_only: false,
+        },
+        MenuItem {
+            name: "nav.accounts",
+            icon: "/assets/icons/person.svg",
+            route: Route::Accounts,
+            admin_only: true,
         },
         MenuItem {
             name: "nav.settings",
             icon: "/assets/icons/settings.svg",
             route: Route::Settings,
+            admin_only: true,
         },
     ]
 };
@@ -52,6 +66,7 @@ pub fn navbar() -> Html {
     let route = use_route::<Route>().unwrap();
     let menu_open = use_state(|| false);
     let locale = use_locale();
+    let (session, _) = use_store::<SessionStore>();
 
     let navigator_cloned = navigator.clone();
     let logout_onclick = Callback::from(move |e: MouseEvent| {
@@ -82,6 +97,7 @@ pub fn navbar() -> Html {
             .map(|root| {
                 ITEMS
                     .iter()
+                    .filter(|entry| !entry.admin_only || session.is_admin())
                     .map(|entry| {
                         let is_active = *root == entry.route;
                         menu_item(locale, entry, is_active, vertical, &navigator, &menu_open)
