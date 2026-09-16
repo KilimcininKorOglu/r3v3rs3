@@ -18,6 +18,7 @@ async fn set_config_persists_to_storage() -> anyhow::Result<()> {
     config.admin.max_login_attempts = 3;
     config.admin.login_attempts_reset = Duration::from_secs(120);
     config.background_task_interval = Duration::from_secs(600);
+    config.upstream_dns_resolver = Some("127.0.0.1:8600".parse()?);
 
     let expected = config.clone();
     with_server(storage.clone(), |mut channels| async move {

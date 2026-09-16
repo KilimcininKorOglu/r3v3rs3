@@ -1001,6 +1001,7 @@ The "Settings" section of the WebUI edits the server-wide options stored in `con
 | HTTP Challenge Address | `0.0.0.0:80` | Listening address for ACME HTTP challenges. |
 | TLS-ALPN Challenge Address | `0.0.0.0:443` | Listening address for ACME TLS-ALPN-01 challenges when no port uses its port. |
 | DNS Challenge Resolver | empty | DNS server, for example `1.1.1.1:53`, that r3v3rs3 asks until the TXT records of a DNS-01 challenge are visible. Empty uses the system resolver. |
+| Upstream DNS Resolver | empty | DNS server, for example `127.0.0.1:8600` for Consul, that answers the SRV lookups of `http+srv` and `https+srv` server URLs. Empty uses the system resolver. |
 | Database Log Retention | `3months` | How long logs are kept in the log database. |
 | Audit Log Retention | `1year` | How long the audit log keeps an entry. See [Audit Log](#audit-log). |
 | Certificate Expiry Warning | `14days` | The certificate list marks a certificate that expires within this time, and the webhook gets a notification for it. See [Notifications](#notifications). |

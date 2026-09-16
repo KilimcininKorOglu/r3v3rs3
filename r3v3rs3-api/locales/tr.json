@@ -592,6 +592,8 @@
   "settings.database_log_retention":"Veritabanı Log Saklama Süresi",
   "settings.dns_challenge_resolver": "DNS Challenge Resolver",
   "settings.dns_challenge_resolver_hint": "r3v3rs3, DNS-01 challenge'ının TXT kayıtları görünene kadar bu DNS sunucusunu sorgular, örneğin 1.1.1.1:53. Sistem resolver'ını kullanmak için boş bırakın.",
+  "settings.upstream_dns_resolver": "Upstream DNS Resolver",
+  "settings.upstream_dns_resolver_hint": "r3v3rs3, http+srv ve https+srv sunucu URL'lerinin SRV kayıtlarını bu DNS sunucusundan sorar, örneğin Consul için 127.0.0.1:8600. Sistem resolver'ını kullanmak için boş bırakın.",
   "settings.docker_client_cert": "Client Sertifikası",
   "settings.docker_client_cert_hint": "r3v3rs3 bu sertifikayı https endpoint'ine gönderir.",
   "settings.docker_enabled": "Proxy'leri Docker label'larından oku",

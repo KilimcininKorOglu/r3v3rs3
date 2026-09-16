@@ -35,6 +35,12 @@ pub struct AppConfig {
     #[schema(value_type = Option<String>, example = "1.1.1.1:53")]
     pub dns_challenge_resolver: Option<SocketAddr>,
 
+    /// DNS server that answers the SRV lookups of `http+srv` and `https+srv` server URLs.
+    /// The system resolver is used when it is not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "127.0.0.1:8600")]
+    pub upstream_dns_resolver: Option<SocketAddr>,
+
     #[serde(default)]
     pub discovery: crate::discovery::DiscoveryConfig,
 

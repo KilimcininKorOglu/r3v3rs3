@@ -49,6 +49,7 @@ struct Fields {
     http_challenge_addr: String,
     tls_alpn_challenge_addr: String,
     dns_challenge_resolver: String,
+    upstream_dns_resolver: String,
     docker_enabled: bool,
     docker_endpoint: String,
     docker_network: String,
@@ -151,6 +152,7 @@ impl Fields {
             http_challenge_addr: text("/http_challenge_addr"),
             tls_alpn_challenge_addr: text("/tls_alpn_challenge_addr"),
             dns_challenge_resolver: text("/dns_challenge_resolver"),
+            upstream_dns_resolver: text("/upstream_dns_resolver"),
         }
     }
 }
@@ -238,6 +240,8 @@ pub fn settings() -> Html {
             { text_field(&fields, &errors, locale.t("settings.tls_alpn_challenge_addr"), "tls_alpn_challenge_addr", "0.0.0.0:443", |f| &mut f.tls_alpn_challenge_addr) }
             { text_field(&fields, &errors, locale.t("settings.dns_challenge_resolver"), "dns_challenge_resolver", "1.1.1.1:53", |f| &mut f.dns_challenge_resolver) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.dns_challenge_resolver_hint")}</p>
+            { text_field(&fields, &errors, locale.t("settings.upstream_dns_resolver"), "upstream_dns_resolver", "127.0.0.1:8600", |f| &mut f.upstream_dns_resolver) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.upstream_dns_resolver_hint")}</p>
             { text_field(&fields, &errors, locale.t("settings.database_log_retention"), "database_log_retention", "3months", |f| &mut f.database_log_retention) }
             { text_field(&fields, &errors, locale.t("settings.audit_log_retention"), "audit_log_retention", "1year", |f| &mut f.audit_log_retention) }
             { text_field(&fields, &errors, locale.t("settings.cert_expiry_warning"), "cert_expiry_warning", "14days", |f| &mut f.cert_expiry_warning) }
@@ -821,26 +825,31 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
     let kubernetes = parse_kubernetes(fields);
     let consul = parse_consul(locale, fields, &mut errors);
     let etcd = parse_etcd(locale, fields, &mut errors);
-    let resolver = parse_optional_addr(&fields.dns_challenge_resolver);
-    if resolver.is_err() {
-        errors.insert(
-            "dns_challenge_resolver".into(),
-            locale.t("settings.invalid_socket_addr").into(),
-        );
-    }
+    let resolver = parse_resolver(
+        locale,
+        &mut errors,
+        "dns_challenge_resolver",
+        &fields.dns_challenge_resolver,
+    );
+    let upstream_resolver = parse_resolver(
+        locale,
+        &mut errors,
+        "upstream_dns_resolver",
+        &fields.upstream_dns_resolver,
+    );
     match (
         admin,
         (log, notifications),
         interval,
         (addr, tls_alpn_addr),
-        resolver,
+        (resolver, upstream_resolver),
     ) {
         (
             Some(admin),
             (Some(log), Some(notifications)),
             Some(interval),
             (Some(addr), Some(tls_alpn_addr)),
-            Ok(resolver),
+            (Ok(resolver), Ok(upstream_resolver)),
         ) if errors.is_empty() => Ok(AppConfig {
             background_task_interval: interval.background_task_interval,
             admin: AdminConfig {
@@ -856,6 +865,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             http_challenge_addr: addr,
             tls_alpn_challenge_addr: tls_alpn_addr,
             dns_challenge_resolver: resolver,
+            upstream_dns_resolver: upstream_resolver,
             discovery: DiscoveryConfig {
                 docker,
                 kubernetes,
@@ -930,12 +940,30 @@ fn parse_addr(
 ) -> Option<SocketAddr> {
     let addr = value.trim().parse::<SocketAddr>().ok();
     if addr.is_none() {
-        errors.insert(
-            key.to_string(),
-            locale.t("settings.invalid_socket_addr").into(),
-        );
+        invalid_addr(locale, errors, key);
     }
     addr
+}
+
+/// Parses an optional DNS server field, or records the error under `key`.
+fn parse_resolver(
+    locale: Locale,
+    errors: &mut HashMap<String, String>,
+    key: &str,
+    value: &str,
+) -> Result<Option<SocketAddr>, std::net::AddrParseError> {
+    let resolver = parse_optional_addr(value);
+    if resolver.is_err() {
+        invalid_addr(locale, errors, key);
+    }
+    resolver
+}
+
+fn invalid_addr(locale: Locale, errors: &mut HashMap<String, String>, key: &str) {
+    errors.insert(
+        key.to_string(),
+        locale.t("settings.invalid_socket_addr").into(),
+    );
 }
 
 /// An empty value means that no address is set.

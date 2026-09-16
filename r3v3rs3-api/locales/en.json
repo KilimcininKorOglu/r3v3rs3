@@ -592,6 +592,8 @@
   "settings.database_log_retention":"Database Log Retention",
   "settings.dns_challenge_resolver": "DNS Challenge Resolver",
   "settings.dns_challenge_resolver_hint": "r3v3rs3 asks this DNS server until the TXT records of a DNS-01 challenge are visible, e.g, 1.1.1.1:53. Leave it empty to use the system resolver.",
+  "settings.upstream_dns_resolver": "Upstream DNS Resolver",
+  "settings.upstream_dns_resolver_hint": "r3v3rs3 asks this DNS server for the SRV records of http+srv and https+srv server URLs, e.g, 127.0.0.1:8600 for Consul. Leave it empty to use the system resolver.",
   "settings.docker_client_cert": "Client Certificate",
   "settings.docker_client_cert_hint": "r3v3rs3 sends this certificate to an https endpoint.",
   "settings.docker_enabled": "Read proxies from Docker labels",
