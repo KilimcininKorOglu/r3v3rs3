@@ -22,6 +22,7 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 - Partial HTTP/3 support: incoming QUIC connections only. Upstream connections use HTTP/2 or HTTP/1.1, and WebTransport is not supported
 - Routing by host name (exact, wildcard or regex) and path, with path rewrite, redirect rules and fixed responses such as a redirect host or a 404 host
 - Load balancing, active and passive health checks, a circuit breaker, sticky sessions, retries, upstream timeouts and traffic mirroring
+- Upstream servers from DNS SRV records (`http+srv://` URLs), refreshed when the TTL expires
 - The PROXY protocol on incoming connections and toward upstream servers
 
 ### Security and traffic control

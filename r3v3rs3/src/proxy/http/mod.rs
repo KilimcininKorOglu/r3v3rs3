@@ -724,6 +724,11 @@ where
         let response = fixed::respond(response, &req);
         return (ProxiedRequest::Respond(response), response_rewriter);
     }
+    if upstream.servers.is_empty() {
+        let err = ProxyError::NoUpstreamServers;
+        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
+        return (ProxiedRequest::Err(err), response_rewriter);
+    }
 
     let secure = info.proto != "http";
     let sticky_cookie = upstream.select(&mut req, res.path_segments, client.ip, secure);

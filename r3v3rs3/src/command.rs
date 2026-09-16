@@ -50,6 +50,10 @@ pub enum ServerCommand {
     SetLeader {
         leader: bool,
     },
+    /// The targets of a DNS SRV name changed, so the proxies must be reloaded.
+    SrvUpdated {
+        name: String,
+    },
 }
 
 impl std::fmt::Debug for ServerCommand {
@@ -96,6 +100,7 @@ impl std::fmt::Debug for ServerCommand {
             Self::SetLeader { leader } => {
                 f.debug_struct("SetLeader").field("leader", leader).finish()
             }
+            Self::SrvUpdated { name } => f.debug_struct("SrvUpdated").field("name", name).finish(),
         }
     }
 }

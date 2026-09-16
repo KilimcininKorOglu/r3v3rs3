@@ -242,6 +242,9 @@ impl ServerState {
         if let Some(store) = this.storage.clone().shared_cache_store() {
             this.registries.caches.start_sharing(store);
         }
+        this.registries
+            .srv
+            .set_nameserver(this.config.upstream_dns_resolver);
         log_save_error(this.update_ports().await);
         this.update_certs().await;
         log_save_error(this.update_proxies().await);
@@ -281,6 +284,13 @@ impl ServerState {
                     log_save_error(self.storage.save_cdn_ranges(&ranges).await);
                 }
             }
+            other => self.handle_topology_command(other).await,
+        }
+    }
+
+    /// Handles the commands that change where the proxies and the cluster get their state from.
+    async fn handle_topology_command(&mut self, cmd: ServerCommand) {
+        match cmd {
             ServerCommand::SetDiscovery { snapshot } => {
                 self.set_discovery(snapshot).await;
             }
@@ -297,6 +307,12 @@ impl ServerState {
             ServerCommand::SetLeader { leader } => {
                 self.set_leader(leader).await;
             }
+            ServerCommand::SrvUpdated { name } => {
+                info!(name, "reloading the proxies for the new SRV targets");
+                self.reload_proxies().await;
+            }
+            // `handle_command` handles the other commands before it calls this method.
+            _ => {}
         }
     }
 
@@ -987,6 +1003,20 @@ impl ServerState {
     }
 
     pub async fn reload_proxies(&mut self) {
+        let names = self
+            .proxies
+            .entries()
+            .filter(|entry| entry.proxy.active)
+            .filter_map(|entry| match &entry.proxy.kind {
+                ProxyKind::Http(http) => Some(http.srv_names()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        self.registries
+            .srv
+            .sync(names, self.command_sender.clone())
+            .await;
         let ports = self.ports.entries().cloned().collect::<Vec<_>>();
         for ctx in self.ports.as_mut_slice() {
             let proxies = self
@@ -1259,6 +1289,13 @@ impl ServerState {
             self.restart_discovery(provider).await;
         }
         self.config.clone_from(&config);
+        if self
+            .registries
+            .srv
+            .set_nameserver(config.upstream_dns_resolver)
+        {
+            self.reload_proxies().await;
+        }
         self.sessions.set_config(config.admin);
         let _ = self.br_sender.send(ServerEvent::AppConfigUpdated {
             config: Box::new(config.masked()),

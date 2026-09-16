@@ -16,6 +16,7 @@ sort_by = "weight"
 - HTTP/3 desteği kısmidir: yalnız gelen QUIC bağlantıları kabul edilir. Upstream bağlantıları HTTP/2 veya HTTP/1.1 kullanır. WebTransport desteği yoktur.
 - Host adına (tam, wildcard veya regex) ve path'e göre routing. Path rewrite, redirect kuralları ve redirect host ya da 404 host gibi fixed response'lar.
 - Load balancing, aktif ve pasif health check, circuit breaker, sticky session, retry, upstream timeout ve traffic mirroring.
+- DNS SRV kayıtlarından gelen upstream sunucuları (`http+srv://` URL'leri). TTL bitince yenilenir.
 - Gelen bağlantılarda ve upstream sunuculara giden bağlantılarda PROXY protocol.
 
 ## Güvenlik ve trafik kontrolü

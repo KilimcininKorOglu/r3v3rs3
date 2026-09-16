@@ -64,9 +64,11 @@ impl Router {
                     .iter()
                     .map(|segment| format!("/{segment}"))
                     .collect();
+                let servers = registries.srv.expand(&route.servers);
                 let upstream = proxy_upstream.route(
                     (id, Some(index)),
                     &route,
+                    &servers,
                     &base_path,
                     upstream,
                     &registries.groups,
@@ -158,12 +160,14 @@ impl ProxyUpstream {
     }
 
     /// Builds the upstream servers of a route. `None` when the client certificate of the proxy is
-    /// invalid, so the route cannot reach its upstream servers. `base_path` is the route path,
-    /// which the sticky cookie and the path rewrite use.
+    /// invalid, so the route cannot reach its upstream servers. `servers` are the servers of the
+    /// route with each SRV server replaced by its targets. `base_path` is the route path, which
+    /// the sticky cookie and the path rewrite use.
     fn route(
         &self,
         key: GroupKey,
         route: &Route,
+        servers: &[Server],
         base_path: &str,
         clients: &mut UpstreamClients<'_>,
         groups: &GroupRegistry,
@@ -171,15 +175,14 @@ impl ProxyUpstream {
         let timeouts = route.timeouts.unwrap_or(self.timeouts);
         let (_, pool) = clients.get(self.client_cert, timeouts.connect);
         let pool = pool?;
-        let members = route
-            .servers
+        let members = servers
             .iter()
             .map(|server| health::GroupServer {
                 addr: server.url.to_string(),
                 weight: server.weight,
             })
             .collect();
-        let probe = http_probe(&route.servers, &self.health_check.path, &pool);
+        let probe = http_probe(servers, &self.health_check.path, &pool);
         let mirror = route
             .mirror
             .as_ref()
@@ -195,13 +198,13 @@ impl ProxyUpstream {
         Some(Upstream {
             pool,
             request_timeout: timeouts.request,
-            servers: route.servers.clone().into(),
+            servers: servers.into(),
             group,
             retry: route.retry.clone().unwrap_or_else(|| self.retry.clone()),
             affinity: self
                 .sticky
                 .enabled
-                .then(|| Affinity::new(&self.sticky, key, &route.servers, base_path))
+                .then(|| Affinity::new(&self.sticky, key, servers, base_path))
                 .flatten()
                 .map(Arc::new),
             max_body_size: route.max_body_size.unwrap_or(self.max_body_size),

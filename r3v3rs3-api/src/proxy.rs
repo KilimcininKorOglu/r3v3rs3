@@ -256,6 +256,20 @@ pub struct HttpProxy {
     pub redirects: Vec<RedirectRule>,
 }
 
+impl HttpProxy {
+    /// The DNS SRV names of the servers of every route, sorted and without duplicates.
+    pub fn srv_names(&self) -> Vec<String> {
+        let names = self
+            .routes
+            .iter()
+            .flat_map(|route| &route.servers)
+            .filter_map(|server| server.url.srv_name())
+            .map(str::to_string)
+            .collect::<std::collections::BTreeSet<_>>();
+        names.into_iter().collect()
+    }
+}
+
 fn is_zero(value: &u64) -> bool {
     *value == 0
 }
@@ -398,6 +412,10 @@ impl Server {
 #[schema(value_type = String)]
 pub struct ServerUrl(pub Url);
 
+/// The URL schemes whose host is a DNS SRV name. The scheme before `+srv` is the scheme of the
+/// resolved targets.
+const SRV_SCHEMES: [&str; 2] = ["http+srv", "https+srv"];
+
 impl ServerUrl {
     pub fn hostname(&self) -> Option<&str> {
         self.0.host_str()
@@ -409,6 +427,33 @@ impl ServerUrl {
             self.hostname()?,
             self.0.port_or_known_default().unwrap_or_default()
         ))
+    }
+
+    /// The DNS SRV name of an `http+srv` or `https+srv` URL. `None` for another scheme.
+    pub fn srv_name(&self) -> Option<&str> {
+        SRV_SCHEMES
+            .contains(&self.0.scheme())
+            .then(|| self.0.host_str())
+            .flatten()
+    }
+
+    /// The URL of one target of the SRV name: the scheme before `+srv`, the target `host:port`,
+    /// and the path and query of this URL.
+    pub fn with_srv_target(&self, host: &str, port: u16) -> Option<ServerUrl> {
+        let scheme = self.0.scheme().strip_suffix("+srv")?;
+        let host = if host.contains(':') {
+            format!("[{host}]")
+        } else {
+            host.to_string()
+        };
+        let query = self.0.query().map(|q| format!("?{q}")).unwrap_or_default();
+        let url = format!("{scheme}://{host}:{port}{}{query}", self.0.path());
+        Url::parse(&url).ok().map(ServerUrl)
+    }
+
+    /// An SRV URL has a name and no port, because the SRV records give the ports.
+    fn is_valid_srv(&self) -> bool {
+        self.0.host_str().is_some_and(|host| !host.is_empty()) && self.0.port().is_none()
     }
 }
 
@@ -435,7 +480,10 @@ impl FromStr for ServerUrl {
         Url::from_str(s)
             .ok()
             .map(ServerUrl)
-            .filter(|url| url.authority().is_some())
+            .filter(|url| match url.0.scheme().strip_suffix("+srv") {
+                Some(_) => url.srv_name().is_some() && url.is_valid_srv(),
+                None => url.authority().is_some(),
+            })
             .ok_or_else(|| Error::InvalidServerUrl { url: s.into() })
     }
 }
@@ -451,5 +499,74 @@ impl TryFrom<Url> for ServerUrl {
 impl fmt::Display for ServerUrl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_server_url_accepts_the_srv_schemes_without_a_port() {
+        let url = ServerUrl::from_str("http+srv://_http._tcp.api.example.com/api").unwrap();
+        assert_eq!(url.srv_name(), Some("_http._tcp.api.example.com"));
+        let secure = ServerUrl::from_str("https+srv://_https._tcp.api.example.com/").unwrap();
+        assert_eq!(secure.srv_name(), Some("_https._tcp.api.example.com"));
+        assert_eq!(
+            ServerUrl::from_str("http://api.example.com/")
+                .unwrap()
+                .srv_name(),
+            None
+        );
+
+        for invalid in [
+            "dns+srv://_http._tcp.api.example.com/",
+            "http+srv://_http._tcp.api.example.com:8080/",
+            "http+srv:///api",
+        ] {
+            assert!(
+                matches!(
+                    ServerUrl::from_str(invalid),
+                    Err(Error::InvalidServerUrl { .. })
+                ),
+                "{invalid} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn an_srv_url_builds_the_url_of_each_target() {
+        let url = ServerUrl::from_str("https+srv://_https._tcp.api.example.com/api?v=1").unwrap();
+        let target = url.with_srv_target("10.0.0.1", 8443).unwrap();
+        assert_eq!(target.to_string(), "https://10.0.0.1:8443/api?v=1");
+        let ipv6 = url.with_srv_target("::1", 8443).unwrap();
+        assert_eq!(ipv6.to_string(), "https://[::1]:8443/api?v=1");
+        let named = url.with_srv_target("api-1.internal", 8443).unwrap();
+        assert_eq!(named.authority(), Some("api-1.internal:8443".into()));
+        assert!(ServerUrl::from_str("http://a/")
+            .unwrap()
+            .with_srv_target("b", 80)
+            .is_none());
+    }
+
+    #[test]
+    fn srv_names_are_sorted_and_unique() {
+        let route = |url: &str| Route {
+            servers: vec![Server::new(url.parse().unwrap())],
+            ..Default::default()
+        };
+        let http = HttpProxy {
+            routes: vec![
+                route("http+srv://_b._tcp.example.com/"),
+                route("http://static.example.com/"),
+                route("http+srv://_a._tcp.example.com/"),
+                route("http+srv://_b._tcp.example.com/other"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            http.srv_names(),
+            ["_a._tcp.example.com", "_b._tcp.example.com"]
+        );
     }
 }

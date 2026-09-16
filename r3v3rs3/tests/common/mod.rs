@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod cluster;
+pub mod dns;
 pub mod e2e;
 pub mod kv;
 

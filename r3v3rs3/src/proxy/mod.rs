@@ -22,17 +22,19 @@ pub mod health;
 pub mod http;
 pub mod proxy_protocol;
 pub mod registry;
+pub mod srv;
 pub mod tcp;
 pub mod tls;
 pub mod udp;
 
-/// The rate limiters, HTTP caches and upstream groups of one server. A configuration reload reuses
-/// them, and two servers in one process do not share them.
+/// The rate limiters, HTTP caches, upstream groups and SRV targets of one server. A configuration
+/// reload reuses them, and two servers in one process do not share them.
 #[derive(Debug, Default)]
 pub struct ProxyRegistries {
     pub limiters: http::rate_limit::LimiterRegistry,
     pub caches: http::cache::CacheRegistry,
     pub groups: health::GroupRegistry,
+    pub srv: srv::SrvRegistry,
 }
 
 /// Runs the task of a client connection in the span and logs its error.

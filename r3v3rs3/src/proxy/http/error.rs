@@ -36,6 +36,9 @@ pub enum ProxyError {
     #[error("every upstream server of the route has an open circuit")]
     NoUpstreamAvailable,
 
+    #[error("the route has no upstream server")]
+    NoUpstreamServers,
+
     #[error("the request body is larger than the limit of the route")]
     PayloadTooLarge,
 }
@@ -51,9 +54,9 @@ impl ProxyError {
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
-            Self::AuthServiceUnavailable | Self::UpstreamClientCertInvalid => {
-                StatusCode::BAD_GATEWAY
-            }
+            Self::AuthServiceUnavailable
+            | Self::UpstreamClientCertInvalid
+            | Self::NoUpstreamServers => StatusCode::BAD_GATEWAY,
         }
     }
 }

@@ -419,7 +419,8 @@ pub async fn wait_for_propagation(
     }
 }
 
-fn build_resolver(addr: Option<SocketAddr>) -> anyhow::Result<TokioAsyncResolver> {
+/// A resolver that asks `addr`, or the system resolver when `addr` is `None`.
+pub(crate) fn build_resolver(addr: Option<SocketAddr>) -> anyhow::Result<TokioAsyncResolver> {
     let (config, opts) = match addr {
         Some(addr) => (
             ResolverConfig::from_parts(

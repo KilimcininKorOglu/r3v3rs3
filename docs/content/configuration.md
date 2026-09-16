@@ -110,6 +110,24 @@ vhosts = ["app.example.com"]
 routes = [{ path = "/", servers = [{ url = "http://app:9000/" }] }]
 ```
 
+### DNS SRV Servers
+
+A server URL with the `http+srv` or `https+srv` scheme takes its servers from the DNS SRV records of its host name. r3v3rs3 resolves the name, and the route gets one server per SRV target with the scheme before `+srv`, the target `host:port` and the path of the URL. Consul, Kubernetes headless services and other service registries publish such records. The URL has no port, because the SRV records give the ports.
+
+```toml
+[my-api]
+protocol = "http"
+routes = [{ path = "/", servers = [{ url = "http+srv://_http._tcp.api.service.consul/v1" }] }]
+```
+
+With the SRV records `_http._tcp.api.service.consul. 30 IN SRV 0 5 8080 api-1.node.consul.` and `... 0 1 8080 api-2.node.consul.`, the route sends the requests to `http://api-1.node.consul:8080/v1` and `http://api-2.node.consul:8080/v1` with the weights `5` and `1`.
+
+- Only the records with the lowest priority value are used. The records with a higher value are backups in DNS, and r3v3rs3 does not use them.
+- The SRV weight of a record is the `weight` of its server. A weight of `0` becomes `1`, because a server with weight `0` gets no traffic in r3v3rs3. A `weight` on the SRV server itself is not allowed.
+- r3v3rs3 resolves the name again when the TTL of the answer expires, at the earliest after 5 seconds. When the targets change, the route gets the new servers without a restart. The health of the servers that stay is kept. A failed lookup keeps the last targets and is retried after 5 seconds.
+- A route whose SRV name has no target answers with 502. The other servers of the route, if any, still get the requests.
+- The "Upstream DNS Resolver" setting (see [Settings](#settings)) selects the DNS server of the SRV lookups, for example `127.0.0.1:8600` for the Consul DNS interface. Without the setting, r3v3rs3 uses the system resolver. The host names of the targets are resolved by the system resolver when r3v3rs3 connects.
+
 ## Path Rewrite
 
 By default, r3v3rs3 removes the route path from the request path and adds the rest to the path of the server URL. For example, a route with `path = "/api"` and the server `http://api:8080/v1/` sends `GET /api/users` to `http://api:8080/v1/users`. The `rewrite` table of a route changes the path in this order:
@@ -1001,7 +1019,7 @@ The "Settings" section of the WebUI edits the server-wide options stored in `con
 | HTTP Challenge Address | `0.0.0.0:80` | Listening address for ACME HTTP challenges. |
 | TLS-ALPN Challenge Address | `0.0.0.0:443` | Listening address for ACME TLS-ALPN-01 challenges when no port uses its port. |
 | DNS Challenge Resolver | empty | DNS server, for example `1.1.1.1:53`, that r3v3rs3 asks until the TXT records of a DNS-01 challenge are visible. Empty uses the system resolver. |
-| Upstream DNS Resolver | empty | DNS server, for example `127.0.0.1:8600` for Consul, that answers the SRV lookups of `http+srv` and `https+srv` server URLs. Empty uses the system resolver. |
+| Upstream DNS Resolver | empty | DNS server, for example `127.0.0.1:8600` for Consul, that answers the SRV lookups of `http+srv` and `https+srv` server URLs. Empty uses the system resolver. See [DNS SRV Servers](#dns-srv-servers). |
 | Database Log Retention | `3months` | How long logs are kept in the log database. |
 | Audit Log Retention | `1year` | How long the audit log keeps an entry. See [Audit Log](#audit-log). |
 | Certificate Expiry Warning | `14days` | The certificate list marks a certificate that expires within this time, and the webhook gets a notification for it. See [Notifications](#notifications). |

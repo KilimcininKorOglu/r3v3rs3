@@ -110,6 +110,24 @@ vhosts = ["app.example.com"]
 routes = [{ path = "/", servers = [{ url = "http://app:9000/" }] }]
 ```
 
+### DNS SRV sunucuları
+
+`http+srv` veya `https+srv` şemalı bir sunucu URL'i, sunucularını host adının DNS SRV kayıtlarından alır. r3v3rs3 adı çözer ve route, her SRV hedefi için bir sunucu alır: `+srv` önündeki şema, hedefin `host:port` değeri ve URL'in path'i. Consul, Kubernetes headless service'leri ve diğer service registry'ler bu kayıtları yayınlar. URL'de port yazılmaz, portları SRV kayıtları verir.
+
+```toml
+[my-api]
+protocol = "http"
+routes = [{ path = "/", servers = [{ url = "http+srv://_http._tcp.api.service.consul/v1" }] }]
+```
+
+`_http._tcp.api.service.consul. 30 IN SRV 0 5 8080 api-1.node.consul.` ve `... 0 1 8080 api-2.node.consul.` kayıtlarıyla route, request'leri `http://api-1.node.consul:8080/v1` ve `http://api-2.node.consul:8080/v1` sunucularına `5` ve `1` weight değerleriyle gönderir.
+
+- Yalnız en düşük priority değerine sahip kayıtlar kullanılır. Daha yüksek değerli kayıtlar DNS'te yedektir ve r3v3rs3 bunları kullanmaz.
+- Kaydın SRV weight değeri, sunucunun `weight` değeri olur. `0` weight değeri `1` olur, çünkü r3v3rs3'te weight değeri `0` olan sunucu trafik almaz. SRV sunucusunun kendisine `weight` verilemez.
+- r3v3rs3, cevabın TTL süresi bitince adı yeniden çözer. En erken 5 saniye sonra çözer. Hedefler değişince route yeni sunucuları yeniden başlatmadan alır. Kalan sunucuların health durumu korunur. Başarısız bir sorgu son hedefleri korur ve 5 saniye sonra yeniden denenir.
+- SRV adının hedefi olmayan route 502 döner. Route'un başka sunucuları varsa request'leri onlar alır.
+- "Upstream DNS Resolver" ayarı ([Ayarlar](#ayarlar) bölümüne bakın) SRV sorgularının DNS sunucusunu seçer, örneğin Consul DNS için `127.0.0.1:8600`. Ayar boşsa r3v3rs3 sistem resolver'ını kullanır. Hedeflerin host adlarını bağlantı sırasında sistem resolver'ı çözer.
+
 ## Path Rewrite
 
 r3v3rs3 varsayılan olarak route path'ini request path'inden kaldırır ve kalan kısmı sunucu URL'sinin path'ine ekler. Örneğin `path = "/api"` değerli bir route ve `http://api:8080/v1/` sunucusu için `GET /api/users` request'i `http://api:8080/v1/users` adresine gider. Route'un `rewrite` tablosu path'i şu sırayla değiştirir:
@@ -1001,7 +1019,7 @@ WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütü
 | HTTP Challenge Adresi | `0.0.0.0:80` | ACME HTTP challenge'larının dinlendiği adres. |
 | TLS-ALPN Challenge Adresi | `0.0.0.0:443` | Hiçbir port bu portu kullanmıyorsa ACME TLS-ALPN-01 challenge'larının dinlendiği adres. |
 | DNS Challenge Resolver | boş | r3v3rs3'ün DNS-01 challenge'ının TXT kayıtları görünene kadar sorguladığı DNS sunucusu, örneğin `1.1.1.1:53`. Boş bırakılırsa sistem resolver'ı kullanılır. |
-| Upstream DNS Resolver | boş | `http+srv` ve `https+srv` sunucu URL'lerinin SRV sorgularını yanıtlayan DNS sunucusu, örneğin Consul için `127.0.0.1:8600`. Boş bırakılırsa sistem resolver'ı kullanılır. |
+| Upstream DNS Resolver | boş | `http+srv` ve `https+srv` sunucu URL'lerinin SRV sorgularını yanıtlayan DNS sunucusu, örneğin Consul için `127.0.0.1:8600`. Boş bırakılırsa sistem resolver'ı kullanılır. Ayrıntılar için [DNS SRV sunucuları](#dns-srv-sunuculari) bölümüne bakın. |
 | Veritabanı Log Saklama Süresi | `3months` | Log'ların log veritabanında ne kadar tutulacağı. |
 | Audit Log Saklama Süresi | `1year` | Audit log'daki bir kaydın ne kadar tutulacağı. Ayrıntılar için [Audit log](#audit-log) bölümüne bakın. |
 | Sertifika Süre Uyarısı | `14days` | Sertifika listesi bu süre içinde sona erecek sertifikayı işaretler. Webhook bu sertifika için bildirim alır. Ayrıntılar için [Bildirimler](#bildirimler) bölümüne bakın. |

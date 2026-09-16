@@ -853,16 +853,18 @@ fn format_server_line(server: &Server) -> String {
     }
 }
 
-/// Reads a server line: the URL, and an optional weight after a space.
+/// Reads a server line: the URL, and an optional weight after a space. An SRV URL has no
+/// weight, because the SRV records give the weights.
 fn parse_server_line(locale: Locale, line: &str) -> Result<Server, String> {
     let mut parts = line.split_whitespace();
     let url = ServerUrl::from_str(parts.next().unwrap_or_default())
         .map_err(|err| locale.error_message(&err))?;
     let rest = parts.collect::<Vec<_>>();
-    let weight = match rest.as_slice() {
-        [] => DEFAULT_WEIGHT,
-        [value] => parse_weight(locale, value)?,
-        _ => parse_weight(locale, &rest.join(" "))?,
+    let weight = match (url.srv_name().is_some(), rest.as_slice()) {
+        (_, []) => DEFAULT_WEIGHT,
+        (true, _) => return Err(locale.t("proxy_form.srv_weight").into()),
+        (false, [value]) => parse_weight(locale, value)?,
+        (false, _) => parse_weight(locale, &rest.join(" "))?,
     };
     Ok(Server { url, weight })
 }
@@ -2803,6 +2805,21 @@ mod tests {
         );
         assert!(parse_server_line(Locale::En, "http://a:80/ 1 2").is_err());
         assert!(parse_server_line(Locale::En, "http://a:80/ 65536").is_err());
+    }
+
+    #[test]
+    fn an_srv_server_line_has_no_weight() {
+        let srv =
+            parse_server_line(Locale::En, "http+srv://_http._tcp.app.example.com/api").unwrap();
+        assert_eq!(srv.url.srv_name(), Some("_http._tcp.app.example.com"));
+        assert_eq!(
+            format_server_line(&srv),
+            "http+srv://_http._tcp.app.example.com/api"
+        );
+        let err =
+            parse_server_line(Locale::Tr, "http+srv://_http._tcp.app.example.com/ 3").unwrap_err();
+        assert_eq!(err, Locale::Tr.t("proxy_form.srv_weight"));
+        assert!(parse_server_line(Locale::En, "dns+srv://_http._tcp.app.example.com/").is_err());
     }
 
     #[test]
