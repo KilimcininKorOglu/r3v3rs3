@@ -24,3 +24,4 @@ Buradaki her sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bi
 - [Consul ve etcd'den proxy'ler](@/tutorials/consul-etcd-discovery.tr.md): catalog, key-value store ve etcd key'leri.
 - [Ekip için hesaplar](@/tutorials/team-accounts.tr.md): roller, proxy listeleri, TOTP ve audit log.
 - [Forward auth ile single sign-on](@/tutorials/forward-auth.tr.md): önde oauth2-proxy, upstream request'inde kullanıcı.
+- [nginx veya Traefik'ten geçiş](@/tutorials/migrate.tr.md): her direktifin karşılığı ve devir sırası.
