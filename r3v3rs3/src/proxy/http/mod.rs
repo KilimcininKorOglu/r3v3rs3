@@ -753,7 +753,7 @@ where
     };
     let req = match authenticate_request(route, req, &auth_ctx, info, &client, &action).await {
         Ok(req) => req,
-        Err(proxied) => return (proxied, response_rewriter),
+        Err(proxied) => return (*proxied, response_rewriter),
     };
     if let Some(response) = &route.response {
         let response = fixed::respond(response, &req);
@@ -803,7 +803,8 @@ fn redirect_of<B>(
 }
 
 /// Authenticates the request. A sign-in page, a redirect or a rejection ends the routing, and a
-/// rejection also writes an access log entry.
+/// rejection also writes an access log entry. The error is boxed, because `ProxiedRequest` is
+/// large and this function never returns its largest variant.
 async fn authenticate_request<B>(
     route: &FilteredRoute,
     req: Request<B>,
@@ -811,18 +812,18 @@ async fn authenticate_request<B>(
     info: &RequestInfo<'_>,
     client: &client_ip::ClientAddr,
     action: &str,
-) -> Result<Request<B>, ProxiedRequest<Request<B>>>
+) -> Result<Request<B>, Box<ProxiedRequest<Request<B>>>>
 where
     B: Body<Data = Bytes>,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     match authenticate(route, req, auth_ctx).await {
         Authenticated::Pass(req) => Ok(req),
-        Authenticated::Respond(response) => Err(ProxiedRequest::Respond(response)),
+        Authenticated::Respond(response) => Err(Box::new(ProxiedRequest::Respond(response))),
         Authenticated::Rejected(rejection) => {
             let resource_id = route.resource_id;
             info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %rejection);
-            Err(rejected(rejection))
+            Err(Box::new(rejected(rejection)))
         }
     }
 }

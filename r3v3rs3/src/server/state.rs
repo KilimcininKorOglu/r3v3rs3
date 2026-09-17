@@ -475,10 +475,15 @@ impl ServerState {
     /// Removes a deleted proxy from the proxy lists of the accounts.
     pub async fn revoke_proxy(&mut self, proxy: r3v3rs3_api::id::ShortId) -> Result<(), Error> {
         self.edit_accounts(|accounts| {
-            Ok(accounts
+            // Every list is visited, so `any` is wrong here: it stops at the first removal.
+            let mut changed = false;
+            for proxies in accounts
                 .values_mut()
                 .filter_map(|account| account.proxies.as_mut())
-                .fold(false, |changed, proxies| proxies.remove(&proxy) || changed))
+            {
+                changed |= proxies.remove(&proxy);
+            }
+            Ok(changed)
         })
         .await
     }

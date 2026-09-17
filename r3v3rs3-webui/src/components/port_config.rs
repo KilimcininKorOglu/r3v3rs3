@@ -465,7 +465,7 @@ fn get_port(
             name: form.name.trim().to_string(),
             listen,
             opts: PortOptions {
-                tls_termination: Some(tls_termination).filter(|_| is_tls_protocol(&form.protocol)),
+                tls_termination: is_tls_protocol(&form.protocol).then_some(tls_termination),
                 proxy_protocol,
             },
         }),
