@@ -395,7 +395,7 @@ fn ip_name(ip: &[u8]) -> Option<SubjectName> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use pkcs8::PrivateKeyInfo;
+    use pkcs8::PrivateKeyInfoRef;
 
     type Sign = fn(&[SubjectName], &Cert) -> Result<Cert, Error>;
 
@@ -436,10 +436,11 @@ mod test {
     fn a_sec1_private_key_signs_like_its_pkcs8_key() {
         let (cert, _) = signed(Cert::new_self_signed, "sec1.example.com");
         let pkcs8 = cert.key.as_ref().unwrap();
-        let info = pkcs8.decode_msg::<PrivateKeyInfo>().unwrap();
+        let info = pkcs8.decode_msg::<PrivateKeyInfoRef<'_>>().unwrap();
         let line_ending = pkcs8::der::pem::LineEnding::LF;
-        let sec1 = pkcs8::der::pem::encode_string("EC PRIVATE KEY", line_ending, info.private_key)
-            .unwrap();
+        let sec1 =
+            pkcs8::der::pem::encode_string("EC PRIVATE KEY", line_ending, info.private_key.as_ref())
+                .unwrap();
 
         let reloaded = Cert::new(
             CertKind::Server,

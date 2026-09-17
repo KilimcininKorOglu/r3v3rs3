@@ -1,6 +1,6 @@
 //! AWS Signature Version 4 for requests that sign only the `host` and `x-amz-date` headers.
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 

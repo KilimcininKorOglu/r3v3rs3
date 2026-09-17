@@ -3,7 +3,7 @@
 use super::cookie::{cookie_values, remove_cookie};
 use crate::proxy::health::GroupKey;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use hyper::header::{HeaderMap, HeaderValue};
 use once_cell::sync::Lazy;
 use r3v3rs3_api::{proxy::Server, upstream::StickyCookie};
