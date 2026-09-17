@@ -1,4 +1,7 @@
-use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
+use argon2::{
+    Argon2, PasswordHasher,
+    password_hash::{SaltString, rand_core::OsRng},
+};
 use r3v3rs3::{
     config::storage::Storage,
     server::rpc::proxies::{GetProxy, GetProxyList, UpdateProxy},
@@ -38,7 +41,7 @@ fn route_token(proxy: &mut Proxy) -> &mut BearerToken {
 
 /// A proxy with a Basic user on the proxy and a bearer token on its route.
 fn stored_entry() -> ProxyEntry {
-    let salt = SaltString::generate(rand::thread_rng());
+    let salt = SaltString::generate(OsRng);
     let password_hash = Argon2::default()
         .hash_password(b"alice-secret", &salt)
         .unwrap()

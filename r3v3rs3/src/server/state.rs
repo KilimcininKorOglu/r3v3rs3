@@ -37,7 +37,7 @@ use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::{ProxyEntry, ProxyKind};
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::str;
@@ -1316,7 +1316,7 @@ impl ServerState {
             .chain(self.access_lists.iter().map(|list| list.id))
             .collect::<HashSet<_>>();
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut id = [b'a'; 6];
         loop {
             for c in &mut id {

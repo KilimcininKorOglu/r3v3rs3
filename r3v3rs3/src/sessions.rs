@@ -3,7 +3,7 @@
 use crate::clock::unix_ms;
 use r3v3rs3_api::app::AdminConfig;
 use r3v3rs3_api::error::Error;
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -73,7 +73,7 @@ impl SessionRecord {
 }
 
 pub fn new_token() -> String {
-    Alphanumeric.sample_string(&mut rand::thread_rng(), TOKEN_LENGTH)
+    Alphanumeric.sample_string(&mut rand::rng(), TOKEN_LENGTH)
 }
 
 fn unix_now() -> u64 {

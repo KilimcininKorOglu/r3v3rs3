@@ -3727,7 +3727,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "axum-server",
- "base64 0.22.1",
+ "base64 0.23.1",
  "built",
  "bytes",
  "clap",
@@ -3768,7 +3768,7 @@ dependencies = [
  "ppp",
  "quinn",
  "r3v3rs3-api",
- "rand 0.8.8",
+ "rand 0.10.2",
  "rcgen 0.13.2",
  "reqwest",
  "ring",
@@ -3817,7 +3817,7 @@ dependencies = [
 name = "r3v3rs3-api"
 version = "0.2.6"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "hex",
  "humantime-serde",
  "ipnet",
@@ -3837,7 +3837,7 @@ dependencies = [
 name = "r3v3rs3-webui"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "console_error_panic_hook",
  "futures",
  "getrandom 0.2.17",

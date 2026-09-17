@@ -8,7 +8,7 @@ use r3v3rs3_api::{
     port::UpstreamServer,
     upstream::{CircuitBreaker, CircuitState, HealthCheck, LoadBalancing, UpstreamHealth},
 };
-use rand::Rng;
+use rand::RngExt;
 use std::{
     hash::Hasher,
     net::IpAddr,
@@ -544,11 +544,11 @@ impl UpstreamGroup {
     /// The weighted random order of Efraimidis and Spirakis: each server gets the key
     /// `u^(1/weight)` for a random `u` in `[0, 1)`, and a higher key goes first.
     fn order_random(&self, servers: Vec<usize>) -> Vec<usize> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut keyed = servers
             .into_iter()
             .map(|index| {
-                let key = rng.r#gen::<f64>().powf(1.0 / f64::from(self.weight(index)));
+                let key = rng.random::<f64>().powf(1.0 / f64::from(self.weight(index)));
                 (key, index)
             })
             .collect::<Vec<_>>();

@@ -666,7 +666,7 @@ fn verify_google_assertion(
 async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_other_values()
 -> anyhow::Result<()> {
     // The test creates its own key, so no key file is stored in the repository.
-    let key = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048)?;
+    let key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048)?;
     let key_file = json!({
         "type": "service_account",
         "project_id": "key-project",

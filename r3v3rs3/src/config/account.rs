@@ -1,13 +1,16 @@
 //! Admin accounts: an Argon2 password hash and an optional TOTP secret.
 
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
+use argon2::{
+    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+    password_hash::{SaltString, rand_core::OsRng},
+};
 use r3v3rs3_api::auth::{Account, LoginMethod, LoginRequest, LoginResponse};
 use r3v3rs3_api::error::Error;
 use totp_rs::{Secret, TOTP};
 use tracing::error;
 
 pub fn new_account(password: &str, totp: bool) -> anyhow::Result<Account> {
-    let salt = SaltString::generate(rand::thread_rng());
+    let salt = SaltString::generate(OsRng);
     let password = Argon2::default()
         .hash_password(password.as_bytes(), &salt)
         .map_err(|_| anyhow::anyhow!("failed to hash password"))?

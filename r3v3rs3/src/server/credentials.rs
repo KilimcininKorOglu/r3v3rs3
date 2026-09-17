@@ -1,6 +1,6 @@
 use argon2::{
     Argon2, PasswordHasher,
-    password_hash::{PasswordHash, SaltString},
+    password_hash::{PasswordHash, SaltString, rand_core::OsRng},
 };
 use r3v3rs3_api::{
     error::Error,
@@ -230,7 +230,7 @@ fn validate_forward_auth(forward: &ForwardAuth) -> Result<(), Error> {
 }
 
 fn hash_password(password: &str) -> Result<String, Error> {
-    let salt = SaltString::generate(rand::thread_rng());
+    let salt = SaltString::generate(OsRng);
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
         .map(|hash| hash.to_string())

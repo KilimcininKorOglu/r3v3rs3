@@ -9,7 +9,7 @@ use hyper::header::{HOST, HeaderValue, UPGRADE};
 use hyper::{Request, Uri};
 use pin_project_lite::pin_project;
 use r3v3rs3_api::{mirror, proxy::Server};
-use rand::Rng;
+use rand::RngExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, ready};
@@ -65,7 +65,7 @@ impl Mirror {
     }
 
     fn sampled(&self) -> bool {
-        self.percent >= 100 || rand::thread_rng().gen_range(0..100) < self.percent
+        self.percent >= 100 || rand::rng().random_range(0..100) < self.percent
     }
 
     /// Returns the request with a body that keeps a copy of itself. When the body ends within the

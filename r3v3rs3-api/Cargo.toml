@@ -15,7 +15,7 @@ repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
 homepage = "https://r3v3rs3.keremgok.tr/"
 
 [dependencies]
-base64 = "0.22.1"
+base64 = "0.23.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
 ipnet = { version = "2.11.0", features = ["serde"] }

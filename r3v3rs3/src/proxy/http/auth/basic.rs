@@ -1,7 +1,7 @@
 use crate::proxy::http::error::ProxyError;
 use argon2::{
     Argon2, PasswordHasher, PasswordVerifier,
-    password_hash::{PasswordHash, SaltString},
+    password_hash::{PasswordHash, SaltString, rand_core::OsRng},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hyper::header::{AUTHORIZATION, HeaderMap, HeaderValue};
@@ -23,7 +23,7 @@ const MAX_VERIFIED_CREDENTIALS: usize = 1024;
 /// Hash that the password of an unknown user is verified against, so the response time does not
 /// reveal which usernames exist.
 static UNKNOWN_USER_HASH: Lazy<Option<String>> = Lazy::new(|| {
-    let salt = SaltString::generate(rand::thread_rng());
+    let salt = SaltString::generate(OsRng);
     match Argon2::default().hash_password(b"", &salt) {
         Ok(hash) => Some(hash.to_string()),
         Err(err) => {
@@ -184,7 +184,7 @@ mod tests {
     use r3v3rs3_api::policy::BasicAuthUser;
 
     fn authenticator(realm: &str) -> BasicAuthenticator {
-        let salt = SaltString::generate(rand::thread_rng());
+        let salt = SaltString::generate(OsRng);
         let hash = Argon2::default()
             .hash_password(b"s3cr:et", &salt)
             .unwrap()
