@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-09-17
+
+### Changed
+- Every crate moved to the 2024 edition.
+- Every function of the server, the API and the WebUI now stays at or below a cyclomatic complexity of 10.
+- The Rust workflow fails the build when a function goes over that limit.
+- The unmaintained backoff and net2 crates replaced with backon and socket2.
+- A cargo-deny policy records the supply-chain decisions.
+- The dependencies updated to clear the security advisories.
+- The test module of the settings page moved to the end of the file.
+
+### Fixed
+- The DNS resolver moved to hickory 0.26, which drops the vulnerable release.
+- Every admin API response sends no-store.
+- The cache headers of the WebUI files corrected.
+- The TCP form of the proxy page starts with a TCP value instead of an HTTP one.
+
 ## [1.0.2] - 2026-09-17
 
 ### Added

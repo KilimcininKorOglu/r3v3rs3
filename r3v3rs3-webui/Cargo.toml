@@ -13,7 +13,7 @@ yew-router = "0.18.0"
 gloo-net = "0.6.0"
 getrandom = { version = "0.2", features = ["js"] }
 wasm-bindgen-futures = "0.4.37"
-r3v3rs3-api = "0.2.5"
+r3v3rs3-api = "0.2.6"
 serde_json = "1.0.102"
 gloo-utils = "0.2.0"
 serde_derive = "1.0.171"

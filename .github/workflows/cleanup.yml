@@ -36,7 +36,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       # The action walks each multi-platform index first and takes its platform children out of the
-      # working set. A child of a tagged image is never deleted, so v1.0.2 and latest stay complete.
+      # working set. A child of a tagged image is never deleted, so a release tag and latest stay
+      # complete.
       - name: Delete untagged images
         uses: dataaxiom/ghcr-cleanup-action@v1.2.2
         with:
