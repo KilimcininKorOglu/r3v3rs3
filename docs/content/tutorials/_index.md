@@ -19,3 +19,4 @@ Each page here is a walkthrough. Follow it from the top and you get a working se
 - [Caching and Compression](@/tutorials/cache-and-compression.md): responses from memory and smaller bodies.
 - [TCP and UDP Proxies](@/tutorials/tcp-and-udp.md): a database, a DNS server and mutual TLS.
 - [r3v3rs3 on Kubernetes](@/tutorials/kubernetes.md): the ingress controller, Ingress resources and the R3v3rs3Proxy custom resource.
+- [Load Balancing and Health Checks](@/tutorials/load-balancing.md): weights, health checks, retries, sticky sessions, WebSocket and gRPC.

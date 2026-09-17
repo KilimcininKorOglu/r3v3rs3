@@ -19,3 +19,4 @@ Buradaki her sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bi
 - [Cache ve compression](@/tutorials/cache-and-compression.tr.md): memory'den response'lar ve daha küçük body'ler.
 - [TCP ve UDP proxy'ler](@/tutorials/tcp-and-udp.tr.md): bir veritabanı, bir DNS sunucusu ve mutual TLS.
 - [Kubernetes'te r3v3rs3](@/tutorials/kubernetes.tr.md): ingress controller, Ingress kaynakları ve R3v3rs3Proxy custom resource'u.
+- [Load balancing ve health check](@/tutorials/load-balancing.tr.md): weight, health check, retry, sticky session, WebSocket ve gRPC.
