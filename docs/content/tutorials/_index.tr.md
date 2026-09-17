@@ -22,3 +22,4 @@ Buradaki her sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bi
 - [Load balancing ve health check](@/tutorials/load-balancing.tr.md): weight, health check, retry, sticky session, WebSocket ve gRPC.
 - [r3v3rs3'ü script ile yönetme](@/tutorials/admin-api.tr.md): admin API, deploy işi ve ona özel hesap.
 - [Consul ve etcd'den proxy'ler](@/tutorials/consul-etcd-discovery.tr.md): catalog, key-value store ve etcd key'leri.
+- [Ekip için hesaplar](@/tutorials/team-accounts.tr.md): roller, proxy listeleri, TOTP ve audit log.
