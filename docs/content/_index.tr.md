@@ -8,6 +8,10 @@ sort_by = "weight"
 [![Rust](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml/badge.svg)](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml)
 [![dependency status](https://deps.rs/crate/r3v3rs3/latest/status.svg)](https://deps.rs/crate/r3v3rs3)
 
+r3v3rs3, Rust ile yazılmış bir reverse proxy sunucusudur. TCP, UDP, TLS, HTTP ve WebSocket trafiğini proxy'ler, gelen HTTP/3 bağlantılarını da kabul eder. [Taxy](https://github.com/picoHz/taxy) projesinin bir fork'udur.
+
+Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngilizce ve Türkçe WebUI'yi taşır; her port, proxy, sertifika ve hesap bu WebUI'de bir formdur. Değişiklik restart olmadan uygulanır. Aynı işlemler admin API üzerinden de yapılır. r3v3rs3 proxy'lerini Docker label'larından, Kubernetes Ingress'ten, Consul catalog'undan veya etcd key'lerinden de oluşturabilir.
+
 # Temel özellikler
 
 ## Proxy

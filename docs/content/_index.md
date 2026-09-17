@@ -8,6 +8,10 @@ sort_by = "weight"
 [![Rust](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml/badge.svg)](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml)
 [![dependency status](https://deps.rs/crate/r3v3rs3/latest/status.svg)](https://deps.rs/crate/r3v3rs3)
 
+r3v3rs3 is a reverse proxy server written in Rust. It proxies TCP, UDP, TLS, HTTP and WebSocket traffic, and it accepts incoming HTTP/3 connections. It is a fork of [Taxy](https://github.com/picoHz/taxy).
+
+You configure it in a browser. One binary carries the proxy and a WebUI in English and Turkish, and every port, proxy, certificate and account is a form in that WebUI. A change applies without a restart. The same operations are available over an admin API, and r3v3rs3 can also build its proxies from Docker labels, a Kubernetes Ingress, the Consul catalog or etcd keys.
+
 # Key Features
 
 ## Proxying
