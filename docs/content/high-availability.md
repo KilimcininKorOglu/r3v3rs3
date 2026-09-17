@@ -252,7 +252,7 @@ Add the admin account after the import. With the cluster on, the account goes to
 $ sudo r3v3rs3 add-user admin --config-dir /etc/r3v3rs3
 ```
 
-The command asks for the password. It creates a new account only. When the account already exists in the store, the command fails with `another node changed the same data, load it again and retry`. Change the password of an existing account on the **Accounts** page of the WebUI.
+The command asks for the password. It replaces the account when the name already exists in the store, so you can also use it to set a new password.
 
 ## Step 7: Start Every Node
 

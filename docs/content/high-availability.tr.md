@@ -252,7 +252,7 @@ Admin hesabını import'tan sonra ekleyin. Cluster açıkken hesap store'a gider
 $ sudo r3v3rs3 add-user admin --config-dir /etc/r3v3rs3
 ```
 
-Komut parolayı sorar. Yalnız yeni hesap oluşturur. Hesap store'da zaten varsa komut `another node changed the same data, load it again and retry` hatasıyla biter. Var olan bir hesabın parolasını WebUI'daki **Hesaplar** sayfasından değiştirin.
+Komut parolayı sorar. Ad store'da zaten varsa hesabın üzerine yazar, bu yüzden aynı komutla yeni parola da verebilirsiniz.
 
 ## Adım 7: Her node'u başlatın
 

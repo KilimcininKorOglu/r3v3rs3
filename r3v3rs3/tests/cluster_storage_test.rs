@@ -280,6 +280,26 @@ async fn an_account_save_conflicts_with_a_change_of_another_account() -> anyhow:
     Ok(())
 }
 
+/// `r3v3rs3 add-user` opens its own storage, so it remembers no value of the store. The command
+/// must still replace an account that another node wrote.
+#[tokio::test]
+async fn add_account_replaces_an_account_that_another_storage_wrote() -> anyhow::Result<()> {
+    let store = Arc::new(MemoryStore::default());
+    let first = node(&store, "node-a")?;
+    first
+        .add_account("admin", "passw0rd", false, Role::Admin)
+        .await?;
+
+    let cli = node(&store, "node-a")?;
+    cli.add_account("admin", "new-passw0rd", false, Role::Viewer)
+        .await?;
+
+    let accounts = node(&store, "node-b")?.load_accounts().await?;
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts["admin"].role, Role::Viewer);
+    Ok(())
+}
+
 #[tokio::test]
 async fn an_unencrypted_value_under_an_encrypted_key_is_not_used() -> anyhow::Result<()> {
     let store = Arc::new(MemoryStore::default());

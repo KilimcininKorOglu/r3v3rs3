@@ -476,8 +476,17 @@ impl KvStorage {
         known: &mut HashMap<String, Known>,
         changes: &[Change],
     ) -> anyhow::Result<()> {
-        for change in changes {
-            let key = change.key();
+        self.refresh_keys(known, changes.iter().map(Change::key))
+            .await
+    }
+
+    /// Reads the current version of each key into the remembered values.
+    async fn refresh_keys<'a>(
+        &self,
+        known: &mut HashMap<String, Known>,
+        keys: impl Iterator<Item = &'a str>,
+    ) -> anyhow::Result<()> {
+        for key in keys {
             let item = self.store.get(key).await?;
             match item.map(|item| self.decode(&item).map(|value| known_value(&item, &value))) {
                 Some(Ok(value)) => known.insert(key.to_string(), value),
@@ -748,6 +757,15 @@ impl Storage for KvStorage {
         let mut account =
             account::new_account(password, totp).map_err(|_| Error::FailedToCreateAccount)?;
         account.role = role;
+        // `r3v3rs3 add-user` holds no loaded state, so the current version of the key is read
+        // first. Without it the write would need an absent key and could not replace an account
+        // that already exists.
+        let key = self.layout.account(name);
+        let mut known = self.known.lock().await;
+        self.refresh_keys(&mut known, std::iter::once(key.as_str()))
+            .await
+            .map_err(unavailable)?;
+        drop(known);
         self.put_account(name, &account).await?;
         Ok(account)
     }
