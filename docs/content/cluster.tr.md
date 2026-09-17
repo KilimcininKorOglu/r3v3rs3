@@ -30,37 +30,9 @@ WebUI'daki **Ayarlar** sayfası node'un durumunu, rolünü ve uyguladığı revi
 
 ## Cluster kurulumu
 
-1. Bir encryption key dosyası oluşturun. Aynı dosyayı her node'a kopyalayın.
+Bir cluster'ı dört komut kurar: `r3v3rs3 cluster keygen` encryption key'i yazar, `config.toml` dosyasındaki `[cluster]` bölümü her node'da store'u tanımlar, `r3v3rs3 cluster import` bir node'un dosyalarını boş bir prefix'e kopyalar ve `r3v3rs3 start` her node'u çalıştırır.
 
-   ```bash
-   $ r3v3rs3 cluster keygen /etc/r3v3rs3/cluster.key
-   ```
-
-   Komut `0600` izinli yeni bir dosya yazar. Var olan bir dosyanın üstüne yazmaz. Key dosyasının bir kopyasını güvenli bir yerde tutun. Key'in bütün kopyaları kaybolursa store'daki veri kimse tarafından çözülemez.
-
-2. Her node'da `config.toml` dosyasına `[cluster]` bölümünü ekleyin. Node'lar arasında yalnız `node_name` farklıdır.
-
-   ```toml
-   [cluster]
-   enabled = true
-   backend = "etcd"
-   endpoints = ["https://10.0.0.1:2379", "https://10.0.0.2:2379", "https://10.0.0.3:2379"]
-   username = "r3v3rs3"
-   password = "<etcd parolası>"
-   node_name = "proxy-1"
-   encryption_key_files = ["/etc/r3v3rs3/cluster.key"]
-   tls = { ca_file = "/etc/r3v3rs3/etcd-ca.pem" }
-   ```
-
-3. Bir node'un dosyalarını store'a kopyalayın. Store'daki prefix boş olmalıdır.
-
-   ```bash
-   $ r3v3rs3 cluster import --config-dir /etc/r3v3rs3
-   ```
-
-   Import `schema` key'ini en son yazar. Bir import yarıda kalırsa prefix'in altındaki key'leri silin ve import'u tekrar çalıştırın.
-
-4. Her node'u `r3v3rs3 start` ile başlatın. Store'da `schema` key'i yoksa node başlamaz ve `r3v3rs3 cluster import` çalıştırmanızı ister. Import'tan sonra `r3v3rs3 add-user` hesabı store'a yazar.
+[Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md) sayfası her adımı komutlarıyla, store kurulumuyla, kimlik bilgileriyle ve load balancer ile birlikte anlatır.
 
 ## Ayarlar
 

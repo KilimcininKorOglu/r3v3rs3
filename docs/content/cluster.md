@@ -30,37 +30,9 @@ The **Settings** page of the WebUI shows the state, the role and the applied rev
 
 ## Set Up a Cluster
 
-1. Create an encryption key file. Copy the same file to every node.
+Four commands build a cluster: `r3v3rs3 cluster keygen` writes the encryption key, the `[cluster]` section of `config.toml` names the store on every node, `r3v3rs3 cluster import` copies the files of one node into an empty prefix, and `r3v3rs3 start` runs every node.
 
-   ```bash
-   $ r3v3rs3 cluster keygen /etc/r3v3rs3/cluster.key
-   ```
-
-   The command writes a new file with mode `0600` and does not replace an existing file. Keep a copy of the key file in a safe place. When every copy of the key is lost, nobody can decrypt the data in the store.
-
-2. Add the `[cluster]` section to `config.toml` on every node. Only `node_name` differs between the nodes.
-
-   ```toml
-   [cluster]
-   enabled = true
-   backend = "etcd"
-   endpoints = ["https://10.0.0.1:2379", "https://10.0.0.2:2379", "https://10.0.0.3:2379"]
-   username = "r3v3rs3"
-   password = "<etcd password>"
-   node_name = "proxy-1"
-   encryption_key_files = ["/etc/r3v3rs3/cluster.key"]
-   tls = { ca_file = "/etc/r3v3rs3/etcd-ca.pem" }
-   ```
-
-3. Copy the files of one node into the store. The prefix of the store must be empty.
-
-   ```bash
-   $ r3v3rs3 cluster import --config-dir /etc/r3v3rs3
-   ```
-
-   The import writes the `schema` key last. When an import stops before the end, remove the keys below the prefix and run the import again.
-
-4. Start every node with `r3v3rs3 start`. A node without the `schema` key in the store does not start and asks for `r3v3rs3 cluster import`. `r3v3rs3 add-user` writes the account to the store after the import.
+[High Availability](@/tutorials/high-availability.md) gives each step with its commands, the store install, the credentials and the load balancer.
 
 ## Settings
 
