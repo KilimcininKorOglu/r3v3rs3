@@ -7,7 +7,7 @@ use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
 use crate::sessions::{LocalSessions, SessionBackend};
 use auth::LoginAttempts;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{header::CACHE_CONTROL, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{middleware, Extension, Json};
 use axum::{
@@ -170,8 +170,17 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi)).route_layer(verify);
     Ok(api
         .merge(docs)
+        // Every admin response carries the config of the server, so no cache may keep it. The
+        // layer sits above the fallback, which sets its own Cache-Control for the WebUI files.
+        .layer(middleware::map_response(no_store))
         .fallback(static_file::fallback)
         .with_state(app_state))
+}
+
+async fn no_store(mut res: Response) -> Response {
+    res.headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    res
 }
 
 fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
