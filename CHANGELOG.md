@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-09-18
+
+### Changed
+- Every outdated dependency moved to its next major release. The upgrade covers the RustCrypto crates, rand, base64, toml, toml_edit, rcgen, x509-parser, sqlx, h3, h3-quinn, argon2, built, axum-extra, axum-server, governor and the yew family.
+- `rust-toolchain.toml` pins the compiler, so CI, the Docker build and a local build all use the same rustc.
+- The Rust workflow gained a lint job that runs `cargo fmt --all --check` and clippy with `-D warnings`.
+- The advisory ignore of a crate that is no longer a dependency was removed from `deny.toml`.
+
+### Fixed
+- Three clippy lints that the current stable compiler reports.
+
 ## [1.0.3] - 2026-09-17
 
 ### Changed
