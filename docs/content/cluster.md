@@ -8,6 +8,8 @@ weight = 0
 
 Several r3v3rs3 nodes can share one state in etcd or in the key-value store of Consul. Each node serves traffic with the same ports, proxies, access lists, certificates, ACME entries, admin accounts and settings. A change on one node reaches the other nodes without a restart.
 
+This page is the reference. To build a cluster from nothing, follow [High Availability](@/high-availability.md): it covers every step from the store to the load balancer.
+
 ## Architecture
 
 - `config.toml` of each node holds the `[cluster]` section. The admin API and the WebUI do not change it, and the store does not hold it.

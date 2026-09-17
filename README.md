@@ -44,7 +44,7 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 - An admin API with an OpenAPI document and a Swagger UI
 - Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists and an audit log
 - Service discovery from Docker labels, Kubernetes Ingress and `R3v3rs3Proxy` resources, Consul and etcd
-- Cluster mode: several nodes share one encrypted state in etcd or Consul
+- High availability with cluster mode: several nodes share one encrypted state in etcd or Consul
 
 ## Documentation
 
@@ -53,7 +53,8 @@ The documentation is available in [English](https://kilimcininkoroglu.github.io/
 - [Configuration](https://kilimcininkoroglu.github.io/r3v3rs3/configuration/): ports, proxies, certificates, ACME, settings, the admin API and logging
 - [Accounts](https://kilimcininkoroglu.github.io/r3v3rs3/accounts/): roles and permissions
 - [Service Discovery](https://kilimcininkoroglu.github.io/r3v3rs3/discovery/): Docker, Kubernetes, Consul and etcd
-- [Cluster](https://kilimcininkoroglu.github.io/r3v3rs3/cluster/): several nodes with a shared state
+- [High Availability](https://kilimcininkoroglu.github.io/r3v3rs3/high-availability/): set up three nodes behind a load balancer, step by step
+- [Cluster](https://kilimcininkoroglu.github.io/r3v3rs3/cluster/): the cluster reference, from the settings to the failure modes
 - [Development](https://kilimcininkoroglu.github.io/r3v3rs3/development/)
 
 ## Screenshot

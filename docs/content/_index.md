@@ -38,7 +38,7 @@ sort_by = "weight"
 - An admin API with an OpenAPI document and a Swagger UI ([Admin API](@/configuration.md#admin-api))
 - Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists and an audit log ([Accounts](@/accounts.md))
 - Service discovery from Docker labels, Kubernetes Ingress and `R3v3rs3Proxy` resources, Consul and etcd ([Service Discovery](@/discovery.md))
-- Cluster mode: several nodes share one encrypted state in etcd or Consul ([Cluster](@/cluster.md))
+- High availability: several nodes share one encrypted state in etcd or Consul ([Setup guide](@/high-availability.md), [Cluster](@/cluster.md))
 
 # Installation
 

@@ -38,7 +38,7 @@ sort_by = "weight"
 - OpenAPI dokümanı ve Swagger UI sunan yönetim API'si ([Yönetim API'si](@/configuration.tr.md#yonetim-api-si)).
 - `admin`, `editor` ve `viewer` rolleri olan hesaplar, hesap başına proxy listesi ve audit log ([Hesaplar](@/accounts.tr.md)).
 - Docker label'ları, Kubernetes Ingress ve `R3v3rs3Proxy` kaynakları, Consul ve etcd ile servis keşfi ([Servis keşfi](@/discovery.tr.md)).
-- Cluster modu: birden fazla node, etcd veya Consul'da şifreli tek bir state paylaşır ([Cluster](@/cluster.tr.md)).
+- Yüksek erişilebilirlik: birden fazla node, etcd veya Consul'da şifreli tek bir state paylaşır ([Kurulum rehberi](@/high-availability.tr.md), [Cluster](@/cluster.tr.md)).
 
 # Kurulum
 

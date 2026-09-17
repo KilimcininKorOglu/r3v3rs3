@@ -8,6 +8,8 @@ weight = 0
 
 Birden fazla r3v3rs3 node'u etcd'de veya Consul'un key-value store'unda tek bir state paylaşabilir. Her node aynı portlar, proxy'ler, erişim listeleri, sertifikalar, ACME kayıtları, admin hesapları ve ayarlarla trafik alır. Bir node'daki değişiklik restart olmadan diğer node'lara ulaşır.
 
+Bu sayfa referanstır. Sıfırdan kuruyorsanız [Yüksek erişilebilirlik](@/high-availability.tr.md) sayfasını izleyin: store'un kurulumundan load balancer'a kadar bütün adımları anlatır.
+
 ## Mimari
 
 - `[cluster]` bölümü her node'un `config.toml` dosyasında durur. Admin API ve WebUI bu bölümü değiştirmez. Store bu bölümü tutmaz.
