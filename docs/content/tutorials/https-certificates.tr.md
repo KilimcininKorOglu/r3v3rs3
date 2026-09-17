@@ -123,6 +123,40 @@ strict-transport-security: max-age=31536000; includeSubDomains
 - `max-age=31536000` bir yıldır. Tarayıcı o süre boyunca domain için düz HTTP'yi reddeder. Her alt domain'in HTTPS sunduğundan emin olana kadar kısa bir `max-age` ile başlayın, örneğin `300`.
 - `includeSubDomains` bütün alt domain'leri kapsar. Bir alt domain hâlâ düz HTTP sunuyorsa bunu göndermeyin.
 
+## Adım 7: HTTP/3 ekleyin
+
+HTTP/3, QUIC üzerinde çalışır ve QUIC UDP'dir. HTTPS portunun yanına ikinci bir port ister; onun yerini almaz.
+
+1. **Portlar** sayfasını açın ve bir port ekleyin.
+2. Protokolü **QUIC üzerinden HTTP (HTTP/3)** yapın.
+3. `0.0.0.0:443` adresini dinleyin. Bu UDP 443'tür, HTTPS portunun TCP 443'ü ile çakışmaz.
+4. **TLS Termination** alanına HTTPS portuyla aynı server name'leri yazın, böylece iki port aynı sertifikayı kullanır.
+5. Proxy'yi açın ve yeni portu HTTPS portunun yanına ekleyin.
+
+Portun listen adresi şöyle olur:
+
+```text
+/ip4/0.0.0.0/udp/443/quic/https
+```
+
+Bundan sonra proxy'nin her response'u bir `alt-svc` header'ı taşır:
+
+```bash
+$ curl -sI https://app.example.com/
+HTTP/2 200
+alt-svc: h2=":443", h3=":443", h3-25=":443"
+```
+
+Bu header'ı r3v3rs3 kendisi yazar; değerini proxy'nin HTTPS portundan ve QUIC portundan üretir. Upstream sunucunun gönderdiği `alt-svc` header'ını siler. Tarayıcı header'ı okur, QUIC portunu hatırlar ve sonraki request'te HTTP/3 kullanır. İlk request her zaman TCP'dir, bu yüzden UDP kapalıysa hiçbir şey bozulmaz.
+
+Kontrol edilecek üç şey:
+
+- UDP 443'ü firewall'da ve security group'ta açın. UDP'si kapalı olan client HTTP/2 kullanmaya devam eder ve hiçbir hata görmezsiniz.
+- Docker UDP'yi ayrı yayınlar: `-p 443:443` yanında `-p 443:443/udp`.
+- HTTPS portu olmayan bir proxy yalnız QUIC üzerinden cevap verir ve `alt-svc` header'ı yalnız `h3` taşır. İki portu da proxy'de tutun.
+
+HTTP/3 yalnız gelen bağlantılar için vardır. Upstream bağlantısı HTTP/2 veya HTTP/1.1 kullanır, WebTransport desteklenmez.
+
 ## Yenileme
 
 r3v3rs3 son order'dan `renewal_days` sonra yeni bir sertifika ister, hazır sağlayıcılarda 60 gün. Let's Encrypt sertifikası 90 gün geçerlidir, yani yenilemenin 30 gün payı olur. Order DNS-01 challenge'ını tekrarlar, bu yüzden credential geçerli kalmalıdır. Cluster'da sertifikayı yalnız leader ister.

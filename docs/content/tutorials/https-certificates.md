@@ -123,6 +123,40 @@ strict-transport-security: max-age=31536000; includeSubDomains
 - `max-age=31536000` is one year. A browser refuses plain HTTP for the domain during that time. Start with a short `max-age`, for example `300`, until you are sure that every subdomain serves HTTPS.
 - `includeSubDomains` covers every subdomain. Do not send it while a subdomain still serves plain HTTP.
 
+## Step 7: Add HTTP/3
+
+HTTP/3 runs over QUIC, which is UDP. It needs a second port next to the HTTPS port; it does not replace it.
+
+1. Open **Ports** and add a port.
+2. Set the protocol to **HTTP over QUIC (HTTP/3)**.
+3. Listen on `0.0.0.0:443`. This is UDP 443, so it does not collide with the TCP 443 of the HTTPS port.
+4. Set **TLS Termination** with the same server names as the HTTPS port, so both ports use the same certificate.
+5. Open the proxy and add the new port next to the HTTPS port.
+
+The listen address of the port then reads:
+
+```text
+/ip4/0.0.0.0/udp/443/quic/https
+```
+
+Now every response of the proxy carries an `alt-svc` header:
+
+```bash
+$ curl -sI https://app.example.com/
+HTTP/2 200
+alt-svc: h2=":443", h3=":443", h3-25=":443"
+```
+
+r3v3rs3 writes this header itself, from the HTTPS port and the QUIC port of the proxy. It removes an `alt-svc` header that the upstream server sent. A browser reads it, remembers the QUIC port and uses HTTP/3 for the next request. The first request always uses TCP, so nothing breaks when UDP is blocked.
+
+Three things to check:
+
+- Open UDP 443 in the firewall and in the security group. A client whose UDP is blocked keeps using HTTP/2, and you see no error.
+- Docker publishes UDP separately: `-p 443:443/udp` next to `-p 443:443`.
+- A proxy without an HTTPS port answers only over QUIC, and the `alt-svc` header then carries only `h3`. Keep both ports on the proxy.
+
+HTTP/3 is available for incoming connections only. The upstream connection uses HTTP/2 or HTTP/1.1, and WebTransport is not supported.
+
 ## Renewal
 
 r3v3rs3 orders a new certificate `renewal_days` after the last order, 60 days with a preset provider. A Let's Encrypt certificate is valid for 90 days, so the renewal has 30 days of margin. The order repeats the DNS-01 challenge, so the credential must stay valid. In a cluster only the leader orders certificates.
