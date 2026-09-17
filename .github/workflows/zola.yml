@@ -36,8 +36,11 @@ jobs:
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v6
+      #  The base_url output of configure-pages carries the scheme of the Pages settings, and it
+      #  stayed http after the custom domain was added. sitemap.xml and og:url take that scheme, so
+      #  the build uses the base_url of config.toml instead.
       - name: Build with Zola
-        run: zola -r docs build -u "${{ steps.pages.outputs.base_url }}/"
+        run: zola -r docs build
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
