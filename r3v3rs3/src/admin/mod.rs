@@ -205,6 +205,15 @@ fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
 
 fn resource_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        .merge(session_routes())
+        .merge(traffic_routes())
+        .merge(cert_routes())
+        .merge(info_routes())
+}
+
+/// The event stream, the session and the accounts of the caller.
+fn session_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
         .nest("/events", OpenApiRouter::new().routes(routes!(events)))
         .nest(
             "/session",
@@ -216,53 +225,80 @@ fn resource_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(accounts::list, accounts::add))
                 .routes(routes!(accounts::put, accounts::delete)),
         )
+}
+
+/// The ports, the proxies and the access lists that carry the traffic.
+fn traffic_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .nest("/ports", port_routes())
+        .nest("/proxies", proxy_routes())
+        .nest("/access_lists", access_list_routes())
+}
+
+fn port_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(ports::list, ports::add))
+        .routes(routes!(ports::get, ports::put, ports::delete))
+        .routes(routes!(ports::status))
+        .routes(routes!(ports::reset))
+        .routes(routes!(ports::interfaces))
+}
+
+fn proxy_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(proxies::list, proxies::add))
+        .routes(routes!(proxies::get, proxies::put, proxies::delete))
+        .routes(routes!(proxies::status))
+        .routes(routes!(proxies::purge_cache))
+}
+
+fn access_list_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(access_lists::list, access_lists::add))
+        .routes(routes!(access_lists::put, access_lists::delete))
+}
+
+/// The certificates and the ACME accounts.
+fn cert_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .nest("/certs", cert_file_routes())
+        .nest("/acme", acme_routes())
+}
+
+fn cert_file_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(certs::list))
+        .routes(routes!(certs::self_sign))
+        .routes(routes!(certs::upload))
+        .routes(routes!(certs::delete_many))
+        .routes(routes!(certs::get, certs::delete))
+        .routes(routes!(certs::download))
+}
+
+fn acme_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(acme::list, acme::add))
+        .routes(routes!(acme::get, acme::put, acme::delete))
+}
+
+/// The read-only views of the server plus the settings and the audit log.
+fn info_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
         .nest("/audit", OpenApiRouter::new().routes(routes!(audit::list)))
-        .nest(
-            "/config",
-            OpenApiRouter::new()
-                .routes(routes!(config::get, config::put))
-                .routes(routes!(config::test_notification)),
-        )
-        .nest(
-            "/ports",
-            OpenApiRouter::new()
-                .routes(routes!(ports::list, ports::add))
-                .routes(routes!(ports::get, ports::put, ports::delete))
-                .routes(routes!(ports::status))
-                .routes(routes!(ports::reset))
-                .routes(routes!(ports::interfaces)),
-        )
-        .nest(
-            "/proxies",
-            OpenApiRouter::new()
-                .routes(routes!(proxies::list, proxies::add))
-                .routes(routes!(proxies::get, proxies::put, proxies::delete))
-                .routes(routes!(proxies::status))
-                .routes(routes!(proxies::purge_cache)),
-        )
-        .nest(
-            "/access_lists",
-            OpenApiRouter::new()
-                .routes(routes!(access_lists::list, access_lists::add))
-                .routes(routes!(access_lists::put, access_lists::delete)),
-        )
-        .nest(
-            "/certs",
-            OpenApiRouter::new()
-                .routes(routes!(certs::list))
-                .routes(routes!(certs::self_sign))
-                .routes(routes!(certs::upload))
-                .routes(routes!(certs::delete_many))
-                .routes(routes!(certs::get, certs::delete))
-                .routes(routes!(certs::download)),
-        )
-        .nest(
-            "/acme",
-            OpenApiRouter::new()
-                .routes(routes!(acme::list, acme::add))
-                .routes(routes!(acme::get, acme::put, acme::delete)),
-        )
+        .nest("/config", config_routes())
         .nest("/logs", OpenApiRouter::new().routes(routes!(logs::get)))
+        .merge(state_routes())
+}
+
+fn config_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(config::get, config::put))
+        .routes(routes!(config::test_notification))
+}
+
+/// The views of the running server: build info, CDN ranges, discovery and cluster state.
+fn state_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
         .nest(
             "/app_info",
             OpenApiRouter::new().routes(routes!(app_info::get)),

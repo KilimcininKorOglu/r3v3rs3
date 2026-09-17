@@ -283,76 +283,115 @@ pub fn last_segment(key: &str) -> &str {
 mod tests {
     use super::*;
 
+    fn layout() -> Layout {
+        Layout::new("/r3v3rs3/")
+    }
+
+    fn id() -> ShortId {
+        "web".parse().unwrap()
+    }
+
     #[test]
-    fn keys_are_below_the_versioned_prefix() {
-        let layout = Layout::new("/r3v3rs3/");
-        let id = "web".parse::<ShortId>().unwrap();
+    fn state_keys_are_below_the_versioned_prefix() {
+        let layout = layout();
         assert_eq!(layout.config(), "r3v3rs3/v1/state/config");
         assert_eq!(layout.ports(), "r3v3rs3/v1/state/ports/");
         assert_eq!(
-            layout.cert(CertKind::Server, id),
+            layout.cert(CertKind::Server, id()),
             format!("r3v3rs3/v1/state/certs/{}/web", CertKind::Server)
         );
         assert_eq!(layout.account("a/b"), "r3v3rs3/v1/state/accounts/612f62");
-        assert_eq!(last_segment(&layout.acme(id)), "web");
+        assert_eq!(last_segment(&layout.acme(id())), "web");
+        assert_eq!(layout.access_list(id()), "r3v3rs3/v1/state/access-lists/web");
+        assert_eq!(layout.leader(), "r3v3rs3/v1/lock/leader");
+    }
 
-        assert!(layout.is_plain("r3v3rs3/v1/state/ports/web"));
-        assert!(layout.is_plain(&layout.cdn()));
-        assert!(!layout.is_plain(&layout.config()));
-        assert!(!layout.is_plain("r3v3rs3/v1/state/proxies/web"));
-
+    #[test]
+    fn state_keys_carry_their_part() {
+        let layout = layout();
         assert_eq!(layout.kind(&layout.config()), Some(StateKind::Config));
         assert_eq!(
             layout.kind("r3v3rs3/v1/state/ports/web"),
             Some(StateKind::Ports)
         );
-        assert_eq!(layout.kind(&layout.acme(id)), Some(StateKind::Acmes));
-        let list = layout.access_list(id);
-        assert_eq!(list, "r3v3rs3/v1/state/access-lists/web");
-        assert_eq!(layout.kind(&list), Some(StateKind::AccessLists));
-        assert!(!layout.is_plain(&list));
+        assert_eq!(layout.kind(&layout.acme(id())), Some(StateKind::Acmes));
+        assert_eq!(
+            layout.kind(&layout.access_list(id())),
+            Some(StateKind::AccessLists)
+        );
         assert_eq!(
             layout.kind(&layout.account("admin")),
             Some(StateKind::Accounts)
         );
         assert_eq!(layout.kind("r3v3rs3/v1/state/unknown/web"), None);
-        assert_eq!(layout.leader(), "r3v3rs3/v1/lock/leader");
         assert_eq!(layout.kind(&layout.leader()), None);
-        assert!(!layout.is_plain(&layout.leader()));
+    }
 
+    #[test]
+    fn only_the_public_keys_are_plain() {
+        let layout = layout();
+        assert!(layout.is_plain("r3v3rs3/v1/state/ports/web"));
+        assert!(layout.is_plain(&layout.cdn()));
+        assert!(layout.is_plain(&layout.tls_alpn_challenge("example.com")));
+        assert!(!layout.is_plain(&layout.config()));
+        assert!(!layout.is_plain("r3v3rs3/v1/state/proxies/web"));
+        assert!(!layout.is_plain(&layout.access_list(id())));
+        assert!(!layout.is_plain(&layout.leader()));
+        assert!(!layout.is_plain(&layout.account("admin")));
+    }
+
+    #[test]
+    fn challenge_keys_hold_the_token_in_hex() {
+        let layout = layout();
         let token = layout.http_challenge("a/b");
         assert_eq!(token, "r3v3rs3/v1/state/challenges/http/612f62");
         assert_eq!(layout.kind(&token), Some(StateKind::Challenges));
         assert!(layout.is_plain(&token));
-        assert!(layout.is_plain(&layout.tls_alpn_challenge("example.com")));
+    }
+
+    #[test]
+    fn node_keys_pair_with_their_ack() {
+        let layout = layout();
         let node = layout.node("node-a");
         assert_eq!(node, "r3v3rs3/v1/nodes/6e6f64652d61");
         assert_eq!(layout.ack_of(&node), layout.ack("node-a"));
         assert!(layout.is_plain(&node));
         assert!(layout.is_plain(&layout.ack("node-a")));
         assert_eq!(layout.kind(&node), None);
+    }
 
+    #[test]
+    fn session_and_rate_limit_keys_are_outside_the_state() {
+        let layout = layout();
         let session = layout.session(SessionScope::Proxy, "ab12");
         assert_eq!(session, "r3v3rs3/v1/sessions/proxy/ab12");
         assert_eq!(layout.kind(&session), None);
         assert!(!layout.is_plain(&session));
-        assert!(!layout.is_plain(&layout.account("admin")));
 
         let counts = layout.rate_limit("node-a");
         assert_eq!(counts, "r3v3rs3/v1/ratelimit/6e6f64652d61");
         assert_eq!(layout.kind(&counts), None);
         assert!(!layout.is_plain(&counts));
+    }
 
-        let response = layout.cached_response(id, "localhost /");
+    #[test]
+    fn cache_keys_hash_the_request() {
+        let layout = layout();
+        let response = layout.cached_response(id(), "localhost /");
         assert!(response.starts_with("r3v3rs3/v1/cache/web/"));
         assert_eq!(last_segment(&response).len(), 64);
         assert_eq!(layout.kind(&response), None);
         assert!(!layout.is_plain(&response));
-        let purge = layout.cache_purge(id);
+
+        let purge = layout.cache_purge(id());
         assert_eq!(purge, "r3v3rs3/v1/state/cache-purges/web");
         assert_eq!(layout.kind(&purge), Some(StateKind::CachePurges));
         assert!(layout.is_plain(&purge));
+    }
 
+    #[test]
+    fn audit_and_notify_keys_are_outside_the_state() {
+        let layout = layout();
         let entry = layout.audit_entry("2026-09-15", 1, 255);
         assert_eq!(entry, "r3v3rs3/v1/audit/2026-09-15/0000000000001-000000ff");
         assert_eq!(layout.kind(&entry), None);

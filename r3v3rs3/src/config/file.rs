@@ -62,6 +62,28 @@ async fn create_parent(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Reads a file into memory. A missing or unreadable file logs its path and reads as empty.
+async fn read_file_or_log(path: &Path) -> Vec<u8> {
+    let mut data = Vec::new();
+    match fs::File::open(path).await {
+        Ok(mut file) => {
+            if let Err(err) = file.read_to_end(&mut data).await {
+                error!(?path, "failed to load: {err}");
+            }
+        }
+        Err(err) => error!(?path, "failed to load: {err}"),
+    }
+    data
+}
+
+/// Reads one certificate from its `cert.pem`, with the `key.pem` beside it when that file exists.
+async fn load_cert_pair(kind: CertKind, chain: &Path) -> Result<Cert, Error> {
+    let chain_data = read_file_or_log(chain).await;
+    let key_data = read_file_or_log(&chain.with_file_name("key.pem")).await;
+    let key_data = (!key_data.is_empty()).then_some(key_data);
+    Cert::new(kind, chain_data, key_data)
+}
+
 /// Writes a file that holds secrets, such as ACME account keys, so only the owner can read it.
 async fn write_private(path: &Path, contents: String) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -259,23 +281,45 @@ impl FileStorage {
     }
 
     async fn save_ports_impl(&self, path: &Path, ports: &[PortEntry]) -> anyhow::Result<()> {
-        create_parent(path).await?;
-        info!(?path, "save config");
-        let mut doc = match self.load_document(path).await {
+        let entries = ports.iter().cloned().map(Into::into);
+        self.save_table(path, entries.collect::<Vec<(ShortId, Port)>>())
+            .await
+    }
+
+    async fn load_document(&self, path: &Path) -> anyhow::Result<DocumentMut> {
+        info!(?path, "load config");
+        let content = fs::read_to_string(path).await?;
+        Ok(content.parse::<DocumentMut>()?)
+    }
+
+    /// Reads the file as a document. A file that cannot be read starts an empty one.
+    async fn load_document_or_new(&self, path: &Path) -> DocumentMut {
+        match self.load_document(path).await {
             Ok(doc) => doc,
             Err(err) => {
                 warn!(?path, %err, "failed to load config");
                 DocumentMut::new()
             }
-        };
+        }
+    }
+
+    /// Writes every entry by its id and drops the keys the file no longer holds. The comments and
+    /// the order of the file survive, because the document is edited in place.
+    async fn save_table<T: serde::Serialize>(
+        &self,
+        path: &Path,
+        entries: Vec<(ShortId, T)>,
+    ) -> anyhow::Result<()> {
+        create_parent(path).await?;
+        info!(?path, "save config");
+        let mut doc = self.load_document_or_new(path).await;
 
         let mut unused = doc
             .as_table()
             .iter()
             .map(|(key, _)| key.to_string())
             .collect::<HashSet<_>>();
-        for port in ports {
-            let (id, entry): (ShortId, Port) = port.clone().into();
+        for (id, entry) in entries {
             let id = id.to_string();
             doc[&id].clone_from(toml_edit::ser::to_document(&entry)?.as_item());
             unused.remove(&id);
@@ -287,12 +331,6 @@ impl FileStorage {
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
         fs::write(path, doc.to_string()).await?;
         Ok(())
-    }
-
-    async fn load_document(&self, path: &Path) -> anyhow::Result<DocumentMut> {
-        info!(?path, "load config");
-        let content = fs::read_to_string(path).await?;
-        Ok(content.parse::<DocumentMut>()?)
     }
 
     /// Reads a versioned table of entries by their ids, in the order of the file.
@@ -348,34 +386,9 @@ impl FileStorage {
     }
 
     async fn save_proxies_impl(&self, path: &Path, proxies: &[ProxyEntry]) -> anyhow::Result<()> {
-        create_parent(path).await?;
-        info!(?path, "save config");
-        let mut doc = match self.load_document(path).await {
-            Ok(doc) => doc,
-            Err(err) => {
-                warn!(?path, %err, "failed to load config");
-                DocumentMut::new()
-            }
-        };
-
-        let mut unused = doc
-            .as_table()
-            .iter()
-            .map(|(key, _)| key.to_string())
-            .collect::<HashSet<_>>();
-        for site in proxies {
-            let (id, entry): (ShortId, Proxy) = site.clone().into();
-            let id = id.to_string();
-            doc[&id].clone_from(toml_edit::ser::to_document(&entry)?.as_item());
-            unused.remove(&id);
-        }
-        for key in unused {
-            doc.remove(&key);
-        }
-
-        doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        fs::write(path, doc.to_string()).await?;
-        Ok(())
+        let entries = proxies.iter().cloned().map(Into::into);
+        self.save_table(path, entries.collect::<Vec<(ShortId, Proxy)>>())
+            .await
     }
 
     async fn save_cert_impl(&self, path: &Path, cert: &Cert) -> anyhow::Result<()> {
@@ -391,13 +404,7 @@ impl FileStorage {
     async fn save_acme_impl(&self, path: &Path, acme: &AcmeEntry) -> anyhow::Result<()> {
         create_parent(path).await?;
         info!(?path, "save config");
-        let mut doc = match self.load_document(path).await {
-            Ok(doc) => doc,
-            Err(err) => {
-                warn!(?path, %err, "failed to load config");
-                DocumentMut::new()
-            }
-        };
+        let mut doc = self.load_document_or_new(path).await;
 
         let (id, entry): (ShortId, AcmeAccount) = acme.clone().into();
         let id = id.to_string();
@@ -410,13 +417,7 @@ impl FileStorage {
 
     async fn delete_acme_impl(&self, path: &Path, id: ShortId) -> anyhow::Result<()> {
         info!(?path, "delete acme");
-        let mut doc = match self.load_document(path).await {
-            Ok(doc) => doc,
-            Err(err) => {
-                warn!(?path, %err, "failed to load config");
-                DocumentMut::new()
-            }
-        };
+        let mut doc = self.load_document_or_new(path).await;
 
         doc.remove(&id.to_string());
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
@@ -438,40 +439,7 @@ impl FileStorage {
 
         let mut certs = Vec::new();
         for pem in walker {
-            let chain = pem.path();
-            let key = chain.with_file_name("key.pem");
-            let mut chain_data = Vec::new();
-            let mut key_data = Vec::new();
-
-            match fs::File::open(&chain).await {
-                Ok(mut file) => {
-                    if let Err(err) = file.read_to_end(&mut chain_data).await {
-                        error!(path = ?chain, "failed to load: {err}");
-                    }
-                }
-                Err(err) => {
-                    error!(path = ?chain, "failed to load: {err}");
-                }
-            }
-
-            match fs::File::open(&key).await {
-                Ok(mut file) => {
-                    if let Err(err) = file.read_to_end(&mut key_data).await {
-                        error!(path = ?key, "failed to load: {err}");
-                    }
-                }
-                Err(err) => {
-                    error!(path = ?key, "failed to load: {err}");
-                }
-            }
-
-            let key_data = if key_data.is_empty() {
-                None
-            } else {
-                Some(key_data)
-            };
-
-            match Cert::new(kind, chain_data, key_data) {
+            match load_cert_pair(kind, pem.path()).await {
                 Ok(cert) => certs.push(Arc::new(cert)),
                 Err(err) => error!(?path, "failed to load: {err}"),
             }
