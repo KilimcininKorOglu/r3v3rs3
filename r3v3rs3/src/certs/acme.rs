@@ -8,7 +8,6 @@ use crate::{
     server::cert_list::CertList,
 };
 use anyhow::{anyhow, bail};
-use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{
@@ -36,12 +35,16 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 use tracing::{error, info};
 
 /// Longest wait for the ACME server to validate the challenges.
 const VALIDATION_TIMEOUT: Duration = Duration::from_secs(180);
+/// First wait between two order refreshes.
+const VALIDATION_MIN_INTERVAL: Duration = Duration::from_millis(500);
+/// Longest wait between two order refreshes.
+const VALIDATION_MAX_INTERVAL: Duration = Duration::from_secs(60);
 const ACME_USER_AGENT: &str = concat!("r3v3rs3/", env!("CARGO_PKG_VERSION"));
 
 /// Adds the User-Agent header that RFC 8555 section 6.1 requires on every ACME request.
@@ -448,9 +451,8 @@ impl AcmeOrder {
     }
 
     async fn wait_until_ready(&mut self) -> anyhow::Result<()> {
-        let mut backoff = ExponentialBackoffBuilder::new()
-            .with_max_elapsed_time(Some(VALIDATION_TIMEOUT))
-            .build();
+        let deadline = Instant::now() + VALIDATION_TIMEOUT;
+        let mut interval = VALIDATION_MIN_INTERVAL;
         loop {
             let state = self.order.refresh().await?;
             match state.status {
@@ -458,10 +460,11 @@ impl AcmeOrder {
                 OrderStatus::Invalid => bail!("order is invalid"),
                 _ => (),
             }
-            match backoff.next_backoff() {
-                Some(next) => tokio::time::sleep(next).await,
-                None => bail!("order is timed-out"),
+            if Instant::now() + interval > deadline {
+                bail!("order is timed-out");
             }
+            tokio::time::sleep(interval).await;
+            interval = (interval * 2).min(VALIDATION_MAX_INTERVAL);
         }
     }
 }

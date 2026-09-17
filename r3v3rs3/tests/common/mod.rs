@@ -7,7 +7,7 @@ pub mod kv;
 
 use futures::Future;
 use hickory_resolver::{config::LookupIpStrategy, system_conf::read_system_conf, Resolver};
-use net2::{TcpBuilder, UdpBuilder};
+use socket2::{Domain, Socket, Type};
 use r3v3rs3::{
     accounts::Caller,
     cdn::CdnRanges,
@@ -613,14 +613,7 @@ pub async fn alloc_tcp_port() -> Result<TestPort, std::io::Error> {
             .unwrap(),
         addr.port(),
     );
-    let addr = if addr.is_ipv4() {
-        TcpBuilder::new_v4()?
-    } else {
-        TcpBuilder::new_v6()?
-    }
-    .reuse_address(true)?
-    .bind(addr)?
-    .local_addr()?;
+    let addr = bind_reusable(addr, Type::STREAM)?;
     Ok(TestPort { addr })
 }
 
@@ -645,15 +638,24 @@ pub async fn alloc_udp_port() -> Result<TestPort, std::io::Error> {
             .unwrap(),
         addr.port(),
     );
-    let addr = if addr.is_ipv4() {
-        UdpBuilder::new_v4()?
-    } else {
-        UdpBuilder::new_v6()?
-    }
-    .reuse_address(true)?
-    .bind(addr)?
-    .local_addr()?;
+    let addr = bind_reusable(addr, Type::DGRAM)?;
     Ok(TestPort { addr })
+}
+
+/// Binds a socket with SO_REUSEADDR and returns the address the kernel picked, so that a test can
+/// hand the port to the server it starts.
+fn bind_reusable(addr: SocketAddr, kind: Type) -> Result<SocketAddr, std::io::Error> {
+    let domain = if addr.is_ipv4() {
+        Domain::IPV4
+    } else {
+        Domain::IPV6
+    };
+    let socket = Socket::new(domain, kind, None)?;
+    socket.set_reuse_address(true)?;
+    socket.bind(&addr.into())?;
+    socket.local_addr()?.as_socket().ok_or_else(|| {
+        std::io::Error::other(format!("the bound address of {addr} is not an IP address"))
+    })
 }
 
 pub struct TestPort {

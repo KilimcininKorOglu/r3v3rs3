@@ -32,7 +32,6 @@ async-trait = "0.1.71"
 axum = { version = "0.8.1", features = ["ws", "multipart"] }
 axum-extra = { version = "0.10.0", features = ["cookie"] }
 axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
-backoff = { version = "0.4.0", features = ["tokio"] }
 base64 = "0.22.1"
 bytes = "1.8.0"
 clap = { version = "4.3.11", features = ["derive", "env"] }
@@ -96,7 +95,7 @@ serde_qs = "0.14.0"
 sha1 = "0.10.6"
 sha2 = "0.10.7"
 shellexpand = "3.1.0"
-socket2 = "0.5.9"
+socket2 = "0.6.1"
 subtle = "2.6.1"
 sqlx = { version = "0.8.2", features = [
     "runtime-tokio-rustls",
@@ -145,7 +144,6 @@ built = "0.6.1"
 [dev-dependencies]
 mockito = "1.6.1"
 serde-saphyr = "1.2.0"
-net2 = "0.2.39"
 reqwest = { version = "0.12.1", default-features = false, features = [
     "rustls-tls",
     "gzip",
