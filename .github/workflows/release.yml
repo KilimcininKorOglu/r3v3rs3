@@ -23,9 +23,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+        # rustup reads rust-toolchain.toml, so every job builds with the pinned channel and its
+        # declared targets.
+        run: rustup toolchain install
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@v1.23.0
       - name: Install trunk
@@ -65,7 +65,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
+        run: rustup toolchain install
       - name: Check host target
         run: test "$(rustc -vV | awk '/^host:/{print $2}')" = "${{ matrix.target }}"
       - name: Cache
@@ -105,7 +106,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
+        run: rustup toolchain install
       - name: Download webui
         uses: actions/download-artifact@v8
         with:

@@ -1,0 +1,7 @@
+[toolchain]
+# Pins the compiler that CI, the Docker build and a local build all use. Without this file
+# `dtolnay/rust-toolchain@stable` resolves a new compiler on every run, so a new lint can turn CI
+# red with no commit. Raise this channel to adopt a newer compiler.
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]

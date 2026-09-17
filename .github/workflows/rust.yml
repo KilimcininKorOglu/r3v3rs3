@@ -20,7 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
+        run: rustup toolchain install
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Install cargo-nextest
@@ -31,6 +32,20 @@ jobs:
         run: cargo build --all-features
       - name: Run tests
         run: cargo nextest run --all-features --no-fail-fast
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
+        run: rustup toolchain install
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+      - name: Check the formatting
+        run: cargo fmt --all --check
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   complexity:
     runs-on: ubuntu-24.04
