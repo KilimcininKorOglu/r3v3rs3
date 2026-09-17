@@ -1,0 +1,114 @@
+name: Clean up build leftovers
+
+on:
+  schedule:
+    # Daily, at an off-peak minute so the run does not queue behind every other repository.
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List what would be deleted, delete nothing"
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: read
+  packages: write
+
+concurrency:
+  group: cleanup
+  cancel-in-progress: false
+
+env:
+  # A workflow run older than this many days is deleted with its logs.
+  RUN_RETENTION_DAYS: 90
+  # A GitHub Actions cache entry that was not read for this many days is deleted. GitHub evicts an
+  # unread entry after 7 days on its own, so this only removes what the eviction missed.
+  CACHE_IDLE_DAYS: 14
+  # An artifact older than this many days is deleted. Both upload steps set retention-days: 1, so
+  # this only removes an artifact that outlived its own retention.
+  ARTIFACT_RETENTION_DAYS: 2
+
+jobs:
+  images:
+    name: Untagged container images
+    runs-on: ubuntu-24.04
+    steps:
+      # The action walks each multi-platform index first and takes its platform children out of the
+      # working set. A child of a tagged image is never deleted, so v1.0.2 and latest stay complete.
+      - name: Delete untagged images
+        uses: dataaxiom/ghcr-cleanup-action@v1.2.2
+        with:
+          packages: r3v3rs3
+          keep-n-untagged: 5
+          exclude-tags: latest
+          validate: true
+          dry-run: ${{ inputs.dry_run || false }}
+
+  runs:
+    name: Old workflow runs
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Delete runs older than the retention period
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d "-${RUN_RETENTION_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
+          echo "Cutoff: $cutoff"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100" \
+            --jq ".workflow_runs[] | select(.created_at < \"${cutoff}\") | select(.status == \"completed\") | \"\(.id) \(.name) \(.created_at)\"" \
+            > runs.txt || true
+          count=$(wc -l < runs.txt)
+          echo "Runs to delete: $count"
+          while read -r id name created; do
+            [ -z "${id:-}" ] && continue
+            echo "run $id  $created  $name"
+            if [ "$DRY_RUN" != "true" ]; then
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/${id}" || true
+            fi
+          done < runs.txt
+
+  caches:
+    name: Idle caches and stale artifacts
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Delete caches that were not read recently
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d "-${CACHE_IDLE_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
+            --jq ".actions_caches[] | select(.last_accessed_at < \"${cutoff}\") | \"\(.id) \(.key)\"" \
+            > caches.txt || true
+          echo "Caches to delete: $(wc -l < caches.txt)"
+          while read -r id key; do
+            [ -z "${id:-}" ] && continue
+            echo "cache $id  $key"
+            if [ "$DRY_RUN" != "true" ]; then
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${id}" || true
+            fi
+          done < caches.txt
+
+      - name: Delete artifacts that outlived their retention
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d "-${ARTIFACT_RETENTION_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.expired == false) | select(.created_at < \"${cutoff}\") | \"\(.id) \(.name)\"" \
+            > artifacts.txt || true
+          echo "Artifacts to delete: $(wc -l < artifacts.txt)"
+          while read -r id name; do
+            [ -z "${id:-}" ] && continue
+            echo "artifact $id  $name"
+            if [ "$DRY_RUN" != "true" ]; then
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" || true
+            fi
+          done < artifacts.txt
