@@ -121,8 +121,8 @@ tokio-rustls = { version = "0.26.0", default-features = false, features = [
 ] }
 tokio-stream = { version = "0.1.14", features = ["sync", "net"] }
 tokio-util = { version = "0.7.14", features = ["io"] }
-toml = "0.8.8"
-toml_edit = { version = "0.22.9", features = ["serde"] }
+toml = { version = "1.1.6", features = ["preserve_order"] }
+toml_edit = { version = "0.25.15", features = ["serde"] }
 totp-rs = { version = "5.1.0", features = ["gen_secret", "zeroize"] }
 tower-service = "0.3.3"
 tower_governor = "0.6.0"
