@@ -328,7 +328,15 @@ impl HttpPortContext {
                         match h3_conn {
                             Ok(mut conn) => loop {
                                 match conn.accept().await {
-                                    Ok(Some((req, stream))) => {
+                                    Ok(Some(resolver)) => {
+                                        // h3 0.0.8 reads the request headers here, not in accept.
+                                        let (req, stream) = match resolver.resolve_request().await {
+                                            Ok(request) => request,
+                                            Err(err) => {
+                                                error!("{err}");
+                                                break;
+                                            }
+                                        };
                                         if let Err(err) = start_quic(
                                             req,
                                             stream,
