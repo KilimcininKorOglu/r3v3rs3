@@ -297,7 +297,7 @@ fn resource_routes() -> OpenApiRouter<AppState> {
 async fn events(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-) -> Sse<StreamWrapper> {
+) -> Sse<impl Stream<Item = Result<Event, axum::Error>>> {
     let stream = StreamWrapper::new(
         BroadcastStream::new(state.event.subscribe()),
         state.event_listener_counter.clone(),
