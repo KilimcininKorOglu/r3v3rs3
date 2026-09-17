@@ -30,8 +30,8 @@ async-compression = { version = "0.4.22", features = [
 ] }
 async-trait = "0.1.71"
 axum = { version = "0.8.1", features = ["ws", "multipart"] }
-axum-extra = { version = "0.10.0", features = ["cookie"] }
-axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 base64 = "0.23.1"
 bytes = "1.8.0"
 clap = { version = "4.3.11", features = ["derive", "env"] }
@@ -41,7 +41,7 @@ flate2 = "1.0.26"
 fnv = "1.0.7"
 futures = "0.3.28"
 globwalk = "0.9.1"
-governor = "0.8.1"
+governor = "0.10.4"
 h3 = "0.0.8"
 h3-quinn = "0.0.10"
 hex = "0.4.3"
