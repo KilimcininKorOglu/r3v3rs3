@@ -41,6 +41,9 @@ pub enum Error {
     #[error("failed to refresh CDN IP ranges")]
     FailedToRefreshCdnRanges,
 
+    #[error("failed to build the DNS resolver: {reason}")]
+    FailedToBuildDnsResolver { reason: String },
+
     #[error("invalid multiaddr: {addr}")]
     InvalidMultiaddr { addr: String },
 

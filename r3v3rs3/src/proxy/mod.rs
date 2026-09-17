@@ -27,6 +27,19 @@ pub mod tcp;
 pub mod tls;
 pub mod udp;
 
+/// Builds the DNS resolver of a TCP or UDP port on the tokio runtime.
+pub(crate) fn tokio_resolver(
+    config: hickory_resolver::config::ResolverConfig,
+    opts: hickory_resolver::config::ResolverOpts,
+) -> anyhow::Result<hickory_resolver::TokioResolver> {
+    let mut builder = hickory_resolver::Resolver::builder_with_config(
+        config,
+        hickory_resolver::net::runtime::TokioRuntimeProvider::default(),
+    );
+    *builder.options_mut() = opts;
+    Ok(builder.build()?)
+}
+
 /// The rate limiters, HTTP caches, upstream groups and SRV targets of one server. A configuration
 /// reload reuses them, and two servers in one process do not share them.
 #[derive(Debug, Default)]

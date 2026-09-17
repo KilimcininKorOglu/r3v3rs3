@@ -47,9 +47,9 @@ h3 = "0.0.7"
 h3-quinn = "0.0.9"
 hex = "0.4.3"
 hmac = "0.12.1"
-hickory-proto = { version = "0.24.4", features = ["dnssec-ring"] }
-hickory-resolver = { version = "0.24.1", features = [
-    "tokio-runtime",
+hickory-proto = { version = "0.26.3", features = ["dnssec-ring"] }
+hickory-resolver = { version = "0.26.3", features = [
+    "tokio",
     "system-config",
 ] }
 http-body-util = "0.1.2"
@@ -153,7 +153,6 @@ reqwest = { version = "0.12.1", default-features = false, features = [
     "json",
     "stream",
     "http2",
-    "hickory-dns",
 ] }
 rsa = "0.9.8"
 tokio-tungstenite = { version = "0.26.0", features = [

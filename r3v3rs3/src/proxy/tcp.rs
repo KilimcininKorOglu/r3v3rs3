@@ -7,9 +7,8 @@ use super::{
 };
 use crate::server::cert_list::CertList;
 use hickory_resolver::config::LookupIpStrategy;
-use hickory_resolver::name_server::{GenericConnector, TokioRuntimeProvider};
 use hickory_resolver::system_conf::read_system_conf;
-use hickory_resolver::AsyncResolver;
+use hickory_resolver::TokioResolver;
 use r3v3rs3_api::{error::Error, id::ShortId, multiaddr::Multiaddr};
 use r3v3rs3_api::{
     port::PortEntry,
@@ -39,7 +38,7 @@ use tracing::{debug, error, info, span, warn, Level, Span};
 
 const MAX_BUFFER_SIZE: usize = 4096;
 
-type Resolver = AsyncResolver<GenericConnector<TokioRuntimeProvider>>;
+type Resolver = TokioResolver;
 
 #[derive(Debug)]
 pub struct TcpPortContext {
@@ -72,7 +71,10 @@ impl TcpPortContext {
 
         let (conf, mut opts) = read_system_conf().unwrap_or_default();
         opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
-        let resolver = AsyncResolver::tokio(conf, opts);
+        let resolver = super::tokio_resolver(conf, opts)
+            .map_err(|err| Error::FailedToBuildDnsResolver {
+                reason: err.to_string(),
+            })?;
 
         Ok(Self {
             listen,

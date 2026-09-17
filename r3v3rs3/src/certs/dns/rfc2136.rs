@@ -5,9 +5,8 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use hickory_proto::{
     op::{update_message, Message, MessageType, OpCode, Query, ResponseCode},
     rr::{
-        dnssec::{rdata::tsig::TsigAlgorithm, tsig::TSigner},
-        rdata::TXT,
-        Name, RData, RecordSet, RecordType,
+        rdata::{tsig::TsigAlgorithm, TXT},
+        Name, RData, RecordSet, RecordType, TSigner,
     },
 };
 use r3v3rs3_api::acme::TsigKeyAlgorithm;
@@ -62,7 +61,7 @@ impl Rfc2136 {
     async fn exchange(&self, mut message: Message) -> anyhow::Result<Message> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         let mut verifier = message
-            .finalize(&self.signer, u32::try_from(now)?)?
+            .finalize(&self.signer, now)?
             .ok_or_else(|| anyhow!("TSIG signing returned no verifier"))?;
         let request = message.to_vec()?;
         let response = tokio::time::timeout(EXCHANGE_TIMEOUT, send_tcp(&self.server, &request))
@@ -70,18 +69,19 @@ impl Rfc2136 {
             .map_err(|_| anyhow!("the DNS server {} did not answer", self.server))??;
 
         let unsigned = Message::from_vec(&response)?;
-        if unsigned.id() != message.id() {
+        if unsigned.metadata.id != message.metadata.id {
             bail!("the DNS server {} answered another message", self.server);
         }
         // A server answers a TSIG error, for example an unknown key, without a signature.
-        if unsigned.signature().is_empty() && unsigned.response_code() != ResponseCode::NoError {
+        if unsigned.signature.is_none() && unsigned.metadata.response_code != ResponseCode::NoError
+        {
             bail!(
                 "the DNS server {} answered {}",
                 self.server,
-                unsigned.response_code()
+                unsigned.metadata.response_code
             );
         }
-        let verified = verifier(&response).map_err(|err| {
+        let verified = verifier.verify(&response).map_err(|err| {
             anyhow!(
                 "the TSIG signature of the DNS server {} is invalid: {err}",
                 self.server
@@ -102,21 +102,19 @@ impl Rfc2136 {
     }
 
     async fn soa_owner(&self, fqdn: &Name) -> anyhow::Result<Name> {
-        let mut message = Message::new();
+        let mut message = Message::new(rand::random(), MessageType::Query, OpCode::Query);
+        message.metadata.recursion_desired = false;
         message
-            .set_id(rand::random())
-            .set_message_type(MessageType::Query)
-            .set_op_code(OpCode::Query)
-            .set_recursion_desired(false)
-            .add_query(Query::query(fqdn.clone(), RecordType::SOA));
+            .queries
+            .push(Query::query(fqdn.clone(), RecordType::SOA));
         let response = self.exchange(message).await?;
         // A name without records has the SOA record of its zone in the authority section.
         response
-            .answers()
+            .answers
             .iter()
-            .chain(response.name_servers())
+            .chain(response.authorities.iter())
             .find(|record| record.record_type() == RecordType::SOA)
-            .map(|record| record.name().clone())
+            .map(|record| record.name.clone())
             .ok_or_else(|| {
                 anyhow!(
                     "the DNS server {} returned no SOA record for {fqdn}",
@@ -127,7 +125,7 @@ impl Rfc2136 {
 
     async fn update(&self, message: Message) -> anyhow::Result<()> {
         let response = self.exchange(message).await?;
-        match response.response_code() {
+        match response.metadata.response_code {
             ResponseCode::NoError => Ok(()),
             code => bail!("the DNS server {} refused the update: {code}", self.server),
         }

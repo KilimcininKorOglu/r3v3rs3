@@ -192,6 +192,7 @@ mod tests {
             Error::InvalidServerUrl { url: text() },
             Error::InvalidCidr { cidr: text() },
             Error::FailedToRefreshCdnRanges,
+            Error::FailedToBuildDnsResolver { reason: text() },
             Error::InvalidMultiaddr { addr: text() },
             Error::TlsTerminationConfigMissing,
             Error::ProxyProtocolNotSupported,

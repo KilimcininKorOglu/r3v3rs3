@@ -6,7 +6,7 @@ pub mod e2e;
 pub mod kv;
 
 use futures::Future;
-use hickory_resolver::{config::LookupIpStrategy, system_conf::read_system_conf, AsyncResolver};
+use hickory_resolver::{config::LookupIpStrategy, system_conf::read_system_conf, Resolver};
 use net2::{TcpBuilder, UdpBuilder};
 use r3v3rs3::{
     accounts::Caller,
@@ -595,7 +595,12 @@ pub async fn serve_http_upstream(app: axum::Router) -> anyhow::Result<Url> {
 pub async fn alloc_tcp_port() -> Result<TestPort, std::io::Error> {
     let (conf, mut opts) = read_system_conf().unwrap_or_default();
     opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
-    let resolver = AsyncResolver::tokio(conf, opts);
+    let mut builder = Resolver::builder_with_config(
+        conf,
+        hickory_resolver::net::runtime::TokioRuntimeProvider::default(),
+    );
+    *builder.options_mut() = opts;
+    let resolver = builder.build().map_err(std::io::Error::other)?;
 
     let addr = "localhost:0".to_socket_addrs().unwrap().next().unwrap();
     let addr = SocketAddr::new(
@@ -622,7 +627,12 @@ pub async fn alloc_tcp_port() -> Result<TestPort, std::io::Error> {
 pub async fn alloc_udp_port() -> Result<TestPort, std::io::Error> {
     let (conf, mut opts) = read_system_conf().unwrap_or_default();
     opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
-    let resolver = AsyncResolver::tokio(conf, opts);
+    let mut builder = Resolver::builder_with_config(
+        conf,
+        hickory_resolver::net::runtime::TokioRuntimeProvider::default(),
+    );
+    *builder.options_mut() = opts;
+    let resolver = builder.build().map_err(std::io::Error::other)?;
 
     let addr = "localhost:0".to_socket_addrs().unwrap().next().unwrap();
     let addr = SocketAddr::new(

@@ -25,9 +25,9 @@ use crate::cdn::fetch::HttpClient;
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use hickory_resolver::{
-    config::{NameServerConfigGroup, ResolverConfig, ResolverOpts},
+    config::{NameServerConfig, ResolverConfig, ResolverOpts},
     system_conf::read_system_conf,
-    TokioAsyncResolver,
+    Resolver, TokioResolver,
 };
 use r3v3rs3_api::{
     acme::{CloudProvider, DnsProvider, KeyedProvider, LocalProvider, TokenApi, TokenProvider},
@@ -420,22 +420,34 @@ pub async fn wait_for_propagation(
 }
 
 /// A resolver that asks `addr`, or the system resolver when `addr` is `None`.
-pub(crate) fn build_resolver(addr: Option<SocketAddr>) -> anyhow::Result<TokioAsyncResolver> {
+pub(crate) fn build_resolver(
+    addr: Option<SocketAddr>,
+) -> anyhow::Result<TokioResolver> {
     let (config, opts) = match addr {
         Some(addr) => (
-            ResolverConfig::from_parts(
-                None,
-                vec![],
-                NameServerConfigGroup::from_ips_clear(&[addr.ip()], addr.port(), true),
-            ),
+            ResolverConfig::from_parts(None, vec![], vec![name_server(addr)]),
             ResolverOpts::default(),
         ),
         None => read_system_conf()?,
     };
-    Ok(TokioAsyncResolver::tokio(config, opts))
+    let mut builder = Resolver::builder_with_config(
+        config,
+        hickory_resolver::net::runtime::TokioRuntimeProvider::default(),
+    );
+    *builder.options_mut() = opts;
+    Ok(builder.build()?)
 }
 
-async fn missing_name<'a>(resolver: &TokioAsyncResolver, names: &'a [TxtName]) -> Option<&'a str> {
+/// A name server on an explicit port. `NameServerConfig::udp_and_tcp` always uses port 53.
+fn name_server(addr: SocketAddr) -> NameServerConfig {
+    let mut config = NameServerConfig::udp_and_tcp(addr.ip());
+    for connection in &mut config.connections {
+        connection.port = addr.port();
+    }
+    config
+}
+
+async fn missing_name<'a>(resolver: &TokioResolver, names: &'a [TxtName]) -> Option<&'a str> {
     for name in names {
         let visible = visible_values(resolver, &name.fqdn).await;
         if !name.values.iter().all(|value| visible.contains(value)) {
@@ -445,13 +457,18 @@ async fn missing_name<'a>(resolver: &TokioAsyncResolver, names: &'a [TxtName]) -
     None
 }
 
-async fn visible_values(resolver: &TokioAsyncResolver, fqdn: &str) -> Vec<String> {
+async fn visible_values(resolver: &TokioResolver, fqdn: &str) -> Vec<String> {
     match resolver.txt_lookup(format!("{fqdn}.")).await {
         Ok(lookup) => lookup
+            .answers()
             .iter()
+            .filter_map(|record| match &record.data {
+                hickory_proto::rr::RData::TXT(txt) => Some(txt),
+                _ => None,
+            })
             .map(|txt| {
                 let data = txt
-                    .txt_data()
+                    .txt_data
                     .iter()
                     .flat_map(|chunk| chunk.iter().copied());
                 String::from_utf8_lossy(&data.collect::<Vec<u8>>()).into_owned()

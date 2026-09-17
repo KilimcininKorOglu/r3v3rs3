@@ -71,26 +71,26 @@ impl MockDns {
 /// Builds the response of a query: the SRV records of the name, or NXDOMAIN.
 fn answer(table: &Table, query: &[u8]) -> Option<Vec<u8>> {
     let request = Message::from_bytes(query).ok()?;
-    let question = request.queries().first()?.clone();
+    let question = request.queries.first()?.clone();
     let name = question
         .name()
         .to_utf8()
         .trim_end_matches('.')
         .to_lowercase();
-    let mut response = Message::new();
-    response
-        .set_id(request.id())
-        .set_message_type(MessageType::Response)
-        .set_op_code(request.op_code())
-        .set_recursion_desired(request.recursion_desired())
-        .set_recursion_available(true)
-        .add_query(question.clone());
+    let mut response = Message::new(
+        request.metadata.id,
+        MessageType::Response,
+        request.metadata.op_code,
+    );
+    response.metadata.recursion_desired = request.metadata.recursion_desired;
+    response.metadata.recursion_available = true;
+    response.queries.push(question.clone());
     match table.lock().unwrap().get(&name) {
         Some((ttl, records)) => {
             for record in records {
                 let target = Name::from_str(&format!("{}.", record.target)).ok()?;
                 let srv = SRV::new(record.priority, record.weight, record.port, target);
-                response.add_answer(Record::from_rdata(
+                response.answers.push(Record::from_rdata(
                     question.name().clone(),
                     *ttl,
                     RData::SRV(srv),
@@ -98,7 +98,7 @@ fn answer(table: &Table, query: &[u8]) -> Option<Vec<u8>> {
             }
         }
         None => {
-            response.set_response_code(ResponseCode::NXDomain);
+            response.metadata.response_code = ResponseCode::NXDomain;
         }
     }
     response.to_bytes().ok()

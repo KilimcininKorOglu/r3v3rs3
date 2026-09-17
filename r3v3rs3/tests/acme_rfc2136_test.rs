@@ -1,16 +1,10 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use hickory_proto::{
-    error::ProtoResult,
     op::{Message, MessageType, OpCode, ResponseCode},
     rr::{
-        dnssec::{
-            rdata::tsig::{make_tsig_record, message_tbs, TsigAlgorithm, TSIG},
-            tsig::TSigner,
-        },
-        rdata::SOA,
-        Name, RData, Record,
+        rdata::{tsig::TsigAlgorithm, SOA},
+        Name, RData, Record, TSigResponseContext, TSigner,
     },
-    serialize::binary::{BinEncodable, BinEncoder},
 };
 use r3v3rs3::certs::dns::{self, DnsClient, TxtName};
 use r3v3rs3_api::{
@@ -73,19 +67,17 @@ async fn serve(
     let length = stream.read_u16().await?;
     let mut bytes = vec![0; usize::from(length)];
     stream.read_exact(&mut bytes).await?;
-    let (request_mac, _, _) = signer(key.to_vec())?.verify_message_byte(None, &bytes, true)?;
+    let (request_mac, _, _) = signer(key.to_vec())?.verify_message_byte(&bytes, None, true)?;
     let request = Message::from_vec(&bytes)?;
     log.lock().unwrap().push(describe(&request));
 
-    let mut response = Message::new();
-    response
-        .set_id(request.id())
-        .set_message_type(MessageType::Response)
-        .set_op_code(request.op_code());
-    for query in request.queries() {
-        response.add_query(query.clone());
-    }
-    match (request.op_code(), mode) {
+    let mut response = Message::new(
+        request.metadata.id,
+        MessageType::Response,
+        request.metadata.op_code,
+    );
+    response.queries.clone_from(&request.queries);
+    match (request.metadata.op_code, mode) {
         (OpCode::Query, _) => {
             let soa = SOA::new(
                 Name::from_ascii("ns1.example.test.")?,
@@ -97,12 +89,13 @@ async fn serve(
                 60,
             );
             let zone = Name::from_ascii("example.test.")?;
+            response.metadata.response_code = ResponseCode::NXDomain;
             response
-                .set_response_code(ResponseCode::NXDomain)
-                .add_name_server(Record::from_rdata(zone, 60, RData::SOA(soa)));
+                .authorities
+                .push(Record::from_rdata(zone, 60, RData::SOA(soa)));
         }
         (_, Mode::RefuseUpdates) => {
-            response.set_response_code(ResponseCode::Refused);
+            response.metadata.response_code = ResponseCode::Refused;
         }
         _ => {}
     }
@@ -120,53 +113,31 @@ async fn serve(
     Ok(())
 }
 
-/// Encoded message bytes that `message_tbs` copies unchanged.
-struct WireBytes(Vec<u8>);
-
-impl BinEncodable for WireBytes {
-    fn emit(&self, encoder: &mut BinEncoder<'_>) -> ProtoResult<()> {
-        encoder.emit_vec(&self.0)
-    }
-}
-
 fn sign_response(response: &mut Message, request_mac: &[u8], key: Vec<u8>) -> anyhow::Result<()> {
     let signer = signer(key)?;
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    let pre_tsig = TSIG::new(
-        TsigAlgorithm::HmacSha256,
-        now,
-        300,
-        Vec::new(),
-        response.id(),
-        0,
-        Vec::new(),
-    );
-    // The MAC covers the wire bytes of the response. Encoding the message after the request MAC
-    // would move the offsets of its compressed names.
-    let wire = WireBytes(response.to_vec()?);
-    let tbs = message_tbs(Some(request_mac), &wire, &pre_tsig, signer.signer_name())?;
-    let mac = signer.sign(&tbs)?;
-    response.add_tsig(make_tsig_record(
-        signer.signer_name().clone(),
-        pre_tsig.set_mac(mac),
-    ));
+    // The MAC covers the wire bytes of the response, so the message is encoded before it is signed.
+    let wire = response.to_vec()?;
+    let context =
+        TSigResponseContext::new(response.metadata.id, now, signer, request_mac.to_vec(), None);
+    response.signature = Some(context.sign(&wire)?);
     Ok(())
 }
 
 /// The op code, the zone or query, and the update records of a request.
 fn describe(request: &Message) -> String {
     let query = request
-        .queries()
+        .queries
         .first()
         .map(|query| format!("{} {}", query.name(), query.query_type()))
         .unwrap_or_default();
     let updates = request
-        .name_servers()
+        .authorities
         .iter()
         .map(|record| {
-            let values = match record.data() {
-                Some(RData::TXT(txt)) => txt
-                    .txt_data()
+            let values = match &record.data {
+                RData::TXT(txt) => txt
+                    .txt_data
                     .iter()
                     .map(|data| String::from_utf8_lossy(data).into_owned())
                     .collect::<Vec<_>>()
@@ -175,14 +146,18 @@ fn describe(request: &Message) -> String {
             };
             format!(
                 "{} {:?} {} {} {values}",
-                record.name(),
-                record.dns_class(),
+                record.name,
+                record.dns_class,
                 record.record_type(),
-                record.ttl()
+                record.ttl
             )
         })
         .collect::<Vec<_>>();
-    format!("{:?} {query} [{}]", request.op_code(), updates.join("; "))
+    format!(
+        "{:?} {query} [{}]",
+        request.metadata.op_code,
+        updates.join("; ")
+    )
 }
 
 fn provider(server: &str, zone: &str, key: &[u8]) -> DnsProvider {

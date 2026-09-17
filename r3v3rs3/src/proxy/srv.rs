@@ -7,6 +7,7 @@
 use crate::certs::dns::build_resolver;
 use crate::command::ServerCommand;
 use hickory_proto::rr::rdata::SRV;
+use hickory_proto::rr::RData;
 use r3v3rs3_api::{proxy::Server, upstream::SrvStatus};
 use std::{
     collections::{BTreeSet, HashMap},
@@ -246,11 +247,11 @@ async fn resolve(
         .srv_lookup(format!("{name}."))
         .await
         .map_err(|err| err.to_string())?;
-    let ttl = lookup
-        .as_lookup()
-        .valid_until()
-        .saturating_duration_since(Instant::now());
-    let targets = lowest_priority(lookup.iter());
+    let ttl = lookup.valid_until().saturating_duration_since(Instant::now());
+    let targets = lowest_priority(lookup.answers().iter().filter_map(|record| match &record.data {
+        RData::SRV(srv) => Some(srv),
+        _ => None,
+    }));
     debug!(name, targets = ?targets, ttl = ?ttl, "SRV lookup finished");
     Ok((targets, ttl))
 }
@@ -260,19 +261,19 @@ async fn resolve(
 /// whose target is `.` names no server.
 fn lowest_priority<'a>(records: impl Iterator<Item = &'a SRV>) -> Vec<SrvTarget> {
     let records = records.collect::<Vec<_>>();
-    let Some(priority) = records.iter().map(|record| record.priority()).min() else {
+    let Some(priority) = records.iter().map(|record| record.priority).min() else {
         return Vec::new();
     };
     let mut targets = records
         .iter()
-        .filter(|record| record.priority() == priority)
+        .filter(|record| record.priority == priority)
         .filter_map(|record| {
-            let host = record.target().to_utf8();
+            let host = record.target.to_utf8();
             let host = host.trim_end_matches('.');
             (!host.is_empty()).then(|| SrvTarget {
                 host: host.to_string(),
-                port: record.port(),
-                weight: record.weight().max(1),
+                port: record.port,
+                weight: record.weight.max(1),
             })
         })
         .collect::<Vec<_>>();
