@@ -21,3 +21,4 @@ Buradaki her sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bi
 - [Kubernetes'te r3v3rs3](@/tutorials/kubernetes.tr.md): ingress controller, Ingress kaynakları ve R3v3rs3Proxy custom resource'u.
 - [Load balancing ve health check](@/tutorials/load-balancing.tr.md): weight, health check, retry, sticky session, WebSocket ve gRPC.
 - [r3v3rs3'ü script ile yönetme](@/tutorials/admin-api.tr.md): admin API, deploy işi ve ona özel hesap.
+- [Consul ve etcd'den proxy'ler](@/tutorials/consul-etcd-discovery.tr.md): catalog, key-value store ve etcd key'leri.
