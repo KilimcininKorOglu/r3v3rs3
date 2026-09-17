@@ -16,3 +16,4 @@ Buradaki her sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bi
 - [Bir uygulamayı korumaya alma](@/tutorials/protect-an-app.tr.md): erişim listesi, kimlik doğrulama, rate limit ve audit log.
 - [Cache ve compression](@/tutorials/cache-and-compression.tr.md): memory'den response'lar ve daha küçük body'ler.
 - [TCP ve UDP proxy'ler](@/tutorials/tcp-and-udp.tr.md): bir veritabanı, bir DNS sunucusu ve mutual TLS.
+- [Kubernetes'te r3v3rs3](@/tutorials/kubernetes.tr.md): ingress controller, Ingress kaynakları ve R3v3rs3Proxy custom resource'u.
