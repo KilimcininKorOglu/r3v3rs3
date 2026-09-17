@@ -179,11 +179,8 @@ pub enum TemplatePart {
 
 /// Parses a header value with `{variable}` placeholders. `{{` and `}}` write a literal brace.
 pub fn parse_header_template(value: &str) -> Result<Vec<TemplatePart>, Error> {
-    let invalid = || Error::InvalidHeaderValue {
-        value: value.into(),
-    };
     if value.chars().any(|c| c.is_control() && c != '\t') {
-        return Err(invalid());
+        return Err(invalid_header_value(value));
     }
     let mut parts = Vec::new();
     let mut literal = String::new();
@@ -191,27 +188,46 @@ pub fn parse_header_template(value: &str) -> Result<Vec<TemplatePart>, Error> {
     while let Some(index) = rest.find(['{', '}']) {
         let (text, tail) = rest.split_at(index);
         literal.push_str(text);
-        if tail.starts_with("{{") || tail.starts_with("}}") {
-            literal.push_str(&tail[..1]);
-            rest = &tail[2..];
-            continue;
-        }
-        let (variable, after) = tail
-            .strip_prefix('{')
-            .and_then(|inner| inner.split_once('}'))
-            .and_then(|(name, after)| Some((variable_named(name)?, after)))
-            .ok_or_else(invalid)?;
-        if !literal.is_empty() {
-            parts.push(TemplatePart::Literal(std::mem::take(&mut literal)));
-        }
-        parts.push(TemplatePart::Variable(variable));
-        rest = after;
+        rest = parse_brace(value, tail, &mut parts, &mut literal)?;
     }
     literal.push_str(rest);
+    push_literal(&mut parts, literal);
+    Ok(parts)
+}
+
+fn invalid_header_value(value: &str) -> Error {
+    Error::InvalidHeaderValue {
+        value: value.into(),
+    }
+}
+
+/// Reads one brace of `tail`. An escaped brace goes to `literal`, and a placeholder becomes a
+/// variable part. Returns the rest of the template after the brace.
+fn parse_brace<'a>(
+    value: &str,
+    tail: &'a str,
+    parts: &mut Vec<TemplatePart>,
+    literal: &mut String,
+) -> Result<&'a str, Error> {
+    if tail.starts_with("{{") || tail.starts_with("}}") {
+        literal.push_str(&tail[..1]);
+        return Ok(&tail[2..]);
+    }
+    let (variable, after) = tail
+        .strip_prefix('{')
+        .and_then(|inner| inner.split_once('}'))
+        .and_then(|(name, after)| Some((variable_named(name)?, after)))
+        .ok_or_else(|| invalid_header_value(value))?;
+    push_literal(parts, std::mem::take(literal));
+    parts.push(TemplatePart::Variable(variable));
+    Ok(after)
+}
+
+/// Adds the text as a literal part. An empty text adds no part.
+fn push_literal(parts: &mut Vec<TemplatePart>, literal: String) {
     if !literal.is_empty() {
         parts.push(TemplatePart::Literal(literal));
     }
-    Ok(parts)
 }
 
 fn variable_named(name: &str) -> Option<HeaderVariable> {

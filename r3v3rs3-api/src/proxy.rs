@@ -94,31 +94,42 @@ impl ProxyKind {
                 validate_weights(udp.upstream_servers.iter().map(|server| server.weight))?;
                 udp.health_check.validate(false)
             }
-            Self::Http(http) => {
-                validate_access_lists(http)?;
-                http.health_check.validate(true)?;
-                http.circuit_breaker.validate()?;
-                http.sticky.validate()?;
-                http.redirects.iter().try_for_each(RedirectRule::validate)?;
-                http.routes.iter().try_for_each(|route| {
-                    validate_route_target(route)?;
-                    validate_weights(route.servers.iter().map(|server| server.weight))?;
-                    route.mirror.iter().try_for_each(Mirror::validate)?;
-                    route.rewrite.validate()
-                })?;
-                http.routes
-                    .iter()
-                    .filter_map(|route| route.retry.as_ref())
-                    .chain([&http.retry])
-                    .try_for_each(RetryPolicy::validate)?;
-                http.routes
-                    .iter()
-                    .filter_map(|route| route.timeouts.as_ref())
-                    .chain([&http.timeouts])
-                    .try_for_each(UpstreamTimeouts::validate)
-            }
+            Self::Http(http) => validate_http_upstream(http),
         }
     }
+}
+
+/// The upstream part of an HTTP proxy: its own settings and the settings of every route.
+fn validate_http_upstream(http: &HttpProxy) -> Result<(), Error> {
+    validate_access_lists(http)?;
+    http.health_check.validate(true)?;
+    http.circuit_breaker.validate()?;
+    http.sticky.validate()?;
+    http.redirects.iter().try_for_each(RedirectRule::validate)?;
+    http.routes.iter().try_for_each(validate_route)?;
+    validate_route_overrides(http)
+}
+
+/// The target, the weights, the mirrors and the rewrite of one route.
+fn validate_route(route: &Route) -> Result<(), Error> {
+    validate_route_target(route)?;
+    validate_weights(route.servers.iter().map(|server| server.weight))?;
+    route.mirror.iter().try_for_each(Mirror::validate)?;
+    route.rewrite.validate()
+}
+
+/// The retry policy and the timeouts of the proxy, plus the override of each route.
+fn validate_route_overrides(http: &HttpProxy) -> Result<(), Error> {
+    http.routes
+        .iter()
+        .filter_map(|route| route.retry.as_ref())
+        .chain([&http.retry])
+        .try_for_each(RetryPolicy::validate)?;
+    http.routes
+        .iter()
+        .filter_map(|route| route.timeouts.as_ref())
+        .chain([&http.timeouts])
+        .try_for_each(UpstreamTimeouts::validate)
 }
 
 /// Rejects an access list next to the IP filter or the authentication of the same proxy or route.

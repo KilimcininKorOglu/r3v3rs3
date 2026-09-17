@@ -334,24 +334,26 @@ impl std::str::FromStr for Endpoint {
         let (scheme, rest) = s.split_once("://").ok_or_else(invalid)?;
         match scheme {
             "unix" if rest.len() > 1 && rest.starts_with('/') => Ok(Self::Unix(rest.to_string())),
-            "tcp" | "http" | "https" => {
-                let tls = scheme == "https";
-                let url =
-                    url::Url::parse(&format!("{}://{rest}", if tls { "https" } else { "http" }))
-                        .map_err(|_| invalid())?;
-                let plain = url.path() == "/" && url.query().is_none() && url.username().is_empty();
-                match (plain, url.host_str(), url.port_or_known_default()) {
-                    (true, Some(host), Some(port)) => Ok(Self::Tcp {
-                        tls,
-                        host: host.trim_matches(['[', ']']).to_string(),
-                        port,
-                    }),
-                    _ => Err(invalid()),
-                }
-            }
+            "tcp" | "http" => parse_tcp_endpoint(rest, false).ok_or_else(invalid),
+            "https" => parse_tcp_endpoint(rest, true).ok_or_else(invalid),
             _ => Err(invalid()),
         }
     }
+}
+
+/// Reads the host and the port of a TCP endpoint. A path, a query or a user name makes it invalid,
+/// because an endpoint names a server only.
+fn parse_tcp_endpoint(rest: &str, tls: bool) -> Option<Endpoint> {
+    let scheme = if tls { "https" } else { "http" };
+    let url = url::Url::parse(&format!("{scheme}://{rest}")).ok()?;
+    if url.path() != "/" || url.query().is_some() || !url.username().is_empty() {
+        return None;
+    }
+    Some(Endpoint::Tcp {
+        tls,
+        host: url.host_str()?.trim_matches(['[', ']']).to_string(),
+        port: url.port_or_known_default()?,
+    })
 }
 
 #[cfg(test)]

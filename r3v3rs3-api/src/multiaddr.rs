@@ -163,38 +163,34 @@ impl FromStr for Multiaddr {
 impl fmt::Display for Multiaddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for protocol in &self.protocols {
-            match protocol {
-                Protocol::Dns(host) => write!(f, "/dns/{}", host)?,
-                Protocol::Ip(addr) => {
-                    if addr.is_ipv4() {
-                        write!(f, "/ip4/{}", addr)?;
-                    } else {
-                        write!(f, "/ip6/{}", addr)?;
-                    }
-                }
-                Protocol::Tcp(port) => write!(f, "/tcp/{}", port)?,
-                Protocol::Udp(port) => write!(f, "/udp/{}", port)?,
-                Protocol::Tls => {
-                    if !self.is_http() {
-                        write!(f, "/tls")?
-                    }
-                }
-                Protocol::Http(path) => {
-                    let path = if path == "/" || path.is_empty() {
-                        ""
-                    } else {
-                        path.as_str()
-                    };
-                    if self.is_tls() {
-                        write!(f, "/https{}", path)?;
-                    } else {
-                        write!(f, "/http{}", path)?;
-                    }
-                }
-                Protocol::Quic => write!(f, "/quic")?,
-            }
+            self.write_protocol(f, protocol)?;
         }
         Ok(())
+    }
+}
+
+impl Multiaddr {
+    /// Writes one protocol segment. `/tls` is implicit in `/https`, so a TLS segment of an HTTP
+    /// address writes nothing.
+    fn write_protocol(&self, f: &mut fmt::Formatter<'_>, protocol: &Protocol) -> fmt::Result {
+        match protocol {
+            Protocol::Dns(host) => write!(f, "/dns/{}", host),
+            Protocol::Ip(addr) if addr.is_ipv4() => write!(f, "/ip4/{}", addr),
+            Protocol::Ip(addr) => write!(f, "/ip6/{}", addr),
+            Protocol::Tcp(port) => write!(f, "/tcp/{}", port),
+            Protocol::Udp(port) => write!(f, "/udp/{}", port),
+            Protocol::Tls if self.is_http() => Ok(()),
+            Protocol::Tls => write!(f, "/tls"),
+            Protocol::Http(path) => self.write_http(f, path),
+            Protocol::Quic => write!(f, "/quic"),
+        }
+    }
+
+    /// Writes the HTTP segment with its scheme. A root path writes no path.
+    fn write_http(&self, f: &mut fmt::Formatter<'_>, path: &str) -> fmt::Result {
+        let path = if path == "/" { "" } else { path };
+        let scheme = if self.is_tls() { "https" } else { "http" };
+        write!(f, "/{scheme}{path}")
     }
 }
 
