@@ -5,8 +5,8 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::subject_name::SubjectName;
 use rcgen::{
-    BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType,
-    ExtendedKeyUsagePurpose, Ia5String, IsCa, KeyPair, SanType,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair, SanType, string::Ia5String,
 };
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -248,7 +248,9 @@ impl Cert {
     }
 
     fn new_signed(kind: CertKind, san: &[SubjectName], ca: &Cert) -> Result<Self, Error> {
-        let (ca_cert, ca_keypair) = ca.signing_cert()?;
+        let ca_pem =
+            std::str::from_utf8(&ca.pem_chain).map_err(|_| Error::FailedToReadPrivateKey)?;
+        let issuer = ca.issuer()?;
 
         let mut params = leaf_params(san)?;
         if kind == CertKind::Client {
@@ -258,27 +260,23 @@ impl Cert {
         let keypair =
             KeyPair::generate().map_err(|_| Error::FailedToGenerateSelfSignedCertificate)?;
         let cert = params
-            .signed_by(&keypair, &ca_cert, &ca_keypair)
+            .signed_by(&keypair, &issuer)
             .map_err(generation_error)?;
 
-        let pem_chain = format!("{}\r\n{}", cert.pem(), ca_cert.pem()).into_bytes();
+        let pem_chain = format!("{}\r\n{}", cert.pem(), ca_pem).into_bytes();
         let pem_key = keypair.serialize_pem().into_bytes();
         Self::new(kind, pem_chain, Some(pem_key))
     }
 
-    /// Rebuilds this CA certificate and its key pair, so that they can sign a new certificate.
-    fn signing_cert(&self) -> Result<(Certificate, KeyPair), Error> {
+    /// Builds the issuer of this CA certificate, so that it can sign a new certificate.
+    fn issuer(&self) -> Result<Issuer<'static, KeyPair>, Error> {
         let ca_pem =
             std::str::from_utf8(&self.pem_chain).map_err(|_| Error::FailedToReadPrivateKey)?;
         let pem_key = self.pem_key.as_ref().ok_or(Error::FailedToReadPrivateKey)?;
         let key_pem = std::str::from_utf8(pem_key).map_err(|_| Error::FailedToReadPrivateKey)?;
         let ca_keypair = KeyPair::from_pem(key_pem).map_err(|_| Error::FailedToReadPrivateKey)?;
-        let ca_params = CertificateParams::from_ca_cert_pem(ca_pem)
-            .map_err(|_| Error::FailedToGenerateSelfSignedCertificate)?;
-        let ca_cert = ca_params
-            .self_signed(&ca_keypair)
-            .map_err(generation_error)?;
-        Ok((ca_cert, ca_keypair))
+        Issuer::from_ca_cert_pem(ca_pem, ca_keypair)
+            .map_err(|_| Error::FailedToGenerateSelfSignedCertificate)
     }
 
     pub fn certified_key(&self) -> Result<CertifiedKey, Error> {

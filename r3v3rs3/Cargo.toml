@@ -81,7 +81,7 @@ quinn = { version = "0.11.6", default-features = false, features = [
     "ring",
 ] }
 rand = "0.10.2"
-rcgen = { version = "0.13.0", features = ["pem", "x509-parser"] }
+rcgen = { version = "0.14.10", features = ["pem", "x509-parser"] }
 ring = "0.17.14"
 rpassword = "7.2.0"
 rustls-native-certs = "0.8.0"
@@ -134,7 +134,7 @@ utoipa = "5.2.0"
 utoipa-axum = "0.2.0"
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "vendored"] }
 webpki = "0.22.4"
-x509-parser = "0.17.0"
+x509-parser = "0.18.1"
 kube = { version = "4.2.0", default-features = false, features = ["client", "rustls-tls", "ring", "runtime"] }
 k8s-openapi = { version = "0.28.0", features = ["v1_32"] }
 
