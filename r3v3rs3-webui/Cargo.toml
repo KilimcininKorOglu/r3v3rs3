@@ -2,6 +2,8 @@
 name = "r3v3rs3-webui"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+publish = false
 
 [dependencies]
 yew = { version = "0.21", features = ["csr"] }
