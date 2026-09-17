@@ -436,9 +436,12 @@ mod test {
         let pkcs8 = cert.key.as_ref().unwrap();
         let info = pkcs8.decode_msg::<PrivateKeyInfoRef<'_>>().unwrap();
         let line_ending = pkcs8::der::pem::LineEnding::LF;
-        let sec1 =
-            pkcs8::der::pem::encode_string("EC PRIVATE KEY", line_ending, info.private_key.as_ref())
-                .unwrap();
+        let sec1 = pkcs8::der::pem::encode_string(
+            "EC PRIVATE KEY",
+            line_ending,
+            info.private_key.as_ref(),
+        )
+        .unwrap();
 
         let reloaded = Cert::new(
             CertKind::Server,
