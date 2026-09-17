@@ -14,7 +14,7 @@ use crate::upstream::{
     default_connect_timeout, default_session_idle_timeout, default_weight,
     is_default_connect_timeout, is_default_session_idle_timeout, is_default_weight,
     validate_timeout, validate_weights, CircuitBreaker, HealthCheck, LoadBalancing, RetryPolicy,
-    StickyCookie, UpstreamHealth, UpstreamTimeouts, DEFAULT_WEIGHT,
+    SrvStatus, StickyCookie, UpstreamHealth, UpstreamTimeouts, DEFAULT_WEIGHT,
 };
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
@@ -302,6 +302,9 @@ pub struct ProxyStatus {
     /// order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub upstreams: Vec<UpstreamHealth>,
+    /// The DNS SRV lookups of the `http+srv` and `https+srv` servers of an HTTP proxy.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub srv: Vec<SrvStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

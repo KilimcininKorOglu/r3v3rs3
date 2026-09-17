@@ -7,7 +7,7 @@ use crate::server::state::ServerState;
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyStatus};
+use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyKind, ProxyStatus};
 
 pub struct GetProxyList;
 
@@ -63,6 +63,10 @@ impl RpcMethod for GetProxyStatus {
             .map(|ctx| ProxyStatus {
                 state: ctx.status.state,
                 upstreams: state.registries.groups.snapshot(self.id),
+                srv: match &ctx.entry.proxy.kind {
+                    ProxyKind::Http(http) => state.registries.srv.snapshot(&http.srv_names()),
+                    _ => Vec::new(),
+                },
             })
             .ok_or(Error::IdNotFound {
                 id: self.id.to_string(),

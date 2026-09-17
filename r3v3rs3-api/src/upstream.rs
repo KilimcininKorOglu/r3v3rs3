@@ -397,6 +397,21 @@ pub struct UpstreamHealth {
     pub circuit: CircuitState,
 }
 
+/// The DNS SRV lookup of one server name of a proxy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SrvStatus {
+    /// The SRV name of the `http+srv` or `https+srv` server URL.
+    pub name: String,
+    /// The `host:port` of each target of the last successful lookup.
+    pub targets: Vec<String>,
+    /// The error of the last lookup. `None` when the last lookup succeeded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The time of the last successful lookup, in seconds since the Unix epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refreshed_at: Option<u64>,
+}
+
 pub fn default_connect_timeout() -> Duration {
     DEFAULT_CONNECT_TIMEOUT
 }

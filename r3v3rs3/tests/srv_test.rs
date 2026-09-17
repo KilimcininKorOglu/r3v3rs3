@@ -3,20 +3,31 @@
 use r3v3rs3::{
     accounts::Caller,
     command::ServerCommand,
-    server::rpc::{config::SetConfig, ErasedRpcMethod, RpcWrapper},
+    server::{
+        rpc::{config::SetConfig, proxies::GetProxyStatus, ErasedRpcMethod, RpcWrapper},
+        ServerChannels,
+    },
 };
 use r3v3rs3_api::{
     app::AppConfig,
-    proxy::{HttpProxy, Route, Server},
+    proxy::{HttpProxy, ProxyStatus, Route, Server},
+    upstream::SrvStatus,
 };
 use std::{net::SocketAddr, time::Duration};
 
 mod common;
 use common::{
-    alloc_tcp_port,
+    alloc_tcp_port, call,
     dns::{MockDns, SrvRecord},
     http_port_entry, http_proxy_entry, wait_for_status, with_server, TestStorage,
 };
+
+/// The SRV lookup states of the proxy `s`.
+async fn srv_status(channels: &mut ServerChannels) -> anyhow::Result<Vec<SrvStatus>> {
+    let id = "s".parse()?;
+    let status: ProxyStatus = call(channels, GetProxyStatus { id }).await??;
+    Ok(status.srv)
+}
 
 // Not `.invalid`: hickory answers that zone with NXDOMAIN without a query (RFC 6761).
 const NAME: &str = "_http._tcp.app.srv-test.test";
@@ -75,12 +86,20 @@ async fn wait_for_body(url: &str, expected: &str, wait: Duration) -> anyhow::Res
 async fn srv_route_sends_requests_to_the_resolved_target() -> anyhow::Result<()> {
     let dns = MockDns::start().await?;
     let (_upstream, record) = upstream("from-srv").await?;
+    let target = format!("{}:{}", record.target, record.port);
     dns.set(NAME, 60, vec![record]);
     let port = alloc_tcp_port().await?;
 
-    with_server(storage(&port, Some(dns.addr)), |_| async move {
+    with_server(storage(&port, Some(dns.addr)), |mut channels| async move {
         let body = wait_for_status(port.http_url("/").as_ref(), 200).await?;
         assert_eq!(body, "from-srv");
+
+        let srv = srv_status(&mut channels).await?;
+        assert_eq!(srv.len(), 1);
+        assert_eq!(srv[0].name, NAME);
+        assert_eq!(srv[0].targets, [target]);
+        assert_eq!(srv[0].error, None);
+        assert!(srv[0].refreshed_at.is_some());
         Ok(())
     })
     .await
@@ -110,8 +129,14 @@ async fn srv_without_an_answer_answers_502() -> anyhow::Result<()> {
     let dns = MockDns::start().await?;
     let port = alloc_tcp_port().await?;
 
-    with_server(storage(&port, Some(dns.addr)), |_| async move {
+    with_server(storage(&port, Some(dns.addr)), |mut channels| async move {
         wait_for_status(port.http_url("/").as_ref(), 502).await?;
+
+        let srv = srv_status(&mut channels).await?;
+        assert_eq!(srv.len(), 1);
+        assert!(srv[0].targets.is_empty());
+        assert!(srv[0].error.is_some(), "{srv:?}");
+        assert_eq!(srv[0].refreshed_at, None);
         Ok(())
     })
     .await

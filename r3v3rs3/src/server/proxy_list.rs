@@ -25,6 +25,7 @@ impl ProxyContext {
             status: ProxyStatus {
                 state,
                 upstreams: Vec::new(),
+                srv: Vec::new(),
             },
         }
     }

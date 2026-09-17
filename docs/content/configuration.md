@@ -302,6 +302,8 @@ The health of the servers stays after a configuration reload while the servers, 
 
 The status API (`GET /api/proxies/{id}/status`) lists the health of each upstream server in `upstreams`: the address, the `weight`, `healthy`, the consecutive `failures`, and `last_error`. The proxy list of the WebUI shows the number of healthy servers and refreshes the statuses every 10 seconds. The title of the number lists the unhealthy servers with their last errors.
 
+An HTTP proxy with [DNS SRV servers](#dns-srv-servers) also lists each SRV name in `srv`: the `name`, the `targets` (`host:port`) of the last successful lookup, the `error` of the last lookup when it failed, and `refreshed_at`, the time of the last successful lookup in seconds since the Unix epoch. The proxy list of the WebUI shows a line for each SRV name whose lookup failed.
+
 ```toml
 [my-app]
 protocol = "http"

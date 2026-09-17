@@ -498,6 +498,7 @@
   "proxies.confirm_purge": "Are you sure to purge the cache of {id}?",
   "proxies.empty": "List is empty. Click 'Add' to configure a new proxy.",
   "proxies.healthy_servers": "{healthy}/{total} healthy",
+  "proxies.srv_error": "SRV {name}: {error}",
   "proxies.purge": "Purge",
   "proxies.purge_failed": "Failed to purge the cache: {error}",
   "proxies.purged": "The cache is purged.",

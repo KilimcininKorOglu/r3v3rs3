@@ -302,6 +302,8 @@ Sunucular, weight değerleri, policy ve health check ayarları değişmediği s�
 
 Status API'si (`GET /api/proxies/{id}/status`), her upstream sunucusunun sağlık durumunu `upstreams` alanında listeler: adres, `weight`, `healthy`, art arda hata sayısı `failures` ve `last_error`. WebUI'daki proxy listesi sağlıklı sunucu sayısını gösterir ve status'leri 10 saniyede bir yeniler. Sayının title'ı sağlıksız sunucuları son hatalarıyla listeler.
 
+[DNS SRV sunucuları](#dns-srv-sunuculari) olan bir HTTP proxy'si her SRV adını `srv` alanında da listeler: `name`, son başarılı sorgunun hedefleri `targets` (`host:port`), son sorgu başarısızsa `error` ve son başarılı sorgunun Unix epoch'tan bu yana saniye cinsinden zamanı `refreshed_at`. WebUI'daki proxy listesi, sorgusu başarısız olan her SRV adı için bir satır gösterir.
+
 ```toml
 [my-app]
 protocol = "http"

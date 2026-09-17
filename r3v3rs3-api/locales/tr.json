@@ -498,6 +498,7 @@
   "proxies.confirm_purge": "{id} proxy'sinin cache'i temizlensin mi?",
   "proxies.empty": "Liste boş. Yeni proxy eklemek için 'Ekle' butonuna tıklayın.",
   "proxies.healthy_servers": "{healthy}/{total} sağlıklı",
+  "proxies.srv_error": "SRV {name}: {error}",
   "proxies.purge": "Temizle",
   "proxies.purge_failed": "Cache temizlenemedi: {error}",
   "proxies.purged": "Cache temizlendi.",

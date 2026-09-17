@@ -7,7 +7,7 @@
 use crate::certs::dns::build_resolver;
 use crate::command::ServerCommand;
 use hickory_proto::rr::rdata::SRV;
-use r3v3rs3_api::proxy::Server;
+use r3v3rs3_api::{proxy::Server, upstream::SrvStatus};
 use std::{
     collections::{BTreeSet, HashMap},
     net::SocketAddr,
@@ -33,6 +33,10 @@ pub struct SrvTarget {
 struct SrvEntry {
     /// The targets of the last successful lookup. A failed lookup keeps them.
     targets: Vec<SrvTarget>,
+    /// The error of the last lookup. `None` when the last lookup succeeded.
+    error: Option<String>,
+    /// The time of the last successful lookup, in seconds since the Unix epoch.
+    refreshed_at: Option<u64>,
     expires_at: Instant,
     task: Option<JoinHandle<()>>,
 }
@@ -41,6 +45,8 @@ impl SrvEntry {
     fn new() -> Self {
         Self {
             targets: Vec::new(),
+            error: None,
+            refreshed_at: None,
             expires_at: Instant::now(),
             task: None,
         }
@@ -51,6 +57,8 @@ impl SrvEntry {
         match result {
             Ok((targets, ttl)) => {
                 self.expires_at = Instant::now() + ttl.max(MIN_TTL);
+                self.error = None;
+                self.refreshed_at = Some(crate::clock::unix_ms() / 1000);
                 let changed = targets != self.targets;
                 if changed {
                     info!(name, targets = ?targets, "SRV targets changed");
@@ -61,8 +69,22 @@ impl SrvEntry {
             Err(err) => {
                 warn!(name, %err, "SRV lookup failed");
                 self.expires_at = Instant::now() + MIN_TTL;
+                self.error = Some(err);
                 false
             }
+        }
+    }
+
+    fn status(&self, name: &str) -> SrvStatus {
+        SrvStatus {
+            name: name.to_string(),
+            targets: self
+                .targets
+                .iter()
+                .map(|target| format!("{}:{}", target.host, target.port))
+                .collect(),
+            error: self.error.clone(),
+            refreshed_at: self.refreshed_at,
         }
     }
 
@@ -131,6 +153,16 @@ impl SrvRegistry {
         }
         inner.names.clear();
         true
+    }
+
+    /// The lookup state of each name, in the order of `names`. A name that the registry does not
+    /// know is skipped.
+    pub fn snapshot(&self, names: &[String]) -> Vec<SrvStatus> {
+        let inner = lock(&self.inner);
+        names
+            .iter()
+            .filter_map(|name| Some(inner.names.get(name)?.status(name)))
+            .collect()
     }
 
     /// Replaces each SRV server with one server per resolved target. A name without targets
@@ -335,7 +367,12 @@ mod tests {
         assert!(entry.apply("n", Ok((vec![target.clone()], Duration::from_secs(1)))));
         assert!(entry.expires_at >= Instant::now() + Duration::from_secs(4));
         assert!(!entry.apply("n", Ok((vec![target.clone()], Duration::from_secs(60)))));
+        assert!(entry.refreshed_at.is_some());
         assert!(!entry.apply("n", Err("timed out".into())));
         assert_eq!(entry.targets, [target]);
+        let status = entry.status("n");
+        assert_eq!(status.targets, ["a:1"]);
+        assert_eq!(status.error.as_deref(), Some("timed out"));
+        assert!(status.refreshed_at.is_some());
     }
 }

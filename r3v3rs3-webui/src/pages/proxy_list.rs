@@ -15,7 +15,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::{ProxyEntry, ProxyKind, ProxyState, ProxyStatus};
-use r3v3rs3_api::upstream::{CircuitState, UpstreamHealth};
+use r3v3rs3_api::upstream::{CircuitState, SrvStatus, UpstreamHealth};
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
@@ -240,7 +240,8 @@ fn status_cell(locale: Locale, status: &ProxyStatus) -> Html {
         ProxyState::Unknown => ("state.unknown", "bg-neutral-500"),
     };
     let badge = status_badge(locale.t(status_key), color);
-    if status.upstreams.is_empty() {
+    let srv_errors = srv_errors(locale, &status.srv);
+    if status.upstreams.is_empty() && srv_errors.is_empty() {
         return badge;
     }
     let (healthy, unhealthy) = health_summary(locale, &status.upstreams);
@@ -251,12 +252,33 @@ fn status_cell(locale: Locale, status: &ProxyStatus) -> Html {
             ("total", &status.upstreams.len().to_string()),
         ],
     );
+    let title = [unhealthy, srv_errors.join("\n")]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
     html! {
         <div>
             {badge}
-            <span class="block text-xs text-neutral-500 dark:text-neutral-400" title={unhealthy}>{text}</span>
+            <span class="block text-xs text-neutral-500 dark:text-neutral-400" title={title}>{text}</span>
+            { for srv_errors.iter().map(|line| html! {
+                <span class="block text-xs text-red-600 dark:text-red-400">{line}</span>
+            }) }
         </div>
     }
+}
+
+/// One line for each SRV name whose last lookup failed.
+fn srv_errors(locale: Locale, srv: &[SrvStatus]) -> Vec<String> {
+    srv.iter()
+        .filter_map(|status| {
+            let error = status.error.as_deref()?;
+            Some(locale.tf(
+                "proxies.srv_error",
+                &[("name", &status.name), ("error", error)],
+            ))
+        })
+        .collect()
 }
 
 /// Returns the number of healthy servers, and one line for each server that is not healthy. A
@@ -424,5 +446,24 @@ mod tests {
                     .to_string()
             )
         );
+    }
+
+    #[test]
+    fn srv_errors_name_the_failed_lookups() {
+        let status = |name: &str, error: Option<&str>| SrvStatus {
+            name: name.into(),
+            targets: Vec::new(),
+            error: error.map(Into::into),
+            refreshed_at: None,
+        };
+        let srv = [
+            status("_http._tcp.a", None),
+            status("_http._tcp.b", Some("no records found")),
+        ];
+        assert_eq!(
+            srv_errors(Locale::En, &srv),
+            ["SRV _http._tcp.b: no records found"]
+        );
+        assert!(srv_errors(Locale::Tr, &srv[..1]).is_empty());
     }
 }
