@@ -83,6 +83,44 @@
 
 {% block head %}
 <link rel="stylesheet" href="{{ get_url(path="r3v3rs3.css") }}">
+<link rel="canonical" href="{{ current_url | safe }}">
+{#- The same page in the other language. Both a page and a section carry the translations. -#}
+{% if page is defined %}{% set translations = page.translations %}
+{% elif section is defined %}{% set translations = section.translations %}
+{% else %}{% set translations = [] %}{% endif %}
+{% for translation in translations %}
+{% if translation.lang %}{% set code = translation.lang %}{% else %}{% set code = config.default_language %}{% endif %}
+<link rel="alternate" hreflang="{{ code }}" href="{{ translation.permalink | safe }}">
+{% endfor %}
+{#- A description of the software for the crawlers that read structured data. Every field below is
+    shown on this site or in the linked package registries. -#}
+{% if section is defined and section.relative_path is starting_with("_index") %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "r3v3rs3",
+  "url": "{{ config.base_url | safe }}/",
+  "description": "{{ trans(key="description", lang=lang) }}",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux",
+  "programmingLanguage": "Rust",
+  "license": "https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/LICENSE",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "sameAs": [
+    "https://github.com/KilimcininKorOglu/r3v3rs3",
+    "https://crates.io/crates/r3v3rs3",
+    "https://crates.io/crates/r3v3rs3-api",
+    "https://docs.rs/r3v3rs3-api",
+    "https://github.com/KilimcininKorOglu/r3v3rs3/pkgs/container/r3v3rs3"
+  ]
+}
+</script>
+{% endif %}
 {% endblock head %}
 
 {#- The juice theme puts a placeholder text and a third-party ad script in the sidebar. This site

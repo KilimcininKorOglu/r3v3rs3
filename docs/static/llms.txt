@@ -1,0 +1,44 @@
+# r3v3rs3
+
+> A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, written in Rust. It is a fork of Taxy.
+
+r3v3rs3 runs as a single binary or a single container. You configure it in a browser, not in a configuration file: every port, proxy, certificate and account is a form in the WebUI, and the same operations are available over an admin API. It can also build its proxies from Docker labels, a Kubernetes Ingress, the Consul catalog, the Consul key-value store or etcd keys.
+
+The documentation is published in English at the root and in Turkish under `/tr/`. Every page listed below has a Turkish translation at the same path with the `/tr/` prefix.
+
+## Documentation
+
+- [Overview](https://r3v3rs3.keremgok.tr/): what r3v3rs3 does and the feature list
+- [Configuration](https://r3v3rs3.keremgok.tr/configuration/): every port and proxy field, with its default
+- [Accounts](https://r3v3rs3.keremgok.tr/accounts/): the roles, the permissions and the proxy list of a panel account
+- [Service Discovery](https://r3v3rs3.keremgok.tr/discovery/): Docker, Kubernetes, Consul and etcd sources
+- [Cluster](https://r3v3rs3.keremgok.tr/cluster/): the cluster settings, the store keys, the encryption and the failure modes
+- [Development](https://r3v3rs3.keremgok.tr/development/): build the server and the WebUI from source
+
+## Tutorials
+
+- [Installing on a Linux Server](https://r3v3rs3.keremgok.tr/tutorials/install-linux/): install as a systemd service with install.sh
+- [Installing with Docker](https://r3v3rs3.keremgok.tr/tutorials/install-docker/): one container with two volumes
+- [Getting Started](https://r3v3rs3.keremgok.tr/tutorials/getting-started/): from the first account to the first working proxy
+- [High Availability](https://r3v3rs3.keremgok.tr/tutorials/high-availability/): three nodes behind a load balancer
+- [Proxies from Docker](https://r3v3rs3.keremgok.tr/tutorials/docker-discovery/): let containers define their own proxies with labels
+- [HTTPS with a Wildcard Certificate](https://r3v3rs3.keremgok.tr/tutorials/https-certificates/): DNS-01, renewal and HTTP/3
+- [Protecting an Application](https://r3v3rs3.keremgok.tr/tutorials/protect-an-app/): IP filter, authentication, rate limit and audit log
+- [Caching and Compression](https://r3v3rs3.keremgok.tr/tutorials/cache-and-compression/): answer repeated requests from memory and send smaller responses
+- [TCP and UDP Proxies](https://r3v3rs3.keremgok.tr/tutorials/tcp-and-udp/): publish a database over TCP and a DNS server over UDP, with mutual TLS
+- [r3v3rs3 on Kubernetes](https://r3v3rs3.keremgok.tr/tutorials/kubernetes/): Ingress and R3v3rs3Proxy resources
+- [Load Balancing and Health Checks](https://r3v3rs3.keremgok.tr/tutorials/load-balancing/): weights, health checks, sticky sessions, WebSocket and gRPC
+- [Driving r3v3rs3 from a Script](https://r3v3rs3.keremgok.tr/tutorials/admin-api/): sign in to the admin API and drive it from CI
+- [Proxies from Consul and etcd](https://r3v3rs3.keremgok.tr/tutorials/consul-etcd-discovery/): the Consul catalog, the Consul key-value store and etcd keys
+- [Accounts for a Team](https://r3v3rs3.keremgok.tr/tutorials/team-accounts/): per-person proxies, TOTP and the audit log
+- [Single Sign-On with Forward Auth](https://r3v3rs3.keremgok.tr/tutorials/forward-auth/): oauth2-proxy in front of an application
+- [Migrating from nginx or Traefik](https://r3v3rs3.keremgok.tr/tutorials/migrate/): translate the configuration and cut over
+
+## Source and packages
+
+- [GitHub repository](https://github.com/KilimcininKorOglu/r3v3rs3)
+- [crates.io: r3v3rs3](https://crates.io/crates/r3v3rs3): the server binary
+- [crates.io: r3v3rs3-api](https://crates.io/crates/r3v3rs3-api): the shared API types
+- [docs.rs: r3v3rs3-api](https://docs.rs/r3v3rs3-api): the API type reference
+- [Container image](https://github.com/KilimcininKorOglu/r3v3rs3/pkgs/container/r3v3rs3): `ghcr.io/kilimcininkoroglu/r3v3rs3`
+- [Changelog](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/CHANGELOG.md)
