@@ -6,7 +6,7 @@ use argon2::{
 };
 use r3v3rs3_api::auth::{Account, LoginMethod, LoginRequest, LoginResponse};
 use r3v3rs3_api::error::Error;
-use totp_rs::{Secret, TOTP};
+use totp_rs::{Builder, Secret, Totp};
 use tracing::error;
 
 pub fn new_account(password: &str, totp: bool) -> anyhow::Result<Account> {
@@ -17,7 +17,7 @@ pub fn new_account(password: &str, totp: bool) -> anyhow::Result<Account> {
         .to_string();
     Ok(Account {
         password,
-        totp: totp.then(|| TOTP::default().get_secret_base32()),
+        totp: totp.then(|| Totp::default().secret().to_base32()),
         ..Default::default()
     })
 }
@@ -55,14 +55,9 @@ fn verify_totp(name: &str, account: &Account, token: &str) -> Result<LoginRespon
         error!(%name, "totp not found: {name}");
         return Err(Error::InvalidLoginCredentials);
     };
-    let secret = Secret::Encoded(encoded.clone())
-        .to_bytes()
-        .map_err(|_| Error::InvalidLoginCredentials)?;
-    let totp = TOTP {
-        secret,
-        ..Default::default()
-    };
-    if totp.check_current(token).unwrap_or_default() {
+    let secret = Secret::try_from_base32(encoded).map_err(|_| Error::InvalidLoginCredentials)?;
+    let totp = Builder::new().with_secret(secret).build_noncompliant();
+    if totp.check_current(token).is_some() {
         return Ok(LoginResponse::Success);
     }
     Err(Error::InvalidLoginCredentials)

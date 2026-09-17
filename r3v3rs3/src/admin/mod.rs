@@ -187,17 +187,15 @@ fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
     let governor_conf = GovernorConfigBuilder::default()
         .per_second(4)
         .burst_size(2)
-        .error_handler(|error| match error {
-            GovernorError::TooManyRequests { .. } => {
-                AppError::R3v3rs3(Error::TooManyLoginAttempts).into_response()
-            }
-            _ => AppError::Anyhow(anyhow::anyhow!(error)).into_response(),
-        })
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid login rate limit config"))?;
-    let login_limit = GovernorLayer {
-        config: Arc::new(governor_conf),
-    };
+    let login_limit = GovernorLayer::new(Arc::new(governor_conf)).error_handler(|error| match error
+    {
+        GovernorError::TooManyRequests { .. } => {
+            AppError::R3v3rs3(Error::TooManyLoginAttempts).into_response()
+        }
+        _ => AppError::Anyhow(anyhow::anyhow!(error)).into_response(),
+    });
     Ok(OpenApiRouter::new()
         .routes(routes!(auth::login).layer(login_limit))
         .routes(routes!(auth::logout)))
