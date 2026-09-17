@@ -6,8 +6,8 @@ use yew::prelude::*;
 use yew_router::prelude::*;
 
 const REPOSITORY_URL: &str = "https://github.com/KilimcininKorOglu/r3v3rs3";
-const DOCS_URL_EN: &str = "https://kilimcininkoroglu.github.io/r3v3rs3/";
-const DOCS_URL_TR: &str = "https://kilimcininkoroglu.github.io/r3v3rs3/tr/";
+const DOCS_URL_EN: &str = "https://r3v3rs3.keremgok.tr/";
+const DOCS_URL_TR: &str = "https://r3v3rs3.keremgok.tr/tr/";
 const API_DOCS_PATH: &str = "/api/docs/";
 const LINK_CLASS: &str = "hover:underline hover:text-neutral-900 dark:hover:text-neutral-200";
 
@@ -74,13 +74,7 @@ mod tests {
 
     #[test]
     fn docs_url_follows_locale() {
-        assert_eq!(
-            docs_url(Locale::En),
-            "https://kilimcininkoroglu.github.io/r3v3rs3/"
-        );
-        assert_eq!(
-            docs_url(Locale::Tr),
-            "https://kilimcininkoroglu.github.io/r3v3rs3/tr/"
-        );
+        assert_eq!(docs_url(Locale::En), "https://r3v3rs3.keremgok.tr/");
+        assert_eq!(docs_url(Locale::Tr), "https://r3v3rs3.keremgok.tr/tr/");
     }
 }

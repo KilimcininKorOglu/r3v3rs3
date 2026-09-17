@@ -48,14 +48,14 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 
 ## Documentation
 
-The documentation is available in [English](https://kilimcininkoroglu.github.io/r3v3rs3/) and [Turkish](https://kilimcininkoroglu.github.io/r3v3rs3/tr/):
+The documentation is available in [English](https://r3v3rs3.keremgok.tr/) and [Turkish](https://r3v3rs3.keremgok.tr/tr/):
 
-- [Configuration](https://kilimcininkoroglu.github.io/r3v3rs3/configuration/): ports, proxies, certificates, ACME, settings, the admin API and logging
-- [Accounts](https://kilimcininkoroglu.github.io/r3v3rs3/accounts/): roles and permissions
-- [Service Discovery](https://kilimcininkoroglu.github.io/r3v3rs3/discovery/): Docker, Kubernetes, Consul and etcd
-- [Tutorials](https://kilimcininkoroglu.github.io/r3v3rs3/tutorials/): step by step guides, starting with [High Availability](https://kilimcininkoroglu.github.io/r3v3rs3/tutorials/high-availability/)
-- [Cluster](https://kilimcininkoroglu.github.io/r3v3rs3/cluster/): the cluster reference, from the settings to the failure modes
-- [Development](https://kilimcininkoroglu.github.io/r3v3rs3/development/)
+- [Configuration](https://r3v3rs3.keremgok.tr/configuration/): ports, proxies, certificates, ACME, settings, the admin API and logging
+- [Accounts](https://r3v3rs3.keremgok.tr/accounts/): roles and permissions
+- [Service Discovery](https://r3v3rs3.keremgok.tr/discovery/): Docker, Kubernetes, Consul and etcd
+- [Tutorials](https://r3v3rs3.keremgok.tr/tutorials/): step by step guides, starting with [High Availability](https://r3v3rs3.keremgok.tr/tutorials/high-availability/)
+- [Cluster](https://r3v3rs3.keremgok.tr/cluster/): the cluster reference, from the settings to the failure modes
+- [Development](https://r3v3rs3.keremgok.tr/development/)
 
 ## Screenshot
 
@@ -153,7 +153,7 @@ r3v3rs3 start
 
 Open the admin panel at [http://localhost:46492/](http://localhost:46492/). `r3v3rs3 start --help` lists the options. Each option also reads an environment variable, for example `R3V3RS3_WEBUI`, `R3V3RS3_CONFIG_DIR` and `R3V3RS3_LOG_DIR`. The default config directory is `~/.config/r3v3rs3`, and the default log directory is `~/.local/share/r3v3rs3/logs`.
 
-The admin API has an OpenAPI document at `/api/openapi.json` and a Swagger UI at `/api/docs/`. Both require a signed-in session. See [Admin API](https://kilimcininkoroglu.github.io/r3v3rs3/configuration/#admin-api) in the documentation.
+The admin API has an OpenAPI document at `/api/openapi.json` and a Swagger UI at `/api/docs/`. Both require a signed-in session. See [Admin API](https://r3v3rs3.keremgok.tr/configuration/#admin-api) in the documentation.
 
 ## Development
 

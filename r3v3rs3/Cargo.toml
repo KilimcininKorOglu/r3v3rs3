@@ -14,7 +14,7 @@ categories = [
 ]
 license = "MIT"
 repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
-homepage = "https://kilimcininkoroglu.github.io/r3v3rs3/"
+homepage = "https://r3v3rs3.keremgok.tr/"
 readme = "../README.md"
 default-run = "r3v3rs3"
 

@@ -164,7 +164,7 @@ write_unit() {
 	cat >"$UNIT" <<EOF
 [Unit]
 Description=r3v3rs3 reverse proxy
-Documentation=https://kilimcininkoroglu.github.io/r3v3rs3/
+Documentation=https://r3v3rs3.keremgok.tr/
 Wants=network-online.target
 After=network-online.target
 
