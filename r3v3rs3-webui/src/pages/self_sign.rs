@@ -57,50 +57,14 @@ pub fn self_sign() -> Html {
         }
     });
 
-    let ca_cert = use_state(|| ShortId::from_str(GENERATE_CA).unwrap_throw());
-    let ca_cert_list = use_state(Vec::<CertInfo>::new);
-    use_effect_with((), {
-        let ca_cert = ca_cert.clone();
-        let ca_cert_list = ca_cert_list.clone();
-        move |_| {
-            wasm_bindgen_futures::spawn_local(async move {
-                if let Ok(res) = get_cert_list().await {
-                    let list = res
-                        .into_iter()
-                        .filter(|cert| cert.has_private_key && cert.kind == CertKind::Root)
-                        .collect::<Vec<_>>();
-                    if let Some(cert) = list.first() {
-                        ca_cert.set(cert.id);
-                    }
-                    ca_cert_list.set(list);
-                }
-            });
-        }
-    });
+    let (ca_cert, ca_cert_list) = use_ca_certs();
 
     let validation = use_state(|| false);
     let entry = get_request(locale, &san, *ca_cert, *kind);
     let error = entry.as_ref().err().filter(|_| *validation).cloned();
     let is_loading = use_state(|| false);
 
-    let onsubmit = Callback::from(move |event: SubmitEvent| {
-        event.prevent_default();
-        validation.set(true);
-        if *is_loading {
-            return;
-        }
-        if let Ok(entry) = entry.clone() {
-            is_loading.set(true);
-            let navigator = navigator.clone();
-            let is_loading = is_loading.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                if request_self_sign(&entry).await.is_ok() {
-                    show_certs(&navigator, entry.kind);
-                }
-                is_loading.set(false);
-            });
-        }
-    });
+    let onsubmit = submit_callback(entry, validation, is_loading, navigator);
 
     html! {
         <>
@@ -125,6 +89,59 @@ pub fn self_sign() -> Html {
             </form>
         </>
     }
+}
+
+/// The root certificates that can sign, and the selected one. The default is the first of them.
+#[hook]
+fn use_ca_certs() -> (UseStateHandle<ShortId>, UseStateHandle<Vec<CertInfo>>) {
+    let ca_cert = use_state(|| ShortId::from_str(GENERATE_CA).unwrap_throw());
+    let ca_cert_list = use_state(Vec::<CertInfo>::new);
+    let ca_cert_cloned = ca_cert.clone();
+    let list_cloned = ca_cert_list.clone();
+    use_effect_with((), move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            let Ok(res) = get_cert_list().await else {
+                return;
+            };
+            let list = res
+                .into_iter()
+                .filter(|cert| cert.has_private_key && cert.kind == CertKind::Root)
+                .collect::<Vec<_>>();
+            if let Some(cert) = list.first() {
+                ca_cert_cloned.set(cert.id);
+            }
+            list_cloned.set(list);
+        });
+    });
+    (ca_cert, ca_cert_list)
+}
+
+/// Signs the certificate and opens the certificate tab. A submit during a request does nothing.
+fn submit_callback(
+    entry: Result<SelfSignedCertRequest, String>,
+    validation: UseStateHandle<bool>,
+    is_loading: UseStateHandle<bool>,
+    navigator: Navigator,
+) -> Callback<SubmitEvent> {
+    Callback::from(move |event: SubmitEvent| {
+        event.prevent_default();
+        validation.set(true);
+        if *is_loading {
+            return;
+        }
+        let Ok(entry) = entry.clone() else {
+            return;
+        };
+        is_loading.set(true);
+        let navigator = navigator.clone();
+        let is_loading = is_loading.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            if request_self_sign(&entry).await.is_ok() {
+                show_certs(&navigator, entry.kind);
+            }
+            is_loading.set(false);
+        });
+    })
 }
 
 /// Opens the certificate tab that lists certificates of this kind.

@@ -73,14 +73,7 @@ pub fn new_acme() -> Html {
     let navigator = use_navigator().unwrap();
 
     let navigator_cloned = navigator.clone();
-    let cancel_onclick = Callback::from(move |_| {
-        let _ = navigator_cloned.push_with_query(
-            &Route::Certs,
-            &CertsQuery {
-                tab: CertsTab::Acme,
-            },
-        );
-    });
+    let cancel_onclick = Callback::from(move |_| show_acme(&navigator_cloned));
 
     let entry = use_state::<AcmeResult, _>(|| Err(Default::default()));
     let entry_cloned = entry.clone();
@@ -92,62 +85,26 @@ pub fn new_acme() -> Html {
     let show_errors = use_state(|| false);
     let submit_error = use_state(|| Option::<String>::None);
 
-    let entry_cloned = entry.clone();
-    let is_loading_cloned = is_loading.clone();
-    let show_errors_cloned = show_errors.clone();
-    let submit_error_cloned = submit_error.clone();
-    let onsubmit = Callback::from(move |event: SubmitEvent| {
-        event.prevent_default();
-        show_errors_cloned.set(true);
-        if *is_loading_cloned {
-            return;
-        }
-        let navigator = navigator.clone();
-        let is_loading_cloned = is_loading_cloned.clone();
-        let submit_error = submit_error_cloned.clone();
-        if let Ok(entry) = (*entry_cloned).clone() {
-            is_loading_cloned.set(true);
-            submit_error.set(None);
-            wasm_bindgen_futures::spawn_local(async move {
-                match add_acme(locale, &entry).await {
-                    Ok(()) => {
-                        let _ = navigator.push_with_query(
-                            &Route::Certs,
-                            &CertsQuery {
-                                tab: CertsTab::Acme,
-                            },
-                        );
-                    }
-                    Err(message) => submit_error.set(Some(
-                        locale.tf("acme.request_failed", &[("message", &message)]),
-                    )),
-                }
-                is_loading_cloned.set(false);
-            });
-        }
-    });
+    let onsubmit = submit_callback(
+        locale,
+        entry.clone(),
+        AcmeStates {
+            is_loading: is_loading.clone(),
+            show_errors: show_errors.clone(),
+            submit_error: submit_error.clone(),
+        },
+        navigator,
+    );
 
     let provider = use_state(|| PROVIDERS[0]);
-    let provider_onchange = Callback::from({
-        let provider = provider.clone();
-        move |event: Event| {
-            let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            if let Ok(index) = target.value().parse::<usize>() {
-                provider.set(PROVIDERS[index]);
-            }
-        }
-    });
+    let provider_onchange = provider_onchange(provider.clone());
 
     html! {
         <>
             <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
                 <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("certs.provider")}</label>
                 <select onchange={provider_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
-                    { PROVIDERS.iter().enumerate().map(|(i, item)| {
-                        html! {
-                            <option selected={&*provider == item} value={i.to_string()}>{item.label(locale)}</option>
-                        }
-                    }).collect::<Html>() }
+                    { provider_options(locale, &provider) }
                 </select>
 
                 { provider.html(onchanged, *show_errors) }
@@ -171,6 +128,77 @@ pub fn new_acme() -> Html {
             </form>
         </>
     }
+}
+
+/// Opens the ACME tab of the certificate list.
+fn show_acme(navigator: &Navigator) {
+    let _ = navigator.push_with_query(
+        &Route::Certs,
+        &CertsQuery {
+            tab: CertsTab::Acme,
+        },
+    );
+}
+
+/// The states of the form that the submit changes.
+struct AcmeStates {
+    is_loading: UseStateHandle<bool>,
+    show_errors: UseStateHandle<bool>,
+    submit_error: UseStateHandle<Option<String>>,
+}
+
+/// Requests the certificate and opens the ACME tab. A submit during a request does nothing.
+fn submit_callback(
+    locale: Locale,
+    entry: UseStateHandle<AcmeResult>,
+    states: AcmeStates,
+    navigator: Navigator,
+) -> Callback<SubmitEvent> {
+    Callback::from(move |event: SubmitEvent| {
+        event.prevent_default();
+        states.show_errors.set(true);
+        if *states.is_loading {
+            return;
+        }
+        let Ok(entry) = (*entry).clone() else {
+            return;
+        };
+        let navigator = navigator.clone();
+        let is_loading = states.is_loading.clone();
+        let submit_error = states.submit_error.clone();
+        is_loading.set(true);
+        submit_error.set(None);
+        wasm_bindgen_futures::spawn_local(async move {
+            match add_acme(locale, &entry).await {
+                Ok(()) => show_acme(&navigator),
+                Err(message) => submit_error.set(Some(
+                    locale.tf("acme.request_failed", &[("message", &message)]),
+                )),
+            }
+            is_loading.set(false);
+        });
+    })
+}
+
+fn provider_onchange(provider: UseStateHandle<Provider>) -> Callback<Event> {
+    Callback::from(move |event: Event| {
+        let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        if let Ok(index) = target.value().parse::<usize>() {
+            provider.set(PROVIDERS[index]);
+        }
+    })
+}
+
+fn provider_options(locale: Locale, selected: &Provider) -> Html {
+    PROVIDERS
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            html! {
+                <option selected={selected == item} value={i.to_string()}>{item.label(locale)}</option>
+            }
+        })
+        .collect()
 }
 
 async fn add_acme(locale: Locale, req: &AcmeRequest) -> Result<(), String> {

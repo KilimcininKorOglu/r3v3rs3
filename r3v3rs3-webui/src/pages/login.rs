@@ -43,16 +43,7 @@ pub fn login() -> Html {
     let navigator = use_navigator().unwrap();
     let locale = use_locale();
 
-    use_effect_with((), move |_| {
-        EventListener::new(&gloo_utils::document(), "visibilitychange", move |_event| {
-            wasm_bindgen_futures::spawn_local(async move {
-                if !test_token().await {
-                    logout();
-                }
-            });
-        })
-        .forget();
-    });
+    use_logout_on_hide();
 
     let location = use_location().unwrap();
     let query = location.query::<LoginQuery>().unwrap_or_default();
@@ -62,99 +53,17 @@ pub fn login() -> Html {
     let totp = use_state(|| Option::<String>::None);
     let error: UseStateHandle<Option<ErrorMessage>> = use_state(|| Option::<ErrorMessage>::None);
 
-    let oninput_username = Callback::from({
-        let username = username.clone();
-        move |input_event: InputEvent| {
-            let target: HtmlInputElement = input_event
-                .target()
-                .unwrap_throw()
-                .dyn_into()
-                .unwrap_throw();
-            username.set(target.value());
-        }
-    });
+    let oninput_username = text_oninput(username.clone());
+    let oninput_password = text_oninput(password.clone());
+    let oninput_totp = totp_oninput(totp.clone());
 
-    let oninput_password = Callback::from({
-        let password = password.clone();
-        move |input_event: InputEvent| {
-            let target: HtmlInputElement = input_event
-                .target()
-                .unwrap_throw()
-                .dyn_into()
-                .unwrap_throw();
-            password.set(target.value());
-        }
-    });
-
-    let totp_cloned = totp.clone();
-    let oninput_totp = Callback::from({
-        let totp = totp_cloned;
-        move |input_event: InputEvent| {
-            let target: HtmlInputElement = input_event
-                .target()
-                .unwrap_throw()
-                .dyn_into()
-                .unwrap_throw();
-            totp.set(Some(target.value()));
-        }
-    });
-
-    let totp_cloned = totp.clone();
-    let error_cloned = error.clone();
-    let username_cloned = username.clone();
-    let password_cloned = password.clone();
-    let onsubmit = Callback::from(move |event: SubmitEvent| {
-        event.prevent_default();
-
-        let navigator = navigator.clone();
-        let username = username_cloned.clone();
-        let password = password_cloned.clone();
-        let totp = totp_cloned.clone();
-        let query = query.clone();
-        let error = error_cloned.clone();
-
-        let method = if let Some(totp) = &*totp {
-            LoginMethod::Totp {
-                token: totp.to_string(),
-            }
-        } else {
-            LoginMethod::Password {
-                password: password.to_string(),
-            }
-        };
-
-        wasm_bindgen_futures::spawn_local(async move {
-            let insecure = web_sys::window()
-                .and_then(|window| window.location().protocol().ok())
-                .unwrap_or_default()
-                != "https:";
-            let login: ApiResult<LoginResponse> = Request::post(&format!("{API_ENDPOINT}/login"))
-                .json(&LoginRequest {
-                    username: username.to_string(),
-                    method,
-                    insecure,
-                })
-                .unwrap()
-                .send()
-                .await
-                .unwrap()
-                .json()
-                .await
-                .unwrap();
-            match login {
-                ApiResult::Ok(LoginResponse::Success) => {
-                    if let Some(redirect) = query.redirect {
-                        navigator.replace(&redirect);
-                    } else {
-                        navigator.push(&Route::Home);
-                    }
-                }
-                ApiResult::Ok(LoginResponse::TotpRequired) => totp.set(Some(String::new())),
-                ApiResult::Err(err) => {
-                    error.set(Some(err));
-                }
-            }
-        });
+    let onsubmit = submit_callback(LoginForm {
+        navigator,
+        query,
+        username: username.clone(),
+        password: password.clone(),
+        totp: totp.clone(),
+        error: error.clone(),
     });
 
     let error_text = (*error).as_ref().map(|err| match &err.error {
@@ -198,4 +107,111 @@ pub fn login() -> Html {
         </form>
         </>
     }
+}
+
+/// Signs the account out when the tab becomes visible again without a valid token.
+#[hook]
+fn use_logout_on_hide() {
+    use_effect_with((), move |_| {
+        EventListener::new(&gloo_utils::document(), "visibilitychange", move |_event| {
+            wasm_bindgen_futures::spawn_local(async move {
+                if !test_token().await {
+                    logout();
+                }
+            });
+        })
+        .forget();
+    });
+}
+
+fn input_value(event: &InputEvent) -> String {
+    let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+    target.value()
+}
+
+fn text_oninput(state: UseStateHandle<String>) -> Callback<InputEvent> {
+    Callback::from(move |event: InputEvent| state.set(input_value(&event)))
+}
+
+fn totp_oninput(state: UseStateHandle<Option<String>>) -> Callback<InputEvent> {
+    Callback::from(move |event: InputEvent| state.set(Some(input_value(&event))))
+}
+
+/// The state of the sign-in form.
+struct LoginForm {
+    navigator: Navigator,
+    query: LoginQuery,
+    username: UseStateHandle<String>,
+    password: UseStateHandle<String>,
+    totp: UseStateHandle<Option<String>>,
+    error: UseStateHandle<Option<ErrorMessage>>,
+}
+
+impl LoginForm {
+    fn clone_state(&self) -> Self {
+        Self {
+            navigator: self.navigator.clone(),
+            query: self.query.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            totp: self.totp.clone(),
+            error: self.error.clone(),
+        }
+    }
+
+    /// The TOTP token when the server asked for one, the password otherwise.
+    fn method(&self) -> LoginMethod {
+        match &*self.totp {
+            Some(totp) => LoginMethod::Totp {
+                token: totp.to_string(),
+            },
+            None => LoginMethod::Password {
+                password: self.password.to_string(),
+            },
+        }
+    }
+
+    fn apply(self, login: ApiResult<LoginResponse>) {
+        match login {
+            ApiResult::Ok(LoginResponse::Success) => match self.query.redirect {
+                Some(redirect) => self.navigator.replace(&redirect),
+                None => self.navigator.push(&Route::Home),
+            },
+            ApiResult::Ok(LoginResponse::TotpRequired) => self.totp.set(Some(String::new())),
+            ApiResult::Err(err) => self.error.set(Some(err)),
+        }
+    }
+}
+
+fn submit_callback(form: LoginForm) -> Callback<SubmitEvent> {
+    Callback::from(move |event: SubmitEvent| {
+        event.prevent_default();
+        let form = form.clone_state();
+        let method = form.method();
+        let username = form.username.to_string();
+        wasm_bindgen_futures::spawn_local(async move {
+            form.apply(send_login(username, method).await);
+        });
+    })
+}
+
+/// Sends the sign-in request. The connection is insecure outside HTTPS.
+async fn send_login(username: String, method: LoginMethod) -> ApiResult<LoginResponse> {
+    let insecure = web_sys::window()
+        .and_then(|window| window.location().protocol().ok())
+        .unwrap_or_default()
+        != "https:";
+    Request::post(&format!("{API_ENDPOINT}/login"))
+        .json(&LoginRequest {
+            username,
+            method,
+            insecure,
+        })
+        .unwrap()
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
 }

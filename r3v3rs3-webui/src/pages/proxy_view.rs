@@ -29,16 +29,7 @@ pub fn proxy_view(props: &Props) -> Html {
     let (proxies, _) = use_store::<ProxyStore>();
     let (session, _) = use_store::<SessionStore>();
     let can_edit = session.can_edit_proxies();
-    let site = use_state(|| proxies.entries.iter().find(|e| e.id == props.id).cloned());
-    let id = props.id;
-    let proxy_cloned = site.clone();
-    use_effect_with((), move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(entry) = get_site(id).await {
-                proxy_cloned.set(Some(entry));
-            }
-        });
-    });
+    let site = use_loaded_proxy(props.id, &proxies);
 
     let navigator = use_navigator().unwrap();
 
@@ -55,27 +46,7 @@ pub fn proxy_view(props: &Props) -> Html {
         });
 
     let is_loading = use_state(|| false);
-
-    let id = props.id;
-    let entry_cloned = entry.clone();
-    let is_loading_cloned = is_loading;
-    let onsubmit = Callback::from(move |event: SubmitEvent| {
-        event.prevent_default();
-        if *is_loading_cloned {
-            return;
-        }
-        let navigator = navigator.clone();
-        let is_loading_cloned = is_loading_cloned.clone();
-        if let Ok(entry) = (*entry_cloned).clone() {
-            is_loading_cloned.set(true);
-            wasm_bindgen_futures::spawn_local(async move {
-                if update_site(id, &entry).await.is_ok() {
-                    navigator.push(&Route::Proxies);
-                }
-                is_loading_cloned.set(false);
-            });
-        }
-    });
+    let onsubmit = submit_callback(props.id, entry.clone(), is_loading, navigator);
 
     html! {
         <>
@@ -106,6 +77,48 @@ pub fn proxy_view(props: &Props) -> Html {
             }
         </>
     }
+}
+
+/// The proxy of the id: the entry of the store first, then the entry that the admin API returns.
+#[hook]
+fn use_loaded_proxy(id: ShortId, proxies: &ProxyStore) -> UseStateHandle<Option<ProxyEntry>> {
+    let site = use_state(|| proxies.entries.iter().find(|e| e.id == id).cloned());
+    let site_cloned = site.clone();
+    use_effect_with((), move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Ok(entry) = get_site(id).await {
+                site_cloned.set(Some(entry));
+            }
+        });
+    });
+    site
+}
+
+/// Saves the proxy and returns to the proxy list. A submit during a save does nothing.
+fn submit_callback(
+    id: ShortId,
+    entry: UseStateHandle<Result<Proxy, HashMap<String, String>>>,
+    is_loading: UseStateHandle<bool>,
+    navigator: Navigator,
+) -> Callback<SubmitEvent> {
+    Callback::from(move |event: SubmitEvent| {
+        event.prevent_default();
+        if *is_loading {
+            return;
+        }
+        let Ok(entry) = (*entry).clone() else {
+            return;
+        };
+        let navigator = navigator.clone();
+        let is_loading = is_loading.clone();
+        is_loading.set(true);
+        wasm_bindgen_futures::spawn_local(async move {
+            if update_site(id, &entry).await.is_ok() {
+                navigator.push(&Route::Proxies);
+            }
+            is_loading.set(false);
+        });
+    })
 }
 
 async fn get_site(id: ShortId) -> Result<ProxyEntry, gloo_net::Error> {

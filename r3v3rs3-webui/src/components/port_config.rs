@@ -132,27 +132,12 @@ struct TlsFields {
     root_certs: UseStateHandle<Vec<CertInfo>>,
 }
 
-#[function_component(PortConfig)]
-pub fn port_config(props: &Props) -> Html {
-    let locale = use_locale();
-    let stack = &props.port.listen;
-    let tls = stack.is_tls();
-    let http = stack.is_http();
-    let udp = stack.is_udp();
-    let quic = stack.is_quic();
-    let interface = stack.host().unwrap();
-    let port = stack.port().unwrap();
-
-    let active = use_state(|| props.port.active);
-    let active_cloned = active.clone();
-    let active_onchange = Callback::from(move |event: Event| {
-        let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-        active_cloned.set(target.checked());
-    });
-
-    let interfaces = use_state(|| vec![interface.clone()]);
+/// Every local IP address, plus the two wildcard addresses and the address of the port.
+#[hook]
+fn use_interfaces(interface: &str) -> UseStateHandle<Vec<String>> {
+    let interfaces = use_state(|| vec![interface.to_string()]);
     let interfaces_cloned = interfaces.clone();
-    let interface_cloned = interface.clone();
+    let interface = interface.to_string();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
             if let Ok(entry) = get_interfaces().await {
@@ -165,58 +150,56 @@ pub fn port_config(props: &Props) -> Html {
                             .map(|addr| addr.ip.to_string()),
                     )
                     .collect::<Vec<_>>();
-                if !list.contains(&interface_cloned) {
-                    list.push(interface_cloned);
+                if !list.contains(&interface) {
+                    list.push(interface);
                 }
                 interfaces_cloned.set(list);
             }
         });
     });
+    interfaces
+}
 
-    let protocol = match (udp, tls, http, quic) {
+/// The protocol name of the listen address, as the form shows it.
+fn protocol_name(udp: bool, tls: bool, http: bool, quic: bool) -> &'static str {
+    match (udp, tls, http, quic) {
         (_, _, true, true) => "http3",
         (true, _, _, _) => "udp",
         (false, true, true, _) => "https",
         (false, true, false, _) => "tls",
         (false, false, true, _) => "http",
         (false, false, false, _) => "tcp",
-    };
+    }
+}
+
+#[function_component(PortConfig)]
+pub fn port_config(props: &Props) -> Html {
+    let locale = use_locale();
+    let stack = &props.port.listen;
+    let tls = stack.is_tls();
+    let http = stack.is_http();
+    let udp = stack.is_udp();
+    let quic = stack.is_quic();
+    let interface = stack.host().unwrap();
+    let port = stack.port().unwrap();
+
+    let active = use_state(|| props.port.active);
+    let active_onchange = checkbox_onchange(active.clone());
+
+    let interfaces = use_interfaces(&interface);
+    let protocol = protocol_name(udp, tls, http, quic);
 
     let name = use_state(|| props.port.name.clone());
-    let name_onchange = Callback::from({
-        let name = name.clone();
-        move |event: Event| {
-            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            name.set(target.value());
-        }
-    });
+    let name_onchange = input_onchange(name.clone());
 
     let protocol = use_state(|| protocol.to_string());
-    let protocol_onchange = Callback::from({
-        let protocol = protocol.clone();
-        move |event: Event| {
-            let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            protocol.set(target.value());
-        }
-    });
+    let protocol_onchange = select_onchange(protocol.clone());
 
     let interface = use_state(|| interface);
-    let interface_onchange = Callback::from({
-        let interface = interface.clone();
-        move |event: Event| {
-            let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            interface.set(target.value());
-        }
-    });
+    let interface_onchange = select_onchange(interface.clone());
 
     let port = use_state(|| port);
-    let port_onchange = Callback::from({
-        let port = port.clone();
-        move |event: Event| {
-            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-            port.set(target.value().parse().unwrap_or(1));
-        }
-    });
+    let port_onchange = port_onchange(port.clone());
 
     let tls_termination = props.port.opts.tls_termination.clone().unwrap_or_default();
     let tls_fields = use_tls_fields(&tls_termination);
@@ -237,10 +220,7 @@ pub fn port_config(props: &Props) -> Html {
     let prev_entry =
         use_state::<Result<Port, HashMap<String, String>>, _>(|| Err(Default::default()));
     let entry = get_port(locale, &form, &tls_termination);
-    if entry != *prev_entry {
-        prev_entry.set(entry.clone());
-        props.onchanged.emit(entry.clone());
-    }
+    emit_change(&props.onchanged, &prev_entry, &entry);
     let errors = entry.err().unwrap_or_default();
 
     html! {
@@ -256,11 +236,7 @@ pub fn port_config(props: &Props) -> Html {
 
             <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("ports.interface")}</label>
             <select onchange={interface_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
-                { interfaces.iter().map(|value| {
-                    html! {
-                        <option selected={&*interface == value} value={value.clone()}>{value}</option>
-                    }
-                }).collect::<Html>() }
+                { interface_options(&interfaces, &interface) }
             </select>
             { error_view(errors.get("interface")) }
 
@@ -269,20 +245,10 @@ pub fn port_config(props: &Props) -> Html {
 
             <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.protocol")}</label>
             <select onchange={protocol_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
-                { PROTOCOLS.iter().map(|(value, label)| {
-                    html! {
-                        <option selected={&*protocol == value} value={*value}>{protocol_label(locale, value, label)}</option>
-                    }
-                }).collect::<Html>() }
+                { protocol_options(locale, &protocol) }
             </select>
 
-            if is_tls_protocol(&protocol) {
-                { tls_view(locale, &tls_fields, &errors) }
-            }
-
-            if supports_proxy_protocol(&protocol) {
-                { proxy_protocol_view(locale, &proxy_protocol, &errors) }
-            }
+            { protocol_view(locale, &protocol, &tls_fields, &proxy_protocol, &errors) }
         </>
     }
 }
@@ -611,6 +577,92 @@ async fn get_interfaces() -> Result<Vec<NetworkInterface>, gloo_net::Error> {
         .await?
         .json()
         .await
+}
+
+fn interface_options(interfaces: &[String], selected: &str) -> Html {
+    interfaces
+        .iter()
+        .map(|value| {
+            html! {
+                <option selected={selected == value} value={value.clone()}>{value}</option>
+            }
+        })
+        .collect()
+}
+
+fn protocol_options(locale: Locale, selected: &str) -> Html {
+    PROTOCOLS
+        .iter()
+        .map(|(value, label)| {
+            html! {
+                <option selected={selected == *value} value={*value}>{protocol_label(locale, value, label)}</option>
+            }
+        })
+        .collect()
+}
+
+/// Emits the entry when it differs from the entry of the last render.
+fn emit_change(
+    onchanged: &Callback<Result<Port, HashMap<String, String>>>,
+    prev_entry: &UseStateHandle<Result<Port, HashMap<String, String>>>,
+    entry: &Result<Port, HashMap<String, String>>,
+) {
+    if *entry != **prev_entry {
+        prev_entry.set(entry.clone());
+        onchanged.emit(entry.clone());
+    }
+}
+
+/// The fields of the protocol: the TLS fields and the PROXY protocol fields.
+fn protocol_view(
+    locale: Locale,
+    protocol: &str,
+    tls_fields: &TlsFields,
+    proxy_protocol: &UseStateHandle<ProxyProtocolForm>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    html! {
+        <>
+            if is_tls_protocol(protocol) {
+                { tls_view(locale, tls_fields, errors) }
+            }
+            if supports_proxy_protocol(protocol) {
+                { proxy_protocol_view(locale, proxy_protocol, errors) }
+            }
+        </>
+    }
+}
+
+/// Writes the checked state of a checkbox to the state handle.
+fn checkbox_onchange(state: UseStateHandle<bool>) -> Callback<Event> {
+    Callback::from(move |event: Event| {
+        let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        state.set(target.checked());
+    })
+}
+
+/// Writes the value of a text input to the state handle.
+fn input_onchange(state: UseStateHandle<String>) -> Callback<Event> {
+    Callback::from(move |event: Event| {
+        let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        state.set(target.value());
+    })
+}
+
+/// Writes the value of a select to the state handle.
+fn select_onchange(state: UseStateHandle<String>) -> Callback<Event> {
+    Callback::from(move |event: Event| {
+        let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        state.set(target.value());
+    })
+}
+
+/// Writes the port number of a text input to the state handle. An invalid number becomes 1.
+fn port_onchange(state: UseStateHandle<u16>) -> Callback<Event> {
+    Callback::from(move |event: Event| {
+        let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        state.set(target.value().parse().unwrap_or(1));
+    })
 }
 
 #[cfg(test)]

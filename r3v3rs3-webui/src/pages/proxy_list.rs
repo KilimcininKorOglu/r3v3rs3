@@ -118,75 +118,24 @@ fn proxy_row(
 ) -> Row {
     let id = entry.id;
 
-    let navigator_cloned = navigator.clone();
-    let log_onclick = Callback::from(move |_| {
-        navigator_cloned.push(&Route::ProxyLogView { id });
-    });
-
-    let navigator_cloned = navigator.clone();
-    let config_onclick = Callback::from(move |_| {
-        navigator_cloned.push(&Route::ProxyView { id });
-    });
-
-    let delete_onclick = Callback::from(move |e: MouseEvent| {
-        e.prevent_default();
-        if gloo_dialogs::confirm(&locale.tf("common.confirm_delete", &[("id", &id.to_string())])) {
-            wasm_bindgen_futures::spawn_local(async move {
-                let _ = delete_site(id).await;
-            });
-        }
-    });
-
+    let log_onclick = route_onclick(navigator, Route::ProxyLogView { id });
+    let config_onclick = route_onclick(navigator, Route::ProxyView { id });
+    let delete_onclick = delete_onclick(locale, id);
     let cache_enabled = matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.cache.enabled);
-    let purge_onclick = Callback::from(move |e: MouseEvent| {
-        e.prevent_default();
-        if gloo_dialogs::confirm(&locale.tf("proxies.confirm_purge", &[("id", &id.to_string())])) {
-            wasm_bindgen_futures::spawn_local(async move {
-                match purge_cache(id).await {
-                    Ok(()) => gloo_dialogs::alert(locale.t("proxies.purged")),
-                    Err(err) => gloo_dialogs::alert(
-                        &locale.tf("proxies.purge_failed", &[("error", &err.to_string())]),
-                    ),
-                }
-            });
-        }
-    });
+    let purge_onclick = purge_onclick(locale, id);
+    let onchange = toggle_onchange(id);
+    let port_names = port_names(entry, ports);
 
-    let onchange = Callback::from(move |_: Event| {
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = toggle_proxy(id).await;
-        });
-    });
-
-    let port_names = entry
-        .proxy
-        .ports
-        .iter()
-        .filter_map(|port| ports.entries.iter().find(|p| p.id == *port))
-        .map(|entry| {
-            let addr = entry
-                .port
-                .listen
-                .socket_addr()
-                .map(|addr| addr.to_string())
-                .unwrap_or_default();
-            format!("{}/{}", entry.port.listen.protocol_name(), addr)
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let title = if entry.proxy.name.is_empty() {
-        id.to_string()
-    } else {
-        entry.proxy.name.clone()
+    let title = match entry.proxy.name.is_empty() {
+        true => id.to_string(),
+        false => entry.proxy.name.clone(),
     };
 
     let status = proxies.statuses.get(&id).cloned().unwrap_or_default();
     let read_only = entry.is_discovered() || !can_edit;
-    let config_label = if read_only {
-        "common.view"
-    } else {
-        "common.edit"
+    let config_label = match read_only {
+        true => "common.view",
+        false => "common.edit",
     };
 
     Row {
@@ -211,6 +160,70 @@ fn proxy_row(
             </>
         },
     }
+}
+
+fn route_onclick(navigator: &Navigator, route: Route) -> Callback<MouseEvent> {
+    let navigator = navigator.clone();
+    Callback::from(move |_| {
+        navigator.push(&route);
+    })
+}
+
+/// Deletes the proxy after the confirmation of the account.
+fn delete_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
+    Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        if gloo_dialogs::confirm(&locale.tf("common.confirm_delete", &[("id", &id.to_string())])) {
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = delete_site(id).await;
+            });
+        }
+    })
+}
+
+/// Purges the cache of the proxy after the confirmation of the account.
+fn purge_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
+    Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        if gloo_dialogs::confirm(&locale.tf("proxies.confirm_purge", &[("id", &id.to_string())])) {
+            wasm_bindgen_futures::spawn_local(async move {
+                match purge_cache(id).await {
+                    Ok(()) => gloo_dialogs::alert(locale.t("proxies.purged")),
+                    Err(err) => gloo_dialogs::alert(
+                        &locale.tf("proxies.purge_failed", &[("error", &err.to_string())]),
+                    ),
+                }
+            });
+        }
+    })
+}
+
+fn toggle_onchange(id: ShortId) -> Callback<Event> {
+    Callback::from(move |_: Event| {
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = toggle_proxy(id).await;
+        });
+    })
+}
+
+/// The protocol and the address of every port of the proxy.
+fn port_names(entry: &ProxyEntry, ports: &PortStore) -> String {
+    entry
+        .proxy
+        .ports
+        .iter()
+        .filter_map(|port| ports.entries.iter().find(|p| p.id == *port))
+        .map(|entry| {
+            let addr = entry
+                .port
+                .listen
+                .socket_addr()
+                .map(|addr| addr.to_string())
+                .unwrap_or_default();
+            format!("{}/{}", entry.port.listen.protocol_name(), addr)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The source of the proxy. The title names the resource of a discovered proxy.

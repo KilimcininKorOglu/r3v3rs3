@@ -159,30 +159,14 @@ pub fn cert_list() -> Html {
     let selected = use_state(HashSet::<ShortId>::new);
     let notice = use_state(|| Option::<Result<String, String>>::None);
 
-    use_effect_with((), move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(res) = get_cert_list().await {
-                certs_dispatcher.set(CertStore {
-                    entries: res,
-                    loaded: true,
-                });
-            }
-            if let Ok(res) = get_acme_list().await {
-                acme_dispatcher.set(AcmeStore {
-                    entries: res,
-                    loaded: true,
-                });
-            }
-        });
-    });
+    use_cert_lists(certs_dispatcher, acme_dispatcher);
 
     let navigator = use_navigator().unwrap();
 
     let navigator_cloned = navigator.clone();
-    let self_sign_kind = if *tab == CertsTab::Client {
-        SelfSignedCertKind::Client
-    } else {
-        SelfSignedCertKind::Server
+    let self_sign_kind = match *tab == CertsTab::Client {
+        true => SelfSignedCertKind::Client,
+        false => SelfSignedCertKind::Server,
     };
     let self_sign_onclick = Callback::from(move |_| {
         let _ = navigator_cloned.push_with_query(
@@ -218,36 +202,18 @@ pub fn cert_list() -> Html {
         .filter(|id| selected.contains(id))
         .collect::<Vec<_>>();
     let delete_selected = delete_selected_onclick(locale, chosen.clone(), &selected, &notice);
-    let body = match *tab {
-        CertsTab::Server | CertsTab::Client => {
-            let rows = cert_list
-                .iter()
-                .map(|entry| {
-                    let select = select_box(locale, entry, &selected, can_edit);
-                    server_row(locale, entry, can_edit, warning, select)
-                })
-                .collect::<Vec<_>>();
-            list_card(locale, certs.loaded, EMPTY_LIST, &SERVER_COLUMNS, &rows)
-        }
-        CertsTab::Root => {
-            let rows = cert_list
-                .iter()
-                .map(|entry| {
-                    let select = select_box(locale, entry, &selected, can_edit);
-                    root_row(locale, entry, can_edit, warning, select)
-                })
-                .collect::<Vec<_>>();
-            list_card(locale, certs.loaded, EMPTY_LIST, &ROOT_COLUMNS, &rows)
-        }
-        CertsTab::Acme => {
-            let rows = acme
-                .entries
-                .iter()
-                .map(|entry| acme_row(locale, entry, &navigator, can_edit))
-                .collect::<Vec<_>>();
-            list_card(locale, acme.loaded, EMPTY_LIST, &ACME_COLUMNS, &rows)
-        }
-    };
+    let body = body_view(
+        locale,
+        *tab,
+        &CertLists {
+            certs: &certs,
+            acme: &acme,
+            filtered: &cert_list,
+        },
+        &selected,
+        &navigator,
+        CertRowOpts { can_edit, warning },
+    );
 
     let active_index = use_state(|| -1);
     html! {
@@ -255,31 +221,7 @@ pub fn cert_list() -> Html {
         <div class="flex flex-col mb-4 lg:float-left">
             <div class="text-sm font-medium text-center text-neutral-500 dark:text-neutral-300">
                 <ul class="flex overflow-x-auto lg:flex-col lg:w-48 lg:mr-2 -mb-px">
-                    { TABS.into_iter().map(|item| {
-                        let navigator = navigator.clone();
-                        let active_index = active_index.clone();
-                        let is_active = item == *tab;
-                        let tab = tab.clone();
-                        let selected = selected.clone();
-                        let notice = notice.clone();
-                        let onclick = Callback::from(move |_|  {
-                            tab.set(item);
-                            active_index.set(-1);
-                            selected.set(HashSet::new());
-                            notice.set(None);
-                            let _ = navigator.push_with_query(&Route::Certs, &CertsQuery { tab: item });
-                        });
-                        let class = if is_active {
-                            vec!["bg-neutral-100", "dark:bg-neutral-800", "text-neutral-600", "dark:text-neutral-200", "dark:text-neutral-100", "active"]
-                        } else {
-                            vec!["border-transparent", "dark:border-transparent"]
-                        };
-                        html! {
-                            <li class="mr-2 shrink-0 lg:mr-0">
-                                <a {onclick} class={classes!("inline-block", "cursor-pointer", "border-2", "border-neutral-400", "px-4", "py-2", "rounded-md", "hover:bg-neutral-100", "dark:hover:bg-neutral-800", "whitespace-nowrap", "w-full", "lg:py-3", "lg:mb-2", class)}>{locale.t(item.label_key())}</a>
-                            </li>
-                        }
-                    }).collect::<Html>() }
+                    { tabs_view(locale, &navigator, &TabStates { tab: tab.clone(), selected: selected.clone(), notice: notice.clone(), active_index: active_index.clone() }) }
 
                 </ul>
             </div>
@@ -318,6 +260,149 @@ pub fn cert_list() -> Html {
             </div>
             }
         </>
+    }
+}
+
+/// Loads the certificates and the ACME requests into the stores.
+#[hook]
+fn use_cert_lists(certs: Dispatch<CertStore>, acme: Dispatch<AcmeStore>) {
+    use_effect_with((), move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Ok(res) = get_cert_list().await {
+                certs.set(CertStore {
+                    entries: res,
+                    loaded: true,
+                });
+            }
+            if let Ok(res) = get_acme_list().await {
+                acme.set(AcmeStore {
+                    entries: res,
+                    loaded: true,
+                });
+            }
+        });
+    });
+}
+
+/// The entries of the tabs. `filtered` holds the certificates of the open tab.
+struct CertLists<'a> {
+    certs: &'a CertStore,
+    acme: &'a AcmeStore,
+    filtered: &'a [&'a CertInfo],
+}
+
+/// The options that every row of the list shares.
+#[derive(Clone, Copy)]
+struct CertRowOpts {
+    can_edit: bool,
+    /// The period before the expiry that marks a certificate as expiring.
+    warning: Duration,
+}
+
+/// The list of the open tab.
+fn body_view(
+    locale: Locale,
+    tab: CertsTab,
+    lists: &CertLists<'_>,
+    selected: &UseStateHandle<HashSet<ShortId>>,
+    navigator: &Navigator,
+    opts: CertRowOpts,
+) -> Html {
+    match tab {
+        CertsTab::Server | CertsTab::Client => {
+            let rows = cert_rows(locale, lists.filtered, selected, opts, server_row);
+            list_card(
+                locale,
+                lists.certs.loaded,
+                EMPTY_LIST,
+                &SERVER_COLUMNS,
+                &rows,
+            )
+        }
+        CertsTab::Root => {
+            let rows = cert_rows(locale, lists.filtered, selected, opts, root_row);
+            list_card(locale, lists.certs.loaded, EMPTY_LIST, &ROOT_COLUMNS, &rows)
+        }
+        CertsTab::Acme => {
+            let rows = lists
+                .acme
+                .entries
+                .iter()
+                .map(|entry| acme_row(locale, entry, navigator, opts.can_edit))
+                .collect::<Vec<_>>();
+            list_card(locale, lists.acme.loaded, EMPTY_LIST, &ACME_COLUMNS, &rows)
+        }
+    }
+}
+
+/// The rows of the certificates, each with its selection box.
+fn cert_rows(
+    locale: Locale,
+    entries: &[&CertInfo],
+    selected: &UseStateHandle<HashSet<ShortId>>,
+    opts: CertRowOpts,
+    row: fn(Locale, &CertInfo, bool, Duration, Html) -> Row,
+) -> Vec<Row> {
+    entries
+        .iter()
+        .map(|entry| {
+            let select = select_box(locale, entry, selected, opts.can_edit);
+            row(locale, entry, opts.can_edit, opts.warning, select)
+        })
+        .collect()
+}
+
+/// The states that a tab change resets.
+struct TabStates {
+    tab: UseStateHandle<CertsTab>,
+    selected: UseStateHandle<HashSet<ShortId>>,
+    notice: UseStateHandle<Option<Result<String, String>>>,
+    active_index: UseStateHandle<i32>,
+}
+
+impl TabStates {
+    /// Opens the tab and resets the selection, the notice and the open menu.
+    fn onclick(&self, navigator: &Navigator, item: CertsTab) -> Callback<MouseEvent> {
+        let navigator = navigator.clone();
+        let tab = self.tab.clone();
+        let active_index = self.active_index.clone();
+        let selected = self.selected.clone();
+        let notice = self.notice.clone();
+        Callback::from(move |_| {
+            tab.set(item);
+            active_index.set(-1);
+            selected.set(HashSet::new());
+            notice.set(None);
+            let _ = navigator.push_with_query(&Route::Certs, &CertsQuery { tab: item });
+        })
+    }
+}
+
+fn tabs_view(locale: Locale, navigator: &Navigator, states: &TabStates) -> Html {
+    TABS.into_iter()
+        .map(|item| {
+            let onclick = states.onclick(navigator, item);
+            let class = tab_class(item == *states.tab);
+            html! {
+                <li class="mr-2 shrink-0 lg:mr-0">
+                    <a {onclick} class={classes!("inline-block", "cursor-pointer", "border-2", "border-neutral-400", "px-4", "py-2", "rounded-md", "hover:bg-neutral-100", "dark:hover:bg-neutral-800", "whitespace-nowrap", "w-full", "lg:py-3", "lg:mb-2", class)}>{locale.t(item.label_key())}</a>
+                </li>
+            }
+        })
+        .collect()
+}
+
+fn tab_class(is_active: bool) -> Vec<&'static str> {
+    match is_active {
+        true => vec![
+            "bg-neutral-100",
+            "dark:bg-neutral-800",
+            "text-neutral-600",
+            "dark:text-neutral-200",
+            "dark:text-neutral-100",
+            "active",
+        ],
+        false => vec!["border-transparent", "dark:border-transparent"],
     }
 }
 

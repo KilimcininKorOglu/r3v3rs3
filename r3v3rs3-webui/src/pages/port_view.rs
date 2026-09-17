@@ -30,16 +30,7 @@ pub fn port_view(props: &Props) -> Html {
     let (ports, _) = use_store::<PortStore>();
     let (session, _) = use_store::<SessionStore>();
     let can_edit = session.can_edit();
-    let port = use_state(|| ports.entries.iter().find(|e| e.id == props.id).cloned());
-    let id = props.id;
-    let port_cloned = port.clone();
-    use_effect_with((), move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(entry) = get_port(id).await {
-                port_cloned.set(Some(entry));
-            }
-        });
-    });
+    let port = use_loaded_port(props.id, &ports);
 
     let navigator = use_navigator().unwrap();
 
@@ -56,27 +47,7 @@ pub fn port_view(props: &Props) -> Html {
         });
 
     let is_loading = use_state(|| false);
-
-    let id = props.id;
-    let entry_cloned = entry.clone();
-    let is_loading_cloned = is_loading;
-    let onsubmit = Callback::from(move |event: SubmitEvent| {
-        event.prevent_default();
-        if *is_loading_cloned {
-            return;
-        }
-        let navigator = navigator.clone();
-        let is_loading_cloned = is_loading_cloned.clone();
-        if let Ok(entry) = (*entry_cloned).clone() {
-            is_loading_cloned.set(true);
-            wasm_bindgen_futures::spawn_local(async move {
-                if update_port(id, &entry).await.is_ok() {
-                    navigator.push(&Route::Ports);
-                }
-                is_loading_cloned.set(false);
-            });
-        }
-    });
+    let onsubmit = submit_callback(props.id, entry.clone(), is_loading, navigator);
 
     html! {
         <>
@@ -102,6 +73,48 @@ pub fn port_view(props: &Props) -> Html {
             }
         </>
     }
+}
+
+/// The port of the id: the entry of the store first, then the entry that the admin API returns.
+#[hook]
+fn use_loaded_port(id: ShortId, ports: &PortStore) -> UseStateHandle<Option<PortEntry>> {
+    let port = use_state(|| ports.entries.iter().find(|e| e.id == id).cloned());
+    let port_cloned = port.clone();
+    use_effect_with((), move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Ok(entry) = get_port(id).await {
+                port_cloned.set(Some(entry));
+            }
+        });
+    });
+    port
+}
+
+/// Saves the port and returns to the port list. A submit during a save does nothing.
+fn submit_callback(
+    id: ShortId,
+    entry: UseStateHandle<Result<Port, HashMap<String, String>>>,
+    is_loading: UseStateHandle<bool>,
+    navigator: Navigator,
+) -> Callback<SubmitEvent> {
+    Callback::from(move |event: SubmitEvent| {
+        event.prevent_default();
+        if *is_loading {
+            return;
+        }
+        let Ok(entry) = (*entry).clone() else {
+            return;
+        };
+        let navigator = navigator.clone();
+        let is_loading = is_loading.clone();
+        is_loading.set(true);
+        wasm_bindgen_futures::spawn_local(async move {
+            if update_port(id, &entry).await.is_ok() {
+                navigator.push(&Route::Ports);
+            }
+            is_loading.set(false);
+        });
+    })
 }
 
 async fn get_port(id: ShortId) -> Result<PortEntry, gloo_net::Error> {

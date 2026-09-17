@@ -44,20 +44,7 @@ pub struct Props {
 #[function_component(ProxyConfig)]
 pub fn proxy_config(props: &Props) -> Html {
     let locale = use_locale();
-    let (ports, dispatcher) = use_store::<PortStore>();
-
-    let ports_cloned = ports.clone();
-    use_effect_with((), move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(res) = get_ports().await {
-                dispatcher.set(PortStore {
-                    entries: res,
-                    loaded: true,
-                    ..(*ports_cloned).clone()
-                });
-            }
-        });
-    });
+    let ports = use_ports();
 
     let active = use_state(|| props.proxy.active);
     let active_cloned = active.clone();
@@ -75,15 +62,7 @@ pub fn proxy_config(props: &Props) -> Html {
         }
     });
 
-    let protocol = use_state(|| {
-        if matches!(props.proxy.kind, ProxyKind::Http(_)) {
-            ProxyProtocol::Http
-        } else if matches!(props.proxy.kind, ProxyKind::Tcp(_)) {
-            ProxyProtocol::Tcp
-        } else {
-            ProxyProtocol::Udp
-        }
-    });
+    let protocol = use_state(|| protocol_of(&props.proxy.kind));
     let protocol_onchange = Callback::from({
         let protocol = protocol.clone();
         move |event: Event| {
@@ -96,43 +75,12 @@ pub fn proxy_config(props: &Props) -> Html {
 
     let bound_ports = use_state(|| props.proxy.ports.clone());
 
-    let http_proxy = use_state::<Result<ProxyKind, HashMap<String, String>>, _>(|| {
-        Ok(ProxyKind::Http(Default::default()))
-    });
-    let http_proxy_cloned = http_proxy.clone();
-    let http_proxy_onchanged: Callback<Result<HttpProxy, HashMap<String, String>>> =
-        Callback::from(move |updated: Result<HttpProxy, HashMap<String, String>>| {
-            http_proxy_cloned.set(updated.map(|http| ProxyKind::Http(Box::new(http))));
-        });
+    let kinds = use_kind_states();
+    let http_proxy_onchanged = kinds.http_callback();
+    let tcp_proxy_onchanged = kinds.tcp_callback();
+    let udp_proxy_onchanged = kinds.udp_callback();
 
-    let tcp_proxy = use_state::<Result<ProxyKind, HashMap<String, String>>, _>(|| {
-        Ok(ProxyKind::Http(Default::default()))
-    });
-    let tcp_proxy_cloned = tcp_proxy.clone();
-    let tcp_proxy_onchanged: Callback<Result<TcpProxy, HashMap<String, String>>> =
-        Callback::from(move |updated: Result<TcpProxy, HashMap<String, String>>| {
-            tcp_proxy_cloned.set(updated.map(ProxyKind::Tcp));
-        });
-
-    let udp_proxy = use_state::<Result<ProxyKind, HashMap<String, String>>, _>(|| {
-        Ok(ProxyKind::Udp(Default::default()))
-    });
-    let udp_proxy_cloned = udp_proxy.clone();
-    let udp_proxy_onchanged: Callback<Result<UdpProxy, HashMap<String, String>>> =
-        Callback::from(move |updated: Result<UdpProxy, HashMap<String, String>>| {
-            udp_proxy_cloned.set(updated.map(ProxyKind::Udp));
-        });
-
-    let compatible_ports = ports
-        .entries
-        .clone()
-        .into_iter()
-        .filter(|entry| match *protocol {
-            ProxyProtocol::Http => entry.port.listen.is_http(),
-            ProxyProtocol::Tcp => !entry.port.listen.is_udp() && !entry.port.listen.is_http(),
-            ProxyProtocol::Udp => entry.port.listen.is_udp() && !entry.port.listen.is_http(),
-        })
-        .collect::<Vec<_>>();
+    let compatible_ports = compatible_ports(&ports.entries, *protocol);
 
     let prev_entry =
         use_state::<Result<Proxy, HashMap<String, String>>, _>(|| Err(Default::default()));
@@ -140,11 +88,7 @@ pub fn proxy_config(props: &Props) -> Html {
         *active,
         &name,
         &bound_ports,
-        match *protocol {
-            ProxyProtocol::Http => &http_proxy,
-            ProxyProtocol::Tcp => &tcp_proxy,
-            ProxyProtocol::Udp => &udp_proxy,
-        },
+        kinds.of(*protocol),
         &compatible_ports,
     );
 
@@ -153,23 +97,9 @@ pub fn proxy_config(props: &Props) -> Html {
         props.onchanged.emit(entry);
     }
 
-    let http_proxy = if let ProxyKind::Http(http_proxy) = &props.proxy.kind {
-        HttpProxy::clone(http_proxy)
-    } else {
-        Default::default()
-    };
-
-    let tcp_proxy = if let ProxyKind::Tcp(tcp_proxy) = &props.proxy.kind {
-        tcp_proxy.clone()
-    } else {
-        Default::default()
-    };
-
-    let udp_proxy = if let ProxyKind::Udp(udp_proxy) = &props.proxy.kind {
-        udp_proxy.clone()
-    } else {
-        Default::default()
-    };
+    let http_proxy = http_proxy_of(&props.proxy.kind);
+    let tcp_proxy = tcp_proxy_of(&props.proxy.kind);
+    let udp_proxy = udp_proxy_of(&props.proxy.kind);
 
     html! {
         <>
@@ -193,30 +123,7 @@ pub fn proxy_config(props: &Props) -> Html {
 
             <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.ports")}</label>
             <ul class="h-32 pb-3 overflow-y-auto text-sm text-neutral-700 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 rounded-lg">
-                { compatible_ports.into_iter().map(|entry| {
-                    let bound_ports_cloned = bound_ports.clone();
-                    let onchange = Callback::from(move |event: Event| {
-                        let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-                        let mut ports = (*bound_ports_cloned).clone();
-                        if target.checked() {
-                            if !ports.contains(&entry.id) {
-                                ports.push(entry.id);
-                            }
-                        } else {
-                            ports.retain(|&id| id != entry.id);
-                        }
-                        bound_ports_cloned.set(ports);
-                    });
-                    let bound_ports_cloned = bound_ports.clone();
-                    html! {
-                        <li>
-                            <div class="flex items-center pl-2 rounded hover:bg-neutral-100 dark:hover:bg-neutral-900">
-                                <input {onchange} id={entry.id.to_string()} type="checkbox" checked={bound_ports_cloned.contains(&entry.id)} class="w-4 h-4 text-blue-600 bg-neutral-100 border-neutral-300 dark:bg-neutral-700 dark:border-neutral-600 rounded focus:ring-blue-500 focus:ring-2" />
-                                <label for={entry.id.to_string()} class="w-full py-2 ml-2 text-sm font-medium text-neutral-900 dark:text-neutral-200 rounded">{entry.port.listen.to_string()}</label>
-                            </div>
-                        </li>
-                    }
-                }).collect::<Html>() }
+                { compatible_ports.into_iter().map(|entry| port_item(entry, &bound_ports)).collect::<Html>() }
             </ul>
 
             if *protocol == ProxyProtocol::Http {
@@ -227,6 +134,145 @@ pub fn proxy_config(props: &Props) -> Html {
                 <UdpProxyConfig onchanged={udp_proxy_onchanged} proxy={udp_proxy} />
             }
         </>
+    }
+}
+
+type KindResult = Result<ProxyKind, HashMap<String, String>>;
+
+/// The edited proxy of each protocol. The form keeps all three, so a protocol change does not lose
+/// the values of the other two.
+struct KindStates {
+    http: UseStateHandle<KindResult>,
+    tcp: UseStateHandle<KindResult>,
+    udp: UseStateHandle<KindResult>,
+}
+
+#[hook]
+fn use_kind_states() -> KindStates {
+    KindStates {
+        http: use_state::<KindResult, _>(|| Ok(ProxyKind::Http(Default::default()))),
+        tcp: use_state::<KindResult, _>(|| Ok(ProxyKind::Tcp(Default::default()))),
+        udp: use_state::<KindResult, _>(|| Ok(ProxyKind::Udp(Default::default()))),
+    }
+}
+
+impl KindStates {
+    fn of(&self, protocol: ProxyProtocol) -> &KindResult {
+        match protocol {
+            ProxyProtocol::Http => &self.http,
+            ProxyProtocol::Tcp => &self.tcp,
+            ProxyProtocol::Udp => &self.udp,
+        }
+    }
+
+    fn http_callback(&self) -> Callback<Result<HttpProxy, HashMap<String, String>>> {
+        let state = self.http.clone();
+        Callback::from(move |updated: Result<HttpProxy, HashMap<String, String>>| {
+            state.set(updated.map(|http| ProxyKind::Http(Box::new(http))));
+        })
+    }
+
+    fn tcp_callback(&self) -> Callback<Result<TcpProxy, HashMap<String, String>>> {
+        let state = self.tcp.clone();
+        Callback::from(move |updated: Result<TcpProxy, HashMap<String, String>>| {
+            state.set(updated.map(ProxyKind::Tcp));
+        })
+    }
+
+    fn udp_callback(&self) -> Callback<Result<UdpProxy, HashMap<String, String>>> {
+        let state = self.udp.clone();
+        Callback::from(move |updated: Result<UdpProxy, HashMap<String, String>>| {
+            state.set(updated.map(ProxyKind::Udp));
+        })
+    }
+}
+
+/// Loads the ports once and returns the store that holds them.
+#[hook]
+fn use_ports() -> std::rc::Rc<PortStore> {
+    let (ports, dispatcher) = use_store::<PortStore>();
+    let ports_cloned = ports.clone();
+    use_effect_with((), move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Ok(res) = get_ports().await {
+                dispatcher.set(PortStore {
+                    entries: res,
+                    loaded: true,
+                    ..(*ports_cloned).clone()
+                });
+            }
+        });
+    });
+    ports
+}
+
+fn protocol_of(kind: &ProxyKind) -> ProxyProtocol {
+    match kind {
+        ProxyKind::Http(_) => ProxyProtocol::Http,
+        ProxyKind::Tcp(_) => ProxyProtocol::Tcp,
+        ProxyKind::Udp(_) => ProxyProtocol::Udp,
+    }
+}
+
+/// The ports that can carry a proxy of the protocol.
+fn compatible_ports(entries: &[PortEntry], protocol: ProxyProtocol) -> Vec<PortEntry> {
+    entries
+        .iter()
+        .filter(|entry| match protocol {
+            ProxyProtocol::Http => entry.port.listen.is_http(),
+            ProxyProtocol::Tcp => !entry.port.listen.is_udp() && !entry.port.listen.is_http(),
+            ProxyProtocol::Udp => entry.port.listen.is_udp() && !entry.port.listen.is_http(),
+        })
+        .cloned()
+        .collect()
+}
+
+fn http_proxy_of(kind: &ProxyKind) -> HttpProxy {
+    match kind {
+        ProxyKind::Http(http_proxy) => HttpProxy::clone(http_proxy),
+        _ => Default::default(),
+    }
+}
+
+fn tcp_proxy_of(kind: &ProxyKind) -> TcpProxy {
+    match kind {
+        ProxyKind::Tcp(tcp_proxy) => tcp_proxy.clone(),
+        _ => Default::default(),
+    }
+}
+
+fn udp_proxy_of(kind: &ProxyKind) -> UdpProxy {
+    match kind {
+        ProxyKind::Udp(udp_proxy) => udp_proxy.clone(),
+        _ => Default::default(),
+    }
+}
+
+/// One checkbox of the port list. It adds the port to the bound ports or removes it.
+fn port_item(entry: PortEntry, bound_ports: &UseStateHandle<Vec<ShortId>>) -> Html {
+    let id = entry.id;
+    let onchange = {
+        let bound_ports = bound_ports.clone();
+        Callback::from(move |event: Event| {
+            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+            let mut ports = (*bound_ports).clone();
+            if target.checked() {
+                if !ports.contains(&id) {
+                    ports.push(id);
+                }
+            } else {
+                ports.retain(|&bound| bound != id);
+            }
+            bound_ports.set(ports);
+        })
+    };
+    html! {
+        <li>
+            <div class="flex items-center pl-2 rounded hover:bg-neutral-100 dark:hover:bg-neutral-900">
+                <input {onchange} id={id.to_string()} type="checkbox" checked={bound_ports.contains(&id)} class="w-4 h-4 text-blue-600 bg-neutral-100 border-neutral-300 dark:bg-neutral-700 dark:border-neutral-600 rounded focus:ring-blue-500 focus:ring-2" />
+                <label for={id.to_string()} class="w-full py-2 ml-2 text-sm font-medium text-neutral-900 dark:text-neutral-200 rounded">{entry.port.listen.to_string()}</label>
+            </div>
+        </li>
     }
 }
 
