@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-09-17
+
+### Added
+- Tutorials for load balancing and health checks, the admin API, Consul and etcd service discovery, team accounts, forward auth, and migration from nginx or Traefik.
+- A WebSocket and gRPC section in the load balancing tutorial, and an HTTP/3 section in the HTTPS tutorial.
+- Install tutorials for a Linux server and for Docker, and tutorials for Docker service discovery, wildcard certificates, application protection, caching and compression, TCP and UDP proxies, Kubernetes and high availability.
+- The upstream DNS resolver setting, DNS SRV server URLs for HTTP routes, and the SRV resolution state in the proxy status.
+- A Linux server installer script and a docker compose file.
+
+### Changed
+- The step by step guides live under a Tutorials section of the documentation site.
+- The author email address of the crates is `k@keremgok.tr`.
+
+### Fixed
+- `add-user` replaces an account that the cluster store already has.
+
 ## [1.0.1] - 2026-09-15
 
 ### Changed

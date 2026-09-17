@@ -1,9 +1,9 @@
 [package]
 name = "r3v3rs3-api"
 description = "Type definitions and API for r3v3rs3"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
-authors = ["picoHz <picoHz@outlook.com>", "KilimcininKorOglu"]
+authors = ["picoHz <picoHz@outlook.com>", "KilimcininKorOglu <k@keremgok.tr>"]
 keywords = ["tcp", "http", "tls", "proxy", "reverse-proxy"]
 categories = [
     "network-programming",
