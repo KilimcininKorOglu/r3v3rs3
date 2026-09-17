@@ -1126,6 +1126,28 @@ async fn get_cdn_status() -> Result<CdnStatus, gloo_net::Error> {
         .await
 }
 
+async fn refresh_cdn_ranges(locale: Locale) -> Result<CdnStatus, String> {
+    fetch_json(
+        locale,
+        Request::post(&format!("{API_ENDPOINT}/cdn/refresh")),
+    )
+    .await
+}
+
+/// Sends a request without a body and reads the JSON of the response. A failed request gives the
+/// message of the admin API error.
+pub async fn fetch_json<T: DeserializeOwned>(
+    locale: Locale,
+    request: gloo_net::http::RequestBuilder,
+) -> Result<T, String> {
+    let request = request.build().map_err(|err| err.to_string())?;
+    send_request(locale, request)
+        .await?
+        .json()
+        .await
+        .map_err(|err| err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1332,26 +1354,4 @@ mod tests {
             Some(Locale::En.t("settings.invalid_endpoint"))
         );
     }
-}
-
-async fn refresh_cdn_ranges(locale: Locale) -> Result<CdnStatus, String> {
-    fetch_json(
-        locale,
-        Request::post(&format!("{API_ENDPOINT}/cdn/refresh")),
-    )
-    .await
-}
-
-/// Sends a request without a body and reads the JSON of the response. A failed request gives the
-/// message of the admin API error.
-pub async fn fetch_json<T: DeserializeOwned>(
-    locale: Locale,
-    request: gloo_net::http::RequestBuilder,
-) -> Result<T, String> {
-    let request = request.build().map_err(|err| err.to_string())?;
-    send_request(locale, request)
-        .await?
-        .json()
-        .await
-        .map_err(|err| err.to_string())
 }
