@@ -1,7 +1,7 @@
 +++
 title = "Kubernetes'te r3v3rs3"
 description = "r3v3rs3'ü cluster içinde çalıştırın, proxy'leri Ingress ve R3v3rs3Proxy ile tanımlayın"
-weight = 8
+weight = 10
 +++
 
 # Kubernetes'te r3v3rs3

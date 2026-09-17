@@ -1,7 +1,7 @@
 +++
 title = "Getting Started"
 description = "From the first account to your first working proxy"
-weight = 1
+weight = 3
 +++
 
 # Getting Started

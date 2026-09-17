@@ -1,7 +1,7 @@
 +++
 title = "TCP and UDP Proxies"
 description = "Publish a database over TCP and a DNS server over UDP, with mutual TLS"
-weight = 7
+weight = 9
 +++
 
 # TCP and UDP Proxies

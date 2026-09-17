@@ -52,17 +52,11 @@ r3v3rs3'ü birkaç yolla kurabilirsiniz.
 curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-Script, yönetim paneli WebUI adresini sorar. Varsayılan adres `127.0.0.1:46492`. Belirli bir release kurmak veya soruyu atlamak için seçenekleri verin:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --version 1.0.1 --webui 0.0.0.0:46492
-```
-
-Config `/etc/r3v3rs3`, log dosyaları `/var/log/r3v3rs3` dizinindedir. Güncellemek için script'i yeniden çalıştırın.
+[Linux sunucuya kurulum](@/tutorials/install-linux.tr.md) rehberi option'ları, yolları, yükseltmeyi ve kaldırmayı anlatır.
 
 ## Docker
 
-r3v3rs3'ü Docker ile başlatmak için şu komutu çalıştırın:
+İki volume ile tek container:
 
 ```bash
 docker run -d \
@@ -77,35 +71,7 @@ docker run -d \
   ghcr.io/kilimcininkoroglu/r3v3rs3:latest
 ```
 
-Yönetim paneline giriş yapmak için önce bir kullanıcı oluşturmanız gerekir. Admin kullanıcısını şu komutla oluşturun:
-
-```bash
-docker exec -t -i r3v3rs3 r3v3rs3 add-user admin
-password?: ******
-```
-
-## Docker Compose
-
-[`docker-compose.yml`](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/docker-compose.yml) dosyasını indirip r3v3rs3'ü başlatın:
-
-```bash
-$ curl -fsSLO https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/docker-compose.yml
-$ docker compose up -d
-```
-
-Dosya host networking kullanır. Bu yüzden WebUI'da eklediğiniz her port, dosyayı değiştirmeden dinlenir. Host networking yalnız Linux Docker host'unda çalışır. Şu değişkenleri dosyanın yanındaki `.env` dosyasında ayarlayın:
-
-- `R3V3RS3_WEBUI`: yönetim paneli WebUI adresi. Varsayılan `127.0.0.1:46492`.
-- `R3V3RS3_VERSION`: image tag'i. Varsayılan `latest`.
-
-Yönetim paneline giriş yapmak için önce bir kullanıcı oluşturmanız gerekir. Admin kullanıcısını şu komutla oluşturun:
-
-```bash
-$ docker compose exec r3v3rs3 r3v3rs3 add-user admin
-password?: ******
-```
-
-Ardından yönetim paneline [http://localhost:46492/](http://localhost:46492/) adresinden erişebilirsiniz.
+[Docker ile kurulum](@/tutorials/install-docker.tr.md) rehberi her option'ı, admin hesabını, Docker Compose'u ve yükseltmeyi anlatır.
 
 ## Cargo binstall
 

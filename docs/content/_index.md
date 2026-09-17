@@ -52,17 +52,11 @@ There are multiple ways to install r3v3rs3.
 curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-The script asks for the admin WebUI address. The default is `127.0.0.1:46492`. To install a specific release or to skip the question, pass the options:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --version 1.0.1 --webui 0.0.0.0:46492
-```
-
-The config is in `/etc/r3v3rs3` and the logs are in `/var/log/r3v3rs3`. Run the script again to upgrade.
+[Installing on a Linux Server](@/tutorials/install-linux.md) covers the options, the paths, the upgrade and the removal.
 
 ## Docker
 
-Run the following command to start r3v3rs3 using Docker:
+One container with two volumes:
 
 ```bash
 docker run -d \
@@ -77,35 +71,7 @@ docker run -d \
   ghcr.io/kilimcininkoroglu/r3v3rs3:latest
 ```
 
-To log in to the admin panel, you'll first need to create a user. Follow the steps below to create an admin user:
-
-```bash
-docker exec -t -i r3v3rs3 r3v3rs3 add-user admin
-password?: ******
-```
-
-## Docker Compose
-
-Download [`docker-compose.yml`](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/docker-compose.yml) and start r3v3rs3:
-
-```bash
-$ curl -fsSLO https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/docker-compose.yml
-$ docker compose up -d
-```
-
-The file uses host networking, so every port that you add in the WebUI listens without a change to the file. Host networking works only on a Linux Docker host. Set these variables in a `.env` file next to it:
-
-- `R3V3RS3_WEBUI`: the admin WebUI address. The default is `127.0.0.1:46492`.
-- `R3V3RS3_VERSION`: the image tag. The default is `latest`.
-
-To log in to the admin panel, you'll first need to create a user. Follow the steps below to create an admin user:
-
-```bash
-$ docker compose exec r3v3rs3 r3v3rs3 add-user admin
-password?: ******
-```
-
-Then, you can access the admin panel at [http://localhost:46492/](http://localhost:46492/).
+[Installing with Docker](@/tutorials/install-docker.md) covers each option, the admin account, Docker Compose and the upgrade.
 
 ## Cargo binstall
 

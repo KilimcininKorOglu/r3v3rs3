@@ -1,7 +1,7 @@
 +++
 title = "Protecting an Application"
 description = "IP filter, authentication, rate limit and audit log in one setup"
-weight = 5
+weight = 7
 +++
 
 # Protecting an Application

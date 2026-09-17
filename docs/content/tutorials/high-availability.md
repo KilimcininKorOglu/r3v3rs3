@@ -1,7 +1,7 @@
 +++
 title = "High Availability"
 description = "Set up three nodes behind a load balancer, step by step"
-weight = 2
+weight = 4
 aliases = ["high-availability/"]
 +++
 

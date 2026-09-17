@@ -1,7 +1,7 @@
 +++
 title = "Docker'dan proxy'ler"
 description = "Container'larınız kendi proxy'lerini label ile tanımlasın"
-weight = 3
+weight = 5
 +++
 
 # Docker'dan proxy'ler

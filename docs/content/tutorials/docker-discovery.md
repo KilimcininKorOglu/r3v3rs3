@@ -1,7 +1,7 @@
 +++
 title = "Proxies from Docker"
 description = "Let your containers define their own proxies with labels"
-weight = 3
+weight = 5
 +++
 
 # Proxies from Docker

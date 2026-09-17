@@ -1,7 +1,7 @@
 +++
 title = "Başlangıç"
 description = "İlk hesaptan çalışan ilk proxy'nize kadar"
-weight = 1
+weight = 3
 +++
 
 # Başlangıç

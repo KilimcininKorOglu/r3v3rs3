@@ -9,6 +9,8 @@ weight = 0
 
 Buradaki her sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bir kurulum elde edersiniz. Sitenin diğer sayfaları referanstır: her alanı ve her davranışı anlatır, ama bir şey kurmaz.
 
+- [Linux sunucuya kurulum](@/tutorials/install-linux.tr.md): `install.sh` ve systemd servisi.
+- [Docker ile kurulum](@/tutorials/install-docker.tr.md): iki volume ile tek container.
 - [Başlangıç](@/tutorials/getting-started.tr.md): ilk admin hesabı, ilk port ve ilk proxy.
 - [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): etcd veya Consul'da tek bir state paylaşan, load balancer arkasındaki üç node.
 - [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md): container'ların label'larından kurulan proxy'ler.

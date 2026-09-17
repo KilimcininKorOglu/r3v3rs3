@@ -1,7 +1,7 @@
 +++
 title = "r3v3rs3 on Kubernetes"
 description = "Run r3v3rs3 in a cluster and define proxies with Ingress and R3v3rs3Proxy resources"
-weight = 8
+weight = 10
 +++
 
 # r3v3rs3 on Kubernetes

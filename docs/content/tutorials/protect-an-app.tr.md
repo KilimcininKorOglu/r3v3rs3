@@ -1,7 +1,7 @@
 +++
 title = "Bir uygulamayı korumaya alma"
 description = "IP filtresi, kimlik doğrulama, rate limit ve audit log tek bir kurulumda"
-weight = 5
+weight = 7
 +++
 
 # Bir uygulamayı korumaya alma

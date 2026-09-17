@@ -1,7 +1,7 @@
 +++
 title = "Wildcard sertifika ile HTTPS"
 description = "Bir domain'i ve alt domain'lerini DNS-01 ile HTTPS üzerinden sunun"
-weight = 4
+weight = 6
 +++
 
 # Wildcard sertifika ile HTTPS

@@ -1,7 +1,7 @@
 +++
 title = "Cache ve compression"
 description = "Tekrarlanan request'leri memory'den karşılayın ve daha küçük response gönderin"
-weight = 6
+weight = 8
 +++
 
 # Cache ve compression

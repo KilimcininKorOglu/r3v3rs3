@@ -1,7 +1,7 @@
 +++
 title = "TCP ve UDP proxy'ler"
 description = "Bir veritabanını TCP, bir DNS sunucusunu UDP üzerinden yayınlayın, mutual TLS ile"
-weight = 7
+weight = 9
 +++
 
 # TCP ve UDP proxy'ler

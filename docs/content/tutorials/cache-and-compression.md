@@ -1,7 +1,7 @@
 +++
 title = "Caching and Compression"
 description = "Answer repeated requests from memory and send smaller responses"
-weight = 6
+weight = 8
 +++
 
 # Caching and Compression

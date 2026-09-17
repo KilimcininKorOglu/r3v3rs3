@@ -1,7 +1,7 @@
 +++
 title = "HTTPS with a Wildcard Certificate"
 description = "Serve a domain and its subdomains over HTTPS with DNS-01"
-weight = 4
+weight = 6
 +++
 
 # HTTPS with a Wildcard Certificate
