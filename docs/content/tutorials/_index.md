@@ -13,3 +13,4 @@ Each page here is a walkthrough. Follow it from the top and you get a working se
 - [High Availability](@/tutorials/high-availability.md): three nodes with a shared state in etcd or Consul, behind a load balancer.
 - [Proxies from Docker](@/tutorials/docker-discovery.md): proxies built from the labels of your containers.
 - [HTTPS with a Wildcard Certificate](@/tutorials/https-certificates.md): a DNS-01 wildcard certificate, the HTTPS redirect and HSTS.
+- [Protecting an Application](@/tutorials/protect-an-app.md): access list, authentication, rate limit and audit log.
