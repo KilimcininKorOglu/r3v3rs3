@@ -31,3 +31,17 @@ jobs:
         run: cargo build --all-features
       - name: Run tests
         run: cargo nextest run --all-features --no-fail-fast
+
+  complexity:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install lizard
+        run: pip install --no-cache-dir lizard==1.24.0
+      # Every function stays at or below a cyclomatic complexity of 10.
+      - name: Check the complexity
+        run: lizard -l rust -C 10 -w r3v3rs3/src r3v3rs3-api/src r3v3rs3-webui/src
