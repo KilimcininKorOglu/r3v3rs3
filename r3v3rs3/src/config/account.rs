@@ -1,18 +1,14 @@
 //! Admin accounts: an Argon2 password hash and an optional TOTP secret.
 
-use argon2::{
-    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
-    password_hash::{SaltString, rand_core::OsRng},
-};
+use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use r3v3rs3_api::auth::{Account, LoginMethod, LoginRequest, LoginResponse};
 use r3v3rs3_api::error::Error;
 use totp_rs::{Builder, Secret, Totp};
 use tracing::error;
 
 pub fn new_account(password: &str, totp: bool) -> anyhow::Result<Account> {
-    let salt = SaltString::generate(OsRng);
     let password = Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map_err(|_| anyhow::anyhow!("failed to hash password"))?
         .to_string();
     Ok(Account {
@@ -36,11 +32,9 @@ pub fn verify(account: Option<&Account>, request: LoginRequest) -> Result<LoginR
 }
 
 fn verify_password(account: &Account, password: &str) -> Result<LoginResponse, Error> {
-    let parsed_hash = PasswordHash::new(&account.password).map_err(|err| {
-        error!(%err, "failed to parse password hash: {err}");
-        Error::InvalidLoginCredentials
-    })?;
-    if let Err(err) = Argon2::default().verify_password(password.as_bytes(), &parsed_hash) {
+    if let Err(err) =
+        Argon2::default().verify_password(password.as_bytes(), account.password.as_str())
+    {
         error!(%err, "failed to verify password: {err}");
         return Err(Error::InvalidLoginCredentials);
     }

@@ -1,7 +1,4 @@
-use argon2::{
-    Argon2, PasswordHasher,
-    password_hash::{SaltString, rand_core::OsRng},
-};
+use argon2::{Argon2, PasswordHasher};
 use mockito::Matcher;
 use r3v3rs3_api::{
     policy::{AuthPolicy, BasicAuth, BasicAuthUser},
@@ -15,9 +12,8 @@ use common::{
 };
 
 fn basic_auth(realm: &str, username: &str, password: &str) -> AuthPolicy {
-    let salt = SaltString::generate(OsRng);
     let password_hash = Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .unwrap()
         .to_string();
     AuthPolicy::Basic(BasicAuth {

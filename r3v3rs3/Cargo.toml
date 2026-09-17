@@ -21,7 +21,7 @@ default-run = "r3v3rs3"
 [dependencies]
 anyhow = "1.0.71"
 arc-swap = "1.6.0"
-argon2 = "0.5.0"
+argon2 = "0.6.0"
 async-compression = { version = "0.4.22", features = [
     "tokio",
     "gzip",
@@ -140,7 +140,7 @@ kube = { version = "4.2.0", default-features = false, features = ["client", "rus
 k8s-openapi = { version = "0.28.0", features = ["v1_32"] }
 
 [build-dependencies]
-built = "0.6.1"
+built = "0.8.1"
 
 [dev-dependencies]
 mockito = "1.6.1"

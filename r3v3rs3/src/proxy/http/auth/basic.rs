@@ -1,8 +1,5 @@
 use crate::proxy::http::error::ProxyError;
-use argon2::{
-    Argon2, PasswordHasher, PasswordVerifier,
-    password_hash::{PasswordHash, SaltString, rand_core::OsRng},
-};
+use argon2::{Argon2, PasswordHasher, PasswordVerifier, password_hash::phc::PasswordHash};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hyper::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use once_cell::sync::Lazy;
@@ -22,16 +19,14 @@ const MAX_VERIFIED_CREDENTIALS: usize = 1024;
 
 /// Hash that the password of an unknown user is verified against, so the response time does not
 /// reveal which usernames exist.
-static UNKNOWN_USER_HASH: Lazy<Option<String>> = Lazy::new(|| {
-    let salt = SaltString::generate(OsRng);
-    match Argon2::default().hash_password(b"", &salt) {
+static UNKNOWN_USER_HASH: Lazy<Option<String>> =
+    Lazy::new(|| match Argon2::default().hash_password(b"") {
         Ok(hash) => Some(hash.to_string()),
         Err(err) => {
             error!(%err, "failed to hash the unknown user password");
             None
         }
-    }
-});
+    });
 
 /// HTTP Basic authentication (RFC 7617) with argon2 password hashes.
 pub struct BasicAuthenticator {
@@ -165,11 +160,9 @@ fn credential_digest(hash: &str, password: &str) -> [u8; 32] {
 /// Verifies the password on a blocking thread, because argon2 takes CPU time.
 async fn verify_password(hash: String, password: String) -> bool {
     tokio::task::spawn_blocking(move || {
-        PasswordHash::new(&hash).is_ok_and(|hash| {
-            Argon2::default()
-                .verify_password(password.as_bytes(), &hash)
-                .is_ok()
-        })
+        Argon2::default()
+            .verify_password(password.as_bytes(), hash.as_str())
+            .is_ok()
     })
     .await
     .unwrap_or_else(|err| {
@@ -184,9 +177,8 @@ mod tests {
     use r3v3rs3_api::policy::BasicAuthUser;
 
     fn authenticator(realm: &str) -> BasicAuthenticator {
-        let salt = SaltString::generate(OsRng);
         let hash = Argon2::default()
-            .hash_password(b"s3cr:et", &salt)
+            .hash_password(b"s3cr:et")
             .unwrap()
             .to_string();
         BasicAuthenticator::new(BasicAuth {
