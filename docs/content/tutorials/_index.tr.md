@@ -23,3 +23,4 @@ Buradaki her sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bi
 - [r3v3rs3'ü script ile yönetme](@/tutorials/admin-api.tr.md): admin API, deploy işi ve ona özel hesap.
 - [Consul ve etcd'den proxy'ler](@/tutorials/consul-etcd-discovery.tr.md): catalog, key-value store ve etcd key'leri.
 - [Ekip için hesaplar](@/tutorials/team-accounts.tr.md): roller, proxy listeleri, TOTP ve audit log.
+- [Forward auth ile single sign-on](@/tutorials/forward-auth.tr.md): önde oauth2-proxy, upstream request'inde kullanıcı.

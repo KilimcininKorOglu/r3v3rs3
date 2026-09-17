@@ -23,3 +23,4 @@ Each page here is a walkthrough. Follow it from the top and you get a working se
 - [Driving r3v3rs3 from a Script](@/tutorials/admin-api.md): the admin API, a deploy job and an account for it.
 - [Proxies from Consul and etcd](@/tutorials/consul-etcd-discovery.md): the catalog, the key-value store and etcd keys.
 - [Accounts for a Team](@/tutorials/team-accounts.md): roles, proxy lists, TOTP and the audit log.
+- [Single Sign-On with Forward Auth](@/tutorials/forward-auth.md): oauth2-proxy in front, the user in the upstream request.
