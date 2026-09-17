@@ -8,6 +8,8 @@ weight = 0
 
 A discovery provider reads proxy definitions from an external system and adds them to the proxy list. When a definition changes, r3v3rs3 updates the routes without a restart.
 
+This page is the reference. To build a working setup with Docker labels, follow [Proxies from Docker](@/tutorials/docker-discovery.md).
+
 ## Discovered Proxies
 
 - A discovered proxy is read-only. The admin API returns `proxy_read_only` for an update or a delete. The WebUI shows the proxy with its source and without the edit actions. To change the proxy, change its definition in the source.

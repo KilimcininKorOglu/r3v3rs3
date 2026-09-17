@@ -8,6 +8,8 @@ weight = 0
 
 Bir discovery provider, dış sistemdeki proxy tanımlarını okur ve proxy listesine ekler. Bir tanım değişince r3v3rs3 route'ları restart olmadan günceller.
 
+Bu sayfa referanstır. Docker label'larıyla çalışan bir kurulum için [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md) rehberini izleyin.
+
 ## Keşfedilen proxy'ler
 
 - Keşfedilen proxy salt okunurdur. Admin API, güncelleme ve silme isteğine `proxy_read_only` döner. WebUI proxy'yi kaynağıyla gösterir ve düzenleme aksiyonlarını göstermez. Proxy'yi değiştirmek için kaynaktaki tanımı değiştirin.

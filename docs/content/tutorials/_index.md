@@ -11,3 +11,4 @@ Each page here is a walkthrough. Follow it from the top and you get a working se
 
 - [Getting Started](@/tutorials/getting-started.md): the first admin account, the first port and the first proxy.
 - [High Availability](@/tutorials/high-availability.md): three nodes with a shared state in etcd or Consul, behind a load balancer.
+- [Proxies from Docker](@/tutorials/docker-discovery.md): proxies built from the labels of your containers.

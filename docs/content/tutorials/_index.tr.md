@@ -11,3 +11,4 @@ Buradaki her sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bi
 
 - [Başlangıç](@/tutorials/getting-started.tr.md): ilk admin hesabı, ilk port ve ilk proxy.
 - [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): etcd veya Consul'da tek bir state paylaşan, load balancer arkasındaki üç node.
+- [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md): container'ların label'larından kurulan proxy'ler.
