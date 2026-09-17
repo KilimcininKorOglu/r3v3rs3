@@ -1,0 +1,20 @@
+{#- A subsection page, for example the tutorials. Zola has no section template in the juice theme,
+    so a subsection would get the hero layout of the home page. This template gives it the layout of
+    a normal page. -#}
+{% import "_macros.html" as macros %}
+{% extends "index.html" %}
+
+{% block title %}{{ section.title }} | {{ super() }} {% endblock title %}
+
+{% block header %}
+<header class="box-shadow">
+    {{ macros::render_header(config=config, lang=lang, translations=section.translations) }}
+</header>
+{% endblock header %}
+
+{% block hero %}{% endblock hero %}
+
+{% block content %}
+<div class="heading-text">{{ section.description }}</div>
+{{ section.content | safe }}
+{% endblock content %}

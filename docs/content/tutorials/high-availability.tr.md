@@ -2,6 +2,7 @@
 title = "Yüksek erişilebilirlik"
 description = "Load balancer arkasında üç node'u adım adım kurun"
 weight = 0
+aliases = ["tr/high-availability/"]
 +++
 
 # Yüksek erişilebilirlik

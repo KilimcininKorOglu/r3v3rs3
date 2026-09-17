@@ -21,6 +21,12 @@
     <a class="nav-item subtitle-text" href="{{ page.permalink | safe }}">{{ page.title }}</a>
     {% endif %}
     {% endfor %}
+    {#- A subsection groups its own pages, for example the tutorials. The menu links to the
+        subsection, and the subsection page lists its pages. -#}
+    {% for path in section.subsections %}
+    {% set child = get_section(path=path) %}
+    <a class="nav-item subtitle-text" href="{{ child.permalink | safe }}">{{ child.title }}</a>
+    {% endfor %}
     {% if config.extra.juice_extra_menu %}
         {% for menu in config.extra.juice_extra_menu %}
         <a class="nav-item subtitle-text" href="{{ menu.link | safe }}">{{ menu.title }}</a>

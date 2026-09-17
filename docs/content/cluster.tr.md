@@ -8,7 +8,7 @@ weight = 0
 
 Birden fazla r3v3rs3 node'u etcd'de veya Consul'un key-value store'unda tek bir state paylaşabilir. Her node aynı portlar, proxy'ler, erişim listeleri, sertifikalar, ACME kayıtları, admin hesapları ve ayarlarla trafik alır. Bir node'daki değişiklik restart olmadan diğer node'lara ulaşır.
 
-Bu sayfa referanstır. Sıfırdan kuruyorsanız [Yüksek erişilebilirlik](@/high-availability.tr.md) sayfasını izleyin: store'un kurulumundan load balancer'a kadar bütün adımları anlatır.
+Bu sayfa referanstır. Sıfırdan kuruyorsanız [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md) sayfasını izleyin: store'un kurulumundan load balancer'a kadar bütün adımları anlatır.
 
 ## Mimari
 

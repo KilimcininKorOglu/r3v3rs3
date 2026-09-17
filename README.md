@@ -53,7 +53,7 @@ The documentation is available in [English](https://kilimcininkoroglu.github.io/
 - [Configuration](https://kilimcininkoroglu.github.io/r3v3rs3/configuration/): ports, proxies, certificates, ACME, settings, the admin API and logging
 - [Accounts](https://kilimcininkoroglu.github.io/r3v3rs3/accounts/): roles and permissions
 - [Service Discovery](https://kilimcininkoroglu.github.io/r3v3rs3/discovery/): Docker, Kubernetes, Consul and etcd
-- [High Availability](https://kilimcininkoroglu.github.io/r3v3rs3/high-availability/): set up three nodes behind a load balancer, step by step
+- [Tutorials](https://kilimcininkoroglu.github.io/r3v3rs3/tutorials/): step by step guides, starting with [High Availability](https://kilimcininkoroglu.github.io/r3v3rs3/tutorials/high-availability/)
 - [Cluster](https://kilimcininkoroglu.github.io/r3v3rs3/cluster/): the cluster reference, from the settings to the failure modes
 - [Development](https://kilimcininkoroglu.github.io/r3v3rs3/development/)
 
