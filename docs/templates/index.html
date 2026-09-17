@@ -85,6 +85,10 @@
 <link rel="stylesheet" href="{{ get_url(path="r3v3rs3.css") }}">
 {% endblock head %}
 
+{#- The juice theme puts a placeholder text and a third-party ad script in the sidebar. This site
+    uses no sidebar, so the block stays empty. -#}
+{% block sidebar %}{% endblock sidebar %}
+
 {% block footer %}
 <footer>
     <small class="subtext">
