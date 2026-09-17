@@ -285,8 +285,8 @@ mod tests {
         assert_eq!(truncate("açb", 3), "aç");
     }
 
-    #[tokio::test]
-    async fn the_log_database_keeps_the_entries_until_the_retention() -> anyhow::Result<()> {
+    /// A store on its own database file, with three entries.
+    async fn filled_store() -> anyhow::Result<(SqliteAuditStore, std::path::PathBuf)> {
         let name = format!(
             "r3v3rs3-audit-{}.db",
             hex::encode(rand::random::<[u8; 8]>())
@@ -296,21 +296,40 @@ mod tests {
         store.append(&entry(1_000, "admin")).await?;
         store.append(&entry(9_000, "editor")).await?;
         store.append(&entry(5_000, "admin")).await?;
+        Ok((store, path))
+    }
 
-        let all = AuditFilter {
+    fn all_entries() -> AuditFilter {
+        AuditFilter {
             since: 0,
             until: u64::MAX,
             username: None,
             resource_id: None,
             limit: 10,
-        };
-        assert_eq!(times(store.query(&all).await?), [9_000, 5_000, 1_000]);
+        }
+    }
+
+    #[tokio::test]
+    async fn the_log_database_returns_the_newest_entry_first() -> anyhow::Result<()> {
+        let (store, path) = filled_store().await?;
+        assert_eq!(
+            times(store.query(&all_entries()).await?),
+            [9_000, 5_000, 1_000]
+        );
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_log_database_filters_by_user_and_by_resource() -> anyhow::Result<()> {
+        let (store, path) = filled_store().await?;
         let admin = AuditFilter {
             username: Some("admin".into()),
             limit: 1,
-            ..all.clone()
+            ..all_entries()
         };
         assert_eq!(times(store.query(&admin).await?), [5_000]);
+
         let web = AuditEntry {
             resource_id: Some("web".into()),
             ..entry(7_000, "editor")
@@ -318,12 +337,18 @@ mod tests {
         store.append(&web).await?;
         let resource = AuditFilter {
             resource_id: Some("web".into()),
-            ..all.clone()
+            ..all_entries()
         };
         assert_eq!(times(store.query(&resource).await?), [7_000]);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
 
+    #[tokio::test]
+    async fn the_log_database_keeps_the_entries_until_the_retention() -> anyhow::Result<()> {
+        let (store, path) = filled_store().await?;
         store.remove_before(5_000).await?;
-        assert_eq!(times(store.query(&all).await?), [9_000, 7_000, 5_000]);
+        assert_eq!(times(store.query(&all_entries()).await?), [9_000, 5_000]);
         std::fs::remove_file(path)?;
         Ok(())
     }

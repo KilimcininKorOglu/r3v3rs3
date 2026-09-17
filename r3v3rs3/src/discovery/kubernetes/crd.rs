@@ -124,15 +124,27 @@ fn add_proxy(
         Vec::new()
     };
 
+    let parsed = parse_spec(built, target, spec, protocol, &services)?;
+    built.add_parsed(groups, &target.group, &target.resource, parsed);
+    Ok(())
+}
+
+/// Reads the spec as discovery labels and points every route at its discovered servers.
+fn parse_spec(
+    built: &mut Built,
+    target: &Target,
+    spec: Map<String, Value>,
+    protocol: &str,
+    services: &[(usize, IngressServiceBackend)],
+) -> Result<labels::Parsed, String> {
     let mut pairs = Vec::new();
     let prefix = format!("{}.{protocol}.{PROXY_NAME}", labels::PREFIX);
     flatten(&prefix, &Value::Object(spec), &mut pairs)?;
     let mut parsed = labels::parse(pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())), None);
     for definition in &mut parsed.definitions {
-        set_route_servers(built, target, definition, &services);
+        set_route_servers(built, target, definition, services);
     }
-    built.add_parsed(groups, &target.group, &target.resource, parsed);
-    Ok(())
+    Ok(parsed)
 }
 
 fn take_protocol(spec: &mut Map<String, Value>) -> Result<&'static str, String> {

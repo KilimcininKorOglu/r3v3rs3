@@ -427,12 +427,7 @@ impl AcmeOrder {
         let csr = request.der();
 
         self.order.finalize_csr(csr).await?;
-        let cert_chain_pem = loop {
-            match self.order.certificate().await? {
-                Some(cert_chain_pem) => break cert_chain_pem,
-                None => tokio::time::sleep(Duration::from_secs(1)).await,
-            }
-        };
+        let cert_chain_pem = self.download_chain().await?;
 
         let metadata = CertMetadata {
             acme_id: self.target.acme_id,
@@ -448,6 +443,16 @@ impl AcmeOrder {
         );
 
         Ok(cert?)
+    }
+
+    /// Reads the certificate chain of the order. The ACME server needs a moment to issue it.
+    async fn download_chain(&mut self) -> anyhow::Result<String> {
+        loop {
+            if let Some(cert_chain_pem) = self.order.certificate().await? {
+                return Ok(cert_chain_pem);
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
     }
 
     async fn wait_until_ready(&mut self) -> anyhow::Result<()> {

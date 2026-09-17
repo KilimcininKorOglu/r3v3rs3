@@ -123,6 +123,28 @@ impl Cert {
         false
     }
 
+    /// The common name of the certificate, then every subject alternative name that differs from
+    /// it.
+    fn subject_names_of(x509: &X509Certificate<'_>) -> Vec<SubjectName> {
+        let common_name = x509.subject().iter_common_name().find_map(|name| {
+            name.as_str()
+                .ok()
+                .and_then(|name| SubjectName::from_str(name).ok())
+        });
+        common_name
+            .clone()
+            .into_iter()
+            .chain(
+                x509.subject_alternative_name()
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|name| &name.value.general_names)
+                    .filter_map(general_name)
+                    .filter(|name| Some(name) != common_name.as_ref()),
+            )
+            .collect()
+    }
+
     pub fn new(
         kind: CertKind,
         pem_chain: Vec<u8>,
@@ -169,39 +191,7 @@ impl Cert {
         let parsed_chain = parse_chain(&certs)?;
         let x509 = parsed_chain.first().ok_or(Error::FailedToReadCertificate)?;
 
-        let common_name = x509.subject().iter_common_name().find_map(|name| {
-            name.as_str()
-                .ok()
-                .and_then(|name| SubjectName::from_str(name).ok())
-        });
-
-        let san = common_name
-            .clone()
-            .into_iter()
-            .chain(
-                x509.subject_alternative_name()
-                    .into_iter()
-                    .flatten()
-                    .flat_map(|name| &name.value.general_names)
-                    .filter_map(|name| match name {
-                        GeneralName::DNSName(name) => SubjectName::from_str(name).ok(),
-                        GeneralName::IPAddress(ip) => match ip.len() {
-                            4 => {
-                                let addr = [ip[0], ip[1], ip[2], ip[3]];
-                                Some(SubjectName::IPAddress(IpAddr::V4(addr.into())))
-                            }
-                            16 => {
-                                let mut addr = [0; 16];
-                                addr.copy_from_slice(ip);
-                                Some(SubjectName::IPAddress(IpAddr::V6(addr.into())))
-                            }
-                            _ => None,
-                        },
-                        _ => None,
-                    })
-                    .filter(|name| Some(name) != common_name.as_ref()),
-            )
-            .collect();
+        let san = Self::subject_names_of(x509);
 
         let not_after = x509.validity().not_after;
         let not_before = x509.validity().not_before;
@@ -376,6 +366,30 @@ fn parse_chain<'a>(chain: &'a [CertificateDer]) -> Result<Vec<X509Certificate<'a
                 .map_err(|_| Error::FailedToReadCertificate)
         })
         .collect()
+}
+
+/// One subject alternative name as a `SubjectName`. A name of another kind gives `None`.
+fn general_name(name: &GeneralName<'_>) -> Option<SubjectName> {
+    match name {
+        GeneralName::DNSName(name) => SubjectName::from_str(name).ok(),
+        GeneralName::IPAddress(ip) => ip_name(ip),
+        _ => None,
+    }
+}
+
+fn ip_name(ip: &[u8]) -> Option<SubjectName> {
+    match ip.len() {
+        4 => {
+            let addr = [ip[0], ip[1], ip[2], ip[3]];
+            Some(SubjectName::IPAddress(IpAddr::V4(addr.into())))
+        }
+        16 => {
+            let mut addr = [0; 16];
+            addr.copy_from_slice(ip);
+            Some(SubjectName::IPAddress(IpAddr::V6(addr.into())))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
