@@ -2,17 +2,17 @@
 //! the label parser reads it. The `service` of an HTTP route, or of a TCP or UDP proxy, names a
 //! Service whose ready endpoints become the upstream servers.
 
-use super::cluster::{object_key, Cluster, Resources};
 use super::PROVIDER;
-use crate::discovery::{labels, Built, ProxyDefinition, ProxyGroups};
+use super::cluster::{Cluster, Resources, object_key};
+use crate::discovery::{Built, ProxyDefinition, ProxyGroups, labels};
+use k8s_openapi::NamespaceResourceScope;
 use k8s_openapi::api::networking::v1::{IngressServiceBackend, ServiceBackendPort};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
-use k8s_openapi::NamespaceResourceScope;
 use kube::Resource;
 use r3v3rs3_api::proxy::ProxyKind;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::borrow::Cow;
 
 pub const GROUP: &str = "r3v3rs3.io";

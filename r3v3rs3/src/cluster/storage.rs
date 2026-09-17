@@ -3,14 +3,14 @@
 //! version, so a change of another node in between is a conflict.
 
 use super::crypto::ClusterKeys;
-use super::layout::{last_segment, Layout};
+use super::layout::{Layout, last_segment};
 use super::{key_file, store};
 use crate::audit::AuditStore;
 use crate::cdn::CdnRanges;
+use crate::certs::Cert;
 use crate::certs::acme::{AcmeAccount, AcmeEntry};
 use crate::certs::alpn::TlsAlpnChallenge;
 use crate::certs::challenges::ServedChallenges;
-use crate::certs::Cert;
 use crate::config::{account, storage::Storage};
 use crate::kv::{Condition, KvItem, KvStore, Txn, TxnOutcome, Write};
 use crate::proxy::http::cache_share::SharedCacheStore;
@@ -30,8 +30,8 @@ use serde::de::DeserializeOwned;
 use serde_derive::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::{error, warn};

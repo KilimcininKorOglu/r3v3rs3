@@ -1,7 +1,7 @@
 //! Encrypts every encrypted value of the cluster with the first key, so an older key file can be
 //! removed.
 
-use super::crypto::{sealed_key_id, ClusterKeys};
+use super::crypto::{ClusterKeys, sealed_key_id};
 use super::{data_prefix, key_file, store};
 use crate::kv::{Condition, KvItem, KvStore, Txn, TxnOutcome, Write};
 use r3v3rs3_api::cluster::ClusterConfig;

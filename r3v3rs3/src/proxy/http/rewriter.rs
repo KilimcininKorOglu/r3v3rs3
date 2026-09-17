@@ -1,19 +1,19 @@
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::header::{ALT_SVC, CONTENT_TYPE, SET_COOKIE};
-use hyper::{body::Body, Response};
 use hyper::{
-    header::{FORWARDED, VIA},
-    http::{header::Entry, HeaderValue},
     HeaderMap,
+    header::{FORWARDED, VIA},
+    http::{HeaderValue, header::Entry},
 };
+use hyper::{Response, body::Body};
 use sailfish::TemplateOnce;
 use std::{iter, net::IpAddr, sync::Arc, sync::PoisonError};
 
 use super::affinity::CookieSlot;
-use super::client_ip::{ClientAddr, CLIENT_IP_HEADERS};
+use super::client_ip::{CLIENT_IP_HEADERS, ClientAddr};
 use super::compression::ResponseCompression;
-use super::error::{error_headers, map_error, status_text, ErrorTemplate};
+use super::error::{ErrorTemplate, error_headers, map_error, status_text};
 use super::header_rules::{CompiledHeaderRules, HeaderVariables};
 use super::page::PagePreferences;
 
@@ -130,10 +130,10 @@ impl RequestRewriter {
             HeaderValue::from_static(forwarded_proto),
         );
 
-        if let Some(host) = &header_host {
-            if let Ok(host) = HeaderValue::from_str(host) {
-                headers.insert("x-forwarded-host", host);
-            }
+        if let Some(host) = &header_host
+            && let Ok(host) = HeaderValue::from_str(host)
+        {
+            headers.insert("x-forwarded-host", host);
         }
     }
 

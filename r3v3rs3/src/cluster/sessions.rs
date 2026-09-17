@@ -1,7 +1,7 @@
 //! Sessions in the cluster store, so a session that one node starts is valid on every node.
 
-use super::storage::{unavailable, KvStorage};
-use crate::sessions::{new_token, SessionBackend, SessionRecord, SessionScope};
+use super::storage::{KvStorage, unavailable};
+use crate::sessions::{SessionBackend, SessionRecord, SessionScope, new_token};
 use r3v3rs3_api::error::Error;
 use sha2::{Digest, Sha256};
 use std::time::Duration;

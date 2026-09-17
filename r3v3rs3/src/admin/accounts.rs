@@ -3,8 +3,8 @@ use super::{AppError, AppState};
 use crate::accounts::Caller;
 use crate::server::rpc::accounts::{AddAccount, DeleteAccount, GetAccountList, UpdateAccount};
 use axum::{
-    extract::{Path, State},
     Extension, Json,
+    extract::{Path, State},
 };
 use r3v3rs3_api::auth::{AccountCreated, AccountInfo, AccountUpdate, NewAccount};
 

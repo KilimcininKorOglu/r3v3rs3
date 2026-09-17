@@ -1,7 +1,7 @@
 //! A client of the Consul HTTP API. It sends the ACL token, reads the index of each response and
 //! sends blocking queries.
 
-use super::http::{read_json, ApiClient, RESPONSE_TIMEOUT};
+use super::http::{ApiClient, RESPONSE_TIMEOUT, read_json};
 use anyhow::Context as _;
 use bytes::Bytes;
 use http_body_util::Full;
@@ -9,7 +9,7 @@ use hyper::body::Incoming;
 use hyper::header::CONTENT_TYPE;
 use hyper::http::request::Builder;
 use hyper::{Method, Response, StatusCode};
-use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_derive::Deserialize;
 use serde_json::Value;
 use std::time::Duration;

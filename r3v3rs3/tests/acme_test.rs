@@ -1,16 +1,16 @@
 use r3v3rs3::{
     accounts::Caller,
     command::ServerCommand,
-    server::rpc::{acme::AddAcme, ErasedRpcMethod, RpcWrapper},
+    server::rpc::{ErasedRpcMethod, RpcWrapper, acme::AddAcme},
 };
 use r3v3rs3_api::{
-    acme::{Acme, AcmeConfig, AcmeRequest, DnsProvider, LocalProvider, DNS_01, HTTP_01},
+    acme::{Acme, AcmeConfig, AcmeRequest, DNS_01, DnsProvider, HTTP_01, LocalProvider},
     error::Error,
     subject_name::SubjectName,
 };
 
 mod common;
-use common::{with_server, TestStorage};
+use common::{TestStorage, with_server};
 
 /// A request whose account creation fails, so a validation error is the only other result.
 fn request(
@@ -59,8 +59,8 @@ async fn add_acme(request: AcmeRequest) -> anyhow::Result<Result<(), Error>> {
 }
 
 #[tokio::test]
-async fn a_wildcard_request_with_http_01_is_rejected_before_the_account_is_created(
-) -> anyhow::Result<()> {
+async fn a_wildcard_request_with_http_01_is_rejected_before_the_account_is_created()
+-> anyhow::Result<()> {
     let identifiers = vec!["example.com".parse()?, "*.example.com".parse()?];
     let result = add_acme(request(identifiers, HTTP_01, None)).await?;
     assert!(matches!(
@@ -71,8 +71,8 @@ async fn a_wildcard_request_with_http_01_is_rejected_before_the_account_is_creat
 }
 
 #[tokio::test]
-async fn an_exec_program_outside_the_allowlist_is_rejected_before_the_account_is_created(
-) -> anyhow::Result<()> {
+async fn an_exec_program_outside_the_allowlist_is_rejected_before_the_account_is_created()
+-> anyhow::Result<()> {
     let provider = DnsProvider::Local(LocalProvider::Exec {
         program: "/bin/sh".to_string(),
     });

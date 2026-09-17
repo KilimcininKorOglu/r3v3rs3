@@ -7,11 +7,11 @@ use super::{
     Condition, KvEvent, KvItem, KvList, KvStore, KvWatcher, Lease, Txn, TxnOutcome, WatchBatch,
     Write,
 };
-use anyhow::{bail, Context as _};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use anyhow::{Context as _, bail};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use hyper::StatusCode;
 use serde_derive::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::time::Duration;
 

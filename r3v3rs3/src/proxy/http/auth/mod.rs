@@ -2,7 +2,7 @@ use super::error::ProxyError;
 use super::page::PagePreferences;
 use bytes::Bytes;
 use http_body_util::Full;
-use hyper::{body::Body, Request, Response};
+use hyper::{Request, Response, body::Body};
 use r3v3rs3_api::{id::ShortId, policy::AuthPolicy};
 use std::{error::Error, fmt, net::IpAddr, ops::ControlFlow, sync::Arc};
 use tokio_rustls::rustls::ClientConfig;

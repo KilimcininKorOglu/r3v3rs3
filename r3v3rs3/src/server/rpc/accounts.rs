@@ -8,7 +8,7 @@ use crate::config::account::new_account;
 use crate::server::state::ServerState;
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::auth::{
-    Account, AccountCreated, AccountInfo, AccountUpdate, NewAccount, Role, MIN_PASSWORD_LENGTH,
+    Account, AccountCreated, AccountInfo, AccountUpdate, MIN_PASSWORD_LENGTH, NewAccount, Role,
 };
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;

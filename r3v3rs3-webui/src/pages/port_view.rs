@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use crate::{
+    API_ENDPOINT,
     auth::use_ensure_auth,
     components::port_config::PortConfig,
     i18n::use_locale,
     pages::Route,
     store::{PortStore, SessionStore},
-    API_ENDPOINT,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::{

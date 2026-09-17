@@ -3,8 +3,8 @@
 
 use serde::de::{self, DeserializeOwned, DeserializeSeed, IntoDeserializer, Visitor};
 use std::cell::RefCell;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::fmt;
 use std::rc::Rc;
 use std::str::FromStr;

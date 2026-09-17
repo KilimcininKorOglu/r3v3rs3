@@ -2,14 +2,14 @@
 //! follows the container events of the Docker Engine API.
 
 use super::labels;
-use super::{Built, ProxyGroups, Reporter, Watch, DEBOUNCE, MIN_BACKOFF};
-use crate::kv::http::{read_json, ApiClient, Lines};
+use super::{Built, DEBOUNCE, MIN_BACKOFF, ProxyGroups, Reporter, Watch};
+use crate::kv::http::{ApiClient, Lines, read_json};
 use anyhow::anyhow;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DockerDiscoveryConfig};
 use serde_derive::Deserialize;
 use std::collections::BTreeMap;
 use std::time::Duration;
-use tokio::time::{timeout, timeout_at, Instant};
+use tokio::time::{Instant, timeout, timeout_at};
 
 const PROVIDER: DiscoveryProvider = DiscoveryProvider::Docker;
 const CONTAINERS_PATH: &str = "/containers/json";
@@ -237,10 +237,10 @@ impl Provider {
         self.sync().await?;
         *backoff = MIN_BACKOFF;
         loop {
-            if let Ok(line) = timeout(RESYNC_INTERVAL, events.next()).await {
-                if line?.is_none() || !debounce(&mut events).await? {
-                    return Ok(());
-                }
+            if let Ok(line) = timeout(RESYNC_INTERVAL, events.next()).await
+                && (line?.is_none() || !debounce(&mut events).await?)
+            {
+                return Ok(());
             }
             self.sync().await?;
         }

@@ -7,7 +7,7 @@ use std::{collections::HashMap, net::SocketAddr, time::Duration};
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::{alloc_tcp_port, wait_for_listener, with_server, TestStorage};
+use common::{TestStorage, alloc_tcp_port, wait_for_listener, with_server};
 
 // The admin login route also has a governor layer that allows a burst of 2
 // and replenishes one request every 4 seconds.

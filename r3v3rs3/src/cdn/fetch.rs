@@ -1,14 +1,14 @@
 //! Downloads the published edge IP ranges of known CDNs.
 
-use super::{set_last_errors, table, CdnRanges};
+use super::{CdnRanges, set_last_errors, table};
 use crate::clock::unix_ms;
 use crate::{command::ServerCommand, proxy::http::hyper_tls::client::HttpsConnector};
 use anyhow::{anyhow, bail};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
-use hyper::{header::CONTENT_TYPE, header::USER_AGENT, Method, Request};
+use hyper::{Method, Request, header::CONTENT_TYPE, header::USER_AGENT};
 use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client},
+    client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
 use ipnet::IpNet;

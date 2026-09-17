@@ -1,7 +1,7 @@
 //! Display preferences of the pages that r3v3rs3 renders itself: the error page and the sign-in
 //! page.
 
-use hyper::header::{HeaderMap, COOKIE};
+use hyper::header::{COOKIE, HeaderMap};
 use r3v3rs3_api::i18n::{Locale, Theme};
 
 /// Language and theme that the WebUI stores in cookies. A browser sends these cookies only to the

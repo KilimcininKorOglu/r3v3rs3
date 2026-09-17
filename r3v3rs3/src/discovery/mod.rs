@@ -19,8 +19,8 @@ use r3v3rs3_api::discovery::{
 };
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::proxy::ProxyKind;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;

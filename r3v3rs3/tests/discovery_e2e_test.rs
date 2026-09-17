@@ -6,31 +6,31 @@
 //! `R3V3RS3_E2E_DIR`, runs the tests and removes the containers. The Docker test needs a host that
 //! reaches the container addresses, for example Linux or OrbStack.
 
-use axum::{routing::get, Router};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use axum::{Router, routing::get};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use kube::api::{DeleteParams, PostParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::core::{ApiResource, DynamicObject, GroupVersionKind};
 use kube::{Api, Client, Config};
+use r3v3rs3::server::ServerChannels;
 use r3v3rs3::server::rpc::config::SetConfig;
 use r3v3rs3::server::rpc::discovery::GetDiscoveryStatus;
-use r3v3rs3::server::ServerChannels;
 use r3v3rs3_api::{
     app::AppConfig,
     discovery::{DiscoveryProvider, DiscoveryState},
     port::PortEntry,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 mod common;
-use common::e2e::{consul_put, etcd_post, etcd_token, CONSUL, CONSUL_TOKEN, ETCD, ETCD_PASSWORD};
+use common::e2e::{CONSUL, CONSUL_TOKEN, ETCD, ETCD_PASSWORD, consul_put, etcd_post, etcd_token};
 use common::{
-    alloc_tcp_port, call, http_port_entry, wait_for_host_body, wait_for_host_status, with_server,
-    TestStorage,
+    TestStorage, alloc_tcp_port, call, http_port_entry, wait_for_host_body, wait_for_host_status,
+    with_server,
 };
 
 const K3S: &str = "https://127.0.0.1:8482";

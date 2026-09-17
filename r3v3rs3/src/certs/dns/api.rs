@@ -5,8 +5,8 @@ use anyhow::{anyhow, bail};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
-    header::{CONTENT_TYPE, USER_AGENT},
     Method, Request, StatusCode, Uri,
+    header::{CONTENT_TYPE, USER_AGENT},
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -66,10 +66,10 @@ impl TokenCache {
         request: impl Future<Output = anyhow::Result<Value>>,
     ) -> anyhow::Result<String> {
         let mut cached = self.0.lock().await;
-        if let Some((token, expires)) = cached.as_ref() {
-            if Instant::now() < *expires {
-                return Ok(token.clone());
-            }
+        if let Some((token, expires)) = cached.as_ref()
+            && Instant::now() < *expires
+        {
+            return Ok(token.clone());
         }
         let response = request.await?;
         let token = response["access_token"]

@@ -1,8 +1,8 @@
 use super::http_proxy_config::{
-    format_seconds, or_error, parse_seconds, timeout_field_view, upstream_form_view,
-    use_entry_errors, use_upstream_form, UpstreamForm,
+    UpstreamForm, format_seconds, or_error, parse_seconds, timeout_field_view, upstream_form_view,
+    use_entry_errors, use_upstream_form,
 };
-use super::tcp_proxy_config::{parse_servers, servers_view, use_server_forms, ServerForm};
+use super::tcp_proxy_config::{ServerForm, parse_servers, servers_view, use_server_forms};
 use crate::i18n::use_locale;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::proxy::UdpProxy;

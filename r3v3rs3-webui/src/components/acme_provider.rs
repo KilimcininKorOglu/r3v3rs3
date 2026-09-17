@@ -1,4 +1,4 @@
-use crate::components::acme_form::{build_request, fields_view, AcmeFields, AcmeResult};
+use crate::components::acme_form::{AcmeFields, AcmeResult, build_request, fields_view};
 use crate::components::http_proxy_config::use_entry_errors;
 use crate::i18n::use_locale;
 use r3v3rs3_api::acme::AcmeConfig;

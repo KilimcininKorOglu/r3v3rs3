@@ -5,8 +5,8 @@ use crate::server::rpc::proxies::{
     AddProxy, DeleteProxy, GetProxy, GetProxyList, GetProxyStatus, PurgeProxyCache, UpdateProxy,
 };
 use axum::{
-    extract::{Path, State},
     Extension, Json,
+    extract::{Path, State},
 };
 use r3v3rs3_api::{
     id::ShortId,

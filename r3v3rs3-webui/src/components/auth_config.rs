@@ -2,8 +2,8 @@ use super::http_proxy_config::{BUTTON_CLASS, HINT_CLASS, INPUT_CLASS, LABEL_CLAS
 use crate::i18n::use_locale;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::policy::{
-    is_header_name, AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, ForwardAuth,
-    DEFAULT_FORWARD_AUTH_TIMEOUT,
+    AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, DEFAULT_FORWARD_AUTH_TIMEOUT,
+    ForwardAuth, is_header_name,
 };
 use r3v3rs3_api::proxy::ServerUrl;
 use std::collections::HashSet;
@@ -460,12 +460,16 @@ mod tests {
             form("http://127.0.0.1/auth", "X Auth", "5").parse(Locale::Tr),
             Err(Locale::Tr.tf("error.invalid_header_name", &[("name", "X Auth")]))
         );
-        assert!(form("http://127.0.0.1/auth", "", "0")
-            .parse(Locale::En)
-            .is_err());
-        assert!(form("http://127.0.0.1/auth", "", "301")
-            .parse(Locale::En)
-            .is_err());
+        assert!(
+            form("http://127.0.0.1/auth", "", "0")
+                .parse(Locale::En)
+                .is_err()
+        );
+        assert!(
+            form("http://127.0.0.1/auth", "", "301")
+                .parse(Locale::En)
+                .is_err()
+        );
     }
 
     #[test]
@@ -492,18 +496,26 @@ mod tests {
         assert!(form(vec![token("ci", "", true)]).parse(Locale::En).is_ok());
 
         assert!(form(vec![]).parse(Locale::En).is_err());
-        assert!(form(vec![token("", "0123456789abcdef", false)])
-            .parse(Locale::En)
-            .is_err());
-        assert!(form(vec![token("ci", "", false)])
-            .parse(Locale::En)
-            .is_err());
-        assert!(form(vec![token("ci", "short", false)])
-            .parse(Locale::En)
-            .is_err());
-        assert!(form(vec![token("ci", "", true), token("ci", "", true)])
-            .parse(Locale::En)
-            .is_err());
+        assert!(
+            form(vec![token("", "0123456789abcdef", false)])
+                .parse(Locale::En)
+                .is_err()
+        );
+        assert!(
+            form(vec![token("ci", "", false)])
+                .parse(Locale::En)
+                .is_err()
+        );
+        assert!(
+            form(vec![token("ci", "short", false)])
+                .parse(Locale::En)
+                .is_err()
+        );
+        assert!(
+            form(vec![token("ci", "", true), token("ci", "", true)])
+                .parse(Locale::En)
+                .is_err()
+        );
     }
 
     #[test]
@@ -551,19 +563,27 @@ mod tests {
     #[test]
     fn basic_form_rejects_invalid_users() {
         assert!(basic_form(vec![]).parse(Locale::En).is_err());
-        assert!(basic_form(vec![user("", "secret")])
-            .parse(Locale::En)
-            .is_err());
-        assert!(basic_form(vec![user("alice", "")])
-            .parse(Locale::En)
-            .is_err());
-        assert!(basic_form(vec![user("alice", "a"), user("alice", "b")])
-            .parse(Locale::En)
-            .is_err());
-        assert!(AuthForm::new(&AuthPolicy::None)
-            .parse(Locale::En)
-            .unwrap()
-            .is_none());
+        assert!(
+            basic_form(vec![user("", "secret")])
+                .parse(Locale::En)
+                .is_err()
+        );
+        assert!(
+            basic_form(vec![user("alice", "")])
+                .parse(Locale::En)
+                .is_err()
+        );
+        assert!(
+            basic_form(vec![user("alice", "a"), user("alice", "b")])
+                .parse(Locale::En)
+                .is_err()
+        );
+        assert!(
+            AuthForm::new(&AuthPolicy::None)
+                .parse(Locale::En)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

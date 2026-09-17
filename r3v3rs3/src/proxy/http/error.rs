@@ -1,6 +1,6 @@
 use super::page::PagePreferences;
-use hyper::header::{HeaderMap, HeaderValue, RETRY_AFTER, WWW_AUTHENTICATE};
 use hyper::StatusCode;
+use hyper::header::{HeaderMap, HeaderValue, RETRY_AFTER, WWW_AUTHENTICATE};
 use r3v3rs3_api::i18n::Locale;
 use sailfish::TemplateOnce;
 use std::time::Duration;

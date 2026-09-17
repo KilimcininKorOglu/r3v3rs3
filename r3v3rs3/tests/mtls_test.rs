@@ -1,4 +1,4 @@
-use axum::{http::HeaderMap, routing::get, Router};
+use axum::{Router, http::HeaderMap, routing::get};
 use axum_server::tls_rustls::RustlsConfig;
 use r3v3rs3::{admin::start_admin, certs::Cert, config::new_appinfo, log::DatabaseLayer};
 use r3v3rs3_api::{
@@ -10,17 +10,17 @@ use r3v3rs3_api::{
     tls::{ClientAuthMode, TlsTermination},
 };
 use reqwest::{
-    header::{COOKIE, HOST},
     Identity, StatusCode,
+    header::{COOKIE, HOST},
 };
 use std::{collections::HashMap, future::IntoFuture, sync::Arc};
-use tokio_rustls::rustls::{server::WebPkiClientVerifier, RootCertStore, ServerConfig};
+use tokio_rustls::rustls::{RootCertStore, ServerConfig, server::WebPkiClientVerifier};
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
 use common::{
-    admin_session_cookie, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route,
-    port_entry, proxy_entry, wait_for_listener, with_server, TestPort, TestStorage,
+    TestPort, TestStorage, admin_session_cookie, alloc_tcp_port, http_port_entry, http_proxy_entry,
+    http_route, port_entry, proxy_entry, wait_for_listener, with_server,
 };
 
 /// A root certificate with a server certificate and a client certificate that it signs.

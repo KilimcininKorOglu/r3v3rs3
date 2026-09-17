@@ -16,7 +16,7 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::{io::BufStream, net::TcpStream};
 use tokio_rustls::rustls::ServerConfig;
-use tracing::{error, Instrument, Span};
+use tracing::{Instrument, Span, error};
 
 pub mod health;
 pub mod http;

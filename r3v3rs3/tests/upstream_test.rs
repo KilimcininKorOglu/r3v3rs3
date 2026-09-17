@@ -1,7 +1,7 @@
-use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
+use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
 use r3v3rs3::{
     command::ServerCommand,
-    server::rpc::{proxies::GetProxyStatus, ErasedRpcMethod, RpcWrapper},
+    server::rpc::{ErasedRpcMethod, RpcWrapper, proxies::GetProxyStatus},
 };
 use r3v3rs3_api::{
     cache::CacheConfig,
@@ -18,8 +18,8 @@ use std::{
     future::{Future, IntoFuture},
     net::SocketAddr,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -31,8 +31,8 @@ use tokio::{
 use url::Url;
 
 mod common;
+use common::{TestPort, TestStorage, serve_http_upstream};
 use common::{alloc_tcp_port, alloc_udp_port, http_route, port_entry, proxy_entry, with_server};
-use common::{serve_http_upstream, TestPort, TestStorage};
 
 /// Starts a listener that accepts TCP connections and never sends a byte, so a TLS handshake
 /// with it does not finish.

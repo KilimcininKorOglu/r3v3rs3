@@ -228,7 +228,7 @@ pub mod fixtures {
     use crate::discovery::{Built, DiscoveredProxy};
     use r3v3rs3_api::proxy::{HttpProxy, ProxyKind, Route};
     use serde::de::DeserializeOwned;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     pub fn object<T: DeserializeOwned>(value: Value) -> Arc<T> {
         Arc::new(serde_json::from_value(value).unwrap())

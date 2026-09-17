@@ -8,12 +8,12 @@ use crate::sessions::{self, SessionBackend, SessionRecord, SessionScope};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
+    Method, Request, Response, StatusCode,
     body::Body,
     header::{
-        HeaderMap, HeaderValue, ALLOW, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE,
+        ALLOW, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderMap, HeaderValue,
         LOCATION, REFERRER_POLICY, SET_COOKIE,
     },
-    Method, Request, Response, StatusCode,
 };
 use r3v3rs3_api::{
     app::AdminConfig,
@@ -404,11 +404,7 @@ fn login_path(ctx: &AuthContext<'_>) -> String {
 }
 
 fn secure_attribute(ctx: &AuthContext<'_>) -> &'static str {
-    if ctx.proto == "http" {
-        ""
-    } else {
-        "; Secure"
-    }
+    if ctx.proto == "http" { "" } else { "; Secure" }
 }
 
 fn query_redirect<B>(req: &Request<B>) -> String {
@@ -429,11 +425,7 @@ fn safe_redirect(target: &str) -> &str {
         && !target.starts_with("/\\")
         && target.len() <= MAX_REDIRECT_LENGTH
         && target.bytes().all(|b| b.is_ascii_graphic());
-    if valid {
-        target
-    } else {
-        "/"
-    }
+    if valid { target } else { "/" }
 }
 
 #[derive(Default)]

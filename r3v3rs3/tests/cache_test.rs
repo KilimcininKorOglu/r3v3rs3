@@ -1,17 +1,17 @@
 use mockito::Matcher;
 use r3v3rs3::{
     command::ServerCommand,
-    server::rpc::{proxies::PurgeProxyCache, ErasedRpcMethod, RpcWrapper},
+    server::rpc::{ErasedRpcMethod, RpcWrapper, proxies::PurgeProxyCache},
 };
 use r3v3rs3_api::{cache::CacheConfig, proxy::HttpProxy};
 use reqwest::{
-    header::{AGE, IF_NONE_MATCH},
     StatusCode,
+    header::{AGE, IF_NONE_MATCH},
 };
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 fn x_cache(resp: &reqwest::Response) -> Option<&str> {

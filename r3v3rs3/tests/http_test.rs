@@ -5,11 +5,11 @@ use r3v3rs3_api::{
     redirect::RedirectRule,
     tls::TlsTermination,
 };
-use reqwest::{header::HOST, redirect::Policy, Body};
+use reqwest::{Body, header::HOST, redirect::Policy};
 use serde_json::json;
 
 mod common;
-use common::{alloc_tcp_port, with_server, TestStorage};
+use common::{TestStorage, alloc_tcp_port, with_server};
 
 #[tokio::test]
 async fn http_proxy() -> anyhow::Result<()> {
@@ -247,74 +247,73 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
     let proxy_port = alloc_tcp_port().await?;
     let proxy_port2 = alloc_tcp_port().await?;
 
-    let config =
-        TestStorage::builder()
-            .ports(vec![
-                PortEntry {
-                    id: "test".parse().unwrap(),
-                    port: Port {
-                        active: true,
-                        name: String::new(),
-                        listen: proxy_port.multiaddr_http(),
-                        opts: Default::default(),
-                    },
+    let config = TestStorage::builder()
+        .ports(vec![
+            PortEntry {
+                id: "test".parse().unwrap(),
+                port: Port {
+                    active: true,
+                    name: String::new(),
+                    listen: proxy_port.multiaddr_http(),
+                    opts: Default::default(),
                 },
-                PortEntry {
-                    id: "secure".parse().unwrap(),
-                    port: Port {
-                        active: true,
-                        name: String::new(),
-                        listen: proxy_port2.multiaddr_https(),
-                        opts: PortOptions {
-                            tls_termination: Some(TlsTermination {
-                                server_names: vec!["localhost".into()],
-                                ..Default::default()
-                            }),
-                            proxy_protocol: None,
-                        },
-                    },
-                },
-            ])
-            .proxies(vec![ProxyEntry {
-                id: "test2".parse().unwrap(),
-                source: None,
-                proxy: Proxy {
-                    ports: vec!["test".parse().unwrap(), "secure".parse().unwrap()],
-                    kind: ProxyKind::Http(Box::new(HttpProxy {
-                        vhosts: vec!["localhost".parse().unwrap()],
-                        routes: vec![Route {
-                            servers: vec![r3v3rs3_api::proxy::Server::new(
-                                "https://httpbin.org/".parse().unwrap(),
-                            )],
+            },
+            PortEntry {
+                id: "secure".parse().unwrap(),
+                port: Port {
+                    active: true,
+                    name: String::new(),
+                    listen: proxy_port2.multiaddr_https(),
+                    opts: PortOptions {
+                        tls_termination: Some(TlsTermination {
+                            server_names: vec!["localhost".into()],
                             ..Default::default()
-                        }],
-                        upgrade_insecure: true,
-                        client_ip: Default::default(),
-                        ip_filter: Default::default(),
-                        rate_limit: Default::default(),
-                        auth: Default::default(),
-                        headers: Default::default(),
-                        compression: Default::default(),
-                        cache: Default::default(),
-                        h2c: false,
-                        timeouts: Default::default(),
-                        load_balancing: Default::default(),
-                        health_check: Default::default(),
-                        circuit_breaker: Default::default(),
-                        retry: Default::default(),
-                        sticky: Default::default(),
-                        access_list: None,
-                        max_body_size: 0,
-                        // The HTTPS redirect runs before this rule, which matches every request.
-                        redirects: vec![
-                            RedirectRule::parse_line("302 .* https://other.test/").unwrap()
-                        ],
-                        client_cert: None,
-                    })),
-                    ..Default::default()
+                        }),
+                        proxy_protocol: None,
+                    },
                 },
-            }])
-            .build();
+            },
+        ])
+        .proxies(vec![ProxyEntry {
+            id: "test2".parse().unwrap(),
+            source: None,
+            proxy: Proxy {
+                ports: vec!["test".parse().unwrap(), "secure".parse().unwrap()],
+                kind: ProxyKind::Http(Box::new(HttpProxy {
+                    vhosts: vec!["localhost".parse().unwrap()],
+                    routes: vec![Route {
+                        servers: vec![r3v3rs3_api::proxy::Server::new(
+                            "https://httpbin.org/".parse().unwrap(),
+                        )],
+                        ..Default::default()
+                    }],
+                    upgrade_insecure: true,
+                    client_ip: Default::default(),
+                    ip_filter: Default::default(),
+                    rate_limit: Default::default(),
+                    auth: Default::default(),
+                    headers: Default::default(),
+                    compression: Default::default(),
+                    cache: Default::default(),
+                    h2c: false,
+                    timeouts: Default::default(),
+                    load_balancing: Default::default(),
+                    health_check: Default::default(),
+                    circuit_breaker: Default::default(),
+                    retry: Default::default(),
+                    sticky: Default::default(),
+                    access_list: None,
+                    max_body_size: 0,
+                    // The HTTPS redirect runs before this rule, which matches every request.
+                    redirects: vec![
+                        RedirectRule::parse_line("302 .* https://other.test/").unwrap(),
+                    ],
+                    client_cert: None,
+                })),
+                ..Default::default()
+            },
+        }])
+        .build();
 
     with_server(config, |_| async move {
         let client = reqwest::Client::builder()

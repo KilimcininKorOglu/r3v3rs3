@@ -4,13 +4,13 @@ use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::auth::Role;
 use r3v3rs3_api::cert::MAX_DELETE_CERTS;
 use reqwest::Method;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::{alloc_tcp_port, send, session_cookie, wait_for_listener, with_server, TestStorage};
+use common::{TestStorage, alloc_tcp_port, send, session_cookie, wait_for_listener, with_server};
 
 #[tokio::test]
 async fn a_request_deletes_each_certificate_that_nothing_uses() -> anyhow::Result<()> {

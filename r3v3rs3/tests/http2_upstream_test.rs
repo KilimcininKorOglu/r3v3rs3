@@ -1,4 +1,4 @@
-use axum::{extract::Request, routing::get, Router};
+use axum::{Router, extract::Request, routing::get};
 use axum_server::tls_rustls::RustlsConfig;
 use r3v3rs3::certs::Cert;
 use r3v3rs3_api::proxy::HttpProxy;
@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 async fn version(req: Request) -> String {

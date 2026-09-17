@@ -9,7 +9,7 @@ use anyhow::{anyhow, bail};
 use hyper::Method;
 use r3v3rs3_api::acme::webhook_url_allowed;
 use r3v3rs3_api::app::WebhookConfig;
-use r3v3rs3_api::cert::{expiry_state, CertInfo, ExpiryState};
+use r3v3rs3_api::cert::{CertInfo, ExpiryState, expiry_state};
 use r3v3rs3_api::id::ShortId;
 use serde::Serialize;
 use std::collections::HashSet;

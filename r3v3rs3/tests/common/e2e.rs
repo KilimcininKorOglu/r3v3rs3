@@ -1,6 +1,6 @@
 //! The services of `tests/discovery/docker-compose.yml` for the ignored end-to-end tests.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub const CONSUL: &str = "http://127.0.0.1:8480";
 /// The management token of the Consul agent.

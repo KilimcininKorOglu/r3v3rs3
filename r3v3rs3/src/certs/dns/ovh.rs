@@ -1,12 +1,13 @@
 use super::{
-    api::{id_text, ApiClient, ApiRequest},
-    domain_zone, relative_name, RecordApi, TXT_TTL,
+    RecordApi, TXT_TTL,
+    api::{ApiClient, ApiRequest, id_text},
+    domain_zone, relative_name,
 };
 use anyhow::anyhow;
 use async_trait::async_trait;
 use hyper::Method;
 use once_cell::sync::OnceCell;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
 use time::OffsetDateTime;
 

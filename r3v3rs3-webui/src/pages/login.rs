@@ -1,9 +1,9 @@
 use crate::{
-    auth::{test_token, LoginQuery},
+    API_ENDPOINT,
+    auth::{LoginQuery, test_token},
     components::{language_menu::LanguageMenu, theme_menu::ThemeMenu},
     i18n::use_locale,
     pages::Route,
-    API_ENDPOINT,
 };
 use gloo_events::EventListener;
 use gloo_net::http::Request;
@@ -12,7 +12,7 @@ use r3v3rs3_api::{
     error::ErrorMessage,
 };
 use serde_derive::Deserialize;
-use wasm_bindgen::{prelude::wasm_bindgen, JsCast, UnwrapThrowExt};
+use wasm_bindgen::{JsCast, UnwrapThrowExt, prelude::wasm_bindgen};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yew_router::prelude::*;

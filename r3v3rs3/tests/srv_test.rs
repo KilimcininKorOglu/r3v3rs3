@@ -4,8 +4,8 @@ use r3v3rs3::{
     accounts::Caller,
     command::ServerCommand,
     server::{
-        rpc::{config::SetConfig, proxies::GetProxyStatus, ErasedRpcMethod, RpcWrapper},
         ServerChannels,
+        rpc::{ErasedRpcMethod, RpcWrapper, config::SetConfig, proxies::GetProxyStatus},
     },
 };
 use r3v3rs3_api::{
@@ -17,9 +17,9 @@ use std::{net::SocketAddr, time::Duration};
 
 mod common;
 use common::{
-    alloc_tcp_port, call,
+    TestStorage, alloc_tcp_port, call,
     dns::{MockDns, SrvRecord},
-    http_port_entry, http_proxy_entry, wait_for_status, with_server, TestStorage,
+    http_port_entry, http_proxy_entry, wait_for_status, with_server,
 };
 
 /// The SRV lookup states of the proxy `s`.

@@ -1,15 +1,15 @@
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{
-    delete_on_click, form_card, load, notice_view, reload_callback, row_actions, save_result,
-    set_on_click, submit_callback, text_input, FormCard, Notice,
+    FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback, row_actions,
+    save_result, set_on_click, submit_callback, text_input,
 };
 use super::settings::send_json;
+use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::auth_config::{AuthConfig, AuthForm, AuthKind};
-use crate::components::data_list::{list_card, Column, Row};
+use crate::components::data_list::{Column, Row, list_card};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
-use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::{
     access_list::{AccessList, AccessListEntry},

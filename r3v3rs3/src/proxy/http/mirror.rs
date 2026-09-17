@@ -3,18 +3,18 @@
 use super::pool::{ConnectionPool, UpstreamH2c};
 use bytes::{Bytes, BytesMut};
 use futures::future::join_all;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::{Body, Frame, SizeHint};
-use hyper::header::{HeaderValue, HOST, UPGRADE};
+use hyper::header::{HOST, HeaderValue, UPGRADE};
 use hyper::{Request, Uri};
 use pin_project_lite::pin_project;
 use r3v3rs3_api::{mirror, proxy::Server};
 use rand::Rng;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::time::Duration;
-use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 use tracing::debug;
 
 type ProxyBody = BoxBody<Bytes, anyhow::Error>;
@@ -193,10 +193,10 @@ impl Body for TeeBody {
             }
             None => {}
         }
-        if frame.is_none() || this.inner.is_end_stream() {
-            if let Some(sender) = this.sender.take() {
-                let _ = sender.send(this.copy.split().freeze());
-            }
+        if (frame.is_none() || this.inner.is_end_stream())
+            && let Some(sender) = this.sender.take()
+        {
+            let _ = sender.send(this.copy.split().freeze());
         }
         Poll::Ready(frame)
     }

@@ -3,8 +3,8 @@ use super::{AppError, AppState};
 use crate::accounts::Caller;
 use crate::server::rpc::proxies::GetProxy;
 use axum::{
-    extract::{Path, Query, State},
     Extension, Json,
+    extract::{Path, Query, State},
 };
 use r3v3rs3_api::{
     error::Error,
@@ -12,7 +12,7 @@ use r3v3rs3_api::{
     log::{LogLevel, LogQuery, SystemLogRow},
 };
 use sqlx::ConnectOptions;
-use sqlx::{sqlite::SqliteConnectOptions, Row, SqlitePool};
+use sqlx::{Row, SqlitePool, sqlite::SqliteConnectOptions};
 use std::time::Duration;
 use time::OffsetDateTime;
 

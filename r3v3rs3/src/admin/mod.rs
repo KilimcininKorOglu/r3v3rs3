@@ -7,19 +7,19 @@ use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
 use crate::sessions::{LocalSessions, SessionBackend};
 use auth::LoginAttempts;
 use axum::extract::State;
-use axum::http::{header::CACHE_CONTROL, HeaderValue, StatusCode};
+use axum::http::{HeaderValue, StatusCode, header::CACHE_CONTROL};
 use axum::response::{IntoResponse, Response};
-use axum::{middleware, Extension, Json};
+use axum::{Extension, Json, middleware};
 use axum::{
-    response::{
-        sse::{Event, KeepAlive},
-        Sse,
-    },
     Router,
+    response::{
+        Sse,
+        sse::{Event, KeepAlive},
+    },
 };
 use futures::{Stream, StreamExt};
 use logs::LogReader;
-use openapi::{ApiDoc, ErrorResponses, DOCS_PATH, OPENAPI_PATH};
+use openapi::{ApiDoc, DOCS_PATH, ErrorResponses, OPENAPI_PATH};
 use r3v3rs3_api::app::{AppConfig, AppInfo};
 use r3v3rs3_api::error::{Error, ErrorMessage};
 use r3v3rs3_api::event::ServerEvent;
@@ -29,14 +29,14 @@ use std::{
     net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{broadcast, mpsc, oneshot, watch, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc, oneshot, watch};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::{GovernorError, GovernorLayer};

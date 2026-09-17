@@ -13,8 +13,8 @@ use r3v3rs3_api::{
 
 mod common;
 use common::{
-    alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route, wait_for_status,
-    with_server, TestStorage,
+    TestStorage, alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route,
+    wait_for_status, with_server,
 };
 
 fn office(deny: &[&str]) -> AccessListEntry {

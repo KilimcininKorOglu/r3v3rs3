@@ -1,15 +1,15 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::{routing::get, Json, Router};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use axum::{Json, Router, routing::get};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use r3v3rs3::config::storage::Storage;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
 use r3v3rs3_api::{
     app::AppConfig,
     discovery::{DiscoveryIssue, DiscoveryState},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -18,8 +18,8 @@ use tokio::sync::watch;
 
 mod common;
 use common::{
-    alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_discovery,
-    wait_for_host_status, wait_for_status, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_discovery,
+    wait_for_host_status, wait_for_status, with_server,
 };
 
 const TOKEN: &str = "consul-test-token";

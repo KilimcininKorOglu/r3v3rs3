@@ -1,7 +1,7 @@
 //! Display preferences of the WebUI. The values are stored in cookies, so the head script of
 //! `index.html` and the pages that the server renders read the same values.
 
-use r3v3rs3_api::i18n::{Locale, Theme, LOCALE_COOKIE, THEME_COOKIE};
+use r3v3rs3_api::i18n::{LOCALE_COOKIE, Locale, THEME_COOKIE, Theme};
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Document, HtmlDocument};
 use yewdux::prelude::*;
@@ -39,10 +39,10 @@ pub fn set_locale(dispatch: &Dispatch<PreferencesStore>, locale: Locale) {
     let root = web_sys::window()
         .and_then(|window| window.document())
         .and_then(|document| document.document_element());
-    if let Some(root) = root {
-        if let Err(err) = root.set_attribute("lang", locale.code()) {
-            report(err);
-        }
+    if let Some(root) = root
+        && let Err(err) = root.set_attribute("lang", locale.code())
+    {
+        report(err);
     }
     dispatch.reduce_mut(|preferences| preferences.locale = locale);
 }
@@ -55,10 +55,10 @@ pub fn set_theme(dispatch: &Dispatch<PreferencesStore>, theme: Theme) {
 }
 
 fn write_cookie(name: &str, value: &str) {
-    if let Some(document) = html_document() {
-        if let Err(err) = document.set_cookie(&format!("{name}={value}; {COOKIE_ATTRIBUTES}")) {
-            report(err);
-        }
+    if let Some(document) = html_document()
+        && let Err(err) = document.set_cookie(&format!("{name}={value}; {COOKIE_ATTRIBUTES}"))
+    {
+        report(err);
     }
 }
 
@@ -81,10 +81,10 @@ fn apply_theme(theme: Theme) {
     let Some(document) = window.document() else {
         return;
     };
-    if let Some(root) = document.document_element() {
-        if let Err(err) = root.class_list().toggle_with_force("dark", dark) {
-            report(err);
-        }
+    if let Some(root) = document.document_element()
+        && let Err(err) = root.class_list().toggle_with_force("dark", dark)
+    {
+        report(err);
     }
     set_theme_color(&document, dark);
 }

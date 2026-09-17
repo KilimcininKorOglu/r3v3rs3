@@ -1,14 +1,14 @@
-use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
+use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
 use mockito::Matcher;
 use r3v3rs3_api::{
     policy::{AuthPolicy, BasicAuth, BasicAuthUser},
     proxy::HttpProxy,
 };
-use reqwest::{header::WWW_AUTHENTICATE, StatusCode};
+use reqwest::{StatusCode, header::WWW_AUTHENTICATE};
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 fn basic_auth(realm: &str, username: &str, password: &str) -> AuthPolicy {

@@ -1,6 +1,6 @@
 use r3v3rs3::audit::{AuditFilter, AuditStore, DAY_MS};
 use r3v3rs3::certs::Cert;
-use r3v3rs3::cluster::crypto::{sealed_key_id, ClusterKey, ClusterKeys};
+use r3v3rs3::cluster::crypto::{ClusterKey, ClusterKeys, sealed_key_id};
 use r3v3rs3::cluster::import::import;
 use r3v3rs3::cluster::storage::KvStorage;
 use r3v3rs3::config::file::{FileState, FileStorage};
@@ -62,8 +62,8 @@ fn usernames(entries: Vec<AuditEntry>) -> BTreeSet<String> {
 }
 
 #[tokio::test]
-async fn the_nodes_share_an_encrypted_audit_log_and_the_leader_deletes_the_old_days(
-) -> anyhow::Result<()> {
+async fn the_nodes_share_an_encrypted_audit_log_and_the_leader_deletes_the_old_days()
+-> anyhow::Result<()> {
     let store = Arc::new(MemoryStore::default());
     let (a, b) = (node(&store, "node-a")?, node(&store, "node-b")?);
     let now = r3v3rs3::clock::unix_ms();
@@ -93,10 +93,11 @@ async fn the_nodes_share_an_encrypted_audit_log_and_the_leader_deletes_the_old_d
 
     let list = store.list(&a.layout().audit()).await?;
     assert_eq!(list.items.len(), 3);
-    assert!(list
-        .items
-        .iter()
-        .all(|item| !String::from_utf8_lossy(&item.value).contains("Web")));
+    assert!(
+        list.items
+            .iter()
+            .all(|item| !String::from_utf8_lossy(&item.value).contains("Web"))
+    );
 
     a.remove_before(now - 30 * DAY_MS).await?;
     assert!(usernames(a.query(&old).await?).is_empty());

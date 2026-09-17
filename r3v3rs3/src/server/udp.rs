@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::net::UdpSocket;
-use tracing::{error, info, span, Level};
+use tracing::{Level, error, info, span};
 
 #[derive(Debug)]
 pub struct UdpListenerPool {

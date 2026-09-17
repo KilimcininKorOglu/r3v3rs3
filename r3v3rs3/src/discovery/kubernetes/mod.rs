@@ -5,15 +5,15 @@ mod cluster;
 mod crd;
 mod ingress;
 
-use super::{Built, Reporter, Watch, DEBOUNCE, MIN_BACKOFF};
+use super::{Built, DEBOUNCE, MIN_BACKOFF, Reporter, Watch};
 use anyhow::anyhow;
 use cluster::Resources;
 use crd::R3v3rs3Proxy;
 use futures::stream::{BoxStream, SelectAll, StreamExt, TryStreamExt};
+use k8s_openapi::NamespaceResourceScope;
 use k8s_openapi::api::core::v1::{Secret, Service};
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::Ingress;
-use k8s_openapi::NamespaceResourceScope;
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::runtime::reflector::{self, Store};
 use kube::runtime::watcher;

@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
+use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::data_list::{
-    active_toggle, list_card, status_badge, Column, Row, DANGER_LINK_CLASS, LINK_CLASS,
+    Column, DANGER_LINK_CLASS, LINK_CLASS, Row, active_toggle, list_card, status_badge,
 };
 use crate::components::discovery_status::DiscoveryStatusCard;
 use crate::i18n::use_locale;
 use crate::pages::Route;
 use crate::store::{PortStore, ProxyStore, SessionStore};
-use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
 use r3v3rs3_api::i18n::Locale;

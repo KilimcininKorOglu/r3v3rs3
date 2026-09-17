@@ -4,7 +4,7 @@ use crate::components::custom_acme::CustomAcme;
 use crate::components::http_proxy_config::error_view;
 use crate::pages::cert_list::{CertsQuery, CertsTab};
 use crate::pages::settings::send_json;
-use crate::{auth::use_ensure_auth, i18n::use_locale, pages::Route, API_ENDPOINT};
+use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale, pages::Route};
 use gloo_net::http::Request;
 use r3v3rs3_api::acme::AcmeRequest;
 use r3v3rs3_api::i18n::Locale;

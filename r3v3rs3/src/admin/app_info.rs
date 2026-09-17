@@ -1,6 +1,6 @@
 use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use r3v3rs3_api::app::AppInfo;
 
 /// Returns the version, build and path information of the server.

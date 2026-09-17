@@ -2,7 +2,7 @@ use crate::components::cluster_status::ClusterStatusCard;
 use crate::components::http_proxy_config::{
     client_cert_label, parse_optional_id, use_client_certs,
 };
-use crate::{auth::use_ensure_auth, i18n::use_locale, API_ENDPOINT};
+use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale};
 use gloo_net::http::{Request, RequestBuilder, Response};
 use r3v3rs3_api::{
     acme::webhook_url_allowed,
@@ -17,10 +17,10 @@ use r3v3rs3_api::{
     i18n::Locale,
     id::ShortId,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 use std::{collections::HashMap, net::SocketAddr};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;

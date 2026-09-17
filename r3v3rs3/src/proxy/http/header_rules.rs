@@ -1,7 +1,7 @@
 use hyper::header::{HeaderMap, HeaderName, HeaderValue};
 use r3v3rs3_api::{
     error::Error,
-    header_rules::{parse_header_template, HeaderRule, HeaderRules, HeaderVariable, TemplatePart},
+    header_rules::{HeaderRule, HeaderRules, HeaderVariable, TemplatePart, parse_header_template},
 };
 use std::{borrow::Cow, net::IpAddr, str::FromStr};
 use tracing::error;

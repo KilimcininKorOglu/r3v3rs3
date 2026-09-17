@@ -1,18 +1,18 @@
 use async_compression::{
-    tokio::bufread::{BrotliEncoder, GzipEncoder, ZstdEncoder},
     Level,
+    tokio::bufread::{BrotliEncoder, GzipEncoder, ZstdEncoder},
 };
 use bytes::Bytes;
 use futures::TryStreamExt;
-use http_body_util::{combinators::BoxBody, BodyExt, StreamBody};
+use http_body_util::{BodyExt, StreamBody, combinators::BoxBody};
 use hyper::{
+    HeaderMap, Method, Response, StatusCode,
     body::Frame,
     header::{
         ACCEPT_ENCODING, ACCEPT_RANGES, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH,
         CONTENT_RANGE, CONTENT_TYPE, ETAG, VARY,
     },
     http::HeaderValue,
-    HeaderMap, Method, Response, StatusCode,
 };
 use r3v3rs3_api::compression::{Compression, CompressionAlgorithm};
 use std::{io, pin::Pin, sync::Arc};

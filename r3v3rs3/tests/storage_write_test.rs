@@ -9,7 +9,7 @@ use std::time::Duration;
 
 mod common;
 use common::{
-    alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 #[tokio::test]

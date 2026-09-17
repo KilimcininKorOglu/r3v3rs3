@@ -1,5 +1,5 @@
 use crate::proxy::http::error::ProxyError;
-use hyper::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use hyper::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use r3v3rs3_api::policy::BearerAuth;
 use sha2::{Digest, Sha256};
 use std::fmt;

@@ -1,6 +1,6 @@
 use crate::{
-    store::{AcmeStore, CertStore, ClusterStore, DiscoveryStore, PortStore, ProxyStore},
     API_ENDPOINT,
+    store::{AcmeStore, CertStore, ClusterStore, DiscoveryStore, PortStore, ProxyStore},
 };
 use futures::StreamExt;
 use gloo_net::eventsource::futures::EventSource;

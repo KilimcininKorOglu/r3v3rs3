@@ -6,17 +6,16 @@ pub mod e2e;
 pub mod kv;
 
 use futures::Future;
-use hickory_resolver::{config::LookupIpStrategy, system_conf::read_system_conf, Resolver};
-use socket2::{Domain, Socket, Type};
+use hickory_resolver::{Resolver, config::LookupIpStrategy, system_conf::read_system_conf};
 use r3v3rs3::{
     accounts::Caller,
     cdn::CdnRanges,
-    certs::{acme::AcmeEntry, Cert},
+    certs::{Cert, acme::AcmeEntry},
     command::ServerCommand,
     config::{new_appinfo, storage::Storage},
     server::{
-        rpc::{discovery::GetDiscoveryStatus, ErasedRpcMethod, RpcMethod, RpcWrapper},
         Server, ServerChannels,
+        rpc::{ErasedRpcMethod, RpcMethod, RpcWrapper, discovery::GetDiscoveryStatus},
     },
 };
 use r3v3rs3_api::{
@@ -30,6 +29,7 @@ use r3v3rs3_api::{
     port::{Port, PortEntry},
     proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route, Server as UpstreamUrl},
 };
+use socket2::{Domain, Socket, Type};
 use std::{
     collections::{BTreeSet, HashMap},
     net::{SocketAddr, ToSocketAddrs},
@@ -355,10 +355,10 @@ impl Storage for TestStorage {
             _ => return Err(Error::InvalidLoginCredentials),
         };
         let inner = self.inner.lock().await;
-        if let Some(account) = inner.accounts.get(&request.username) {
-            if password_matches(&account.password, &password) {
-                return Ok(LoginResponse::Success);
-            }
+        if let Some(account) = inner.accounts.get(&request.username)
+            && password_matches(&account.password, &password)
+        {
+            return Ok(LoginResponse::Success);
         }
         Err(Error::InvalidLoginCredentials)
     }

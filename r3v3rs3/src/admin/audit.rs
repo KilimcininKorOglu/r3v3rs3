@@ -5,8 +5,8 @@ use crate::audit::AuditFilter;
 use crate::clock::unix_ms;
 use crate::server::rpc::auth::GetAuditLog;
 use axum::{
-    extract::{Query, State},
     Extension, Json,
+    extract::{Query, State},
 };
 use r3v3rs3_api::{
     audit::{AuditEntry, AuditQuery},

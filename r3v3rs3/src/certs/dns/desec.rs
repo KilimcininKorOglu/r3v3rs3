@@ -1,6 +1,6 @@
 use super::{
     api::{ApiClient, ApiRequest},
-    rrset::{quoted, RrsetApi},
+    rrset::{RrsetApi, quoted},
 };
 use anyhow::anyhow;
 use async_trait::async_trait;

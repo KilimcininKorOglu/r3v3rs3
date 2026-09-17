@@ -1,19 +1,19 @@
 //! [`KvStore`] for etcd. A lock is a key that a transaction creates with the lease of its holder.
 
 use super::etcd::{
-    int64, next_watch_line, watch_result, EtcdClient, Event, EventType, KeyRange, KeyValue,
-    RangeResponse,
+    EtcdClient, Event, EventType, KeyRange, KeyValue, RangeResponse, int64, next_watch_line,
+    watch_result,
 };
-use super::http::{read_json, Lines, RESPONSE_TIMEOUT};
+use super::http::{Lines, RESPONSE_TIMEOUT, read_json};
 use super::{
     Condition, KvEvent, KvItem, KvList, KvStore, KvWatcher, Lease, Txn, TxnOutcome, WatchBatch,
     Write,
 };
-use anyhow::{anyhow, bail, Context as _};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use anyhow::{Context as _, anyhow, bail};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use hyper::StatusCode;
 use serde_derive::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 
 #[derive(Debug, Deserialize)]

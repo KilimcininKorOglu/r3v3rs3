@@ -1,4 +1,4 @@
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
 use r3v3rs3_api::{
     port::UpstreamServer,
@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use tracing_subscriber::filter::LevelFilter;
 mod common;
 use common::{
-    admin_session_cookie, alloc_tcp_port, port_entry, wait_for_listener, with_server, TestPort,
-    TestStorage,
+    TestPort, TestStorage, admin_session_cookie, alloc_tcp_port, port_entry, wait_for_listener,
+    with_server,
 };
 
 #[tokio::test]

@@ -3,15 +3,15 @@ use crate::proxy::http::{error::ProxyError, hyper_tls::client::HttpsConnector};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty, Full, Limited};
 use hyper::{
+    Request, Response, Uri,
     body::Incoming,
     header::{
-        HeaderMap, HeaderName, HeaderValue, CONNECTION, CONTENT_LENGTH, HOST, TE, TRAILER,
+        CONNECTION, CONTENT_LENGTH, HOST, HeaderMap, HeaderName, HeaderValue, TE, TRAILER,
         TRANSFER_ENCODING, UPGRADE,
     },
-    Request, Response, Uri,
 };
 use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client},
+    client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
 use r3v3rs3_api::policy::ForwardAuth;

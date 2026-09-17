@@ -2,7 +2,7 @@
 //! 404 host.
 
 use crate::error::Error;
-use crate::redirect::{validate_target, RedirectStatus};
+use crate::redirect::{RedirectStatus, validate_target};
 use serde_derive::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

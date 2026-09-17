@@ -1,4 +1,4 @@
-use crate::{i18n::use_locale, pages::Route, API_ENDPOINT};
+use crate::{API_ENDPOINT, i18n::use_locale, pages::Route};
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use serde_derive::Deserialize;

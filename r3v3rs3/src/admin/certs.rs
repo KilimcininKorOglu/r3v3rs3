@@ -6,10 +6,10 @@ use crate::{
     server::rpc::certs::{AddCert, DeleteCert, DeleteCerts, DownloadCert, GetCert, GetCertList},
 };
 use axum::{
+    Extension, Json,
     extract::{Multipart, Path, Query, State},
     http::header::{CONTENT_DISPOSITION, CONTENT_TYPE},
     response::IntoResponse,
-    Extension, Json,
 };
 use r3v3rs3_api::{
     cert::{
@@ -110,10 +110,10 @@ pub async fn upload(
             if let Ok(buf) = field.bytes().await {
                 chain = buf.to_vec();
             }
-        } else if field.name() == Some("key") {
-            if let Ok(buf) = field.bytes().await {
-                key = buf.to_vec();
-            }
+        } else if field.name() == Some("key")
+            && let Ok(buf) = field.bytes().await
+        {
+            key = buf.to_vec();
         }
     }
 

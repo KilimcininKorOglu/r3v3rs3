@@ -3,11 +3,11 @@ use r3v3rs3_api::{
     policy::{RateLimit, RatePeriod},
     proxy::HttpProxy,
 };
-use reqwest::{header::RETRY_AFTER, StatusCode};
+use reqwest::{StatusCode, header::RETRY_AFTER};
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 fn per_minute(requests: u32) -> RateLimit {

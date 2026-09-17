@@ -2,9 +2,9 @@
 //! the host becomes one route to the ready endpoints of its Service. The `r3v3rs3.io/<field>`
 //! annotations set the other fields of the proxies.
 
-use super::cluster::{object_key, Cluster, Resources};
 use super::PROVIDER;
-use crate::discovery::{labels, Built, ProxyDefinition, ProxyGroups};
+use super::cluster::{Cluster, Resources, object_key};
+use crate::discovery::{Built, ProxyDefinition, ProxyGroups, labels};
 use k8s_openapi::api::networking::v1::{Ingress, IngressBackend};
 use r3v3rs3_api::discovery::DiscoverySource;
 use r3v3rs3_api::proxy::{ProxyKind, Route};
@@ -290,13 +290,13 @@ fn add_secret(built: &mut Built, cluster: &Cluster, namespace: &str, name: &str)
 
 #[cfg(test)]
 mod tests {
-    use super::super::cluster::fixtures::{cluster_resources, http, messages, object, urls};
     use super::super::cluster::TLS_SECRET_TYPE;
+    use super::super::cluster::fixtures::{cluster_resources, http, messages, object, urls};
     use super::*;
     use crate::certs::Cert;
     use k8s_openapi::api::core::v1::Secret;
     use r3v3rs3_api::subject_name::SubjectName;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     fn ingress(name: &str, annotations: Value, spec: Value) -> Arc<Ingress> {
         object(json!({
@@ -506,7 +506,7 @@ mod tests {
     }
 
     fn base64_encode(bytes: &[u8]) -> String {
-        use base64::prelude::{Engine as _, BASE64_STANDARD};
+        use base64::prelude::{BASE64_STANDARD, Engine as _};
         BASE64_STANDARD.encode(bytes)
     }
 

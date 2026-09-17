@@ -2,12 +2,12 @@
 //! store and does not wait for the write. On a local miss, a node reads the store once with a short
 //! timeout, so a slow store does not delay the request much.
 
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use r3v3rs3_api::id::ShortId;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};

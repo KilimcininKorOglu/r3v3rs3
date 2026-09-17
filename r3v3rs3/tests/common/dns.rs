@@ -2,7 +2,7 @@
 
 use hickory_proto::{
     op::{Message, MessageType, ResponseCode},
-    rr::{rdata::SRV, Name, RData, Record},
+    rr::{Name, RData, Record, rdata::SRV},
     serialize::binary::{BinDecodable, BinEncodable},
 };
 use std::{

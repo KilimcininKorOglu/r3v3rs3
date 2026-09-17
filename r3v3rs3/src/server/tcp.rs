@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::net::{TcpListener, TcpStream};
-use tracing::{error, info, span, Level};
+use tracing::{Level, error, info, span};
 
 const SOCKET_BACKLOG_SIZE: i32 = 128;
 

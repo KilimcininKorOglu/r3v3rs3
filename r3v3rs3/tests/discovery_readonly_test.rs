@@ -1,14 +1,14 @@
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use r3v3rs3::{
     command::ServerCommand,
     config::storage::Storage,
     discovery::{DiscoveredProxy, DiscoverySnapshot, ProxyDefinition},
+    server::ServerChannels,
     server::rpc::{
         discovery::GetDiscoveryStatus,
         ports::UpdatePort,
         proxies::{DeleteProxy, GetProxyList, UpdateProxy},
     },
-    server::ServerChannels,
 };
 use r3v3rs3_api::{
     discovery::{DiscoveryIssue, DiscoveryProvider, DiscoverySource, DiscoveryState},
@@ -19,8 +19,8 @@ use r3v3rs3_api::{
 
 mod common;
 use common::{
-    alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route, serve_http_upstream,
-    wait_for_host_status, wait_for_status, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route,
+    serve_http_upstream, wait_for_host_status, wait_for_status, with_server,
 };
 
 fn discovered(name: &str, port: &str, upstream: &str) -> DiscoveredProxy {

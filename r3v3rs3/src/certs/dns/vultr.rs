@@ -1,6 +1,7 @@
 use super::{
-    api::{strings, ApiClient, ApiRequest},
-    domain_zone, relative_name, RecordApi, TXT_TTL,
+    RecordApi, TXT_TTL,
+    api::{ApiClient, ApiRequest, strings},
+    domain_zone, relative_name,
 };
 use anyhow::anyhow;
 use async_trait::async_trait;

@@ -1,4 +1,4 @@
-use crate::{pages::Route, store::SessionStore, API_ENDPOINT};
+use crate::{API_ENDPOINT, pages::Route, store::SessionStore};
 use gloo_net::http::Request;
 use yew::prelude::*;
 use yew_router::prelude::*;

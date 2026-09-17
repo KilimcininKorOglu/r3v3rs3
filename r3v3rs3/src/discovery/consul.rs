@@ -4,11 +4,11 @@
 
 use super::kv::{self, KvEntry};
 use super::labels::{self, Upstream};
-use super::{Built, ProxyGroups, Reporter, Watch, DEBOUNCE, MIN_BACKOFF};
+use super::{Built, DEBOUNCE, MIN_BACKOFF, ProxyGroups, Reporter, Watch};
 use crate::kv::consul::{self, ConsulClient, WAIT};
-use crate::kv::http::{read_json, ApiClient};
+use crate::kv::http::{ApiClient, read_json};
 use anyhow::anyhow;
-use futures::future::{select_all, BoxFuture, FutureExt};
+use futures::future::{BoxFuture, FutureExt, select_all};
 use r3v3rs3_api::discovery::{ConsulDiscoveryConfig, DiscoveryProvider};
 use serde_derive::Deserialize;
 use std::collections::BTreeMap;

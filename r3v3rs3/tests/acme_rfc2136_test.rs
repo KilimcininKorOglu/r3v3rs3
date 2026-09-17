@@ -1,9 +1,9 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use hickory_proto::{
     op::{Message, MessageType, OpCode, ResponseCode},
     rr::{
-        rdata::{tsig::TsigAlgorithm, SOA},
         Name, RData, Record, TSigResponseContext, TSigner,
+        rdata::{SOA, tsig::TsigAlgorithm},
     },
 };
 use r3v3rs3::certs::dns::{self, DnsClient, TxtName};
@@ -118,8 +118,13 @@ fn sign_response(response: &mut Message, request_mac: &[u8], key: Vec<u8>) -> an
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     // The MAC covers the wire bytes of the response, so the message is encoded before it is signed.
     let wire = response.to_vec()?;
-    let context =
-        TSigResponseContext::new(response.metadata.id, now, signer, request_mac.to_vec(), None);
+    let context = TSigResponseContext::new(
+        response.metadata.id,
+        now,
+        signer,
+        request_mac.to_vec(),
+        None,
+    );
     response.signature = Some(context.sign(&wire)?);
     Ok(())
 }

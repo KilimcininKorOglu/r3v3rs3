@@ -7,7 +7,7 @@ use axum::routing::{get, put as put_route};
 use axum::{Json, Router};
 use r3v3rs3::kv::consul::ConsulClient;
 use r3v3rs3::kv::{ConsulStore, KvStore};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

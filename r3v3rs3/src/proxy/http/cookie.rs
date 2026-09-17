@@ -1,6 +1,6 @@
 //! Reads and removes the cookies of a request that only r3v3rs3 uses.
 
-use hyper::header::{HeaderMap, HeaderValue, COOKIE};
+use hyper::header::{COOKIE, HeaderMap, HeaderValue};
 
 /// The values of the cookie in the `Cookie` headers, in header order.
 pub fn cookie_values<'a>(headers: &'a HeaderMap, name: &'a str) -> impl Iterator<Item = &'a str> {

@@ -1,6 +1,6 @@
 use clap::ValueEnum;
 use dashmap::DashMap;
-use sqlx::{sqlite::SqliteConnectOptions, ConnectOptions, SqlitePool};
+use sqlx::{ConnectOptions, SqlitePool, sqlite::SqliteConnectOptions};
 use std::fs;
 use std::time::Duration;
 use std::{
@@ -10,10 +10,10 @@ use std::{
 use time::OffsetDateTime;
 use tokio::runtime::Handle;
 use tracing::{
-    field::{Field, Visit},
     Event,
+    field::{Field, Visit},
 };
-use tracing::{span, Subscriber};
+use tracing::{Subscriber, span};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt;
@@ -169,36 +169,36 @@ where
             return;
         }
 
-        if let Some(span) = ctx.lookup_current() {
-            if let Some(entry) = self.span_map.get(&span.id()) {
-                let resource_id = entry.value().to_string();
-                let timestamp = OffsetDateTime::now_utc();
-                let level = match *metadata.level() {
-                    tracing::Level::ERROR => 1,
-                    tracing::Level::WARN => 2,
-                    tracing::Level::INFO => 3,
-                    tracing::Level::DEBUG => 4,
-                    tracing::Level::TRACE => 5,
-                };
-                let mut visitor = KeyValueVisitor::default();
-                event.record(&mut visitor);
-                let message = visitor.values.remove("message").unwrap_or_default();
+        if let Some(span) = ctx.lookup_current()
+            && let Some(entry) = self.span_map.get(&span.id())
+        {
+            let resource_id = entry.value().to_string();
+            let timestamp = OffsetDateTime::now_utc();
+            let level = match *metadata.level() {
+                tracing::Level::ERROR => 1,
+                tracing::Level::WARN => 2,
+                tracing::Level::INFO => 3,
+                tracing::Level::DEBUG => 4,
+                tracing::Level::TRACE => 5,
+            };
+            let mut visitor = KeyValueVisitor::default();
+            event.record(&mut visitor);
+            let message = visitor.values.remove("message").unwrap_or_default();
 
-                let pool = self.pool.clone();
-                self.handle.spawn(async move {
-                    sqlx::query(
-                        "INSERT INTO system_log (timestamp, level, resource_id, message, fields)
+            let pool = self.pool.clone();
+            self.handle.spawn(async move {
+                sqlx::query(
+                    "INSERT INTO system_log (timestamp, level, resource_id, message, fields)
                     VALUES (?, ?, ?, ?, ?)",
-                    )
-                    .bind(timestamp)
-                    .bind(level)
-                    .bind(resource_id)
-                    .bind(message)
-                    .bind(serde_json::to_string(&visitor.values).unwrap_or_default())
-                    .execute(&pool)
-                    .await
-                });
-            }
+                )
+                .bind(timestamp)
+                .bind(level)
+                .bind(resource_id)
+                .bind(message)
+                .bind(serde_json::to_string(&visitor.values).unwrap_or_default())
+                .execute(&pool)
+                .await
+            });
         }
     }
 }

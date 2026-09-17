@@ -1,8 +1,8 @@
 //! Proxy definitions in labels, tags and keys: `r3v3rs3.<protocol>.<name>.<field>=<value>`.
 //! The fields follow the proxy model of the admin API.
 
-use super::tree::{from_node, Node};
 use super::ProxyDefinition;
+use super::tree::{Node, from_node};
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::proxy::{HttpProxy, ProxyKind, TcpProxy, UdpProxy};
 use serde::de::DeserializeOwned;

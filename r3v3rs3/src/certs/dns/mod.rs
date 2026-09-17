@@ -25,9 +25,9 @@ use crate::cdn::fetch::HttpClient;
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use hickory_resolver::{
+    Resolver, TokioResolver,
     config::{NameServerConfig, ResolverConfig, ResolverOpts},
     system_conf::read_system_conf,
-    Resolver, TokioResolver,
 };
 use r3v3rs3_api::{
     acme::{CloudProvider, DnsProvider, KeyedProvider, LocalProvider, TokenApi, TokenProvider},
@@ -420,9 +420,7 @@ pub async fn wait_for_propagation(
 }
 
 /// A resolver that asks `addr`, or the system resolver when `addr` is `None`.
-pub(crate) fn build_resolver(
-    addr: Option<SocketAddr>,
-) -> anyhow::Result<TokioResolver> {
+pub(crate) fn build_resolver(addr: Option<SocketAddr>) -> anyhow::Result<TokioResolver> {
     let (config, opts) = match addr {
         Some(addr) => (
             ResolverConfig::from_parts(None, vec![], vec![name_server(addr)]),
@@ -467,10 +465,7 @@ async fn visible_values(resolver: &TokioResolver, fqdn: &str) -> Vec<String> {
                 _ => None,
             })
             .map(|txt| {
-                let data = txt
-                    .txt_data
-                    .iter()
-                    .flat_map(|chunk| chunk.iter().copied());
+                let data = txt.txt_data.iter().flat_map(|chunk| chunk.iter().copied());
                 String::from_utf8_lossy(&data.collect::<Vec<u8>>()).into_owned()
             })
             .collect(),

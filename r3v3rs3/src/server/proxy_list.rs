@@ -1,5 +1,5 @@
-use indexmap::map::Entry;
 use indexmap::IndexMap;
+use indexmap::map::Entry;
 use r3v3rs3_api::discovery::DiscoveryProvider;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
@@ -290,8 +290,9 @@ mod tests {
         assert_eq!(skipped, ["manual", "stream", "other"]);
         assert!(update.changed);
         assert_eq!(list.entries().count(), 2);
-        assert!(list
-            .get("manual".parse().unwrap())
-            .is_some_and(|ctx| !ctx.entry.is_discovered()));
+        assert!(
+            list.get("manual".parse().unwrap())
+                .is_some_and(|ctx| !ctx.entry.is_discovered())
+        );
     }
 }

@@ -1,4 +1,4 @@
-use crate::certs::{acme::AcmeTarget, Cert};
+use crate::certs::{Cert, acme::AcmeTarget};
 use indexmap::IndexMap;
 use log::warn;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoverySource};
@@ -122,10 +122,10 @@ impl CertList {
         if !self.certs.contains_key(&id) {
             Err(Error::IdNotFound { id: id.to_string() })
         } else {
-            if let Some(cert) = self.certs.swap_remove(&id) {
-                if cert.kind == CertKind::Root {
-                    self.update_root_certs();
-                }
+            if let Some(cert) = self.certs.swap_remove(&id)
+                && cert.kind == CertKind::Root
+            {
+                self.update_root_certs();
             }
             Ok(())
         }
@@ -195,12 +195,12 @@ impl CertList {
     fn update_root_certs(&mut self) {
         let mut root_certs = self.system_root_certs.clone();
         for cert in self.certs.values() {
-            if cert.kind == CertKind::Root {
-                if let Ok(certs) = cert.certificates() {
-                    for cert in certs {
-                        if let Err(err) = root_certs.add(cert) {
-                            warn!("failed to add root cert: {}", err);
-                        }
+            if cert.kind == CertKind::Root
+                && let Ok(certs) = cert.certificates()
+            {
+                for cert in certs {
+                    if let Err(err) = root_certs.add(cert) {
+                        warn!("failed to add root cert: {}", err);
                     }
                 }
             }
@@ -301,8 +301,10 @@ mod tests {
                 .count(),
             1
         );
-        assert!(certs
-            .expired_acme_certs(&active, ASN1Time::now())
-            .is_empty());
+        assert!(
+            certs
+                .expired_acme_certs(&active, ASN1Time::now())
+                .is_empty()
+        );
     }
 }

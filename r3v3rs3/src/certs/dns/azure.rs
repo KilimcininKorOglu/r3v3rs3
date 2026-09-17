@@ -1,12 +1,13 @@
 use super::{
+    TXT_TTL,
     api::{ApiClient, ApiRequest, TokenCache},
     rrset::RrsetApi,
-    zone_with_id, TXT_TTL,
+    zone_with_id,
 };
 use anyhow::anyhow;
 use async_trait::async_trait;
 use hyper::Method;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub const API_URL: &str = "https://management.azure.com";
 pub const AUTH_URL: &str = "https://login.microsoftonline.com";

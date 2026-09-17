@@ -6,8 +6,8 @@
 
 use crate::certs::dns::build_resolver;
 use crate::command::ServerCommand;
-use hickory_proto::rr::rdata::SRV;
 use hickory_proto::rr::RData;
+use hickory_proto::rr::rdata::SRV;
 use r3v3rs3_api::{proxy::Server, upstream::SrvStatus};
 use std::{
     collections::{BTreeSet, HashMap},
@@ -247,11 +247,15 @@ async fn resolve(
         .srv_lookup(format!("{name}."))
         .await
         .map_err(|err| err.to_string())?;
-    let ttl = lookup.valid_until().saturating_duration_since(Instant::now());
-    let targets = lowest_priority(lookup.answers().iter().filter_map(|record| match &record.data {
-        RData::SRV(srv) => Some(srv),
-        _ => None,
-    }));
+    let ttl = lookup
+        .valid_until()
+        .saturating_duration_since(Instant::now());
+    let targets = lowest_priority(lookup.answers().iter().filter_map(
+        |record| match &record.data {
+            RData::SRV(srv) => Some(srv),
+            _ => None,
+        },
+    ));
     debug!(name, targets = ?targets, ttl = ?ttl, "SRV lookup finished");
     Ok((targets, ttl))
 }

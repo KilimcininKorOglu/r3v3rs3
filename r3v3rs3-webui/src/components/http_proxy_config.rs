@@ -1,7 +1,7 @@
 use super::auth_config::{AuthConfig, AuthForm};
+use crate::API_ENDPOINT;
 use crate::i18n::use_locale;
 use crate::pages::cert_list::get_cert_list;
-use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::access_list::AccessListEntry;
 use r3v3rs3_api::cache::CacheConfig;
@@ -9,21 +9,21 @@ use r3v3rs3_api::cert::{CertInfo, CertKind};
 use r3v3rs3_api::cidr::{format_cidr_list, parse_cidr_list};
 use r3v3rs3_api::client_ip::ClientIpConfig;
 use r3v3rs3_api::compression::{
-    format_mime_list, parse_mime_list, Compression, CompressionAlgorithm,
+    Compression, CompressionAlgorithm, format_mime_list, parse_mime_list,
 };
 use r3v3rs3_api::error::Error;
-use r3v3rs3_api::fixed_response::{FixedRedirect, FixedResponse, FixedStatus, FIXED_STATUSES};
-use r3v3rs3_api::header_rules::{format_header_rules, HeaderRule, HeaderRules};
+use r3v3rs3_api::fixed_response::{FIXED_STATUSES, FixedRedirect, FixedResponse, FixedStatus};
+use r3v3rs3_api::header_rules::{HeaderRule, HeaderRules, format_header_rules};
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::mirror::{Mirror, DEFAULT_MIRROR_BODY_SIZE};
+use r3v3rs3_api::mirror::{DEFAULT_MIRROR_BODY_SIZE, Mirror};
 use r3v3rs3_api::policy::{AuthPolicy, IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
 use r3v3rs3_api::redirect::{RedirectRule, RedirectStatus};
 use r3v3rs3_api::rewrite::{PathRegex, PathRewrite};
 use r3v3rs3_api::upstream::{
-    CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, StickyCookie,
-    UpstreamTimeouts, DEFAULT_WEIGHT, MAX_RETRY_ATTEMPTS,
+    CircuitBreaker, DEFAULT_WEIGHT, HealthCheck, LoadBalancing, MAX_RETRY_ATTEMPTS, RetryOn,
+    RetryPolicy, StickyCookie, UpstreamTimeouts,
 };
 use r3v3rs3_api::vhost::VirtualHost;
 use std::collections::HashMap;

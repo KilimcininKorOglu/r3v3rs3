@@ -102,14 +102,20 @@ mod test {
 
     #[test]
     fn test_subject_name_test() {
-        assert!(SubjectName::from_str("*.example.com")
-            .unwrap()
-            .test("app.example.com"));
-        assert!(SubjectName::from_str("example.com")
-            .unwrap()
-            .test("example.com"));
-        assert!(SubjectName::from_str("127.0.0.1")
-            .unwrap()
-            .test("127.0.0.1"));
+        assert!(
+            SubjectName::from_str("*.example.com")
+                .unwrap()
+                .test("app.example.com")
+        );
+        assert!(
+            SubjectName::from_str("example.com")
+                .unwrap()
+                .test("example.com")
+        );
+        assert!(
+            SubjectName::from_str("127.0.0.1")
+                .unwrap()
+                .test("127.0.0.1")
+        );
     }
 }

@@ -1,8 +1,8 @@
 use super::{
-    api::{ApiClient, ApiRequest},
     DnsClient, TxtName, TxtRecord,
+    api::{ApiClient, ApiRequest},
 };
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use async_trait::async_trait;
 use hyper::Method;
 use r3v3rs3_api::acme::webhook_url_allowed;

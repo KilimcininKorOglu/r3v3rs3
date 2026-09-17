@@ -1,8 +1,8 @@
 use axum::{
-    http::{HeaderMap, Method, StatusCode, Uri},
     Router,
+    http::{HeaderMap, Method, StatusCode, Uri},
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use r3v3rs3::certs::dns::{self, DnsClient, TxtName};
 use r3v3rs3_api::{
     acme::{
@@ -12,7 +12,7 @@ use r3v3rs3_api::{
     app::AcmeExecConfig,
     error::Error,
 };
-use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
+use ring::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
 use rsa::{
     pkcs1::EncodeRsaPublicKey,
     pkcs8::{EncodePrivateKey, LineEnding},
@@ -166,11 +166,13 @@ async fn cloudflare_adds_each_value_and_deletes_it_by_id() -> anyhow::Result<()>
             "DELETE /zones/zone-1/dns_records/rec-2",
         ]
     );
-    assert!(calls
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|call| call.authorization == "Bearer cf-token"));
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| call.authorization == "Bearer cf-token")
+    );
     assert_eq!(
         body(&calls, 2)?,
         json!({ "type": "TXT", "name": "_acme-challenge.app.example.test", "content": "v1", "ttl": 60 })
@@ -410,11 +412,13 @@ async fn gandi_merges_the_values_and_keeps_the_values_of_other_tools() -> anyhow
         body(&calls, 4)?,
         json!({ "rrset_ttl": 300, "rrset_values": ["\"other\""] })
     );
-    assert!(calls
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|call| call.authorization == "Bearer gd-token"));
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| call.authorization == "Bearer gd-token")
+    );
     Ok(())
 }
 
@@ -449,8 +453,8 @@ fn desec_with(url: String) -> DnsProvider {
 }
 
 #[tokio::test]
-async fn desec_creates_a_missing_rrset_and_deletes_it_when_only_its_values_remain(
-) -> anyhow::Result<()> {
+async fn desec_creates_a_missing_rrset_and_deletes_it_when_only_its_values_remain()
+-> anyhow::Result<()> {
     let rrset = "/domains/example.test/rrsets/_acme-challenge.app/TXT/";
 
     let (client, calls) = mock_client(desec_missing, desec_with).await?;
@@ -567,9 +571,11 @@ async fn azure_reuses_its_token_follows_the_next_link_and_keeps_other_values() -
     ]
     .map(|(key, value)| (key.to_string(), value));
     assert_eq!(form, HashMap::from(expected));
-    assert!(calls[1..]
-        .iter()
-        .all(|call| call.authorization == "Bearer az-access"));
+    assert!(
+        calls[1..]
+            .iter()
+            .all(|call| call.authorization == "Bearer az-access")
+    );
     Ok(())
 }
 
@@ -657,8 +663,8 @@ fn verify_google_assertion(
 }
 
 #[tokio::test]
-async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_other_values(
-) -> anyhow::Result<()> {
+async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_other_values()
+-> anyhow::Result<()> {
     // The test creates its own key, so no key file is stored in the repository.
     let key = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048)?;
     let key_file = json!({
@@ -695,9 +701,11 @@ async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_othe
     {
         let calls = calls.lock().unwrap();
         verify_google_assertion(&calls[0], &key, &format!("{base}/token"))?;
-        assert!(calls[1..]
-            .iter()
-            .all(|call| call.authorization == "Bearer gc-access"));
+        assert!(
+            calls[1..]
+                .iter()
+                .all(|call| call.authorization == "Bearer gc-access")
+        );
     }
 
     let (client, calls) = mock_client(google_with_other, |url| provider("", url)).await?;
@@ -752,11 +760,13 @@ async fn a_webhook_receives_the_action_the_name_and_the_values() -> anyhow::Resu
     let expected = |action: &str| json!({ "action": action, "fqdn": "_acme-challenge.app.example.test", "values": ["v1", "v2"] });
     assert_eq!(body(&calls, 0)?, expected("add"));
     assert_eq!(body(&calls, 1)?, expected("remove"));
-    assert!(calls
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|call| call.authorization == "Bearer wh-token"));
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| call.authorization == "Bearer wh-token")
+    );
     Ok(())
 }
 
@@ -781,9 +791,11 @@ async fn a_failed_webhook_add_sends_a_remove_and_a_plain_http_host_is_refused() 
         url: "http://dns-hook.example.test/acme".to_string(),
         token: String::new(),
     });
-    assert!(dns::client(&remote, &AcmeExecConfig::default())
-        .await
-        .is_err());
+    assert!(
+        dns::client(&remote, &AcmeExecConfig::default())
+            .await
+            .is_err()
+    );
     Ok(())
 }
 
@@ -831,8 +843,8 @@ fn log_lines(log: &Path) -> anyhow::Result<Vec<String>> {
 }
 
 #[tokio::test]
-async fn an_exec_program_gets_each_value_as_an_argument_without_a_shell_or_environment(
-) -> anyhow::Result<()> {
+async fn an_exec_program_gets_each_value_as_an_argument_without_a_shell_or_environment()
+-> anyhow::Result<()> {
     let (script, log) = exec_script(
         "arguments",
         r#"echo "$# $1 $2 [$3] ${HOME-unset}" >> "$log""#,
@@ -887,8 +899,8 @@ async fn an_exec_program_outside_the_allowlist_is_refused() -> anyhow::Result<()
 }
 
 #[tokio::test]
-async fn a_failing_exec_program_removes_the_added_values_and_reports_its_stderr(
-) -> anyhow::Result<()> {
+async fn a_failing_exec_program_removes_the_added_values_and_reports_its_stderr()
+-> anyhow::Result<()> {
     let (script, log) = exec_script(
         "failing",
         r#"echo "$1 $3" >> "$log"
@@ -1067,7 +1079,9 @@ fn route53(call: &Call) -> (StatusCode, String) {
             "</ListHostedZonesResponse>"
         ));
     }
-    ok("<ChangeResourceRecordSetsResponse><ChangeInfo><Id>/change/C1</Id><Status>PENDING</Status></ChangeInfo></ChangeResourceRecordSetsResponse>")
+    ok(
+        "<ChangeResourceRecordSetsResponse><ChangeInfo><Id>/change/C1</Id><Status>PENDING</Status></ChangeInfo></ChangeResourceRecordSetsResponse>",
+    )
 }
 
 #[tokio::test]

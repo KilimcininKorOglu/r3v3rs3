@@ -1,5 +1,5 @@
-use axum::http::Uri;
 use axum::Router;
+use axum::http::Uri;
 use r3v3rs3_api::cidr::parse_cidr_list;
 use r3v3rs3_api::fixed_response::{FixedRedirect, FixedResponse, FixedStatus};
 use r3v3rs3_api::policy::IpFilter;
@@ -10,8 +10,8 @@ use reqwest::redirect::Policy;
 use url::Url;
 
 mod common;
+use common::{TestPort, TestStorage, serve_http_upstream};
 use common::{alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server};
-use common::{serve_http_upstream, TestPort, TestStorage};
 
 /// Starts an HTTP upstream server that answers every request with its name.
 async fn start_named_upstream(name: &'static str) -> anyhow::Result<Url> {

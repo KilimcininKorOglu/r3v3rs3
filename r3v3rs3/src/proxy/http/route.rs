@@ -8,8 +8,8 @@ use super::mirror::Mirror;
 use super::pool::{ConnectionPool, Upstream, UpstreamClients};
 use super::rate_limit::ClientRateLimiter;
 use super::rewrite::Rewrite;
-use crate::proxy::health::{self, GroupKey, GroupRegistry, Probe};
 use crate::proxy::ProxyRegistries;
+use crate::proxy::health::{self, GroupKey, GroupRegistry, Probe};
 use hyper::{Request, Uri};
 use r3v3rs3_api::redirect::RedirectRule;
 use r3v3rs3_api::{

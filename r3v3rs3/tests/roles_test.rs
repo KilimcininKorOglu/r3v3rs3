@@ -6,10 +6,10 @@ use r3v3rs3::{
     config::{new_appinfo, storage::Storage},
     log::DatabaseLayer,
     server::rpc::{
+        ErasedRpcMethod, RpcMethod, RpcWrapper,
         config::GetConfig,
         ports::AddPort,
         proxies::{AddProxy, DeleteProxy, GetProxy, GetProxyList, UpdateProxy},
-        ErasedRpcMethod, RpcMethod, RpcWrapper,
     },
 };
 use r3v3rs3_api::{
@@ -18,15 +18,15 @@ use r3v3rs3_api::{
     id::ShortId,
     proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind},
 };
-use reqwest::{header::COOKIE, Client, Method, Response};
+use reqwest::{Client, Method, Response, header::COOKIE};
 use std::{collections::BTreeSet, net::SocketAddr, time::Duration};
 use tokio::sync::mpsc;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
 use common::{
-    alloc_tcp_port, call, call_as, http_route, port_entry, session_cookie, wait_for_listener,
-    with_server, TestStorage,
+    TestStorage, alloc_tcp_port, call, call_as, http_route, port_entry, session_cookie,
+    wait_for_listener, with_server,
 };
 
 fn caller(role: Role, proxies: Option<BTreeSet<ShortId>>) -> Caller {
@@ -260,8 +260,8 @@ async fn read_for(response: &mut Response, duration: Duration) -> anyhow::Result
 }
 
 #[tokio::test]
-async fn the_event_stream_holds_only_the_proxies_of_the_account_and_ends_when_the_account_changes(
-) -> anyhow::Result<()> {
+async fn the_event_stream_holds_only_the_proxies_of_the_account_and_ends_when_the_account_changes()
+-> anyhow::Result<()> {
     let dir = log_dir("roles-events").await?;
     let addr = alloc_tcp_port().await?.socket_addr();
     let storage = restricted_storage();

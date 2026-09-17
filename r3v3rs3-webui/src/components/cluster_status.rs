@@ -1,5 +1,5 @@
 use crate::{
-    components::data_list::status_badge, i18n::use_locale, store::ClusterStore, API_ENDPOINT,
+    API_ENDPOINT, components::data_list::status_badge, i18n::use_locale, store::ClusterStore,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::cluster::{ClusterState, ClusterStatus};

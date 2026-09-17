@@ -2,7 +2,7 @@
 
 use bytes::Bytes;
 use http_body_util::Full;
-use hyper::header::{HeaderValue, CONTENT_TYPE, LOCATION};
+use hyper::header::{CONTENT_TYPE, HeaderValue, LOCATION};
 use hyper::{Request, Response, StatusCode};
 use r3v3rs3_api::fixed_response::{FixedRedirect, FixedResponse, FixedStatus};
 use tracing::warn;

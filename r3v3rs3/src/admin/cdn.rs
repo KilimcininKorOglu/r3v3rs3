@@ -6,7 +6,7 @@ use crate::{
     cdn,
     command::ServerCommand,
 };
-use axum::{extract::State, Extension, Json};
+use axum::{Extension, Json, extract::State};
 use r3v3rs3_api::{
     audit::AuditAction,
     cdn::{CdnRangesSource, CdnStatus},

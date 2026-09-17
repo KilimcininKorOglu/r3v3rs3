@@ -1,14 +1,14 @@
 use crate::{
+    API_ENDPOINT,
     auth::use_ensure_auth,
     components::http_proxy_config::{
-        error_view, select_field, select_setter, HINT_CLASS, INPUT_CLASS, LABEL_CLASS,
+        HINT_CLASS, INPUT_CLASS, LABEL_CLASS, error_view, select_field, select_setter,
     },
     i18n::use_locale,
     pages::{
-        cert_list::{get_cert_list, CertsQuery, CertsTab},
         Route,
+        cert_list::{CertsQuery, CertsTab, get_cert_list},
     },
-    API_ENDPOINT,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::{

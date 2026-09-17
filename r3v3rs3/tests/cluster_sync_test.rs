@@ -1,4 +1,4 @@
-use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use r3v3rs3::accounts::AccountDirectory;
 use r3v3rs3::admin::start_admin;
 use r3v3rs3::certs::acme::AcmeEntry;
@@ -14,12 +14,12 @@ use r3v3rs3::log::DatabaseLayer;
 use r3v3rs3::proxy::http::rate_share::{
     ClientCount, LimiterCounts, NodeCounts, RateCountExchange, WindowCount,
 };
+use r3v3rs3::server::Server;
 use r3v3rs3::server::rpc::acme::GetAcmeList;
 use r3v3rs3::server::rpc::cluster::GetClusterStatus;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
 use r3v3rs3::server::rpc::ports::{AddPort, GetPortList};
 use r3v3rs3::server::rpc::proxies::{AddProxy, GetProxyList};
-use r3v3rs3::server::Server;
 use r3v3rs3::sessions::{SessionBackend, SessionRecord, SessionScope};
 use r3v3rs3_api::acme::{Acme, AcmeConfig, HTTP_01};
 use r3v3rs3_api::app::AppConfig;
@@ -35,16 +35,16 @@ use reqwest::{Client, Url};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::cluster::{stop_server, Node};
-use common::kv::{check_locks_and_leases, MemoryStore};
+use common::cluster::{Node, stop_server};
+use common::kv::{MemoryStore, check_locks_and_leases};
 use common::{
     admin_session_cookie, alloc_tcp_port, call, http_port_entry, http_route, wait_for_listener,
     wait_until,
@@ -611,8 +611,8 @@ async fn a_node_that_loses_the_store_rejects_changes_until_it_returns() -> anyho
 }
 
 #[tokio::test]
-async fn a_node_whose_store_stops_answering_becomes_degraded_and_stops_leading(
-) -> anyhow::Result<()> {
+async fn a_node_whose_store_stops_answering_becomes_degraded_and_stops_leading()
+-> anyhow::Result<()> {
     let store = Arc::new(MemoryStore::default());
     let mut node = start_node(&store, "node-a").await?;
     let leading = |status: &ClusterStatus| status.state == ClusterState::Synced && status.leader;

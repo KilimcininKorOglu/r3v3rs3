@@ -538,7 +538,7 @@ impl UpstreamGroup {
         let mut keyed = servers
             .into_iter()
             .map(|index| {
-                let key = rng.gen::<f64>().powf(1.0 / f64::from(self.weight(index)));
+                let key = rng.r#gen::<f64>().powf(1.0 / f64::from(self.weight(index)));
                 (key, index)
             })
             .collect::<Vec<_>>();

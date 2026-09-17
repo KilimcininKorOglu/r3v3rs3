@@ -1,10 +1,10 @@
 use crate::{
+    API_ENDPOINT,
     auth::use_ensure_auth,
     components::proxy_config::ProxyConfig,
     i18n::use_locale,
     pages::Route,
     store::{ProxyStore, SessionStore},
-    API_ENDPOINT,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::{

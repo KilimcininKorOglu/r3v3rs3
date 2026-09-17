@@ -1,15 +1,15 @@
 use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
 use r3v3rs3_api::auth::Role;
 use reqwest::Method;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
 use common::{
-    alloc_tcp_port, login_when_allowed, send, session_cookie, wait_for_listener, with_server,
-    TestStorage,
+    TestStorage, alloc_tcp_port, login_when_allowed, send, session_cookie, wait_for_listener,
+    with_server,
 };
 
 const PATH: &str = "/api/access_lists";

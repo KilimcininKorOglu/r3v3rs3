@@ -5,8 +5,8 @@ use super::acme_list::AcmeList;
 use super::cert_list::CertList;
 use super::credentials::seal;
 use super::proxy_list::accepts;
-use crate::certs::{acme::AcmeTarget, Cert};
-use crate::discovery::{ids, DiscoveredProxy, DiscoverySnapshot};
+use crate::certs::{Cert, acme::AcmeTarget};
+use crate::discovery::{DiscoveredProxy, DiscoverySnapshot, ids};
 use crate::proxy::tls::upstream_client_config;
 use hyper::header::HeaderValue;
 use r3v3rs3_api::discovery::{
@@ -711,7 +711,7 @@ mod tests {
     }
 
     fn acme_entry(id: &str, challenge_type: &str, active: bool) -> AcmeEntry {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
         let key = rcgen::KeyPair::generate().unwrap();
         let account = serde_json::from_value(serde_json::json!({
             "id": "https://acme.example/acct/1",

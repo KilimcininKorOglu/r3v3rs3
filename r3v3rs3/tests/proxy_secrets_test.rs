@@ -1,4 +1,4 @@
-use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
+use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
 use r3v3rs3::{
     config::storage::Storage,
     server::rpc::proxies::{GetProxy, GetProxyList, UpdateProxy},
@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 mod common;
-use common::{call, http_proxy_entry, http_route, with_server, TestStorage};
+use common::{TestStorage, call, http_proxy_entry, http_route, with_server};
 
 fn http(proxy: &mut Proxy) -> &mut HttpProxy {
     match &mut proxy.kind {

@@ -1,11 +1,12 @@
 use super::{
+    DnsClient, TXT_TTL, TxtName, TxtRecord,
     api::{ApiClient, ApiRequest},
-    longest_zone, sigv4, DnsClient, TxtName, TxtRecord, TXT_TTL,
+    longest_zone, sigv4,
 };
 use anyhow::anyhow;
 use async_trait::async_trait;
 use hyper::Method;
-use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use time::OffsetDateTime;
 
 pub const API_URL: &str = "https://route53.amazonaws.com";

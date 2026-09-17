@@ -1,5 +1,5 @@
-use axum::http::Uri;
 use axum::Router;
+use axum::http::Uri;
 use r3v3rs3_api::mirror::Mirror;
 use r3v3rs3_api::proxy::{HttpProxy, Route, Server};
 use std::time::{Duration, Instant};
@@ -7,8 +7,8 @@ use tokio::sync::mpsc;
 use url::Url;
 
 mod common;
+use common::{TestStorage, serve_http_upstream};
 use common::{alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server};
-use common::{serve_http_upstream, TestStorage};
 
 type Copies = mpsc::UnboundedReceiver<(String, String)>;
 

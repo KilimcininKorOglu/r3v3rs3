@@ -1,6 +1,6 @@
 //! A client for provider APIs that write the whole TXT record set of a name at once.
 
-use super::{relative_name, DnsClient, TxtName, TxtRecord};
+use super::{DnsClient, TxtName, TxtRecord, relative_name};
 use async_trait::async_trait;
 
 /// A provider API that reads and writes every TXT value of a name together.

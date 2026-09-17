@@ -1,6 +1,6 @@
 use crate::audit::AuditStore;
 use crate::cdn::CdnRanges;
-use crate::certs::{acme::AcmeEntry, challenges::ServedChallenges, Cert};
+use crate::certs::{Cert, acme::AcmeEntry, challenges::ServedChallenges};
 use crate::proxy::http::cache_share::SharedCacheStore;
 use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::{LocalSessions, SessionBackend};

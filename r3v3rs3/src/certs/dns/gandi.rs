@@ -1,7 +1,7 @@
 use super::{
-    api::{strings, ApiClient, ApiRequest},
+    api::{ApiClient, ApiRequest, strings},
     domain_zone,
-    rrset::{quoted, RrsetApi},
+    rrset::{RrsetApi, quoted},
 };
 use async_trait::async_trait;
 use hyper::Method;

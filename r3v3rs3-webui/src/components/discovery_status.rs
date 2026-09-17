@@ -1,5 +1,5 @@
 use crate::{
-    components::data_list::status_badge, i18n::use_locale, store::DiscoveryStore, API_ENDPOINT,
+    API_ENDPOINT, components::data_list::status_badge, i18n::use_locale, store::DiscoveryStore,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryState, DiscoveryStatus};

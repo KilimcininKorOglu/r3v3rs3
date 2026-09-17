@@ -1,22 +1,22 @@
 use super::health::{self, GroupRegistry, Probe, UpstreamGroup};
 use super::{PortContextEvent, PortStatus, SocketState};
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::system_conf::read_system_conf;
-use hickory_resolver::TokioResolver;
 use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing};
 use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
 use std::collections::HashMap;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use std::{net::SocketAddr, time::SystemTime};
 use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
 use tokio_rustls::rustls::pki_types::ServerName;
-use tracing::{debug, error, info, span, warn, Level, Span};
+use tracing::{Level, Span, debug, error, info, span, warn};
 
 type Resolver = TokioResolver;
 
@@ -44,8 +44,8 @@ impl UdpPortContext {
 
         let (conf, mut opts) = read_system_conf().unwrap_or_default();
         opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
-        let resolver = super::tokio_resolver(conf, opts)
-            .map_err(|err| Error::FailedToBuildDnsResolver {
+        let resolver =
+            super::tokio_resolver(conf, opts).map_err(|err| Error::FailedToBuildDnsResolver {
                 reason: err.to_string(),
             })?;
 

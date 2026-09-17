@@ -240,8 +240,10 @@ mod tests {
             (masked.password.as_deref(), masked.password_set),
             (None, false)
         );
-        assert!(!serde_json::to_string(&masked)
-            .unwrap()
-            .contains("consul-secret"));
+        assert!(
+            !serde_json::to_string(&masked)
+                .unwrap()
+                .contains("consul-secret")
+        );
     }
 }

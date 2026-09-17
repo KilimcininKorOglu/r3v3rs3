@@ -14,14 +14,14 @@ use tokio::{
     sync::mpsc,
 };
 use tokio_rustls::{
-    rustls::{crypto::ring, pki_types::ServerName, ClientConfig, RootCertStore},
     TlsConnector,
+    rustls::{ClientConfig, RootCertStore, crypto::ring, pki_types::ServerName},
 };
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, port_entry, proxy_entry,
-    wait_for_listener, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, port_entry,
+    proxy_entry, wait_for_listener, with_server,
 };
 
 const REQUEST: &[u8] = b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";

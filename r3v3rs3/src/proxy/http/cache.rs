@@ -4,17 +4,17 @@ use super::pool::Upstream;
 use crate::clock::unix_ms;
 use crate::proxy::registry::WeakRegistry;
 use bytes::{Bytes, BytesMut};
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::{
+    HeaderMap, Method, Request, Response, StatusCode,
     body::{Body, Frame, SizeHint},
     header::{
-        HeaderName, ACCEPT_ENCODING, AGE, CACHE_CONTROL, CONTENT_LENGTH, DATE, ETAG, EXPIRES,
+        ACCEPT_ENCODING, AGE, CACHE_CONTROL, CONTENT_LENGTH, DATE, ETAG, EXPIRES, HeaderName,
         IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, PRAGMA, RANGE, SET_COOKIE, UPGRADE, VARY,
     },
     http::HeaderValue,
-    HeaderMap, Method, Request, Response, StatusCode,
 };
-use moka::{sync::Cache, Expiry};
+use moka::{Expiry, sync::Cache};
 use pin_project_lite::pin_project;
 use r3v3rs3_api::{cache::CacheConfig, id::ShortId};
 use std::{
@@ -22,7 +22,7 @@ use std::{
     fmt,
     pin::Pin,
     sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError},
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::{Duration, Instant, SystemTime},
 };
 use tracing::{debug, warn};

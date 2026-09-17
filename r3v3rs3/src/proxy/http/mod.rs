@@ -3,35 +3,35 @@ use self::{
     cache::CacheRequest,
     compression::ResponseCompression,
     error::ProxyError,
-    header_rules::{new_request_id, HeaderVariables},
+    header_rules::{HeaderVariables, new_request_id},
     page::PagePreferences,
     pool::{Upstream, UpstreamClients, UpstreamH2c},
     route::{FilteredRoute, Router},
 };
 use super::{
+    PortContextEvent, ProxyRegistries,
     proxy_protocol::{self, Client},
     spawn_connection,
     tls::{
-        port_acceptor, port_tls, server_cert_resolver, ClientCertInfo, Handshake, PortTls,
-        TlsTermination,
+        ClientCertInfo, Handshake, PortTls, TlsTermination, port_acceptor, port_tls,
+        server_cert_resolver,
     },
-    PortContextEvent, ProxyRegistries,
 };
 use crate::server::cert_list::CertList;
 use arc_swap::{ArcSwap, Cache};
 use bytes::{Buf, Bytes};
 use futures::{Stream, StreamExt};
 use h3::{quic::BidiStream, server::RequestStream};
-use http_body_util::{combinators::BoxBody, BodyExt, BodyStream, Full, StreamBody};
+use http_body_util::{BodyExt, BodyStream, Full, StreamBody, combinators::BoxBody};
 use hyper::{
+    Request, Response, StatusCode, Uri,
     body::{Body, Frame, Incoming},
     header::{AUTHORIZATION, HOST, LOCATION},
     http::{
-        uri::{Parts, Scheme},
         HeaderValue,
+        uri::{Parts, Scheme},
     },
     service::service_fn,
-    Request, Response, StatusCode, Uri,
 };
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -39,7 +39,7 @@ use hyper_util::{
 };
 use quinn::{
     crypto::rustls::QuicServerConfig,
-    rustls::{pki_types::CertificateDer, server::WebPkiClientVerifier, ServerConfig},
+    rustls::{ServerConfig, pki_types::CertificateDer, server::WebPkiClientVerifier},
 };
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::port::{PortStatus, SocketState};
@@ -54,8 +54,8 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-use tokio_rustls::{rustls::pki_types::ServerName, TlsAcceptor};
-use tracing::{debug, error, info, span, Instrument, Level, Span};
+use tokio_rustls::{TlsAcceptor, rustls::pki_types::ServerName};
+use tracing::{Instrument, Level, Span, debug, error, info, span};
 
 mod affinity;
 mod auth;
@@ -713,7 +713,7 @@ where
     let mut req = match authenticate(route, req, &auth_ctx).await {
         Authenticated::Pass(req) => req,
         Authenticated::Respond(response) => {
-            return (ProxiedRequest::Respond(response), response_rewriter)
+            return (ProxiedRequest::Respond(response), response_rewriter);
         }
         Authenticated::Rejected(rejection) => {
             info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %rejection);

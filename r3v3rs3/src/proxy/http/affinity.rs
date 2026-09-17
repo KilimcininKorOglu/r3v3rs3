@@ -2,7 +2,7 @@
 
 use super::cookie::{cookie_values, remove_cookie};
 use crate::proxy::health::GroupKey;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, Mac};
 use hyper::header::{HeaderMap, HeaderValue};
 use once_cell::sync::Lazy;
@@ -189,10 +189,12 @@ mod tests {
 
         let persistent = affinity(1, "/api", Some(Duration::from_secs(3600)));
         let cookie = persistent.set_cookie(1, true).unwrap();
-        assert!(cookie
-            .to_str()
-            .unwrap()
-            .ends_with("; Path=/api; HttpOnly; SameSite=Lax; Max-Age=3600; Secure"));
+        assert!(
+            cookie
+                .to_str()
+                .unwrap()
+                .ends_with("; Path=/api; HttpOnly; SameSite=Lax; Max-Age=3600; Secure")
+        );
         assert!(persistent.set_cookie(2, true).is_none());
         assert_ne!(cookie_value(&session, 0), cookie_value(&session, 1));
     }

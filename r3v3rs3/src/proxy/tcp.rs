@@ -1,14 +1,14 @@
 use super::{
+    PortContextEvent, PortStatus, SocketState,
     health::{self, GroupRegistry, Probe, UpstreamGroup},
     proxy_protocol::{self, Client},
     spawn_connection,
-    tls::{port_acceptor, port_tls, upstream_client_config, Handshake, PortTls, TlsTermination},
-    PortContextEvent, PortStatus, SocketState,
+    tls::{Handshake, PortTls, TlsTermination, port_acceptor, port_tls, upstream_client_config},
 };
 use crate::server::cert_list::CertList;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::system_conf::read_system_conf;
-use hickory_resolver::TokioResolver;
 use r3v3rs3_api::{error::Error, id::ShortId, multiaddr::Multiaddr};
 use r3v3rs3_api::{
     port::PortEntry,
@@ -23,7 +23,7 @@ use std::{
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpSocket, TcpStream},
-    time::{timeout_at, Instant},
+    time::{Instant, timeout_at},
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, BufStream},
@@ -31,10 +31,10 @@ use tokio::{
 };
 use tokio_rustls::rustls::pki_types::{IpAddr, ServerName};
 use tokio_rustls::{
-    rustls::{ClientConfig, ServerConfig},
     TlsAcceptor, TlsConnector,
+    rustls::{ClientConfig, ServerConfig},
 };
-use tracing::{debug, error, info, span, warn, Level, Span};
+use tracing::{Level, Span, debug, error, info, span, warn};
 
 const MAX_BUFFER_SIZE: usize = 4096;
 
@@ -71,8 +71,8 @@ impl TcpPortContext {
 
         let (conf, mut opts) = read_system_conf().unwrap_or_default();
         opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
-        let resolver = super::tokio_resolver(conf, opts)
-            .map_err(|err| Error::FailedToBuildDnsResolver {
+        let resolver =
+            super::tokio_resolver(conf, opts).map_err(|err| Error::FailedToBuildDnsResolver {
                 reason: err.to_string(),
             })?;
 

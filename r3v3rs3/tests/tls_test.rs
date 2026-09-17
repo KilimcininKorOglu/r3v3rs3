@@ -1,4 +1,4 @@
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use axum_server::tls_rustls::RustlsConfig;
 use r3v3rs3::certs::Cert;
 use r3v3rs3_api::{
@@ -9,7 +9,7 @@ use r3v3rs3_api::{
 use std::sync::Arc;
 
 mod common;
-use common::{alloc_tcp_port, with_server, TestStorage};
+use common::{TestStorage, alloc_tcp_port, with_server};
 
 #[tokio::test]
 async fn tls_proxy() -> anyhow::Result<()> {

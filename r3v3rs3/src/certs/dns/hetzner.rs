@@ -1,11 +1,12 @@
 use super::{
+    DnsClient, TXT_TTL, TxtName, TxtRecord,
     api::{ApiClient, ApiRequest},
-    relative_name, DnsClient, TxtName, TxtRecord, TXT_TTL,
+    relative_name,
 };
 use anyhow::anyhow;
 use async_trait::async_trait;
 use hyper::Method;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub const API_URL: &str = "https://api.hetzner.cloud/v1";
 

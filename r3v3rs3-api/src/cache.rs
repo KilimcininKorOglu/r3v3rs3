@@ -78,9 +78,11 @@ mod tests {
         assert!(config(1024, 1024).validate().is_ok());
         assert!(config(1024, 0).validate().is_err());
         assert!(config(1024, 2048).validate().is_err());
-        assert!(config(u64::MAX, u64::from(u32::MAX) + 1)
-            .validate()
-            .is_err());
+        assert!(
+            config(u64::MAX, u64::from(u32::MAX) + 1)
+                .validate()
+                .is_err()
+        );
         let disabled = CacheConfig {
             enabled: false,
             ..config(1024, 0)

@@ -6,8 +6,8 @@ use crate::server::rpc::ports::{
     UpdatePort,
 };
 use axum::{
-    extract::{Path, State},
     Extension, Json,
+    extract::{Path, State},
 };
 use r3v3rs3_api::{
     id::ShortId,

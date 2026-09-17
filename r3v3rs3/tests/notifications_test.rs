@@ -4,14 +4,14 @@ use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
 use r3v3rs3_api::app::{AppConfig, NotificationConfig, WebhookConfig};
 use r3v3rs3_api::auth::Role;
 use reqwest::Method;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::{alloc_tcp_port, send, session_cookie, wait_for_listener, with_server, TestStorage};
+use common::{TestStorage, alloc_tcp_port, send, session_cookie, wait_for_listener, with_server};
 
 const TOKEN: &str = "hook-token";
 

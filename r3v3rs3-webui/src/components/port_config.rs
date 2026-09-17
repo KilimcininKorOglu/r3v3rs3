@@ -1,10 +1,10 @@
 use super::http_proxy_config::{
-    checked, error_view, format_seconds, parse_comma_list, parse_seconds, seconds_input,
-    select_field, select_setter, state_input, text, toggle, HINT_CLASS, INPUT_CLASS, LABEL_CLASS,
+    HINT_CLASS, INPUT_CLASS, LABEL_CLASS, checked, error_view, format_seconds, parse_comma_list,
+    parse_seconds, seconds_input, select_field, select_setter, state_input, text, toggle,
 };
+use crate::API_ENDPOINT;
 use crate::i18n::use_locale;
 use crate::pages::cert_list::get_cert_list;
-use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::{
     cert::{CertInfo, CertKind},

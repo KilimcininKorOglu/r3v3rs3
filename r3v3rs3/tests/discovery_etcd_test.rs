@@ -4,15 +4,15 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use futures::future::ready;
 use futures::stream::{self, StreamExt};
 use r3v3rs3::config::storage::Storage;
+use r3v3rs3::server::ServerChannels;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
 use r3v3rs3::server::rpc::discovery::GetDiscoveryStatus;
-use r3v3rs3::server::ServerChannels;
 use r3v3rs3_api::{app::AppConfig, discovery::DiscoveryState};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -23,8 +23,8 @@ use tokio_stream::wrappers::WatchStream;
 
 mod common;
 use common::{
-    alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_discovery,
-    wait_for_status, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_discovery,
+    wait_for_status, with_server,
 };
 
 const USER: &str = "root";

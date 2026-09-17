@@ -1,5 +1,5 @@
 use super::dropdown::Dropdown;
-use crate::preferences::{set_locale, PreferencesStore};
+use crate::preferences::{PreferencesStore, set_locale};
 use r3v3rs3_api::i18n::Locale;
 use yew::prelude::*;
 use yewdux::prelude::*;

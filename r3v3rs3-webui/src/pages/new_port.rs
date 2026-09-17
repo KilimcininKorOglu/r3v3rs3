@@ -1,6 +1,6 @@
 use crate::{
-    auth::use_ensure_auth, components::port_config::PortConfig, i18n::use_locale, pages::Route,
-    API_ENDPOINT,
+    API_ENDPOINT, auth::use_ensure_auth, components::port_config::PortConfig, i18n::use_locale,
+    pages::Route,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::port::Port;

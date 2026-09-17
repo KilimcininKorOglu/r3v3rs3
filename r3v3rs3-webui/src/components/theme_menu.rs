@@ -1,5 +1,5 @@
 use super::dropdown::Dropdown;
-use crate::preferences::{set_theme, PreferencesStore};
+use crate::preferences::{PreferencesStore, set_theme};
 use r3v3rs3_api::i18n::{Locale, Theme};
 use yew::prelude::*;
 use yewdux::prelude::*;

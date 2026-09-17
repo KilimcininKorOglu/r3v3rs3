@@ -1,12 +1,12 @@
 //! The account, challenge and domain name fields that every ACME provider form shares.
 
 use crate::components::http_proxy_config::{
-    error_view, parse_comma_list, HINT_CLASS, INPUT_CLASS, LABEL_CLASS,
+    HINT_CLASS, INPUT_CLASS, LABEL_CLASS, error_view, parse_comma_list,
 };
-use base64::{engine::general_purpose, Engine};
+use base64::{Engine, engine::general_purpose};
 use r3v3rs3_api::{
     acme::{
-        Acme, AcmeConfig, AcmeRequest, DnsProvider, ExternalAccountBinding, DNS_01, HTTP_01,
+        Acme, AcmeConfig, AcmeRequest, DNS_01, DnsProvider, ExternalAccountBinding, HTTP_01,
         TLS_ALPN_01,
     },
     error::Error,

@@ -3,7 +3,7 @@
 
 use super::labels;
 use super::{Built, ProxyGroups};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 
 /// A key and its Base64 value. A folder has no value.
 #[derive(Debug, Clone, PartialEq, Eq)]

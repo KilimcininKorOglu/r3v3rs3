@@ -11,13 +11,13 @@ use r3v3rs3_api::{
     auth::{LoginMethod, LoginRequest, Role},
     event::ServerEvent,
 };
-use reqwest::{header::COOKIE, Client};
+use reqwest::{Client, header::COOKIE};
 use serde_json::json;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
 use common::{
-    alloc_tcp_port, login_when_allowed, session_cookie, wait_for_listener, wait_until, TestStorage,
+    TestStorage, alloc_tcp_port, login_when_allowed, session_cookie, wait_for_listener, wait_until,
 };
 
 /// The action, the account, the resource id and the summary of each entry.
@@ -122,9 +122,11 @@ async fn the_audit_log_records_the_changes_and_the_sign_ins_of_an_account() -> a
     for row in expected {
         assert!(found.contains(&row), "{row:?} is missing in {found:?}");
     }
-    assert!(entries
-        .iter()
-        .all(|entry| entry.client.is_some_and(|ip| ip.is_loopback())));
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.client.is_some_and(|ip| ip.is_loopback()))
+    );
     assert!(!serde_json::to_string(&entries)?.contains("viewer-secret"));
 
     // The admin API returns the entries to an admin, newest first.

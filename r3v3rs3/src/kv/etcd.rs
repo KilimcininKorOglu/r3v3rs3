@@ -1,9 +1,9 @@
 //! A client of the etcd v3 HTTP API. It reads key ranges, keeps the authentication token and
 //! follows changes with a watch stream.
 
-use super::http::{read_json, ApiClient, Lines, RESPONSE_TIMEOUT};
-use anyhow::{anyhow, bail, Context as _};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use super::http::{ApiClient, Lines, RESPONSE_TIMEOUT, read_json};
+use anyhow::{Context as _, anyhow, bail};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::body::Incoming;
@@ -11,7 +11,7 @@ use hyper::header::{AUTHORIZATION, CONTENT_TYPE};
 use hyper::{Method, Response, StatusCode};
 use serde::Deserialize as _;
 use serde_derive::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 

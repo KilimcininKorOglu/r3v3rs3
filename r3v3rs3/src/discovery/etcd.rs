@@ -2,10 +2,10 @@
 //! changes with a watch stream.
 
 use super::kv::{self, KvEntry};
-use super::{Built, ProxyGroups, Reporter, Watch, DEBOUNCE, MIN_BACKOFF};
+use super::{Built, DEBOUNCE, MIN_BACKOFF, ProxyGroups, Reporter, Watch};
 use crate::kv::etcd::{EtcdClient, KeyRange, KeyValue};
 use crate::kv::http::ApiClient;
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use r3v3rs3_api::discovery::{DiscoveryProvider, EtcdDiscoveryConfig};
 use std::convert::Infallible;
 use std::time::Duration;

@@ -1,5 +1,5 @@
 use crate::{error::Error, id::ShortId, subject_name::SubjectName};
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt;
@@ -35,7 +35,7 @@ impl Acme {
             _ => {
                 return Err(Error::AcmeUnsupportedChallenge {
                     challenge: self.challenge_type.clone(),
-                })
+                });
             }
         }
         if self.identifiers.is_empty() {
@@ -512,9 +512,11 @@ mod test {
 
     #[test]
     fn http_01_accepts_plain_domain_names() {
-        assert!(acme(&["example.com", "www.example.com"], HTTP_01)
-            .validate()
-            .is_ok());
+        assert!(
+            acme(&["example.com", "www.example.com"], HTTP_01)
+                .validate()
+                .is_ok()
+        );
     }
 
     #[test]

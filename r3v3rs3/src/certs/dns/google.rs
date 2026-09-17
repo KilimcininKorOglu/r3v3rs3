@@ -1,17 +1,18 @@
 use super::{
+    TXT_TTL,
     api::{ApiClient, ApiRequest, TokenCache},
-    rrset::{quoted, RrsetApi},
-    zone_candidates, TXT_TTL,
+    rrset::{RrsetApi, quoted},
+    zone_candidates,
 };
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hyper::Method;
 use ring::{
     rand::SystemRandom,
-    signature::{RsaKeyPair, RSA_PKCS1_SHA256},
+    signature::{RSA_PKCS1_SHA256, RsaKeyPair},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 pub const API_URL: &str = "https://dns.googleapis.com/dns/v1";

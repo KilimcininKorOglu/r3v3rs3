@@ -1,6 +1,6 @@
 use super::RpcMethod;
 use crate::{accounts::Permission, audit::AuditRecord, certs::Cert, server::state::ServerState};
-use flate2::{write::GzEncoder, Compression};
+use flate2::{Compression, write::GzEncoder};
 use hyper::body::Bytes;
 use r3v3rs3_api::{
     audit::AuditAction,

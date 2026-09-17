@@ -3,12 +3,12 @@ use r3v3rs3_api::{
     policy::{AuthPolicy, ForwardAuth},
     proxy::HttpProxy,
 };
-use reqwest::{header::LOCATION, redirect::Policy, StatusCode};
+use reqwest::{StatusCode, header::LOCATION, redirect::Policy};
 use std::time::Duration;
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 fn proxy(upstream: &str, auth_url: String) -> HttpProxy {

@@ -1,6 +1,6 @@
 //! Admin accounts: an Argon2 password hash and an optional TOTP secret.
 
-use argon2::{password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use r3v3rs3_api::auth::{Account, LoginMethod, LoginRequest, LoginResponse};
 use r3v3rs3_api::error::Error;
 use totp_rs::{Secret, TOTP};

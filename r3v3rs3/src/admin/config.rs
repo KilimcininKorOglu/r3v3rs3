@@ -3,7 +3,7 @@ use super::{AppError, AppState};
 use crate::accounts::Caller;
 use crate::notify::{self, Notification, NotificationEvent};
 use crate::server::rpc::config::{GetConfig, GetNotificationWebhook, SetConfig};
-use axum::{extract::State, Extension, Json};
+use axum::{Extension, Json, extract::State};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::error::Error;
 

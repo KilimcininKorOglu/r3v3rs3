@@ -302,7 +302,10 @@ mod tests {
         );
         assert_eq!(layout.account("a/b"), "r3v3rs3/v1/state/accounts/612f62");
         assert_eq!(last_segment(&layout.acme(id())), "web");
-        assert_eq!(layout.access_list(id()), "r3v3rs3/v1/state/access-lists/web");
+        assert_eq!(
+            layout.access_list(id()),
+            "r3v3rs3/v1/state/access-lists/web"
+        );
         assert_eq!(layout.leader(), "r3v3rs3/v1/lock/leader");
     }
 

@@ -1,12 +1,12 @@
 use argon2::{
-    password_hash::{PasswordHash, SaltString},
     Argon2, PasswordHasher,
+    password_hash::{PasswordHash, SaltString},
 };
 use r3v3rs3_api::{
     error::Error,
     header_rules::HeaderRules,
     policy::{
-        is_header_name, AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, ForwardAuth,
+        AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, ForwardAuth, is_header_name,
     },
     proxy::{Proxy, ProxyKind},
 };

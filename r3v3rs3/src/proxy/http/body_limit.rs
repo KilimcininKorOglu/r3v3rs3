@@ -4,14 +4,14 @@ use super::compression::header_number;
 use super::error::ProxyError;
 use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
-use hyper::body::{Body, Frame, SizeHint};
-use hyper::header::{HeaderMap, CONTENT_LENGTH};
 use hyper::Request;
+use hyper::body::{Body, Frame, SizeHint};
+use hyper::header::{CONTENT_LENGTH, HeaderMap};
 use pin_project_lite::pin_project;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll, ready};
 
 type ProxyBody = BoxBody<Bytes, anyhow::Error>;
 

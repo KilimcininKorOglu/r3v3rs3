@@ -4,7 +4,7 @@ use crate::kv::consul::ConsulClient;
 use crate::kv::etcd::EtcdClient;
 use crate::kv::http::ApiClient;
 use crate::kv::{ConsulStore, KvStore};
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::cluster::{ClusterBackend, ClusterConfig, ClusterTlsConfig};
 use r3v3rs3_api::discovery::Endpoint;
 use std::path::Path;

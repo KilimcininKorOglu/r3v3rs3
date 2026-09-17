@@ -3,11 +3,11 @@
 use rcgen::{CertificateParams, CustomExtension, KeyPair};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::crypto::ring::sign;
 use tokio_rustls::rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::server::{ClientHello, ResolvesServerCert};
 use tokio_rustls::rustls::sign::CertifiedKey;
-use tokio_rustls::rustls::ServerConfig;
 
 /// The ALPN protocol of the TLS-ALPN-01 challenge.
 pub const ACME_TLS_ALPN: &[u8] = b"acme-tls/1";

@@ -1,8 +1,8 @@
-use crate::{auth::use_ensure_auth, i18n::use_locale, API_ENDPOINT};
+use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale};
 use gloo_net::http::Request;
 use gloo_timers::callback::Timeout;
 use r3v3rs3_api::log::{LogLevel, SystemLogRow};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use web_sys::Element;
 use yew::prelude::*;
 use yew_router::prelude::use_navigator;

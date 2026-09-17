@@ -1,9 +1,9 @@
 //! The files of the cluster encryption keys. A file holds one key in base64. Empty lines and lines
 //! that start with `#` are ignored.
 
-use super::crypto::{ClusterKey, ClusterKeys, KeyId, KEY_LEN};
-use anyhow::{anyhow, Context as _};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use super::crypto::{ClusterKey, ClusterKeys, KEY_LEN, KeyId};
+use anyhow::{Context as _, anyhow};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use ring::rand::{SecureRandom, SystemRandom};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;

@@ -3,7 +3,7 @@ use r3v3rs3_api::{client_ip::ClientIpConfig, proxy::HttpProxy};
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 fn proxy(upstream: &str, client_ip: ClientIpConfig) -> HttpProxy {

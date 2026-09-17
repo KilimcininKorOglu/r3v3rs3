@@ -5,8 +5,8 @@ use crate::server::rpc::access_lists::{
     AddAccessList, DeleteAccessList, GetAccessLists, UpdateAccessList,
 };
 use axum::{
-    extract::{Path, State},
     Extension, Json,
+    extract::{Path, State},
 };
 use r3v3rs3_api::{
     access_list::{AccessList, AccessListEntry},

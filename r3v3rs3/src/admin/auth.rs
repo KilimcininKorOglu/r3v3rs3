@@ -5,14 +5,14 @@ use crate::audit::AuditRecord;
 use crate::server::rpc::auth::VerifyAccount;
 use crate::sessions::{self, SessionBackend, SessionRecord, SessionScope};
 use axum::{
+    Extension, Json,
     extract::{ConnectInfo, Request, State},
     middleware::Next,
     response::{IntoResponse, Response},
-    Extension, Json,
 };
 use axum_extra::extract::{
-    cookie::{Cookie, SameSite},
     CookieJar,
+    cookie::{Cookie, SameSite},
 };
 use r3v3rs3_api::{
     audit::AuditAction,
@@ -54,11 +54,11 @@ pub async fn login(
     ensure_login_allowed(&state, &attempt_key).await?;
 
     let token = jar.get("token").map(|c| c.value().to_string());
-    if let LoginMethod::Totp { .. } = &request.method {
-        if !verify_login_session(&state, &token.unwrap_or_default(), &username).await {
-            record_login_failure(&state, attempt_key).await;
-            return Err(Error::InvalidLoginCredentials.into());
-        }
+    if let LoginMethod::Totp { .. } = &request.method
+        && !verify_login_session(&state, &token.unwrap_or_default(), &username).await
+    {
+        record_login_failure(&state, attempt_key).await;
+        return Err(Error::InvalidLoginCredentials.into());
     }
 
     let insecure = request.insecure;

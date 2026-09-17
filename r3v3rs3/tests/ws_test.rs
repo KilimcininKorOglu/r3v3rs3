@@ -1,8 +1,8 @@
 use axum::{
-    extract::{ws::WebSocket, WebSocketUpgrade},
+    Router,
+    extract::{WebSocketUpgrade, ws::WebSocket},
     response::IntoResponse,
     routing::any,
-    Router,
 };
 use futures::{SinkExt, StreamExt};
 use hyper::Uri;
@@ -13,7 +13,7 @@ use r3v3rs3_api::{
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 mod common;
-use common::{alloc_tcp_port, with_server, TestStorage};
+use common::{TestStorage, alloc_tcp_port, with_server};
 
 #[tokio::test]
 async fn ws_proxy() -> anyhow::Result<()> {

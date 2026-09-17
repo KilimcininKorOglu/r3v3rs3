@@ -5,7 +5,7 @@
 //! Consul token that has only the permissions of the cluster guide, so the tests also check these
 //! permissions.
 
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use r3v3rs3::clock::unix_ms;
 use r3v3rs3::cluster::import;
 use r3v3rs3::cluster::key_file::write_new_key_file;
@@ -23,7 +23,7 @@ use std::time::Duration;
 
 mod common;
 use common::cluster::Node;
-use common::e2e::{consul_put, etcd_post, etcd_token, CONSUL, ETCD};
+use common::e2e::{CONSUL, ETCD, consul_put, etcd_post, etcd_token};
 use common::{alloc_tcp_port, http_port_entry};
 
 /// The parent of the key prefixes of the tests. The restricted credentials write only below it.

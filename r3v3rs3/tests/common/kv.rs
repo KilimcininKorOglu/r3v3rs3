@@ -1,6 +1,6 @@
 //! Checks that every [`KvStore`] must pass.
 
-use r3v3rs3::cluster::crypto::{sealed_key_id, ClusterKey, ClusterKeys};
+use r3v3rs3::cluster::crypto::{ClusterKey, ClusterKeys, sealed_key_id};
 use r3v3rs3::cluster::data_prefix;
 use r3v3rs3::cluster::rekey::rekey;
 use r3v3rs3::kv::http::ApiClient;

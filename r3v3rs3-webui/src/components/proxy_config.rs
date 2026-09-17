@@ -1,9 +1,9 @@
+use crate::API_ENDPOINT;
 use crate::components::http_proxy_config::HttpProxyConfig;
 use crate::components::tcp_proxy_config::TcpProxyConfig;
 use crate::components::udp_proxy_config::UdpProxyConfig;
 use crate::i18n::use_locale;
 use crate::store::PortStore;
-use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;

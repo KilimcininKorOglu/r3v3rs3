@@ -6,13 +6,13 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use hyper::rt::{Read, Write};
 use hyper::Uri;
+use hyper::rt::{Read, Write};
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioIo;
-use tokio_rustls::rustls::pki_types::ServerName;
-use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::TlsConnector;
+use tokio_rustls::rustls::ClientConfig;
+use tokio_rustls::rustls::pki_types::ServerName;
 use tower_service::Service;
 
 use super::stream::MaybeHttpsStream;

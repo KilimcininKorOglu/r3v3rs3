@@ -1,4 +1,5 @@
 use crate::{
+    API_ENDPOINT,
     auth::use_ensure_auth,
     components::{
         http_proxy_config::{select_field, select_setter},
@@ -6,7 +7,6 @@ use crate::{
     },
     i18n::use_locale,
     pages::Route,
-    API_ENDPOINT,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::fixed_response::{FixedRedirect, FixedResponse, FixedStatus};

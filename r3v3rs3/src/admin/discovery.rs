@@ -2,7 +2,7 @@ use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
 use crate::accounts::Caller;
 use crate::server::rpc::discovery::GetDiscoveryStatus;
-use axum::{extract::State, Extension, Json};
+use axum::{Extension, Json, extract::State};
 use r3v3rs3_api::discovery::DiscoveryStatus;
 
 /// Lists the state, the proxy count and the issues of each discovery provider that has sent a

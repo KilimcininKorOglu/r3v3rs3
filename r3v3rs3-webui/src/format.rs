@@ -1,5 +1,5 @@
 use r3v3rs3_api::i18n::Locale;
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use wasm_bindgen::UnwrapThrowExt;
 use web_time::{SystemTime, UNIX_EPOCH};
 

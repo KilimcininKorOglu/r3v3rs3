@@ -1,10 +1,10 @@
 use crate::proxy::http::error::ProxyError;
 use argon2::{
-    password_hash::{PasswordHash, SaltString},
     Argon2, PasswordHasher, PasswordVerifier,
+    password_hash::{PasswordHash, SaltString},
 };
-use base64::{engine::general_purpose::STANDARD, Engine};
-use hyper::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use hyper::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use once_cell::sync::Lazy;
 use r3v3rs3_api::policy::BasicAuth;
 use sha2::{Digest, Sha256};

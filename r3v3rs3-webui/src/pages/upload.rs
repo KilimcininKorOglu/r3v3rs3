@@ -1,11 +1,11 @@
 use crate::{
+    API_ENDPOINT,
     auth::use_ensure_auth,
     i18n::use_locale,
     pages::{
-        cert_list::{CertsQuery, CertsTab},
         Route,
+        cert_list::{CertsQuery, CertsTab},
     },
-    API_ENDPOINT,
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::cert::{CertKind, UploadQuery};

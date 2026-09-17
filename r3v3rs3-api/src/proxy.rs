@@ -11,10 +11,10 @@ use crate::proxy_protocol::ProxyProtocolVersion;
 use crate::redirect::RedirectRule;
 use crate::rewrite::PathRewrite;
 use crate::upstream::{
-    default_connect_timeout, default_session_idle_timeout, default_weight,
-    is_default_connect_timeout, is_default_session_idle_timeout, is_default_weight,
-    validate_timeout, validate_weights, CircuitBreaker, HealthCheck, LoadBalancing, RetryPolicy,
-    SrvStatus, StickyCookie, UpstreamHealth, UpstreamTimeouts, DEFAULT_WEIGHT,
+    CircuitBreaker, DEFAULT_WEIGHT, HealthCheck, LoadBalancing, RetryPolicy, SrvStatus,
+    StickyCookie, UpstreamHealth, UpstreamTimeouts, default_connect_timeout,
+    default_session_idle_timeout, default_weight, is_default_connect_timeout,
+    is_default_session_idle_timeout, is_default_weight, validate_timeout, validate_weights,
 };
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
@@ -546,10 +546,12 @@ mod tests {
         assert_eq!(ipv6.to_string(), "https://[::1]:8443/api?v=1");
         let named = url.with_srv_target("api-1.internal", 8443).unwrap();
         assert_eq!(named.authority(), Some("api-1.internal:8443".into()));
-        assert!(ServerUrl::from_str("http://a/")
-            .unwrap()
-            .with_srv_target("b", 80)
-            .is_none());
+        assert!(
+            ServerUrl::from_str("http://a/")
+                .unwrap()
+                .with_srv_target("b", 80)
+                .is_none()
+        );
     }
 
     #[test]

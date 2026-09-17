@@ -1,25 +1,25 @@
 //! A small HTTP/1.1 client for the APIs of Docker, etcd and Consul. It connects over a Unix
 //! socket, TCP or TLS, and reads JSON bodies and line-delimited streams.
 
-use anyhow::{anyhow, bail, Context as _};
+use anyhow::{Context as _, anyhow, bail};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Incoming;
 use hyper::client::conn::http1;
-use hyper::header::{HeaderValue, HOST, USER_AGENT};
+use hyper::header::{HOST, HeaderValue, USER_AGENT};
 use hyper::http::request::Builder;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use r3v3rs3_api::discovery::Endpoint;
 use serde::de::DeserializeOwned;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use tokio_rustls::rustls::pki_types::ServerName;
-use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::TlsConnector;
+use tokio_rustls::rustls::ClientConfig;
+use tokio_rustls::rustls::pki_types::ServerName;
 use tracing::debug;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);

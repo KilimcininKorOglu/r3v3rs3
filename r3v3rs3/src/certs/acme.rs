@@ -1,9 +1,9 @@
 use crate::{
-    cdn::fetch::{build_client, HttpClient as FetchClient},
+    cdn::fetch::{HttpClient as FetchClient, build_client},
     certs::{
+        Cert,
         alpn::TlsAlpnChallenge,
         dns::{self, TxtName},
-        Cert,
     },
     server::cert_list::CertList,
 };
@@ -11,14 +11,14 @@ use anyhow::{anyhow, bail};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{
-    header::{HeaderValue, USER_AGENT},
     Request,
+    header::{HeaderValue, USER_AGENT},
 };
 use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, BodyWrapper, BytesResponse, ChallengeType,
     ExternalAccountKey, HttpClient, Identifier, NewAccount, NewOrder, Order, OrderStatus,
 };
-use r3v3rs3_api::acme::{AcmeInfo, DnsProvider, DNS_01, HTTP_01, TLS_ALPN_01};
+use r3v3rs3_api::acme::{AcmeInfo, DNS_01, DnsProvider, HTTP_01, TLS_ALPN_01};
 use r3v3rs3_api::app::AcmeExecConfig;
 use r3v3rs3_api::{
     acme::Acme,
@@ -533,8 +533,8 @@ fn tls_alpn_challenge(identifier: &Identifier, digest: &[u8]) -> anyhow::Result<
 mod tests {
     use super::*;
     use hyper::{
-        header::{HeaderMap, LOCATION},
         Response,
+        header::{HeaderMap, LOCATION},
     };
     use r3v3rs3_api::acme::{AcmeConfig, KeyedProvider, TokenApi, TokenProvider};
     use sha2::{Digest, Sha256};

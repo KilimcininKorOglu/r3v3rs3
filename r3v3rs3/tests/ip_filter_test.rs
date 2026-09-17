@@ -6,11 +6,11 @@ use r3v3rs3_api::{
     policy::IpFilter,
     proxy::{HttpProxy, Route},
 };
-use reqwest::{header::COOKIE, StatusCode};
+use reqwest::{StatusCode, header::COOKIE};
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 fn nets(values: &[&str]) -> Vec<IpNet> {

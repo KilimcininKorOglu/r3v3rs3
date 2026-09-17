@@ -4,9 +4,9 @@
 //! must name the Pebble test CA. `make test-acme-pebble` does both.
 
 use axum::{
+    Json, Router,
     extract::{Path, State},
     routing::{delete, get, post},
-    Json, Router,
 };
 use r3v3rs3::{
     certs::Cert,
@@ -14,13 +14,13 @@ use r3v3rs3::{
     config::storage::Storage,
     discovery::{DiscoveredProxy, DiscoverySnapshot, ProxyDefinition},
     server::{
-        rpc::acme::{AddAcme, GetAcmeList},
         ServerChannels,
+        rpc::acme::{AddAcme, GetAcmeList},
     },
 };
 use r3v3rs3_api::{
     acme::{
-        Acme, AcmeConfig, AcmeRequest, DnsProvider, TokenApi, TokenProvider, DNS_01, TLS_ALPN_01,
+        Acme, AcmeConfig, AcmeRequest, DNS_01, DnsProvider, TLS_ALPN_01, TokenApi, TokenProvider,
     },
     app::AppConfig,
     discovery::{DiscoveryProvider, DiscoverySource, DiscoveryState},
@@ -28,7 +28,7 @@ use r3v3rs3_api::{
     port::PortEntry,
     proxy::{HttpProxy, ProxyKind},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -37,8 +37,8 @@ use std::{
 
 mod common;
 use common::{
-    alloc_tcp_port, call, http_port_entry, http_route, serve_http_upstream, wait_for_listener,
-    with_server, TestStorage,
+    TestStorage, alloc_tcp_port, call, http_port_entry, http_route, serve_http_upstream,
+    wait_for_listener, with_server,
 };
 
 const PEBBLE_DIRECTORY: &str = "https://localhost:8470/dir";

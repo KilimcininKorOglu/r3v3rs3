@@ -1,5 +1,5 @@
-use crate::certs::alpn::offers_only_acme_tls;
 use crate::certs::Cert;
+use crate::certs::alpn::offers_only_acme_tls;
 use crate::server::cert_list::CertList;
 use dashmap::DashMap;
 use r3v3rs3_api::cert::CertKind;
@@ -20,7 +20,7 @@ use tokio_rustls::rustls::server::{
 };
 use tokio_rustls::rustls::sign::CertifiedKey;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore, ServerConfig};
-use tokio_rustls::{server::TlsStream, LazyConfigAcceptor, TlsAcceptor};
+use tokio_rustls::{LazyConfigAcceptor, TlsAcceptor, server::TlsStream};
 use tracing::{debug, error};
 use x509_parser::parse_x509_certificate;
 
@@ -326,7 +326,7 @@ impl ResolvesServerCert for CertResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge, ACME_TLS_ALPN};
+    use crate::certs::alpn::{ACME_TLS_ALPN, ChallengeCerts, TlsAlpnChallenge, challenge_config};
     use r3v3rs3_api::tls::TlsTermination as TlsConfig;
     use tokio::io::DuplexStream;
     use tokio_rustls::rustls::pki_types::ServerName;
@@ -462,10 +462,11 @@ mod tests {
         assert_ne!(cert, port_cert);
         assert_eq!(alpn.as_deref(), Some(ACME_TLS_ALPN));
         let (_, x509) = parse_x509_certificate(cert.as_ref()).unwrap();
-        assert!(x509
-            .extensions()
-            .iter()
-            .any(|ext| ext.critical && ext.oid.to_id_string() == "1.3.6.1.5.5.7.1.31"));
+        assert!(
+            x509.extensions()
+                .iter()
+                .any(|ext| ext.critical && ext.oid.to_id_string() == "1.3.6.1.5.5.7.1.31")
+        );
 
         let (result, cert, alpn) = handshake(&tls, &[b"h2", ACME_TLS_ALPN]).await;
         assert!(matches!(result, Handshake::Established(_)));
@@ -483,13 +484,13 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod testing {
     use std::sync::Arc;
+    use tokio_rustls::TlsConnector;
     use tokio_rustls::rustls::client::danger::{
         HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
     };
     use tokio_rustls::rustls::crypto::ring;
     use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
     use tokio_rustls::rustls::{ClientConfig, DigitallySignedStruct, Error, SignatureScheme};
-    use tokio_rustls::TlsConnector;
 
     /// Accepts every server certificate, so a test can read a challenge certificate.
     #[derive(Debug)]

@@ -594,9 +594,11 @@ mod tests {
         let route: Route =
             serde_json::from_str(r#"{"servers":[{"url":"http://a/","weight":3}]}"#).unwrap();
         assert_eq!(route.servers[0].weight, 3);
-        assert!(serde_json::to_string(&route)
-            .unwrap()
-            .contains(r#""weight":3"#));
+        assert!(
+            serde_json::to_string(&route)
+                .unwrap()
+                .contains(r#""weight":3"#)
+        );
 
         assert!(validate_weights([]).is_ok());
         assert!(validate_weights([0, 1]).is_ok());
@@ -697,9 +699,11 @@ mod tests {
                 retry: retry.clone(),
                 ..Default::default()
             };
-            assert!(ProxyKind::Http(Box::new(proxy))
-                .validate_upstream()
-                .is_err());
+            assert!(
+                ProxyKind::Http(Box::new(proxy))
+                    .validate_upstream()
+                    .is_err()
+            );
 
             let route = Route {
                 servers: vec![Server::new("http://127.0.0.1:9000/".parse().unwrap())],
@@ -710,9 +714,11 @@ mod tests {
                 routes: vec![route],
                 ..Default::default()
             };
-            assert!(ProxyKind::Http(Box::new(proxy))
-                .validate_upstream()
-                .is_err());
+            assert!(
+                ProxyKind::Http(Box::new(proxy))
+                    .validate_upstream()
+                    .is_err()
+            );
         }
     }
 
@@ -806,8 +812,10 @@ mod tests {
             ..Default::default()
         };
         assert!(request_disabled.validate().is_ok());
-        assert!(ProxyKind::Tcp(TcpProxy::default())
-            .validate_upstream()
-            .is_ok());
+        assert!(
+            ProxyKind::Tcp(TcpProxy::default())
+                .validate_upstream()
+                .is_ok()
+        );
     }
 }

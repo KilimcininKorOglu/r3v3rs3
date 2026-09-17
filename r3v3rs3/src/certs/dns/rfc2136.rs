@@ -1,12 +1,12 @@
-use super::{DnsClient, TxtName, TxtRecord, TXT_TTL};
-use anyhow::{anyhow, bail, Context};
+use super::{DnsClient, TXT_TTL, TxtName, TxtRecord};
+use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use hickory_proto::{
-    op::{update_message, Message, MessageType, OpCode, Query, ResponseCode},
+    op::{Message, MessageType, OpCode, Query, ResponseCode, update_message},
     rr::{
-        rdata::{tsig::TsigAlgorithm, TXT},
         Name, RData, RecordSet, RecordType, TSigner,
+        rdata::{TXT, tsig::TsigAlgorithm},
     },
 };
 use r3v3rs3_api::acme::TsigKeyAlgorithm;

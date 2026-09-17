@@ -8,7 +8,7 @@ use tokio::io::AsyncReadExt;
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 async fn decode(encoding: &str, body: &[u8]) -> anyhow::Result<String> {

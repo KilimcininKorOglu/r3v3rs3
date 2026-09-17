@@ -1,11 +1,12 @@
 use super::{
-    api::{id_text, ApiClient, ApiRequest},
-    zone_with_id, RecordApi,
+    RecordApi,
+    api::{ApiClient, ApiRequest, id_text},
+    zone_with_id,
 };
 use anyhow::anyhow;
 use async_trait::async_trait;
 use hyper::Method;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub const API_URL: &str = "https://api.linode.com/v4";
 /// The lowest TTL that Linode accepts, in seconds.

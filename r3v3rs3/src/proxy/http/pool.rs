@@ -1,18 +1,18 @@
 use crate::proxy::health::{Permit, UpstreamGroup};
 use crate::proxy::http::error::ProxyError;
-use crate::proxy::http::{hyper_tls::client::HttpsConnector, HTTP2_MAX_FRAME_SIZE};
+use crate::proxy::http::{HTTP2_MAX_FRAME_SIZE, hyper_tls::client::HttpsConnector};
 use crate::proxy::tls::upstream_client_config;
 use crate::server::cert_list::CertList;
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Full, Limited};
+use http_body_util::{BodyExt, Full, Limited, combinators::BoxBody};
 use hyper::{
-    body::Body,
-    header::{HeaderValue, CONTENT_LENGTH, HOST, UPGRADE},
-    http::uri::Scheme,
     Method, Request, Response, StatusCode, Uri,
+    body::Body,
+    header::{CONTENT_LENGTH, HOST, HeaderValue, UPGRADE},
+    http::uri::Scheme,
 };
 use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client},
+    client::legacy::{Client, connect::HttpConnector},
     rt::{TokioExecutor, TokioIo},
 };
 use r3v3rs3_api::upstream::{RetryOn, RetryPolicy};

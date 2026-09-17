@@ -36,10 +36,10 @@ impl<K: Eq + Hash + Clone, V> WeakRegistry<K, V> {
     ) -> Arc<V> {
         let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
         entries.retain(|_, value| value.strong_count() > 0);
-        if let Some(existing) = entries.get(&key).and_then(Weak::upgrade) {
-            if reuse(&existing) {
-                return existing;
-            }
+        if let Some(existing) = entries.get(&key).and_then(Weak::upgrade)
+            && reuse(&existing)
+        {
+            return existing;
         }
         let value = create();
         entries.insert(key, Arc::downgrade(&value));

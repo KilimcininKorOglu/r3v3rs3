@@ -1,8 +1,8 @@
 use axum::{
-    extract::{ws::WebSocket, WebSocketUpgrade},
+    Router,
+    extract::{WebSocketUpgrade, ws::WebSocket},
     response::IntoResponse,
     routing::any,
-    Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
 use core::panic;
@@ -15,11 +15,11 @@ use r3v3rs3_api::{
     tls::TlsTermination,
 };
 use std::sync::Arc;
-use tokio_rustls::rustls::{client::ClientConfig, RootCertStore};
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Connector};
+use tokio_rustls::rustls::{RootCertStore, client::ClientConfig};
+use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite::Message};
 
 mod common;
-use common::{alloc_tcp_port, with_server, TestStorage};
+use common::{TestStorage, alloc_tcp_port, with_server};
 
 #[tokio::test]
 async fn wss_proxy() -> anyhow::Result<()> {

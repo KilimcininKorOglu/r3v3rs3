@@ -2,8 +2,8 @@
 //! the nonce, the AES-256-GCM ciphertext and its tag. The KV key of the value is the associated
 //! data, so a sealed value does not open under another KV key.
 
-use anyhow::{anyhow, Context as _};
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, NONCE_LEN};
+use anyhow::{Context as _, anyhow};
+use ring::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
 use ring::rand::{SecureRandom, SystemRandom};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -155,9 +155,11 @@ mod tests {
         let keys = keys(&[1]);
         let sealed = keys.seal("r3v3rs3/v1/state/config", b"config").unwrap();
         assert_eq!(sealed_key_id(&sealed), Some(keys.primary_id()));
-        assert!(!sealed
-            .windows(b"config".len())
-            .any(|part| part == b"config"));
+        assert!(
+            !sealed
+                .windows(b"config".len())
+                .any(|part| part == b"config")
+        );
         assert_eq!(
             keys.open("r3v3rs3/v1/state/config", &sealed).unwrap(),
             b"config"

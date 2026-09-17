@@ -374,9 +374,11 @@ mod tests {
         };
         let (_client, mut server) = tokio::io::duplex(64);
         let result = read_source(&mut server, PEER.parse().unwrap(), Some(&config)).await;
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("no PROXY protocol header"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("no PROXY protocol header")
+        );
     }
 }

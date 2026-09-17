@@ -1,11 +1,12 @@
 use super::{
-    api::{id_text, strings, ApiClient, ApiRequest},
-    domain_zone, relative_name, RecordApi,
+    RecordApi,
+    api::{ApiClient, ApiRequest, id_text, strings},
+    domain_zone, relative_name,
 };
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use hyper::Method;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub const API_URL: &str = "https://api.porkbun.com/api/json/v3";
 /// The largest number of domains in one page of `domain/listAll`.

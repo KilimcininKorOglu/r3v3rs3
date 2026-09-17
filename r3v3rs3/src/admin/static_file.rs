@@ -1,17 +1,17 @@
 use axum::{
     body::Bytes,
     http::{
+        HeaderMap, HeaderValue, StatusCode, Uri,
         header::{
             ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, ETAG, IF_NONE_MATCH,
             VARY,
         },
-        HeaderMap, HeaderValue, StatusCode, Uri,
     },
     response::IntoResponse,
 };
 use flate2::read::GzDecoder;
 use fnv::FnvHasher;
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 use std::{collections::HashMap, hash::Hasher, io::Read, path::Path, sync::LazyLock};
 
 use super::AppError;

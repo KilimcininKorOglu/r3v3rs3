@@ -5,8 +5,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 mod common;
+use common::{TestStorage, serve_http_upstream};
 use common::{alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server};
-use common::{serve_http_upstream, TestStorage};
 
 /// A proxy whose routes answer with the request body: `/` has the proxy limit of 16 bytes, `/small`
 /// has a limit of 4 bytes and `/free` has no limit.

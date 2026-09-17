@@ -11,9 +11,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio_rustls::rustls::server::ResolvesServerCert;
 use tokio_rustls::rustls::ServerConfig;
-use tracing::{error, info, span, Level};
+use tokio_rustls::rustls::server::ResolvesServerCert;
+use tracing::{Level, error, info, span};
 
 #[derive(Debug)]
 pub struct QuicListenerPool {

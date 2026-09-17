@@ -1,7 +1,7 @@
 use super::RpcMethod;
 use crate::accounts::Permission;
 use crate::audit::AuditRecord;
-use crate::proxy::{tls::validate_client_auth, PortContext};
+use crate::proxy::{PortContext, tls::validate_client_auth};
 use crate::server::state::ServerState;
 use network_interface::NetworkInterfaceConfig;
 use r3v3rs3_api::audit::AuditAction;

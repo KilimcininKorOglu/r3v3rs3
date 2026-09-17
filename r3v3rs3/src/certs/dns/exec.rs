@@ -1,5 +1,5 @@
 use super::{DnsClient, TxtName, TxtRecord};
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use r3v3rs3_api::{
     acme::{DnsProvider, LocalProvider},

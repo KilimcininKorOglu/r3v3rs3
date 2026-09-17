@@ -3,9 +3,9 @@ use r3v3rs3_api::{
     app::AppConfig, auth::Role, i18n::Locale, id::ShortId, policy::AuthPolicy, proxy::HttpProxy,
 };
 use reqwest::{
+    StatusCode,
     header::{COOKIE, HOST, LOCATION, SET_COOKIE},
     redirect::Policy,
-    StatusCode,
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -14,7 +14,7 @@ use std::{
 
 mod common;
 use common::{
-    alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 #[tokio::test]
@@ -108,10 +108,11 @@ async fn session_auth_signs_clients_in_with_panel_accounts() -> anyhow::Result<(
             .send()
             .await?;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-        assert!(resp
-            .text()
-            .await?
-            .contains(Locale::Tr.t("login.invalid_credentials")));
+        assert!(
+            resp.text()
+                .await?
+                .contains(Locale::Tr.t("login.invalid_credentials"))
+        );
 
         let resp = client
             .post(login_url.clone())

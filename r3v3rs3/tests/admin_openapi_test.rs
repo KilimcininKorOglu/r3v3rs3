@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::{admin_session_cookie, alloc_tcp_port, wait_for_listener, with_server, TestStorage};
+use common::{TestStorage, admin_session_cookie, alloc_tcp_port, wait_for_listener, with_server};
 
 /// Every route of the admin API. The OpenAPI document must list exactly these operations.
 const OPERATIONS: [(&str, &str); 49] = [

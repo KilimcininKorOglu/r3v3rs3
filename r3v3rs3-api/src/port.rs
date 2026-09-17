@@ -3,7 +3,7 @@ use crate::{
     multiaddr::Multiaddr,
     proxy_protocol::ProxyProtocolReceive,
     tls::{TlsState, TlsTermination},
-    upstream::{default_weight, is_default_weight, DEFAULT_WEIGHT},
+    upstream::{DEFAULT_WEIGHT, default_weight, is_default_weight},
 };
 use serde_derive::{Deserialize, Serialize};
 use std::{

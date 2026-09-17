@@ -2,8 +2,8 @@ use crate::{
     accounts::Caller,
     cdn::CdnRanges,
     certs::{
-        acme::{AcmeOrder, AcmeTarget},
         Cert,
+        acme::{AcmeOrder, AcmeTarget},
     },
     cluster::layout::StateKind,
     discovery::DiscoverySnapshot,

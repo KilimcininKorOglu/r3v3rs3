@@ -4,18 +4,18 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use futures::future::ready;
 use futures::stream::{self, StreamExt};
 use r3v3rs3::certs::Cert;
 use r3v3rs3::config::storage::Storage;
+use r3v3rs3::server::ServerChannels;
 use r3v3rs3::server::rpc::certs::{DeleteCert, GetCertList};
 use r3v3rs3::server::rpc::config::SetConfig;
 use r3v3rs3::server::rpc::proxies::GetProxyList;
-use r3v3rs3::server::ServerChannels;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryState};
 use r3v3rs3_api::{app::AppConfig, error::Error, proxy::ProxyKind, subject_name::SubjectName};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 use std::str::FromStr;
@@ -25,8 +25,8 @@ use tokio_stream::wrappers::WatchStream;
 
 mod common;
 use common::{
-    alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_discovery,
-    wait_for_host_body, wait_for_host_status, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_discovery,
+    wait_for_host_body, wait_for_host_status, with_server,
 };
 
 const TOKEN: &str = "mock-token";

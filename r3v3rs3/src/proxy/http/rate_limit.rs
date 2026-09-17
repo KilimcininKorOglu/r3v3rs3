@@ -1,6 +1,6 @@
 use super::rate_share::{self, RateCountExchange, RateShare, SharedWindow};
 use crate::proxy::registry::WeakRegistry;
-use governor::{clock::Clock, DefaultKeyedRateLimiter, Quota, RateLimiter};
+use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter, clock::Clock};
 use r3v3rs3_api::{id::ShortId, policy::RateLimit};
 use std::{
     fmt,
@@ -186,9 +186,11 @@ mod tests {
     #[test]
     fn disabled_limit_has_no_limiter() {
         let registry = LimiterRegistry::default();
-        assert!(registry
-            .limiter(("rldis".parse().unwrap(), None), RateLimit::default())
-            .is_none());
+        assert!(
+            registry
+                .limiter(("rldis".parse().unwrap(), None), RateLimit::default())
+                .is_none()
+        );
     }
 
     #[test]

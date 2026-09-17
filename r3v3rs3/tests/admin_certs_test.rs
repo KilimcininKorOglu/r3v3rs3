@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::{admin_session_cookie, alloc_tcp_port, wait_for_listener, with_server, TestStorage};
+use common::{TestStorage, admin_session_cookie, alloc_tcp_port, wait_for_listener, with_server};
 
 #[tokio::test]
 async fn self_sign_creates_a_client_certificate() -> anyhow::Result<()> {

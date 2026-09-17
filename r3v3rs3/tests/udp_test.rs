@@ -5,7 +5,7 @@ use r3v3rs3_api::{
 use std::{net::SocketAddr, time::Duration};
 use tokio::{net::UdpSocket, sync::mpsc, time::timeout};
 mod common;
-use common::{alloc_udp_port, with_server, TestPort, TestStorage};
+use common::{TestPort, TestStorage, alloc_udp_port, with_server};
 
 /// Starts an upstream server that echoes each packet and reports the source address of the packet.
 async fn start_echo_upstream(

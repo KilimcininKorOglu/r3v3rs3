@@ -2,13 +2,13 @@ use r3v3rs3::{
     accounts::Caller,
     command::ServerCommand,
     config::storage::Storage,
-    server::rpc::{config::SetConfig, ErasedRpcMethod, RpcWrapper},
+    server::rpc::{ErasedRpcMethod, RpcWrapper, config::SetConfig},
 };
 use r3v3rs3_api::app::{AcmeExecConfig, AppConfig};
 use std::time::Duration;
 
 mod common;
-use common::{with_server, TestStorage};
+use common::{TestStorage, with_server};
 
 #[tokio::test]
 async fn set_config_persists_to_storage() -> anyhow::Result<()> {

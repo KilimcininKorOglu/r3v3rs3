@@ -1,6 +1,6 @@
 use super::{
-    api::{ApiClient, ApiRequest},
     RecordApi, TXT_TTL,
+    api::{ApiClient, ApiRequest},
 };
 use anyhow::anyhow;
 use async_trait::async_trait;

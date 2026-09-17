@@ -301,9 +301,11 @@ mod tests {
     #[test]
     fn a_webhook_needs_https_unless_it_is_a_loopback_address() {
         assert!(NotificationConfig::default().validate().is_ok());
-        assert!(webhook("https://hooks.example.com/", None)
-            .validate()
-            .is_ok());
+        assert!(
+            webhook("https://hooks.example.com/", None)
+                .validate()
+                .is_ok()
+        );
         assert!(webhook("http://127.0.0.1:9000/", None).validate().is_ok());
         assert!(matches!(
             webhook("http://hooks.example.com/", None).validate(),

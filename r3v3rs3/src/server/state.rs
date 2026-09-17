@@ -11,7 +11,7 @@ use super::{port_list::PortList, rpc::RpcCallback, tcp::TcpListenerPool};
 use crate::accounts::{AccountDirectory, Caller};
 use crate::audit::{AuditLog, AuditRecord, AuditStore, DAY_MS};
 use crate::certs::acme::{AcmeEntry, AcmeOrder, AcmeTarget};
-use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge};
+use crate::certs::alpn::{ChallengeCerts, TlsAlpnChallenge, challenge_config};
 use crate::certs::challenges::ServedChallenges;
 use crate::clock::unix_ms;
 use crate::cluster::layout::StateKind;
@@ -19,7 +19,7 @@ use crate::config::storage::Storage;
 use crate::discovery::DiscoverySnapshot;
 use crate::kv::http::ApiClient;
 use crate::log::DatabaseLayer;
-use crate::notify::{certificate_notifications, Notification, Notifier};
+use crate::notify::{Notification, Notifier, certificate_notifications};
 use crate::proxy::http::SessionService;
 use crate::proxy::tls::upstream_client_config;
 use crate::sessions::{self, SessionBackend};
@@ -28,7 +28,7 @@ use crate::{
     proxy::{PortContext, PortContextKind, ProxyRegistries},
 };
 use quinn::Incoming;
-use r3v3rs3_api::access_list::{apply_access_lists, AccessListEntry};
+use r3v3rs3_api::access_list::{AccessListEntry, apply_access_lists};
 use r3v3rs3_api::app::{AppConfig, AppInfo};
 use r3v3rs3_api::cluster::ClusterStatus;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryState, DiscoveryStatus};
@@ -49,7 +49,7 @@ use tokio::{
     sync::{broadcast, mpsc, watch},
 };
 use tokio_rustls::rustls::ServerConfig;
-use tracing::{error, info, span, warn, Instrument, Level};
+use tracing::{Instrument, Level, error, info, span, warn};
 use x509_parser::time::ASN1Time;
 
 pub struct ServerState {
@@ -488,9 +488,9 @@ impl ServerState {
     pub async fn edit_accounts(
         &mut self,
         edit: impl FnOnce(
-                &mut std::collections::HashMap<String, r3v3rs3_api::auth::Account>,
-            ) -> Result<bool, Error>
-            + Send,
+            &mut std::collections::HashMap<String, r3v3rs3_api::auth::Account>,
+        ) -> Result<bool, Error>
+        + Send,
     ) -> Result<(), Error> {
         let mut accounts = self.storage.load_accounts().await?;
         if edit(&mut accounts)? {

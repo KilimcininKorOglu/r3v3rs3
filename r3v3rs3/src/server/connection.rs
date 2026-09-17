@@ -1,7 +1,7 @@
 //! Starts an accepted TCP connection, which can first be an ACME HTTP-01 challenge request.
 
-use hyper::service::service_fn;
 use hyper::Response;
+use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use std::collections::HashMap;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufStream};
 use tokio::net::TcpStream;
-use tokio_rustls::{rustls::ServerConfig, TlsAcceptor};
+use tokio_rustls::{TlsAcceptor, rustls::ServerConfig};
 use tracing::error;
 
 /// The ACME HTTP-01 tokens and their key authorizations.
@@ -104,7 +104,7 @@ async fn serve_tls_alpn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::certs::alpn::{challenge_config, ChallengeCerts, TlsAlpnChallenge, ACME_TLS_ALPN};
+    use crate::certs::alpn::{ACME_TLS_ALPN, ChallengeCerts, TlsAlpnChallenge, challenge_config};
     use crate::proxy::tls::testing::connector;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

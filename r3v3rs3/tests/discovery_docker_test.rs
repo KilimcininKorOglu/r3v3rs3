@@ -1,6 +1,6 @@
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
+use http_body_util::{BodyExt, Full, StreamBody, combinators::BoxBody};
 use hyper::body::{Frame, Incoming};
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -11,18 +11,18 @@ use r3v3rs3_api::{
     discovery::{DiscoveryState, DiscoveryStatus},
     error::Error,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::convert::Infallible;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::net::UnixListener;
 use tokio::sync::broadcast;
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 mod common;
 use common::{
-    alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_discovery,
-    wait_for_status, with_server, TestStorage,
+    TestStorage, alloc_tcp_port, call, http_port_entry, serve_http_upstream, wait_for_discovery,
+    wait_for_status, with_server,
 };
 
 type MockBody = BoxBody<Bytes, Infallible>;
