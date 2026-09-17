@@ -42,58 +42,58 @@ pub fn create_layer<S>(
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
-    if let Some(level) = log_level.into_level() {
-        if let Some(file) = file {
-            let file = file.to_string_lossy();
-            let file = shellexpand::tilde(&file);
-            let file = Path::new(file.as_ref());
-            let (dir, prefix) = match (
-                file.parent(),
-                file.file_name().and_then(|name| name.to_str()),
-            ) {
-                (Some(dir), Some(prefix)) => (dir, prefix),
-                _ => (file, default_file),
-            };
-            let current_dir = std::env::current_dir()?;
-            let dir = match dir.to_str() {
-                Some("") => log_dir,
-                Some(".") => &current_dir,
-                _ => log_dir,
-            };
-            fs::create_dir_all(dir)?;
-            let file_appender = tracing_appender::rolling::hourly(dir, prefix);
-            let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-            Ok((
-                if format == LogFormat::Json {
-                    fmt::layer()
-                        .json()
-                        .with_writer(non_blocking.with_max_level(level))
-                        .boxed()
-                } else {
-                    fmt::layer()
-                        .with_ansi(false)
-                        .with_writer(non_blocking.with_max_level(level))
-                        .boxed()
-                },
-                Some(guard),
-            ))
-        } else {
-            Ok((
-                if format == LogFormat::Json {
-                    fmt::layer()
-                        .with_writer(std::io::stdout.with_max_level(level))
-                        .json()
-                        .boxed()
-                } else {
-                    fmt::layer()
-                        .with_writer(std::io::stdout.with_max_level(level))
-                        .boxed()
-                },
-                None,
-            ))
-        }
+    let Some(level) = log_level.into_level() else {
+        return Ok((layer::Identity::new().boxed(), None));
+    };
+    let Some(file) = file else {
+        return Ok((stdout_layer(level, format), None));
+    };
+    let file = file.to_string_lossy();
+    let file = shellexpand::tilde(&file);
+    let file = Path::new(file.as_ref());
+    let (dir, prefix) = split_log_path(file, default_file);
+    let current_dir = std::env::current_dir()?;
+    let dir = if dir.to_str() == Some(".") {
+        &current_dir
     } else {
-        Ok((layer::Identity::new().boxed(), None))
+        log_dir
+    };
+    fs::create_dir_all(dir)?;
+    let file_appender = tracing_appender::rolling::hourly(dir, prefix);
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let writer = non_blocking.with_max_level(level);
+    let layer = if format == LogFormat::Json {
+        fmt::layer().json().with_writer(writer).boxed()
+    } else {
+        fmt::layer().with_ansi(false).with_writer(writer).boxed()
+    };
+    Ok((layer, Some(guard)))
+}
+
+/// The directory and the file name prefix of the log file. A path without a name keeps the
+/// default file name.
+fn split_log_path<'a>(file: &'a Path, default_file: &'a str) -> (&'a Path, &'a str) {
+    match (
+        file.parent(),
+        file.file_name().and_then(|name| name.to_str()),
+    ) {
+        (Some(dir), Some(prefix)) => (dir, prefix),
+        _ => (file, default_file),
+    }
+}
+
+fn stdout_layer<S>(
+    level: tracing::Level,
+    format: LogFormat,
+) -> Box<dyn Layer<S> + Send + Sync + 'static>
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+    let writer = std::io::stdout.with_max_level(level);
+    if format == LogFormat::Json {
+        fmt::layer().with_writer(writer).json().boxed()
+    } else {
+        fmt::layer().with_writer(writer).boxed()
     }
 }
 

@@ -172,20 +172,7 @@ fn definition(
     if acme.is_some() && protocol != Protocol::Http {
         return Err("acme is available only for HTTP proxies".into());
     }
-    let kind = match protocol {
-        Protocol::Http => {
-            expand_http_ports(&mut node, upstream)?;
-            ProxyKind::Http(Box::new(read::<HttpProxy>(node)?))
-        }
-        Protocol::Tcp => {
-            expand_stream_port(&mut node, upstream, "tcp")?;
-            ProxyKind::Tcp(read::<TcpProxy>(node)?)
-        }
-        Protocol::Udp => {
-            expand_stream_port(&mut node, upstream, "udp")?;
-            ProxyKind::Udp(read::<UdpProxy>(node)?)
-        }
-    };
+    let kind = proxy_kind(protocol, node, upstream)?;
     Ok(ProxyDefinition {
         key: format!("{protocol}.{name}"),
         name: display_name,
@@ -194,6 +181,28 @@ fn definition(
         acme,
         kind,
     })
+}
+
+/// Adds the discovered endpoints to the labels, then reads the proxy of the protocol.
+fn proxy_kind(
+    protocol: Protocol,
+    mut node: Node,
+    upstream: Upstream<'_>,
+) -> Result<ProxyKind, String> {
+    match protocol {
+        Protocol::Http => {
+            expand_http_ports(&mut node, upstream)?;
+            Ok(ProxyKind::Http(Box::new(read::<HttpProxy>(node)?)))
+        }
+        Protocol::Tcp => {
+            expand_stream_port(&mut node, upstream, "tcp")?;
+            Ok(ProxyKind::Tcp(read::<TcpProxy>(node)?))
+        }
+        Protocol::Udp => {
+            expand_stream_port(&mut node, upstream, "udp")?;
+            Ok(ProxyKind::Udp(read::<UdpProxy>(node)?))
+        }
+    }
 }
 
 fn read<T: DeserializeOwned>(node: Node) -> Result<T, String> {

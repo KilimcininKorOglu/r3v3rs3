@@ -9,13 +9,14 @@ use r3v3rs3::config::file::FileStorage;
 use r3v3rs3::config::new_appinfo;
 use r3v3rs3::config::storage::Storage;
 use r3v3rs3::log::DatabaseLayer;
-use r3v3rs3::server::Server;
-use r3v3rs3_api::app::AppConfig;
+use r3v3rs3::server::{Server, ServerChannels};
+use r3v3rs3_api::app::{AppConfig, AppInfo};
 use r3v3rs3_api::auth::MIN_PASSWORD_LENGTH;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::{self, FilterExt};
 use tracing_subscriber::prelude::*;
 
@@ -80,20 +81,22 @@ async fn read_local_config(config_dir: &Path) -> anyhow::Result<AppConfig> {
     FileStorage::new(config_dir).read_app_config().await
 }
 
-async fn start(args: StartArgs) -> anyhow::Result<()> {
-    let log_dir = get_log_dir(args.log_dir)?;
-    fs::create_dir_all(&log_dir)?;
-
-    let (log, _guard) = r3v3rs3::log::create_layer(
-        &log_dir,
-        args.log,
+/// Starts the log file, the access log file and the log database. The returned guards flush the
+/// files, so the caller keeps them until it exits.
+async fn init_logging(
+    args: &mut StartArgs,
+    log_dir: &Path,
+) -> anyhow::Result<(Option<WorkerGuard>, Option<WorkerGuard>)> {
+    let (log, log_guard) = r3v3rs3::log::create_layer(
+        log_dir,
+        args.log.take(),
         "r3v3rs3.log",
         args.log_level,
         args.log_format,
     )?;
-    let (access_log, _guard) = r3v3rs3::log::create_layer(
-        &log_dir,
-        args.access_log,
+    let (access_log, access_guard) = r3v3rs3::log::create_layer(
+        log_dir,
+        args.access_log.take(),
         "access.log",
         args.access_log_level,
         args.log_format,
@@ -108,25 +111,52 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
         .with(access_log.with_filter(access_log_filter.or(is_span)))
         .with(db)
         .init();
+    Ok((log_guard, access_guard))
+}
 
-    let config_dir = get_config_dir(args.config_dir)?;
+/// Builds the server. A node of a cluster reads its state from the store and starts the cluster
+/// tasks, and every other server reads its state from the config directory.
+async fn new_server(
+    app_info: AppInfo,
+    local: AppConfig,
+    config_dir: &Path,
+) -> anyhow::Result<(Server, ServerChannels)> {
+    if !local.cluster.enabled {
+        return Ok(Server::new(app_info, FileStorage::new(config_dir)).await);
+    }
+    let storage = Arc::new(KvStorage::open(local).await?);
+    let (server, channels) = Server::new_shared(app_info, storage.clone()).await;
+    r3v3rs3::cluster::spawn_tasks(storage, channels.command.clone());
+    Ok((server, channels))
+}
+
+async fn start(mut args: StartArgs) -> anyhow::Result<()> {
+    let log_dir = get_log_dir(args.log_dir.take())?;
+    fs::create_dir_all(&log_dir)?;
+    let _guards = init_logging(&mut args, &log_dir).await?;
+
+    let config_dir = get_config_dir(args.config_dir.take())?;
     fs::create_dir_all(&config_dir)?;
 
     let app_info = new_appinfo(&config_dir, &log_dir);
     let local = read_local_config(&config_dir).await?;
 
-    let (server, channels) = if local.cluster.enabled {
-        let storage = Arc::new(KvStorage::open(local).await?);
-        let (server, channels) = Server::new_shared(app_info.clone(), storage.clone()).await;
-        r3v3rs3::cluster::spawn_tasks(storage, channels.command.clone());
-        (server, channels)
-    } else {
-        Server::new(app_info.clone(), FileStorage::new(&config_dir)).await
-    };
+    let (server, channels) = new_server(app_info.clone(), local, &config_dir).await?;
     r3v3rs3::cdn::fetch::spawn_refresh_task(channels.command.clone());
     let server_task = tokio::spawn(server.start());
     let event_send = channels.event.clone();
 
+    serve_admin(app_info, &args, channels).await;
+
+    let _ = event_send.send(r3v3rs3_api::event::ServerEvent::Shutdown);
+    server_task.await??;
+
+    Ok(())
+}
+
+/// Runs the admin API until it fails or the process gets SIGINT. With `--no-webui` it waits for
+/// the signal only.
+async fn serve_admin(app_info: AppInfo, args: &StartArgs, channels: ServerChannels) {
     let webui_enabled = !args.no_webui;
     tokio::select! {
         r = r3v3rs3::admin::start_admin(app_info, args.webui, channels.command, channels.callback, channels.event, channels.accounts), if webui_enabled => {
@@ -138,35 +168,39 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
             info!("received ctrl-c signal");
         }
     };
-
-    let _ = event_send.send(r3v3rs3_api::event::ServerEvent::Shutdown);
-    server_task.await??;
-
-    Ok(())
 }
 
-async fn add_user(args: r3v3rs3::args::AddUserArgs) -> anyhow::Result<()> {
-    let config_dir = get_config_dir(args.config_dir)?;
+/// Writes the account to the store of a cluster node, or to the config directory of every other
+/// server.
+async fn create_account(
+    args: &r3v3rs3::args::AddUserArgs,
+    password: &str,
+    local: AppConfig,
+    config_dir: &Path,
+) -> anyhow::Result<r3v3rs3_api::auth::Account> {
+    if local.cluster.enabled {
+        let storage = KvStorage::open(local).await?;
+        return Ok(storage
+            .add_account(&args.name, password, args.totp, args.role)
+            .await?);
+    }
+    let files = FileStorage::new(config_dir);
+    Ok(files
+        .add_account(&args.name, password, args.totp, args.role)
+        .await?)
+}
+
+async fn add_user(mut args: r3v3rs3::args::AddUserArgs) -> anyhow::Result<()> {
+    let config_dir = get_config_dir(args.config_dir.take())?;
     let local = read_local_config(&config_dir).await?;
-    let password = if let Some(password) = args.password {
-        password
-    } else {
-        rpassword::prompt_password("password?: ")?
+    let password = match args.password.take() {
+        Some(password) => password,
+        None => rpassword::prompt_password("password?: ")?,
     };
     if password.chars().count() < MIN_PASSWORD_LENGTH {
         anyhow::bail!("the password needs at least {MIN_PASSWORD_LENGTH} characters");
     }
-    let account = if local.cluster.enabled {
-        let storage = KvStorage::open(local).await?;
-        storage
-            .add_account(&args.name, &password, args.totp, args.role)
-            .await?
-    } else {
-        let files = FileStorage::new(&config_dir);
-        files
-            .add_account(&args.name, &password, args.totp, args.role)
-            .await?
-    };
+    let account = create_account(&args, &password, local, &config_dir).await?;
     if let Some(totp) = account.totp {
         println!("\nUse this code to setup your TOTP client:\n{totp}\n");
     }
