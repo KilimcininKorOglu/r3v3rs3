@@ -14,3 +14,4 @@ Each page here is a walkthrough. Follow it from the top and you get a working se
 - [Proxies from Docker](@/tutorials/docker-discovery.md): proxies built from the labels of your containers.
 - [HTTPS with a Wildcard Certificate](@/tutorials/https-certificates.md): a DNS-01 wildcard certificate, the HTTPS redirect and HSTS.
 - [Protecting an Application](@/tutorials/protect-an-app.md): access list, authentication, rate limit and audit log.
+- [Caching and Compression](@/tutorials/cache-and-compression.md): responses from memory and smaller bodies.
