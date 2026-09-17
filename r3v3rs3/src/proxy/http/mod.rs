@@ -416,35 +416,10 @@ async fn start(
     let first_byte = stream.read_u8().await?;
     client_stream.write_u8(first_byte).await?;
 
-    tokio::spawn(
-        async move {
-            tokio::select! {
-                result = tokio::io::copy_bidirectional(&mut stream, &mut client_stream) => {
-                    if let Err(err) = result {
-                        error!("{err}");
-                    }
-                },
-                _ = stop_notifier.notified() => {
-                    debug!("stop");
-                },
-            }
-        }
-        .instrument(span.clone()),
-    );
+    spawn_pipe(stream, client_stream, stop_notifier, span.clone());
 
     if tls.is_some() && local.port() != 80 && first_byte != 0x16 {
-        tokio::task::spawn(
-            async move {
-                let server_stream = TokioIo::new(server_stream);
-                if let Err(err) = auto::Builder::new(TokioExecutor::new())
-                    .serve_connection(server_stream, service_fn(redirect))
-                    .await
-                {
-                    error!("Failed to serve the connection: {:?}", err);
-                }
-            }
-            .instrument(span.clone()),
-        );
+        spawn_redirect(server_stream, span.clone());
         return Ok(());
     }
 
@@ -470,43 +445,42 @@ async fn start(
         let client_cert = client_cert.clone();
 
         async move {
-            let (req, response_rewriter) = if is_domain_fronting(&req, sni.as_deref()) {
-                (
-                    ProxiedRequest::Err(ProxyError::DomainFrontingDetected),
-                    ResponseRewriter::builder(),
-                )
-            } else {
-                let info = RequestInfo {
-                    remote,
-                    peer,
-                    local: local.to_string(),
-                    sni: sni.as_deref(),
-                    proto: forwarded_proto,
-                    client_cert: client_cert.as_deref(),
-                };
-                route_request(&shared, req, &info).await
+            let info = RequestInfo {
+                remote,
+                peer,
+                local: local.to_string(),
+                sni: sni.as_deref(),
+                proto: forwarded_proto,
+                client_cert: client_cert.as_deref(),
             };
-            response_rewriter.build().map_response(match req {
-                ProxiedRequest::Ok(req, upstream, span, cache_request) => {
-                    let req = req.map(|b| BoxBody::new(b.map_err(Into::into)));
-                    cache::fetch(&upstream, req, cache_request)
-                        .instrument(span)
-                        .await
-                }
-                ProxiedRequest::Respond(resp) => {
-                    Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into))))
-                }
-                ProxiedRequest::Err(err) => Err(err.into()),
-            })
+            let fronting = is_domain_fronting(&req, sni.as_deref());
+            proxied_response(&shared, req, &info, fronting).await
         }
         .instrument(span)
     });
 
+    spawn_http(stream, service, server_http2, span.clone());
+
+    Ok(())
+}
+
+/// Serves the connection with the HTTP service. `http2_only` skips the protocol detection, because
+/// the TLS handshake already selected HTTP/2 through ALPN.
+fn spawn_http<I, S, B>(stream: I, service: S, http2_only: bool, span: Span)
+where
+    I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    S: hyper::service::Service<Request<Incoming>, Response = Response<B>> + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    B: Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     tokio::task::spawn(
         async move {
             let stream = TokioIo::new(stream);
             let builder = auto::Builder::new(TokioExecutor::new());
-            let builder = if server_http2 {
+            let builder = if http2_only {
                 builder.http2_only()
             } else {
                 builder
@@ -516,10 +490,68 @@ async fn start(
                 error!("Failed to serve the connection: {:?}", err);
             }
         }
-        .instrument(span.clone()),
+        .instrument(span),
     );
+}
 
-    Ok(())
+/// Copies the bytes of the client connection into the duplex stream of the proxy until one side
+/// closes or the port stops.
+fn spawn_pipe(
+    mut stream: BufStream<TcpStream>,
+    mut client_stream: tokio::io::DuplexStream,
+    stop_notifier: Arc<Notify>,
+    span: Span,
+) {
+    tokio::spawn(
+        async move {
+            tokio::select! {
+                result = tokio::io::copy_bidirectional(&mut stream, &mut client_stream) => {
+                    if let Err(err) = result {
+                        error!("{err}");
+                    }
+                },
+                _ = stop_notifier.notified() => {
+                    debug!("stop");
+                },
+            }
+        }
+        .instrument(span),
+    );
+}
+
+/// Answers a plain HTTP request on a TLS port with a redirect to the secure address.
+fn spawn_redirect(server_stream: tokio::io::DuplexStream, span: Span) {
+    tokio::task::spawn(
+        async move {
+            let server_stream = TokioIo::new(server_stream);
+            if let Err(err) = auto::Builder::new(TokioExecutor::new())
+                .serve_connection(server_stream, service_fn(redirect))
+                .await
+            {
+                error!("Failed to serve the connection: {:?}", err);
+            }
+        }
+        .instrument(span),
+    );
+}
+
+/// Routes one request and rewrites its response. A domain fronting request gets no route.
+async fn proxied_response(
+    shared: &SharedContext,
+    req: Request<Incoming>,
+    info: &RequestInfo<'_>,
+    fronting: bool,
+) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
+    let (req, response_rewriter) = if fronting {
+        (
+            ProxiedRequest::Err(ProxyError::DomainFrontingDetected),
+            ResponseRewriter::builder(),
+        )
+    } else {
+        route_request(shared, req, info).await
+    };
+    let res = upstream_response(req).await;
+    response_rewriter.build().map_response(res)
 }
 
 /// The details of the TLS connection of a client.
@@ -648,10 +680,7 @@ where
     let preferences = PagePreferences::from_headers(req.headers());
     let response_rewriter = ResponseRewriter::builder().preferences(preferences);
     let header_host = header_host(&req).map(str::to_string);
-    let request_host = header_host
-        .clone()
-        .or_else(|| info.sni.map(str::to_string))
-        .or_else(|| req.uri().host().map(str::to_string));
+    let request_host = request_host(&req, header_host.clone(), info.sni);
     let Some((res, route)) = shared.router.get_route(&req, request_host.as_deref()) else {
         return (
             ProxiedRequest::Err(ProxyError::NoRouteFound),
@@ -682,9 +711,13 @@ where
         }
     };
 
-    let redirect = upgrade_redirect(route, &req, header_host.as_deref(), info.proto)
-        .or_else(|| redirect::redirect_rule(&route.redirects, request_host.as_deref(), &req));
-    if let Some(redirect) = redirect {
+    if let Some(redirect) = redirect_of(
+        route,
+        &req,
+        header_host.as_deref(),
+        request_host.as_deref(),
+        info.proto,
+    ) {
         return (ProxiedRequest::Respond(redirect), response_rewriter);
     }
 
@@ -710,15 +743,9 @@ where
         path_segments: &res.path_segments,
         preferences,
     };
-    let mut req = match authenticate(route, req, &auth_ctx).await {
-        Authenticated::Pass(req) => req,
-        Authenticated::Respond(response) => {
-            return (ProxiedRequest::Respond(response), response_rewriter);
-        }
-        Authenticated::Rejected(rejection) => {
-            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %rejection);
-            return (rejected(rejection), response_rewriter);
-        }
+    let req = match authenticate_request(route, req, &auth_ctx, info, &client, &action).await {
+        Ok(req) => req,
+        Err(proxied) => return (proxied, response_rewriter),
     };
     if let Some(response) = &route.response {
         let response = fixed::respond(response, &req);
@@ -730,6 +757,106 @@ where
         return (ProxiedRequest::Err(err), response_rewriter);
     }
 
+    let prepared = PreparedRequest {
+        route,
+        res,
+        info,
+        client: &client,
+        action,
+        header_host,
+        request_host,
+        cache_key,
+        authorized,
+    };
+    prepare_upstream_request(shared, req, upstream, prepared, response_rewriter)
+}
+
+/// The host of the request: the `Host` header, then the SNI name, then the host of the URI.
+fn request_host<B>(
+    req: &Request<B>,
+    header_host: Option<String>,
+    sni: Option<&str>,
+) -> Option<String> {
+    header_host
+        .or_else(|| sni.map(str::to_string))
+        .or_else(|| req.uri().host().map(str::to_string))
+}
+
+/// The redirect response of the request: the HTTPS upgrade first, then the redirect rules.
+fn redirect_of<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    header_host: Option<&str>,
+    request_host: Option<&str>,
+    proto: &str,
+) -> Option<Response<Full<Bytes>>> {
+    upgrade_redirect(route, req, header_host, proto)
+        .or_else(|| redirect::redirect_rule(&route.redirects, request_host, req))
+}
+
+/// Authenticates the request. A sign-in page, a redirect or a rejection ends the routing, and a
+/// rejection also writes an access log entry.
+async fn authenticate_request<B>(
+    route: &FilteredRoute,
+    req: Request<B>,
+    auth_ctx: &AuthContext<'_>,
+    info: &RequestInfo<'_>,
+    client: &client_ip::ClientAddr,
+    action: &str,
+) -> Result<Request<B>, ProxiedRequest<Request<B>>>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    match authenticate(route, req, auth_ctx).await {
+        Authenticated::Pass(req) => Ok(req),
+        Authenticated::Respond(response) => Err(ProxiedRequest::Respond(response)),
+        Authenticated::Rejected(rejection) => {
+            let resource_id = route.resource_id;
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %rejection);
+            Err(rejected(rejection))
+        }
+    }
+}
+
+/// What `prepare_upstream_request` needs about the matched route and the client.
+struct PreparedRequest<'a> {
+    route: &'a FilteredRoute,
+    res: filter::FilterResult,
+    info: &'a RequestInfo<'a>,
+    client: &'a client_ip::ClientAddr,
+    action: String,
+    header_host: Option<String>,
+    request_host: Option<String>,
+    cache_key: String,
+    authorized: bool,
+}
+
+/// Selects the upstream server, applies the header rules and builds the cache request. The route
+/// accepted the request already.
+fn prepare_upstream_request<B>(
+    shared: &SharedContext,
+    mut req: Request<B>,
+    upstream: Upstream,
+    prepared: PreparedRequest<'_>,
+    response_rewriter: ResponseRewriterBuilder,
+) -> (ProxiedRequest<Request<B>>, ResponseRewriterBuilder)
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    let PreparedRequest {
+        route,
+        res,
+        info,
+        client,
+        action,
+        header_host,
+        request_host,
+        cache_key,
+        authorized,
+    } = prepared;
+    let resource_id = route.resource_id;
     let secure = info.proto != "http";
     let sticky_cookie = upstream.select(&mut req, res.path_segments, client.ip, secure);
     let response_rewriter = response_rewriter.sticky_cookie(sticky_cookie);
@@ -742,7 +869,7 @@ where
 
     shared
         .header_rewriter
-        .pre_process(req.headers_mut(), &client, header_host, info.proto);
+        .pre_process(req.headers_mut(), client, header_host, info.proto);
     shared.header_rewriter.post_process(req.headers_mut());
     let response_rewriter = apply_header_rules(
         route,
@@ -909,15 +1036,7 @@ where
     let body = BoxBody::new(StreamBody::new(StreamWrapper::<T> { stream: recv }));
     let (req, response_rewriter) = route_request(shared, req.map(|()| body), &info).await;
 
-    let res = match req {
-        ProxiedRequest::Ok(req, upstream, span, cache_request) => {
-            cache::fetch(&upstream, req, cache_request)
-                .instrument(span)
-                .await
-        }
-        ProxiedRequest::Respond(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
-        ProxiedRequest::Err(err) => Err(err.into()),
-    };
+    let res = upstream_response(req).await;
     let (parts, body) = response_rewriter.build().map_response(res)?.into_parts();
     let mut res = Response::from_parts(parts, ());
     res.headers_mut().remove("transfer-encoding");
@@ -928,18 +1047,7 @@ where
     loop {
         tokio::select! {
             frame = res_stream.next() => {
-                if let Some(Ok(frame)) = frame {
-                    match frame.into_data() {
-                        Ok(data) => {
-                            send.send_data(data).await?;
-                        }
-                        Err(frame) => {
-                            if let Ok(trailers) = frame.into_trailers() {
-                                send.send_trailers(trailers).await?;
-                            }
-                        }
-                    }
-                } else {
+                if send_frame(&mut send, frame).await?.is_break() {
                     break;
                 }
             },
@@ -950,6 +1058,48 @@ where
     }
 
     Ok(send.finish().await?)
+}
+
+/// Sends one body frame of the response. The end of the stream breaks the send loop.
+async fn send_frame<T>(
+    send: &mut RequestStream<T, Bytes>,
+    frame: Option<Result<Frame<Bytes>, anyhow::Error>>,
+) -> anyhow::Result<ControlFlow<()>>
+where
+    T: h3::quic::SendStream<Bytes>,
+{
+    let Some(Ok(frame)) = frame else {
+        return Ok(ControlFlow::Break(()));
+    };
+    match frame.into_data() {
+        Ok(data) => send.send_data(data).await?,
+        Err(frame) => {
+            if let Ok(trailers) = frame.into_trailers() {
+                send.send_trailers(trailers).await?;
+            }
+        }
+    }
+    Ok(ControlFlow::Continue(()))
+}
+
+/// Runs the routed request against its upstream server, or returns the response the router built.
+async fn upstream_response<B>(
+    req: ProxiedRequest<Request<B>>,
+) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error>
+where
+    B: Body<Data = Bytes> + Send + Sync + 'static,
+    B::Error: Into<anyhow::Error>,
+{
+    match req {
+        ProxiedRequest::Ok(req, upstream, span, cache_request) => {
+            let req = req.map(|b| BoxBody::new(b.map_err(Into::into)));
+            cache::fetch(&upstream, req, cache_request)
+                .instrument(span)
+                .await
+        }
+        ProxiedRequest::Respond(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
+        ProxiedRequest::Err(err) => Err(err.into()),
+    }
 }
 
 struct StreamWrapper<T: BidiStream<Bytes>> {
