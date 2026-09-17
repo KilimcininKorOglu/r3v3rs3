@@ -274,6 +274,14 @@ impl EtcdWatcher {
             self.revision = list.revision;
             return Ok(Some(WatchBatch::Resync(list)));
         }
+        let batch = self.batch_of(result)?;
+        self.lines = Some(lines);
+        Ok(batch)
+    }
+
+    /// The batch of one watch result. A result without an event gives `None`, and every other
+    /// result moves the revision forward.
+    fn batch_of(&mut self, result: super::etcd::WatchResult) -> anyhow::Result<Option<WatchBatch>> {
         let last = result
             .events
             .iter()
@@ -284,7 +292,6 @@ impl EtcdWatcher {
             .into_iter()
             .map(event)
             .collect::<anyhow::Result<Vec<_>>>()?;
-        self.lines = Some(lines);
         let Some(last) = last else {
             return Ok(None);
         };

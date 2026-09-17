@@ -79,66 +79,7 @@ impl QuicListenerPool {
             } else if let Some(listener) = listeners.remove(&bind) {
                 (Some(listener), SocketState::Listening)
             } else {
-                span.in_scope(|| {
-                    info!(%bind, "listening on quic port");
-                });
-
-                let server_config = quinn::ServerConfig::with_crypto(Arc::new(
-                    QuicServerConfig::try_from(tls_config.clone()).unwrap(),
-                ));
-
-                match create_quic_endpoint(bind, server_config) {
-                    Ok(sock) => {
-                        let local_addr = sock.local_addr().unwrap();
-                        let (send, recv) = tokio::sync::mpsc::channel(1);
-                        let (close_send, mut close_recv) = tokio::sync::mpsc::channel::<()>(1);
-                        let (closed_send, closed_recv) = tokio::sync::mpsc::channel::<()>(1);
-                        tokio::spawn(async move {
-                            loop {
-                                tokio::select! {
-                                    _ = close_recv.recv() => break,
-                                    conn = sock.accept() => {
-                                        match conn {
-                                            Some(conn) => {
-                                                if send.send(conn).await.is_err() {
-                                                    break;
-                                                }
-                                            }
-                                            None => {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            sock.close(1001u16.into(), &[]);
-                            sock.wait_idle().await;
-                            std::mem::drop(send);
-                            let _ = closed_send.send(()).await;
-                        });
-                        (
-                            Some(QuicListenerStream {
-                                config_index: 0,
-                                local_addr,
-                                inner: recv,
-                                close: close_send,
-                                closed: closed_recv,
-                            }),
-                            SocketState::Listening,
-                        )
-                    }
-                    Err(err) => {
-                        let _enter = span.enter();
-                        error!(%bind, %err, "failed to listen on quic port");
-                        let error = match err.kind() {
-                            io::ErrorKind::AddrInUse => SocketState::AddressAlreadyInUse,
-                            io::ErrorKind::PermissionDenied => SocketState::PermissionDenied,
-                            io::ErrorKind::AddrNotAvailable => SocketState::AddressNotAvailable,
-                            _ => SocketState::Error,
-                        };
-                        (None, error)
-                    }
-                }
+                open_listener(bind, &tls_config, &span)
             };
             if let Some(mut sock) = listener {
                 sock.config_index = index;
@@ -158,6 +99,69 @@ impl QuicListenerPool {
             Some((index, incoming)) => Some((index, incoming)),
             _ => None,
         }
+    }
+}
+
+/// Opens the QUIC endpoint of the address. A failed bind gives the socket state of its error.
+fn open_listener(
+    bind: SocketAddr,
+    tls_config: &ServerConfig,
+    span: &tracing::Span,
+) -> (Option<QuicListenerStream>, SocketState) {
+    span.in_scope(|| {
+        info!(%bind, "listening on quic port");
+    });
+    let server_config = quinn::ServerConfig::with_crypto(Arc::new(
+        QuicServerConfig::try_from(tls_config.clone()).unwrap(),
+    ));
+    match create_quic_endpoint(bind, server_config) {
+        Ok(sock) => (Some(spawn_accept_loop(sock)), SocketState::Listening),
+        Err(err) => {
+            let _enter = span.enter();
+            error!(%bind, %err, "failed to listen on quic port");
+            (None, socket_state_of(&err))
+        }
+    }
+}
+
+fn socket_state_of(err: &io::Error) -> SocketState {
+    match err.kind() {
+        io::ErrorKind::AddrInUse => SocketState::AddressAlreadyInUse,
+        io::ErrorKind::PermissionDenied => SocketState::PermissionDenied,
+        io::ErrorKind::AddrNotAvailable => SocketState::AddressNotAvailable,
+        _ => SocketState::Error,
+    }
+}
+
+/// Accepts the connections of the endpoint into a channel until the caller closes the listener.
+fn spawn_accept_loop(sock: quinn::Endpoint) -> QuicListenerStream {
+    let local_addr = sock.local_addr().unwrap();
+    let (send, recv) = tokio::sync::mpsc::channel(1);
+    let (close_send, mut close_recv) = tokio::sync::mpsc::channel::<()>(1);
+    let (closed_send, closed_recv) = tokio::sync::mpsc::channel::<()>(1);
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = close_recv.recv() => break,
+                conn = sock.accept() => {
+                    let Some(conn) = conn else { break };
+                    if send.send(conn).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        sock.close(1001u16.into(), &[]);
+        sock.wait_idle().await;
+        std::mem::drop(send);
+        let _ = closed_send.send(()).await;
+    });
+    QuicListenerStream {
+        config_index: 0,
+        local_addr,
+        inner: recv,
+        close: close_send,
+        closed: closed_recv,
     }
 }
 

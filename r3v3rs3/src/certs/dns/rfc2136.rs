@@ -68,11 +68,23 @@ impl Rfc2136 {
             .await
             .map_err(|_| anyhow!("the DNS server {} did not answer", self.server))??;
 
-        let unsigned = Message::from_vec(&response)?;
-        if unsigned.metadata.id != message.metadata.id {
+        self.check_response(&response, message.metadata.id)?;
+        let verified = verifier.verify(&response).map_err(|err| {
+            anyhow!(
+                "the TSIG signature of the DNS server {} is invalid: {err}",
+                self.server
+            )
+        })?;
+        Ok(verified.into_message())
+    }
+
+    /// Rejects a response of another message and a TSIG error. A server answers a TSIG error, for
+    /// example an unknown key, without a signature.
+    fn check_response(&self, response: &[u8], request_id: u16) -> anyhow::Result<()> {
+        let unsigned = Message::from_vec(response)?;
+        if unsigned.metadata.id != request_id {
             bail!("the DNS server {} answered another message", self.server);
         }
-        // A server answers a TSIG error, for example an unknown key, without a signature.
         if unsigned.signature.is_none() && unsigned.metadata.response_code != ResponseCode::NoError
         {
             bail!(
@@ -81,13 +93,7 @@ impl Rfc2136 {
                 unsigned.metadata.response_code
             );
         }
-        let verified = verifier.verify(&response).map_err(|err| {
-            anyhow!(
-                "the TSIG signature of the DNS server {} is invalid: {err}",
-                self.server
-            )
-        })?;
-        Ok(verified.into_message())
+        Ok(())
     }
 
     /// The zone of `fqdn`: the configured zone, or the owner of the SOA record that the server

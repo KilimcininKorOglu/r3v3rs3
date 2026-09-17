@@ -34,7 +34,26 @@ pub async fn import(storage: &KvStorage, state: FileState) -> anyhow::Result<Imp
         .iter()
         .filter(|cert| cert.source.is_none())
         .collect::<Vec<_>>();
-    for cert in &certs {
+    import_entries(storage, &state, &certs).await?;
+    storage.write_schema().await?;
+    Ok(ImportReport {
+        ports: state.ports.len(),
+        proxies: state.proxies.len(),
+        access_lists: state.access_lists.len(),
+        certs: certs.len(),
+        acmes: state.acmes.len(),
+        accounts: state.accounts.len(),
+    })
+}
+
+/// Writes the entries that the store keeps under one key each: the certificates, the ACME
+/// accounts, the accounts and the CDN ranges.
+async fn import_entries(
+    storage: &KvStorage,
+    state: &FileState,
+    certs: &[&std::sync::Arc<crate::certs::Cert>],
+) -> anyhow::Result<()> {
+    for cert in certs {
         storage.save_cert(cert).await?;
     }
     for acme in &state.acmes {
@@ -46,15 +65,7 @@ pub async fn import(storage: &KvStorage, state: FileState) -> anyhow::Result<Imp
     if let Some(ranges) = &state.cdn_ranges {
         storage.save_cdn_ranges(ranges).await?;
     }
-    storage.write_schema().await?;
-    Ok(ImportReport {
-        ports: state.ports.len(),
-        proxies: state.proxies.len(),
-        access_lists: state.access_lists.len(),
-        certs: certs.len(),
-        acmes: state.acmes.len(),
-        accounts: state.accounts.len(),
-    })
+    Ok(())
 }
 
 async fn ensure_empty(storage: &KvStorage) -> anyhow::Result<()> {

@@ -283,27 +283,37 @@ impl Probe {
             }
             Self::Resolve(targets) => {
                 let (host, port) = target(targets, index)?;
-                let mut addrs = tokio::net::lookup_host((host.as_str(), *port))
-                    .await
-                    .map_err(|err| err.to_string())?;
-                addrs
-                    .next()
-                    .map(drop)
-                    .ok_or_else(|| format!("no IP address found for {host}"))
+                resolve_host(host, *port).await
             }
             Self::Http { uris, pool } => {
                 let uri = target(uris, index)?;
-                let status = pool
-                    .probe(uri.clone())
-                    .await
-                    .map_err(|err| err.to_string())?;
-                if status.is_success() || status.is_redirection() {
-                    Ok(())
-                } else {
-                    Err(format!("the active check received status {status}"))
-                }
+                probe_http(pool, uri).await
             }
         }
+    }
+}
+
+/// Passes when the name resolves to at least one IP address.
+async fn resolve_host(host: &str, port: u16) -> Result<(), String> {
+    let mut addrs = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|err| err.to_string())?;
+    addrs
+        .next()
+        .map(drop)
+        .ok_or_else(|| format!("no IP address found for {host}"))
+}
+
+/// Passes on a 2xx or a 3xx status.
+async fn probe_http(pool: &ConnectionPool, uri: &Uri) -> Result<(), String> {
+    let status = pool
+        .probe(uri.clone())
+        .await
+        .map_err(|err| err.to_string())?;
+    if status.is_success() || status.is_redirection() {
+        Ok(())
+    } else {
+        Err(format!("the active check received status {status}"))
     }
 }
 
