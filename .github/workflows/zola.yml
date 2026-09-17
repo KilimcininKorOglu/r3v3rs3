@@ -1,10 +1,16 @@
 name: Deploy Zola site to Pages
 
 on:
-  # The github-pages environment accepts deployments from main and from v* tags.
+  # The github-pages environment accepts deployments from main. A docs commit deploys at once, so
+  # a documentation fix does not wait for the next release. A `paths` filter also applies to a tag
+  # push, and a release commit rarely touches docs/, so the tag trigger is gone. Use
+  # workflow_dispatch to deploy without a docs change.
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - ".github/workflows/zola.yml"
   workflow_dispatch:
 
 permissions:
