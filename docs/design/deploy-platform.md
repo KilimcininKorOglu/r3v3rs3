@@ -302,7 +302,7 @@ The platform uses the existing permissions of `r3v3rs3/src/accounts.rs`:
 | Create, change or delete an app, read or change its environment, deploy, restart, roll back | `Edit` |
 | Create, enroll or revoke a target | `Admin` |
 
-The first version has no app lists. An account with a proxy list gets `403 forbidden` for every platform request (`Caller::authorize_platform`). App lists and a separate `EditApps` permission can follow later. A secret environment value is never returned by the API; the WebUI shows it as set or not set.
+The first version has no app lists. An account with a proxy list gets `403 forbidden` for every platform request (`Caller::authorize_platform`). App lists and a separate permission for app changes can follow later. A secret environment value is never returned by the API; the WebUI shows it as set or not set.
 
 The admin handlers call the platform directly and do not run inside the server loop, because a database query or a Docker call must not delay the ports and the other RPC methods. The admin API reads the platform handle once at its start through the `GetPlatform` RPC method, checks the permission itself and writes the audit entry itself, as `refresh` in `admin/cdn.rs` does.
 
