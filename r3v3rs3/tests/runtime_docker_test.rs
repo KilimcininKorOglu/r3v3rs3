@@ -1,19 +1,21 @@
-//! The Docker runtime against a real Docker Engine: pull, network, container lifecycle, logs and
-//! removal.
+//! The Docker runtime against a real Docker Engine: pull, network, container lifecycle, logs,
+//! image builds, removal, and a Compose project through the `docker` binary.
 //!
 //! The test needs a Docker Engine. It reads `DOCKER_HOST` and falls back to
 //! `unix:///var/run/docker.sock`. `make test-runtime-docker` runs it.
 
 use anyhow::{Context as _, ensure};
+use r3v3rs3::build::compose::{ComposeProject, ComposeRunner, DockerCompose};
 use r3v3rs3::kv::http::ApiClient;
 use r3v3rs3::runtime::ContainerRuntime;
 use r3v3rs3::runtime::docker::DockerRuntime;
 use r3v3rs3_api::container::{
-    APP_LABEL, AppName, ContainerName, ContainerSpec, EnvVar, ImageRef, NetworkName,
+    APP_LABEL, AppName, ContainerName, ContainerSpec, EnvVar, ImageRef, NetworkName, ProjectName,
     ResourceLimits, RestartPolicy,
 };
 use r3v3rs3_api::discovery::Endpoint;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -22,9 +24,12 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 /// A small multi-platform image that serves HTTP on port 80 with its default command.
 const IMAGE: &str = "traefik/whoami:v1.10.3";
 
+fn docker_host() -> String {
+    std::env::var("DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into())
+}
+
 fn runtime() -> anyhow::Result<DockerRuntime> {
-    let host = std::env::var("DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());
-    let endpoint = host.parse::<Endpoint>()?;
+    let endpoint = docker_host().parse::<Endpoint>()?;
     let tls = ClientConfig::builder()
         .with_root_certificates(RootCertStore::empty())
         .with_no_client_auth();
@@ -251,6 +256,77 @@ async fn build(runtime: &DockerRuntime, tag: &ImageRef) -> anyhow::Result<()> {
     let message = format!("{error:#}");
     ensure!(message.contains("RUN false"), "{message}");
     Ok(())
+}
+
+/// The project file and the file that publishes the service on 127.0.0.1, as the platform
+/// writes it.
+const COMPOSE_FILE: &str = "services:\n  web:\n    image: traefik/whoami:v1.10.3\n    environment:\n      WHOAMI_NAME: ${NAME}\n";
+const OVERRIDE_FILE: &str = r#"{"services": {"web": {"ports": ["127.0.0.1::80"]}}}"#;
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_compose_project_starts_and_goes_down() -> anyhow::Result<()> {
+    let dir = std::env::temp_dir().join(format!("r3v3rs3-compose-{:08x}", rand::random::<u32>()));
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join("compose.yaml"), COMPOSE_FILE)?;
+    std::fs::write(dir.join("override.json"), OVERRIDE_FILE)?;
+    let compose = DockerCompose::new(docker_host());
+    let name: ProjectName = format!("r3v3rs3-rt-{:08x}", rand::random::<u32>()).parse()?;
+    let result = compose_up(&compose, &name, &dir).await;
+    let down = compose.down(&name).await;
+    let _ = std::fs::remove_dir_all(&dir);
+    result?;
+    down?;
+    ensure!(project_containers(&name).await?.is_empty());
+    Ok(())
+}
+
+async fn compose_up(compose: &DockerCompose, name: &ProjectName, dir: &Path) -> anyhow::Result<()> {
+    let files = [dir.join("compose.yaml"), dir.join("override.json")];
+    let env = [EnvVar {
+        key: "NAME".parse()?,
+        value: "compose".into(),
+    }];
+    let project = ComposeProject {
+        name,
+        dir,
+        files: &files,
+        env: &env,
+    };
+    let model = compose.config(&project).await?;
+    let ports = &model.services.get("web").context("web service")?.ports;
+    ensure_eq!(ports.len(), 1);
+    ensure_eq!(ports[0].host_ip.as_deref(), Some("127.0.0.1"));
+    compose.up(&project).await?;
+    check_answer(name).await
+}
+
+/// Checks that the one container of the project answers with the interpolated name.
+async fn check_answer(name: &ProjectName) -> anyhow::Result<()> {
+    let containers = project_containers(name).await?;
+    ensure_eq!(containers.len(), 1);
+    let container = runtime()?
+        .inspect_container(&containers[0].parse()?)
+        .await?
+        .context("the web container")?;
+    let host_port = container.published.get(&80).copied().context("port")?;
+    let reply = http_get(host_port).await?;
+    ensure!(reply.contains("Name: compose"), "{reply}");
+    Ok(())
+}
+
+/// The names of the containers of a Compose project.
+async fn project_containers(name: &ProjectName) -> anyhow::Result<Vec<String>> {
+    let output = tokio::process::Command::new("docker")
+        .args(["ps", "--all", "--format", "{{.Names}}", "--filter"])
+        .arg(format!("label=com.docker.compose.project={name}"))
+        .output()
+        .await?;
+    ensure!(output.status.success(), "docker ps failed");
+    Ok(String::from_utf8(output.stdout)?
+        .lines()
+        .map(str::to_string)
+        .collect())
 }
 
 #[tokio::test]

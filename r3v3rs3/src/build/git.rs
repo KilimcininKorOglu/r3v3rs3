@@ -3,12 +3,12 @@
 //! hooks or reach another protocol.
 
 use super::Revision;
-use anyhow::{Context as _, anyhow, bail};
+use super::process::run;
+use anyhow::{Context as _, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use r3v3rs3_api::git::{CommitSha, GitRef, RepoUrl};
 use std::path::Path;
-use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
@@ -17,9 +17,6 @@ const CLONE_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// The user name that GitHub, GitLab and Gitea accept together with an access token.
 const TOKEN_USER: &str = "x-access-token";
-
-/// The most characters of the `git` error output that a failure message carries.
-const MAX_ERROR_OUTPUT: usize = 2000;
 
 /// Checks out the revision into `dest`, which must not exist, and returns the commit SHA.
 pub async fn clone(
@@ -110,11 +107,7 @@ fn git(token: Option<&str>, dir: &Path) -> Command {
             "protocol.https.allow=always",
         ])
         .args(["-c", "core.hooksPath=/dev/null", "-c", "credential.helper="])
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+        .current_dir(dir);
     if let Some(token) = token {
         let basic = STANDARD.encode(format!("{TOKEN_USER}:{token}"));
         command
@@ -126,27 +119,6 @@ fn git(token: Option<&str>, dir: &Path) -> Command {
             );
     }
     command
-}
-
-/// Runs the command and returns its standard output. A failure carries the error output.
-async fn run(mut command: Command, timeout: Duration) -> anyhow::Result<String> {
-    let child = command.spawn().map_err(|err| match err.kind() {
-        std::io::ErrorKind::NotFound => {
-            anyhow!("the git binary is missing; run the -platform image of r3v3rs3")
-        }
-        _ => anyhow!("failed to run git: {err}"),
-    })?;
-    let output = tokio::time::timeout(timeout, child.wait_with_output())
-        .await
-        .map_err(|_| anyhow!("git did not finish in {} seconds", timeout.as_secs()))??;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr = stderr.trim();
-        let start = stderr.len().saturating_sub(MAX_ERROR_OUTPUT);
-        let tail = stderr.get(start..).unwrap_or(stderr);
-        bail!("git failed with {}: {tail}", output.status);
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 #[cfg(test)]

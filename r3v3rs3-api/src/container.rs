@@ -92,6 +92,11 @@ name_type!(
 name_type!(ContainerName, "container name");
 name_type!(NetworkName, "network name");
 name_type!(VolumeName, "volume name");
+name_type!(
+    /// The name of a Compose project, which prefixes the names of its containers.
+    ProjectName,
+    "project name"
+);
 
 /// An image reference such as `nginx:1.27`, `ghcr.io/owner/app@sha256:…` or
 /// `registry.example:5000/app`.

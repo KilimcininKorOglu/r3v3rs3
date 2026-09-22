@@ -1,7 +1,9 @@
 //! The build step of the deployment platform: a checkout of the source, and the build context
 //! that the Docker Engine builds an image from.
 
+pub mod compose;
 pub mod git;
+mod process;
 
 use anyhow::{Context as _, bail};
 use r3v3rs3_api::git::{CommitSha, GitRef, RelPath, RepoUrl};
