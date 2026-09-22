@@ -1,118 +1,29 @@
-use axum::{Router, http::HeaderMap, routing::get};
+use axum::{Router, routing::get};
 use axum_server::tls_rustls::RustlsConfig;
 use r3v3rs3::{admin::start_admin, certs::Cert, config::new_appinfo, log::DatabaseLayer};
 use r3v3rs3_api::{
     header_rules::{HeaderRule, HeaderRules},
     id::ShortId,
     multiaddr::Multiaddr,
-    port::{Port, PortEntry, PortOptions, UpstreamServer},
+    port::{Port, UpstreamServer},
     proxy::{HttpProxy, ProxyEntry, ProxyKind, TcpProxy},
-    tls::{ClientAuthMode, TlsTermination},
+    tls::ClientAuthMode,
 };
 use reqwest::{
-    Identity, StatusCode,
+    StatusCode,
     header::{COOKIE, HOST},
 };
-use std::{collections::HashMap, future::IntoFuture, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 use tokio_rustls::rustls::{RootCertStore, ServerConfig, server::WebPkiClientVerifier};
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
 use common::{
     TestPort, TestStorage, admin_session_cookie, alloc_tcp_port, http_port_entry, http_proxy_entry,
-    http_route, port_entry, proxy_entry, wait_for_listener, with_server,
+    http_route,
+    pki::{Pki, foreign_client_cert, start_echo_upstream, tls_port},
+    port_entry, proxy_entry, wait_for_listener, with_server,
 };
-
-/// A root certificate with a server certificate and a client certificate that it signs.
-struct Pki {
-    root: Arc<Cert>,
-    server: Arc<Cert>,
-    client: Arc<Cert>,
-}
-
-impl Pki {
-    fn new() -> Self {
-        let root = Arc::new(Cert::new_ca().unwrap());
-        let server =
-            Arc::new(Cert::new_self_signed(&["localhost".parse().unwrap()], &root).unwrap());
-        let client =
-            Arc::new(Cert::new_client(&["client.example.com".parse().unwrap()], &root).unwrap());
-        Self {
-            root,
-            server,
-            client,
-        }
-    }
-
-    fn certs(&self) -> HashMap<ShortId, Arc<Cert>> {
-        [&self.root, &self.server, &self.client]
-            .into_iter()
-            .map(|cert| (cert.id, cert.clone()))
-            .collect()
-    }
-
-    /// Returns a client that trusts the root certificate and sends the client certificate.
-    fn client(&self, identity: Option<&Cert>) -> anyhow::Result<reqwest::Client> {
-        let builder = reqwest::Client::builder()
-            .add_root_certificate(reqwest::Certificate::from_pem(&self.root.pem_chain)?);
-        let builder = match identity {
-            Some(cert) => builder.identity(identity_of(cert)?),
-            None => builder,
-        };
-        Ok(builder.build()?)
-    }
-}
-
-fn identity_of(cert: &Cert) -> anyhow::Result<Identity> {
-    let key = cert
-        .pem_key
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("certificate has no private key"))?;
-    Ok(Identity::from_pem(
-        &[key.as_slice(), &cert.pem_chain].concat(),
-    )?)
-}
-
-/// A client certificate that another root certificate signs.
-fn foreign_client_cert() -> Cert {
-    let root = Cert::new_ca().unwrap();
-    Cert::new_client(&["client.example.com".parse().unwrap()], &root).unwrap()
-}
-
-fn tls_port(id: &str, listen: Multiaddr, mode: ClientAuthMode, roots: Vec<ShortId>) -> PortEntry {
-    let mut entry = port_entry(id, listen);
-    entry.port.opts = PortOptions {
-        tls_termination: Some(TlsTermination {
-            server_names: vec!["localhost".into()],
-            client_auth: mode,
-            client_ca_certs: roots,
-        }),
-        proxy_protocol: None,
-    };
-    entry
-}
-
-/// Starts a plain HTTP upstream server that returns the client certificate headers.
-async fn start_echo_upstream() -> anyhow::Result<TestPort> {
-    async fn echo(headers: HeaderMap) -> String {
-        let value = |name: &str| {
-            headers
-                .get(name)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or("-")
-                .to_string()
-        };
-        format!(
-            "{}|{}",
-            value("x-client-cert"),
-            value("x-client-cert-fingerprint")
-        )
-    }
-    let port = alloc_tcp_port().await?;
-    let listener = tokio::net::TcpListener::bind(port.socket_addr()).await?;
-    tokio::spawn(axum::serve(listener, Router::new().route("/", get(echo))).into_future());
-    Ok(port)
-}
 
 /// Starts an HTTPS upstream server that requires a client certificate of the root certificate.
 async fn start_mtls_upstream(pki: &Pki) -> anyhow::Result<TestPort> {

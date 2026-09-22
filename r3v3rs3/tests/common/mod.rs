@@ -4,6 +4,7 @@ pub mod cluster;
 pub mod dns;
 pub mod e2e;
 pub mod kv;
+pub mod pki;
 
 use futures::Future;
 use hickory_resolver::{Resolver, config::LookupIpStrategy, system_conf::read_system_conf};
