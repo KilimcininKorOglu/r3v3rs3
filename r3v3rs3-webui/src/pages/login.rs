@@ -93,15 +93,15 @@ pub fn login() -> Html {
 
             if let Some(totp) = &*totp {
                 <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.one_time_password")}</label>
-                <input type="number" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" oninput={oninput_totp} />
+                <input type="number" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocomplete="one-time-code" oninput={oninput_totp} />
                 <input type="submit" class="w-full mt-4 text-neutral-50 font-bold bg-neutral-800 dark:bg-neutral-900 py-3 rounded-md hover:bg-neutral-600 transition duration-300" value={locale.t("login.continue")} disabled={totp.is_empty()} />
             } else {
                 <div class="mb-4">
                     <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.username")}</label>
-                    <input type="text" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocapitalize="off" autofocus={true} oninput={oninput_username} />
+                    <input type="text" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocapitalize="off" autocomplete="username" autofocus={true} oninput={oninput_username} />
                 </div>
                 <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.password")}</label>
-                <input type="password" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" oninput={oninput_password} />
+                <input type="password" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocomplete="current-password" oninput={oninput_password} />
                 <input type="submit" class="w-full mt-4 text-neutral-50 font-bold bg-neutral-800 dark:bg-neutral-900 py-3 rounded-md hover:bg-neutral-600 transition duration-300" value={locale.t("login.submit")} disabled={username.is_empty() || password.is_empty()} />
             }
         </form>
