@@ -1,7 +1,8 @@
 use crate::accounts::{AccountDirectory, AccountEntry, Caller};
 use crate::audit::{AuditLog, AuditRecord};
 use crate::command::ServerCommand;
-use crate::server::rpc::auth::{GetAuditLog, GetSessionBackend};
+use crate::platform::PlatformHandle;
+use crate::server::rpc::auth::{GetAuditLog, GetPlatform, GetSessionBackend};
 use crate::server::rpc::config::GetConfig;
 use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
 use crate::sessions::{LocalSessions, SessionBackend};
@@ -59,6 +60,7 @@ mod config;
 mod discovery;
 mod logs;
 mod openapi;
+mod platform;
 mod ports;
 mod proxies;
 mod static_file;
@@ -151,10 +153,15 @@ async fn load_server_state(app_state: &AppState) -> anyhow::Result<()> {
         .call_system(GetAuditLog)
         .await
         .map_err(|err| anyhow::anyhow!("failed to load the audit log: {err}"))?;
+    let platform = app_state
+        .call_system(GetPlatform)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to load the deployment platform: {err}"))?;
     let mut data = app_state.data.lock().await;
     data.config = *config;
     data.sessions = *sessions;
     data.audit = Some(*audit);
+    data.platform = *platform;
     Ok(())
 }
 
@@ -207,6 +214,28 @@ fn resource_routes() -> OpenApiRouter<AppState> {
         .merge(traffic_routes())
         .merge(cert_routes())
         .merge(info_routes())
+        .merge(platform_routes())
+}
+
+/// The targets and the apps of the deployment platform.
+fn platform_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .nest(
+            "/targets",
+            OpenApiRouter::new().routes(routes!(platform::list_targets)),
+        )
+        .nest(
+            "/apps",
+            OpenApiRouter::new()
+                .routes(routes!(platform::list_apps, platform::add_app))
+                .routes(routes!(
+                    platform::get_app,
+                    platform::update_app,
+                    platform::delete_app
+                ))
+                .routes(routes!(platform::get_env, platform::put_env))
+                .routes(routes!(platform::list_deployments)),
+        )
 }
 
 /// The event stream, the session and the accounts of the caller.
@@ -534,6 +563,8 @@ pub struct Data {
     pub log: Arc<LogReader>,
     /// The audit log of the server. The admin API reads it at its start.
     pub audit: Option<Arc<AuditLog>>,
+    /// The deployment platform of the server. The admin API reads it at its start.
+    pub platform: PlatformHandle,
 
     pub rpc_counter: usize,
     pub rpc_callbacks: HashMap<usize, oneshot::Sender<CallbackData>>,
@@ -549,6 +580,7 @@ impl Data {
             login_attempts: Default::default(),
             log: Arc::new(LogReader::new(&log).await?),
             audit: None,
+            platform: PlatformHandle::default(),
             rpc_counter: 0,
             rpc_callbacks: HashMap::new(),
         })

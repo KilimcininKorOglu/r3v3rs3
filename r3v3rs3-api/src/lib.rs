@@ -21,6 +21,7 @@ pub mod id;
 pub mod log;
 pub mod mirror;
 pub mod multiaddr;
+pub mod platform;
 pub mod policy;
 pub mod port;
 pub mod proxy;

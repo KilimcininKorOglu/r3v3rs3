@@ -1,0 +1,328 @@
+//! The apps, the targets and the deployments of the deployment platform.
+
+use crate::container::{AppName, EnvKey, ImageRef, ResourceLimits, RestartPolicy, VolumeMount};
+use crate::error::Error;
+use crate::id::ShortId;
+use crate::subject_name::SubjectName;
+use serde_default::DefaultFromSerde;
+use serde_derive::{Deserialize, Serialize};
+use std::collections::HashSet;
+use utoipa::ToSchema;
+
+/// The id of the target that runs the containers on the server of r3v3rs3 itself.
+pub const LOCAL_TARGET: &str = "local";
+
+/// The longest health check path.
+const MAX_HEALTH_PATH_LENGTH: usize = 1024;
+
+/// The `[platform]` section of `config.toml`. The admin API does not change it.
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PlatformConfig {
+    /// Whether the server deploys apps. A cluster does not run the platform.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// The Docker Engine API of the local target.
+    #[serde(default = "default_docker_endpoint")]
+    #[schema(example = "unix:///var/run/docker.sock")]
+    pub docker: String,
+}
+
+fn default_docker_endpoint() -> String {
+    "unix:///var/run/docker.sock".to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetKind {
+    /// The Docker Engine of the server that runs r3v3rs3.
+    Local,
+    /// A remote server that runs `r3v3rs3 agent`.
+    Agent,
+}
+
+/// A Docker host that runs the containers of apps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TargetEntry {
+    #[schema(value_type = String)]
+    pub id: ShortId,
+    pub name: String,
+    pub kind: TargetKind,
+    /// The Unix time in milliseconds of the last contact with an agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen_at: Option<u64>,
+}
+
+/// Where the image of an app comes from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AppSource {
+    /// A ready image from a registry.
+    Image {
+        #[schema(value_type = String, example = "nginx:1.27")]
+        image: ImageRef,
+    },
+}
+
+/// What a deployment of an app runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AppSpec {
+    pub source: AppSource,
+
+    /// The port that the container listens on.
+    #[schema(example = 8080)]
+    pub port: u16,
+
+    /// The host names that route to the app.
+    #[serde(default)]
+    #[schema(value_type = Vec<String>, example = json!(["app.example.com"]))]
+    pub domains: Vec<SubjectName>,
+
+    /// An HTTP path that answers 2xx or 3xx when the app is ready. Without it a deployment waits
+    /// until the port accepts a connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "/healthz")]
+    pub health_check_path: Option<String>,
+
+    #[serde(default)]
+    pub volumes: Vec<VolumeMount>,
+
+    #[serde(default)]
+    pub restart: RestartPolicy,
+
+    #[serde(default)]
+    pub limits: ResourceLimits,
+}
+
+impl AppSpec {
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.port == 0 {
+            return Err(invalid("the port must be between 1 and 65535"));
+        }
+        self.validate_domains()?;
+        if let Some(path) = &self.health_check_path {
+            validate_health_path(path)?;
+        }
+        let mut targets = HashSet::new();
+        if let Some(mount) = self
+            .volumes
+            .iter()
+            .find(|m| !targets.insert(m.target.as_str()))
+        {
+            return Err(invalid(&format!(
+                "the path {} is mounted twice",
+                mount.target.as_str()
+            )));
+        }
+        Ok(())
+    }
+
+    /// A domain gets a certificate from ACME, so it is one DNS name, not a wildcard or an IP
+    /// address.
+    fn validate_domains(&self) -> Result<(), Error> {
+        let mut seen = HashSet::new();
+        for domain in &self.domains {
+            let SubjectName::DnsName(name) = domain else {
+                return Err(invalid(&format!("the domain {domain} is not a DNS name")));
+            };
+            if !seen.insert(name.to_ascii_lowercase()) {
+                return Err(invalid(&format!("the domain {domain} is listed twice")));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_health_path(path: &str) -> Result<(), Error> {
+    let valid = path.starts_with('/')
+        && path.len() <= MAX_HEALTH_PATH_LENGTH
+        && path.chars().all(|c| c.is_ascii_graphic());
+    if valid {
+        Ok(())
+    } else {
+        Err(invalid(&format!("invalid health check path: {path}")))
+    }
+}
+
+fn invalid(reason: &str) -> Error {
+    Error::InvalidContainerSpec {
+        reason: reason.to_string(),
+    }
+}
+
+/// The body that creates or replaces an app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AppRequest {
+    #[schema(value_type = String, example = "shop")]
+    pub name: AppName,
+    /// The id of the target that runs the app.
+    #[schema(value_type = String, example = "local")]
+    pub target: ShortId,
+    pub spec: AppSpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AppEntry {
+    #[schema(value_type = String)]
+    pub id: ShortId,
+    #[schema(value_type = String)]
+    pub name: AppName,
+    #[schema(value_type = String)]
+    pub target: ShortId,
+    pub spec: AppSpec,
+    /// The Unix time in milliseconds.
+    pub created_at: u64,
+    /// The Unix time in milliseconds.
+    pub updated_at: u64,
+}
+
+/// One environment variable of an app. The admin API does not return the value of a secret
+/// variable. An update without a value keeps the current value of a secret variable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvEntry {
+    #[schema(value_type = String, example = "DATABASE_URL")]
+    pub key: EnvKey,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub secret: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeploymentStatus {
+    Queued,
+    Building,
+    Deploying,
+    Running,
+    /// A newer deployment of the app replaced this one.
+    Superseded,
+    Failed,
+    Cancelled,
+}
+
+impl DeploymentStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Building => "building",
+            Self::Deploying => "deploying",
+            Self::Running => "running",
+            Self::Superseded => "superseded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeploymentTrigger {
+    Manual,
+    Webhook,
+    Rollback,
+    Api,
+}
+
+impl DeploymentTrigger {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Webhook => "webhook",
+            Self::Rollback => "rollback",
+            Self::Api => "api",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DeploymentEntry {
+    #[schema(value_type = String)]
+    pub id: ShortId,
+    #[schema(value_type = String)]
+    pub app: ShortId,
+    pub status: DeploymentStatus,
+    pub trigger: DeploymentTrigger,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_sha: Option<String>,
+    /// The image digest that the deployment runs. A rollback starts this digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_digest: Option<String>,
+    /// The account that started the deployment.
+    pub username: String,
+    /// The Unix time in milliseconds.
+    pub started_at: u64,
+    /// The Unix time in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<u64>,
+    /// The reason of a failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn spec(value: serde_json::Value) -> Result<AppSpec, String> {
+        let spec: AppSpec = serde_json::from_value(value).map_err(|err| err.to_string())?;
+        spec.validate().map_err(|err| err.to_string())?;
+        Ok(spec)
+    }
+
+    #[test]
+    fn a_spec_with_an_image_and_a_port_is_valid() {
+        let parsed = spec(json!({
+            "source": {"type": "image", "image": "nginx:1.27"},
+            "port": 80,
+            "domains": ["shop.example.com"],
+            "health_check_path": "/healthz",
+            "volumes": [{"volume": "shop-data", "target": "/data"}],
+        }))
+        .unwrap();
+        assert_eq!(parsed.restart, RestartPolicy::UnlessStopped);
+        assert_eq!(parsed.limits, ResourceLimits::default());
+    }
+
+    #[test]
+    fn a_spec_rejects_what_a_deployment_cannot_serve() {
+        let base = || json!({"source": {"type": "image", "image": "nginx"}, "port": 80});
+        let cases = [
+            ("port", json!(0)),
+            ("domains", json!(["*.example.com"])),
+            ("domains", json!(["192.0.2.1"])),
+            ("domains", json!(["a.example.com", "A.example.com"])),
+            ("health_check_path", json!("healthz")),
+            ("health_check_path", json!("/a b")),
+            (
+                "volumes",
+                json!([
+                    {"volume": "a", "target": "/data"},
+                    {"volume": "b", "target": "/data"},
+                ]),
+            ),
+        ];
+        for (field, value) in cases {
+            let mut input = base();
+            input[field] = value.clone();
+            assert!(spec(input).is_err(), "{field}: {value}");
+        }
+        let mut unsafe_image = base();
+        unsafe_image["source"]["image"] = json!("nginx --privileged");
+        assert!(spec(unsafe_image).is_err());
+    }
+
+    #[test]
+    fn a_secret_env_entry_omits_its_value() {
+        let entry = EnvEntry {
+            key: "TOKEN".parse().unwrap(),
+            value: None,
+            secret: true,
+        };
+        assert_eq!(
+            serde_json::to_value(&entry).unwrap(),
+            json!({"key": "TOKEN", "secret": true})
+        );
+    }
+}

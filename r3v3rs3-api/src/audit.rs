@@ -41,10 +41,14 @@ pub enum AuditAction {
     AddAcme,
     UpdateAcme,
     DeleteAcme,
+    AddApp,
+    UpdateApp,
+    DeleteApp,
+    UpdateAppEnv,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 24] = [
+    pub const ALL: [AuditAction; 28] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -69,6 +73,10 @@ impl AuditAction {
         Self::AddAcme,
         Self::UpdateAcme,
         Self::DeleteAcme,
+        Self::AddApp,
+        Self::UpdateApp,
+        Self::DeleteApp,
+        Self::UpdateAppEnv,
     ];
 }
 
@@ -83,7 +91,7 @@ pub struct AuditEntry {
     #[schema(value_type = Option<String>, example = "192.0.2.10")]
     pub client: Option<IpAddr>,
     pub action: AuditAction,
-    /// The id of the changed port, proxy, certificate or ACME entry, or the changed username.
+    /// The id of the changed port, proxy, certificate, ACME entry or app, or the changed username.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource_id: Option<String>,
     /// The names, the addresses and the roles of the change. It holds no password, token or key.

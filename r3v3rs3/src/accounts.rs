@@ -52,6 +52,15 @@ impl Caller {
         }
     }
 
+    /// The deployment platform has no app lists yet, so an account with a proxy list gets no
+    /// access to it.
+    pub fn authorize_platform(&self, permission: Permission) -> Result<(), Error> {
+        if self.proxies.is_some() {
+            return Err(Error::Forbidden);
+        }
+        self.authorize(permission)
+    }
+
     pub fn can_see(&self, proxy: ShortId) -> bool {
         self.proxies
             .as_ref()
@@ -277,5 +286,29 @@ mod tests {
                 assert!(expected, "{caller:?} {permission:?}");
             }
         }
+    }
+
+    #[test]
+    fn an_account_with_a_proxy_list_gets_no_platform_access() {
+        let restricted = Caller {
+            username: "user".to_string(),
+            role: Role::Editor,
+            proxies: Some(BTreeSet::from(["web".parse::<ShortId>().unwrap()])),
+            client: None,
+        };
+        assert!(matches!(
+            restricted.authorize_platform(Permission::Read),
+            Err(Error::Forbidden)
+        ));
+        let viewer = Caller {
+            role: Role::Viewer,
+            proxies: None,
+            ..restricted
+        };
+        assert!(viewer.authorize_platform(Permission::Read).is_ok());
+        assert!(matches!(
+            viewer.authorize_platform(Permission::Edit),
+            Err(Error::Forbidden)
+        ));
     }
 }

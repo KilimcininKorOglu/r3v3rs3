@@ -56,6 +56,7 @@ impl Server {
         let server_state = ServerState::new(
             storage,
             audit_store,
+            &app_info.config_path,
             command_send.clone(),
             callback_send,
             event_send.clone(),

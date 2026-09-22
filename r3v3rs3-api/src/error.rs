@@ -101,6 +101,18 @@ pub enum Error {
     #[error("invalid container settings: {reason}")]
     InvalidContainerSpec { reason: String },
 
+    #[error("the deployment platform is not enabled")]
+    PlatformDisabled,
+
+    #[error("the deployment platform does not run in a cluster")]
+    PlatformInCluster,
+
+    #[error("the deployment platform failed to start")]
+    PlatformFailed,
+
+    #[error("an app with this name already exists: {name}")]
+    AppNameExists { name: String },
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 
@@ -301,8 +313,13 @@ impl Error {
             Self::Unauthorized => 401,
             Self::Forbidden | Self::ProxyReadOnly { .. } | Self::CertificateReadOnly { .. } => 403,
             Self::TooManyLoginAttempts => 429,
-            Self::ClusterWriteConflict | Self::AccountExists { .. } => 409,
-            Self::ClusterUnavailable => 503,
+            Self::ClusterWriteConflict
+            | Self::AccountExists { .. }
+            | Self::AppNameExists { .. } => 409,
+            Self::ClusterUnavailable
+            | Self::PlatformDisabled
+            | Self::PlatformInCluster
+            | Self::PlatformFailed => 503,
             Self::NotificationFailed { .. } => 502,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig

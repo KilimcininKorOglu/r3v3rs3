@@ -18,6 +18,8 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 | Portları, sertifikaları, ACME kayıtlarını ve erişim listelerini okuma | evet | evet | evet | evet |
 | Portları, sertifikaları, ACME kayıtlarını ve erişim listelerini değiştirme, sertifika indirme, CDN IP aralıklarını yenileme | evet | evet | hayır | hayır |
 | Ayarları ve hesapları okuma veya değiştirme, audit log'u okuma | evet | hayır | hayır | hayır |
+| Deploy platformunun uygulamalarını, target'larını ve deployment'larını okuma | evet | evet | hayır | evet, proxy listesi yoksa |
+| Uygulama ekleme, değiştirme veya silme, environment değişkenlerini okuma veya değiştirme | evet | evet | hayır | hayır |
 
 - Proxy listesi olmayan hesap bütün proxy'leri görür. Admin her zaman bütün proxy'leri görür. Bu yüzden admin hesabının proxy listesi olamaz.
 - Hesabın listesinde olmayan proxy, bu hesap için yoktur. Yönetim API'si `404 id_not_found` döndürür.
@@ -25,6 +27,8 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 - WebUI, rolün açamadığı sayfaları gizler.
 - Proxy listesi olan editör, kendi proxy'leri için bir erişim listesi seçebilir. Erişim listesinin içeriğini yalnız erişim listelerini değiştirebilen hesap değiştirir.
 - Bir hesap proxy'yi silince r3v3rs3 proxy'yi her hesabın proxy listesinden kaldırır.
+- Proxy listesi olan hesap, deploy platformuna gönderdiği her istek için `403 forbidden` alır.
+- Yönetim API'si secret environment değişkeninin değerini hiçbir zaman döndürmez.
 
 ## Kurallar
 

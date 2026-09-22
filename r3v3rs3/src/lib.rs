@@ -12,6 +12,7 @@ pub mod discovery;
 pub mod kv;
 pub mod log;
 pub mod notify;
+pub mod platform;
 pub mod proxy;
 pub mod runtime;
 pub mod server;

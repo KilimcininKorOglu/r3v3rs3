@@ -1,6 +1,7 @@
 use super::RpcMethod;
 use crate::accounts::Permission;
 use crate::audit::AuditLog;
+use crate::platform::PlatformHandle;
 use crate::server::state::ServerState;
 use crate::sessions::SessionBackend;
 use r3v3rs3_api::{
@@ -32,6 +33,19 @@ impl RpcMethod for GetAuditLog {
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         Ok(state.audit_log())
+    }
+}
+
+/// The deployment platform, which the admin API calls outside the server loop.
+pub struct GetPlatform;
+
+#[async_trait::async_trait]
+impl RpcMethod for GetPlatform {
+    type Output = PlatformHandle;
+    const PERMISSION: Permission = Permission::Admin;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        Ok(state.platform())
     }
 }
 

@@ -123,7 +123,7 @@ A deployment is one attempt to bring an app to a new version.
 
 - `status`: `queued`, `building`, `deploying`, `running`, `superseded`, `failed`, `cancelled`.
 - `trigger`: `manual`, `webhook`, `rollback`, `api`.
-- `commit_sha`, `image_digest`, `config_snapshot` (the app config at start, as JSON).
+- `commit_sha`, `image_digest`, `spec` (the app spec at start, as JSON) and `env` (the environment at start, sealed with `platform.key`).
 - `log`: the build and deploy output, stored as a file under the data directory.
 
 At most one deployment per app is `running`. A newer `running` deployment marks the previous one `superseded`.
@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS apps (
     id            TEXT PRIMARY KEY,          -- ShortId
     name          TEXT NOT NULL UNIQUE,
     target_id     TEXT NOT NULL REFERENCES targets(id),
-    spec          TEXT NOT NULL,             -- JSON of r3v3rs3_api::app::AppSpec
+    spec          TEXT NOT NULL,             -- JSON of r3v3rs3_api::platform::AppSpec
     proxy_id      TEXT,                      -- the generated r3v3rs3 proxy
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL
@@ -168,8 +168,10 @@ CREATE TABLE IF NOT EXISTS deployments (
     trigger       TEXT NOT NULL,
     commit_sha    TEXT,
     image_digest  TEXT,
-    config        TEXT NOT NULL,             -- config snapshot JSON
+    spec          TEXT NOT NULL,             -- app spec snapshot JSON
+    env           BLOB NOT NULL,             -- environment snapshot, sealed
     username      TEXT NOT NULL,
+    message       TEXT,                      -- the reason of a failure
     started_at    INTEGER NOT NULL,
     finished_at   INTEGER
 );
@@ -178,13 +180,13 @@ CREATE INDEX IF NOT EXISTS deployments_app ON deployments (app_id, started_at);
 
 The app spec is one JSON column, as the audit entry is, so a new spec field needs no schema change. Only fields that a query filters on get their own column.
 
-Environment values are encrypted with AES-256-GCM. The key is a 32-byte file `platform.key` in the config directory, created at the first start with mode `0600`. A value never leaves the server in plain text except inside the mTLS link to the agent that runs the container.
+Environment values are encrypted with AES-256-GCM. The key is a 32-byte file `platform.key` in the config directory, created at the first start with mode `0600`. The file has the format of a cluster key file, and the associated data of a value is `app/<app_id>/env/<key>`, so a value copied to another row does not decrypt. A value never leaves the server in plain text except inside the mTLS link to the agent that runs the container.
 
 ## 8. Deploy pipeline
 
 One worker per app runs the steps in order. A global limit bounds the builds that run at the same time. Each step checks a cancel flag before it starts.
 
-1. **Snapshot.** Copy the app spec and the decrypted environment into the deployment row. The rest of the pipeline reads only the snapshot, so an edit during a deploy does not change it.
+1. **Snapshot.** Copy the app spec and the sealed environment into the deployment row. The environment stays sealed at rest and is decrypted only when the container starts. The rest of the pipeline reads only the snapshot, so an edit during a deploy does not change it.
 2. **Fetch source.** For `git`: clone or fetch into `builds/<app_id>/src`, check out the branch, record `commit_sha`. For `image`: skip.
 3. **Build.** For `dockerfile`: build the image with the tag `r3v3rs3/<app>:<deployment_id>`. For `compose`: validate the file. For `image`: pull it.
 4. **Resolve digest.** Read the image digest and store it. A rollback starts this digest, never a tag.
@@ -196,7 +198,7 @@ One worker per app runs the steps in order. A global limit bounds the builds tha
 
 This is blue-green: the old container serves until the new one passes its health check. The switch in step 7 is a proxy config change, which r3v3rs3 applies without a restart.
 
-**Rollback** creates a new deployment with `trigger = rollback` and the `image_digest` and `config` of the chosen earlier deployment. It skips steps 2 and 3 and runs steps 4 to 9.
+**Rollback** creates a new deployment with `trigger = rollback` and the `image_digest`, `spec` and `env` of the chosen earlier deployment. It skips steps 2 and 3 and runs steps 4 to 9.
 
 **Compose** apps use `docker compose -p r3v3rs3-<app> up -d`. The service named in `build.compose.service` receives the traffic. Compose apps deploy by recreate, not blue-green, because Compose manages its own container names. The design states this limit in the WebUI.
 
@@ -230,7 +232,7 @@ The token is single use. A lost agent key is replaced by a new enrollment. Revok
 
 ### 10.2 Transport
 
-- The master listens for agents on a dedicated port, set by `agent_port` in `config.toml` (for example `agent_port = 9443`). The listener is not an entry of the port list, so the port list cannot edit or delete it. Without `agent_port` the master accepts no agents.
+- The master listens for agents on a dedicated port, set by `agent_port` in the `[platform]` section of `config.toml` (for example `agent_port = 9443`). The listener is not an entry of the port list, so the port list cannot edit or delete it. Without `agent_port` the master accepts no agents.
 - The agent opens a TCP connection to that port and completes a TLS handshake with its client certificate. The listener verifies client certificates against the agent CA. A connection without one is limited to the enrollment frame of section 10.1.
 - The master creates the agent CA and its own agent server certificate at the first start with `agent_port`, and stores them under `certs/agent/` in the config directory.
 - After the handshake the master maps the certificate fingerprint to the target.
@@ -292,16 +294,17 @@ From that point the stream is an ordinary byte stream. HTTP/1.1, HTTP/2 and WebS
 
 ## 11. Access control
 
-New permissions extend `r3v3rs3/src/accounts.rs`:
+The platform uses the existing permissions of `r3v3rs3/src/accounts.rs`:
 
 | Action | Permission |
 |---|---|
 | List apps, deployments, targets, read logs | `Read` |
-| Deploy, restart, roll back, edit environment of an app | `EditApps` (new) |
-| Create or delete an app | `Edit` |
+| Create, change or delete an app, read or change its environment, deploy, restart, roll back | `Edit` |
 | Create, enroll or revoke a target | `Admin` |
 
-An account with an app list sees only the apps of that list, in the way an account with a proxy list sees only its proxies. A secret environment value is never returned by the API; the WebUI shows it as set or not set.
+The first version has no app lists. An account with a proxy list gets `403 forbidden` for every platform request (`Caller::authorize_platform`). App lists and a separate `EditApps` permission can follow later. A secret environment value is never returned by the API; the WebUI shows it as set or not set.
+
+The admin handlers call the platform directly and do not run inside the server loop, because a database query or a Docker call must not delay the ports and the other RPC methods. The admin API reads the platform handle once at its start through the `GetPlatform` RPC method, checks the permission itself and writes the audit entry itself, as `refresh` in `admin/cdn.rs` does.
 
 ## 12. API and WebUI
 
@@ -316,7 +319,8 @@ POST   /api/apps
 GET    /api/apps/{id}
 PUT    /api/apps/{id}
 DELETE /api/apps/{id}
-PUT    /api/apps/{id}/env
+GET    /api/apps/{id}/env               a secret variable has no value
+PUT    /api/apps/{id}/env               a secret variable without a value keeps its value
 POST   /api/apps/{id}/deploy
 POST   /api/apps/{id}/restart
 GET    /api/apps/{id}/deployments

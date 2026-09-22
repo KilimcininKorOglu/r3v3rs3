@@ -20,6 +20,7 @@ use crate::discovery::DiscoverySnapshot;
 use crate::kv::http::ApiClient;
 use crate::log::DatabaseLayer;
 use crate::notify::{Notification, Notifier, certificate_notifications};
+use crate::platform::PlatformHandle;
 use crate::proxy::http::SessionService;
 use crate::proxy::tls::upstream_client_config;
 use crate::sessions::{self, SessionBackend};
@@ -40,6 +41,7 @@ use r3v3rs3_api::proxy::{ProxyEntry, ProxyKind};
 use rand::seq::IndexedRandom;
 use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::str;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
@@ -92,6 +94,7 @@ pub struct ServerState {
     notifier: Notifier,
     /// The keys of the certificate events that the webhook got.
     sent_notifications: HashSet<String>,
+    platform: PlatformHandle,
 }
 
 pub enum Received {
@@ -158,11 +161,13 @@ impl ServerState {
     pub async fn new(
         storage: Arc<dyn Storage>,
         audit_store: Arc<dyn AuditStore>,
+        config_dir: &Path,
         command_sender: mpsc::Sender<ServerCommand>,
         callback_sender: mpsc::Sender<RpcCallback>,
         br_sender: broadcast::Sender<ServerEvent>,
     ) -> Self {
         let config = storage.load_app_config().await;
+        let platform = PlatformHandle::start(&config, config_dir).await;
         let _ = br_sender.send(ServerEvent::AppConfigUpdated {
             config: Box::new(config.masked()),
         });
@@ -233,6 +238,7 @@ impl ServerState {
             audit_cleaned_day: 0,
             notifier: Notifier::spawn(),
             sent_notifications,
+            platform,
         };
 
         if let Some(exchange) = this.storage.clone().rate_count_exchange() {
@@ -359,6 +365,10 @@ impl ServerState {
 
     pub fn audit_log(&self) -> Arc<AuditLog> {
         self.audit.clone()
+    }
+
+    pub fn platform(&self) -> PlatformHandle {
+        self.platform.clone()
     }
 
     /// Deletes the audit log entries after the retention, once a day.

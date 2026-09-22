@@ -7,6 +7,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
+use utoipa::ToSchema;
 
 /// The label that names the app of a container, network or volume that the platform creates.
 pub const APP_LABEL: &str = "r3v3rs3.app";
@@ -277,15 +278,17 @@ pub struct EnvVar {
 
 /// A named volume mounted into a container. Host paths cannot be mounted, so a deployment cannot
 /// read or change the files of the host.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct VolumeMount {
+    #[schema(value_type = String, example = "shop-data")]
     pub volume: VolumeName,
+    #[schema(value_type = String, example = "/data")]
     pub target: ContainerPath,
     #[serde(default)]
     pub read_only: bool,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum RestartPolicy {
     No,
@@ -307,7 +310,7 @@ impl RestartPolicy {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ResourceLimits {
     /// The memory limit in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]

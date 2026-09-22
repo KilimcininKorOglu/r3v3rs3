@@ -51,6 +51,10 @@ pub struct AppConfig {
     /// Only `config.toml` sets this section. An update through the admin API keeps it.
     #[serde(default)]
     pub cluster: crate::cluster::ClusterConfig,
+
+    /// Only `config.toml` sets this section. An update through the admin API keeps it.
+    #[serde(default)]
+    pub platform: crate::platform::PlatformConfig,
 }
 
 /// The programs that the exec DNS provider can run.
@@ -92,6 +96,7 @@ impl AppConfig {
     pub fn keep_file_only(&mut self, current: &Self) {
         self.acme_exec.clone_from(&current.acme_exec);
         self.cluster.clone_from(&current.cluster);
+        self.platform.clone_from(&current.platform);
     }
 }
 

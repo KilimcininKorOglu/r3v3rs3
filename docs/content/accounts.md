@@ -18,6 +18,8 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 | Read the ports, the certificates, the ACME entries and the access lists | yes | yes | yes | yes |
 | Change the ports, the certificates, the ACME entries and the access lists, download a certificate, refresh the CDN IP ranges | yes | yes | no | no |
 | Read or change the settings and the accounts, read the audit log | yes | no | no | no |
+| Read the apps, the targets and the deployments of the deployment platform | yes | yes | no | yes, without a proxy list |
+| Add, change or delete an app, read or change its environment variables | yes | yes | no | no |
 
 - An account without a proxy list sees every proxy. An admin always sees every proxy, so an admin cannot have a proxy list.
 - A proxy that is not in the list of an account does not exist for the account. The admin API answers `404 id_not_found`.
@@ -25,6 +27,8 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 - The WebUI hides the pages that the role cannot open.
 - An editor with a proxy list can select an access list for its proxies. Only an account that changes the access lists can change the content of an access list.
 - When an account deletes a proxy, r3v3rs3 removes the proxy from the proxy list of each account.
+- An account with a proxy list gets `403 forbidden` for every request to the deployment platform.
+- The admin API never returns the value of a secret environment variable.
 
 ## Rules
 
