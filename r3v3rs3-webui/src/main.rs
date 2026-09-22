@@ -10,6 +10,7 @@ use yew_router::prelude::*;
 
 mod auth;
 mod components;
+mod dialog;
 mod event;
 mod format;
 mod i18n;

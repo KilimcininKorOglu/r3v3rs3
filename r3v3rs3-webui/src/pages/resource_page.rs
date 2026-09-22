@@ -3,6 +3,7 @@
 use super::settings::{failure_box, send_request, success_box};
 use crate::API_ENDPOINT;
 use crate::components::data_list::{DANGER_LINK_CLASS, LINK_CLASS};
+use crate::dialog::{self, Icon};
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use serde::de::DeserializeOwned;
@@ -154,14 +155,11 @@ pub fn delete_on_click(
 ) -> Callback<MouseEvent> {
     Callback::from(move |event: MouseEvent| {
         event.prevent_default();
-        if !gloo_dialogs::confirm(&question) {
-            return;
-        }
         let (path, deleted) = (path.clone(), deleted.clone());
-        spawn_local(async move {
+        dialog::confirm_then(locale, question.clone(), async move {
             match delete(locale, &path).await {
                 Ok(()) => deleted.emit(()),
-                Err(message) => gloo_dialogs::alert(&message),
+                Err(message) => dialog::message(locale, &message, Icon::Error).await,
             }
         });
     })

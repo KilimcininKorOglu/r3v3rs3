@@ -1,6 +1,7 @@
 use super::language_menu::LanguageMenu;
 use super::sidebar::Menu;
 use super::theme_menu::ThemeMenu;
+use crate::dialog;
 use crate::i18n::use_locale;
 use crate::pages::Route;
 use yew::prelude::*;
@@ -26,9 +27,10 @@ pub fn navbar() -> Html {
     let navigator_cloned = navigator.clone();
     let logout_onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        if gloo_dialogs::confirm(locale.t("nav.logout_confirm")) {
-            navigator_cloned.push(&Route::Logout);
-        }
+        let navigator = navigator_cloned.clone();
+        dialog::confirm_then(locale, locale.t("nav.logout_confirm").into(), async move {
+            navigator.push(&Route::Logout);
+        });
     });
 
     let logo_onclick = Callback::from(move |e: MouseEvent| {

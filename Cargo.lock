@@ -1463,7 +1463,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d15282ece24eaf4bd338d73ef580c6714c8615155c4190c781290ee3fa0fd372"
 dependencies = [
  "gloo-console",
- "gloo-dialogs 0.2.0",
+ "gloo-dialogs",
  "gloo-events 0.2.0",
  "gloo-file",
  "gloo-history",
@@ -1493,16 +1493,6 @@ name = "gloo-dialogs"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf4748e10122b01435750ff530095b1217cf6546173459448b83913ebe7815df"
-dependencies = [
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "gloo-dialogs"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45618929b7022bb49903b958b5b7af1d4fb58fbd99712926d91641fe582f3d55"
 dependencies = [
  "wasm-bindgen",
  "web-sys",
@@ -3588,11 +3578,11 @@ dependencies = [
  "base64 0.23.1",
  "console_error_panic_hook",
  "futures",
- "gloo-dialogs 0.3.0",
  "gloo-events 0.3.0",
  "gloo-net 0.7.0",
  "gloo-timers 0.4.0",
  "gloo-utils 0.3.0",
+ "js-sys",
  "r3v3rs3-api",
  "serde",
  "serde_derive",

@@ -4,6 +4,7 @@ use crate::components::data_list::{
     Column, DANGER_LINK_CLASS, LINK_CLASS, Row, WARNING_LINK_CLASS, active_toggle, list_card,
     status_badge,
 };
+use crate::dialog;
 use crate::i18n::use_locale;
 use crate::pages::Route;
 use crate::store::{PortStore, SessionStore};
@@ -133,20 +134,18 @@ fn port_row(
 
     let reset_onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        if gloo_dialogs::confirm(&locale.tf("ports.confirm_reset", &[("id", &id.to_string())])) {
-            wasm_bindgen_futures::spawn_local(async move {
-                let _ = reset_port(id).await;
-            });
-        }
+        let question = locale.tf("ports.confirm_reset", &[("id", &id.to_string())]);
+        dialog::confirm_then(locale, question, async move {
+            let _ = reset_port(id).await;
+        });
     });
 
     let delete_onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        if gloo_dialogs::confirm(&locale.tf("common.confirm_delete", &[("id", &id.to_string())])) {
-            wasm_bindgen_futures::spawn_local(async move {
-                let _ = delete_port(id).await;
-            });
-        }
+        let question = locale.tf("common.confirm_delete", &[("id", &id.to_string())]);
+        dialog::confirm_then(locale, question, async move {
+            let _ = delete_port(id).await;
+        });
     });
 
     let onchange = Callback::from(move |_: Event| {

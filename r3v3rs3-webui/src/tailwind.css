@@ -17,3 +17,13 @@ html.dark body {
   background-color: #333;
   color: #fff;
 }
+
+/* SweetAlert2 styles its buttons through :where(), so the preflight rule
+   [type='button'] { background-color: transparent } hides them. */
+.swal2-container .swal2-styled.swal2-confirm {
+  background-color: var(--swal2-confirm-button-background-color);
+}
+
+.swal2-container .swal2-styled.swal2-cancel {
+  background-color: var(--swal2-cancel-button-background-color);
+}

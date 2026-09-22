@@ -1,3 +1,4 @@
+use crate::dialog::{self, Icon};
 use std::collections::HashMap;
 
 use crate::API_ENDPOINT;
@@ -173,11 +174,10 @@ fn route_onclick(navigator: &Navigator, route: Route) -> Callback<MouseEvent> {
 fn delete_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
     Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        if gloo_dialogs::confirm(&locale.tf("common.confirm_delete", &[("id", &id.to_string())])) {
-            wasm_bindgen_futures::spawn_local(async move {
-                let _ = delete_site(id).await;
-            });
-        }
+        let question = locale.tf("common.confirm_delete", &[("id", &id.to_string())]);
+        dialog::confirm_then(locale, question, async move {
+            let _ = delete_site(id).await;
+        });
     })
 }
 
@@ -185,16 +185,16 @@ fn delete_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
 fn purge_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
     Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        if gloo_dialogs::confirm(&locale.tf("proxies.confirm_purge", &[("id", &id.to_string())])) {
-            wasm_bindgen_futures::spawn_local(async move {
-                match purge_cache(id).await {
-                    Ok(()) => gloo_dialogs::alert(locale.t("proxies.purged")),
-                    Err(err) => gloo_dialogs::alert(
-                        &locale.tf("proxies.purge_failed", &[("error", &err.to_string())]),
-                    ),
+        let question = locale.tf("proxies.confirm_purge", &[("id", &id.to_string())]);
+        dialog::confirm_then(locale, question, async move {
+            match purge_cache(id).await {
+                Ok(()) => dialog::message(locale, locale.t("proxies.purged"), Icon::Success).await,
+                Err(err) => {
+                    let text = locale.tf("proxies.purge_failed", &[("error", &err.to_string())]);
+                    dialog::message(locale, &text, Icon::Error).await;
                 }
-            });
-        }
+            }
+        });
     })
 }
 

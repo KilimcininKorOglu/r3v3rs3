@@ -4,6 +4,7 @@ use crate::components::acme_form::dns_provider_label;
 use crate::components::data_list::{
     Column, DANGER_LINK_CLASS, LINK_CLASS, Row, active_toggle, list_card, status_badge,
 };
+use crate::dialog;
 use crate::format::{format_duration, unix_now};
 use crate::i18n::use_locale;
 use crate::pages::Route;
@@ -409,11 +410,10 @@ fn tab_class(is_active: bool) -> Vec<&'static str> {
 fn delete_cert_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
     Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        if gloo_dialogs::confirm(&locale.tf("common.confirm_delete", &[("id", &id.to_string())])) {
-            wasm_bindgen_futures::spawn_local(async move {
-                let _ = delete_server_cert(id).await;
-            });
-        }
+        let question = locale.tf("common.confirm_delete", &[("id", &id.to_string())]);
+        dialog::confirm_then(locale, question, async move {
+            let _ = delete_server_cert(id).await;
+        });
     })
 }
 
@@ -454,14 +454,11 @@ fn delete_selected_onclick(
     let notice = notice.clone();
     Callback::from(move |_: MouseEvent| {
         let count = ids.len().to_string();
-        if !gloo_dialogs::confirm(&locale.tf("certs.confirm_delete_selected", &[("count", &count)]))
-        {
-            return;
-        }
+        let question = locale.tf("certs.confirm_delete_selected", &[("count", &count)]);
         let ids = ids.clone();
         let selected = selected.clone();
         let notice = notice.clone();
-        wasm_bindgen_futures::spawn_local(async move {
+        dialog::confirm_then(locale, question, async move {
             let result = delete_certs(locale, ids).await;
             selected.set(HashSet::new());
             notice.set(Some(
@@ -528,12 +525,14 @@ async fn delete_certs(locale: Locale, ids: Vec<ShortId>) -> Result<Vec<DeleteCer
 fn download_onclick(locale: Locale, id: ShortId, has_private_key: bool) -> Callback<MouseEvent> {
     Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        if !has_private_key
-            || gloo_dialogs::confirm(
-                &locale.tf("certs.confirm_download", &[("id", &id.to_string())]),
-            )
-        {
+        let download = async move {
             location::assign(&format!("{API_ENDPOINT}/certs/{id}/download"));
+        };
+        if has_private_key {
+            let question = locale.tf("certs.confirm_download", &[("id", &id.to_string())]);
+            dialog::confirm_then(locale, question, download);
+        } else {
+            wasm_bindgen_futures::spawn_local(download);
         }
     })
 }
@@ -637,11 +636,10 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator, can_edit: b
     let id = entry.id;
     let delete_onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        if gloo_dialogs::confirm(&locale.tf("common.confirm_delete", &[("id", &id.to_string())])) {
-            wasm_bindgen_futures::spawn_local(async move {
-                let _ = delete_acme(id).await;
-            });
-        }
+        let question = locale.tf("common.confirm_delete", &[("id", &id.to_string())]);
+        dialog::confirm_then(locale, question, async move {
+            let _ = delete_acme(id).await;
+        });
     });
 
     let navigator = navigator.clone();
