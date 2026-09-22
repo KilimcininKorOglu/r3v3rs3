@@ -5,6 +5,7 @@ pub mod dns;
 pub mod e2e;
 pub mod kv;
 pub mod pki;
+pub mod quic;
 
 use futures::Future;
 use hickory_resolver::{Resolver, config::LookupIpStrategy, system_conf::read_system_conf};
@@ -696,6 +697,14 @@ impl TestPort {
         let protocol = if self.addr.is_ipv4() { "ip4" } else { "ip6" };
         let addr = self.addr.ip();
         format!("/{protocol}/{addr}/udp/{}", self.addr.port())
+            .parse()
+            .unwrap()
+    }
+
+    pub fn multiaddr_quic_https(&self) -> Multiaddr {
+        let protocol = if self.addr.is_ipv4() { "ip4" } else { "ip6" };
+        let addr = self.addr.ip();
+        format!("/{protocol}/{addr}/udp/{}/quic/https", self.addr.port())
             .parse()
             .unwrap()
     }
