@@ -337,6 +337,10 @@ pub struct ContainerSpec {
     pub restart: RestartPolicy,
     #[serde(default)]
     pub limits: ResourceLimits,
+    /// A TCP port of the container that Docker publishes on a free port of `127.0.0.1`, so that
+    /// r3v3rs3 on the host reaches the container and other hosts do not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publish: Option<u16>,
 }
 
 impl ContainerSpec {
@@ -389,6 +393,8 @@ pub struct ContainerInfo {
     /// The IP address of the container on each network, IPv4 before IPv6.
     pub addresses: BTreeMap<String, String>,
     pub labels: BTreeMap<String, String>,
+    /// The published TCP ports: the container port and its port on `127.0.0.1`.
+    pub published: BTreeMap<u16, u16>,
 }
 
 /// One entry of a container list.
@@ -504,6 +510,7 @@ mod tests {
             volumes: Vec::new(),
             restart: RestartPolicy::default(),
             limits: ResourceLimits::default(),
+            publish: None,
         };
         assert!(spec.validate().is_ok());
         spec.env[0].value = "a\0b".into();

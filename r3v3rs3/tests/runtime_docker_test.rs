@@ -16,6 +16,7 @@ use r3v3rs3_api::discovery::Endpoint;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
 /// A small multi-platform image that serves HTTP on port 80 with its default command.
@@ -117,6 +118,7 @@ fn spec(names: &Names, image: ImageRef) -> anyhow::Result<ContainerSpec> {
             memory_bytes: Some(64 << 20),
             nano_cpus: Some(500_000_000),
         },
+        publish: Some(80),
     })
 }
 
@@ -161,7 +163,26 @@ async fn check_running(runtime: &DockerRuntime, names: &Names, id: &str) -> anyh
     ensure_eq!(names_and_states, [(names.container.as_str(), "running")]);
     let logs = runtime.logs(&names.container, 50).await?;
     ensure!(logs.contains("80"), "{logs}");
+    let host_port = running
+        .published
+        .get(&80)
+        .copied()
+        .context("published port")?;
+    let reply = http_get(host_port).await?;
+    ensure!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    ensure!(reply.contains("Name: r3v3rs3"), "{reply}");
     Ok(())
+}
+
+/// Sends `GET /` to the published port on 127.0.0.1 and returns the whole reply.
+async fn http_get(port: u16) -> anyhow::Result<String> {
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await?;
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply).await?;
+    Ok(reply)
 }
 
 /// A name that is only a prefix of the container id must not find the container.

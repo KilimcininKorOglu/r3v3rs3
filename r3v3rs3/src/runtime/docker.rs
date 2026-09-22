@@ -26,6 +26,9 @@ use std::time::Duration;
 /// The time a pull may go without a progress line.
 const PULL_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// The host address of a published container port.
+const PUBLISH_HOST: &str = "127.0.0.1";
+
 /// The content type of a log body that carries the raw output of a TTY container.
 const RAW_STREAM: &str = "application/vnd.docker.raw-stream";
 
@@ -326,7 +329,34 @@ fn create_body(spec: &ContainerSpec) -> Value {
         body["HostConfig"]["NetworkMode"] = json!(network.as_str());
         body["NetworkingConfig"] = json!({ "EndpointsConfig": { network.as_str(): {} } });
     }
+    if let Some(port) = spec.publish {
+        let key = format!("{port}/tcp");
+        body["ExposedPorts"] = json!({ key.as_str(): {} });
+        // An empty host port lets Docker pick a free port.
+        body["HostConfig"]["PortBindings"] =
+            json!({ key.as_str(): [{ "HostIp": PUBLISH_HOST, "HostPort": "" }] });
+    }
     body
+}
+
+/// The TCP ports that Docker published on `127.0.0.1`, by container port.
+fn published_ports(
+    ports: Option<BTreeMap<String, Option<Vec<PortBinding>>>>,
+) -> BTreeMap<u16, u16> {
+    ports
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(key, bindings)| {
+            let port = key.strip_suffix("/tcp")?.parse().ok()?;
+            let host_port = bindings?
+                .into_iter()
+                .find(|binding| binding.host_ip == PUBLISH_HOST)?
+                .host_port
+                .parse()
+                .ok()?;
+            Some((port, host_port))
+        })
+        .collect()
 }
 
 /// Joins the frames of a multiplexed log stream. Each frame has an 8-byte header: the stream type,
@@ -420,6 +450,17 @@ struct InspectConfig {
 struct InspectNetworkSettings {
     #[serde(default)]
     networks: Option<BTreeMap<String, InspectEndpoint>>,
+    #[serde(default)]
+    ports: Option<BTreeMap<String, Option<Vec<PortBinding>>>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct PortBinding {
+    #[serde(default)]
+    host_ip: String,
+    #[serde(default)]
+    host_port: String,
 }
 
 #[derive(Deserialize)]
@@ -441,9 +482,10 @@ impl InspectEndpoint {
 
 impl InspectContainer {
     fn into_info(self) -> ContainerInfo {
-        let addresses = self
-            .network_settings
-            .and_then(|settings| settings.networks)
+        let settings = self.network_settings.unwrap_or_default();
+        let published = published_ports(settings.ports);
+        let addresses = settings
+            .networks
             .unwrap_or_default()
             .into_iter()
             .filter_map(|(network, endpoint)| {
@@ -467,6 +509,7 @@ impl InspectContainer {
                 .config
                 .and_then(|config| config.labels)
                 .unwrap_or_default(),
+            published,
         }
     }
 }
@@ -570,6 +613,7 @@ mod tests {
                 memory_bytes: Some(256 << 20),
                 nano_cpus: None,
             },
+            publish: Some(8080),
         };
         let expected = json!({
             "Image": "nginx@sha256:abc",
@@ -585,8 +629,10 @@ mod tests {
                 }],
                 "Memory": 268435456,
                 "NetworkMode": "r3v3rs3-shop",
+                "PortBindings": { "8080/tcp": [{ "HostIp": "127.0.0.1", "HostPort": "" }] },
             },
             "NetworkingConfig": { "EndpointsConfig": { "r3v3rs3-shop": {} } },
+            "ExposedPorts": { "8080/tcp": {} },
         });
         assert_eq!(create_body(&spec), expected);
     }
@@ -603,6 +649,13 @@ mod tests {
                 "r3v3rs3-shop": { "IPAddress": "172.20.0.2", "GlobalIPv6Address": "" },
                 "v6": { "IPAddress": "", "GlobalIPv6Address": "fd00::2" },
                 "none": { "IPAddress": "", "GlobalIPv6Address": "" },
+            }, "Ports": {
+                "80/tcp": [
+                    { "HostIp": "0.0.0.0", "HostPort": "8081" },
+                    { "HostIp": "127.0.0.1", "HostPort": "49153" },
+                ],
+                "53/udp": [{ "HostIp": "127.0.0.1", "HostPort": "5353" }],
+                "443/tcp": null,
             }},
         });
         let info = serde_json::from_value::<InspectContainer>(document)
@@ -619,6 +672,7 @@ mod tests {
             ])
         );
         assert_eq!(info.labels[APP_LABEL], "shop");
+        assert_eq!(info.published, BTreeMap::from([(80, 49153)]));
     }
 
     #[test]
