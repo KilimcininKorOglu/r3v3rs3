@@ -1,6 +1,6 @@
 # Deployment platform design
 
-Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. The user reference is `docs/content/platform.md`.
+Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 has the Git source with its Dockerfile build; Compose and the `-platform` image are open. The user reference is `docs/content/platform.md`.
 
 This document describes how r3v3rs3 grows from a reverse proxy into a self-hosted deployment platform, in the space of Coolify. It lives outside `docs/content/`, so the Zola site does not publish it.
 
@@ -69,6 +69,7 @@ All new code lives in the existing crates. The entries marked *later* belong to 
 ```
 r3v3rs3-api/src/
   container.rs      the validated container types: ContainerSpec, ContainerName, ImageRef, EnvKey
+  git.rs            the validated Git source types: RepoUrl, GitRef, RelPath
   platform.rs       PlatformConfig, AppSpec, AppEntry, EnvEntry, DeploymentEntry, TargetEntry
   agent.rs          later: AgentRequest, AgentResponse, AgentEvent (the wire protocol)
 
@@ -77,14 +78,17 @@ r3v3rs3/src/
     mod.rs          PlatformHandle and Platform: the apps, the sealed environment, the app lock
     store.rs        SQLite schema and queries
     deploy.rs       the pipeline of section 8, the health probe and the rollback
+    build.rs        the build step of a Git app, the build limit and the removal of old images
     proxy.rs        the proxy of a running app, and the snapshots of the Platform provider
     publish.rs      reads the running containers and sends the snapshot to the server
-    fake.rs         a runtime in memory for the unit tests
+    fake.rs         a runtime and a source fetcher in memory for the unit tests
   runtime/
     mod.rs          ContainerRuntime trait
-    docker.rs       the local runtime over the Docker Engine API
+    docker.rs       the local runtime over the Docker Engine API, with the image build
     remote.rs       later: the agent runtime, sends AgentRequest, awaits AgentResponse
-  build/            later: clone, checkout, build image or run Compose
+  build/
+    mod.rs          SourceFetcher trait and the build context archive
+    git.rs          the git clone of one branch, without host configuration or hooks
   agent/            later: the agent listener, the `r3v3rs3 agent` command, one agent session
   admin/
     platform.rs     the admin API routes of section 12
@@ -169,6 +173,13 @@ CREATE TABLE IF NOT EXISTS deployments (
     finished_at   INTEGER
 );
 CREATE INDEX IF NOT EXISTS deployments_app ON deployments (app_id, started_at);
+
+CREATE TABLE IF NOT EXISTS app_secrets (
+    app_id        TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    name          TEXT NOT NULL,             -- 'git_token'
+    value         BLOB NOT NULL,             -- sealed, associated data app/<app_id>/secret/<name>
+    PRIMARY KEY (app_id, name)
+);
 ```
 
 The app spec is one JSON column, as the audit entry is, so a new spec field needs no schema change. Only fields that a query filters on get their own column.
@@ -191,9 +202,11 @@ One worker per app runs the steps in order. A global limit bounds the builds tha
 
 This is blue-green: the old container serves until the new one passes its health check. The switch in step 7 is a proxy config change, which r3v3rs3 applies without a restart.
 
-Phase 3 implements steps 1, 4 to 9 for image apps. One pipeline runs per app at a time (`AppLock`); a second deploy, a rollback or a deletion gets `409 app_busy`. The global build limit, the cancel flag and the finish notification follow with phases 4 and 8. A server restart marks an unfinished deployment `failed`.
+Phase 3 implements steps 1, 4 to 9 for image apps. One pipeline runs per app at a time (`AppLock`); a second deploy, a rollback or a deletion gets `409 app_busy`. The cancel flag and the finish notification follow with phase 8. A server restart marks an unfinished deployment `failed`.
 
-**Rollback** creates a new deployment with `trigger = rollback` and the `image_digest`, `spec` and `env` of the chosen earlier deployment. It skips steps 2 and 3 and runs steps 4 to 9.
+Phase 4 implements steps 2 and 3 for Git apps. The deployment status is `building` during both steps. The build runs in `builds/<deployment_id>` under the config directory, which is removed after every build and at the start of the server. `git clone --depth 1 --single-branch` runs without the host configuration, without hooks, with only the HTTPS protocol, and with the token of the app in an `http.extraHeader` taken from the environment. The build context is a tar archive of the `context` directory without `.git`; symbolic links stay links. The Docker Engine builds it through `POST /build` with the classic builder, because BuildKit needs a gRPC session besides the request. At most two builds run at the same time. The image id of the build is the `image_digest` of the deployment. After every pipeline of a Git app, the images of the deployments after the newest five are removed, except the image of the running deployment.
+
+**Rollback** creates a new deployment with `trigger = rollback` and the `image_digest`, `spec` and `env` of the chosen earlier deployment. It skips steps 2 and 3 and runs steps 4 to 9. A built image has no registry, so the rollback of a removed build fails.
 
 **Compose** apps use `docker compose -p r3v3rs3-<app> up -d`. The service named in `build.compose.service` receives the traffic. Compose apps deploy by recreate, not blue-green, because Compose manages its own container names. The design states this limit in the WebUI.
 
@@ -352,3 +365,5 @@ Each phase ends with integration tests and docs, and is usable on its own.
 6. **App certificates.** From an existing ACME entry named by `acme` in the `[platform]` section. The platform creates no ACME entry.
 7. **Container address.** Docker publishes the app port on a free port of `127.0.0.1`. r3v3rs3 reaches the container there, and other hosts do not. This works the same whether r3v3rs3 runs on the host or in a container with host networking.
 8. **Proxy delivery.** The app proxies travel as the snapshot of the `Platform` discovery provider (section 9), not as stored proxies.
+9. **Private repositories.** An HTTPS access token per app, sealed in `app_secrets`. SSH keys are not supported.
+10. **Dockerfile builds.** Through the Docker Engine API, not the `docker` CLI, so a Dockerfile app needs only `git` on the host.
