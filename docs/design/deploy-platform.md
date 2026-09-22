@@ -205,24 +205,24 @@ This is blue-green: the old container serves until the new one passes its health
 Each app with at least one domain owns one generated r3v3rs3 HTTP proxy. `platform::routes` writes that proxy from the app spec:
 
 - `vhosts`: the app domains.
-- `routes[0].servers`: the address of the running container. On the local target it is the container IP on the app network. On an agent target it is the agent host and the published port.
+- `routes[0].servers`: the address of the running container. On the local target it is the container IP on the app network. On an agent target it is an `agent://<target_id>/<container>:<port>` address, which section 10.4 resolves through the agent tunnel.
 - `health_check`: the app health check path.
 - `ports`: the HTTP and HTTPS ports the operator selects for apps in the platform settings.
 
 The generated proxy carries a marker, so the proxy list shows it as managed by an app and the proxy edit form refuses direct edits. A certificate for the domains comes from an ACME entry that the platform creates with `http-01`.
 
-An agent target publishes the app port on the agent host. The master reaches it over the network between the two servers. Private networking between master and agent (WireGuard, a tunnel through the agent link) is a later phase.
+An agent target publishes no app port on the agent host. Every request to an agent app travels through the mTLS link of that agent (section 10.4), so the agent host needs no inbound port and works behind NAT.
 
 ## 10. Agent
 
 ### 10.1 Enrollment
 
-1. The operator creates an agent target in the WebUI. The master generates a random token, stores its SHA-256 and shows the token once.
+1. The operator creates an agent target in the WebUI. The master generates a random secret, stores its SHA-256 and shows the enrollment token once. The token has the form `<secret>.<ca_hash>`, where `ca_hash` is the SHA-256 of the agent CA certificate.
 2. The operator runs on the remote server:
    ```
-   r3v3rs3 agent --master https://master.example:9443 --token <token>
+   r3v3rs3 agent --master master.example:9443 --token <token>
    ```
-3. The agent generates a key pair and a certificate signing request, and sends it with the token to `POST /agent/enroll` on the master. This request uses TLS with server verification only.
+3. The agent connects to the agent port without a client certificate. It accepts the server certificate only when its chain ends in a CA whose SHA-256 equals `ca_hash`, so the first connection needs no pre-shared CA file and still cannot be intercepted. The agent generates a key pair and sends an enrollment frame with the secret and a certificate signing request. A connection without a client certificate may send only this one frame; the master closes it after the answer.
 4. The master verifies the token, signs the certificate with its agent CA, stores the certificate fingerprint, clears the token hash and returns the certificate and the agent CA.
 5. The agent stores its key, its certificate and the master CA in its data directory. Every later connection uses mTLS with that certificate.
 
@@ -230,9 +230,13 @@ The token is single use. A lost agent key is replaced by a new enrollment. Revok
 
 ### 10.2 Transport
 
-- The agent opens a TLS connection to the agent port of the master and presents its client certificate. The master port uses `client_auth = required` with the agent CA in `client_ca_certs`.
+- The master listens for agents on a dedicated port, set by `agent_port` in `config.toml` (for example `agent_port = 9443`). The listener is not an entry of the port list, so the port list cannot edit or delete it. Without `agent_port` the master accepts no agents.
+- The agent opens a TCP connection to that port and completes a TLS handshake with its client certificate. The listener verifies client certificates against the agent CA. A connection without one is limited to the enrollment frame of section 10.1.
+- The master creates the agent CA and its own agent server certificate at the first start with `agent_port`, and stores them under `certs/agent/` in the config directory.
 - After the handshake the master maps the certificate fingerprint to the target.
-- Frames are newline-delimited JSON with a size limit of 8 MiB per frame. Log streams and image transfers use chunked frames.
+- A stream multiplexer (the `yamux` crate) runs inside the TLS connection, so both sides open independent streams over one connection. TCP is used instead of QUIC, because networks block outbound UDP more often than TCP.
+- Stream 1 is the control stream. It carries newline-delimited JSON frames with a size limit of 8 MiB per frame.
+- Log streams and tunnel connections each use their own stream, so a large transfer does not delay a control frame.
 - The agent reconnects with exponential backoff. The master marks a target offline when no heartbeat arrives for 30 seconds.
 
 ### 10.3 Protocol
@@ -274,6 +278,17 @@ pub enum AgentEvent {
 Every operand is a newtype that validates in `FromStr` and `Deserialize`: `ContainerName`, `NetworkName` and `AppName` accept `[a-z0-9][a-z0-9_.-]{0,62}`; `RelPath` rejects `..` and absolute paths; `RepoUrl` accepts only `https://` and `ssh://`; `GitRef` rejects a leading `-`. The agent validates again after deserialization, so a compromised master cannot pass an operand that the types refuse.
 
 Each request carries an id. The agent answers with the same id. Several requests run at the same time, bounded by a limit on the agent.
+
+### 10.4 Tunnel
+
+The proxy reaches an app on an agent target through the agent link, not through a published port.
+
+1. The proxy selects an upstream server with an `agent://<target_id>/<container>:<port>` address.
+2. The connection pool of the proxy opens a new stream on the link of that target and sends one header frame: `{"container": "<name>", "port": <port>}`.
+3. The agent verifies that the container carries the `r3v3rs3.app` label, so the tunnel reaches only containers that the platform created. It then opens a TCP connection to the container address on its local Docker network.
+4. Both sides copy bytes in both directions until either side closes.
+
+From that point the stream is an ordinary byte stream. HTTP/1.1, HTTP/2 and WebSocket run over it unchanged. The health check of the app uses the same tunnel. An offline agent makes the upstream server unhealthy, and the proxy answers `502`.
 
 ## 11. Access control
 
@@ -321,15 +336,16 @@ Each phase ends with integration tests and docs, and is usable on its own.
 1. **Runtime.** `ContainerRuntime` trait and `runtime::docker` with create, start, stop, remove, inspect, logs, pull, network. Integration test against a local Docker Engine, skipped when no socket exists.
 2. **Store and model.** `platform.db` schema, `r3v3rs3-api` types, RPC methods and admin routes for apps and the local target.
 3. **Pipeline for images.** Deploy an `image` source to the local target with blue-green switching and rollback. Generated proxy and ACME entry.
-4. **Build.** Git fetch, Dockerfile build, Compose up.
+4. **Build.** Git fetch, Dockerfile build, Compose up. A second Docker image, `ghcr.io/kilimcininkoroglu/r3v3rs3:<version>-platform`, adds the `git` and `docker` binaries (with the Compose plugin). The existing distroless image stays unchanged.
 5. **WebUI.** Targets, Apps, App detail, live log.
-6. **Agent.** Enrollment, mTLS listener, protocol, `runtime::remote`, `r3v3rs3 agent` command.
-7. **Webhooks and notifications.** Git push deploys, deploy events through `notify.rs`.
-8. **Later.** Managed databases, volume backups to S3, a template registry, PR preview environments, metrics history, private networking to agents.
+6. **Agent.** Agent CA, `agent_port` listener, enrollment, control protocol, `runtime::remote`, `r3v3rs3 agent` command.
+7. **Tunnel.** `agent://` upstream addresses, tunnel streams, health checks through the tunnel.
+8. **Webhooks and notifications.** Git push deploys, deploy events through `notify.rs`.
+9. **Later.** Cluster mode, managed databases, volume backups to S3, a template registry, PR preview environments, metrics history.
 
-## 14. Open questions
+## 14. Decisions
 
-1. **Cluster mode.** The audit log uses the cluster store in cluster mode. `platform.db` is local to one node. Either only the cluster leader runs the platform and the database moves with leadership, or the platform state moves into the cluster store. The first version supports a single server; cluster mode is refused with a clear error until this is decided.
-2. **Docker access in the published image.** The image is distroless and has no `docker` or `git` binary. The Docker Engine API needs only the socket, but Compose and `git` need binaries. Options: a second image variant with those binaries, or a pure Rust Git client and Compose support through the Engine API.
-3. **Agent port.** The agent listener can be a normal r3v3rs3 TLS port with `client_auth = required`, or a dedicated listener outside the port list. A normal port reuses the most code but shows a system port in the port list.
-4. **Traffic to agent apps.** The first version routes over the published port of the agent host. Section 9 names private networking as a later phase; until then the published port must be protected by the firewall of the agent host.
+1. **Cluster mode.** The first version runs on a single server. `platform.db` is local to that server, so the platform refuses to start in cluster mode with a clear error. Cluster support is a later phase.
+2. **Docker image.** A second image with the `-platform` tag suffix carries `git` and `docker`. The default image stays distroless and small. An installation through `install.sh` uses the `git` and `docker` binaries of the host.
+3. **Agent port.** A dedicated `agent_port` setting in `config.toml`, outside the port list (section 10.2).
+4. **Traffic to agent apps.** Through a tunnel inside the agent link (section 10.4). The agent host opens no app port.
