@@ -262,6 +262,8 @@ pub fn is_enabled(config: &DiscoveryConfig, provider: DiscoveryProvider) -> bool
         DiscoveryProvider::Kubernetes => config.kubernetes.enabled,
         DiscoveryProvider::Consul => config.consul.enabled,
         DiscoveryProvider::Etcd => config.etcd.enabled,
+        // The deployment platform sends its snapshots without a provider task.
+        DiscoveryProvider::Platform => false,
     }
 }
 

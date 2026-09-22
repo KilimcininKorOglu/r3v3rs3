@@ -26,6 +26,18 @@ pub struct PlatformConfig {
     #[serde(default = "default_docker_endpoint")]
     #[schema(example = "unix:///var/run/docker.sock")]
     pub docker: String,
+
+    /// The names or the ids of the ports that serve the apps, for example the HTTP port and the
+    /// HTTPS port.
+    #[serde(default)]
+    #[schema(example = json!(["http", "https"]))]
+    pub proxy_ports: Vec<String>,
+
+    /// The ACME entry that orders the certificates of the app domains. Without it the apps get
+    /// no certificate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub acme: Option<ShortId>,
 }
 
 fn default_docker_endpoint() -> String {

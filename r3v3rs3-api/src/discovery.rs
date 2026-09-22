@@ -12,9 +12,13 @@ pub enum DiscoveryProvider {
     Kubernetes,
     Consul,
     Etcd,
+    /// The apps of the deployment platform.
+    Platform,
 }
 
 impl DiscoveryProvider {
+    /// The providers that the discovery settings configure. The deployment platform is not one of
+    /// them, because it publishes its proxies itself.
     pub const ALL: [DiscoveryProvider; 4] = [
         DiscoveryProvider::Docker,
         DiscoveryProvider::Kubernetes,
@@ -29,6 +33,7 @@ impl DiscoveryProvider {
             Self::Kubernetes => "Kubernetes",
             Self::Consul => "Consul",
             Self::Etcd => "etcd",
+            Self::Platform => "Platform",
         }
     }
 }

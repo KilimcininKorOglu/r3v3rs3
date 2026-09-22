@@ -291,7 +291,7 @@ pub fn spawn(
         (DiscoveryProvider::Etcd, Some(client)) => {
             tokio::spawn(run(etcd::Provider::new(&config.etcd, client, reporter)))
         }
-        (_, None) => tokio::spawn(async move {
+        _ => tokio::spawn(async move {
             let error = Some("the provider has no API client".to_string());
             reporter.send(DiscoveryState::Error, error, None).await;
         }),

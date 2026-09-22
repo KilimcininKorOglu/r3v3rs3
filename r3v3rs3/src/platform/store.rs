@@ -9,6 +9,7 @@ use r3v3rs3_api::platform::{
     AppEntry, AppSpec, DeploymentEntry, DeploymentStatus, DeploymentTrigger, LOCAL_TARGET,
     TargetEntry, TargetKind,
 };
+use serde_derive::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 use std::path::Path;
@@ -57,11 +58,33 @@ const SCHEMA: &[&str] = &[
 ];
 
 /// One stored environment variable. The value is sealed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredEnv {
     pub key: String,
     pub sealed: Vec<u8>,
     pub secret: bool,
+}
+
+/// A deployment at its start. The spec and the sealed environment are the snapshot that the
+/// deployment and a later rollback run.
+pub struct NewDeployment<'a> {
+    pub id: ShortId,
+    pub app: ShortId,
+    pub trigger: DeploymentTrigger,
+    pub username: &'a str,
+    pub spec: &'a AppSpec,
+    pub env: &'a [StoredEnv],
+    pub image_digest: Option<&'a str>,
+    pub started_at: u64,
+}
+
+/// A deployment whose container serves its app.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunningDeployment {
+    pub id: ShortId,
+    pub app: ShortId,
+    pub app_name: AppName,
+    pub spec: AppSpec,
 }
 
 /// The outcome of a write that a unique app name can refuse.
@@ -236,6 +259,153 @@ impl PlatformStore {
         .fetch_all(&self.pool)
         .await?;
         rows.iter().map(deployment_of).collect()
+    }
+}
+
+impl PlatformStore {
+    pub async fn insert_deployment(&self, deployment: &NewDeployment<'_>) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO deployments (id, app_id, status, trigger, image_digest, spec, env,
+                username, started_at)
+            VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(deployment.id.to_string())
+        .bind(deployment.app.to_string())
+        .bind(deployment.trigger.as_str())
+        .bind(deployment.image_digest)
+        .bind(serde_json::to_string(deployment.spec)?)
+        .bind(serde_json::to_vec(deployment.env)?)
+        .bind(deployment.username)
+        .bind(sql_int(deployment.started_at))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Sets the status of a deployment that has not finished.
+    pub async fn set_status(&self, id: ShortId, status: DeploymentStatus) -> anyhow::Result<()> {
+        sqlx::query("UPDATE deployments SET status = ? WHERE id = ?")
+            .bind(status.as_str())
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn set_image_digest(&self, id: ShortId, digest: &str) -> anyhow::Result<()> {
+        sqlx::query("UPDATE deployments SET image_digest = ? WHERE id = ?")
+            .bind(digest)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Ends a deployment with `failed` or `cancelled` and the reason.
+    pub async fn fail_deployment(
+        &self,
+        id: ShortId,
+        status: DeploymentStatus,
+        message: &str,
+        now: u64,
+    ) -> anyhow::Result<()> {
+        sqlx::query("UPDATE deployments SET status = ?, message = ?, finished_at = ? WHERE id = ?")
+            .bind(status.as_str())
+            .bind(message)
+            .bind(sql_int(now))
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Marks a deployment `running` and the running deployment of the same app `superseded`, in
+    /// one transaction.
+    pub async fn finish_deployment(
+        &self,
+        app: ShortId,
+        id: ShortId,
+        now: u64,
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE deployments SET status = 'superseded'
+            WHERE app_id = ? AND status = 'running' AND id <> ?",
+        )
+        .bind(app.to_string())
+        .bind(id.to_string())
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE deployments SET status = 'running', finished_at = ? WHERE id = ?")
+            .bind(sql_int(now))
+            .bind(id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Ends the deployments that a stopped server left unfinished.
+    pub async fn fail_unfinished(&self, now: u64) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE deployments SET status = 'failed', finished_at = ?,
+                message = 'the server stopped during the deployment'
+            WHERE status IN ('queued', 'building', 'deploying')",
+        )
+        .bind(sql_int(now))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn deployment(&self, id: ShortId) -> anyhow::Result<Option<DeploymentEntry>> {
+        let row = sqlx::query(
+            "SELECT id, app_id, status, trigger, commit_sha, image_digest, username, message,
+                started_at, finished_at
+            FROM deployments WHERE id = ?",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(deployment_of).transpose()
+    }
+
+    /// The spec and the sealed environment that a deployment ran.
+    pub async fn deployment_snapshot(
+        &self,
+        id: ShortId,
+    ) -> anyhow::Result<Option<(AppSpec, Vec<StoredEnv>)>> {
+        let row = sqlx::query("SELECT spec, env FROM deployments WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(|row| {
+            let spec = serde_json::from_str(row.try_get("spec")?)?;
+            let env = serde_json::from_slice(row.try_get("env")?)?;
+            Ok((spec, env))
+        })
+        .transpose()
+    }
+
+    /// The running deployment of every app, with the app name.
+    pub async fn running_deployments(&self) -> anyhow::Result<Vec<RunningDeployment>> {
+        let rows = sqlx::query(
+            "SELECT d.id, d.app_id, a.name, d.spec FROM deployments d
+            JOIN apps a ON a.id = d.app_id
+            WHERE d.status = 'running' ORDER BY a.name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                Ok(RunningDeployment {
+                    id: id_of(row, "id")?,
+                    app: id_of(row, "app_id")?,
+                    app_name: row.try_get::<&str, _>("name")?.parse()?,
+                    spec: serde_json::from_str(row.try_get("spec")?)?,
+                })
+            })
+            .collect()
     }
 }
 
@@ -497,6 +667,78 @@ mod tests {
         .bind(app.to_string())
         .execute(&store.pool)
         .await?;
+        Ok(())
+    }
+
+    fn new_deployment<'a>(id: &str, app: &'a AppEntry, env: &'a [StoredEnv]) -> NewDeployment<'a> {
+        NewDeployment {
+            id: id.parse().unwrap(),
+            app: app.id,
+            trigger: DeploymentTrigger::Manual,
+            username: "alice",
+            spec: &app.spec,
+            env,
+            image_digest: None,
+            started_at: 5,
+        }
+    }
+
+    /// Deploys `shop` twice. The first deployment has the environment and an image digest.
+    async fn deploy_twice(
+        store: &PlatformStore,
+        shop: &AppEntry,
+        env: &[StoredEnv],
+    ) -> anyhow::Result<(ShortId, ShortId)> {
+        store.insert_app(shop).await?;
+        let first = new_deployment("fff-bcd", shop, env);
+        store.insert_deployment(&first).await?;
+        store.set_image_digest(first.id, "nginx@sha256:ab").await?;
+        store.finish_deployment(shop.id, first.id, 7).await?;
+        let second = new_deployment("fff-cdf", shop, &[]);
+        store.insert_deployment(&second).await?;
+        store.finish_deployment(shop.id, second.id, 9).await?;
+        Ok((first.id, second.id))
+    }
+
+    #[tokio::test]
+    async fn one_deployment_of_an_app_runs_and_keeps_its_snapshot() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let shop = app("abc-def", "shop");
+        let env = [stored("A", &[1, 2], true)];
+        let (first, second) = deploy_twice(&store, &shop, &env).await?;
+
+        let running = store.running_deployments().await?;
+        assert_eq!(running.len(), 1);
+        assert_eq!(
+            (running[0].id, running[0].app_name.as_str()),
+            (second, "shop")
+        );
+        let old = store.deployment(first).await?.context("first")?;
+        assert_eq!(old.status, DeploymentStatus::Superseded);
+        assert_eq!(old.image_digest.as_deref(), Some("nginx@sha256:ab"));
+        let (spec, sealed) = store
+            .deployment_snapshot(first)
+            .await?
+            .context("snapshot")?;
+        assert_eq!((spec, sealed), (shop.spec.clone(), env.to_vec()));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_restart_fails_the_unfinished_deployments() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let shop = app("abc-def", "shop");
+        store.insert_app(&shop).await?;
+        let deployment = new_deployment("fff-bcd", &shop, &[]);
+        store.insert_deployment(&deployment).await?;
+        store
+            .set_status(deployment.id, DeploymentStatus::Deploying)
+            .await?;
+        store.fail_unfinished(8).await?;
+        let entry = store.deployment(deployment.id).await?.context("entry")?;
+        assert_eq!(entry.status, DeploymentStatus::Failed);
+        assert_eq!(entry.finished_at, Some(8));
+        assert!(store.running_deployments().await?.is_empty());
         Ok(())
     }
 

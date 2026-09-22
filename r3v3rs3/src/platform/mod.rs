@@ -3,10 +3,13 @@
 //! The admin API calls the platform directly instead of through the server loop, because a
 //! database query or a Docker call must not hold up the ports and the other RPC methods.
 
+pub mod proxy;
+mod publish;
 pub mod store;
 
 use crate::cluster::crypto::ClusterKeys;
 use crate::cluster::key_file::{load_keys, write_new_key_file};
+use crate::command::ServerCommand;
 use crate::kv::http::ApiClient;
 use crate::runtime::ContainerRuntime;
 use crate::runtime::docker::DockerRuntime;
@@ -15,12 +18,15 @@ use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::discovery::Endpoint;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{AppEntry, AppRequest, DeploymentEntry, EnvEntry, TargetEntry};
+use r3v3rs3_api::platform::{
+    AppEntry, AppRequest, DeploymentEntry, EnvEntry, PlatformConfig, TargetEntry,
+};
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use store::{PlatformStore, StoredEnv, Write};
+use tokio::sync::{Mutex, mpsc};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tracing::error;
 
@@ -48,8 +54,13 @@ pub enum PlatformHandle {
 }
 
 impl PlatformHandle {
-    /// Opens the platform when `config.toml` enables it.
-    pub async fn start(config: &AppConfig, config_dir: &Path) -> Self {
+    /// Opens the platform when `config.toml` enables it, and starts the task that sends the proxies
+    /// of the apps to the server through `command`.
+    pub async fn start(
+        config: &AppConfig,
+        config_dir: &Path,
+        command: mpsc::Sender<ServerCommand>,
+    ) -> Self {
         if !config.platform.enabled {
             return Self::Disabled;
         }
@@ -57,8 +68,12 @@ impl PlatformHandle {
             error!("the deployment platform does not run in a cluster, so it stays off");
             return Self::InCluster;
         }
-        match Platform::open(config, config_dir).await {
-            Ok(platform) => Self::Ready(Arc::new(platform)),
+        match Platform::open(config, config_dir, command).await {
+            Ok(platform) => {
+                let platform = Arc::new(platform);
+                tokio::spawn(publish::refresh(Arc::downgrade(&platform)));
+                Self::Ready(platform)
+            }
             Err(err) => {
                 error!(
                     err = format!("{err:#}"),
@@ -83,13 +98,23 @@ pub struct Platform {
     store: PlatformStore,
     keys: ClusterKeys,
     local: Arc<dyn ContainerRuntime>,
+    config: PlatformConfig,
+    command: mpsc::Sender<ServerCommand>,
+    /// The proxies and the issues of the last snapshot that the server got.
+    sent: Mutex<Option<publish::Published>>,
 }
 
 impl Platform {
-    async fn open(config: &AppConfig, config_dir: &Path) -> anyhow::Result<Self> {
+    async fn open(
+        config: &AppConfig,
+        config_dir: &Path,
+        command: mpsc::Sender<ServerCommand>,
+    ) -> anyhow::Result<Self> {
         let local = docker_runtime(&config.platform.docker)?;
         let store = PlatformStore::open(&config_dir.join(DATABASE_FILE)).await?;
-        store.ensure_local_target(crate::clock::unix_ms()).await?;
+        let now = crate::clock::unix_ms();
+        store.ensure_local_target(now).await?;
+        store.fail_unfinished(now).await?;
         let key_path = config_dir.join(KEY_FILE);
         if !tokio::fs::try_exists(&key_path).await? {
             write_new_key_file(&key_path).await?;
@@ -99,6 +124,9 @@ impl Platform {
             store,
             keys,
             local: Arc::new(local),
+            config: config.platform.clone(),
+            command,
+            sent: Mutex::new(None),
         })
     }
 
@@ -343,7 +371,7 @@ mod tests {
     use super::*;
     use r3v3rs3_api::platform::{AppSource, AppSpec, LOCAL_TARGET};
 
-    struct TempDir(std::path::PathBuf);
+    pub(super) struct TempDir(std::path::PathBuf);
 
     impl Drop for TempDir {
         fn drop(&mut self) {
@@ -352,17 +380,31 @@ mod tests {
     }
 
     async fn platform() -> anyhow::Result<(Platform, TempDir)> {
+        // These tests read no commands.
+        let (command, _) = mpsc::channel(1);
+        platform_with(&PlatformConfig::default(), command).await
+    }
+
+    pub(super) async fn platform_with(
+        platform: &PlatformConfig,
+        command: mpsc::Sender<ServerCommand>,
+    ) -> anyhow::Result<(Platform, TempDir)> {
         let dir = TempDir(std::env::temp_dir().join(format!(
             "r3v3rs3-platform-{}",
             hex::encode(rand::random::<[u8; 8]>())
         )));
         std::fs::create_dir_all(&dir.0)?;
-        let mut config = AppConfig::default();
-        config.platform.enabled = true;
-        Ok((Platform::open(&config, &dir.0).await?, dir))
+        let config = AppConfig {
+            platform: PlatformConfig {
+                enabled: true,
+                ..platform.clone()
+            },
+            ..Default::default()
+        };
+        Ok((Platform::open(&config, &dir.0, command).await?, dir))
     }
 
-    fn request(name: &str) -> AppRequest {
+    pub(super) fn request(name: &str) -> AppRequest {
         AppRequest {
             name: name.parse().unwrap(),
             target: LOCAL_TARGET.parse().unwrap(),
@@ -492,18 +534,19 @@ mod tests {
     #[tokio::test]
     async fn the_platform_stays_off_unless_enabled_and_outside_a_cluster() {
         let dir = std::env::temp_dir();
+        let (command, _commands) = mpsc::channel(1);
         let mut config = AppConfig::default();
-        let handle = PlatformHandle::start(&config, &dir).await;
+        let handle = PlatformHandle::start(&config, &dir, command.clone()).await;
         assert!(matches!(handle.get(), Err(Error::PlatformDisabled)));
 
         config.platform.enabled = true;
         config.cluster.enabled = true;
-        let handle = PlatformHandle::start(&config, &dir).await;
+        let handle = PlatformHandle::start(&config, &dir, command.clone()).await;
         assert!(matches!(handle.get(), Err(Error::PlatformInCluster)));
 
         config.cluster.enabled = false;
         config.platform.docker = "https://docker.example:2376".into();
-        let handle = PlatformHandle::start(&config, &dir).await;
+        let handle = PlatformHandle::start(&config, &dir, command).await;
         assert!(matches!(handle.get(), Err(Error::PlatformFailed)));
     }
 }
