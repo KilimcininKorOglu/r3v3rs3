@@ -73,6 +73,14 @@ impl SessionStore {
             info.role.is_admin() || (info.role == Role::Editor && info.proxies.is_none())
         })
     }
+
+    /// Whether the account reads the deployment platform. An account with a proxy list gets no
+    /// access, as in the admin API.
+    pub fn can_read_platform(&self) -> bool {
+        self.info
+            .as_ref()
+            .is_some_and(|info| info.proxies.is_none())
+    }
 }
 
 #[cfg(test)]
@@ -92,19 +100,24 @@ mod tests {
         };
         let restricted = Some(BTreeSet::from(["web".parse().unwrap()]));
         let cases = [
-            (SessionStore::default(), [false, false, false]),
-            (session(Role::Admin, None), [true, true, true]),
-            (session(Role::Editor, None), [false, true, true]),
+            (SessionStore::default(), [false, false, false, false]),
+            (session(Role::Admin, None), [true, true, true, true]),
+            (session(Role::Editor, None), [false, true, true, true]),
+            (session(Role::Viewer, None), [false, false, false, true]),
             (
                 session(Role::Editor, restricted.clone()),
-                [false, true, false],
+                [false, true, false, false],
             ),
-            (session(Role::Viewer, restricted), [false, false, false]),
+            (
+                session(Role::Viewer, restricted),
+                [false, false, false, false],
+            ),
         ];
-        for (session, [admin, proxies, edit]) in cases {
+        for (session, [admin, proxies, edit, platform]) in cases {
             assert_eq!(session.is_admin(), admin, "{:?}", session.info);
             assert_eq!(session.can_edit_proxies(), proxies, "{:?}", session.info);
             assert_eq!(session.can_edit(), edit, "{:?}", session.info);
+            assert_eq!(session.can_read_platform(), platform, "{:?}", session.info);
         }
     }
 }

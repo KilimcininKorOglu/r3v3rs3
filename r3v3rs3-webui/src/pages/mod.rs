@@ -5,6 +5,7 @@ use yew_router::prelude::*;
 
 mod access_lists;
 mod accounts;
+mod app_list;
 mod audit;
 pub mod cert_list;
 mod log_view;
@@ -59,6 +60,8 @@ pub enum Route {
     ProxyView { id: ShortId },
     #[at("/access_lists")]
     AccessLists,
+    #[at("/apps")]
+    Apps,
     #[at("/settings")]
     Settings,
     #[at("/accounts")]
@@ -86,7 +89,7 @@ impl Route {
             | Route::NewProxy
             | Route::ProxyView { .. }
             | Route::ProxyLogView { .. } => Some(Route::Proxies),
-            Route::AccessLists | Route::Settings | Route::Accounts | Route::Audit => {
+            Route::AccessLists | Route::Apps | Route::Settings | Route::Accounts | Route::Audit => {
                 Some(self.clone())
             }
             _ => None,
@@ -108,6 +111,7 @@ pub fn switch(routes: Route) -> Html {
         Route::ProxyView { id } => html! { <proxy_view::ProxyView {id} /> },
         Route::NewProxy => html! { <new_proxy::NewProxy /> },
         Route::AccessLists => html! { <access_lists::AccessLists /> },
+        Route::Apps => html! { <app_list::AppList /> },
         Route::Certs => html! { <cert_list::CertList /> },
         Route::SelfSign => html! { <self_sign::SelfSign /> },
         Route::NewAcme => html! { <new_acme::NewAcme /> },

@@ -11,6 +11,8 @@ use yewdux::prelude::*;
 enum Access {
     All,
     AdminOnly,
+    /// An account without a proxy list.
+    Platform,
 }
 
 struct MenuItem {
@@ -58,6 +60,15 @@ const GROUPS: &[MenuGroup] = &[
         ],
     },
     MenuGroup {
+        name: "nav.group_platform",
+        items: &[MenuItem {
+            name: "nav.apps",
+            icon: "/assets/icons/cube.svg",
+            route: Route::Apps,
+            access: Access::Platform,
+        }],
+    },
+    MenuGroup {
         name: "nav.group_admin",
         items: &[
             MenuItem {
@@ -87,6 +98,7 @@ impl Access {
         match self {
             Access::All => true,
             Access::AdminOnly => session.is_admin(),
+            Access::Platform => session.can_read_platform(),
         }
     }
 }
