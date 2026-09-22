@@ -77,6 +77,34 @@ Host networking publishes no port, so every port that you add in the WebUI liste
 - `R3V3RS3_WEBUI`: the admin panel address. The default is `127.0.0.1:46492`.
 - `R3V3RS3_VERSION`: the image tag. The default is `latest`.
 
+## Deployment Platform
+
+The [deployment platform](@/platform.md) needs the `git` binary for Git sources and the `docker` binary with the Compose plugin for Compose sources. The default image has neither. Use the image with the `-platform` tag suffix, for example `latest-platform`. It is a `debian:trixie-slim` image with `git`, the `docker` CLI and its Compose and buildx plugins.
+
+```bash
+$ sudo mkdir -p /var/lib/r3v3rs3
+$ docker run -d \
+  --network host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /var/lib/r3v3rs3:/var/lib/r3v3rs3 \
+  -e R3V3RS3_CONFIG_DIR=/var/lib/r3v3rs3 \
+  -v r3v3rs3-data:/root/.local/share/r3v3rs3 \
+  --restart unless-stopped \
+  --stop-signal SIGINT \
+  --name r3v3rs3 \
+  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform
+```
+
+The command differs from Step 1 in three places:
+
+| Option | Reason |
+|---|---|
+| `--network host` | Docker publishes the port of an app on `127.0.0.1` of the host, and r3v3rs3 reaches it there. In a bridge network, `127.0.0.1` is the container itself. |
+| `-v /var/run/docker.sock:/var/run/docker.sock` | The platform starts the app containers through the Docker Engine of the host. Access to the socket is equal to root access on the host. |
+| `-v /var/lib/r3v3rs3:/var/lib/r3v3rs3` and `R3V3RS3_CONFIG_DIR` | The config directory holds the checkouts of the Compose apps. `docker compose` sends the paths of a bind mount to the Docker Engine of the host, so a bind mount of a file from the repository works only when the directory has the same path on the host and in the container. |
+
+Then enable the platform in `/var/lib/r3v3rs3/config.toml` and restart the container.
+
 ## Upgrade
 
 ```bash

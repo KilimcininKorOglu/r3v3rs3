@@ -36,7 +36,7 @@ Platform ilk başlangıçta config dizininde iki dosya oluşturur:
 - `platform.db`: uygulamalar, environment değişkenleri ve deployment'lar.
 - `platform.key`: environment değerlerini şifreleyen key. Dosya modu `0600` olur. Bu dosyanın yedeğini `platform.db` yedeğinin yanında saklayın, çünkü değerler bu key olmadan açılmaz.
 
-Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın. r3v3rs3 bir container içinde çalışıyorsa `/var/run/docker.sock` dosyasını container'a bağlayın.
+Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın. r3v3rs3 bir container içinde çalışıyorsa [Docker ile kurulum](@/tutorials/install-docker.tr.md#deploy-platformu) rehberindeki gibi `-platform` tag son ekli image'ı, host networking'i ve Docker socket'ini kullanın.
 
 ## Uygulamalar
 

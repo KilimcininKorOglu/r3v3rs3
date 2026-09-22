@@ -36,7 +36,7 @@ At its first start the platform creates two files in the config directory:
 - `platform.db`: the apps, their environment variables and their deployments.
 - `platform.key`: the key that encrypts the environment values. Its mode is `0600`. Keep a backup of it next to the backup of `platform.db`, because the values do not open without it.
 
-Access to the Docker socket is equal to root access on the host. Enable the platform only on a server where r3v3rs3 may control every container. When r3v3rs3 runs in a container, mount `/var/run/docker.sock` into it.
+Access to the Docker socket is equal to root access on the host. Enable the platform only on a server where r3v3rs3 may control every container. When r3v3rs3 runs in a container, use the image with the `-platform` tag suffix, host networking and the Docker socket, as [Installing with Docker](@/tutorials/install-docker.md#deployment-platform) shows.
 
 ## Apps
 

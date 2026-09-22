@@ -77,6 +77,34 @@ Host networking hiçbir port yayınlamaz, panelde eklediğiniz her port host'ta 
 - `R3V3RS3_WEBUI`: admin paneli adresi. Varsayılan `127.0.0.1:46492` değeridir.
 - `R3V3RS3_VERSION`: image tag'i. Varsayılan `latest` değeridir.
 
+## Deploy platformu
+
+[Deploy platformu](@/platform.tr.md), Git kaynakları için `git` binary'sine, Compose kaynakları için Compose plugin'i olan `docker` binary'sine ihtiyaç duyar. Varsayılan image ikisini de içermez. `-platform` tag son ekli image'ı kullanın, örneğin `latest-platform`. Bu image, `git`, `docker` CLI ve onun Compose ve buildx plugin'lerini içeren bir `debian:trixie-slim` image'ıdır.
+
+```bash
+$ sudo mkdir -p /var/lib/r3v3rs3
+$ docker run -d \
+  --network host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /var/lib/r3v3rs3:/var/lib/r3v3rs3 \
+  -e R3V3RS3_CONFIG_DIR=/var/lib/r3v3rs3 \
+  -v r3v3rs3-data:/root/.local/share/r3v3rs3 \
+  --restart unless-stopped \
+  --stop-signal SIGINT \
+  --name r3v3rs3 \
+  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform
+```
+
+Komut Adım 1'den üç yerde ayrılır:
+
+| Option | Neden |
+|---|---|
+| `--network host` | Docker bir uygulamanın portunu host'un `127.0.0.1` adresinde yayınlar ve r3v3rs3 porta orada ulaşır. Bridge network'te `127.0.0.1` container'ın kendisidir. |
+| `-v /var/run/docker.sock:/var/run/docker.sock` | Platform, uygulama container'larını host'un Docker Engine'i üzerinden başlatır. Socket'e erişim, host üzerinde root erişimine eşittir. |
+| `-v /var/lib/r3v3rs3:/var/lib/r3v3rs3` ve `R3V3RS3_CONFIG_DIR` | Config dizini Compose uygulamalarının checkout'larını tutar. `docker compose` bir bind mount'un yollarını host'un Docker Engine'ine gönderir. Bu yüzden repodaki bir dosyanın bind mount'u yalnız dizinin host'ta ve container'da aynı yolda olduğu durumda çalışır. |
+
+Sonra platformu `/var/lib/r3v3rs3/config.toml` dosyasında açın ve container'ı yeniden başlatın.
+
 ## Yükseltme
 
 ```bash
