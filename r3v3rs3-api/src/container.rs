@@ -12,6 +12,9 @@ use utoipa::ToSchema;
 /// The label that names the app of a container, network or volume that the platform creates.
 pub const APP_LABEL: &str = "r3v3rs3.app";
 
+/// The label that Docker Compose puts on the containers and the built images of a project.
+pub const COMPOSE_PROJECT_LABEL: &str = "com.docker.compose.project";
+
 /// The longest name of a container, a network, a volume or an app.
 const MAX_NAME_LENGTH: usize = 63;
 
@@ -96,6 +99,11 @@ name_type!(
     /// The name of a Compose project, which prefixes the names of its containers.
     ProjectName,
     "project name"
+);
+name_type!(
+    /// The name of a service in a Compose file.
+    ServiceName,
+    "service name"
 );
 
 /// An image reference such as `nginx:1.27`, `ghcr.io/owner/app@sha256:…` or

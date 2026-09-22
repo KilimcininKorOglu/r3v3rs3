@@ -4,6 +4,7 @@
 //! database query or a Docker call must not hold up the ports and the other RPC methods.
 
 mod build;
+mod compose;
 pub mod deploy;
 #[cfg(test)]
 mod fake;
@@ -11,6 +12,7 @@ pub mod proxy;
 mod publish;
 pub mod store;
 
+use crate::build::compose::{ComposeRunner, DockerCompose};
 use crate::build::{GitFetcher, SourceFetcher};
 use crate::cluster::crypto::ClusterKeys;
 use crate::cluster::key_file::{load_keys, write_new_key_file};
@@ -118,6 +120,9 @@ pub struct Platform {
     builds: Semaphore,
     /// The directory of the checkouts.
     build_dir: PathBuf,
+    compose: Arc<dyn ComposeRunner>,
+    /// The directory of the Compose checkouts.
+    compose_dir: PathBuf,
 }
 
 impl Platform {
@@ -151,6 +156,8 @@ impl Platform {
             fetcher: Arc::new(GitFetcher),
             builds: Semaphore::new(build::MAX_BUILDS),
             build_dir,
+            compose: Arc::new(DockerCompose::new(config.platform.docker.clone())),
+            compose_dir: config_dir.join(compose::COMPOSE_DIR),
         })
     }
 

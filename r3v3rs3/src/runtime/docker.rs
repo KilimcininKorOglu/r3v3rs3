@@ -14,8 +14,8 @@ use hyper::body::Incoming;
 use hyper::header::CONTENT_TYPE;
 use hyper::{Method, Response, StatusCode};
 use r3v3rs3_api::container::{
-    APP_LABEL, AppName, ContainerHealth, ContainerInfo, ContainerName, ContainerSpec,
-    ContainerSummary, ImageInfo, ImageRef, NetworkName,
+    APP_LABEL, AppName, COMPOSE_PROJECT_LABEL, ContainerHealth, ContainerInfo, ContainerName,
+    ContainerSpec, ContainerSummary, ImageInfo, ImageRef, NetworkName, ProjectName,
 };
 use r3v3rs3_api::git::RelPath;
 use serde::de::DeserializeOwned;
@@ -205,6 +205,18 @@ impl ContainerRuntime for DockerRuntime {
         // 409 Conflict: a container still uses the image, so it stays until a later cleanup.
         let allowed = [StatusCode::NOT_FOUND, StatusCode::CONFLICT];
         self.call(Method::DELETE, &path, None, &allowed).await
+    }
+
+    async fn prune_project_images(&self, project: &ProjectName, all: bool) -> anyhow::Result<()> {
+        let filters = json!({
+            "label": [format!("{COMPOSE_PROJECT_LABEL}={project}")],
+            "dangling": [(!all).to_string()],
+        })
+        .to_string();
+        let path = format!("/images/prune?filters={}", encode(&filters));
+        // 409 Conflict: another prune runs, and the next job prunes again.
+        self.call(Method::POST, &path, None, &[StatusCode::CONFLICT])
+            .await
     }
 
     async fn ensure_network(&self, network: &NetworkName, app: &AppName) -> anyhow::Result<()> {

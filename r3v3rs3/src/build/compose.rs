@@ -65,8 +65,8 @@ pub trait ComposeRunner: Send + Sync {
     /// recreated.
     async fn up(&self, project: &ComposeProject<'_>) -> anyhow::Result<()>;
 
-    /// Stops and removes the containers, the networks and the built images of the project.
-    /// Named volumes stay.
+    /// Stops and removes the containers and the networks of the project. Named volumes and
+    /// images stay; without the Compose file, `down` does not know the built images.
     async fn down(&self, name: &ProjectName) -> anyhow::Result<()>;
 }
 
@@ -148,7 +148,7 @@ impl ComposeRunner for DockerCompose {
     async fn down(&self, name: &ProjectName) -> anyhow::Result<()> {
         // Without a Compose file, `down` finds the containers by the project name.
         let mut command = self.command(name, Path::new("/"));
-        command.args(["down", "--remove-orphans", "--rmi", "local"]);
+        command.args(["down", "--remove-orphans"]);
         run(command, TIMEOUT).await?;
         Ok(())
     }

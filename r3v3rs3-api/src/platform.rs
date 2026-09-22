@@ -1,6 +1,8 @@
 //! The apps, the targets and the deployments of the deployment platform.
 
-use crate::container::{AppName, EnvKey, ImageRef, ResourceLimits, RestartPolicy, VolumeMount};
+use crate::container::{
+    AppName, EnvKey, ImageRef, ResourceLimits, RestartPolicy, ServiceName, VolumeMount,
+};
 use crate::error::Error;
 use crate::git::{GitRef, RelPath, RepoUrl};
 use crate::id::ShortId;
@@ -92,6 +94,23 @@ pub enum AppSource {
         #[schema(value_type = String, example = "Dockerfile")]
         dockerfile: RelPath,
     },
+    /// A branch of a Git repository that r3v3rs3 starts with `docker compose`. A deployment
+    /// recreates the changed services instead of running the new version next to the old one.
+    Compose {
+        #[schema(value_type = String, example = "https://github.com/owner/shop.git")]
+        repository: RepoUrl,
+        #[serde(default = "GitRef::main")]
+        #[schema(value_type = String, example = "main")]
+        branch: GitRef,
+        /// The Compose file. Without it the first of `compose.yaml`, `compose.yml`,
+        /// `docker-compose.yaml` and `docker-compose.yml` in the root of the repository.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schema(value_type = Option<String>, example = "compose.yaml")]
+        file: Option<RelPath>,
+        /// The service that receives the requests of the domains on `port`.
+        #[schema(value_type = String, example = "web")]
+        service: ServiceName,
+    },
 }
 
 /// What a deployment of an app runs.
@@ -130,6 +149,7 @@ impl AppSpec {
             return Err(invalid("the port must be between 1 and 65535"));
         }
         self.validate_domains()?;
+        self.validate_compose()?;
         if let Some(path) = &self.health_check_path {
             validate_health_path(path)?;
         }
@@ -158,6 +178,20 @@ impl AppSpec {
             if !seen.insert(name.to_ascii_lowercase()) {
                 return Err(invalid(&format!("the domain {domain} is listed twice")));
             }
+        }
+        Ok(())
+    }
+
+    /// The Compose file sets the volumes, the restart policy and the limits of its services.
+    fn validate_compose(&self) -> Result<(), Error> {
+        let compose = matches!(self.source, AppSource::Compose { .. });
+        let customized = !self.volumes.is_empty()
+            || self.restart != RestartPolicy::default()
+            || self.limits != ResourceLimits::default();
+        if compose && customized {
+            return Err(invalid(
+                "a Compose app sets its volumes, restart policy and limits in its Compose file",
+            ));
         }
         Ok(())
     }
@@ -391,6 +425,40 @@ mod tests {
                 spec(json!({"source": source, "port": 80})).is_err(),
                 "{field}"
             );
+        }
+    }
+
+    #[test]
+    fn a_compose_source_names_its_service_and_leaves_the_rest_to_the_file() {
+        let source = json!({
+            "type": "compose",
+            "repository": "https://github.com/owner/shop.git",
+            "service": "web",
+        });
+        let parsed = spec(json!({"source": source, "port": 80})).unwrap();
+        let AppSource::Compose {
+            branch,
+            file,
+            service,
+            ..
+        } = parsed.source
+        else {
+            panic!("a compose source");
+        };
+        assert_eq!((branch.as_str(), service.as_str()), ("main", "web"));
+        assert!(file.is_none());
+
+        let mut without_service = source.clone();
+        without_service.as_object_mut().unwrap().remove("service");
+        assert!(spec(json!({"source": without_service, "port": 80})).is_err());
+        for (field, value) in [
+            ("volumes", json!([{"volume": "data", "target": "/data"}])),
+            ("restart", json!("always")),
+            ("limits", json!({"memory_bytes": 1024})),
+        ] {
+            let mut input = json!({"source": source, "port": 80});
+            input[field] = value;
+            assert!(spec(input).is_err(), "{field}");
         }
     }
 

@@ -6,7 +6,7 @@ pub mod docker;
 
 use r3v3rs3_api::container::{
     AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, ImageInfo, ImageRef,
-    NetworkName,
+    NetworkName, ProjectName,
 };
 use r3v3rs3_api::git::RelPath;
 use std::time::Duration;
@@ -34,6 +34,10 @@ pub trait ContainerRuntime: Send + Sync {
     /// Removes an image reference. A missing image, and an image that a container still uses,
     /// are not errors.
     async fn remove_image(&self, image: &ImageRef) -> anyhow::Result<()>;
+
+    /// Removes the unused images that a Compose project built: the untagged ones, or with `all`
+    /// every one that no container uses.
+    async fn prune_project_images(&self, project: &ProjectName, all: bool) -> anyhow::Result<()>;
 
     /// Creates a bridge network unless it exists.
     async fn ensure_network(&self, network: &NetworkName, app: &AppName) -> anyhow::Result<()>;

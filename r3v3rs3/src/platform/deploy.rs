@@ -1,8 +1,10 @@
-//! The deploy pipeline of an image app on the local target. A deployment is blue-green: the old
+//! The deploy pipeline of an app on the local target. A deployment is blue-green: the old
 //! container serves until the new container passes its health check, then the proxy switches to
-//! the new container and the old container stops after a drain period.
+//! the new container and the old container stops after a drain period. A Compose app deploys by
+//! recreate instead (`compose.rs`).
 
 use super::build::GitBuild;
+use super::compose::{ComposeBuild, ComposeJob, SourceRevision};
 use super::store::{NewDeployment, StoredEnv};
 use super::{Platform, new_id, not_found, proxy};
 use crate::clock::unix_ms;
@@ -73,6 +75,8 @@ enum JobImage {
     /// The image of the app, or the digest of the deployment that a rollback repeats.
     Pull(ImageRef),
     Build(GitBuild),
+    /// The services of a Compose file, which Compose builds and starts itself.
+    Compose(ComposeBuild),
 }
 
 impl From<AppSource> for JobImage {
@@ -90,7 +94,37 @@ impl From<AppSource> for JobImage {
                 context,
                 dockerfile,
             }),
+            AppSource::Compose {
+                repository,
+                branch,
+                file,
+                service,
+            } => Self::Compose(ComposeBuild {
+                repository,
+                revision: SourceRevision::Branch(branch),
+                file,
+                service,
+            }),
         }
+    }
+}
+
+impl JobImage {
+    /// What a rollback to `source` starts: the image that it ran, or for a Compose app its
+    /// commit.
+    fn rollback(spec: &AppSpec, source: &DeploymentEntry) -> Result<Self, Error> {
+        let unavailable = || Error::RollbackUnavailable { id: source.id };
+        let mut image = Self::from(spec.source.clone());
+        if let Self::Compose(build) = &mut image {
+            let commit = source
+                .commit_sha
+                .as_deref()
+                .and_then(|sha| sha.parse().ok());
+            build.revision = SourceRevision::Commit(commit.ok_or_else(unavailable)?);
+            return Ok(image);
+        }
+        let digest = source.image_digest.as_deref().and_then(|d| d.parse().ok());
+        Ok(Self::Pull(digest.ok_or_else(unavailable)?))
     }
 }
 
@@ -136,36 +170,26 @@ impl Platform {
         self.start_job(lock, new, image).await
     }
 
-    /// Starts a deployment that repeats the image digest, the spec and the environment of an
-    /// earlier deployment.
+    /// Starts a deployment that repeats the image digest, or for a Compose app the commit, the
+    /// spec and the environment of an earlier deployment.
     pub async fn rollback(
         self: &Arc<Self>,
         id: ShortId,
         username: &str,
     ) -> anyhow::Result<DeploymentEntry> {
-        let (app, digest) = self.rollback_source(id).await?;
-        let image = digest
-            .parse::<ImageRef>()
-            .map_err(|_| Error::RollbackUnavailable { id })?;
+        let source = self.deployment(id).await?;
         let (spec, env) = self
             .store
             .deployment_snapshot(id)
             .await?
             .ok_or_else(|| not_found(id))?;
-        let app = self.app(app).await?;
+        let image = JobImage::rollback(&spec, &source)?;
+        let app = self.app(source.app).await?;
         let lock = self.lock_app(&app)?;
         let trigger = DeploymentTrigger::Rollback;
-        let new = new_deployment(&app, trigger, username, &spec, &env, Some(&digest))?;
-        self.start_job(lock, new, JobImage::Pull(image)).await
-    }
-
-    /// The app and the image digest of the deployment that a rollback repeats.
-    async fn rollback_source(&self, id: ShortId) -> anyhow::Result<(ShortId, String)> {
-        let source = self.deployment(id).await?;
-        let digest = source
-            .image_digest
-            .ok_or(Error::RollbackUnavailable { id })?;
-        Ok((source.app, digest))
+        let digest = source.image_digest.as_deref();
+        let new = new_deployment(&app, trigger, username, &spec, &env, digest)?;
+        self.start_job(lock, new, image).await
     }
 
     async fn start_job(
@@ -198,16 +222,19 @@ impl Platform {
     async fn run_job(&self, job: &Job) {
         self.run_pipeline(job).await;
         // A failed deployment can leave a built image too, so the cleanup follows every build.
-        if matches!(job.spec.source, AppSource::Git { .. })
-            && let Err(err) = self.prune_builds(job.app).await
-        {
+        let pruned = match job.spec.source {
+            AppSource::Git { .. } => self.prune_builds(job.app).await,
+            AppSource::Compose { .. } => self.prune_compose_images(job.app).await,
+            AppSource::Image { .. } => Ok(()),
+        };
+        if let Err(err) = pruned {
             error!(app = %job.app, "failed to remove the old built images: {err:#}");
         }
     }
 
     async fn run_pipeline(&self, job: &Job) {
         info!(app = %job.app, deployment = %job.deployment, "deployment started");
-        let result = match self.start_container(job).await {
+        let result = match self.start_job_container(job).await {
             Ok(name) => self.switch(job, &name).await,
             Err(err) => Err(err),
         };
@@ -229,6 +256,28 @@ impl Platform {
         if let Err(err) = failed {
             error!(deployment = %job.deployment, "failed to store the failure: {err:#}");
         }
+    }
+
+    /// Starts the container that receives the requests of the new deployment, and waits for its
+    /// health check.
+    async fn start_job_container(&self, job: &Job) -> anyhow::Result<ContainerName> {
+        let JobImage::Compose(source) = &job.image else {
+            return self.start_container(job).await;
+        };
+        let name = proxy::container_name(job.app, job.deployment)?;
+        let env = self.open_env(job.app, &job.env)?;
+        let compose = ComposeJob {
+            app: job.app,
+            deployment: job.deployment,
+            port: job.spec.port,
+            source,
+            env: &env,
+            container: &name,
+        };
+        self.compose_up(&compose).await?;
+        // Compose replaced the old container already, so a failed container stays for its log.
+        self.wait_healthy(&name, &job.spec).await?;
+        Ok(name)
     }
 
     /// Starts the new container and waits for its health check. A failure removes the new
@@ -266,6 +315,7 @@ impl Platform {
                     .await?;
                 Ok(id)
             }
+            JobImage::Compose(_) => bail!("a Compose deployment has no image of its own"),
         }
     }
 
@@ -387,16 +437,35 @@ impl Platform {
     }
 
     /// Routes the app to the new container, marks the deployment running, and removes the old
-    /// containers after the drain period.
+    /// containers after the drain period. A Compose deployment has no drain period, because
+    /// Compose stopped the old container already.
     async fn switch(&self, job: &Job, name: &ContainerName) -> anyhow::Result<()> {
         self.store
             .finish_deployment(job.app, job.deployment, unix_ms())
             .await?;
         self.publish().await;
-        tokio::time::sleep(self.timing.drain).await;
-        if let Err(err) = self.remove_containers(job.app, Some(name)).await {
+        let compose = matches!(job.image, JobImage::Compose(_));
+        if !compose {
+            tokio::time::sleep(self.timing.drain).await;
+        }
+        if let Err(err) = self.remove_old(job.app, name, compose).await {
             // The deployment serves already, so only the log shows the failed cleanup.
             error!(app = %job.app, "failed to remove the old containers: {err:#}");
+        }
+        Ok(())
+    }
+
+    /// Removes the containers of the earlier deployments, also those of another source kind
+    /// after a change of the app source.
+    async fn remove_old(
+        &self,
+        app: ShortId,
+        keep: &ContainerName,
+        compose: bool,
+    ) -> anyhow::Result<()> {
+        self.remove_containers(app, Some(keep)).await?;
+        if !compose {
+            self.remove_compose_project(app).await?;
         }
         Ok(())
     }
@@ -424,8 +493,9 @@ impl Platform {
         Ok(())
     }
 
-    /// Removes the containers, the network and the built images of an app.
+    /// Removes the containers, the network, the Compose project and the built images of an app.
     pub(super) async fn remove_app_resources(&self, app: ShortId) -> anyhow::Result<()> {
+        self.remove_compose_project(app).await?;
         self.remove_containers(app, None).await?;
         self.local.remove_network(&app_network(app)?).await?;
         self.remove_builds(app).await
@@ -519,9 +589,11 @@ async fn stays_open(stream: &mut TcpStream) -> std::io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::super::build::KEPT_BUILDS;
-    use super::super::fake::{COMMIT, DIGEST, FakeFetcher, FakeRuntime};
+    use super::super::compose::OVERRIDE_FILE;
+    use super::super::fake::{COMMIT, DIGEST, FakeCompose, FakeFetcher, FakeRuntime};
     use super::super::tests::{TempDir, platform_with, request};
     use super::*;
+    use crate::build::compose::{ComposePort, DockerCompose};
     use r3v3rs3_api::platform::{AppRequest, EnvEntry, PlatformConfig};
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
@@ -547,6 +619,7 @@ mod tests {
         platform: Arc<Platform>,
         runtime: Arc<FakeRuntime>,
         fetcher: Arc<FakeFetcher>,
+        compose: Arc<FakeCompose>,
         app: AppEntry,
         dir: TempDir,
     }
@@ -564,6 +637,8 @@ mod tests {
             platform_with(&PlatformConfig::default(), command).await?;
         let fetcher = Arc::new(FakeFetcher::default());
         platform.fetcher = fetcher.clone();
+        let compose = Arc::new(FakeCompose::new(runtime.clone()));
+        platform.compose = compose.clone();
         let platform = Arc::new(platform);
         runtime.state().host_port = app_server(200).await?;
         app.spec.health_check_path = Some("/healthz".into());
@@ -572,9 +647,259 @@ mod tests {
             platform,
             runtime,
             fetcher,
+            compose,
             app,
             dir,
         })
+    }
+
+    /// The app `stack` whose service `web` of `compose.yaml` on the branch `release` receives
+    /// the requests.
+    fn compose_request() -> anyhow::Result<AppRequest> {
+        let mut stack = request("stack");
+        stack.spec.source = compose_source()?;
+        Ok(stack)
+    }
+
+    fn compose_source() -> anyhow::Result<AppSource> {
+        Ok(AppSource::Compose {
+            repository: "https://git.example.com/team/stack.git".parse()?,
+            branch: "release".parse()?,
+            file: None,
+            service: "web".parse()?,
+        })
+    }
+
+    fn project(setup: &Setup) -> String {
+        format!("r3v3rs3-{}", setup.app.id)
+    }
+
+    fn checkout_dir(setup: &Setup, deployment: &DeploymentEntry) -> std::path::PathBuf {
+        let app = setup.platform.compose_dir.join(setup.app.id.to_string());
+        app.join(deployment.id.to_string())
+    }
+
+    #[tokio::test]
+    async fn a_compose_deployment_recreates_the_traffic_service() -> anyhow::Result<()> {
+        let setup = setup_with(compose_request()?).await?;
+        let first = deploy_mode(&setup, "blue").await?;
+        assert_eq!(first.status, DeploymentStatus::Running);
+        assert_eq!(first.commit_sha.as_deref(), Some(COMMIT));
+        assert!(first.image_digest.is_none());
+        let project = project(&setup);
+        {
+            let compose = setup.compose.state();
+            let calls = [format!("config {project}"), format!("up {project}")];
+            assert_eq!(compose.calls, calls);
+            assert_eq!(compose.env, [("MODE".to_string(), "blue".to_string())]);
+        }
+        assert_eq!(setup.runtime.names(), [container_of(&setup, &first)]);
+        let written = std::fs::read(checkout_dir(&setup, &first).join(OVERRIDE_FILE))?;
+        assert!(!String::from_utf8(written)?.contains("blue"));
+
+        let second = deploy_mode(&setup, "green").await?;
+        assert_eq!(second.status, DeploymentStatus::Running);
+        assert_eq!(setup.runtime.names(), [container_of(&setup, &second)]);
+        let first = setup.platform.deployment(first.id).await?;
+        assert_eq!(first.status, DeploymentStatus::Superseded);
+        assert!(!checkout_dir(&setup, &first).exists());
+        assert!(
+            checkout_dir(&setup, &second)
+                .join("src/compose.yaml")
+                .exists()
+        );
+        assert!(setup.runtime.state().pruned.contains(&(project, false)));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_compose_file_that_publishes_a_port_fails_before_up() -> anyhow::Result<()> {
+        let setup = setup_with(compose_request()?).await?;
+        let published = ComposePort {
+            target: 5432,
+            published: Some("5432".into()),
+            host_ip: None,
+        };
+        setup.compose.state().extra_ports = vec![("db".into(), published)];
+        let failed = deploy(&setup).await?;
+        assert_eq!(failed.status, DeploymentStatus::Failed);
+        let message = failed.message.clone().context("message")?;
+        assert!(
+            message.contains("the service db publishes its port 5432"),
+            "{message}"
+        );
+        assert_eq!(setup.compose.state().calls.len(), 1);
+        assert!(!checkout_dir(&setup, &failed).exists());
+
+        setup.compose.state().extra_ports.clear();
+        setup.compose.state().up_error = Some("pull access denied".into());
+        let failed = deploy(&setup).await?;
+        let message = failed.message.context("message")?;
+        assert!(message.contains("pull access denied"), "{message}");
+        assert!(setup.runtime.names().is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_compose_rollback_checks_out_the_old_commit() -> anyhow::Result<()> {
+        let setup = setup_with(compose_request()?).await?;
+        let first = deploy_mode(&setup, "blue").await?;
+        deploy_mode(&setup, "green").await?;
+        let rollback = setup.platform.rollback(first.id, "bob").await?;
+        let rollback = finished(&setup, rollback.id).await?;
+        assert_eq!(rollback.status, DeploymentStatus::Running);
+        assert_eq!(rollback.commit_sha, first.commit_sha);
+        let revisions = setup
+            .fetcher
+            .state()
+            .fetched
+            .iter()
+            .map(|(_, revision, _)| revision.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(revisions, ["release", "release", COMMIT]);
+        assert_eq!(setup.compose.state().env[0].1, "blue");
+
+        setup.fetcher.state().error = Some("repository not found".into());
+        let failed = deploy(&setup).await?;
+        assert!(failed.commit_sha.is_none());
+        let err = setup.platform.rollback(failed.id, "bob").await.unwrap_err();
+        assert!(matches!(
+            err.downcast::<Error>()?,
+            Error::RollbackUnavailable { .. }
+        ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn deleting_a_compose_app_takes_its_project_down() -> anyhow::Result<()> {
+        let setup = setup_with(compose_request()?).await?;
+        deploy(&setup).await?;
+        setup.platform.delete_app(setup.app.id).await?;
+        let project = project(&setup);
+        assert!(
+            setup
+                .compose
+                .state()
+                .calls
+                .contains(&format!("down {project}"))
+        );
+        assert!(setup.runtime.state().pruned.contains(&(project, true)));
+        assert!(setup.runtime.names().is_empty());
+        let app_dir = setup.platform.compose_dir.join(setup.app.id.to_string());
+        assert!(!app_dir.exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_new_source_kind_removes_the_containers_of_the_old_one() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        deploy(&setup).await?;
+        let mut app = request("shop");
+        app.spec.health_check_path = Some("/healthz".into());
+        app.spec.source = compose_source()?;
+        setup
+            .platform
+            .update_app(setup.app.id, app.clone(), 2)
+            .await?;
+        let stack = deploy(&setup).await?;
+        assert_eq!(setup.runtime.names(), [container_of(&setup, &stack)]);
+
+        app.spec.source = request("shop").spec.source;
+        setup.platform.update_app(setup.app.id, app, 3).await?;
+        let image = deploy(&setup).await?;
+        assert_eq!(setup.runtime.names(), [container_of(&setup, &image)]);
+        let down = format!("down {}", project(&setup));
+        assert!(setup.compose.state().calls.contains(&down));
+        Ok(())
+    }
+
+    /// A Compose file whose traffic service publishes a port itself, which the override replaces.
+    const DOCKER_COMPOSE_FILE: &str = "services:\n  web:\n    image: traefik/whoami:v1.10.3\n    ports: [\"18080:80\"]\n  sidecar:\n    image: traefik/whoami:v1.10.3\n";
+
+    /// The app `stack` on the real Docker Engine, with a checkout that holds
+    /// [`DOCKER_COMPOSE_FILE`].
+    async fn docker_setup() -> anyhow::Result<Setup> {
+        let (command, _) = mpsc::channel(1);
+        let (mut platform, runtime, dir) =
+            platform_with(&PlatformConfig::default(), command).await?;
+        let host = std::env::var("DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());
+        platform.local = Arc::new(super::super::docker_runtime(&host)?);
+        platform.compose = Arc::new(DockerCompose::new(host));
+        platform.timing.health_timeout = Duration::from_secs(60);
+        let fetcher = Arc::new(FakeFetcher::default());
+        fetcher.state().compose_file = Some(DOCKER_COMPOSE_FILE.into());
+        platform.fetcher = fetcher.clone();
+        let compose = Arc::new(FakeCompose::new(runtime.clone()));
+        let platform = Arc::new(platform);
+        let mut app = compose_request()?;
+        app.spec.health_check_path = Some("/health".into());
+        let app = platform.add_app(app, 1).await?;
+        Ok(Setup {
+            platform,
+            runtime,
+            fetcher,
+            compose,
+            app,
+            dir,
+        })
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+    async fn a_compose_app_runs_on_the_docker_engine() -> anyhow::Result<()> {
+        let setup = docker_setup().await?;
+        let result = compose_on_docker(&setup).await;
+        let deleted = setup.platform.delete_app(setup.app.id).await;
+        result?;
+        deleted?;
+        let app_dir = setup.platform.compose_dir.join(setup.app.id.to_string());
+        assert!(!app_dir.exists());
+        Ok(())
+    }
+
+    async fn compose_on_docker(setup: &Setup) -> anyhow::Result<()> {
+        let blue = deploy_mode(setup, "blue").await?;
+        anyhow::ensure!(blue.status == DeploymentStatus::Running, "{blue:?}");
+        check_whoami(setup, &blue, "MODE=blue").await?;
+        let green = deploy_mode(setup, "green").await?;
+        anyhow::ensure!(green.status == DeploymentStatus::Running, "{green:?}");
+        check_whoami(setup, &green, "MODE=green").await?;
+        let blue = container_of(setup, &blue).parse()?;
+        anyhow::ensure!(
+            setup
+                .platform
+                .local
+                .inspect_container(&blue)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    /// Checks that the traffic container publishes only its port on 127.0.0.1, and that the
+    /// variable of the app reached it.
+    async fn check_whoami(
+        setup: &Setup,
+        deployment: &DeploymentEntry,
+        expected: &str,
+    ) -> anyhow::Result<()> {
+        let name = container_of(setup, deployment).parse()?;
+        let info = setup
+            .platform
+            .local
+            .inspect_container(&name)
+            .await?
+            .context("the traffic container")?;
+        anyhow::ensure!(info.published.len() == 1, "{:?}", info.published);
+        let port = info.published[&80];
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await?;
+        stream
+            .write_all(b"GET /?env=true HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .await?;
+        let mut reply = String::new();
+        stream.read_to_string(&mut reply).await?;
+        anyhow::ensure!(reply.contains(expected), "{reply}");
+        Ok(())
     }
 
     /// The app `site` that builds `app/Dockerfile` of the branch `release`.

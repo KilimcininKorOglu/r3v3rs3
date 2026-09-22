@@ -1,15 +1,19 @@
-//! A container runtime and a source fetcher in memory for the unit tests of the platform.
+//! A container runtime, a source fetcher and a Compose runner in memory for the unit tests of the
+//! platform.
 
+use crate::build::compose::{ComposeModel, ComposePort, ComposeProject, ComposeRunner};
 use crate::build::{Revision, SourceFetcher};
 use crate::runtime::ContainerRuntime;
-use anyhow::bail;
+use anyhow::{Context as _, bail};
 use r3v3rs3_api::container::{
-    APP_LABEL, AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, ImageInfo,
-    ImageRef, NetworkName,
+    APP_LABEL, AppName, COMPOSE_PROJECT_LABEL, ContainerInfo, ContainerName, ContainerSpec,
+    ContainerSummary, ImageInfo, ImageRef, NetworkName, ProjectName,
 };
 use r3v3rs3_api::git::{RelPath, RepoUrl};
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -33,6 +37,8 @@ pub struct FakeState {
     pub build_error: Option<String>,
     /// The builds in their order.
     pub builds: Vec<Build>,
+    /// The Compose projects whose images were pruned, and whether every unused image went.
+    pub pruned: Vec<(String, bool)>,
 }
 
 /// One build of the fake runtime.
@@ -54,6 +60,8 @@ pub struct FetchState {
     pub error: Option<String>,
     /// The repository, the branch and the token of every fetch.
     pub fetched: Vec<(String, String, Option<String>)>,
+    /// The `compose.yaml` of the checkout. Without it the file has no services.
+    pub compose_file: Option<String>,
 }
 
 /// A source fetcher that writes a checkout with `.git` and `app/Dockerfile`.
@@ -78,7 +86,7 @@ impl SourceFetcher for FakeFetcher {
         token: Option<&str>,
         dest: &Path,
     ) -> anyhow::Result<String> {
-        {
+        let compose = {
             let mut state = self.state();
             if let Some(error) = &state.error {
                 bail!("git failed: {error}");
@@ -89,16 +97,146 @@ impl SourceFetcher for FakeFetcher {
                 token.map(str::to_string),
             );
             state.fetched.push(fetch);
-        }
+            state.compose_file.clone()
+        };
         std::fs::create_dir_all(dest.join(".git"))?;
         std::fs::create_dir_all(dest.join("app"))?;
         std::fs::write(dest.join(".git/config"), "[core]\n")?;
         std::fs::write(dest.join("app/Dockerfile"), "FROM scratch\n")?;
+        let compose = compose.unwrap_or_else(|| "services: {}\n".into());
+        std::fs::write(dest.join("compose.yaml"), compose)?;
         Ok(match revision {
             Revision::Branch(_) => COMMIT.into(),
             Revision::Commit(commit) => commit.to_string(),
         })
     }
+}
+
+#[derive(Default)]
+pub struct ComposeState {
+    /// Ports that the resolved model has besides the ports of the override file, as
+    /// `(service, port)`.
+    pub extra_ports: Vec<(String, ComposePort)>,
+    /// Every `up` fails with this error.
+    pub up_error: Option<String>,
+    /// The commands in their order, as `<command> <project>`.
+    pub calls: Vec<String>,
+    /// The variables of the last command.
+    pub env: Vec<(String, String)>,
+}
+
+/// A Compose runner that reads the override file of the platform and starts the traffic service
+/// as a container of the fake runtime.
+pub struct FakeCompose {
+    state: Mutex<ComposeState>,
+    runtime: Arc<FakeRuntime>,
+}
+
+impl FakeCompose {
+    pub fn new(runtime: Arc<FakeRuntime>) -> Self {
+        Self {
+            state: Mutex::new(ComposeState::default()),
+            runtime,
+        }
+    }
+
+    pub fn state(&self) -> MutexGuard<'_, ComposeState> {
+        match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn record(&self, command: &str, project: &ComposeProject<'_>) {
+        let mut state = self.state();
+        state.calls.push(format!("{command} {}", project.name));
+        state.env = project
+            .env
+            .iter()
+            .map(|var| (var.key.as_str().to_string(), var.value.clone()))
+            .collect();
+    }
+}
+
+/// The traffic service of the override file: its name and its settings.
+fn override_service(project: &ComposeProject<'_>) -> anyhow::Result<(String, Value)> {
+    let path = project.files.last().context("no override file")?;
+    // The tag is YAML, and the rest of the file is JSON.
+    let text = std::fs::read_to_string(path)?.replacen("!override ", "", 1);
+    let document: Value = serde_json::from_str(&text)?;
+    let services = document["services"].as_object().context("no services")?;
+    let (name, service) = services.iter().next().context("no service")?;
+    Ok((name.clone(), service.clone()))
+}
+
+/// The container port of a `127.0.0.1::<port>` entry.
+fn override_port(service: &Value) -> anyhow::Result<u16> {
+    let entry = service["ports"][0].as_str().context("no port")?;
+    Ok(entry.trim_start_matches("127.0.0.1::").parse()?)
+}
+
+#[async_trait::async_trait]
+impl ComposeRunner for FakeCompose {
+    async fn config(&self, project: &ComposeProject<'_>) -> anyhow::Result<ComposeModel> {
+        self.record("config", project);
+        if !project.files[0].is_file() {
+            bail!("no such Compose file");
+        }
+        let (name, service) = override_service(project)?;
+        let own = ComposePort {
+            target: override_port(&service)?,
+            published: None,
+            host_ip: Some("127.0.0.1".into()),
+        };
+        let mut model = ComposeModel::default();
+        model.services.entry(name).or_default().ports.push(own);
+        for (name, port) in &self.state().extra_ports {
+            model
+                .services
+                .entry(name.clone())
+                .or_default()
+                .ports
+                .push(port.clone());
+        }
+        Ok(model)
+    }
+
+    /// Recreates the traffic service: the container of the earlier deployment goes, and the
+    /// container of the override file starts.
+    async fn up(&self, project: &ComposeProject<'_>) -> anyhow::Result<()> {
+        self.record("up", project);
+        if let Some(error) = &self.state().up_error {
+            bail!("docker failed with exit status: 1: {error}");
+        }
+        let (_, service) = override_service(project)?;
+        let name: ContainerName = service["container_name"]
+            .as_str()
+            .context("name")?
+            .parse()?;
+        let mut labels: BTreeMap<String, String> =
+            serde_json::from_value(service["labels"].clone())?;
+        labels.insert(COMPOSE_PROJECT_LABEL.into(), project.name.to_string());
+        let mut state = self.runtime.check()?;
+        remove_project(&mut state, project.name);
+        let published = [(override_port(&service)?, state.host_port)];
+        let mut info = container(&name, labels, !state.crash, &published);
+        info.exit_code = i64::from(state.crash);
+        state.containers.insert(name.to_string(), info);
+        Ok(())
+    }
+
+    async fn down(&self, name: &ProjectName) -> anyhow::Result<()> {
+        self.state().calls.push(format!("down {name}"));
+        let mut state = self.runtime.check()?;
+        remove_project(&mut state, name);
+        Ok(())
+    }
+}
+
+fn remove_project(state: &mut FakeState, project: &ProjectName) {
+    state.containers.retain(|_, info| {
+        info.labels.get(COMPOSE_PROJECT_LABEL).map(String::as_str) != Some(project.as_str())
+    });
 }
 
 impl FakeRuntime {
@@ -214,6 +352,11 @@ impl ContainerRuntime for FakeRuntime {
         if !tagged {
             state.images.remove(&info.id);
         }
+        Ok(())
+    }
+
+    async fn prune_project_images(&self, project: &ProjectName, all: bool) -> anyhow::Result<()> {
+        self.check()?.pruned.push((project.to_string(), all));
         Ok(())
     }
 

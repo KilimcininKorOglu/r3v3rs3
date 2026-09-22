@@ -55,11 +55,14 @@ test-discovery-e2e:
 		R3V3RS3_E2E_DIR=$(CURDIR)/$(DISCOVERY_DIR) CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test discovery_e2e_test -- --ignored; \
 		status=$$?; $(DISCOVERY_COMPOSE) down -v; exit $$status
 
-# Runs the cluster end-to-end tests against etcd and Consul in Docker, then removes the containers.
-# The nodes use a restricted etcd user and a restricted Consul token, like the cluster guide.
+# Runs the Docker runtime and the deployment platform against the local Docker Engine. The tests
+# remove their containers, networks and images.
 test-runtime-docker:
 	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test runtime_docker_test --test platform_deploy_test -- --ignored
+	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --lib on_the_docker_engine -- --ignored
 
+# Runs the cluster end-to-end tests against etcd and Consul in Docker, then removes the containers.
+# The nodes use a restricted etcd user and a restricted Consul token, like the cluster guide.
 test-cluster-e2e:
 	$(DISCOVERY_COMPOSE) up -d --wait consul etcd && \
 		CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test cluster_e2e_test -- --ignored; \
