@@ -13,6 +13,7 @@ The documentation is published in English at the root and in Turkish under `/tr/
 - [Accounts](https://r3v3rs3.keremgok.tr/accounts/): the roles, the permissions and the proxy list of a panel account
 - [Service Discovery](https://r3v3rs3.keremgok.tr/discovery/): Docker, Kubernetes, Consul and etcd sources
 - [Cluster](https://r3v3rs3.keremgok.tr/cluster/): the cluster settings, the store keys, the encryption and the failure modes
+- [Deployment Platform](https://r3v3rs3.keremgok.tr/platform/): deploy container images, roll back and route their domains
 - [Development](https://r3v3rs3.keremgok.tr/development/): build the server and the WebUI from source
 
 ## Tutorials

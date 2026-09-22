@@ -1,6 +1,6 @@
 # Deployment platform design
 
-Status: draft. No code exists for this design yet.
+Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. The user reference is `docs/content/platform.md`.
 
 This document describes how r3v3rs3 grows from a reverse proxy into a self-hosted deployment platform, in the space of Coolify. It lives outside `docs/content/`, so the Zola site does not publish it.
 
@@ -64,37 +64,30 @@ The new work is the container lifecycle: the domain model, the runtime, the buil
 
 ## 5. Module layout
 
-All new code lives in the existing crates.
+All new code lives in the existing crates. The entries marked *later* belong to the phases that have not started.
 
 ```
 r3v3rs3-api/src/
-  app.rs            App, AppSource, BuildSpec, RuntimeSpec, Domain binding
-  deployment.rs     Deployment, DeploymentStatus, DeploymentTrigger
-  server_target.rs  Target (local | agent), AgentInfo, AgentStatus
-  agent.rs          AgentRequest, AgentResponse, AgentEvent (the wire protocol)
+  container.rs      the validated container types: ContainerSpec, ContainerName, ImageRef, EnvKey
+  platform.rs       PlatformConfig, AppSpec, AppEntry, EnvEntry, DeploymentEntry, TargetEntry
+  agent.rs          later: AgentRequest, AgentResponse, AgentEvent (the wire protocol)
 
 r3v3rs3/src/
   platform/
-    mod.rs          PlatformState: owns the store, the runtimes and the queue
+    mod.rs          PlatformHandle and Platform: the apps, the sealed environment, the app lock
     store.rs        SQLite schema and queries
-    queue.rs        one worker per app, a global concurrency limit
-    pipeline.rs     the deploy steps of section 8
-    routes.rs       generates the r3v3rs3 proxy for an app
-    secrets.rs      AES-256-GCM encryption of environment values
+    deploy.rs       the pipeline of section 8, the health probe and the rollback
+    proxy.rs        the proxy of a running app, and the snapshots of the Platform provider
+    publish.rs      reads the running containers and sends the snapshot to the server
+    fake.rs         a runtime in memory for the unit tests
   runtime/
     mod.rs          ContainerRuntime trait
     docker.rs       the local runtime over the Docker Engine API
-    remote.rs       the agent runtime: sends AgentRequest, awaits AgentResponse
-  build/
-    mod.rs          Builder: clone, checkout, build image or run Compose
-    git.rs          git clone and fetch through the `git` binary, with validated operands
-  agent/
-    server.rs       the agent listener on the master
-    client.rs       the `r3v3rs3 agent` command
-    session.rs      one connected agent: request ids, pending replies, heartbeat
-  server/rpc/
-    apps.rs         RPC methods for apps and deployments
-    targets.rs      RPC methods for targets and agent tokens
+    remote.rs       later: the agent runtime, sends AgentRequest, awaits AgentResponse
+  build/            later: clone, checkout, build image or run Compose
+  agent/            later: the agent listener, the `r3v3rs3 agent` command, one agent session
+  admin/
+    platform.rs     the admin API routes of section 12
 ```
 
 The runtime split is the central abstraction. The pipeline talks only to `ContainerRuntime`. The local target uses `runtime::docker`; an agent target uses `runtime::remote`, which forwards the same calls to the agent, and the agent runs them against its own `runtime::docker`. One implementation of the Docker calls serves both targets.
@@ -192,11 +185,13 @@ One worker per app runs the steps in order. A global limit bounds the builds tha
 4. **Resolve digest.** Read the image digest and store it. A rollback starts this digest, never a tag.
 5. **Start the new container.** Name `r3v3rs3-<app>-<deployment_id>`, labels `r3v3rs3.app` and `r3v3rs3.deployment`, the app network, the limits, the environment.
 6. **Wait for health.** Poll the health check path of the new container until it passes or a timeout expires. A failure stops the new container and marks the deployment `failed`. The old container keeps serving.
-7. **Switch traffic.** Replace the upstream server of the app proxy with the new container address. The existing health group drains the old server.
-8. **Stop the old container** after a grace period, then remove it.
+7. **Switch traffic.** Mark the deployment `running` and send a new snapshot of the `Platform` provider, whose proxy routes to the published port of the new container (section 9).
+8. **Stop the old container** after a drain period of 10 seconds, then remove it.
 9. **Finish.** Mark the deployment `running`, the previous one `superseded`, write the audit entry, send the notification.
 
 This is blue-green: the old container serves until the new one passes its health check. The switch in step 7 is a proxy config change, which r3v3rs3 applies without a restart.
+
+Phase 3 implements steps 1, 4 to 9 for image apps. One pipeline runs per app at a time (`AppLock`); a second deploy, a rollback or a deletion gets `409 app_busy`. The global build limit, the cancel flag and the finish notification follow with phases 4 and 8. A server restart marks an unfinished deployment `failed`.
 
 **Rollback** creates a new deployment with `trigger = rollback` and the `image_digest`, `spec` and `env` of the chosen earlier deployment. It skips steps 2 and 3 and runs steps 4 to 9.
 
@@ -204,14 +199,14 @@ This is blue-green: the old container serves until the new one passes its health
 
 ## 9. Ingress integration
 
-Each app with at least one domain owns one generated r3v3rs3 HTTP proxy. `platform::routes` writes that proxy from the app spec:
+Each running app with at least one domain gets one r3v3rs3 HTTP proxy. The platform does not write the proxy into `proxies.toml`: it sends the proxies of all apps as the snapshot of the `Platform` discovery provider, so the existing discovery code resolves the ports, orders the certificates and shows the provider status, and the proxies are read-only like every discovered proxy.
 
 - `vhosts`: the app domains.
-- `routes[0].servers`: the address of the running container. On the local target it is the container IP on the app network. On an agent target it is an `agent://<target_id>/<container>:<port>` address, which section 10.4 resolves through the agent tunnel.
-- `health_check`: the app health check path.
-- `ports`: the HTTP and HTTPS ports the operator selects for apps in the platform settings.
+- `routes[0].servers`: `http://127.0.0.1:<port>/`, the port that Docker publishes for the container port on `127.0.0.1`. On an agent target it will be an `agent://<target_id>/<container>:<port>` address, which section 10.4 resolves through the agent tunnel.
+- `ports`: the ports of `proxy_ports` in the `[platform]` section of `config.toml`.
+- `acme`: the existing ACME entry of `acme` in the `[platform]` section. The certificate follows the rules of discovered proxies.
 
-The generated proxy carries a marker, so the proxy list shows it as managed by an app and the proxy edit form refuses direct edits. A certificate for the domains comes from an ACME entry that the platform creates with `http-01`.
+`publish.rs` reads the running deployments and inspects their containers every 15 seconds, and sends a snapshot only when the result changed. A missing or stopped container becomes an issue of the provider status. `DiscoveryProvider::ALL` does not list `Platform`, so a change of the discovery settings never clears the app proxies. An app without a domain gets no proxy, because a proxy without virtual hosts would answer every host name of its ports.
 
 An agent target publishes no app port on the agent host. Every request to an agent app travels through the mTLS link of that agent (section 10.4), so the agent host needs no inbound port and works behind NAT.
 
@@ -353,3 +348,7 @@ Each phase ends with integration tests and docs, and is usable on its own.
 2. **Docker image.** A second image with the `-platform` tag suffix carries `git` and `docker`. The default image stays distroless and small. An installation through `install.sh` uses the `git` and `docker` binaries of the host.
 3. **Agent port.** A dedicated `agent_port` setting in `config.toml`, outside the port list (section 10.2).
 4. **Traffic to agent apps.** Through a tunnel inside the agent link (section 10.4). The agent host opens no app port.
+5. **App proxy ports.** The operator lists them in `proxy_ports` of the `[platform]` section. The platform opens no port of its own.
+6. **App certificates.** From an existing ACME entry named by `acme` in the `[platform]` section. The platform creates no ACME entry.
+7. **Container address.** Docker publishes the app port on a free port of `127.0.0.1`. r3v3rs3 reaches the container there, and other hosts do not. This works the same whether r3v3rs3 runs on the host or in a container with host networking.
+8. **Proxy delivery.** The app proxies travel as the snapshot of the `Platform` discovery provider (section 9), not as stored proxies.

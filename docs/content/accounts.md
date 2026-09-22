@@ -19,7 +19,7 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 | Change the ports, the certificates, the ACME entries and the access lists, download a certificate, refresh the CDN IP ranges | yes | yes | no | no |
 | Read or change the settings and the accounts, read the audit log | yes | no | no | no |
 | Read the apps, the targets and the deployments of the deployment platform | yes | yes | no | yes, without a proxy list |
-| Add, change or delete an app, read or change its environment variables | yes | yes | no | no |
+| Add, change or delete an app, read or change its environment variables, deploy an app, roll back a deployment | yes | yes | no | no |
 
 - An account without a proxy list sees every proxy. An admin always sees every proxy, so an admin cannot have a proxy list.
 - A proxy that is not in the list of an account does not exist for the account. The admin API answers `404 id_not_found`.
