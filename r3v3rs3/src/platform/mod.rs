@@ -3,6 +3,7 @@
 //! The admin API calls the platform directly instead of through the server loop, because a
 //! database query or a Docker call must not hold up the ports and the other RPC methods.
 
+mod build;
 pub mod deploy;
 #[cfg(test)]
 mod fake;
@@ -10,6 +11,7 @@ pub mod proxy;
 mod publish;
 pub mod store;
 
+use crate::build::{GitFetcher, SourceFetcher};
 use crate::cluster::crypto::ClusterKeys;
 use crate::cluster::key_file::{load_keys, write_new_key_file};
 use crate::command::ServerCommand;
@@ -26,10 +28,10 @@ use r3v3rs3_api::platform::{
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use store::{PlatformStore, StoredEnv, Write};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, Semaphore, mpsc};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tracing::error;
 
@@ -108,6 +110,11 @@ pub struct Platform {
     /// The apps that a pipeline or a deletion holds.
     busy: std::sync::Mutex<HashSet<ShortId>>,
     timing: deploy::Timing,
+    fetcher: Arc<dyn SourceFetcher>,
+    /// Limits the builds that run at the same time.
+    builds: Semaphore,
+    /// The directory of the checkouts.
+    build_dir: PathBuf,
 }
 
 impl Platform {
@@ -126,6 +133,9 @@ impl Platform {
             write_new_key_file(&key_path).await?;
         }
         let keys = load_keys(std::slice::from_ref(&key_path)).await?;
+        // A stopped server can leave the checkouts of its unfinished builds.
+        let build_dir = config_dir.join(build::BUILD_DIR);
+        build::remove_dir(&build_dir).await?;
         Ok(Self {
             store,
             keys,
@@ -135,6 +145,9 @@ impl Platform {
             sent: Mutex::new(None),
             busy: std::sync::Mutex::new(HashSet::new()),
             timing: deploy::Timing::default(),
+            fetcher: Arc::new(GitFetcher),
+            builds: Semaphore::new(build::MAX_BUILDS),
+            build_dir,
         })
     }
 

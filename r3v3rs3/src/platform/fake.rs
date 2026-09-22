@@ -1,13 +1,15 @@
-//! A container runtime in memory for the unit tests of the platform.
+//! A container runtime and a source fetcher in memory for the unit tests of the platform.
 
+use crate::build::SourceFetcher;
 use crate::runtime::ContainerRuntime;
 use anyhow::bail;
 use r3v3rs3_api::container::{
     APP_LABEL, AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, ImageInfo,
     ImageRef, NetworkName,
 };
-use r3v3rs3_api::git::RelPath;
+use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -29,10 +31,69 @@ pub struct FakeState {
     pub host_port: u16,
     /// Every build fails with this error.
     pub build_error: Option<String>,
+    /// The builds in their order.
+    pub builds: Vec<Build>,
+}
+
+/// One build of the fake runtime.
+pub struct Build {
+    pub tag: String,
+    pub dockerfile: String,
+    pub context: Vec<u8>,
 }
 
 #[derive(Default)]
 pub struct FakeRuntime(Mutex<FakeState>);
+
+/// The commit of every fake checkout.
+pub const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+
+#[derive(Default)]
+pub struct FetchState {
+    /// Every fetch fails with this error.
+    pub error: Option<String>,
+    /// The repository and the branch of every fetch.
+    pub fetched: Vec<(String, String)>,
+}
+
+/// A source fetcher that writes a checkout with `.git` and `app/Dockerfile`.
+#[derive(Default)]
+pub struct FakeFetcher(Mutex<FetchState>);
+
+impl FakeFetcher {
+    pub fn state(&self) -> MutexGuard<'_, FetchState> {
+        match self.0.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SourceFetcher for FakeFetcher {
+    async fn fetch(
+        &self,
+        repository: &RepoUrl,
+        branch: &GitRef,
+        _: Option<&str>,
+        dest: &Path,
+    ) -> anyhow::Result<String> {
+        {
+            let mut state = self.state();
+            if let Some(error) = &state.error {
+                bail!("git failed: {error}");
+            }
+            state
+                .fetched
+                .push((repository.to_string(), branch.to_string()));
+        }
+        std::fs::create_dir_all(dest.join(".git"))?;
+        std::fs::create_dir_all(dest.join("app"))?;
+        std::fs::write(dest.join(".git/config"), "[core]\n")?;
+        std::fs::write(dest.join("app/Dockerfile"), "FROM scratch\n")?;
+        Ok(COMMIT.into())
+    }
+}
 
 impl FakeRuntime {
     pub fn state(&self) -> MutexGuard<'_, FakeState> {
@@ -111,15 +172,20 @@ impl ContainerRuntime for FakeRuntime {
 
     async fn build_image(
         &self,
-        _: Vec<u8>,
-        _: &RelPath,
+        context: Vec<u8>,
+        dockerfile: &RelPath,
         tag: &ImageRef,
     ) -> anyhow::Result<String> {
         let mut state = self.check()?;
         if let Some(error) = &state.build_error {
             bail!("failed to build {tag}: {error}");
         }
-        let id = format!("sha256:{:064x}", state.images.len() + 1);
+        state.builds.push(Build {
+            tag: tag.to_string(),
+            dockerfile: dockerfile.to_string(),
+            context,
+        });
+        let id = format!("sha256:{:064x}", state.builds.len());
         let info = ImageInfo {
             id: id.clone(),
             repo_digests: Vec::new(),
@@ -129,8 +195,19 @@ impl ContainerRuntime for FakeRuntime {
         Ok(id)
     }
 
+    /// Removes the reference, and like Docker also the image when no other tag names it.
     async fn remove_image(&self, image: &ImageRef) -> anyhow::Result<()> {
-        self.check()?.images.remove(image.as_str());
+        let mut state = self.check()?;
+        let Some(info) = state.images.remove(image.as_str()) else {
+            return Ok(());
+        };
+        let tagged = state
+            .images
+            .iter()
+            .any(|(name, other)| *name != info.id && other.id == info.id);
+        if !tagged {
+            state.images.remove(&info.id);
+        }
         Ok(())
     }
 

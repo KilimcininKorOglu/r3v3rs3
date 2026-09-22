@@ -8,7 +8,7 @@ weight = 0
 
 The deployment platform runs apps as containers on the Docker Engine of the r3v3rs3 server and routes their domains through r3v3rs3 proxies. A new deployment starts next to the running container, and the proxy switches to it only after it passes its health check.
 
-The platform is under development. This version deploys a ready image from a registry to the local Docker Engine through the admin API. The WebUI pages, Git and Dockerfile builds and remote servers follow in later versions.
+The platform is under development. This version deploys a ready image from a registry, or builds an image from a Git repository with its Dockerfile, on the local Docker Engine through the admin API. The WebUI pages, Docker Compose apps and remote servers follow in later versions.
 
 ## Enable the Platform
 
@@ -66,6 +66,31 @@ An app names an image, the port that the container listens on and the domains th
 
 A change of an app, of its domains or of its environment variables takes effect at the next deployment.
 
+### Git Source
+
+An app with a `git` source builds its image from a branch of a repository with the Dockerfile of the repository:
+
+```json
+"source": {
+  "type": "git",
+  "repository": "https://github.com/owner/shop.git",
+  "branch": "main",
+  "context": ".",
+  "dockerfile": "Dockerfile"
+}
+```
+
+| Field | Default | Description |
+|---|---|---|
+| `repository` | | An `https://` URL without a user name, a password, a query or a fragment. |
+| `branch` | `main` | A branch or a tag. |
+| `context` | `.` | The directory of the repository that Docker receives as the build context. |
+| `dockerfile` | `Dockerfile` | The Dockerfile, relative to `context`. |
+
+The server that runs r3v3rs3 needs the `git` binary. r3v3rs3 runs `git` without the configuration of the host, without hooks and only over HTTPS. The build context holds no `.git` directory, and a symbolic link in it stays a link, so a build does not read a file from outside the repository. The context can hold up to 512 MiB.
+
+Docker builds the image with its classic builder. Two builds run at the same time, and every other build waits. The builder keeps the stages of a multi-stage Dockerfile as its build cache, so the next build of the same app is faster. `docker image prune` removes that cache.
+
 ### Environment Variables
 
 `PUT /api/apps/{id}/env` replaces the environment variables of an app. A variable with `"secret": true` never leaves the server again: the admin API returns it without its value, and an update without a value keeps the current value. r3v3rs3 encrypts every value with `platform.key` and decrypts it only when a container starts.
@@ -74,7 +99,7 @@ A change of an app, of its domains or of its environment variables takes effect 
 
 `POST /api/apps/{id}/deploy` starts a deployment and returns it with the status `queued`. `GET /api/deployments/{id}` shows its progress.
 
-1. r3v3rs3 pulls the image and records its digest.
+1. r3v3rs3 pulls the image and records its digest. For a Git source it clones the branch, records the commit, builds the image as `r3v3rs3/<app id>:<deployment id>` and records the image id.
 2. It creates the container `r3v3rs3-<app id>-<deployment id>` on the network `r3v3rs3-<app id>`, so the containers of different apps do not reach each other. The container publishes its port on a free port of `127.0.0.1`, so only r3v3rs3 on the host reaches it.
 3. It waits up to 120 seconds for the health check. A container that stops or fails the check ends the deployment as `failed`, and the failure message holds the last lines of the container log. The old container keeps serving.
 4. It marks the deployment `running`, marks the previous one `superseded`, and routes the domains to the new container.
@@ -85,6 +110,7 @@ An app runs one deployment at a time. A second deploy, a rollback or a deletion 
 | Status | Meaning |
 |---|---|
 | `queued` | The deployment waits to start. |
+| `building` | r3v3rs3 clones the branch and builds the image. |
 | `deploying` | The image is pulled, or the new container waits for its health check. |
 | `running` | The container of the deployment serves the app. |
 | `superseded` | A newer deployment replaced this one. |
@@ -93,6 +119,8 @@ An app runs one deployment at a time. A second deploy, a rollback or a deletion 
 ### Rollback
 
 `POST /api/deployments/{id}/rollback` starts a new deployment with the image digest, the app settings and the environment variables of an earlier deployment. The digest, not the tag, selects the image, so a rollback runs the same image even after the tag moved. A deployment that failed before it pulled its image has no digest and answers `400 rollback_unavailable`.
+
+A rollback of a Git app starts the built image again and does not build. r3v3rs3 keeps the images of the 5 newest deployments of an app and of its running deployment, and removes older ones. A rollback to a deployment whose image is removed fails with the message `the image ... is no longer present`.
 
 ## Routing
 
@@ -107,7 +135,7 @@ An app without a domain gets no proxy. A running deployment whose container is m
 
 ## Deleting an App
 
-`DELETE /api/apps/{id}` stops and removes the containers and the network of the app, removes its proxy, and deletes its environment variables and its deployments. The named volumes stay.
+`DELETE /api/apps/{id}` stops and removes the containers, the network and the built images of the app, removes its proxy, and deletes its environment variables and its deployments. The named volumes stay.
 
 ## Admin API
 

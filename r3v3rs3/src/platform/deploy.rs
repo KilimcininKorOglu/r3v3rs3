@@ -2,12 +2,13 @@
 //! container serves until the new container passes its health check, then the proxy switches to
 //! the new container and the old container stops after a drain period.
 
+use super::build::GitBuild;
 use super::store::{NewDeployment, StoredEnv};
 use super::{Platform, new_id, not_found, proxy};
 use crate::clock::unix_ms;
 use anyhow::{Context as _, anyhow, bail};
 use r3v3rs3_api::container::{
-    APP_LABEL, AppName, ContainerName, ContainerSpec, EnvVar, ImageRef, NetworkName,
+    APP_LABEL, AppName, ContainerName, ContainerSpec, EnvVar, ImageInfo, ImageRef, NetworkName,
 };
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
@@ -64,8 +65,33 @@ struct Job {
     deployment: ShortId,
     spec: AppSpec,
     env: Vec<StoredEnv>,
-    /// The image to pull, or the digest of the deployment that a rollback repeats.
-    image: ImageRef,
+    image: JobImage,
+}
+
+/// Where the image of a deployment comes from.
+enum JobImage {
+    /// The image of the app, or the digest of the deployment that a rollback repeats.
+    Pull(ImageRef),
+    Build(GitBuild),
+}
+
+impl From<AppSource> for JobImage {
+    fn from(source: AppSource) -> Self {
+        match source {
+            AppSource::Image { image } => Self::Pull(image),
+            AppSource::Git {
+                repository,
+                branch,
+                context,
+                dockerfile,
+            } => Self::Build(GitBuild {
+                repository,
+                branch,
+                context,
+                dockerfile,
+            }),
+        }
+    }
 }
 
 /// Holds the app of a running pipeline, so that the app gets one pipeline at a time.
@@ -103,7 +129,7 @@ impl Platform {
         trigger: DeploymentTrigger,
     ) -> anyhow::Result<DeploymentEntry> {
         let app = self.app(id).await?;
-        let AppSource::Image { image } = app.spec.source.clone();
+        let image = JobImage::from(app.spec.source.clone());
         let env = self.store.env(id).await?;
         let lock = self.lock_app(&app)?;
         let new = new_deployment(&app, trigger, username, &app.spec, &env, None)?;
@@ -130,7 +156,7 @@ impl Platform {
         let lock = self.lock_app(&app)?;
         let trigger = DeploymentTrigger::Rollback;
         let new = new_deployment(&app, trigger, username, &spec, &env, Some(&digest))?;
-        self.start_job(lock, new, image).await
+        self.start_job(lock, new, JobImage::Pull(image)).await
     }
 
     /// The app and the image digest of the deployment that a rollback repeats.
@@ -146,7 +172,7 @@ impl Platform {
         self: &Arc<Self>,
         lock: AppLock,
         new: NewDeployment<'_>,
-        image: ImageRef,
+        image: JobImage,
     ) -> anyhow::Result<DeploymentEntry> {
         self.store.insert_deployment(&new).await?;
         let entry = self
@@ -170,6 +196,16 @@ impl Platform {
     }
 
     async fn run_job(&self, job: &Job) {
+        self.run_pipeline(job).await;
+        // A failed deployment can leave a built image too, so the cleanup follows every build.
+        if matches!(job.spec.source, AppSource::Git { .. })
+            && let Err(err) = self.prune_builds(job.app).await
+        {
+            error!(app = %job.app, "failed to remove the old built images: {err:#}");
+        }
+    }
+
+    async fn run_pipeline(&self, job: &Job) {
         info!(app = %job.app, deployment = %job.deployment, "deployment started");
         let result = match self.start_container(job).await {
             Ok(name) => self.switch(job, &name).await,
@@ -198,10 +234,7 @@ impl Platform {
     /// Starts the new container and waits for its health check. A failure removes the new
     /// container, and the old container keeps serving.
     async fn start_container(&self, job: &Job) -> anyhow::Result<ContainerName> {
-        self.store
-            .set_status(job.deployment, DeploymentStatus::Deploying)
-            .await?;
-        let digest = self.resolve_image(&job.image).await?;
+        let digest = self.prepare_image(job).await?;
         self.store.set_image_digest(job.deployment, &digest).await?;
         let name = proxy::container_name(job.app, job.deployment)?;
         let result = self.run_container(job, &name, &digest).await;
@@ -213,14 +246,45 @@ impl Platform {
         result.map(|()| name)
     }
 
+    /// Pulls or builds the image of the deployment, and returns the reference that pins it.
+    async fn prepare_image(&self, job: &Job) -> anyhow::Result<String> {
+        let deployment = job.deployment;
+        match &job.image {
+            JobImage::Pull(image) => {
+                self.store
+                    .set_status(deployment, DeploymentStatus::Deploying)
+                    .await?;
+                self.resolve_image(image).await
+            }
+            JobImage::Build(source) => {
+                self.store
+                    .set_status(deployment, DeploymentStatus::Building)
+                    .await?;
+                let id = self.build(job.app, deployment, source).await?;
+                self.store
+                    .set_status(deployment, DeploymentStatus::Deploying)
+                    .await?;
+                Ok(id)
+            }
+        }
+    }
+
+    /// The present image of a pinned reference, which needs no pull.
+    async fn present_image(&self, image: &ImageRef) -> anyhow::Result<Option<ImageInfo>> {
+        match self.local.inspect_image(image).await? {
+            Some(info) if pinned(image) => Ok(Some(info)),
+            // An image id names a built image, which no registry has.
+            None if image.as_str().starts_with("sha256:") => {
+                bail!("the image {image} is no longer present")
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// Pulls the image unless it is present, and returns the reference that pins it: a
     /// repository digest, or the image id of an image that has none.
     async fn resolve_image(&self, image: &ImageRef) -> anyhow::Result<String> {
-        let present = match self.local.inspect_image(image).await? {
-            Some(info) if pinned(image) => Some(info),
-            _ => None,
-        };
-        let info = match present {
+        let info = match self.present_image(image).await? {
             Some(info) => info,
             None => {
                 self.local.pull_image(image).await?;
@@ -360,10 +424,11 @@ impl Platform {
         Ok(())
     }
 
-    /// Removes the containers and the network of an app.
+    /// Removes the containers, the network and the built images of an app.
     pub(super) async fn remove_app_resources(&self, app: ShortId) -> anyhow::Result<()> {
         self.remove_containers(app, None).await?;
-        self.local.remove_network(&app_network(app)?).await
+        self.local.remove_network(&app_network(app)?).await?;
+        self.remove_builds(app).await
     }
 }
 
@@ -453,10 +518,11 @@ async fn stays_open(stream: &mut TcpStream) -> std::io::Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::{DIGEST, FakeRuntime};
+    use super::super::build::KEPT_BUILDS;
+    use super::super::fake::{COMMIT, DIGEST, FakeFetcher, FakeRuntime};
     use super::super::tests::{TempDir, platform_with, request};
     use super::*;
-    use r3v3rs3_api::platform::{EnvEntry, PlatformConfig};
+    use r3v3rs3_api::platform::{AppRequest, EnvEntry, PlatformConfig};
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
 
@@ -480,26 +546,176 @@ mod tests {
     struct Setup {
         platform: Arc<Platform>,
         runtime: Arc<FakeRuntime>,
+        fetcher: Arc<FakeFetcher>,
         app: AppEntry,
         _dir: TempDir,
     }
 
-    /// A platform with the app `shop`, whose container answers its health check.
+    /// A platform with the image app `shop`, whose container answers its health check.
     async fn setup() -> anyhow::Result<Setup> {
+        setup_with(request("shop")).await
+    }
+
+    /// A platform with the app of `request`, whose container answers its health check.
+    async fn setup_with(mut app: AppRequest) -> anyhow::Result<Setup> {
         // The tests read no proxy snapshots.
         let (command, _) = mpsc::channel(1);
-        let (platform, runtime, dir) = platform_with(&PlatformConfig::default(), command).await?;
+        let (mut platform, runtime, dir) =
+            platform_with(&PlatformConfig::default(), command).await?;
+        let fetcher = Arc::new(FakeFetcher::default());
+        platform.fetcher = fetcher.clone();
         let platform = Arc::new(platform);
         runtime.state().host_port = app_server(200).await?;
-        let mut shop = request("shop");
-        shop.spec.health_check_path = Some("/healthz".into());
-        let app = platform.add_app(shop, 1).await?;
+        app.spec.health_check_path = Some("/healthz".into());
+        let app = platform.add_app(app, 1).await?;
         Ok(Setup {
             platform,
             runtime,
+            fetcher,
             app,
             _dir: dir,
         })
+    }
+
+    /// The app `site` that builds `app/Dockerfile` of the branch `release`.
+    fn git_request() -> anyhow::Result<AppRequest> {
+        let mut site = request("site");
+        site.spec.source = AppSource::Git {
+            repository: "https://git.example.com/team/site.git".parse()?,
+            branch: "release".parse()?,
+            context: "app".parse()?,
+            dockerfile: "Dockerfile".parse()?,
+        };
+        Ok(site)
+    }
+
+    /// The tags of the images that the deployments of the app built.
+    fn built_tags(setup: &Setup) -> Vec<String> {
+        let prefix = format!("r3v3rs3/{}:", setup.app.id);
+        let state = setup.runtime.state();
+        state
+            .images
+            .keys()
+            .filter(|name| name.starts_with(&prefix))
+            .cloned()
+            .collect()
+    }
+
+    fn tar_entries(archive: &[u8]) -> anyhow::Result<Vec<String>> {
+        let mut names = Vec::new();
+        for entry in tar::Archive::new(archive).entries()? {
+            names.push(entry?.path()?.to_string_lossy().into_owned());
+        }
+        Ok(names)
+    }
+
+    #[tokio::test]
+    async fn a_git_deployment_builds_its_image_from_the_checkout() -> anyhow::Result<()> {
+        let setup = setup_with(git_request()?).await?;
+        let deployment = deploy(&setup).await?;
+        assert_eq!(deployment.status, DeploymentStatus::Running);
+        assert_eq!(deployment.commit_sha.as_deref(), Some(COMMIT));
+        assert_eq!(
+            setup.fetcher.state().fetched,
+            [(
+                "https://git.example.com/team/site.git".to_string(),
+                "release".to_string()
+            )]
+        );
+        let state = setup.runtime.state();
+        let [build] = state.builds.as_slice() else {
+            bail!("one build expected");
+        };
+        assert_eq!(
+            build.tag,
+            format!("r3v3rs3/{}:{}", setup.app.id, deployment.id)
+        );
+        assert_eq!(build.dockerfile, "Dockerfile");
+        let entries = tar_entries(&build.context)?;
+        assert!(
+            entries.iter().any(|name| name == "Dockerfile"),
+            "{entries:?}"
+        );
+        assert!(
+            !entries.iter().any(|name| name.contains(".git")),
+            "{entries:?}"
+        );
+        assert_eq!(
+            deployment.image_digest.as_deref(),
+            Some(state.images[&build.tag].id.as_str())
+        );
+        assert!(
+            !setup
+                .platform
+                .build_dir
+                .join(deployment.id.to_string())
+                .exists()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_failed_build_fails_the_deployment_without_a_container() -> anyhow::Result<()> {
+        let setup = setup_with(git_request()?).await?;
+        setup.runtime.state().build_error = Some("RUN make exited with 2".into());
+        let failed = deploy(&setup).await?;
+        assert_eq!(failed.status, DeploymentStatus::Failed);
+        let message = failed.message.context("message")?;
+        assert!(message.contains("RUN make exited with 2"), "{message}");
+        assert_eq!(failed.commit_sha.as_deref(), Some(COMMIT));
+
+        setup.runtime.state().build_error = None;
+        setup.fetcher.state().error = Some("repository not found".into());
+        let failed = deploy(&setup).await?;
+        let message = failed.message.context("message")?;
+        assert!(message.contains("repository not found"), "{message}");
+        assert!(failed.commit_sha.is_none());
+        assert!(setup.runtime.names().is_empty());
+        assert!(
+            !setup
+                .platform
+                .build_dir
+                .join(failed.id.to_string())
+                .exists()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn only_the_newest_built_images_stay() -> anyhow::Result<()> {
+        let setup = setup_with(git_request()?).await?;
+        let first = deploy(&setup).await?;
+        let mut last = first.clone();
+        for _ in 0..KEPT_BUILDS + 1 {
+            last = deploy(&setup).await?;
+        }
+        let tags = built_tags(&setup);
+        assert_eq!(tags.len(), KEPT_BUILDS, "{tags:?}");
+        assert!(tags.contains(&format!("r3v3rs3/{}:{}", setup.app.id, last.id)));
+
+        // The image of the first deployment is gone, so its rollback fails.
+        let rollback = setup.platform.rollback(first.id, "bob").await?;
+        let rollback = finished(&setup, rollback.id).await?;
+        assert_eq!(rollback.status, DeploymentStatus::Failed);
+        let message = rollback.message.context("message")?;
+        assert!(message.contains("no longer present"), "{message}");
+
+        setup.platform.delete_app(setup.app.id).await?;
+        assert!(built_tags(&setup).is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_rollback_starts_a_kept_build_without_a_new_build() -> anyhow::Result<()> {
+        let setup = setup_with(git_request()?).await?;
+        let first = deploy(&setup).await?;
+        deploy(&setup).await?;
+        let rollback = setup.platform.rollback(first.id, "bob").await?;
+        let rollback = finished(&setup, rollback.id).await?;
+        assert_eq!(rollback.status, DeploymentStatus::Running);
+        assert_eq!(rollback.image_digest, first.image_digest);
+        assert_eq!(setup.runtime.state().builds.len(), 2);
+        Ok(())
     }
 
     /// Waits until the pipeline of the app has ended, and returns the deployment.

@@ -30,10 +30,14 @@ use common::{TestPort, TestStorage, alloc_tcp_port, port_entry, send, session_co
 /// A small image that serves HTTP on port 80 and prints `WHOAMI_NAME` in its answer.
 const IMAGE: &str = "traefik/whoami:v1.10.3";
 
+/// The repository of the same app, with a multi-stage Dockerfile, at the tag of [`IMAGE`].
+const GIT_REPOSITORY: &str = "https://github.com/traefik/whoami.git";
+const GIT_TAG: &str = "v1.10.3";
+
 const DOMAIN: &str = "whoami.test";
 
-/// The time a deployment may take, including the image pull.
-const DEPLOY_TIMEOUT: Duration = Duration::from_secs(180);
+/// The time a deployment may take, including the image pull or the build.
+const DEPLOY_TIMEOUT: Duration = Duration::from_secs(600);
 
 struct TempDir(PathBuf);
 
@@ -77,6 +81,34 @@ struct Context {
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn an_app_deploys_blue_green_and_rolls_back() -> anyhow::Result<()> {
+    let source = json!({"type": "image", "image": IMAGE});
+    with_app(source, |ctx, id| async move {
+        deploy_and_roll_back(&ctx, &id).await
+    })
+    .await
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_git_app_builds_its_image_and_deploys() -> anyhow::Result<()> {
+    let source = json!({
+        "type": "git",
+        "repository": GIT_REPOSITORY,
+        "branch": GIT_TAG,
+    });
+    with_app(source, |ctx, id| async move {
+        build_and_delete(&ctx, &id).await
+    })
+    .await
+}
+
+/// Starts a server with the platform, adds an app with `source` and runs `check` on it. The
+/// containers and the network of the app are removed after a failed check too.
+async fn with_app<F, O>(source: Value, check: F) -> anyhow::Result<()>
+where
+    F: FnOnce(Context, String) -> O,
+    O: Future<Output = anyhow::Result<()>>,
+{
     let dir = TempDir::new()?;
     let proxy = alloc_tcp_port().await?;
     let mut config = AppConfig::default();
@@ -88,7 +120,6 @@ async fn an_app_deploys_blue_green_and_rolls_back() -> anyhow::Result<()> {
         .ports(vec![port_entry("apps", proxy.multiaddr_http())])
         .account("admin", "admin-secret", Role::Admin, None)
         .build();
-    // The id of the app, so that the cleanup runs after a failed check too.
     let app_id = Arc::new(std::sync::Mutex::new(None));
     let shared_id = app_id.clone();
     let result = with_server(&dir.0, storage, |admin| async move {
@@ -98,11 +129,11 @@ async fn an_app_deploys_blue_green_and_rolls_back() -> anyhow::Result<()> {
             cookie,
             proxy,
         };
-        let id = add_app(&ctx).await?;
+        let id = add_app(&ctx, source).await?;
         if let Ok(mut shared) = shared_id.lock() {
             *shared = Some(id.clone());
         }
-        deploy_and_roll_back(&ctx, &id).await
+        check(ctx, id).await
     })
     .await;
     let id = app_id.lock().ok().and_then(|id| id.clone());
@@ -112,6 +143,30 @@ async fn an_app_deploys_blue_green_and_rolls_back() -> anyhow::Result<()> {
     };
     result?;
     cleanup
+}
+
+/// Builds and deploys the Git app, then deletes it with its built image.
+async fn build_and_delete(ctx: &Context, id: &str) -> anyhow::Result<()> {
+    let deployment = deploy(ctx, id, "git").await?;
+    wait_for_answer(ctx, "Name: git").await?;
+    check_build(ctx, &deployment).await?;
+    let tag = format!("r3v3rs3/{id}:{deployment}").parse()?;
+    let runtime = runtime()?;
+    ensure!(runtime.inspect_image(&tag).await?.is_some());
+    delete_app(ctx, id).await?;
+    ensure!(runtime.inspect_image(&tag).await?.is_none());
+    Ok(())
+}
+
+/// Checks that the deployment records its commit and the id of its built image.
+async fn check_build(ctx: &Context, deployment: &str) -> anyhow::Result<()> {
+    let path = format!("/api/deployments/{deployment}");
+    let entry = call(ctx, Method::GET, &path, None).await?;
+    let sha = entry["commit_sha"].as_str().context("commit sha")?;
+    ensure!(sha.len() == 40, "{entry}");
+    let digest = entry["image_digest"].as_str().context("image digest")?;
+    ensure!(digest.starts_with("sha256:"), "{entry}");
+    Ok(())
 }
 
 async fn with_server<F, O>(dir: &Path, storage: TestStorage, func: F) -> anyhow::Result<()>
@@ -150,13 +205,13 @@ async fn call(
     Ok(serde_json::from_str(&text)?)
 }
 
-async fn add_app(ctx: &Context) -> anyhow::Result<String> {
+async fn add_app(ctx: &Context, source: Value) -> anyhow::Result<String> {
     let name = format!("e2e-{:08x}", rand::random::<u32>());
     let body = json!({
         "name": name,
         "target": "local",
         "spec": {
-            "source": {"type": "image", "image": IMAGE},
+            "source": source,
             "port": 80,
             "domains": [DOMAIN],
             "health_check_path": "/health",
@@ -174,7 +229,13 @@ async fn deploy_and_roll_back(ctx: &Context, id: &str) -> anyhow::Result<()> {
     ensure!(blue != green);
     wait_for_answer(ctx, "Name: green").await?;
     wait_for_containers(id, 1).await?;
+    roll_back(ctx, &blue).await?;
+    wait_for_containers(id, 1).await?;
+    delete_app(ctx, id).await
+}
 
+/// Rolls back to the deployment `blue`, which set `WHOAMI_NAME` to `blue`.
+async fn roll_back(ctx: &Context, blue: &str) -> anyhow::Result<()> {
     let path = format!("/api/deployments/{blue}/rollback");
     let rollback = call_when_free(ctx, Method::POST, &path).await?;
     let rollback = rollback["id"].as_str().context("rollback id")?.to_string();
@@ -188,8 +249,11 @@ async fn deploy_and_roll_back(ctx: &Context, id: &str) -> anyhow::Result<()> {
         old["image_digest"] == entry["image_digest"],
         "{old} {entry}"
     );
+    Ok(())
+}
 
-    wait_for_containers(id, 1).await?;
+/// Deletes the app, and checks that its containers, its network and its route are gone.
+async fn delete_app(ctx: &Context, id: &str) -> anyhow::Result<()> {
     call_when_free(ctx, Method::DELETE, &format!("/api/apps/{id}")).await?;
     wait_for_containers(id, 0).await?;
     let network: NetworkName = format!("r3v3rs3-{id}").parse()?;

@@ -301,6 +301,15 @@ impl PlatformStore {
         Ok(())
     }
 
+    pub async fn set_commit_sha(&self, id: ShortId, sha: &str) -> anyhow::Result<()> {
+        sqlx::query("UPDATE deployments SET commit_sha = ? WHERE id = ?")
+            .bind(sha)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Ends a deployment with `failed` or `cancelled` and the reason.
     pub async fn fail_deployment(
         &self,

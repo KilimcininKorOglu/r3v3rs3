@@ -77,6 +77,25 @@ checked_string!(
     check_rel_path
 );
 
+impl GitRef {
+    /// The branch `main`.
+    pub fn main() -> Self {
+        Self("main".to_string())
+    }
+}
+
+impl RelPath {
+    /// The file `Dockerfile`.
+    pub fn dockerfile() -> Self {
+        Self("Dockerfile".to_string())
+    }
+
+    /// The root directory of the checkout.
+    pub fn root() -> Self {
+        Self(".".to_string())
+    }
+}
+
 fn check_repo_url(value: &str) -> Result<(), Error> {
     let url = Url::parse(value).map_err(|_| invalid(format!("invalid repository URL: {value}")))?;
     let valid = value.len() <= MAX_LENGTH
@@ -178,6 +197,13 @@ mod tests {
         ] {
             assert!(invalid.parse::<GitRef>().is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn the_defaults_pass_their_own_checks() {
+        assert!(check_git_ref(GitRef::main().as_str()).is_ok());
+        assert!(check_rel_path(RelPath::dockerfile().as_str()).is_ok());
+        assert!(check_rel_path(RelPath::root().as_str()).is_ok());
     }
 
     #[test]

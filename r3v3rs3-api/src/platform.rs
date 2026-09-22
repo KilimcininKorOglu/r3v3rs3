@@ -2,6 +2,7 @@
 
 use crate::container::{AppName, EnvKey, ImageRef, ResourceLimits, RestartPolicy, VolumeMount};
 use crate::error::Error;
+use crate::git::{GitRef, RelPath, RepoUrl};
 use crate::id::ShortId;
 use crate::subject_name::SubjectName;
 use serde_default::DefaultFromSerde;
@@ -73,6 +74,23 @@ pub enum AppSource {
     Image {
         #[schema(value_type = String, example = "nginx:1.27")]
         image: ImageRef,
+    },
+    /// A branch of a Git repository that r3v3rs3 builds with its Dockerfile. A private
+    /// repository needs the Git token of the app.
+    Git {
+        #[schema(value_type = String, example = "https://github.com/owner/shop.git")]
+        repository: RepoUrl,
+        #[serde(default = "GitRef::main")]
+        #[schema(value_type = String, example = "main")]
+        branch: GitRef,
+        /// The directory of the repository that Docker receives as the build context.
+        #[serde(default = "RelPath::root")]
+        #[schema(value_type = String, example = ".")]
+        context: RelPath,
+        /// The Dockerfile, relative to the context.
+        #[serde(default = "RelPath::dockerfile")]
+        #[schema(value_type = String, example = "Dockerfile")]
+        dockerfile: RelPath,
     },
 }
 
@@ -323,6 +341,41 @@ mod tests {
         let mut unsafe_image = base();
         unsafe_image["source"]["image"] = json!("nginx --privileged");
         assert!(spec(unsafe_image).is_err());
+    }
+
+    #[test]
+    fn a_git_source_gets_the_default_branch_and_paths() {
+        let parsed = spec(json!({
+            "source": {"type": "git", "repository": "https://github.com/owner/shop.git"},
+            "port": 8080,
+        }))
+        .unwrap();
+        let AppSource::Git {
+            branch,
+            context,
+            dockerfile,
+            ..
+        } = parsed.source
+        else {
+            panic!("a git source");
+        };
+        assert_eq!(
+            (branch.as_str(), context.as_str(), dockerfile.as_str()),
+            ("main", ".", "Dockerfile")
+        );
+        for (field, value) in [
+            ("repository", "http://github.com/owner/shop"),
+            ("branch", "--upload-pack=x"),
+            ("context", "../outside"),
+            ("dockerfile", "/etc/passwd"),
+        ] {
+            let mut source = json!({"type": "git", "repository": "https://example.com/a.git"});
+            source[field] = json!(value);
+            assert!(
+                spec(json!({"source": source, "port": 80})).is_err(),
+                "{field}"
+            );
+        }
     }
 
     #[test]
