@@ -101,93 +101,16 @@ pub async fn refresh(platform: Weak<Platform>) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::fake::FakeRuntime;
     use super::super::store::NewDeployment;
     use super::super::tests::{platform_with, request};
     use super::*;
     use crate::discovery::DiscoverySnapshot;
-    use crate::runtime::ContainerRuntime;
-    use r3v3rs3_api::container::{
-        AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, ImageInfo,
-        ImageRef, NetworkName,
-    };
+    use r3v3rs3_api::container::ContainerName;
     use r3v3rs3_api::discovery::DiscoveryState;
     use r3v3rs3_api::platform::{DeploymentTrigger, PlatformConfig};
-    use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use tokio::sync::mpsc;
-
-    /// A runtime that knows only the state of its containers.
-    #[derive(Default)]
-    struct FakeRuntime {
-        containers: Mutex<BTreeMap<String, ContainerInfo>>,
-        broken: Mutex<bool>,
-    }
-
-    impl FakeRuntime {
-        fn set(&self, name: &ContainerName, running: bool, published: &[(u16, u16)]) {
-            let info = ContainerInfo {
-                id: format!("id-{name}"),
-                name: name.to_string(),
-                image_id: "sha256:ab".into(),
-                running,
-                exit_code: 0,
-                health: None,
-                addresses: BTreeMap::new(),
-                labels: BTreeMap::new(),
-                published: published.iter().copied().collect(),
-            };
-            self.containers
-                .lock()
-                .unwrap()
-                .insert(name.to_string(), info);
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ContainerRuntime for FakeRuntime {
-        async fn version(&self) -> anyhow::Result<String> {
-            anyhow::bail!("not used")
-        }
-        async fn pull_image(&self, _: &ImageRef) -> anyhow::Result<()> {
-            anyhow::bail!("not used")
-        }
-        async fn inspect_image(&self, _: &ImageRef) -> anyhow::Result<Option<ImageInfo>> {
-            anyhow::bail!("not used")
-        }
-        async fn ensure_network(&self, _: &NetworkName, _: &AppName) -> anyhow::Result<()> {
-            anyhow::bail!("not used")
-        }
-        async fn remove_network(&self, _: &NetworkName) -> anyhow::Result<()> {
-            anyhow::bail!("not used")
-        }
-        async fn create_container(&self, _: &ContainerSpec) -> anyhow::Result<String> {
-            anyhow::bail!("not used")
-        }
-        async fn start_container(&self, _: &ContainerName) -> anyhow::Result<()> {
-            anyhow::bail!("not used")
-        }
-        async fn stop_container(&self, _: &ContainerName, _: Duration) -> anyhow::Result<()> {
-            anyhow::bail!("not used")
-        }
-        async fn remove_container(&self, _: &ContainerName) -> anyhow::Result<()> {
-            anyhow::bail!("not used")
-        }
-        async fn inspect_container(
-            &self,
-            name: &ContainerName,
-        ) -> anyhow::Result<Option<ContainerInfo>> {
-            if *self.broken.lock().unwrap() {
-                anyhow::bail!("the Docker Engine does not answer");
-            }
-            Ok(self.containers.lock().unwrap().get(name.as_str()).cloned())
-        }
-        async fn list_containers(&self, _: &AppName) -> anyhow::Result<Vec<ContainerSummary>> {
-            anyhow::bail!("not used")
-        }
-        async fn logs(&self, _: &ContainerName, _: u32) -> anyhow::Result<String> {
-            anyhow::bail!("not used")
-        }
-    }
 
     struct Setup {
         platform: Platform,
@@ -202,9 +125,7 @@ mod tests {
             ..Default::default()
         };
         let (command, commands) = mpsc::channel(1);
-        let (mut platform, dir) = platform_with(&config, command).await?;
-        let runtime = Arc::new(FakeRuntime::default());
-        platform.local = runtime.clone();
+        let (platform, runtime, dir) = platform_with(&config, command).await?;
         Ok(Setup {
             platform,
             runtime,
@@ -296,13 +217,13 @@ mod tests {
         assert!(setup.platform.publish().await);
         assert!(take(&mut setup.commands).is_some());
 
-        *setup.runtime.broken.lock().unwrap() = true;
+        setup.runtime.state().broken = true;
         assert!(setup.platform.publish().await);
         let snapshot = take(&mut setup.commands).expect("an error snapshot");
         assert_eq!(snapshot.state, DiscoveryState::Error);
         assert!(snapshot.proxies.is_none());
 
-        *setup.runtime.broken.lock().unwrap() = false;
+        setup.runtime.state().broken = false;
         assert!(setup.platform.publish().await);
         let snapshot = take(&mut setup.commands).expect("a snapshot");
         assert_eq!(resources(&snapshot), ["shop"]);

@@ -58,7 +58,7 @@ test-discovery-e2e:
 # Runs the cluster end-to-end tests against etcd and Consul in Docker, then removes the containers.
 # The nodes use a restricted etcd user and a restricted Consul token, like the cluster guide.
 test-runtime-docker:
-	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test runtime_docker_test -- --ignored
+	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test runtime_docker_test --test platform_deploy_test -- --ignored
 
 test-cluster-e2e:
 	$(DISCOVERY_COMPOSE) up -d --wait consul etcd && \

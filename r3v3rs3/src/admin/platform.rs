@@ -15,7 +15,7 @@ use r3v3rs3_api::{
     audit::AuditAction,
     error::Error,
     id::ShortId,
-    platform::{AppEntry, AppRequest, DeploymentEntry, EnvEntry, TargetEntry},
+    platform::{AppEntry, AppRequest, DeploymentEntry, DeploymentTrigger, EnvEntry, TargetEntry},
 };
 use std::sync::Arc;
 use tracing::error;
@@ -253,4 +253,80 @@ pub async fn list_deployments(
     Ok(Json(
         platform.deployments(id).await.map_err(platform_error)?,
     ))
+}
+
+/// Starts a deployment of the current spec and environment of an app. The response returns the
+/// queued deployment; `GET /api/deployments/{id}` shows its progress.
+#[utoipa::path(
+    post,
+    path = "/{id}/deploy",
+    tag = "platform",
+    operation_id = "deploy_app",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The queued deployment.", body = DeploymentEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn deploy_app(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<DeploymentEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let deployment = platform
+        .deploy(id, &caller.username, DeploymentTrigger::Manual)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeployApp)
+        .id(id)
+        .summary(deployment.id.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(deployment))
+}
+
+/// Returns a deployment.
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "get_deployment",
+    params(("id" = ShortId, Path, description = "Deployment id.")),
+    responses((status = 200, description = "The deployment.", body = DeploymentEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_deployment(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<DeploymentEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    Ok(Json(platform.deployment(id).await.map_err(platform_error)?))
+}
+
+/// Starts a deployment that repeats the image digest, the spec and the environment of an earlier
+/// deployment.
+#[utoipa::path(
+    post,
+    path = "/{id}/rollback",
+    tag = "platform",
+    operation_id = "rollback_deployment",
+    params(("id" = ShortId, Path, description = "The id of the deployment to repeat.")),
+    responses((status = 200, description = "The queued deployment.", body = DeploymentEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn rollback_deployment(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<DeploymentEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let deployment = platform
+        .rollback(id, &caller.username)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::RollbackApp)
+        .id(deployment.app)
+        .summary(format!("{id} -> {}", deployment.id));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(deployment))
 }

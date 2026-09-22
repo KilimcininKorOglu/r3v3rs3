@@ -45,10 +45,12 @@ pub enum AuditAction {
     UpdateApp,
     DeleteApp,
     UpdateAppEnv,
+    DeployApp,
+    RollbackApp,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 28] = [
+    pub const ALL: [AuditAction; 30] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -77,6 +79,8 @@ impl AuditAction {
         Self::UpdateApp,
         Self::DeleteApp,
         Self::UpdateAppEnv,
+        Self::DeployApp,
+        Self::RollbackApp,
     ];
 }
 

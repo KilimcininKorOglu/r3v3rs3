@@ -113,6 +113,12 @@ pub enum Error {
     #[error("an app with this name already exists: {name}")]
     AppNameExists { name: String },
 
+    #[error("a deployment of the app is in progress: {name}")]
+    AppBusy { name: String },
+
+    #[error("the deployment has no image to roll back to: {id}")]
+    RollbackUnavailable { id: ShortId },
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 
@@ -315,7 +321,8 @@ impl Error {
             Self::TooManyLoginAttempts => 429,
             Self::ClusterWriteConflict
             | Self::AccountExists { .. }
-            | Self::AppNameExists { .. } => 409,
+            | Self::AppNameExists { .. }
+            | Self::AppBusy { .. } => 409,
             Self::ClusterUnavailable
             | Self::PlatformDisabled
             | Self::PlatformInCluster

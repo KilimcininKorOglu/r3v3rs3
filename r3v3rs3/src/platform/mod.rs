@@ -3,6 +3,9 @@
 //! The admin API calls the platform directly instead of through the server loop, because a
 //! database query or a Docker call must not hold up the ports and the other RPC methods.
 
+pub mod deploy;
+#[cfg(test)]
+mod fake;
 pub mod proxy;
 mod publish;
 pub mod store;
@@ -102,6 +105,9 @@ pub struct Platform {
     command: mpsc::Sender<ServerCommand>,
     /// The proxies and the issues of the last snapshot that the server got.
     sent: Mutex<Option<publish::Published>>,
+    /// The apps that a pipeline or a deletion holds.
+    busy: std::sync::Mutex<HashSet<ShortId>>,
+    timing: deploy::Timing,
 }
 
 impl Platform {
@@ -127,7 +133,17 @@ impl Platform {
             config: config.platform.clone(),
             command,
             sent: Mutex::new(None),
+            busy: std::sync::Mutex::new(HashSet::new()),
+            timing: deploy::Timing::default(),
         })
+    }
+
+    fn busy_apps(&self) -> std::sync::MutexGuard<'_, HashSet<ShortId>> {
+        match self.busy.lock() {
+            Ok(busy) => busy,
+            // The set stays valid when a holder panics.
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     /// The runtime of the local target.
@@ -198,11 +214,18 @@ impl Platform {
         }
     }
 
-    pub async fn delete_app(&self, id: ShortId) -> anyhow::Result<AppEntry> {
+    /// Deletes an app with its containers, its network, its environment and its deployments.
+    pub async fn delete_app(self: &Arc<Self>, id: ShortId) -> anyhow::Result<AppEntry> {
         let app = self.app(id).await?;
+        let _lock = self.lock_app(&app)?;
+        // Only a pipeline creates containers, so an app without deployments needs no Docker call.
+        if !self.store.deployments(id, 1).await?.is_empty() {
+            self.remove_app_resources(id).await?;
+        }
         if !self.store.delete_app(id).await? {
             return Err(not_found(id));
         }
+        self.publish().await;
         Ok(app)
     }
 
@@ -256,6 +279,13 @@ impl Platform {
     pub async fn deployments(&self, id: ShortId) -> anyhow::Result<Vec<DeploymentEntry>> {
         self.app(id).await?;
         self.store.deployments(id, DEPLOYMENT_LIST_LIMIT).await
+    }
+
+    pub async fn deployment(&self, id: ShortId) -> anyhow::Result<DeploymentEntry> {
+        self.store
+            .deployment(id)
+            .await?
+            .ok_or_else(|| not_found(id))
     }
 
     async fn check_request(&self, request: &AppRequest) -> anyhow::Result<()> {
@@ -370,6 +400,7 @@ fn docker_runtime(endpoint: &str) -> anyhow::Result<DockerRuntime> {
 mod tests {
     use super::*;
     use r3v3rs3_api::platform::{AppSource, AppSpec, LOCAL_TARGET};
+    use std::time::Duration;
 
     pub(super) struct TempDir(std::path::PathBuf);
 
@@ -379,16 +410,18 @@ mod tests {
         }
     }
 
-    async fn platform() -> anyhow::Result<(Platform, TempDir)> {
+    pub(super) async fn platform() -> anyhow::Result<(Arc<Platform>, TempDir)> {
         // These tests read no commands.
         let (command, _) = mpsc::channel(1);
-        platform_with(&PlatformConfig::default(), command).await
+        let (platform, _, dir) = platform_with(&PlatformConfig::default(), command).await?;
+        Ok((Arc::new(platform), dir))
     }
 
+    /// A platform on a runtime in memory, with short deployment durations.
     pub(super) async fn platform_with(
         platform: &PlatformConfig,
         command: mpsc::Sender<ServerCommand>,
-    ) -> anyhow::Result<(Platform, TempDir)> {
+    ) -> anyhow::Result<(Platform, Arc<fake::FakeRuntime>, TempDir)> {
         let dir = TempDir(std::env::temp_dir().join(format!(
             "r3v3rs3-platform-{}",
             hex::encode(rand::random::<[u8; 8]>())
@@ -401,7 +434,17 @@ mod tests {
             },
             ..Default::default()
         };
-        Ok((Platform::open(&config, &dir.0, command).await?, dir))
+        let mut platform = Platform::open(&config, &dir.0, command).await?;
+        let runtime = Arc::new(fake::FakeRuntime::default());
+        platform.local = runtime.clone();
+        platform.timing = deploy::Timing {
+            health_timeout: Duration::from_secs(2),
+            health_interval: Duration::from_millis(20),
+            probe_timeout: Duration::from_secs(1),
+            drain: Duration::ZERO,
+            stop_timeout: Duration::ZERO,
+        };
+        Ok((platform, runtime, dir))
     }
 
     pub(super) fn request(name: &str) -> AppRequest {

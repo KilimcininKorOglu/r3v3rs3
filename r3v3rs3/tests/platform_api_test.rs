@@ -122,6 +122,7 @@ async fn an_editor_manages_apps_and_their_secrets_stay_hidden() -> anyhow::Resul
         let item = format!("{APPS}/{id}");
         assert_eq!(get(addr, &item, &viewer).await?["name"], "shop");
         check_env(addr, &admin, &viewer, &item).await?;
+        check_deploy_access(addr, &viewer, &scoped, &item).await?;
         assert_eq!(
             get(addr, &format!("{item}/deployments"), &viewer).await?,
             json!([])
@@ -199,6 +200,26 @@ async fn check_env(addr: SocketAddr, admin: &str, viewer: &str, item: &str) -> a
             {"key": "TOKEN", "secret": true},
         ])
     );
+    Ok(())
+}
+
+/// A deployment needs the Edit permission, and an unknown deployment is not found.
+async fn check_deploy_access(
+    addr: SocketAddr,
+    viewer: &str,
+    scoped: &str,
+    item: &str,
+) -> anyhow::Result<()> {
+    let deploy = format!("{item}/deploy");
+    for cookie in [viewer, scoped] {
+        let (status, _) = send(addr, Method::POST, &deploy, cookie, None).await?;
+        assert_eq!(status, 403);
+    }
+    let (status, body) = send(addr, Method::GET, "/api/deployments/bcd-fgh", viewer, None).await?;
+    assert_eq!(status, 404, "{body}");
+    let rollback = "/api/deployments/bcd-fgh/rollback";
+    let (status, _) = send(addr, Method::POST, rollback, viewer, None).await?;
+    assert_eq!(status, 403);
     Ok(())
 }
 

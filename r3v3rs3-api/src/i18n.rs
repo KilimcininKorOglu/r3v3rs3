@@ -228,6 +228,10 @@ mod tests {
             Error::PlatformInCluster,
             Error::PlatformFailed,
             Error::AppNameExists { name: text() },
+            Error::AppBusy { name: text() },
+            Error::RollbackUnavailable {
+                id: "abc".parse().unwrap(),
+            },
             Error::AcmeAccountCreationFailed,
             Error::AcmeUnsupportedChallenge { challenge: text() },
             Error::AcmeIdentifiersMissing,
