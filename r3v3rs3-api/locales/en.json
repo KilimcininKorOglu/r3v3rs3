@@ -267,6 +267,7 @@
   "error.invalid_circuit_breaker": "Circuit breaker needs a failure ratio from 1 to 100, at least one minimum request, and a window and an open duration above zero.",
   "error.invalid_client_ca_cert": "Client CA certificate must be a root certificate: {id}",
   "error.invalid_client_cert": "Upstream client certificate must be a client certificate with a private key: {id}",
+  "error.invalid_container_spec": "Invalid container settings: {reason}",
   "error.invalid_discovery_config": "Invalid service discovery settings: {reason}",
   "error.invalid_fixed_status": "Fixed response status must be 200, 400, 403, 404, 410, 429, 451, 500, 502 or 503: {status}",
   "error.invalid_header_name": "Invalid header name: {name}",

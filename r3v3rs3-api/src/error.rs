@@ -98,6 +98,9 @@ pub enum Error {
     #[error("invalid service discovery settings: {reason}")]
     InvalidDiscoveryConfig { reason: String },
 
+    #[error("invalid container settings: {reason}")]
+    InvalidContainerSpec { reason: String },
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 

@@ -13,5 +13,6 @@ pub mod kv;
 pub mod log;
 pub mod notify;
 pub mod proxy;
+pub mod runtime;
 pub mod server;
 pub mod sessions;

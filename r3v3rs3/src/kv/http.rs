@@ -159,7 +159,7 @@ pub async fn read_json<T: DeserializeOwned>(response: Response<Incoming>) -> any
     Ok(serde_json::from_slice(&read_body(response).await?)?)
 }
 
-async fn read_body(response: Response<Incoming>) -> anyhow::Result<Bytes> {
+pub async fn read_body(response: Response<Incoming>) -> anyhow::Result<Bytes> {
     let body = Limited::new(response.into_body(), MAX_BODY_SIZE).collect();
     let body = tokio::time::timeout(RESPONSE_TIMEOUT, body)
         .await

@@ -223,6 +223,7 @@ mod tests {
                 id: "abc".parse().unwrap(),
             },
             Error::InvalidDiscoveryConfig { reason: text() },
+            Error::InvalidContainerSpec { reason: text() },
             Error::AcmeAccountCreationFailed,
             Error::AcmeUnsupportedChallenge { challenge: text() },
             Error::AcmeIdentifiersMissing,

@@ -1,4 +1,4 @@
-.PHONY: all build release webui webui-release test test-api test-server test-acme-pebble test-discovery-e2e test-cluster-e2e lint fmt fmt-check check run clean cdn-snapshot
+.PHONY: all build release webui webui-release test test-api test-server test-acme-pebble test-discovery-e2e test-cluster-e2e test-runtime-docker lint fmt fmt-check check run clean cdn-snapshot
 
 CARGO ?= cargo
 TRUNK ?= trunk
@@ -57,6 +57,9 @@ test-discovery-e2e:
 
 # Runs the cluster end-to-end tests against etcd and Consul in Docker, then removes the containers.
 # The nodes use a restricted etcd user and a restricted Consul token, like the cluster guide.
+test-runtime-docker:
+	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test runtime_docker_test -- --ignored
+
 test-cluster-e2e:
 	$(DISCOVERY_COMPOSE) up -d --wait consul etcd && \
 		CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test cluster_e2e_test -- --ignored; \

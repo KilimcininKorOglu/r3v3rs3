@@ -267,6 +267,7 @@
   "error.invalid_circuit_breaker": "Circuit breaker için hata oranı 1 ile 100 arasında, minimum request sayısı en az 1, zaman penceresi ve açık kalma süresi sıfırdan büyük olmalıdır.",
   "error.invalid_client_ca_cert": "Client CA sertifikası root sertifika olmalıdır: {id}",
   "error.invalid_client_cert": "Upstream client sertifikası, private key'i olan bir client sertifikası olmalıdır: {id}",
+  "error.invalid_container_spec": "Container ayarları geçersiz: {reason}",
   "error.invalid_discovery_config": "Servis keşfi ayarları geçersiz: {reason}",
   "error.invalid_fixed_status": "Sabit response status değeri 200, 400, 403, 404, 410, 429, 451, 500, 502 veya 503 olmalıdır: {status}",
   "error.invalid_header_name": "Geçersiz header adı: {name}",
