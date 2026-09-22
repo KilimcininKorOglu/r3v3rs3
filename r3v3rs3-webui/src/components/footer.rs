@@ -1,9 +1,10 @@
-use crate::{API_ENDPOINT, i18n::use_locale, pages::Route};
+use crate::{API_ENDPOINT, i18n::use_locale, pages::Route, store::SessionStore};
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use serde_derive::Deserialize;
 use yew::prelude::*;
 use yew_router::prelude::*;
+use yewdux::prelude::*;
 
 const REPOSITORY_URL: &str = "https://github.com/KilimcininKorOglu/r3v3rs3";
 const DOCS_URL_EN: &str = "https://r3v3rs3.keremgok.tr/";
@@ -17,20 +18,26 @@ struct AppVersion {
 }
 
 /// Shows the server version and the project links. The version comes from `/api/app_info`,
-/// which requires a session, so the footer stays empty on the login page.
+/// which requires a session, so the footer stays empty until the session loads and on the login
+/// page.
 #[function_component(Footer)]
 pub fn footer() -> Html {
     let locale = use_locale();
     let is_login = use_route::<Route>() == Some(Route::Login);
+    let (session, _) = use_store::<SessionStore>();
     let version = use_state(|| Option::<String>::None);
+    let signed_in = session.info.is_some();
 
     let version_cloned = version.clone();
-    use_effect_with(is_login, move |is_login| {
+    use_effect_with(signed_in, move |signed_in| {
         version_cloned.set(None);
-        if !*is_login {
+        if *signed_in {
             wasm_bindgen_futures::spawn_local(async move {
-                if let Ok(info) = get_app_version().await {
-                    version_cloned.set(Some(info.version));
+                match get_app_version().await {
+                    Ok(info) => version_cloned.set(Some(info.version)),
+                    Err(err) => web_sys::console::error_1(
+                        &format!("the server version is not readable: {err}").into(),
+                    ),
                 }
             });
         }

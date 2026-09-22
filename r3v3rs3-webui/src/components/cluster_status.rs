@@ -1,5 +1,8 @@
 use crate::{
-    API_ENDPOINT, components::data_list::status_badge, i18n::use_locale, store::ClusterStore,
+    API_ENDPOINT,
+    components::data_list::status_badge,
+    i18n::use_locale,
+    store::{ClusterStore, SessionStore},
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::cluster::{ClusterState, ClusterStatus};
@@ -9,20 +12,27 @@ use yewdux::prelude::*;
 
 /// A warning on every page while this node serves the last state without the cluster store.
 ///
-/// The banner reads the status again on each page change, so a status that the login page could
-/// not read shows after the login.
+/// The banner reads the status again on each page change while the client has a session. Without
+/// a session the admin API refuses the request, so the banner waits for the login.
 #[function_component(ClusterBanner)]
 pub fn cluster_banner() -> Html {
     let locale = use_locale();
     let (store, dispatch) = use_store::<ClusterStore>();
+    let (session, _) = use_store::<SessionStore>();
     let path = use_location().map(|location| location.path().to_string());
+    let signed_in = session.info.is_some();
 
-    use_effect_with(path, move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(status) = get_status().await {
-                dispatch.set(ClusterStore { status });
-            }
-        });
+    use_effect_with((path, signed_in), move |(_, signed_in)| {
+        if *signed_in {
+            wasm_bindgen_futures::spawn_local(async move {
+                match get_status().await {
+                    Ok(status) => dispatch.set(ClusterStore { status }),
+                    Err(err) => web_sys::console::error_1(
+                        &format!("the cluster status is not readable: {err}").into(),
+                    ),
+                }
+            });
+        }
     });
 
     if store.status.state != ClusterState::Degraded {
