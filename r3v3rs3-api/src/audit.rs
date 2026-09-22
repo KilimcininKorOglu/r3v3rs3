@@ -47,10 +47,12 @@ pub enum AuditAction {
     UpdateAppEnv,
     DeployApp,
     RollbackApp,
+    SetAppGitToken,
+    DeleteAppGitToken,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 30] = [
+    pub const ALL: [AuditAction; 32] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -81,6 +83,8 @@ impl AuditAction {
         Self::UpdateAppEnv,
         Self::DeployApp,
         Self::RollbackApp,
+        Self::SetAppGitToken,
+        Self::DeleteAppGitToken,
     ];
 }
 

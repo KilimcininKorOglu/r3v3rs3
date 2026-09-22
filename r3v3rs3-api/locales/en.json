@@ -101,6 +101,8 @@
   "audit.action_refresh_cdn_ranges": "Refresh CDN IP ranges",
   "audit.action_reset_port": "Reset port",
   "audit.action_rollback_app": "Roll back app",
+  "audit.action_set_app_git_token": "Set app Git token",
+  "audit.action_delete_app_git_token": "Delete app Git token",
   "audit.action_update_access_list": "Update access list",
   "audit.action_update_account": "Update account",
   "audit.action_update_acme": "Update ACME request",

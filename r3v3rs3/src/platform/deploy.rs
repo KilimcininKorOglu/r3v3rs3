@@ -548,7 +548,7 @@ mod tests {
         runtime: Arc<FakeRuntime>,
         fetcher: Arc<FakeFetcher>,
         app: AppEntry,
-        _dir: TempDir,
+        dir: TempDir,
     }
 
     /// A platform with the image app `shop`, whose container answers its health check.
@@ -573,7 +573,7 @@ mod tests {
             runtime,
             fetcher,
             app,
-            _dir: dir,
+            dir,
         })
     }
 
@@ -619,7 +619,8 @@ mod tests {
             setup.fetcher.state().fetched,
             [(
                 "https://git.example.com/team/site.git".to_string(),
-                "release".to_string()
+                "release".to_string(),
+                None
             )]
         );
         let state = setup.runtime.state();
@@ -651,6 +652,53 @@ mod tests {
                 .join(deployment.id.to_string())
                 .exists()
         );
+        Ok(())
+    }
+
+    /// The tokens of the fetches, in their order.
+    fn fetched_tokens(setup: &Setup) -> Vec<Option<String>> {
+        let state = setup.fetcher.state();
+        state
+            .fetched
+            .iter()
+            .map(|(_, _, token)| token.clone())
+            .collect()
+    }
+
+    const TOKEN: &str = "ghp_s3cr3tT0ken";
+
+    /// Whether the database file holds `needle` in plain text.
+    fn database_contains(setup: &Setup, needle: &str) -> anyhow::Result<bool> {
+        let database = std::fs::read(setup.dir.0.join(super::super::DATABASE_FILE))?;
+        let needle = needle.as_bytes();
+        Ok(database.windows(needle.len()).any(|w| w == needle))
+    }
+
+    #[tokio::test]
+    async fn a_git_token_is_one_word_of_printable_ascii() -> anyhow::Result<()> {
+        let setup = setup_with(git_request()?).await?;
+        for invalid in ["", "two words", "line\nbreak", &"x".repeat(4097)] {
+            let result = setup.platform.set_git_token(setup.app.id, invalid).await;
+            let err = result.unwrap_err().downcast::<Error>()?;
+            assert!(matches!(err, Error::InvalidContainerSpec { .. }));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_git_token_reaches_only_the_clone() -> anyhow::Result<()> {
+        let setup = setup_with(git_request()?).await?;
+        let app = setup.platform.set_git_token(setup.app.id, TOKEN).await?;
+        assert!(app.git_token_set);
+        assert!(!serde_json::to_string(&app)?.contains(TOKEN));
+        // The database holds only the sealed token.
+        assert!(!database_contains(&setup, TOKEN)?);
+        deploy(&setup).await?;
+
+        let app = setup.platform.delete_git_token(setup.app.id).await?;
+        assert!(!app.git_token_set);
+        deploy(&setup).await?;
+        assert_eq!(fetched_tokens(&setup), [Some(TOKEN.to_string()), None]);
         Ok(())
     }
 

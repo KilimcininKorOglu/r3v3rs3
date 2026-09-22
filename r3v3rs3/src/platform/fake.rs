@@ -52,8 +52,8 @@ pub const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 pub struct FetchState {
     /// Every fetch fails with this error.
     pub error: Option<String>,
-    /// The repository and the branch of every fetch.
-    pub fetched: Vec<(String, String)>,
+    /// The repository, the branch and the token of every fetch.
+    pub fetched: Vec<(String, String, Option<String>)>,
 }
 
 /// A source fetcher that writes a checkout with `.git` and `app/Dockerfile`.
@@ -75,7 +75,7 @@ impl SourceFetcher for FakeFetcher {
         &self,
         repository: &RepoUrl,
         branch: &GitRef,
-        _: Option<&str>,
+        token: Option<&str>,
         dest: &Path,
     ) -> anyhow::Result<String> {
         {
@@ -83,9 +83,12 @@ impl SourceFetcher for FakeFetcher {
             if let Some(error) = &state.error {
                 bail!("git failed: {error}");
             }
-            state
-                .fetched
-                .push((repository.to_string(), branch.to_string()));
+            let fetch = (
+                repository.to_string(),
+                branch.to_string(),
+                token.map(str::to_string),
+            );
+            state.fetched.push(fetch);
         }
         std::fs::create_dir_all(dest.join(".git"))?;
         std::fs::create_dir_all(dest.join("app"))?;

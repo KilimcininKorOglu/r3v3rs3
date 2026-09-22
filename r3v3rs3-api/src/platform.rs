@@ -200,10 +200,26 @@ pub struct AppEntry {
     #[schema(value_type = String)]
     pub target: ShortId,
     pub spec: AppSpec,
+    /// Whether the app has a Git token. The admin API never returns the token.
+    #[serde(default)]
+    pub git_token_set: bool,
     /// The Unix time in milliseconds.
     pub created_at: u64,
     /// The Unix time in milliseconds.
     pub updated_at: u64,
+}
+
+/// The access token that clones the private repository of a Git app.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GitTokenRequest {
+    pub token: String,
+}
+
+/// The token stays out of debug output and logs.
+impl std::fmt::Debug for GitTokenRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitTokenRequest").finish_non_exhaustive()
+    }
 }
 
 /// One environment variable of an app. The admin API does not return the value of a secret

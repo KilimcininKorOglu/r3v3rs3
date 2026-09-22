@@ -87,6 +87,8 @@ Uygulamanın, domain'lerinin veya environment değişkenlerinin değişikliği s
 | `context` | `.` | Docker'ın build context olarak aldığı repo dizini. |
 | `dockerfile` | `Dockerfile` | `context` dizinine göre Dockerfile yolu. |
 
+Private bir repo bir access token gerektirir. Örnekler: reponun içeriğini okuma izni olan bir GitHub fine-grained token'ı, veya `read_repository` scope'u olan bir GitLab ya da Gitea token'ı. `PUT /api/apps/{id}/git_token`, `{"token": "..."}` gövdesiyle token'ı ayarlar. `DELETE /api/apps/{id}/git_token` token'ı siler. r3v3rs3 token'ı `platform.key` ile şifreler. Yönetim API'si token'ı hiçbir zaman döndürmez, uygulamada yalnız `"git_token_set": true` görünür. git token'ı `x-access-token` kullanıcı adıyla HTTP basic authentication olarak alır. Token URL'de veya komut satırında yer almaz, git'e bir environment değişkeniyle ulaşır.
+
 r3v3rs3'ü çalıştıran sunucuda `git` binary'si bulunmalıdır. r3v3rs3, `git`'i host'un yapılandırması ve hook'lar olmadan, yalnız HTTPS üzerinden çalıştırır. Build context'inde `.git` dizini yer almaz. Context'teki bir sembolik link link olarak kalır. Bu yüzden bir build, repo dışındaki bir dosyayı okuyamaz. Context en fazla 512 MiB olabilir.
 
 Docker image'ı klasik builder ile build eder. Aynı anda iki build çalışır, diğerleri sırada bekler. Builder, multi-stage bir Dockerfile'ın stage'lerini build cache'i olarak saklar. Bu yüzden aynı uygulamanın sonraki build'i daha hızlı biter. `docker image prune` bu cache'i siler.
@@ -149,9 +151,11 @@ Domain'i olmayan bir uygulama proxy almaz. Container'ı olmayan veya durmuş ola
 | `DELETE /api/apps/{id}` | Edit | Bir uygulamayı container'larıyla birlikte siler. |
 | `GET /api/apps/{id}/env` | Edit | Secret değerleri olmadan environment değişkenleri. |
 | `PUT /api/apps/{id}/env` | Edit | Environment değişkenlerini değiştirir. |
+| `PUT /api/apps/{id}/git_token` | Edit | Private bir reponun token'ını ayarlar. |
+| `DELETE /api/apps/{id}/git_token` | Edit | Token'ı siler. |
 | `GET /api/apps/{id}/deployments` | Read | Bir uygulamanın son 100 deployment'ı. |
 | `POST /api/apps/{id}/deploy` | Edit | Bir deployment başlatır. |
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
 | `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |
 
-Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). Audit log, uygulamanın her değişikliğini, her deployment'ı ve her rollback'i kaydeder. Environment değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez.
+Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). Audit log, uygulamanın her değişikliğini, her deployment'ı ve her rollback'i kaydeder. Environment değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token değişikliğinin özeti yalnız uygulamayı adlandırır.

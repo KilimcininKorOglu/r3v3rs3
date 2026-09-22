@@ -55,7 +55,30 @@ const SCHEMA: &[&str] = &[
         finished_at  INTEGER
     )",
     "CREATE INDEX IF NOT EXISTS deployments_app ON deployments (app_id, started_at)",
+    "CREATE TABLE IF NOT EXISTS app_secrets (
+        app_id TEXT NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+        name   TEXT NOT NULL,
+        value  BLOB NOT NULL,
+        PRIMARY KEY (app_id, name)
+    )",
 ];
+
+/// The secret of an app that holds its Git token.
+pub const GIT_TOKEN: &str = "git_token";
+
+/// The query of the app entries, followed by `$rest`. A literal, because sqlx takes only a
+/// static query.
+macro_rules! select_apps {
+    ($rest:literal) => {
+        concat!(
+            "SELECT id, name, target_id, spec, created_at, updated_at,
+                EXISTS (SELECT 1 FROM app_secrets s WHERE s.app_id = apps.id
+                    AND s.name = 'git_token') AS git_token_set
+            FROM apps ",
+            $rest
+        )
+    };
+}
 
 /// One stored environment variable. The value is sealed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,22 +167,50 @@ impl PlatformStore {
     }
 
     pub async fn apps(&self) -> anyhow::Result<Vec<AppEntry>> {
-        let rows = sqlx::query(
-            "SELECT id, name, target_id, spec, created_at, updated_at FROM apps ORDER BY name",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query(select_apps!("ORDER BY name"))
+            .fetch_all(&self.pool)
+            .await?;
         rows.iter().map(app_of).collect()
     }
 
     pub async fn app(&self, id: ShortId) -> anyhow::Result<Option<AppEntry>> {
-        let row = sqlx::query(
-            "SELECT id, name, target_id, spec, created_at, updated_at FROM apps WHERE id = ?",
-        )
-        .bind(id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query(select_apps!("WHERE id = ?"))
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
         row.as_ref().map(app_of).transpose()
+    }
+
+    /// The sealed value of a secret of an app.
+    pub async fn secret(&self, app: ShortId, name: &str) -> anyhow::Result<Option<Vec<u8>>> {
+        let row = sqlx::query("SELECT value FROM app_secrets WHERE app_id = ? AND name = ?")
+            .bind(app.to_string())
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.try_get("value")).transpose()?)
+    }
+
+    pub async fn set_secret(&self, app: ShortId, name: &str, sealed: &[u8]) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO app_secrets (app_id, name, value) VALUES (?, ?, ?)
+            ON CONFLICT (app_id, name) DO UPDATE SET value = excluded.value",
+        )
+        .bind(app.to_string())
+        .bind(name)
+        .bind(sealed)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_secret(&self, app: ShortId, name: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM app_secrets WHERE app_id = ? AND name = ?")
+            .bind(app.to_string())
+            .bind(name)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn insert_app(&self, app: &AppEntry) -> anyhow::Result<Write> {
@@ -469,6 +520,7 @@ fn app_of(row: &SqliteRow) -> anyhow::Result<AppEntry> {
         name: row.try_get::<&str, _>("name")?.parse::<AppName>()?,
         target: id_of(row, "target_id")?,
         spec,
+        git_token_set: row.try_get("git_token_set")?,
         created_at: time_of(row, "created_at")?,
         updated_at: time_of(row, "updated_at")?,
     })
@@ -560,9 +612,45 @@ mod tests {
                 restart: Default::default(),
                 limits: Default::default(),
             },
+            git_token_set: false,
             created_at: 10,
             updated_at: 10,
         }
+    }
+
+    #[tokio::test]
+    async fn a_second_secret_value_replaces_the_first() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let shop = app("abc-def", "shop");
+        store.insert_app(&shop).await?;
+        store.set_secret(shop.id, GIT_TOKEN, &[1]).await?;
+        store.set_secret(shop.id, GIT_TOKEN, &[2]).await?;
+        assert_eq!(store.secret(shop.id, GIT_TOKEN).await?, Some(vec![2]));
+        assert!(store.app(shop.id).await?.context("app")?.git_token_set);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_deleted_secret_is_gone() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let shop = app("abc-def", "shop");
+        store.insert_app(&shop).await?;
+        store.set_secret(shop.id, GIT_TOKEN, &[1]).await?;
+        store.delete_secret(shop.id, GIT_TOKEN).await?;
+        assert_eq!(store.secret(shop.id, GIT_TOKEN).await?, None);
+        assert!(!store.apps().await?[0].git_token_set);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn deleting_an_app_removes_its_secrets() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let shop = app("abc-def", "shop");
+        store.insert_app(&shop).await?;
+        store.set_secret(shop.id, GIT_TOKEN, &[3]).await?;
+        store.delete_app(shop.id).await?;
+        assert_eq!(store.secret(shop.id, GIT_TOKEN).await?, None);
+        Ok(())
     }
 
     #[tokio::test]

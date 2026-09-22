@@ -101,6 +101,8 @@
   "audit.action_refresh_cdn_ranges": "CDN IP aralıklarını yenileme",
   "audit.action_reset_port": "Port sıfırlama",
   "audit.action_rollback_app": "Uygulamayı rollback etme",
+  "audit.action_set_app_git_token": "Uygulamanın Git token'ını ayarlama",
+  "audit.action_delete_app_git_token": "Uygulamanın Git token'ını silme",
   "audit.action_update_access_list": "Erişim listesi güncelleme",
   "audit.action_update_account": "Hesap güncelleme",
   "audit.action_update_acme": "ACME kaydı güncelleme",

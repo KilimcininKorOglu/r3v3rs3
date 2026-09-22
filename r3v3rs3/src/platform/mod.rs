@@ -30,7 +30,7 @@ use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use store::{PlatformStore, StoredEnv, Write};
+use store::{GIT_TOKEN, PlatformStore, StoredEnv, Write};
 use tokio::sync::{Mutex, Semaphore, mpsc};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tracing::error;
@@ -46,6 +46,9 @@ pub const DEPLOYMENT_LIST_LIMIT: u32 = 100;
 
 /// The longest value of an environment variable in bytes.
 const MAX_ENV_VALUE_LENGTH: usize = 64 * 1024;
+
+/// The longest Git token.
+const MAX_GIT_TOKEN_LENGTH: usize = 4096;
 
 /// The state of the platform after the start of the server.
 #[derive(Clone, Default)]
@@ -183,6 +186,7 @@ impl Platform {
             name: request.name,
             target: request.target,
             spec: request.spec,
+            git_token_set: false,
             created_at: now,
             updated_at: now,
         };
@@ -217,6 +221,7 @@ impl Platform {
             name: request.name,
             target: request.target,
             spec: request.spec,
+            git_token_set: current.git_token_set,
             created_at: current.created_at,
             updated_at: now,
         };
@@ -288,6 +293,33 @@ impl Platform {
         self.store.replace_env(id, &stored).await
     }
 
+    /// Sets the token that clones the private repository of an app, and returns the app.
+    pub async fn set_git_token(&self, id: ShortId, token: &str) -> anyhow::Result<AppEntry> {
+        self.app(id).await?;
+        check_git_token(token)?;
+        let sealed = self.keys.seal(&git_token_aad(id), token.as_bytes())?;
+        self.store.set_secret(id, GIT_TOKEN, &sealed).await?;
+        self.app(id).await
+    }
+
+    /// Deletes the Git token of an app, and returns the app.
+    pub async fn delete_git_token(&self, id: ShortId) -> anyhow::Result<AppEntry> {
+        self.app(id).await?;
+        self.store.delete_secret(id, GIT_TOKEN).await?;
+        self.app(id).await
+    }
+
+    /// The Git token of an app, opened for one clone.
+    async fn git_token(&self, id: ShortId) -> anyhow::Result<Option<String>> {
+        let Some(sealed) = self.store.secret(id, GIT_TOKEN).await? else {
+            return Ok(None);
+        };
+        let token = self.keys.open(&git_token_aad(id), &sealed)?;
+        Ok(Some(
+            String::from_utf8(token).context("the Git token is not UTF-8")?,
+        ))
+    }
+
     /// The latest deployments of an app, the newest first.
     pub async fn deployments(&self, id: ShortId) -> anyhow::Result<Vec<DeploymentEntry>> {
         self.app(id).await?;
@@ -343,6 +375,26 @@ impl Platform {
 /// another row does not open.
 fn env_aad(app: ShortId, key: &str) -> String {
     format!("app/{app}/env/{key}")
+}
+
+fn git_token_aad(app: ShortId) -> String {
+    format!("app/{app}/secret/{GIT_TOKEN}")
+}
+
+/// A token is one word of printable ASCII, because git sends it in an HTTP header.
+fn check_git_token(token: &str) -> anyhow::Result<()> {
+    let valid = !token.is_empty()
+        && token.len() <= MAX_GIT_TOKEN_LENGTH
+        && token.chars().all(|c| c.is_ascii_graphic());
+    if valid {
+        Ok(())
+    } else {
+        Err(Error::InvalidContainerSpec {
+            reason: "a Git token is up to 4096 printable ASCII characters without spaces"
+                .to_string(),
+        }
+        .into())
+    }
 }
 
 fn check_env_value(key: &str, value: &str) -> anyhow::Result<()> {
@@ -415,7 +467,7 @@ mod tests {
     use r3v3rs3_api::platform::{AppSource, AppSpec, LOCAL_TARGET};
     use std::time::Duration;
 
-    pub(super) struct TempDir(std::path::PathBuf);
+    pub(super) struct TempDir(pub(super) std::path::PathBuf);
 
     impl Drop for TempDir {
         fn drop(&mut self) {

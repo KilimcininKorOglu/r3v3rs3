@@ -19,6 +19,7 @@ use common::{
 
 const APPS: &str = "/api/apps";
 const SECRET: &str = "s3cr3t-token-value";
+const GIT_TOKEN: &str = "ghp_g1tT0kenValue";
 
 /// A config directory that is removed after the test.
 struct TempDir(PathBuf);
@@ -99,52 +100,62 @@ async fn an_editor_manages_apps_and_their_secrets_stay_hidden() -> anyhow::Resul
         .account("viewer", "viewer-secret", Role::Viewer, None)
         .build();
 
-    with_admin(&dir.0, storage, |addr| async move {
-        let admin = session_cookie(addr, "admin", "admin-secret").await?;
-        let scoped = session_cookie(addr, "scoped", "scoped-secret").await?;
-        // The third sign-in waits for the login rate limit.
-        let viewer = login_when_allowed(addr, "viewer", "viewer-secret").await?;
-
-        let targets = get(addr, "/api/targets", &viewer).await?;
-        assert_eq!(
-            targets,
-            json!([{"id": "local", "name": "local", "kind": "local"}])
-        );
-
-        // An account with a proxy list gets no access, and a viewer only reads.
-        let (status, _) = send(addr, Method::GET, APPS, &scoped, None).await?;
-        assert_eq!(status, 403);
-        let body = Some(app("shop", "local"));
-        let (status, _) = send(addr, Method::POST, APPS, &viewer, body).await?;
-        assert_eq!(status, 403);
-
-        let id = check_app_writes(addr, &admin).await?;
-        let item = format!("{APPS}/{id}");
-        assert_eq!(get(addr, &item, &viewer).await?["name"], "shop");
-        check_env(addr, &admin, &viewer, &item).await?;
-        check_deploy_access(addr, &viewer, &scoped, &item).await?;
-        assert_eq!(
-            get(addr, &format!("{item}/deployments"), &viewer).await?,
-            json!([])
-        );
-
-        let (status, _) = send(addr, Method::DELETE, &item, &viewer, None).await?;
-        assert_eq!(status, 403);
-        let (status, _) = send(addr, Method::DELETE, &item, &admin, None).await?;
-        assert_eq!(status, 200);
-        let (status, _) = send(addr, Method::DELETE, &item, &admin, None).await?;
-        assert_eq!(status, 404);
-        assert_eq!(get(addr, APPS, &admin).await?, json!([]));
-
-        check_audit(addr, &admin, &id).await
-    })
-    .await?;
+    with_admin(&dir.0, storage, manage_apps).await?;
 
     // The key of the environment values is readable only by its owner.
     let mode = std::fs::metadata(dir.0.join("platform.key"))?
         .permissions()
         .mode();
     assert_eq!(mode & 0o777, 0o600);
+    Ok(())
+}
+
+/// Signs in the three accounts and checks what each may do with an app.
+async fn manage_apps(addr: SocketAddr) -> anyhow::Result<()> {
+    let admin = session_cookie(addr, "admin", "admin-secret").await?;
+    let scoped = session_cookie(addr, "scoped", "scoped-secret").await?;
+    // The third sign-in waits for the login rate limit.
+    let viewer = login_when_allowed(addr, "viewer", "viewer-secret").await?;
+
+    check_read_access(addr, &viewer, &scoped).await?;
+    let id = check_app_writes(addr, &admin).await?;
+    let item = format!("{APPS}/{id}");
+    check_env(addr, &admin, &viewer, &item).await?;
+    check_git_token(addr, &admin, &viewer, &item).await?;
+    check_deploy_access(addr, &viewer, &scoped, &item).await?;
+    check_delete(addr, &admin, &viewer, &item).await?;
+    check_audit(addr, &admin, &id).await
+}
+
+/// A viewer reads the targets but adds no app, and an account with a proxy list gets no access.
+async fn check_read_access(addr: SocketAddr, viewer: &str, scoped: &str) -> anyhow::Result<()> {
+    let targets = get(addr, "/api/targets", viewer).await?;
+    assert_eq!(
+        targets,
+        json!([{"id": "local", "name": "local", "kind": "local"}])
+    );
+    let (status, _) = send(addr, Method::GET, APPS, scoped, None).await?;
+    assert_eq!(status, 403);
+    let body = Some(app("shop", "local"));
+    let (status, _) = send(addr, Method::POST, APPS, viewer, body).await?;
+    assert_eq!(status, 403);
+    Ok(())
+}
+
+/// Only an editor deletes the app, and a second deletion finds no app.
+async fn check_delete(
+    addr: SocketAddr,
+    admin: &str,
+    viewer: &str,
+    item: &str,
+) -> anyhow::Result<()> {
+    let (status, _) = send(addr, Method::DELETE, item, viewer, None).await?;
+    assert_eq!(status, 403);
+    let (status, _) = send(addr, Method::DELETE, item, admin, None).await?;
+    assert_eq!(status, 200);
+    let (status, _) = send(addr, Method::DELETE, item, admin, None).await?;
+    assert_eq!(status, 404);
+    assert_eq!(get(addr, APPS, admin).await?, json!([]));
     Ok(())
 }
 
@@ -203,7 +214,33 @@ async fn check_env(addr: SocketAddr, admin: &str, viewer: &str, item: &str) -> a
     Ok(())
 }
 
-/// A deployment needs the Edit permission, and an unknown deployment is not found.
+/// The Git token needs the Edit permission, and no response returns it.
+async fn check_git_token(
+    addr: SocketAddr,
+    admin: &str,
+    viewer: &str,
+    item: &str,
+) -> anyhow::Result<()> {
+    let path = format!("{item}/git_token");
+    let body = json!({"token": GIT_TOKEN});
+    let (status, _) = send(addr, Method::PUT, &path, viewer, Some(body.clone())).await?;
+    assert_eq!(status, 403);
+    let (status, text) = send(addr, Method::PUT, &path, admin, Some(body)).await?;
+    assert_eq!(status, 200, "{text}");
+    assert!(!text.contains(GIT_TOKEN), "{text}");
+    assert_eq!(get(addr, item, viewer).await?["git_token_set"], true);
+
+    let spaced = Some(json!({"token": "two words"}));
+    let (status, _) = send(addr, Method::PUT, &path, admin, spaced).await?;
+    assert_eq!(status, 400);
+    let (status, text) = send(addr, Method::DELETE, &path, admin, None).await?;
+    assert_eq!(status, 200, "{text}");
+    assert_eq!(get(addr, item, viewer).await?["git_token_set"], false);
+    Ok(())
+}
+
+/// A viewer reads the app and its deployments, a deployment needs the Edit permission, and an
+/// unknown deployment is not found.
 async fn check_deploy_access(
     addr: SocketAddr,
     viewer: &str,
@@ -220,6 +257,9 @@ async fn check_deploy_access(
     let rollback = "/api/deployments/bcd-fgh/rollback";
     let (status, _) = send(addr, Method::POST, rollback, viewer, None).await?;
     assert_eq!(status, 403);
+    assert_eq!(get(addr, item, viewer).await?["name"], "shop");
+    let deployments = get(addr, &format!("{item}/deployments"), viewer).await?;
+    assert_eq!(deployments, json!([]));
     Ok(())
 }
 
@@ -233,11 +273,23 @@ async fn check_audit(addr: SocketAddr, admin: &str, id: &str) -> anyhow::Result<
         .collect::<Vec<_>>();
     assert_eq!(
         actions,
-        ["delete_app", "update_app_env", "update_app", "add_app"]
+        [
+            "delete_app",
+            "delete_app_git_token",
+            "set_app_git_token",
+            "update_app_env",
+            "update_app",
+            "add_app"
+        ]
     );
-    assert_eq!(entries[1]["summary"], "MODE, TOKEN");
+    assert_eq!(entries[1]["summary"], "shop");
+    assert_eq!(entries[3]["summary"], "MODE, TOKEN");
     assert!(entries.iter().all(|entry| entry["username"] == "admin"));
-    assert!(!Value::Array(entries).to_string().contains(SECRET));
+    let text = Value::Array(entries).to_string();
+    assert!(
+        !text.contains(SECRET) && !text.contains(GIT_TOKEN),
+        "{text}"
+    );
     Ok(())
 }
 

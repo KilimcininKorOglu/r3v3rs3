@@ -62,9 +62,15 @@ impl Platform {
     ) -> anyhow::Result<String> {
         tokio::fs::create_dir_all(dir).await?;
         let checkout = dir.join("src");
+        let token = self.git_token(app).await?;
         let sha = self
             .fetcher
-            .fetch(&source.repository, &source.branch, None, &checkout)
+            .fetch(
+                &source.repository,
+                &source.branch,
+                token.as_deref(),
+                &checkout,
+            )
             .await?;
         self.store.set_commit_sha(deployment, &sha).await?;
         let context = source.context.clone();

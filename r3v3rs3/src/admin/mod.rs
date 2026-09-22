@@ -234,6 +234,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     platform::delete_app
                 ))
                 .routes(routes!(platform::get_env, platform::put_env))
+                .routes(routes!(platform::put_git_token, platform::delete_git_token))
                 .routes(routes!(platform::list_deployments))
                 .routes(routes!(platform::deploy_app)),
         )

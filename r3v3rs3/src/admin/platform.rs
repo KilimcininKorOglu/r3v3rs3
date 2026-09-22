@@ -15,7 +15,10 @@ use r3v3rs3_api::{
     audit::AuditAction,
     error::Error,
     id::ShortId,
-    platform::{AppEntry, AppRequest, DeploymentEntry, DeploymentTrigger, EnvEntry, TargetEntry},
+    platform::{
+        AppEntry, AppRequest, DeploymentEntry, DeploymentTrigger, EnvEntry, GitTokenRequest,
+        TargetEntry,
+    },
 };
 use std::sync::Arc;
 use tracing::error;
@@ -233,6 +236,66 @@ pub async fn put_env(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(()))
+}
+
+/// Sets the token that clones the private repository of a Git app. The admin API never returns
+/// the token.
+#[utoipa::path(
+    put,
+    path = "/{id}/git_token",
+    tag = "platform",
+    operation_id = "set_app_git_token",
+    params(("id" = ShortId, Path, description = "App id.")),
+    request_body = GitTokenRequest,
+    responses((status = 200, description = "The app.", body = AppEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn put_git_token(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<GitTokenRequest>,
+) -> Result<Json<AppEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let app = platform
+        .set_git_token(id, &request.token)
+        .await
+        .map_err(platform_error)?;
+    // The summary names the app, never the token.
+    let record = AuditRecord::new(AuditAction::SetAppGitToken)
+        .id(id)
+        .summary(app.name.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(app))
+}
+
+/// Deletes the Git token of an app.
+#[utoipa::path(
+    delete,
+    path = "/{id}/git_token",
+    tag = "platform",
+    operation_id = "delete_app_git_token",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The app.", body = AppEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn delete_git_token(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AppEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let app = platform
+        .delete_git_token(id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeleteAppGitToken)
+        .id(id)
+        .summary(app.name.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(app))
 }
 
 /// Lists the latest deployments of an app, the newest first.
