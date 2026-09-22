@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod admin;
 pub mod args;
 pub mod audit;
+pub mod build;
 pub mod cdn;
 pub mod certs;
 pub mod clock;

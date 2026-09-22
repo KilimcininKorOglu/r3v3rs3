@@ -15,6 +15,7 @@ pub mod discovery;
 pub mod error;
 pub mod event;
 pub mod fixed_response;
+pub mod git;
 pub mod header_rules;
 pub mod i18n;
 pub mod id;
