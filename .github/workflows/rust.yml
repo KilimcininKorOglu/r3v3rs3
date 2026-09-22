@@ -34,7 +34,7 @@ jobs:
         run: cargo nextest run --all-features --no-fail-fast
       # The runner has a Docker Engine, so the Docker runtime runs against a real one.
       - name: Run the Docker runtime tests
-        run: cargo nextest run --all-features --no-fail-fast --run-ignored only -E 'binary(runtime_docker_test)'
+        run: cargo nextest run --all-features --no-fail-fast --run-ignored only -E 'binary(runtime_docker_test) | binary(platform_deploy_test)'
 
   lint:
     runs-on: ubuntu-24.04
