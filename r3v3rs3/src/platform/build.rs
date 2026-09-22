@@ -3,7 +3,7 @@
 //! old deployments are removed.
 
 use super::Platform;
-use crate::build::context_archive;
+use crate::build::{Revision, context_archive};
 use anyhow::Context as _;
 use r3v3rs3_api::container::ImageRef;
 use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
@@ -67,7 +67,7 @@ impl Platform {
             .fetcher
             .fetch(
                 &source.repository,
-                &source.branch,
+                Revision::Branch(&source.branch),
                 token.as_deref(),
                 &checkout,
             )

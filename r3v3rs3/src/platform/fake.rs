@@ -1,13 +1,13 @@
 //! A container runtime and a source fetcher in memory for the unit tests of the platform.
 
-use crate::build::SourceFetcher;
+use crate::build::{Revision, SourceFetcher};
 use crate::runtime::ContainerRuntime;
 use anyhow::bail;
 use r3v3rs3_api::container::{
     APP_LABEL, AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, ImageInfo,
     ImageRef, NetworkName,
 };
-use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
+use r3v3rs3_api::git::{RelPath, RepoUrl};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -74,7 +74,7 @@ impl SourceFetcher for FakeFetcher {
     async fn fetch(
         &self,
         repository: &RepoUrl,
-        branch: &GitRef,
+        revision: Revision<'_>,
         token: Option<&str>,
         dest: &Path,
     ) -> anyhow::Result<String> {
@@ -85,7 +85,7 @@ impl SourceFetcher for FakeFetcher {
             }
             let fetch = (
                 repository.to_string(),
-                branch.to_string(),
+                revision.as_str().to_string(),
                 token.map(str::to_string),
             );
             state.fetched.push(fetch);
@@ -94,7 +94,10 @@ impl SourceFetcher for FakeFetcher {
         std::fs::create_dir_all(dest.join("app"))?;
         std::fs::write(dest.join(".git/config"), "[core]\n")?;
         std::fs::write(dest.join("app/Dockerfile"), "FROM scratch\n")?;
-        Ok(COMMIT.into())
+        Ok(match revision {
+            Revision::Branch(_) => COMMIT.into(),
+            Revision::Commit(commit) => commit.to_string(),
+        })
     }
 }
 

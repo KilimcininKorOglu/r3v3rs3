@@ -76,6 +76,11 @@ checked_string!(
     RelPath,
     check_rel_path
 );
+checked_string!(
+    /// The full SHA-1 or SHA-256 name of a commit, in lowercase.
+    CommitSha,
+    check_commit_sha
+);
 
 impl GitRef {
     /// The branch `main`.
@@ -151,6 +156,18 @@ fn check_rel_path(value: &str) -> Result<(), Error> {
     }
 }
 
+fn check_commit_sha(value: &str) -> Result<(), Error> {
+    let valid = matches!(value.len(), 40 | 64)
+        && value
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
+    if valid {
+        Ok(())
+    } else {
+        Err(invalid(format!("invalid commit: {value}")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,6 +230,16 @@ mod tests {
         }
         for invalid in ["", "/etc/passwd", "../x", "a/../../b", "-f", "a b"] {
             assert!(invalid.parse::<RelPath>().is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn a_commit_is_a_full_lowercase_hash() {
+        let sha1 = "0123456789abcdef0123456789abcdef01234567";
+        assert!(sha1.parse::<CommitSha>().is_ok());
+        assert!(sha1.repeat(2)[..64].parse::<CommitSha>().is_ok());
+        for invalid in [&sha1[..39], &sha1.to_uppercase(), "--upload-pack=x", ""] {
+            assert!(invalid.parse::<CommitSha>().is_err(), "{invalid}");
         }
     }
 }

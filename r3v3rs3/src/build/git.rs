@@ -1,11 +1,12 @@
-//! Clones one branch of a repository with the `git` binary. Every operand is a validated type,
-//! and the process reads no configuration of the host, so a repository cannot run hooks or reach
-//! another protocol.
+//! Clones one branch or one commit of a repository with the `git` binary. Every operand is a
+//! validated type, and the process reads no configuration of the host, so a repository cannot run
+//! hooks or reach another protocol.
 
+use super::Revision;
 use anyhow::{Context as _, anyhow, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
-use r3v3rs3_api::git::{GitRef, RepoUrl};
+use r3v3rs3_api::git::{CommitSha, GitRef, RepoUrl};
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
@@ -20,19 +21,66 @@ const TOKEN_USER: &str = "x-access-token";
 /// The most characters of the `git` error output that a failure message carries.
 const MAX_ERROR_OUTPUT: usize = 2000;
 
-/// Clones the branch into `dest`, which must not exist, and returns the commit SHA.
+/// Checks out the revision into `dest`, which must not exist, and returns the commit SHA.
 pub async fn clone(
+    repository: &RepoUrl,
+    revision: Revision<'_>,
+    token: Option<&str>,
+    dest: &Path,
+) -> anyhow::Result<String> {
+    match revision {
+        Revision::Branch(branch) => clone_branch(repository, branch, token, dest).await?,
+        Revision::Commit(commit) => fetch_commit(repository, commit, token, dest).await?,
+    }
+    let sha = head(dest).await?;
+    if let Revision::Commit(commit) = revision
+        && sha != commit.as_str()
+    {
+        bail!("git checked out {sha} instead of {commit}");
+    }
+    Ok(sha)
+}
+
+async fn clone_branch(
     repository: &RepoUrl,
     branch: &GitRef,
     token: Option<&str>,
     dest: &Path,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<()> {
     let mut clone = git(token, dest.parent().context("the checkout has no parent")?);
     clone
         .args(["clone", "--depth", "1", "--single-branch", "--no-tags"])
         .args(["--branch", branch.as_str(), "--", repository.as_str()])
         .arg(dest);
     run(clone, CLONE_TIMEOUT).await?;
+    Ok(())
+}
+
+/// Fetches only the commit. The server must allow a fetch by commit, as GitHub, GitLab and Gitea
+/// do for a commit of a branch.
+async fn fetch_commit(
+    repository: &RepoUrl,
+    commit: &CommitSha,
+    token: Option<&str>,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    tokio::fs::create_dir_all(dest).await?;
+    let mut init = git(None, dest);
+    init.args(["init", "--quiet"]);
+    run(init, CLONE_TIMEOUT).await?;
+    let mut fetch = git(token, dest);
+    fetch
+        .args(["fetch", "--depth", "1", "--no-tags", "--"])
+        .args([repository.as_str(), commit.as_str()]);
+    run(fetch, CLONE_TIMEOUT).await?;
+    let mut checkout = git(None, dest);
+    checkout.args(["checkout", "--quiet", "--detach", "FETCH_HEAD"]);
+    run(checkout, CLONE_TIMEOUT).await?;
+    Ok(())
+}
+
+/// The commit SHA of the checkout.
+async fn head(dest: &Path) -> anyhow::Result<String> {
     let mut rev_parse = git(None, dest);
     rev_parse.args(["rev-parse", "HEAD"]);
     let sha = run(rev_parse, CLONE_TIMEOUT).await?;
@@ -149,11 +197,15 @@ mod tests {
     async fn a_failed_clone_reports_the_git_error() -> anyhow::Result<()> {
         let dir = temp_dir();
         let repository: RepoUrl = "https://127.0.0.1:9/owner/app.git".parse()?;
-        let err = clone(&repository, &"main".parse()?, None, &dir.0.join("src"))
-            .await
-            .unwrap_err();
-        let message = format!("{err:#}");
-        assert!(message.contains("git failed"), "{message}");
+        let branch = "main".parse()?;
+        let commit = "0123456789abcdef0123456789abcdef01234567".parse()?;
+        let revisions = [Revision::Branch(&branch), Revision::Commit(&commit)];
+        for (index, revision) in revisions.into_iter().enumerate() {
+            let dest = dir.0.join(index.to_string());
+            let err = clone(&repository, revision, None, &dest).await.unwrap_err();
+            let message = format!("{err:#}");
+            assert!(message.contains("git failed"), "{message}");
+        }
         Ok(())
     }
 }

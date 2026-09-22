@@ -5,6 +5,7 @@
 //! `unix:///var/run/docker.sock`. `make test-runtime-docker` runs it.
 
 use anyhow::{Context as _, bail, ensure};
+use r3v3rs3::build::{Revision, git};
 use r3v3rs3::kv::http::{ApiClient, RESPONSE_TIMEOUT};
 use r3v3rs3::runtime::ContainerRuntime;
 use r3v3rs3::runtime::docker::DockerRuntime;
@@ -33,6 +34,8 @@ const IMAGE: &str = "traefik/whoami:v1.10.3";
 /// The repository of the same app, with a multi-stage Dockerfile, at the tag of [`IMAGE`].
 const GIT_REPOSITORY: &str = "https://github.com/traefik/whoami.git";
 const GIT_TAG: &str = "v1.10.3";
+/// The commit of [`GIT_TAG`].
+const GIT_COMMIT: &str = "dec1ed84e37648285d4ddfae911344483c77906b";
 
 const DOMAIN: &str = "whoami.test";
 
@@ -100,6 +103,20 @@ async fn a_git_app_builds_its_image_and_deploys() -> anyhow::Result<()> {
         build_and_delete(&ctx, &id).await
     })
     .await
+}
+
+/// A rollback of a Compose app fetches the commit of the old deployment, which no branch names.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_commit_checks_out_without_its_branch() -> anyhow::Result<()> {
+    let dir = TempDir::new()?;
+    let dest = dir.0.join("src");
+    let repository = GIT_REPOSITORY.parse()?;
+    let commit = GIT_COMMIT.parse()?;
+    let sha = git::clone(&repository, Revision::Commit(&commit), None, &dest).await?;
+    ensure!(sha == GIT_COMMIT, "{sha}");
+    ensure!(dest.join("Dockerfile").is_file());
+    Ok(())
 }
 
 /// Starts a server with the platform, adds an app with `source` and runs `check` on it. The

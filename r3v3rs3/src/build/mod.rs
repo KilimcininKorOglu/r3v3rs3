@@ -4,20 +4,39 @@
 pub mod git;
 
 use anyhow::{Context as _, bail};
-use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
+use r3v3rs3_api::git::{CommitSha, GitRef, RelPath, RepoUrl};
 use std::path::Path;
 
 /// The largest build context. The context is held in memory while it is sent to Docker.
 pub const MAX_CONTEXT_BYTES: u64 = 512 << 20;
 
+/// The version of a repository that a checkout holds.
+#[derive(Debug, Clone, Copy)]
+pub enum Revision<'a> {
+    /// The newest commit of a branch or a tag.
+    Branch(&'a GitRef),
+    /// One commit, which a rollback repeats.
+    Commit(&'a CommitSha),
+}
+
+impl Revision<'_> {
+    /// The branch name or the commit SHA.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Branch(branch) => branch.as_str(),
+            Self::Commit(commit) => commit.as_str(),
+        }
+    }
+}
+
 /// Fetches the source of an app into a directory.
 #[async_trait::async_trait]
 pub trait SourceFetcher: Send + Sync {
-    /// Checks out the branch into `dest`, which must not exist, and returns the commit SHA.
+    /// Checks out the revision into `dest`, which must not exist, and returns the commit SHA.
     async fn fetch(
         &self,
         repository: &RepoUrl,
-        branch: &GitRef,
+        revision: Revision<'_>,
         token: Option<&str>,
         dest: &Path,
     ) -> anyhow::Result<String>;
@@ -31,11 +50,11 @@ impl SourceFetcher for GitFetcher {
     async fn fetch(
         &self,
         repository: &RepoUrl,
-        branch: &GitRef,
+        revision: Revision<'_>,
         token: Option<&str>,
         dest: &Path,
     ) -> anyhow::Result<String> {
-        git::clone(repository, branch, token, dest).await
+        git::clone(repository, revision, token, dest).await
     }
 }
 
