@@ -17,14 +17,24 @@ use r3v3rs3_api::container::{
     APP_LABEL, AppName, ContainerHealth, ContainerInfo, ContainerName, ContainerSpec,
     ContainerSummary, ImageInfo, ImageRef, NetworkName,
 };
+use r3v3rs3_api::git::RelPath;
 use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
 
 /// The time a pull may go without a progress line.
 const PULL_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// The time that Docker has to accept a build context and start the build.
+const BUILD_START_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// The time a build may go without an output line. A long step prints nothing while it runs.
+const BUILD_IDLE_TIMEOUT: Duration = Duration::from_secs(1800);
+
+/// The output lines of a build that a build failure carries.
+const BUILD_LOG_TAIL: usize = 20;
 
 /// The host address of a published container port.
 const PUBLISH_HOST: &str = "127.0.0.1";
@@ -149,6 +159,52 @@ impl ContainerRuntime for DockerRuntime {
             id: image.id,
             repo_digests: image.repo_digests.unwrap_or_default(),
         }))
+    }
+
+    async fn build_image(
+        &self,
+        context: Vec<u8>,
+        dockerfile: &RelPath,
+        tag: &ImageRef,
+    ) -> anyhow::Result<String> {
+        // Version 1 is the classic builder. BuildKit needs a gRPC session besides this request.
+        let path = format!(
+            "/build?t={}&dockerfile={}&rm=1&forcerm=1&version=1",
+            encode(tag.as_str()),
+            encode(dockerfile.as_str())
+        );
+        let request = self
+            .client
+            .builder(Method::POST, &path)
+            .header(CONTENT_TYPE, "application/x-tar")
+            .body(Full::new(Bytes::from(context)))?;
+        let response = self
+            .client
+            .send_with(request, BUILD_START_TIMEOUT, &[])
+            .await?;
+        let mut lines = Lines::new(response);
+        let mut output = BuildOutput::default();
+        loop {
+            let line = tokio::time::timeout(BUILD_IDLE_TIMEOUT, lines.next())
+                .await
+                .map_err(|_| anyhow!("the build of {tag} stopped sending output"))??;
+            let Some(line) = line else {
+                break;
+            };
+            output
+                .read(&line)
+                .map_err(|err| anyhow!("failed to build {tag}: {err:#}"))?;
+        }
+        output
+            .id
+            .ok_or_else(|| anyhow!("the build of {tag} returned no image id"))
+    }
+
+    async fn remove_image(&self, image: &ImageRef) -> anyhow::Result<()> {
+        let path = format!("/images/{image}");
+        // 409 Conflict: a container still uses the image, so it stays until a later cleanup.
+        let allowed = [StatusCode::NOT_FOUND, StatusCode::CONFLICT];
+        self.call(Method::DELETE, &path, None, &allowed).await
     }
 
     async fn ensure_network(&self, network: &NetworkName, app: &AppName) -> anyhow::Result<()> {
@@ -290,6 +346,45 @@ fn pull_error(line: &[u8]) -> anyhow::Result<()> {
     }
 }
 
+/// The image id and the last output lines of a build stream.
+#[derive(Default)]
+struct BuildOutput {
+    id: Option<String>,
+    tail: VecDeque<String>,
+}
+
+impl BuildOutput {
+    /// Reads one line of the stream. Docker reports a failed build inside a `200 OK` stream, and
+    /// the error then carries the last output lines.
+    fn read(&mut self, line: &[u8]) -> anyhow::Result<()> {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            return Ok(());
+        }
+        let progress: BuildProgress = serde_json::from_slice(line)?;
+        for text in progress.stream.iter().flat_map(|stream| stream.lines()) {
+            self.push(text.trim_end());
+        }
+        if let Some(error) = progress.error {
+            let tail = Vec::from(std::mem::take(&mut self.tail)).join("\n");
+            bail!("{error}\n{tail}");
+        }
+        if let Some(id) = progress.aux.and_then(|aux| aux.id) {
+            self.id = Some(id);
+        }
+        Ok(())
+    }
+
+    fn push(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        if self.tail.len() == BUILD_LOG_TAIL {
+            self.tail.pop_front();
+        }
+        self.tail.push_back(text.to_string());
+    }
+}
+
 /// The body of `POST /containers/create`.
 fn create_body(spec: &ContainerSpec) -> Value {
     let env = spec
@@ -387,6 +482,22 @@ struct VersionResponse {
 struct PullProgress {
     #[serde(default)]
     error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BuildProgress {
+    #[serde(default)]
+    stream: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    aux: Option<BuildAux>,
+}
+
+#[derive(Deserialize)]
+struct BuildAux {
+    #[serde(rename = "ID", default)]
+    id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -590,6 +701,30 @@ mod tests {
             .to_string();
         assert_eq!(error, "denied");
         assert!(pull_error(b"not json").is_err());
+    }
+
+    #[test]
+    fn a_build_stream_yields_the_image_id_or_the_error_with_the_last_lines() {
+        let mut output = BuildOutput::default();
+        output
+            .read(br#"{"stream":"Step 1/2 : FROM busybox\n"}"#)
+            .unwrap();
+        output.read(br#"{"aux":{"ID":"sha256:feed"}}"#).unwrap();
+        output.read(b" ").unwrap();
+        assert_eq!(output.id.as_deref(), Some("sha256:feed"));
+
+        let mut output = BuildOutput::default();
+        for step in 0..30 {
+            let line = json!({ "stream": format!("line {step}\n\n") }).to_string();
+            output.read(line.as_bytes()).unwrap();
+        }
+        let error = output
+            .read(br#"{"errorDetail":{"code":1},"error":"exit code 2"}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(error.starts_with("exit code 2\nline 10\n"), "{error}");
+        assert!(error.ends_with("line 29"), "{error}");
+        assert!(output.read(b"not json").is_err());
     }
 
     #[test]

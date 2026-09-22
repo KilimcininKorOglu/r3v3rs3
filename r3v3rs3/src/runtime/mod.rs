@@ -8,6 +8,7 @@ use r3v3rs3_api::container::{
     AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, ImageInfo, ImageRef,
     NetworkName,
 };
+use r3v3rs3_api::git::RelPath;
 use std::time::Duration;
 
 #[async_trait::async_trait]
@@ -20,6 +21,19 @@ pub trait ContainerRuntime: Send + Sync {
 
     /// Returns `None` when the image is not present.
     async fn inspect_image(&self, image: &ImageRef) -> anyhow::Result<Option<ImageInfo>>;
+
+    /// Builds an image from a tar archive of the build context and tags it with `tag`.
+    /// `dockerfile` is relative to the root of the context. Returns the image id.
+    async fn build_image(
+        &self,
+        context: Vec<u8>,
+        dockerfile: &RelPath,
+        tag: &ImageRef,
+    ) -> anyhow::Result<String>;
+
+    /// Removes an image reference. A missing image, and an image that a container still uses,
+    /// are not errors.
+    async fn remove_image(&self, image: &ImageRef) -> anyhow::Result<()>;
 
     /// Creates a bridge network unless it exists.
     async fn ensure_network(&self, network: &NetworkName, app: &AppName) -> anyhow::Result<()>;

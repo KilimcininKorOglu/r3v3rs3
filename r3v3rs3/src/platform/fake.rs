@@ -6,6 +6,7 @@ use r3v3rs3_api::container::{
     APP_LABEL, AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, ImageInfo,
     ImageRef, NetworkName,
 };
+use r3v3rs3_api::git::RelPath;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
@@ -26,6 +27,8 @@ pub struct FakeState {
     pub crash: bool,
     /// The port of 127.0.0.1 that a started container publishes.
     pub host_port: u16,
+    /// Every build fails with this error.
+    pub build_error: Option<String>,
 }
 
 #[derive(Default)]
@@ -104,6 +107,31 @@ impl ContainerRuntime for FakeRuntime {
 
     async fn inspect_image(&self, image: &ImageRef) -> anyhow::Result<Option<ImageInfo>> {
         Ok(self.check()?.images.get(image.as_str()).cloned())
+    }
+
+    async fn build_image(
+        &self,
+        _: Vec<u8>,
+        _: &RelPath,
+        tag: &ImageRef,
+    ) -> anyhow::Result<String> {
+        let mut state = self.check()?;
+        if let Some(error) = &state.build_error {
+            bail!("failed to build {tag}: {error}");
+        }
+        let id = format!("sha256:{:064x}", state.images.len() + 1);
+        let info = ImageInfo {
+            id: id.clone(),
+            repo_digests: Vec::new(),
+        };
+        state.images.insert(tag.to_string(), info.clone());
+        state.images.insert(id.clone(), info);
+        Ok(id)
+    }
+
+    async fn remove_image(&self, image: &ImageRef) -> anyhow::Result<()> {
+        self.check()?.images.remove(image.as_str());
+        Ok(())
     }
 
     async fn ensure_network(&self, network: &NetworkName, _: &AppName) -> anyhow::Result<()> {

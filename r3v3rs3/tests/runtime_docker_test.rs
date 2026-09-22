@@ -209,6 +209,50 @@ async fn stop_and_remove(runtime: &DockerRuntime, names: &Names) -> anyhow::Resu
     Ok(())
 }
 
+/// A tar archive with one Dockerfile at `path`.
+fn context(path: &str, dockerfile: &str) -> anyhow::Result<Vec<u8>> {
+    let mut builder = tar::Builder::new(Vec::new());
+    let mut header = tar::Header::new_gnu();
+    header.set_size(dockerfile.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    builder.append_data(&mut header, path, dockerfile.as_bytes())?;
+    Ok(builder.into_inner()?)
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn an_image_builds_from_a_context_and_is_removed() -> anyhow::Result<()> {
+    let runtime = runtime()?;
+    let tag: ImageRef = format!("r3v3rs3/rt-build:{:08x}", rand::random::<u32>()).parse()?;
+    let result = build(&runtime, &tag).await;
+    let removed = runtime.remove_image(&tag).await;
+    result?;
+    removed?;
+    ensure!(runtime.inspect_image(&tag).await?.is_none());
+    runtime.remove_image(&tag).await
+}
+
+async fn build(runtime: &DockerRuntime, tag: &ImageRef) -> anyhow::Result<()> {
+    let dockerfile = format!("FROM {IMAGE}\nLABEL r3v3rs3.test=build\n");
+    let archive = context("docker/Dockerfile", &dockerfile)?;
+    let id = runtime
+        .build_image(archive, &"docker/Dockerfile".parse()?, tag)
+        .await?;
+    let info = runtime.inspect_image(tag).await?.context("built image")?;
+    ensure_eq!(info.id, id);
+
+    // The image has no shell, so the RUN step fails.
+    let failing = context("Dockerfile", &format!("FROM {IMAGE}\nRUN false\n"))?;
+    let error = runtime
+        .build_image(failing, &"Dockerfile".parse()?, tag)
+        .await
+        .unwrap_err();
+    let message = format!("{error:#}");
+    ensure!(message.contains("RUN false"), "{message}");
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn a_missing_image_fails_the_pull() -> anyhow::Result<()> {
