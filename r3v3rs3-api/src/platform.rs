@@ -10,7 +10,7 @@ use crate::subject_name::SubjectName;
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashSet;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 /// The id of the target that runs the containers on the server of r3v3rs3 itself.
 pub const LOCAL_TARGET: &str = "local";
@@ -254,6 +254,23 @@ impl std::fmt::Debug for GitTokenRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GitTokenRequest").finish_non_exhaustive()
     }
+}
+
+/// The container log of the running deployment of an app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AppLog {
+    /// The last lines of stdout and stderr. Empty when the app has no running deployment.
+    pub log: String,
+    /// Whether the app has a running deployment.
+    pub running: bool,
+}
+
+/// The query of an app log request.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct AppLogQuery {
+    /// The number of lines, from 1 to 1000. The default is 200.
+    pub tail: Option<u32>,
 }
 
 /// One environment variable of an app. The admin API does not return the value of a secret

@@ -260,6 +260,31 @@ async fn check_deploy_access(
     assert_eq!(get(addr, item, viewer).await?["name"], "shop");
     let deployments = get(addr, &format!("{item}/deployments"), viewer).await?;
     assert_eq!(deployments, json!([]));
+    check_logs(addr, viewer, scoped, item).await
+}
+
+/// A viewer reads the log of an app without a running deployment, and an account with a proxy
+/// list does not.
+async fn check_logs(
+    addr: SocketAddr,
+    viewer: &str,
+    scoped: &str,
+    item: &str,
+) -> anyhow::Result<()> {
+    let logs = format!("{item}/logs?tail=5");
+    let (status, _) = send(addr, Method::GET, &logs, scoped, None).await?;
+    assert_eq!(status, 403);
+    let log = get(addr, &logs, viewer).await?;
+    assert_eq!(log, json!({"log": "", "running": false}));
+    let (status, _) = send(
+        addr,
+        Method::GET,
+        &format!("{APPS}/bcd-fgh/logs"),
+        viewer,
+        None,
+    )
+    .await?;
+    assert_eq!(status, 404);
     Ok(())
 }
 

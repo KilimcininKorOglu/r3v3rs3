@@ -1157,6 +1157,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_log_comes_from_the_running_container() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let log = setup.platform.app_log(setup.app.id, 10).await?;
+        assert_eq!(log.log, "");
+        assert!(!log.running);
+
+        let deployment = deploy(&setup).await?;
+        let log = setup.platform.app_log(setup.app.id, 10).await?;
+        assert!(log.running);
+        assert_eq!(
+            log.log,
+            format!("the log of {}\n", container_of(&setup, &deployment))
+        );
+
+        let missing = setup.platform.app_log(ShortId::new(), 10).await;
+        assert!(missing.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn a_failed_deployment_keeps_the_old_container() -> anyhow::Result<()> {
         let setup = setup().await?;
         let first = deploy(&setup).await?;

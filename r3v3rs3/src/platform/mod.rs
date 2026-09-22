@@ -26,7 +26,7 @@ use r3v3rs3_api::discovery::Endpoint;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppRequest, DeploymentEntry, EnvEntry, PlatformConfig, TargetEntry,
+    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, PlatformConfig, TargetEntry,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashSet};
@@ -45,6 +45,12 @@ pub const KEY_FILE: &str = "platform.key";
 
 /// The most deployments that one list returns.
 pub const DEPLOYMENT_LIST_LIMIT: u32 = 100;
+
+/// The most log lines that one log request returns.
+pub const MAX_LOG_TAIL: u32 = 1000;
+
+/// The log lines that a log request returns without a `tail`.
+pub const DEFAULT_LOG_TAIL: u32 = 200;
 
 /// The longest value of an environment variable in bytes.
 const MAX_ENV_VALUE_LENGTH: usize = 64 * 1024;
@@ -331,6 +337,21 @@ impl Platform {
     pub async fn deployments(&self, id: ShortId) -> anyhow::Result<Vec<DeploymentEntry>> {
         self.app(id).await?;
         self.store.deployments(id, DEPLOYMENT_LIST_LIMIT).await
+    }
+
+    /// The last `tail` lines of the container log of the running deployment of an app. An app
+    /// without a running deployment has an empty log.
+    pub async fn app_log(&self, id: ShortId, tail: u32) -> anyhow::Result<AppLog> {
+        self.app(id).await?;
+        let Some(deployment) = self.store.running_deployment(id).await? else {
+            return Ok(AppLog {
+                log: String::new(),
+                running: false,
+            });
+        };
+        let name = proxy::container_name(id, deployment)?;
+        let log = self.local.logs(&name, tail.clamp(1, MAX_LOG_TAIL)).await?;
+        Ok(AppLog { log, running: true })
     }
 
     pub async fn deployment(&self, id: ShortId) -> anyhow::Result<DeploymentEntry> {

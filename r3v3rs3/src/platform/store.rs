@@ -447,6 +447,18 @@ impl PlatformStore {
         .transpose()
     }
 
+    /// The id of the running deployment of an app.
+    pub async fn running_deployment(&self, app: ShortId) -> anyhow::Result<Option<ShortId>> {
+        let row = sqlx::query(
+            "SELECT id FROM deployments WHERE app_id = ? AND status = 'running'
+            ORDER BY started_at DESC LIMIT 1",
+        )
+        .bind(app.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| id_of(&row, "id")).transpose()
+    }
+
     /// The running deployment of every app, with the app name.
     pub async fn running_deployments(&self) -> anyhow::Result<Vec<RunningDeployment>> {
         let rows = sqlx::query(

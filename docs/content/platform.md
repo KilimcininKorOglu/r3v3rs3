@@ -191,6 +191,7 @@ An app without a domain gets no proxy. A running deployment whose container is m
 | `PUT /api/apps/{id}/git_token` | Edit | Sets the token of a private repository. |
 | `DELETE /api/apps/{id}/git_token` | Edit | Deletes the token. |
 | `GET /api/apps/{id}/deployments` | Read | The latest 100 deployments of an app. |
+| `GET /api/apps/{id}/logs?tail=200` | Read | The last lines of the container log of the running deployment, from 1 to 1000 lines. `running` is `false` when the app has no running deployment. |
 | `POST /api/apps/{id}/deploy` | Edit | Starts a deployment. |
 | `GET /api/deployments/{id}` | Read | Returns a deployment. |
 | `POST /api/deployments/{id}/rollback` | Edit | Repeats an earlier deployment. |

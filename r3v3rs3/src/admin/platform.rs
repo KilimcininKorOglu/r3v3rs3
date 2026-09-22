@@ -6,18 +6,18 @@ use super::{AppError, AppState};
 use crate::accounts::{Caller, Permission};
 use crate::audit::AuditRecord;
 use crate::clock::unix_ms;
-use crate::platform::Platform;
+use crate::platform::{DEFAULT_LOG_TAIL, Platform};
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
 };
 use r3v3rs3_api::{
     audit::AuditAction,
     error::Error,
     id::ShortId,
     platform::{
-        AppEntry, AppRequest, DeploymentEntry, DeploymentTrigger, EnvEntry, GitTokenRequest,
-        TargetEntry,
+        AppEntry, AppLog, AppLogQuery, AppRequest, DeploymentEntry, DeploymentTrigger, EnvEntry,
+        GitTokenRequest, TargetEntry,
     },
 };
 use std::sync::Arc;
@@ -315,6 +315,28 @@ pub async fn list_deployments(
     let platform = state.platform(&caller, Permission::Read).await?;
     Ok(Json(
         platform.deployments(id).await.map_err(platform_error)?,
+    ))
+}
+
+/// Returns the last lines of the container log of the running deployment of an app.
+#[utoipa::path(
+    get,
+    path = "/{id}/logs",
+    tag = "platform",
+    operation_id = "get_app_logs",
+    params(("id" = ShortId, Path, description = "App id."), AppLogQuery),
+    responses((status = 200, description = "The container log.", body = AppLog), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_logs(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Query(query): Query<AppLogQuery>,
+) -> Result<Json<AppLog>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let tail = query.tail.unwrap_or(DEFAULT_LOG_TAIL);
+    Ok(Json(
+        platform.app_log(id, tail).await.map_err(platform_error)?,
     ))
 }
 

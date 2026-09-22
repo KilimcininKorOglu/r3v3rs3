@@ -191,6 +191,7 @@ Domain'i olmayan bir uygulama proxy almaz. Container'ı olmayan veya durmuş ola
 | `PUT /api/apps/{id}/git_token` | Edit | Private bir reponun token'ını ayarlar. |
 | `DELETE /api/apps/{id}/git_token` | Edit | Token'ı siler. |
 | `GET /api/apps/{id}/deployments` | Read | Bir uygulamanın son 100 deployment'ı. |
+| `GET /api/apps/{id}/logs?tail=200` | Read | Çalışan deployment'ın container log'unun son satırları, 1 ile 1000 satır arası. Uygulamanın çalışan deployment'ı yoksa `running` değeri `false` olur. |
 | `POST /api/apps/{id}/deploy` | Edit | Bir deployment başlatır. |
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
 | `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |
