@@ -8,7 +8,7 @@ weight = 0
 
 The deployment platform runs apps as containers on the Docker Engine of the r3v3rs3 server and routes their domains through r3v3rs3 proxies. A new deployment starts next to the running container, and the proxy switches to it only after it passes its health check.
 
-The platform is under development. This version deploys a ready image from a registry, or builds an image from a Git repository with its Dockerfile, on the local Docker Engine through the admin API. The WebUI pages, Docker Compose apps and remote servers follow in later versions.
+The platform is under development. This version deploys a ready image from a registry, builds an image from a Git repository with its Dockerfile, or starts the Docker Compose file of a Git repository, on the local Docker Engine through the admin API. The WebUI pages and remote servers follow in later versions.
 
 ## Enable the Platform
 
@@ -93,6 +93,41 @@ The server that runs r3v3rs3 needs the `git` binary. r3v3rs3 runs `git` without 
 
 Docker builds the image with its classic builder. Two builds run at the same time, and every other build waits. The builder keeps the stages of a multi-stage Dockerfile as its build cache, so the next build of the same app is faster. `docker image prune` removes that cache.
 
+### Compose Source
+
+An app with a `compose` source starts the Docker Compose file of a branch of a repository:
+
+```json
+"source": {
+  "type": "compose",
+  "repository": "https://github.com/owner/shop.git",
+  "branch": "main",
+  "file": "deploy/compose.yaml",
+  "service": "web"
+}
+```
+
+| Field | Default | Description |
+|---|---|---|
+| `repository` | | An `https://` URL, as for a Git source. The Git token of the app clones a private repository. |
+| `branch` | `main` | A branch or a tag. |
+| `file` | the first of `compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml` | The Compose file, relative to the root of the repository. Its relative paths resolve against its own directory. |
+| `service` | | The service that receives the requests of the domains on `port`. A service name has lowercase letters, digits and `_.-`. |
+
+The server needs the `git` binary and the `docker` binary with the Compose plugin. r3v3rs3 runs `docker compose` with the Compose project `r3v3rs3-<app id>` and adds a file that sets for the service of `service`:
+
+- the container name `r3v3rs3-<app id>-<deployment id>` and the labels of the platform,
+- one published port: `port` on a free port of `127.0.0.1`. This port replaces the `ports` of the service in the Compose file.
+- the environment variables of the app. The file names only their keys, and `docker compose` reads the values from its own environment, so no value reaches the disk. The same values fill the `${VARIABLE}` references of the Compose file. The names `PATH`, `HOME`, `DOCKER_CONFIG` and `DOCKER_HOST` belong to the `docker` binary, and an app that sets one fails its deployment.
+
+Another service of the Compose file must not publish a port, because a published port bypasses r3v3rs3. A Compose file with such a port fails the deployment before any service starts, and the message names the service. The services reach each other on the network of the project.
+
+A Compose app sets `volumes`, `restart` and `limits` in the Compose file, so its app spec does not accept them. The service of `service` runs as one container, because it has a container name.
+
+A Compose deployment recreates the service of `service`: Docker stops the old container before the new one starts, so the app does not answer until the new container passes its health check. A deployment that fails its health check keeps the new container for its log, and the app has no healthy container until the next deployment or rollback. The checkout of the running deployment stays in `compose/<app id>/` of the config directory, because a bind mount of the Compose file can read it.
+
+r3v3rs3 does not check the other settings of a Compose file. A Compose file can mount a host path, run a privileged container or use the network of the host, so every account that can edit an app can take over the host through it. Give the Edit permission only to accounts that may do that.
+
 ### Environment Variables
 
 `PUT /api/apps/{id}/env` replaces the environment variables of an app. A variable with `"secret": true` never leaves the server again: the admin API returns it without its value, and an update without a value keeps the current value. r3v3rs3 encrypts every value with `platform.key` and decrypts it only when a container starts.
@@ -101,7 +136,7 @@ Docker builds the image with its classic builder. Two builds run at the same tim
 
 `POST /api/apps/{id}/deploy` starts a deployment and returns it with the status `queued`. `GET /api/deployments/{id}` shows its progress.
 
-1. r3v3rs3 pulls the image and records its digest. For a Git source it clones the branch, records the commit, builds the image as `r3v3rs3/<app id>:<deployment id>` and records the image id.
+1. r3v3rs3 pulls the image and records its digest. For a Git source it clones the branch, records the commit, builds the image as `r3v3rs3/<app id>:<deployment id>` and records the image id. For a Compose source it clones the branch, records the commit and runs `docker compose up --build`, then continues with step 3.
 2. It creates the container `r3v3rs3-<app id>-<deployment id>` on the network `r3v3rs3-<app id>`, so the containers of different apps do not reach each other. The container publishes its port on a free port of `127.0.0.1`, so only r3v3rs3 on the host reaches it.
 3. It waits up to 120 seconds for the health check. A container that stops or fails the check ends the deployment as `failed`, and the failure message holds the last lines of the container log. The old container keeps serving.
 4. It marks the deployment `running`, marks the previous one `superseded`, and routes the domains to the new container.
@@ -112,8 +147,8 @@ An app runs one deployment at a time. A second deploy, a rollback or a deletion 
 | Status | Meaning |
 |---|---|
 | `queued` | The deployment waits to start. |
-| `building` | r3v3rs3 clones the branch and builds the image. |
-| `deploying` | The image is pulled, or the new container waits for its health check. |
+| `building` | r3v3rs3 clones the branch and builds the image, or reads the Compose file. |
+| `deploying` | The image is pulled, `docker compose up` runs, or the new container waits for its health check. |
 | `running` | The container of the deployment serves the app. |
 | `superseded` | A newer deployment replaced this one. |
 | `failed` | The deployment stopped. `message` holds the reason. |
@@ -123,6 +158,8 @@ An app runs one deployment at a time. A second deploy, a rollback or a deletion 
 `POST /api/deployments/{id}/rollback` starts a new deployment with the image digest, the app settings and the environment variables of an earlier deployment. The digest, not the tag, selects the image, so a rollback runs the same image even after the tag moved. A deployment that failed before it pulled its image has no digest and answers `400 rollback_unavailable`.
 
 A rollback of a Git app starts the built image again and does not build. r3v3rs3 keeps the images of the 5 newest deployments of an app and of its running deployment, and removes older ones. A rollback to a deployment whose image is removed fails with the message `the image ... is no longer present`.
+
+A rollback of a Compose app clones the recorded commit of the earlier deployment and runs `docker compose up --build` again, with the app settings and the environment variables of that deployment. A Compose deployment that failed before it recorded its commit answers `400 rollback_unavailable`.
 
 ## Routing
 
@@ -137,7 +174,7 @@ An app without a domain gets no proxy. A running deployment whose container is m
 
 ## Deleting an App
 
-`DELETE /api/apps/{id}` stops and removes the containers, the network and the built images of the app, removes its proxy, and deletes its environment variables and its deployments. The named volumes stay.
+`DELETE /api/apps/{id}` stops and removes the containers, the network and the built images of the app, removes its proxy, and deletes its environment variables and its deployments. The named volumes stay. For a Compose app it runs `docker compose down`, removes the images that the project built and deletes its checkout. The volumes of the Compose project stay.
 
 ## Admin API
 

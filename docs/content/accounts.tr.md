@@ -29,6 +29,7 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 - Bir hesap proxy'yi silince r3v3rs3 proxy'yi her hesabın proxy listesinden kaldırır.
 - Proxy listesi olan hesap, deploy platformuna gönderdiği her istek için `403 forbidden` alır.
 - Yönetim API'si secret environment değişkeninin değerini hiçbir zaman döndürmez.
+- Uygulama değiştirebilen hesap, bir [Compose uygulamasının](@/platform.tr.md#compose-kaynagi) Compose dosyası üzerinden host'u ele geçirebilir, çünkü r3v3rs3 Compose dosyasının ayarlarını kısıtlamaz.
 
 ## Kurallar
 

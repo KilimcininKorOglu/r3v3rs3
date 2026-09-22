@@ -29,6 +29,7 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 - When an account deletes a proxy, r3v3rs3 removes the proxy from the proxy list of each account.
 - An account with a proxy list gets `403 forbidden` for every request to the deployment platform.
 - The admin API never returns the value of a secret environment variable.
+- An account that can change an app can take over the host through the Compose file of a [Compose app](@/platform.md#compose-source), because r3v3rs3 does not restrict the settings of a Compose file.
 
 ## Rules
 
