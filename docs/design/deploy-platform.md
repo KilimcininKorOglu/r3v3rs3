@@ -1,6 +1,6 @@
 # Deployment platform design
 
-Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 has the Git source with its Dockerfile build and the Compose source; the `-platform` image is open. The user reference is `docs/content/platform.md`.
+Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 is implemented too: the Git source with its Dockerfile build, the Compose source and the `-platform` image. The user reference is `docs/content/platform.md`.
 
 This document describes how r3v3rs3 grows from a reverse proxy into a self-hosted deployment platform, in the space of Coolify. It lives outside `docs/content/`, so the Zola site does not publish it.
 
@@ -362,7 +362,7 @@ Each phase ends with integration tests and docs, and is usable on its own.
 ## 14. Decisions
 
 1. **Cluster mode.** The first version runs on a single server. `platform.db` is local to that server, so the platform refuses to start in cluster mode with a clear error. Cluster support is a later phase.
-2. **Docker image.** A second image with the `-platform` tag suffix carries `git` and `docker`. The default image stays distroless and small. An installation through `install.sh` uses the `git` and `docker` binaries of the host.
+2. **Docker image.** A second image with the `-platform` tag suffix carries `git` and `docker`. The default image stays distroless and small. The `platform` target of the `Dockerfile` is `debian:trixie-slim` with `git` from apt and the static `docker` CLI, Compose and buildx plugins of the pinned `docker:<version>-cli` image. buildx is included, because without it Compose builds with the classic builder, which rejects `RUN --mount`. `latest` becomes `latest-platform`. In a container the platform needs host networking and the config directory on the same path as on the host, because the bind mounts of a Compose file resolve on the host. An installation through `install.sh` uses the `git` and `docker` binaries of the host.
 3. **Agent port.** A dedicated `agent_port` setting in `config.toml`, outside the port list (section 10.2).
 4. **Traffic to agent apps.** Through a tunnel inside the agent link (section 10.4). The agent host opens no app port.
 5. **App proxy ports.** The operator lists them in `proxy_ports` of the `[platform]` section. The platform opens no port of its own.
