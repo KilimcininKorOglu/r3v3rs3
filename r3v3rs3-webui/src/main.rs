@@ -3,6 +3,7 @@
 use components::cluster_status::ClusterBanner;
 use components::footer::Footer;
 use components::navbar::Navbar;
+use components::sidebar::Sidebar;
 use console_error_panic_hook::set_once as set_panic_hook;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -26,9 +27,12 @@ pub fn app() -> Html {
         <BrowserRouter>
             <div class="min-h-screen flex flex-col">
                 <Navbar />
-                <div class="w-full max-w-6xl mx-auto px-4 sm:px-6 py-4 flex-1">
-                    <ClusterBanner />
-                    <Switch<pages::Route> render={pages::switch} />
+                <div class="w-full max-w-7xl mx-auto px-4 sm:px-6 py-4 flex-1 flex gap-6">
+                    <Sidebar />
+                    <main class="flex-1 min-w-0">
+                        <ClusterBanner />
+                        <Switch<pages::Route> render={pages::switch} />
+                    </main>
                 </div>
                 <Footer />
             </div>

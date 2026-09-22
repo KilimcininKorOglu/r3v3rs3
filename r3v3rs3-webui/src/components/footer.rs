@@ -41,7 +41,7 @@ pub fn footer() -> Html {
     };
 
     html! {
-        <footer class="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-2 pb-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-neutral-500 dark:text-neutral-400">
+        <footer class="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-2 pb-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-neutral-500 dark:text-neutral-400">
             <span>{format!("r3v3rs3 v{version}")}</span>
             <span aria-hidden="true">{"·"}</span>
             <a href={docs_url(locale)} target="_blank" rel="noopener noreferrer" class={LINK_CLASS}>{locale.t("footer.documentation")}</a>

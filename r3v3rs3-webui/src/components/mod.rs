@@ -12,6 +12,7 @@ pub mod language_menu;
 pub mod navbar;
 pub mod port_config;
 pub mod proxy_config;
+pub mod sidebar;
 pub mod tcp_proxy_config;
 pub mod theme_menu;
 pub mod udp_proxy_config;

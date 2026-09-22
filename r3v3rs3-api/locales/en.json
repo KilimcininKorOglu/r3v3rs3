@@ -476,6 +476,8 @@
   "nav.ports": "Ports",
   "nav.proxies": "Proxies",
   "nav.settings": "Settings",
+  "nav.group_proxy": "Proxy",
+  "nav.group_admin": "Administration",
   "period.hour": "hour",
   "period.minute": "minute",
   "period.second": "second",

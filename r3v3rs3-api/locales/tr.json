@@ -476,6 +476,8 @@
   "nav.ports": "Portlar",
   "nav.proxies": "Proxy'ler",
   "nav.settings": "Ayarlar",
+  "nav.group_proxy": "Proxy",
+  "nav.group_admin": "Yönetim",
   "period.hour": "saat",
   "period.minute": "dakika",
   "period.second": "saniye",
