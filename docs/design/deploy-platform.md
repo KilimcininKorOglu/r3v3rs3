@@ -1,6 +1,6 @@
 # Deployment platform design
 
-Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 has the Git source with its Dockerfile build; Compose and the `-platform` image are open. The user reference is `docs/content/platform.md`.
+Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 has the Git source with its Dockerfile build and the Compose source; the `-platform` image is open. The user reference is `docs/content/platform.md`.
 
 This document describes how r3v3rs3 grows from a reverse proxy into a self-hosted deployment platform, in the space of Coolify. It lives outside `docs/content/`, so the Zola site does not publish it.
 
@@ -68,8 +68,9 @@ All new code lives in the existing crates. The entries marked *later* belong to 
 
 ```
 r3v3rs3-api/src/
-  container.rs      the validated container types: ContainerSpec, ContainerName, ImageRef, EnvKey
-  git.rs            the validated Git source types: RepoUrl, GitRef, RelPath
+  container.rs      the validated container types: ContainerSpec, ContainerName, ImageRef, EnvKey,
+                    ProjectName, ServiceName
+  git.rs            the validated Git source types: RepoUrl, GitRef, RelPath, CommitSha
   platform.rs       PlatformConfig, AppSpec, AppEntry, EnvEntry, DeploymentEntry, TargetEntry
   agent.rs          later: AgentRequest, AgentResponse, AgentEvent (the wire protocol)
 
@@ -79,6 +80,7 @@ r3v3rs3/src/
     store.rs        SQLite schema and queries
     deploy.rs       the pipeline of section 8, the health probe and the rollback
     build.rs        the build step of a Git app, the build limit and the removal of old images
+    compose.rs      the checkout, the override file and the port check of a Compose app
     proxy.rs        the proxy of a running app, and the snapshots of the Platform provider
     publish.rs      reads the running containers and sends the snapshot to the server
     fake.rs         a runtime and a source fetcher in memory for the unit tests
@@ -88,7 +90,9 @@ r3v3rs3/src/
     remote.rs       later: the agent runtime, sends AgentRequest, awaits AgentResponse
   build/
     mod.rs          SourceFetcher trait and the build context archive
-    git.rs          the git clone of one branch, without host configuration or hooks
+    git.rs          the git checkout of one branch or one commit, without host configuration or hooks
+    compose.rs      ComposeRunner and DockerCompose: `docker compose config`, `up` and `down`
+    process.rs      runs git and docker with a timeout and the end of stderr in the error
   agent/            later: the agent listener, the `r3v3rs3 agent` command, one agent session
   admin/
     platform.rs     the admin API routes of section 12
@@ -208,7 +212,7 @@ Phase 4 implements steps 2 and 3 for Git apps. The deployment status is `buildin
 
 **Rollback** creates a new deployment with `trigger = rollback` and the `image_digest`, `spec` and `env` of the chosen earlier deployment. It skips steps 2 and 3 and runs steps 4 to 9. A built image has no registry, so the rollback of a removed build fails.
 
-**Compose** apps use `docker compose -p r3v3rs3-<app> up -d`. The service named in `build.compose.service` receives the traffic. Compose apps deploy by recreate, not blue-green, because Compose manages its own container names. The design states this limit in the WebUI.
+**Compose** apps run the `docker` CLI with its Compose plugin, because the Engine API has no Compose endpoint. The project is `r3v3rs3-<app>`. The checkout is `compose/<app>/<deployment>/src` under the config directory, and the checkout of the running deployment stays, because a bind mount of the project reads it; every other checkout of the app is removed after `up`. `docker compose` runs with a cleared environment: `PATH`, `DOCKER_HOST` from the `docker` setting, `HOME` and `DOCKER_CONFIG` of the host, and the decrypted app environment, which fills the interpolation of the Compose file. An app variable with one of those four names fails the deployment. An override file `r3v3rs3.override.yaml` next to the checkout gives the service named in `source.service` the container name `r3v3rs3-<app>-<deployment>`, the platform labels, the app environment by name only (so no value reaches the disk), and `ports: !override ["127.0.0.1::<port>"]`, which replaces the ports of that service. `docker compose config --format json` then validates the project, and a published port on any other service fails the deployment before `up`. The status is `building` for the checkout and the validation and `deploying` from `up --detach --build --remove-orphans`. The container name changes with every deployment, so Compose recreates the service: the old container stops before the new one starts, and steps 6 to 9 run without the drain. A failed health check leaves the new container for its log. After every Compose job the dangling images with the label `com.docker.compose.project=<project>` are pruned through the Engine API. A rollback clones the `commit_sha` of the chosen deployment with a detached `git fetch --depth 1` of that commit and runs `up --build` again; a deployment without a commit cannot be rolled back. Deleting the app, or deploying it with another source kind, runs `docker compose down --remove-orphans`, prunes every image of the project and removes the checkouts. The volumes of the project stay.
 
 ## 9. Ingress integration
 
@@ -367,3 +371,5 @@ Each phase ends with integration tests and docs, and is usable on its own.
 8. **Proxy delivery.** The app proxies travel as the snapshot of the `Platform` discovery provider (section 9), not as stored proxies.
 9. **Private repositories.** An HTTPS access token per app, sealed in `app_secrets`. SSH keys are not supported.
 10. **Dockerfile builds.** Through the Docker Engine API, not the `docker` CLI, so a Dockerfile app needs only `git` on the host.
+11. **Compose settings.** r3v3rs3 does not restrict a Compose file: privileged containers, host binds and the host network are allowed, so an account with the Edit permission can take over the host. The user reference states this risk. Only published ports are refused, except the one port of the served service that the override file sets.
+12. **Compose rollback.** A rollback checks out the recorded commit and builds again, instead of keeping the built images of every deployment.
