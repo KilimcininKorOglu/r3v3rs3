@@ -13,10 +13,14 @@ permissions:
 
 jobs:
   # Each platform builds on a native runner, because building the server under QEMU takes hours.
+  # The `runtime` target is the default distroless image, and the `platform` target adds git and
+  # the docker CLI for the deployment platform under the `-platform` tag suffix.
   build:
-    name: Build ${{ matrix.platform }}
+    name: Build ${{ matrix.target }} ${{ matrix.platform }}
     strategy:
       matrix:
+        platform: [linux/amd64, linux/arm64]
+        target: [runtime, platform]
         include:
           - platform: linux/amd64
             runner: ubuntu-24.04
@@ -49,11 +53,14 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          target: ${{ matrix.target }}
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ github.event_name == 'push' }}
+          # The two targets share the builder stages, so they read one cache per platform. Only
+          # the runtime target writes it, so the two jobs do not overwrite each other.
           cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
-          cache-to: type=gha,mode=max,scope=${{ env.PLATFORM_PAIR }}
+          cache-to: ${{ matrix.target == 'runtime' && format('type=gha,mode=max,scope={0}', env.PLATFORM_PAIR) || '' }}
       - name: Export digest
         if: github.event_name == 'push'
         run: |
@@ -64,14 +71,21 @@ jobs:
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
-          name: digests-${{ env.PLATFORM_PAIR }}
+          name: digests-${{ matrix.target }}-${{ env.PLATFORM_PAIR }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
 
   merge:
-    name: Publish multi-platform image
+    name: Publish multi-platform ${{ matrix.target }} image
     if: github.event_name == 'push'
+    strategy:
+      matrix:
+        include:
+          - target: runtime
+            suffix: ""
+          - target: platform
+            suffix: -platform
     runs-on: ubuntu-24.04
     needs: build
     steps:
@@ -81,7 +95,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: ${{ runner.temp }}/digests
-          pattern: digests-*
+          pattern: digests-${{ matrix.target }}-*
           merge-multiple: true
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -96,6 +110,10 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
+          # `onlatest` gives the platform image `latest-platform`, so it never takes `latest`.
+          flavor: |
+            suffix=${{ matrix.suffix }}
+            onlatest=true
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
         run: |
@@ -106,4 +124,4 @@ jobs:
           done
           docker buildx imagetools create "${tags[@]}" "${sources[@]}"
       - name: Inspect image
-        run: docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
+        run: docker buildx imagetools inspect "$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")"

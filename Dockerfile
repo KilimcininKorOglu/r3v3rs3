@@ -33,6 +33,20 @@ COPY r3v3rs3-webui r3v3rs3-webui
 COPY --from=webui /usr/src/app/r3v3rs3/dist/webui r3v3rs3/dist/webui
 RUN cargo build --release --locked -p r3v3rs3
 
+FROM docker:29.8.1-cli AS docker-cli
+
+# The platform image adds git for the Git sources of the deployment platform, and the static docker
+# CLI with the Compose plugin for its Compose sources. The buildx plugin lets Compose build with
+# BuildKit, which a Dockerfile with `RUN --mount` needs.
+FROM debian:trixie-slim AS platform
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/
+COPY --from=builder /usr/src/app/target/release/r3v3rs3 /usr/bin/r3v3rs3
+ENTRYPOINT ["/usr/bin/r3v3rs3", "start", "--webui", "0.0.0.0:46492"]
+
 # distroless/cc holds glibc, libgcc and the CA certificates the binary needs, and nothing else.
 FROM gcr.io/distroless/cc-debian13 AS runtime
 COPY --from=builder /usr/src/app/target/release/r3v3rs3 /usr/bin/r3v3rs3
