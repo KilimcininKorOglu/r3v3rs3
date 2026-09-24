@@ -503,7 +503,14 @@ mod tests {
             .authorize_git_connection(entry.id, &CALLBACK.parse()?, "admin", None)
             .await?;
         assert_eq!(page.url, install_page);
+        Ok(())
+    }
 
+    #[tokio::test]
+    async fn a_github_app_connection_changes_only_its_name() -> anyhow::Result<()> {
+        let mut setup = setup().await?;
+        let (created, _) = create(&mut setup).await?;
+        let entry = created.entry;
         let mut rename = r3v3rs3_api::git_connection::GitConnectionRequest {
             name: "renamed".parse()?,
             provider: GitProvider::Github,
