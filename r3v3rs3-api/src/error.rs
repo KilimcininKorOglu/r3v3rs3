@@ -119,6 +119,9 @@ pub enum Error {
     #[error("the deployment has no image to roll back to: {id}")]
     RollbackUnavailable { id: ShortId },
 
+    #[error("the enrollment token is invalid or was used already")]
+    InvalidEnrollmentToken,
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 

@@ -159,7 +159,7 @@ fn roots(certificates: &[CertificateDer<'static>]) -> anyhow::Result<RootCertSto
     Ok(roots)
 }
 
-fn pem_certificates(pem: &str) -> anyhow::Result<Vec<CertificateDer<'static>>> {
+pub fn pem_certificates(pem: &str) -> anyhow::Result<Vec<CertificateDer<'static>>> {
     let certificates = rustls_pemfile::certs(&mut pem.as_bytes()).collect::<Result<Vec<_>, _>>()?;
     if certificates.is_empty() {
         anyhow::bail!("the PEM text holds no certificate");

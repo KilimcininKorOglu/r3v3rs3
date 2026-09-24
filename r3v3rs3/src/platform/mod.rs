@@ -3,6 +3,7 @@
 //! The admin API calls the platform directly instead of through the server loop, because a
 //! database query or a Docker call must not hold up the ports and the other RPC methods.
 
+mod agents;
 mod build;
 mod compose;
 pub mod deploy;
@@ -12,6 +13,8 @@ pub mod proxy;
 mod publish;
 pub mod store;
 
+use crate::agent::pki::AgentPki;
+use crate::agent::registry::AgentRegistry;
 use crate::build::compose::{ComposeRunner, DockerCompose};
 use crate::build::{GitFetcher, SourceFetcher};
 use crate::cluster::crypto::ClusterKeys;
@@ -24,6 +27,7 @@ use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::discovery::Endpoint;
 use r3v3rs3_api::error::Error;
+use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, PlatformConfig, TargetEntry,
@@ -33,7 +37,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use store::{GIT_TOKEN, PlatformStore, StoredEnv, Write};
-use tokio::sync::{Mutex, Semaphore, mpsc};
+use tokio::sync::{Mutex, Semaphore, broadcast, mpsc};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tracing::error;
 
@@ -76,6 +80,7 @@ impl PlatformHandle {
         config: &AppConfig,
         config_dir: &Path,
         command: mpsc::Sender<ServerCommand>,
+        events: &broadcast::Sender<ServerEvent>,
     ) -> Self {
         if !config.platform.enabled {
             return Self::Disabled;
@@ -88,6 +93,14 @@ impl PlatformHandle {
             Ok(platform) => {
                 let platform = Arc::new(platform);
                 tokio::spawn(publish::refresh(Arc::downgrade(&platform)));
+                if let Some(port) = config.platform.agent_port
+                    && let Err(err) = platform
+                        .start_agent_listener(port, events.subscribe())
+                        .await
+                {
+                    // The local target keeps working without the agents.
+                    error!(err = format!("{err:#}"), "failed to start the agent port");
+                }
                 Self::Ready(platform)
             }
             Err(err) => {
@@ -129,6 +142,10 @@ pub struct Platform {
     compose: Arc<dyn ComposeRunner>,
     /// The directory of the Compose checkouts.
     compose_dir: PathBuf,
+    /// The CA of the agent link. Only a server with an agent port has it.
+    pki: Option<AgentPki>,
+    /// The connected agents.
+    agents: Arc<AgentRegistry>,
 }
 
 impl Platform {
@@ -142,15 +159,14 @@ impl Platform {
         let now = crate::clock::unix_ms();
         store.ensure_local_target(now).await?;
         store.fail_unfinished(now).await?;
-        let key_path = config_dir.join(KEY_FILE);
-        if !tokio::fs::try_exists(&key_path).await? {
-            write_new_key_file(&key_path).await?;
-        }
-        let keys = load_keys(std::slice::from_ref(&key_path)).await?;
+        let keys = open_keys(config_dir).await?;
         // A stopped server can leave the checkouts of its unfinished builds.
         let build_dir = config_dir.join(build::BUILD_DIR);
         build::remove_dir(&build_dir).await?;
+        let pki = agent_pki(&config.platform, config_dir).await?;
         Ok(Self {
+            pki,
+            agents: Arc::new(AgentRegistry::default()),
             store,
             keys,
             local: Arc::new(local),
@@ -469,6 +485,23 @@ fn new_id() -> anyhow::Result<ShortId> {
     Ok(id.parse()?)
 }
 
+/// The key of the environment values, created at the first start.
+async fn open_keys(config_dir: &Path) -> anyhow::Result<ClusterKeys> {
+    let key_path = config_dir.join(KEY_FILE);
+    if !tokio::fs::try_exists(&key_path).await? {
+        write_new_key_file(&key_path).await?;
+    }
+    load_keys(std::slice::from_ref(&key_path)).await
+}
+
+/// The CA of the agent link. Only a server with an agent port needs it.
+async fn agent_pki(config: &PlatformConfig, config_dir: &Path) -> anyhow::Result<Option<AgentPki>> {
+    match config.agent_port {
+        Some(_) => Ok(Some(AgentPki::load_or_create(config_dir).await?)),
+        None => Ok(None),
+    }
+}
+
 /// The runtime of the Docker Engine at `endpoint`. The platform talks to a local engine over a
 /// Unix socket or plain TCP.
 fn docker_runtime(endpoint: &str) -> anyhow::Result<DockerRuntime> {
@@ -671,18 +704,19 @@ mod tests {
     async fn the_platform_stays_off_unless_enabled_and_outside_a_cluster() {
         let dir = std::env::temp_dir();
         let (command, _commands) = mpsc::channel(1);
+        let (events, _) = broadcast::channel(1);
         let mut config = AppConfig::default();
-        let handle = PlatformHandle::start(&config, &dir, command.clone()).await;
+        let handle = PlatformHandle::start(&config, &dir, command.clone(), &events).await;
         assert!(matches!(handle.get(), Err(Error::PlatformDisabled)));
 
         config.platform.enabled = true;
         config.cluster.enabled = true;
-        let handle = PlatformHandle::start(&config, &dir, command.clone()).await;
+        let handle = PlatformHandle::start(&config, &dir, command.clone(), &events).await;
         assert!(matches!(handle.get(), Err(Error::PlatformInCluster)));
 
         config.cluster.enabled = false;
         config.platform.docker = "https://docker.example:2376".into();
-        let handle = PlatformHandle::start(&config, &dir, command).await;
+        let handle = PlatformHandle::start(&config, &dir, command, &events).await;
         assert!(matches!(handle.get(), Err(Error::PlatformFailed)));
     }
 }

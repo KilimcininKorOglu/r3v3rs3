@@ -41,6 +41,17 @@ pub struct PlatformConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub acme: Option<ShortId>,
+
+    /// The TCP port that the agents connect to. Without it the server accepts no agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 9443)]
+    pub agent_port: Option<u16>,
+
+    /// The host name or the address that an agent dials, as the enrollment command shows it.
+    /// Without it the WebUI shows the host name of its own page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "master.example.com")]
+    pub agent_host: Option<String>,
 }
 
 fn default_docker_endpoint() -> String {

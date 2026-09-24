@@ -232,6 +232,7 @@ mod tests {
             Error::RollbackUnavailable {
                 id: "abc".parse().unwrap(),
             },
+            Error::InvalidEnrollmentToken,
             Error::AcmeAccountCreationFailed,
             Error::AcmeUnsupportedChallenge { challenge: text() },
             Error::AcmeIdentifiersMissing,

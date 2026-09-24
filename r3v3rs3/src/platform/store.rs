@@ -158,6 +158,91 @@ impl PlatformStore {
         rows.iter().map(target_of).collect()
     }
 
+    /// Adds an agent target that waits for its enrollment with the token of `token_hash`.
+    pub async fn add_agent_target(
+        &self,
+        id: ShortId,
+        name: &str,
+        token_hash: &str,
+        now: u64,
+    ) -> anyhow::Result<Write> {
+        let result = sqlx::query(
+            "INSERT INTO targets (id, name, kind, token_hash, created_at)
+            VALUES (?, ?, 'agent', ?, ?)",
+        )
+        .bind(id.to_string())
+        .bind(name)
+        .bind(token_hash)
+        .bind(sql_int(now))
+        .execute(&self.pool)
+        .await
+        .map(|_| Write::Done);
+        written_name(result, "targets.name")
+    }
+
+    /// Gives an agent target a new enrollment token. The certificate of the target stays valid
+    /// until an agent enrolls with the new token.
+    pub async fn set_target_token(&self, id: ShortId, token_hash: &str) -> anyhow::Result<bool> {
+        let result =
+            sqlx::query("UPDATE targets SET token_hash = ? WHERE id = ? AND kind = 'agent'")
+                .bind(token_hash)
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// The agent target whose enrollment token has `token_hash`.
+    pub async fn target_by_token(&self, token_hash: &str) -> anyhow::Result<Option<ShortId>> {
+        let row = sqlx::query("SELECT id FROM targets WHERE token_hash = ? AND kind = 'agent'")
+            .bind(token_hash)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(|row| id_of(&row, "id")).transpose()
+    }
+
+    /// Stores the certificate of an enrolled agent and clears the token, so the token enrolls
+    /// only once. Returns false when another enrollment used the token first.
+    pub async fn enroll_target(
+        &self,
+        id: ShortId,
+        token_hash: &str,
+        fingerprint: &str,
+    ) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            "UPDATE targets SET cert_fingerprint = ?, token_hash = NULL
+            WHERE id = ? AND token_hash = ?",
+        )
+        .bind(fingerprint)
+        .bind(id.to_string())
+        .bind(token_hash)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// The agent target of the client certificate with `fingerprint`.
+    pub async fn target_by_fingerprint(
+        &self,
+        fingerprint: &str,
+    ) -> anyhow::Result<Option<ShortId>> {
+        let row =
+            sqlx::query("SELECT id FROM targets WHERE cert_fingerprint = ? AND kind = 'agent'")
+                .bind(fingerprint)
+                .fetch_optional(&self.pool)
+                .await?;
+        row.map(|row| id_of(&row, "id")).transpose()
+    }
+
+    pub async fn target_seen(&self, id: ShortId, now: u64) -> anyhow::Result<()> {
+        sqlx::query("UPDATE targets SET last_seen_at = ? WHERE id = ?")
+            .bind(sql_int(now))
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn has_target(&self, id: ShortId) -> anyhow::Result<bool> {
         let row = sqlx::query("SELECT 1 FROM targets WHERE id = ?")
             .bind(id.to_string())
@@ -483,9 +568,14 @@ impl PlatformStore {
 
 /// Maps a unique constraint failure on the app name to `NameTaken`.
 fn written(result: Result<Write, sqlx::Error>) -> anyhow::Result<Write> {
+    written_name(result, "apps.name")
+}
+
+/// Maps a unique constraint failure on the `column` of a name to `NameTaken`.
+fn written_name(result: Result<Write, sqlx::Error>, column: &str) -> anyhow::Result<Write> {
     match result {
         Err(sqlx::Error::Database(err))
-            if err.is_unique_violation() && err.message().contains("apps.name") =>
+            if err.is_unique_violation() && err.message().contains(column) =>
         {
             Ok(Write::NameTaken)
         }
@@ -639,6 +729,56 @@ mod tests {
         store.set_secret(shop.id, GIT_TOKEN, &[2]).await?;
         assert_eq!(store.secret(shop.id, GIT_TOKEN).await?, Some(vec![2]));
         assert!(store.app(shop.id).await?.context("app")?.git_token_set);
+        Ok(())
+    }
+
+    async fn edge_store() -> anyhow::Result<(PlatformStore, tempfile_path::TempPath, ShortId)> {
+        let (store, path) = store().await?;
+        let edge: ShortId = "fzn-txd".parse()?;
+        assert_eq!(
+            store.add_agent_target(edge, "edge", "hash-1", 5).await?,
+            Write::Done
+        );
+        Ok((store, path, edge))
+    }
+
+    #[tokio::test]
+    async fn an_enrollment_token_enrolls_one_certificate_once() -> anyhow::Result<()> {
+        let (store, _path, edge) = edge_store().await?;
+        let other: ShortId = "bcd-fgh".parse()?;
+        let taken = store.add_agent_target(other, "edge", "hash-2", 5).await?;
+        assert_eq!(taken, Write::NameTaken);
+        assert_eq!(store.target_by_token("hash-1").await?, Some(edge));
+        assert!(store.enroll_target(edge, "hash-1", "cert-1").await?);
+        assert!(!store.enroll_target(edge, "hash-1", "cert-2").await?);
+        assert_eq!(store.target_by_token("hash-1").await?, None);
+        assert_eq!(store.target_by_fingerprint("cert-1").await?, Some(edge));
+        assert_eq!(store.target_by_fingerprint("cert-2").await?, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_new_token_keeps_the_certificate_until_the_new_enrollment() -> anyhow::Result<()> {
+        let (store, _path, edge) = edge_store().await?;
+        assert!(store.enroll_target(edge, "hash-1", "cert-1").await?);
+        assert!(store.set_target_token(edge, "hash-3").await?);
+        assert_eq!(store.target_by_fingerprint("cert-1").await?, Some(edge));
+        assert!(store.enroll_target(edge, "hash-3", "cert-3").await?);
+        assert_eq!(store.target_by_fingerprint("cert-1").await?, None);
+        // The local target has no token.
+        let local: ShortId = LOCAL_TARGET.parse()?;
+        assert!(!store.set_target_token(local, "hash-4").await?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_contact_time_of_an_agent_is_stored() -> anyhow::Result<()> {
+        let (store, _path, edge) = edge_store().await?;
+        store.target_seen(edge, 42).await?;
+        let targets = store.targets().await?;
+        let entry = targets.iter().find(|t| t.id == edge).context("edge")?;
+        assert_eq!(entry.last_seen_at, Some(42));
+        assert_eq!(entry.kind, TargetKind::Agent);
         Ok(())
     }
 

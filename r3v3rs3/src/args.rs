@@ -17,6 +17,37 @@ pub enum Command {
     AddUser(AddUserArgs),
     /// Manage the cluster store
     Cluster(ClusterArgs),
+    /// Run the containers of a deployment platform target for a master
+    Agent(AgentArgs),
+}
+
+#[derive(Args)]
+pub struct AgentArgs {
+    /// The agent port of the master as HOST:PORT.
+    #[clap(long, value_name = "HOST:PORT", env = "R3V3RS3_AGENT_MASTER")]
+    pub master: String,
+
+    /// The enrollment token of the target. Only the first start needs it.
+    #[clap(
+        long,
+        value_name = "TOKEN",
+        env = "R3V3RS3_AGENT_TOKEN",
+        hide_env_values = true
+    )]
+    pub token: Option<String>,
+
+    /// The directory of the key and the certificate of the agent.
+    #[clap(long, value_name = "DIR", env = "R3V3RS3_AGENT_DATA_DIR")]
+    pub data_dir: Option<PathBuf>,
+
+    #[clap(
+        long,
+        short,
+        value_name = "LEVEL",
+        default_value = "info",
+        env = "R3V3RS3_AGENT_LOG_LEVEL"
+    )]
+    pub log_level: LevelFilter,
 }
 
 #[derive(Args)]

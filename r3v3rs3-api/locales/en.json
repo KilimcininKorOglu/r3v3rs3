@@ -320,6 +320,7 @@
   "error.proxy_protocol_trusted_missing": "PROXY protocol needs at least one trusted IP address or CIDR block.",
   "error.proxy_read_only": "The proxy comes from service discovery and cannot be changed here: {id}",
   "error.rollback_unavailable": "The deployment {id} has no image to roll back to.",
+  "error.invalid_enrollment_token": "The enrollment token is invalid or was used already. Create a new token for the target.",
   "error.route_response_conflict": "A route cannot have both servers and a fixed response.",
   "error.tls_termination_config_missing": "TLS termination config is missing.",
   "error.too_many_certificates": "A request can delete at most {max} certificates.",

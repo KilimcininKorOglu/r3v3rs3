@@ -2,8 +2,10 @@
 
 use clap::Parser;
 use directories::ProjectDirs;
+use r3v3rs3::agent::client::{AgentClient, AgentTiming};
+use r3v3rs3::agent::token::EnrollmentToken;
 use r3v3rs3::args::StartArgs;
-use r3v3rs3::args::{ClusterArgs, ClusterCommand, Command};
+use r3v3rs3::args::{AgentArgs, ClusterArgs, ClusterCommand, Command};
 use r3v3rs3::cluster::storage::KvStorage;
 use r3v3rs3::config::file::FileStorage;
 use r3v3rs3::config::new_appinfo;
@@ -28,9 +30,41 @@ async fn main() -> anyhow::Result<()> {
         Command::Start(args) => start(args).await?,
         Command::AddUser(args) => add_user(args).await?,
         Command::Cluster(args) => cluster(args).await?,
+        Command::Agent(args) => agent(args).await?,
     }
 
     Ok(())
+}
+
+/// Enrolls the agent at its first start, then holds its connection to the master until SIGINT.
+async fn agent(args: AgentArgs) -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(args.log_level)
+        .init();
+    let data_dir = match args.data_dir {
+        Some(dir) => dir,
+        None => ProjectDirs::from("", "", "r3v3rs3")
+            .ok_or_else(|| {
+                anyhow::anyhow!("failed to get project directories, try setting --data-dir")
+            })?
+            .data_dir()
+            .join("agent"),
+    };
+    let token = args
+        .token
+        .as_deref()
+        .map(str::parse::<EnrollmentToken>)
+        .transpose()?;
+    let client = AgentClient::new(args.master, data_dir, AgentTiming::default());
+    let identity = client.identity(token.as_ref()).await?;
+    info!(target = %identity.target, "the agent starts");
+    tokio::select! {
+        result = client.run(&identity) => result,
+        _ = tokio::signal::ctrl_c() => {
+            info!("received ctrl-c signal");
+            Ok(())
+        }
+    }
 }
 
 async fn cluster(args: ClusterArgs) -> anyhow::Result<()> {

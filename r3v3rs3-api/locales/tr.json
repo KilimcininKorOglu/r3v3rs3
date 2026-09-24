@@ -320,6 +320,7 @@
   "error.proxy_protocol_trusted_missing": "PROXY protocol için en az bir güvenilen IP adresi veya CIDR bloğu gerekir.",
   "error.proxy_read_only": "Bu proxy servis keşfinden geliyor ve burada değiştirilemez: {id}",
   "error.rollback_unavailable": "{id} deployment'ının rollback için bir image'ı yok.",
+  "error.invalid_enrollment_token": "Enrollment token'ı geçersiz veya daha önce kullanılmış. Target için yeni bir token oluşturun.",
   "error.route_response_conflict": "Bir route'ta hem sunucu hem de sabit response tanımlanamaz.",
   "error.tls_termination_config_missing": "TLS termination config eksik.",
   "error.too_many_certificates": "Bir request en fazla {max} sertifika silebilir.",

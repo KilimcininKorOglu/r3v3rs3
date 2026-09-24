@@ -167,7 +167,8 @@ impl ServerState {
         br_sender: broadcast::Sender<ServerEvent>,
     ) -> Self {
         let config = storage.load_app_config().await;
-        let platform = PlatformHandle::start(&config, config_dir, command_sender.clone()).await;
+        let platform =
+            PlatformHandle::start(&config, config_dir, command_sender.clone(), &br_sender).await;
         let _ = br_sender.send(ServerEvent::AppConfigUpdated {
             config: Box::new(config.masked()),
         });

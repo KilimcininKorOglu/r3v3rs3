@@ -7,7 +7,6 @@ use rand::distr::{Alphanumeric, SampleString};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::str::FromStr;
-use subtle::ConstantTimeEq;
 
 /// The length of the secret: 43 alphanumeric characters carry more than 256 bits.
 const SECRET_LENGTH: usize = 43;
@@ -39,14 +38,6 @@ impl EnrollmentToken {
 /// The SHA-256 of an enrollment secret in lowercase hex.
 pub fn secret_hash(secret: &str) -> String {
     hex::encode(Sha256::digest(secret.as_bytes()))
-}
-
-/// Whether `secret` has the stored hash. The comparison takes the same time for every secret.
-pub fn secret_matches(secret: &str, stored_hash: &str) -> bool {
-    secret_hash(secret)
-        .as_bytes()
-        .ct_eq(stored_hash.as_bytes())
-        .into()
 }
 
 impl fmt::Display for EnrollmentToken {
@@ -99,18 +90,6 @@ mod tests {
         let parsed: EnrollmentToken = token.to_string().parse().unwrap();
         assert_eq!(parsed, token);
         assert_ne!(EnrollmentToken::new(CA_HASH).secret, token.secret);
-    }
-
-    #[test]
-    fn only_the_secret_matches_its_hash() {
-        let token = EnrollmentToken::new(CA_HASH);
-        let stored = token.secret_hash();
-        assert!(secret_matches(&token.secret, &stored));
-        assert!(!secret_matches(
-            &EnrollmentToken::new(CA_HASH).secret,
-            &stored
-        ));
-        assert!(!secret_matches(&token.secret, ""));
     }
 
     #[test]
