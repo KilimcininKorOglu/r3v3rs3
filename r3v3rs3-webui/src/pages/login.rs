@@ -3,7 +3,6 @@ use crate::{
     auth::{LoginQuery, test_token},
     components::{language_menu::LanguageMenu, theme_menu::ThemeMenu},
     i18n::use_locale,
-    pages::Route,
 };
 use gloo_events::EventListener;
 use gloo_net::http::Request;
@@ -173,10 +172,7 @@ impl LoginForm {
 
     fn apply(self, login: ApiResult<LoginResponse>) {
         match login {
-            ApiResult::Ok(LoginResponse::Success) => match self.query.redirect {
-                Some(redirect) => self.navigator.replace(&redirect),
-                None => self.navigator.push(&Route::Home),
-            },
+            ApiResult::Ok(LoginResponse::Success) => self.navigator.replace(&self.query.route()),
             ApiResult::Ok(LoginResponse::TotpRequired) => self.totp.set(Some(String::new())),
             ApiResult::Err(err) => self.error.set(Some(err)),
         }
