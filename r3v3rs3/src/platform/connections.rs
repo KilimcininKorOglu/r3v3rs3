@@ -233,7 +233,7 @@ mod tests {
         };
         platform
             .store
-            .connect_git_connection(entry.id, "alice", &tokens)
+            .connect_git_connection(entry.id, "alice", "https://r.example/cb", &tokens)
             .await?;
         let same = platform
             .update_git_connection(entry.id, request("team", None), 2)

@@ -553,6 +553,7 @@ async fn manage_connections(addr: SocketAddr) -> anyhow::Result<()> {
     let admin = session_cookie(addr, "admin", "admin-secret").await?;
     let editor = session_cookie(addr, "editor", "editor-secret").await?;
     let id = check_connection_add(addr, &admin, &editor).await?;
+    check_authorization(addr, &admin, &editor, &id).await?;
     check_connection_update(addr, &admin, &editor, &id).await?;
     check_platform_settings(addr, &admin, &editor).await?;
     check_connection_audit(addr, &admin, &id).await
@@ -596,6 +597,50 @@ async fn check_connection_add(
     assert_eq!(listed.as_array().map(Vec::len), Some(1));
     assert!(!listed.to_string().contains(CLIENT_SECRET), "{listed}");
     Ok(added["id"].as_str().unwrap_or_default().to_string())
+}
+
+/// Only an admin starts an authorization, and the callback without a session needs a state that
+/// an authorization issued.
+async fn check_authorization(
+    addr: SocketAddr,
+    admin: &str,
+    editor: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let path = format!("{CONNECTIONS}/{id}/authorize");
+    let callback = format!("http://{addr}/oauth/git/callback");
+    let body = json!({"redirect_uri": callback});
+    let (status, _) = send(addr, Method::POST, &path, editor, Some(body.clone())).await?;
+    assert_eq!(status, 403);
+    let wrong = Some(json!({"redirect_uri": format!("http://{addr}/elsewhere")}));
+    let (status, text) = send(addr, Method::POST, &path, admin, wrong).await?;
+    assert_eq!(status, 422, "{text}");
+    let (status, text) = send(addr, Method::POST, &path, admin, Some(body)).await?;
+    assert_eq!(status, 200, "{text}");
+    let started: Value = serde_json::from_str(&text)?;
+    let url = started["url"].as_str().unwrap_or_default();
+    assert!(
+        url.starts_with("https://git.example.com/login/oauth/authorize?client_id=client-id&"),
+        "{url}"
+    );
+
+    for (query, result) in [
+        ("code=c&state=forged", "error=oauth_state_invalid"),
+        (
+            "error=access_denied&state=forged",
+            "error=git_authorization_refused",
+        ),
+    ] {
+        let response = reqwest::get(format!("{callback}?{query}")).await?;
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["referrer-policy"], "no-referrer");
+        let page = response.text().await?;
+        assert!(
+            page.contains(&format!("url=/git_connections?{result}")),
+            "{page}"
+        );
+    }
+    Ok(())
 }
 
 /// Only an admin changes or deletes a connection, and an update keeps the secret.

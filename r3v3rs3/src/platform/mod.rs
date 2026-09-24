@@ -12,6 +12,8 @@ pub mod deploy;
 pub(crate) mod fake;
 pub mod hooks;
 mod notices;
+pub mod oauth;
+mod provider;
 pub mod proxy;
 mod publish;
 #[cfg(test)]
@@ -168,6 +170,12 @@ pub struct Platform {
     forwarders: Arc<Forwarders>,
     /// Records the enrollments of the agents. The tests run without it.
     audit: Option<Arc<AuditLog>>,
+    /// The HTTPS client of the Git provider APIs, built at its first use.
+    http: tokio::sync::OnceCell<crate::cdn::fetch::HttpClient>,
+    /// The OAuth authorizations that wait for the callback of their provider.
+    pending: oauth::PendingAuthorizations,
+    /// Lets one token renewal run at a time.
+    renewing: Mutex<()>,
 }
 
 impl Platform {
@@ -207,6 +215,9 @@ impl Platform {
             build_dir,
             compose: Arc::new(DockerCompose::new(config.platform.docker.clone())),
             compose_dir: config_dir.join(compose::COMPOSE_DIR),
+            http: tokio::sync::OnceCell::new(),
+            pending: oauth::PendingAuthorizations::default(),
+            renewing: Mutex::new(()),
         })
     }
 

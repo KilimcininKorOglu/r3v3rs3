@@ -249,6 +249,11 @@ mod tests {
             Error::InvalidGitConnection { reason: text() },
             Error::GitConnectionNameExists { name: text() },
             Error::InvalidPublicUrl { url: text() },
+            Error::OauthStateInvalid,
+            Error::GitConnectionNotConnected {
+                id: "abc".parse().unwrap(),
+            },
+            Error::GitProviderFailed { reason: text() },
             Error::AcmeAccountCreationFailed,
             Error::AcmeUnsupportedChallenge { challenge: text() },
             Error::AcmeIdentifiersMissing,

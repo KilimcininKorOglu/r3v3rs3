@@ -61,10 +61,12 @@ pub enum AuditAction {
     UpdateGitConnection,
     DeleteGitConnection,
     UpdatePlatformSettings,
+    /// An account of the Git provider authorized a connection.
+    ConnectGitConnection,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 43] = [
+    pub const ALL: [AuditAction; 44] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -108,6 +110,7 @@ impl AuditAction {
         Self::UpdateGitConnection,
         Self::DeleteGitConnection,
         Self::UpdatePlatformSettings,
+        Self::ConnectGitConnection,
     ];
 }
 

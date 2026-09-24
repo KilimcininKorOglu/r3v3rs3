@@ -13,9 +13,37 @@ use axum::{
 };
 use r3v3rs3_api::{
     audit::AuditAction,
-    git_connection::{GitConnectionEntry, GitConnectionRequest, PlatformSettings},
+    git_connection::{
+        AuthorizeRequest, AuthorizeResponse, GitConnectionEntry, GitConnectionRequest,
+        PlatformSettings,
+    },
     id::ShortId,
 };
+
+/// Starts the authorization of a Git provider connection. The browser of the admin opens the
+/// returned page of the provider, and the provider sends it back to `redirect_uri`.
+#[utoipa::path(
+    post,
+    path = "/{id}/authorize",
+    tag = "platform",
+    operation_id = "authorize_git_connection",
+    params(("id" = ShortId, Path, description = "Connection id.")),
+    request_body = AuthorizeRequest,
+    responses((status = 200, description = "The authorization page of the provider.", body = AuthorizeResponse), NotFoundResponse, ErrorResponses)
+)]
+pub async fn authorize_connection(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<AuthorizeRequest>,
+) -> Result<Json<AuthorizeResponse>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let response = platform
+        .authorize_git_connection(id, &request.redirect_uri, &caller.username, caller.client)
+        .await
+        .map_err(platform_error)?;
+    Ok(Json(response))
+}
 
 /// Lists the Git provider connections.
 #[utoipa::path(

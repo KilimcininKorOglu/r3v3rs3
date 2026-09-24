@@ -216,6 +216,43 @@ pub struct PlatformSettings {
     pub public_url: Option<PublicUrl>,
 }
 
+/// The path of the OAuth callback on the address of the WebUI.
+pub const OAUTH_CALLBACK_PATH: &str = "/oauth/git/callback";
+
+checked_string!(
+    /// The callback address of an OAuth application: the address of the WebUI followed by
+    /// `/oauth/git/callback`.
+    RedirectUri,
+    check_redirect_uri
+);
+
+fn check_redirect_uri(value: &str) -> Result<(), Error> {
+    let valid = Url::parse(value).is_ok_and(|url| {
+        matches!(url.scheme(), "http" | "https") && url.path().ends_with(OAUTH_CALLBACK_PATH)
+    }) && is_plain_base_url(value);
+    if valid {
+        Ok(())
+    } else {
+        Err(invalid(format!(
+            "the callback address must be an http or https URL that ends with {OAUTH_CALLBACK_PATH}: {value}"
+        )))
+    }
+}
+
+/// Starts the authorization of a connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AuthorizeRequest {
+    /// The callback address that the OAuth application of the provider lists.
+    #[schema(value_type = String, example = "https://r3v3rs3.example.com/oauth/git/callback")]
+    pub redirect_uri: RedirectUri,
+}
+
+/// The authorization page of the provider. The browser of the admin opens it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AuthorizeResponse {
+    pub url: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +311,24 @@ mod tests {
             "https://d.example#x",
         ] {
             assert!(invalid.parse::<PublicUrl>().is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn a_callback_address_ends_with_the_callback_path() {
+        let valid = "https://r3v3rs3.example.com/oauth/git/callback";
+        assert!(valid.parse::<RedirectUri>().is_ok());
+        assert!(
+            "http://127.0.0.1:46492/oauth/git/callback"
+                .parse::<RedirectUri>()
+                .is_ok()
+        );
+        for invalid in [
+            "https://r3v3rs3.example.com/",
+            "https://r3v3rs3.example.com/oauth/git/callback?x=1",
+            "javascript:alert(1)//oauth/git/callback",
+        ] {
+            assert!(invalid.parse::<RedirectUri>().is_err(), "{invalid}");
         }
     }
 

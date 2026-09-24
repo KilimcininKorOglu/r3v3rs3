@@ -152,6 +152,15 @@ pub enum Error {
     #[error("the public address must be an http or https URL without a trailing slash: {url}")]
     InvalidPublicUrl { url: String },
 
+    #[error("the authorization expired or was used already, start it again")]
+    OauthStateInvalid,
+
+    #[error("the Git provider connection is not connected: {id}")]
+    GitConnectionNotConnected { id: ShortId },
+
+    #[error("the Git provider failed: {reason}")]
+    GitProviderFailed { reason: String },
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 
@@ -361,6 +370,7 @@ impl Error {
             | Self::AppBusy { .. }
             | Self::TargetNameExists { .. }
             | Self::GitConnectionNameExists { .. }
+            | Self::GitConnectionNotConnected { .. }
             | Self::TargetInUse { .. }
             | Self::AppTargetFixed { .. } => 409,
             Self::ClusterUnavailable
@@ -368,7 +378,7 @@ impl Error {
             | Self::PlatformDisabled
             | Self::PlatformInCluster
             | Self::PlatformFailed => 503,
-            Self::NotificationFailed { .. } => 502,
+            Self::NotificationFailed { .. } | Self::GitProviderFailed { .. } => 502,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig
             | Self::FailedToInvokeRpc

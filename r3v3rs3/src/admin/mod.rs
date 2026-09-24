@@ -61,6 +61,7 @@ mod discovery;
 mod git;
 mod hooks;
 mod logs;
+mod oauth;
 mod openapi;
 mod platform;
 mod ports;
@@ -174,8 +175,9 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
     let (api, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api", auth_routes()?)
         .nest("/api", resource_routes().route_layer(verify.clone()))
-        // The webhooks carry a signature instead of a session.
-        .nest("/hooks", hook_routes()?)
+        // The webhooks and the OAuth callback carry a signature or a one-time state instead of a
+        // session.
+        .merge(public_routes()?)
         .split_for_parts();
     let docs: Router<AppState> =
         Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi)).route_layer(verify);
@@ -215,20 +217,24 @@ fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
 /// The largest webhook event. A push of many commits stays far below it.
 const MAX_HOOK_BODY: usize = 5 * 1024 * 1024;
 
-fn hook_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
+/// The routes without a session. They share one rate limit per client address.
+fn public_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
     let governor_conf = GovernorConfigBuilder::default()
         .per_second(1)
         .burst_size(10)
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid webhook rate limit config"))?;
-    let hook_limit =
-        GovernorLayer::new(Arc::new(governor_conf)).error_handler(|error| match error {
-            GovernorError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS.into_response(),
-            _ => AppError::Anyhow(anyhow::anyhow!(error)).into_response(),
-        });
+    let limit = GovernorLayer::new(Arc::new(governor_conf)).error_handler(|error| match error {
+        GovernorError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS.into_response(),
+        _ => AppError::Anyhow(anyhow::anyhow!(error)).into_response(),
+    });
+    let hooks = OpenApiRouter::new()
+        .routes(routes!(hooks::app_hook).layer(limit.clone()))
+        .layer(DefaultBodyLimit::max(MAX_HOOK_BODY));
+    let oauth = OpenApiRouter::new().routes(routes!(oauth::git_callback).layer(limit));
     Ok(OpenApiRouter::new()
-        .routes(routes!(hooks::app_hook).layer(hook_limit))
-        .layer(DefaultBodyLimit::max(MAX_HOOK_BODY)))
+        .nest("/hooks", hooks)
+        .nest("/oauth", oauth))
 }
 
 fn resource_routes() -> OpenApiRouter<AppState> {
@@ -283,7 +289,8 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     git::get_connection,
                     git::update_connection,
                     git::delete_connection
-                )),
+                ))
+                .routes(routes!(git::authorize_connection)),
         )
         .nest(
             "/platform/settings",

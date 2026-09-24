@@ -22,13 +22,15 @@ macro_rules! select_connections {
     };
 }
 
-/// The sealed values of a connection.
+/// The sealed values of a connection, and the callback address of its authorization, which a
+/// token renewal repeats.
 pub struct StoredConnection {
     pub client_secret: Vec<u8>,
     pub access_token: Option<Vec<u8>>,
     pub refresh_token: Option<Vec<u8>>,
     /// The Unix time in milliseconds when the access token expires.
     pub expires_at: Option<u64>,
+    pub redirect_uri: Option<String>,
 }
 
 /// The sealed tokens of an authorization.
@@ -61,21 +63,13 @@ impl PlatformStore {
         id: ShortId,
     ) -> anyhow::Result<Option<StoredConnection>> {
         let row = sqlx::query(
-            "SELECT client_secret, access_token, refresh_token, expires_at
+            "SELECT client_secret, access_token, refresh_token, expires_at, redirect_uri
             FROM git_connections WHERE id = ?",
         )
         .bind(id.to_string())
         .fetch_optional(&self.pool)
         .await?;
-        row.map(|row| {
-            Ok(StoredConnection {
-                client_secret: row.try_get("client_secret")?,
-                access_token: row.try_get("access_token")?,
-                refresh_token: row.try_get("refresh_token")?,
-                expires_at: optional_time_of(&row, "expires_at")?,
-            })
-        })
-        .transpose()
+        row.as_ref().map(stored_connection_of).transpose()
     }
 
     pub async fn insert_git_connection(
@@ -122,6 +116,8 @@ impl PlatformStore {
                     THEN refresh_token END,
                 expires_at = CASE WHEN provider = ?1 AND url = ?2 AND client_id = ?3
                     THEN expires_at END,
+                redirect_uri = CASE WHEN provider = ?1 AND url = ?2 AND client_id = ?3
+                    THEN redirect_uri END,
                 provider = ?1, url = ?2, client_id = ?3,
                 client_secret = COALESCE(?4, client_secret),
                 name = ?5, updated_at = ?6
@@ -151,13 +147,15 @@ impl PlatformStore {
         &self,
         id: ShortId,
         account: &str,
+        redirect_uri: &str,
         tokens: &StoredTokens<'_>,
     ) -> anyhow::Result<bool> {
         let result = sqlx::query(
-            "UPDATE git_connections SET status = 'connected', account = ?, access_token = ?,
-                refresh_token = ?, expires_at = ? WHERE id = ?",
+            "UPDATE git_connections SET status = 'connected', account = ?, redirect_uri = ?,
+                access_token = ?, refresh_token = ?, expires_at = ? WHERE id = ?",
         )
         .bind(account)
+        .bind(redirect_uri)
         .bind(tokens.access_token)
         .bind(tokens.refresh_token)
         .bind(tokens.expires_at.map(sql_int))
@@ -165,6 +163,37 @@ impl PlatformStore {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() == 1)
+    }
+
+    /// Replaces the tokens of a connected connection after a renewal.
+    pub async fn renew_git_tokens(
+        &self,
+        id: ShortId,
+        tokens: &StoredTokens<'_>,
+    ) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            "UPDATE git_connections SET access_token = ?, refresh_token = ?, expires_at = ?
+            WHERE id = ? AND status = 'connected'",
+        )
+        .bind(tokens.access_token)
+        .bind(tokens.refresh_token)
+        .bind(tokens.expires_at.map(sql_int))
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Marks a connection expired and drops its tokens, because the provider refused them.
+    pub async fn expire_git_connection(&self, id: ShortId) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE git_connections SET status = 'expired', access_token = NULL,
+                refresh_token = NULL, expires_at = NULL WHERE id = ?",
+        )
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// Deletes a connection. Returns false when no connection has the id.
@@ -198,6 +227,16 @@ impl PlatformStore {
         query.execute(&self.pool).await?;
         Ok(())
     }
+}
+
+fn stored_connection_of(row: &SqliteRow) -> anyhow::Result<StoredConnection> {
+    Ok(StoredConnection {
+        client_secret: row.try_get("client_secret")?,
+        access_token: row.try_get("access_token")?,
+        refresh_token: row.try_get("refresh_token")?,
+        expires_at: optional_time_of(row, "expires_at")?,
+        redirect_uri: row.try_get("redirect_uri")?,
+    })
 }
 
 fn connection_of(row: &SqliteRow) -> anyhow::Result<GitConnectionEntry> {

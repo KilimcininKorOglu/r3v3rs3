@@ -202,8 +202,12 @@ impl ApiClient {
         Ok(T::deserialize(value)?)
     }
 
-    /// Sends the request and returns the method and path, the status and the body.
-    async fn exchange(&self, request: ApiRequest) -> anyhow::Result<(String, StatusCode, Bytes)> {
+    /// Sends the request and returns the method and path, the status and the body. A status that
+    /// is not a success is not an error here.
+    pub async fn exchange(
+        &self,
+        request: ApiRequest,
+    ) -> anyhow::Result<(String, StatusCode, Bytes)> {
         let target = format!("{} {}", request.method, request.path);
         let mut builder = Request::builder()
             .method(request.method)
