@@ -138,7 +138,7 @@ $ docker compose pull
 $ docker compose up -d
 ```
 
-The volumes keep the configuration and the accounts, so no account is created again. Pin a version with the tag, for example `:v1.5.2`, when you upgrade several hosts in steps.
+The volumes keep the configuration and the accounts, so no account is created again. Pin a version with the tag, for example `:v1.5.3`, when you upgrade several hosts in steps.
 
 ## What a Restart Does
 
