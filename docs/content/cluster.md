@@ -12,11 +12,13 @@ This page is the reference. To build a cluster from nothing, follow [High Availa
 
 ## Architecture
 
-- `config.toml` of each node holds the `[cluster]` section. The admin API and the WebUI do not change it, and the store does not hold it.
-- The store holds the rest of the state: the settings, the ports, the proxies, the access lists, the certificates, the ACME entries, the admin accounts and the CDN IP ranges. It also holds the audit log and the sent certificate notifications. A node with the cluster on does not read `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `accounts.toml`, `notifications.json` or the certificate files.
+- `config.toml` of each node holds the `[cluster]`, `[acme_exec]` and `[platform]` sections. The admin API and the WebUI do not change them, and the store does not hold them.
+- The store holds the rest of the state: the settings, the ports, the proxies, the access lists, the certificates, the ACME entries, the admin accounts and the CDN IP ranges. It also holds the audit log and the sent certificate notifications. A node with the cluster on does not read `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `accounts.toml`, `notifications.json`, `cdn-ranges.json` or the certificate files.
 - Each node watches the store and applies every change. A change through the admin API of a node goes to the store first. A write that finds a newer value fails with `409 cluster_write_conflict`, and the node gets the newer value from the store.
 - The nodes share the admin sessions, the proxy sessions, the rate limit counts and, when `share_cache` is on, the cached responses.
-- One node is the leader. Only the leader orders ACME certificates, sends the certificate notifications, removes expired certificates and old audit log entries, saves the downloaded CDN IP ranges to the store and removes the expired sessions and shared responses. The leader runs these tasks when it takes the lead and then at each `background_task_interval`.
+- One node is the leader. Only the leader orders ACME certificates, sends the certificate notifications, removes expired certificates and old audit log entries, saves the downloaded CDN IP ranges to the store and removes the expired sessions and shared responses. The leader runs these tasks, except the CDN save, when it takes the lead and then at each `background_task_interval`. It saves the CDN IP ranges after each download.
+- Every node runs the enabled discovery providers itself, so every node needs access to the Docker socket, the Kubernetes API, Consul or etcd of each enabled provider.
+- The deployment platform does not run on a node with the cluster on. Its admin API answers `503 platform_in_cluster`.
 - A load balancer in front of the nodes can send each request to any node.
 
 The **Settings** page of the WebUI shows the state, the role and the applied revision of the node. `GET /api/cluster/status` returns the same data.
@@ -30,7 +32,7 @@ The **Settings** page of the WebUI shows the state, the role and the applied rev
 
 ## Set Up a Cluster
 
-Four commands build a cluster: `r3v3rs3 cluster keygen` writes the encryption key, the `[cluster]` section of `config.toml` names the store on every node, `r3v3rs3 cluster import` copies the files of one node into an empty prefix, and `r3v3rs3 start` runs every node.
+Four commands build a cluster: `r3v3rs3 cluster keygen` writes the encryption key, the `[cluster]` section of `config.toml` names the store on every node, `r3v3rs3 cluster import` copies the files of one node into an empty prefix, and `r3v3rs3 start` runs every node. With the cluster on, `r3v3rs3 add-user` writes the account to the store and replaces an account with the same name.
 
 [High Availability](@/tutorials/high-availability.md) gives each step with its commands, the store install, the credentials and the load balancer.
 
@@ -42,21 +44,21 @@ Only `config.toml` sets these fields.
 |---|---|---|
 | `enabled` | `false` | Turns the cluster on. |
 | `backend` | `etcd` | `etcd` or `consul`. |
-| `endpoints` | none | The HTTP API addresses of the store: `http://<host>:<port>`, `https://<host>:<port>` or `unix://<path>`. A connection error selects the next address. |
+| `endpoints` | none | Required. The HTTP API addresses of the store: `http://<host>:<port>`, `https://<host>:<port>` or `unix://<path>`. A connection error selects the next address. |
 | `username`, `password` | empty | The etcd user. An empty user sends no credentials. |
 | `token` | none | The Consul ACL token. |
 | `datacenter` | empty | The Consul datacenter. Empty uses the datacenter of the agent. |
-| `prefix` | `r3v3rs3` | Every key of the cluster starts with `<prefix>/v1/`. Several clusters can share one store with different prefixes. |
+| `prefix` | `r3v3rs3` | Every key of the cluster starts with `<prefix>/v1/`. Several clusters can share one store with different prefixes. It cannot be empty. |
 | `node_name` | none | The name of the node. It is required, and each node needs a different name. |
-| `tls` | none | `ca_file` verifies the store. Without it, the system root certificates verify the store. `cert_file` and `key_file` send a client certificate. |
-| `encryption_key_files` | none | The key files. The first key encrypts. Every key decrypts. |
+| `tls` | none | `ca_file` verifies the store. Without it, the system root certificates verify the store. `cert_file` and `key_file` send a client certificate, and one needs the other. |
+| `encryption_key_files` | none | Required. The key files. The first key encrypts. Every key decrypts. |
 | `lock_ttl` | `15s` | The TTL of the leader lock and of the node presence. etcd needs at least `1s`, Consul at least `10s`. |
 | `startup_timeout` | `30s` | The longest wait for the store when the node starts. |
-| `rate_limit_sync_interval` | `1s` | How often a node publishes its rate limit counts. The minimum is `100ms`. |
+| `rate_limit_sync_interval` | `1s` | How often a node publishes its rate limit counts. The minimum is `100ms`, and a shorter value uses `100ms`. |
 | `share_cache` | `false` | Stores cached responses in the store for the other nodes. |
 | `cache_max_value_size` | `1048576` | The largest cached response in bytes that a node stores for the other nodes. |
 
-The admin API does not return `password` or `token`.
+The admin API does not return `password` or `token`. `GET /api/config` returns `password_set: true` or `token_set: true` when the value is set.
 
 ## Keys in the Store
 
@@ -86,7 +88,7 @@ Every key starts with `<prefix>/v1/`.
 
 ## Encryption
 
-A node encrypts each value with AES-256-GCM before it writes the value. The KV key of the value is the associated data, so a value that somebody moves to another key does not decrypt. An encrypted value starts with the id of its key: the first 8 bytes of the SHA-256 digest of the key.
+A node encrypts each value with AES-256-GCM before it writes the value. The KV key of the value is the associated data, so a value that somebody moves to another key does not decrypt. An encrypted value starts with the 4 bytes `R3E1`, followed by the id of its key: the first 8 bytes of the SHA-256 digest of the key.
 
 To replace a key:
 
@@ -145,6 +147,7 @@ For an HTTP-01 or TLS-ALPN-01 challenge, the leader writes the challenge to the 
 - A new login and a new proxy session need the store. Without the store, they fail with `503`.
 - When the store is back, the node reads the whole state again and becomes `synced`. The node does not write its local state to the store.
 - A node that cannot reach the store when it starts stops after `startup_timeout`.
+- A node whose store has no data below the prefix stops with the message to run `r3v3rs3 cluster import` first.
 
 ## Sessions
 
@@ -152,7 +155,7 @@ The admin sessions and the sessions of the proxy authentication are in the store
 
 ## Rate Limit Accuracy
 
-A node does not read the store for each request. Each node counts the requests of each client and publishes the counts of the 2048 busiest clients of each limit at each `rate_limit_sync_interval`. A node adds the recent counts of the other nodes to its own counts. Counts that are older than three intervals, or older than 2 seconds when that is longer, do not count.
+A node does not read the store for each request. Each node counts the requests of each client and publishes the counts of the 2048 busiest clients of all its limits together at each `rate_limit_sync_interval`. A node adds the recent counts of the other nodes to its own counts. Counts that are older than three intervals, or older than 2 seconds when that is longer, do not count.
 
 - A limit whose period is at least 10 times `rate_limit_sync_interval` uses the counts of every node. The counts of the other nodes are up to one interval old. A burst that reaches every node at the same time can pass up to `(N − 1) × burst` more requests than the limit, where `N` is the number of nodes.
 - A limit with a shorter period divides the limit between the present nodes. Each node allows `ceil(limit / N)` requests. A load balancer that sends a client to one node gives the client less than the limit.
@@ -160,7 +163,7 @@ A node does not read the store for each request. Each node counts the requests o
 
 ## Shared Cache
 
-With `share_cache = true`, a node queues each cached response that stays fresh for at least 60 seconds for the store. The node does not wait for the write. On a local miss, a node reads the store for at most 100 milliseconds.
+With `share_cache = true`, a node queues each cached response that stays fresh for at least 60 seconds for the store. The node does not wait for the write. The write queue of a proxy holds 64 responses, and a response that finds the queue full stays on its node. On a local miss, a node reads the store for at most 100 milliseconds.
 
 - A response stays on its node when its encoded size is larger than `cache_max_value_size`, 1 MiB for etcd or 350 KiB for Consul, whichever is smaller. The body is stored in base64, so the stored size is about 4/3 of the body size. The node does not split a response into several keys.
 - A purge of the cache of a proxy writes `state/cache-purges/<proxy id>` and deletes the shared responses of the proxy. Every node purges its local cache after the change.

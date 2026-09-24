@@ -29,6 +29,8 @@ Proxy listesi her sağlayıcının durumunu, eklediği proxy sayısını ve prox
 | `running` | Sağlayıcı kaynaklarını okudu ve değişiklikleri izliyor. |
 | `error` | Sağlayıcı kaynaklarını okuyamıyor. Son okumasındaki proxy'ler aktif kalır. |
 
+[Deploy platformu](@/platform.tr.md) çalışırken liste, deploy edilen uygulamaların proxy'lerini yayınlayan `platform` sağlayıcısını da içerir.
+
 Her sorun, kaynağı ve sebebi gösterir, örneğin `web-1: http.app: port not found: https`.
 
 # Etiketler
@@ -48,7 +50,7 @@ r3v3rs3.<protocol>.<name>.<field>=<value>
 
 | Key | Değer |
 |---|---|
-| `r3v3rs3.enable` | Sağlayıcı her kaynağı okumuyorsa `true` kaynağı seçer. |
+| `r3v3rs3.enable` | Sağlayıcı her kaynağı okumuyorsa `true` kaynağı seçer. Başka her değer, örneğin `false`, kaynağı `exposed_by_default = true` iken de atlar. |
 | `ports` | Zorunlu. Virgülle ayrılmış port adları veya port id'leri. |
 | `name` | Proxy listesindeki ad. Varsayılan değer `<name>` olur. |
 | `active` | `false` proxy'yi pasif olarak ekler. Varsayılan değer `true` olur. |
@@ -75,7 +77,7 @@ r3v3rs3.http.app.vhosts=app.example.com
 r3v3rs3.http.app.port=8080
 ```
 
-Bir route da `port` ve `scheme` kullanabilir. Aynı route'un `servers` alanıyla birlikte kullanılamaz.
+Bir route da `port` ve `scheme` kullanabilir. Aynı route'un `servers` veya `response` alanıyla birlikte kullanılamaz.
 
 ```text
 r3v3rs3.http.app.ports=http,https
@@ -176,10 +178,10 @@ exposed_by_default = false
 | `enabled` | Sağlayıcıyı başlatır. |
 | `endpoint` | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` veya `https://<host>:<port>`. Varsayılan değer `unix:///var/run/docker.sock` olur. |
 | `client_cert` | r3v3rs3'ün `https` endpoint'ine gönderdiği istemci sertifikasının id'si. Sunucu sertifikasını bir sistem kök sertifikası veya r3v3rs3'teki bir kök sertifika imzalamalıdır. |
-| `network` | Upstream adreslerinin alındığı Docker ağı. Her container tek ağa bağlıysa boş bırakın. |
+| `network` | Upstream adreslerinin alındığı Docker ağı. Her container tek ağa bağlıysa boş bırakın. Bu ağda olmayan veya ayar boşken birden fazla ağa bağlı container sorun sayılır. |
 | `exposed_by_default` | `true`, `r3v3rs3.` etiketi olan her container'ı okur. `false` yalnız `r3v3rs3.enable=true` olan container'ları okur. |
 
-Ayar değişikliği yalnız sağlayıcıyı yeniden başlatır, sunucu yeniden başlamaz. Sağlayıcının kullandığı sertifika silinemez.
+Ayar değişikliği yalnız sağlayıcıyı yeniden başlatır, sunucu yeniden başlamaz. Sağlayıcının proxy'leri ve sertifikaları hemen kaldırılır ve ilk okumasıyla geri gelir. Sağlayıcıyı kapatmak onları kaldırır. Sağlayıcının kullandığı sertifika silinemez.
 
 ## Container'lar
 
@@ -253,14 +255,14 @@ ports = ["http"]
 | `ingress` | Ingress kaynaklarını okur. Varsayılan değer `true` olur. |
 | `crd` | R3v3rs3Proxy kaynaklarını okur. Varsayılan değer `false` olur. Önce custom resource definition'ı kurun, çünkü sağlayıcı cluster'ın tanımadığı bir kaynağı izleyemez. Sağlayıcı `ingress` veya `crd` ayarını gerektirir. |
 | `ingress_class` | r3v3rs3 yalnız bu class'ın Ingress kaynaklarını okur. Class, `spec.ingressClassName` alanından veya `kubernetes.io/ingress.class` annotation'ından gelir. Her Ingress'i okumak için boş bırakın. |
-| `ports` | `r3v3rs3.io/ports` annotation'ı olmayan bir Ingress'in kullandığı port adları veya id'leri. |
+| `ports` | `r3v3rs3.io/ports` annotation'ı olmayan bir Ingress'in ve `spec.ports` alanı olmayan bir R3v3rs3Proxy'nin kullandığı port adları veya id'leri. |
 
-Ayar değişikliği yalnız sağlayıcıyı yeniden başlatır, sunucu yeniden başlamaz.
+Ayar değişikliği yalnız sağlayıcıyı yeniden başlatır, sunucu yeniden başlamaz. Sağlayıcının proxy'leri ve sertifikaları hemen kaldırılır ve ilk okumasıyla geri gelir.
 
 ## Ingress kaynakları
 
 - Ingress'in her host'u bir HTTP proxy olur. Host, proxy'nin virtual host'udur. Host'un her yolu bir route olur. Proxy'nin adı `<namespace>/<name> <host>` olur.
-- Host'u olmayan kurallar ve `spec.defaultBackend` virtual host'u olmayan tek bir proxy olur. Porttaki başka hiçbir proxy'nin eşleşmediği istekler bu proxy'ye gelir.
+- Host'u olmayan kurallar ve `spec.defaultBackend` virtual host'u olmayan ve adı `<namespace>/<name>` olan tek bir proxy olur. Porttaki başka hiçbir proxy'nin eşleşmediği istekler bu proxy'ye gelir.
 - `Prefix` ve `ImplementationSpecific` yol türleri yolu önek olarak eşler. r3v3rs3'te tam yol eşleşmesi yoktur. Bu yüzden `Exact` türündeki yol sorun sayılır ve route olmaz.
 - Route'un sunucuları, Service'in EndpointSlice'larında Service portunun hazır endpoint'leridir. Backend, Service portunu `port.number` veya `port.name` ile seçer. `ready` koşulu olmayan endpoint hazır sayılır.
 - Adı `https` olan veya `appProtocol` değeri `https` olan Service portu endpoint'lere HTTPS ile bağlanır.
@@ -336,7 +338,7 @@ spec:
 
 ## RBAC
 
-Sağlayıcı beş kaynağı listeler ve izler. `deploy/kubernetes/rbac.yaml` dosyası bu nesneleri içerir. r3v3rs3'ün service account'una bir ClusterRole verin veya `namespaces` ayarındaki her namespace'te bir Role verin:
+Sağlayıcı beş kaynağı listeler ve izler. `deploy/kubernetes/rbac.yaml` dosyası bu nesneleri ve `r3v3rs3` namespace'ini içerir. r3v3rs3'ün service account'una bir ClusterRole verin veya `namespaces` ayarındaki her namespace'te bir Role verin:
 
 ```yaml
 apiVersion: v1
@@ -443,6 +445,8 @@ exposed_by_default = false
 | `prefix` | Key öneki. Varsayılan değer `r3v3rs3` olur. |
 | `exposed_by_default` | `true`, `r3v3rs3.` etiketi olan her servisi okur. `false` yalnız `r3v3rs3.enable=true` etiketi olan servisleri okur. |
 
+Sağlayıcı `catalog` veya `kv` ayarını gerektirir. `kv` açıkken `prefix` boş olamaz.
+
 Yönetim API'si token'ı döndürmez. Kayıtlı bir token varsa `GET /api/config` yanıtında `token_set: true` döner. `token` alanı olmayan bir `PUT /api/config` isteği kayıtlı token'ı korur. `"token": ""` token'ı siler. `config.toml` token'ı düz metin olarak saklar. Bu yüzden config dizinini yalnız r3v3rs3 kullanıcısı okuyabilmelidir.
 
 ## Catalog servisleri
@@ -450,8 +454,9 @@ Yönetim API'si token'ı döndürmez. Kayıtlı bir token varsa `GET /api/config
 - Etiket `<key>=<value>` biçimindedir, örneğin `r3v3rs3.http.app.ports=https`. `=` içermeyen bir `r3v3rs3.` etiketi sorun sayılır.
 - r3v3rs3 yalnız sağlık kontrollerini geçen servis örneklerini okur. Sağlık kontrolünü geçen örneği olmayan seçili bir servis sorun sayılır ve proxy'leri kaldırılır.
 - Servis örneğinin upstream adresi servis adresidir. Servis adresi olmayan örnek düğüm adresini kullanır.
-- `port`, `routes` ve `upstream_servers` alanları olmayan bir proxy servisin portunu kullanır. `port` ve `servers` alanları olmayan bir route da servisin portunu kullanır.
+- `port`, `routes` ve `upstream_servers` alanları olmayan bir proxy servisin portunu kullanır. `port`, `servers` ve `response` alanları olmayan bir route da servisin portunu kullanır.
 - Bir servisin örnekleri proxy'lerini paylaşır. Her örnek kendi sunucularını proxy'nin route'larına ekler, böylece proxy yükü örneklere dağıtır.
+- r3v3rs3 her örneği kendi etiketleriyle seçer. `exposed_by_default = false` iken `r3v3rs3.enable=true` etiketi olmayan örnek sunucu eklemez.
 
 Servisi Consul agent'ına kaydedin, örneğin `consul services register whoami.json` komutuyla:
 
@@ -508,6 +513,8 @@ prefix = "r3v3rs3"
 | `username` | etcd kimlik doğrulamasının kullanıcısı. Kimlik doğrulama kapalıysa boş bırakın. |
 | `password` | Kullanıcının parolası. `username` ile birlikte verin. |
 | `prefix` | Key öneki. Varsayılan değer `r3v3rs3` olur. |
+
+`endpoints` en az bir adres içermelidir ve `prefix` boş olamaz.
 
 Yönetim API'si parolayı döndürmez. Kayıtlı bir parola varsa `GET /api/config` yanıtında `password_set: true` döner. `password` alanı olmayan bir `PUT /api/config` isteği kayıtlı parolayı korur. `"password": ""` parolayı siler. `config.toml` parolayı düz metin olarak saklar. Bu yüzden config dizinini yalnız r3v3rs3 kullanıcısı okuyabilmelidir.
 

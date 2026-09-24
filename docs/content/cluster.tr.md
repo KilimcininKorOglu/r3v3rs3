@@ -12,11 +12,13 @@ Bu sayfa referanstır. Sıfırdan kuruyorsanız [Yüksek erişilebilirlik](@/tut
 
 ## Mimari
 
-- `[cluster]` bölümü her düğümün `config.toml` dosyasında durur. Yönetim API'si ve WebUI bu bölümü değiştirmez. Veri deposu bu bölümü tutmaz.
-- Durum bilgisinin geri kalanı veri deposunda durur: ayarlar, portlar, proxy'ler, erişim listeleri, sertifikalar, ACME kayıtları, admin hesapları ve CDN IP aralıkları. Denetim kaydı ve gönderilen sertifika bildirimleri de veri deposunda durur. Cluster açık olan düğüm `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `accounts.toml`, `notifications.json` ve sertifika dosyalarını okumaz.
+- `[cluster]`, `[acme_exec]` ve `[platform]` bölümleri her düğümün `config.toml` dosyasında durur. Yönetim API'si ve WebUI bu bölümleri değiştirmez. Veri deposu bu bölümleri tutmaz.
+- Durum bilgisinin geri kalanı veri deposunda durur: ayarlar, portlar, proxy'ler, erişim listeleri, sertifikalar, ACME kayıtları, admin hesapları ve CDN IP aralıkları. Denetim kaydı ve gönderilen sertifika bildirimleri de veri deposunda durur. Cluster açık olan düğüm `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `accounts.toml`, `notifications.json`, `cdn-ranges.json` ve sertifika dosyalarını okumaz.
 - Her düğüm veri deposunu izler ve her değişikliği uygular. Bir düğümün yönetim API'sinden gelen değişiklik önce veri deposuna yazılır. Daha yeni bir değer bulan yazma `409 cluster_write_conflict` ile başarısız olur ve düğüm yeni değeri veri deposundan alır.
 - Düğümler admin oturumlarını, proxy oturumlarını, rate limit sayılarını ve `share_cache` açıksa cache'lenen yanıtları paylaşır.
-- Düğümlerden biri liderdir. ACME sertifikalarını yalnız lider sipariş eder. Sertifika bildirimlerini yalnız lider gönderir. Eski denetim kayıtlarını, süresi dolan sertifikaları, süresi dolan oturumları ve paylaşılan yanıtları yalnız lider siler. İndirilen CDN IP aralıklarını veri deposuna yalnız lider yazar. Lider bu işleri lider olduğu anda ve sonra her `background_task_interval` sürede çalıştırır.
+- Düğümlerden biri liderdir. ACME sertifikalarını yalnız lider sipariş eder. Sertifika bildirimlerini yalnız lider gönderir. Eski denetim kayıtlarını, süresi dolan sertifikaları, süresi dolan oturumları ve paylaşılan yanıtları yalnız lider siler. İndirilen CDN IP aralıklarını veri deposuna yalnız lider yazar. Lider CDN kaydı dışındaki bu işleri lider olduğu anda ve sonra her `background_task_interval` sürede çalıştırır. CDN IP aralıklarını her indirmeden sonra yazar.
+- Her düğüm açık servis keşfi sağlayıcılarını kendisi çalıştırır. Bu yüzden her düğüm, açık her sağlayıcının Docker socket'ine, Kubernetes API'sine, Consul'una veya etcd'sine erişebilmelidir.
+- Deploy platformu cluster açık olan düğümde çalışmaz. Platform API'si `503 platform_in_cluster` döner.
 - Düğümlerin önündeki bir yük dengeleyici her isteği herhangi bir düğüme gönderebilir.
 
 WebUI'daki **Ayarlar** sayfası düğümün durumunu, rolünü ve uyguladığı revizyonu gösterir. `GET /api/cluster/status` aynı veriyi döner.
@@ -30,7 +32,7 @@ WebUI'daki **Ayarlar** sayfası düğümün durumunu, rolünü ve uyguladığı 
 
 ## Cluster kurulumu
 
-Bir cluster'ı dört komut kurar: `r3v3rs3 cluster keygen` şifreleme key'ini yazar, `config.toml` dosyasındaki `[cluster]` bölümü her düğümde veri deposunu tanımlar, `r3v3rs3 cluster import` bir düğümün dosyalarını boş bir öneke kopyalar ve `r3v3rs3 start` her düğümü çalıştırır.
+Bir cluster'ı dört komut kurar: `r3v3rs3 cluster keygen` şifreleme key'ini yazar, `config.toml` dosyasındaki `[cluster]` bölümü her düğümde veri deposunu tanımlar, `r3v3rs3 cluster import` bir düğümün dosyalarını boş bir öneke kopyalar ve `r3v3rs3 start` her düğümü çalıştırır. Cluster açıkken `r3v3rs3 add-user` hesabı veri deposuna yazar ve aynı adlı hesabın üzerine yazar.
 
 [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md) sayfası her adımı komutlarıyla, veri deposu kurulumuyla, kimlik bilgileriyle ve yük dengeleyici ile birlikte anlatır.
 
@@ -42,21 +44,21 @@ Bu alanları yalnız `config.toml` belirler.
 |---|---|---|
 | `enabled` | `false` | Cluster'ı açar. |
 | `backend` | `etcd` | `etcd` veya `consul`. |
-| `endpoints` | yok | Veri deposunun HTTP API adresleri: `http://<host>:<port>`, `https://<host>:<port>` veya `unix://<path>`. Bağlantı hatası bir sonraki adresi seçer. |
+| `endpoints` | yok | Zorunludur. Veri deposunun HTTP API adresleri: `http://<host>:<port>`, `https://<host>:<port>` veya `unix://<path>`. Bağlantı hatası bir sonraki adresi seçer. |
 | `username`, `password` | boş | etcd kullanıcısı. Kullanıcı boşsa kimlik bilgisi gönderilmez. |
 | `token` | yok | Consul ACL token'ı. |
 | `datacenter` | boş | Consul veri merkezi. Boşsa agent'ın veri merkezi kullanılır. |
-| `prefix` | `r3v3rs3` | Cluster'ın her key'i `<prefix>/v1/` ile başlar. Farklı öneklerle birden fazla cluster aynı veri deposunu paylaşabilir. |
+| `prefix` | `r3v3rs3` | Cluster'ın her key'i `<prefix>/v1/` ile başlar. Farklı öneklerle birden fazla cluster aynı veri deposunu paylaşabilir. Boş olamaz. |
 | `node_name` | yok | Düğümün adı. Zorunludur ve her düğümün adı farklı olmalıdır. |
-| `tls` | yok | `ca_file` veri deposunu doğrular. Bu alan yoksa sistemin kök sertifikaları veri deposunu doğrular. `cert_file` ve `key_file` istemci sertifikası gönderir. |
-| `encryption_key_files` | yok | Key dosyaları. İlk key şifreler. Her key çözer. |
+| `tls` | yok | `ca_file` veri deposunu doğrular. Bu alan yoksa sistemin kök sertifikaları veri deposunu doğrular. `cert_file` ve `key_file` istemci sertifikası gönderir ve birlikte verilir. |
+| `encryption_key_files` | yok | Zorunludur. Key dosyaları. İlk key şifreler. Her key çözer. |
 | `lock_ttl` | `15s` | Lider kilidinin ve düğüm varlık kaydının TTL'i. etcd en az `1s`, Consul en az `10s` ister. |
 | `startup_timeout` | `30s` | Düğüm başlarken veri deposu için en uzun bekleme süresi. |
-| `rate_limit_sync_interval` | `1s` | Düğümün rate limit sayılarını yayınlama sıklığı. En düşük değer `100ms`'dir. |
+| `rate_limit_sync_interval` | `1s` | Düğümün rate limit sayılarını yayınlama sıklığı. En düşük değer `100ms`'dir. Daha kısa bir değer `100ms` olarak kullanılır. |
 | `share_cache` | `false` | Cache'lenen yanıtları diğer düğümler için veri deposuna yazar. |
 | `cache_max_value_size` | `1048576` | Düğümün diğer düğümler için veri deposuna yazdığı en büyük cache'lenmiş yanıtın byte cinsinden boyutu. |
 
-Yönetim API'si `password` ve `token` değerlerini döndürmez.
+Yönetim API'si `password` ve `token` değerlerini döndürmez. Değer varsa `GET /api/config` yanıtında `password_set: true` veya `token_set: true` döner.
 
 ## Veri deposundaki key'ler
 
@@ -86,7 +88,7 @@ Her key `<prefix>/v1/` ile başlar.
 
 ## Şifreleme
 
-Düğüm her değeri yazmadan önce AES-256-GCM ile şifreler. Değerin KV key'i associated data olarak kullanılır. Bu yüzden başka bir key'e taşınan değer çözülmez. Şifreli değer, key'inin id'si ile başlar: key'in SHA-256 özetinin ilk 8 byte'ı.
+Düğüm her değeri yazmadan önce AES-256-GCM ile şifreler. Değerin KV key'i associated data olarak kullanılır. Bu yüzden başka bir key'e taşınan değer çözülmez. Şifreli değer 4 byte'lık `R3E1` ile başlar, ardından key'inin id'si gelir: key'in SHA-256 özetinin ilk 8 byte'ı.
 
 Bir key'i değiştirmek için:
 
@@ -145,6 +147,7 @@ HTTP-01 veya TLS-ALPN-01 challenge'ında lider challenge'ı veri deposuna yazar.
 - Yeni bir giriş ve yeni bir proxy oturumu veri deposuna ihtiyaç duyar. Veri deposu yoksa `503` ile başarısız olur.
 - Veri deposu geri gelince düğüm bütün durum bilgisini yeniden okur ve durumu `synced` olur. Düğüm yerel durum bilgisini veri deposuna yazmaz.
 - Başlarken veri deposuna ulaşamayan düğüm `startup_timeout` sonunda durur.
+- Veri deposunda önekin altında veri yoksa düğüm, önce `r3v3rs3 cluster import` çalıştırılmasını isteyen mesajla durur.
 
 ## Oturumlar
 
@@ -152,7 +155,7 @@ Admin oturumları ve proxy kimlik doğrulama oturumları veri deposunda durur. B
 
 ## Rate limit doğruluğu
 
-Düğüm her istek için veri deposunu okumaz. Her düğüm her istemcinin isteklerini sayar. Her `rate_limit_sync_interval` sürede her limit için en yoğun 2048 istemcinin sayılarını yayınlar. Düğüm, diğer düğümlerin yeni sayılarını kendi sayılarına ekler. Üç aralıktan eski sayılar sayılmaz. Üç aralık 2 saniyeden kısaysa sınır 2 saniyedir.
+Düğüm her istek için veri deposunu okumaz. Her düğüm her istemcinin isteklerini sayar. Her `rate_limit_sync_interval` sürede bütün limitlerinin toplamında en yoğun 2048 istemcinin sayılarını yayınlar. Düğüm, diğer düğümlerin yeni sayılarını kendi sayılarına ekler. Üç aralıktan eski sayılar sayılmaz. Üç aralık 2 saniyeden kısaysa sınır 2 saniyedir.
 
 - Periyodu `rate_limit_sync_interval` değerinin en az 10 katı olan limit, bütün düğümlerin sayılarını kullanır. Diğer düğümlerin sayıları en fazla bir aralık eskidir. Her düğüme aynı anda ulaşan bir burst, limitin `(N − 1) × burst` kadar üstüne çıkabilir. `N` düğüm sayısıdır.
 - Periyodu daha kısa olan limit, limiti var olan düğümler arasında böler. Her düğüm `ceil(limit / N)` isteğe izin verir. Bir istemciyi tek düğüme gönderen yük dengeleyici, o istemciye limitten daha az hak verir.
@@ -160,7 +163,7 @@ Düğüm her istek için veri deposunu okumaz. Her düğüm her istemcinin istek
 
 ## Paylaşılan cache
 
-`share_cache = true` iken düğüm, en az 60 saniye taze kalan her cache'lenmiş yanıtı veri deposuna yazmak için kuyruğa koyar. Düğüm yazmayı beklemez. Yanıt yerel cache'te yoksa düğüm veri deposunu en fazla 100 milisaniye okur.
+`share_cache = true` iken düğüm, en az 60 saniye taze kalan her cache'lenmiş yanıtı veri deposuna yazmak için kuyruğa koyar. Düğüm yazmayı beklemez. Bir proxy'nin yazma kuyruğu 64 yanıt tutar. Kuyruğu dolu bulan yanıt kendi düğümünde kalır. Yanıt yerel cache'te yoksa düğüm veri deposunu en fazla 100 milisaniye okur.
 
 - Kodlanmış boyutu `cache_max_value_size`, etcd için 1 MiB veya Consul için 350 KiB değerlerinden küçük olanını aşan yanıt, kendi düğümünde kalır. Gövde base64 olarak saklanır, bu yüzden saklanan boyut gövde boyutunun yaklaşık 4/3'üdür. Düğüm bir yanıtı birden fazla key'e bölmez.
 - Bir proxy'nin cache temizleme işlemi `state/cache-purges/<proxy id>` key'ini yazar ve proxy'nin paylaşılan yanıtlarını siler. Her düğüm değişiklikten sonra kendi yerel cache'ini temizler.

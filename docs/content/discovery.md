@@ -29,6 +29,8 @@ The proxy list shows the state of each provider, the number of proxies that it a
 | `running` | The provider has read its resources and watches them for changes. |
 | `error` | The provider cannot read its resources. The proxies of its last read stay active. |
 
+When the [deployment platform](@/platform.md) runs, the list also holds the provider `platform`, which publishes the proxies of the deployed apps.
+
 An issue names the resource and the reason, for example `web-1: http.app: port not found: https`.
 
 # Labels
@@ -48,7 +50,7 @@ r3v3rs3.<protocol>.<name>.<field>=<value>
 
 | Key | Value |
 |---|---|
-| `r3v3rs3.enable` | `true` selects the resource when the provider does not read every resource. |
+| `r3v3rs3.enable` | `true` selects the resource when the provider does not read every resource. Any other value, for example `false`, skips the resource, also with `exposed_by_default = true`. |
 | `ports` | Required. Port names or port ids, separated by commas. |
 | `name` | The name in the proxy list. The default is `<name>`. |
 | `active` | `false` adds the proxy as inactive. The default is `true`. |
@@ -75,7 +77,7 @@ r3v3rs3.http.app.vhosts=app.example.com
 r3v3rs3.http.app.port=8080
 ```
 
-A route can also use `port` and `scheme`. They cannot be used together with `servers` of the same route.
+A route can also use `port` and `scheme`. They cannot be used together with `servers` or `response` of the same route.
 
 ```text
 r3v3rs3.http.app.ports=http,https
@@ -176,10 +178,10 @@ exposed_by_default = false
 | `enabled` | Starts the provider. |
 | `endpoint` | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` or `https://<host>:<port>`. The default is `unix:///var/run/docker.sock`. |
 | `client_cert` | The id of a client certificate that r3v3rs3 sends to an `https` endpoint. A system root certificate or a root certificate in r3v3rs3 must sign the server certificate. |
-| `network` | The Docker network of the upstream addresses. Leave it empty when each container is on one network. |
+| `network` | The Docker network of the upstream addresses. Leave it empty when each container is on one network. A container that is not on this network, or that is on more than one network while the setting is empty, is an issue. |
 | `exposed_by_default` | `true` reads every container that has `r3v3rs3.` labels. `false` reads only the containers with `r3v3rs3.enable=true`. |
 
-A change of the settings restarts the provider without a server restart. A certificate that the provider uses cannot be deleted.
+A change of the settings restarts the provider without a server restart. The proxies and certificates of the provider are removed at once and return with its first read. Turning the provider off removes them. A certificate that the provider uses cannot be deleted.
 
 ## Containers
 
@@ -253,14 +255,14 @@ ports = ["http"]
 | `ingress` | Reads the Ingress resources. The default is `true`. |
 | `crd` | Reads the R3v3rs3Proxy resources. The default is `false`. Install the custom resource definition first, because the provider cannot watch a resource that the cluster does not know. The provider needs `ingress` or `crd`. |
 | `ingress_class` | r3v3rs3 reads only the Ingress resources of this class. The class comes from `spec.ingressClassName` or the `kubernetes.io/ingress.class` annotation. Leave it empty to read every Ingress. |
-| `ports` | The port names or ids of an Ingress without the `r3v3rs3.io/ports` annotation. |
+| `ports` | The port names or ids of an Ingress without the `r3v3rs3.io/ports` annotation and of an R3v3rs3Proxy without `spec.ports`. |
 
-A change of the settings restarts the provider without a server restart.
+A change of the settings restarts the provider without a server restart. The proxies and certificates of the provider are removed at once and return with its first read.
 
 ## Ingress Resources
 
 - Each host of an Ingress becomes one HTTP proxy with the host as its virtual host. Each path of the host becomes a route. The name of the proxy is `<namespace>/<name> <host>`.
-- The rules without a host and `spec.defaultBackend` become one proxy without a virtual host. The requests that no other proxy on the port matches reach this proxy.
+- The rules without a host and `spec.defaultBackend` become one proxy without a virtual host, named `<namespace>/<name>`. The requests that no other proxy on the port matches reach this proxy.
 - The `Prefix` and `ImplementationSpecific` path types match the path as a prefix. r3v3rs3 has no exact path match, so a path with the `Exact` type is an issue and does not become a route.
 - The servers of a route are the ready endpoints of the Service port in the EndpointSlices of the Service. A backend selects the Service port by `port.number` or `port.name`. An endpoint without the `ready` condition is ready.
 - A Service port with the name `https` or the `appProtocol` `https` uses HTTPS to the endpoints.
@@ -336,7 +338,7 @@ spec:
 
 ## RBAC
 
-The provider lists and watches five resources. `deploy/kubernetes/rbac.yaml` holds these objects. Grant the service account of r3v3rs3 a ClusterRole, or a Role in each namespace of `namespaces`:
+The provider lists and watches five resources. `deploy/kubernetes/rbac.yaml` holds these objects and the `r3v3rs3` namespace. Grant the service account of r3v3rs3 a ClusterRole, or a Role in each namespace of `namespaces`:
 
 ```yaml
 apiVersion: v1
@@ -443,6 +445,8 @@ exposed_by_default = false
 | `prefix` | The key prefix. The default is `r3v3rs3`. |
 | `exposed_by_default` | `true` reads every service that has `r3v3rs3.` tags. `false` reads only the services with the `r3v3rs3.enable=true` tag. |
 
+The provider needs `catalog` or `kv`, and with `kv` the `prefix` cannot be empty.
+
 The admin API does not return the token. `GET /api/config` returns `token_set: true` when a token is saved. A `PUT /api/config` without `token` keeps the saved token, and `"token": ""` removes it. `config.toml` holds the token as plain text, so allow only the r3v3rs3 user to read the config directory.
 
 ## Catalog Services
@@ -450,8 +454,9 @@ The admin API does not return the token. `GET /api/config` returns `token_set: t
 - A tag has the form `<key>=<value>`, for example `r3v3rs3.http.app.ports=https`. A `r3v3rs3.` tag without `=` is an issue.
 - r3v3rs3 reads only the instances that pass their health checks. A selected service without a passing instance is an issue, and its proxies are removed.
 - The upstream address of an instance is the service address. An instance without a service address uses the node address.
-- A proxy without `port`, `routes` and `upstream_servers` uses the port of the service. A route without `port` and `servers` also uses the port of the service.
+- A proxy without `port`, `routes` and `upstream_servers` uses the port of the service. A route without `port`, `servers` and `response` also uses the port of the service.
 - The instances of a service share its proxies. Each instance adds its servers to the routes of the proxy, so the proxy balances the load across the instances.
+- r3v3rs3 selects each instance by its own tags. With `exposed_by_default = false`, an instance without `r3v3rs3.enable=true` adds no server.
 
 Register a service with the Consul agent, for example with `consul services register whoami.json`:
 
@@ -508,6 +513,8 @@ prefix = "r3v3rs3"
 | `username` | The user of etcd authentication. Leave it empty when authentication is off. |
 | `password` | The password of the user. Set it together with `username`. |
 | `prefix` | The key prefix. The default is `r3v3rs3`. |
+
+`endpoints` needs at least one address, and `prefix` cannot be empty.
 
 The admin API does not return the password. `GET /api/config` returns `password_set: true` when a password is saved. A `PUT /api/config` without `password` keeps the saved password, and `"password": ""` removes it. `config.toml` holds the password as plain text, so allow only the r3v3rs3 user to read the config directory.
 
