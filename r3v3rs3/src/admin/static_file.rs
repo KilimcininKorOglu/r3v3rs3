@@ -55,22 +55,23 @@ pub async fn fallback(uri: Uri, req_headers: HeaderMap) -> Result<impl IntoRespo
         .get(file_path.to_string_lossy().as_ref())
         .ok_or(AppError::NotFound)?;
     let gzip = accepts_gzip(&req_headers);
-    let etag = etag_of(hash, gzip);
 
     let mut headers = HeaderMap::new();
     headers.insert(
         CACHE_CONTROL,
         HeaderValue::from_static(cache_control(file_name)),
     );
-    headers.insert(ETAG, header_value(&etag)?);
     // The stored file is gzip encoded, so the body differs per Accept-Encoding.
     headers.insert(VARY, HeaderValue::from_static("Accept-Encoding"));
     if gzip {
         headers.insert(CONTENT_ENCODING, HeaderValue::from_static("gzip"));
     }
 
-    if matches_etag(&req_headers, &etag) {
-        return Ok((StatusCode::NOT_MODIFIED, headers, Bytes::new()));
+    if let Some(etag) = validator(file_name, hash, gzip) {
+        headers.insert(ETAG, header_value(&etag)?);
+        if matches_etag(&req_headers, &etag) {
+            return Ok((StatusCode::NOT_MODIFIED, headers, Bytes::new()));
+        }
     }
 
     let ext = file
@@ -87,6 +88,12 @@ pub async fn fallback(uri: Uri, req_headers: HeaderMap) -> Result<impl IntoRespo
         Bytes::from(gunzip(file.contents())?)
     };
     Ok((StatusCode::OK, headers, body))
+}
+
+/// The ETag of a file that a browser revalidates. A hashed bundle file is immutable, so the
+/// browser never revalidates it and it gets no ETag.
+fn validator(file_name: &str, hash: &str, gzip: bool) -> Option<String> {
+    (!is_immutable(file_name)).then(|| etag_of(hash, gzip))
 }
 
 /// The gzip body and the plain body are different bytes, so each one gets its own strong ETag.
@@ -158,14 +165,17 @@ fn requested_file_name(path: &str) -> &str {
 /// Hashed bundle files never change, so browsers may keep them. Every other file,
 /// index.html included, must be revalidated so that an upgrade loads the new bundle.
 fn cache_control(file_name: &str) -> &'static str {
-    if IMMUTABLE_FILE_PREFIXES
-        .iter()
-        .any(|prefix| file_name.starts_with(prefix))
-    {
+    if is_immutable(file_name) {
         "public, max-age=31536000, immutable"
     } else {
         "no-cache"
     }
+}
+
+fn is_immutable(file_name: &str) -> bool {
+    IMMUTABLE_FILE_PREFIXES
+        .iter()
+        .any(|prefix| file_name.starts_with(prefix))
 }
 
 fn header_value(value: &str) -> Result<HeaderValue, AppError> {
@@ -215,6 +225,23 @@ mod tests {
     fn etag_is_quoted_and_differs_per_encoding() {
         assert_eq!(etag_of("abc", true), "\"abc\"");
         assert_eq!(etag_of("abc", false), "\"abc-identity\"");
+    }
+
+    #[test]
+    fn only_revalidated_files_get_an_etag() {
+        assert_eq!(validator("index.html", "abc", true), Some("\"abc\"".into()));
+        assert_eq!(
+            validator("robots.txt", "abc", false),
+            Some("\"abc-identity\"".into())
+        );
+        assert_eq!(
+            validator("r3v3rs3-webui-f5ed843114223c55.js", "abc", true),
+            None
+        );
+        assert_eq!(
+            validator("tailwind-cd802f743c089f72.css", "abc", true),
+            None
+        );
     }
 
     #[test]
