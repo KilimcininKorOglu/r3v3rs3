@@ -92,18 +92,21 @@ $ docker run -d \
   --restart unless-stopped \
   --stop-signal SIGINT \
   --name r3v3rs3 \
-  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform
+  --entrypoint /usr/bin/r3v3rs3 \
+  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform \
+  start --webui 127.0.0.1:46492
 ```
 
-Komut Adım 1'den üç yerde ayrılır:
+Komut Adım 1'den dört yerde ayrılır:
 
 | Seçenek | Neden |
 |---|---|
 | `--network host` | Docker bir uygulamanın portunu host'un `127.0.0.1` adresinde yayınlar ve r3v3rs3 porta orada ulaşır. Bridge ağında `127.0.0.1` container'ın kendisidir. |
 | `-v /var/run/docker.sock:/var/run/docker.sock` | Platform, uygulama container'larını host'un Docker Engine'i üzerinden başlatır. Socket'e erişim, host üzerinde root erişimine eşittir. |
 | `-v /var/lib/r3v3rs3:/var/lib/r3v3rs3` ve `R3V3RS3_CONFIG_DIR` | Config dizini Compose uygulamalarının checkout'larını tutar. `docker compose` bir bind mount'un yollarını host'un Docker Engine'ine gönderir. Bu yüzden repository'deki bir dosyanın bind mount'u yalnız dizinin host'ta ve container'da aynı yolda olduğu durumda çalışır. |
+| `--entrypoint /usr/bin/r3v3rs3` ve `start --webui 127.0.0.1:46492` | Image `--webui 0.0.0.0:46492` ile başlar. Host ağ modunda bu adres yönetim panelini host'un bütün ağ arayüzlerinde açar. Bu yüzden komut adresi `127.0.0.1` ile değiştirir. |
 
-Sonra platformu `/var/lib/r3v3rs3/config.toml` dosyasında açın ve container'ı yeniden başlatın. Uygulamaları kenar çubuğundaki **Platform** grubunun **Uygulamalar** sayfasında yönetin.
+Sonra `/var/lib/r3v3rs3/config.toml` dosyasına `enabled = true` ve `proxy_ports = ["<http portu>", "<https portu>"]` değerleriyle bir `[platform]` bölümü yazın ve container'ı yeniden başlatın. Uygulamalar route'larını yalnız `proxy_ports` içindeki portlarda alır. Uygulamaları kenar çubuğundaki **Platform** grubunun **Uygulamalar** sayfasında yönetin.
 
 ### Agent
 
@@ -135,7 +138,7 @@ $ docker compose pull
 $ docker compose up -d
 ```
 
-Volume'lar yapılandırmayı ve hesapları korur, yani hiçbir hesap yeniden oluşturulmaz. Birkaç host'u adım adım yükseltirken sürümü tag ile sabitleyin, örneğin `:1.0.1`.
+Volume'lar yapılandırmayı ve hesapları korur, yani hiçbir hesap yeniden oluşturulmaz. Birkaç host'u adım adım yükseltirken sürümü tag ile sabitleyin, örneğin `:v1.5.2`.
 
 ## Yeniden başlatma ne yapar
 

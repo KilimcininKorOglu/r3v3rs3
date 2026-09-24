@@ -92,18 +92,21 @@ $ docker run -d \
   --restart unless-stopped \
   --stop-signal SIGINT \
   --name r3v3rs3 \
-  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform
+  --entrypoint /usr/bin/r3v3rs3 \
+  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform \
+  start --webui 127.0.0.1:46492
 ```
 
-The command differs from Step 1 in three places:
+The command differs from Step 1 in four places:
 
 | Option | Reason |
 |---|---|
 | `--network host` | Docker publishes the port of an app on `127.0.0.1` of the host, and r3v3rs3 reaches it there. In a bridge network, `127.0.0.1` is the container itself. |
 | `-v /var/run/docker.sock:/var/run/docker.sock` | The platform starts the app containers through the Docker Engine of the host. Access to the socket is equal to root access on the host. |
 | `-v /var/lib/r3v3rs3:/var/lib/r3v3rs3` and `R3V3RS3_CONFIG_DIR` | The config directory holds the checkouts of the Compose apps. `docker compose` sends the paths of a bind mount to the Docker Engine of the host, so a bind mount of a file from the repository works only when the directory has the same path on the host and in the container. |
+| `--entrypoint /usr/bin/r3v3rs3` and `start --webui 127.0.0.1:46492` | The image starts with `--webui 0.0.0.0:46492`. With host networking that address opens the admin panel on every interface of the host, so the command replaces it with `127.0.0.1`. |
 
-Then enable the platform in `/var/lib/r3v3rs3/config.toml` and restart the container. Manage the apps on the **Apps** page of the **Platform** group in the sidebar.
+Then write a `[platform]` section with `enabled = true` and `proxy_ports = ["<http port>", "<https port>"]` in `/var/lib/r3v3rs3/config.toml`, and restart the container. The apps get their routes only on the ports of `proxy_ports`. Manage the apps on the **Apps** page of the **Platform** group in the sidebar.
 
 ### Agent
 
@@ -135,7 +138,7 @@ $ docker compose pull
 $ docker compose up -d
 ```
 
-The volumes keep the configuration and the accounts, so no account is created again. Pin a version with the tag, for example `:1.0.1`, when you upgrade several hosts in steps.
+The volumes keep the configuration and the accounts, so no account is created again. Pin a version with the tag, for example `:v1.5.2`, when you upgrade several hosts in steps.
 
 ## What a Restart Does
 
