@@ -18,7 +18,7 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 | Portları, sertifikaları, ACME kayıtlarını ve erişim listelerini okuma | evet | evet | evet | evet |
 | Portları, sertifikaları, ACME kayıtlarını ve erişim listelerini değiştirme, sertifika indirme, CDN IP aralıklarını yenileme | evet | evet | hayır | hayır |
 | Ayarları ve hesapları okuma veya değiştirme, denetim kaydını okuma | evet | hayır | hayır | hayır |
-| Deploy platformunun uygulamalarını, hedeflerini ve deployment'larını okuma | evet | evet | hayır | evet, proxy listesi yoksa |
+| Deploy platformunun uygulamalarını, hedeflerini, deployment'larını ve container log'larını okuma | evet | evet | hayır | evet, proxy listesi yoksa |
 | Uygulama ekleme, değiştirme veya silme, ortam değişkenlerini okuma veya değiştirme, Git token'ını ayarlama veya silme, webhook secret'ını oluşturma veya silme, uygulamayı deploy etme, deployment'ı geri alma | evet | evet | hayır | hayır |
 | Agent hedefi ekleme, kayıt token'ını oluşturma, hedefi silme | evet | hayır | hayır | hayır |
 | Git sağlayıcı bağlantılarını ve genel adresi okuma, bir bağlantının repository'lerini ve branch'lerini listeleme, uygulamanın webhook'unu yeniden kurma | evet | evet | hayır | hayır |

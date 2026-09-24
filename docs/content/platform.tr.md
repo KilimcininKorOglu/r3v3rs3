@@ -37,10 +37,10 @@ Yönetim API'si `[platform]` bölümünü değiştirmez. Bir değişiklik yenide
 
 Platform ilk başlangıçta config dizininde iki dosya oluşturur:
 
-- `platform.db`: uygulamalar, ortam değişkenleri ve deployment'lar.
-- `platform.key`: ortam değişkenlerinin değerlerini şifreleyen key. Dosya modu `0600` olur. Bu dosyanın yedeğini `platform.db` yedeğinin yanında saklayın, çünkü değerler bu key olmadan açılmaz.
+- `platform.db`: uygulamalar, ortam değişkenleri, deployment'lar, hedefler, Git sağlayıcı bağlantıları ve genel adres.
+- `platform.key`: ortam değişkenlerinin değerlerini, uygulamaların Git token'larını ve webhook secret'larını, Git sağlayıcı bağlantılarının client secret'larını, private key'lerini ve token'larını şifreleyen key. Dosya modu `0600` olur. Bu dosyanın yedeğini `platform.db` yedeğinin yanında saklayın, çünkü değerler bu key olmadan açılmaz.
 
-Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın. r3v3rs3 bir container içinde çalışıyorsa [Docker ile kurulum](@/tutorials/install-docker.tr.md#deploy-platformu) rehberindeki gibi `-platform` tag son ekli image'ı, host ağ modunu ve Docker socket'ini kullanın.
+Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın. r3v3rs3 bir container içinde çalışıyorsa [Docker ile kurulum](@/tutorials/install-docker.tr.md#deploy-platformu) rehberindeki gibi `-platform` tag son ekli image'ı, host ağ modunu, Docker socket'ini ve host'takiyle aynı yolda bağlanmış config dizinini kullanın.
 
 ## Uygulamalar
 
@@ -65,8 +65,8 @@ Bir uygulama bir image'ı, container'ın dinlediği portu ve uygulamaya yönlene
 - `target` değeri, r3v3rs3 sunucusunun Docker Engine'i olan `local` veya bir [agent hedefinin](#agent-hedefleri) id'sidir. Bir uygulamanın hedefi ilk deployment'tan sonra değişmez: bir değişiklik `409 app_target_fixed` yanıtını alır.
 - `domains` DNS adlarıdır. Wildcard veya IP adresi kabul edilmez, çünkü her alan adı ACME'den bir sertifika alır.
 - `health_check_path`, uygulama hazır olduğunda `2xx` veya `3xx` döndüren bir HTTP yoludur. Bu değer yoksa deployment, port bir bağlantıyı kabul edip açık tutana kadar bekler.
-- `volumes` adlandırılmış Docker volume'larını bağlar. Host üzerindeki bir yol bağlanamaz.
-- `restart` değeri `no`, `on-failure`, `unless-stopped` veya `always` olur.
+- `volumes` adlandırılmış Docker volume'larını bağlar. `"read_only": true` volume'u salt okunur bağlar. Host üzerindeki bir yol bağlanamaz.
+- `restart` değeri `no`, `on-failure`, `unless-stopped` (varsayılan) veya `always` olur.
 
 Uygulamanın, alan adlarının veya ortam değişkenlerinin değişikliği sonraki deployment'ta geçerli olur.
 
@@ -92,7 +92,7 @@ Uygulamanın, alan adlarının veya ortam değişkenlerinin değişikliği sonra
 | `dockerfile` | `Dockerfile` | `context` dizinine göre Dockerfile yolu. |
 | `connection` | yok | Bir [Git sağlayıcı](#git-saglayicilari) bağlantısının id'si. Bağlantı repoyu clone eder ve webhook'unu kurar. |
 
-Private bir repo, bir [Git sağlayıcı](#git-saglayicilari) bağlantısı veya uygulamanın erişim token'ını gerektirir. Erişim token'ı örnekleri: reponun içeriğini okuma izni olan bir GitHub fine-grained token'ı, veya `read_repository` kapsamı olan bir GitLab ya da Gitea token'ı. `PUT /api/apps/{id}/git_token`, `{"token": "..."}` gövdesiyle token'ı ayarlar. `DELETE /api/apps/{id}/git_token` token'ı siler. r3v3rs3 token'ı `platform.key` ile şifreler. Yönetim API'si token'ı hiçbir zaman döndürmez, uygulamada yalnız `"git_token_set": true` görünür. git token'ı `x-access-token` kullanıcı adıyla HTTP Basic kimlik doğrulaması olarak alır. Token URL'de veya komut satırında yer almaz, git'e bir ortam değişkeniyle ulaşır.
+Private bir repo, bir [Git sağlayıcı](#git-saglayicilari) bağlantısı veya uygulamanın erişim token'ını gerektirir. Erişim token'ı örnekleri: reponun içeriğini okuma izni olan bir GitHub fine-grained token'ı, `read_repository` kapsamı olan bir GitLab token'ı veya `read:repository` kapsamı olan bir Gitea token'ı. `PUT /api/apps/{id}/git_token`, `{"token": "..."}` gövdesiyle token'ı ayarlar. `DELETE /api/apps/{id}/git_token` token'ı siler. r3v3rs3 token'ı `platform.key` ile şifreler. Yönetim API'si token'ı hiçbir zaman döndürmez, uygulamada yalnız `"git_token_set": true` görünür. git token'ı `x-access-token` kullanıcı adıyla HTTP Basic kimlik doğrulaması olarak alır. Token URL'de veya komut satırında yer almaz, git'e bir ortam değişkeniyle ulaşır.
 
 r3v3rs3'ü çalıştıran sunucuda `git` binary'si bulunmalıdır. r3v3rs3, `git`'i host'un yapılandırması ve hook'lar olmadan, yalnız HTTPS üzerinden çalıştırır. Build context'inde `.git` dizini yer almaz. Context'teki bir sembolik link link olarak kalır. Bu yüzden bir build, repo dışındaki bir dosyayı okuyamaz. Context en fazla 512 MiB olabilir.
 
@@ -148,7 +148,7 @@ r3v3rs3, Compose dosyasının diğer ayarlarını denetlemez. Bir Compose dosyas
 4. Deployment'ı `running`, öncekini `superseded` olarak işaretler ve alan adlarını yeni container'a yönlendirir.
 5. 10 saniye sonra eski container'ı durdurur ve siler. Bu süre, eski container'daki açık isteklerin bitmesi içindir.
 
-Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment sürerken gelen ikinci deploy, geri alma veya silme isteği `409 app_busy` alır. Bir deployment sürerken gelen [webhook](#webhook-lar) push'u ise bir deployment daha kuyruğa alır. Sunucu yeniden başlarsa bitmemiş deployment `failed` olur.
+Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment sürerken gelen ikinci deploy, geri alma veya silme isteği `409 app_busy` alır. Bir deployment sürerken gelen [webhook](#webhook-lar) push'u ise bir deployment daha kuyruğa alır. Sunucu yeniden başlarsa bitmemiş deployment `the server stopped during the deployment` mesajıyla `failed` olur ve `deployment_failed` bildirimi gönderilir.
 
 | Durum | Anlamı |
 |---|---|
@@ -194,7 +194,8 @@ Deploy eden istek `200` ve `{"outcome": "deployed", "deployment": {...}}` yanıt
 | `400 invalid_webhook_payload` | GitHub, Gitea veya GitLab push'unun gövdesi JSON değildir, örneğin içerik türü `application/x-www-form-urlencoded` olduğunda. |
 | `401 unauthorized` | İmza yoktur veya yanlıştır. |
 | `404 id_not_found` | Bu id ile bir uygulama yoktur veya uygulamanın webhook secret'ı yoktur. |
-| `429` | İstemci art arda 10'dan fazla istek, bundan sonra da saniyede birden fazla istek gönderdi. |
+| `429` | İstemci art arda 10'dan fazla istek, bundan sonra da saniyede birden fazla istek gönderdi. `POST /hooks/apps/{id}` ve `GET /oauth/git/callback` bu limiti her istemci adresi için paylaşır. |
+| `503 platform_disabled` | Deploy platformu kapalıdır. |
 
 Gövde en fazla 5 MiB olabilir. Denetim kaydı, bir deployment başlatan veya kuyruğa alan her isteği göndericinin adresiyle ve hesapsız olarak kaydeder.
 
@@ -210,7 +211,7 @@ GitHub bağlantısı, r3v3rs3'ün sizin için oluşturduğu bir GitHub App'tir. 
 
 **GitHub App oluştur** bir manifest'i GitHub'a gönderir. GitHub, ayarları doldurulmuş bir GitHub App oluşturma sayfası açar:
 
-- Ad `r3v3rs3-<bağlantı adı>` olur. GitHub'da her uygulama adı tek olmalıdır. Ad alınmışsa GitHub'da değiştirin.
+- Ad `r3v3rs3-<bağlantı adı>` olur ve 34 karakterde kesilir. GitHub'da her uygulama adı tek olmalıdır. Ad alınmışsa GitHub'da değiştirin.
 - Uygulama private'tır, yani yalnız sahibinin hesabına kurulabilir.
 - İzinler: Contents okuma, Metadata okuma ve repository webhook'larını yazma.
 - Uygulamanın kendi webhook'u yoktur. r3v3rs3 her uygulamanın webhook'unu reposuna ayrıca kurar.
@@ -252,7 +253,7 @@ Deployment ve geri alma, repoyu bağlantının güncel token'ıyla clone eder. G
 
 Bağlantısı olan bir uygulama kaydedilince r3v3rs3, uygulamanın webhook secret'ı yoksa onu oluşturur ve repoya bir push webhook'u kurar. Uygulamanın reposu değişince, bağlantısı kaldırılınca veya uygulama silinince r3v3rs3 sağlayıcıdaki eski webhook'u siler. Yeni bir webhook secret'ı webhook'u yeniden kurar. **Webhook'u kapat** webhook'u sağlayıcıda siler.
 
-Başarısız bir kurulum uygulamanın değişikliğini durdurmaz. Uygulama sayfasının **Webhook** bölümü nedeni gösterir. **Webhook'u yeniden kur** veya `POST /api/apps/{id}/hook`, uygulamanın eski webhook'unu siler ve onu yeniden kurar. Genel adres yoksa hiçbir webhook kurulmaz ve uygulama bu nedeni gösterir. r3v3rs3'ün sağlayıcıda silemediği bir webhook orada kalır ve r3v3rs3'ten `404` alır.
+Başarısız bir kurulum uygulamanın değişikliğini durdurmaz. Uygulama sayfasının **Webhook** bölümü nedeni gösterir. **Webhook'u yeniden kur** veya `POST /api/apps/{id}/hook`, uygulamanın eski webhook'unu siler ve onu yeniden kurar. Genel adres yoksa hiçbir webhook kurulmaz ve uygulama bu nedeni gösterir. `POST /api/apps/{id}/hook`, genel adres yoksa `409 public_url_missing`, bağlantısı olmayan uygulamada `400 invalid_git_connection` yanıtını verir. r3v3rs3'ün sağlayıcıda silemediği bir webhook orada kalır ve r3v3rs3'ten `404` alır.
 
 Bir uygulamanın kullandığı bağlantı silinemez ve `409 git_connection_in_use` yanıtını alır. Bağlantıyı silmek sağlayıcıdaki yetkiyi kaldırmaz. GitHub App'i GitHub ayarlarında, GitLab veya Gitea OAuth uygulamasını sağlayıcıda silin.
 
@@ -328,7 +329,7 @@ Veri dizini `agent.key` (mod `0600`), `agent.pem`, `ca.pem`, `target` dosyaları
 
 - Image uygulaması image'ını agent host'unda pull eder.
 - Git uygulaması master'da clone edilir. Master build context'i agent'a gönderir ve image'ı agent host'unun Docker Engine'i build eder.
-- Compose uygulaması master'da clone edilir ve override dosyasını da master yazar. Master deployment dizinini agent'a gönderir. Agent dizini kendi veri dizinindeki `compose/<uygulama id>/<deployment id>/` altına açar ve `docker compose` komutunu orada çalıştırır.
+- Compose uygulaması master'da clone edilir ve override dosyasını da master yazar. Master deployment dizinini agent'a gönderir. Agent dizini kendi veri dizinindeki `compose/<app id>/<deployment id>/` altına açar ve `docker compose` komutunu orada çalıştırır.
 
 Container'lar portlarını agent host'unun `127.0.0.1` adresinde publish eder. Master her böyle port için kendi `127.0.0.1` adresinde bir forwarder açar. Uygulamanın route'u ve sağlık kontrolü bu forwarder'ı kullanır. Forwarder'a gelen her bağlantı, agent bağlantısı üzerinden agent host'undaki porta bir tunnel açar. Bu yüzden HTTP/1.1, HTTP/2 ve WebSocket değişmeden çalışır.
 
@@ -382,7 +383,7 @@ Sayfa, bitmemiş bir deployment varken uygulamaları 2 saniyede bir, yoksa 10 sa
 
 ### Deployment geçmişi
 
-Deployment geçmişi son 100 deployment'ı durumu, **Tetikleyen**, **Commit**, **Hesap**, **Başlangıç**, **Süre** ve **Mesaj** ile gösterir. **Geri al** onaydan sonra önceki bir deployment'ı yeniden başlatır. Link yalnız bitmiş, artık çalışmayan ve image özeti kaydedilmiş bir deployment'ta görünür. Compose uygulamasında kaydedilmiş commit gerekir. Uygulamanın bitmemiş bir deployment'ı varken link gizlenir. Sayfa **Uygulamalar** sayfasıyla aynı aralıklarla yenilenir.
+Deployment geçmişi son 100 deployment'ı durumu, **Tetikleyen** (**Elle**, **Webhook** veya **Geri alma**), **Commit**, **Hesap**, **Başlangıç**, **Süre** ve **Mesaj** ile gösterir. **Geri al** onaydan sonra önceki bir deployment'ı yeniden başlatır. Link yalnız bitmiş, artık çalışmayan ve image özeti kaydedilmiş bir deployment'ta görünür. Compose uygulamasında kaydedilmiş commit gerekir. Uygulamanın bitmemiş bir deployment'ı varken link gizlenir. Sayfa **Uygulamalar** sayfasıyla aynı aralıklarla yenilenir.
 
 ### Log
 
@@ -398,7 +399,7 @@ Admin hesabı ayrıca şunları görür:
 - Bir agent hedefinin satırındaki **Yeni token**. Onaydan sonra yeni bir kayıt token'ı oluşturur.
 - Bir agent hedefinin satırındaki **Sil**. Onaydan sonra hedefi siler.
 
-`agent_port` ayarlı değilse ekleme ve yeni token işlemleri agent portunun ayarlı olmadığını bildirir.
+`agent_port` ayarlı değilse ekleme ve yeni token işlemleri `400 agent_port_missing` yanıtını alır.
 
 ## Yönetim API'si
 
@@ -440,4 +441,4 @@ Admin hesabı ayrıca şunları görür:
 | `GET /api/platform/settings` | Edit | Platformun genel adresi. |
 | `PUT /api/platform/settings` | Admin | `{"public_url": "https://..."}` gövdesiyle genel adresi ayarlar. |
 
-Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, deploy eden her webhook isteğini, hedefin her değişikliğini, her agent kaydını, Git sağlayıcı bağlantısının her değişikliğini ve yetkilendirmesini, genel adresin her değişikliğini ve bir hesabın başlattığı her webhook kurulumunu kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token veya secret değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Webhook isteğinin özeti uygulamayı, sağlayıcıyı ve deployment'ı adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır. Bağlantının özeti bağlantıyı ve sağlayıcısını adlandırır, client secret'ı veya bir token'ı hiçbir zaman içermez. Yetkilendirmenin özeti hesabı da adlandırır. Webhook kurulumunun özeti uygulamayı adlandırır.
+Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). `[platform] enabled` kapalıyken her platform route'u `503 platform_disabled`, cluster düğümünde `503 platform_in_cluster`, platform veritabanını veya key'ini açamadığında `503 platform_failed` yanıtını verir. Başka bir uygulamanın, hedefin veya bağlantının kullandığı ad `409 app_name_exists`, `409 target_name_exists` veya `409 git_connection_name_exists` alır. Bağlı olmayan bağlantı `409 git_connection_not_connected` alır. GitHub App kurulmadan `POST /api/git/connections/{id}/installation` isteği `409 github_app_not_installed`, sağlayıcıya giden başarısız istek `502 git_provider_failed` alır. Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, deploy eden her webhook isteğini, hedefin her değişikliğini, her agent kaydını, Git sağlayıcı bağlantısının her değişikliğini ve yetkilendirmesini, genel adresin her değişikliğini ve bir hesabın başlattığı her webhook kurulumunu kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token veya secret değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Webhook isteğinin özeti uygulamayı, sağlayıcıyı ve deployment'ı adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır. Bağlantının özeti bağlantıyı ve sağlayıcısını adlandırır, client secret'ı veya bir token'ı hiçbir zaman içermez. Yetkilendirmenin özeti hesabı da adlandırır. Webhook kurulumunun özeti uygulamayı adlandırır.

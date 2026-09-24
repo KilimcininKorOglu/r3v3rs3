@@ -37,10 +37,10 @@ The admin API does not change the `[platform]` section. A change takes effect af
 
 At its first start the platform creates two files in the config directory:
 
-- `platform.db`: the apps, their environment variables and their deployments.
-- `platform.key`: the key that encrypts the environment values. Its mode is `0600`. Keep a backup of it next to the backup of `platform.db`, because the values do not open without it.
+- `platform.db`: the apps, their environment variables, their deployments, the targets, the Git provider connections and the public address.
+- `platform.key`: the key that encrypts the environment values, the Git tokens and webhook secrets of the apps, and the client secrets, private keys and tokens of the Git provider connections. Its mode is `0600`. Keep a backup of it next to the backup of `platform.db`, because the values do not open without it.
 
-Access to the Docker socket is equal to root access on the host. Enable the platform only on a server where r3v3rs3 may control every container. When r3v3rs3 runs in a container, use the image with the `-platform` tag suffix, host networking and the Docker socket, as [Installing with Docker](@/tutorials/install-docker.md#deployment-platform) shows.
+Access to the Docker socket is equal to root access on the host. Enable the platform only on a server where r3v3rs3 may control every container. When r3v3rs3 runs in a container, use the image with the `-platform` tag suffix, host networking, the Docker socket and the config directory on the same path as on the host, as [Installing with Docker](@/tutorials/install-docker.md#deployment-platform) shows.
 
 ## Apps
 
@@ -65,8 +65,8 @@ An app names an image, the port that the container listens on and the domains th
 - `target` is `local`, the Docker Engine of the r3v3rs3 server, or the id of an [agent target](#agent-targets). The target of an app cannot change after its first deployment: a change answers `409 app_target_fixed`.
 - `domains` are DNS names. A wildcard or an IP address is not accepted, because each domain gets a certificate from ACME.
 - `health_check_path` is an HTTP path that answers `2xx` or `3xx` when the app is ready. Without it a deployment waits until the port accepts a connection and keeps it open.
-- `volumes` mounts named Docker volumes. A host path cannot be mounted.
-- `restart` is `no`, `on-failure`, `unless-stopped` or `always`.
+- `volumes` mounts named Docker volumes, and `"read_only": true` mounts one read-only. A host path cannot be mounted.
+- `restart` is `no`, `on-failure`, `unless-stopped` (the default) or `always`.
 
 A change of an app, of its domains or of its environment variables takes effect at the next deployment.
 
@@ -92,7 +92,7 @@ An app with a `git` source builds its image from a branch of a repository with t
 | `dockerfile` | `Dockerfile` | The Dockerfile, relative to `context`. |
 | `connection` | none | The id of a [Git provider](#git-providers) connection. The connection clones the repository and installs its webhook. |
 
-A private repository needs a [Git provider](#git-providers) connection or an access token of the app. An access token is, for example, a GitHub fine-grained token with read access to the contents of the repository, or a GitLab or Gitea token with the `read_repository` scope. `PUT /api/apps/{id}/git_token` with `{"token": "..."}` sets the token, and `DELETE /api/apps/{id}/git_token` deletes it. r3v3rs3 encrypts the token with `platform.key`, and the admin API never returns it: an app shows only `"git_token_set": true`. git receives the token as HTTP basic authentication with the user name `x-access-token`, through an environment variable instead of the URL or the command line.
+A private repository needs a [Git provider](#git-providers) connection or an access token of the app. An access token is, for example, a GitHub fine-grained token with read access to the contents of the repository, a GitLab token with the `read_repository` scope, or a Gitea token with the `read:repository` scope. `PUT /api/apps/{id}/git_token` with `{"token": "..."}` sets the token, and `DELETE /api/apps/{id}/git_token` deletes it. r3v3rs3 encrypts the token with `platform.key`, and the admin API never returns it: an app shows only `"git_token_set": true`. git receives the token as HTTP basic authentication with the user name `x-access-token`, through an environment variable instead of the URL or the command line.
 
 The server that runs r3v3rs3 needs the `git` binary. r3v3rs3 runs `git` without the configuration of the host, without hooks and only over HTTPS. The build context holds no `.git` directory, and a symbolic link in it stays a link, so a build does not read a file from outside the repository. The context can hold up to 512 MiB.
 
@@ -148,7 +148,7 @@ r3v3rs3 does not check the other settings of a Compose file. A Compose file can 
 4. It marks the deployment `running`, marks the previous one `superseded`, and routes the domains to the new container.
 5. After 10 seconds it stops and removes the old container, so that its open requests end.
 
-An app runs one deployment at a time. A second deploy, a rollback or a deletion during a deployment gets `409 app_busy`. A [webhook](#webhooks) push during a deployment queues one more deployment instead. A restart of the server marks an unfinished deployment as `failed`.
+An app runs one deployment at a time. A second deploy, a rollback or a deletion during a deployment gets `409 app_busy`. A [webhook](#webhooks) push during a deployment queues one more deployment instead. A restart of the server marks an unfinished deployment as `failed` with the message `the server stopped during the deployment`, and sends its `deployment_failed` notification.
 
 | Status | Meaning |
 |---|---|
@@ -194,7 +194,8 @@ A deploying request answers `200` with `{"outcome": "deployed", "deployment": {.
 | `400 invalid_webhook_payload` | The body of a GitHub, Gitea or GitLab push is not JSON, for example with the content type `application/x-www-form-urlencoded`. |
 | `401 unauthorized` | The signature is missing or wrong. |
 | `404 id_not_found` | No app has this id, or the app has no webhook secret. |
-| `429` | The client sent more than 10 requests in a burst, or more than one request per second after the burst. |
+| `429` | The client sent more than 10 requests in a burst, or more than one request per second after the burst. `POST /hooks/apps/{id}` and `GET /oauth/git/callback` share this limit for each client address. |
+| `503 platform_disabled` | The deployment platform is off. |
 
 The body can be up to 5 MiB. The audit log records every request that deployed or queued a deployment, with the address of the sender, and without an account.
 
@@ -210,7 +211,7 @@ On the **Git Providers** page, select GitHub as the provider and give the connec
 
 **Create GitHub App** posts a manifest to GitHub. GitHub opens the page that creates a GitHub App, with these settings filled in:
 
-- The name is `r3v3rs3-<connection name>`. Each app name on GitHub must be unique, so change it on GitHub when it is taken.
+- The name is `r3v3rs3-<connection name>`, cut to 34 characters. Each app name on GitHub must be unique, so change it on GitHub when it is taken.
 - The app is private, so only the account that owns it can install it.
 - The permissions are read access to Contents and Metadata, and write access to the repository webhooks.
 - The app has no webhook of its own. r3v3rs3 installs the webhook of each app on its repository.
@@ -252,7 +253,7 @@ Set the **Public address** on the **Git Providers** page, for example `https://d
 
 When an app with a connection is saved, r3v3rs3 creates the webhook secret of the app if it has none, and installs a push webhook at the repository. When the repository of the app changes, when its connection is removed, or when the app is deleted, r3v3rs3 deletes the old webhook at the provider. A new webhook secret installs the webhook again, and **Turn off webhook** deletes it at the provider.
 
-A failed installation does not stop the change of the app. The **Webhook** section of the app page shows the reason, and **Install the webhook again**, or `POST /api/apps/{id}/hook`, deletes the old webhook of the app and installs it again. Without a public address no webhook is installed, and the app shows that reason. A webhook that r3v3rs3 cannot delete at the provider stays there and gets `404` from r3v3rs3.
+A failed installation does not stop the change of the app. The **Webhook** section of the app page shows the reason, and **Install the webhook again**, or `POST /api/apps/{id}/hook`, deletes the old webhook of the app and installs it again. Without a public address no webhook is installed, and the app shows that reason. `POST /api/apps/{id}/hook` answers `409 public_url_missing` without a public address, and `400 invalid_git_connection` for an app without a connection. A webhook that r3v3rs3 cannot delete at the provider stays there and gets `404` from r3v3rs3.
 
 A connection that an app uses cannot be deleted and answers `409 git_connection_in_use`. Deleting a connection does not remove its access at the provider: delete the GitHub App in the settings of GitHub, or the OAuth application at GitLab or Gitea.
 
@@ -382,7 +383,7 @@ The page reads the apps again every 2 seconds while a deployment is unfinished, 
 
 ### Deployments
 
-The deployment history shows the latest 100 deployments with their status, **Trigger**, **Commit**, **Account**, **Started**, **Duration** and **Message**. **Roll back** starts an earlier deployment again after a confirmation. The link appears only for a finished deployment that no longer runs and has a recorded image digest, or a recorded commit for a Compose app. It hides while a deployment of the app is unfinished. The page follows the same refresh intervals as the **Apps** page.
+The deployment history shows the latest 100 deployments with their status, **Trigger** (**Manual**, **Webhook** or **Rollback**), **Commit**, **Account**, **Started**, **Duration** and **Message**. **Roll back** starts an earlier deployment again after a confirmation. The link appears only for a finished deployment that no longer runs and has a recorded image digest, or a recorded commit for a Compose app. It hides while a deployment of the app is unfinished. The page follows the same refresh intervals as the **Apps** page.
 
 ### Log
 
@@ -398,7 +399,7 @@ An admin account also sees:
 - **New token** on the row of an agent target, which creates a new enrollment token after a confirmation.
 - **Delete** on the row of an agent target, which deletes it after a confirmation.
 
-Without `agent_port` the add and the new token actions answer that the agent port is not set.
+Without `agent_port` the add and the new token actions answer `400 agent_port_missing`.
 
 ## Admin API
 
@@ -440,4 +441,4 @@ Without `agent_port` the add and the new token actions answer that the agent por
 | `GET /api/platform/settings` | Edit | The public address of the platform. |
 | `PUT /api/platform/settings` | Admin | Sets the public address with `{"public_url": "https://..."}`. |
 
-An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target, every agent enrollment, every change and authorization of a Git provider connection, every change of the public address and every webhook installation that an account starts. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, an enrollment names the target and the version of the agent, a connection names itself and its provider, never its client secret or a token, an authorization also names the account, and a webhook installation names the app.
+An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). Every platform route answers `503 platform_disabled` when `[platform] enabled` is off, `503 platform_in_cluster` on a cluster node, and `503 platform_failed` when the platform failed to open its database or its key. A name that another app, target or connection uses answers `409 app_name_exists`, `409 target_name_exists` or `409 git_connection_name_exists`. A connection that is not connected answers `409 git_connection_not_connected`. `POST /api/git/connections/{id}/installation` before the GitHub App is installed answers `409 github_app_not_installed`, and a failed request to the provider answers `502 git_provider_failed`. The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target, every agent enrollment, every change and authorization of a Git provider connection, every change of the public address and every webhook installation that an account starts. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, an enrollment names the target and the version of the agent, a connection names itself and its provider, never its client secret or a token, an authorization also names the account, and a webhook installation names the app.
