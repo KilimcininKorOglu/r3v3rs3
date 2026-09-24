@@ -20,6 +20,7 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 | Ayarları ve hesapları okuma veya değiştirme, denetim kaydını okuma | evet | hayır | hayır | hayır |
 | Deploy platformunun uygulamalarını, hedeflerini ve deployment'larını okuma | evet | evet | hayır | evet, proxy listesi yoksa |
 | Uygulama ekleme, değiştirme veya silme, ortam değişkenlerini okuma veya değiştirme, Git token'ını ayarlama veya silme, uygulamayı deploy etme, deployment'ı geri alma | evet | evet | hayır | hayır |
+| Agent hedefi ekleme, kayıt token'ını oluşturma, hedefi silme | evet | hayır | hayır | hayır |
 
 - Proxy listesi olmayan hesap bütün proxy'leri görür. Admin her zaman bütün proxy'leri görür. Bu yüzden admin hesabının proxy listesi olamaz.
 - Hesabın listesinde olmayan proxy, bu hesap için yoktur. Yönetim API'si `404 id_not_found` döndürür.
@@ -29,7 +30,7 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 - Bir hesap proxy'yi silince r3v3rs3 proxy'yi her hesabın proxy listesinden kaldırır.
 - Proxy listesi olan hesap, deploy platformuna gönderdiği her istek için `403 forbidden` alır.
 - Yönetim API'si secret ortam değişkeninin değerini hiçbir zaman döndürmez.
-- Uygulama değiştirebilen hesap, bir [Compose uygulamasının](@/platform.tr.md#compose-kaynagi) Compose dosyası üzerinden host'u ele geçirebilir, çünkü r3v3rs3 Compose dosyasının ayarlarını kısıtlamaz.
+- Uygulama değiştirebilen hesap, bir [Compose uygulamasının](@/platform.tr.md#compose-kaynagi) Compose dosyası üzerinden host'u ele geçirebilir, çünkü r3v3rs3 Compose dosyasının ayarlarını kısıtlamaz. Bir [agent hedefinde](@/platform.tr.md#agent-hedefleri) bu host, agent'ın host'udur.
 
 ## Kurallar
 

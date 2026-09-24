@@ -6,9 +6,9 @@ weight = 0
 
 # Deployment Platform
 
-The deployment platform runs apps as containers on the Docker Engine of the r3v3rs3 server and routes their domains through r3v3rs3 proxies. A new deployment starts next to the running container, and the proxy switches to it only after it passes its health check.
+The deployment platform runs apps as containers on the Docker Engine of the r3v3rs3 server, or of a remote server that runs the r3v3rs3 agent, and routes their domains through r3v3rs3 proxies. A new deployment starts next to the running container, and the proxy switches to it only after it passes its health check.
 
-The platform is under development. This version deploys a ready image from a registry, builds an image from a Git repository with its Dockerfile, or starts the Docker Compose file of a Git repository, on the local Docker Engine through the WebUI or the admin API. Remote servers follow in later versions.
+The platform is under development. This version deploys a ready image from a registry, builds an image from a Git repository with its Dockerfile, or starts the Docker Compose file of a Git repository, on the local Docker Engine or on an [agent target](#agent-targets), through the WebUI or the admin API.
 
 ## Enable the Platform
 
@@ -20,6 +20,8 @@ enabled = true
 docker = "unix:///var/run/docker.sock"
 proxy_ports = ["http", "https"]
 acme = "bcd-fgh"
+agent_port = 9443
+agent_host = "master.example.com"
 ```
 
 | Key | Default | Description |
@@ -28,6 +30,8 @@ acme = "bcd-fgh"
 | `docker` | `unix:///var/run/docker.sock` | The Docker Engine API: a Unix socket or plain TCP. TLS is not supported. |
 | `proxy_ports` | empty | The names or the ids of the ports that serve the apps, for example the HTTP port and the HTTPS port. |
 | `acme` | none | The id of the ACME entry that orders the certificates of the app domains. Without it the apps get no certificate. |
+| `agent_port` | none | The TCP port on every IPv4 address that the agents of remote servers connect to. Without it the server accepts no agent. See [Agent targets](#agent-targets). |
+| `agent_host` | none | The host name or the address of this server in the agent commands of the **Targets** page. Without it the page uses the host name of its own address. |
 
 The admin API does not change the `[platform]` section. A change takes effect after a restart.
 
@@ -58,7 +62,7 @@ An app names an image, the port that the container listens on and the domains th
 }
 ```
 
-- `target` is `local`, the Docker Engine of the r3v3rs3 server.
+- `target` is `local`, the Docker Engine of the r3v3rs3 server, or the id of an [agent target](#agent-targets). The target of an app cannot change after its first deployment: a change answers `409 app_target_fixed`.
 - `domains` are DNS names. A wildcard or an IP address is not accepted, because each domain gets a certificate from ACME.
 - `health_check_path` is an HTTP path that answers `2xx` or `3xx` when the app is ready. Without it a deployment waits until the port accepts a connection and keeps it open.
 - `volumes` mounts named Docker volumes. A host path cannot be mounted.
@@ -176,9 +180,84 @@ An app without a domain gets no proxy. A running deployment whose container is m
 
 `DELETE /api/apps/{id}` stops and removes the containers, the network and the built images of the app, removes its proxy, and deletes its environment variables and its deployments. The named volumes stay. For a Compose app it runs `docker compose down`, removes the images that the project built and deletes its checkout. The volumes of the Compose project stay.
 
+## Agent Targets
+
+An agent target runs apps on a remote server. That server runs `r3v3rs3 agent`, which connects to the agent port of this server (the master) and runs the requests of the master on its own Docker Engine. The agent opens no port: it dials the master, and every request to an app comes back through that connection. The remote server can sit behind NAT.
+
+### Enable the Agent Port
+
+Set `agent_port` in the `[platform]` section and restart the server. At the first start with `agent_port` the master creates the agent CA and its own agent server certificate under `certs/agent/` in the config directory. The agent port uses this CA, not a certificate of the certificate list. Keep a backup of `certs/agent/`, because a new agent CA makes every agent enroll again. Allow the port in the firewall for the addresses of the agents.
+
+### Add a Target
+
+**Add an agent target** on the **Targets** page, or `POST /api/targets` with `{"name": "edge-1"}`, adds a target and shows its enrollment token once. The token has the form `<secret>.<ca hash>`. The CA hash lets the agent recognize the master at its first connection, so the enrollment needs no CA file and cannot be intercepted. The token enrolls one agent: the agent sends a certificate signing request, the master signs it with the agent CA and deletes the token. From then on the agent connects with its own client certificate.
+
+### Install the Agent
+
+The remote server needs Docker Engine, and the `docker` binary with the Compose plugin for Compose apps. It needs no `git`, because the master clones the repository and sends the files to the agent.
+
+The **Targets** page shows both commands with the address of the master and the token filled in. With `install.sh` on a Linux server with systemd:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --agent --master master.example.com:9443 --token <token>
+```
+
+The script installs the binary, creates the systemd service `r3v3rs3-agent` with the data directory `/var/lib/r3v3rs3-agent`, waits until the agent enrolls and then deletes the token. The token never enters the unit file. Run the script again with `--agent` to upgrade; an enrolled agent needs no token. With a new token the script enrolls the agent again, and when that enrollment fails it restores the earlier identity.
+
+With Docker, use the image with the `-platform` tag suffix, because it holds the `docker` binary with the Compose plugin:
+
+```sh
+docker run -d --name r3v3rs3-agent --restart unless-stopped --network host --stop-signal SIGINT \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /var/lib/r3v3rs3-agent:/var/lib/r3v3rs3-agent \
+  --entrypoint /usr/bin/r3v3rs3 \
+  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform \
+  agent --master master.example.com:9443 --data-dir /var/lib/r3v3rs3-agent --token <token>
+```
+
+The container needs host networking, because the agent reaches the apps on `127.0.0.1` of the host. The data directory needs the same path in the container and on the host, because `docker compose` sends the bind mount paths of a Compose file to the Docker Engine of the host.
+
+| Option | Environment variable | Default | Description |
+|---|---|---|---|
+| `--master` | `R3V3RS3_AGENT_MASTER` | | The agent port of the master as `HOST:PORT`. |
+| `--token` | `R3V3RS3_AGENT_TOKEN` | | The enrollment token. Only the first start needs it; an enrolled agent ignores it. |
+| `--data-dir` | `R3V3RS3_AGENT_DATA_DIR` | `agent` in the data directory of the user | The key, the certificate and the Compose files of the agent. |
+| `--docker` | `R3V3RS3_AGENT_DOCKER` | `unix:///var/run/docker.sock` | The Docker Engine API of the agent host. |
+| `--log-level` | `R3V3RS3_AGENT_LOG_LEVEL` | `info` | The log level. |
+
+The data directory holds `agent.key` (mode `0600`), `agent.pem`, `ca.pem`, `target` and the `compose/` directory. The agent stops gracefully on SIGINT.
+
+### Apps on an Agent
+
+An app with the id of an agent target in `target` runs there with every source:
+
+- An image app pulls its image on the agent host.
+- A Git app is cloned on the master. The master sends the build context to the agent, and the Docker Engine of the agent host builds the image.
+- A Compose app is cloned on the master, which also writes the override file. The master sends the deployment directory to the agent, which unpacks it into `compose/<app id>/<deployment id>/` of its data directory and runs `docker compose` there.
+
+The containers publish their port on `127.0.0.1` of the agent host. For each such port the master opens a forwarder on `127.0.0.1` of the master, and the route and the health check of the app use it. Every connection to a forwarder opens a tunnel through the agent connection to the port on the agent host, so HTTP/1.1, HTTP/2 and WebSocket work unchanged.
+
+The agent checks every request again. It changes only containers with the label of the platform, networks and Compose projects whose name starts with `r3v3rs3-`, and images whose name starts with `r3v3rs3/`, and it validates every container spec. A Compose file is not restricted on an agent host either, so an account with the Edit permission can take over the agent host through a Compose app.
+
+### Offline Agents
+
+The master pings every agent every 10 seconds. An agent that closes its connection, or does not answer a ping within 20 seconds, is offline. For an app on an offline target:
+
+- the route stays and answers `502`,
+- a deployment fails with the message `the agent of the target is not connected`,
+- the log answers `503 agent_offline`.
+
+The agent connects again after a pause that grows from 1 to 60 seconds. When it is back, the routes of its apps work again within 15 seconds.
+
+### Replace or Delete an Agent
+
+**New token** on the **Targets** page, or `POST /api/targets/{id}/token`, gives a target a new enrollment token. The enrolled agent keeps working until another agent enrolls with that token. Then the master disconnects the old agent and refuses its certificate. Use it to move a target to a new server or to replace a lost agent key.
+
+`DELETE /api/targets/{id}` deletes a target without apps and disconnects its agent. A target with an app answers `409 target_in_use`, and the local target answers `403 target_read_only`. An agent whose certificate belongs to no target logs `the master closed the connection before its first request` and keeps trying to connect.
+
 ## WebUI
 
-The **Platform** group of the sidebar holds the **Apps** page. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+The **Platform** group of the sidebar holds the **Apps** and **Targets** pages. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
 
 ### Apps
 
@@ -213,11 +292,26 @@ The deployment history shows the latest 100 deployments with their status, **Tri
 
 The log page shows the last 200 lines of stdout and stderr of the running container and reads them again every 10 seconds. **Refresh** reads them at once. An app without a running container shows "The app has no running container."
 
+### Targets
+
+The **Targets** page lists the local target and the agent targets with their **Kind**, their **Status** (**Online**, **Offline** or **Waiting for enrollment**), **Last seen** and the **Version** of the agent. It reads the list again every 10 seconds. The **Target** select of the app form shows the status of each target next to its name.
+
+An admin account also sees:
+
+- **Add an agent target** below the list. **Add** creates the target and shows its **Token** once at the top of the page, with the `install.sh` command and the `docker run` command of the agent. Copy them before you leave the page.
+- **New token** on the row of an agent target, which creates a new enrollment token after a confirmation.
+- **Delete** on the row of an agent target, which deletes it after a confirmation.
+
+Without `agent_port` the add and the new token actions answer that the agent port is not set.
+
 ## Admin API
 
 | Route | Permission | Description |
 |---|---|---|
-| `GET /api/targets` | Read | The Docker hosts that run apps. |
+| `GET /api/targets` | Read | The Docker hosts that run apps, with the state of their agents. |
+| `POST /api/targets` | Admin | Adds an agent target and returns its enrollment token once. |
+| `POST /api/targets/{id}/token` | Admin | Returns a new enrollment token of an agent target. |
+| `DELETE /api/targets/{id}` | Admin | Deletes an agent target without apps and disconnects its agent. |
 | `GET /api/apps` | Read | The apps. |
 | `POST /api/apps` | Edit | Adds an app. |
 | `GET /api/apps/{id}` | Read | Returns an app. |
@@ -233,4 +327,4 @@ The log page shows the last 200 lines of stdout and stderr of the running contai
 | `GET /api/deployments/{id}` | Read | Returns a deployment. |
 | `POST /api/deployments/{id}/rollback` | Edit | Repeats an earlier deployment. |
 
-An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). The audit log records every change of an app, every deployment and every rollback. The summary of an environment change names the keys, never a value, and a token change names only the app.
+An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). The audit log records every change of an app, every deployment, every rollback, every change of a target and every agent enrollment. The summary of an environment change names the keys, never a value, a token change names only the app or the target, and an enrollment names the target and the version of the agent.

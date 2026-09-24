@@ -1048,7 +1048,7 @@ r3v3rs3 includes a built-in WebUI. By default, it is served on localhost:46492. 
 The menu of the WebUI is a sidebar on the left with three groups:
 
 - **Proxy**: **Ports**, **Proxies**, **Access Lists** and **Certificates**.
-- **Platform**: **Apps**, the [deployment platform](@/platform.md). Only an account without a proxy list sees this group.
+- **Platform**: **Apps** and **Targets**, the [deployment platform](@/platform.md). Only an account without a proxy list sees this group.
 - **Administration**: **Accounts**, **Audit Log** and **Settings**. Only an admin account sees this group.
 
 The navbar holds the logo, the language menu, the theme menu and **Logout**. On a narrow screen the **Menu** button of the navbar replaces the sidebar and **Logout**, and opens the same menu with **Logout** at its end.

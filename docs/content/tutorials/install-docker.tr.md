@@ -105,6 +105,21 @@ Komut Adım 1'den üç yerde ayrılır:
 
 Sonra platformu `/var/lib/r3v3rs3/config.toml` dosyasında açın ve container'ı yeniden başlatın. Uygulamaları kenar çubuğundaki **Platform** grubunun **Uygulamalar** sayfasında yönetin.
 
+### Agent
+
+Bir [agent hedefi](@/platform.tr.md#agent-hedefleri), uygulamaları başka bir sunucuda çalıştırır. Master'da `[platform]` bölümüne `agent_port` ekleyin. Host ağ modunda bu port host üzerinde dinler. Hedefi **Hedefler** sayfasında ekleyin, sonra diğer sunucuda agent'ı sayfanın gösterdiği `docker run` komutuyla başlatın:
+
+```bash
+$ docker run -d --name r3v3rs3-agent --restart unless-stopped --network host --stop-signal SIGINT \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /var/lib/r3v3rs3-agent:/var/lib/r3v3rs3-agent \
+  --entrypoint /usr/bin/r3v3rs3 \
+  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform \
+  agent --master master.example.com:9443 --data-dir /var/lib/r3v3rs3-agent --token <token>
+```
+
+Agent, yukarıdaki tablodaki nedenlerle host ağ modunu, Docker socket'ini ve aynı yoldaki veri dizinini ister. Token yalnız ilk başlangıçta gerekir: agent'ın key'i ve sertifikası `/var/lib/r3v3rs3-agent` dizininde kalır. Bu yüzden aynı dizini kullanan yeni bir container token olmadan bağlanır.
+
 ## Yükseltme
 
 ```bash

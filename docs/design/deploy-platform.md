@@ -1,6 +1,6 @@
 # Deployment platform design
 
-Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 is implemented too: the Git source with its Dockerfile build, the Compose source and the `-platform` image. Phase 5 is implemented: the container log route and the WebUI pages (the left sidebar, the app list, the app form with its environment variables and Git token, the deployment history with rollback, and the container log). The user reference is `docs/content/platform.md`.
+Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 is implemented too: the Git source with its Dockerfile build, the Compose source and the `-platform` image. Phase 5 is implemented: the container log route and the WebUI pages (the left sidebar, the app list, the app form with its environment variables and Git token, the deployment history with rollback, and the container log). Phases 6 and 7 are implemented as one: agent targets with the agent CA, the one-time enrollment, the mTLS link, the remote runtime, Compose and Git apps on an agent, the loopback forwarders of section 10.4, the target admin API, the Targets page and the agent mode of `install.sh`. The user reference is `docs/content/platform.md`.
 
 This document describes how r3v3rs3 grows from a reverse proxy into a self-hosted deployment platform, in the space of Coolify. It lives outside `docs/content/`, so the Zola site does not publish it.
 
@@ -64,15 +64,15 @@ The new work is the container lifecycle: the domain model, the runtime, the buil
 
 ## 5. Module layout
 
-All new code lives in the existing crates. The entries marked *later* belong to the phases that have not started.
+All new code lives in the existing crates.
 
 ```
 r3v3rs3-api/src/
   container.rs      the validated container types: ContainerSpec, ContainerName, ImageRef, EnvKey,
                     ProjectName, ServiceName
   git.rs            the validated Git source types: RepoUrl, GitRef, RelPath, CommitSha
-  platform.rs       PlatformConfig, AppSpec, AppEntry, EnvEntry, DeploymentEntry, TargetEntry
-  agent.rs          later: AgentRequest, AgentResponse, AgentEvent (the wire protocol)
+  platform.rs       PlatformConfig, AppSpec, AppEntry, EnvEntry, DeploymentEntry, TargetEntry,
+                    TargetRequest, TargetToken
 
 r3v3rs3/src/
   platform/
@@ -83,22 +83,34 @@ r3v3rs3/src/
     compose.rs      the checkout, the override file and the port check of a Compose app
     proxy.rs        the proxy of a running app, and the snapshots of the Platform provider
     publish.rs      reads the running containers and sends the snapshot to the server
+    agents.rs       the agent port, the targets, the enrollment and the audit of an enrollment
     fake.rs         a runtime and a source fetcher in memory for the unit tests
   runtime/
     mod.rs          ContainerRuntime trait
     docker.rs       the local runtime over the Docker Engine API, with the image build
-    remote.rs       later: the agent runtime, sends AgentRequest, awaits AgentResponse
   build/
     mod.rs          SourceFetcher trait and the build context archive
     git.rs          the git checkout of one branch or one commit, without host configuration or hooks
     compose.rs      ComposeRunner and DockerCompose: `docker compose config`, `up` and `down`
     process.rs      runs git and docker with a timeout and the end of stderr in the error
-  agent/            later: the agent listener, the `r3v3rs3 agent` command, one agent session
+  agent/
+    pki.rs          the agent CA, the master certificate, the CSR signing and the pinned verifier
+    token.rs        the enrollment token <secret>.<ca_hash>
+    frame.rs        the length-prefixed JSON frames and the raw payloads
+    link.rs         yamux over TLS: one stream per request, the tunnel streams
+    listener.rs     the agent port of the master: enrollment, sessions, pings
+    registry.rs     the connected agents with their version and last contact
+    protocol.rs     AgentRequest, AgentReply, AgentOutput (the wire protocol)
+    remote.rs       RemoteRuntime: ContainerRuntime over the link of a target
+    compose.rs      RemoteCompose on the master, AgentCompose on the agent
+    forward.rs      the loopback forwarders of the published ports of agent apps
+    executor.rs     the agent side: checks and runs each request
+    client.rs       `r3v3rs3 agent`: the enrollment, the identity, the reconnect loop
   admin/
     platform.rs     the admin API routes of section 12
 ```
 
-The runtime split is the central abstraction. The pipeline talks only to `ContainerRuntime`. The local target uses `runtime::docker`; an agent target uses `runtime::remote`, which forwards the same calls to the agent, and the agent runs them against its own `runtime::docker`. One implementation of the Docker calls serves both targets.
+The runtime split is the central abstraction. The pipeline talks only to `ContainerRuntime`. The local target uses `runtime::docker`; an agent target uses `agent::remote`, which forwards the same calls to the agent, and the agent runs them against its own `runtime::docker`. `Platform::backend` selects the runtime and the Compose runner of a target at the start of each job. One implementation of the Docker calls serves both targets.
 
 ## 6. Domain model
 
@@ -219,7 +231,7 @@ Phase 4 implements steps 2 and 3 for Git apps. The deployment status is `buildin
 Each running app with at least one domain gets one r3v3rs3 HTTP proxy. The platform does not write the proxy into `proxies.toml`: it sends the proxies of all apps as the snapshot of the `Platform` discovery provider, so the existing discovery code resolves the ports, orders the certificates and shows the provider status, and the proxies are read-only like every discovered proxy.
 
 - `vhosts`: the app domains.
-- `routes[0].servers`: `http://127.0.0.1:<port>/`, the port that Docker publishes for the container port on `127.0.0.1`. On an agent target it will be an `agent://<target_id>/<container>:<port>` address, which section 10.4 resolves through the agent tunnel.
+- `routes[0].servers`: `http://127.0.0.1:<port>/`, the port that Docker publishes for the container port on `127.0.0.1`. On an agent target it is the port of a loopback forwarder of the master, which section 10.4 connects to the agent tunnel.
 - `ports`: the ports of `proxy_ports` in the `[platform]` section of `config.toml`.
 - `acme`: the existing ACME entry of `acme` in the `[platform]` section. The certificate follows the rules of discovered proxies.
 
@@ -231,78 +243,82 @@ An agent target publishes no app port on the agent host. Every request to an age
 
 ### 10.1 Enrollment
 
-1. The operator creates an agent target in the WebUI. The master generates a random secret, stores its SHA-256 and shows the enrollment token once. The token has the form `<secret>.<ca_hash>`, where `ca_hash` is the SHA-256 of the agent CA certificate.
-2. The operator runs on the remote server:
-   ```
-   r3v3rs3 agent --master master.example:9443 --token <token>
-   ```
-3. The agent connects to the agent port without a client certificate. It accepts the server certificate only when its chain ends in a CA whose SHA-256 equals `ca_hash`, so the first connection needs no pre-shared CA file and still cannot be intercepted. The agent generates a key pair and sends an enrollment frame with the secret and a certificate signing request. A connection without a client certificate may send only this one frame; the master closes it after the answer.
-4. The master verifies the token, signs the certificate with its agent CA, stores the certificate fingerprint, clears the token hash and returns the certificate and the agent CA.
-5. The agent stores its key, its certificate and the master CA in its data directory. Every later connection uses mTLS with that certificate.
+1. The operator creates an agent target in the WebUI or with `POST /api/targets`. The master generates a random secret of 43 alphanumeric characters, stores its SHA-256 and shows the enrollment token once. The token has the form `<secret>.<ca_hash>`, where `ca_hash` is the SHA-256 of the agent CA certificate.
+2. The operator runs on the remote server one of the commands that the Targets page shows: `install.sh --agent --master <host:port> --token <token>`, which installs the `r3v3rs3-agent` systemd service, or `docker run` of the `-platform` image with `agent --master <host:port> --token <token>`.
+3. The agent connects to the agent port without a client certificate. It accepts the server certificate only when its chain ends in a CA whose SHA-256 equals `ca_hash`, so the first connection needs no pre-shared CA file and still cannot be intercepted. The agent generates a key pair and sends an enrollment frame with the secret, a certificate signing request and its version. A connection without a client certificate may send only this one frame; the master closes it after the answer.
+4. The master verifies the token, signs the certificate with its agent CA, stores the certificate fingerprint, clears the token hash, disconnects an agent of an earlier enrollment of the target and returns the certificate and the agent CA.
+5. The agent stores its key (`agent.key`, mode `0600`), its certificate, the master CA and its target id in its data directory. Every later connection uses mTLS with that certificate, and the agent ignores a token.
 
-The token is single use. A lost agent key is replaced by a new enrollment. Revoking an agent deletes its fingerprint, so its certificate stops matching any target.
+The token is single use. `POST /api/targets/{id}/token` creates a new token; the enrolled agent keeps working until another agent enrolls with it, which replaces a lost agent key or moves a target to a new server. `DELETE /api/targets/{id}` deletes a target without apps. After either change the old certificate matches no target.
 
 ### 10.2 Transport
 
-- The master listens for agents on a dedicated port, set by `agent_port` in the `[platform]` section of `config.toml` (for example `agent_port = 9443`). The listener is not an entry of the port list, so the port list cannot edit or delete it. Without `agent_port` the master accepts no agents.
+- The master listens for agents on a dedicated port on every IPv4 address, set by `agent_port` in the `[platform]` section of `config.toml` (for example `agent_port = 9443`). The listener is not an entry of the port list, so the port list cannot edit or delete it. Without `agent_port` the master accepts no agents. `agent_host` names the address that the enrollment commands of the WebUI show.
 - The agent opens a TCP connection to that port and completes a TLS handshake with its client certificate. The listener verifies client certificates against the agent CA. A connection without one is limited to the enrollment frame of section 10.1.
-- The master creates the agent CA and its own agent server certificate at the first start with `agent_port`, and stores them under `certs/agent/` in the config directory.
-- After the handshake the master maps the certificate fingerprint to the target.
-- A stream multiplexer (the `yamux` crate) runs inside the TLS connection, so both sides open independent streams over one connection. TCP is used instead of QUIC, because networks block outbound UDP more often than TCP.
-- Stream 1 is the control stream. It carries newline-delimited JSON frames with a size limit of 8 MiB per frame.
-- Log streams and tunnel connections each use their own stream, so a large transfer does not delay a control frame.
-- The agent reconnects with exponential backoff. The master marks a target offline when no heartbeat arrives for 30 seconds.
+- The master creates the agent CA and its own agent server certificate (subject name `r3v3rs3-master`) at the first start with `agent_port`, and stores them under `certs/agent/` in the config directory.
+- After the handshake the master maps the certificate fingerprint to the target. A certificate that belongs to no target gets its connection closed before the first request. The agent reports such a close as a refused certificate.
+- A stream multiplexer (the `yamux` crate) runs inside the TLS connection. The agent is the yamux server: the master opens one stream per request, and the agent answers it. TCP is used instead of QUIC, because networks block outbound UDP more often than TCP.
+- A frame is a big-endian `u32` length and that many bytes of JSON, at most 8 MiB. A stream carries one request frame, an optional raw payload (a `u64` length and the bytes, for a build context or a deployment directory), and one answer frame. A request id is not needed, because the stream pairs the request with its answer, and concurrent requests use concurrent streams.
+- A tunnel stream carries the bytes of one TCP connection after its answer frame, so a large transfer does not delay another request.
+- The master pings the agent every 10 seconds, and a ping without an answer within 20 seconds marks the target offline. The agent reconnects when the master sends no request for 45 seconds or when the connection closes, with a pause that doubles from 1 to 60 seconds.
 
 ### 10.3 Protocol
 
 The protocol is a closed set of typed requests. The agent never receives a program name, a shell string or raw arguments.
 
+The requests follow the methods of `ContainerRuntime` and `ComposeRunner` (`r3v3rs3/src/agent/protocol.rs`). The enums are tagged externally, because an internally tagged enum cannot read the integer keys of the published port map.
+
 ```rust
 pub enum AgentRequest {
     Ping,
-    ImagePull { reference: ImageRef, auth: Option<RegistryAuth> },
-    ImageBuild { context: BuildContext, dockerfile: RelPath, tag: ImageTag, args: Vec<(EnvKey, String)> },
-    ImageInspect { reference: ImageRef },
-    ContainerCreate { spec: ContainerSpec },
-    ContainerStart { name: ContainerName },
-    ContainerStop { name: ContainerName, timeout_secs: u32 },
-    ContainerRemove { name: ContainerName },
-    ContainerInspect { name: ContainerName },
-    ContainerLogs { name: ContainerName, tail: u32, follow: bool },
-    ContainerList { app: AppName },
-    NetworkEnsure { name: NetworkName },
-    ComposeUp { project: AppName, files: Vec<ComposeFile> },
-    ComposeDown { project: AppName },
-    GitFetch { url: RepoUrl, branch: GitRef, auth: Option<GitAuth> },
-    Stats,
+    Version,
+    PullImage { image: ImageRef },
+    InspectImage { image: ImageRef },
+    BuildImage { dockerfile: RelPath, tag: ImageRef },          // payload: the build context
+    RemoveImage { image: ImageRef },
+    PruneProjectImages { project: ProjectName, all: bool },
+    EnsureNetwork { network: NetworkName, app: AppName },
+    RemoveNetwork { network: NetworkName },
+    CreateContainer { spec: ContainerSpec },
+    StartContainer { name: ContainerName },
+    StopContainer { name: ContainerName, timeout_secs: u64 },
+    RemoveContainer { name: ContainerName },
+    InspectContainer { name: ContainerName },
+    ListContainers { app: AppName },
+    Logs { name: ContainerName, tail: u32 },
+    Tunnel { container: ContainerName, port: u16 },
+    ComposeConfig(ComposeRequest),                              // payload: the deployment directory
+    ComposeUp(ComposeRequest),
+    ComposeDown { project: ProjectName },
+    ComposeRetain { app: ShortId, keep: ShortId },
+    ComposeRemove { app: ShortId },
 }
 
-pub enum AgentResponse {
+pub enum AgentReply {
     Ok(AgentOutput),
-    Error { kind: AgentErrorKind, message: String },
-}
-
-pub enum AgentEvent {
-    Heartbeat { version: String, stats: HostStats },
-    ContainerDied { name: ContainerName, exit_code: i64 },
-    LogChunk { stream: StreamId, data: String },
+    Error { message: String },
 }
 ```
 
-Every operand is a newtype that validates in `FromStr` and `Deserialize`: `ContainerName`, `NetworkName` and `AppName` accept `[a-z0-9][a-z0-9_.-]{0,62}`; `RelPath` rejects `..` and absolute paths; `RepoUrl` accepts only `https://` and `ssh://`; `GitRef` rejects a leading `-`. The agent validates again after deserialization, so a compromised master cannot pass an operand that the types refuse.
+Every operand is a newtype that validates in `FromStr` and `Deserialize`: `ContainerName`, `NetworkName` and `AppName` accept `[a-z0-9][a-z0-9_.-]{0,62}`; `RelPath` rejects `..` and absolute paths. The agent checks again after deserialization (`r3v3rs3/src/agent/executor.rs`), so a compromised master cannot reach anything outside the platform:
 
-Each request carries an id. The agent answers with the same id. Several requests run at the same time, bounded by a limit on the agent.
+- a container operation needs the `r3v3rs3.app` label; a foreign container is invisible, and stopping or removing it does nothing,
+- a network or a Compose project needs the `r3v3rs3-` prefix, and a built image the `r3v3rs3/` prefix,
+- `ContainerSpec::validate` runs before a create,
+- a Compose deployment unpacks only below `compose/` of the data directory of the agent.
+
+The git checkout stays on the master: the master sends the build context of a Git app and the deployment directory of a Compose app as a tar payload, so the agent host needs no `git`.
 
 ### 10.4 Tunnel
 
-The proxy reaches an app on an agent target through the agent link, not through a published port.
+The proxy reaches an app on an agent target through the agent link, not through a port that the agent host opens to the network. The implementation differs from the first design, which gave the proxy an `agent://` upstream address: that change needed new code in the connection pool and in the health check. The master uses loopback forwarders instead, and the proxy code stays unchanged.
 
-1. The proxy selects an upstream server with an `agent://<target_id>/<container>:<port>` address.
-2. The connection pool of the proxy opens a new stream on the link of that target and sends one header frame: `{"container": "<name>", "port": <port>}`.
-3. The agent verifies that the container carries the `r3v3rs3.app` label, so the tunnel reaches only containers that the platform created. It then opens a TCP connection to the container address on its local Docker network.
+1. The container publishes its port on `127.0.0.1` of the agent host, as on the local target (decision 7).
+2. `RemoteRuntime::inspect_container` replaces each published port with the port of a forwarder: a listener on `127.0.0.1:0` of the master for the target, the container and the port (`r3v3rs3/src/agent/forward.rs`). The deploy pipeline, the publish step and the app proxy see an ordinary `127.0.0.1` address.
+3. Every connection that a forwarder accepts opens a stream with `AgentRequest::Tunnel { container, port }`. The agent checks that the container carries the label, runs and publishes `port`, connects to `127.0.0.1:<host port>` and answers `AgentOutput::Tunnel`.
 4. Both sides copy bytes in both directions until either side closes.
 
-From that point the stream is an ordinary byte stream. HTTP/1.1, HTTP/2 and WebSocket run over it unchanged. The health check of the app uses the same tunnel. An offline agent makes the upstream server unhealthy, and the proxy answers `502`.
+HTTP/1.1, HTTP/2 and WebSocket run over the tunnel unchanged, and the health check of a deployment uses the same forwarder. The publish step keeps the route of an app on an offline target with its old forwarder port, and the forwarder closes every connection, so the proxy answers `502`. Deleting an app or a target closes its forwarders.
 
 ## 11. Access control
 
@@ -325,6 +341,7 @@ Every new route follows the existing rules: a `#[utoipa::path]` attribute, a uni
 ```
 GET    /api/targets
 POST   /api/targets                     create an agent target, returns the one-time token
+POST   /api/targets/{id}/token          a new enrollment token for an agent target
 DELETE /api/targets/{id}
 GET    /api/apps
 POST   /api/apps
@@ -354,8 +371,8 @@ Each phase ends with integration tests and docs, and is usable on its own.
 3. **Pipeline for images.** Deploy an `image` source to the local target with blue-green switching and rollback. Generated proxy and ACME entry.
 4. **Build.** Git fetch, Dockerfile build, Compose up. A second Docker image, `ghcr.io/kilimcininkoroglu/r3v3rs3:<version>-platform`, adds the `git` and `docker` binaries (with the Compose plugin). The existing distroless image stays unchanged.
 5. **WebUI.** Targets, Apps, App detail, live log.
-6. **Agent.** Agent CA, `agent_port` listener, enrollment, control protocol, `runtime::remote`, `r3v3rs3 agent` command.
-7. **Tunnel.** `agent://` upstream addresses, tunnel streams, health checks through the tunnel.
+6. **Agent.** Agent CA, `agent_port` listener, enrollment, the request protocol, `agent::remote`, `r3v3rs3 agent` command.
+7. **Tunnel.** Loopback forwarders and tunnel streams, health checks through the tunnel. Implemented together with phase 6.
 8. **Webhooks and notifications.** Git push deploys, deploy events through `notify.rs`.
 9. **Later.** Cluster mode, managed databases, volume backups to S3, a template registry, PR preview environments, metrics history.
 
@@ -364,7 +381,7 @@ Each phase ends with integration tests and docs, and is usable on its own.
 1. **Cluster mode.** The first version runs on a single server. `platform.db` is local to that server, so the platform refuses to start in cluster mode with a clear error. Cluster support is a later phase.
 2. **Docker image.** A second image with the `-platform` tag suffix carries `git` and `docker`. The default image stays distroless and small. The `platform` target of the `Dockerfile` is `debian:trixie-slim` with `git` from apt and the static `docker` CLI, Compose and buildx plugins of the pinned `docker:<version>-cli` image. buildx is included, because without it Compose builds with the classic builder, which rejects `RUN --mount`. `latest` becomes `latest-platform`. In a container the platform needs host networking and the config directory on the same path as on the host, because the bind mounts of a Compose file resolve on the host. An installation through `install.sh` uses the `git` and `docker` binaries of the host.
 3. **Agent port.** A dedicated `agent_port` setting in `config.toml`, outside the port list (section 10.2).
-4. **Traffic to agent apps.** Through a tunnel inside the agent link (section 10.4). The agent host opens no app port.
+4. **Traffic to agent apps.** Through a tunnel inside the agent link, reached through a loopback forwarder on the master (section 10.4). The agent host opens no port to the network.
 5. **App proxy ports.** The operator lists them in `proxy_ports` of the `[platform]` section. The platform opens no port of its own.
 6. **App certificates.** From an existing ACME entry named by `acme` in the `[platform]` section. The platform creates no ACME entry.
 7. **Container address.** Docker publishes the app port on a free port of `127.0.0.1`. r3v3rs3 reaches the container there, and other hosts do not. This works the same whether r3v3rs3 runs on the host or in a container with host networking.

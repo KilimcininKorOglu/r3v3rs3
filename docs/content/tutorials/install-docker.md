@@ -105,6 +105,21 @@ The command differs from Step 1 in three places:
 
 Then enable the platform in `/var/lib/r3v3rs3/config.toml` and restart the container. Manage the apps on the **Apps** page of the **Platform** group in the sidebar.
 
+### Agent
+
+An [agent target](@/platform.md#agent-targets) runs apps on another server. Set `agent_port` in the `[platform]` section of the master; with host networking the port listens on the host. Add the target on the **Targets** page, then start the agent on the other server with the `docker run` command that the page shows:
+
+```bash
+$ docker run -d --name r3v3rs3-agent --restart unless-stopped --network host --stop-signal SIGINT \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /var/lib/r3v3rs3-agent:/var/lib/r3v3rs3-agent \
+  --entrypoint /usr/bin/r3v3rs3 \
+  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform \
+  agent --master master.example.com:9443 --data-dir /var/lib/r3v3rs3-agent --token <token>
+```
+
+The agent needs host networking, the Docker socket and its data directory on the same path, for the reasons of the table above. The token is needed only at the first start: the key and the certificate of the agent stay in `/var/lib/r3v3rs3-agent`, so a new container with the same directory connects without a token.
+
 ## Upgrade
 
 ```bash

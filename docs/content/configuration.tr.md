@@ -1048,7 +1048,7 @@ r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak localhost:46492 a
 WebUI menüsü soldaki kenar çubuğundadır ve üç gruptan oluşur:
 
 - **Proxy**: **Portlar**, **Proxy'ler**, **Erişim Listeleri** ve **Sertifikalar**.
-- **Platform**: **Uygulamalar**, yani [deploy platformu](@/platform.tr.md). Bu grubu yalnız proxy listesi olmayan hesap görür.
+- **Platform**: **Uygulamalar** ve **Hedefler**, yani [deploy platformu](@/platform.tr.md). Bu grubu yalnız proxy listesi olmayan hesap görür.
 - **Yönetim**: **Hesaplar**, **Denetim Kaydı** ve **Ayarlar**. Bu grubu yalnız admin hesabı görür.
 
 Üst çubuk logoyu, dil menüsünü, tema menüsünü ve **Çıkış Yap** butonunu içerir. Dar bir ekranda kenar çubuğu ve **Çıkış Yap** yerine üst çubukta **Menü** butonu görünür. Bu buton aynı menüyü açar ve menünün sonunda **Çıkış Yap** bulunur.

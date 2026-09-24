@@ -128,6 +128,41 @@ $ sudo systemctl daemon-reload
 
 Bu adımlar `/etc/r3v3rs3` ve `/var/log/r3v3rs3` dizinlerini bırakır. Onları yalnız hiçbir sertifikayı ve hesabı saklamayacaksanız silin.
 
+## Agent kurma
+
+Deploy platformunun bir [agent hedefi](@/platform.tr.md#agent-hedefleri), uygulamaları başka bir sunucuda çalıştırır. O sunucuda Docker Engine çalışmalıdır. Hedefi master'daki **Hedefler** sayfasında ekleyin, sonra sayfanın gösterdiği komutu çalıştırın:
+
+```bash
+$ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
+    | sudo bash -s -- --agent --master master.example.com:9443 --token <token>
+```
+
+Script aynı binary'yi kurar ve `r3v3rs3 agent` komutunu `r3v3rs3-agent` systemd servisi olarak çalıştırır:
+
+```ini
+[Service]
+Type=simple
+Environment=R3V3RS3_AGENT_MASTER=master.example.com:9443
+Environment=R3V3RS3_AGENT_DATA_DIR=/var/lib/r3v3rs3-agent
+EnvironmentFile=-/var/lib/r3v3rs3-agent/token.env
+ExecStart=/usr/local/bin/r3v3rs3 agent
+KillSignal=SIGINT
+Restart=always
+RestartSec=5
+```
+
+Token yalnız agent kaydolana kadar `token.env` dosyasında (mod `0600`) kalır. Script kayıt için en fazla 30 saniye bekler, sonra dosyayı siler. Kayıt başarısız olursa journal'ın son 50 satırını yazar ve durur. Agent bağlıyken **Hedefler** sayfası hedefi **Bağlı** olarak gösterir.
+
+Agent'ı güncellemek için script'i token vermeden `--agent` ile yeniden çalıştırın. Sunucuyu yeniden kaydetmek için **Hedefler** sayfasında **Yeni token** oluşturun ve onu `--token` ile verin. Agent'ı kaldırmak için:
+
+```bash
+$ sudo systemctl disable --now r3v3rs3-agent
+$ sudo rm /etc/systemd/system/r3v3rs3-agent.service
+$ sudo systemctl daemon-reload
+```
+
+`/var/lib/r3v3rs3-agent` dizini agent'ın key'ini ve Compose uygulamalarının dosyalarını tutar.
+
 ## Diğer kurulum yolları
 
 - [Docker](@/tutorials/install-docker.tr.md): iki volume ile tek container.
