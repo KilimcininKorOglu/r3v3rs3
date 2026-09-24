@@ -269,7 +269,7 @@ impl Cert {
     }
 
     /// Builds the issuer of this CA certificate, so that it can sign a new certificate.
-    fn issuer(&self) -> Result<Issuer<'static, KeyPair>, Error> {
+    pub(crate) fn issuer(&self) -> Result<Issuer<'static, KeyPair>, Error> {
         let ca_pem =
             std::str::from_utf8(&self.pem_chain).map_err(|_| Error::FailedToReadPrivateKey)?;
         let pem_key = self.pem_key.as_ref().ok_or(Error::FailedToReadPrivateKey)?;

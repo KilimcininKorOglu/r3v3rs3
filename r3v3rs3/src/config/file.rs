@@ -85,7 +85,7 @@ async fn load_cert_pair(kind: CertKind, chain: &Path) -> Result<Cert, Error> {
 }
 
 /// Writes a file that holds secrets, such as ACME account keys, so only the owner can read it.
-async fn write_private(path: &Path, contents: String) -> anyhow::Result<()> {
+pub(crate) async fn write_private(path: &Path, contents: String) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     use tokio::io::AsyncWriteExt;
 

@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod admin;
+pub mod agent;
 pub mod args;
 pub mod audit;
 pub mod build;
