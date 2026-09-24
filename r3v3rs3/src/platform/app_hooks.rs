@@ -134,11 +134,15 @@ impl Platform {
         target: &HookTarget,
         now: u64,
     ) -> anyhow::Result<()> {
-        let (remote_id, error) = match self.create_app_hook(app, target).await {
-            Ok(remote_id) => (Some(remote_id), None),
+        let (remote_id, error, failure) = match self.create_app_hook(app, target).await {
+            Ok(remote_id) => (Some(remote_id), None, None),
             Err(err) => {
                 warn!(app = %app, "failed to install the webhook of the app: {err:#}");
-                (None, Some(format!("{err:#}")))
+                let failure = err
+                    .downcast_ref::<Error>()
+                    .map(serde_json::to_string)
+                    .transpose()?;
+                (None, Some(format!("{err:#}")), failure)
             }
         };
         let hook = StoredHook {
@@ -146,6 +150,7 @@ impl Platform {
             repository: target.repository.to_string(),
             remote_id,
             error,
+            failure,
             updated_at: now,
         };
         self.store.set_app_hook(app, &hook).await
@@ -311,6 +316,12 @@ mod tests {
             ("team/site", false)
         );
         assert!(hook.error.unwrap_or_default().contains("public address"));
+        // The client translates the API error.
+        assert!(
+            hook.failure
+                .unwrap_or_default()
+                .contains("public_url_missing")
+        );
         let err = platform.reinstall_app_hook(app.id, 3).await.unwrap_err();
         assert!(matches!(api_error(err), Error::PublicUrlMissing));
 

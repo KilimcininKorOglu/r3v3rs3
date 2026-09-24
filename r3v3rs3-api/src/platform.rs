@@ -333,6 +333,10 @@ pub struct AppHook {
     /// Why the last installation failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The JSON of the API error of a failed installation, which a client shows in its own
+    /// language.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
     /// The Unix time in milliseconds of the last installation.
     pub updated_at: u64,
 }

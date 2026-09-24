@@ -14,6 +14,8 @@ pub struct StoredHook {
     pub repository: String,
     pub remote_id: Option<String>,
     pub error: Option<String>,
+    /// The JSON of the API error of a failed installation.
+    pub failure: Option<String>,
     pub updated_at: u64,
 }
 
@@ -21,7 +23,8 @@ impl PlatformStore {
     pub async fn app_hook(&self, app: ShortId) -> anyhow::Result<Option<StoredHook>> {
         let row = sqlx::query(
             "SELECT connection_id AS hook_connection, repository AS hook_repository,
-                remote_id AS hook_remote_id, error AS hook_error, updated_at AS hook_updated_at
+                remote_id AS hook_remote_id, error AS hook_error, failure AS hook_failure,
+                updated_at AS hook_updated_at
             FROM app_hooks WHERE app_id = ?",
         )
         .bind(app.to_string())
@@ -33,17 +36,20 @@ impl PlatformStore {
     /// Stores the webhook of an app in place of its old one.
     pub async fn set_app_hook(&self, app: ShortId, hook: &StoredHook) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO app_hooks (app_id, connection_id, repository, remote_id, error, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            "INSERT INTO app_hooks
+                (app_id, connection_id, repository, remote_id, error, failure, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (app_id) DO UPDATE SET connection_id = excluded.connection_id,
                 repository = excluded.repository, remote_id = excluded.remote_id,
-                error = excluded.error, updated_at = excluded.updated_at",
+                error = excluded.error, failure = excluded.failure,
+                updated_at = excluded.updated_at",
         )
         .bind(app.to_string())
         .bind(hook.connection.to_string())
         .bind(&hook.repository)
         .bind(&hook.remote_id)
         .bind(&hook.error)
+        .bind(&hook.failure)
         .bind(sql_int(hook.updated_at))
         .execute(&self.pool)
         .await?;
@@ -81,6 +87,7 @@ fn stored_hook_of(row: &SqliteRow) -> anyhow::Result<StoredHook> {
         repository: row.try_get("hook_repository")?,
         remote_id: row.try_get("hook_remote_id")?,
         error: row.try_get("hook_error")?,
+        failure: row.try_get("hook_failure")?,
         updated_at: time_of(row, "hook_updated_at")?,
     })
 }
@@ -96,6 +103,7 @@ pub(super) fn app_hook_of(row: &SqliteRow) -> anyhow::Result<Option<AppHook>> {
         repository: hook.repository,
         installed: hook.remote_id.is_some(),
         error: hook.error,
+        failure: hook.failure,
         updated_at: hook.updated_at,
     }))
 }

@@ -87,6 +87,7 @@ const SCHEMA: &[&str] = &[
         repository    TEXT    NOT NULL,
         remote_id     TEXT,
         error         TEXT,
+        failure       TEXT,
         updated_at    INTEGER NOT NULL
     )",
 ];
@@ -113,7 +114,7 @@ macro_rules! select_apps {
                 EXISTS (SELECT 1 FROM app_secrets s WHERE s.app_id = apps.id
                     AND s.name = 'webhook_secret') AS webhook_secret_set,
                 h.connection_id AS hook_connection, h.repository AS hook_repository,
-                h.remote_id AS hook_remote_id, h.error AS hook_error,
+                h.remote_id AS hook_remote_id, h.error AS hook_error, h.failure AS hook_failure,
                 h.updated_at AS hook_updated_at
             FROM apps LEFT JOIN app_hooks h ON h.app_id = apps.id ",
             $rest
