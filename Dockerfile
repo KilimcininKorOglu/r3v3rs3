@@ -45,7 +45,8 @@ RUN apt-get update \
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/
 COPY --from=builder /usr/src/app/target/release/r3v3rs3 /usr/bin/r3v3rs3
-ENTRYPOINT ["/usr/bin/r3v3rs3", "start", "--webui", "0.0.0.0:46492"]
+# The platform image runs with host networking, so the WebUI keeps its loopback default.
+ENTRYPOINT ["/usr/bin/r3v3rs3", "start"]
 
 # distroless/cc holds glibc, libgcc and the CA certificates the binary needs, and nothing else.
 FROM gcr.io/distroless/cc-debian13 AS runtime

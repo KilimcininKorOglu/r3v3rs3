@@ -104,7 +104,7 @@ The command differs from Step 1 in four places:
 | `--network host` | Docker publishes the port of an app on `127.0.0.1` of the host, and r3v3rs3 reaches it there. In a bridge network, `127.0.0.1` is the container itself. |
 | `-v /var/run/docker.sock:/var/run/docker.sock` | The platform starts the app containers through the Docker Engine of the host. Access to the socket is equal to root access on the host. |
 | `-v /var/lib/r3v3rs3:/var/lib/r3v3rs3` and `R3V3RS3_CONFIG_DIR` | The config directory holds the checkouts of the Compose apps. `docker compose` sends the paths of a bind mount to the Docker Engine of the host, so a bind mount of a file from the repository works only when the directory has the same path on the host and in the container. |
-| `--entrypoint /usr/bin/r3v3rs3` and `start --webui 127.0.0.1:46492` | The image starts with `--webui 0.0.0.0:46492`. With host networking that address opens the admin panel on every interface of the host, so the command replaces it with `127.0.0.1`. |
+| `--entrypoint /usr/bin/r3v3rs3` and `start --webui 127.0.0.1:46492` | Keeps the admin panel on `127.0.0.1` of the host. Platform images up to 1.5.2 start with `--webui 0.0.0.0:46492`, which host networking opens on every interface of the host. |
 
 Then write a `[platform]` section with `enabled = true` and `proxy_ports = ["<http port>", "<https port>"]` in `/var/lib/r3v3rs3/config.toml`, and restart the container. The apps get their routes only on the ports of `proxy_ports`. Manage the apps on the **Apps** page of the **Platform** group in the sidebar.
 
