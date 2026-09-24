@@ -15,6 +15,7 @@ mod publish;
 mod remote_tests;
 pub mod store;
 
+use crate::agent::compose::RemoteCompose;
 use crate::agent::forward::Forwarders;
 use crate::agent::pki::AgentPki;
 use crate::agent::registry::AgentRegistry;
@@ -129,6 +130,12 @@ impl PlatformHandle {
     }
 }
 
+/// The runtime and the Compose runner of one target.
+pub(super) struct Backend {
+    pub runtime: Arc<dyn ContainerRuntime>,
+    pub compose: Arc<dyn ComposeRunner>,
+}
+
 pub struct Platform {
     store: PlatformStore,
     keys: ClusterKeys,
@@ -208,6 +215,23 @@ impl Platform {
     /// The runtime of the local target.
     pub fn local_runtime(&self) -> Arc<dyn ContainerRuntime> {
         self.local.clone()
+    }
+
+    /// The runtime and the Compose runner of a target.
+    fn backend(&self, target: ShortId) -> Backend {
+        let compose: Arc<dyn ComposeRunner> = if is_local(target) {
+            self.compose.clone()
+        } else {
+            Arc::new(RemoteCompose::new(
+                target,
+                self.agents.clone(),
+                self.compose_dir.clone(),
+            ))
+        };
+        Backend {
+            runtime: self.runtime(target),
+            compose,
+        }
     }
 
     /// The runtime of a target: the local Docker Engine, or the agent of the target.
@@ -296,8 +320,8 @@ impl Platform {
         let _lock = self.lock_app(&app)?;
         // Only a pipeline creates containers, so an app without deployments needs no Docker call.
         if !self.store.deployments(id, 1).await?.is_empty() {
-            let runtime = self.runtime(app.target);
-            self.remove_app_resources(&*runtime, id).await?;
+            self.remove_app_resources(&self.backend(app.target), id)
+                .await?;
         }
         if !self.store.delete_app(id).await? {
             return Err(not_found(id));

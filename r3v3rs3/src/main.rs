@@ -3,9 +3,12 @@
 use clap::Parser;
 use directories::ProjectDirs;
 use r3v3rs3::agent::client::{AgentClient, AgentTiming};
+use r3v3rs3::agent::compose::AgentCompose;
+use r3v3rs3::agent::executor::Executor;
 use r3v3rs3::agent::token::EnrollmentToken;
 use r3v3rs3::args::StartArgs;
 use r3v3rs3::args::{AgentArgs, ClusterArgs, ClusterCommand, Command};
+use r3v3rs3::build::compose::DockerCompose;
 use r3v3rs3::cluster::storage::KvStorage;
 use r3v3rs3::config::file::FileStorage;
 use r3v3rs3::config::new_appinfo;
@@ -56,7 +59,12 @@ async fn agent(args: AgentArgs) -> anyhow::Result<()> {
         .map(str::parse::<EnrollmentToken>)
         .transpose()?;
     let runtime = Arc::new(r3v3rs3::platform::docker_runtime(&args.docker)?);
-    let client = AgentClient::new(args.master, data_dir, AgentTiming::default(), runtime);
+    let compose = AgentCompose::new(
+        Arc::new(DockerCompose::new(args.docker)),
+        data_dir.join("compose"),
+    );
+    let executor = Executor::new(runtime, compose);
+    let client = AgentClient::new(args.master, data_dir, AgentTiming::default(), executor);
     let identity = client.identity(token.as_ref()).await?;
     info!(target = %identity.target, "the agent starts");
     tokio::select! {

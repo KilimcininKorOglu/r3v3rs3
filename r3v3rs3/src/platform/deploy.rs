@@ -6,7 +6,7 @@
 use super::build::GitBuild;
 use super::compose::{ComposeBuild, ComposeJob, SourceRevision};
 use super::store::{NewDeployment, StoredEnv};
-use super::{Platform, is_local, new_id, not_found, proxy};
+use super::{Backend, Platform, new_id, not_found, proxy};
 use crate::agent::executor::RESOURCE_PREFIX;
 use crate::clock::unix_ms;
 use crate::runtime::ContainerRuntime;
@@ -67,9 +67,9 @@ impl Default for Timing {
 struct Job {
     app: ShortId,
     deployment: ShortId,
-    /// The target of the app at the start of the deployment, and its runtime.
-    target: ShortId,
-    runtime: Arc<dyn ContainerRuntime>,
+    /// The runtime and the Compose runner of the target of the app at the start of the
+    /// deployment.
+    backend: Backend,
     spec: AppSpec,
     env: Vec<StoredEnv>,
     image: JobImage,
@@ -213,8 +213,7 @@ impl Platform {
         let job = Job {
             app: new.app,
             deployment: new.id,
-            target,
-            runtime: self.runtime(target),
+            backend: self.backend(target),
             spec: new.spec.clone(),
             env: new.env.to_vec(),
             image,
@@ -230,7 +229,7 @@ impl Platform {
     async fn run_job(&self, job: &Job) {
         self.run_pipeline(job).await;
         // A failed deployment can leave a built image too, so the cleanup follows every build.
-        let runtime = &*job.runtime;
+        let runtime = &*job.backend.runtime;
         let pruned = match job.spec.source {
             AppSource::Git { .. } => self.prune_builds(runtime, job.app).await,
             AppSource::Compose { .. } => self.prune_compose_images(runtime, job.app).await,
@@ -273,12 +272,10 @@ impl Platform {
         let JobImage::Compose(source) = &job.image else {
             return self.start_container(job).await;
         };
-        if !is_local(job.target) {
-            bail!("a Compose app runs only on the local target");
-        }
         let name = proxy::container_name(job.app, job.deployment)?;
         let env = self.open_env(job.app, &job.env)?;
         let compose = ComposeJob {
+            runner: &*job.backend.compose,
             app: job.app,
             deployment: job.deployment,
             port: job.spec.port,
@@ -288,7 +285,8 @@ impl Platform {
         };
         self.compose_up(&compose).await?;
         // Compose replaced the old container already, so a failed container stays for its log.
-        self.wait_healthy(&*job.runtime, &name, &job.spec).await?;
+        self.wait_healthy(&*job.backend.runtime, &name, &job.spec)
+            .await?;
         Ok(name)
     }
 
@@ -300,7 +298,7 @@ impl Platform {
         let name = proxy::container_name(job.app, job.deployment)?;
         let result = self.run_container(job, &name, &digest).await;
         if result.is_err()
-            && let Err(err) = job.runtime.remove_container(&name).await
+            && let Err(err) = job.backend.runtime.remove_container(&name).await
         {
             error!(container = %name, "failed to remove a failed container: {err:#}");
         }
@@ -315,14 +313,14 @@ impl Platform {
                 self.store
                     .set_status(deployment, DeploymentStatus::Deploying)
                     .await?;
-                self.resolve_image(&*job.runtime, image).await
+                self.resolve_image(&*job.backend.runtime, image).await
             }
             JobImage::Build(source) => {
                 self.store
                     .set_status(deployment, DeploymentStatus::Building)
                     .await?;
                 let id = self
-                    .build(&*job.runtime, job.app, deployment, source)
+                    .build(&*job.backend.runtime, job.app, deployment, source)
                     .await?;
                 self.store
                     .set_status(deployment, DeploymentStatus::Deploying)
@@ -382,7 +380,7 @@ impl Platform {
         name: &ContainerName,
         digest: &str,
     ) -> anyhow::Result<()> {
-        let runtime = &*job.runtime;
+        let runtime = &*job.backend.runtime;
         let app_label = app_label(job.app)?;
         let network = app_network(job.app)?;
         runtime.ensure_network(&network, &app_label).await?;
@@ -465,7 +463,7 @@ impl Platform {
         if !compose {
             tokio::time::sleep(self.timing.drain).await;
         }
-        if let Err(err) = self.remove_old(&*job.runtime, job.app, name, compose).await {
+        if let Err(err) = self.remove_old(&job.backend, job.app, name, compose).await {
             // The deployment serves already, so only the log shows the failed cleanup.
             error!(app = %job.app, "failed to remove the old containers: {err:#}");
         }
@@ -476,14 +474,15 @@ impl Platform {
     /// after a change of the app source.
     async fn remove_old(
         &self,
-        runtime: &dyn ContainerRuntime,
+        backend: &Backend,
         app: ShortId,
         keep: &ContainerName,
         compose: bool,
     ) -> anyhow::Result<()> {
-        self.remove_containers(runtime, app, Some(keep)).await?;
+        self.remove_containers(&*backend.runtime, app, Some(keep))
+            .await?;
         if !compose {
-            self.remove_compose_project(runtime, app).await?;
+            self.remove_compose_project(backend, app).await?;
         }
         Ok(())
     }
@@ -515,10 +514,11 @@ impl Platform {
     /// Removes the containers, the network, the Compose project and the built images of an app.
     pub(super) async fn remove_app_resources(
         &self,
-        runtime: &dyn ContainerRuntime,
+        backend: &Backend,
         app: ShortId,
     ) -> anyhow::Result<()> {
-        self.remove_compose_project(runtime, app).await?;
+        let runtime = &*backend.runtime;
+        self.remove_compose_project(backend, app).await?;
         self.remove_containers(runtime, app, None).await?;
         runtime.remove_network(&app_network(app)?).await?;
         self.remove_builds(runtime, app).await

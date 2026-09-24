@@ -130,10 +130,4 @@ pub(super) fn build_tag(app: ShortId, deployment: ShortId) -> anyhow::Result<Ima
     Ok(format!("{BUILD_REPOSITORY_PREFIX}{app}:{deployment}").parse()?)
 }
 
-/// Removes a directory. A missing directory is not an error.
-pub(super) async fn remove_dir(dir: &Path) -> std::io::Result<()> {
-    match tokio::fs::remove_dir_all(dir).await {
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        other => other,
-    }
-}
+pub(super) use crate::build::remove_dir;

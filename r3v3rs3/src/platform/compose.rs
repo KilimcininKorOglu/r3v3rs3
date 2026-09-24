@@ -2,12 +2,12 @@
 //! service on 127.0.0.1, and start the services with `docker compose up`. Compose recreates the
 //! changed services, so a Compose app deploys by recreate, not blue-green.
 
-use super::Platform;
 use super::build::remove_dir;
 use super::deploy::DEPLOYMENT_LABEL;
+use super::{Backend, Platform};
 use crate::agent::executor::RESOURCE_PREFIX;
 use crate::build::Revision;
-use crate::build::compose::{ComposeModel, ComposePort, ComposeProject};
+use crate::build::compose::{ComposeModel, ComposePort, ComposeProject, ComposeRunner};
 use crate::runtime::ContainerRuntime;
 use anyhow::{Context as _, bail};
 use r3v3rs3_api::container::{APP_LABEL, ContainerName, EnvVar, ProjectName, ServiceName};
@@ -61,6 +61,8 @@ pub(super) struct ComposeBuild {
 
 /// One deployment of a Compose app.
 pub(super) struct ComposeJob<'a> {
+    /// The runner of the target of the app.
+    pub runner: &'a dyn ComposeRunner,
     pub app: ShortId,
     pub deployment: ShortId,
     /// The port of the traffic service.
@@ -95,12 +97,9 @@ impl Platform {
             .set_status(job.deployment, DeploymentStatus::Deploying)
             .await?;
         let name = project_name(job.app)?;
-        let result = self
-            .compose
-            .up(&project(&name, &dir, &files, job.env))
-            .await;
+        let result = job.runner.up(&project(&name, &dir, &files, job.env)).await;
         // The services can use the new checkout now, even when `up` failed halfway.
-        if let Err(err) = remove_other_dirs(&app_dir, &dir).await {
+        if let Err(err) = job.runner.retain(&app_dir, &dir).await {
             error!(app = %job.app, "failed to remove the old checkouts: {err:#}");
         }
         result
@@ -124,8 +123,8 @@ impl Platform {
         tokio::fs::write(&override_file, override_text(job)?).await?;
         let files = vec![file, override_file];
         let name = project_name(job.app)?;
-        let model = self
-            .compose
+        let model = job
+            .runner
             .config(&project(&name, dir, &files, job.env))
             .await?;
         check_ports(&model, &job.source.service, job.port)?;
@@ -163,7 +162,7 @@ impl Platform {
     /// images and its checkouts. An app that never ran as a Compose app has none.
     pub(super) async fn remove_compose_project(
         &self,
-        runtime: &dyn ContainerRuntime,
+        backend: &Backend,
         app: ShortId,
     ) -> anyhow::Result<()> {
         let app_dir = self.compose_dir.join(app.to_string());
@@ -171,10 +170,9 @@ impl Platform {
             return Ok(());
         }
         let name = project_name(app)?;
-        self.compose.down(&name).await?;
-        runtime.prune_project_images(&name, true).await?;
-        remove_dir(&app_dir).await?;
-        Ok(())
+        backend.compose.down(&name).await?;
+        backend.runtime.prune_project_images(&name, true).await?;
+        backend.compose.remove(&app_dir).await
     }
 }
 
@@ -275,17 +273,6 @@ fn check_ports(model: &ComposeModel, service: &ServiceName, port: u16) -> anyhow
     Ok(())
 }
 
-/// Removes every directory in `app_dir` except `keep`.
-async fn remove_other_dirs(app_dir: &Path, keep: &Path) -> anyhow::Result<()> {
-    let mut entries = tokio::fs::read_dir(app_dir).await?;
-    while let Some(entry) = entries.next_entry().await? {
-        if entry.path() != keep {
-            remove_dir(&entry.path()).await?;
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,7 +334,9 @@ mod tests {
             value: "postgres://secret".into(),
         }];
         let container = "r3v3rs3-bcd-fgh-jkl-mnp".parse()?;
+        let runner = crate::build::compose::DockerCompose::new("unix:///var/run/docker.sock");
         let job = ComposeJob {
+            runner: &runner,
             app: "bcd-fgh".parse()?,
             deployment: "jkl-mnp".parse()?,
             port: 8080,

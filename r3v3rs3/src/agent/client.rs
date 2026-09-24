@@ -12,7 +12,6 @@ use super::protocol::{EnrollRequest, EnrollResponse, Enrolled};
 use super::token::EnrollmentToken;
 use crate::clock::unix_ms;
 use crate::config::file::write_private;
-use crate::runtime::ContainerRuntime;
 use anyhow::{Context, anyhow, bail};
 use r3v3rs3_api::id::ShortId;
 use std::path::{Path, PathBuf};
@@ -124,18 +123,13 @@ pub struct AgentClient {
 }
 
 impl AgentClient {
-    /// A client that runs the requests of the master on `runtime`.
-    pub fn new(
-        master: String,
-        data_dir: PathBuf,
-        timing: AgentTiming,
-        runtime: Arc<dyn ContainerRuntime>,
-    ) -> Self {
+    /// A client that runs the requests of the master with `executor`.
+    pub fn new(master: String, data_dir: PathBuf, timing: AgentTiming, executor: Executor) -> Self {
         Self {
             master,
             data_dir,
             timing,
-            executor: Arc::new(Executor::new(runtime)),
+            executor: Arc::new(executor),
         }
     }
 

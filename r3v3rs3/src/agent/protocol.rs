@@ -1,9 +1,10 @@
 //! The messages of the agent link. The set is closed: the agent never receives a program name,
 //! a shell string or raw arguments, and every operand is a type that validates itself.
 
+use crate::build::compose::ComposeModel;
 use r3v3rs3_api::container::{
-    AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, ImageInfo, ImageRef,
-    NetworkName, ProjectName,
+    AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, EnvVar, ImageInfo,
+    ImageRef, NetworkName, ProjectName,
 };
 use r3v3rs3_api::git::RelPath;
 use r3v3rs3_api::id::ShortId;
@@ -110,6 +111,47 @@ pub enum AgentRequest {
         container: ContainerName,
         port: u16,
     },
+    /// The tar archive of the deployment directory follows the frame as a payload. The agent
+    /// unpacks it and resolves the files of the project.
+    ComposeConfig(ComposeRequest),
+    /// Starts the services from the directory that `ComposeConfig` unpacked.
+    ComposeUp(ComposeRequest),
+    ComposeDown {
+        project: ProjectName,
+    },
+    /// Removes the deployment directories of an app except `keep`.
+    ComposeRetain {
+        app: ShortId,
+        keep: ShortId,
+    },
+    /// Removes every deployment directory of an app.
+    ComposeRemove {
+        app: ShortId,
+    },
+}
+
+/// One deployment of a Compose app. The files are relative to the deployment directory
+/// `<app>/<deployment>` in the Compose directory of the agent.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComposeRequest {
+    pub project: ProjectName,
+    pub app: ShortId,
+    pub deployment: ShortId,
+    pub files: Vec<RelPath>,
+    /// The variables that the files interpolate.
+    pub env: Vec<EnvVar>,
+}
+
+// The values of the variables stay out of every log line.
+impl fmt::Debug for ComposeRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ComposeRequest")
+            .field("project", &self.project)
+            .field("app", &self.app)
+            .field("deployment", &self.deployment)
+            .field("files", &self.files)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The answer of the agent to one request.
@@ -149,4 +191,7 @@ pub enum AgentOutput {
     },
     /// The stream is connected to the port.
     Tunnel,
+    ComposeModel {
+        model: ComposeModel,
+    },
 }

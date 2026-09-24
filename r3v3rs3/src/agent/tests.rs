@@ -1,12 +1,14 @@
 //! The link between a master and an agent over a loopback TCP connection.
 
 use super::client::{AgentClient, AgentIdentity, AgentTiming, VERSION};
+use super::compose::AgentCompose;
+use super::executor::Executor;
 use super::listener::{AgentDirectory, AgentListener, LinkTiming};
 use super::pki::{AgentPki, fingerprint, pem_certificates};
 use super::protocol::{EnrollRequest, Enrolled};
 use super::registry::AgentRegistry;
 use super::token::{EnrollmentToken, secret_hash};
-use crate::platform::fake::FakeRuntime;
+use crate::platform::fake::{FakeCompose, FakeRuntime};
 use anyhow::{Context, anyhow};
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
@@ -119,12 +121,7 @@ impl Master {
             max_backoff: Duration::from_millis(200),
         };
         (
-            AgentClient::new(
-                self.address.clone(),
-                dir.clone(),
-                timing,
-                Arc::new(FakeRuntime::default()),
-            ),
+            AgentClient::new(self.address.clone(), dir.clone(), timing, executor(&dir)),
             dir,
         )
     }
@@ -147,6 +144,13 @@ impl Drop for Master {
         let _ = self.events.send(ServerEvent::Shutdown);
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+/// An executor on a fake runtime, with its Compose directory in `dir`.
+fn executor(dir: &std::path::Path) -> Executor {
+    let runtime = Arc::new(FakeRuntime::default());
+    let compose = Arc::new(FakeCompose::new(runtime.clone()));
+    Executor::new(runtime, AgentCompose::new(compose, dir.join("compose")))
 }
 
 fn temp_dir(name: &str) -> PathBuf {

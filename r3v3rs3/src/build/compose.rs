@@ -3,9 +3,10 @@
 //! r3v3rs3 does not reach the interpolation of a Compose file.
 
 use super::process::run;
+use super::{remove_dir, remove_other_dirs};
 use anyhow::bail;
 use r3v3rs3_api::container::{EnvVar, ProjectName};
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -33,20 +34,20 @@ pub struct ComposeProject<'a> {
 }
 
 /// The part of the resolved Compose model that the platform reads.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComposeModel {
     #[serde(default)]
     pub services: BTreeMap<String, ComposeService>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComposeService {
     #[serde(default)]
     pub ports: Vec<ComposePort>,
 }
 
 /// One port of a service. A port without `published` gets a free host port from Docker.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComposePort {
     pub target: u16,
     #[serde(default)]
@@ -68,6 +69,16 @@ pub trait ComposeRunner: Send + Sync {
     /// Stops and removes the containers and the networks of the project. Named volumes and
     /// images stay; without the Compose file, `down` does not know the built images.
     async fn down(&self, name: &ProjectName) -> anyhow::Result<()>;
+
+    /// Removes the checkouts in `app_dir` except `keep`, once the services use `keep`.
+    async fn retain(&self, app_dir: &Path, keep: &Path) -> anyhow::Result<()> {
+        remove_other_dirs(app_dir, keep).await
+    }
+
+    /// Removes `app_dir` with every checkout of an app.
+    async fn remove(&self, app_dir: &Path) -> anyhow::Result<()> {
+        Ok(remove_dir(app_dir).await?)
+    }
 }
 
 /// The runner that calls the `docker` binary with the Compose plugin.

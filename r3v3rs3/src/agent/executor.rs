@@ -3,6 +3,7 @@
 //! images of the platform.
 
 use super::client::VERSION;
+use super::compose::AgentCompose;
 use super::frame::{read_frame, read_payload, write_frame};
 use super::link::LinkStream;
 use super::protocol::{AgentOutput, AgentReply, AgentRequest};
@@ -27,11 +28,12 @@ const MAX_PAYLOAD: u64 = MAX_CONTEXT_BYTES + (64 << 20);
 
 pub struct Executor {
     runtime: Arc<dyn ContainerRuntime>,
+    compose: AgentCompose,
 }
 
 impl Executor {
-    pub fn new(runtime: Arc<dyn ContainerRuntime>) -> Self {
-        Self { runtime }
+    pub fn new(runtime: Arc<dyn ContainerRuntime>, compose: AgentCompose) -> Self {
+        Self { runtime, compose }
     }
 
     /// Reads one request from a stream of the master and answers it. A tunnel keeps the stream
@@ -45,6 +47,10 @@ impl Executor {
             AgentRequest::BuildImage { dockerfile, tag } => {
                 let context = read_payload(&mut stream, MAX_PAYLOAD).await?;
                 self.build_image(context, &dockerfile, &tag).await
+            }
+            AgentRequest::ComposeConfig(request) => {
+                let checkout = read_payload(&mut stream, MAX_PAYLOAD).await?;
+                self.compose.config(&request, checkout).await
             }
             request => self.execute(request).await,
         };
@@ -85,6 +91,10 @@ impl Executor {
                     .await
                     .map(done)
             }
+            AgentRequest::ComposeUp(request) => self.compose.up(&request).await,
+            AgentRequest::ComposeDown { project } => self.compose.down(&project).await,
+            AgentRequest::ComposeRetain { app, keep } => self.compose.retain(app, keep).await,
+            AgentRequest::ComposeRemove { app } => self.compose.remove(app).await,
             request => self.container_request(request).await,
         }
     }
@@ -121,7 +131,8 @@ impl Executor {
                     .await
                     .map(|log| AgentOutput::Log { log })
             }
-            other => bail!("the agent cannot answer {other:?} here"),
+            // The request can hold the values of variables, so the message does not show it.
+            _ => bail!("the agent cannot answer this request here"),
         }
     }
 

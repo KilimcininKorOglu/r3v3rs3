@@ -2,6 +2,7 @@
 //! the agent port of the master over mTLS, and runs the containers of its target.
 
 pub mod client;
+pub mod compose;
 pub mod executor;
 pub mod forward;
 pub mod frame;

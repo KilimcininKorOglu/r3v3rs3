@@ -1,7 +1,7 @@
 //! The deployment of an app on an agent target, with an agent in memory.
 
 use super::Platform;
-use super::fake::FakeRuntime;
+use super::fake::{COMMIT, FakeFetcher, FakeRuntime};
 use super::tests::{TempDir, api_error, platform_with, request};
 use crate::agent::forward::ForwardKey;
 use crate::agent::testing::TestAgent;
@@ -10,7 +10,8 @@ use anyhow::{Context as _, bail};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, DeploymentEntry, DeploymentStatus, DeploymentTrigger, LOCAL_TARGET, PlatformConfig,
+    AppEntry, AppRequest, AppSource, DeploymentEntry, DeploymentStatus, DeploymentTrigger,
+    LOCAL_TARGET, PlatformConfig,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,12 +48,18 @@ async fn app_server() -> anyhow::Result<u16> {
 
 /// A platform with the agent target `edge`, its connected agent and the image app `shop` on it.
 async fn setup() -> anyhow::Result<Setup> {
+    setup_with(request("shop")).await
+}
+
+/// A platform with the agent target `edge`, its connected agent and the app of `shop` on it.
+async fn setup_with(mut shop: AppRequest) -> anyhow::Result<Setup> {
     let config = PlatformConfig {
         proxy_ports: vec!["http".into()],
         ..Default::default()
     };
     let (command, commands) = mpsc::channel(4);
-    let (platform, local, dir) = platform_with(&config, command).await?;
+    let (mut platform, local, dir) = platform_with(&config, command).await?;
+    platform.fetcher = Arc::new(FakeFetcher::default());
     let edge: ShortId = "fzn-txd".parse()?;
     platform
         .store
@@ -60,7 +67,6 @@ async fn setup() -> anyhow::Result<Setup> {
         .await?;
     let agent = TestAgent::connect(&platform.agents, edge);
     agent.runtime.state().host_port = app_server().await?;
-    let mut shop = request("shop");
     shop.target = edge;
     shop.spec.domains = vec!["shop.example.com".parse()?];
     shop.spec.health_check_path = Some("/healthz".into());
@@ -207,5 +213,76 @@ async fn a_rollback_on_an_agent_starts_the_old_image_there() -> anyhow::Result<(
     assert_eq!(rollback.image_digest, first.image_digest);
     let container = format!("r3v3rs3-{}-{}", setup.app.id, rollback.id);
     assert_eq!(setup.agent.runtime.names(), [container]);
+    Ok(())
+}
+
+fn compose_request() -> anyhow::Result<AppRequest> {
+    let mut stack = request("stack");
+    stack.spec.source = AppSource::Compose {
+        repository: "https://git.example.com/team/stack.git".parse()?,
+        branch: "release".parse()?,
+        file: None,
+        service: "web".parse()?,
+    };
+    Ok(stack)
+}
+
+#[tokio::test]
+async fn a_compose_app_on_an_agent_runs_from_its_files_there() -> anyhow::Result<()> {
+    let setup = setup_with(compose_request()?).await?;
+    let first = deploy(&setup).await?;
+    assert_eq!(first.status, DeploymentStatus::Running, "{first:?}");
+    assert_eq!(first.commit_sha.as_deref(), Some(COMMIT));
+    let project = format!("r3v3rs3-{}", setup.app.id);
+    let calls = [format!("config {project}"), format!("up {project}")];
+    assert_eq!(setup.agent.compose.state().calls, calls);
+    let container = format!("r3v3rs3-{}-{}", setup.app.id, first.id);
+    assert_eq!(setup.agent.runtime.names(), [container]);
+    let app_dir = setup.agent.dir.join(setup.app.id.to_string());
+    let first_dir = app_dir.join(first.id.to_string());
+    assert!(first_dir.join("src/compose.yaml").is_file());
+    assert!(first_dir.join(super::compose::OVERRIDE_FILE).is_file());
+
+    let second = deploy(&setup).await?;
+    assert_eq!(second.status, DeploymentStatus::Running, "{second:?}");
+    assert!(!first_dir.exists());
+    assert!(app_dir.join(second.id.to_string()).is_dir());
+
+    setup.platform.delete_app(setup.app.id).await?;
+    let calls = setup.agent.compose.state().calls.clone();
+    assert_eq!(calls.last(), Some(&format!("down {project}")));
+    assert!(!app_dir.exists());
+    let master_dir = setup.platform.compose_dir.join(setup.app.id.to_string());
+    assert!(!master_dir.exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_git_app_on_an_agent_is_built_there() -> anyhow::Result<()> {
+    let mut shop = request("shop");
+    shop.spec.source = AppSource::Git {
+        repository: "https://git.example.com/team/shop.git".parse()?,
+        branch: "main".parse()?,
+        context: "app".parse()?,
+        dockerfile: "Dockerfile".parse()?,
+    };
+    let setup = setup_with(shop).await?;
+    let deployment = deploy(&setup).await?;
+    assert_eq!(
+        deployment.status,
+        DeploymentStatus::Running,
+        "{deployment:?}"
+    );
+    let builds = setup
+        .agent
+        .runtime
+        .state()
+        .builds
+        .iter()
+        .map(|build| build.tag.clone())
+        .collect::<Vec<_>>();
+    let tag = format!("r3v3rs3/{}:{}", setup.app.id, deployment.id);
+    assert_eq!(builds, [tag]);
+    assert!(setup.local.state().builds.is_empty());
     Ok(())
 }

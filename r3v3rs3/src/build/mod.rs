@@ -69,16 +69,22 @@ pub fn context_archive(checkout: &Path, context: &RelPath) -> anyhow::Result<Vec
     if git_dir.exists() {
         std::fs::remove_dir_all(&git_dir)?;
     }
-    let size = tree_size(&dir, MAX_CONTEXT_BYTES)?;
+    directory_archive(&dir)
+}
+
+/// Packs a directory into a tar archive of at most [`MAX_CONTEXT_BYTES`] of files. Symbolic
+/// links stay links.
+pub fn directory_archive(dir: &Path) -> anyhow::Result<Vec<u8>> {
+    let size = tree_size(dir, MAX_CONTEXT_BYTES)?;
     if size > MAX_CONTEXT_BYTES {
         bail!(
-            "the build context is larger than {} MiB",
+            "the directory is larger than {} MiB",
             MAX_CONTEXT_BYTES >> 20
         );
     }
     let mut builder = tar::Builder::new(Vec::new());
     builder.follow_symlinks(false);
-    builder.append_dir_all(".", &dir)?;
+    builder.append_dir_all(".", dir)?;
     Ok(builder.into_inner()?)
 }
 
@@ -92,6 +98,25 @@ fn context_dir(root: &Path, context: &RelPath) -> anyhow::Result<std::path::Path
         bail!("the context {context} is not a directory of the repository");
     }
     Ok(dir)
+}
+
+/// Removes a directory. A missing directory is not an error.
+pub async fn remove_dir(dir: &Path) -> std::io::Result<()> {
+    match tokio::fs::remove_dir_all(dir).await {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// Removes every entry of `dir` except `keep`.
+pub async fn remove_other_dirs(dir: &Path, keep: &Path) -> anyhow::Result<()> {
+    let mut entries = tokio::fs::read_dir(dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        if entry.path() != keep {
+            remove_dir(&entry.path()).await?;
+        }
+    }
+    Ok(())
 }
 
 /// The size of the files under `dir`, counted until it passes `limit`.
