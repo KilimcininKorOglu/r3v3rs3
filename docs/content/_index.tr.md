@@ -8,7 +8,7 @@ sort_by = "weight"
 [![Rust](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml/badge.svg)](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml)
 [![dependency status](https://deps.rs/crate/r3v3rs3/latest/status.svg)](https://deps.rs/crate/r3v3rs3)
 
-r3v3rs3, Rust ile yazılmış bir reverse proxy sunucusudur. TCP, UDP, TLS, HTTP ve WebSocket bağlantılarını proxy'ler, gelen HTTP/3 bağlantılarını da kabul eder. [Taxy](https://github.com/picoHz/taxy) projesinin bir fork'udur.
+r3v3rs3, Rust ile yazılmış bir reverse proxy sunucusudur. TCP, UDP, TLS, HTTP ve WebSocket bağlantılarını proxy'ler, gelen HTTP/3 bağlantılarını da kabul eder. Uygulamaları container olarak deploy eder ve alan adlarını kendi proxy'leri üzerinden yönlendirir. [Taxy](https://github.com/picoHz/taxy) projesinin bir fork'udur.
 
 Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngilizce ve Türkçe WebUI'yi taşır; her port, proxy, sertifika ve hesap bu WebUI'de bir formdur. Değişiklik yeniden başlatmadan uygulanır. Aynı işlemler yönetim API'si üzerinden de yapılır. r3v3rs3 proxy'lerini Docker etiketlerinden, Kubernetes Ingress'ten, Consul catalog'undan veya etcd key'lerinden de oluşturabilir.
 
@@ -16,7 +16,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 
 ## Proxy
 
-- TCP, UDP, TLS, HTTP/1.1 ve HTTP/2 proxy'leri. HTTP upgrade ve WebSocket bağlantıları da buna dahildir. Rust ile [tokio](https://tokio.rs/) ve [hyper](https://hyper.rs/) üzerine yazıldı.
+- TCP, UDP, TLS, HTTP/1.1 ve HTTP/2 proxy'leri. HTTP upgrade ve WebSocket bağlantıları da buna dahildir.
 - HTTP/3 desteği kısmidir: yalnız gelen QUIC bağlantıları kabul edilir. Upstream bağlantıları HTTP/2 veya HTTP/1.1 kullanır. WebTransport desteği yoktur.
 - Host adına (tam, wildcard veya regex) ve yola göre routing. Yol yeniden yazma, yönlendirme kuralları ve yönlendirme host'u ya da 404 host'u gibi sabit yanıtlar.
 - Yük dengeleme, aktif ve pasif sağlık kontrolü, circuit breaker, sticky session, yeniden deneme, upstream timeout ve istek yansıtma.
@@ -42,68 +42,25 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - OpenAPI dokümanı ve Swagger UI sunan yönetim API'si ([Yönetim API'si](@/configuration.tr.md#yonetim-api-si)).
 - `admin`, `editor` ve `viewer` rolleri olan hesaplar, hesap başına proxy listesi ve denetim kaydı ([Hesaplar](@/accounts.tr.md)).
 - Docker etiketleri, Kubernetes Ingress ve `R3v3rs3Proxy` kaynakları, Consul ve etcd ile servis keşfi ([Servis keşfi](@/discovery.tr.md)).
-- Yüksek erişilebilirlik: birden fazla düğüm, etcd veya Consul'da şifreli tek bir durum bilgisini paylaşır ([Kurulum rehberi](@/tutorials/high-availability.tr.md), [Cluster](@/cluster.tr.md)).
+- Cluster modu ile yüksek erişilebilirlik: birden fazla düğüm, etcd veya Consul'da şifreli tek bir durum bilgisini paylaşır ([Kurulum rehberi](@/tutorials/high-availability.tr.md), [Cluster](@/cluster.tr.md)).
+
+## Deploy platformu
+
+- Registry image'ından, Dockerfile'ı olan bir Git repository'sinden veya bir Git repository'sindeki Docker Compose dosyasından uygulamalar.
+- Proxy'yi ancak yeni container sağlık kontrolünden geçince değiştiren blue-green deployment'lar ve önceki bir deployment'a geri alma.
+- r3v3rs3 uygulamaların alan adlarını kendisi yönlendirir ve sertifikalarını ACME ile alır.
+- Şifreli ortam değişkenleri. Her uygulamanın deployment'ları ve container log'u WebUI'da ve yönetim API'sinde görünür.
+- Git sağlayıcı bağlantıları: r3v3rs3'ün bir manifest'ten oluşturduğu GitHub App (GitHub Enterprise Server'da da) ve GitLab ile Gitea için OAuth uygulamaları. Bağlantı repository'leri ve branch'leri listeler, private repository'leri clone eder ve push webhook'unu kurar.
+- GitHub, GitLab, Gitea, Forgejo veya genel bir HMAC göndericisinden gelen push webhook'ları deployment başlatır.
+- Agent hedefleri uygulamaları başka sunucularda çalıştırır. Agent, tek seferlik kayıttan sonra master'a mTLS ile bağlanır ([Deploy platformu](@/platform.tr.md)).
 
 # Kurulum
-
-r3v3rs3'ü birkaç yolla kurabilirsiniz.
-
-## Linux sunucu
-
-`install.sh`, son release binary'sini (x86_64 veya aarch64) sha256 kontrolüyle kurar, admin hesabını oluşturur ve r3v3rs3'ü systemd servisi olarak çalıştırır:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-[Linux sunucuya kurulum](@/tutorials/install-linux.tr.md) rehberi seçenekleri, yolları, yükseltmeyi ve kaldırmayı anlatır.
-
-## Docker
-
-İki volume ile tek container:
-
-```bash
-docker run -d \
-  -v r3v3rs3-config:/root/.config/r3v3rs3 \
-  -v r3v3rs3-data:/root/.local/share/r3v3rs3 \
-  -p 80:80 \
-  -p 443:443 \
-  -p 127.0.0.1:46492:46492 \
-  --restart unless-stopped \
-  --stop-signal SIGINT \
-  --name r3v3rs3 \
-  ghcr.io/kilimcininkoroglu/r3v3rs3:latest
-```
-
-[Docker ile kurulum](@/tutorials/install-docker.tr.md) rehberi her seçeneği, admin hesabını, Docker Compose'u ve yükseltmeyi anlatır.
-
-## Cargo binstall
-
-[cargo-binstall](https://github.com/cargo-bins/), platformunuza uygun hazır binary'yi indirip kurar. Hazır binary yoksa `cargo install` kullanır.
-
-Önce [cargo-binstall](https://github.com/cargo-bins/cargo-binstall#installation) kurulu olmalıdır.
-
-Ardından r3v3rs3'ü şu komutla kurabilirsiniz:
-
-```bash
-$ cargo binstall r3v3rs3
-```
-
-## Cargo install
-
-Rust toolchain kurulu olmalıdır. Kurulu değilse [rustup.rs](https://rustup.rs/) adresindeki talimatları izleyin.
-
-crates.io paketinde WebUI statik dosyalar olarak hazır gelir. Bu yüzden WebUI'ı kendiniz build etmeniz gerekmez; bunun için [trunk](https://trunkrs.dev/) ve wasm toolchain gerekirdi.
-
-```bash
-$ cargo install r3v3rs3
-```
-
-## GitHub Releases
-
-Linux için hazır binary'lerin (x86_64 ve aarch64) son sürümünü doğrudan [releases sayfasından](https://github.com/KilimcininKorOglu/r3v3rs3/releases) da indirebilirsiniz.
-
-Arşivden çıkan binary'yi `$PATH` içindeki bir dizine koymanız yeterlidir.
+[Linux sunucuya kurulum](@/tutorials/install-linux.tr.md) rehberi seçenekleri, yolları, yükseltmeyi, kaldırmayı ve diğer kurulum yollarını anlatır: cargo-binstall, `cargo install` ve release arşivleri. [Docker ile kurulum](@/tutorials/install-docker.tr.md) rehberi container'ı, Docker Compose'u ve deploy platformunun image'ını anlatır.
 
 # Geliştirme
 

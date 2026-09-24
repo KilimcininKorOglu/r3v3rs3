@@ -8,7 +8,7 @@ sort_by = "weight"
 [![Rust](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml/badge.svg)](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml)
 [![dependency status](https://deps.rs/crate/r3v3rs3/latest/status.svg)](https://deps.rs/crate/r3v3rs3)
 
-r3v3rs3 is a reverse proxy server written in Rust. It proxies TCP, UDP, TLS, HTTP and WebSocket traffic, and it accepts incoming HTTP/3 connections. It is a fork of [Taxy](https://github.com/picoHz/taxy).
+r3v3rs3 is a reverse proxy server written in Rust. It proxies TCP, UDP, TLS, HTTP and WebSocket traffic, and it accepts incoming HTTP/3 connections. It also deploys apps as containers and routes their domains through its own proxies. It is a fork of [Taxy](https://github.com/picoHz/taxy).
 
 You configure it in a browser. One binary carries the proxy and a WebUI in English and Turkish, and every port, proxy, certificate and account is a form in that WebUI. A change applies without a restart. The same operations are available over an admin API, and r3v3rs3 can also build its proxies from Docker labels, a Kubernetes Ingress, the Consul catalog or etcd keys.
 
@@ -16,7 +16,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 
 ## Proxying
 
-- TCP, UDP, TLS, HTTP/1.1 and HTTP/2 proxies, including HTTP upgrades and WebSocket, built with Rust on [tokio](https://tokio.rs/) and [hyper](https://hyper.rs/)
+- TCP, UDP, TLS, HTTP/1.1 and HTTP/2 proxies, including HTTP upgrades and WebSocket
 - Partial HTTP/3 support: incoming QUIC connections only. Upstream connections use HTTP/2 or HTTP/1.1, and WebTransport is not supported
 - Routing by host name (exact, wildcard or regex) and path, with path rewrite, redirect rules and fixed responses such as a redirect host or a 404 host
 - Load balancing, active and passive health checks, a circuit breaker, sticky sessions, retries, upstream timeouts and traffic mirroring
@@ -42,68 +42,25 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 - An admin API with an OpenAPI document and a Swagger UI ([Admin API](@/configuration.md#admin-api))
 - Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists and an audit log ([Accounts](@/accounts.md))
 - Service discovery from Docker labels, Kubernetes Ingress and `R3v3rs3Proxy` resources, Consul and etcd ([Service Discovery](@/discovery.md))
-- High availability: several nodes share one encrypted state in etcd or Consul ([Setup guide](@/tutorials/high-availability.md), [Cluster](@/cluster.md))
+- High availability with cluster mode: several nodes share one encrypted state in etcd or Consul ([Setup guide](@/tutorials/high-availability.md), [Cluster](@/cluster.md))
+
+## Deployment platform
+
+- Apps from a registry image, from a Git repository with its Dockerfile, or from the Docker Compose file of a Git repository
+- Blue-green deployments that switch the proxy only after the new container passes its health check, and rollback to an earlier deployment
+- r3v3rs3 routes the domains of the apps itself and orders their certificates through ACME
+- Encrypted environment variables, the deployments and the container log of every app in the WebUI and the admin API
+- Git provider connections: a GitHub App that r3v3rs3 creates from a manifest, also on GitHub Enterprise Server, and OAuth apps for GitLab and Gitea. A connection lists the repositories and branches, clones private repositories and installs the push webhook
+- Push webhooks from GitHub, GitLab, Gitea, Forgejo or a generic HMAC sender start a deployment
+- Agent targets run apps on other servers. The agent connects to the master over mTLS after a one-time enrollment ([Deployment Platform](@/platform.md))
 
 # Installation
-
-There are multiple ways to install r3v3rs3.
-
-## Linux server
-
-`install.sh` installs the latest release binary (x86_64 or aarch64) with its sha256 check, creates the admin account and runs r3v3rs3 as a systemd service:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-[Installing on a Linux Server](@/tutorials/install-linux.md) covers the options, the paths, the upgrade and the removal.
-
-## Docker
-
-One container with two volumes:
-
-```bash
-docker run -d \
-  -v r3v3rs3-config:/root/.config/r3v3rs3 \
-  -v r3v3rs3-data:/root/.local/share/r3v3rs3 \
-  -p 80:80 \
-  -p 443:443 \
-  -p 127.0.0.1:46492:46492 \
-  --restart unless-stopped \
-  --stop-signal SIGINT \
-  --name r3v3rs3 \
-  ghcr.io/kilimcininkoroglu/r3v3rs3:latest
-```
-
-[Installing with Docker](@/tutorials/install-docker.md) covers each option, the admin account, Docker Compose and the upgrade.
-
-## Cargo binstall
-
-[cargo-binstall](https://github.com/cargo-bins/) automatically downloads and installs pre-built binaries for your platform. If there is no pre-built binary available, it will fall back to `cargo install`.
-
-You need to install [cargo-binstall](https://github.com/cargo-bins/cargo-binstall#installation) first.
-
-Then you can install r3v3rs3 with:
-
-```bash
-$ cargo binstall r3v3rs3
-```
-
-## Cargo install
-
-You need to have the Rust toolchain installed. If you don't, please follow the instructions on [rustup.rs](https://rustup.rs/).
-
-The package on crates.io comes bundled with the WebUI as a static asset. Thus, you don't need to build it yourself (which would require [trunk](https://trunkrs.dev/) and wasm toolchain).
-
-```bash
-$ cargo install r3v3rs3
-```
-
-## GitHub Releases
-
-Alternatively, you can directly download the latest pre-built Linux binaries (x86_64 and aarch64) from the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases).
-
-You simply put the extracted binary somewhere in your `$PATH` and you're good to go.
+[Installing on a Linux Server](@/tutorials/install-linux.md) covers the options, the paths, the upgrade, the removal and the other install methods: cargo-binstall, `cargo install` and the release archives. [Installing with Docker](@/tutorials/install-docker.md) covers the container, Docker Compose and the image of the deployment platform.
 
 # Development
 
