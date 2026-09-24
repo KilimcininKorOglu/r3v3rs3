@@ -1157,9 +1157,11 @@ mod tests {
         Ok(())
     }
 
-    /// Waits until the pipeline of the app has ended, and returns the deployment.
+    /// Waits until the pipeline of the app has ended, and returns the deployment. The deadline
+    /// covers a real Docker Engine, which pulls and starts containers on a slow CI runner.
     async fn finished(setup: &Setup, id: ShortId) -> anyhow::Result<DeploymentEntry> {
-        for _ in 0..500 {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+        while tokio::time::Instant::now() < deadline {
             let busy = setup.platform.busy_apps().contains(&setup.app.id);
             let entry = setup
                 .platform
