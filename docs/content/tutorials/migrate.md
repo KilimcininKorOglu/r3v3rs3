@@ -26,32 +26,32 @@ Everything in the tables below has an r3v3rs3 equivalent. Anything that is not t
 
 | nginx | r3v3rs3 |
 |---|---|
-| `listen 443 ssl;` | A port with the protocol **HTTPS** and **TLS Termination** |
+| `listen 443 ssl;` | A port with the protocol **HTTPS** and its **Server Names** |
 | `listen 443 quic;` | A port with the protocol **HTTP over QUIC (HTTP/3)** |
 | `server_name app.example.com;` | **Virtual Hosts** of the proxy |
 | `location /api { }` | A route with the path `/api` |
 | `proxy_pass http://api:8080/v1/;` | A server `http://api:8080/v1/` on the route |
 | `upstream app { server a; server b; }` | Two servers on one route |
-| `server a weight=3;` | **Weight** `3` on the server |
+| `server a weight=3;` | `http://a/ 3` in **Target**: the weight follows the URL |
 | `return 301 https://$host$request_uri;` | **Automatically Redirect HTTP to HTTPS** |
-| `rewrite ^/items/([0-9]+)$ /item/$1 break;` | **Rewrite** with `regex` and `replacement` on the route |
+| `rewrite ^/items/([0-9]+)$ /item/$1 break;` | **Path Regex** and **Replacement** on the route |
 | `add_header X-Frame-Options DENY;` | A response header rule: `set X-Frame-Options: DENY` |
 | `auth_basic` and `auth_basic_user_file` | **Basic Auth** with users on the proxy |
 | `auth_request /auth;` | **Forward Auth** with the auth URL |
-| `allow` and `deny` | **IP Filter** allow and deny lists |
+| `allow` and `deny` | **Allowed IP Addresses** and **Denied IP Addresses** |
 | `limit_req_zone` and `limit_req` | **Rate Limit** with requests, period and burst |
 | `proxy_cache_path` and `proxy_cache` | **Cache** with a memory limit and a default TTL |
 | `gzip on;` | **Compression** with the algorithms and a minimum size |
 | `return 404;` | A route with the fixed response **Fixed status** |
-| `proxy_set_header X-Real-IP $remote_addr;` | Automatic. See [Client IP](@/configuration.md#client-ip) |
+| `proxy_set_header X-Real-IP $remote_addr;` | Set only for a trusted proxy or CDN. Otherwise the request header rule `set X-Real-IP: {client_ip}`. See [Client IP](@/configuration.md#client-ip) |
 | `client_max_body_size 10m;` | **Request Body Limit** |
-| `proxy_read_timeout 60s;` | **Request Timeout** of the proxy or the route |
+| `proxy_read_timeout 60s;` | **Request Timeout (Seconds)** of the proxy or the route |
 | `stream { server { proxy_pass db:5432; } }` | A TCP proxy |
 
 Two differences that cost people time:
 
 - **The order of the locations does not matter.** nginx picks by its own precedence rules and the order in the file. r3v3rs3 always sends the request to the route with the longest matching path, over every proxy of the port. `/api` matches `/api` and `/api/users`, never `/apiv2`.
-- **The trailing slash rule is not the same.** In nginx, `proxy_pass http://api:8080/` strips the location prefix and `proxy_pass http://api:8080` keeps it. In r3v3rs3 the route path is always removed and the rest is added to the path of the server URL:
+- **The trailing slash rule is not the same.** In nginx, `proxy_pass http://api:8080/` strips the location prefix and `proxy_pass http://api:8080` keeps it. In r3v3rs3 the route path is removed by default (**Remove Route Path**) and the rest is added to the path of the server URL:
 
 ```
 route /api, server http://api:8080/v1/   ->  GET /api/users  =  /v1/users
@@ -69,10 +69,10 @@ The query string is kept in both cases.
 | `PathPrefix(\`/api\`)` | A route with the path `/api` |
 | A router without `PathPrefix` | A route with the path `/` |
 | `service` with `loadBalancer.servers` | The servers of the route |
-| `loadBalancer.healthCheck` | **Health Check** with a path and an interval |
+| `loadBalancer.healthCheck` | **Health Check Path** and **Check Interval (Seconds)** |
 | `loadBalancer.sticky.cookie` | **Enable Sticky Cookie** with a cookie name |
 | `middlewares.stripPrefix` | The default behavior of a route |
-| `middlewares.addPrefix` | **Rewrite** with `add_prefix` |
+| `middlewares.addPrefix` | **Add Prefix** |
 | `middlewares.redirectScheme` | **Automatically Redirect HTTP to HTTPS** |
 | `middlewares.redirectRegex` | A redirect rule with `regex`, `target` and `status` |
 | `middlewares.basicAuth` | **Basic Auth** |
@@ -131,7 +131,7 @@ Look at the cache headers, the `Set-Cookie` attributes, the CORS headers and the
 }
 ```
 
-An application that reads `X-Real-IP` needs a request header rule that sets it, because r3v3rs3 does not send that header.
+r3v3rs3 sets `X-Real-IP` only when the peer is a trusted proxy or CDN. For an application that reads `X-Real-IP` from direct clients, add the request header rule `set X-Real-IP: {client_ip}`.
 
 If you sit behind a CDN, set the CDN in [Client IP](@/configuration.md#client-ip) before you compare. Otherwise every log line holds the address of the CDN.
 
@@ -160,7 +160,7 @@ After a few days of quiet:
 - Remove the old proxy and its configuration.
 - Remove its certificate files, unless r3v3rs3 uses them.
 - Remove the `traefik.` labels from your containers, when you moved to Docker service discovery.
-- Delete the `8080` and `8443` ports from r3v3rs3.
+- Delete any test port that you kept in r3v3rs3.
 
 ## What Does Not Have an Equivalent
 

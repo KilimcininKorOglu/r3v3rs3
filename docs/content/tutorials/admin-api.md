@@ -30,6 +30,16 @@ set-cookie: token=QWZ1uBQz5A9gAnmK2b18EZ7tD7CpkJ9I; HttpOnly; SameSite=Strict
 
 `"insecure": true` removes the `Secure` attribute, so the cookie also works over plain HTTP. Drop it when the admin panel runs behind HTTPS.
 
+For an account with TOTP, the first response is `"totp_required"`. Send the code in a second request with the cookie of the first one:
+
+```bash
+$ curl -s -b cookies.txt -c cookies.txt \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"admin","method":"totp","token":"123456","insecure":true}' \
+    http://localhost:46492/api/login
+"success"
+```
+
 Every other endpoint needs that cookie:
 
 ```bash
@@ -65,8 +75,8 @@ Both need the session cookie. Open them in the browser where you signed in to th
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/openapi.json | jq '.info.version, (.paths | length)'
-"1.0.1"
-34
+"1.5.2"
+58
 ```
 
 Use the document to generate a client, or to see the exact body of an endpoint instead of guessing it.
@@ -89,7 +99,7 @@ $ curl -s -b cookies.txt http://localhost:46492/api/ports | jq -r '.[] | select(
 smc-gzh
 ```
 
-r3v3rs3 generates the id. Never write one by hand: a `PUT` with an id that does not exist is accepted and creates nothing that your proxies point at.
+r3v3rs3 generates the id. Never write one by hand: a `PUT` with an id that does not exist answers `404 id_not_found`.
 
 `PUT /api/ports/{id}` replaces a port, `DELETE /api/ports/{id}` removes it, and `GET /api/ports/{id}/status` reports whether the socket listens.
 
@@ -164,13 +174,13 @@ The three roles:
 | Role | What it can do |
 |---|---|
 | `admin` | Everything, including accounts, settings and the audit log. |
-| `editor` | Changes the ports and proxies of its own proxy list. |
+| `editor` | Changes the ports, the proxies, the certificates, the ACME entries, the access lists and the apps. With a proxy list, it adds proxies and changes only the proxies of its list. |
 | `viewer` | Reads only. |
 
-A `viewer` reads the proxy list but cannot change anything:
+A `viewer` reads the proxy list but cannot change anything. With the cookie of a `viewer` account in `viewer.txt`:
 
 ```bash
-$ curl -s -b ci.txt -X DELETE http://localhost:46492/api/proxies/jzr-pgf/cache
+$ curl -s -b viewer.txt -X DELETE http://localhost:46492/api/proxies/jzr-pgf/cache
 {"message":"the role of the account does not allow this action","error":{"message":"forbidden"}}
 ```
 

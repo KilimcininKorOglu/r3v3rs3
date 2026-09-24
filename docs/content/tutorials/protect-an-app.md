@@ -23,7 +23,7 @@ Follow [Getting Started](@/tutorials/getting-started.md) first. This guide conti
 
 An access list holds an IP filter and an authentication under one name. Several proxies and routes use the same list, and one change applies to all of them.
 
-1. Click **Access Lists** in the menu, then **Add**.
+1. Click **Access Lists** in the menu. The **Add an access list** form is below the list.
 2. Write `Office` in the name field.
 3. Write your office network in **Allowed IP Addresses**, for example `203.0.113.0/24`. Only these clients reach the proxy. Leave it empty to allow every address.
 4. Select **Basic Auth** in the authentication section.
@@ -39,9 +39,9 @@ Use **Denied IP Addresses** for a single address that must not reach the proxy. 
 
 1. Open the proxy and find the **Access List** field.
 2. Select `Office`.
-3. Save.
+3. Click **Update**.
 
-The list replaces the **IP Filter** and the **Authentication** of the proxy. A proxy cannot hold both, and the admin API answers `400 access_list_conflict` when it does.
+The list replaces the **Allowed IP Addresses**, the **Denied IP Addresses** and the **Authentication** of the proxy. A proxy cannot hold both, and the admin API answers `400 access_list_conflict` when it does.
 
 Check the result:
 
@@ -63,7 +63,7 @@ The rate limit stays on the proxy, because an access list holds no limit.
 1. Open the proxy and find the **Rate Limit** section.
 2. Write `60` in **Requests** and select `minute` in **Per**.
 3. Write `10` in **Burst**, so a page that loads ten files at once passes.
-4. Save.
+4. Click **Update**.
 
 ```bash
 $ curl -i -u alice:<password> https://app.example.com/
@@ -103,7 +103,7 @@ Basic Auth needs no other service, but it shows a browser dialog and has no sign
 
 A health check or a webhook needs no credentials. Give it its own route:
 
-1. Open the proxy and add a route with the path `/healthz`.
+1. Open the proxy and add a route with the path `/healthz`. Write `http://127.0.0.1:3000/healthz` in its **Target**, because r3v3rs3 removes the route path by default (**Remove Route Path**).
 2. Turn on **Override Authentication for This Route** and select **None**.
 3. Turn on **Override IP Filter for This Route** and leave both lists empty. The route then allows every client.
 
@@ -117,7 +117,7 @@ Behind a CDN or a load balancer, the TCP peer is the edge server. Without the ri
 - For your own load balancer, write its address in **Trusted Proxies** of the proxy.
 - For an untrusted peer, r3v3rs3 removes `X-Forwarded-For`, `X-Real-IP` and the other client IP headers, because a client can forge them.
 
-Check the resolved address in the access log of your application. r3v3rs3 sends it in `X-Real-IP`. [Client IP](@/configuration.md#client-ip) describes the order of the headers.
+Check the resolved address in the access log of your application. r3v3rs3 sends it in `X-Forwarded-For`, and in `X-Real-IP` when the peer is a trusted proxy or CDN. [Client IP](@/configuration.md#client-ip) describes the order of the headers.
 
 ## Step 7: Read the Audit Log
 

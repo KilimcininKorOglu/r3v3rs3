@@ -26,32 +26,32 @@ Aşağıdaki tablolardaki her maddenin r3v3rs3 karşılığı vardır. Tabloda o
 
 | nginx | r3v3rs3 |
 |---|---|
-| `listen 443 ssl;` | **HTTPS** protokollü bir port ve **TLS Termination** |
+| `listen 443 ssl;` | **HTTPS** protokollü bir port ve onun **Sunucu Adları** alanı |
 | `listen 443 quic;` | **QUIC üzerinden HTTP (HTTP/3)** protokollü bir port |
 | `server_name app.example.com;` | Proxy'nin **Virtual Host'lar** alanı |
 | `location /api { }` | Yolu `/api` olan bir route |
 | `proxy_pass http://api:8080/v1/;` | Route'ta `http://api:8080/v1/` sunucusu |
 | `upstream app { server a; server b; }` | Bir route'ta iki sunucu |
-| `server a weight=3;` | Sunucunun **Ağırlık** değeri `3` |
+| `server a weight=3;` | **Hedef** alanında `http://a/ 3`: ağırlık URL'den sonra gelir |
 | `return 301 https://$host$request_uri;` | **HTTP'yi Otomatik Olarak HTTPS'e Yönlendir** |
 | `rewrite ^/items/([0-9]+)$ /item/$1 break;` | Route'ta **Yol Regex'i** ve **Yerine Yazılacak Değer** |
 | `add_header X-Frame-Options DENY;` | Yanıt header'ı kuralı: `set X-Frame-Options: DENY` |
 | `auth_basic` ve `auth_basic_user_file` | Proxy'de kullanıcılarıyla **Basic Auth** |
 | `auth_request /auth;` | **Doğrulama URL'i** ile **Forward Auth** |
-| `allow` ve `deny` | **IP Filtresi** izin ve engelleme listeleri |
+| `allow` ve `deny` | **İzin Verilen IP Adresleri** ve **Engellenen IP Adresleri** |
 | `limit_req_zone` ve `limit_req` | İstek sayısı, süre ve burst ile **Rate Limit** |
 | `proxy_cache_path` ve `proxy_cache` | Bellek limiti ve varsayılan TTL ile **Cache** |
 | `gzip on;` | Algoritmalar ve minimum boyut ile **Sıkıştırma** |
 | `return 404;` | **Sabit durum kodu** route türü |
-| `proxy_set_header X-Real-IP $remote_addr;` | Otomatiktir. [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümüne bakın |
+| `proxy_set_header X-Real-IP $remote_addr;` | Yalnız güvenilen bir proxy veya CDN için yazılır. Diğer durumda `set X-Real-IP: {client_ip}` istek header'ı kuralı. [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümüne bakın |
 | `client_max_body_size 10m;` | **İstek Gövdesi Limiti** |
-| `proxy_read_timeout 60s;` | Proxy'nin veya route'un **İstek Timeout'u** |
+| `proxy_read_timeout 60s;` | Proxy'nin veya route'un **İstek Timeout'u (Saniye)** alanı |
 | `stream { server { proxy_pass db:5432; } }` | TCP proxy |
 
 Zaman kaybettiren iki fark:
 
 - **Location'ların sırası sonucu değiştirmez.** nginx, kendi öncelik kurallarına ve dosyadaki sıraya göre seçer. r3v3rs3 isteği her zaman, portun bütün proxy'leri içinde yolu en uzun eşleşen route'a gönderir. `/api`, `/api` ve `/api/users` ile eşleşir, `/apiv2` ile eşleşmez.
-- **Sondaki eğik çizgi kuralı aynı değildir.** nginx'te `proxy_pass http://api:8080/` location önekini kaldırır, `proxy_pass http://api:8080` ise korur. r3v3rs3'te route yolu her zaman kaldırılır ve kalan kısım sunucu URL'inin yoluna eklenir:
+- **Sondaki eğik çizgi kuralı aynı değildir.** nginx'te `proxy_pass http://api:8080/` location önekini kaldırır, `proxy_pass http://api:8080` ise korur. r3v3rs3'te route yolu varsayılan olarak kaldırılır (**Route Yolunu Kaldır**) ve kalan kısım sunucu URL'inin yoluna eklenir:
 
 ```
 route /api, sunucu http://api:8080/v1/    ->  GET /api/users  =  /v1/users
@@ -131,7 +131,7 @@ Cache header'larına, `Set-Cookie` özniteliklerine, CORS header'larına ve yön
 }
 ```
 
-`X-Real-IP` okuyan bir uygulama için bu header'ı yazan bir istek header'ı kuralı ekleyin, çünkü r3v3rs3 bu header'ı göndermez.
+r3v3rs3 `X-Real-IP` header'ını yalnız karşı uç güvenilen bir proxy veya CDN olduğunda yazar. Doğrudan gelen istemcilerde `X-Real-IP` okuyan bir uygulama için `set X-Real-IP: {client_ip}` istek header'ı kuralını ekleyin.
 
 CDN arkasındaysanız karşılaştırmadan önce CDN'i [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) ayarlarında tanımlayın. Aksi halde her log satırı CDN'in adresini taşır.
 
@@ -160,7 +160,7 @@ Birkaç gün sorunsuz geçtikten sonra:
 - Eski proxy'yi ve yapılandırmasını silin.
 - r3v3rs3 kullanmıyorsa eski sertifika dosyalarını silin.
 - Docker servis keşfine geçtiyseniz container'larınızdan `traefik.` etiketlerini kaldırın.
-- r3v3rs3'ten `8080` ve `8443` portlarını silin.
+- r3v3rs3'te sakladığınız test portlarını silin.
 
 ## Karşılığı olmayanlar
 

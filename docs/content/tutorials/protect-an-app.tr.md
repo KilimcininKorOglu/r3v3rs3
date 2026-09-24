@@ -23,7 +23,7 @@ r3v3rs3 bunları şu sırayla uygular: IP filtresi, rate limit, HTTPS yönlendir
 
 Erişim listesi bir IP filtresini ve bir kimlik doğrulamayı tek bir adın altında tutar. Birkaç proxy ve route aynı listeyi kullanır, tek bir değişiklik hepsine uygulanır.
 
-1. Menüde **Erişim Listeleri** linkine, sonra **Ekle** butonuna tıklayın.
+1. Menüde **Erişim Listeleri** linkine tıklayın. **Erişim listesi ekle** formu listenin altındadır.
 2. Ad alanına `Office` yazın.
 3. **İzin Verilen IP Adresleri** alanına ofis ağınızı yazın, örneğin `203.0.113.0/24`. Proxy'ye yalnız bu istemciler ulaşır. Bütün adreslere izin vermek için alanı boş bırakın.
 4. Kimlik doğrulama bölümünde **Basic Auth** seçin.
@@ -39,9 +39,9 @@ Proxy'ye ulaşmaması gereken tek bir adres için **Engellenen IP Adresleri** al
 
 1. Proxy'yi açın ve **Erişim Listesi** alanını bulun.
 2. `Office` listesini seçin.
-3. Kaydedin.
+3. **Güncelle** butonuna tıklayın.
 
-Liste, proxy'nin **IP Filtresi** ve **Kimlik Doğrulama** ayarlarının yerini alır. Bir proxy ikisini birden tutamaz, yönetim API'si bu durumda `400 access_list_conflict` döndürür.
+Liste, proxy'nin **İzin Verilen IP Adresleri**, **Engellenen IP Adresleri** ve **Kimlik Doğrulama** ayarlarının yerini alır. Bir proxy ikisini birden tutamaz, yönetim API'si bu durumda `400 access_list_conflict` döndürür.
 
 Sonucu kontrol edin:
 
@@ -63,7 +63,7 @@ Rate limit proxy üzerinde kalır, çünkü erişim listesi limit tutmaz.
 1. Proxy'yi açın ve **Rate Limit** bölümünü bulun.
 2. **İstek Sayısı** alanına `60` yazın, **Süre** alanında `dakika` seçin.
 3. **Burst** alanına `10` yazın, böylece on dosyayı aynı anda yükleyen bir sayfa geçer.
-4. Kaydedin.
+4. **Güncelle** butonuna tıklayın.
 
 ```bash
 $ curl -i -u alice:<parola> https://app.example.com/
@@ -103,7 +103,7 @@ Her yöntemi alanlarıyla ve yanıtlarıyla [Kimlik doğrulama](@/configuration.
 
 Bir sağlık kontrolü veya bir webhook kimlik bilgisi istemez. Ona kendi route'unu verin:
 
-1. Proxy'yi açın ve `/healthz` yolu ile bir route ekleyin.
+1. Proxy'yi açın ve `/healthz` yolu ile bir route ekleyin. Route'un **Hedef** alanına `http://127.0.0.1:3000/healthz` yazın, çünkü r3v3rs3 route yolunu varsayılan olarak kaldırır (**Route Yolunu Kaldır**).
 2. **Bu Route için Ayrı Kimlik Doğrulama Kullan** seçeneğini açın ve **Yok** seçin.
 3. **Bu Route için Ayrı IP Filtresi Kullan** seçeneğini açın ve iki listeyi de boş bırakın. Route böylece bütün istemcilere açılır.
 
@@ -117,7 +117,7 @@ CDN veya yük dengeleyici arkasında TCP bağlantısının karşı ucu edge sunu
 - Kendi yük dengeleyiciniz için adresini proxy'nin **Güvenilen Proxy'ler** alanına yazın.
 - Güvenilmeyen bir karşı uç için r3v3rs3 `X-Forwarded-For`, `X-Real-IP` ve diğer istemci IP header'larını siler, çünkü istemci onları uydurabilir.
 
-Çözümlenen adresi uygulamanızın erişim log'unda görün. r3v3rs3 adresi `X-Real-IP` header'ında gönderir. Header sırasını [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümü anlatır.
+Çözümlenen adresi uygulamanızın erişim log'unda görün. r3v3rs3 adresi `X-Forwarded-For` header'ında, karşı uç güvenilen bir proxy veya CDN ise `X-Real-IP` header'ında da gönderir. Header sırasını [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümü anlatır.
 
 ## Adım 7: Denetim kaydını okuyun
 

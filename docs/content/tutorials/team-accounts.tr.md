@@ -84,7 +84,7 @@ Yani proxy listesi olan bir editör, başka bir ekibin proxy'lerini hiç görmed
 
 ## Adım 4: TOTP açın
 
-Hesabı `"totp": true` ile oluşturun veya sonradan açın. Secret yanıtta bir kez döner:
+Hesabı `"totp": true` ile oluşturun. TOTP yalnız hesap oluşturulurken ayarlanır: var olan bir hesaba eklemek için hesabı silin ve yeniden oluşturun. Secret yanıtta bir kez döner:
 
 ```bash
 $ curl -s -b cookies.txt -X POST http://localhost:46492/api/accounts \

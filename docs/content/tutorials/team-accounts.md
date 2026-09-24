@@ -84,7 +84,7 @@ So an editor with a list can build and run their own service without ever seeing
 
 ## Step 4: Turn On TOTP
 
-Create the account with `"totp": true`, or turn it on later. The response holds the secret once:
+Create the account with `"totp": true`. TOTP can be set only when the account is created: to add it to an existing account, delete the account and create it again. The response holds the secret once:
 
 ```bash
 $ curl -s -b cookies.txt -X POST http://localhost:46492/api/accounts \

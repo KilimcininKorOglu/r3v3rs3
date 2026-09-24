@@ -47,10 +47,10 @@ The browser must reach `/oauth2/` on the same host as the application, because t
 
 | Route | Servers | Authentication |
 |---|---|---|
-| `/oauth2` | `http://127.0.0.1:4180/` | **None** |
+| `/oauth2` | `http://127.0.0.1:4180/oauth2/` | **None** |
 | `/` | your application | **Forward Auth** |
 
-The longest matching path wins, so `/oauth2/start` goes to oauth2-proxy and everything else goes to the application. Set the authentication of the `/oauth2` route to **None**; without that, a client would need a session to reach the sign-in page.
+The longest matching path wins, so `/oauth2/start` goes to oauth2-proxy and everything else goes to the application. r3v3rs3 removes the route path by default (**Remove Route Path**), so the server URL of the `/oauth2` route ends with `/oauth2/`. Turn on **Override Authentication for This Route** on the `/oauth2` route and select **None**; without that, a client would need a session to reach the sign-in page.
 
 ## Step 3: Turn On Forward Auth
 
@@ -62,7 +62,7 @@ Set the authentication of the proxy to **Forward Auth**:
 | **Copy Response Headers** | `X-Auth-Request-User`, `X-Auth-Request-Email` |
 | **Timeout (Seconds)** | `10` |
 
-In `config.toml`:
+In `proxies.toml`:
 
 ```toml
 [my-app]
@@ -70,7 +70,7 @@ protocol = "http"
 vhosts = ["app.example.com"]
 auth = { type = "forward", url = "http://127.0.0.1:4180/oauth2/auth", response_headers = ["X-Auth-Request-User"], timeout = "10s" }
 routes = [
-  { path = "/oauth2", servers = [{ url = "http://127.0.0.1:4180/" }], auth = { type = "none" } },
+  { path = "/oauth2", servers = [{ url = "http://127.0.0.1:4180/oauth2/" }], auth = { type = "none" } },
   { path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] },
 ]
 ```
@@ -106,6 +106,8 @@ $ curl -i https://app.example.com/
 HTTP/1.1 302 Found
 location: https://sso.example.com/login
 ```
+
+oauth2-proxy answers `/oauth2/auth` with 401 and no redirect, so r3v3rs3 passes the 401 to the browser. Send the user to `/oauth2/start?rd=/` from the error page or a link of your application; oauth2-proxy then starts the sign-in.
 
 With a session, the same request reaches the application:
 
@@ -145,10 +147,10 @@ Note that the auth request itself still carries the client headers, so your auth
 
 ## Step 7: Leave a Route Open
 
-A health check or a webhook must not go through the sign-in. Give it its own route with the authentication **None**:
+A health check or a webhook must not go through the sign-in. Give it its own route, turn on **Override Authentication for This Route** and select **None**:
 
 ```toml
-{ path = "/healthz", servers = [{ url = "http://127.0.0.1:9000/" }], auth = { type = "none" } }
+{ path = "/healthz", servers = [{ url = "http://127.0.0.1:9000/healthz" }], auth = { type = "none" } }
 ```
 
 ```bash

@@ -30,6 +30,16 @@ set-cookie: token=QWZ1uBQz5A9gAnmK2b18EZ7tD7CpkJ9I; HttpOnly; SameSite=Strict
 
 `"insecure": true`, cookie'den `Secure` özelliğini kaldırır, böylece cookie düz HTTP'de de çalışır. Yönetim paneli HTTPS arkasındaysa bu alanı yazmayın.
 
+TOTP'si olan bir hesapta ilk yanıt `"totp_required"` olur. Kodu, ilk isteğin cookie'si ile ikinci bir istekte gönderin:
+
+```bash
+$ curl -s -b cookies.txt -c cookies.txt \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"admin","method":"totp","token":"123456","insecure":true}' \
+    http://localhost:46492/api/login
+"success"
+```
+
 Diğer her endpoint bu cookie'yi ister:
 
 ```bash
@@ -65,8 +75,8 @@ r3v3rs3 OpenAPI dokümanını sunucu kodundan üretir, yani doküman her zaman �
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/openapi.json | jq '.info.version, (.paths | length)'
-"1.0.1"
-34
+"1.5.2"
+58
 ```
 
 Dokümanı bir istemci üretmek için veya bir endpoint'in gövdesini tahmin etmek yerine görmek için kullanın.
@@ -89,7 +99,7 @@ $ curl -s -b cookies.txt http://localhost:46492/api/ports | jq -r '.[] | select(
 smc-gzh
 ```
 
-Id'yi r3v3rs3 üretir. Elle id yazmayın: var olmayan bir id ile yapılan `PUT` kabul edilir ve proxy'lerinizin gösterdiği hiçbir şeyi oluşturmaz.
+Id'yi r3v3rs3 üretir. Elle id yazmayın: var olmayan bir id ile yapılan `PUT` isteği `404 id_not_found` döner.
 
 `PUT /api/ports/{id}` bir portu değiştirir, `DELETE /api/ports/{id}` siler, `GET /api/ports/{id}/status` socket'in dinleyip dinlemediğini söyler.
 
@@ -164,13 +174,13 @@ $ curl -s -b cookies.txt -X POST http://localhost:46492/api/accounts \
 | Rol | Ne yapabilir |
 |---|---|
 | `admin` | Her şeyi: hesaplar, ayarlar ve denetim kaydı dahil. |
-| `editor` | Kendi proxy listesindeki port ve proxy'leri değiştirir. |
+| `editor` | Portları, proxy'leri, sertifikaları, ACME kayıtlarını, erişim listelerini ve uygulamaları değiştirir. Proxy listesi varsa proxy ekler ve yalnız listesindeki proxy'leri değiştirir. |
 | `viewer` | Yalnız okur. |
 
-`viewer` rolü proxy listesini okur, ama hiçbir şeyi değiştiremez:
+`viewer` rolü proxy listesini okur, ama hiçbir şeyi değiştiremez. `viewer.txt` dosyasında bir `viewer` hesabının cookie'si ile:
 
 ```bash
-$ curl -s -b ci.txt -X DELETE http://localhost:46492/api/proxies/jzr-pgf/cache
+$ curl -s -b viewer.txt -X DELETE http://localhost:46492/api/proxies/jzr-pgf/cache
 {"message":"the role of the account does not allow this action","error":{"message":"forbidden"}}
 ```
 

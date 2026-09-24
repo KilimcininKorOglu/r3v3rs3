@@ -47,10 +47,10 @@ Tarayıcı `/oauth2/` adresine uygulamayla aynı host üzerinden ulaşmalıdır,
 
 | Route | Sunucular | Kimlik doğrulama |
 |---|---|---|
-| `/oauth2` | `http://127.0.0.1:4180/` | **Yok** |
+| `/oauth2` | `http://127.0.0.1:4180/oauth2/` | **Yok** |
 | `/` | uygulamanız | **Forward Auth** |
 
-Yolu en uzun eşleşen route kazanır, yani `/oauth2/start` oauth2-proxy'ye, diğer her şey uygulamaya gider. `/oauth2` route'unun kimlik doğrulamasını **Yok** yapın; aksi halde istemci, giriş sayfasına ulaşmak için oturuma ihtiyaç duyar.
+Yolu en uzun eşleşen route kazanır, yani `/oauth2/start` oauth2-proxy'ye, diğer her şey uygulamaya gider. r3v3rs3 route yolunu varsayılan olarak kaldırır (**Route Yolunu Kaldır**), bu yüzden `/oauth2` route'unun sunucu URL'i `/oauth2/` ile biter. `/oauth2` route'unda **Bu Route için Ayrı Kimlik Doğrulama Kullan** seçeneğini açın ve **Yok** seçin; aksi halde istemci, giriş sayfasına ulaşmak için oturuma ihtiyaç duyar.
 
 ## Adım 3: Forward auth'u açın
 
@@ -62,7 +62,7 @@ Proxy'nin kimlik doğrulamasını **Forward Auth** yapın:
 | **Kopyalanacak Yanıt Header'ları** | `X-Auth-Request-User`, `X-Auth-Request-Email` |
 | **Timeout (Saniye)** | `10` |
 
-`config.toml` içinde:
+`proxies.toml` içinde:
 
 ```toml
 [my-app]
@@ -70,7 +70,7 @@ protocol = "http"
 vhosts = ["app.example.com"]
 auth = { type = "forward", url = "http://127.0.0.1:4180/oauth2/auth", response_headers = ["X-Auth-Request-User"], timeout = "10s" }
 routes = [
-  { path = "/oauth2", servers = [{ url = "http://127.0.0.1:4180/" }], auth = { type = "none" } },
+  { path = "/oauth2", servers = [{ url = "http://127.0.0.1:4180/oauth2/" }], auth = { type = "none" } },
   { path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] },
 ]
 ```
@@ -106,6 +106,8 @@ $ curl -i https://app.example.com/
 HTTP/1.1 302 Found
 location: https://sso.example.com/login
 ```
+
+oauth2-proxy `/oauth2/auth` isteğine yönlendirme olmadan 401 döner, bu yüzden r3v3rs3 401 yanıtını tarayıcıya aktarır. Kullanıcıyı uygulamanızın hata sayfasından veya bir linkten `/oauth2/start?rd=/` adresine gönderin; oauth2-proxy girişi o zaman başlatır.
 
 Oturumla gönderilen aynı istek uygulamaya ulaşır:
 
@@ -145,10 +147,10 @@ Doğrulama isteği ise istemci header'larını taşımaya devam eder, yani doğr
 
 ## Adım 7: Bir route'u açık bırakın
 
-Sağlık kontrolü veya webhook girişten geçmemelidir. Ona kimlik doğrulaması **Yok** olan kendi route'unu verin:
+Sağlık kontrolü veya webhook girişten geçmemelidir. Ona kendi route'unu verin, **Bu Route için Ayrı Kimlik Doğrulama Kullan** seçeneğini açın ve **Yok** seçin:
 
 ```toml
-{ path = "/healthz", servers = [{ url = "http://127.0.0.1:9000/" }], auth = { type = "none" } }
+{ path = "/healthz", servers = [{ url = "http://127.0.0.1:9000/healthz" }], auth = { type = "none" } }
 ```
 
 ```bash
