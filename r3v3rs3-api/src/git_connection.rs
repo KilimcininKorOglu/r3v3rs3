@@ -10,7 +10,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use url::Url;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 /// The address of GitHub. A GitHub connection always uses it.
 pub const GITHUB_URL: &str = "https://github.com";
@@ -253,6 +253,67 @@ pub struct AuthorizeResponse {
     pub url: String,
 }
 
+/// The longest repository name.
+const MAX_REPO_NAME_LENGTH: usize = 255;
+
+checked_string!(
+    /// The full name of a repository at its provider: `owner/repo`, or `group/subgroup/repo` on
+    /// GitLab. Each segment holds letters, digits and `._-`, so the name is safe in an API path.
+    RepoName,
+    check_repo_name
+);
+
+fn check_repo_name(value: &str) -> Result<(), Error> {
+    let segment_valid = |segment: &str| {
+        !segment.is_empty()
+            && !segment.starts_with('.')
+            && segment
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+    };
+    let valid = value.len() <= MAX_REPO_NAME_LENGTH
+        && value.contains('/')
+        && value.split('/').all(segment_valid);
+    if valid {
+        Ok(())
+    } else {
+        Err(invalid(format!("invalid repository name: {value}")))
+    }
+}
+
+/// A repository that the account of a connection can read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GitRepository {
+    #[schema(value_type = String, example = "owner/shop")]
+    pub full_name: RepoName,
+    /// The HTTPS address that clones the repository.
+    #[schema(example = "https://github.com/owner/shop.git")]
+    pub clone_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_branch: Option<String>,
+    pub private: bool,
+}
+
+/// The query of a repository list.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct RepositoryQuery {
+    /// A part of the repository name. Without it the list holds the recently changed
+    /// repositories.
+    pub search: Option<String>,
+    /// The page of the list, from 1.
+    pub page: Option<u32>,
+}
+
+/// The query of a branch list.
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct BranchQuery {
+    /// The full name of the repository.
+    #[param(value_type = String, example = "owner/shop")]
+    pub repository: RepoName,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +390,23 @@ mod tests {
             "javascript:alert(1)//oauth/git/callback",
         ] {
             assert!(invalid.parse::<RedirectUri>().is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn a_repository_name_is_safe_in_a_path() {
+        for valid in ["owner/shop", "group/sub.group/app-1", "o/r_x"] {
+            assert!(valid.parse::<RepoName>().is_ok(), "{valid}");
+        }
+        for invalid in [
+            "shop",
+            "owner/../x",
+            "owner//x",
+            "owner/x?y",
+            "/owner/x",
+            "owner/.git",
+        ] {
+            assert!(invalid.parse::<RepoName>().is_err(), "{invalid}");
         }
     }
 

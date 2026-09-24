@@ -7,6 +7,9 @@ use hyper::{Method, StatusCode};
 use r3v3rs3_api::git_connection::{GITHUB_URL, GitProvider, ProviderUrl};
 use serde_json::Value;
 
+mod repos;
+pub(super) use repos::NewHook;
+
 /// The REST API of github.com.
 const GITHUB_API: &str = "https://api.github.com";
 

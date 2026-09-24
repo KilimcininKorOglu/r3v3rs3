@@ -102,7 +102,7 @@ fn needs_renewal(expires_at: Option<u64>, now: u64) -> bool {
     expires_at.is_some_and(|at| now.saturating_add(RENEWAL_MARGIN_MS) >= at)
 }
 
-fn provider_failed(err: impl Into<anyhow::Error>) -> anyhow::Error {
+pub(super) fn provider_failed(err: impl Into<anyhow::Error>) -> anyhow::Error {
     Error::GitProviderFailed {
         reason: format!("{:#}", err.into()),
     }
@@ -111,7 +111,7 @@ fn provider_failed(err: impl Into<anyhow::Error>) -> anyhow::Error {
 
 impl Platform {
     /// The HTTPS client of the provider APIs, built at its first use.
-    async fn http(&self) -> anyhow::Result<&HttpClient> {
+    pub(super) async fn http(&self) -> anyhow::Result<&HttpClient> {
         self.http
             .get_or_try_init(crate::cdn::fetch::build_client)
             .await
@@ -320,7 +320,8 @@ impl Platform {
     }
 }
 
-fn site(entry: &GitConnectionEntry) -> Site<'_> {
+/// The provider of a connection at its address.
+pub(super) fn site(entry: &GitConnectionEntry) -> Site<'_> {
     Site {
         provider: entry.provider,
         url: &entry.url,

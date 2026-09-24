@@ -9,16 +9,64 @@ use crate::audit::AuditRecord;
 use crate::clock::unix_ms;
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
 };
 use r3v3rs3_api::{
     audit::AuditAction,
     git_connection::{
-        AuthorizeRequest, AuthorizeResponse, GitConnectionEntry, GitConnectionRequest,
-        PlatformSettings,
+        AuthorizeRequest, AuthorizeResponse, BranchQuery, GitConnectionEntry, GitConnectionRequest,
+        GitRepository, PlatformSettings, RepositoryQuery,
     },
     id::ShortId,
 };
+
+/// Lists one page of the repositories that the account of a connection can read.
+#[utoipa::path(
+    get,
+    path = "/{id}/repositories",
+    tag = "platform",
+    operation_id = "list_git_repositories",
+    params(("id" = ShortId, Path, description = "Connection id."), RepositoryQuery),
+    responses((status = 200, description = "The repositories, at most 50.", body = Vec<GitRepository>), NotFoundResponse, ErrorResponses)
+)]
+pub async fn list_repositories(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Query(query): Query<RepositoryQuery>,
+) -> Result<Json<Vec<GitRepository>>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    Ok(Json(
+        platform
+            .git_repositories(id, &query)
+            .await
+            .map_err(platform_error)?,
+    ))
+}
+
+/// Lists the branches of a repository of a connection.
+#[utoipa::path(
+    get,
+    path = "/{id}/branches",
+    tag = "platform",
+    operation_id = "list_git_branches",
+    params(("id" = ShortId, Path, description = "Connection id."), BranchQuery),
+    responses((status = 200, description = "The branch names, at most 50.", body = Vec<String>), NotFoundResponse, ErrorResponses)
+)]
+pub async fn list_branches(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Query(query): Query<BranchQuery>,
+) -> Result<Json<Vec<String>>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    Ok(Json(
+        platform
+            .git_branches(id, &query.repository)
+            .await
+            .map_err(platform_error)?,
+    ))
+}
 
 /// Starts the authorization of a Git provider connection. The browser of the admin opens the
 /// returned page of the provider, and the provider sends it back to `redirect_uri`.

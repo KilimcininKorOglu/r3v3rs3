@@ -554,6 +554,7 @@ async fn manage_connections(addr: SocketAddr) -> anyhow::Result<()> {
     let editor = session_cookie(addr, "editor", "editor-secret").await?;
     let id = check_connection_add(addr, &admin, &editor).await?;
     check_authorization(addr, &admin, &editor, &id).await?;
+    check_not_connected(addr, &editor, &id).await?;
     check_connection_update(addr, &admin, &editor, &id).await?;
     check_platform_settings(addr, &admin, &editor).await?;
     check_connection_audit(addr, &admin, &id).await
@@ -640,6 +641,22 @@ async fn check_authorization(
             "{page}"
         );
     }
+    Ok(())
+}
+
+/// An editor lists repositories and branches, and a connection without tokens refuses both.
+async fn check_not_connected(addr: SocketAddr, editor: &str, id: &str) -> anyhow::Result<()> {
+    for path in [
+        format!("{CONNECTIONS}/{id}/repositories?search=app"),
+        format!("{CONNECTIONS}/{id}/branches?repository=team/app"),
+    ] {
+        let (status, text) = send(addr, Method::GET, &path, editor, None).await?;
+        assert_eq!(status, 409, "{text}");
+        assert!(text.contains("git_connection_not_connected"), "{text}");
+    }
+    let unsafe_name = format!("{CONNECTIONS}/{id}/branches?repository=../app");
+    let (status, _) = send(addr, Method::GET, &unsafe_name, editor, None).await?;
+    assert_eq!(status, 400);
     Ok(())
 }
 

@@ -290,7 +290,9 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     git::update_connection,
                     git::delete_connection
                 ))
-                .routes(routes!(git::authorize_connection)),
+                .routes(routes!(git::authorize_connection))
+                .routes(routes!(git::list_repositories))
+                .routes(routes!(git::list_branches)),
         )
         .nest(
             "/platform/settings",

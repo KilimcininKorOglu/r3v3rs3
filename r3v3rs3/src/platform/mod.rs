@@ -18,6 +18,7 @@ pub mod proxy;
 mod publish;
 #[cfg(test)]
 mod remote_tests;
+mod repositories;
 pub mod store;
 
 use crate::agent::compose::RemoteCompose;
