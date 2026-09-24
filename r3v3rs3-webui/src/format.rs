@@ -27,6 +27,14 @@ pub fn format_duration(locale: Locale, unix_time: i64) -> String {
     format!("{date} ({})", time_left(locale, remaining))
 }
 
+/// A Unix time in milliseconds in the RFC 3339 form, in UTC.
+pub fn format_time(ms: u64) -> String {
+    OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
+        .ok()
+        .and_then(|time| time.format(&Rfc3339).ok())
+        .unwrap_or_else(|| ms.to_string())
+}
+
 /// The current Unix time in seconds.
 pub fn unix_now() -> i64 {
     SystemTime::now()

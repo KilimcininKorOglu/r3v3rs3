@@ -164,19 +164,14 @@ fn app_row(
             deploy.emit(row.clone());
         })
     };
-    let view_onclick = {
-        let navigator = navigator.clone();
-        let id = row.app.id;
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            navigator.push(&Route::AppView { id });
-        })
-    };
     let view_label = if can_edit {
         "common.edit"
     } else {
         "common.view"
     };
+    let view_onclick = link(navigator, Route::AppView { id: row.app.id });
+    let deployments_onclick = link(navigator, Route::AppDeployments { id: row.app.id });
+    let log_onclick = link(navigator, Route::AppLog { id: row.app.id });
     Row {
         key: row.app.id.to_string(),
         cells: vec![
@@ -188,12 +183,23 @@ fn app_row(
         actions: html! {
             <>
                 <a class={LINK_CLASS} onclick={view_onclick}>{locale.t(view_label)}</a>
+                <a class={LINK_CLASS} onclick={deployments_onclick}>{locale.t("apps.deployments")}</a>
+                <a class={LINK_CLASS} onclick={log_onclick}>{locale.t("common.log")}</a>
                 if can_edit && !busy {
                     <a class={LINK_CLASS} onclick={deploy_onclick}>{locale.t("apps.deploy")}</a>
                 }
             </>
         },
     }
+}
+
+/// A click handler that opens `route`.
+fn link(navigator: &Navigator, route: Route) -> Callback<MouseEvent> {
+    let navigator = navigator.clone();
+    Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        navigator.push(&route);
+    })
 }
 
 /// The kind of the source, and the image or the repository with its branch.

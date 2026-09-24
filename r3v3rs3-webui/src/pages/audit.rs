@@ -4,6 +4,7 @@ use super::settings::{failure_box, fetch_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::data_list::{Column, Row, list_card};
+use crate::format::format_time;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -11,7 +12,6 @@ use r3v3rs3_api::{
     audit::{AuditAction, AuditEntry, MAX_QUERY_LIMIT},
     i18n::Locale,
 };
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use web_time::{SystemTime, UNIX_EPOCH};
@@ -192,14 +192,6 @@ fn action_key(action: AuditAction) -> String {
         .and_then(|value| value.as_str().map(str::to_string))
         .unwrap_or_default();
     format!("audit.action_{name}")
-}
-
-/// The time of an entry in the RFC 3339 form, in UTC.
-fn format_time(ms: u64) -> String {
-    OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
-        .ok()
-        .and_then(|time| time.format(&Rfc3339).ok())
-        .unwrap_or_else(|| ms.to_string())
 }
 
 fn now_ms() -> u64 {

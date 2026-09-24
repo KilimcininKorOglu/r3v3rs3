@@ -5,10 +5,12 @@ use yew_router::prelude::*;
 
 mod access_lists;
 mod accounts;
+mod app_deployments;
 mod app_env;
 mod app_form;
 mod app_git_token;
 mod app_list;
+mod app_log;
 mod app_view;
 mod audit;
 pub mod cert_list;
@@ -70,6 +72,10 @@ pub enum Route {
     NewApp,
     #[at("/apps/:id")]
     AppView { id: ShortId },
+    #[at("/apps/:id/deployments")]
+    AppDeployments { id: ShortId },
+    #[at("/apps/:id/log")]
+    AppLog { id: ShortId },
     #[at("/settings")]
     Settings,
     #[at("/accounts")]
@@ -97,7 +103,11 @@ impl Route {
             | Route::NewProxy
             | Route::ProxyView { .. }
             | Route::ProxyLogView { .. } => Some(Route::Proxies),
-            Route::Apps | Route::NewApp | Route::AppView { .. } => Some(Route::Apps),
+            Route::Apps
+            | Route::NewApp
+            | Route::AppView { .. }
+            | Route::AppDeployments { .. }
+            | Route::AppLog { .. } => Some(Route::Apps),
             Route::AccessLists | Route::Settings | Route::Accounts | Route::Audit => {
                 Some(self.clone())
             }
@@ -123,6 +133,8 @@ pub fn switch(routes: Route) -> Html {
         Route::Apps => html! { <app_list::AppList /> },
         Route::NewApp => html! { <app_view::AppView /> },
         Route::AppView { id } => html! { <app_view::AppView id={Some(id)} /> },
+        Route::AppDeployments { id } => html! { <app_deployments::AppDeployments {id} /> },
+        Route::AppLog { id } => html! { <app_log::AppLogView {id} /> },
         Route::Certs => html! { <cert_list::CertList /> },
         Route::SelfSign => html! { <self_sign::SelfSign /> },
         Route::NewAcme => html! { <new_acme::NewAcme /> },
