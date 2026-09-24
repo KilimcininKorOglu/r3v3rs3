@@ -5,7 +5,11 @@ use yew_router::prelude::*;
 
 mod access_lists;
 mod accounts;
+mod app_env;
+mod app_form;
+mod app_git_token;
 mod app_list;
+mod app_view;
 mod audit;
 pub mod cert_list;
 mod log_view;
@@ -62,6 +66,10 @@ pub enum Route {
     AccessLists,
     #[at("/apps")]
     Apps,
+    #[at("/apps/new")]
+    NewApp,
+    #[at("/apps/:id")]
+    AppView { id: ShortId },
     #[at("/settings")]
     Settings,
     #[at("/accounts")]
@@ -89,7 +97,8 @@ impl Route {
             | Route::NewProxy
             | Route::ProxyView { .. }
             | Route::ProxyLogView { .. } => Some(Route::Proxies),
-            Route::AccessLists | Route::Apps | Route::Settings | Route::Accounts | Route::Audit => {
+            Route::Apps | Route::NewApp | Route::AppView { .. } => Some(Route::Apps),
+            Route::AccessLists | Route::Settings | Route::Accounts | Route::Audit => {
                 Some(self.clone())
             }
             _ => None,
@@ -112,6 +121,8 @@ pub fn switch(routes: Route) -> Html {
         Route::NewProxy => html! { <new_proxy::NewProxy /> },
         Route::AccessLists => html! { <access_lists::AccessLists /> },
         Route::Apps => html! { <app_list::AppList /> },
+        Route::NewApp => html! { <app_view::AppView /> },
+        Route::AppView { id } => html! { <app_view::AppView id={Some(id)} /> },
         Route::Certs => html! { <cert_list::CertList /> },
         Route::SelfSign => html! { <self_sign::SelfSign /> },
         Route::NewAcme => html! { <new_acme::NewAcme /> },

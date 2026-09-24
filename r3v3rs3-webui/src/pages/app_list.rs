@@ -3,6 +3,7 @@ use crate::auth::use_ensure_auth;
 use crate::components::data_list::{Column, LINK_CLASS, Row, list_card, status_badge};
 use crate::dialog;
 use crate::i18n::use_locale;
+use crate::pages::Route;
 use crate::pages::settings::{failure_box, fetch_json};
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -10,6 +11,7 @@ use gloo_timers::callback::Interval;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::platform::{AppEntry, AppSource, DeploymentEntry, DeploymentStatus};
 use yew::prelude::*;
+use yew_router::prelude::*;
 use yewdux::prelude::*;
 
 /// The refresh interval while a deployment of an app is unfinished.
@@ -80,22 +82,8 @@ pub fn app_list() -> Html {
     });
 
     let can_edit = session.can_edit();
-    let deploy = {
-        let failure = failure.clone();
-        let reload = reload.clone();
-        Callback::from(move |row: AppRow| {
-            let question = locale.tf("apps.confirm_deploy", &[("name", row.app.name.as_str())]);
-            let failure = failure.clone();
-            let reload = reload.clone();
-            dialog::confirm_then(locale, question, async move {
-                match start_deployment(locale, &row.app).await {
-                    Ok(_) => failure.set(None),
-                    Err(err) => failure.set(Some(err)),
-                }
-                reload.set(*reload + 1);
-            });
-        })
-    };
+    let navigator = use_navigator().unwrap();
+    let deploy = deploy_callback(locale, &failure, &reload);
 
     let (loaded, list, error) = match &*rows {
         None => (false, Vec::new(), None),
@@ -104,7 +92,7 @@ pub fn app_list() -> Html {
     };
     let table_rows = list
         .into_iter()
-        .map(|row| app_row(locale, row, can_edit, &deploy))
+        .map(|row| app_row(locale, row, can_edit, &deploy, &navigator))
         .collect::<Vec<_>>();
     html! {
         <>
@@ -112,11 +100,53 @@ pub fn app_list() -> Html {
                 { failure_box(err) }
             }
             { list_card(locale, loaded, "apps.empty", &COLUMNS, &table_rows) }
+            if can_edit {
+                { add_button(locale, &navigator) }
+            }
         </>
     }
 }
 
-fn app_row(locale: Locale, row: AppRow, can_edit: bool, deploy: &Callback<AppRow>) -> Row {
+/// Asks for a confirmation, starts a deployment of the app and reloads the list.
+fn deploy_callback(
+    locale: Locale,
+    failure: &UseStateHandle<Option<String>>,
+    reload: &UseStateHandle<u32>,
+) -> Callback<AppRow> {
+    let (failure, reload) = (failure.clone(), reload.clone());
+    Callback::from(move |row: AppRow| {
+        let question = locale.tf("apps.confirm_deploy", &[("name", row.app.name.as_str())]);
+        let (failure, reload) = (failure.clone(), reload.clone());
+        dialog::confirm_then(locale, question, async move {
+            match start_deployment(locale, &row.app).await {
+                Ok(_) => failure.set(None),
+                Err(err) => failure.set(Some(err)),
+            }
+            reload.set(*reload + 1);
+        });
+    })
+}
+
+fn add_button(locale: Locale, navigator: &Navigator) -> Html {
+    let navigator = navigator.clone();
+    let onclick = Callback::from(move |_: MouseEvent| navigator.push(&Route::NewApp));
+    html! {
+        <div class="flex items-center justify-end my-4">
+            <button {onclick} type="button" class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                <img src="/assets/icons/add.svg" class="w-4 h-4 mr-1" />
+                {locale.t("common.add")}
+            </button>
+        </div>
+    }
+}
+
+fn app_row(
+    locale: Locale,
+    row: AppRow,
+    can_edit: bool,
+    deploy: &Callback<AppRow>,
+    navigator: &Navigator,
+) -> Row {
     let domains = row
         .app
         .spec
@@ -134,6 +164,19 @@ fn app_row(locale: Locale, row: AppRow, can_edit: bool, deploy: &Callback<AppRow
             deploy.emit(row.clone());
         })
     };
+    let view_onclick = {
+        let navigator = navigator.clone();
+        let id = row.app.id;
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            navigator.push(&Route::AppView { id });
+        })
+    };
+    let view_label = if can_edit {
+        "common.edit"
+    } else {
+        "common.view"
+    };
     Row {
         key: row.app.id.to_string(),
         cells: vec![
@@ -143,9 +186,12 @@ fn app_row(locale: Locale, row: AppRow, can_edit: bool, deploy: &Callback<AppRow
             deployment_cell(locale, row.latest.as_ref()),
         ],
         actions: html! {
-            if can_edit && !busy {
-                <a class={LINK_CLASS} onclick={deploy_onclick}>{locale.t("apps.deploy")}</a>
-            }
+            <>
+                <a class={LINK_CLASS} onclick={view_onclick}>{locale.t(view_label)}</a>
+                if can_edit && !busy {
+                    <a class={LINK_CLASS} onclick={deploy_onclick}>{locale.t("apps.deploy")}</a>
+                }
+            </>
         },
     }
 }
