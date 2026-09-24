@@ -106,11 +106,18 @@ fn accepts_gzip(headers: &HeaderMap) -> bool {
     value.split(',').any(|entry| {
         let mut parts = entry.split(';');
         let coding = parts.next().unwrap_or_default().trim();
-        if coding != "gzip" && coding != "*" {
-            return false;
-        }
-        !parts.any(|param| param.trim().replace(' ', "") == "q=0")
+        (coding.eq_ignore_ascii_case("gzip") || coding == "*") && !parts.any(is_zero_quality)
     })
+}
+
+/// A `q` parameter whose value is zero, such as `q=0` or `q=0.000`, refuses the coding
+/// (RFC 9110 section 12.4.2).
+fn is_zero_quality(param: &str) -> bool {
+    let param = param.trim().replace(' ', "").to_ascii_lowercase();
+    param
+        .strip_prefix("q=")
+        .and_then(|value| value.parse::<f32>().ok())
+        == Some(0.0)
 }
 
 /// Compares the response ETag with `If-None-Match`, which holds a list, `*`, or a weak validator
@@ -230,6 +237,9 @@ mod tests {
         assert!(accepts_gzip(&headers(ACCEPT_ENCODING, "*")));
         assert!(!accepts_gzip(&headers(ACCEPT_ENCODING, "br, deflate")));
         assert!(!accepts_gzip(&headers(ACCEPT_ENCODING, "gzip;q=0")));
+        assert!(!accepts_gzip(&headers(ACCEPT_ENCODING, "gzip; q=0.0")));
+        assert!(!accepts_gzip(&headers(ACCEPT_ENCODING, "br, gzip;Q=0.000")));
+        assert!(accepts_gzip(&headers(ACCEPT_ENCODING, "GZIP;q=0.5")));
         assert!(!accepts_gzip(&headers(ACCEPT_ENCODING, "identity")));
         assert!(!accepts_gzip(&HeaderMap::new()));
     }
