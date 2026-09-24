@@ -18,6 +18,7 @@ use r3v3rs3::server::{Server, ServerChannels};
 use r3v3rs3_api::app::{AppConfig, AppInfo};
 use r3v3rs3_api::auth::MIN_PASSWORD_LENGTH;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info};
@@ -41,8 +42,10 @@ async fn main() -> anyhow::Result<()> {
 
 /// Enrolls the agent at its first start, then holds its connection to the master until SIGINT.
 async fn agent(args: AgentArgs) -> anyhow::Result<()> {
+    // A service manager writes the output to a file or the journal, which shows no colors.
     tracing_subscriber::fmt()
         .with_max_level(args.log_level)
+        .with_ansi(std::io::stdout().is_terminal())
         .init();
     let data_dir = match args.data_dir {
         Some(dir) => dir,
