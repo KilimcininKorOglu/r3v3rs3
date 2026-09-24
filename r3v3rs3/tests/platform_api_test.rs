@@ -367,6 +367,7 @@ async fn check_target_add(
     let added: Value = serde_json::from_str(&text)?;
     assert_eq!(added["target"]["kind"], "agent");
     assert_eq!(added["target"]["enrolled"], false);
+    assert!(added["agent_port"].as_u64().is_some_and(|port| port > 0));
     let (status, text) = send(addr, Method::POST, TARGETS, admin, Some(body)).await?;
     assert_eq!(status, 409, "{text}");
     assert!(text.contains("target_name_exists"), "{text}");

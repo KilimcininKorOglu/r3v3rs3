@@ -27,6 +27,7 @@ mod proxy_view;
 mod resource_page;
 mod self_sign;
 mod settings;
+mod targets;
 mod upload;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Routable)]
@@ -76,6 +77,8 @@ pub enum Route {
     AppDeployments { id: ShortId },
     #[at("/apps/:id/log")]
     AppLog { id: ShortId },
+    #[at("/targets")]
+    Targets,
     #[at("/settings")]
     Settings,
     #[at("/accounts")]
@@ -108,9 +111,11 @@ impl Route {
             | Route::AppView { .. }
             | Route::AppDeployments { .. }
             | Route::AppLog { .. } => Some(Route::Apps),
-            Route::AccessLists | Route::Settings | Route::Accounts | Route::Audit => {
-                Some(self.clone())
-            }
+            Route::AccessLists
+            | Route::Targets
+            | Route::Settings
+            | Route::Accounts
+            | Route::Audit => Some(self.clone()),
             _ => None,
         }
     }
@@ -135,6 +140,7 @@ pub fn switch(routes: Route) -> Html {
         Route::AppView { id } => html! { <app_view::AppView id={Some(id)} /> },
         Route::AppDeployments { id } => html! { <app_deployments::AppDeployments {id} /> },
         Route::AppLog { id } => html! { <app_log::AppLogView {id} /> },
+        Route::Targets => html! { <targets::Targets /> },
         Route::Certs => html! { <cert_list::CertList /> },
         Route::SelfSign => html! { <self_sign::SelfSign /> },
         Route::NewAcme => html! { <new_acme::NewAcme /> },

@@ -487,7 +487,9 @@ fn target_select(locale: Locale, form: &UseStateHandle<AppForm>, targets: &[Targ
         .iter()
         .map(|target| {
             let id = target.id.to_string();
-            html! { <option value={id.clone()} selected={id == form.target}>{target.name.clone()}</option> }
+            let (status, _) = super::targets::target_status(target);
+            let label = format!("{} ({})", target.name, locale.t(status));
+            html! { <option value={id.clone()} selected={id == form.target}>{label}</option> }
         })
         .collect::<Html>();
     html! {

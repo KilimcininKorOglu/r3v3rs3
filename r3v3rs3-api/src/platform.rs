@@ -101,6 +101,11 @@ pub struct TargetToken {
     pub target: TargetEntry,
     /// The one-time token of `r3v3rs3 agent --token`.
     pub token: String,
+    /// The agent port of the master, which `r3v3rs3 agent --master` names.
+    pub agent_port: u16,
+    /// The `agent_host` of the `[platform]` section, which the agent dials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_host: Option<String>,
 }
 
 /// Where the image of an app comes from.

@@ -128,6 +128,11 @@ impl Platform {
         Ok(TargetToken {
             target: self.target(id).await?,
             token: token.to_string(),
+            agent_port: self
+                .config
+                .agent_port
+                .context("the agent port is not set")?,
+            agent_host: self.config.agent_host.clone(),
         })
     }
 

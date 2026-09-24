@@ -61,12 +61,20 @@ const GROUPS: &[MenuGroup] = &[
     },
     MenuGroup {
         name: "nav.group_platform",
-        items: &[MenuItem {
-            name: "nav.apps",
-            icon: "/assets/icons/cube.svg",
-            route: Route::Apps,
-            access: Access::Platform,
-        }],
+        items: &[
+            MenuItem {
+                name: "nav.apps",
+                icon: "/assets/icons/cube.svg",
+                route: Route::Apps,
+                access: Access::Platform,
+            },
+            MenuItem {
+                name: "nav.targets",
+                icon: "/assets/icons/server.svg",
+                route: Route::Targets,
+                access: Access::Platform,
+            },
+        ],
     },
     MenuGroup {
         name: "nav.group_admin",
