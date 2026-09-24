@@ -651,16 +651,25 @@ fn target_of(row: &SqliteRow) -> anyhow::Result<TargetEntry> {
 
 fn app_of(row: &SqliteRow) -> anyhow::Result<AppEntry> {
     let spec: AppSpec = serde_json::from_str(row.try_get("spec")?)?;
+    let (git_token_set, webhook_secret_set) = secret_flags(row)?;
     Ok(AppEntry {
         id: id_of(row, "id")?,
         name: row.try_get::<&str, _>("name")?.parse::<AppName>()?,
         target: id_of(row, "target_id")?,
         spec,
-        git_token_set: row.try_get("git_token_set")?,
-        webhook_secret_set: row.try_get("webhook_secret_set")?,
+        git_token_set,
+        webhook_secret_set,
         created_at: time_of(row, "created_at")?,
         updated_at: time_of(row, "updated_at")?,
     })
+}
+
+/// Whether the app has a Git token and whether it has a webhook secret.
+fn secret_flags(row: &SqliteRow) -> anyhow::Result<(bool, bool)> {
+    Ok((
+        row.try_get("git_token_set")?,
+        row.try_get("webhook_secret_set")?,
+    ))
 }
 
 fn deployment_of(row: &SqliteRow) -> anyhow::Result<DeploymentEntry> {
@@ -766,9 +775,17 @@ mod tests {
         assert_eq!(store.secret(shop.id, GIT_TOKEN).await?, Some(vec![2]));
         let entry = store.app(shop.id).await?.context("app")?;
         assert!(entry.git_token_set && !entry.webhook_secret_set);
+        Ok(())
+    }
 
+    #[tokio::test]
+    async fn each_secret_has_its_own_flag() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let shop = app("abc-def", "shop");
+        store.insert_app(&shop).await?;
         store.set_secret(shop.id, WEBHOOK_SECRET, &[4]).await?;
-        assert!(store.apps().await?[0].webhook_secret_set);
+        let entry = &store.apps().await?[0];
+        assert!(entry.webhook_secret_set && !entry.git_token_set);
         Ok(())
     }
 
