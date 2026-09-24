@@ -50,14 +50,7 @@ where
     };
     let file = file.to_string_lossy();
     let file = shellexpand::tilde(&file);
-    let file = Path::new(file.as_ref());
-    let (dir, prefix) = split_log_path(file, default_file);
-    let current_dir = std::env::current_dir()?;
-    let dir = if dir.to_str() == Some(".") {
-        &current_dir
-    } else {
-        log_dir
-    };
+    let (dir, prefix) = log_file_location(Path::new(file.as_ref()), default_file, log_dir);
     fs::create_dir_all(dir)?;
     let file_appender = tracing_appender::rolling::hourly(dir, prefix);
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
@@ -70,15 +63,25 @@ where
     Ok((layer, Some(guard)))
 }
 
-/// The directory and the file name prefix of the log file. A path without a name keeps the
+/// The directory and the file name prefix of the log file. A bare file name goes into the log
+/// directory, and a path with a directory keeps that directory. A path without a name keeps the
 /// default file name.
-fn split_log_path<'a>(file: &'a Path, default_file: &'a str) -> (&'a Path, &'a str) {
-    match (
+fn log_file_location<'a>(
+    file: &'a Path,
+    default_file: &'a str,
+    log_dir: &'a Path,
+) -> (&'a Path, &'a str) {
+    let (dir, prefix) = match (
         file.parent(),
         file.file_name().and_then(|name| name.to_str()),
     ) {
         (Some(dir), Some(prefix)) => (dir, prefix),
         _ => (file, default_file),
+    };
+    if dir.as_os_str().is_empty() {
+        (log_dir, prefix)
+    } else {
+        (dir, prefix)
     }
 }
 
@@ -217,5 +220,44 @@ impl Visit for KeyValueVisitor {
     fn record_str(&mut self, field: &Field, value: &str) {
         self.values
             .insert(field.name().to_string(), value.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::log_file_location;
+    use std::path::Path;
+
+    const LOG_DIR: &str = "/data/logs";
+
+    fn location(file: &str) -> (String, String) {
+        let (dir, prefix) = log_file_location(Path::new(file), "r3v3rs3.log", Path::new(LOG_DIR));
+        (dir.display().to_string(), prefix.to_string())
+    }
+
+    #[test]
+    fn a_path_with_a_directory_keeps_it() {
+        assert_eq!(
+            location("/var/log/r3v3rs3.log"),
+            ("/var/log".into(), "r3v3rs3.log".into())
+        );
+        assert_eq!(location("./access.log"), (".".into(), "access.log".into()));
+        assert_eq!(
+            location("logs/access.log"),
+            ("logs".into(), "access.log".into())
+        );
+    }
+
+    #[test]
+    fn a_bare_file_name_goes_into_the_log_directory() {
+        assert_eq!(
+            location("access.log"),
+            (LOG_DIR.into(), "access.log".into())
+        );
+    }
+
+    #[test]
+    fn a_path_without_a_name_keeps_the_default_name() {
+        assert_eq!(location("/"), ("/".into(), "r3v3rs3.log".into()));
     }
 }
