@@ -49,10 +49,14 @@ pub enum AuditAction {
     RollbackApp,
     SetAppGitToken,
     DeleteAppGitToken,
+    AddTarget,
+    DeleteTarget,
+    NewTargetToken,
+    EnrollAgent,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 32] = [
+    pub const ALL: [AuditAction; 36] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -85,6 +89,10 @@ impl AuditAction {
         Self::RollbackApp,
         Self::SetAppGitToken,
         Self::DeleteAppGitToken,
+        Self::AddTarget,
+        Self::DeleteTarget,
+        Self::NewTargetToken,
+        Self::EnrollAgent,
     ];
 }
 

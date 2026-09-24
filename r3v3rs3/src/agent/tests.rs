@@ -10,6 +10,7 @@ use anyhow::{Context, anyhow};
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -33,7 +34,7 @@ impl AgentDirectory for Directory {
         Ok(self.certificates.lock().unwrap().get(fingerprint).copied())
     }
 
-    async fn enroll(&self, request: &EnrollRequest) -> anyhow::Result<Enrolled> {
+    async fn enroll(&self, request: &EnrollRequest, _: IpAddr) -> anyhow::Result<Enrolled> {
         let target = self
             .tokens
             .lock()

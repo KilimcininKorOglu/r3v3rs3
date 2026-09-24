@@ -152,9 +152,12 @@ impl PlatformStore {
     }
 
     pub async fn targets(&self) -> anyhow::Result<Vec<TargetEntry>> {
-        let rows = sqlx::query("SELECT id, name, kind, last_seen_at FROM targets ORDER BY name")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(
+            "SELECT id, name, kind, last_seen_at, cert_fingerprint IS NOT NULL AS enrolled
+            FROM targets ORDER BY name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
         rows.iter().map(target_of).collect()
     }
 
@@ -241,6 +244,24 @@ impl PlatformStore {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// Deletes an agent target. Returns false when no agent target has the id.
+    pub async fn delete_target(&self, id: ShortId) -> anyhow::Result<bool> {
+        let result = sqlx::query("DELETE FROM targets WHERE id = ? AND kind = 'agent'")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Whether an app runs on the target.
+    pub async fn target_has_apps(&self, id: ShortId) -> anyhow::Result<bool> {
+        let row = sqlx::query("SELECT 1 FROM apps WHERE target_id = ? LIMIT 1")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.is_some())
     }
 
     pub async fn has_target(&self, id: ShortId) -> anyhow::Result<bool> {
@@ -607,11 +628,16 @@ fn target_of(row: &SqliteRow) -> anyhow::Result<TargetEntry> {
         "agent" => TargetKind::Agent,
         other => return Err(anyhow!("unknown target kind {other}")),
     };
+    // The local target runs on the server itself, so it is enrolled and online.
+    let local = kind == TargetKind::Local;
     Ok(TargetEntry {
         id: id_of(row, "id")?,
         name: row.try_get("name")?,
         kind,
         last_seen_at: optional_time_of(row, "last_seen_at")?,
+        enrolled: local || row.try_get::<bool, _>("enrolled")?,
+        online: local,
+        version: None,
     })
 }
 

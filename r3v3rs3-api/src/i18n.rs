@@ -233,6 +233,14 @@ mod tests {
                 id: "abc".parse().unwrap(),
             },
             Error::InvalidEnrollmentToken,
+            Error::AgentPortMissing,
+            Error::TargetNameExists { name: text() },
+            Error::TargetInUse {
+                id: "abc".parse().unwrap(),
+            },
+            Error::TargetReadOnly {
+                id: "abc".parse().unwrap(),
+            },
             Error::AcmeAccountCreationFailed,
             Error::AcmeUnsupportedChallenge { challenge: text() },
             Error::AcmeIdentifiersMissing,

@@ -15,6 +15,7 @@ pub mod store;
 
 use crate::agent::pki::AgentPki;
 use crate::agent::registry::AgentRegistry;
+use crate::audit::AuditLog;
 use crate::build::compose::{ComposeRunner, DockerCompose};
 use crate::build::{GitFetcher, SourceFetcher};
 use crate::cluster::crypto::ClusterKeys;
@@ -30,7 +31,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, PlatformConfig, TargetEntry,
+    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, PlatformConfig,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashSet};
@@ -81,6 +82,7 @@ impl PlatformHandle {
         config_dir: &Path,
         command: mpsc::Sender<ServerCommand>,
         events: &broadcast::Sender<ServerEvent>,
+        audit: Arc<AuditLog>,
     ) -> Self {
         if !config.platform.enabled {
             return Self::Disabled;
@@ -89,7 +91,7 @@ impl PlatformHandle {
             error!("the deployment platform does not run in a cluster, so it stays off");
             return Self::InCluster;
         }
-        match Platform::open(config, config_dir, command).await {
+        match Platform::open(config, config_dir, command, Some(audit)).await {
             Ok(platform) => {
                 let platform = Arc::new(platform);
                 tokio::spawn(publish::refresh(Arc::downgrade(&platform)));
@@ -146,6 +148,8 @@ pub struct Platform {
     pki: Option<AgentPki>,
     /// The connected agents.
     agents: Arc<AgentRegistry>,
+    /// Records the enrollments of the agents. The tests run without it.
+    audit: Option<Arc<AuditLog>>,
 }
 
 impl Platform {
@@ -153,6 +157,7 @@ impl Platform {
         config: &AppConfig,
         config_dir: &Path,
         command: mpsc::Sender<ServerCommand>,
+        audit: Option<Arc<AuditLog>>,
     ) -> anyhow::Result<Self> {
         let local = docker_runtime(&config.platform.docker)?;
         let store = PlatformStore::open(&config_dir.join(DATABASE_FILE)).await?;
@@ -167,6 +172,7 @@ impl Platform {
         Ok(Self {
             pki,
             agents: Arc::new(AgentRegistry::default()),
+            audit,
             store,
             keys,
             local: Arc::new(local),
@@ -194,10 +200,6 @@ impl Platform {
     /// The runtime of the local target.
     pub fn local_runtime(&self) -> Arc<dyn ContainerRuntime> {
         self.local.clone()
-    }
-
-    pub async fn targets(&self) -> anyhow::Result<Vec<TargetEntry>> {
-        self.store.targets().await
     }
 
     pub async fn apps(&self) -> anyhow::Result<Vec<AppEntry>> {
@@ -560,7 +562,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let mut platform = Platform::open(&config, &dir.0, command).await?;
+        let mut platform = Platform::open(&config, &dir.0, command, None).await?;
         let runtime = Arc::new(fake::FakeRuntime::default());
         platform.local = runtime.clone();
         platform.timing = deploy::Timing {
@@ -599,7 +601,7 @@ mod tests {
         }
     }
 
-    fn api_error(err: anyhow::Error) -> Error {
+    pub(super) fn api_error(err: anyhow::Error) -> Error {
         err.downcast::<Error>().expect("an API error")
     }
 
@@ -705,18 +707,26 @@ mod tests {
         let dir = std::env::temp_dir();
         let (command, _commands) = mpsc::channel(1);
         let (events, _) = broadcast::channel(1);
+        let audit = Arc::new(AuditLog::new(
+            Arc::new(crate::audit::SqliteAuditStore::new(
+                dir.join("r3v3rs3-unused-audit.db"),
+            )),
+            String::new(),
+        ));
         let mut config = AppConfig::default();
-        let handle = PlatformHandle::start(&config, &dir, command.clone(), &events).await;
+        let handle =
+            PlatformHandle::start(&config, &dir, command.clone(), &events, audit.clone()).await;
         assert!(matches!(handle.get(), Err(Error::PlatformDisabled)));
 
         config.platform.enabled = true;
         config.cluster.enabled = true;
-        let handle = PlatformHandle::start(&config, &dir, command.clone(), &events).await;
+        let handle =
+            PlatformHandle::start(&config, &dir, command.clone(), &events, audit.clone()).await;
         assert!(matches!(handle.get(), Err(Error::PlatformInCluster)));
 
         config.cluster.enabled = false;
         config.platform.docker = "https://docker.example:2376".into();
-        let handle = PlatformHandle::start(&config, &dir, command, &events).await;
+        let handle = PlatformHandle::start(&config, &dir, command, &events, audit).await;
         assert!(matches!(handle.get(), Err(Error::PlatformFailed)));
     }
 }

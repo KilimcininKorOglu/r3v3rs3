@@ -17,7 +17,7 @@ use r3v3rs3_api::{
     id::ShortId,
     platform::{
         AppEntry, AppLog, AppLogQuery, AppRequest, DeploymentEntry, DeploymentTrigger, EnvEntry,
-        GitTokenRequest, TargetEntry,
+        GitTokenRequest, TargetEntry, TargetRequest, TargetToken,
     },
 };
 use std::sync::Arc;
@@ -63,6 +63,89 @@ pub async fn list_targets(
 ) -> Result<Json<Vec<TargetEntry>>, AppError> {
     let platform = state.platform(&caller, Permission::Read).await?;
     Ok(Json(platform.targets().await.map_err(platform_error)?))
+}
+
+/// Adds an agent target and returns its one-time enrollment token.
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "platform",
+    operation_id = "add_target",
+    request_body = TargetRequest,
+    responses((status = 200, description = "The target with its enrollment token.", body = TargetToken), ErrorResponses)
+)]
+pub async fn add_target(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<TargetRequest>,
+) -> Result<Json<TargetToken>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let created = platform
+        .add_target(request, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    // The summary names the target, never the token.
+    let record = AuditRecord::new(AuditAction::AddTarget)
+        .id(created.target.id)
+        .summary(created.target.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(created))
+}
+
+/// Replaces the enrollment token of an agent target. An agent that enrolls with the new token
+/// replaces the enrolled agent.
+#[utoipa::path(
+    post,
+    path = "/{id}/token",
+    tag = "platform",
+    operation_id = "new_target_token",
+    params(("id" = ShortId, Path, description = "Target id.")),
+    responses((status = 200, description = "The target with its new enrollment token.", body = TargetToken), NotFoundResponse, ErrorResponses)
+)]
+pub async fn new_target_token(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<TargetToken>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let created = platform
+        .new_target_token(id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::NewTargetToken)
+        .id(id)
+        .summary(created.target.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(created))
+}
+
+/// Deletes an agent target without apps and closes the connection of its agent.
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "delete_target",
+    params(("id" = ShortId, Path, description = "Target id.")),
+    responses((status = 200, description = "The target is deleted."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn delete_target(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<()>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let target = platform.delete_target(id).await.map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeleteTarget)
+        .id(id)
+        .summary(target.name);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(()))
 }
 
 /// Lists the apps.

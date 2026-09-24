@@ -10,7 +10,7 @@ use crate::clock::unix_ms;
 use anyhow::{anyhow, bail};
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -29,8 +29,9 @@ pub trait AgentDirectory: Send + Sync {
     /// The target of the agent certificate with the SHA-256 `fingerprint`.
     async fn target_of(&self, fingerprint: &str) -> anyhow::Result<Option<ShortId>>;
 
-    /// Checks the token secret, signs the certificate and stores its fingerprint.
-    async fn enroll(&self, request: &EnrollRequest) -> anyhow::Result<Enrolled>;
+    /// Checks the token secret, signs the certificate and stores its fingerprint. `client` is the
+    /// address of the agent.
+    async fn enroll(&self, request: &EnrollRequest, client: IpAddr) -> anyhow::Result<Enrolled>;
 
     /// Records the time of the last contact with the agent of `target`.
     async fn seen(&self, target: ShortId, now: u64) -> anyhow::Result<()>;
@@ -102,12 +103,12 @@ impl AgentListener {
     }
 
     async fn connection(self: Arc<Self>, stream: TcpStream, peer: SocketAddr) {
-        if let Err(err) = self.serve(stream).await {
+        if let Err(err) = self.serve(stream, peer.ip()).await {
             warn!(%peer, err = format!("{err:#}"), "an agent connection failed");
         }
     }
 
-    async fn serve(&self, stream: TcpStream) -> anyhow::Result<()> {
+    async fn serve(&self, stream: TcpStream, client: IpAddr) -> anyhow::Result<()> {
         let tls = timeout(self.timing.handshake, self.acceptor.accept(stream)).await??;
         let certificate = tls
             .get_ref()
@@ -117,13 +118,13 @@ impl AgentListener {
             .map(|der| fingerprint(der));
         match certificate {
             Some(certificate) => self.session(tls, &certificate).await,
-            None => self.enroll(tls).await,
+            None => self.enroll(tls, client).await,
         }
     }
 
-    async fn enroll(&self, mut tls: TlsStream<TcpStream>) -> anyhow::Result<()> {
+    async fn enroll(&self, mut tls: TlsStream<TcpStream>, client: IpAddr) -> anyhow::Result<()> {
         let request: EnrollRequest = timeout(self.timing.handshake, read_frame(&mut tls)).await??;
-        let response = match self.directory.enroll(&request).await {
+        let response = match self.directory.enroll(&request, client).await {
             Ok(enrolled) => {
                 info!(target = %enrolled.target, version = request.version, "an agent enrolled");
                 EnrollResponse::Enrolled(enrolled)

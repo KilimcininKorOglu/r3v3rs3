@@ -77,6 +77,30 @@ pub struct TargetEntry {
     /// The Unix time in milliseconds of the last contact with an agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seen_at: Option<u64>,
+    /// Whether an agent enrolled for the target. The local target is always enrolled.
+    #[serde(default)]
+    pub enrolled: bool,
+    /// Whether the target runs containers now: the local target, or a connected agent.
+    #[serde(default)]
+    pub online: bool,
+    /// The version of the connected agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+/// A new agent target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TargetRequest {
+    #[schema(value_type = String, example = "edge-1")]
+    pub name: AppName,
+}
+
+/// An agent target with its new enrollment token. The token is shown only once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TargetToken {
+    pub target: TargetEntry,
+    /// The one-time token of `r3v3rs3 agent --token`.
+    pub token: String,
 }
 
 /// Where the image of an app comes from.

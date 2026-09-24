@@ -222,7 +222,10 @@ fn platform_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .nest(
             "/targets",
-            OpenApiRouter::new().routes(routes!(platform::list_targets)),
+            OpenApiRouter::new()
+                .routes(routes!(platform::list_targets, platform::add_target))
+                .routes(routes!(platform::delete_target))
+                .routes(routes!(platform::new_target_token)),
         )
         .nest(
             "/apps",

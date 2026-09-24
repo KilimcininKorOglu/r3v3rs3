@@ -18,6 +18,7 @@ use common::{
 };
 
 const APPS: &str = "/api/apps";
+const TARGETS: &str = "/api/targets";
 const SECRET: &str = "s3cr3t-token-value";
 const GIT_TOKEN: &str = "ghp_g1tT0kenValue";
 
@@ -132,13 +133,22 @@ async fn check_read_access(addr: SocketAddr, viewer: &str, scoped: &str) -> anyh
     let targets = get(addr, "/api/targets", viewer).await?;
     assert_eq!(
         targets,
-        json!([{"id": "local", "name": "local", "kind": "local"}])
+        json!([{"id": "local", "name": "local", "kind": "local", "enrolled": true, "online": true}])
     );
     let (status, _) = send(addr, Method::GET, APPS, scoped, None).await?;
     assert_eq!(status, 403);
     let body = Some(app("shop", "local"));
     let (status, _) = send(addr, Method::POST, APPS, viewer, body).await?;
     assert_eq!(status, 403);
+    Ok(())
+}
+
+/// The platform runs without the agent port, so it adds no agent target.
+async fn check_no_agent_port(addr: SocketAddr, admin: &str) -> anyhow::Result<()> {
+    let body = Some(json!({"name": "edge"}));
+    let (status, text) = send(addr, Method::POST, TARGETS, admin, body).await?;
+    assert_eq!(status, 400, "{text}");
+    assert!(text.contains("agent_port_missing"), "{text}");
     Ok(())
 }
 
@@ -161,6 +171,7 @@ async fn check_delete(
 
 /// Adds the app `shop` after the rejected requests, and returns its id.
 async fn check_app_writes(addr: SocketAddr, admin: &str) -> anyhow::Result<String> {
+    check_no_agent_port(addr, admin).await?;
     let mut invalid = app("shop", "local");
     invalid["spec"]["port"] = json!(0);
     let (status, body) = send(addr, Method::POST, APPS, admin, Some(invalid)).await?;
@@ -315,6 +326,115 @@ async fn check_audit(addr: SocketAddr, admin: &str, id: &str) -> anyhow::Result<
         !text.contains(SECRET) && !text.contains(GIT_TOKEN),
         "{text}"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_admin_manages_the_agent_targets() -> anyhow::Result<()> {
+    let dir = TempDir::new("platform-targets")?;
+    let mut config = AppConfig::default();
+    config.platform.enabled = true;
+    config.platform.agent_port = Some(alloc_tcp_port().await?.socket_addr().port());
+    let storage = TestStorage::builder()
+        .config(config)
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, None)
+        .build();
+    with_admin(&dir.0, storage, manage_targets).await
+}
+
+async fn manage_targets(addr: SocketAddr) -> anyhow::Result<()> {
+    let admin = session_cookie(addr, "admin", "admin-secret").await?;
+    let editor = session_cookie(addr, "editor", "editor-secret").await?;
+    let (id, first) = check_target_add(addr, &admin, &editor).await?;
+    let second = check_target_token(addr, &admin, &editor, &id).await?;
+    assert_ne!(first, second);
+    check_target_delete(addr, &admin, &editor, &id).await?;
+    check_target_audit(addr, &admin, &id, &[&first, &second]).await
+}
+
+/// Only an admin adds a target, and the answer carries its token once.
+async fn check_target_add(
+    addr: SocketAddr,
+    admin: &str,
+    editor: &str,
+) -> anyhow::Result<(String, String)> {
+    let body = json!({"name": "edge"});
+    let (status, _) = send(addr, Method::POST, TARGETS, editor, Some(body.clone())).await?;
+    assert_eq!(status, 403);
+    let (status, text) = send(addr, Method::POST, TARGETS, admin, Some(body.clone())).await?;
+    assert_eq!(status, 200, "{text}");
+    let added: Value = serde_json::from_str(&text)?;
+    assert_eq!(added["target"]["kind"], "agent");
+    assert_eq!(added["target"]["enrolled"], false);
+    let (status, text) = send(addr, Method::POST, TARGETS, admin, Some(body)).await?;
+    assert_eq!(status, 409, "{text}");
+    assert!(text.contains("target_name_exists"), "{text}");
+
+    let listed = get(addr, TARGETS, editor).await?;
+    assert_eq!(listed.as_array().map(Vec::len), Some(2));
+    assert!(!listed.to_string().contains("token"), "{listed}");
+    let id = added["target"]["id"].as_str().unwrap_or_default();
+    let token = added["token"].as_str().unwrap_or_default();
+    Ok((id.to_string(), token.to_string()))
+}
+
+/// Only an admin replaces the token of an agent target, and the local target has no token.
+async fn check_target_token(
+    addr: SocketAddr,
+    admin: &str,
+    editor: &str,
+    id: &str,
+) -> anyhow::Result<String> {
+    let path = format!("{TARGETS}/{id}/token");
+    let (status, _) = send(addr, Method::POST, &path, editor, None).await?;
+    assert_eq!(status, 403);
+    let local = format!("{TARGETS}/local/token");
+    let (status, text) = send(addr, Method::POST, &local, admin, None).await?;
+    assert_eq!(status, 403, "{text}");
+    assert!(text.contains("target_read_only"), "{text}");
+    let (status, text) = send(addr, Method::POST, &path, admin, None).await?;
+    assert_eq!(status, 200, "{text}");
+    let renewed: Value = serde_json::from_str(&text)?;
+    Ok(renewed["token"].as_str().unwrap_or_default().to_string())
+}
+
+/// Only an admin deletes an agent target, and a second deletion finds no target.
+async fn check_target_delete(
+    addr: SocketAddr,
+    admin: &str,
+    editor: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let path = format!("{TARGETS}/{id}");
+    let (status, _) = send(addr, Method::DELETE, &path, editor, None).await?;
+    assert_eq!(status, 403);
+    let (status, text) = send(addr, Method::DELETE, &path, admin, None).await?;
+    assert_eq!(status, 200, "{text}");
+    let (status, _) = send(addr, Method::DELETE, &path, admin, None).await?;
+    assert_eq!(status, 404);
+    let (status, _) = send(addr, Method::DELETE, "/api/targets/local", admin, None).await?;
+    assert_eq!(status, 403);
+    Ok(())
+}
+
+/// The audit log names the target changes and never a token.
+async fn check_target_audit(
+    addr: SocketAddr,
+    admin: &str,
+    id: &str,
+    tokens: &[&str],
+) -> anyhow::Result<()> {
+    let entries = get(addr, &format!("/api/audit?resource_id={id}"), admin).await?;
+    let entries = entries.as_array().cloned().unwrap_or_default();
+    let actions = entries
+        .iter()
+        .map(|entry| entry["action"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(actions, ["delete_target", "new_target_token", "add_target"]);
+    assert!(entries.iter().all(|entry| entry["summary"] == "edge"));
+    let text = Value::Array(entries).to_string();
+    assert!(tokens.iter().all(|token| !text.contains(token)), "{text}");
     Ok(())
 }
 

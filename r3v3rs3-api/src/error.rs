@@ -122,6 +122,18 @@ pub enum Error {
     #[error("the enrollment token is invalid or was used already")]
     InvalidEnrollmentToken,
 
+    #[error("the agent port is not set in the [platform] section of config.toml")]
+    AgentPortMissing,
+
+    #[error("a target with this name already exists: {name}")]
+    TargetNameExists { name: String },
+
+    #[error("an app runs on the target: {id}")]
+    TargetInUse { id: ShortId },
+
+    #[error("the local target cannot be changed or deleted: {id}")]
+    TargetReadOnly { id: ShortId },
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 
@@ -320,12 +332,17 @@ impl Error {
         match self {
             Self::IdNotFound { .. } | Self::AccountNotFound { .. } => 404,
             Self::Unauthorized => 401,
-            Self::Forbidden | Self::ProxyReadOnly { .. } | Self::CertificateReadOnly { .. } => 403,
+            Self::Forbidden
+            | Self::ProxyReadOnly { .. }
+            | Self::CertificateReadOnly { .. }
+            | Self::TargetReadOnly { .. } => 403,
             Self::TooManyLoginAttempts => 429,
             Self::ClusterWriteConflict
             | Self::AccountExists { .. }
             | Self::AppNameExists { .. }
-            | Self::AppBusy { .. } => 409,
+            | Self::AppBusy { .. }
+            | Self::TargetNameExists { .. }
+            | Self::TargetInUse { .. } => 409,
             Self::ClusterUnavailable
             | Self::PlatformDisabled
             | Self::PlatformInCluster
