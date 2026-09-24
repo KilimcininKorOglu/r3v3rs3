@@ -161,13 +161,13 @@ impl AgentListener {
         };
         info!(%target, version, "an agent connected");
         let now = unix_ms();
-        // A reconnect that replaces an open session is no change of the connection state.
-        let replaces = self.registry.status(target).is_some();
-        let generation =
+        // A reconnect that replaces a session is no change of the connection state: the replaced
+        // session reports no offline, even when its link closed already.
+        let (generation, replaced) =
             self.registry
                 .insert(target, link.clone(), version, task.abort_handle(), now);
         self.record_contact(target, now).await;
-        if !replaces {
+        if !replaced {
             self.directory.online(target).await;
         }
         self.heartbeat(target, generation, &link).await;

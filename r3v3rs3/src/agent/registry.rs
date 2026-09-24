@@ -37,7 +37,9 @@ impl AgentRegistry {
     }
 
     /// Adds the session of an agent and closes its previous session. Returns the generation of
-    /// the new session.
+    /// the new session, and whether it replaced a session, also one whose link already closed.
+    /// A replaced session ends without a `remove` that returns true, so the caller reports the
+    /// target online only when nothing was replaced.
     pub fn insert(
         &self,
         target: ShortId,
@@ -45,7 +47,7 @@ impl AgentRegistry {
         version: String,
         task: AbortHandle,
         now: u64,
-    ) -> u64 {
+    ) -> (u64, bool) {
         let generation = {
             let mut generations = self
                 .generations
@@ -61,10 +63,12 @@ impl AgentRegistry {
             generation,
             task,
         };
-        if let Some(previous) = self.sessions().insert(target, session) {
+        let previous = self.sessions().insert(target, session);
+        let replaced = previous.is_some();
+        if let Some(previous) = previous {
             previous.task.abort();
         }
-        generation
+        (generation, replaced)
     }
 
     /// The link of a connected agent.
@@ -114,5 +118,37 @@ impl AgentRegistry {
         if let Some(session) = self.sessions().remove(&target) {
             session.task.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio_util::compat::TokioAsyncReadCompatExt;
+
+    /// A link over a pipe whose other end is dropped, so the link closes.
+    async fn closed_link() -> (Link, AbortHandle) {
+        let (master, agent) = tokio::io::duplex(64);
+        drop(agent);
+        let (link, task) = Link::spawn(master.compat());
+        let handle = task.abort_handle();
+        let _ = task.await;
+        (link, handle)
+    }
+
+    #[tokio::test]
+    async fn a_session_replaces_one_whose_link_closed_already() {
+        let registry = AgentRegistry::default();
+        let target: ShortId = "bcd-fgh".parse().unwrap();
+        let (link, task) = closed_link().await;
+        let (first, replaced) = registry.insert(target, link, "1".into(), task, 1);
+        assert!(!replaced);
+        // The first link closed, but its session still waits for its own removal.
+        assert!(registry.status(target).is_none());
+        let (link, task) = closed_link().await;
+        let (second, replaced) = registry.insert(target, link, "1".into(), task, 2);
+        assert!(replaced);
+        assert!(!registry.remove(target, first));
+        assert!(registry.remove(target, second));
     }
 }
