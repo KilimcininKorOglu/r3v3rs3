@@ -21,6 +21,8 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 | Deploy platformunun uygulamalarını, hedeflerini ve deployment'larını okuma | evet | evet | hayır | evet, proxy listesi yoksa |
 | Uygulama ekleme, değiştirme veya silme, ortam değişkenlerini okuma veya değiştirme, Git token'ını ayarlama veya silme, webhook secret'ını oluşturma veya silme, uygulamayı deploy etme, deployment'ı geri alma | evet | evet | hayır | hayır |
 | Agent hedefi ekleme, kayıt token'ını oluşturma, hedefi silme | evet | hayır | hayır | hayır |
+| Git sağlayıcı bağlantılarını ve genel adresi okuma, bir bağlantının repository'lerini ve branch'lerini listeleme, uygulamanın webhook'unu yeniden kurma | evet | evet | hayır | hayır |
+| Git sağlayıcı bağlantısı ekleme, değiştirme, bağlama veya silme, genel adresi değiştirme | evet | hayır | hayır | hayır |
 
 - Proxy listesi olmayan hesap bütün proxy'leri görür. Admin her zaman bütün proxy'leri görür. Bu yüzden admin hesabının proxy listesi olamaz.
 - Hesabın listesinde olmayan proxy, bu hesap için yoktur. Yönetim API'si `404 id_not_found` döndürür.

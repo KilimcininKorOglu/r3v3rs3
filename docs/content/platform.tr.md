@@ -90,8 +90,9 @@ Uygulamanın, alan adlarının veya ortam değişkenlerinin değişikliği sonra
 | `branch` | `main` | Bir branch veya tag. |
 | `context` | `.` | Docker'ın build context olarak aldığı repo dizini. |
 | `dockerfile` | `Dockerfile` | `context` dizinine göre Dockerfile yolu. |
+| `connection` | yok | Bir [Git sağlayıcı](#git-saglayicilari) bağlantısının id'si. Bağlantı repoyu clone eder ve webhook'unu kurar. |
 
-Private bir repo bir erişim token'ı gerektirir. Örnekler: reponun içeriğini okuma izni olan bir GitHub fine-grained token'ı, veya `read_repository` kapsamı olan bir GitLab ya da Gitea token'ı. `PUT /api/apps/{id}/git_token`, `{"token": "..."}` gövdesiyle token'ı ayarlar. `DELETE /api/apps/{id}/git_token` token'ı siler. r3v3rs3 token'ı `platform.key` ile şifreler. Yönetim API'si token'ı hiçbir zaman döndürmez, uygulamada yalnız `"git_token_set": true` görünür. git token'ı `x-access-token` kullanıcı adıyla HTTP Basic kimlik doğrulaması olarak alır. Token URL'de veya komut satırında yer almaz, git'e bir ortam değişkeniyle ulaşır.
+Private bir repo, bir [Git sağlayıcı](#git-saglayicilari) bağlantısı veya uygulamanın erişim token'ını gerektirir. Erişim token'ı örnekleri: reponun içeriğini okuma izni olan bir GitHub fine-grained token'ı, veya `read_repository` kapsamı olan bir GitLab ya da Gitea token'ı. `PUT /api/apps/{id}/git_token`, `{"token": "..."}` gövdesiyle token'ı ayarlar. `DELETE /api/apps/{id}/git_token` token'ı siler. r3v3rs3 token'ı `platform.key` ile şifreler. Yönetim API'si token'ı hiçbir zaman döndürmez, uygulamada yalnız `"git_token_set": true` görünür. git token'ı `x-access-token` kullanıcı adıyla HTTP Basic kimlik doğrulaması olarak alır. Token URL'de veya komut satırında yer almaz, git'e bir ortam değişkeniyle ulaşır.
 
 r3v3rs3'ü çalıştıran sunucuda `git` binary'si bulunmalıdır. r3v3rs3, `git`'i host'un yapılandırması ve hook'lar olmadan, yalnız HTTPS üzerinden çalıştırır. Build context'inde `.git` dizini yer almaz. Context'teki bir sembolik link link olarak kalır. Bu yüzden bir build, repo dışındaki bir dosyayı okuyamaz. Context en fazla 512 MiB olabilir.
 
@@ -113,10 +114,11 @@ Docker image'ı klasik builder ile build eder. Aynı anda iki build çalışır,
 
 | Alan | Varsayılan | Açıklama |
 |---|---|---|
-| `repository` | | Git kaynağındaki gibi bir `https://` URL'si. Uygulamanın Git token'ı private bir repoyu clone eder. |
+| `repository` | | Git kaynağındaki gibi bir `https://` URL'si. Private bir repoyu bağlantı veya uygulamanın Git token'ı clone eder. |
 | `branch` | `main` | Bir branch veya tag. |
 | `file` | `compose.yaml`, `compose.yml`, `docker-compose.yaml` ve `docker-compose.yml` dosyalarından ilk bulunan | Reponun köküne göre Compose dosyası. Dosyadaki göreli yollar dosyanın kendi dizinine göre çözülür. |
 | `service` | | Alan adına gelen istekleri `port` üzerinde alan servis. Servis adı küçük harf, rakam ve `_.-` içerir. |
+| `connection` | yok | Git kaynağındaki gibi bir [Git sağlayıcı](#git-saglayicilari) bağlantısının id'si. |
 
 Sunucuda `git` binary'si ve Compose eklentisi olan `docker` binary'si bulunmalıdır. r3v3rs3, `docker compose` komutunu `r3v3rs3-<app id>` Compose projesiyle çalıştırır ve `service` servisi için şu ayarları yapan bir dosya ekler:
 
@@ -186,6 +188,44 @@ Hangi istek deploy eder:
 - Ping, başka bir branch'e push veya başka bir olay `200` ve `{"outcome": "ignored"}` yanıtını alır.
 
 Deploy eden istek `200` ve `{"outcome": "deployed", "deployment": {...}}` yanıtını alır. Deployment'ın tetikleyeni `webhook`, hesabı `webhook` olur. Çalışan bir deployment sırasında gelen push `202` ve `{"outcome": "queued"}` yanıtını alır. Çalışan deployment bitince branch'in en son commit'iyle bir deployment daha başlar. Böylece kuyruktaki tek deployment aradaki bütün push'ları kapsar. r3v3rs3 kuyruğu bellekte tutar, bu yüzden yeniden başlatma kuyruğu siler.
+
+## Git sağlayıcıları
+
+Git sağlayıcı bağlantısı, r3v3rs3'ün bir GitHub, GitLab veya Gitea hesabı adına çalışmasını sağlar. Bir admin bağlantıyı bir kez bağladıktan sonra uygulama formu o hesabın repository'lerini ve branch'lerini listeler. Deployment private bir repoyu bağlantının token'ıyla clone eder ve r3v3rs3 uygulamanın push webhook'unu repoya kurar. Bağlantılar sunucuya aittir: bir admin onları ekler, Edit izni olan her hesap onları uygulamalarında kullanır. Bağlantısı olmayan uygulama, repo adresi ve kendi Git token'ıyla çalışmaya devam eder.
+
+### OAuth uygulamasını kaydetme
+
+Her bağlantı, sağlayıcıda kaydettiğiniz bir OAuth uygulamasıdır. Callback adresi, WebUI adresinin sonuna `/oauth/git/callback` eklenerek oluşur, örneğin `https://r3v3rs3.example.com/oauth/git/callback`. **Git Sağlayıcıları** sayfası bu adresi kullandığınız sayfaya göre gösterir. Sağlayıcı admin'in tarayıcısını bu adrese geri gönderir. Bu yüzden adres, genel adres değil, admin'in açtığı adres olmalıdır.
+
+| Sağlayıcı | Yer | Ayarlar |
+|---|---|---|
+| GitHub | **Settings**, **Developer settings**, **OAuth Apps**, **New OAuth App** | **Authorization callback URL** callback adresidir. r3v3rs3 `repo` ve `admin:repo_hook` scope'larını ister. |
+| GitLab | **Preferences**, **Applications**, veya bir grubun ya da sunucunun **Applications** sayfası | **Redirect URI** callback adresidir. `api` scope'unu seçin ve **Confidential** seçeneğini açık bırakın. |
+| Gitea | **Settings**, **Applications**, **Manage OAuth2 Applications** | **Redirect URI** callback adresidir. **Confidential Client** seçeneğini açık bırakın. r3v3rs3 `read:repository`, `write:repository` ve `read:user` scope'larını ister. |
+
+Sağlayıcı bir client id ve bir client secret gösterir. İkisini de **Git Sağlayıcıları** sayfasında ekleyin. GitHub bağlantısı her zaman `https://github.com` kullanır. GitLab bağlantısı, kendi GitLab'ınızın adresini girmezseniz `https://gitlab.com` kullanır. Gitea bağlantısı sunucusunun adresini ister. Sağlayıcı adresi `https://` kullanır. `http://` yalnız bir loopback adresinde kabul edilir.
+
+### Bağlanma
+
+Bir bağlantının satırındaki **Bağlan** sağlayıcının yetkilendirme sayfasını açar. Hesap erişime izin verince sağlayıcı tarayıcıyı callback adresine geri gönderir ve r3v3rs3 kodu hesabın token'larıyla değiştirir. Yetkilendirme PKCE kullanır. State bir kez ve 10 dakika boyunca geçerlidir. Callback oturum istemez, çünkü oturum cookie'si başka bir siteden gelen yönlendirmeyle gönderilmez. Sayfa **Bağlı** durumunu ve hesabın adını gösterir.
+
+r3v3rs3, client secret'ı ve token'ları `platform.key` ile şifreler. Yönetim API'si onları hiçbir zaman döndürmez. GitLab ve Gitea token'larının süresi dolar. Bu yüzden r3v3rs3 token'ı kullanmadan önce refresh token'ıyla yeniler. Sağlayıcı yenilemeyi reddederse bağlantı **Yeniden bağlanın** durumunu gösterir ve **Yeniden bağlan** bağlantıyı yeniden yetkilendirir. Bir bağlantının sağlayıcısını, adresini veya client id'sini değiştirmek de bağlantıyı koparır.
+
+### Bağlantılı uygulamalar
+
+Uygulama formundaki **Git sağlayıcı bağlantısı** seçimi bağlantıları listeler. Bağlı bir bağlantı seçilince form hesabın son değişen repository'lerini listeler. **Repository'lerde ara** bir repoyu adıyla bulur. Seçilen repo **Repository** adresini ve varsayılan branch'ini doldurur. Ardından **Branch** alanı reponun branch'lerini listeler. Repo adresi bağlantının sağlayıcısına ait olmalıdır.
+
+Deployment ve geri alma, repoyu bağlantının güncel token'ıyla clone eder. GitHub ve Gitea token'ı kullanıcı adı olarak, GitLab ise `oauth2` kullanıcısının parolası olarak alır.
+
+### Bağlantının webhook'ları
+
+**Git Sağlayıcıları** sayfasında **Genel adres** alanını ayarlayın, örneğin `https://deploy.example.com`. Git sağlayıcısı webhook isteklerini `<genel adres>/hooks/apps/{id}` adresine gönderir. Bu yüzden sağlayıcı o adrese ulaşabilmelidir. `/hooks/` önekinin proxy'si için [Webhook'lar](#webhook-lar) bölümüne bakın.
+
+Bağlantısı olan bir uygulama kaydedilince r3v3rs3, uygulamanın webhook secret'ı yoksa onu oluşturur ve repoya bir push webhook'u kurar. Uygulamanın reposu değişince, bağlantısı kaldırılınca veya uygulama silinince r3v3rs3 sağlayıcıdaki eski webhook'u siler. Yeni bir webhook secret'ı webhook'u yeniden kurar. **Webhook'u kapat** webhook'u sağlayıcıda siler.
+
+Başarısız bir kurulum uygulamanın değişikliğini durdurmaz. Uygulama sayfasının **Webhook** bölümü nedeni gösterir. **Webhook'u yeniden kur** veya `POST /api/apps/{id}/hook`, uygulamanın eski webhook'unu siler ve onu yeniden kurar. Genel adres yoksa hiçbir webhook kurulmaz ve uygulama bu nedeni gösterir. r3v3rs3'ün sağlayıcıda silemediği bir webhook orada kalır ve r3v3rs3'ten `404` alır.
+
+Bir uygulamanın kullandığı bağlantı silinemez ve `409 git_connection_in_use` yanıtını alır. Bağlantıyı silmek sağlayıcıdaki yetkisini kaldırmaz. OAuth uygulamasının yetkisini sağlayıcıda kaldırın.
 
 | Durum kodu | Nedeni |
 |---|---|
@@ -292,7 +332,7 @@ Agent, 1 saniyeden 60 saniyeye kadar uzayan bir beklemeden sonra yeniden bağlan
 
 ## WebUI
 
-Kenar çubuğundaki **Platform** grubu **Uygulamalar** ve **Hedefler** sayfalarını içerir. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
+Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **Hedefler** ve **Git Sağlayıcıları** sayfalarını içerir. **Git Sağlayıcıları** sayfası Edit izni olan hesaba görünür. Orada bağlantı ekleme, değiştirme, bağlama, silme ve genel adresi değiştirme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
 
 ### Uygulamalar
 
@@ -307,7 +347,7 @@ Sayfa, bitmemiş bir deployment varken uygulamaları 2 saniyede bir, yoksa 10 sa
 
 ### Uygulama ekleme ve değiştirme
 
-**Ekle** boş bir uygulama formu açar. **Kaynak** alanında **Image**, **Git** veya **Compose** seçilir ve form o kaynağın alanlarını gösterir. Compose uygulamasında **Volume'lar**, **Yeniden başlatma politikası**, **Bellek limiti (MB)** ve **CPU limiti** gizlenir, çünkü bunları Compose dosyası ayarlar.
+**Ekle** boş bir uygulama formu açar. **Kaynak** alanında **Image**, **Git** veya **Compose** seçilir ve form o kaynağın alanlarını gösterir. Git veya Compose uygulaması reposunu bir **Git sağlayıcı bağlantısı** ile seçebilir, bkz. [Bağlantılı uygulamalar](#baglantili-uygulamalar). Compose uygulamasında **Volume'lar**, **Yeniden başlatma politikası**, **Bellek limiti (MB)** ve **CPU limiti** gizlenir, çünkü bunları Compose dosyası ayarlar.
 
 - **Alan adları** alanına her satıra bir alan adı yazın.
 - **Volume'lar** alanına her satıra bir mount yazın: `volume:/yol`, salt okunur mount için `volume:/yol:ro`.
@@ -316,7 +356,7 @@ Sayfa, bitmemiş bir deployment varken uygulamaları 2 saniyede bir, yoksa 10 sa
 **Oluştur** uygulamayı kaydeder ve sayfasını açar. Mevcut bir uygulamanın sayfasında formun altında şu bölümler bulunur:
 
 - **Git token**, Git veya Compose uygulamasında. **Token'ı ayarla** bir token kaydeder, **Token'ı kaldır** onaydan sonra token'ı siler. Sayfa yalnız token'ın ayarlı olup olmadığını gösterir.
-- **Webhook**. **Secret oluştur** [webhook](#webhook-lar) secret'ını oluşturur ve onu sayfanın adresindeki hook adresi olan **Payload URL** ile birlikte bir kez gösterir. Sayfadan ayrılmadan önce ikisini de kopyalayın. **Yeni secret oluştur** onaydan sonra secret'ı değiştirir, **Webhook'u kapat** onaydan sonra secret'ı siler.
+- **Webhook**. Bağlantısı olan uygulamada bu bölüm, webhook'un sağlayıcıda kurulu olup olmadığını veya neden kurulmadığını **Webhook'u yeniden kur** ile birlikte gösterir. **Secret oluştur** [webhook](#webhook-lar) secret'ını oluşturur ve onu sayfanın adresindeki hook adresi olan **Payload URL** ile birlikte bir kez gösterir. Sayfadan ayrılmadan önce ikisini de kopyalayın. **Yeni secret oluştur** onaydan sonra secret'ı değiştirir, **Webhook'u kapat** onaydan sonra secret'ı siler.
 - **Ortam değişkenleri**. **Değişken ekle**, **Key**, **Değer** ve **Secret** kutusu olan bir satır ekler. Kaydedilmiş secret bir değişkenin değeri **Değişmedi** olarak görünür. Değeri korumak için alanı boş bırakın. **Değişkenleri kaydet** bütün değişkenleri değiştirir ve sonraki deployment bunları kullanır.
 - **Uygulamayı sil** onaydan sonra uygulamayı container'larıyla birlikte siler.
 
@@ -359,11 +399,23 @@ Admin hesabı ayrıca şunları görür:
 | `DELETE /api/apps/{id}/git_token` | Edit | Token'ı siler. |
 | `POST /api/apps/{id}/webhook_secret` | Edit | Yeni bir webhook secret'ı oluşturur ve onu bir kez döndürür. |
 | `DELETE /api/apps/{id}/webhook_secret` | Edit | Webhook'u kapatır. |
+| `POST /api/apps/{id}/hook` | Edit | Bağlantısı olan bir uygulamanın webhook'unu yeniden kurar. |
 | `POST /hooks/apps/{id}` | İmza | İmzalı bir push ile uygulamayı deploy eder. Bkz. [Webhook'lar](#webhook-lar). |
 | `GET /api/apps/{id}/deployments` | Read | Bir uygulamanın son 100 deployment'ı. |
 | `GET /api/apps/{id}/logs?tail=200` | Read | Çalışan deployment'ın container log'unun son satırları, 1 ile 1000 satır arası. Uygulamanın çalışan deployment'ı yoksa `running` değeri `false` olur. |
 | `POST /api/apps/{id}/deploy` | Edit | Bir deployment başlatır. |
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
 | `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |
+| `GET /api/git/connections` | Edit | Secret'lar ve token'lar olmadan Git sağlayıcı bağlantıları. |
+| `POST /api/git/connections` | Admin | Bağlantı ekler. |
+| `GET /api/git/connections/{id}` | Edit | Bir bağlantıyı döndürür. |
+| `PUT /api/git/connections/{id}` | Admin | Bir bağlantıyı değiştirir. `client_secret` yoksa mevcut secret kalır. |
+| `DELETE /api/git/connections/{id}` | Admin | Hiçbir uygulamanın kullanmadığı bir bağlantıyı siler. |
+| `POST /api/git/connections/{id}/authorize` | Admin | `{"redirect_uri": "<callback adresi>"}` gövdesiyle bir yetkilendirme başlatır ve sağlayıcının sayfasını döndürür. |
+| `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Bağlı hesabın en fazla 50 repository'si. |
+| `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit | Bir reponun en fazla 50 branch'i. |
+| `GET /oauth/git/callback` | State | Sağlayıcının callback'i. Bkz. [Bağlanma](#baglanma). |
+| `GET /api/platform/settings` | Edit | Platformun genel adresi. |
+| `PUT /api/platform/settings` | Admin | `{"public_url": "https://..."}` gövdesiyle genel adresi ayarlar. |
 
-Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, deploy eden her webhook isteğini, hedefin her değişikliğini ve her agent kaydını kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token veya secret değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Webhook isteğinin özeti uygulamayı, sağlayıcıyı ve deployment'ı adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır.
+Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, deploy eden her webhook isteğini, hedefin her değişikliğini, her agent kaydını, Git sağlayıcı bağlantısının her değişikliğini ve yetkilendirmesini, genel adresin her değişikliğini ve bir hesabın başlattığı her webhook kurulumunu kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token veya secret değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Webhook isteğinin özeti uygulamayı, sağlayıcıyı ve deployment'ı adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır. Bağlantının özeti bağlantıyı ve sağlayıcısını adlandırır, client secret'ı veya bir token'ı hiçbir zaman içermez. Yetkilendirmenin özeti hesabı da adlandırır. Webhook kurulumunun özeti uygulamayı adlandırır.

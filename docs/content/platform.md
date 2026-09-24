@@ -90,8 +90,9 @@ An app with a `git` source builds its image from a branch of a repository with t
 | `branch` | `main` | A branch or a tag. |
 | `context` | `.` | The directory of the repository that Docker receives as the build context. |
 | `dockerfile` | `Dockerfile` | The Dockerfile, relative to `context`. |
+| `connection` | none | The id of a [Git provider](#git-providers) connection. The connection clones the repository and installs its webhook. |
 
-A private repository needs an access token, for example a GitHub fine-grained token with read access to the contents of the repository, or a GitLab or Gitea token with the `read_repository` scope. `PUT /api/apps/{id}/git_token` with `{"token": "..."}` sets the token, and `DELETE /api/apps/{id}/git_token` deletes it. r3v3rs3 encrypts the token with `platform.key`, and the admin API never returns it: an app shows only `"git_token_set": true`. git receives the token as HTTP basic authentication with the user name `x-access-token`, through an environment variable instead of the URL or the command line.
+A private repository needs a [Git provider](#git-providers) connection or an access token of the app. An access token is, for example, a GitHub fine-grained token with read access to the contents of the repository, or a GitLab or Gitea token with the `read_repository` scope. `PUT /api/apps/{id}/git_token` with `{"token": "..."}` sets the token, and `DELETE /api/apps/{id}/git_token` deletes it. r3v3rs3 encrypts the token with `platform.key`, and the admin API never returns it: an app shows only `"git_token_set": true`. git receives the token as HTTP basic authentication with the user name `x-access-token`, through an environment variable instead of the URL or the command line.
 
 The server that runs r3v3rs3 needs the `git` binary. r3v3rs3 runs `git` without the configuration of the host, without hooks and only over HTTPS. The build context holds no `.git` directory, and a symbolic link in it stays a link, so a build does not read a file from outside the repository. The context can hold up to 512 MiB.
 
@@ -113,10 +114,11 @@ An app with a `compose` source starts the Docker Compose file of a branch of a r
 
 | Field | Default | Description |
 |---|---|---|
-| `repository` | | An `https://` URL, as for a Git source. The Git token of the app clones a private repository. |
+| `repository` | | An `https://` URL, as for a Git source. The connection or the Git token of the app clones a private repository. |
 | `branch` | `main` | A branch or a tag. |
 | `file` | the first of `compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml` | The Compose file, relative to the root of the repository. Its relative paths resolve against its own directory. |
 | `service` | | The service that receives the requests of the domains on `port`. A service name has lowercase letters, digits and `_.-`. |
+| `connection` | none | The id of a [Git provider](#git-providers) connection, as for a Git source. |
 
 The server needs the `git` binary and the `docker` binary with the Compose plugin. r3v3rs3 runs `docker compose` with the Compose project `r3v3rs3-<app id>` and adds a file that sets for the service of `service`:
 
@@ -195,6 +197,44 @@ A deploying request answers `200` with `{"outcome": "deployed", "deployment": {.
 | `429` | The client sent more than 10 requests in a burst, or more than one request per second after the burst. |
 
 The body can be up to 5 MiB. The audit log records every request that deployed or queued a deployment, with the address of the sender, and without an account.
+
+## Git Providers
+
+A Git provider connection lets r3v3rs3 act for an account of GitHub, GitLab or Gitea. After an admin connects it once, the app form lists the repositories and the branches of that account, a deployment clones a private repository with the token of the connection, and r3v3rs3 installs the push webhook of the app at the repository. The connections belong to the server: an admin adds them, and every account with the Edit permission can use them in its apps. An app without a connection keeps working with its repository address and its own Git token.
+
+### Register an OAuth Application
+
+Each connection is an OAuth application that you register at the provider. Its callback address is the address of the WebUI followed by `/oauth/git/callback`, for example `https://r3v3rs3.example.com/oauth/git/callback`. The **Git Providers** page shows this address for the page that you use. The provider sends the browser of the admin back to it, so it must be the address that the admin opens, not the public address.
+
+| Provider | Where | Settings |
+|---|---|---|
+| GitHub | **Settings**, **Developer settings**, **OAuth Apps**, **New OAuth App** | **Authorization callback URL** is the callback address. r3v3rs3 asks for the scopes `repo` and `admin:repo_hook`. |
+| GitLab | **Preferences**, **Applications**, or the **Applications** of a group or of the instance | **Redirect URI** is the callback address. Select the scope `api`, and keep **Confidential** on. |
+| Gitea | **Settings**, **Applications**, **Manage OAuth2 Applications** | **Redirect URI** is the callback address. Keep **Confidential Client** on. r3v3rs3 asks for the scopes `read:repository`, `write:repository` and `read:user`. |
+
+The provider shows a client id and a client secret. Add both on the **Git Providers** page. A GitHub connection always uses `https://github.com`. A GitLab connection uses `https://gitlab.com` unless you give the address of your own GitLab. A Gitea connection needs the address of its server. The address of a provider uses `https://`; `http://` is allowed only on a loopback address.
+
+### Connect
+
+**Connect** on the row of a connection opens the authorization page of the provider. After the account allows the access, the provider sends the browser back to the callback address, and r3v3rs3 exchanges the code for the tokens of the account. The authorization uses PKCE, and its state works once and for 10 minutes. The callback needs no session, because the session cookie does not follow a redirect from another site. The page shows **Connected** and the name of the account.
+
+r3v3rs3 encrypts the client secret and the tokens with `platform.key`, and the admin API never returns them. A GitLab or Gitea token expires, so r3v3rs3 renews it with its refresh token before it uses it. When the provider refuses the renewal, the connection shows **Connect again**, and **Connect again** authorizes it anew. A change of the provider, the address or the client id of a connection also disconnects it.
+
+### Apps with a Connection
+
+The **Git provider connection** select of the app form offers the connections. With a connected connection the form lists the recently changed repositories of the account, **Search the repositories** finds one by its name, and a chosen repository fills the **Repository** address and its default branch. **Branch** then lists the branches of the repository. The repository address must belong to the provider of the connection.
+
+A deployment and a rollback clone the repository with the current token of the connection. GitHub and Gitea receive the token as the user name, and GitLab as the password of the user `oauth2`.
+
+### Webhooks of a Connection
+
+Set the **Public address** on the **Git Providers** page, for example `https://deploy.example.com`. The Git provider sends the webhook requests to `<public address>/hooks/apps/{id}`, so the provider must reach that address. See [Webhooks](#webhooks) for the proxy of the `/hooks/` prefix.
+
+When an app with a connection is saved, r3v3rs3 creates the webhook secret of the app if it has none, and installs a push webhook at the repository. When the repository of the app changes, when its connection is removed, or when the app is deleted, r3v3rs3 deletes the old webhook at the provider. A new webhook secret installs the webhook again, and **Turn off webhook** deletes it at the provider.
+
+A failed installation does not stop the change of the app. The **Webhook** section of the app page shows the reason, and **Install the webhook again**, or `POST /api/apps/{id}/hook`, deletes the old webhook of the app and installs it again. Without a public address no webhook is installed, and the app shows that reason. A webhook that r3v3rs3 cannot delete at the provider stays there and gets `404` from r3v3rs3.
+
+A connection that an app uses cannot be deleted and answers `409 git_connection_in_use`. Deleting a connection does not revoke its authorization at the provider; revoke the OAuth application there.
 
 ## Notifications
 
@@ -292,7 +332,7 @@ The agent connects again after a pause that grows from 1 to 60 seconds. When it 
 
 ## WebUI
 
-The **Platform** group of the sidebar holds the **Apps** and **Targets** pages. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+The **Platform** group of the sidebar holds the **Apps**, **Targets** and **Git Providers** pages. The **Git Providers** page appears for an account with the Edit permission, and only an admin adds, changes, connects or deletes a connection there or changes the public address. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
 
 ### Apps
 
@@ -307,7 +347,7 @@ The page reads the apps again every 2 seconds while a deployment is unfinished, 
 
 ### Add and Change an App
 
-**Add** opens an empty app form. **Source** selects **Image**, **Git** or **Compose**, and the form shows the fields of that source. A Compose app hides **Volumes**, **Restart Policy**, **Memory Limit (MB)** and **CPU Limit**, because its Compose file sets them.
+**Add** opens an empty app form. **Source** selects **Image**, **Git** or **Compose**, and the form shows the fields of that source. A Git or a Compose app can pick its repository through a **Git provider connection**, see [Apps with a Connection](#apps-with-a-connection). A Compose app hides **Volumes**, **Restart Policy**, **Memory Limit (MB)** and **CPU Limit**, because its Compose file sets them.
 
 - **Domains** takes one domain on each line.
 - **Volumes** takes one mount on each line: `volume:/path`, or `volume:/path:ro` for a read-only mount.
@@ -316,7 +356,7 @@ The page reads the apps again every 2 seconds while a deployment is unfinished, 
 **Create** saves the app and opens its page. The page of an existing app adds these parts below the form:
 
 - **Git Token**, for a Git or a Compose app. **Set Token** saves a token, and **Remove token** deletes it after a confirmation. The page shows only whether a token is set.
-- **Webhook**. **Create Secret** creates the [webhook](#webhooks) secret and shows it once with the **Payload URL**, which is the hook address on the address of the page. Copy both before you leave the page. **Create New Secret** replaces the secret after a confirmation, and **Turn off webhook** deletes it after a confirmation.
+- **Webhook**. An app with a connection shows here whether its webhook is installed at the provider, or why it is not, with **Install the webhook again**. **Create Secret** creates the [webhook](#webhooks) secret and shows it once with the **Payload URL**, which is the hook address on the address of the page. Copy both before you leave the page. **Create New Secret** replaces the secret after a confirmation, and **Turn off webhook** deletes it after a confirmation.
 - **Environment Variables**. **Add variable** adds a row with a **Key**, a **Value** and a **Secret** checkbox. The value of a saved secret variable shows as **Unchanged**. Leave it empty to keep the value. **Save Variables** replaces all variables, and the next deployment uses them.
 - **Delete app** deletes the app with its containers after a confirmation.
 
@@ -359,11 +399,23 @@ Without `agent_port` the add and the new token actions answer that the agent por
 | `DELETE /api/apps/{id}/git_token` | Edit | Deletes the token. |
 | `POST /api/apps/{id}/webhook_secret` | Edit | Creates a new webhook secret and returns it once. |
 | `DELETE /api/apps/{id}/webhook_secret` | Edit | Turns the webhook off. |
+| `POST /api/apps/{id}/hook` | Edit | Installs the webhook of an app with a connection again. |
 | `POST /hooks/apps/{id}` | The signature | Deploys the app for a signed push. See [Webhooks](#webhooks). |
 | `GET /api/apps/{id}/deployments` | Read | The latest 100 deployments of an app. |
 | `GET /api/apps/{id}/logs?tail=200` | Read | The last lines of the container log of the running deployment, from 1 to 1000 lines. `running` is `false` when the app has no running deployment. |
 | `POST /api/apps/{id}/deploy` | Edit | Starts a deployment. |
 | `GET /api/deployments/{id}` | Read | Returns a deployment. |
 | `POST /api/deployments/{id}/rollback` | Edit | Repeats an earlier deployment. |
+| `GET /api/git/connections` | Edit | The Git provider connections, without secrets or tokens. |
+| `POST /api/git/connections` | Admin | Adds a connection. |
+| `GET /api/git/connections/{id}` | Edit | Returns a connection. |
+| `PUT /api/git/connections/{id}` | Admin | Replaces a connection. Without `client_secret` the current secret stays. |
+| `DELETE /api/git/connections/{id}` | Admin | Deletes a connection that no app uses. |
+| `POST /api/git/connections/{id}/authorize` | Admin | Starts an authorization with `{"redirect_uri": "<callback address>"}` and returns the page of the provider. |
+| `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Up to 50 repositories of the connected account. |
+| `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit | Up to 50 branches of a repository. |
+| `GET /oauth/git/callback` | The state | The callback of the provider. See [Connect](#connect). |
+| `GET /api/platform/settings` | Edit | The public address of the platform. |
+| `PUT /api/platform/settings` | Admin | Sets the public address with `{"public_url": "https://..."}`. |
 
-An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target and every agent enrollment. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, and an enrollment names the target and the version of the agent.
+An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target, every agent enrollment, every change and authorization of a Git provider connection, every change of the public address and every webhook installation that an account starts. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, an enrollment names the target and the version of the agent, a connection names itself and its provider, never its client secret or a token, an authorization also names the account, and a webhook installation names the app.
