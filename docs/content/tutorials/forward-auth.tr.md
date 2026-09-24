@@ -6,7 +6,7 @@ weight = 15
 
 # Forward auth ile single sign-on
 
-Forward auth, her istek için harici bir servise "bu istek geçsin mi?" diye sorar. Kimlik sağlayıcısındaki oturumu o servis tutar; r3v3rs3 yalnız sorar ve cevabı taşır. nginx'teki `auth_request`, Traefik'teki `forwardAuth` budur.
+Forward auth, her istek için harici bir servise "bu istek geçsin mi?" diye sorar. Kimlik sağlayıcısındaki oturumu o servis tutar; r3v3rs3 yalnız sorar ve cevabı taşır. nginx'teki `auth_request`, Traefik'teki ForwardAuth middleware'i budur.
 
 Zaten oauth2-proxy, Authelia veya kendi yazdığınız bir servisi çalıştırıyorsanız bunu kullanın. r3v3rs3'ün kendi tuttuğu hesaplar için [Ekip için hesaplar](@/tutorials/team-accounts.tr.md) daha basittir.
 

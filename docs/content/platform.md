@@ -124,7 +124,7 @@ The server needs the `git` binary and the `docker` binary with the Compose plugi
 
 - the container name `r3v3rs3-<app id>-<deployment id>` and the labels of the platform,
 - one published port: `port` on a free port of `127.0.0.1`. This port replaces the `ports` of the service in the Compose file.
-- the environment variables of the app. The file names only their keys, and `docker compose` reads the values from its own environment, so no value reaches the disk. The same values fill the `${VARIABLE}` references of the Compose file. The names `PATH`, `HOME`, `DOCKER_CONFIG` and `DOCKER_HOST` belong to the `docker` binary, and an app that sets one fails its deployment.
+- the environment variables of the app. The file names only their keys, and `docker compose` reads the values from its own environment, so no value reaches the disk. The same values fill the `${VARIABLE}` references of the Compose file. The names PATH, HOME, DOCKER_CONFIG and DOCKER_HOST belong to the `docker` binary, and an app that sets one fails its deployment.
 
 Another service of the Compose file must not publish a port, because a published port bypasses r3v3rs3. A Compose file with such a port fails the deployment before any service starts, and the message names the service. The services reach each other on the network of the project.
 

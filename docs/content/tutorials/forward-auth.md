@@ -6,7 +6,7 @@ weight = 15
 
 # Single Sign-On with Forward Auth
 
-Forward auth asks an external service whether to allow each request. The service holds the identity provider session; r3v3rs3 only asks it and copies the answer. This is the `auth_request` of nginx and the `forwardAuth` of Traefik.
+Forward auth asks an external service whether to allow each request. The service holds the identity provider session; r3v3rs3 only asks it and copies the answer. This is the `auth_request` of nginx and the ForwardAuth middleware of Traefik.
 
 Use it when you already run oauth2-proxy, Authelia or a service of your own. For accounts that r3v3rs3 itself keeps, [Accounts for a Team](@/tutorials/team-accounts.md) is simpler.
 
