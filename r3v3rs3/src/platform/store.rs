@@ -66,6 +66,9 @@ const SCHEMA: &[&str] = &[
 /// The secret of an app that holds its Git token.
 pub const GIT_TOKEN: &str = "git_token";
 
+/// The secret of an app that verifies the signatures of its webhook requests.
+pub const WEBHOOK_SECRET: &str = "webhook_secret";
+
 /// The query of the app entries, followed by `$rest`. A literal, because sqlx takes only a
 /// static query.
 macro_rules! select_apps {
@@ -73,7 +76,9 @@ macro_rules! select_apps {
         concat!(
             "SELECT id, name, target_id, spec, created_at, updated_at,
                 EXISTS (SELECT 1 FROM app_secrets s WHERE s.app_id = apps.id
-                    AND s.name = 'git_token') AS git_token_set
+                    AND s.name = 'git_token') AS git_token_set,
+                EXISTS (SELECT 1 FROM app_secrets s WHERE s.app_id = apps.id
+                    AND s.name = 'webhook_secret') AS webhook_secret_set
             FROM apps ",
             $rest
         )
@@ -652,6 +657,7 @@ fn app_of(row: &SqliteRow) -> anyhow::Result<AppEntry> {
         target: id_of(row, "target_id")?,
         spec,
         git_token_set: row.try_get("git_token_set")?,
+        webhook_secret_set: row.try_get("webhook_secret_set")?,
         created_at: time_of(row, "created_at")?,
         updated_at: time_of(row, "updated_at")?,
     })
@@ -744,6 +750,7 @@ mod tests {
                 limits: Default::default(),
             },
             git_token_set: false,
+            webhook_secret_set: false,
             created_at: 10,
             updated_at: 10,
         }
@@ -757,7 +764,11 @@ mod tests {
         store.set_secret(shop.id, GIT_TOKEN, &[1]).await?;
         store.set_secret(shop.id, GIT_TOKEN, &[2]).await?;
         assert_eq!(store.secret(shop.id, GIT_TOKEN).await?, Some(vec![2]));
-        assert!(store.app(shop.id).await?.context("app")?.git_token_set);
+        let entry = store.app(shop.id).await?.context("app")?;
+        assert!(entry.git_token_set && !entry.webhook_secret_set);
+
+        store.set_secret(shop.id, WEBHOOK_SECRET, &[4]).await?;
+        assert!(store.apps().await?[0].webhook_secret_set);
         Ok(())
     }
 

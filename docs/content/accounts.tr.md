@@ -19,7 +19,7 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 | Portları, sertifikaları, ACME kayıtlarını ve erişim listelerini değiştirme, sertifika indirme, CDN IP aralıklarını yenileme | evet | evet | hayır | hayır |
 | Ayarları ve hesapları okuma veya değiştirme, denetim kaydını okuma | evet | hayır | hayır | hayır |
 | Deploy platformunun uygulamalarını, hedeflerini ve deployment'larını okuma | evet | evet | hayır | evet, proxy listesi yoksa |
-| Uygulama ekleme, değiştirme veya silme, ortam değişkenlerini okuma veya değiştirme, Git token'ını ayarlama veya silme, uygulamayı deploy etme, deployment'ı geri alma | evet | evet | hayır | hayır |
+| Uygulama ekleme, değiştirme veya silme, ortam değişkenlerini okuma veya değiştirme, Git token'ını ayarlama veya silme, webhook secret'ını oluşturma veya silme, uygulamayı deploy etme, deployment'ı geri alma | evet | evet | hayır | hayır |
 | Agent hedefi ekleme, kayıt token'ını oluşturma, hedefi silme | evet | hayır | hayır | hayır |
 
 - Proxy listesi olmayan hesap bütün proxy'leri görür. Admin her zaman bütün proxy'leri görür. Bu yüzden admin hesabının proxy listesi olamaz.

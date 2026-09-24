@@ -583,6 +583,7 @@ mod tests {
             target: request.target,
             spec: request.spec.clone(),
             git_token_set: false,
+            webhook_secret_set: false,
             created_at: 0,
             updated_at: 0,
         };

@@ -19,7 +19,7 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 | Change the ports, the certificates, the ACME entries and the access lists, download a certificate, refresh the CDN IP ranges | yes | yes | no | no |
 | Read or change the settings and the accounts, read the audit log | yes | no | no | no |
 | Read the apps, the targets and the deployments of the deployment platform | yes | yes | no | yes, without a proxy list |
-| Add, change or delete an app, read or change its environment variables, set or delete its Git token, deploy an app, roll back a deployment | yes | yes | no | no |
+| Add, change or delete an app, read or change its environment variables, set or delete its Git token, create or delete its webhook secret, deploy an app, roll back a deployment | yes | yes | no | no |
 | Add an agent target, create its enrollment token, delete it | yes | no | no | no |
 
 - An account without a proxy list sees every proxy. An admin always sees every proxy, so an admin cannot have a proxy list.

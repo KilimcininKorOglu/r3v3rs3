@@ -222,6 +222,7 @@ impl Platform {
         tokio::spawn(async move {
             platform.run_job(&job).await;
             drop(lock);
+            platform.run_queued_hook(job.app).await;
         });
         Ok(entry)
     }

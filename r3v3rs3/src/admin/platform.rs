@@ -17,7 +17,7 @@ use r3v3rs3_api::{
     id::ShortId,
     platform::{
         AppEntry, AppLog, AppLogQuery, AppRequest, DeploymentEntry, DeploymentTrigger, EnvEntry,
-        GitTokenRequest, TargetEntry, TargetRequest, TargetToken,
+        GitTokenRequest, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
     },
 };
 use std::sync::Arc;
@@ -37,7 +37,7 @@ impl AppState {
 
 /// An API error keeps its status code. Any other failure is logged, because its text can hold
 /// file paths of the server.
-fn platform_error(err: anyhow::Error) -> AppError {
+pub(super) fn platform_error(err: anyhow::Error) -> AppError {
     match err.downcast::<Error>() {
         Ok(err) => AppError::R3v3rs3(err),
         Err(err) => {
@@ -373,6 +373,65 @@ pub async fn delete_git_token(
         .await
         .map_err(platform_error)?;
     let record = AuditRecord::new(AuditAction::DeleteAppGitToken)
+        .id(id)
+        .summary(app.name.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(app))
+}
+
+/// Creates a new webhook secret of an app, so that the signed requests of `POST
+/// /hooks/apps/{id}` deploy it. The response is the only one that holds the secret, and the old
+/// secret stops working.
+#[utoipa::path(
+    post,
+    path = "/{id}/webhook_secret",
+    tag = "platform",
+    operation_id = "new_app_webhook_secret",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The new secret.", body = WebhookSecret), NotFoundResponse, ErrorResponses)
+)]
+pub async fn new_webhook_secret(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<WebhookSecret>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let (app, secret) = platform
+        .new_webhook_secret(id)
+        .await
+        .map_err(platform_error)?;
+    // The summary names the app, never the secret.
+    let record = AuditRecord::new(AuditAction::NewAppWebhookSecret)
+        .id(id)
+        .summary(app.name.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(secret))
+}
+
+/// Deletes the webhook secret of an app, so that no webhook request deploys it.
+#[utoipa::path(
+    delete,
+    path = "/{id}/webhook_secret",
+    tag = "platform",
+    operation_id = "delete_app_webhook_secret",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The app.", body = AppEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn delete_webhook_secret(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AppEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let app = platform
+        .delete_webhook_secret(id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeleteAppWebhookSecret)
         .id(id)
         .summary(app.name.to_string());
     state

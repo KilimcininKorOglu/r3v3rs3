@@ -12,6 +12,7 @@ mod app_git_token;
 mod app_list;
 mod app_log;
 mod app_view;
+mod app_webhook;
 mod audit;
 pub mod cert_list;
 mod log_view;

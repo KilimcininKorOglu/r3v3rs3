@@ -245,6 +245,7 @@ mod tests {
                 id: "abc".parse().unwrap(),
             },
             Error::AppTargetFixed { name: text() },
+            Error::InvalidWebhookPayload { reason: text() },
             Error::AcmeAccountCreationFailed,
             Error::AcmeUnsupportedChallenge { challenge: text() },
             Error::AcmeIdentifiersMissing,

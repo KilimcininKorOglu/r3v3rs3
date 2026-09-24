@@ -7,7 +7,7 @@ use crate::server::rpc::config::GetConfig;
 use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
 use crate::sessions::{LocalSessions, SessionBackend};
 use auth::LoginAttempts;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderValue, StatusCode, header::CACHE_CONTROL};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json, middleware};
@@ -58,6 +58,7 @@ mod certs;
 mod cluster;
 mod config;
 mod discovery;
+mod hooks;
 mod logs;
 mod openapi;
 mod platform;
@@ -172,6 +173,8 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
     let (api, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api", auth_routes()?)
         .nest("/api", resource_routes().route_layer(verify.clone()))
+        // The webhooks carry a signature instead of a session.
+        .nest("/hooks", hook_routes()?)
         .split_for_parts();
     let docs: Router<AppState> =
         Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi)).route_layer(verify);
@@ -208,6 +211,25 @@ fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
         .routes(routes!(auth::logout)))
 }
 
+/// The largest webhook event. A push of many commits stays far below it.
+const MAX_HOOK_BODY: usize = 5 * 1024 * 1024;
+
+fn hook_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
+    let governor_conf = GovernorConfigBuilder::default()
+        .per_second(1)
+        .burst_size(10)
+        .finish()
+        .ok_or_else(|| anyhow::anyhow!("invalid webhook rate limit config"))?;
+    let hook_limit =
+        GovernorLayer::new(Arc::new(governor_conf)).error_handler(|error| match error {
+            GovernorError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS.into_response(),
+            _ => AppError::Anyhow(anyhow::anyhow!(error)).into_response(),
+        });
+    Ok(OpenApiRouter::new()
+        .routes(routes!(hooks::app_hook).layer(hook_limit))
+        .layer(DefaultBodyLimit::max(MAX_HOOK_BODY)))
+}
+
 fn resource_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .merge(session_routes())
@@ -238,6 +260,10 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 ))
                 .routes(routes!(platform::get_env, platform::put_env))
                 .routes(routes!(platform::put_git_token, platform::delete_git_token))
+                .routes(routes!(
+                    platform::new_webhook_secret,
+                    platform::delete_webhook_secret
+                ))
                 .routes(routes!(platform::list_deployments))
                 .routes(routes!(platform::get_logs))
                 .routes(routes!(platform::deploy_app)),

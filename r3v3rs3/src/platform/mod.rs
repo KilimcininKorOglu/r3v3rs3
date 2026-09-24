@@ -9,6 +9,7 @@ mod compose;
 pub mod deploy;
 #[cfg(test)]
 pub(crate) mod fake;
+pub mod hooks;
 pub mod proxy;
 mod publish;
 #[cfg(test)]
@@ -146,6 +147,8 @@ pub struct Platform {
     sent: Mutex<Option<publish::Published>>,
     /// The apps that a pipeline or a deletion holds.
     busy: std::sync::Mutex<HashSet<ShortId>>,
+    /// The apps that a webhook request deploys again after their running pipeline.
+    queued: std::sync::Mutex<HashSet<ShortId>>,
     timing: deploy::Timing,
     fetcher: Arc<dyn SourceFetcher>,
     /// Limits the builds that run at the same time.
@@ -195,6 +198,7 @@ impl Platform {
             command,
             sent: Mutex::new(None),
             busy: std::sync::Mutex::new(HashSet::new()),
+            queued: std::sync::Mutex::new(HashSet::new()),
             timing: deploy::Timing::default(),
             fetcher: Arc::new(GitFetcher),
             builds: Semaphore::new(build::MAX_BUILDS),
@@ -262,6 +266,7 @@ impl Platform {
             target: request.target,
             spec: request.spec,
             git_token_set: false,
+            webhook_secret_set: false,
             created_at: now,
             updated_at: now,
         };
@@ -304,6 +309,7 @@ impl Platform {
             target: request.target,
             spec: request.spec,
             git_token_set: current.git_token_set,
+            webhook_secret_set: current.webhook_secret_set,
             created_at: current.created_at,
             updated_at: now,
         };
@@ -326,6 +332,7 @@ impl Platform {
         if !self.store.delete_app(id).await? {
             return Err(not_found(id));
         }
+        self.forget_queued_hook(id);
         self.publish().await;
         Ok(app)
     }

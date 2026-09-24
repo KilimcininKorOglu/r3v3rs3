@@ -10,7 +10,7 @@ mod common;
 use common::{TestStorage, admin_session_cookie, alloc_tcp_port, wait_for_listener, with_server};
 
 /// Every route of the admin API. The OpenAPI document must list exactly these operations.
-const OPERATIONS: [(&str, &str); 67] = [
+const OPERATIONS: [(&str, &str); 70] = [
     ("post", "/api/login"),
     ("get", "/api/logout"),
     ("get", "/api/events"),
@@ -73,6 +73,9 @@ const OPERATIONS: [(&str, &str); 67] = [
     ("put", "/api/apps/{id}/env"),
     ("put", "/api/apps/{id}/git_token"),
     ("delete", "/api/apps/{id}/git_token"),
+    ("post", "/api/apps/{id}/webhook_secret"),
+    ("delete", "/api/apps/{id}/webhook_secret"),
+    ("post", "/hooks/apps/{id}"),
     ("get", "/api/apps/{id}/deployments"),
     ("get", "/api/apps/{id}/logs"),
     ("post", "/api/apps/{id}/deploy"),

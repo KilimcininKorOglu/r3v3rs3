@@ -122,7 +122,7 @@ async fn manage_apps(addr: SocketAddr) -> anyhow::Result<()> {
     let id = check_app_writes(addr, &admin).await?;
     let item = format!("{APPS}/{id}");
     check_env(addr, &admin, &viewer, &item).await?;
-    check_git_token(addr, &admin, &viewer, &item).await?;
+    check_secrets(addr, &admin, &viewer, &id).await?;
     check_deploy_access(addr, &viewer, &scoped, &item).await?;
     check_delete(addr, &admin, &viewer, &item).await?;
     check_audit(addr, &admin, &id).await
@@ -225,6 +225,18 @@ async fn check_env(addr: SocketAddr, admin: &str, viewer: &str, item: &str) -> a
     Ok(())
 }
 
+/// The Git token and the webhook secret of the app.
+async fn check_secrets(
+    addr: SocketAddr,
+    admin: &str,
+    viewer: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    check_git_token(addr, admin, viewer, &format!("{APPS}/{id}")).await?;
+    let secret = create_webhook_secret(addr, admin, viewer, id).await?;
+    check_hook_requests(addr, admin, id, &secret).await
+}
+
 /// The Git token needs the Edit permission, and no response returns it.
 async fn check_git_token(
     addr: SocketAddr,
@@ -247,6 +259,85 @@ async fn check_git_token(
     let (status, text) = send(addr, Method::DELETE, &path, admin, None).await?;
     assert_eq!(status, 200, "{text}");
     assert_eq!(get(addr, item, viewer).await?["git_token_set"], false);
+    Ok(())
+}
+
+/// Sends a webhook request without a session. `secret` signs the body like GitHub does.
+async fn hook(
+    addr: SocketAddr,
+    id: &str,
+    event: &str,
+    secret: Option<&str>,
+) -> anyhow::Result<(u16, String)> {
+    use hmac::{Hmac, KeyInit, Mac};
+    let body = r#"{"zen":"Keep it logically awesome."}"#;
+    let mut request = reqwest::Client::new()
+        .post(format!("http://{addr}/hooks/apps/{id}"))
+        .header("x-github-event", event)
+        .header("content-type", "application/json")
+        .body(body);
+    if let Some(secret) = secret {
+        let mut mac = Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes())?;
+        mac.update(body.as_bytes());
+        let signature = hex::encode(mac.finalize().into_bytes());
+        request = request.header("x-hub-signature-256", format!("sha256={signature}"));
+    }
+    let response = request.send().await?;
+    Ok((response.status().as_u16(), response.text().await?))
+}
+
+/// The webhook secret needs the Edit permission, and only its own response returns it.
+async fn create_webhook_secret(
+    addr: SocketAddr,
+    admin: &str,
+    viewer: &str,
+    id: &str,
+) -> anyhow::Result<String> {
+    let item = format!("{APPS}/{id}");
+    let path = format!("{item}/webhook_secret");
+    let (status, _) = hook(addr, id, "ping", None).await?;
+    assert_eq!(status, 404, "an app without a secret has no webhook");
+    let (status, _) = send(addr, Method::POST, &path, viewer, None).await?;
+    assert_eq!(status, 403);
+    let (status, text) = send(addr, Method::POST, &path, admin, None).await?;
+    assert_eq!(status, 200, "{text}");
+    let created: Value = serde_json::from_str(&text)?;
+    let secret = created["secret"].as_str().unwrap_or_default().to_string();
+    assert_eq!(secret.len(), 64, "{text}");
+    let entry = get(addr, &item, viewer).await?;
+    assert_eq!(entry["webhook_secret_set"], true);
+    assert!(!entry.to_string().contains(&secret), "{entry}");
+    Ok(secret)
+}
+
+/// A hook request needs its signature instead of a session, and a deleted secret turns the
+/// webhook off.
+async fn check_hook_requests(
+    addr: SocketAddr,
+    admin: &str,
+    id: &str,
+    secret: &str,
+) -> anyhow::Result<()> {
+    let path = format!("{APPS}/{id}/webhook_secret");
+    let (status, text) = hook(addr, id, "ping", None).await?;
+    assert_eq!(status, 401, "{text}");
+    let (status, text) = hook(addr, id, "ping", Some("wrong")).await?;
+    assert_eq!(status, 401, "{text}");
+    let (status, text) = hook(addr, id, "ping", Some(secret)).await?;
+    assert_eq!(status, 200, "{text}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&text)?,
+        json!({"outcome": "ignored"})
+    );
+
+    let (status, text) = send(addr, Method::DELETE, &path, admin, None).await?;
+    assert_eq!(status, 200, "{text}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&text)?["webhook_secret_set"],
+        false
+    );
+    let (status, _) = hook(addr, id, "ping", Some(secret)).await?;
+    assert_eq!(status, 404);
     Ok(())
 }
 
@@ -311,6 +402,8 @@ async fn check_audit(addr: SocketAddr, admin: &str, id: &str) -> anyhow::Result<
         actions,
         [
             "delete_app",
+            "delete_app_webhook_secret",
+            "new_app_webhook_secret",
             "delete_app_git_token",
             "set_app_git_token",
             "update_app_env",
@@ -319,7 +412,8 @@ async fn check_audit(addr: SocketAddr, admin: &str, id: &str) -> anyhow::Result<
         ]
     );
     assert_eq!(entries[1]["summary"], "shop");
-    assert_eq!(entries[3]["summary"], "MODE, TOKEN");
+    assert_eq!(entries[2]["summary"], "shop");
+    assert_eq!(entries[5]["summary"], "MODE, TOKEN");
     assert!(entries.iter().all(|entry| entry["username"] == "admin"));
     let text = Value::Array(entries).to_string();
     assert!(

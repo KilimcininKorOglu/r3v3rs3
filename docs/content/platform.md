@@ -146,7 +146,7 @@ r3v3rs3 does not check the other settings of a Compose file. A Compose file can 
 4. It marks the deployment `running`, marks the previous one `superseded`, and routes the domains to the new container.
 5. After 10 seconds it stops and removes the old container, so that its open requests end.
 
-An app runs one deployment at a time. A second deploy, a rollback or a deletion during a deployment gets `409 app_busy`. A restart of the server marks an unfinished deployment as `failed`.
+An app runs one deployment at a time. A second deploy, a rollback or a deletion during a deployment gets `409 app_busy`. A [webhook](#webhooks) push during a deployment queues one more deployment instead. A restart of the server marks an unfinished deployment as `failed`.
 
 | Status | Meaning |
 |---|---|
@@ -164,6 +164,37 @@ An app runs one deployment at a time. A second deploy, a rollback or a deletion 
 A rollback of a Git app starts the built image again and does not build. r3v3rs3 keeps the images of the 5 newest deployments of an app and of its running deployment, and removes older ones. A rollback to a deployment whose image is removed fails with the message `the image ... is no longer present`.
 
 A rollback of a Compose app clones the recorded commit of the earlier deployment and runs `docker compose up --build` again, with the app settings and the environment variables of that deployment. A Compose deployment that failed before it recorded its commit answers `400 rollback_unavailable`.
+
+## Webhooks
+
+A webhook deploys an app when its Git provider sends a push event. `POST /api/apps/{id}/webhook_secret` creates the secret of the app and returns it once. The secret is 64 hex characters, and r3v3rs3 encrypts it with `platform.key`. A second call creates a new secret, and the old one stops working at once. `DELETE /api/apps/{id}/webhook_secret` turns the webhook off.
+
+The provider sends its events to `POST /hooks/apps/{id}` on the address of the admin API. This route needs no session, because the signature of each request proves it. The admin API listens on `127.0.0.1` by default, so the provider needs a way in: add a proxy that sends the path prefix `/hooks/` of a public domain to the admin port, and keep every other path of the admin API private.
+
+| Provider | Setting |
+|---|---|
+| GitHub | **Payload URL** is the hook address, **Content type** is `application/json`, and **Secret** is the secret. GitHub signs the body in the `X-Hub-Signature-256` header. |
+| Gitea, Forgejo | **Target URL** is the hook address, **POST Content Type** is `application/json`, and **Secret** is the secret. The provider signs the body in the `X-Gitea-Signature` or `X-Forgejo-Signature` header. |
+| GitLab | **URL** is the hook address, and **Secret token** is the secret. GitLab sends the secret itself in the `X-Gitlab-Token` header. Enable **Push events**, and **Tag push events** when the branch field of the app names a tag. |
+| Another sender | Sign the body with HMAC-SHA256 and the secret, and send the hex signature as `X-Signature-256: sha256=<hex>`. A CI job can deploy an image app this way after it pushes a new image. |
+
+Which request deploys:
+
+- A Git or a Compose app deploys for a push whose `ref` is `refs/heads/<branch>` or `refs/tags/<branch>`, where `<branch>` is the branch field of the app. A push that deletes the branch does not deploy.
+- An image app has no branch, so every signed push deploys it again, and r3v3rs3 pulls the tag of the image again.
+- A request of another sender always deploys, with any body.
+- A ping, a push to another branch, or another event answers `200` with `{"outcome": "ignored"}`.
+
+A deploying request answers `200` with `{"outcome": "deployed", "deployment": {...}}`. The deployment has the trigger `webhook` and the account `webhook`. A push during a running deployment answers `202` with `{"outcome": "queued"}`. When the running deployment ends, one more deployment starts with the latest commit of the branch, so one queued deployment covers every push that arrived in between. r3v3rs3 keeps the queue in memory, so a restart drops it.
+
+| Status | Reason |
+|---|---|
+| `400 invalid_webhook_payload` | The body of a GitHub, Gitea or GitLab push is not JSON, for example with the content type `application/x-www-form-urlencoded`. |
+| `401 unauthorized` | The signature is missing or wrong. |
+| `404 id_not_found` | No app has this id, or the app has no webhook secret. |
+| `429` | The client sent more than 10 requests in a burst, or more than one request per second after the burst. |
+
+The body can be up to 5 MiB. The audit log records every request that deployed or queued a deployment, with the address of the sender, and without an account.
 
 ## Routing
 
@@ -278,9 +309,10 @@ The page reads the apps again every 2 seconds while a deployment is unfinished, 
 - **Volumes** takes one mount on each line: `volume:/path`, or `volume:/path:ro` for a read-only mount.
 - **Memory Limit (MB)** takes a whole number of megabytes, and **CPU Limit** a number of CPUs such as `1.5`. An empty field sets no limit.
 
-**Create** saves the app and opens its page. The page of an existing app adds three parts below the form:
+**Create** saves the app and opens its page. The page of an existing app adds these parts below the form:
 
 - **Git Token**, for a Git or a Compose app. **Set Token** saves a token, and **Remove token** deletes it after a confirmation. The page shows only whether a token is set.
+- **Webhook**. **Create Secret** creates the [webhook](#webhooks) secret and shows it once with the **Payload URL**, which is the hook address on the address of the page. Copy both before you leave the page. **Create New Secret** replaces the secret after a confirmation, and **Turn off webhook** deletes it after a confirmation.
 - **Environment Variables**. **Add variable** adds a row with a **Key**, a **Value** and a **Secret** checkbox. The value of a saved secret variable shows as **Unchanged**. Leave it empty to keep the value. **Save Variables** replaces all variables, and the next deployment uses them.
 - **Delete app** deletes the app with its containers after a confirmation.
 
@@ -321,10 +353,13 @@ Without `agent_port` the add and the new token actions answer that the agent por
 | `PUT /api/apps/{id}/env` | Edit | Replaces the environment variables. |
 | `PUT /api/apps/{id}/git_token` | Edit | Sets the token of a private repository. |
 | `DELETE /api/apps/{id}/git_token` | Edit | Deletes the token. |
+| `POST /api/apps/{id}/webhook_secret` | Edit | Creates a new webhook secret and returns it once. |
+| `DELETE /api/apps/{id}/webhook_secret` | Edit | Turns the webhook off. |
+| `POST /hooks/apps/{id}` | The signature | Deploys the app for a signed push. See [Webhooks](#webhooks). |
 | `GET /api/apps/{id}/deployments` | Read | The latest 100 deployments of an app. |
 | `GET /api/apps/{id}/logs?tail=200` | Read | The last lines of the container log of the running deployment, from 1 to 1000 lines. `running` is `false` when the app has no running deployment. |
 | `POST /api/apps/{id}/deploy` | Edit | Starts a deployment. |
 | `GET /api/deployments/{id}` | Read | Returns a deployment. |
 | `POST /api/deployments/{id}/rollback` | Edit | Repeats an earlier deployment. |
 
-An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). The audit log records every change of an app, every deployment, every rollback, every change of a target and every agent enrollment. The summary of an environment change names the keys, never a value, a token change names only the app or the target, and an enrollment names the target and the version of the agent.
+An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target and every agent enrollment. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, and an enrollment names the target and the version of the agent.

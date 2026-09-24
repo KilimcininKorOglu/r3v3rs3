@@ -140,6 +140,9 @@ pub enum Error {
     #[error("the target of an app with deployments cannot change: {name}")]
     AppTargetFixed { name: String },
 
+    #[error("the webhook request is not a JSON event of the Git provider: {reason}")]
+    InvalidWebhookPayload { reason: String },
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 

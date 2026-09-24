@@ -5,6 +5,7 @@ use super::Route;
 use super::app_env::AppEnv;
 use super::app_form::{AppForm, fields_view};
 use super::app_git_token::AppGitToken;
+use super::app_webhook::AppWebhook;
 use super::resource_page::{FormCard, Notice, delete_on_click, form_card, notice_view};
 use super::settings::{fetch_json, send_request};
 use crate::API_ENDPOINT;
@@ -118,7 +119,7 @@ fn form_view(
     form_card(locale, card, onsubmit)
 }
 
-/// The Git token, the environment variables and the delete link of an existing app.
+/// The Git token, the webhook, the environment variables and the delete link of an existing app.
 fn edit_extras(
     locale: Locale,
     entry: AppEntry,
@@ -136,8 +137,9 @@ fn edit_extras(
     html! {
         <>
             if uses_git {
-                <AppGitToken app={entry.clone()} {locale} {onchanged} />
+                <AppGitToken app={entry.clone()} {locale} onchanged={onchanged.clone()} />
             }
+            <AppWebhook app={entry.clone()} {locale} {onchanged} />
             <AppEnv id={entry.id} {locale} />
             <div class="flex justify-end mt-4">
                 <a class={DANGER_LINK_CLASS} onclick={delete}>{locale.t("apps.delete")}</a>

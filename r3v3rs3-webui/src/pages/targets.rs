@@ -275,7 +275,7 @@ fn token_view(locale: Locale, token: &TargetToken) -> Html {
 }
 
 /// A read-only text that a click selects, so that it can be copied.
-fn copy_box(label: &str, text: &str, rows: u8) -> Html {
+pub(super) fn copy_box(label: &str, text: &str, rows: u8) -> Html {
     let onclick = Callback::from(|event: MouseEvent| {
         let area: HtmlTextAreaElement = event.target_unchecked_into();
         area.select();

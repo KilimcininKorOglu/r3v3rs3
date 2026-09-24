@@ -146,7 +146,7 @@ r3v3rs3, Compose dosyasının diğer ayarlarını denetlemez. Bir Compose dosyas
 4. Deployment'ı `running`, öncekini `superseded` olarak işaretler ve alan adlarını yeni container'a yönlendirir.
 5. 10 saniye sonra eski container'ı durdurur ve siler. Bu süre, eski container'daki açık isteklerin bitmesi içindir.
 
-Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment sürerken gelen ikinci deploy, geri alma veya silme isteği `409 app_busy` alır. Sunucu yeniden başlarsa bitmemiş deployment `failed` olur.
+Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment sürerken gelen ikinci deploy, geri alma veya silme isteği `409 app_busy` alır. Bir deployment sürerken gelen [webhook](#webhook-lar) push'u ise bir deployment daha kuyruğa alır. Sunucu yeniden başlarsa bitmemiş deployment `failed` olur.
 
 | Durum | Anlamı |
 |---|---|
@@ -164,6 +164,37 @@ Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment süre
 Bir Git uygulamasını geri alma build yapmaz, build edilmiş image'ı yeniden başlatır. r3v3rs3, bir uygulamanın en yeni 5 deployment'ının ve çalışan deployment'ının image'larını saklar, daha eskilerini siler. Image'ı silinmiş bir deployment'a geri alma `the image ... is no longer present` mesajıyla başarısız olur.
 
 Bir Compose uygulamasını geri alma, önceki deployment'ın kaydedilmiş commit'ini clone eder ve `docker compose up --build` komutunu o deployment'ın uygulama ayarları ve ortam değişkenleriyle yeniden çalıştırır. Commit'ini kaydetmeden önce başarısız olan bir Compose deployment'ı için geri alma isteği `400 rollback_unavailable` alır.
+
+## Webhook'lar
+
+Webhook, Git sağlayıcısı bir push olayı gönderdiğinde uygulamayı deploy eder. `POST /api/apps/{id}/webhook_secret` uygulamanın secret'ını oluşturur ve onu bir kez döndürür. Secret 64 hex karakterdir ve r3v3rs3 onu `platform.key` ile şifreler. İkinci bir çağrı yeni bir secret oluşturur ve eski secret hemen çalışmaz olur. `DELETE /api/apps/{id}/webhook_secret` webhook'u kapatır.
+
+Sağlayıcı olaylarını yönetim API'sinin adresindeki `POST /hooks/apps/{id}` route'una gönderir. Bu route oturum istemez, çünkü her isteği kendi imzası doğrular. Yönetim API'si varsayılan olarak `127.0.0.1` üzerinde dinler, bu yüzden sağlayıcının API'ye ulaşacak bir yolu olmalıdır: herkese açık bir alan adının `/hooks/` yol önekini yönetim portuna gönderen bir proxy ekleyin ve yönetim API'sinin diğer yollarını kapalı tutun.
+
+| Sağlayıcı | Ayar |
+|---|---|
+| GitHub | **Payload URL** hook adresidir, **Content type** `application/json` değeridir, **Secret** secret'tır. GitHub gövdeyi `X-Hub-Signature-256` header'ında imzalar. |
+| Gitea, Forgejo | **Target URL** hook adresidir, **POST Content Type** `application/json` değeridir, **Secret** secret'tır. Sağlayıcı gövdeyi `X-Gitea-Signature` veya `X-Forgejo-Signature` header'ında imzalar. |
+| GitLab | **URL** hook adresidir, **Secret token** secret'tır. GitLab secret'ın kendisini `X-Gitlab-Token` header'ında gönderir. **Push events** seçeneğini açın. Uygulamanın branch alanı bir tag adıysa **Tag push events** seçeneğini de açın. |
+| Başka bir gönderici | Gövdeyi secret ile HMAC-SHA256 kullanarak imzalayın ve hex imzayı `X-Signature-256: sha256=<hex>` olarak gönderin. Bir CI işi yeni bir image push ettikten sonra image uygulamasını bu yolla deploy edebilir. |
+
+Hangi istek deploy eder:
+
+- Git veya Compose uygulaması, `ref` değeri `refs/heads/<branch>` veya `refs/tags/<branch>` olan bir push ile deploy olur. Burada `<branch>` uygulamanın branch alanıdır. Branch'i silen bir push deploy etmez.
+- Image uygulamasının branch'i yoktur. Bu yüzden imzalı her push onu yeniden deploy eder ve r3v3rs3 image'ın tag'ini yeniden çeker.
+- Başka bir göndericinin isteği gövdesi ne olursa olsun her zaman deploy eder.
+- Ping, başka bir branch'e push veya başka bir olay `200` ve `{"outcome": "ignored"}` yanıtını alır.
+
+Deploy eden istek `200` ve `{"outcome": "deployed", "deployment": {...}}` yanıtını alır. Deployment'ın tetikleyeni `webhook`, hesabı `webhook` olur. Çalışan bir deployment sırasında gelen push `202` ve `{"outcome": "queued"}` yanıtını alır. Çalışan deployment bitince branch'in en son commit'iyle bir deployment daha başlar. Böylece kuyruktaki tek deployment aradaki bütün push'ları kapsar. r3v3rs3 kuyruğu bellekte tutar, bu yüzden yeniden başlatma kuyruğu siler.
+
+| Durum kodu | Nedeni |
+|---|---|
+| `400 invalid_webhook_payload` | GitHub, Gitea veya GitLab push'unun gövdesi JSON değildir, örneğin içerik türü `application/x-www-form-urlencoded` olduğunda. |
+| `401 unauthorized` | İmza yoktur veya yanlıştır. |
+| `404 id_not_found` | Bu id ile bir uygulama yoktur veya uygulamanın webhook secret'ı yoktur. |
+| `429` | İstemci art arda 10'dan fazla istek, bundan sonra da saniyede birden fazla istek gönderdi. |
+
+Gövde en fazla 5 MiB olabilir. Denetim kaydı, bir deployment başlatan veya kuyruğa alan her isteği göndericinin adresiyle ve hesapsız olarak kaydeder.
 
 ## Yönlendirme
 
@@ -278,9 +309,10 @@ Sayfa, bitmemiş bir deployment varken uygulamaları 2 saniyede bir, yoksa 10 sa
 - **Volume'lar** alanına her satıra bir mount yazın: `volume:/yol`, salt okunur mount için `volume:/yol:ro`.
 - **Bellek limiti (MB)** tam bir megabayt değeri, **CPU limiti** `1.5` gibi bir CPU sayısı alır. Boş alan limit koymaz.
 
-**Oluştur** uygulamayı kaydeder ve sayfasını açar. Mevcut bir uygulamanın sayfasında formun altında üç bölüm daha bulunur:
+**Oluştur** uygulamayı kaydeder ve sayfasını açar. Mevcut bir uygulamanın sayfasında formun altında şu bölümler bulunur:
 
 - **Git token**, Git veya Compose uygulamasında. **Token'ı ayarla** bir token kaydeder, **Token'ı kaldır** onaydan sonra token'ı siler. Sayfa yalnız token'ın ayarlı olup olmadığını gösterir.
+- **Webhook**. **Secret oluştur** [webhook](#webhook-lar) secret'ını oluşturur ve onu sayfanın adresindeki hook adresi olan **Payload URL** ile birlikte bir kez gösterir. Sayfadan ayrılmadan önce ikisini de kopyalayın. **Yeni secret oluştur** onaydan sonra secret'ı değiştirir, **Webhook'u kapat** onaydan sonra secret'ı siler.
 - **Ortam değişkenleri**. **Değişken ekle**, **Key**, **Değer** ve **Secret** kutusu olan bir satır ekler. Kaydedilmiş secret bir değişkenin değeri **Değişmedi** olarak görünür. Değeri korumak için alanı boş bırakın. **Değişkenleri kaydet** bütün değişkenleri değiştirir ve sonraki deployment bunları kullanır.
 - **Uygulamayı sil** onaydan sonra uygulamayı container'larıyla birlikte siler.
 
@@ -321,10 +353,13 @@ Admin hesabı ayrıca şunları görür:
 | `PUT /api/apps/{id}/env` | Edit | Ortam değişkenlerini değiştirir. |
 | `PUT /api/apps/{id}/git_token` | Edit | Private bir reponun token'ını ayarlar. |
 | `DELETE /api/apps/{id}/git_token` | Edit | Token'ı siler. |
+| `POST /api/apps/{id}/webhook_secret` | Edit | Yeni bir webhook secret'ı oluşturur ve onu bir kez döndürür. |
+| `DELETE /api/apps/{id}/webhook_secret` | Edit | Webhook'u kapatır. |
+| `POST /hooks/apps/{id}` | İmza | İmzalı bir push ile uygulamayı deploy eder. Bkz. [Webhook'lar](#webhook-lar). |
 | `GET /api/apps/{id}/deployments` | Read | Bir uygulamanın son 100 deployment'ı. |
 | `GET /api/apps/{id}/logs?tail=200` | Read | Çalışan deployment'ın container log'unun son satırları, 1 ile 1000 satır arası. Uygulamanın çalışan deployment'ı yoksa `running` değeri `false` olur. |
 | `POST /api/apps/{id}/deploy` | Edit | Bir deployment başlatır. |
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
 | `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |
 
-Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, hedefin her değişikliğini ve her agent kaydını kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır.
+Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, deploy eden her webhook isteğini, hedefin her değişikliğini ve her agent kaydını kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token veya secret değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Webhook isteğinin özeti uygulamayı, sağlayıcıyı ve deployment'ı adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır.

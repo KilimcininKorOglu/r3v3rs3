@@ -277,6 +277,10 @@ pub struct AppEntry {
     /// Whether the app has a Git token. The admin API never returns the token.
     #[serde(default)]
     pub git_token_set: bool,
+    /// Whether the app has a webhook secret, so that `POST /hooks/apps/{id}` deploys it. The
+    /// admin API returns the secret only once, when it creates the secret.
+    #[serde(default)]
+    pub webhook_secret_set: bool,
     /// The Unix time in milliseconds.
     pub created_at: u64,
     /// The Unix time in milliseconds.
@@ -294,6 +298,41 @@ impl std::fmt::Debug for GitTokenRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GitTokenRequest").finish_non_exhaustive()
     }
+}
+
+/// A new webhook secret of an app. The admin API returns it only in this response.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WebhookSecret {
+    /// The secret that signs the requests of the Git provider.
+    pub secret: String,
+}
+
+/// The secret stays out of debug output and logs.
+impl std::fmt::Debug for WebhookSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebhookSecret").finish_non_exhaustive()
+    }
+}
+
+/// What a webhook request did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HookOutcome {
+    /// The request started a deployment.
+    Deployed,
+    /// A deployment of the app was running, so a new deployment starts after it.
+    Queued,
+    /// The request was a ping, or an event or a branch that does not deploy the app.
+    Ignored,
+}
+
+/// The response of a webhook request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct HookResponse {
+    pub outcome: HookOutcome,
+    /// The deployment that the request started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployment: Option<DeploymentEntry>,
 }
 
 /// The container log of the running deployment of an app.
