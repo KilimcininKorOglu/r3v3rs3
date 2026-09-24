@@ -58,6 +58,7 @@ mod certs;
 mod cluster;
 mod config;
 mod discovery;
+mod git;
 mod hooks;
 mod logs;
 mod openapi;
@@ -273,6 +274,20 @@ fn platform_routes() -> OpenApiRouter<AppState> {
             OpenApiRouter::new()
                 .routes(routes!(platform::get_deployment))
                 .routes(routes!(platform::rollback_deployment)),
+        )
+        .nest(
+            "/git/connections",
+            OpenApiRouter::new()
+                .routes(routes!(git::list_connections, git::add_connection))
+                .routes(routes!(
+                    git::get_connection,
+                    git::update_connection,
+                    git::delete_connection
+                )),
+        )
+        .nest(
+            "/platform/settings",
+            OpenApiRouter::new().routes(routes!(git::get_settings, git::put_settings)),
         )
 }
 

@@ -25,7 +25,7 @@ use tracing::error;
 
 impl AppState {
     /// The platform, after the permission check of the caller.
-    async fn platform(
+    pub(super) async fn platform(
         &self,
         caller: &Caller,
         permission: Permission,

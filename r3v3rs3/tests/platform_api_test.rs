@@ -533,6 +533,136 @@ async fn check_target_audit(
     Ok(())
 }
 
+const CONNECTIONS: &str = "/api/git/connections";
+const CLIENT_SECRET: &str = "c1ient-s3cr3t-value";
+
+#[tokio::test]
+async fn an_admin_manages_the_git_connections() -> anyhow::Result<()> {
+    let dir = TempDir::new("platform-connections")?;
+    let mut config = AppConfig::default();
+    config.platform.enabled = true;
+    let storage = TestStorage::builder()
+        .config(config)
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, None)
+        .build();
+    with_admin(&dir.0, storage, manage_connections).await
+}
+
+async fn manage_connections(addr: SocketAddr) -> anyhow::Result<()> {
+    let admin = session_cookie(addr, "admin", "admin-secret").await?;
+    let editor = session_cookie(addr, "editor", "editor-secret").await?;
+    let id = check_connection_add(addr, &admin, &editor).await?;
+    check_connection_update(addr, &admin, &editor, &id).await?;
+    check_platform_settings(addr, &admin, &editor).await?;
+    check_connection_audit(addr, &admin, &id).await
+}
+
+fn connection(name: &str, secret: Option<&str>) -> Value {
+    let mut body = json!({
+        "name": name,
+        "provider": "gitea",
+        "url": "https://git.example.com",
+        "client_id": "client-id",
+    });
+    if let Some(secret) = secret {
+        body["client_secret"] = json!(secret);
+    }
+    body
+}
+
+/// Only an admin adds a connection, an editor lists it, and no response holds its secret.
+async fn check_connection_add(
+    addr: SocketAddr,
+    admin: &str,
+    editor: &str,
+) -> anyhow::Result<String> {
+    let body = Some(connection("team", Some(CLIENT_SECRET)));
+    let (status, _) = send(addr, Method::POST, CONNECTIONS, editor, body.clone()).await?;
+    assert_eq!(status, 403);
+    let no_secret = Some(connection("team", None));
+    let (status, text) = send(addr, Method::POST, CONNECTIONS, admin, no_secret).await?;
+    assert_eq!(status, 400, "{text}");
+    assert!(text.contains("invalid_git_connection"), "{text}");
+    let (status, text) = send(addr, Method::POST, CONNECTIONS, admin, body.clone()).await?;
+    assert_eq!(status, 200, "{text}");
+    let added: Value = serde_json::from_str(&text)?;
+    assert_eq!(added["status"], "not_connected");
+    let (status, text) = send(addr, Method::POST, CONNECTIONS, admin, body).await?;
+    assert_eq!(status, 409, "{text}");
+    assert!(text.contains("git_connection_name_exists"), "{text}");
+
+    let listed = get(addr, CONNECTIONS, editor).await?;
+    assert_eq!(listed.as_array().map(Vec::len), Some(1));
+    assert!(!listed.to_string().contains(CLIENT_SECRET), "{listed}");
+    Ok(added["id"].as_str().unwrap_or_default().to_string())
+}
+
+/// Only an admin changes or deletes a connection, and an update keeps the secret.
+async fn check_connection_update(
+    addr: SocketAddr,
+    admin: &str,
+    editor: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let item = format!("{CONNECTIONS}/{id}");
+    let body = Some(connection("renamed", None));
+    let (status, _) = send(addr, Method::PUT, &item, editor, body.clone()).await?;
+    assert_eq!(status, 403);
+    let (status, text) = send(addr, Method::PUT, &item, admin, body).await?;
+    assert_eq!(status, 200, "{text}");
+    assert_eq!(get(addr, &item, editor).await?["name"], "renamed");
+    let (status, _) = send(addr, Method::DELETE, &item, editor, None).await?;
+    assert_eq!(status, 403);
+    let (status, text) = send(addr, Method::DELETE, &item, admin, None).await?;
+    assert_eq!(status, 200, "{text}");
+    let (status, _) = send(addr, Method::GET, &item, admin, None).await?;
+    assert_eq!(status, 404);
+    Ok(())
+}
+
+/// An editor reads the public address, and only an admin changes it.
+async fn check_platform_settings(
+    addr: SocketAddr,
+    admin: &str,
+    editor: &str,
+) -> anyhow::Result<()> {
+    let path = "/api/platform/settings";
+    assert_eq!(get(addr, path, editor).await?, json!({}));
+    let body = json!({"public_url": "https://deploy.example.com"});
+    let (status, _) = send(addr, Method::PUT, path, editor, Some(body.clone())).await?;
+    assert_eq!(status, 403);
+    let invalid = Some(json!({"public_url": "https://deploy.example.com/"}));
+    let (status, text) = send(addr, Method::PUT, path, admin, invalid).await?;
+    assert_eq!(status, 422, "{text}");
+    let (status, text) = send(addr, Method::PUT, path, admin, Some(body.clone())).await?;
+    assert_eq!(status, 200, "{text}");
+    assert_eq!(get(addr, path, editor).await?, body);
+    Ok(())
+}
+
+/// The audit log names the connection and its provider, never the secret.
+async fn check_connection_audit(addr: SocketAddr, admin: &str, id: &str) -> anyhow::Result<()> {
+    let entries = get(addr, &format!("/api/audit?resource_id={id}"), admin).await?;
+    let entries = entries.as_array().cloned().unwrap_or_default();
+    let actions = entries
+        .iter()
+        .map(|entry| entry["action"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actions,
+        [
+            "delete_git_connection",
+            "update_git_connection",
+            "add_git_connection"
+        ]
+    );
+    assert_eq!(entries[0]["summary"], "renamed (gitea)");
+    let text = Value::Array(entries).to_string();
+    assert!(!text.contains(CLIENT_SECRET), "{text}");
+    Ok(())
+}
+
 #[tokio::test]
 async fn the_platform_answers_503_until_it_is_enabled() -> anyhow::Result<()> {
     let dir = TempDir::new("platform-off")?;

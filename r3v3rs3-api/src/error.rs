@@ -143,6 +143,15 @@ pub enum Error {
     #[error("the webhook request is not a JSON event of the Git provider: {reason}")]
     InvalidWebhookPayload { reason: String },
 
+    #[error("invalid Git provider connection: {reason}")]
+    InvalidGitConnection { reason: String },
+
+    #[error("a Git provider connection with this name already exists: {name}")]
+    GitConnectionNameExists { name: String },
+
+    #[error("the public address must be an http or https URL without a trailing slash: {url}")]
+    InvalidPublicUrl { url: String },
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 
@@ -351,6 +360,7 @@ impl Error {
             | Self::AppNameExists { .. }
             | Self::AppBusy { .. }
             | Self::TargetNameExists { .. }
+            | Self::GitConnectionNameExists { .. }
             | Self::TargetInUse { .. }
             | Self::AppTargetFixed { .. } => 409,
             Self::ClusterUnavailable

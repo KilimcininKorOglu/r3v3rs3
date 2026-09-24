@@ -60,6 +60,8 @@ macro_rules! checked_string {
     };
 }
 
+pub(crate) use checked_string;
+
 checked_string!(
     /// An `https://` repository URL without credentials. A private repository gets its token
     /// through the token of the app, never through the URL.
@@ -118,7 +120,7 @@ fn check_repo_url(value: &str) -> Result<(), Error> {
 }
 
 /// Whether the URL carries no credentials, query or fragment.
-fn has_only_host_and_path(url: &Url) -> bool {
+pub(crate) fn has_only_host_and_path(url: &Url) -> bool {
     url.username().is_empty()
         && url.password().is_none()
         && url.query().is_none()

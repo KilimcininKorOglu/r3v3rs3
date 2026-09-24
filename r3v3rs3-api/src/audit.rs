@@ -57,10 +57,14 @@ pub enum AuditAction {
     DeleteAppWebhookSecret,
     /// A signed webhook request of a Git provider started or queued a deployment.
     AppWebhook,
+    AddGitConnection,
+    UpdateGitConnection,
+    DeleteGitConnection,
+    UpdatePlatformSettings,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 39] = [
+    pub const ALL: [AuditAction; 43] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -100,6 +104,10 @@ impl AuditAction {
         Self::NewAppWebhookSecret,
         Self::DeleteAppWebhookSecret,
         Self::AppWebhook,
+        Self::AddGitConnection,
+        Self::UpdateGitConnection,
+        Self::DeleteGitConnection,
+        Self::UpdatePlatformSettings,
     ];
 }
 

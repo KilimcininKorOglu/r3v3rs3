@@ -61,7 +61,29 @@ const SCHEMA: &[&str] = &[
         value  BLOB NOT NULL,
         PRIMARY KEY (app_id, name)
     )",
+    "CREATE TABLE IF NOT EXISTS git_connections (
+        id            TEXT PRIMARY KEY,
+        name          TEXT NOT NULL UNIQUE,
+        provider      TEXT NOT NULL,
+        url           TEXT NOT NULL,
+        client_id     TEXT NOT NULL,
+        client_secret BLOB NOT NULL,
+        status        TEXT NOT NULL,
+        account       TEXT,
+        access_token  BLOB,
+        refresh_token BLOB,
+        expires_at    INTEGER,
+        created_at    INTEGER NOT NULL,
+        updated_at    INTEGER NOT NULL
+    )",
+    "CREATE TABLE IF NOT EXISTS platform_settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )",
 ];
+
+mod connections;
+pub use connections::{PUBLIC_URL, StoredConnection, StoredTokens};
 
 /// The secret of an app that holds its Git token.
 pub const GIT_TOKEN: &str = "git_token";

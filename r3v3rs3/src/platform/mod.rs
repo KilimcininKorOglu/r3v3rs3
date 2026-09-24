@@ -6,6 +6,7 @@
 mod agents;
 mod build;
 mod compose;
+mod connections;
 pub mod deploy;
 #[cfg(test)]
 pub(crate) mod fake;
