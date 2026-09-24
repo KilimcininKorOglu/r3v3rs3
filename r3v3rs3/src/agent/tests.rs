@@ -6,6 +6,7 @@ use super::pki::{AgentPki, fingerprint, pem_certificates};
 use super::protocol::{EnrollRequest, Enrolled};
 use super::registry::AgentRegistry;
 use super::token::{EnrollmentToken, secret_hash};
+use crate::platform::fake::FakeRuntime;
 use anyhow::{Context, anyhow};
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
@@ -118,7 +119,12 @@ impl Master {
             max_backoff: Duration::from_millis(200),
         };
         (
-            AgentClient::new(self.address.clone(), dir.clone(), timing),
+            AgentClient::new(
+                self.address.clone(),
+                dir.clone(),
+                timing,
+                Arc::new(FakeRuntime::default()),
+            ),
             dir,
         )
     }

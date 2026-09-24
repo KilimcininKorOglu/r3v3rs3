@@ -6,8 +6,10 @@
 use super::build::GitBuild;
 use super::compose::{ComposeBuild, ComposeJob, SourceRevision};
 use super::store::{NewDeployment, StoredEnv};
-use super::{Platform, new_id, not_found, proxy};
+use super::{Platform, is_local, new_id, not_found, proxy};
+use crate::agent::executor::RESOURCE_PREFIX;
 use crate::clock::unix_ms;
+use crate::runtime::ContainerRuntime;
 use anyhow::{Context as _, anyhow, bail};
 use r3v3rs3_api::container::{
     APP_LABEL, AppName, ContainerName, ContainerSpec, EnvVar, ImageInfo, ImageRef, NetworkName,
@@ -65,6 +67,9 @@ impl Default for Timing {
 struct Job {
     app: ShortId,
     deployment: ShortId,
+    /// The target of the app at the start of the deployment, and its runtime.
+    target: ShortId,
+    runtime: Arc<dyn ContainerRuntime>,
     spec: AppSpec,
     env: Vec<StoredEnv>,
     image: JobImage,
@@ -167,7 +172,7 @@ impl Platform {
         let env = self.store.env(id).await?;
         let lock = self.lock_app(&app)?;
         let new = new_deployment(&app, trigger, username, &app.spec, &env, None)?;
-        self.start_job(lock, new, image).await
+        self.start_job(lock, app.target, new, image).await
     }
 
     /// Starts a deployment that repeats the image digest, or for a Compose app the commit, the
@@ -189,12 +194,13 @@ impl Platform {
         let trigger = DeploymentTrigger::Rollback;
         let digest = source.image_digest.as_deref();
         let new = new_deployment(&app, trigger, username, &spec, &env, digest)?;
-        self.start_job(lock, new, image).await
+        self.start_job(lock, app.target, new, image).await
     }
 
     async fn start_job(
         self: &Arc<Self>,
         lock: AppLock,
+        target: ShortId,
         new: NewDeployment<'_>,
         image: JobImage,
     ) -> anyhow::Result<DeploymentEntry> {
@@ -207,6 +213,8 @@ impl Platform {
         let job = Job {
             app: new.app,
             deployment: new.id,
+            target,
+            runtime: self.runtime(target),
             spec: new.spec.clone(),
             env: new.env.to_vec(),
             image,
@@ -222,9 +230,10 @@ impl Platform {
     async fn run_job(&self, job: &Job) {
         self.run_pipeline(job).await;
         // A failed deployment can leave a built image too, so the cleanup follows every build.
+        let runtime = &*job.runtime;
         let pruned = match job.spec.source {
-            AppSource::Git { .. } => self.prune_builds(job.app).await,
-            AppSource::Compose { .. } => self.prune_compose_images(job.app).await,
+            AppSource::Git { .. } => self.prune_builds(runtime, job.app).await,
+            AppSource::Compose { .. } => self.prune_compose_images(runtime, job.app).await,
             AppSource::Image { .. } => Ok(()),
         };
         if let Err(err) = pruned {
@@ -264,6 +273,9 @@ impl Platform {
         let JobImage::Compose(source) = &job.image else {
             return self.start_container(job).await;
         };
+        if !is_local(job.target) {
+            bail!("a Compose app runs only on the local target");
+        }
         let name = proxy::container_name(job.app, job.deployment)?;
         let env = self.open_env(job.app, &job.env)?;
         let compose = ComposeJob {
@@ -276,7 +288,7 @@ impl Platform {
         };
         self.compose_up(&compose).await?;
         // Compose replaced the old container already, so a failed container stays for its log.
-        self.wait_healthy(&name, &job.spec).await?;
+        self.wait_healthy(&*job.runtime, &name, &job.spec).await?;
         Ok(name)
     }
 
@@ -288,7 +300,7 @@ impl Platform {
         let name = proxy::container_name(job.app, job.deployment)?;
         let result = self.run_container(job, &name, &digest).await;
         if result.is_err()
-            && let Err(err) = self.local.remove_container(&name).await
+            && let Err(err) = job.runtime.remove_container(&name).await
         {
             error!(container = %name, "failed to remove a failed container: {err:#}");
         }
@@ -303,13 +315,15 @@ impl Platform {
                 self.store
                     .set_status(deployment, DeploymentStatus::Deploying)
                     .await?;
-                self.resolve_image(image).await
+                self.resolve_image(&*job.runtime, image).await
             }
             JobImage::Build(source) => {
                 self.store
                     .set_status(deployment, DeploymentStatus::Building)
                     .await?;
-                let id = self.build(job.app, deployment, source).await?;
+                let id = self
+                    .build(&*job.runtime, job.app, deployment, source)
+                    .await?;
                 self.store
                     .set_status(deployment, DeploymentStatus::Deploying)
                     .await?;
@@ -320,8 +334,11 @@ impl Platform {
     }
 
     /// The present image of a pinned reference, which needs no pull.
-    async fn present_image(&self, image: &ImageRef) -> anyhow::Result<Option<ImageInfo>> {
-        match self.local.inspect_image(image).await? {
+    async fn present_image(
+        runtime: &dyn ContainerRuntime,
+        image: &ImageRef,
+    ) -> anyhow::Result<Option<ImageInfo>> {
+        match runtime.inspect_image(image).await? {
             Some(info) if pinned(image) => Ok(Some(info)),
             // An image id names a built image, which no registry has.
             None if image.as_str().starts_with("sha256:") => {
@@ -333,12 +350,16 @@ impl Platform {
 
     /// Pulls the image unless it is present, and returns the reference that pins it: a
     /// repository digest, or the image id of an image that has none.
-    async fn resolve_image(&self, image: &ImageRef) -> anyhow::Result<String> {
-        let info = match self.present_image(image).await? {
+    async fn resolve_image(
+        &self,
+        runtime: &dyn ContainerRuntime,
+        image: &ImageRef,
+    ) -> anyhow::Result<String> {
+        let info = match Self::present_image(runtime, image).await? {
             Some(info) => info,
             None => {
-                self.local.pull_image(image).await?;
-                self.local
+                runtime.pull_image(image).await?;
+                runtime
                     .inspect_image(image)
                     .await?
                     .ok_or_else(|| anyhow!("the image {image} is missing after its pull"))?
@@ -361,9 +382,10 @@ impl Platform {
         name: &ContainerName,
         digest: &str,
     ) -> anyhow::Result<()> {
+        let runtime = &*job.runtime;
         let app_label = app_label(job.app)?;
         let network = app_network(job.app)?;
-        self.local.ensure_network(&network, &app_label).await?;
+        runtime.ensure_network(&network, &app_label).await?;
         let spec = ContainerSpec {
             name: name.clone(),
             image: digest.parse()?,
@@ -378,9 +400,9 @@ impl Platform {
             limits: job.spec.limits,
             publish: Some(job.spec.port),
         };
-        self.local.create_container(&spec).await?;
-        self.local.start_container(name).await?;
-        self.wait_healthy(name, &job.spec).await
+        runtime.create_container(&spec).await?;
+        runtime.start_container(name).await?;
+        self.wait_healthy(runtime, name, &job.spec).await
     }
 
     fn open_env(&self, app: ShortId, env: &[StoredEnv]) -> anyhow::Result<Vec<EnvVar>> {
@@ -395,16 +417,20 @@ impl Platform {
     }
 
     /// Waits until the container passes its health check. A stopped container fails at once.
-    async fn wait_healthy(&self, name: &ContainerName, spec: &AppSpec) -> anyhow::Result<()> {
+    async fn wait_healthy(
+        &self,
+        runtime: &dyn ContainerRuntime,
+        name: &ContainerName,
+        spec: &AppSpec,
+    ) -> anyhow::Result<()> {
         let deadline = tokio::time::Instant::now() + self.timing.health_timeout;
         loop {
-            let info = self
-                .local
+            let info = runtime
                 .inspect_container(name)
                 .await?
                 .ok_or_else(|| anyhow!("the container {name} disappeared"))?;
             if !info.running {
-                let log = self.log_tail(name).await;
+                let log = log_tail(runtime, name).await;
                 bail!(
                     "the container stopped with exit code {}{log}",
                     info.exit_code
@@ -417,22 +443,13 @@ impl Platform {
                 return Ok(());
             }
             if tokio::time::Instant::now() >= deadline {
-                let log = self.log_tail(name).await;
+                let log = log_tail(runtime, name).await;
                 bail!(
                     "the app did not pass its health check in {} seconds{log}",
                     self.timing.health_timeout.as_secs()
                 );
             }
             tokio::time::sleep(self.timing.health_interval).await;
-        }
-    }
-
-    /// The last lines of the container log, for a failure message.
-    async fn log_tail(&self, name: &ContainerName) -> String {
-        match self.local.logs(name, LOG_TAIL).await {
-            Ok(log) if !log.trim().is_empty() => format!("\n{}", log.trim_end()),
-            Ok(_) => String::new(),
-            Err(err) => format!("\nthe log is not readable: {err:#}"),
         }
     }
 
@@ -448,7 +465,7 @@ impl Platform {
         if !compose {
             tokio::time::sleep(self.timing.drain).await;
         }
-        if let Err(err) = self.remove_old(job.app, name, compose).await {
+        if let Err(err) = self.remove_old(&*job.runtime, job.app, name, compose).await {
             // The deployment serves already, so only the log shows the failed cleanup.
             error!(app = %job.app, "failed to remove the old containers: {err:#}");
         }
@@ -459,13 +476,14 @@ impl Platform {
     /// after a change of the app source.
     async fn remove_old(
         &self,
+        runtime: &dyn ContainerRuntime,
         app: ShortId,
         keep: &ContainerName,
         compose: bool,
     ) -> anyhow::Result<()> {
-        self.remove_containers(app, Some(keep)).await?;
+        self.remove_containers(runtime, app, Some(keep)).await?;
         if !compose {
-            self.remove_compose_project(app).await?;
+            self.remove_compose_project(runtime, app).await?;
         }
         Ok(())
     }
@@ -473,10 +491,11 @@ impl Platform {
     /// Stops and removes every container of an app except `keep`.
     pub(super) async fn remove_containers(
         &self,
+        runtime: &dyn ContainerRuntime,
         app: ShortId,
         keep: Option<&ContainerName>,
     ) -> anyhow::Result<()> {
-        let containers = self.local.list_containers(&app_label(app)?).await?;
+        let containers = runtime.list_containers(&app_label(app)?).await?;
         for container in containers {
             let name = container
                 .name
@@ -485,20 +504,24 @@ impl Platform {
             if Some(&name) == keep {
                 continue;
             }
-            self.local
+            runtime
                 .stop_container(&name, self.timing.stop_timeout)
                 .await?;
-            self.local.remove_container(&name).await?;
+            runtime.remove_container(&name).await?;
         }
         Ok(())
     }
 
     /// Removes the containers, the network, the Compose project and the built images of an app.
-    pub(super) async fn remove_app_resources(&self, app: ShortId) -> anyhow::Result<()> {
-        self.remove_compose_project(app).await?;
-        self.remove_containers(app, None).await?;
-        self.local.remove_network(&app_network(app)?).await?;
-        self.remove_builds(app).await
+    pub(super) async fn remove_app_resources(
+        &self,
+        runtime: &dyn ContainerRuntime,
+        app: ShortId,
+    ) -> anyhow::Result<()> {
+        self.remove_compose_project(runtime, app).await?;
+        self.remove_containers(runtime, app, None).await?;
+        runtime.remove_network(&app_network(app)?).await?;
+        self.remove_builds(runtime, app).await
     }
 }
 
@@ -522,6 +545,15 @@ fn new_deployment<'a>(
     })
 }
 
+/// The last lines of the container log, for a failure message.
+async fn log_tail(runtime: &dyn ContainerRuntime, name: &ContainerName) -> String {
+    match runtime.logs(name, LOG_TAIL).await {
+        Ok(log) if !log.trim().is_empty() => format!("\n{}", log.trim_end()),
+        Ok(_) => String::new(),
+        Err(err) => format!("\nthe log is not readable: {err:#}"),
+    }
+}
+
 /// Whether a reference names one image version, so that a present image needs no pull.
 fn pinned(image: &ImageRef) -> bool {
     image.as_str().contains('@') || image.as_str().starts_with("sha256:")
@@ -534,7 +566,7 @@ fn app_label(app: ShortId) -> anyhow::Result<AppName> {
 
 /// The network of an app, so that the containers of different apps do not reach each other.
 fn app_network(app: ShortId) -> anyhow::Result<NetworkName> {
-    Ok(format!("r3v3rs3-{app}").parse()?)
+    Ok(format!("{RESOURCE_PREFIX}{app}").parse()?)
 }
 
 /// Checks a published port once. With a path, the app must answer the HTTP request with 2xx or

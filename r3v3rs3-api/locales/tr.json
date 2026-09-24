@@ -334,6 +334,8 @@
   "error.target_name_exists": "{name} adında bir target zaten var.",
   "error.target_in_use": "Target üzerinde bir uygulama çalışıyor, bu yüzden target silinemez: {id}",
   "error.target_read_only": "Local target değiştirilemez ve silinemez: {id}",
+  "error.agent_offline": "Target'ın agent'ı bağlı değil: {id}",
+  "error.app_target_fixed": "{name} uygulamasının deployment'ları var, bu yüzden target'ı değiştirilemez.",
   "error_page.401": "Yetkisiz Erişim",
   "error_page.403": "Erişim Engellendi",
   "error_page.413": "Request Body'si Çok Büyük",

@@ -134,6 +134,12 @@ pub enum Error {
     #[error("the local target cannot be changed or deleted: {id}")]
     TargetReadOnly { id: ShortId },
 
+    #[error("the agent of the target is not connected: {id}")]
+    AgentOffline { id: ShortId },
+
+    #[error("the target of an app with deployments cannot change: {name}")]
+    AppTargetFixed { name: String },
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 
@@ -342,8 +348,10 @@ impl Error {
             | Self::AppNameExists { .. }
             | Self::AppBusy { .. }
             | Self::TargetNameExists { .. }
-            | Self::TargetInUse { .. } => 409,
+            | Self::TargetInUse { .. }
+            | Self::AppTargetFixed { .. } => 409,
             Self::ClusterUnavailable
+            | Self::AgentOffline { .. }
             | Self::PlatformDisabled
             | Self::PlatformInCluster
             | Self::PlatformFailed => 503,

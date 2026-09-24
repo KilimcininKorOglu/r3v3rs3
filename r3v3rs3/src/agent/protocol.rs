@@ -1,6 +1,11 @@
 //! The messages of the agent link. The set is closed: the agent never receives a program name,
 //! a shell string or raw arguments, and every operand is a type that validates itself.
 
+use r3v3rs3_api::container::{
+    AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, ImageInfo, ImageRef,
+    NetworkName, ProjectName,
+};
+use r3v3rs3_api::git::RelPath;
 use r3v3rs3_api::id::ShortId;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt;
@@ -42,11 +47,69 @@ pub struct Enrolled {
     pub ca: String,
 }
 
-/// A request of the master. Each request travels on its own stream.
+/// A request of the master. Each request travels on its own stream. The requests follow the
+/// methods of `ContainerRuntime`. The enums of the link are tagged externally, because an
+/// internally tagged enum reads its content through a buffer that cannot read the integer keys of
+/// a map, such as the published ports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum AgentRequest {
     Ping,
+    Version,
+    PullImage {
+        image: ImageRef,
+    },
+    InspectImage {
+        image: ImageRef,
+    },
+    /// The tar archive of the build context follows the frame as a payload.
+    BuildImage {
+        dockerfile: RelPath,
+        tag: ImageRef,
+    },
+    RemoveImage {
+        image: ImageRef,
+    },
+    PruneProjectImages {
+        project: ProjectName,
+        all: bool,
+    },
+    EnsureNetwork {
+        network: NetworkName,
+        app: AppName,
+    },
+    RemoveNetwork {
+        network: NetworkName,
+    },
+    CreateContainer {
+        spec: ContainerSpec,
+    },
+    StartContainer {
+        name: ContainerName,
+    },
+    StopContainer {
+        name: ContainerName,
+        timeout_secs: u64,
+    },
+    RemoveContainer {
+        name: ContainerName,
+    },
+    InspectContainer {
+        name: ContainerName,
+    },
+    ListContainers {
+        app: AppName,
+    },
+    Logs {
+        name: ContainerName,
+        tail: u32,
+    },
+    /// Connects the stream to a published port of a container. After the answer the stream
+    /// carries the bytes of the connection.
+    Tunnel {
+        container: ContainerName,
+        port: u16,
+    },
 }
 
 /// The answer of the agent to one request.
@@ -58,7 +121,32 @@ pub enum AgentReply {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum AgentOutput {
-    Pong { version: String },
+    Pong {
+        version: String,
+    },
+    /// The version of the container engine.
+    Version {
+        version: String,
+    },
+    Done,
+    Image {
+        image: Option<ImageInfo>,
+    },
+    /// The id of a built image or a created container.
+    Id {
+        id: String,
+    },
+    Container {
+        container: Option<ContainerInfo>,
+    },
+    Containers {
+        containers: Vec<ContainerSummary>,
+    },
+    Log {
+        log: String,
+    },
+    /// The stream is connected to the port.
+    Tunnel,
 }

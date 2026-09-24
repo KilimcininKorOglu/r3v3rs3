@@ -2,17 +2,17 @@
 //! key and certificate in its data directory, and then holds an mTLS connection to the master,
 //! which it opens again after every failure.
 
+use super::executor::Executor;
 use super::frame::{read_frame, write_frame};
-use super::link::{LinkStream, serve};
+use super::link::serve;
 use super::pki::{
     agent_client_config, enrollment_client_config, master_server_name, new_agent_key,
 };
-use super::protocol::{
-    AgentOutput, AgentReply, AgentRequest, EnrollRequest, EnrollResponse, Enrolled,
-};
+use super::protocol::{EnrollRequest, EnrollResponse, Enrolled};
 use super::token::EnrollmentToken;
 use crate::clock::unix_ms;
 use crate::config::file::write_private;
+use crate::runtime::ContainerRuntime;
 use anyhow::{Context, anyhow, bail};
 use r3v3rs3_api::id::ShortId;
 use std::path::{Path, PathBuf};
@@ -120,14 +120,22 @@ pub struct AgentClient {
     master: String,
     data_dir: PathBuf,
     timing: AgentTiming,
+    executor: Arc<Executor>,
 }
 
 impl AgentClient {
-    pub fn new(master: String, data_dir: PathBuf, timing: AgentTiming) -> Self {
+    /// A client that runs the requests of the master on `runtime`.
+    pub fn new(
+        master: String,
+        data_dir: PathBuf,
+        timing: AgentTiming,
+        runtime: Arc<dyn ContainerRuntime>,
+    ) -> Self {
         Self {
             master,
             data_dir,
             timing,
+            executor: Arc::new(Executor::new(runtime)),
         }
     }
 
@@ -213,9 +221,18 @@ impl AgentClient {
         info!(master = self.master, "connected to the master");
         let last_request = Arc::new(AtomicU64::new(unix_ms()));
         let seen = last_request.clone();
+        let executor = self.executor.clone();
         let served = serve(tls.compat(), move |stream| {
             seen.store(unix_ms(), Ordering::Relaxed);
-            tokio::spawn(answer(stream));
+            let executor = executor.clone();
+            tokio::spawn(async move {
+                if let Err(err) = executor.answer(stream).await {
+                    warn!(
+                        err = format!("{err:#}"),
+                        "failed to answer a request of the master"
+                    );
+                }
+            });
         });
         tokio::select! {
             result = served => Ok(result?),
@@ -235,25 +252,5 @@ async fn idle(last_request: &AtomicU64, limit: Duration) {
         if quiet > limit_ms {
             return;
         }
-    }
-}
-
-/// Reads one request from a stream of the master and writes the answer.
-async fn answer(mut stream: LinkStream) {
-    let result = async {
-        let request: AgentRequest = read_frame(&mut stream).await?;
-        let reply = match request {
-            AgentRequest::Ping => AgentReply::Ok(AgentOutput::Pong {
-                version: VERSION.to_string(),
-            }),
-        };
-        write_frame(&mut stream, &reply).await
-    }
-    .await;
-    if let Err(err) = result {
-        warn!(
-            err = format!("{err:#}"),
-            "failed to answer a request of the master"
-        );
     }
 }

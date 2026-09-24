@@ -1,8 +1,9 @@
 //! Sends the proxies of the running apps to the server.
 
-use super::Platform;
 use super::proxy::{self, LiveApp};
 use super::store::RunningDeployment;
+use super::{Platform, is_local};
+use crate::agent::forward::ForwardKey;
 use crate::command::ServerCommand;
 use crate::discovery::DiscoveredProxy;
 use r3v3rs3_api::discovery::DiscoveryIssue;
@@ -73,7 +74,25 @@ impl Platform {
     ) -> anyhow::Result<Result<u16, String>> {
         let name = proxy::container_name(deployment.app, deployment.id)?;
         let port = deployment.spec.port;
-        Ok(match self.local.inspect_container(&name).await? {
+        let info = match self
+            .runtime(deployment.target)
+            .inspect_container(&name)
+            .await
+        {
+            Ok(info) => info,
+            // The app of an unreachable agent keeps its route, and its forwarder closes every
+            // connection until the agent is back, so the proxy answers 502.
+            Err(err) if !is_local(deployment.target) => {
+                let key = ForwardKey {
+                    target: deployment.target,
+                    container: name,
+                    port,
+                };
+                return Ok(self.forwarders.existing(&key).ok_or(format!("{err:#}")));
+            }
+            Err(err) => return Err(err),
+        };
+        Ok(match info {
             Some(info) if info.running => info
                 .published
                 .get(&port)

@@ -55,7 +55,8 @@ async fn agent(args: AgentArgs) -> anyhow::Result<()> {
         .as_deref()
         .map(str::parse::<EnrollmentToken>)
         .transpose()?;
-    let client = AgentClient::new(args.master, data_dir, AgentTiming::default());
+    let runtime = Arc::new(r3v3rs3::platform::docker_runtime(&args.docker)?);
+    let client = AgentClient::new(args.master, data_dir, AgentTiming::default(), runtime);
     let identity = client.identity(token.as_ref()).await?;
     info!(target = %identity.target, "the agent starts");
     tokio::select! {

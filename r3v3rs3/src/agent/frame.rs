@@ -38,6 +38,34 @@ where
     Ok(serde_json::from_slice(&body)?)
 }
 
+/// Writes a payload after its frame: a big-endian `u64` length, then the bytes.
+pub async fn write_payload<W>(writer: &mut W, payload: &[u8]) -> anyhow::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    writer.write_u64(u64::try_from(payload.len())?).await?;
+    writer.write_all(payload).await?;
+    writer.flush().await?;
+    Ok(())
+}
+
+/// Reads a payload of at most `limit` bytes.
+pub async fn read_payload<R>(reader: &mut R, limit: u64) -> anyhow::Result<Vec<u8>>
+where
+    R: AsyncRead + Unpin,
+{
+    let length = reader.read_u64().await?;
+    if length > limit {
+        bail!("the payload of {length} bytes is larger than {limit} bytes");
+    }
+    let mut payload = Vec::with_capacity(usize::try_from(length)?);
+    reader.take(length).read_to_end(&mut payload).await?;
+    if payload.len() as u64 != length {
+        bail!("the payload ended after {} bytes", payload.len());
+    }
+    Ok(payload)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -53,6 +81,23 @@ mod tests {
         });
         written?;
         assert_eq!(read?, value);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_payload_survives_the_pipe_and_keeps_its_limit() -> anyhow::Result<()> {
+        let (mut writer, mut reader) = duplex(64);
+        let payload = vec![7u8; 1000];
+        let (written, read) = tokio::join!(
+            write_payload(&mut writer, &payload),
+            read_payload(&mut reader, 1000)
+        );
+        written?;
+        assert_eq!(read?, payload);
+
+        writer.write_u64(1001).await?;
+        let read = read_payload(&mut reader, 1000).await;
+        assert!(read.unwrap_err().to_string().contains("larger"));
         Ok(())
     }
 

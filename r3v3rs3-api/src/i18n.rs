@@ -241,6 +241,10 @@ mod tests {
             Error::TargetReadOnly {
                 id: "abc".parse().unwrap(),
             },
+            Error::AgentOffline {
+                id: "abc".parse().unwrap(),
+            },
+            Error::AppTargetFixed { name: text() },
             Error::AcmeAccountCreationFailed,
             Error::AcmeUnsupportedChallenge { challenge: text() },
             Error::AcmeIdentifiersMissing,

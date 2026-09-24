@@ -106,6 +106,8 @@ pub struct NewDeployment<'a> {
 pub struct RunningDeployment {
     pub id: ShortId,
     pub app: ShortId,
+    /// The target of the app, which runs the container.
+    pub target: ShortId,
     pub app_name: AppName,
     pub spec: AppSpec,
 }
@@ -568,7 +570,7 @@ impl PlatformStore {
     /// The running deployment of every app, with the app name.
     pub async fn running_deployments(&self) -> anyhow::Result<Vec<RunningDeployment>> {
         let rows = sqlx::query(
-            "SELECT d.id, d.app_id, a.name, d.spec FROM deployments d
+            "SELECT d.id, d.app_id, a.target_id, a.name, d.spec FROM deployments d
             JOIN apps a ON a.id = d.app_id
             WHERE d.status = 'running' ORDER BY a.name",
         )
@@ -579,6 +581,7 @@ impl PlatformStore {
                 Ok(RunningDeployment {
                     id: id_of(row, "id")?,
                     app: id_of(row, "app_id")?,
+                    target: id_of(row, "target_id")?,
                     app_name: row.try_get::<&str, _>("name")?.parse()?,
                     spec: serde_json::from_str(row.try_get("spec")?)?,
                 })

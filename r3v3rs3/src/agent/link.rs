@@ -1,7 +1,7 @@
 //! One multiplexed agent connection. A yamux connection runs inside the TLS stream. The master
 //! opens a new stream for every request and every tunnel; the agent only accepts streams.
 
-use super::frame::{read_frame, write_frame};
+use super::frame::{read_frame, write_frame, write_payload};
 use super::protocol::{AgentOutput, AgentReply, AgentRequest};
 use anyhow::anyhow;
 use futures::future::poll_fn;
@@ -65,10 +65,37 @@ impl Link {
     pub async fn request(&self, request: &AgentRequest) -> anyhow::Result<AgentOutput> {
         let mut stream = self.open().await?;
         write_frame(&mut stream, request).await?;
-        match read_frame(&mut stream).await? {
-            AgentReply::Ok(output) => Ok(output),
-            AgentReply::Error { message } => Err(anyhow!(message)),
+        read_reply(&mut stream).await
+    }
+
+    /// Sends one request with its payload on a new stream and reads its answer.
+    pub async fn request_with_payload(
+        &self,
+        request: &AgentRequest,
+        payload: &[u8],
+    ) -> anyhow::Result<AgentOutput> {
+        let mut stream = self.open().await?;
+        write_frame(&mut stream, request).await?;
+        write_payload(&mut stream, payload).await?;
+        read_reply(&mut stream).await
+    }
+
+    /// Opens a stream that the agent connects to a port, and returns it once the agent confirmed
+    /// the connection.
+    pub async fn tunnel(&self, request: &AgentRequest) -> anyhow::Result<LinkStream> {
+        let mut stream = self.open().await?;
+        write_frame(&mut stream, request).await?;
+        match read_reply(&mut stream).await? {
+            AgentOutput::Tunnel => Ok(stream),
+            other => Err(anyhow!("the agent answered a tunnel with {other:?}")),
         }
+    }
+}
+
+async fn read_reply(stream: &mut LinkStream) -> anyhow::Result<AgentOutput> {
+    match read_frame(stream).await? {
+        AgentReply::Ok(output) => Ok(output),
+        AgentReply::Error { message } => Err(anyhow!(message)),
     }
 }
 

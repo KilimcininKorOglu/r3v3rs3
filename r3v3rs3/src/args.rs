@@ -40,6 +40,15 @@ pub struct AgentArgs {
     #[clap(long, value_name = "DIR", env = "R3V3RS3_AGENT_DATA_DIR")]
     pub data_dir: Option<PathBuf>,
 
+    /// The Docker Engine API that runs the containers of the target.
+    #[clap(
+        long,
+        value_name = "ENDPOINT",
+        default_value = "unix:///var/run/docker.sock",
+        env = "R3V3RS3_AGENT_DOCKER"
+    )]
+    pub docker: String,
+
     #[clap(
         long,
         short,

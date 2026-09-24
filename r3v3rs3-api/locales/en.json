@@ -334,6 +334,8 @@
   "error.target_name_exists": "A target named {name} already exists.",
   "error.target_in_use": "An app runs on the target, so the target cannot be deleted: {id}",
   "error.target_read_only": "The local target cannot be changed or deleted: {id}",
+  "error.agent_offline": "The agent of the target is not connected: {id}",
+  "error.app_target_fixed": "The app {name} has deployments, so its target cannot change.",
   "error_page.401": "Unauthorized",
   "error_page.403": "Forbidden",
   "error_page.413": "Payload Too Large",

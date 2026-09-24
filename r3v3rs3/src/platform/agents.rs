@@ -116,6 +116,7 @@ impl Platform {
             return Err(not_found(id));
         }
         self.agents.disconnect(id);
+        self.forwarders.close_target(id);
         Ok(target)
     }
 

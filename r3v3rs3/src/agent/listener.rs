@@ -184,6 +184,7 @@ impl AgentListener {
             .map_err(|_| anyhow!("the agent did not answer a ping"))??;
         match output {
             AgentOutput::Pong { version } => Ok(version),
+            other => Err(anyhow!("the agent answered a ping with {other:?}")),
         }
     }
 

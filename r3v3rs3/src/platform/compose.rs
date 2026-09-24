@@ -5,8 +5,10 @@
 use super::Platform;
 use super::build::remove_dir;
 use super::deploy::DEPLOYMENT_LABEL;
+use crate::agent::executor::RESOURCE_PREFIX;
 use crate::build::Revision;
 use crate::build::compose::{ComposeModel, ComposePort, ComposeProject};
+use crate::runtime::ContainerRuntime;
 use anyhow::{Context as _, bail};
 use r3v3rs3_api::container::{APP_LABEL, ContainerName, EnvVar, ProjectName, ServiceName};
 use r3v3rs3_api::git::{CommitSha, GitRef, RelPath, RepoUrl};
@@ -147,22 +149,30 @@ impl Platform {
 
     /// Removes the unused built images of the Compose project of an app, after a new build left
     /// the old ones without a tag.
-    pub(super) async fn prune_compose_images(&self, app: ShortId) -> anyhow::Result<()> {
-        self.local
+    pub(super) async fn prune_compose_images(
+        &self,
+        runtime: &dyn ContainerRuntime,
+        app: ShortId,
+    ) -> anyhow::Result<()> {
+        runtime
             .prune_project_images(&project_name(app)?, false)
             .await
     }
 
     /// Stops the Compose project of an app and removes its containers, its networks, its built
     /// images and its checkouts. An app that never ran as a Compose app has none.
-    pub(super) async fn remove_compose_project(&self, app: ShortId) -> anyhow::Result<()> {
+    pub(super) async fn remove_compose_project(
+        &self,
+        runtime: &dyn ContainerRuntime,
+        app: ShortId,
+    ) -> anyhow::Result<()> {
         let app_dir = self.compose_dir.join(app.to_string());
         if !tokio::fs::try_exists(&app_dir).await? {
             return Ok(());
         }
         let name = project_name(app)?;
         self.compose.down(&name).await?;
-        self.local.prune_project_images(&name, true).await?;
+        runtime.prune_project_images(&name, true).await?;
         remove_dir(&app_dir).await?;
         Ok(())
     }
@@ -170,7 +180,7 @@ impl Platform {
 
 /// The Compose project of an app.
 pub(super) fn project_name(app: ShortId) -> anyhow::Result<ProjectName> {
-    Ok(format!("r3v3rs3-{app}").parse()?)
+    Ok(format!("{RESOURCE_PREFIX}{app}").parse()?)
 }
 
 fn project<'a>(

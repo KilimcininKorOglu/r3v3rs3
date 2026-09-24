@@ -8,13 +8,17 @@ mod build;
 mod compose;
 pub mod deploy;
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 pub mod proxy;
 mod publish;
+#[cfg(test)]
+mod remote_tests;
 pub mod store;
 
+use crate::agent::forward::Forwarders;
 use crate::agent::pki::AgentPki;
 use crate::agent::registry::AgentRegistry;
+use crate::agent::remote::RemoteRuntime;
 use crate::audit::AuditLog;
 use crate::build::compose::{ComposeRunner, DockerCompose};
 use crate::build::{GitFetcher, SourceFetcher};
@@ -31,7 +35,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, PlatformConfig,
+    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, LOCAL_TARGET, PlatformConfig,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashSet};
@@ -148,6 +152,8 @@ pub struct Platform {
     pki: Option<AgentPki>,
     /// The connected agents.
     agents: Arc<AgentRegistry>,
+    /// The loopback listeners of the published ports on the agents.
+    forwarders: Arc<Forwarders>,
     /// Records the enrollments of the agents. The tests run without it.
     audit: Option<Arc<AuditLog>>,
 }
@@ -169,9 +175,11 @@ impl Platform {
         let build_dir = config_dir.join(build::BUILD_DIR);
         build::remove_dir(&build_dir).await?;
         let pki = agent_pki(&config.platform, config_dir).await?;
+        let agents = Arc::new(AgentRegistry::default());
         Ok(Self {
             pki,
-            agents: Arc::new(AgentRegistry::default()),
+            forwarders: Arc::new(Forwarders::new(agents.clone())),
+            agents,
             audit,
             store,
             keys,
@@ -200,6 +208,18 @@ impl Platform {
     /// The runtime of the local target.
     pub fn local_runtime(&self) -> Arc<dyn ContainerRuntime> {
         self.local.clone()
+    }
+
+    /// The runtime of a target: the local Docker Engine, or the agent of the target.
+    fn runtime(&self, target: ShortId) -> Arc<dyn ContainerRuntime> {
+        if is_local(target) {
+            return self.local.clone();
+        }
+        Arc::new(RemoteRuntime::new(
+            target,
+            self.agents.clone(),
+            self.forwarders.clone(),
+        ))
     }
 
     pub async fn apps(&self) -> anyhow::Result<Vec<AppEntry>> {
@@ -247,6 +267,13 @@ impl Platform {
     ) -> anyhow::Result<AppEntry> {
         self.check_request(&request).await?;
         let current = self.app(id).await?;
+        // The containers of the deployments run on the old target.
+        if request.target != current.target && !self.store.deployments(id, 1).await?.is_empty() {
+            return Err(Error::AppTargetFixed {
+                name: current.name.to_string(),
+            }
+            .into());
+        }
         let app = AppEntry {
             id,
             name: request.name,
@@ -269,7 +296,8 @@ impl Platform {
         let _lock = self.lock_app(&app)?;
         // Only a pipeline creates containers, so an app without deployments needs no Docker call.
         if !self.store.deployments(id, 1).await?.is_empty() {
-            self.remove_app_resources(id).await?;
+            let runtime = self.runtime(app.target);
+            self.remove_app_resources(&*runtime, id).await?;
         }
         if !self.store.delete_app(id).await? {
             return Err(not_found(id));
@@ -360,7 +388,7 @@ impl Platform {
     /// The last `tail` lines of the container log of the running deployment of an app. An app
     /// without a running deployment has an empty log.
     pub async fn app_log(&self, id: ShortId, tail: u32) -> anyhow::Result<AppLog> {
-        self.app(id).await?;
+        let app = self.app(id).await?;
         let Some(deployment) = self.store.running_deployment(id).await? else {
             return Ok(AppLog {
                 log: String::new(),
@@ -368,7 +396,8 @@ impl Platform {
             });
         };
         let name = proxy::container_name(id, deployment)?;
-        let log = self.local.logs(&name, tail.clamp(1, MAX_LOG_TAIL)).await?;
+        let runtime = self.runtime(app.target);
+        let log = runtime.logs(&name, tail.clamp(1, MAX_LOG_TAIL)).await?;
         Ok(AppLog { log, running: true })
     }
 
@@ -462,6 +491,11 @@ fn invalid_env(reason: &str) -> anyhow::Error {
     .into()
 }
 
+/// Whether a target is the Docker Engine of the server itself.
+fn is_local(target: ShortId) -> bool {
+    target.to_string() == LOCAL_TARGET
+}
+
 fn not_found(id: ShortId) -> anyhow::Error {
     Error::IdNotFound { id: id.to_string() }.into()
 }
@@ -506,7 +540,7 @@ async fn agent_pki(config: &PlatformConfig, config_dir: &Path) -> anyhow::Result
 
 /// The runtime of the Docker Engine at `endpoint`. The platform talks to a local engine over a
 /// Unix socket or plain TCP.
-fn docker_runtime(endpoint: &str) -> anyhow::Result<DockerRuntime> {
+pub fn docker_runtime(endpoint: &str) -> anyhow::Result<DockerRuntime> {
     let endpoint = endpoint
         .parse::<Endpoint>()
         .map_err(|err| anyhow!("invalid Docker endpoint {endpoint}: {err}"))?;

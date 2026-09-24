@@ -3,7 +3,9 @@
 //! old deployments are removed.
 
 use super::Platform;
+use crate::agent::executor::BUILD_REPOSITORY_PREFIX;
 use crate::build::{Revision, context_archive};
+use crate::runtime::ContainerRuntime;
 use anyhow::Context as _;
 use r3v3rs3_api::container::ImageRef;
 use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
@@ -36,6 +38,7 @@ impl Platform {
     /// the build, whether the build passed or not.
     pub(super) async fn build(
         &self,
+        runtime: &dyn ContainerRuntime,
         app: ShortId,
         deployment: ShortId,
         source: &GitBuild,
@@ -46,7 +49,7 @@ impl Platform {
             .await
             .context("the build queue is closed")?;
         let dir = self.build_dir.join(deployment.to_string());
-        let result = self.build_in(app, deployment, source, &dir).await;
+        let result = self.build_in(runtime, app, deployment, source, &dir).await;
         if let Err(err) = remove_dir(&dir).await {
             error!(dir = %dir.display(), "failed to remove a checkout: {err:#}");
         }
@@ -55,6 +58,7 @@ impl Platform {
 
     async fn build_in(
         &self,
+        runtime: &dyn ContainerRuntime,
         app: ShortId,
         deployment: ShortId,
         source: &GitBuild,
@@ -77,15 +81,17 @@ impl Platform {
         let archive =
             tokio::task::spawn_blocking(move || context_archive(&checkout, &context)).await??;
         let tag = build_tag(app, deployment)?;
-        self.local
-            .build_image(archive, &source.dockerfile, &tag)
-            .await
+        runtime.build_image(archive, &source.dockerfile, &tag).await
     }
 
     /// Removes the built images of the deployments after the newest [`KEPT_BUILDS`], except the
     /// image of the running deployment. Each pipeline runs it, so each deployment passes the
     /// window once.
-    pub(super) async fn prune_builds(&self, app: ShortId) -> anyhow::Result<()> {
+    pub(super) async fn prune_builds(
+        &self,
+        runtime: &dyn ContainerRuntime,
+        app: ShortId,
+    ) -> anyhow::Result<()> {
         let window = u32::try_from(KEPT_BUILDS * 2)?;
         let deployments = self.store.deployments(app, window).await?;
         let old = deployments
@@ -93,7 +99,7 @@ impl Platform {
             .skip(KEPT_BUILDS)
             .filter(|deployment| deployment.status != DeploymentStatus::Running);
         for deployment in old {
-            self.local
+            runtime
                 .remove_image(&build_tag(app, deployment.id)?)
                 .await?;
         }
@@ -101,13 +107,17 @@ impl Platform {
     }
 
     /// Removes the built images of every listed deployment of an app.
-    pub(super) async fn remove_builds(&self, app: ShortId) -> anyhow::Result<()> {
+    pub(super) async fn remove_builds(
+        &self,
+        runtime: &dyn ContainerRuntime,
+        app: ShortId,
+    ) -> anyhow::Result<()> {
         let deployments = self
             .store
             .deployments(app, super::DEPLOYMENT_LIST_LIMIT)
             .await?;
         for deployment in deployments {
-            self.local
+            runtime
                 .remove_image(&build_tag(app, deployment.id)?)
                 .await?;
         }
@@ -117,7 +127,7 @@ impl Platform {
 
 /// The tag of the image that a deployment builds.
 pub(super) fn build_tag(app: ShortId, deployment: ShortId) -> anyhow::Result<ImageRef> {
-    Ok(format!("r3v3rs3/{app}:{deployment}").parse()?)
+    Ok(format!("{BUILD_REPOSITORY_PREFIX}{app}:{deployment}").parse()?)
 }
 
 /// Removes a directory. A missing directory is not an error.
