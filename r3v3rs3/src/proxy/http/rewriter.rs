@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
-use hyper::header::{ALT_SVC, CONTENT_TYPE, SET_COOKIE};
+use hyper::header::{ALT_SVC, CACHE_CONTROL, CONTENT_TYPE, SET_COOKIE};
 use hyper::{
     HeaderMap,
     header::{FORWARDED, VIA},
@@ -268,6 +268,10 @@ fn error_response(
         CONTENT_TYPE,
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
+    // The page follows the language and theme cookies, and an error must not outlive its cause,
+    // so no cache in front of r3v3rs3 may keep it.
+    res.headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(res)
 }
 
@@ -327,6 +331,15 @@ mod test {
             ip: ip.parse().unwrap(),
             trusted_peer: true,
         }
+    }
+
+    #[test]
+    fn the_error_page_is_never_stored() {
+        let err = anyhow::Error::new(super::super::error::ProxyError::NoUpstreamServers);
+        let res = error_response(err, PagePreferences::default()).unwrap();
+        assert_eq!(res.status(), 502);
+        assert_eq!(res.headers()[CACHE_CONTROL], "no-store");
+        assert_eq!(res.headers()[CONTENT_TYPE], "text/html; charset=utf-8");
     }
 
     #[test]
