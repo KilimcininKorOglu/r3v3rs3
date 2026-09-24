@@ -17,6 +17,8 @@ r3v3rs3 supports six types of ports:
 - TCP over TLS
 - UDP
 
+The `listen` address of a port starts with `/ip4/<address>` or `/ip6/<address>`, followed by `/tcp/<port>` (TCP), `/tcp/<port>/tls` (TCP over TLS), `/tcp/<port>/http` (HTTP), `/tcp/<port>/https` (HTTPS), `/udp/<port>` (UDP) or `/udp/<port>/quic/http` (HTTP over QUIC). `name` is an optional name of the port. Turn off "Active" (`active = false`) to stop a port or a proxy without deleting it.
+
 ## Server Names
 
 HTTPS, HTTP over QUIC and TCP over TLS ports have a "Server Names" field. r3v3rs3 selects the server certificate from the SNI (Server Name Indication) of the client. When the client sends no SNI, r3v3rs3 selects a valid server certificate that has all the server names. When the list is empty, r3v3rs3 selects the first valid server certificate.
@@ -112,7 +114,7 @@ routes = [{ path = "/", servers = [{ url = "http://app:9000/" }] }]
 
 ### DNS SRV Servers
 
-A server URL with the `http+srv` or `https+srv` scheme takes its servers from the DNS SRV records of its host name. r3v3rs3 resolves the name, and the route gets one server per SRV target with the scheme before `+srv`, the target `host:port` and the path of the URL. Consul, Kubernetes headless services and other service registries publish such records. The URL has no port, because the SRV records give the ports.
+A server URL with the `http+srv` or `https+srv` scheme takes its servers from the DNS SRV records of its host name. r3v3rs3 resolves the name, and the route gets one server per SRV target with the scheme before `+srv`, the target `host:port` and the path and query of the URL. Consul, Kubernetes headless services and other service registries publish such records. The URL has no port, because the SRV records give the ports.
 
 ```toml
 [my-api]
@@ -127,6 +129,10 @@ With the SRV records `_http._tcp.api.service.consul. 30 IN SRV 0 5 8080 api-1.no
 - r3v3rs3 resolves the name again when the TTL of the answer expires, at the earliest after 5 seconds. When the targets change, the route gets the new servers without a restart. The health of the servers that stay is kept. A failed lookup keeps the last targets and is retried after 5 seconds.
 - A route whose SRV name has no target answers with 502. The other servers of the route, if any, still get the requests.
 - The "Upstream DNS Resolver" setting (see [Settings](#settings)) selects the DNS server of the SRV lookups, for example `127.0.0.1:8600` for the Consul DNS interface. Without the setting, r3v3rs3 uses the system resolver. The host names of the targets are resolved by the system resolver when r3v3rs3 connects.
+
+## HTTPS Redirect
+
+"Automatically Redirect HTTP to HTTPS" (`upgrade_insecure`, default `true`) answers a plain HTTP request with `301` to the same host and path on the HTTPS port of the proxy. A proxy without an HTTPS port does not redirect.
 
 ## Path Rewrite
 
@@ -387,6 +393,12 @@ The CDN IP ranges are compiled into the binary and downloaded again every day. T
 
 Akamai does not publish its edge IP ranges. Add your Akamai Site Shield ranges to "Trusted Proxies" instead.
 
+```toml
+[my-app]
+protocol = "http"
+client_ip = { trust_cdn = true, trusted_proxies = ["10.0.0.0/8"] }
+```
+
 ## IP Filter
 
 You can allow or deny clients by IP address for each HTTP / HTTPS proxy. r3v3rs3 checks the client IP that the "Client IP" section resolves, so the filter also works behind a CDN or a trusted proxy.
@@ -499,7 +511,7 @@ For each client request, r3v3rs3 sends a `GET` request to the auth URL. The auth
 
 - **2xx response**: r3v3rs3 sends the request to the upstream server. It copies the headers in "Copy Response Headers" from the auth response to the upstream request. It removes these headers from the client request first, so a client cannot send them itself.
 - **Other responses**: r3v3rs3 sends the auth response (status, headers and a body up to 64 KiB) to the client. So a redirect to a login page works.
-- **No response within the timeout, or a connection error**: The client receives `502 Bad Gateway`.
+- **No response within `timeout` (default `10s`), or a connection error**: The client receives `502 Bad Gateway`.
 
 The auth request trusts the same root certificates as the upstream requests. It sends the client certificate of the proxy, see "Upstream Client Certificates".
 
@@ -732,7 +744,9 @@ r3v3rs3 supports WebSocket (and HTTP upgrading) for HTTP and HTTPS proxies. You 
 
 ## HTTP/3
 
-To enable HTTP/3 proxying, bind a QUIC port in the Ports section and select HTTP over QUIC as the protocol. Note that HTTP/3 is only supported for incoming connections—upstream connections will be downgraded to HTTP/2 or HTTP/1.1.
+To enable HTTP/3 proxying, bind a QUIC port in the Ports section and select HTTP over QUIC as the protocol. HTTP/3 is only supported for incoming connections. Upstream connections use HTTP/2 or HTTP/1.1.
+
+r3v3rs3 replaces the `Alt-Svc` header of each response with the HTTPS and QUIC ports of the proxy, so a browser learns about HTTP/3 from its first HTTPS response.
 
 WebTransport is not supported.
 
@@ -868,6 +882,8 @@ An id that the request repeats gets one result.
 r3v3rs3 supports automatic certificate provisioning using [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment). ACME is supported by many certificate authorities, such as Let's Encrypt, ZeroSSL, and Google Trust Services.
 
 An ACME entry holds one or more domain names. Enter them separated by commas in the "Domain Names" field, for example `example.com, *.example.com`. The certificate contains every domain name as a Subject Alternative Name. r3v3rs3 renews the certificate automatically before it expires. If an order fails, r3v3rs3 orders again after one hour.
+
+Select the certificate authority (Let's Encrypt, Google Trust Services, ZeroSSL, or "Custom" with its "Server URL") and enter an "Email Address". Google Trust Services and ZeroSSL need the "EAB Key ID" and the "EAB HMAC Key" of your account at the certificate authority. r3v3rs3 orders a new certificate "Renewal Interval (days)" (`renewal_days`, default `60`) days after the last one.
 
 ## Challenges
 
@@ -1051,12 +1067,12 @@ A node of a cluster reads only `config.toml`. The rest of its state is in etcd o
 
 # WebUI
 
-r3v3rs3 includes a built-in WebUI. By default, it is served on localhost:46492. However, you can customize the port using the `R3V3RS3_WEBUI` environment variable or the `--webui` command-line option. If you wish to disable the WebUI, set the `R3V3RS3_NO_WEBUI=1` environment variable or use the `--no-webui` command-line option.
+r3v3rs3 includes a built-in WebUI. By default, it is served on `127.0.0.1:46492`. Set another listening address, for example `0.0.0.0:46492`, with the `R3V3RS3_WEBUI` environment variable or the `--webui` command-line option. The `R3V3RS3_NO_WEBUI=1` environment variable or the `--no-webui` command-line option turns off the WebUI and the admin API.
 
 The menu of the WebUI is a sidebar on the left with three groups:
 
 - **Proxy**: **Ports**, **Proxies**, **Access Lists** and **Certificates**.
-- **Platform**: **Apps** and **Targets**, the [deployment platform](@/platform.md). Only an account without a proxy list sees this group.
+- **Platform**: **Apps**, **Targets** and **Git Providers**, the [deployment platform](@/platform.md). Only an account without a proxy list sees this group, and only an admin or an editor sees **Git Providers**.
 - **Administration**: **Accounts**, **Audit Log** and **Settings**. Only an admin account sees this group.
 
 The navbar holds the logo, the language menu, the theme menu and **Logout**. On a narrow screen the **Menu** button of the navbar replaces the sidebar and **Logout**, and opens the same menu with **Logout** at its end.
@@ -1085,9 +1101,17 @@ $ curl -b cookies.txt http://localhost:46492/api/ports
 
 `"insecure": true` removes the `Secure` attribute from the cookie. Use it when the admin panel uses plain HTTP.
 
+For an account with TOTP, the first response is `"totp_required"`. Send the code in a second request with the cookie of the first one:
+
+```bash
+$ curl -b cookies.txt -c cookies.txt -H 'Content-Type: application/json' \
+    -d '{"username":"admin","method":"totp","token":"123456","insecure":true}' \
+    http://localhost:46492/api/login
+```
+
 # Audit Log
 
-r3v3rs3 records the changes that an account makes through the WebUI or the admin API: ports, proxies, access lists, certificates, ACME entries, settings, CDN IP range refreshes and accounts. It also records each sign-in, failed sign-in and sign-out of the admin panel. The changes that r3v3rs3 makes by itself, for example a certificate renewal or a discovered proxy, are not recorded.
+r3v3rs3 records the changes that an account makes through the WebUI or the admin API: ports (including resets), proxies (including cache purges), access lists, certificates, ACME entries, settings, CDN IP range refreshes and accounts. For the [deployment platform](@/platform.md) it records the apps, their environment variables, deployments and rollbacks, Git tokens and webhook secrets, the targets and agent enrollments, the Git provider connections, the reinstalled webhooks and the platform settings. A deployment that a signed Git provider webhook starts is also recorded. It also records each sign-in, failed sign-in and sign-out of the admin panel. The changes that r3v3rs3 makes by itself, for example a certificate renewal or a discovered proxy, are not recorded.
 
 Each entry holds the time, the account, the client IP address, the action, the id of the changed resource and a short summary. The summary holds names, addresses and roles. It never holds a password, a token or a key.
 
@@ -1116,7 +1140,11 @@ A cluster reads at most 31 days before `until`, so a longer period does not retu
 r3v3rs3 logs to the standard output as its default setting. You can change this behavior by setting the `R3V3RS3_LOG`, `R3V3RS3_ACCESS_LOG` environment variable or using the `--log`, `--access-log` command-line option.
 
 ```bash
-$ r3v3rs3 start --log /var/log/r3v3rs3.log --access-log /var/log/r3v3rs3-access.log
+$ r3v3rs3 start --log /var/log/r3v3rs3/r3v3rs3.log --access-log /var/log/r3v3rs3/access.log
 ```
 
-If you want to adjust the log level, you can do so by setting the `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` environment variable or using the `--log-level`, `--access-log-level` command-line option.
+A path with a directory writes into that directory, and a bare file name writes into the log directory. r3v3rs3 starts a new file every hour and adds the date and the hour to the name, for example `r3v3rs3.log.2026-09-25-10`.
+
+The log directory holds these files and `log.db`, the database of the log page and the audit log. The `R3V3RS3_LOG_DIR` environment variable or the `--log-dir` command-line option sets it. The default is `$XDG_DATA_HOME/r3v3rs3/logs` or `$HOME/.local/share/r3v3rs3/logs`.
+
+If you want to adjust the log level, you can do so by setting the `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` environment variable or using the `--log-level`, `--access-log-level` command-line option. The default level is `info`, and `off` turns a log off. `R3V3RS3_LOG_FORMAT` or `--log-format` selects `text` (the default) or `json` for both logs.

@@ -1,6 +1,6 @@
 +++
-title = "Config"
-description = "Config"
+title = "Yapılandırma"
+description = "Yapılandırma"
 weight = 0
 +++
 
@@ -16,6 +16,8 @@ r3v3rs3 altı port türünü destekler:
 - TCP
 - TLS üzerinden TCP
 - UDP
+
+Portun `listen` adresi `/ip4/<adres>` veya `/ip6/<adres>` ile başlar. Ardından `/tcp/<port>` (TCP), `/tcp/<port>/tls` (TLS üzerinden TCP), `/tcp/<port>/http` (HTTP), `/tcp/<port>/https` (HTTPS), `/udp/<port>` (UDP) veya `/udp/<port>/quic/http` (QUIC üzerinden HTTP) gelir. `name` portun isteğe bağlı adıdır. Bir portu veya proxy'yi silmeden durdurmak için "Aktif" seçeneğini kapatın (`active = false`).
 
 ## Sunucu adları
 
@@ -112,7 +114,7 @@ routes = [{ path = "/", servers = [{ url = "http://app:9000/" }] }]
 
 ### DNS SRV sunucuları
 
-`http+srv` veya `https+srv` şemalı bir sunucu URL'i, sunucularını host adının DNS SRV kayıtlarından alır. r3v3rs3 adı çözer ve route, her SRV hedefi için bir sunucu alır: `+srv` önündeki şema, hedefin `host:port` değeri ve URL'in yolu. Consul, Kubernetes headless service'leri ve diğer service registry'ler bu kayıtları yayınlar. URL'de port yazılmaz, portları SRV kayıtları verir.
+`http+srv` veya `https+srv` şemalı bir sunucu URL'i, sunucularını host adının DNS SRV kayıtlarından alır. r3v3rs3 adı çözer ve route, her SRV hedefi için bir sunucu alır: `+srv` önündeki şema, hedefin `host:port` değeri ve URL'in yolu ile sorgusu. Consul, Kubernetes headless service'leri ve diğer service registry'ler bu kayıtları yayınlar. URL'de port yazılmaz, portları SRV kayıtları verir.
 
 ```toml
 [my-api]
@@ -127,6 +129,10 @@ routes = [{ path = "/", servers = [{ url = "http+srv://_http._tcp.api.service.co
 - r3v3rs3, yanıtın TTL süresi bitince adı yeniden çözer. En erken 5 saniye sonra çözer. Hedefler değişince route yeni sunucuları yeniden başlatmadan alır. Kalan sunucuların sağlık durumu korunur. Başarısız bir sorgu son hedefleri korur ve 5 saniye sonra yeniden denenir.
 - SRV adının hedefi olmayan route 502 döner. Route'un başka sunucuları varsa istekleri onlar alır.
 - "Upstream DNS Çözümleyicisi" ayarı ([Ayarlar](#ayarlar) bölümüne bakın) SRV sorgularının DNS sunucusunu seçer, örneğin Consul DNS için `127.0.0.1:8600`. Ayar boşsa r3v3rs3 sistemin çözümleyicisini kullanır. Hedeflerin host adlarını bağlantı sırasında sistemin çözümleyicisi çözer.
+
+## HTTPS yönlendirmesi
+
+"HTTP'yi Otomatik Olarak HTTPS'e Yönlendir" (`upgrade_insecure`, varsayılan `true`) düz HTTP isteğine `301` ile yanıt verir ve istemciyi aynı host ile yolun proxy'nin HTTPS portundaki adresine yönlendirir. HTTPS portu olmayan proxy yönlendirme yapmaz.
 
 ## Yol yeniden yazma
 
@@ -387,6 +393,12 @@ CDN IP aralıkları binary'ye gömülüdür ve r3v3rs3 bu listeyi her gün yenid
 
 Akamai edge IP aralıklarını yayınlamaz. Akamai kullanıyorsanız Site Shield aralıklarınızı "Güvenilen Proxy'ler" listesine ekleyin.
 
+```toml
+[my-app]
+protocol = "http"
+client_ip = { trust_cdn = true, trusted_proxies = ["10.0.0.0/8"] }
+```
+
 ## IP filtresi
 
 Her HTTP / HTTPS proxy'sinde istemcileri IP adresine göre engelleyebilir veya yalnız belirli adreslere izin verebilirsiniz. Filtre, "İstemci IP adresi" bölümünde belirlenen adrese bakar. Bu yüzden CDN veya güvenilen bir proxy arkasında da doğru çalışır.
@@ -499,7 +511,7 @@ r3v3rs3 her istemci isteğinde doğrulama URL'ine bir `GET` isteği gönderir. B
 
 - **2xx yanıt**: r3v3rs3 isteği upstream sunucuya gönderir. "Kopyalanacak Yanıt Header'ları" alanında listelenen header'ları doğrulama yanıtından upstream isteğine kopyalar. İstemci bu header'ları kendisi gönderemesin diye önce istemci isteğindeki aynı adlı header'ları siler.
 - **Diğer yanıtlar**: r3v3rs3 doğrulama yanıtını (durum kodu, header'lar ve en fazla 64 KiB gövde) istemciye gönderir. Bu sayede giriş sayfasına yapılan yönlendirmeler de çalışır.
-- **Timeout süresinde yanıt gelmezse veya bağlantı hatası olursa**: İstemci `502 Bad Gateway` alır.
+- **`timeout` süresinde (varsayılan `10s`) yanıt gelmezse veya bağlantı hatası olursa**: İstemci `502 Bad Gateway` alır.
 
 Doğrulama isteği, upstream istekleriyle aynı kök sertifikalara güvenir. Proxy'nin istemci sertifikasını da gönderir. Ayrıntılar için "Upstream istemci sertifikaları" bölümüne bakın.
 
@@ -734,6 +746,8 @@ r3v3rs3, HTTP ve HTTPS proxy'lerinde WebSocket'i (ve HTTP upgrade'i) destekler. 
 
 HTTP/3 proxy'lemeyi açmak için "Portlar" bölümünde bir QUIC portu bağlayın ve protokol olarak "QUIC üzerinden HTTP (HTTP/3)" seçin. HTTP/3 yalnız gelen bağlantılarda desteklenir. Upstream bağlantılar HTTP/2 veya HTTP/1.1 kullanır.
 
+r3v3rs3 her yanıtın `Alt-Svc` header'ını proxy'nin HTTPS ve QUIC portlarıyla değiştirir. Böylece tarayıcı HTTP/3'ü ilk HTTPS yanıtından öğrenir.
+
 WebTransport desteklenmez.
 
 ## Upstream istemci sertifikaları
@@ -868,6 +882,8 @@ Listedeki onay kutularıyla sertifikaları seçin ve "Seçilenleri Sil" butonuna
 r3v3rs3, sertifikaları [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment) ile otomatik alabilir. Let's Encrypt, ZeroSSL ve Google Trust Services gibi birçok sertifika otoritesi ACME'yi destekler.
 
 Bir ACME kaydı bir veya daha fazla alan adı içerir. Alan adlarını "Alan Adları" alanına virgülle ayırarak yazın, örneğin `example.com, *.example.com`. Sertifika her alan adını Subject Alternative Name olarak içerir. r3v3rs3 sertifikayı süresi dolmadan otomatik yeniler. Bir order başarısız olursa r3v3rs3 bir saat sonra yeniden order oluşturur.
+
+Sertifika otoritesini seçin (Let's Encrypt, Google Trust Services, ZeroSSL veya "Sunucu URL'i" ile "Özel") ve "E-posta Adresi" girin. Google Trust Services ve ZeroSSL, sertifika otoritesindeki hesabınızın "EAB Key ID" ve "EAB HMAC Key" değerlerini ister. r3v3rs3 yeni sertifikayı son sertifikadan "Yenileme Aralığı (Gün)" (`renewal_days`, varsayılan `60`) gün sonra ister.
 
 ## Challenge'lar
 
@@ -1051,12 +1067,12 @@ Cluster'daki bir düğüm yalnız `config.toml` dosyasını okur. Düğümün di
 
 # WebUI
 
-r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak localhost:46492 adresinde çalışır. Portu `R3V3RS3_WEBUI` ortam değişkeni veya `--webui` komut satırı seçeneğiyle değiştirebilirsiniz. WebUI'ı kapatmak için `R3V3RS3_NO_WEBUI=1` ortam değişkenini ayarlayın veya `--no-webui` komut satırı seçeneğini kullanın.
+r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak `127.0.0.1:46492` adresinde çalışır. Başka bir dinleme adresini, örneğin `0.0.0.0:46492`, `R3V3RS3_WEBUI` ortam değişkeni veya `--webui` komut satırı seçeneğiyle ayarlayın. `R3V3RS3_NO_WEBUI=1` ortam değişkeni veya `--no-webui` komut satırı seçeneği WebUI'ı ve yönetim API'sini kapatır.
 
 WebUI menüsü soldaki kenar çubuğundadır ve üç gruptan oluşur:
 
 - **Proxy**: **Portlar**, **Proxy'ler**, **Erişim Listeleri** ve **Sertifikalar**.
-- **Platform**: **Uygulamalar** ve **Hedefler**, yani [deploy platformu](@/platform.tr.md). Bu grubu yalnız proxy listesi olmayan hesap görür.
+- **Platform**: **Uygulamalar**, **Hedefler** ve **Git Sağlayıcıları**, yani [deploy platformu](@/platform.tr.md). Bu grubu yalnız proxy listesi olmayan hesap görür. **Git Sağlayıcıları** öğesini yalnız admin veya editör görür.
 - **Yönetim**: **Hesaplar**, **Denetim Kaydı** ve **Ayarlar**. Bu grubu yalnız admin hesabı görür.
 
 Üst çubuk logoyu, dil menüsünü, tema menüsünü ve **Çıkış Yap** butonunu içerir. Dar bir ekranda kenar çubuğu ve **Çıkış Yap** yerine üst çubukta **Menü** butonu görünür. Bu buton aynı menüyü açar ve menünün sonunda **Çıkış Yap** bulunur.
@@ -1085,9 +1101,17 @@ $ curl -b cookies.txt http://localhost:46492/api/ports
 
 `"insecure": true` değeri cookie'den `Secure` özelliğini kaldırır. Yönetim paneli düz HTTP kullanıyorsa bu değeri gönderin.
 
+TOTP'si açık hesapta ilk yanıt `"totp_required"` olur. Kodu, ilk isteğin cookie'siyle birlikte ikinci bir istekte gönderin:
+
+```bash
+$ curl -b cookies.txt -c cookies.txt -H 'Content-Type: application/json' \
+    -d '{"username":"admin","method":"totp","token":"123456","insecure":true}' \
+    http://localhost:46492/api/login
+```
+
 # Denetim kaydı
 
-r3v3rs3, bir hesabın WebUI veya yönetim API'si ile yaptığı değişiklikleri kaydeder: portlar, proxy'ler, erişim listeleri, sertifikalar, ACME kayıtları, ayarlar, CDN IP aralığı yenilemeleri ve hesaplar. Yönetim paneline her giriş, her başarısız giriş denemesi ve her çıkış da kaydedilir. r3v3rs3'ün kendi yaptığı değişiklikler kaydedilmez. Sertifika yenileme ve keşfedilen proxy'ler buna örnektir.
+r3v3rs3, bir hesabın WebUI veya yönetim API'si ile yaptığı değişiklikleri kaydeder: portlar (sıfırlamalar dahil), proxy'ler (cache temizlemeleri dahil), erişim listeleri, sertifikalar, ACME kayıtları, ayarlar, CDN IP aralığı yenilemeleri ve hesaplar. [Deploy platformu](@/platform.tr.md) için uygulamaları, ortam değişkenlerini, deployment'ları ve geri almaları, Git token'larını ve webhook secret'larını, hedefleri ve agent kayıtlarını, Git sağlayıcı bağlantılarını, yeniden kurulan webhook'ları ve platform ayarlarını kaydeder. İmzalı bir Git sağlayıcı webhook'unun başlattığı deployment da kaydedilir. Yönetim paneline her giriş, her başarısız giriş denemesi ve her çıkış da kaydedilir. r3v3rs3'ün kendi yaptığı değişiklikler kaydedilmez. Sertifika yenileme ve keşfedilen proxy'ler buna örnektir.
 
 Her kayıtta zaman, hesap, istemci IP adresi, işlem, değişen kaynağın id'si ve kısa bir özet bulunur. Özet isimleri, adresleri ve rolleri içerir. Parola, token veya key içermez.
 
@@ -1116,7 +1140,11 @@ Cluster, `until` değerinden en fazla 31 gün geriye okur. Bu yüzden daha uzun 
 r3v3rs3 varsayılan olarak log'ları standart çıktıya yazar. Bunu `R3V3RS3_LOG`, `R3V3RS3_ACCESS_LOG` ortam değişkenleriyle veya `--log`, `--access-log` komut satırı seçenekleriyle değiştirebilirsiniz.
 
 ```bash
-$ r3v3rs3 start --log /var/log/r3v3rs3.log --access-log /var/log/r3v3rs3-access.log
+$ r3v3rs3 start --log /var/log/r3v3rs3/r3v3rs3.log --access-log /var/log/r3v3rs3/access.log
 ```
 
-Log seviyesini değiştirmek için `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` ortam değişkenlerini veya `--log-level`, `--access-log-level` komut satırı seçeneklerini kullanın.
+Dizin içeren bir yol o dizine yazar. Yalnız dosya adı verilirse dosya log dizinine yazılır. r3v3rs3 her saat yeni bir dosya açar ve ada tarihle saati ekler, örneğin `r3v3rs3.log.2026-09-25-10`.
+
+Log dizini bu dosyaları ve log sayfasıyla denetim kaydının veritabanı olan `log.db` dosyasını tutar. Dizini `R3V3RS3_LOG_DIR` ortam değişkeni veya `--log-dir` komut satırı seçeneği belirler. Varsayılan dizin `$XDG_DATA_HOME/r3v3rs3/logs` veya `$HOME/.local/share/r3v3rs3/logs` olur.
+
+Log seviyesini değiştirmek için `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` ortam değişkenlerini veya `--log-level`, `--access-log-level` komut satırı seçeneklerini kullanın. Varsayılan seviye `info` olur. `off` log'u kapatır. `R3V3RS3_LOG_FORMAT` veya `--log-format` iki log için `text` (varsayılan) veya `json` biçimini seçer.
