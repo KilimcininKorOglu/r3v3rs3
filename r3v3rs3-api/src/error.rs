@@ -158,6 +158,9 @@ pub enum Error {
     #[error("the Git provider connection is not connected: {id}")]
     GitConnectionNotConnected { id: ShortId },
 
+    #[error("the GitHub App is not installed on an account yet")]
+    GithubAppNotInstalled,
+
     #[error("the Git provider failed: {reason}")]
     GitProviderFailed { reason: String },
 
@@ -377,6 +380,7 @@ impl Error {
             | Self::TargetNameExists { .. }
             | Self::GitConnectionNameExists { .. }
             | Self::GitConnectionNotConnected { .. }
+            | Self::GithubAppNotInstalled
             | Self::GitConnectionInUse { .. }
             | Self::PublicUrlMissing
             | Self::TargetInUse { .. }

@@ -6,12 +6,8 @@ use super::{
 };
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hyper::Method;
-use ring::{
-    rand::SystemRandom,
-    signature::{RSA_PKCS1_SHA256, RsaKeyPair},
-};
+use ring::signature::RsaKeyPair;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 
@@ -63,7 +59,6 @@ impl ServiceAccount {
     /// A JWT that asks the token endpoint `audience` for an access token, signed with RS256.
     fn assertion(&self, audience: &str) -> anyhow::Result<String> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
-        let header = json!({ "alg": "RS256", "typ": "JWT" });
         let claims = json!({
             "iss": self.email,
             "scope": SCOPE,
@@ -71,21 +66,7 @@ impl ServiceAccount {
             "iat": now,
             "exp": now + ASSERTION_LIFETIME,
         });
-        let message = format!(
-            "{}.{}",
-            URL_SAFE_NO_PAD.encode(header.to_string()),
-            URL_SAFE_NO_PAD.encode(claims.to_string())
-        );
-        let mut signature = vec![0; self.key.public().modulus_len()];
-        self.key
-            .sign(
-                &RSA_PKCS1_SHA256,
-                &SystemRandom::new(),
-                message.as_bytes(),
-                &mut signature,
-            )
-            .map_err(|_| anyhow!("failed to sign the Google Cloud token request"))?;
-        Ok(format!("{message}.{}", URL_SAFE_NO_PAD.encode(signature)))
+        crate::jwt::rs256(&self.key, &claims)
     }
 }
 

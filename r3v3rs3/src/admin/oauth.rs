@@ -1,6 +1,7 @@
 //! The OAuth callback of the Git provider connections. The provider sends the browser of the admin
-//! here with a code. The session cookie is `SameSite=Strict`, so this cross-site navigation carries
-//! no session: the one-time `state` of the authorization proves the request instead.
+//! here with a code, after an authorization or after GitHub created a GitHub App. The session
+//! cookie is `SameSite=Strict`, so this cross-site navigation carries no session: the one-time
+//! `state` of the authorization proves the request instead.
 
 use super::{AppError, AppState};
 use crate::audit::AuditRecord;
@@ -31,7 +32,8 @@ pub struct CallbackQuery {
 }
 
 /// Finishes the authorization of a Git provider connection, then sends the browser to the
-/// connections page of the WebUI with the result.
+/// connections page of the WebUI with the result. A new GitHub App sends it to its installation
+/// page on GitHub instead.
 #[utoipa::path(
     get,
     path = "/git/callback",
@@ -49,7 +51,10 @@ pub async fn git_callback(
     let target = match finish(&platform, query).await {
         Ok(authorized) => {
             record(&state, &authorized).await;
-            format!("{CONNECTIONS_PAGE}?connected={}", authorized.entry.id)
+            match authorized.install_url {
+                Some(install_url) => install_url,
+                None => format!("{CONNECTIONS_PAGE}?connected={}", authorized.entry.id),
+            }
         }
         Err(code) => format!("{CONNECTIONS_PAGE}?error={code}"),
     };
@@ -94,18 +99,20 @@ fn error_code(err: &anyhow::Error) -> &'static str {
     }
 }
 
-/// The summary names the connection and the account of the provider, never a token.
+/// A new GitHub App adds a connection, and an authorization connects one. The summary never
+/// holds a token.
 async fn record(state: &AppState, authorized: &Authorized) {
     let entry = &authorized.entry;
-    let summary = format!(
-        "{} ({}): {}",
-        entry.name,
-        entry.provider.as_str(),
-        entry.account.as_deref().unwrap_or_default()
-    );
-    let record = AuditRecord::new(AuditAction::ConnectGitConnection)
-        .id(entry.id)
-        .summary(summary);
+    let (action, summary) = if authorized.install_url.is_some() {
+        let summary = format!("{} ({})", entry.name, entry.provider.as_str());
+        (AuditAction::AddGitConnection, summary)
+    } else {
+        (
+            AuditAction::ConnectGitConnection,
+            super::git::connected_summary(entry),
+        )
+    };
+    let record = AuditRecord::new(action).id(entry.id).summary(summary);
     state
         .record_audit(&authorized.username, authorized.client, record)
         .await;

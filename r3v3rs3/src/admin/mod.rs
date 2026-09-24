@@ -292,8 +292,13 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     git::delete_connection
                 ))
                 .routes(routes!(git::authorize_connection))
+                .routes(routes!(git::install_github_app))
                 .routes(routes!(git::list_repositories))
                 .routes(routes!(git::list_branches)),
+        )
+        .nest(
+            "/git/github_apps",
+            OpenApiRouter::new().routes(routes!(git::create_github_app)),
         )
         .nest(
             "/platform/settings",

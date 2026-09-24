@@ -15,7 +15,7 @@ use r3v3rs3_api::{
     audit::AuditAction,
     git_connection::{
         AuthorizeRequest, AuthorizeResponse, BranchQuery, GitConnectionEntry, GitConnectionRequest,
-        GitRepository, PlatformSettings, RepositoryQuery,
+        GitRepository, GithubAppForm, GithubAppRequest, PlatformSettings, RepositoryQuery,
     },
     id::ShortId,
 };
@@ -91,6 +91,59 @@ pub async fn authorize_connection(
         .await
         .map_err(platform_error)?;
     Ok(Json(response))
+}
+
+/// Starts the creation of the GitHub App of a new GitHub connection. The browser of the admin posts
+/// the returned manifest to GitHub, and GitHub sends it back to `redirect_uri`, which stores the
+/// connection.
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "platform",
+    operation_id = "create_github_app",
+    request_body = GithubAppRequest,
+    responses((status = 200, description = "The form that the browser posts to GitHub.", body = GithubAppForm), ErrorResponses)
+)]
+pub async fn create_github_app(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<GithubAppRequest>,
+) -> Result<Json<GithubAppForm>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let form = platform
+        .create_github_app(&request, &caller.username, caller.client)
+        .await
+        .map_err(platform_error)?;
+    Ok(Json(form))
+}
+
+/// Connects a GitHub connection to the installation of its GitHub App, after an admin installed
+/// the GitHub App on GitHub.
+#[utoipa::path(
+    post,
+    path = "/{id}/installation",
+    tag = "platform",
+    operation_id = "install_github_app",
+    params(("id" = ShortId, Path, description = "Connection id.")),
+    responses((status = 200, description = "The connected connection.", body = GitConnectionEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn install_github_app(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<GitConnectionEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let entry = platform
+        .install_github_app(id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::ConnectGitConnection)
+        .id(entry.id)
+        .summary(connected_summary(&entry));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(entry))
 }
 
 /// Lists the Git provider connections.
@@ -201,6 +254,17 @@ pub async fn delete_connection(
         .map_err(platform_error)?;
     record(&state, &caller, AuditAction::DeleteGitConnection, &entry).await;
     Ok(Json(()))
+}
+
+/// The summary of a connection that an account connected: the connection, its provider and the
+/// account of the provider, never a token.
+pub(super) fn connected_summary(entry: &GitConnectionEntry) -> String {
+    format!(
+        "{} ({}): {}",
+        entry.name,
+        entry.provider.as_str(),
+        entry.account.as_deref().unwrap_or_default()
+    )
 }
 
 /// The summary names the connection and its provider, never the client secret.

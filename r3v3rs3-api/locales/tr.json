@@ -351,6 +351,7 @@
   "error.invalid_public_url": "Public adres, sonunda eğik çizgi olmayan bir http veya https URL'i olmalıdır: {url}",
   "error.oauth_state_invalid": "Yetkilendirmenin süresi doldu veya yetkilendirme zaten kullanıldı. Yeniden başlatın.",
   "error.git_connection_not_connected": "{id} Git sağlayıcı bağlantısı bağlı değil.",
+  "error.github_app_not_installed": "GitHub App henüz bir hesaba kurulmadı. GitHub'da kurun ve yeniden deneyin.",
   "error.git_provider_failed": "Git sağlayıcısı hata verdi: {reason}",
   "error.git_connection_in_use": "{name} uygulaması bu Git sağlayıcı bağlantısını kullanıyor.",
   "error.public_url_missing": "Webhook kurulmadan önce platformun genel adresini ayarlayın.",

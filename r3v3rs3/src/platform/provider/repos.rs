@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 /// The repositories of one page.
 const PAGE_SIZE: u32 = 50;
 
-/// The pages that a GitHub search reads, because the repository list of GitHub has no search.
+/// The pages that a GitHub search reads, because the repository list of an installation has no
+/// search.
 const GITHUB_SEARCH_PAGES: u32 = 10;
 
 /// The branches that a list returns.
@@ -24,8 +25,9 @@ pub(in crate::platform) struct NewHook<'a> {
 }
 
 impl Site<'_> {
-    /// One page of the repositories that the account can read, the recently changed first. With
-    /// `search` the list holds the repositories whose name contains it.
+    /// One page of the repositories that the connection can read. GitLab and Gitea list the
+    /// recently changed first, and GitHub lists the repositories of the installation. With `search`
+    /// the list holds the repositories whose name contains it.
     pub async fn repositories(
         &self,
         http: &HttpClient,
@@ -150,11 +152,9 @@ async fn github_page(
     token: &str,
     page: u32,
 ) -> anyhow::Result<Vec<GitRepository>> {
-    let path = format!(
-        "/user/repos?sort=updated&affiliation=owner,collaborator,organization_member&per_page={PAGE_SIZE}&page={page}"
-    );
-    let items = api.json(get(path, token)).await?;
-    Ok(repositories(&items, github_repository))
+    let path = format!("/installation/repositories?per_page={PAGE_SIZE}&page={page}");
+    let found = api.json(get(path, token)).await?;
+    Ok(repositories(&found["repositories"], github_repository))
 }
 
 /// Reads the first pages and keeps the repositories whose name contains `search`.
@@ -318,15 +318,18 @@ mod tests {
             .map(|index| repo(&format!("o/other-{index}")))
             .collect::<Vec<_>>();
         server
-            .mock("GET", "/api/v3/user/repos")
+            .mock("GET", "/api/v3/installation/repositories")
             .match_query(Matcher::UrlEncoded("page".into(), "1".into()))
-            .with_body(Value::Array(first).to_string())
+            .with_body(json!({"total_count": 52, "repositories": first}).to_string())
             .create_async()
             .await;
         server
-            .mock("GET", "/api/v3/user/repos")
+            .mock("GET", "/api/v3/installation/repositories")
             .match_query(Matcher::UrlEncoded("page".into(), "2".into()))
-            .with_body(json!([repo("o/Shop"), repo("o/blog")]).to_string())
+            .with_body(
+                json!({"total_count": 52, "repositories": [repo("o/Shop"), repo("o/blog")]})
+                    .to_string(),
+            )
             .create_async()
             .await;
         let site = Site {

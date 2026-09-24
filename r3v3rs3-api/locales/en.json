@@ -351,6 +351,7 @@
   "error.invalid_public_url": "The public address must be an http or https URL without a trailing slash: {url}",
   "error.oauth_state_invalid": "The authorization expired or was used already. Start it again.",
   "error.git_connection_not_connected": "The Git provider connection {id} is not connected.",
+  "error.github_app_not_installed": "The GitHub App is not installed on an account yet. Install it on GitHub, then try again.",
   "error.git_provider_failed": "The Git provider failed: {reason}",
   "error.git_connection_in_use": "The app {name} uses this Git provider connection.",
   "error.public_url_missing": "Set the public address of the platform before a webhook is installed.",

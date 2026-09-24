@@ -253,6 +253,7 @@ mod tests {
             Error::GitConnectionNotConnected {
                 id: "abc".parse().unwrap(),
             },
+            Error::GithubAppNotInstalled,
             Error::GitProviderFailed { reason: text() },
             Error::GitConnectionInUse { name: text() },
             Error::PublicUrlMissing,

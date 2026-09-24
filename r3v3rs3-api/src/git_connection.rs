@@ -1,6 +1,6 @@
-//! The Git provider connections of the deployment platform. A connection is an OAuth application
-//! of GitHub, GitLab or Gitea that lists the repositories of its account, clones them and installs
-//! their webhooks.
+//! The Git provider connections of the deployment platform. A connection is a GitHub App, or an
+//! OAuth application of GitLab or Gitea, that lists the repositories of its account, clones them
+//! and installs their webhooks.
 
 use crate::container::AppName;
 use crate::error::Error;
@@ -23,6 +23,9 @@ const MAX_CLIENT_VALUE_LENGTH: usize = 512;
 
 /// The longest provider or public address.
 const MAX_URL_LENGTH: usize = 1024;
+
+/// The longest account or organization name of GitHub.
+const MAX_GITHUB_OWNER_LENGTH: usize = 39;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -162,10 +165,9 @@ impl GitConnectionRequest {
 
     fn provider_url(&self) -> Result<ProviderUrl, Error> {
         match (self.provider, &self.url) {
-            (GitProvider::Github, Some(url)) if url.as_str() != GITHUB_URL => Err(invalid(
-                format!("a GitHub connection uses {GITHUB_URL}: {url}"),
+            (GitProvider::Github, _) => Err(invalid(
+                "a GitHub connection is created as a GitHub App".to_string(),
             )),
-            (GitProvider::Github, _) => GITHUB_URL.parse(),
             (GitProvider::Gitlab, None) => GITLAB_URL.parse(),
             (GitProvider::Gitea, None) => Err(invalid(
                 "a Gitea connection needs the address of its server".to_string(),
@@ -200,6 +202,10 @@ pub struct GitConnectionEntry {
     /// The account of the provider that authorized the connection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// The page of the GitHub App of a GitHub connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "https://github.com/apps/r3v3rs3-team")]
+    pub app_url: Option<String>,
     /// The Unix time in milliseconds.
     pub created_at: u64,
     /// The Unix time in milliseconds.
@@ -247,10 +253,74 @@ pub struct AuthorizeRequest {
     pub redirect_uri: RedirectUri,
 }
 
-/// The authorization page of the provider. The browser of the admin opens it.
+/// The authorization page of the provider, or the installation page of a GitHub App. The browser
+/// of the admin opens it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AuthorizeResponse {
     pub url: String,
+}
+
+checked_string!(
+    /// The name of a GitHub account or organization: letters, digits and `-`, without a `-` at
+    /// either end.
+    GithubOwner,
+    check_github_owner
+);
+
+fn check_github_owner(value: &str) -> Result<(), Error> {
+    let valid = !value.is_empty()
+        && value.len() <= MAX_GITHUB_OWNER_LENGTH
+        && !value.starts_with('-')
+        && !value.ends_with('-')
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if valid {
+        Ok(())
+    } else {
+        Err(invalid(format!(
+            "invalid GitHub organization name: {value}"
+        )))
+    }
+}
+
+/// Starts the creation of a GitHub App for a new GitHub connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GithubAppRequest {
+    /// The name of the connection.
+    #[schema(value_type = String, example = "github-team")]
+    pub name: AppName,
+    /// The address of a GitHub Enterprise Server. Without it the connection uses
+    /// `https://github.com`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "https://github.example.com")]
+    pub url: Option<ProviderUrl>,
+    /// The organization that owns the GitHub App. Without it the account of the admin owns it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "my-team")]
+    pub organization: Option<GithubOwner>,
+    /// The callback address on the address of the WebUI. GitHub sends the browser there after it
+    /// creates the GitHub App.
+    #[schema(value_type = String, example = "https://r3v3rs3.example.com/oauth/git/callback")]
+    pub redirect_uri: RedirectUri,
+}
+
+impl GithubAppRequest {
+    /// The address of GitHub for the connection.
+    pub fn provider_url(&self) -> Result<ProviderUrl, Error> {
+        match &self.url {
+            Some(url) => Ok(url.clone()),
+            None => GITHUB_URL.parse(),
+        }
+    }
+}
+
+/// The form that the browser of the admin posts to GitHub. The manifest describes the GitHub App,
+/// and GitHub returns `state` to the callback.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GithubAppForm {
+    /// The address that receives the form, with the `state` query.
+    pub url: String,
+    /// The JSON manifest of the GitHub App, the value of the `manifest` form field.
+    pub manifest: String,
 }
 
 /// The longest repository name.
@@ -343,15 +413,24 @@ mod tests {
 
     #[test]
     fn each_provider_has_its_address() {
-        let github = request(GitProvider::Github, None).validate().unwrap();
-        assert_eq!(github.as_str(), GITHUB_URL);
+        assert!(request(GitProvider::Github, None).validate().is_err());
         let gitlab = request(GitProvider::Gitlab, None).validate().unwrap();
         assert_eq!(gitlab.as_str(), GITLAB_URL);
         let own = Some("https://git.example.com");
         let gitlab = request(GitProvider::Gitlab, own).validate().unwrap();
         assert_eq!(gitlab.as_str(), "https://git.example.com");
         assert!(request(GitProvider::Gitea, None).validate().is_err());
-        assert!(request(GitProvider::Github, own).validate().is_err());
+    }
+
+    #[test]
+    fn a_github_organization_is_a_github_login() {
+        for valid in ["my-team", "A1", "x"] {
+            assert!(valid.parse::<GithubOwner>().is_ok(), "{valid}");
+        }
+        let long = "a".repeat(40);
+        for invalid in ["", "-team", "team-", "my_team", "a/b", long.as_str()] {
+            assert!(invalid.parse::<GithubOwner>().is_err(), "{invalid}");
+        }
     }
 
     #[test]
@@ -451,13 +530,14 @@ mod tests {
 
     #[test]
     fn client_values_are_printable_words() {
-        let mut spaced = request(GitProvider::Github, None);
+        assert!(request(GitProvider::Gitlab, None).validate().is_ok());
+        let mut spaced = request(GitProvider::Gitlab, None);
         spaced.client_id = "a b".into();
         assert!(spaced.validate().is_err());
-        let mut empty = request(GitProvider::Github, None);
+        let mut empty = request(GitProvider::Gitlab, None);
         empty.client_secret = Some(String::new());
         assert!(empty.validate().is_err());
-        let debug = format!("{:?}", request(GitProvider::Github, None));
+        let debug = format!("{:?}", request(GitProvider::Gitlab, None));
         assert!(!debug.contains("s3cr3t"), "{debug}");
     }
 }

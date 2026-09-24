@@ -6,7 +6,8 @@ use super::{Platform, new_id, not_found};
 use anyhow::anyhow;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git_connection::{
-    ConnectionStatus, GitConnectionEntry, GitConnectionRequest, PlatformSettings,
+    ConnectionStatus, GitConnectionEntry, GitConnectionRequest, GitProvider, PlatformSettings,
+    ProviderUrl,
 };
 use r3v3rs3_api::id::ShortId;
 
@@ -48,6 +49,7 @@ impl Platform {
             client_id: request.client_id,
             status: ConnectionStatus::NotConnected,
             account: None,
+            app_url: None,
             created_at: now,
             updated_at: now,
         };
@@ -61,15 +63,19 @@ impl Platform {
     }
 
     /// Replaces the settings of a connection. A new provider, address or client id disconnects
-    /// it.
+    /// it. A GitHub App connection changes only its name.
     pub async fn update_git_connection(
         &self,
         id: ShortId,
         request: GitConnectionRequest,
         now: u64,
     ) -> anyhow::Result<GitConnectionEntry> {
-        let url = request.validate()?;
         let current = self.git_connection(id).await?;
+        let url = if current.provider == GitProvider::Github {
+            renamed_github_app(&current, &request)?
+        } else {
+            request.validate()?
+        };
         let entry = GitConnectionEntry {
             name: request.name,
             provider: request.provider,
@@ -124,7 +130,7 @@ impl Platform {
     }
 
     /// A new id that no connection uses.
-    async fn free_connection_id(&self) -> anyhow::Result<ShortId> {
+    pub(super) async fn free_connection_id(&self) -> anyhow::Result<ShortId> {
         for _ in 0..16 {
             let id = new_id()?;
             if self.store.git_connection(id).await?.is_none() {
@@ -132,6 +138,24 @@ impl Platform {
             }
         }
         Err(anyhow!("no free connection id"))
+    }
+}
+
+/// The address of a GitHub App connection when the request changes nothing but its name.
+fn renamed_github_app(
+    current: &GitConnectionEntry,
+    request: &GitConnectionRequest,
+) -> Result<ProviderUrl, Error> {
+    let same = request.provider == GitProvider::Github
+        && request.client_id == current.client_id
+        && request.url.as_ref().is_none_or(|url| *url == current.url)
+        && request.client_secret.is_none();
+    if same {
+        Ok(current.url.clone())
+    } else {
+        Err(Error::InvalidGitConnection {
+            reason: "a GitHub App connection changes only its name".to_string(),
+        })
     }
 }
 
@@ -147,7 +171,6 @@ mod tests {
     use super::super::tests::platform;
     use super::*;
     use anyhow::Context as _;
-    use r3v3rs3_api::git_connection::GitProvider;
 
     fn request(name: &str, secret: Option<&str>) -> GitConnectionRequest {
         GitConnectionRequest {

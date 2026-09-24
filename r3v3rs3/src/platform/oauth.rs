@@ -1,19 +1,21 @@
-//! The OAuth authorization of the Git provider connections. An admin starts an authorization, the
-//! provider sends the browser back to the public callback with a code, and the platform trades the
-//! code for tokens. A token that expires is renewed with its refresh token before it is used.
+//! The OAuth authorization of the GitLab and Gitea connections. An admin starts an authorization,
+//! the provider sends the browser back to the public callback with a code, and the platform trades
+//! the code for tokens. A token that expires is renewed with its refresh token before it is used.
+//! The creation of a GitHub App returns to the same callback, see `github_app`.
 
 use super::connections::connection_aad;
 use super::provider::{Authorization, GrantError, Site, TokenGrant};
-use super::store::StoredTokens;
+use super::store::{StoredConnection, StoredTokens};
 use super::{Platform, not_found};
 use crate::cdn::fetch::HttpClient;
 use crate::clock::unix_ms;
 use anyhow::Context as _;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git_connection::{
-    AuthorizeResponse, ConnectionStatus, GitConnectionEntry, RedirectUri,
+    AuthorizeResponse, ConnectionStatus, GitConnectionEntry, GitProvider, ProviderUrl, RedirectUri,
 };
 use r3v3rs3_api::id::ShortId;
 use sha2::{Digest, Sha256};
@@ -31,16 +33,24 @@ const MAX_PENDING: usize = 64;
 /// A token is renewed when it expires within this many milliseconds.
 const RENEWAL_MARGIN_MS: u64 = 60_000;
 
-/// An authorization that waits for the callback of the provider.
-struct Pending {
-    connection: ShortId,
-    redirect_uri: RedirectUri,
-    /// The PKCE verifier, which only the token request reveals.
-    verifier: String,
+/// An authorization or a GitHub App creation that waits for the callback of the provider.
+pub(super) struct Pending {
+    pub connection: ShortId,
+    pub redirect_uri: RedirectUri,
+    pub purpose: Purpose,
     /// The account of r3v3rs3 that started the authorization.
-    username: String,
-    client: Option<IpAddr>,
-    created: Instant,
+    pub username: String,
+    pub client: Option<IpAddr>,
+    pub created: Instant,
+}
+
+/// What the code of the callback completes.
+pub(super) enum Purpose {
+    /// The authorization of a GitLab or Gitea connection, with the PKCE verifier that only the
+    /// token request reveals.
+    Authorize { verifier: String },
+    /// The creation of the GitHub App of a new connection.
+    CreateApp { name: AppName, url: ProviderUrl },
 }
 
 /// The waiting authorizations by their `state`. Each state is used once.
@@ -56,7 +66,7 @@ impl PendingAuthorizations {
         }
     }
 
-    fn insert(&self, state: String, pending: Pending) {
+    pub(super) fn insert(&self, state: String, pending: Pending) {
         let mut map = self.lock();
         map.retain(|_, pending| pending.created.elapsed() < AUTHORIZATION_LIFETIME);
         if map.len() >= MAX_PENDING
@@ -78,17 +88,19 @@ impl PendingAuthorizations {
     }
 }
 
-/// A connection that an account of the provider authorized.
+/// A connection that an account of the provider authorized, or a new GitHub App connection.
 #[derive(Debug)]
 pub struct Authorized {
     pub entry: GitConnectionEntry,
     /// The account of r3v3rs3 that started the authorization.
     pub username: String,
     pub client: Option<IpAddr>,
+    /// The installation page of a new GitHub App, which the browser opens next.
+    pub install_url: Option<String>,
 }
 
 /// 32 random bytes in URL-safe base64.
-fn random_word() -> String {
+pub(super) fn random_word() -> String {
     URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>())
 }
 
@@ -100,6 +112,14 @@ fn challenge_of(verifier: &str) -> String {
 /// Whether a token that expires at `expires_at` must be renewed before its use.
 fn needs_renewal(expires_at: Option<u64>, now: u64) -> bool {
     expires_at.is_some_and(|at| now.saturating_add(RENEWAL_MARGIN_MS) >= at)
+}
+
+/// The sealed access token of a connection while it does not expire soon.
+fn current_token(stored: &StoredConnection) -> Option<&[u8]> {
+    stored
+        .access_token
+        .as_deref()
+        .filter(|_| !needs_renewal(stored.expires_at, unix_ms()))
 }
 
 pub(super) fn provider_failed(err: impl Into<anyhow::Error>) -> anyhow::Error {
@@ -117,7 +137,8 @@ impl Platform {
             .await
     }
 
-    /// Starts an authorization and returns the page of the provider that the admin opens.
+    /// Starts an authorization and returns the page of the provider that the admin opens. A
+    /// GitHub App is authorized by its installation, so its installation page opens.
     pub async fn authorize_git_connection(
         &self,
         id: ShortId,
@@ -126,6 +147,9 @@ impl Platform {
         client: Option<IpAddr>,
     ) -> anyhow::Result<AuthorizeResponse> {
         let entry = self.git_connection(id).await?;
+        if entry.provider == GitProvider::Github {
+            return self.github_install_page(id).await;
+        }
         let (state, verifier) = (random_word(), random_word());
         let authorization = Authorization {
             client_id: &entry.client_id,
@@ -137,7 +161,7 @@ impl Platform {
         let pending = Pending {
             connection: id,
             redirect_uri: redirect_uri.clone(),
-            verifier,
+            purpose: Purpose::Authorize { verifier },
             username: username.to_string(),
             client,
             created: Instant::now(),
@@ -151,15 +175,37 @@ impl Platform {
         self.pending.take(state).map(|pending| pending.connection)
     }
 
-    /// Trades the code of the callback for the tokens of the connection.
+    /// Trades the code of the callback for the tokens of the connection, or for a new GitHub App.
     pub async fn finish_git_authorization(
         &self,
         state: &str,
         code: &str,
     ) -> anyhow::Result<Authorized> {
-        let pending = self.pending.take(state).ok_or(Error::OauthStateInvalid)?;
+        let mut pending = self.pending.take(state).ok_or(Error::OauthStateInvalid)?;
+        let purpose = std::mem::replace(
+            &mut pending.purpose,
+            Purpose::Authorize {
+                verifier: String::new(),
+            },
+        );
+        match purpose {
+            Purpose::Authorize { verifier } => {
+                self.finish_authorization(pending, &verifier, code).await
+            }
+            Purpose::CreateApp { name, url } => {
+                self.finish_github_app(pending, name, url, code).await
+            }
+        }
+    }
+
+    async fn finish_authorization(
+        &self,
+        pending: Pending,
+        verifier: &str,
+        code: &str,
+    ) -> anyhow::Result<Authorized> {
         let entry = self.git_connection(pending.connection).await?;
-        let (grant, account) = self.trade_code(&entry, &pending, code).await?;
+        let (grant, account) = self.trade_code(&entry, &pending, verifier, code).await?;
         let tokens = self.seal_grant(entry.id, &grant, None)?;
         let redirect_uri = pending.redirect_uri.as_str();
         let stored = tokens.stored();
@@ -174,6 +220,7 @@ impl Platform {
             entry: self.git_connection(entry.id).await?,
             username: pending.username,
             client: pending.client,
+            install_url: None,
         })
     }
 
@@ -182,6 +229,7 @@ impl Platform {
         &self,
         entry: &GitConnectionEntry,
         pending: &Pending,
+        verifier: &str,
         code: &str,
     ) -> anyhow::Result<(TokenGrant, String)> {
         let secret = self.client_secret(entry.id).await?;
@@ -191,7 +239,7 @@ impl Platform {
             ("code", code),
             ("grant_type", "authorization_code"),
             ("redirect_uri", pending.redirect_uri.as_str()),
-            ("code_verifier", pending.verifier.as_str()),
+            ("code_verifier", verifier),
         ];
         let http = self.http().await?;
         let grant = site(entry)
@@ -215,25 +263,24 @@ impl Platform {
             return Err(Error::GitConnectionNotConnected { id }.into());
         }
         let stored = self.connection_secrets(id).await?;
-        let token = if needs_renewal(stored.expires_at, unix_ms()) {
-            self.renew_git_token(&entry).await?
-        } else {
-            let sealed = stored.access_token.context("the connection has no token")?;
-            self.open_connection_value(id, "access_token", &sealed)?
+        let token = match current_token(&stored) {
+            Some(sealed) => self.open_connection_value(id, "access_token", sealed)?,
+            None => self.renew_git_token(&entry).await?,
         };
         Ok((entry, token))
     }
 
-    /// Renews the access token. One renewal runs at a time, so a second caller finds the token
-    /// that the first stored.
+    /// Renews the access token, or asks a GitHub App for a token of its installation. One renewal
+    /// runs at a time, so a second caller finds the token that the first stored.
     async fn renew_git_token(&self, entry: &GitConnectionEntry) -> anyhow::Result<String> {
         let _renewal = self.renewing.lock().await;
         let id = entry.id;
         let stored = self.connection_secrets(id).await?;
-        if !needs_renewal(stored.expires_at, unix_ms())
-            && let Some(sealed) = &stored.access_token
-        {
+        if let Some(sealed) = current_token(&stored) {
             return self.open_connection_value(id, "access_token", sealed);
+        }
+        if entry.provider == GitProvider::Github {
+            return self.renew_installation_token(entry).await;
         }
         let Some(sealed_refresh) = stored.refresh_token else {
             return self
@@ -262,7 +309,11 @@ impl Platform {
     }
 
     /// Marks a connection expired after the provider refused its tokens.
-    async fn expire(&self, entry: &GitConnectionEntry, reason: &str) -> anyhow::Result<String> {
+    pub(super) async fn expire(
+        &self,
+        entry: &GitConnectionEntry,
+        reason: &str,
+    ) -> anyhow::Result<String> {
         warn!(
             connection = %entry.id,
             reason,
@@ -294,7 +345,7 @@ impl Platform {
         })
     }
 
-    async fn connection_secrets(
+    pub(super) async fn connection_secrets(
         &self,
         id: ShortId,
     ) -> anyhow::Result<super::store::StoredConnection> {

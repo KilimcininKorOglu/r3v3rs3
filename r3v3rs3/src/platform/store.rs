@@ -77,6 +77,12 @@ const SCHEMA: &[&str] = &[
         created_at    INTEGER NOT NULL,
         updated_at    INTEGER NOT NULL
     )",
+    "CREATE TABLE IF NOT EXISTS github_apps (
+        connection_id   TEXT PRIMARY KEY REFERENCES git_connections (id) ON DELETE CASCADE,
+        html_url        TEXT    NOT NULL,
+        private_key     BLOB    NOT NULL,
+        installation_id INTEGER
+    )",
     "CREATE TABLE IF NOT EXISTS platform_settings (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -94,7 +100,7 @@ const SCHEMA: &[&str] = &[
 
 mod connections;
 mod hooks;
-pub use connections::{PUBLIC_URL, StoredConnection, StoredTokens};
+pub use connections::{PUBLIC_URL, StoredConnection, StoredGithubApp, StoredTokens};
 pub use hooks::StoredHook;
 
 /// The secret of an app that holds its Git token.

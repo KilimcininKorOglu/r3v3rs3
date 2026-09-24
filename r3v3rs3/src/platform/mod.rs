@@ -11,6 +11,7 @@ mod connections;
 pub mod deploy;
 #[cfg(test)]
 pub(crate) mod fake;
+mod github_app;
 pub mod hooks;
 mod notices;
 pub mod oauth;

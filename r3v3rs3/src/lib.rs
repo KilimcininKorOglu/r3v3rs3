@@ -11,6 +11,7 @@ pub mod cluster;
 pub mod command;
 pub mod config;
 pub mod discovery;
+pub mod jwt;
 pub mod kv;
 pub mod log;
 pub mod notify;

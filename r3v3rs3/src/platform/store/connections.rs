@@ -15,8 +15,9 @@ pub const PUBLIC_URL: &str = "public_url";
 macro_rules! select_connections {
     ($rest:literal) => {
         concat!(
-            "SELECT id, name, provider, url, client_id, status, account, created_at, updated_at
-            FROM git_connections ",
+            "SELECT c.id, c.name, c.provider, c.url, c.client_id, c.status, c.account,
+                c.created_at, c.updated_at, g.html_url AS app_url
+            FROM git_connections c LEFT JOIN github_apps g ON g.connection_id = c.id ",
             $rest
         )
     };
@@ -33,6 +34,14 @@ pub struct StoredConnection {
     pub redirect_uri: Option<String>,
 }
 
+/// The GitHub App of a GitHub connection, with its sealed private key.
+pub struct StoredGithubApp {
+    pub html_url: String,
+    pub private_key: Vec<u8>,
+    /// The installation of the GitHub App on an account, once an admin installed it.
+    pub installation_id: Option<u64>,
+}
+
 /// The sealed tokens of an authorization.
 pub struct StoredTokens<'a> {
     pub access_token: &'a [u8],
@@ -43,14 +52,14 @@ pub struct StoredTokens<'a> {
 
 impl PlatformStore {
     pub async fn git_connections(&self) -> anyhow::Result<Vec<GitConnectionEntry>> {
-        let rows = sqlx::query(select_connections!("ORDER BY name"))
+        let rows = sqlx::query(select_connections!("ORDER BY c.name"))
             .fetch_all(&self.pool)
             .await?;
         rows.iter().map(connection_of).collect()
     }
 
     pub async fn git_connection(&self, id: ShortId) -> anyhow::Result<Option<GitConnectionEntry>> {
-        let row = sqlx::query(select_connections!("WHERE id = ?"))
+        let row = sqlx::query(select_connections!("WHERE c.id = ?"))
             .bind(id.to_string())
             .fetch_optional(&self.pool)
             .await?;
@@ -94,6 +103,84 @@ impl PlatformStore {
         .await
         .map(|_| Write::Done);
         written_name(result, "git_connections.name")
+    }
+
+    /// Stores the connection of a new GitHub App, not connected until an admin installs it.
+    pub async fn insert_github_app(
+        &self,
+        entry: &GitConnectionEntry,
+        client_secret: &[u8],
+        app: &StoredGithubApp,
+    ) -> anyhow::Result<Write> {
+        let mut transaction = self.pool.begin().await?;
+        let inserted = sqlx::query(
+            "INSERT INTO git_connections (id, name, provider, url, client_id, client_secret,
+                status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'not_connected', ?, ?)",
+        )
+        .bind(entry.id.to_string())
+        .bind(entry.name.as_str())
+        .bind(entry.provider.as_str())
+        .bind(entry.url.as_str())
+        .bind(&entry.client_id)
+        .bind(client_secret)
+        .bind(sql_int(entry.created_at))
+        .bind(sql_int(entry.updated_at))
+        .execute(&mut *transaction)
+        .await
+        .map(|_| Write::Done);
+        let written = written_name(inserted, "git_connections.name")?;
+        if !matches!(written, Write::Done) {
+            return Ok(written);
+        }
+        sqlx::query(
+            "INSERT INTO github_apps (connection_id, html_url, private_key) VALUES (?, ?, ?)",
+        )
+        .bind(entry.id.to_string())
+        .bind(&app.html_url)
+        .bind(&app.private_key)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(Write::Done)
+    }
+
+    /// The GitHub App of a connection.
+    pub async fn github_app(&self, id: ShortId) -> anyhow::Result<Option<StoredGithubApp>> {
+        let row = sqlx::query(
+            "SELECT html_url, private_key, installation_id FROM github_apps
+            WHERE connection_id = ?",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(github_app_of).transpose()
+    }
+
+    /// Stores the installation of a GitHub App and marks its connection connected. The token of
+    /// an earlier installation is dropped.
+    pub async fn install_github_app(
+        &self,
+        id: ShortId,
+        installation_id: u64,
+        account: &str,
+    ) -> anyhow::Result<bool> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("UPDATE github_apps SET installation_id = ? WHERE connection_id = ?")
+            .bind(sql_int(installation_id))
+            .bind(id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        let result = sqlx::query(
+            "UPDATE git_connections SET status = 'connected', account = ?, access_token = NULL,
+                refresh_token = NULL, expires_at = NULL WHERE id = ?",
+        )
+        .bind(account)
+        .bind(id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
     }
 
     /// Replaces the settings of a connection. A new provider, address or client id clears the
@@ -239,6 +326,14 @@ fn stored_connection_of(row: &SqliteRow) -> anyhow::Result<StoredConnection> {
     })
 }
 
+fn github_app_of(row: &SqliteRow) -> anyhow::Result<StoredGithubApp> {
+    Ok(StoredGithubApp {
+        html_url: row.try_get("html_url")?,
+        private_key: row.try_get("private_key")?,
+        installation_id: optional_time_of(row, "installation_id")?,
+    })
+}
+
 fn connection_of(row: &SqliteRow) -> anyhow::Result<GitConnectionEntry> {
     let (provider, url) = provider_of(row)?;
     let (status, account) = authorization_of(row)?;
@@ -251,6 +346,7 @@ fn connection_of(row: &SqliteRow) -> anyhow::Result<GitConnectionEntry> {
         client_id: row.try_get("client_id")?,
         status,
         account,
+        app_url: row.try_get("app_url")?,
         created_at,
         updated_at,
     })

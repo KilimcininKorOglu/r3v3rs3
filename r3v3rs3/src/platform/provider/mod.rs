@@ -1,14 +1,17 @@
-//! The OAuth endpoints and the REST APIs of GitHub, GitLab and Gitea.
+//! The OAuth endpoints of GitLab and Gitea, the GitHub App endpoints, and the REST APIs of the
+//! three providers.
 
 use crate::build::GitCredential;
 use crate::cdn::fetch::HttpClient;
 use crate::certs::dns::api::{ApiClient, ApiRequest};
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use hyper::{Method, StatusCode};
 use r3v3rs3_api::git_connection::{GITHUB_URL, GitProvider, ProviderUrl};
 use serde_json::Value;
 
+mod github_app;
 mod repos;
+pub(super) use github_app::{Conversion, TokenError};
 pub(super) use repos::NewHook;
 
 /// The REST API of github.com.
@@ -24,17 +27,14 @@ pub(super) struct Site<'a> {
 impl Site<'_> {
     /// The authorization page that the browser of the admin opens.
     pub fn authorize_url(&self, authorization: &Authorization<'_>) -> anyhow::Result<String> {
-        let path = match self.provider {
-            GitProvider::Github | GitProvider::Gitea => "/login/oauth/authorize",
-            GitProvider::Gitlab => "/oauth/authorize",
-        };
+        let endpoints = self.oauth()?;
         let url = url::Url::parse_with_params(
-            &format!("{}{path}", self.url),
+            &format!("{}{}", self.url, endpoints.authorize),
             [
                 ("client_id", authorization.client_id),
                 ("redirect_uri", authorization.redirect_uri),
                 ("response_type", "code"),
-                ("scope", self.scopes()),
+                ("scope", endpoints.scopes),
                 ("state", authorization.state),
                 ("code_challenge", authorization.challenge),
                 ("code_challenge_method", "S256"),
@@ -43,19 +43,21 @@ impl Site<'_> {
         Ok(url.into())
     }
 
-    /// The scopes that list, clone and hook the repositories of the account.
-    fn scopes(&self) -> &'static str {
+    /// The OAuth endpoints and the scopes that list, clone and hook the repositories of the
+    /// account. A GitHub connection is a GitHub App, which uses no OAuth authorization.
+    fn oauth(&self) -> anyhow::Result<OauthEndpoints> {
         match self.provider {
-            GitProvider::Github => "repo admin:repo_hook",
-            GitProvider::Gitlab => "api",
-            GitProvider::Gitea => "read:repository write:repository read:user",
-        }
-    }
-
-    fn token_path(&self) -> &'static str {
-        match self.provider {
-            GitProvider::Github | GitProvider::Gitea => "/login/oauth/access_token",
-            GitProvider::Gitlab => "/oauth/token",
+            GitProvider::Github => bail!("a GitHub App connection has no OAuth authorization"),
+            GitProvider::Gitlab => Ok(OauthEndpoints {
+                authorize: "/oauth/authorize",
+                token: "/oauth/token",
+                scopes: "api",
+            }),
+            GitProvider::Gitea => Ok(OauthEndpoints {
+                authorize: "/login/oauth/authorize",
+                token: "/login/oauth/access_token",
+                scopes: "read:repository write:repository read:user",
+            }),
         }
     }
 
@@ -81,24 +83,30 @@ impl Site<'_> {
         http: &HttpClient,
         form: &[(&str, &str)],
     ) -> Result<TokenGrant, GrantError> {
+        let token_path = self.oauth().map_err(GrantError::Failed)?.token;
         let client = ApiClient::new(http.clone(), Some(self.url.as_str()), self.url.as_str())
             .map_err(GrantError::Failed)?;
-        let request = ApiRequest::new(Method::POST, self.token_path().to_string())
+        let request = ApiRequest::new(Method::POST, token_path.to_string())
             .header("accept", "application/json".to_string())
             .form(form);
         let (_, status, body) = client.exchange(request).await.map_err(GrantError::Failed)?;
         grant_of(status, &body)
     }
 
-    /// The user name and the password that clone a repository with an OAuth token. GitLab takes
-    /// the token as the password of `oauth2`, and GitHub and Gitea take it as the user name.
+    /// The user name and the password that clone a repository with the token of a connection.
+    /// GitHub takes an installation token as the password of `x-access-token`, GitLab takes an
+    /// OAuth token as the password of `oauth2`, and Gitea takes it as the user name.
     pub fn credential(&self, token: String) -> GitCredential {
         match self.provider {
+            GitProvider::Github => GitCredential {
+                user: "x-access-token".to_string(),
+                password: token,
+            },
             GitProvider::Gitlab => GitCredential {
                 user: "oauth2".to_string(),
                 password: token,
             },
-            GitProvider::Github | GitProvider::Gitea => GitCredential {
+            GitProvider::Gitea => GitCredential {
                 user: token,
                 password: "x-oauth-basic".to_string(),
             },
@@ -112,14 +120,21 @@ impl Site<'_> {
             .json(ApiRequest::new(Method::GET, "/user".to_string()).bearer(token))
             .await?;
         let field = match self.provider {
-            GitProvider::Github | GitProvider::Gitea => "login",
             GitProvider::Gitlab => "username",
+            GitProvider::Github | GitProvider::Gitea => "login",
         };
         user[field]
             .as_str()
             .map(str::to_string)
             .ok_or_else(|| anyhow!("the provider returned no account name"))
     }
+}
+
+/// The OAuth endpoints of a provider.
+struct OauthEndpoints {
+    authorize: &'static str,
+    token: &'static str,
+    scopes: &'static str,
 }
 
 /// The values of an authorization request.

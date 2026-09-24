@@ -555,6 +555,7 @@ async fn manage_connections(addr: SocketAddr) -> anyhow::Result<()> {
     let id = check_connection_add(addr, &admin, &editor).await?;
     check_authorization(addr, &admin, &editor, &id).await?;
     check_not_connected(addr, &editor, &id).await?;
+    check_github_app(addr, &admin, &editor, &id).await?;
     check_connected_app(addr, &admin, &editor, &id).await?;
     check_connection_update(addr, &admin, &editor, &id).await?;
     check_platform_settings(addr, &admin, &editor).await?;
@@ -658,6 +659,57 @@ async fn check_not_connected(addr: SocketAddr, editor: &str, id: &str) -> anyhow
     let unsafe_name = format!("{CONNECTIONS}/{id}/branches?repository=../app");
     let (status, _) = send(addr, Method::GET, &unsafe_name, editor, None).await?;
     assert_eq!(status, 400);
+    Ok(())
+}
+
+/// A GitHub connection is a GitHub App: only an admin starts its creation, and the form for GitHub
+/// holds a manifest without secrets.
+async fn check_github_app(
+    addr: SocketAddr,
+    admin: &str,
+    editor: &str,
+    gitea: &str,
+) -> anyhow::Result<()> {
+    let mut oauth = connection("hub", Some(CLIENT_SECRET));
+    oauth["provider"] = json!("github");
+    oauth["url"] = json!("https://github.com");
+    let (status, text) = send(addr, Method::POST, CONNECTIONS, admin, Some(oauth)).await?;
+    assert_eq!(status, 400, "{text}");
+    assert!(text.contains("invalid_git_connection"), "{text}");
+
+    let apps = "/api/git/github_apps";
+    let callback = format!("http://{addr}/oauth/git/callback");
+    let body = json!({"name": "hub", "organization": "my-team", "redirect_uri": callback});
+    let (status, _) = send(addr, Method::POST, apps, editor, Some(body.clone())).await?;
+    assert_eq!(status, 403);
+    let mut invalid = body.clone();
+    invalid["organization"] = json!("my_team");
+    let (status, text) = send(addr, Method::POST, apps, admin, Some(invalid)).await?;
+    assert_eq!(status, 422, "{text}");
+    let mut taken = body.clone();
+    taken["name"] = json!("team");
+    let (status, text) = send(addr, Method::POST, apps, admin, Some(taken)).await?;
+    assert_eq!(status, 409, "{text}");
+    assert!(text.contains("git_connection_name_exists"), "{text}");
+
+    let (status, text) = send(addr, Method::POST, apps, admin, Some(body)).await?;
+    assert_eq!(status, 200, "{text}");
+    let form: Value = serde_json::from_str(&text)?;
+    let url = form["url"].as_str().unwrap_or_default();
+    assert!(
+        url.starts_with("https://github.com/organizations/my-team/settings/apps/new?state="),
+        "{url}"
+    );
+    let manifest: Value = serde_json::from_str(form["manifest"].as_str().unwrap_or_default())?;
+    assert_eq!(manifest["redirect_url"], callback.as_str());
+    assert_eq!(manifest["public"], false);
+
+    let installation = format!("{CONNECTIONS}/{gitea}/installation");
+    let (status, _) = send(addr, Method::POST, &installation, editor, None).await?;
+    assert_eq!(status, 403);
+    let (status, text) = send(addr, Method::POST, &installation, admin, None).await?;
+    assert_eq!(status, 409, "{text}");
+    assert!(text.contains("git_connection_not_connected"), "{text}");
     Ok(())
 }
 

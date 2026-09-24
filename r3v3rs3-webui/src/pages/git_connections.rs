@@ -569,6 +569,7 @@ mod tests {
     fn a_form_needs_a_secret_only_for_a_new_connection() {
         let mut form = Form {
             name: "team".into(),
+            provider: GitProvider::Gitlab,
             client_id: "client".into(),
             ..Form::default()
         };
