@@ -1,8 +1,10 @@
 # r3v3rs3
 
-> A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, written in Rust. It is a fork of Taxy.
+> A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, and a deployment platform that runs your apps behind it, written in Rust. It is a fork of Taxy.
 
 r3v3rs3 runs as a single binary or a single container. You configure it in a browser, not in a configuration file: every port, proxy, certificate and account is a form in the WebUI, and the same operations are available over an admin API. It can also build its proxies from Docker labels, a Kubernetes Ingress, the Consul catalog, the Consul key-value store or etcd keys.
+
+The deployment platform runs apps as containers on the Docker Engine of the server or of a remote server with the r3v3rs3 agent. An app comes from a registry image, from a Git repository with its Dockerfile, or from the Docker Compose file of a Git repository. A deployment is blue-green, and r3v3rs3 routes the domains of the apps itself. Git provider connections (a GitHub App, or an OAuth app for GitLab and Gitea) list the repositories, clone private ones and install the push webhook that starts a deployment.
 
 The documentation is published in English at the root and in Turkish under `/tr/`. Every page listed below has a Turkish translation at the same path with the `/tr/` prefix.
 
@@ -13,13 +15,13 @@ The documentation is published in English at the root and in Turkish under `/tr/
 - [Accounts](https://r3v3rs3.keremgok.tr/accounts/): the roles, the permissions and the proxy list of a panel account
 - [Service Discovery](https://r3v3rs3.keremgok.tr/discovery/): Docker, Kubernetes, Consul and etcd sources
 - [Cluster](https://r3v3rs3.keremgok.tr/cluster/): the cluster settings, the store keys, the encryption and the failure modes
-- [Deployment Platform](https://r3v3rs3.keremgok.tr/platform/): deploy container images, roll back and route their domains
+- [Deployment Platform](https://r3v3rs3.keremgok.tr/platform/): image, Git and Compose apps, deployments and rollback, webhooks, Git providers and agent targets
 - [Development](https://r3v3rs3.keremgok.tr/development/): build the server and the WebUI from source
 
 ## Tutorials
 
 - [Installing on a Linux Server](https://r3v3rs3.keremgok.tr/tutorials/install-linux/): install as a systemd service with install.sh
-- [Installing with Docker](https://r3v3rs3.keremgok.tr/tutorials/install-docker/): one container with two volumes
+- [Installing with Docker](https://r3v3rs3.keremgok.tr/tutorials/install-docker/): one container with two volumes, and the image of the deployment platform
 - [Getting Started](https://r3v3rs3.keremgok.tr/tutorials/getting-started/): from the first account to the first working proxy
 - [High Availability](https://r3v3rs3.keremgok.tr/tutorials/high-availability/): three nodes behind a load balancer
 - [Proxies from Docker](https://r3v3rs3.keremgok.tr/tutorials/docker-discovery/): let containers define their own proxies with labels
@@ -41,5 +43,5 @@ The documentation is published in English at the root and in Turkish under `/tr/
 - [crates.io: r3v3rs3](https://crates.io/crates/r3v3rs3): the server binary
 - [crates.io: r3v3rs3-api](https://crates.io/crates/r3v3rs3-api): the shared API types
 - [docs.rs: r3v3rs3-api](https://docs.rs/r3v3rs3-api): the API type reference
-- [Container image](https://github.com/KilimcininKorOglu/r3v3rs3/pkgs/container/r3v3rs3): `ghcr.io/kilimcininkoroglu/r3v3rs3`
+- [Container image](https://github.com/KilimcininKorOglu/r3v3rs3/pkgs/container/r3v3rs3): `ghcr.io/kilimcininkoroglu/r3v3rs3`, and the image with the `-platform` tag suffix for the deployment platform
 - [Changelog](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/CHANGELOG.md)

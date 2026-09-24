@@ -28,7 +28,7 @@ heading = "Reverse everything."
 tagline = "A reverse proxy server with a built-in WebUI."
 getting_started = "Getting Started"
 overview = "Overview"
-description = "A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, written in Rust."
+description = "A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, and a deployment platform that runs your apps behind it, written in Rust."
 theme_by = "Zola theme by"
 
 [languages.tr]
@@ -44,7 +44,7 @@ heading = "Reverse everything."
 tagline = "WebUI ile birlikte gelen bir reverse proxy sunucusu."
 getting_started = "Başlarken"
 overview = "Genel Bakış"
-description = "Rust ile yazılmış, WebUI ile birlikte gelen ve TCP, UDP, TLS, HTTP, WebSocket ve HTTP/3 destekleyen bir reverse proxy sunucusu."
+description = "Rust ile yazılmış, WebUI ile birlikte gelen ve TCP, UDP, TLS, HTTP, WebSocket ve HTTP/3 destekleyen bir reverse proxy sunucusu. Uygulamalarınızı arkasında çalıştıran bir deployment platformu da içerir."
 theme_by = "Zola teması:"
 
 [extra]
