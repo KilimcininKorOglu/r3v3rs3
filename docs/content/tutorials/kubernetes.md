@@ -49,7 +49,7 @@ $ kubectl -n r3v3rs3 port-forward deployment/r3v3rs3 46492:46492
 Open [http://localhost:46492/](http://localhost:46492/) and create the admin account:
 
 ```bash
-$ kubectl -n r3v3rs3 exec deployment/r3v3rs3 -- r3v3rs3 add-user admin
+$ kubectl -n r3v3rs3 exec -it deployment/r3v3rs3 -- r3v3rs3 add-user admin
 ```
 
 ## Step 3: Turn On the Kubernetes Provider
@@ -151,14 +151,14 @@ spec:
 
 ```bash
 $ kubectl get rproxy
-NAME       AGE
-whoami     20s
-postgres   20s
+NAME       PROTOCOL   PORTS          AGE
+postgres   tcp        ["postgres"]   20s
+whoami                ["https"]      20s
 ```
 
 ## Step 6: Check the Result
 
-The **Proxies** page lists both proxies with the source `kubernetes` and without an edit button, because the cluster owns them.
+The **Proxies** page lists both proxies with the source **Kubernetes** and without an edit button, because the cluster owns them.
 
 ```bash
 $ curl -b session.txt http://127.0.0.1:46492/api/discovery

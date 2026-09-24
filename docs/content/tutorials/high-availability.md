@@ -32,7 +32,7 @@ This page is a walkthrough. Follow it from the top and you get a working setup. 
 | Failure | Result |
 |---|---|
 | One r3v3rs3 node stops | keepalived moves the VIP to another node. The other nodes keep the whole state. |
-| The leader stops | Another node takes the lead within `lock_ttl`. ACME orders and the background tasks continue there. |
+| The leader stops | A leader that stops releases the lock, and another node takes the lead within `lock_ttl / 3`. After a crash, another node takes the lead when the lease ends, within about `lock_ttl + lock_ttl / 3`. ACME orders and the background tasks continue there. |
 | One store node stops | The store keeps its quorum. Nothing changes for r3v3rs3. |
 | The store loses its quorum | Every node becomes `degraded`. Traffic continues with the last state, and changes are rejected. |
 
@@ -181,7 +181,7 @@ Keep the `SecretID` of the new token. It is the `token` of the nodes.
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-The script installs the binary, creates `/etc/r3v3rs3`, asks for an admin user name and a password, and runs r3v3rs3 as a systemd service. That account goes to `/etc/r3v3rs3/accounts.toml`. A node with the cluster on does not read that file, so Step 6 creates the account of the cluster again.
+The script installs the binary, creates `/etc/r3v3rs3`, asks for an admin user name and a password, and runs r3v3rs3 as a systemd service. That account goes to `/etc/r3v3rs3/accounts.toml`. A node with the cluster on does not read that file, so Step 6 creates the account of the cluster again. The script also asks for the admin WebUI address. Enter `0.0.0.0:46492` or the address of the node, because Step 7 opens the WebUI of each node over the network.
 
 Stop the service on every node until the cluster configuration is ready:
 
@@ -189,7 +189,7 @@ Stop the service on every node until the cluster configuration is ready:
 $ sudo systemctl stop r3v3rs3
 ```
 
-With Docker, use the `docker-compose.yml` of the repository on each node and add `/etc/r3v3rs3` as the config volume. Keep `network_mode: host`, because the proxy ports bind on the host.
+With Docker, use the `docker-compose.yml` of the repository on each node and mount `/etc/r3v3rs3` at `/root/.config/r3v3rs3`. Write the paths inside the container in `config.toml`, for example `encryption_key_files = ["/root/.config/r3v3rs3/cluster.key"]`. Keep `network_mode: host`, because the proxy ports bind on the host.
 
 ## Step 4: Create the Encryption Key
 
@@ -268,7 +268,7 @@ $ curl -b session.txt http://10.0.0.11:46492/api/cluster/status
 {"state":"synced","node_name":"proxy-1","leader":false,"revision":247}
 ```
 
-Every node must report `synced`, and exactly one node must report `"leader":true`. A node that reports `syncing` for a long time cannot read the store: check the credentials and the endpoints in its log.
+Every node must report `synced`, and exactly one node must report `"leader":true`. A node that does not start, or that reports `degraded`, cannot read the store: check the credentials and the endpoints in its log.
 
 ## Step 8: Add a Health Check Route
 
@@ -277,7 +277,7 @@ The load balancer needs an address that answers without a login. The admin API i
 On the **Ports** page, add an HTTP port, for example `/ip4/0.0.0.0/tcp/80/http`. On the **Proxies** page, add an HTTP proxy on that port with one route:
 
 - **Path**: `/healthz`
-- **Response**: `Status`, status `200`, body `ok`
+- **Route Type**: **Fixed status**, **Status** `200`, **Body** `ok`
 
 The change reaches every node through the store, so one WebUI is enough. Check each node by its own address:
 
@@ -353,10 +353,10 @@ This spreads the load over the three nodes without a VIP. It has one limit: DNS 
 ## Verify the Cluster
 
 1. Add a proxy on one node. It appears on the other nodes within a second.
-2. Stop the leader: `sudo systemctl stop r3v3rs3`. Another node reports `"leader":true` within `lock_ttl`, 15 seconds by default.
+2. Stop the leader: `sudo systemctl stop r3v3rs3`. The leader releases the lock, and another node reports `"leader":true` within `lock_ttl / 3`, 5 seconds by default.
 3. Check the VIP: `ip addr show eth0` on the other nodes. One of them now holds `10.0.0.10`.
 4. Start the stopped node again. It reads the whole state from the store and reports `synced`.
-5. Sign in on one node and open the WebUI of another node with the same browser. The session is valid there too.
+5. Sign in through the VIP, for example `http://10.0.0.10:46492/`. Stop the node that holds the VIP and reload the page. The session stays valid on the new node. A browser sends the session cookie only to the address that set it, so a node that you open by its own address asks for a new sign-in.
 
 ## Operate the Cluster
 

@@ -49,7 +49,7 @@ $ kubectl -n r3v3rs3 port-forward deployment/r3v3rs3 46492:46492
 [http://localhost:46492/](http://localhost:46492/) adresini açın ve admin hesabını oluşturun:
 
 ```bash
-$ kubectl -n r3v3rs3 exec deployment/r3v3rs3 -- r3v3rs3 add-user admin
+$ kubectl -n r3v3rs3 exec -it deployment/r3v3rs3 -- r3v3rs3 add-user admin
 ```
 
 ## Adım 3: Kubernetes sağlayıcısını açın
@@ -151,14 +151,14 @@ spec:
 
 ```bash
 $ kubectl get rproxy
-NAME       AGE
-whoami     20s
-postgres   20s
+NAME       PROTOCOL   PORTS          AGE
+postgres   tcp        ["postgres"]   20s
+whoami                ["https"]      20s
 ```
 
 ## Adım 6: Sonucu kontrol edin
 
-**Proxy'ler** sayfası iki proxy'yi de kaynağı `kubernetes` olarak listeler ve düzenleme butonu göstermez, çünkü onların sahibi cluster'dır.
+**Proxy'ler** sayfası iki proxy'yi de kaynağı **Kubernetes** olarak listeler ve düzenleme butonu göstermez, çünkü onların sahibi cluster'dır.
 
 ```bash
 $ curl -b session.txt http://127.0.0.1:46492/api/discovery

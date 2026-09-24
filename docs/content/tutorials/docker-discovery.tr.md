@@ -106,7 +106,7 @@ exposed_by_default = false
 
 ## Adım 5: Sonucu kontrol edin
 
-**Proxy'ler** sayfası artık kaynağı `docker` olan `whoami` adlı bir proxy listeler. Proxy'nin düzenleme butonu yoktur, çünkü sahibi container'dır. Sayfa sağlayıcının durumunu da gösterir:
+**Proxy'ler** sayfası artık kaynağı **Docker** olan `whoami` adlı bir proxy listeler. Proxy'nin düzenleme butonu yoktur, çünkü sahibi container'dır. Sayfa sağlayıcının durumunu da gösterir:
 
 ```bash
 $ curl -b session.txt http://127.0.0.1:46492/api/discovery
@@ -159,7 +159,7 @@ Her yeni container'ın kendi etiketleri olur. Protokolden sonraki proxy adı iki
       r3v3rs3.http.api.rate_limit.per: minute
 ```
 
-Yönetim API'sinin proxy modelindeki her alan etiket olarak çalışır. [Etiketler](@/discovery.tr.md) sayfası key'leri, değer biçimlerini, TCP ve UDP proxy'lerini listeler. r3v3rs3 düz metin parolayı ve token'ı kullanmadan önce hash'e çevirir, bu yüzden etikette `password_hash` ve `token_hash` tercih edin.
+Yönetim API'sinin proxy modelindeki her alan etiket olarak çalışır. [Etiketler](@/discovery.tr.md#etiketler) bölümü key'leri, değer biçimlerini, TCP ve UDP proxy'lerini listeler. r3v3rs3 düz metin parolayı ve token'ı kullanmadan önce hash'e çevirir, bu yüzden etikette `password_hash` ve `token_hash` tercih edin.
 
 ## Sertifikalar
 
@@ -169,7 +169,7 @@ Etiketten gelen bir HTTP proxy sertifikasını kendiliğinden alabilir. Önce bi
       r3v3rs3.http.api.acme: e7k-2np
 ```
 
-r3v3rs3 proxy'nin `vhosts` değeri için sertifika ister. Kuralları [Servis keşfi](@/discovery.tr.md) sayfasının ACME bölümü anlatır.
+r3v3rs3 proxy'nin `vhosts` değeri için sertifika ister. Kuralları [ACME sertifikaları](@/discovery.tr.md#acme-sertifikalari) bölümü anlatır.
 
 ## Sonraki adımlar
 

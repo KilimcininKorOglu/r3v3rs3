@@ -32,7 +32,7 @@ Bu sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bir kurulum 
 | Arıza | Sonuç |
 |---|---|
 | Bir r3v3rs3 düğümü durur | keepalived VIP'i başka bir düğüme taşır. Diğer düğümler aynı durum bilgisini tutar. |
-| Lider durur | `lock_ttl` içinde başka bir düğüm lider olur. ACME siparişleri ve arka plan görevleri orada devam eder. |
+| Lider durur | Duran lider kilidi bırakır ve başka bir düğüm `lock_ttl / 3` içinde lider olur. Çökmeden sonra lease bitince, yaklaşık `lock_ttl + lock_ttl / 3` içinde başka bir düğüm lider olur. ACME siparişleri ve arka plan görevleri orada devam eder. |
 | Bir veri deposu düğümü durur | Veri deposu quorum'unu korur. r3v3rs3 için hiçbir şey değişmez. |
 | Veri deposu quorum'unu kaybeder | Her düğüm `degraded` olur. İstekler son durum bilgisiyle karşılanmaya devam eder, değişiklikler reddedilir. |
 
@@ -181,7 +181,7 @@ Yeni token'ın `SecretID` değerini saklayın. Düğümlerin `token` alanı budu
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-Script binary'yi kurar, `/etc/r3v3rs3` dizinini oluşturur, bir admin kullanıcı adı ile parola sorar ve r3v3rs3'ü systemd servisi olarak çalıştırır. Bu hesap `/etc/r3v3rs3/accounts.toml` dosyasına yazılır. Cluster'ı açık olan bir düğüm bu dosyayı okumaz, bu yüzden Adım 6 cluster'ın hesabını yeniden oluşturur.
+Script binary'yi kurar, `/etc/r3v3rs3` dizinini oluşturur, bir admin kullanıcı adı ile parola sorar ve r3v3rs3'ü systemd servisi olarak çalıştırır. Bu hesap `/etc/r3v3rs3/accounts.toml` dosyasına yazılır. Cluster'ı açık olan bir düğüm bu dosyayı okumaz, bu yüzden Adım 6 cluster'ın hesabını yeniden oluşturur. Script yönetim WebUI adresini de sorar. `0.0.0.0:46492` veya düğümün adresini girin, çünkü Adım 7 her düğümün WebUI'ını ağ üzerinden açar.
 
 Cluster yapılandırması hazır olana kadar servisi her düğümde durdurun:
 
@@ -189,7 +189,7 @@ Cluster yapılandırması hazır olana kadar servisi her düğümde durdurun:
 $ sudo systemctl stop r3v3rs3
 ```
 
-Docker kullanıyorsanız her düğümde repository'nin `docker-compose.yml` dosyasını kullanın ve `/etc/r3v3rs3` dizinini yapılandırma volume'u olarak ekleyin. `network_mode: host` satırını koruyun, çünkü proxy portları host üzerinde dinler.
+Docker kullanıyorsanız her düğümde repository'nin `docker-compose.yml` dosyasını kullanın ve `/etc/r3v3rs3` dizinini `/root/.config/r3v3rs3` yoluna bağlayın. `config.toml` içinde container içindeki yolları yazın, örneğin `encryption_key_files = ["/root/.config/r3v3rs3/cluster.key"]`. `network_mode: host` satırını koruyun, çünkü proxy portları host üzerinde dinler.
 
 ## Adım 4: Şifreleme key'ini oluşturun
 
@@ -268,7 +268,7 @@ $ curl -b session.txt http://10.0.0.11:46492/api/cluster/status
 {"state":"synced","node_name":"proxy-1","leader":false,"revision":247}
 ```
 
-Her düğüm `synced` demelidir ve tam bir düğüm `"leader":true` demelidir. Uzun süre `syncing` diyen bir düğüm veri deposunu okuyamıyordur: log'unda kimlik bilgilerini ve endpoint'leri kontrol edin.
+Her düğüm `synced` demelidir ve tam bir düğüm `"leader":true` demelidir. Başlamayan veya `degraded` diyen bir düğüm veri deposunu okuyamıyordur: log'unda kimlik bilgilerini ve endpoint'leri kontrol edin.
 
 ## Adım 8: Sağlık kontrolü route'u ekleyin
 
@@ -353,10 +353,10 @@ Bu, yükü VIP olmadan üç düğüme dağıtır. Tek sınırı vardır: DNS dur
 ## Cluster'ı doğrulayın
 
 1. Bir düğümde proxy ekleyin. Bir saniye içinde diğer düğümlerde görünür.
-2. Lideri durdurun: `sudo systemctl stop r3v3rs3`. Başka bir düğüm `lock_ttl` içinde, varsayılan olarak 15 saniyede `"leader":true` der.
+2. Lideri durdurun: `sudo systemctl stop r3v3rs3`. Lider kilidi bırakır ve başka bir düğüm `lock_ttl / 3` içinde, varsayılan olarak 5 saniyede `"leader":true` der.
 3. VIP'i kontrol edin: diğer düğümlerde `ip addr show eth0`. Biri artık `10.0.0.10` adresini tutar.
 4. Durdurduğunuz düğümü yeniden başlatın. Bütün durum bilgisini veri deposundan okur ve `synced` der.
-5. Bir düğümde giriş yapın ve aynı tarayıcıyla başka bir düğümün WebUI'ını açın. Oturum orada da geçerlidir.
+5. VIP üzerinden giriş yapın, örneğin `http://10.0.0.10:46492/`. VIP'i tutan düğümü durdurun ve sayfayı yenileyin. Oturum yeni düğümde de geçerlidir. Tarayıcı oturum cookie'sini yalnız onu yazan adrese gönderir. Bu yüzden kendi adresiyle açtığınız bir düğüm yeniden giriş ister.
 
 ## Cluster'ı işletin
 

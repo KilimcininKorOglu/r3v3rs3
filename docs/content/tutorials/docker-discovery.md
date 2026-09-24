@@ -91,7 +91,7 @@ A discovery provider opens no port. The label `ports: http` names a port that mu
 2. Find **Docker Service Discovery** and turn it on.
 3. Write `unix:///var/run/docker.sock` in the endpoint field.
 4. Write `proxy` in the network field. This is the name of the Docker network of Step 1.
-5. Leave **Expose containers by default** off, so r3v3rs3 reads only the containers with `r3v3rs3.enable=true`.
+5. Leave **Read every container** off, so r3v3rs3 reads only the containers with `r3v3rs3.enable=true`.
 6. Save.
 
 The same settings in `config.toml`:
@@ -106,7 +106,7 @@ exposed_by_default = false
 
 ## Step 5: Check the Result
 
-The **Proxies** page now lists a proxy named `whoami` with the source `docker`. It has no edit button, because the container owns it. The page also shows the provider state:
+The **Proxies** page now lists a proxy named `whoami` with the source **Docker**. It has no edit button, because the container owns it. The page also shows the provider state:
 
 ```bash
 $ curl -b session.txt http://127.0.0.1:46492/api/discovery
