@@ -1,6 +1,6 @@
 [package]
 name = "r3v3rs3"
-version = "1.5.2"
+version = "1.5.3"
 edition = "2024"
 include = ["/src", "/templates", "/data", "/build.rs", "/LICENSE", "/dist/webui"]
 build = "build.rs"

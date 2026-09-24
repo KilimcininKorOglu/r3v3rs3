@@ -3455,7 +3455,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r3v3rs3"
-version = "1.5.2"
+version = "1.5.3"
 dependencies = [
  "anyhow",
  "arc-swap",

@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-09-25
+
+### Changed
+- The README, the docs home page, `llms.txt` and the site description name the deployment platform.
+- The configuration, deployment platform, service discovery, cluster, accounts and development references are corrected and complete.
+- Every tutorial uses the current WebUI labels, the route path rules, the client IP headers and the account rules of the server.
+- The Docker install guide keeps the WebUI of the platform container on loopback and names the `proxy_ports` setting.
+
+### Fixed
+- `--log` and `--access-log` write the file into the directory of the given path. A bare file name still goes into the log directory.
+- The platform image starts the WebUI on its loopback default. Before, it listened on `0.0.0.0:46492`, which host networking opened on every interface of the host.
+
 ## [1.5.2] - 2026-09-24
 
 ### Changed
