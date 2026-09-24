@@ -19,7 +19,7 @@ gloo-utils = "0.3.0"
 serde_derive = "1.0.171"
 serde = "1.0.171"
 yewdux = "0.13.0"
-web-sys = { version = "0.3.64", features = ["console", "Document", "DomTokenList", "Element", "HtmlDocument", "HtmlSelectElement", "HtmlTextAreaElement", "MediaQueryList", "Window"] }
+web-sys = { version = "0.3.64", features = ["console", "Document", "DomTokenList", "Element", "HtmlDocument", "HtmlElement", "HtmlFormElement", "HtmlInputElement", "HtmlSelectElement", "HtmlTextAreaElement", "MediaQueryList", "Window"] }
 futures = "0.3.28"
 gloo-timers = "0.4.0"
 url = "2.4.0"

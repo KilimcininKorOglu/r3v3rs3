@@ -17,6 +17,7 @@ mod app_webhook;
 mod audit;
 pub mod cert_list;
 mod git_connections;
+mod github_app;
 mod log_view;
 mod login;
 mod logout;
