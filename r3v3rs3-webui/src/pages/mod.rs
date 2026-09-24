@@ -11,10 +11,12 @@ mod app_form;
 mod app_git_token;
 mod app_list;
 mod app_log;
+mod app_repository;
 mod app_view;
 mod app_webhook;
 mod audit;
 pub mod cert_list;
+mod git_connections;
 mod log_view;
 mod login;
 mod logout;
@@ -80,6 +82,8 @@ pub enum Route {
     AppLog { id: ShortId },
     #[at("/targets")]
     Targets,
+    #[at("/git_connections")]
+    GitConnections,
     #[at("/settings")]
     Settings,
     #[at("/accounts")]
@@ -114,6 +118,7 @@ impl Route {
             | Route::AppLog { .. } => Some(Route::Apps),
             Route::AccessLists
             | Route::Targets
+            | Route::GitConnections
             | Route::Settings
             | Route::Accounts
             | Route::Audit => Some(self.clone()),
@@ -142,6 +147,7 @@ pub fn switch(routes: Route) -> Html {
         Route::AppDeployments { id } => html! { <app_deployments::AppDeployments {id} /> },
         Route::AppLog { id } => html! { <app_log::AppLogView {id} /> },
         Route::Targets => html! { <targets::Targets /> },
+        Route::GitConnections => html! { <git_connections::GitConnections /> },
         Route::Certs => html! { <cert_list::CertList /> },
         Route::SelfSign => html! { <self_sign::SelfSign /> },
         Route::NewAcme => html! { <new_acme::NewAcme /> },

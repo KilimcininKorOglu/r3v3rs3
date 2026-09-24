@@ -13,6 +13,8 @@ enum Access {
     AdminOnly,
     /// An account without a proxy list.
     Platform,
+    /// An account without a proxy list that changes the platform.
+    PlatformEdit,
 }
 
 struct MenuItem {
@@ -74,6 +76,12 @@ const GROUPS: &[MenuGroup] = &[
                 route: Route::Targets,
                 access: Access::Platform,
             },
+            MenuItem {
+                name: "nav.git_connections",
+                icon: "/assets/icons/git-branch.svg",
+                route: Route::GitConnections,
+                access: Access::PlatformEdit,
+            },
         ],
     },
     MenuGroup {
@@ -107,6 +115,7 @@ impl Access {
             Access::All => true,
             Access::AdminOnly => session.is_admin(),
             Access::Platform => session.can_read_platform(),
+            Access::PlatformEdit => session.can_read_platform() && session.can_edit(),
         }
     }
 }

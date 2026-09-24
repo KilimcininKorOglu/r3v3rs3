@@ -14,6 +14,7 @@ use crate::components::data_list::DANGER_LINK_CLASS;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
+use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, AppRequest, TargetEntry};
@@ -29,6 +30,7 @@ struct Loaded {
     app: UseStateHandle<Option<AppEntry>>,
     form: UseStateHandle<AppForm>,
     targets: UseStateHandle<Vec<TargetEntry>>,
+    connections: UseStateHandle<Vec<GitConnectionEntry>>,
     notice: AppNotice,
 }
 
@@ -48,6 +50,7 @@ pub fn app_view(props: &Props) -> Html {
     let app = use_state(|| Option::<AppEntry>::None);
     let form = use_state(AppForm::default);
     let targets = use_state(Vec::<TargetEntry>::new);
+    let connections = use_state(Vec::<GitConnectionEntry>::new);
     let notice = use_state(|| Option::<Notice<()>>::None);
 
     // The admin API answers 401 until the session loads, so the page waits for it.
@@ -56,22 +59,28 @@ pub fn app_view(props: &Props) -> Html {
         app: app.clone(),
         form: form.clone(),
         targets: targets.clone(),
+        connections: connections.clone(),
         notice: notice.clone(),
     };
+    // Only an account that changes the apps reads the connections.
+    let can_edit = session.can_edit();
     use_effect_with((props.id, signed_in), move |&(id, signed_in)| {
         if signed_in {
-            load(locale, id, state);
+            load(locale, id, can_edit, state);
         }
     });
 
     if props.id.is_some() && app.is_none() {
         return html! { { notice_view(&notice, |_: &()| html! {}) } };
     }
-    let can_edit = session.can_edit();
     let saved = saved_callback(&app, &form, &notice, &navigator);
+    let lists = Lists {
+        targets: &targets,
+        connections: &connections,
+    };
     html! {
         <>
-            { form_view(locale, &form, &targets, &notice, (*app).as_ref(), can_edit, saved) }
+            { form_view(locale, &form, lists, &notice, (*app).as_ref(), can_edit, saved) }
             if let Some(entry) = (*app).clone().filter(|_| can_edit) {
                 { edit_extras(locale, entry, &app, &navigator) }
             }
@@ -79,10 +88,16 @@ pub fn app_view(props: &Props) -> Html {
     }
 }
 
+/// The targets and the connections that the form offers.
+struct Lists<'a> {
+    targets: &'a [TargetEntry],
+    connections: &'a [GitConnectionEntry],
+}
+
 fn form_view(
     locale: Locale,
     form: &UseStateHandle<AppForm>,
-    targets: &[TargetEntry],
+    lists: Lists<'_>,
     notice: &AppNotice,
     app: Option<&AppEntry>,
     can_edit: bool,
@@ -99,7 +114,7 @@ fn form_view(
         notice: notice_view(notice, |_: &()| html! { {locale.t("apps.saved")} }),
         fields: html! {
             <fieldset disabled={!can_edit}>
-                { fields_view(locale, form, targets, app.is_some()) }
+                { fields_view(locale, form, lists.targets, lists.connections, app.is_some()) }
             </fieldset>
         },
         error: parsed
@@ -209,18 +224,26 @@ async fn save(
         .map_err(|err| err.to_string())
 }
 
-/// Reads the targets and the app. A failed read shows its message.
-fn load(locale: Locale, id: Option<ShortId>, loaded: Loaded) {
+/// Reads the targets, the connections and the app. A failed read shows its message.
+fn load(locale: Locale, id: Option<ShortId>, can_edit: bool, loaded: Loaded) {
     let Loaded {
         app,
         form,
         targets,
+        connections,
         notice,
     } = loaded;
     spawn_local(async move {
         match fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/targets"))).await {
             Ok(list) => targets.set(list),
             Err(message) => notice.set(Some(Notice::Failed(message))),
+        }
+        if can_edit {
+            let path = format!("{API_ENDPOINT}/git/connections");
+            match fetch_json(locale, Request::get(&path)).await {
+                Ok(list) => connections.set(list),
+                Err(message) => notice.set(Some(Notice::Failed(message))),
+            }
         }
         let Some(id) = id else {
             return;

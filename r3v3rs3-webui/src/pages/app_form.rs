@@ -1,10 +1,12 @@
 //! The fields of the app form and the request that they make.
 
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
+use super::app_repository::RepositoryPicker;
 use super::resource_page::text_input;
 use r3v3rs3_api::container::{ResourceLimits, RestartPolicy, VolumeMount};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git::{GitRef, RelPath};
+use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, AppRequest, AppSource, AppSpec, LOCAL_TARGET, TargetEntry};
@@ -342,6 +344,7 @@ pub fn fields_view(
     locale: Locale,
     form: &UseStateHandle<AppForm>,
     targets: &[TargetEntry],
+    connections: &[GitConnectionEntry],
     editing: bool,
 ) -> Html {
     html! {
@@ -351,7 +354,7 @@ pub fn fields_view(
             <p class={HINT_CLASS}>{locale.t("apps.name_hint")}</p>
             { target_select(locale, form, targets) }
             { kind_select(locale, form) }
-            { source_view(locale, form) }
+            { source_view(locale, form, connections) }
             { text_field(locale, form, "apps.port", Some("apps.port_hint"), |f| &mut f.port) }
             { text_area(locale, form, "apps.domains", "apps.domains_hint", |f| &mut f.domains) }
             { text_field(locale, form, "apps.health_check_path", Some("apps.health_check_path_hint"), |f| &mut f.health_check_path) }
@@ -362,21 +365,25 @@ pub fn fields_view(
     }
 }
 
-fn source_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+fn source_view(
+    locale: Locale,
+    form: &UseStateHandle<AppForm>,
+    connections: &[GitConnectionEntry],
+) -> Html {
     match form.kind {
         SourceKind::Image => text_field(locale, form, "apps.image", Some("apps.image_hint"), |f| {
             &mut f.image
         }),
         SourceKind::Git => html! {
             <>
-                { repository_view(locale, form) }
+                { repository_view(locale, form, connections) }
                 { text_field(locale, form, "apps.context", Some("apps.context_hint"), |f| &mut f.context) }
                 { text_field(locale, form, "apps.dockerfile", Some("apps.dockerfile_hint"), |f| &mut f.dockerfile) }
             </>
         },
         SourceKind::Compose => html! {
             <>
-                { repository_view(locale, form) }
+                { repository_view(locale, form, connections) }
                 { text_field(locale, form, "apps.compose_file", Some("apps.compose_file_hint"), |f| &mut f.compose_file) }
                 { text_field(locale, form, "apps.service", Some("apps.service_hint"), |f| &mut f.service) }
             </>
@@ -384,13 +391,12 @@ fn source_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
     }
 }
 
-fn repository_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
-    html! {
-        <>
-            { text_field(locale, form, "apps.repository", Some("apps.repository_hint"), |f| &mut f.repository) }
-            { text_field(locale, form, "apps.branch", None, |f| &mut f.branch) }
-        </>
-    }
+fn repository_view(
+    locale: Locale,
+    form: &UseStateHandle<AppForm>,
+    connections: &[GitConnectionEntry],
+) -> Html {
+    html! { <RepositoryPicker form={form.clone()} connections={connections.to_vec()} {locale} /> }
 }
 
 /// The volumes, the restart policy and the limits. A Compose app sets them in its Compose file.
@@ -405,7 +411,7 @@ fn container_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
     }
 }
 
-fn text_field(
+pub(super) fn text_field(
     locale: Locale,
     form: &UseStateHandle<AppForm>,
     label: &'static str,
