@@ -227,6 +227,16 @@ async fn a_revoked_certificate_cannot_connect() -> anyhow::Result<()> {
     let (agent, dir) = master.agent("revoked");
     let identity = agent.identity(Some(&master.token(target()))).await?;
     master.directory.certificates.lock().unwrap().clear();
+    // The agent names the reason, because the master closes the connection without one.
+    let err = agent
+        .session(identity.client_config()?)
+        .await
+        .err()
+        .context("error")?;
+    assert!(
+        format!("{err:#}").contains("belongs to no target"),
+        "{err:#}"
+    );
     let running = tokio::spawn(async move { agent.run(&identity).await });
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(master.registry.status(target()).is_none());

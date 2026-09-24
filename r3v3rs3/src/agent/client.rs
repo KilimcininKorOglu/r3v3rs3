@@ -16,7 +16,7 @@ use anyhow::{Context, anyhow, bail};
 use r3v3rs3_api::id::ShortId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::fs;
 use tokio::net::TcpStream;
@@ -94,7 +94,7 @@ impl AgentIdentity {
         Ok(())
     }
 
-    fn client_config(&self) -> anyhow::Result<ClientConfig> {
+    pub(super) fn client_config(&self) -> anyhow::Result<ClientConfig> {
         agent_client_config(&self.ca, &self.certificate, &self.key)
     }
 }
@@ -210,14 +210,20 @@ impl AgentClient {
 
     /// One connection: serves the streams of the master until the connection closes or stays
     /// idle.
-    async fn session(&self, config: ClientConfig) -> anyhow::Result<()> {
+    pub(super) async fn session(&self, config: ClientConfig) -> anyhow::Result<()> {
         let tls = self.connect(config).await?;
-        info!(master = self.master, "connected to the master");
         let last_request = Arc::new(AtomicU64::new(unix_ms()));
         let seen = last_request.clone();
+        // The master pings an accepted agent at once, so the first request starts the session.
+        let accepted = Arc::new(AtomicBool::new(false));
+        let first = accepted.clone();
+        let master = self.master.clone();
         let executor = self.executor.clone();
         let served = serve(tls.compat(), move |stream| {
             seen.store(unix_ms(), Ordering::Relaxed);
+            if !first.swap(true, Ordering::Relaxed) {
+                info!(master, "connected to the master");
+            }
             let executor = executor.clone();
             tokio::spawn(async move {
                 if let Err(err) = executor.answer(stream).await {
@@ -229,7 +235,16 @@ impl AgentClient {
             });
         });
         tokio::select! {
-            result = served => Ok(result?),
+            result = served => {
+                if !accepted.load(Ordering::Relaxed) {
+                    bail!(
+                        "the master closed the connection before its first request, as it does \
+                         for a certificate that belongs to no target: the target was deleted, or \
+                         another agent enrolled with a new token of the target"
+                    );
+                }
+                Ok(result?)
+            }
             () = idle(&last_request, self.timing.idle) => {
                 bail!("the master sent no request for {} seconds", self.timing.idle.as_secs())
             }
