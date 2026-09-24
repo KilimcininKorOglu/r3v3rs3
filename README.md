@@ -5,7 +5,7 @@
 
 **Reverse everything.**
 
-A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, written in Rust.
+A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, and a deployment platform that runs your apps behind it, written in Rust.
 
 [![Crates.io](https://img.shields.io/crates/v/r3v3rs3.svg)](https://crates.io/crates/r3v3rs3)
 [![GitHub license](https://img.shields.io/github/license/KilimcininKorOglu/r3v3rs3.svg)](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/LICENSE)
@@ -46,6 +46,16 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 - Service discovery from Docker labels, Kubernetes Ingress and `R3v3rs3Proxy` resources, Consul and etcd
 - High availability with cluster mode: several nodes share one encrypted state in etcd or Consul
 
+### Deployment platform
+
+- Apps from a registry image, from a Git repository with its Dockerfile, or from the Docker Compose file of a Git repository
+- Blue-green deployments that switch the proxy only after the new container passes its health check, and rollback to an earlier deployment
+- r3v3rs3 routes the domains of the apps itself and orders their certificates through ACME
+- Encrypted environment variables, the deployments and the container log of every app in the WebUI and the admin API
+- Git provider connections: a GitHub App that r3v3rs3 creates from a manifest, also on GitHub Enterprise Server, and OAuth apps for GitLab and Gitea. A connection lists the repositories and branches, clones private repositories and installs the push webhook
+- Push webhooks from GitHub, GitLab, Gitea, Forgejo or a generic HMAC sender start a deployment
+- Agent targets run apps on other servers. The agent connects to the master over mTLS after a one-time enrollment
+
 ## Documentation
 
 The documentation is available in [English](https://r3v3rs3.keremgok.tr/) and [Turkish](https://r3v3rs3.keremgok.tr/tr/):
@@ -53,6 +63,7 @@ The documentation is available in [English](https://r3v3rs3.keremgok.tr/) and [T
 - [Configuration](https://r3v3rs3.keremgok.tr/configuration/): ports, proxies, certificates, ACME, settings, the admin API and logging
 - [Accounts](https://r3v3rs3.keremgok.tr/accounts/): roles and permissions
 - [Service Discovery](https://r3v3rs3.keremgok.tr/discovery/): Docker, Kubernetes, Consul and etcd
+- [Deployment Platform](https://r3v3rs3.keremgok.tr/platform/): apps, deployments, webhooks, Git providers and agent targets
 - [Tutorials](https://r3v3rs3.keremgok.tr/tutorials/): step by step guides, starting with [High Availability](https://r3v3rs3.keremgok.tr/tutorials/high-availability/)
 - [Cluster](https://r3v3rs3.keremgok.tr/cluster/): the cluster reference, from the settings to the failure modes
 - [Development](https://r3v3rs3.keremgok.tr/development/)
@@ -101,6 +112,8 @@ Publish each additional port that you add in the WebUI with another `-p` option.
 ```bash
 docker exec -it r3v3rs3 r3v3rs3 add-user admin
 ```
+
+The deployment platform needs the image with the `-platform` tag suffix (for example `latest-platform`), which adds `git` and the `docker` CLI with its Compose and buildx plugins. Run it with host networking, the Docker socket and the config directory on the same path as on the host, as [Installing with Docker](https://r3v3rs3.keremgok.tr/tutorials/install-docker/#deployment-platform) shows.
 
 ### Docker Compose
 
@@ -171,7 +184,7 @@ cd r3v3rs3-webui
 trunk serve
 ```
 
-`make check` runs the format check, clippy, the tests and the WebUI build. `make release` builds the release WebUI and the release binary. The repository also has a Gitpod configuration and a dev container.
+`make check` runs the format check, clippy, the tests and the WebUI build. `make test-runtime-docker` runs the Docker runtime and deployment platform tests against the local Docker Engine. `make release` builds the release WebUI and the release binary. The repository also has a Gitpod configuration and a dev container.
 
 [![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/KilimcininKorOglu/r3v3rs3)
 
