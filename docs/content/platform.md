@@ -202,29 +202,49 @@ The body can be up to 5 MiB. The audit log records every request that deployed o
 
 A Git provider connection lets r3v3rs3 act for an account of GitHub, GitLab or Gitea. After an admin connects it once, the app form lists the repositories and the branches of that account, a deployment clones a private repository with the token of the connection, and r3v3rs3 installs the push webhook of the app at the repository. The connections belong to the server: an admin adds them, and every account with the Edit permission can use them in its apps. An app without a connection keeps working with its repository address and its own Git token.
 
-### Register an OAuth Application
+A GitHub connection is a GitHub App that r3v3rs3 creates for you. A GitLab or Gitea connection is an OAuth application that you register at the provider.
 
-Each connection is an OAuth application that you register at the provider. Its callback address is the address of the WebUI followed by `/oauth/git/callback`, for example `https://r3v3rs3.example.com/oauth/git/callback`. The **Git Providers** page shows this address for the page that you use. The provider sends the browser of the admin back to it, so it must be the address that the admin opens, not the public address.
+### Create a GitHub App
+
+On the **Git Providers** page, select GitHub as the provider and give the connection a name. Leave **Address** empty for github.com, or enter the address of a GitHub Enterprise Server. **Organization** takes the GitHub organization that owns the app. Without it the app belongs to your own account.
+
+**Create GitHub App** posts a manifest to GitHub. GitHub opens the page that creates a GitHub App, with these settings filled in:
+
+- The name is `r3v3rs3-<connection name>`. Each app name on GitHub must be unique, so change it on GitHub when it is taken.
+- The app is private, so only the account that owns it can install it.
+- The permissions are read access to Contents and Metadata, and write access to the repository webhooks.
+- The app has no webhook of its own. r3v3rs3 installs the webhook of each app on its repository.
+
+When you create the app on GitHub, GitHub sends the browser to the callback address (`/oauth/git/callback`) with a code. r3v3rs3 exchanges the code for the client id, the client secret and the private key of the app, and stores the connection. The browser then opens the installation page of the app. The state works once and for 10 minutes. The callback needs no session, because the session cookie does not follow a redirect from another site.
+
+On the installation page, select the account or the organization and the repositories. GitHub returns the browser to the **Git Providers** page, which reads the installation of the app from GitHub, and the connection shows **Connected**. **Account** shows the account of the installation. On a connection that is not installed, **Install on GitHub** opens the installation page. The link in the **Address** column opens the page of the app on GitHub, where you can change the selected repositories.
+
+GitHub keeps the callback and return addresses with the WebUI address of the moment the app was created. When the WebUI address changes, change these addresses in the settings of the app on GitHub.
+
+r3v3rs3 encrypts the client secret and the private key with `platform.key`, and the admin API never returns them. For each GitHub request r3v3rs3 gets an installation token with a JWT signed by the private key. The token lives one hour, and r3v3rs3 renews it before it expires. When the app is uninstalled on GitHub, the connection shows **Connect again**, and **Connect again** opens the installation page. A GitHub App connection changes only its name.
+
+### GitLab and Gitea
+
+The callback address is the address of the WebUI followed by `/oauth/git/callback`, for example `https://r3v3rs3.example.com/oauth/git/callback`. The **Git Providers** page shows this address for the page that you use. The provider sends the browser of the admin back to it, so it must be the address that the admin opens, not the public address.
 
 | Provider | Where | Settings |
 |---|---|---|
-| GitHub | **Settings**, **Developer settings**, **OAuth Apps**, **New OAuth App** | **Authorization callback URL** is the callback address. r3v3rs3 asks for the scopes `repo` and `admin:repo_hook`. |
 | GitLab | **Preferences**, **Applications**, or the **Applications** of a group or of the instance | **Redirect URI** is the callback address. Select the scope `api`, and keep **Confidential** on. |
 | Gitea | **Settings**, **Applications**, **Manage OAuth2 Applications** | **Redirect URI** is the callback address. Keep **Confidential Client** on. r3v3rs3 asks for the scopes `read:repository`, `write:repository` and `read:user`. |
 
-The provider shows a client id and a client secret. Add both on the **Git Providers** page. A GitHub connection always uses `https://github.com`. A GitLab connection uses `https://gitlab.com` unless you give the address of your own GitLab. A Gitea connection needs the address of its server. The address of a provider uses `https://`; `http://` is allowed only on a loopback address.
+The provider shows a client id and a client secret. Add both on the **Git Providers** page. A GitLab connection uses `https://gitlab.com` unless you give the address of your own GitLab. A Gitea connection needs the address of its server. The address of a provider uses `https://`; `http://` is allowed only on a loopback address.
 
 ### Connect
 
-**Connect** on the row of a connection opens the authorization page of the provider. After the account allows the access, the provider sends the browser back to the callback address, and r3v3rs3 exchanges the code for the tokens of the account. The authorization uses PKCE, and its state works once and for 10 minutes. The callback needs no session, because the session cookie does not follow a redirect from another site. The page shows **Connected** and the name of the account.
+**Connect** on the row of a GitLab or Gitea connection opens the authorization page of the provider. After the account allows the access, the provider sends the browser back to the callback address, and r3v3rs3 exchanges the code for the tokens of the account. The authorization uses PKCE, and its state works once and for 10 minutes. The page shows **Connected** and the name of the account.
 
 r3v3rs3 encrypts the client secret and the tokens with `platform.key`, and the admin API never returns them. A GitLab or Gitea token expires, so r3v3rs3 renews it with its refresh token before it uses it. When the provider refuses the renewal, the connection shows **Connect again**, and **Connect again** authorizes it anew. A change of the provider, the address or the client id of a connection also disconnects it.
 
 ### Apps with a Connection
 
-The **Git provider connection** select of the app form offers the connections. With a connected connection the form lists the recently changed repositories of the account, **Search the repositories** finds one by its name, and a chosen repository fills the **Repository** address and its default branch. **Branch** then lists the branches of the repository. The repository address must belong to the provider of the connection.
+The **Git provider connection** select of the app form offers the connections. With a connected connection the form lists repositories: the recently changed repositories of the account on GitLab and Gitea, and the repositories that the GitHub App is installed on. **Search the repositories** finds one by its name, and a chosen repository fills the **Repository** address and its default branch. **Branch** then lists the branches of the repository. The repository address must belong to the provider of the connection.
 
-A deployment and a rollback clone the repository with the current token of the connection. GitHub and Gitea receive the token as the user name, and GitLab as the password of the user `oauth2`.
+A deployment and a rollback clone the repository with the current token of the connection. GitHub takes the installation token as the password of the user `x-access-token`, GitLab takes the token as the password of the user `oauth2`, and Gitea takes it as the user name.
 
 ### Webhooks of a Connection
 
@@ -234,7 +254,7 @@ When an app with a connection is saved, r3v3rs3 creates the webhook secret of th
 
 A failed installation does not stop the change of the app. The **Webhook** section of the app page shows the reason, and **Install the webhook again**, or `POST /api/apps/{id}/hook`, deletes the old webhook of the app and installs it again. Without a public address no webhook is installed, and the app shows that reason. A webhook that r3v3rs3 cannot delete at the provider stays there and gets `404` from r3v3rs3.
 
-A connection that an app uses cannot be deleted and answers `409 git_connection_in_use`. Deleting a connection does not revoke its authorization at the provider; revoke the OAuth application there.
+A connection that an app uses cannot be deleted and answers `409 git_connection_in_use`. Deleting a connection does not remove its access at the provider: delete the GitHub App in the settings of GitHub, or the OAuth application at GitLab or Gitea.
 
 ## Notifications
 
@@ -407,14 +427,16 @@ Without `agent_port` the add and the new token actions answer that the agent por
 | `GET /api/deployments/{id}` | Read | Returns a deployment. |
 | `POST /api/deployments/{id}/rollback` | Edit | Repeats an earlier deployment. |
 | `GET /api/git/connections` | Edit | The Git provider connections, without secrets or tokens. |
-| `POST /api/git/connections` | Admin | Adds a connection. |
+| `POST /api/git/connections` | Admin | Adds a GitLab or Gitea connection. |
 | `GET /api/git/connections/{id}` | Edit | Returns a connection. |
-| `PUT /api/git/connections/{id}` | Admin | Replaces a connection. Without `client_secret` the current secret stays. |
+| `PUT /api/git/connections/{id}` | Admin | Replaces a connection. Without `client_secret` the current secret stays. A GitHub App connection changes only its name. |
 | `DELETE /api/git/connections/{id}` | Admin | Deletes a connection that no app uses. |
-| `POST /api/git/connections/{id}/authorize` | Admin | Starts an authorization with `{"redirect_uri": "<callback address>"}` and returns the page of the provider. |
-| `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Up to 50 repositories of the connected account. |
+| `POST /api/git/connections/{id}/authorize` | Admin | Starts an authorization with `{"redirect_uri": "<callback address>"}` and returns the page of the provider, or the installation page of a GitHub App. |
+| `POST /api/git/connections/{id}/installation` | Admin | Reads the installation of the GitHub App from GitHub and connects the connection. |
+| `POST /api/git/github_apps` | Admin | Starts a GitHub App with `{"name": "...", "url": "...", "organization": "...", "redirect_uri": "<callback address>"}`, `url` and `organization` optional, and returns the form address and the manifest that the browser posts to GitHub. |
+| `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Up to 50 repositories of the connected account or of the installation. |
 | `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit | Up to 50 branches of a repository. |
-| `GET /oauth/git/callback` | The state | The callback of the provider. See [Connect](#connect). |
+| `GET /oauth/git/callback` | The state | The callback of the provider and of a new GitHub App. See [Connect](#connect) and [Create a GitHub App](#create-a-github-app). |
 | `GET /api/platform/settings` | Edit | The public address of the platform. |
 | `PUT /api/platform/settings` | Admin | Sets the public address with `{"public_url": "https://..."}`. |
 

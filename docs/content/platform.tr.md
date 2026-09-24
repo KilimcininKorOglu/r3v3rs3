@@ -189,33 +189,62 @@ Hangi istek deploy eder:
 
 Deploy eden istek `200` ve `{"outcome": "deployed", "deployment": {...}}` yanıtını alır. Deployment'ın tetikleyeni `webhook`, hesabı `webhook` olur. Çalışan bir deployment sırasında gelen push `202` ve `{"outcome": "queued"}` yanıtını alır. Çalışan deployment bitince branch'in en son commit'iyle bir deployment daha başlar. Böylece kuyruktaki tek deployment aradaki bütün push'ları kapsar. r3v3rs3 kuyruğu bellekte tutar, bu yüzden yeniden başlatma kuyruğu siler.
 
+| Durum kodu | Nedeni |
+|---|---|
+| `400 invalid_webhook_payload` | GitHub, Gitea veya GitLab push'unun gövdesi JSON değildir, örneğin içerik türü `application/x-www-form-urlencoded` olduğunda. |
+| `401 unauthorized` | İmza yoktur veya yanlıştır. |
+| `404 id_not_found` | Bu id ile bir uygulama yoktur veya uygulamanın webhook secret'ı yoktur. |
+| `429` | İstemci art arda 10'dan fazla istek, bundan sonra da saniyede birden fazla istek gönderdi. |
+
+Gövde en fazla 5 MiB olabilir. Denetim kaydı, bir deployment başlatan veya kuyruğa alan her isteği göndericinin adresiyle ve hesapsız olarak kaydeder.
+
 ## Git sağlayıcıları
 
 Git sağlayıcı bağlantısı, r3v3rs3'ün bir GitHub, GitLab veya Gitea hesabı adına çalışmasını sağlar. Bir admin bağlantıyı bir kez bağladıktan sonra uygulama formu o hesabın repository'lerini ve branch'lerini listeler. Deployment private bir repoyu bağlantının token'ıyla clone eder ve r3v3rs3 uygulamanın push webhook'unu repoya kurar. Bağlantılar sunucuya aittir: bir admin onları ekler, Edit izni olan her hesap onları uygulamalarında kullanır. Bağlantısı olmayan uygulama, repo adresi ve kendi Git token'ıyla çalışmaya devam eder.
 
-### OAuth uygulamasını kaydetme
+GitHub bağlantısı, r3v3rs3'ün sizin için oluşturduğu bir GitHub App'tir. GitLab ve Gitea bağlantısı ise sağlayıcıda kaydettiğiniz bir OAuth uygulamasıdır.
 
-Her bağlantı, sağlayıcıda kaydettiğiniz bir OAuth uygulamasıdır. Callback adresi, WebUI adresinin sonuna `/oauth/git/callback` eklenerek oluşur, örneğin `https://r3v3rs3.example.com/oauth/git/callback`. **Git Sağlayıcıları** sayfası bu adresi kullandığınız sayfaya göre gösterir. Sağlayıcı admin'in tarayıcısını bu adrese geri gönderir. Bu yüzden adres, genel adres değil, admin'in açtığı adres olmalıdır.
+### GitHub App oluşturma
+
+**Git Sağlayıcıları** sayfasında sağlayıcı olarak GitHub'ı seçin ve bağlantıya bir ad verin. **Adres** alanını github.com için boş bırakın. GitHub Enterprise Server için sunucunun adresini girin. **Organizasyon** alanı, uygulamanın sahibi olacak GitHub organizasyonunu alır. Alanı boş bırakırsanız uygulama kendi hesabınızda oluşur.
+
+**GitHub App oluştur** bir manifest'i GitHub'a gönderir. GitHub, ayarları doldurulmuş bir GitHub App oluşturma sayfası açar:
+
+- Ad `r3v3rs3-<bağlantı adı>` olur. GitHub'da her uygulama adı tek olmalıdır. Ad alınmışsa GitHub'da değiştirin.
+- Uygulama private'tır, yani yalnız sahibinin hesabına kurulabilir.
+- İzinler: Contents okuma, Metadata okuma ve repository webhook'larını yazma.
+- Uygulamanın kendi webhook'u yoktur. r3v3rs3 her uygulamanın webhook'unu reposuna ayrıca kurar.
+
+Uygulamayı GitHub'da oluşturduğunuzda GitHub tarayıcıyı callback adresine (`/oauth/git/callback`) bir kodla gönderir. r3v3rs3 kodu uygulamanın client id'si, client secret'ı ve private key'iyle değiştirir ve bağlantıyı kaydeder. Tarayıcı ardından uygulamanın kurulum sayfasına gider. State bir kez ve 10 dakika boyunca geçerlidir. Callback oturum istemez, çünkü oturum cookie'si başka bir siteden gelen yönlendirmeyle gönderilmez.
+
+Kurulum sayfasında hesabı veya organizasyonu ve repository'leri seçin. GitHub tarayıcıyı **Git Sağlayıcıları** sayfasına döndürür. Sayfa uygulamanın kurulumunu GitHub'dan okur ve bağlantı **Bağlı** durumuna geçer. **Hesap** sütunu kurulumun hesabını gösterir. Kurulmamış bir bağlantıda **GitHub'da kur** kurulum sayfasını açar. **Adres** sütunundaki link uygulamanın GitHub sayfasını açar. Repo seçimini orada değiştirebilirsiniz.
+
+GitHub, callback ve dönüş adreslerini uygulama oluştuğu andaki WebUI adresiyle saklar. WebUI adresi değişirse bu adresleri uygulamanın GitHub ayarlarında değiştirin.
+
+r3v3rs3, client secret'ı ve private key'i `platform.key` ile şifreler. Yönetim API'si onları hiçbir zaman döndürmez. Her GitHub isteği için r3v3rs3 private key ile imzalanmış bir JWT'yle bir installation token'ı alır. Token bir saat geçerlidir ve r3v3rs3 onu süresi dolmadan yeniler. Uygulama GitHub'da kaldırılırsa bağlantı **Yeniden bağlanın** durumuna geçer. **Yeniden bağlan** kurulum sayfasını açar. Bir GitHub App bağlantısında yalnız ad değişir.
+
+### GitLab ve Gitea
+
+Callback adresi, WebUI adresinin sonuna `/oauth/git/callback` eklenerek oluşur, örneğin `https://r3v3rs3.example.com/oauth/git/callback`. **Git Sağlayıcıları** sayfası bu adresi kullandığınız sayfaya göre gösterir. Sağlayıcı admin'in tarayıcısını bu adrese geri gönderir. Bu yüzden adres, genel adres değil, admin'in açtığı adres olmalıdır.
 
 | Sağlayıcı | Yer | Ayarlar |
 |---|---|---|
-| GitHub | **Settings**, **Developer settings**, **OAuth Apps**, **New OAuth App** | **Authorization callback URL** callback adresidir. r3v3rs3 `repo` ve `admin:repo_hook` scope'larını ister. |
 | GitLab | **Preferences**, **Applications**, veya bir grubun ya da sunucunun **Applications** sayfası | **Redirect URI** callback adresidir. `api` scope'unu seçin ve **Confidential** seçeneğini açık bırakın. |
 | Gitea | **Settings**, **Applications**, **Manage OAuth2 Applications** | **Redirect URI** callback adresidir. **Confidential Client** seçeneğini açık bırakın. r3v3rs3 `read:repository`, `write:repository` ve `read:user` scope'larını ister. |
 
-Sağlayıcı bir client id ve bir client secret gösterir. İkisini de **Git Sağlayıcıları** sayfasında ekleyin. GitHub bağlantısı her zaman `https://github.com` kullanır. GitLab bağlantısı, kendi GitLab'ınızın adresini girmezseniz `https://gitlab.com` kullanır. Gitea bağlantısı sunucusunun adresini ister. Sağlayıcı adresi `https://` kullanır. `http://` yalnız bir loopback adresinde kabul edilir.
+Sağlayıcı bir client id ve bir client secret gösterir. İkisini de **Git Sağlayıcıları** sayfasında ekleyin. GitLab bağlantısı, kendi GitLab'ınızın adresini girmezseniz `https://gitlab.com` kullanır. Gitea bağlantısı sunucusunun adresini ister. Sağlayıcı adresi `https://` kullanır. `http://` yalnız bir loopback adresinde kabul edilir.
 
 ### Bağlanma
 
-Bir bağlantının satırındaki **Bağlan** sağlayıcının yetkilendirme sayfasını açar. Hesap erişime izin verince sağlayıcı tarayıcıyı callback adresine geri gönderir ve r3v3rs3 kodu hesabın token'larıyla değiştirir. Yetkilendirme PKCE kullanır. State bir kez ve 10 dakika boyunca geçerlidir. Callback oturum istemez, çünkü oturum cookie'si başka bir siteden gelen yönlendirmeyle gönderilmez. Sayfa **Bağlı** durumunu ve hesabın adını gösterir.
+Bir GitLab veya Gitea bağlantısının satırındaki **Bağlan** sağlayıcının yetkilendirme sayfasını açar. Hesap erişime izin verince sağlayıcı tarayıcıyı callback adresine geri gönderir ve r3v3rs3 kodu hesabın token'larıyla değiştirir. Yetkilendirme PKCE kullanır. State bir kez ve 10 dakika boyunca geçerlidir. Sayfa **Bağlı** durumunu ve hesabın adını gösterir.
 
 r3v3rs3, client secret'ı ve token'ları `platform.key` ile şifreler. Yönetim API'si onları hiçbir zaman döndürmez. GitLab ve Gitea token'larının süresi dolar. Bu yüzden r3v3rs3 token'ı kullanmadan önce refresh token'ıyla yeniler. Sağlayıcı yenilemeyi reddederse bağlantı **Yeniden bağlanın** durumunu gösterir ve **Yeniden bağlan** bağlantıyı yeniden yetkilendirir. Bir bağlantının sağlayıcısını, adresini veya client id'sini değiştirmek de bağlantıyı koparır.
 
 ### Bağlantılı uygulamalar
 
-Uygulama formundaki **Git sağlayıcı bağlantısı** seçimi bağlantıları listeler. Bağlı bir bağlantı seçilince form hesabın son değişen repository'lerini listeler. **Repository'lerde ara** bir repoyu adıyla bulur. Seçilen repo **Repository** adresini ve varsayılan branch'ini doldurur. Ardından **Branch** alanı reponun branch'lerini listeler. Repo adresi bağlantının sağlayıcısına ait olmalıdır.
+Uygulama formundaki **Git sağlayıcı bağlantısı** seçimi bağlantıları listeler. Bağlı bir bağlantı seçilince form repository'leri listeler: GitLab ve Gitea hesabın son değişen repository'lerini, GitHub ise uygulamanın kurulduğu repository'leri gösterir. **Repository'lerde ara** bir repoyu adıyla bulur. Seçilen repo **Repository** adresini ve varsayılan branch'ini doldurur. Ardından **Branch** alanı reponun branch'lerini listeler. Repo adresi bağlantının sağlayıcısına ait olmalıdır.
 
-Deployment ve geri alma, repoyu bağlantının güncel token'ıyla clone eder. GitHub ve Gitea token'ı kullanıcı adı olarak, GitLab ise `oauth2` kullanıcısının parolası olarak alır.
+Deployment ve geri alma, repoyu bağlantının güncel token'ıyla clone eder. GitHub installation token'ını `x-access-token` kullanıcısının parolası olarak, GitLab token'ı `oauth2` kullanıcısının parolası olarak, Gitea ise token'ı kullanıcı adı olarak alır.
 
 ### Bağlantının webhook'ları
 
@@ -225,16 +254,7 @@ Bağlantısı olan bir uygulama kaydedilince r3v3rs3, uygulamanın webhook secre
 
 Başarısız bir kurulum uygulamanın değişikliğini durdurmaz. Uygulama sayfasının **Webhook** bölümü nedeni gösterir. **Webhook'u yeniden kur** veya `POST /api/apps/{id}/hook`, uygulamanın eski webhook'unu siler ve onu yeniden kurar. Genel adres yoksa hiçbir webhook kurulmaz ve uygulama bu nedeni gösterir. r3v3rs3'ün sağlayıcıda silemediği bir webhook orada kalır ve r3v3rs3'ten `404` alır.
 
-Bir uygulamanın kullandığı bağlantı silinemez ve `409 git_connection_in_use` yanıtını alır. Bağlantıyı silmek sağlayıcıdaki yetkisini kaldırmaz. OAuth uygulamasının yetkisini sağlayıcıda kaldırın.
-
-| Durum kodu | Nedeni |
-|---|---|
-| `400 invalid_webhook_payload` | GitHub, Gitea veya GitLab push'unun gövdesi JSON değildir, örneğin içerik türü `application/x-www-form-urlencoded` olduğunda. |
-| `401 unauthorized` | İmza yoktur veya yanlıştır. |
-| `404 id_not_found` | Bu id ile bir uygulama yoktur veya uygulamanın webhook secret'ı yoktur. |
-| `429` | İstemci art arda 10'dan fazla istek, bundan sonra da saniyede birden fazla istek gönderdi. |
-
-Gövde en fazla 5 MiB olabilir. Denetim kaydı, bir deployment başlatan veya kuyruğa alan her isteği göndericinin adresiyle ve hesapsız olarak kaydeder.
+Bir uygulamanın kullandığı bağlantı silinemez ve `409 git_connection_in_use` yanıtını alır. Bağlantıyı silmek sağlayıcıdaki yetkiyi kaldırmaz. GitHub App'i GitHub ayarlarında, GitLab veya Gitea OAuth uygulamasını sağlayıcıda silin.
 
 ## Bildirimler
 
@@ -407,14 +427,16 @@ Admin hesabı ayrıca şunları görür:
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
 | `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |
 | `GET /api/git/connections` | Edit | Secret'lar ve token'lar olmadan Git sağlayıcı bağlantıları. |
-| `POST /api/git/connections` | Admin | Bağlantı ekler. |
+| `POST /api/git/connections` | Admin | GitLab veya Gitea bağlantısı ekler. |
 | `GET /api/git/connections/{id}` | Edit | Bir bağlantıyı döndürür. |
-| `PUT /api/git/connections/{id}` | Admin | Bir bağlantıyı değiştirir. `client_secret` yoksa mevcut secret kalır. |
+| `PUT /api/git/connections/{id}` | Admin | Bir bağlantıyı değiştirir. `client_secret` yoksa mevcut secret kalır. GitHub App bağlantısında yalnız ad değişir. |
 | `DELETE /api/git/connections/{id}` | Admin | Hiçbir uygulamanın kullanmadığı bir bağlantıyı siler. |
-| `POST /api/git/connections/{id}/authorize` | Admin | `{"redirect_uri": "<callback adresi>"}` gövdesiyle bir yetkilendirme başlatır ve sağlayıcının sayfasını döndürür. |
-| `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Bağlı hesabın en fazla 50 repository'si. |
+| `POST /api/git/connections/{id}/authorize` | Admin | `{"redirect_uri": "<callback adresi>"}` gövdesiyle bir yetkilendirme başlatır ve sağlayıcının sayfasını, GitHub App'te ise kurulum sayfasını döndürür. |
+| `POST /api/git/connections/{id}/installation` | Admin | GitHub App'in kurulumunu GitHub'dan okur ve bağlantıyı bağlar. |
+| `POST /api/git/github_apps` | Admin | `{"name": "...", "url": "...", "organization": "...", "redirect_uri": "<callback adresi>"}` gövdesiyle bir GitHub App başlatır. `url` ve `organization` isteğe bağlıdır. Yanıt, tarayıcının GitHub'a gönderdiği form adresini ve manifest'i içerir. |
+| `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Bağlı hesabın veya kurulumun en fazla 50 repository'si. |
 | `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit | Bir reponun en fazla 50 branch'i. |
-| `GET /oauth/git/callback` | State | Sağlayıcının callback'i. Bkz. [Bağlanma](#baglanma). |
+| `GET /oauth/git/callback` | State | Sağlayıcının ve yeni bir GitHub App'in callback'i. Bkz. [Bağlanma](#baglanma) ve [GitHub App oluşturma](#github-app-olusturma). |
 | `GET /api/platform/settings` | Edit | Platformun genel adresi. |
 | `PUT /api/platform/settings` | Admin | `{"public_url": "https://..."}` gövdesiyle genel adresi ayarlar. |
 

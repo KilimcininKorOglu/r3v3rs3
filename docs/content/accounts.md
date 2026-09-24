@@ -22,7 +22,7 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 | Add, change or delete an app, read or change its environment variables, set or delete its Git token, create or delete its webhook secret, deploy an app, roll back a deployment | yes | yes | no | no |
 | Add an agent target, create its enrollment token, delete it | yes | no | no | no |
 | Read the Git provider connections and the public address, list the repositories and the branches of a connection, install the webhook of an app again | yes | yes | no | no |
-| Add, change, connect or delete a Git provider connection, change the public address | yes | no | no | no |
+| Add, change, connect or delete a Git provider connection, create or install a GitHub App, change the public address | yes | no | no | no |
 
 - An account without a proxy list sees every proxy. An admin always sees every proxy, so an admin cannot have a proxy list.
 - A proxy that is not in the list of an account does not exist for the account. The admin API answers `404 id_not_found`.
