@@ -17,7 +17,7 @@ Follow [Getting Started](@/tutorials/getting-started.md) first. This guide conti
 1. Open the proxy and find the **Compression** section.
 2. Select **Brotli**, **Zstandard** and **Gzip**. The order of your selection is the order that r3v3rs3 prefers when a client accepts several encodings with the same `q` value.
 3. Leave **Minimum Size (Bytes)** at `1024`. A smaller body gets no smaller through compression.
-4. Save.
+4. Click **Update**.
 
 ```bash
 $ curl -s http://app.example.com/data.json -o /dev/null -w '%{size_download}\n'
@@ -27,7 +27,7 @@ $ curl -s -H 'Accept-Encoding: br' http://app.example.com/data.json -o /dev/null
 711
 ```
 
-r3v3rs3 compresses a response only when the media type is in **Media Types**. The default list holds `text/*`, `application/json`, `application/javascript`, `application/wasm`, the XML types, `image/svg+xml` and two font types. An image or a video is already compressed, so it is not in the list.
+r3v3rs3 compresses a response only when the media type is in **Media Types**. The default list holds `text/*`, `application/json`, `application/javascript`, `application/manifest+json`, `application/wasm`, the XML types, `image/svg+xml` and two font types. An image or a video is already compressed, so it is not in the list.
 
 r3v3rs3 skips compression when the upstream server already encoded the response, when `Cache-Control` holds `no-transform`, and for `text/event-stream`, because compression holds server-sent events back.
 
@@ -37,7 +37,7 @@ r3v3rs3 skips compression when the upstream server already encoded the response,
 2. Turn on **Enable Cache**.
 3. Leave **Memory Limit (Bytes)** at `67108864` (64 MiB) and **Maximum Response Size (Bytes)** at `1048576` (1 MiB).
 4. Write `300` in **Default TTL (Seconds)**.
-5. Save.
+5. Click **Update**.
 
 Every route of the proxy shares one cache. Each proxy has its own.
 

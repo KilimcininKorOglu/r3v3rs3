@@ -12,7 +12,7 @@ You need a port and a proxy from [Getting Started](@/tutorials/getting-started.m
 
 ## Step 1: Add the Servers
 
-Open your HTTP proxy and add the servers of the route:
+Open your HTTP proxy and write the servers of the route in **Target**, one per line:
 
 ```
 http://10.0.0.1:9000/
@@ -33,7 +33,7 @@ An HTTP proxy selects a server for each request, a TCP proxy for each connection
 
 ## Step 2: Give a Server More Traffic
 
-**Weight** of a server is a whole number from 0 to 65535, and the default is 1. Round robin uses each server as often as its weight, and it spreads the turns over the cycle instead of sending a burst.
+The weight of a server is a whole number from 0 to 65535, and the default is 1. An HTTP proxy takes it after the URL in **Target**, for example `http://10.0.0.3:9000/ 3`. A TCP or UDP proxy has a **Weight** field for each server. Round robin uses each server as often as its weight, and it spreads the turns over the cycle instead of sending a burst.
 
 Two servers with the weights 1 and 3 answer in this order:
 
@@ -47,7 +47,7 @@ Random selects a server with a chance that is proportional to its weight. Client
 
 ## Step 3: Find the Failing Server
 
-Without an active health check, r3v3rs3 learns about a failure only from the traffic. **Max Fails** consecutive failures (default 1) mark a server unhealthy for **Fail Timeout** (default 30 seconds). A failure is a failed connection or a request without a response. A 500 response is a success, because the server answered.
+Without an active health check, r3v3rs3 learns about a failure only from the traffic. **Max Fails** consecutive failures (default 1) mark a server unhealthy for **Fail Timeout (Seconds)** (default 30 seconds). A failure is a failed connection or a request without a response. A 500 response is a success, because the server answered.
 
 Turn on the active check to find a server that is up but broken:
 
@@ -67,7 +67,7 @@ A server whose `/health` answers 500 appears as:
 
 ```json
 {
-  "url": "http://10.0.0.3:9000/",
+  "addr": "http://10.0.0.3:9000/",
   "weight": 1,
   "healthy": false,
   "failures": 0,
@@ -91,7 +91,7 @@ When every server is unhealthy, r3v3rs3 still sends the traffic to them. It does
 A retry goes to the next server and skips a server whose circuit is open. With three attempts and one dead server in the list, every client still receives 200 while the status API counts the failures of that server:
 
 ```json
-{ "url": "http://10.0.0.9:9000/", "healthy": false, "failures": 1, "last_error": "client error (Connect)" }
+{ "addr": "http://10.0.0.9:9000/", "healthy": false, "failures": 1, "last_error": "client error (Connect)" }
 ```
 
 A request with a body is retried only when the body length is known and is at most **Replay Body Limit (Bytes)** (default 0). r3v3rs3 keeps such a body in memory. A WebSocket or other upgrade request is never retried. A route can use its own retry settings with **Override Retries for This Route**.
@@ -118,7 +118,7 @@ A TCP or UDP proxy has no cookies. Use **Client IP hash** there.
 
 ## Step 6: Take a Server Out of Service
 
-Set the **Weight** of the server to `0` and save. The server gets no new traffic, also when every other server is unhealthy. Its open TCP connections and UDP sessions stay, and its sticky clients stay, so the sessions on it end on their own.
+Set the weight of the server to `0` and click **Update**: write `http://10.0.0.3:9000/ 0` in **Target**, or `0` in the **Weight** field of a TCP or UDP proxy. The server gets no new traffic, also when every other server is unhealthy. Its open TCP connections and UDP sessions stay, and its sticky clients stay, so the sessions on it end on their own.
 
 At least one server must have a weight above 0. r3v3rs3 refuses a route where every server is drained.
 

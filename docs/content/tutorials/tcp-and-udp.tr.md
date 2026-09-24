@@ -19,7 +19,7 @@ TCP veya UDP proxy byte taşır. İstek okumaz, bu yüzden virtual host'u, route
 3. **Oluştur** butonuna tıklayın ve **Dinliyor** durumunu kontrol edin.
 4. **Proxy'ler** linkine, sonra **Ekle** butonuna tıklayın ve protokol olarak **TCP / TLS üzerinden TCP** seçin.
 5. `postgres` portunu seçin.
-6. **Upstream Sunucu** alanına veritabanının adresini yazın, örneğin `/ip4/10.0.0.5/tcp/5432`.
+6. **Upstream Sunucu** altında **Host** alanına veritabanının adresini, örneğin `10.0.0.5`, **Port** alanına `5432` yazın.
 7. **Oluştur** butonuna tıklayın.
 
 ```bash
@@ -27,14 +27,14 @@ $ psql "postgresql://postgres:<parola>@proxy.example.com:5432/postgres" -c 'sele
  PostgreSQL 17.11 on aarch64-unknown-linux-musl, ...
 ```
 
-Adres bir multiaddr'dır: `/ip4/<adres>/tcp/<port>`, `/ip6/<adres>/tcp/<port>` veya `/dns/<ad>/tcp/<port>`. `/dns` ile r3v3rs3 adı her bağlantıda çözer.
+r3v3rs3 adresi multiaddr olarak saklar: `/ip4/<adres>/tcp/<port>`, `/ip6/<adres>/tcp/<port>` veya `/dns/<ad>/tcp/<port>`. `/dns` ile r3v3rs3 adı her bağlantıda çözer.
 
 Bir TCP portunu aynı anda tek bir TCP proxy kullanır. Aynı porttaki ikinci bir TCP proxy hatadır.
 
 ## Adım 2: Bir DNS sunucusunu UDP üzerinden yayınlayın
 
 1. Protokolü **UDP** olan bir port ekleyin, örneğin `53` portunda.
-2. Protokolü **UDP** olan bir proxy ekleyin, portu seçin ve upstream adresi olarak `/ip4/10.0.0.53/udp/53` yazın.
+2. Protokolü **UDP** olan bir proxy ekleyin ve portu seçin. **Upstream Sunucu** altında **Host** alanına `10.0.0.53`, **Port** alanına `53` yazın.
 
 ```bash
 $ dig +short @proxy.example.com example.com A
@@ -53,24 +53,24 @@ TLS üzerinden TCP portu TLS'i sonlandırır ve upstream sunucuya düz byte gön
 2. Subject name olarak proxy'nin host adını yazın, örneğin `db.example.com`, ve oluşturun. r3v3rs3 **Kök Sertifikalar** sekmesinde bir CA sertifikası da oluşturur.
 3. **İstemci Sertifikaları** sekmesini açın, **Kendinden İmzalı** butonuna tıklayın, **Sertifika Türü** olarak **İstemci Sertifikası** ve bir önceki adımdaki CA'yı seçin, sonra oluşturun.
 4. İstemci sertifikasını **İndir** ile indirin. Arşiv `chain.pem` ve `key.pem` dosyalarını taşır. İkisini de istemciye verin.
+5. **Kök Sertifikalar** sekmesindeki CA sertifikasını indirin ve `ca.pem` olarak kaydedin. İstemci sunucu sertifikasını onunla kontrol eder.
 
 ### Portu bağlayın
 
-1. Protokolü **TLS üzerinden TCP** olan bir port ekleyin.
+1. Protokolü **TLS üzerinden TCP** olan bir port ekleyin, örneğin `5433` portunda. Adım 1'deki `5432` portunu zaten bir TCP proxy kullanır.
 2. **Sunucu Adları** alanına host adını yazın. r3v3rs3 sunucu sertifikasını istemcinin SNI değerinden seçer.
 3. **İstemci Kimlik Doğrulaması** alanında **Zorunlu** seçin.
 4. **İstemci CA Sertifikaları** alanında CA sertifikasını seçin. Sistemin kök sertifikaları kullanılmaz.
 5. Proxy'yi bu portta, Adım 1'deki upstream sunucuyla oluşturun.
 
-Sertifikası olmayan bir istemci bağlantı kuramaz. Mesaj istemcinin TLS kütüphanesine göre değişir:
+Portu `openssl s_client` ile deneyin:
 
 ```bash
-$ curl --cacert ca.pem https://db.example.com:5432/
-curl: (56) LibreSSL SSL_read: LibreSSL/3.3.6: error:1404C45C:SSL routines:ST_OK:reason(1116), errno 0
-
-$ curl --cacert ca.pem --cert chain.pem --key key.pem https://db.example.com:5432/ -o /dev/null -w '%{http_code}\n'
-200
+$ openssl s_client -connect db.example.com:5433 -servername db.example.com \
+    -CAfile ca.pem -cert chain.pem -key key.pem
 ```
+
+`-cert` ve `-key` olmadan bağlanan istemci bağlantı kuramaz. Alert'in adını istemcinin TLS kütüphanesi yazar.
 
 **İsteğe bağlı** mod sertifikası olmayan istemciyi kabul eder, sertifika gönderen istemcinin sertifikasını kontrol eder. **Kapalı** mod sertifika istemez.
 
@@ -97,7 +97,7 @@ Bir proxy'nin kullandığı istemci sertifikası silinemez. Sertifika geçersiz 
 Birkaç upstream sunucusu olan bir TCP proxy bağlantıları dağıtır. UDP proxy bir oturumun paketlerini tek bir sunucuya gönderir.
 
 - **Yük Dengeleme** algoritmayı seçer, örneğin round robin veya istemci IP hash'i.
-- Sağlık kontrolü cevap vermeyen sunucuyu çıkarır, tekrar cevap verince geri alır.
+- Sağlık kontrolü cevap vermeyen sunucuyu çıkarır, tekrar cevap verince geri alır. **Maksimum Hata Sayısı** ve **Kontrol Aralığı (Saniye)** alanları onu ayarlar.
 - **Circuit Breaker** sürekli hata veren bir sunucuya yeni bağlantı göndermeyi durdurur. Bütün sunucuların circuit'i açıksa istemcinin bağlantısı kapanır.
 
 Alanları [Yük dengeleme ve sağlık kontrolü](@/configuration.tr.md#yuk-dengeleme-ve-saglik-kontrolu) bölümü anlatır.

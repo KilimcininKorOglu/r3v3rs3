@@ -19,7 +19,7 @@ Follow [Getting Started](@/tutorials/getting-started.md) first.
 3. Click **Create** and check the state **Listening**.
 4. Click **Proxies**, then **Add**, and select the protocol **TCP / TCP over TLS**.
 5. Select the `postgres` port.
-6. Write the address of the database in **Upstream Server**, for example `/ip4/10.0.0.5/tcp/5432`.
+6. Under **Upstream Server**, write the address of the database in **Host**, for example `10.0.0.5`, and `5432` in **Port**.
 7. Click **Create**.
 
 ```bash
@@ -27,14 +27,14 @@ $ psql "postgresql://postgres:<password>@proxy.example.com:5432/postgres" -c 'se
  PostgreSQL 17.11 on aarch64-unknown-linux-musl, ...
 ```
 
-An address is a multiaddr: `/ip4/<address>/tcp/<port>`, `/ip6/<address>/tcp/<port>` or `/dns/<name>/tcp/<port>`. With `/dns`, r3v3rs3 resolves the name for each connection.
+r3v3rs3 stores the address as a multiaddr: `/ip4/<address>/tcp/<port>`, `/ip6/<address>/tcp/<port>` or `/dns/<name>/tcp/<port>`. With `/dns`, r3v3rs3 resolves the name for each connection.
 
 A TCP port serves one TCP proxy at a time. A second TCP proxy on the same port is an error.
 
 ## Step 2: Publish a DNS Server over UDP
 
 1. Add a port with the protocol **UDP**, for example on the port `53`.
-2. Add a proxy with the protocol **UDP**, select the port, and write the upstream address `/ip4/10.0.0.53/udp/53`.
+2. Add a proxy with the protocol **UDP** and select the port. Under **Upstream Server**, write `10.0.0.53` in **Host** and `53` in **Port**.
 
 ```bash
 $ dig +short @proxy.example.com example.com A
@@ -53,24 +53,24 @@ A TCP over TLS port terminates TLS and sends plain bytes to the upstream server.
 2. Write the host name of the proxy in the subject names, for example `db.example.com`, and create it. r3v3rs3 also creates a CA certificate in the **Root Certs** tab.
 3. Open the **Client Certs** tab, click **Self-sign**, select the certificate type **Client Certificate** and the CA of the step before, then create it.
 4. Download the client certificate with **Download**. The archive holds `chain.pem` and `key.pem`. Give both to the client.
+5. Download the CA certificate in the **Root Certs** tab and save it as `ca.pem`. The client checks the server certificate with it.
 
 ### Bind the port
 
-1. Add a port with the protocol **TCP over TLS**.
+1. Add a port with the protocol **TCP over TLS**, for example on the port `5433`. The port `5432` of Step 1 already carries a TCP proxy.
 2. Write the host name in **Server Names**. r3v3rs3 selects the server certificate from the SNI of the client.
 3. Select **Required** in **Client Authentication**.
 4. Select the CA certificate in **Client CA Certificates**. The system root certificates are not used.
 5. Create the proxy on this port, with the same upstream server as Step 1.
 
-A client without a certificate gets no connection. The message depends on the TLS library of the client:
+Test the port with `openssl s_client`:
 
 ```bash
-$ curl --cacert ca.pem https://db.example.com:5432/
-curl: (56) LibreSSL SSL_read: LibreSSL/3.3.6: error:1404C45C:SSL routines:ST_OK:reason(1116), errno 0
-
-$ curl --cacert ca.pem --cert chain.pem --key key.pem https://db.example.com:5432/ -o /dev/null -w '%{http_code}\n'
-200
+$ openssl s_client -connect db.example.com:5433 -servername db.example.com \
+    -CAfile ca.pem -cert chain.pem -key key.pem
 ```
+
+A client without `-cert` and `-key` gets no connection. The TLS library of the client names the alert.
 
 **Optional** accepts a client without a certificate, and checks the certificate of a client that sends one. **Off** asks for none.
 
@@ -97,7 +97,7 @@ A client certificate that a proxy uses cannot be deleted. When it becomes invali
 A TCP proxy with several upstream servers balances the connections. A UDP proxy sends the packets of one session to one server.
 
 - **Load Balancing** selects the algorithm, for example round robin or client IP hash.
-- **Health Check** removes a server that does not answer, and brings it back when it answers again.
+- The health check removes a server that does not answer, and brings it back when it answers again. **Max Fails** and **Check Interval (Seconds)** set it.
 - **Circuit Breaker** stops new connections to a server that keeps failing. When every server has an open circuit, the client connection closes.
 
 [Load Balancing and Health Checks](@/configuration.md#load-balancing-and-health-checks) describes the fields.

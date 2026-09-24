@@ -42,12 +42,12 @@ Linux'ta 1024 altındaki bir port root veya `CAP_NET_BIND_SERVICE` capability'si
 ## Adım 3: ACME kaydını oluşturun
 
 1. Menüde **Sertifikalar** linkine, sonra **ACME** sekmesine, sonra **Ekle** butonuna tıklayın.
-2. Sağlayıcı olarak **Let's Encrypt** seçin. Sayfa onun directory URL'ini kullanır. **ACME Sağlayıcısı** listesinde Google Trust Services, ZeroSSL ve özel bir sunucu da vardır.
+2. Sağlayıcı olarak **Let's Encrypt** seçin. Sayfa onun directory URL'ini kullanır. **Sağlayıcı** listesinde Google Trust Services, ZeroSSL ve özel bir sunucu da vardır.
 3. **E-posta Adresi** alanına adresinizi yazın. Sertifika otoritesi bitiş uyarılarını oraya gönderir.
 4. **Alan Adları** alanına `example.com, *.example.com` yazın. Sertifika her adı bir Subject Alternative Name olarak taşır.
 5. **Challenge** alanında **DNS-01** seçin.
 6. **DNS Sağlayıcısı** alanında sağlayıcınızı seçin ve Adım 1'deki kimlik bilgisi alanlarını doldurun.
-7. **Oluştur** butonuna tıklayın. Hazır sağlayıcılar her siparişten 60 gün sonra yeni sipariş verir. Özel bir sunucuda **Yenileme Aralığı (Gün)** alanı vardır.
+7. **Sertifika Al** butonuna tıklayın. Hazır sağlayıcılar her siparişten 60 gün sonra yeni sipariş verir. Özel bir sunucuda **Yenileme Aralığı (Gün)** alanı vardır.
 
 r3v3rs3 sertifikayı hemen, sonra her yenileme kontrolünde ister. `example.com` ve `*.example.com` aynı TXT kayıt adını, `_acme-challenge.example.com` adını paylaşır, bu yüzden doğrulama sırasında kayıt iki değer taşır.
 
@@ -69,7 +69,7 @@ Kaydı bu dosyada değil, panelde oluşturun. r3v3rs3 ACME hesabını kaydı ekl
 
 ## Adım 4: Sertifikayı kontrol edin
 
-Siparişten sonra **Sunucu Sertifikaları** sekmesi sertifikayı gösterir. Sekme sertifikayı vereni, subject adlarını ve **Yenileme Tarihi** alanını yazar.
+Siparişten sonra **Sunucu Sertifikaları** sekmesi sertifikayı gösterir. Sekme sertifikayı vereni, subject adlarını ve **Bitiş Tarihi** değerini yazar. **ACME** sekmesi kaydın **Yenileme Tarihi** değerini gösterir.
 
 Başarısız bir sipariş nedenini sunucu log'una yazar, r3v3rs3 bir saat sonra yeniden sipariş verir. İki neden sık görülür:
 
@@ -112,7 +112,7 @@ HSTS, tarayıcıya bir sonraki istekte yönlendirme beklemeden HTTPS kullanması
 set Strict-Transport-Security: max-age=31536000; includeSubDomains
 ```
 
-3. Kaydedin.
+3. **Güncelle** butonuna tıklayın.
 
 ```bash
 $ curl -sI https://app.example.com/ | grep -i strict
@@ -130,13 +130,13 @@ HTTP/3, QUIC üzerinde çalışır ve QUIC UDP'dir. HTTPS portunun yanına ikinc
 1. **Portlar** sayfasını açın ve bir port ekleyin.
 2. Protokolü **QUIC üzerinden HTTP (HTTP/3)** yapın.
 3. `0.0.0.0:443` adresini dinleyin. Bu UDP 443'tür, HTTPS portunun TCP 443'ü ile çakışmaz.
-4. **TLS Termination** ayarına HTTPS portuyla aynı sunucu adlarını yazın, böylece iki port aynı sertifikayı kullanır.
+4. **Sunucu Adları** alanına HTTPS portundaki adları yazın, böylece iki port aynı sertifikayı kullanır.
 5. Proxy'yi açın ve yeni portu HTTPS portunun yanına ekleyin.
 
 Portun dinleme adresi şöyle olur:
 
 ```text
-/ip4/0.0.0.0/udp/443/quic/https
+/ip4/0.0.0.0/udp/443/quic/http
 ```
 
 Bundan sonra proxy'nin her yanıtı bir `alt-svc` header'ı taşır:
@@ -153,7 +153,7 @@ Kontrol edilecek üç şey:
 
 - UDP 443'ü güvenlik duvarında ve security group'ta açın. UDP'si kapalı olan istemci HTTP/2 kullanmaya devam eder ve hiçbir hata görmezsiniz.
 - Docker UDP'yi ayrı yayınlar: `-p 443:443` yanında `-p 443:443/udp`.
-- HTTPS portu olmayan bir proxy yalnız QUIC üzerinden yanıt verir ve `alt-svc` header'ı yalnız `h3` taşır. İki portu da proxy'de tutun.
+- HTTPS portu olmayan bir proxy yalnız QUIC üzerinden yanıt verir ve `alt-svc` header'ı yalnız `h3` ve `h3-25` taşır. İki portu da proxy'de tutun.
 
 HTTP/3 yalnız gelen bağlantılar için vardır. Upstream bağlantısı HTTP/2 veya HTTP/1.1 kullanır, WebTransport desteklenmez.
 

@@ -42,12 +42,12 @@ On Linux a port below 1024 needs root or the `CAP_NET_BIND_SERVICE` capability.
 ## Step 3: Create the ACME Entry
 
 1. Click **Certificates** in the menu, then the **ACME** tab, then **Add**.
-2. Select the provider **Let's Encrypt**. The page uses its directory URL. **ACME Provider** offers Google Trust Services, ZeroSSL and a custom server too.
+2. Select the provider **Let's Encrypt**. The page uses its directory URL. **Provider** offers Google Trust Services, ZeroSSL and a custom server too.
 3. Write your address in **Email Address**. The certificate authority sends the expiry warnings there.
 4. Write `example.com, *.example.com` in **Domain Names**. The certificate holds every name as a Subject Alternative Name.
 5. Select **DNS-01** in **Challenge**.
 6. Select your provider in **DNS Provider** and fill in the credential fields of Step 1.
-7. Click **Create**. The preset providers order again 60 days after each order. A custom server has a **Renewal Interval (days)** field.
+7. Click **Request**. The preset providers order again 60 days after each order. A custom server has a **Renewal Interval (days)** field.
 
 r3v3rs3 orders the certificate at once, and then at each renewal check. `example.com` and `*.example.com` share one TXT record name, `_acme-challenge.example.com`, so the record set holds two values during the validation.
 
@@ -69,7 +69,7 @@ Create the entry in the WebUI and not in this file, because r3v3rs3 creates the 
 
 ## Step 4: Check the Certificate
 
-The **Server Certs** tab shows the certificate after the order. It names the issuer, the subject names and the **Renews on** date.
+The **Server Certs** tab shows the certificate after the order. It names the issuer, the subject names and the **Expires on** date. The **ACME** tab shows the **Renews on** date of the entry.
 
 A failed order writes the reason to the server log, and r3v3rs3 orders again one hour later. Two causes are common:
 
@@ -112,7 +112,7 @@ HSTS tells a browser to use HTTPS for the next request without a redirect. Add i
 set Strict-Transport-Security: max-age=31536000; includeSubDomains
 ```
 
-3. Save.
+3. Click **Update**.
 
 ```bash
 $ curl -sI https://app.example.com/ | grep -i strict
@@ -130,13 +130,13 @@ HTTP/3 runs over QUIC, which is UDP. It needs a second port next to the HTTPS po
 1. Open **Ports** and add a port.
 2. Set the protocol to **HTTP over QUIC (HTTP/3)**.
 3. Listen on `0.0.0.0:443`. This is UDP 443, so it does not collide with the TCP 443 of the HTTPS port.
-4. Set **TLS Termination** with the same server names as the HTTPS port, so both ports use the same certificate.
+4. Write the same **Server Names** as on the HTTPS port, so both ports use the same certificate.
 5. Open the proxy and add the new port next to the HTTPS port.
 
 The listen address of the port then reads:
 
 ```text
-/ip4/0.0.0.0/udp/443/quic/https
+/ip4/0.0.0.0/udp/443/quic/http
 ```
 
 Now every response of the proxy carries an `alt-svc` header:
@@ -153,7 +153,7 @@ Three things to check:
 
 - Open UDP 443 in the firewall and in the security group. A client whose UDP is blocked keeps using HTTP/2, and you see no error.
 - Docker publishes UDP separately: `-p 443:443/udp` next to `-p 443:443`.
-- A proxy without an HTTPS port answers only over QUIC, and the `alt-svc` header then carries only `h3`. Keep both ports on the proxy.
+- A proxy without an HTTPS port answers only over QUIC, and the `alt-svc` header then carries only `h3` and `h3-25`. Keep both ports on the proxy.
 
 HTTP/3 is available for incoming connections only. The upstream connection uses HTTP/2 or HTTP/1.1, and WebTransport is not supported.
 

@@ -45,7 +45,7 @@ Yönetim paneli [http://localhost:46492/](http://localhost:46492/) adresinde din
 > $ ssh -L 46492:127.0.0.1:46492 kullanici@sunucunuz
 > ```
 >
-> Adım 5, paneli r3v3rs3 üzerinden HTTPS ile sunmayı anlatır.
+> Paneli HTTPS ile sunmak için Adım 5'ten sonra bir HTTPS portunda **Hedef** değeri `http://127.0.0.1:46492` olan bir proxy ekleyin.
 
 ## Adım 3: Port bağlayın
 
@@ -88,7 +88,7 @@ Herkese açık bir site HTTPS ister. r3v3rs3 sertifikaları bir ACME sunucusunda
 2. Menüde **Sertifikalar** linkine, sonra **ACME** sekmesine, sonra **Ekle** butonuna tıklayın.
 3. Sağlayıcıyı seçin, e-posta adresinizi ve alan adlarını yazın.
 4. Challenge'ı seçin. **HTTP-01**, internetin eriştiği bir `80` portu ister. **DNS-01** hiçbir açık port istemez ve wildcard sertifika verir.
-5. **Oluştur** butonuna tıklayın. Order hemen ve sonra her gün çalışır.
+5. **Sertifika Al** butonuna tıklayın. Order hemen çalışır, sonra her sertifikadan 60 gün sonra tekrar çalışır.
 6. HTTPS portunu proxy'nize ekleyin ve alan adını **Virtual Host'lar** alanına yazın.
 
 [Sertifikalar](@/configuration.tr.md#sertifikalar) ve [ACME](@/configuration.tr.md#acme) bölümleri her alanı anlatır.

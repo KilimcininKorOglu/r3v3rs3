@@ -45,7 +45,7 @@ The admin WebUI listens on [http://localhost:46492/](http://localhost:46492/). S
 > $ ssh -L 46492:127.0.0.1:46492 user@your-server
 > ```
 >
-> Step 5 shows how to serve the WebUI over HTTPS through r3v3rs3 itself.
+> To serve the WebUI over HTTPS, add a proxy with the **Target** `http://127.0.0.1:46492` on an HTTPS port after Step 5.
 
 ## Step 3: Bind a Port
 
@@ -54,7 +54,7 @@ A proxy needs a port that listens for the clients.
 1. Click **Ports** in the menu.
 2. Click **Add**.
 3. Name the port, for example `My Website`. The name can stay empty.
-4. Select the network interface. `0.0.0.0` listens on every interface.
+4. Select the network interface in **Interface**. `0.0.0.0` listens on every interface.
 5. Select the port, for example `80`. Check that no other program uses it, and that you may bind it. A Linux port below 1024 needs root or the `CAP_NET_BIND_SERVICE` capability.
 6. Select the protocol. This example uses **HTTP**.
 7. Click **Create**.
@@ -88,7 +88,7 @@ A public site needs HTTPS. r3v3rs3 orders certificates from an ACME server, for 
 2. Click **Certificates** in the menu, then the **ACME** tab, then **Add**.
 3. Select the provider, write your email address and the domain names.
 4. Select the challenge. **HTTP-01** needs a port `80` that the internet reaches. **DNS-01** needs no open port and issues wildcard certificates.
-5. Click **Create**. The order runs at once and then every day.
+5. Click **Request**. The order runs at once, then again 60 days after each issued certificate.
 6. Add the HTTPS port to your proxy and write the domain name in **Virtual Hosts**.
 
 [Certificates](@/configuration.md#certificates) and [ACME](@/configuration.md#acme) describe every field.

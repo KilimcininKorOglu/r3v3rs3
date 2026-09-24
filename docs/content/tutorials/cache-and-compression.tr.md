@@ -17,7 +17,7 @@ Bu rehber bir siteyi iki proxy ayarıyla hızlandırır. Cache, tekrarlanan bir 
 1. Proxy'yi açın ve **Sıkıştırma** bölümünü bulun.
 2. **Brotli**, **Zstandard** ve **Gzip** seçin. Seçim sıranız, istemci birkaç encoding'i aynı `q` değeriyle kabul ettiğinde r3v3rs3'ün tercih ettiği sıradır.
 3. **Minimum Boyut (Byte)** alanını `1024` bırakın. Daha küçük bir gövde sıkıştırmayla küçülmez.
-4. Kaydedin.
+4. **Güncelle** butonuna tıklayın.
 
 ```bash
 $ curl -s http://app.example.com/data.json -o /dev/null -w '%{size_download}\n'
@@ -27,7 +27,7 @@ $ curl -s -H 'Accept-Encoding: br' http://app.example.com/data.json -o /dev/null
 711
 ```
 
-r3v3rs3 bir yanıtı yalnız medya türü **Medya Türleri** listesindeyse sıkıştırır. Varsayılan liste `text/*`, `application/json`, `application/javascript`, `application/wasm`, XML türleri, `image/svg+xml` ve iki font türünü tutar. Bir görsel veya video zaten sıkıştırılmıştır, bu yüzden listede yoktur.
+r3v3rs3 bir yanıtı yalnız medya türü **Medya Türleri** listesindeyse sıkıştırır. Varsayılan liste `text/*`, `application/json`, `application/javascript`, `application/manifest+json`, `application/wasm`, XML türleri, `image/svg+xml` ve iki font türünü tutar. Bir görsel veya video zaten sıkıştırılmıştır, bu yüzden listede yoktur.
 
 Upstream sunucu yanıtı zaten encode ettiyse, `Cache-Control` içinde `no-transform` varsa ve `text/event-stream` için r3v3rs3 sıkıştırma yapmaz. Sıkıştırma server-sent event'leri geciktirir.
 
@@ -37,7 +37,7 @@ Upstream sunucu yanıtı zaten encode ettiyse, `Cache-Control` içinde `no-trans
 2. **Cache'i Aç** seçeneğini açın.
 3. **Bellek Limiti (Byte)** alanını `67108864` (64 MiB), **Maksimum Yanıt Boyutu (Byte)** alanını `1048576` (1 MiB) bırakın.
 4. **Varsayılan TTL (Saniye)** alanına `300` yazın.
-5. Kaydedin.
+5. **Güncelle** butonuna tıklayın.
 
 Proxy'nin bütün route'ları tek bir cache'i paylaşır. Her proxy'nin kendi cache'i vardır.
 

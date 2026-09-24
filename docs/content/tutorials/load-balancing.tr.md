@@ -12,7 +12,7 @@ Bu rehber bir uygulamanın üç kopyasını tek bir proxy'nin arkasına koyar. H
 
 ## Adım 1: Sunucuları ekleyin
 
-HTTP proxy'nizi açın ve route'a sunucuları ekleyin:
+HTTP proxy'nizi açın ve route'un sunucularını **Hedef** alanına her satıra bir tane olacak şekilde yazın:
 
 ```
 http://10.0.0.1:9000/
@@ -33,7 +33,7 @@ HTTP proxy her istek için, TCP proxy her bağlantı için, UDP proxy her istemc
 
 ## Adım 2: Bir sunucuya daha çok istek verin
 
-Bir sunucunun **Ağırlık** değeri 0 ile 65535 arasında bir tam sayıdır, varsayılanı 1'dir. Round robin her sunucuyu ağırlığı kadar kullanır ve sıraları döngüye yayar, arka arkaya göndermez.
+Bir sunucunun ağırlığı 0 ile 65535 arasında bir tam sayıdır, varsayılanı 1'dir. HTTP proxy ağırlığı **Hedef** alanında URL'den sonra alır, örneğin `http://10.0.0.3:9000/ 3`. TCP ve UDP proxy'de her sunucunun bir **Ağırlık** alanı vardır. Round robin her sunucuyu ağırlığı kadar kullanır ve sıraları döngüye yayar, arka arkaya göndermez.
 
 Ağırlıkları 1 ve 3 olan iki sunucu şu sırayla yanıt verir:
 
@@ -47,7 +47,7 @@ Rastgele seçeneği sunucuyu ağırlığıyla orantılı bir olasılıkla seçer
 
 ## Adım 3: Bozulan sunucuyu bulun
 
-Aktif sağlık kontrolü kapalıyken r3v3rs3 bir hatayı yalnız gelen isteklerden öğrenir. Art arda **Maksimum Hata Sayısı** kadar hata (varsayılan 1) alan sunucu, **Sağlıksız Kalma Süresi** boyunca (varsayılan 30 saniye) sağlıksız sayılır. Hata, kurulamayan bir bağlantı veya yanıtı gelmeyen bir istektir. 500 yanıtı başarı sayılır, çünkü sunucu yanıt vermiştir.
+Aktif sağlık kontrolü kapalıyken r3v3rs3 bir hatayı yalnız gelen isteklerden öğrenir. Art arda **Maksimum Hata Sayısı** kadar hata (varsayılan 1) alan sunucu, **Sağlıksız Kalma Süresi (Saniye)** boyunca (varsayılan 30 saniye) sağlıksız sayılır. Hata, kurulamayan bir bağlantı veya yanıtı gelmeyen bir istektir. 500 yanıtı başarı sayılır, çünkü sunucu yanıt vermiştir.
 
 Ayakta olan ama bozuk çalışan bir sunucuyu bulmak için aktif kontrolü açın:
 
@@ -67,7 +67,7 @@ $ curl -s -b cookies.txt http://127.0.0.1:46492/api/proxies/<proxy-id>/status
 
 ```json
 {
-  "url": "http://10.0.0.3:9000/",
+  "addr": "http://10.0.0.3:9000/",
   "weight": 1,
   "healthy": false,
   "failures": 0,
@@ -91,7 +91,7 @@ Bütün sunucular sağlıksızsa r3v3rs3 istekleri yine onlara gönderir. Kendil
 Yeniden deneme sıradaki sunucuya gider ve circuit'i açık olan sunucuyu atlar. Üç deneme ve listede ölü bir sunucu varken her istemci yine 200 alır, durum API'si o sunucunun hatalarını sayar:
 
 ```json
-{ "url": "http://10.0.0.9:9000/", "healthy": false, "failures": 1, "last_error": "client error (Connect)" }
+{ "addr": "http://10.0.0.9:9000/", "healthy": false, "failures": 1, "last_error": "client error (Connect)" }
 ```
 
 Gövdesi olan bir istek yalnız gövde uzunluğu biliniyorsa ve **Yeniden Gönderim Gövde Limiti (Byte)** değerini aşmıyorsa (varsayılan 0) yeniden denenir. r3v3rs3 böyle bir gövdeyi bellekte tutar. WebSocket ve diğer upgrade istekleri hiç yeniden denenmez. Bir route **Bu Route için Ayrı Yeniden Deneme Ayarları Kullan** seçeneğiyle kendi ayarlarını kullanabilir.
@@ -118,7 +118,7 @@ TCP ve UDP proxy'de cookie yoktur. Orada **İstemci IP hash'i** kullanın.
 
 ## Adım 6: Bir sunucuyu devre dışı bırakın
 
-Sunucunun **Ağırlık** değerini `0` yapın ve kaydedin. Sunucu yeni istek almaz, diğer bütün sunucular sağlıksız olsa da almaz. Açık TCP bağlantıları ve UDP oturumları kalır, sticky istemcileri de kalır, yani üzerindeki oturumlar kendiliğinden biter.
+Sunucunun ağırlığını `0` yapın ve **Güncelle** butonuna tıklayın: **Hedef** alanına `http://10.0.0.3:9000/ 0` yazın, TCP veya UDP proxy'de **Ağırlık** alanına `0` yazın. Sunucu yeni istek almaz, diğer bütün sunucular sağlıksız olsa da almaz. Açık TCP bağlantıları ve UDP oturumları kalır, sticky istemcileri de kalır, yani üzerindeki oturumlar kendiliğinden biter.
 
 En az bir sunucunun ağırlığı 0'dan büyük olmalıdır. r3v3rs3, bütün sunucuları devre dışı bırakılmış bir route'u kabul etmez.
 
