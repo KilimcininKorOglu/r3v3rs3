@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-24
+
+### Added
+- A deployment platform that runs apps next to the reverse proxy. It has a container runtime on the Docker Engine, an app store with an admin API, and a platform discovery provider that routes the domains of the running apps.
+- Image apps deploy blue-green and roll back to an earlier deployment.
+- Git apps build their image from a branch before the deployment, and clone a private repository with a sealed Git token.
+- Compose apps deploy from a Git branch through the `docker` binary, and a rollback checks out the recorded commit.
+- A `-platform` Docker image carries `git` and the `docker` CLI with its Compose and buildx plugins.
+- The admin API returns the container log of an app.
+- Agent targets run apps on other hosts. An agent connects to the master over mTLS after a one-time enrollment, and the master reaches the agent apps through a tunnel. `install.sh --agent` installs an agent.
+- A signed push of GitHub, GitLab, Gitea, Forgejo or a generic HMAC sender deploys an app.
+- The notification webhook of the settings receives the deployment and agent events.
+- Git provider connections. A GitHub connection is a GitHub App that r3v3rs3 creates from a manifest, also on GitHub Enterprise Server. GitLab and Gitea connections authorize an OAuth application. The app form lists the repositories and branches of a connection, a deployment clones with its token, and r3v3rs3 installs the push webhook of the app at the repository.
+- WebUI pages for the apps, their deployments and container log, the targets and the Git providers.
+- The WebUI menus moved into a left sidebar.
+- The WebUI dialogs use an offline copy of SweetAlert2.
+
+### Changed
+- The Turkish WebUI texts and docs keep only real technical terms in English.
+- The docs describe the deployment platform, its design decisions and its WebUI pages.
+- The shared PKI test helpers moved into the common test module, and client certificate verification on HTTP/3 ports has a test.
+- The app row mapper and the GitHub App tests stay within the complexity limit.
+
+### Fixed
+- The WebUI event stream, the cluster status and the version load only with a session.
+- A signed-out client of a WebUI page with parameters goes to the sign-in page.
+- The WebUI login fields name their autocomplete purpose.
+- The empty port and proxy lists no longer name an Add button that the reader cannot see.
+- The agent writes its log without color codes when the output is not a terminal.
+- The master names the reason when it refuses the certificate of an agent.
+- A failed webhook installation keeps its API error, so the WebUI shows it in the selected language.
+
 ## [1.0.4] - 2026-09-18
 
 ### Changed
