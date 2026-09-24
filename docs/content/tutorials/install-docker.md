@@ -103,7 +103,7 @@ The command differs from Step 1 in three places:
 | `-v /var/run/docker.sock:/var/run/docker.sock` | The platform starts the app containers through the Docker Engine of the host. Access to the socket is equal to root access on the host. |
 | `-v /var/lib/r3v3rs3:/var/lib/r3v3rs3` and `R3V3RS3_CONFIG_DIR` | The config directory holds the checkouts of the Compose apps. `docker compose` sends the paths of a bind mount to the Docker Engine of the host, so a bind mount of a file from the repository works only when the directory has the same path on the host and in the container. |
 
-Then enable the platform in `/var/lib/r3v3rs3/config.toml` and restart the container.
+Then enable the platform in `/var/lib/r3v3rs3/config.toml` and restart the container. Manage the apps on the **Apps** page of the **Platform** group in the sidebar.
 
 ## Upgrade
 

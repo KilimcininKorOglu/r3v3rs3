@@ -8,7 +8,7 @@ weight = 0
 
 Deploy platformu, uygulamaları r3v3rs3 sunucusunun Docker Engine'inde container olarak çalıştırır ve domain'lerini r3v3rs3 proxy'leri üzerinden yönlendirir. Yeni bir deployment, çalışan container'ın yanında başlar. Proxy yeni container'a ancak container health check'ten geçince geçer.
 
-Platform geliştirme aşamasındadır. Bu sürüm, yönetim API'si üzerinden yerel Docker Engine'e registry'deki hazır bir image'ı deploy eder, bir Git reposundaki Dockerfile ile image build eder veya bir Git reposundaki Docker Compose dosyasını başlatır. WebUI sayfaları ve uzak sunucular sonraki sürümlerde gelir.
+Platform geliştirme aşamasındadır. Bu sürüm, WebUI veya yönetim API'si üzerinden yerel Docker Engine'e registry'deki hazır bir image'ı deploy eder, bir Git reposundaki Dockerfile ile image build eder veya bir Git reposundaki Docker Compose dosyasını başlatır. Uzak sunucular sonraki sürümlerde gelir.
 
 ## Platformu açma
 
@@ -175,6 +175,43 @@ Domain'i olmayan bir uygulama proxy almaz. Container'ı olmayan veya durmuş ola
 ## Uygulamayı silme
 
 `DELETE /api/apps/{id}` uygulamanın container'larını, network'ünü ve build edilmiş image'larını durdurup siler, proxy'sini kaldırır, environment değişkenlerini ve deployment'larını siler. Adlandırılmış volume'lar kalır. Compose uygulamasında `docker compose down` çalıştırır, projenin build ettiği image'ları ve checkout'u siler. Compose projesinin volume'ları kalır.
+
+## WebUI
+
+Sidebar'daki **Platform** grubu **Uygulamalar** sayfasını içerir. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
+
+### Uygulamalar
+
+**Uygulamalar** sayfası her uygulamayı **Kaynak**, **Domain'ler** ve **Son deployment** durumuyla listeler. Bir uygulamanın satır aksiyonları şunlardır:
+
+- **Düzenle** uygulama sayfasını açar. Edit izni olmayan hesap **Görüntüle** ve salt okunur bir form görür.
+- **Deployment'lar** deployment geçmişini açar.
+- **Log** container log'unu açar.
+- **Deploy et** onaydan sonra bir deployment başlatır.
+
+Sayfa, bitmemiş bir deployment varken uygulamaları 2 saniyede bir, yoksa 10 saniyede bir yeniden okur.
+
+### Uygulama ekleme ve değiştirme
+
+**Ekle** boş bir uygulama formu açar. **Kaynak** alanında **Image**, **Git** veya **Compose** seçilir ve form o kaynağın alanlarını gösterir. Compose uygulamasında **Volume'lar**, **Restart politikası**, **Bellek limiti (MB)** ve **CPU limiti** gizlenir, çünkü bunları Compose dosyası ayarlar.
+
+- **Domain'ler** alanına her satıra bir domain yazın.
+- **Volume'lar** alanına her satıra bir mount yazın: `volume:/yol`, salt okunur mount için `volume:/yol:ro`.
+- **Bellek limiti (MB)** tam bir megabayt değeri, **CPU limiti** `1.5` gibi bir CPU sayısı alır. Boş alan limit koymaz.
+
+**Oluştur** uygulamayı kaydeder ve sayfasını açar. Mevcut bir uygulamanın sayfasında formun altında üç bölüm daha bulunur:
+
+- **Git token**, Git veya Compose uygulamasında. **Token'ı ayarla** bir token kaydeder, **Token'ı kaldır** onaydan sonra token'ı siler. Sayfa yalnız token'ın ayarlı olup olmadığını gösterir.
+- **Environment değişkenleri**. **Değişken ekle**, **Key**, **Değer** ve **Secret** kutusu olan bir satır ekler. Kaydedilmiş secret bir değişkenin değeri **Değişmedi** olarak görünür. Değeri korumak için alanı boş bırakın. **Değişkenleri kaydet** bütün değişkenleri değiştirir ve sonraki deployment bunları kullanır.
+- **Uygulamayı sil** onaydan sonra uygulamayı container'larıyla birlikte siler.
+
+### Deployment geçmişi
+
+Deployment geçmişi son 100 deployment'ı durumu, **Tetikleyen**, **Commit**, **Hesap**, **Başlangıç**, **Süre** ve **Mesaj** ile gösterir. **Rollback yap** onaydan sonra önceki bir deployment'ı yeniden başlatır. Link yalnız bitmiş, artık çalışmayan ve image digest'i kaydedilmiş bir deployment'ta görünür. Compose uygulamasında kaydedilmiş commit gerekir. Uygulamanın bitmemiş bir deployment'ı varken link gizlenir. Sayfa **Uygulamalar** sayfasıyla aynı aralıklarla yenilenir.
+
+### Log
+
+Log sayfası çalışan container'ın stdout ve stderr çıktısının son 200 satırını gösterir ve 10 saniyede bir yeniden okur. **Yenile** satırları hemen okur. Çalışan container'ı olmayan uygulamada "Uygulamanın çalışan container'ı yok." mesajı görünür.
 
 ## Yönetim API'si
 

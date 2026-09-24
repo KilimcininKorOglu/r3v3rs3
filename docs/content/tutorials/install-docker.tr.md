@@ -103,7 +103,7 @@ Komut Adım 1'den üç yerde ayrılır:
 | `-v /var/run/docker.sock:/var/run/docker.sock` | Platform, uygulama container'larını host'un Docker Engine'i üzerinden başlatır. Socket'e erişim, host üzerinde root erişimine eşittir. |
 | `-v /var/lib/r3v3rs3:/var/lib/r3v3rs3` ve `R3V3RS3_CONFIG_DIR` | Config dizini Compose uygulamalarının checkout'larını tutar. `docker compose` bir bind mount'un yollarını host'un Docker Engine'ine gönderir. Bu yüzden repodaki bir dosyanın bind mount'u yalnız dizinin host'ta ve container'da aynı yolda olduğu durumda çalışır. |
 
-Sonra platformu `/var/lib/r3v3rs3/config.toml` dosyasında açın ve container'ı yeniden başlatın.
+Sonra platformu `/var/lib/r3v3rs3/config.toml` dosyasında açın ve container'ı yeniden başlatın. Uygulamaları sidebar'daki **Platform** grubunun **Uygulamalar** sayfasında yönetin.
 
 ## Yükseltme
 

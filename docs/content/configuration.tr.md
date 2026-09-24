@@ -1045,6 +1045,14 @@ Cluster'daki bir node yalnız `config.toml` dosyasını okur. State'in geri kala
 
 r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak localhost:46492 adresinde çalışır. Portu `R3V3RS3_WEBUI` environment variable'ı veya `--webui` komut satırı seçeneğiyle değiştirebilirsiniz. WebUI'ı kapatmak için `R3V3RS3_NO_WEBUI=1` environment variable'ını ayarlayın veya `--no-webui` komut satırı seçeneğini kullanın.
 
+WebUI menüsü soldaki sidebar'dadır ve üç gruptan oluşur:
+
+- **Proxy**: **Portlar**, **Proxy'ler**, **Erişim Listeleri** ve **Sertifikalar**.
+- **Platform**: **Uygulamalar**, yani [deploy platformu](@/platform.tr.md). Bu grubu yalnız proxy listesi olmayan hesap görür.
+- **Yönetim**: **Hesaplar**, **Audit Log** ve **Ayarlar**. Bu grubu yalnız admin hesabı görür.
+
+Navbar logoyu, dil menüsünü, tema menüsünü ve **Çıkış Yap** butonunu içerir. Dar bir ekranda sidebar ve **Çıkış Yap** yerine navbar'da **Menü** butonu görünür. Bu buton aynı menüyü açar ve menünün sonunda **Çıkış Yap** bulunur.
+
 WebUI dilini navbar'daki bayrak menüsünden seçebilirsiniz: İngilizce veya Türkçe. Tema menüsünde Sistem, Açık ve Koyu seçenekleri bulunur. WebUI bu seçimleri `r3v3rs3_lang` ve `r3v3rs3_theme` cookie'lerinde saklar. Bu cookie'ler yoksa WebUI İngilizce ve sistem temasıyla açılır.
 
 r3v3rs3'ün hata sayfaları ve Panel Session giriş sayfası da bu cookie'lere bakar. Ancak tarayıcı bu cookie'leri yalnız WebUI'ın host'una gönderir. Bu yüzden başka bir host'taki proxy'nin sayfaları İngilizce ve sistem temasıyla açılır.

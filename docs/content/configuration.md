@@ -1045,6 +1045,14 @@ A node of a cluster reads only `config.toml`. The rest of its state is in etcd o
 
 r3v3rs3 includes a built-in WebUI. By default, it is served on localhost:46492. However, you can customize the port using the `R3V3RS3_WEBUI` environment variable or the `--webui` command-line option. If you wish to disable the WebUI, set the `R3V3RS3_NO_WEBUI=1` environment variable or use the `--no-webui` command-line option.
 
+The menu of the WebUI is a sidebar on the left with three groups:
+
+- **Proxy**: **Ports**, **Proxies**, **Access Lists** and **Certificates**.
+- **Platform**: **Apps**, the [deployment platform](@/platform.md). Only an account without a proxy list sees this group.
+- **Administration**: **Accounts**, **Audit Log** and **Settings**. Only an admin account sees this group.
+
+The navbar holds the logo, the language menu, the theme menu and **Logout**. On a narrow screen the **Menu** button of the navbar replaces the sidebar and **Logout**, and opens the same menu with **Logout** at its end.
+
 The flag menu in the navbar selects the WebUI language: English or Turkish. The theme menu selects the System, Light or Dark theme. The WebUI stores the selections in the `r3v3rs3_lang` and `r3v3rs3_theme` cookies. Without these cookies, the WebUI uses English and the system theme.
 
 The error pages of r3v3rs3 and the Admin Session sign-in page read these cookies too. A browser sends the cookies only to the host of the WebUI, so the pages of a proxy on another host use English and the system theme.

@@ -8,7 +8,7 @@ weight = 0
 
 The deployment platform runs apps as containers on the Docker Engine of the r3v3rs3 server and routes their domains through r3v3rs3 proxies. A new deployment starts next to the running container, and the proxy switches to it only after it passes its health check.
 
-The platform is under development. This version deploys a ready image from a registry, builds an image from a Git repository with its Dockerfile, or starts the Docker Compose file of a Git repository, on the local Docker Engine through the admin API. The WebUI pages and remote servers follow in later versions.
+The platform is under development. This version deploys a ready image from a registry, builds an image from a Git repository with its Dockerfile, or starts the Docker Compose file of a Git repository, on the local Docker Engine through the WebUI or the admin API. Remote servers follow in later versions.
 
 ## Enable the Platform
 
@@ -175,6 +175,43 @@ An app without a domain gets no proxy. A running deployment whose container is m
 ## Deleting an App
 
 `DELETE /api/apps/{id}` stops and removes the containers, the network and the built images of the app, removes its proxy, and deletes its environment variables and its deployments. The named volumes stay. For a Compose app it runs `docker compose down`, removes the images that the project built and deletes its checkout. The volumes of the Compose project stay.
+
+## WebUI
+
+The **Platform** group of the sidebar holds the **Apps** page. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+
+### Apps
+
+The **Apps** page lists every app with its **Source**, its **Domains** and the status of its **Last Deployment**. The row actions of an app are:
+
+- **Edit** opens the app page. An account without the Edit permission sees **View** and a read-only form.
+- **Deployments** opens the deployment history.
+- **Log** opens the container log.
+- **Deploy** starts a deployment after a confirmation.
+
+The page reads the apps again every 2 seconds while a deployment is unfinished, and every 10 seconds otherwise.
+
+### Add and Change an App
+
+**Add** opens an empty app form. **Source** selects **Image**, **Git** or **Compose**, and the form shows the fields of that source. A Compose app hides **Volumes**, **Restart Policy**, **Memory Limit (MB)** and **CPU Limit**, because its Compose file sets them.
+
+- **Domains** takes one domain on each line.
+- **Volumes** takes one mount on each line: `volume:/path`, or `volume:/path:ro` for a read-only mount.
+- **Memory Limit (MB)** takes a whole number of megabytes, and **CPU Limit** a number of CPUs such as `1.5`. An empty field sets no limit.
+
+**Create** saves the app and opens its page. The page of an existing app adds three parts below the form:
+
+- **Git Token**, for a Git or a Compose app. **Set Token** saves a token, and **Remove token** deletes it after a confirmation. The page shows only whether a token is set.
+- **Environment Variables**. **Add variable** adds a row with a **Key**, a **Value** and a **Secret** checkbox. The value of a saved secret variable shows as **Unchanged**. Leave it empty to keep the value. **Save Variables** replaces all variables, and the next deployment uses them.
+- **Delete app** deletes the app with its containers after a confirmation.
+
+### Deployments
+
+The deployment history shows the latest 100 deployments with their status, **Trigger**, **Commit**, **Account**, **Started**, **Duration** and **Message**. **Roll back** starts an earlier deployment again after a confirmation. The link appears only for a finished deployment that no longer runs and has a recorded image digest, or a recorded commit for a Compose app. It hides while a deployment of the app is unfinished. The page follows the same refresh intervals as the **Apps** page.
+
+### Log
+
+The log page shows the last 200 lines of stdout and stderr of the running container and reads them again every 10 seconds. **Refresh** reads them at once. An app without a running container shows "The app has no running container."
 
 ## Admin API
 

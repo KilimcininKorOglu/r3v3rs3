@@ -1,6 +1,6 @@
 # Deployment platform design
 
-Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 is implemented too: the Git source with its Dockerfile build, the Compose source and the `-platform` image. The user reference is `docs/content/platform.md`.
+Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 is implemented too: the Git source with its Dockerfile build, the Compose source and the `-platform` image. Phase 5 is implemented: the container log route and the WebUI pages (the left sidebar, the app list, the app form with its environment variables and Git token, the deployment history with rollback, and the container log). The user reference is `docs/content/platform.md`.
 
 This document describes how r3v3rs3 grows from a reverse proxy into a self-hosted deployment platform, in the space of Coolify. It lives outside `docs/content/`, so the Zola site does not publish it.
 
