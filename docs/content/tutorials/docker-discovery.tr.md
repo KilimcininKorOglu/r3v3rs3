@@ -1,26 +1,26 @@
 +++
 title = "Docker'dan proxy'ler"
-description = "Container'larınız kendi proxy'lerini label ile tanımlasın"
+description = "Container'larınız kendi proxy'lerini etiketlerle tanımlasın"
 weight = 5
 +++
 
 # Docker'dan proxy'ler
 
-r3v3rs3 çalışan container'larınızın label'larını okur ve proxy'leri onlardan kurar. Başlayan bir container yaklaşık bir saniye içinde proxy'sini alır, duran bir container proxy'sini kaybeder. Elle hiç proxy eklemezsiniz.
+r3v3rs3 çalışan container'larınızın etiketlerini okur ve proxy'leri onlardan kurar. Başlayan bir container yaklaşık bir saniye içinde proxy'sini alır, duran bir container proxy'sini kaybeder. Elle hiç proxy eklemezsiniz.
 
 Bu rehber o kurulumu Docker Compose ile yapar ve her adımı doğrular. Birkaç dakika sürer.
 
 ## Ne kuruyorsunuz
 
 ```
-   client ---> :80 r3v3rs3 ---> whoami container(ları)
-                    |
-                    +-- label ve event için Docker socket'ini okur
+   istemci ---> :80 r3v3rs3 ---> whoami container(ları)
+                     |
+                     +-- etiketler ve olaylar için Docker socket'ini okur
 ```
 
-r3v3rs3 ile container'lar aynı Docker network'ünü paylaşır. r3v3rs3 her container'ın label'ını okur ve trafiği container'ın o network'teki adresine gönderir.
+r3v3rs3 ile container'lar aynı Docker ağını paylaşır. r3v3rs3 her container'ın etiketini okur ve istekleri container'ın o ağdaki adresine gönderir.
 
-> Docker socket'ine erişim, host üzerinde root erişimine eşittir. `:ro` seçeneği yalnız socket dosyası içindir, API'yi read-only yapmaz. Host güvenilmeyen bir network'ten erişilebiliyorsa önüne yalnız `GET /containers/json` ve `GET /events` isteklerine izin veren bir Docker socket proxy'si koyun.
+> Docker socket'ine erişim, host üzerinde root erişimine eşittir. `:ro` seçeneği yalnız socket dosyası içindir, API'yi salt okunur yapmaz. Host güvenilmeyen bir ağdan erişilebiliyorsa önüne yalnız `GET /containers/json` ve `GET /events` isteklerine izin veren bir Docker socket proxy'si koyun.
 
 ## Adım 1: Compose dosyasını yazın
 
@@ -58,9 +58,9 @@ volumes:
   r3v3rs3-data:
 ```
 
-Label'lar şunu söyler: bu container'ın `whoami` adında bir HTTP proxy'si vardır, r3v3rs3'ün `http` adlı portunu kullanır, `whoami.example.com` host'una cevap verir ve upstream sunucusu container'ın `80` portunda dinler.
+Etiketler şunu söyler: bu container'ın `whoami` adında bir HTTP proxy'si vardır, r3v3rs3'ün `http` adlı portunu kullanır, `whoami.example.com` host'una cevap verir ve upstream sunucusu container'ın `80` portunda dinler.
 
-Network altındaki `name: proxy` satırı network adını `proxy` olarak bırakır. Onsuz Compose başa proje adını ekler.
+Ağ tanımının altındaki `name: proxy` satırı ağ adını `proxy` olarak bırakır. Onsuz Compose başa proje adını ekler.
 
 Stack'i başlatın:
 
@@ -78,20 +78,20 @@ $ docker compose exec r3v3rs3 r3v3rs3 add-user admin
 
 ## Adım 3: Portu bağlayın
 
-Bir discovery sağlayıcısı port açmaz. `ports: http` label'ı, önceden var olması gereken bir portun adını yazar.
+Bir servis keşfi sağlayıcısı port açmaz. `ports: http` etiketi, önceden var olması gereken bir portun adını yazar.
 
 1. Menüde **Portlar** linkine, sonra **Ekle** butonuna tıklayın.
-2. Ad alanına `http` yazın. Label bu adı kullanır.
-3. Interface olarak `0.0.0.0`, port olarak `80` ve protokol olarak **HTTP** seçin.
+2. Ad alanına `http` yazın. Etiket bu adı kullanır.
+3. Ağ arayüzü olarak `0.0.0.0`, port olarak `80` ve protokol olarak **HTTP** seçin.
 4. **Oluştur** butonuna tıklayın ve **Dinliyor** durumunu kontrol edin.
 
 ## Adım 4: Docker sağlayıcısını açın
 
 1. Menüde **Ayarlar** linkine tıklayın.
-2. **Docker Service Discovery** bölümünü bulun ve açın.
-3. Endpoint alanına `unix:///var/run/docker.sock` yazın.
-4. Network alanına `proxy` yazın. Bu, Adım 1'deki Docker network'ünün adıdır.
-5. **Expose containers by default** seçeneğini kapalı bırakın. Böylece r3v3rs3 yalnız `r3v3rs3.enable=true` label'ı olan container'ları okur.
+2. **Docker Servis Keşfi** bölümünü bulun ve açın.
+3. **Endpoint** alanına `unix:///var/run/docker.sock` yazın.
+4. **Ağ** alanına `proxy` yazın. Bu, Adım 1'deki Docker ağının adıdır.
+5. **Her container'ı oku** seçeneğini kapalı bırakın. Böylece r3v3rs3 yalnız `r3v3rs3.enable=true` etiketi olan container'ları okur.
 6. Kaydedin.
 
 Aynı ayarlar `config.toml` içinde:
@@ -113,7 +113,7 @@ $ curl -b session.txt http://127.0.0.1:46492/api/discovery
 [{"provider":"docker","state":"running","proxies":1,"updated_at":1789642012}]
 ```
 
-Label'daki host ile bir request gönderin:
+Etiketteki host ile bir istek gönderin:
 
 ```bash
 $ curl -H 'Host: whoami.example.com' http://127.0.0.1/
@@ -124,7 +124,7 @@ IP: 192.168.164.2
 
 Başka bir host `502` alır, çünkü hiçbir route eşleşmez.
 
-Sağlayıcı socket'i okuyamazsa `state` alanı `error` olur. Bir issue kaynağı ve nedeni yazar, örneğin `whoami: http.whoami: port not found: http`. Bu mesaj Adım 3'ün eksik olduğu anlamına gelir.
+Sağlayıcı socket'i okuyamazsa `state` alanı `error` olur. Bir sorun kaydı kaynağı ve nedeni yazar, örneğin `whoami: http.whoami: port not found: http`. Bu mesaj Adım 3'ün eksik olduğu anlamına gelir.
 
 ## Adım 6: Servisi ölçekleyin
 
@@ -138,13 +138,13 @@ Bir saniye içinde proxy'nin her replikaya bir tane olmak üzere üç sunucusu o
 $ curl -H 'Host: whoami.example.com' http://127.0.0.1/ | grep Hostname
 ```
 
-Request'i tekrarlayın. Cevaplar üç container arasında dönüşümlü gelir, çünkü bir Compose servisinin replikaları proxy'lerini paylaşır ve her replika kendi sunucusunu ekler.
+İsteği tekrarlayın. Cevaplar üç container arasında dönüşümlü gelir, çünkü bir Compose servisinin replikaları proxy'lerini paylaşır ve her replika kendi sunucusunu ekler.
 
 Bir replikayı durdurun, proxy o sunucuyu bırakır. Bütün replikalar durunca proxy kaybolur.
 
 ## Yeni container ekleme
 
-Her yeni container'ın kendi label'ları olur. Protokolden sonraki proxy adı iki container'ı birbirinden ayırır:
+Her yeni container'ın kendi etiketleri olur. Protokolden sonraki proxy adı iki container'ı birbirinden ayırır:
 
 ```yaml
   api:
@@ -159,11 +159,11 @@ Her yeni container'ın kendi label'ları olur. Protokolden sonraki proxy adı ik
       r3v3rs3.http.api.rate_limit.per: minute
 ```
 
-Admin API proxy modelinin her alanı label olarak çalışır. [Label'lar](@/discovery.tr.md) sayfası key'leri, değer biçimlerini, TCP ve UDP proxy'lerini listeler. r3v3rs3 düz metin parolayı ve token'ı kullanmadan önce hash'e çevirir, bu yüzden label'da `password_hash` ve `token_hash` tercih edin.
+Yönetim API'sinin proxy modelindeki her alan etiket olarak çalışır. [Etiketler](@/discovery.tr.md) sayfası key'leri, değer biçimlerini, TCP ve UDP proxy'lerini listeler. r3v3rs3 düz metin parolayı ve token'ı kullanmadan önce hash'e çevirir, bu yüzden etikette `password_hash` ve `token_hash` tercih edin.
 
 ## Sertifikalar
 
-Label'dan gelen bir HTTP proxy sertifikasını kendiliğinden alabilir. Önce bir ACME kaydı oluşturun, sonra id'sini label'da yazın:
+Etiketten gelen bir HTTP proxy sertifikasını kendiliğinden alabilir. Önce bir ACME kaydı oluşturun, sonra id'sini etikete yazın:
 
 ```yaml
       r3v3rs3.http.api.acme: e7k-2np
@@ -173,6 +173,6 @@ r3v3rs3 proxy'nin `vhosts` değeri için sertifika ister. Kuralları [Servis ke�
 
 ## Sonraki adımlar
 
-- [Servis keşfi](@/discovery.tr.md): bütün sağlayıcılar, bütün label key'leri ve Kubernetes, Consul, etcd kaynakları.
-- [Config](@/configuration.tr.md): her proxy alanının ne yaptığı.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek bir state paylaşan birkaç node.
+- [Servis keşfi](@/discovery.tr.md): bütün sağlayıcılar, bütün etiket key'leri ve Kubernetes, Consul, etcd kaynakları.
+- [Yapılandırma](@/configuration.tr.md): her proxy alanının ne yaptığı.
+- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek bir durum bilgisini paylaşan birkaç düğüm.

@@ -6,13 +6,13 @@ weight = 15
 
 # Forward auth ile single sign-on
 
-Forward auth, her request için harici bir servise "bu request geçsin mi?" diye sorar. Identity provider session'ını o servis tutar; r3v3rs3 yalnız sorar ve cevabı taşır. nginx'teki `auth_request`, Traefik'teki `forwardAuth` budur.
+Forward auth, her istek için harici bir servise "bu istek geçsin mi?" diye sorar. Kimlik sağlayıcısındaki oturumu o servis tutar; r3v3rs3 yalnız sorar ve cevabı taşır. nginx'teki `auth_request`, Traefik'teki `forwardAuth` budur.
 
 Zaten oauth2-proxy, Authelia veya kendi yazdığınız bir servisi çalıştırıyorsanız bunu kullanın. r3v3rs3'ün kendi tuttuğu hesaplar için [Ekip için hesaplar](@/tutorials/team-accounts.tr.md) daha basittir.
 
-## Adım 1: Auth servisini çalıştırın
+## Adım 1: Doğrulama servisini çalıştırın
 
-Örnek olarak Google client'ı ile oauth2-proxy:
+Örnek olarak Google istemcisi ile oauth2-proxy:
 
 ```yaml
 services:
@@ -34,23 +34,23 @@ services:
       - 127.0.0.1:4180:4180
 ```
 
-r3v3rs3 için iki option önemlidir:
+r3v3rs3 için iki seçenek önemlidir:
 
 - `--reverse-proxy=true`, oauth2-proxy'nin r3v3rs3'ün gönderdiği `X-Forwarded-*` header'larını okumasını sağlar.
-- `--set-xauthrequest=true`, kullanıcıyı `X-Auth-Request-User` ve `X-Auth-Request-Email` response header'larına yazar. r3v3rs3 bunları kopyalayabilir.
+- `--set-xauthrequest=true`, kullanıcıyı `X-Auth-Request-User` ve `X-Auth-Request-Email` yanıt header'larına yazar. r3v3rs3 bunları kopyalayabilir.
 
-`/oauth2/auth`, giriş yapmış client için 202, diğerleri için 401 dönen endpoint'tir. `/oauth2/start` ve `/oauth2/callback` tarayıcı girişini yürütür.
+`/oauth2/auth`, giriş yapmış istemci için 202, diğerleri için 401 dönen endpoint'tir. `/oauth2/start` ve `/oauth2/callback` tarayıcı girişini yürütür.
 
-## Adım 2: Auth endpoint'lerini yayınlayın
+## Adım 2: Doğrulama endpoint'lerini yayınlayın
 
-Tarayıcı `/oauth2/` adresine uygulamayla aynı host üzerinden ulaşmalıdır, çünkü session cookie'si o host'a aittir. Proxy'nize bir route ekleyin:
+Tarayıcı `/oauth2/` adresine uygulamayla aynı host üzerinden ulaşmalıdır, çünkü oturum cookie'si o host'a aittir. Proxy'nize bir route ekleyin:
 
 | Route | Sunucular | Kimlik doğrulama |
 |---|---|---|
 | `/oauth2` | `http://127.0.0.1:4180/` | **Yok** |
 | `/` | uygulamanız | **Forward Auth** |
 
-Path'i en uzun eşleşen route kazanır, yani `/oauth2/start` oauth2-proxy'ye, diğer her şey uygulamaya gider. `/oauth2` route'unun kimlik doğrulamasını **Yok** yapın; aksi halde client, giriş sayfasına ulaşmak için session'a ihtiyaç duyar.
+Yolu en uzun eşleşen route kazanır, yani `/oauth2/start` oauth2-proxy'ye, diğer her şey uygulamaya gider. `/oauth2` route'unun kimlik doğrulamasını **Yok** yapın; aksi halde istemci, giriş sayfasına ulaşmak için oturuma ihtiyaç duyar.
 
 ## Adım 3: Forward auth'u açın
 
@@ -58,8 +58,8 @@ Proxy'nin kimlik doğrulamasını **Forward Auth** yapın:
 
 | Alan | Değer |
 |---|---|
-| **Auth URL** | `http://127.0.0.1:4180/oauth2/auth` |
-| **Kopyalanacak Response Header'ları** | `X-Auth-Request-User`, `X-Auth-Request-Email` |
+| **Doğrulama URL'i** | `http://127.0.0.1:4180/oauth2/auth` |
+| **Kopyalanacak Yanıt Header'ları** | `X-Auth-Request-User`, `X-Auth-Request-Email` |
 | **Timeout (Saniye)** | `10` |
 
 `config.toml` içinde:
@@ -77,7 +77,7 @@ routes = [
 
 ## Adım 4: r3v3rs3 ne gönderir
 
-r3v3rs3 her client request'i için auth URL'ine bir `GET` gönderir. Auth request'i, client request'inin header'larını (connection header'ları ve `Host` hariç) ve beş header'ı taşır:
+r3v3rs3 her istemci isteği için doğrulama URL'ine bir `GET` gönderir. Doğrulama isteği, istemci isteğinin header'larını (connection header'ları ve `Host` hariç) ve beş header'ı taşır:
 
 ```
 x-forwarded-method: GET
@@ -87,19 +87,19 @@ x-forwarded-uri: /
 x-forwarded-for: 203.0.113.7
 ```
 
-`X-Forwarded-For`, [Client IP](@/configuration.tr.md#client-ip) ayarlarının çözdüğü client IP adresini taşır. Yani öndeki bir CDN, gerçek client'ı policy'nizden gizlemez.
+`X-Forwarded-For`, [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) ayarlarının çözdüğü istemci IP adresini taşır. Yani öndeki bir CDN, gerçek istemciyi erişim kurallarınızdan gizlemez.
 
-Auth request'i, upstream request'leriyle aynı root sertifikalara güvenir ve proxy'nin client certificate'ını gönderir. Mutual TLS ile HTTPS üzerinden çalışan bir auth servisi için ikinci bir sertifika ayarı gerekmez.
+Doğrulama isteği, upstream isteklerle aynı kök sertifikalara güvenir ve proxy'nin istemci sertifikasını gönderir. Mutual TLS ile HTTPS üzerinden çalışan bir doğrulama servisi için ikinci bir sertifika ayarı gerekmez.
 
 ## Adım 5: r3v3rs3 cevabı ne yapar
 
-| Auth response | Sonuç |
+| Doğrulama yanıtı | Sonuç |
 |---|---|
-| 2xx | Request, kopyalanan header'larla upstream sunucuya gider. |
-| Diğer status'ler | Client auth response'unu alır: status, header'lar ve en çok 64 KiB body. |
-| Timeout içinde cevap yok veya bağlantı hatası | Client 502 Bad Gateway alır. |
+| 2xx | İstek, kopyalanan header'larla upstream sunucuya gider. |
+| Diğer durum kodları | İstemci doğrulama yanıtını alır: durum kodu, header'lar ve en çok 64 KiB gövde. |
+| Timeout içinde cevap yok veya bağlantı hatası | İstemci 502 Bad Gateway alır. |
 
-Tarayıcı girişini mümkün kılan satır ikincisidir. `Location` ile `302 Found` dönen bir auth servisi tarayıcıyı giriş sayfasına gönderir ve r3v3rs3 bu redirect'i aynen aktarır:
+Tarayıcı girişini mümkün kılan satır ikincisidir. `Location` ile `302 Found` dönen bir doğrulama servisi tarayıcıyı giriş sayfasına gönderir ve r3v3rs3 bu yönlendirmeyi aynen aktarır:
 
 ```bash
 $ curl -i https://app.example.com/
@@ -107,18 +107,18 @@ HTTP/1.1 302 Found
 location: https://sso.example.com/login
 ```
 
-Session ile aynı request uygulamaya ulaşır:
+Oturumla gönderilen aynı istek uygulamaya ulaşır:
 
 ```bash
 $ curl -s https://app.example.com/ -H 'Cookie: <session>'
 200
 ```
 
-Auth servisi kapalıyken her request 502 döner. Servisi r3v3rs3'ün yanında çalıştırın veya load balancer'ınızın health check'i için auth'u atlayan bir route verin.
+Doğrulama servisi kapalıyken her istek 502 döner. Servisi r3v3rs3'ün yanında çalıştırın veya yük dengeleyicinizin sağlık kontrolü için doğrulamayı atlayan bir route verin.
 
-## Adım 6: Kullanıcıyı upstream request'inde görün
+## Adım 6: Kullanıcıyı upstream isteğinde görün
 
-**Kopyalanacak Response Header'ları** listesindeki header'lar auth response'undan upstream request'ine kopyalanır:
+**Kopyalanacak Yanıt Header'ları** listesindeki header'lar doğrulama yanıtından upstream isteğine kopyalanır:
 
 ```json
 {
@@ -133,19 +133,19 @@ Auth servisi kapalıyken her request 502 döner. Servisi r3v3rs3'ün yanında ç
 }
 ```
 
-Uygulamanız `X-Auth-Request-User` header'ını okur ve kimin çağırdığını bilir. Identity kütüphanesi gerekmez.
+Uygulamanız `X-Auth-Request-User` header'ını okur ve kimin çağırdığını bilir. Kimlik kütüphanesi gerekmez.
 
-**Client bu header'ları taklit edemez.** r3v3rs3, auth response'unu kopyalamadan önce listedeki her header'ı client request'inden siler. `X-Auth-Request-User: attacker@evil` taşıyan bir request, upstream sunucuya auth servisinin verdiği değerle ulaşır:
+**İstemci bu header'ları taklit edemez.** r3v3rs3, doğrulama yanıtını kopyalamadan önce listedeki her header'ı istemci isteğinden siler. `X-Auth-Request-User: attacker@evil` taşıyan bir istek, upstream sunucuya doğrulama servisinin verdiği değerle ulaşır:
 
 ```
 x-auth-request-user: alice@example.com
 ```
 
-Auth request'i ise client header'larını taşımaya devam eder, yani auth servisiniz sahte değeri görür. Orada listedeki header'ları dikkate almayın.
+Doğrulama isteği ise istemci header'larını taşımaya devam eder, yani doğrulama servisiniz sahte değeri görür. Orada listedeki header'ları dikkate almayın.
 
 ## Adım 7: Bir route'u açık bırakın
 
-Health check veya webhook girişten geçmemelidir. Ona kimlik doğrulaması **Yok** olan kendi route'unu verin:
+Sağlık kontrolü veya webhook girişten geçmemelidir. Ona kimlik doğrulaması **Yok** olan kendi route'unu verin:
 
 ```toml
 { path = "/healthz", servers = [{ url = "http://127.0.0.1:9000/" }], auth = { type = "none" } }
@@ -162,18 +162,18 @@ Route, proxy'nin kimlik doğrulamasının yerine geçer. Bu kural tersine de ça
 
 | Belirti | Sebebi |
 |---|---|
-| Her request 502 dönüyor | Auth servisi cevap vermiyor veya URL yanlış. |
+| Her istek 502 dönüyor | Doğrulama servisi cevap vermiyor veya URL yanlış. |
 | Tarayıcı uygulama ile giriş sayfası arasında dönüp duruyor | `/oauth2` route'u yok veya kimlik doğrulaması **Yok** değil. |
-| Upstream sunucu kullanıcı header'ını almıyor | Header, **Kopyalanacak Response Header'ları** listesinde yok veya oauth2-proxy `--set-xauthrequest` olmadan çalışıyor. |
-| Auth servisi client olarak `127.0.0.1` görüyor | [Client IP](@/configuration.tr.md#client-ip) ayarlarında CDN'iniz veya güvenilen proxy'niz tanımlı değil. |
+| Upstream sunucu kullanıcı header'ını almıyor | Header, **Kopyalanacak Yanıt Header'ları** listesinde yok veya oauth2-proxy `--set-xauthrequest` olmadan çalışıyor. |
+| Doğrulama servisi istemci olarak `127.0.0.1` görüyor | [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) ayarlarında CDN'iniz veya güvenilen proxy'niz tanımlı değil. |
 
 ## Referans
 
-- [Forward Auth](@/configuration.tr.md#forward-auth): header'lar, response kuralları ve timeout.
-- [Client IP](@/configuration.tr.md#client-ip): `X-Forwarded-For` nasıl çözülür.
-- [Routing](@/configuration.tr.md#routing): en uzun path neden kazanır.
+- [Forward Auth](@/configuration.tr.md#forward-auth): header'lar, yanıt kuralları ve timeout.
+- [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi): `X-Forwarded-For` nasıl çözülür.
+- [Route seçimi](@/configuration.tr.md#route-secimi): en uzun yol neden kazanır.
 
 ## Sonraki adımlar
 
 - [Ekip için hesaplar](@/tutorials/team-accounts.tr.md): aynı koruma r3v3rs3 hesaplarıyla.
-- [Bir uygulamayı korumaya alma](@/tutorials/protect-an-app.tr.md): IP filtresi, rate limit ve audit log.
+- [Bir uygulamayı korumaya alma](@/tutorials/protect-an-app.tr.md): IP filtresi, rate limit ve denetim kaydı.

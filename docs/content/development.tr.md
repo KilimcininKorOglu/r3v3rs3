@@ -11,7 +11,7 @@ Projenin kaynak kodu [GitHub](https://github.com/KilimcininKorOglu/r3v3rs3) üze
 Başlamadan önce şunları kurun:
 
 - Rust toolchain: [rustup.rs](https://rustup.rs/) ile kurabilirsiniz.
-- WASM toolchain: Rust toolchain'i kurduktan sonra WASM target'ını `rustup target add wasm32-unknown-unknown` komutuyla ekleyin.
+- WASM toolchain: Rust toolchain'i kurduktan sonra WASM hedefini `rustup target add wasm32-unknown-unknown` komutuyla ekleyin.
 - [Trunk](https://trunkrs.dev/): Kurulum talimatları web sitesinde bulunur.
 
 # Geliştirme ortamı

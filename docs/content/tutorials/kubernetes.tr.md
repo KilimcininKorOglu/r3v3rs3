@@ -10,14 +10,14 @@ r3v3rs3 cluster içinde bir ingress controller olarak çalışır. Kendi class'�
 
 Bu rehber r3v3rs3'ü kurar, bir proxy'yi Ingress ile, bir proxy'yi custom resource ile tanımlar ve ikisini de kontrol eder.
 
-Bu rehberin uyguladığı üç manifest deponun `deploy/kubernetes` dizinindedir: `rbac.yaml`, `crd.yaml` ve `deployment.yaml`.
+Bu rehberin uyguladığı üç manifest repository'nin `deploy/kubernetes` dizinindedir: `rbac.yaml`, `crd.yaml` ve `deployment.yaml`.
 
 ## Başlamadan önce
 
 - Bir cluster ve çalışan bir `kubectl`.
 - r3v3rs3'ün pod adreslerine ulaşması gerekir, bu yüzden onu bu rehberdeki gibi cluster içinde çalıştırın.
 
-## Adım 1: Service account'u ve definition'ı kurun
+## Adım 1: Service account'u ve kaynak tanımını kurun
 
 ```bash
 $ kubectl apply -f deploy/kubernetes/rbac.yaml
@@ -27,7 +27,7 @@ $ kubectl wait --for condition=established --timeout=60s crd/r3v3rs3proxies.r3v3
 
 `rbac.yaml` dosyası `r3v3rs3` namespace'ini, service account'u ve beş kaynakta `get`, `list`, `watch` yapabilen bir ClusterRole'ü oluşturur: `ingresses`, `services`, `secrets`, `endpointslices` ve `r3v3rs3proxies`.
 
-Provider yalnız `kubernetes.io/tls` tipindeki secret'ları okur, ama Kubernetes RBAC `list` iznini tipe göre sınırlayamaz. Bu yüzden role, namespace'lerdeki bütün secret'lara izin verir. Bunu daraltmak için Adım 3'te `namespaces` alanını doldurun ve ClusterRole yerine her namespace'te bir Role kullanın.
+Sağlayıcı yalnız `kubernetes.io/tls` türündeki secret'ları okur, ama Kubernetes RBAC `list` iznini türe göre sınırlayamaz. Bu yüzden role, namespace'lerdeki bütün secret'lara izin verir. Bunu daraltmak için Adım 3'te `namespaces` alanını doldurun ve ClusterRole yerine her namespace'te bir Role kullanın.
 
 ## Adım 2: r3v3rs3'ü çalıştırın
 
@@ -38,7 +38,7 @@ $ kubectl -n r3v3rs3 rollout status deployment/r3v3rs3
 
 Manifest `/root/.config/r3v3rs3` için 1 Gi'lik bir PersistentVolumeClaim, tek replikalı ve `Recreate` stratejili bir Deployment ve 80 ile 443 portları için bir `LoadBalancer` Service oluşturur.
 
-Deployment `serviceAccountName: r3v3rs3` kullanır, bu yüzden provider'ın pod içinde kubeconfig'e ihtiyacı yoktur. Container image `--webui 0.0.0.0:46492` ile başlar.
+Deployment `serviceAccountName: r3v3rs3` kullanır, bu yüzden sağlayıcının pod içinde kubeconfig'e ihtiyacı yoktur. Container image `--webui 0.0.0.0:46492` ile başlar.
 
 Panele, onu dışarı açmadan ulaşın:
 
@@ -52,7 +52,7 @@ $ kubectl -n r3v3rs3 port-forward deployment/r3v3rs3 46492:46492
 $ kubectl -n r3v3rs3 exec deployment/r3v3rs3 -- r3v3rs3 add-user admin
 ```
 
-## Adım 3: Kubernetes provider'ını açın
+## Adım 3: Kubernetes sağlayıcısını açın
 
 1. Menüde **Ayarlar** linkine tıklayın.
 2. **Kubernetes Servis Keşfi** bölümünü bulun ve **Proxy'leri Kubernetes'ten oku** seçeneğini açın.
@@ -72,9 +72,9 @@ ingress_class = "r3v3rs3"
 ports = ["http"]
 ```
 
-**R3v3rs3Proxy kaynaklarını oku** seçeneği varsayılan olarak kapalıdır. Onu yalnız Adım 1'den sonra açın, çünkü provider cluster'ın tanımadığı bir kaynağı izleyemez.
+**R3v3rs3Proxy kaynaklarını oku** seçeneği varsayılan olarak kapalıdır. Onu yalnız Adım 1'den sonra açın, çünkü sağlayıcı cluster'ın tanımadığı bir kaynağı izleyemez.
 
-**Varsayılan Portlar**, `r3v3rs3.io/ports` annotation'ı taşımayan bir Ingress'in r3v3rs3 portlarını yazar. Önce o portları bağlayın: discovery provider'ı hiç port açmaz. `http` adıyla 80 portunda bir HTTP portu, `https` adıyla 443 portunda bir TLS portu ekleyin. Böylece Deployment'ın container port'larıyla eşleşirler.
+**Varsayılan Portlar**, `r3v3rs3.io/ports` annotation'ı taşımayan bir Ingress'in r3v3rs3 portlarını yazar. Önce o portları bağlayın: servis keşfi sağlayıcısı hiç port açmaz. `http` adıyla 80 portunda bir HTTP portu, `https` adıyla 443 portunda bir TLS portu ekleyin. Böylece Deployment'ın container portlarıyla eşleşirler.
 
 ## Adım 4: Ingress ile bir proxy tanımlayın
 
@@ -106,11 +106,11 @@ spec:
                   name: http
 ```
 
-- Her host, o host'u virtual host olarak taşıyan bir HTTP proxy olur. Her path bir route olur. Proxy adı `<namespace>/<name> <host>` biçimindedir.
-- Bir route'un sunucuları, Service port'unun hazır endpoint'leridir. Bunlar Service'in EndpointSlice'larından gelir. Hazır olan yeni bir pod yaklaşık bir saniye içinde katılır.
-- `Prefix` ve `ImplementationSpecific` path'i ön ek olarak eşler. r3v3rs3'te tam eşleşme yoktur, bu yüzden `Exact` bir issue'dur ve o path route olmaz.
-- Diğer bütün proxy alanları `r3v3rs3.io/<alan>` annotation'ı olarak çalışır. `routes`, `vhosts`, `port` ve `scheme` Ingress'in kendisinden gelir, bu yüzden onlar için yazılan bir annotation issue olur.
-- r3v3rs3, `spec.tls` alanındaki her `kubernetes.io/tls` secret'ının sertifikasını sertifika listesine ekler. TLS portu onu server name ile seçer. r3v3rs3 böyle bir sertifikayı saklamaz; Ingress veya secret silinince sertifikayı da kaldırır.
+- Her host, o host'u virtual host olarak taşıyan bir HTTP proxy olur. Her yol bir route olur. Proxy adı `<namespace>/<name> <host>` biçimindedir.
+- Bir route'un sunucuları, Service portunun hazır endpoint'leridir. Bunlar Service'in EndpointSlice'larından gelir. Hazır olan yeni bir pod yaklaşık bir saniye içinde katılır.
+- `Prefix` ve `ImplementationSpecific` yolu önek olarak eşler. r3v3rs3'te tam eşleşme yoktur, bu yüzden `Exact` sorun sayılır ve o yol route olmaz.
+- Diğer bütün proxy alanları `r3v3rs3.io/<alan>` annotation'ı olarak çalışır. `routes`, `vhosts`, `port` ve `scheme` Ingress'in kendisinden gelir, bu yüzden onlar için yazılan bir annotation sorun sayılır.
+- r3v3rs3, `spec.tls` alanındaki her `kubernetes.io/tls` secret'ının sertifikasını sertifika listesine ekler. TLS portu onu sunucu adıyla seçer. r3v3rs3 böyle bir sertifikayı saklamaz; Ingress veya secret silinince sertifikayı da kaldırır.
 
 ## Adım 5: Custom resource ile bir proxy tanımlayın
 
@@ -165,24 +165,24 @@ $ curl -b session.txt http://127.0.0.1:46492/api/discovery
 [{"provider":"kubernetes","state":"running","proxies":2,"updated_at":1789643174}]
 ```
 
-r3v3rs3'ün kullanamadığı bir kaynak proxy yerine issue olur. Sık görülenler:
+r3v3rs3'ün kullanamadığı bir kaynak proxy olmaz, sorun olarak görünür. Sık görülenler:
 
-| Issue | Nedeni |
+| Sorun | Nedeni |
 |---|---|
 | `port not found` | Ingress, var olmayan bir r3v3rs3 portunu yazıyordur. Portu **Portlar** sayfasında bağlayın. |
-| Sunucusuz route | Service yoktur, port adı yanlıştır veya hazır pod yoktur. Böyle bir route hata döndürür ve request başka bir route'a geçmez. |
+| Sunucusuz route | Service yoktur, port adı yanlıştır veya hazır pod yoktur. Böyle bir route hata döndürür ve istek başka bir route'a geçmez. |
 | Eksik secret | `spec.tls`, var olmayan bir secret'ı gösteriyordur ya da sertifikası veya key'i geçersizdir. |
 
 Bir Ingress'i sildiğinizde proxy'si kaybolur. Custom resource'lar proxy'lerini korur.
 
 ## Nelere dikkat etmeli
 
-- Tek replika. Deployment `Recreate` stratejisini ve ReadWriteOnce bir volume'ü kullanır, çünkü iki replika config'in iki kopyasını tutardı. Tek state'i paylaşan birkaç replika için [cluster mode](@/tutorials/high-availability.tr.md) kullanın.
+- Tek replika. Deployment `Recreate` stratejisini ve ReadWriteOnce bir volume'ü kullanır, çünkü iki replika yapılandırmanın iki kopyasını tutardı. Tek durum bilgisini paylaşan birkaç replika için [cluster modunu](@/tutorials/high-availability.tr.md) kullanın.
 - r3v3rs3 pod adreslerine ulaşabilmelidir. Cluster dışındaki bir r3v3rs3 kaynakları okur, ama endpoint'lere bağlanamaz.
-- Provider hiç port açmaz. Her Ingress ve her custom resource var olan r3v3rs3 portlarını yazar.
+- Sağlayıcı hiç port açmaz. Her Ingress ve her custom resource var olan r3v3rs3 portlarını yazar.
 
 ## Sonraki adımlar
 
 - [Kubernetes](@/discovery.tr.md#kubernetes): bütün ayarlar, bütün annotation'lar ve RBAC manifest'i.
-- [Label'lar](@/discovery.tr.md#label-lar): annotation'ların ve `spec` alanlarının kullandığı alan adları.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek bir state paylaşan birkaç node.
+- [Etiketler](@/discovery.tr.md#etiketler): annotation'ların ve `spec` alanlarının kullandığı alan adları.
+- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek bir durum bilgisini paylaşan birkaç düğüm.

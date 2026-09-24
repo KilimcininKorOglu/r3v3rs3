@@ -1,22 +1,22 @@
 +++
-title = "Cache ve compression"
-description = "Tekrarlanan request'leri memory'den karşılayın ve daha küçük response gönderin"
+title = "Cache ve sıkıştırma"
+description = "Tekrarlanan istekleri bellekten karşılayın ve daha küçük yanıtlar gönderin"
 weight = 8
 +++
 
-# Cache ve compression
+# Cache ve sıkıştırma
 
-Bu rehber bir siteyi iki proxy ayarıyla hızlandırır. Cache, tekrarlanan bir request'i memory'den karşılar ve upstream sunucuya hiç gitmez. Compression her client'a daha küçük bir body gönderir.
+Bu rehber bir siteyi iki proxy ayarıyla hızlandırır. Cache, tekrarlanan bir isteği bellekten karşılar ve upstream sunucuya hiç gitmez. Sıkıştırma her istemciye daha küçük bir gövde gönderir.
 
-İkisi birlikte çalışır: r3v3rs3 tek bir sıkıştırılmamış response saklar ve onu her client için ayrı sıkıştırır. Böylece tek bir kayıt hem Brotli isteyen client'a, hem gzip isteyen client'a, hem de compression istemeyen client'a hizmet eder.
+İkisi birlikte çalışır: r3v3rs3 tek bir sıkıştırılmamış yanıt saklar ve onu her istemci için ayrı sıkıştırır. Böylece tek bir kayıt hem Brotli isteyen istemciye, hem gzip isteyen istemciye, hem de sıkıştırma istemeyen istemciye hizmet eder.
 
 Önce [Başlangıç](@/tutorials/getting-started.tr.md) rehberini izleyin. Bu rehber çalışan bir proxy ile devam eder.
 
-## Adım 1: Compression'ı açın
+## Adım 1: Sıkıştırmayı açın
 
-1. Proxy'yi açın ve **Compression** bölümünü bulun.
-2. **Brotli**, **Zstandard** ve **Gzip** seçin. Seçim sıranız, client birkaç encoding'i aynı `q` değeriyle kabul ettiğinde r3v3rs3'ün tercih ettiği sıradır.
-3. **Minimum Boyut (Byte)** alanını `1024` bırakın. Daha küçük bir body sıkıştırmayla küçülmez.
+1. Proxy'yi açın ve **Sıkıştırma** bölümünü bulun.
+2. **Brotli**, **Zstandard** ve **Gzip** seçin. Seçim sıranız, istemci birkaç encoding'i aynı `q` değeriyle kabul ettiğinde r3v3rs3'ün tercih ettiği sıradır.
+3. **Minimum Boyut (Byte)** alanını `1024` bırakın. Daha küçük bir gövde sıkıştırmayla küçülmez.
 4. Kaydedin.
 
 ```bash
@@ -27,15 +27,15 @@ $ curl -s -H 'Accept-Encoding: br' http://app.example.com/data.json -o /dev/null
 711
 ```
 
-r3v3rs3 bir response'u yalnız media type'ı **Media Type'lar** listesindeyse sıkıştırır. Varsayılan liste `text/*`, `application/json`, `application/javascript`, `application/wasm`, XML type'ları, `image/svg+xml` ve iki font type'ını tutar. Bir görsel veya video zaten sıkıştırılmıştır, bu yüzden listede yoktur.
+r3v3rs3 bir yanıtı yalnız medya türü **Medya Türleri** listesindeyse sıkıştırır. Varsayılan liste `text/*`, `application/json`, `application/javascript`, `application/wasm`, XML türleri, `image/svg+xml` ve iki font türünü tutar. Bir görsel veya video zaten sıkıştırılmıştır, bu yüzden listede yoktur.
 
-Upstream sunucu response'u zaten encode ettiyse, `Cache-Control` içinde `no-transform` varsa ve `text/event-stream` için r3v3rs3 sıkıştırma yapmaz. Sıkıştırma server-sent event'leri geciktirir.
+Upstream sunucu yanıtı zaten encode ettiyse, `Cache-Control` içinde `no-transform` varsa ve `text/event-stream` için r3v3rs3 sıkıştırma yapmaz. Sıkıştırma server-sent event'leri geciktirir.
 
 ## Adım 2: Cache'i açın
 
 1. Proxy'yi açın ve **Cache** bölümünü bulun.
 2. **Cache'i Aç** seçeneğini açın.
-3. **Memory Limiti (Byte)** alanını `67108864` (64 MiB), **Maksimum Response Boyutu (Byte)** alanını `1048576` (1 MiB) bırakın.
+3. **Bellek Limiti (Byte)** alanını `67108864` (64 MiB), **Maksimum Yanıt Boyutu (Byte)** alanını `1048576` (1 MiB) bırakın.
 4. **Varsayılan TTL (Saniye)** alanına `300` yazın.
 5. Kaydedin.
 
@@ -50,39 +50,39 @@ x-cache: HIT
 age: 0
 ```
 
-`X-Cache: MISS` response'un upstream sunucudan geldiği, `HIT` ise memory'den geldiği anlamına gelir. `Age`, upstream sunucunun response'u gönderdiği andan beri geçen saniyeyi sayar.
+`X-Cache: MISS` yanıtın upstream sunucudan geldiği, `HIT` ise bellekten geldiği anlamına gelir. `Age`, upstream sunucunun yanıtı gönderdiği andan beri geçen saniyeyi sayar.
 
 ## Adım 3: TTL'i anlayın
 
-Saklanan bir response'un ömrü şunlardan var olan ilkinden gelir: `s-maxage`, `max-age`, `Expires`, sonra **Varsayılan TTL (Saniye)**.
+Saklanan bir yanıtın ömrü şunlardan var olan ilkinden gelir: `s-maxage`, `max-age`, `Expires`, sonra **Varsayılan TTL (Saniye)**.
 
-Yani kararı upstream sunucu verir, **Varsayılan TTL (Saniye)** de hiçbir şey söylemeyen response'ları kapsar. Yapabildiğiniz yerde header'ları uygulamanızda ayarlayın:
+Yani kararı upstream sunucu verir, **Varsayılan TTL (Saniye)** de hiçbir şey söylemeyen yanıtları kapsar. Yapabildiğiniz yerde header'ları uygulamanızda ayarlayın:
 
 ```text
 Cache-Control: public, max-age=300
 ```
 
-**Varsayılan TTL (Saniye)** alanı `0` ise, r3v3rs3 böyle bir response'u yalnız `ETag` veya `Last-Modified` header'ı varsa saklar ve her request'te yeniden doğrular. Bu her client request'i için bir conditional request demektir, ama hiçbir zaman bayat içerik sunmaz.
+**Varsayılan TTL (Saniye)** alanı `0` ise, r3v3rs3 böyle bir yanıtı yalnız `ETag` veya `Last-Modified` header'ı varsa saklar ve her istekte yeniden doğrular. Bu her istemci isteği için bir koşullu istek demektir, ama hiçbir zaman bayat içerik sunmaz.
 
-Saklanan bir response bayatladıysa ve validator'ı varsa, r3v3rs3 `If-None-Match` veya `If-Modified-Since` ile conditional request gönderir. `304 Not Modified` cevabı saklanan header'ları tazeler, client da body'yi yeniden indirmeden alır.
+Saklanan bir yanıt bayatladıysa ve validator'ı varsa, r3v3rs3 `If-None-Match` veya `If-Modified-Since` ile koşullu istek gönderir. `304 Not Modified` cevabı saklanan header'ları tazeler, istemci de saklanan gövdeyi yeniden indirmeden alır.
 
 ## Adım 4: Nelerin saklanmadığını bilin
 
-r3v3rs3 bir response'u yalnız bütün koşullar sağlanınca saklar. Sürekli `MISS` görmenin sık nedenleri:
+r3v3rs3 bir yanıtı yalnız bütün koşullar sağlanınca saklar. Sürekli `MISS` görmenin sık nedenleri:
 
-- Request `GET` veya `HEAD` değildir, ya da `Range`, `Upgrade` veya `Cache-Control: no-store` taşır.
-- Response `Set-Cookie` header'ı taşır. Session response'u paylaşılmamalıdır.
+- İstek `GET` veya `HEAD` değildir, ya da `Range`, `Upgrade` veya `Cache-Control: no-store` taşır.
+- Yanıt `Set-Cookie` header'ı taşır. Bir oturuma ait yanıt paylaşılmamalıdır.
 - `Cache-Control` içinde `no-store` veya `private` vardır.
-- Response `Vary: *` taşır.
-- Request `Authorization` header'ı taşır ve `Cache-Control` içinde `public`, `s-maxage`, `must-revalidate` değerlerinden hiçbiri yoktur.
-- Body, **Maksimum Response Boyutu (Byte)** değerinden büyüktür.
-- Status şunlardan biri değildir: `200`, `203`, `204`, `300`, `301`, `308`, `404`, `405`, `410`, `414`, `501`.
+- Yanıt `Vary: *` taşır.
+- İstek `Authorization` header'ı taşır ve `Cache-Control` içinde `public`, `s-maxage`, `must-revalidate` değerlerinden hiçbiri yoktur.
+- Gövde, **Maksimum Yanıt Boyutu (Byte)** değerinden büyüktür.
+- Durum kodu şunlardan biri değildir: `200`, `203`, `204`, `300`, `301`, `308`, `404`, `405`, `410`, `414`, `501`.
 
-Cache key'i, istenen host ile request'in path'i ve query'sidir. Load balancing key'i değiştirmez, yani bütün upstream sunucular tek bir kaydı paylaşır. Response, request header adlarını taşıyan bir `Vary` header'ı içeriyorsa r3v3rs3 saklanan response'u yalnız o header'ları aynı değerlerle taşıyan request'e verir.
+Cache key'i, istenen host ile isteğin yolu ve sorgusudur. Yük dengeleme key'i değiştirmez, yani bütün upstream sunucular tek bir kaydı paylaşır. Yanıt, istek header adlarını taşıyan bir `Vary` header'ı içeriyorsa r3v3rs3 saklanan yanıtı yalnız o header'ları aynı değerlerle taşıyan isteğe verir.
 
 ## Adım 5: Deploy'dan sonra temizleyin
 
-Deploy dosyaları değiştirir, ama saklanan response'lar TTL'lerini korur.
+Deploy dosyaları değiştirir, ama saklanan yanıtlar TTL'lerini korur.
 
 - Proxy listesinde **Temizle** linkine tıklayın.
 - Veya `DELETE /api/proxies/{id}/cache` gönderin.
@@ -93,30 +93,30 @@ $ curl -sI http://app.example.com/data.json | grep -i x-cache
 x-cache: MISS
 ```
 
-r3v3rs3'ün restart'ı ve cache ayarlarının değişmesi de saklanan bütün response'ları siler. Saklanan response'lar yalnız memory'de durur.
+r3v3rs3'ün yeniden başlaması ve cache ayarlarının değişmesi de saklanan bütün yanıtları siler. Saklanan yanıtlar yalnız bellekte durur.
 
-## Adım 6: CDN arkasında gerçek client IP'sini görün
+## Adım 6: CDN arkasında gerçek istemci IP'sini görün
 
 r3v3rs3 önündeki bir CDN de cache tutar ve ziyaretçi adresini proxy'den gizler. Doğru ayar olmadan rate limit ve IP filtresi edge sunucuyu görür.
 
-r3v3rs3 sekiz bilinen CDN'in IP range'lerine varsayılan olarak güvenir: Cloudflare, Fastly, Amazon CloudFront, Bunny CDN, Gcore, KeyCDN, Imperva ve Google Cloud Load Balancing. Güvenilen bir peer için provider header'ını okur, örneğin `CF-Connecting-IP`, ve çözümlenen adresi upstream sunucuya `X-Real-IP` header'ında gönderir.
+r3v3rs3 sekiz bilinen CDN'in IP aralıklarına varsayılan olarak güvenir: Cloudflare, Fastly, Amazon CloudFront, Bunny CDN, Gcore, KeyCDN, Imperva ve Google Cloud Load Balancing. Güvenilen bir karşı taraf için sağlayıcının header'ını okur, örneğin `CF-Connecting-IP`, ve çözümlenen adresi upstream sunucuya `X-Real-IP` header'ında gönderir.
 
-- Range'ler binary'nin içine derlenir ve her gün yeniden indirilir. **Ayarlar** sayfası listenin durumunu gösterir ve bir **Şimdi Yenile** butonu taşır.
-- Kendi load balancer'ınızı proxy'nin **Güvenilen Proxy'ler** alanına ekleyin.
-- Akamai edge range'lerini yayınlamaz. Site Shield range'lerinizi **Güvenilen Proxy'ler** alanına yazın.
+- Aralıklar binary'nin içine derlenir ve her gün yeniden indirilir. **Ayarlar** sayfası listenin durumunu gösterir ve bir **Şimdi Yenile** butonu taşır.
+- Kendi yük dengeleyicinizi proxy'nin **Güvenilen Proxy'ler** alanına ekleyin.
+- Akamai edge aralıklarını yayınlamaz. Site Shield aralıklarınızı **Güvenilen Proxy'ler** alanına yazın.
 
 ## Cluster'da
 
-Her node'un kendi cache'i vardır. `share_cache = true` ile node'lar response'ları cluster store'a da yazar, böylece bir node'un aldığı response diğerlerine de hizmet eder.
+Her düğümün kendi cache'i vardır. `share_cache = true` ile düğümler yanıtları cluster veri deposuna da yazar, böylece bir düğümün aldığı yanıt diğerlerine de hizmet eder.
 
-- Bir node, en az 60 saniye taze kalacak bir response'u cluster store'a yazar.
-- Temizleme paylaşılan response'ları da siler ve her node kendi yerel cache'ini temizler.
-- Saklanan her response store'a bir write demektir, yani yoğun bir cache store'u compaction'lar arasında büyütür.
+- Bir düğüm, en az 60 saniye taze kalacak bir yanıtı cluster veri deposuna yazar.
+- Temizleme paylaşılan yanıtları da siler ve her düğüm kendi yerel cache'ini temizler.
+- Saklanan her yanıt veri deposuna bir yazma demektir, yani yoğun bir cache veri deposunu compaction'lar arasında büyütür.
 
 Sınırları [Paylaşılan cache](@/cluster.tr.md#paylasilan-cache) bölümü anlatır.
 
 ## Sonraki adımlar
 
-- [Cache](@/configuration.tr.md#cache) ve [Compression](@/configuration.tr.md#compression): bütün alanlar ve bütün koşullar.
-- [Client IP](@/configuration.tr.md#client-ip): CDN arkasındaki header sırası.
-- [Load balancing ve health check](@/configuration.tr.md#load-balancing-ve-health-check): tek bir cache arkasında daha çok upstream sunucu.
+- [Cache](@/configuration.tr.md#cache) ve [Sıkıştırma](@/configuration.tr.md#sikistirma): bütün alanlar ve bütün koşullar.
+- [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi): CDN arkasındaki header sırası.
+- [Yük dengeleme ve sağlık kontrolü](@/configuration.tr.md#yuk-dengeleme-ve-saglik-kontrolu): tek bir cache arkasında daha çok upstream sunucu.

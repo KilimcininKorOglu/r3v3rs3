@@ -12,16 +12,16 @@ Beş kişinin paylaştığı tek bir admin parolası bir yetki modeli değildir.
 
 ## Adım 1: Rolü seçin
 
-Üç rol vardır. Proxy listesi, editor ve viewer rolünü daha da daraltır:
+Üç rol vardır. Proxy listesi, editör ve izleyici rolünü daha da daraltır:
 
-| İşlem | Admin | Editor | Proxy listesi olan editor | Viewer |
+| İşlem | Admin | Editör | Proxy listesi olan editör | İzleyici |
 |---|---|---|---|---|
 | Proxy'leri okumak | her proxy | her proxy | listesindeki proxy'ler | her proxy veya listesindekiler |
 | Proxy eklemek | evet | evet | evet, yeni proxy listesine girer | hayır |
 | Proxy değiştirmek, silmek, cache'ini temizlemek | evet | evet | listesindeki proxy'ler | hayır |
 | Port, sertifika, ACME kaydı ve erişim listesi okumak | evet | evet | evet | evet |
 | Port, sertifika, ACME kaydı ve erişim listesi değiştirmek | evet | evet | hayır | hayır |
-| Ayarları ve hesapları okumak veya değiştirmek, audit log okumak | evet | hayır | hayır | hayır |
+| Ayarları ve hesapları okumak veya değiştirmek, denetim kaydını okumak | evet | hayır | hayır | hayır |
 
 Admin her zaman bütün proxy'leri görür, bu yüzden admin hesabının proxy listesi olamaz. Listesi olmayan hesap her proxy'yi görür.
 
@@ -65,7 +65,7 @@ $ curl -s -b alice.txt http://localhost:46492/api/proxies/cfr-kpm
 {"message":"port id not found: cfr-kpm","error":{"message":"id_not_found","id":"cfr-kpm"}}
 ```
 
-Bu 404'tür, 403 değil. Proxy listesi olan editor portları da değiştiremez:
+Bu 404'tür, 403 değil. Proxy listesi olan editör portları da değiştiremez:
 
 ```bash
 $ curl -s -o /dev/null -w '%{http_code}\n' -b alice.txt -X POST http://localhost:46492/api/ports \
@@ -80,7 +80,7 @@ $ curl -s -b cookies.txt http://localhost:46492/api/accounts | jq -c '.[] | sele
 {"username":"alice","role":"editor","proxies":["pdb-khh","tpq-gcv"],"totp":false}
 ```
 
-Yani proxy listesi olan bir editor, başka bir ekibin proxy'lerini hiç görmeden kendi servisini kurar ve yönetir.
+Yani proxy listesi olan bir editör, başka bir ekibin proxy'lerini hiç görmeden kendi servisini kurar ve yönetir.
 
 ## Adım 4: TOTP açın
 
@@ -93,7 +93,7 @@ $ curl -s -b cookies.txt -X POST http://localhost:46492/api/accounts \
 {"totp_secret":"V2J27IEPLYHJ3Y62XSZM4GJBQSFTFSRF"}
 ```
 
-**Hesaplar** sayfası da secret'ı bir kez gösterir. Authenticator uygulamasına o anda ekleyin; r3v3rs3 secret'ı bir daha göstermez.
+**Hesaplar** sayfası da secret'ı bir kez gösterir. Secret'ı o anda doğrulama uygulamanıza ekleyin; r3v3rs3 secret'ı bir daha göstermez.
 
 Giriş bundan sonra iki çağrıdır. İlki `totp_required` döner:
 
@@ -108,18 +108,18 @@ $ curl -s -b bob.txt -c bob.txt -X POST http://localhost:46492/api/login \
 "success"
 ```
 
-Yanlış kod, yanlış parola ile aynı yanıtı verir: 400 `invalid_login_credentials`. `max_login_attempts` (varsayılan 10) bir client IP adresi ve kullanıcı adı çiftini o kadar hatadan sonra engeller, `login_attempts_reset` (varsayılan 15 dakika) engeli kaldırır.
+Yanlış kod, yanlış parola ile aynı yanıtı verir: 400 `invalid_login_credentials`. `max_login_attempts` (varsayılan 10) bir istemci IP adresi ve kullanıcı adı çiftini o kadar hatadan sonra engeller, `login_attempts_reset` (varsayılan 15 dakika) engeli kaldırır.
 
 ## Adım 5: Aynı hesaplarla bir uygulamayı koruyun
 
-Kendi girişi olmayan bir uygulama bu hesapları kullanabilir. Proxy'nin kimlik doğrulamasını **Panel Session** yapın:
+Kendi girişi olmayan bir uygulama bu hesapları kullanabilir. Proxy'nin kimlik doğrulamasını **Panel Oturumu** yapın:
 
 ```bash
 $ curl -s -b cookies.txt -X PUT http://localhost:46492/api/proxies/tpq-gcv \
     -H 'Content-Type: application/json' -d '{ ... , "auth": {"type":"session"} }'
 ```
 
-Session'ı olmayan tarayıcı request'i yönlendirilir:
+Oturumu olmayan tarayıcının isteği yönlendirilir:
 
 ```
 HTTP/1.1 302 Found
@@ -135,15 +135,15 @@ $ curl -s -o /dev/null -w '%{http_code}\n' -c app.txt -X POST \
 303
 ```
 
-Bundan sonra uygulama her zamanki gibi cevap verir. `POST /.r3v3rs3/auth/logout` session'ı bitirir ve sonraki request yeniden yönlendirilir.
+Bundan sonra uygulama her zamanki gibi yanıt verir. `POST /.r3v3rs3/auth/logout` oturumu bitirir ve sonraki istek yeniden yönlendirilir.
 
 **Giriş yapabilmek için hesabın o proxy'yi görmesi gerekir.** Proxy listesinde bu proxy olmayan bir hesap, parolası doğru olsa da giriş formunda 401 alır. İnsanları şaşırtan nokta budur: proxy listesi yalnız paneli değil, uygulama erişimini de belirler.
 
-r3v3rs3 hesabı her request'te kontrol eder. Hesap silinince, hesap değişince veya proxy hesabın listesinden çıkınca session biter. Session'lar memory'dedir, yani restart bütün client'ları çıkarır.
+r3v3rs3 hesabı her istekte kontrol eder. Hesap silinince, hesap değişince veya proxy hesabın listesinden çıkınca oturum biter. Oturumlar bellektedir, yani yeniden başlatma bütün istemcilerin oturumunu kapatır.
 
 ## Adım 6: Hesabı değiştirin ve silin
 
-Rol, proxy listesi veya parola değişikliği, değişiklikten önce başlayan session'ları bitirir:
+Rol, proxy listesi veya parola değişikliği, değişiklikten önce başlayan oturumları bitirir:
 
 ```bash
 $ curl -s -b cookies.txt -X PUT http://localhost:46492/api/accounts/alice \
@@ -153,7 +153,7 @@ $ curl -s -o /dev/null -w '%{http_code}\n' -b alice.txt http://localhost:46492/a
 401
 ```
 
-Bu kural hem panel session'ları hem de Adım 5'teki uygulama girişleri için geçerlidir. Ekipten ayrılan kişi ikisini birden kaybeder.
+Bu kural hem panel oturumları hem de Adım 5'teki uygulama girişleri için geçerlidir. Ekipten ayrılan kişi ikisini birden kaybeder.
 
 İki kural kendinizi dışarıda bırakmanızı engeller:
 
@@ -165,7 +165,7 @@ $ curl -s -b cookies.txt -X DELETE http://localhost:46492/api/accounts/admin
 - Hesap kendini silemez ve kendi rolünü değiştiremez.
 - En az bir admin hesabı kalır. Son admin'i kaldıran değişiklik 400 `last_admin` döner.
 
-`proxies` alanı olmayan bir update proxy listesini siler, `password` alanı olmayan bir update parolayı korur.
+`proxies` alanı olmayan bir güncelleme proxy listesini siler, `password` alanı olmayan bir güncelleme parolayı korur.
 
 ## Adım 7: Kimin neyi değiştirdiğini okuyun
 
@@ -177,19 +177,19 @@ $ curl -s -b cookies.txt 'http://localhost:46492/api/audit?limit=3' | jq -c '.[]
 {"time":1789647489459,"username":"admin","client":"127.0.0.1","action":"login"}
 ```
 
-WebUI'ın **Audit Log** sayfası kayıtları hesaba, kaynağa ve döneme göre filtreler ve en çok 500 kayıt gösterir. Summary; ad, adres ve rol taşır, hiçbir zaman parola, token veya key taşımaz. Varsayılan saklama süresi bir yıldır.
+WebUI'ın **Denetim Kaydı** sayfası kayıtları hesaba, kaynağa ve döneme göre filtreler ve en çok 500 kayıt gösterir. **Özet** sütunu ad, adres ve rol taşır, hiçbir zaman parola, token veya key taşımaz. Varsayılan saklama süresi bir yıldır.
 
-r3v3rs3'ün kendi yaptığı değişiklikler, örneğin sertifika yenileme veya discovery ile gelen proxy, kaydedilmez.
+r3v3rs3'ün kendi yaptığı değişiklikler, örneğin sertifika yenileme veya servis keşfiyle gelen proxy, kaydedilmez.
 
 ## Hesaplar nerede durur
 
-Config dizinindeki `accounts.toml` hesapları parola hash'leriyle tutar ve `0600` mode ile yazılır. Cluster hesapları store'da şifreli tutar, böylece her node aynı hesapları paylaşır.
+Yapılandırma dizinindeki `accounts.toml` hesapları parola hash'leriyle tutar ve `0600` izinleriyle yazılır. Cluster hesapları veri deposunda şifreli tutar, böylece her düğüm aynı hesapları paylaşır.
 
 ## Referans
 
 - [Hesaplar](@/accounts.tr.md): bütün kurallar, hata kodları ve API.
-- [Panel Session](@/configuration.tr.md#panel-session): endpoint'ler ve cookie.
-- [Audit log](@/configuration.tr.md#audit-log): alanlar ve query parametreleri.
+- [Panel Oturumu](@/configuration.tr.md#panel-oturumu): endpoint'ler ve cookie.
+- [Denetim kaydı](@/configuration.tr.md#denetim-kaydi): alanlar ve sorgu parametreleri.
 
 ## Sonraki adımlar
 

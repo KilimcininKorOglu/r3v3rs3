@@ -6,7 +6,7 @@ weight = 1
 
 # Linux sunucuya kurulum
 
-`install.sh` release binary'sini indirir, sha256 digest'ini kontrol eder, admin hesabını oluşturur ve r3v3rs3'ü systemd servisi olarak çalıştırır. Tek bir komut kurar, aynı komut sonra yükseltir.
+`install.sh` release binary'sini indirir, sha256 özetini kontrol eder, admin hesabını oluşturur ve r3v3rs3'ü systemd servisi olarak çalıştırır. Tek bir komut kurar, aynı komut sonra yükseltir.
 
 ## Başlamadan önce
 
@@ -40,7 +40,7 @@ r3v3rs3 v1.0.1 is running.
   Add user: /usr/local/bin/r3v3rs3 add-user --config-dir /etc/r3v3rs3 <name>
 ```
 
-Soru sormadan kurmak için iki option da vardır:
+Soru sormadan kurmak için iki seçenek de vardır:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
@@ -99,9 +99,9 @@ $ ssh -L 46492:127.0.0.1:46492 kullanici@sunucunuz
 |---|---|
 | `/usr/local/bin/r3v3rs3` | Binary. |
 | `/etc/r3v3rs3` | `accounts.toml`, `proxies.toml`, `ports.toml`, `access_lists.toml`, `acme.toml`, `config.toml` ve sertifikalar. Dizinin modu `0700` değeridir. |
-| `/var/log/r3v3rs3` | Audit log'u tutan `log.db`. Dizinin modu `0750` değeridir. |
+| `/var/log/r3v3rs3` | Denetim kaydını tutan `log.db`. Dizinin modu `0750` değeridir. |
 
-Sunucu log'unu `journalctl -u r3v3rs3` gösterir. `/etc/r3v3rs3/acme.toml` dosyası ACME hesap key'lerini ve DNS provider credential'larını düz metin tutar, bu yüzden bütün dizini yedekleyin ve yedeği koruyun.
+Sunucu log'unu `journalctl -u r3v3rs3` gösterir. `/etc/r3v3rs3/acme.toml` dosyası ACME hesap key'lerini ve DNS sağlayıcılarının kimlik bilgilerini düz metin tutar, bu yüzden bütün dizini yedekleyin ve yedeği koruyun.
 
 ## Yükseltme
 
@@ -111,10 +111,10 @@ Aynı komutu tekrar çalıştırın:
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-- Script binary'yi rename ile değiştirir, çünkü çalışan servis eski dosyayı açık tutar.
-- Config'i ve hesapları korur. İkinci bir hesap oluşturmaz.
+- Script binary'yi yeniden adlandırarak değiştirir, çünkü çalışan servis eski dosyayı açık tutar.
+- Yapılandırmayı ve hesapları korur. İkinci bir hesap oluşturmaz.
 - WebUI sorusunda varsayılan olarak kurulu servisin adresini sunar, yani Enter adresi korur.
-- Servisi restart eder ve WebUI cevap verene kadar bekler. WebUI 30 saniye sessiz kalırsa `systemctl status` çıktısını ve son 50 journal satırını yazar, sonra durur.
+- Servisi yeniden başlatır ve WebUI cevap verene kadar bekler. WebUI 30 saniye sessiz kalırsa `systemctl status` çıktısını ve son 50 journal satırını yazar, sonra durur.
 
 Bir filoyu adım adım yükseltirken sürümü `--version 1.0.1` ile sabitleyin.
 
@@ -137,5 +137,5 @@ Bu adımlar `/etc/r3v3rs3` ve `/var/log/r3v3rs3` dizinlerini bırakır. Onları 
 ## Sonraki adımlar
 
 - [Başlangıç](@/tutorials/getting-started.tr.md): ilk port ve ilk proxy.
-- [Config dosyaları](@/configuration.tr.md#config-dosyalari): config dizinindeki her dosyanın içeriği.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek state paylaşan birkaç sunucu.
+- [Yapılandırma dosyaları](@/configuration.tr.md#yapilandirma-dosyalari): config dizinindeki her dosyanın içeriği.
+- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek bir durum bilgisini paylaşan birkaç sunucu.

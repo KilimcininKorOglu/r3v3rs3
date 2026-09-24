@@ -1,26 +1,26 @@
 +++
 title = "Yüksek erişilebilirlik"
-description = "Load balancer arkasında üç node'u adım adım kurun"
+description = "Yük dengeleyici arkasında üç düğümü adım adım kurun"
 weight = 4
 aliases = ["tr/high-availability/"]
 +++
 
 # Yüksek erişilebilirlik
 
-r3v3rs3'ü tek arıza noktası olmadan çalıştırmanın tek yolu cluster mode'dur. Birkaç node, state'i etcd'de veya Consul'un key-value store'unda paylaşır. Önlerindeki load balancer her request'i herhangi birine gönderir. Başka bir failover mekanizması yoktur.
+r3v3rs3'ü tek arıza noktası olmadan çalıştırmanın tek yolu cluster modudur. Birkaç düğüm, durum bilgisini etcd'de veya Consul'un key-value store'unda paylaşır. Önlerindeki yük dengeleyici her isteği herhangi birine gönderir. Başka bir yedeğe geçiş mekanizması yoktur.
 
-Bu sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bir kurulum elde edersiniz. [Cluster](@/cluster.tr.md) ise referans sayfasıdır: her ayarı, store'daki her key'i ve her arıza durumunu anlatır.
+Bu sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bir kurulum elde edersiniz. [Cluster](@/cluster.tr.md) ise referans sayfasıdır: her ayarı, veri deposundaki her key'i ve her arıza durumunu anlatır.
 
 ## Ne kuruyorsunuz
 
 ```
-                    client'lar
+                    istemciler
                        |
                  10.0.0.10 (VIP)
                        |
           +------------+------------+
           |            |            |
-     10.0.0.11    10.0.0.12    10.0.0.13     r3v3rs3 node'ları
+     10.0.0.11    10.0.0.12    10.0.0.13     r3v3rs3 düğümleri
           |            |            |
           +------------+------------+
                        |
@@ -31,20 +31,20 @@ Bu sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bir kurulum 
 
 | Arıza | Sonuç |
 |---|---|
-| Bir r3v3rs3 node'u durur | keepalived VIP'i başka bir node'a taşır. Diğer node'lar aynı state'i tutar. |
-| Leader durur | `lock_ttl` içinde başka bir node lead alır. ACME order'ları ve background task'lar orada devam eder. |
-| Bir store node'u durur | Store quorum'unu korur. r3v3rs3 için hiçbir şey değişmez. |
-| Store quorum'unu kaybeder | Her node `degraded` olur. Trafik son state ile devam eder, değişiklikler reddedilir. |
+| Bir r3v3rs3 düğümü durur | keepalived VIP'i başka bir düğüme taşır. Diğer düğümler aynı durum bilgisini tutar. |
+| Lider durur | `lock_ttl` içinde başka bir düğüm lider olur. ACME siparişleri ve arka plan görevleri orada devam eder. |
+| Bir veri deposu düğümü durur | Veri deposu quorum'unu korur. r3v3rs3 için hiçbir şey değişmez. |
+| Veri deposu quorum'unu kaybeder | Her düğüm `degraded` olur. İstekler son durum bilgisiyle karşılanmaya devam eder, değişiklikler reddedilir. |
 
-Üç node işe yarayan en küçük boyuttur. İki node store'da quorum vermez ve bütün cluster'ın erişilebilirliğine store karar verir.
+Üç düğüm işe yarayan en küçük boyuttur. İki düğüm veri deposunda quorum sağlamaz ve bütün cluster'ın erişilebilirliğine veri deposu karar verir.
 
 ## Başlamadan önce
 
 | Sunucu | Adres | Görev |
 |---|---|---|
-| `proxy-1` | `10.0.0.11` | r3v3rs3 node'u |
-| `proxy-2` | `10.0.0.12` | r3v3rs3 node'u |
-| `proxy-3` | `10.0.0.13` | r3v3rs3 node'u |
+| `proxy-1` | `10.0.0.11` | r3v3rs3 düğümü |
+| `proxy-2` | `10.0.0.12` | r3v3rs3 düğümü |
+| `proxy-3` | `10.0.0.13` | r3v3rs3 düğümü |
 | `store-1` | `10.0.2.11` | etcd veya Consul |
 | `store-2` | `10.0.2.12` | etcd veya Consul |
 | `store-3` | `10.0.2.13` | etcd veya Consul |
@@ -53,20 +53,20 @@ Bu sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bir kurulum 
 Gereksinimler:
 
 - Her sunucuda Linux. r3v3rs3 yalnız Linux'u destekler.
-- Her sunucuda NTP. Node'lar session'lar, rate limit pencereleri ve cache expiry için Unix zamanlarını karşılaştırır. Bakınız [Saatler](@/cluster.tr.md#saatler).
-- Node'lar store'a `2379` (etcd) veya `8500` (Consul) portundan erişir.
-- keepalived kullanırsanız node'lar birbirine VRRP (protokol 112) ile erişir.
-- Client'lar VIP'e proxy portlarınızdan erişir, örneğin `80` ve `443`.
+- Her sunucuda NTP. Düğümler oturumlar, rate limit pencereleri ve cache süreleri için Unix zamanlarını karşılaştırır. Bakınız [Saatler](@/cluster.tr.md#saatler).
+- Düğümler veri deposuna `2379` (etcd) veya `8500` (Consul) portundan erişir.
+- keepalived kullanırsanız düğümler birbirine VRRP (protokol 112) ile erişir.
+- İstemciler VIP'e proxy portlarınızdan erişir, örneğin `80` ve `443`.
 
-Store sertifikalarınızı ve parolalarınızı şifreli biçimde tutar. Onu özel bir ağa koyun.
+Veri deposu sertifikalarınızı ve parolalarınızı şifreli biçimde tutar. Onu özel bir ağa koyun.
 
-## Adım 1: Store'u kurun
+## Adım 1: Veri deposunu kurun
 
 etcd veya Consul'dan birini kurun. r3v3rs3 için ikisi de aynı şekilde çalışır.
 
 ### etcd
 
-Bu unit'i üç store sunucusunun her birinde, o sunucunun `<NAME>` ve `<IP>` değerleriyle çalıştırın:
+Bu unit'i üç veri deposu sunucusunun her birinde, o sunucunun `<NAME>` ve `<IP>` değerleriyle çalıştırın:
 
 ```ini
 [Unit]
@@ -89,7 +89,7 @@ Restart=always
 WantedBy=multi-user.target
 ```
 
-Store'u kontrol edin:
+Veri deposunu kontrol edin:
 
 ```bash
 $ etcdctl --endpoints=http://10.0.2.11:2379,http://10.0.2.12:2379,http://10.0.2.13:2379 endpoint health
@@ -99,7 +99,7 @@ Her endpoint `is healthy` demelidir.
 
 ### Consul
 
-Bu config'i üç store sunucusunun her birinde, o sunucunun `<NAME>` ve `<IP>` değerleriyle çalıştırın:
+Bu yapılandırmayı üç veri deposu sunucusunun her birinde, o sunucunun `<NAME>` ve `<IP>` değerleriyle çalıştırın:
 
 ```json
 {
@@ -114,18 +114,18 @@ Bu config'i üç store sunucusunun her birinde, o sunucunun `<NAME>` ve `<IP>` d
 }
 ```
 
-ACL sistemini bir sunucuda bootstrap edin ve management token'ını saklayın:
+ACL sistemini bir sunucuda bootstrap edin ve yönetim token'ını saklayın:
 
 ```bash
 $ consul acl bootstrap
 $ consul members
 ```
 
-`consul members` üç server'ı `alive` durumunda listelemelidir.
+`consul members` üç sunucuyu `alive` durumunda listelemelidir.
 
 ## Adım 2: Kimlik bilgilerini oluşturun
 
-Node'lar, yalnız kendi prefix'i altındaki key'leri okuyup yazan bir hesaba ihtiyaç duyar.
+Düğümler, yalnız kendi öneklerinin altındaki key'leri okuyup yazan bir hesaba ihtiyaç duyar.
 
 ### etcd
 
@@ -136,7 +136,7 @@ $ etcdctl user add r3v3rs3 --new-user-password=<parola>
 $ etcdctl user grant-role r3v3rs3 r3v3rs3
 ```
 
-`--new-user-password` olmadan komut parolayı terminalden sorar. etcd'nin authentication'ını bir `root` kullanıcısı oluşturduktan sonra açın, çünkü authentication kapalıyken etcd hiçbir izni kontrol etmez:
+`--new-user-password` olmadan komut parolayı terminalden sorar. etcd'nin kimlik doğrulamasını bir `root` kullanıcısı oluşturduktan sonra açın, çünkü kimlik doğrulama kapalıyken etcd hiçbir izni kontrol etmez:
 
 ```bash
 $ etcdctl user add root --new-user-password=<root parolası>
@@ -144,7 +144,7 @@ $ etcdctl user grant-role root root
 $ etcdctl auth enable
 ```
 
-Yeni kullanıcının prefix dışına yazamadığını kontrol edin:
+Yeni kullanıcının önek dışına yazamadığını kontrol edin:
 
 ```bash
 $ etcdctl --user r3v3rs3:<parola> put r3v3rs3/probe ok
@@ -156,7 +156,7 @@ $ etcdctl --user r3v3rs3:<parola> del r3v3rs3/probe
 
 ### Consul
 
-Policy'yi `r3v3rs3.hcl` dosyasına yazın:
+Politikayı `r3v3rs3.hcl` dosyasına yazın:
 
 ```hcl
 key_prefix "r3v3rs3/" {
@@ -173,27 +173,27 @@ $ consul acl policy create -name r3v3rs3 -rules @r3v3rs3.hcl
 $ consul acl token create -description "r3v3rs3 nodes" -policy-name r3v3rs3
 ```
 
-Yeni token'ın `SecretID` değerini saklayın. Node'ların `token` alanı budur.
+Yeni token'ın `SecretID` değerini saklayın. Düğümlerin `token` alanı budur.
 
-## Adım 3: Her node'a r3v3rs3 kurun
+## Adım 3: Her düğüme r3v3rs3 kurun
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-Script binary'yi kurar, `/etc/r3v3rs3` dizinini oluşturur, bir admin kullanıcı adı ile parola sorar ve r3v3rs3'ü systemd servisi olarak çalıştırır. Bu hesap `/etc/r3v3rs3/accounts.toml` dosyasına yazılır. Cluster'ı açık olan bir node bu dosyayı okumaz, bu yüzden Adım 6 cluster'ın hesabını yeniden oluşturur.
+Script binary'yi kurar, `/etc/r3v3rs3` dizinini oluşturur, bir admin kullanıcı adı ile parola sorar ve r3v3rs3'ü systemd servisi olarak çalıştırır. Bu hesap `/etc/r3v3rs3/accounts.toml` dosyasına yazılır. Cluster'ı açık olan bir düğüm bu dosyayı okumaz, bu yüzden Adım 6 cluster'ın hesabını yeniden oluşturur.
 
-Cluster config'i hazır olana kadar servisi her node'da durdurun:
+Cluster yapılandırması hazır olana kadar servisi her düğümde durdurun:
 
 ```bash
 $ sudo systemctl stop r3v3rs3
 ```
 
-Docker kullanıyorsanız her node'da deponun `docker-compose.yml` dosyasını kullanın ve `/etc/r3v3rs3` dizinini config volume'u olarak ekleyin. `network_mode: host` satırını koruyun, çünkü proxy portları host üzerinde dinler.
+Docker kullanıyorsanız her düğümde repository'nin `docker-compose.yml` dosyasını kullanın ve `/etc/r3v3rs3` dizinini yapılandırma volume'u olarak ekleyin. `network_mode: host` satırını koruyun, çünkü proxy portları host üzerinde dinler.
 
-## Adım 4: Encryption key'i oluşturun
+## Adım 4: Şifreleme key'ini oluşturun
 
-Node'lar store'daki her değeri şifreler. Tek bir key oluşturup her node'a kopyalayın:
+Düğümler veri deposundaki her değeri şifreler. Tek bir key oluşturup her düğüme kopyalayın:
 
 ```bash
 $ sudo r3v3rs3 cluster keygen /etc/r3v3rs3/cluster.key
@@ -201,13 +201,13 @@ Wrote the encryption key 855523573514e205 to /etc/r3v3rs3/cluster.key.
 Keep a copy of the key file. The cluster data cannot be decrypted when every key file is lost.
 ```
 
-Dosya `0600` mode'u ile oluşur. Komut var olan bir dosyanın üzerine yazmaz.
+Dosya `0600` izinleriyle oluşur. Komut var olan bir dosyanın üzerine yazmaz.
 
-Aynı dosyayı `proxy-2` ve `proxy-3` sunucularına kopyalayın ve node'ların dışında da bir kopyasını saklayın. Bütün kopyalar kaybolursa store'daki sertifikaları, parolaları ve proxy'leri kimse bir daha okuyamaz.
+Aynı dosyayı `proxy-2` ve `proxy-3` sunucularına kopyalayın ve düğümlerin dışında da bir kopyasını saklayın. Bütün kopyalar kaybolursa veri deposundaki sertifikaları, parolaları ve proxy'leri kimse bir daha okuyamaz.
 
-## Adım 5: Her node'u yapılandırın
+## Adım 5: Her düğümü yapılandırın
 
-`/etc/r3v3rs3/config.toml` dosyasına `[cluster]` bölümünü ekleyin. Node'lar arasında yalnız `node_name` farklıdır.
+`/etc/r3v3rs3/config.toml` dosyasına `[cluster]` bölümünü ekleyin. Düğümler arasında yalnız `node_name` farklıdır.
 
 etcd:
 
@@ -234,52 +234,52 @@ node_name = "proxy-1"
 encryption_key_files = ["/etc/r3v3rs3/cluster.key"]
 ```
 
-Production'da `https://` endpoint'leri ve `tls` alanını kullanın. [Ayarlar](@/cluster.tr.md#ayarlar) her alanı varsayılanıyla listeler.
+Canlı ortamda `https://` endpoint'lerini ve `tls` alanını kullanın. [Ayarlar](@/cluster.tr.md#ayarlar) her alanı varsayılanıyla listeler.
 
-## Adım 6: State'i import edin ve admin hesabını ekleyin
+## Adım 6: Durum bilgisini içe aktarın ve admin hesabını ekleyin
 
-Import'u bir kez, yalnız bir node'da çalıştırın:
+İçe aktarmayı bir kez, yalnız bir düğümde çalıştırın:
 
 ```bash
 $ sudo r3v3rs3 cluster import --config-dir /etc/r3v3rs3
 Imported the config, 0 ports, 0 proxies, 0 access lists, 0 certificates, 0 ACME entries and 0 accounts.
 ```
 
-Store'un prefix'i boş olmalıdır. Import `schema` key'ini en son yazar, bu yüzden yarıda kalan bir import kullanılabilir bir prefix bırakmaz: prefix altındaki key'leri silin ve import'u yeniden çalıştırın.
+Veri deposunun öneki boş olmalıdır. İçe aktarma `schema` key'ini en son yazar, bu yüzden yarıda kalan bir içe aktarma kullanılabilir bir önek bırakmaz: önekin altındaki key'leri silin ve içe aktarmayı yeniden çalıştırın.
 
-Admin hesabını import'tan sonra ekleyin. Cluster açıkken hesap store'a gider ve her node onu görür:
+Admin hesabını içe aktarmadan sonra ekleyin. Cluster açıkken hesap veri deposuna gider ve her düğüm onu görür:
 
 ```bash
 $ sudo r3v3rs3 add-user admin --config-dir /etc/r3v3rs3
 ```
 
-Komut parolayı sorar. Ad store'da zaten varsa hesabın üzerine yazar, bu yüzden aynı komutla yeni parola da verebilirsiniz.
+Komut parolayı sorar. Ad veri deposunda zaten varsa hesabın üzerine yazar, bu yüzden aynı komutla yeni parola da verebilirsiniz.
 
-## Adım 7: Her node'u başlatın
+## Adım 7: Her düğümü başlatın
 
 ```bash
 $ sudo systemctl start r3v3rs3
 ```
 
-Her node'un WebUI'ını açıp giriş yapın. **Ayarlar** sayfası node'un durumunu, rolünü ve revision değerini gösterir. Aynı veri admin API'sinden de gelir:
+Her düğümün WebUI'ını açıp giriş yapın. **Ayarlar** sayfası düğümün durumunu, rolünü ve revizyonunu gösterir. Aynı veri yönetim API'sinden de gelir:
 
 ```bash
 $ curl -b session.txt http://10.0.0.11:46492/api/cluster/status
 {"state":"synced","node_name":"proxy-1","leader":false,"revision":247}
 ```
 
-Her node `synced` demelidir ve tam bir node `"leader":true` demelidir. Uzun süre `syncing` diyen bir node store'u okuyamıyordur: log'unda kimlik bilgilerini ve endpoint'leri kontrol edin.
+Her düğüm `synced` demelidir ve tam bir düğüm `"leader":true` demelidir. Uzun süre `syncing` diyen bir düğüm veri deposunu okuyamıyordur: log'unda kimlik bilgilerini ve endpoint'leri kontrol edin.
 
-## Adım 8: Health check route'u ekleyin
+## Adım 8: Sağlık kontrolü route'u ekleyin
 
-Load balancer'ın, giriş yapmadan sorgulayabileceği bir adrese ihtiyacı vardır. Admin API'si session cookie'sinin arkasındadır, bu yüzden bu işi göremez. Bunun yerine sabit status kodu döndüren bir route ekleyin.
+Yük dengeleyicinin, giriş yapmadan sorgulayabileceği bir adrese ihtiyacı vardır. Yönetim API'si oturum cookie'sinin arkasındadır, bu yüzden bu işi göremez. Bunun yerine sabit durum kodu döndüren bir route ekleyin.
 
 **Portlar** sayfasında bir HTTP port ekleyin, örneğin `/ip4/0.0.0.0/tcp/80/http`. **Proxy'ler** sayfasında o port üzerinde tek route'lu bir HTTP proxy ekleyin:
 
-- **Path**: `/healthz`
-- **Route Tipi**: `Sabit status kodu`, **Status** `200`, **Body** `ok`
+- **Yol**: `/healthz`
+- **Route Türü**: `Sabit durum kodu`, **Durum Kodu** `200`, **Gövde** `ok`
 
-Değişiklik store üzerinden her node'a ulaşır, bu yüzden tek bir WebUI yeterlidir. Her node'u kendi adresinden kontrol edin:
+Değişiklik veri deposu üzerinden her düğüme ulaşır, bu yüzden tek bir WebUI yeterlidir. Her düğümü kendi adresinden kontrol edin:
 
 ```bash
 $ curl -i http://10.0.0.11/healthz
@@ -288,13 +288,13 @@ HTTP/1.1 200 OK
 ok
 ```
 
-Route, node trafik sunduğu sürece yanıt verir, node `degraded` olsa bile. Load balancer'ın ihtiyacı budur: duran bir node'u listeden çıkarır, store'u kaybeden bir node'u değil.
+Route, düğüm istekleri karşıladığı sürece yanıt verir, düğüm `degraded` olsa bile. Yük dengeleyicinin ihtiyacı budur: duran bir düğümü listeden çıkarır, veri deposunu kaybeden bir düğümü değil.
 
-## Adım 9: Öne load balancer koyun
+## Adım 9: Öne yük dengeleyici koyun
 
 ### keepalived
 
-keepalived `10.0.0.10` VIP'ini yanıt veren bir node'a taşır. Üç node'a da kurun.
+keepalived `10.0.0.10` VIP'ini yanıt veren bir düğüme taşır. Üç düğüme de kurun.
 
 `proxy-1` sunucusunda `/etc/keepalived/keepalived.conf`:
 
@@ -328,7 +328,7 @@ vrrp_instance r3v3rs3 {
 
 `proxy-2` ve `proxy-3` sunucularında `state` değerini `BACKUP`, `priority` değerini `140` ve `130` yapın. `virtual_router_id` ve `auth_pass` üçünde de aynı kalmalıdır.
 
-Servisi başlatmadan önce config'i kontrol edin:
+Servisi başlatmadan önce yapılandırmayı kontrol edin:
 
 ```bash
 $ keepalived -t -f /etc/keepalived/keepalived.conf
@@ -336,11 +336,11 @@ $ keepalived -t -f /etc/keepalived/keepalived.conf
 
 DNS kayıtlarınızı `10.0.0.10` adresine yöneltin.
 
-Bu kurulumda her request'i tek node sunar. Diğer ikisi aynı state'i tutar ve iki başarısız check'ten sonra, yani `interval` çarpı `fall` saniye sonra devralır.
+Bu kurulumda her isteği tek düğüm karşılar. Diğer ikisi aynı durum bilgisini tutar ve iki başarısız kontrolden sonra, yani `interval` çarpı `fall` saniye sonra görevi devralır.
 
 ### DNS round robin
 
-Kaydınıza üç node'un adresini birden verin:
+Kaydınıza üç düğümün adresini birden verin:
 
 ```
 proxy.example.com. 60 IN A 10.0.0.11
@@ -348,31 +348,31 @@ proxy.example.com. 60 IN A 10.0.0.12
 proxy.example.com. 60 IN A 10.0.0.13
 ```
 
-Bu, yükü VIP olmadan üç node'a dağıtır. Tek sınırı vardır: DNS duran bir node'u listeden çıkarmaz. Client TTL bitene kadar adresi kullanmayı sürdürür, bazı client'lar daha da uzun süre cache'ler. Client'larınız başka bir adresi deniyorsa bunu kullanın, denemiyorsa keepalived kullanın.
+Bu, yükü VIP olmadan üç düğüme dağıtır. Tek sınırı vardır: DNS duran bir düğümü listeden çıkarmaz. İstemci TTL bitene kadar adresi kullanmayı sürdürür, bazı istemciler adresi daha da uzun süre cache'te tutar. İstemcileriniz başka bir adresi yeniden deniyorsa bunu kullanın, denemiyorsa keepalived kullanın.
 
 ## Cluster'ı doğrulayın
 
-1. Bir node'da proxy ekleyin. Bir saniye içinde diğer node'larda görünür.
-2. Leader'ı durdurun: `sudo systemctl stop r3v3rs3`. Başka bir node `lock_ttl` içinde, varsayılan olarak 15 saniyede `"leader":true` der.
-3. VIP'i kontrol edin: diğer node'larda `ip addr show eth0`. Biri artık `10.0.0.10` adresini tutar.
-4. Durdurduğunuz node'u yeniden başlatın. Bütün state'i store'dan okur ve `synced` der.
-5. Bir node'da giriş yapın ve aynı tarayıcıyla başka bir node'un WebUI'ını açın. Session orada da geçerlidir.
+1. Bir düğümde proxy ekleyin. Bir saniye içinde diğer düğümlerde görünür.
+2. Lideri durdurun: `sudo systemctl stop r3v3rs3`. Başka bir düğüm `lock_ttl` içinde, varsayılan olarak 15 saniyede `"leader":true` der.
+3. VIP'i kontrol edin: diğer düğümlerde `ip addr show eth0`. Biri artık `10.0.0.10` adresini tutar.
+4. Durdurduğunuz düğümü yeniden başlatın. Bütün durum bilgisini veri deposundan okur ve `synced` der.
+5. Bir düğümde giriş yapın ve aynı tarayıcıyla başka bir düğümün WebUI'ını açın. Oturum orada da geçerlidir.
 
 ## Cluster'ı işletin
 
-**Node ekleme.** r3v3rs3'ü kurun, `cluster.key` dosyasını kopyalayın, aynı `[cluster]` bölümünü yeni bir `node_name` ile yazın ve başlatın. Import'u yeniden çalıştırmayın.
+**Düğüm ekleme.** r3v3rs3'ü kurun, `cluster.key` dosyasını kopyalayın, aynı `[cluster]` bölümünü yeni bir `node_name` ile yazın ve başlatın. İçe aktarmayı yeniden çalıştırmayın.
 
-**Node çıkarma.** Servisi durdurun. `nodes/` key'i lease'i ile birlikte biter ve diğer node'lar onu saymayı bırakır. keepalived config'ini de kaldırın.
+**Düğüm çıkarma.** Servisi durdurun. Düğümün `nodes/` key'i lease'i ile birlikte biter ve diğer düğümler onu saymayı bırakır. Düğümün keepalived yapılandırmasını da kaldırın.
 
-**Yükseltme.** Önce follower'ları teker teker, en son leader'ı yükseltin. Her node başlarken state'i yeniden okur.
+**Yükseltme.** Önce takipçileri teker teker, en son lideri yükseltin. Her düğüm başlarken durum bilgisini yeniden okur.
 
-**Encryption key değiştirme.** [Şifreleme](@/cluster.tr.md#sifreleme) bölümünü izleyin. Sıra önemlidir: her node key dosyalarını başlarken okur.
+**Şifreleme key'ini değiştirme.** [Şifreleme](@/cluster.tr.md#sifreleme) bölümünü izleyin. Sıra önemlidir: her düğüm key dosyalarını başlarken okur.
 
-## Neyin failover'ı yoktur
+## Yedeğe geçişin çözmediği durumlar
 
-- Store'u kaybeden node `degraded` olur. Son state ile trafik sunar, admin API'si değişiklikleri `503 cluster_unavailable` ile reddeder.
-- Yeni giriş ve yeni proxy session'ı store'a ihtiyaç duyar. Store olmadan `503` ile biter.
-- Kısa periyotlu rate limit node'lar arasında bölünür, bu yüzden tek node'a giden bir client limitin tamamını alamaz. Bakınız [Rate limit doğruluğu](@/cluster.tr.md#rate-limit-dogrulugu).
-- Response cache'i, `share_cache = true` yazmadığınız sürece yereldir. Bakınız [Paylaşılan cache](@/cluster.tr.md#paylasilan-cache).
+- Veri deposunu kaybeden düğüm `degraded` olur. Son durum bilgisiyle istekleri karşılar, yönetim API'si değişiklikleri `503 cluster_unavailable` ile reddeder.
+- Yeni giriş ve yeni proxy oturumu veri deposuna ihtiyaç duyar. Veri deposu yoksa `503` ile başarısız olur.
+- Periyodu kısa olan rate limit düğümler arasında bölünür, bu yüzden tek düğüme giden bir istemci limitin tamamını alamaz. Bakınız [Rate limit doğruluğu](@/cluster.tr.md#rate-limit-dogrulugu).
+- Yanıt cache'i, `share_cache = true` yazmadığınız sürece yereldir. Bakınız [Paylaşılan cache](@/cluster.tr.md#paylasilan-cache).
 
 [Hata durumları](@/cluster.tr.md#hata-durumlari) her durumu ayrıntısıyla anlatır.

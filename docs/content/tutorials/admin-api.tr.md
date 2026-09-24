@@ -1,18 +1,18 @@
 +++
 title = "r3v3rs3'ü script ile yönetme"
-description = "Admin API'ye giriş yapın, port ve proxy oluşturun, CI'dan cache'i temizleyin"
+description = "Yönetim API'sine giriş yapın, port ve proxy oluşturun, CI'dan cache'i temizleyin"
 weight = 12
 +++
 
 # r3v3rs3'ü script ile yönetme
 
-WebUI'da, WebUI'ın kendisinin kullanmadığı hiçbir düğme yoktur. Yaptığı her şey `/api` altındaki admin API üzerinden gider, yani bir script de aynısını yapabilir. Bu rehber giriş yapar, port ve proxy oluşturur, status okur, deploy işinden cache temizler ve o işe başka hiçbir şey yapamayan bir hesap verir.
+WebUI'da, WebUI'ın kendisinin kullanmadığı hiçbir düğme yoktur. Yaptığı her şey `/api` altındaki yönetim API'si üzerinden gider, yani bir script de aynısını yapabilir. Bu rehber giriş yapar, port ve proxy oluşturur, durum bilgisini okur, deploy işinden cache temizler ve o işe başka hiçbir şey yapamayan bir hesap verir.
 
-Örnekler `curl` ile `http://localhost:46492` adresine gider. Bu, admin panelinin varsayılan adresidir.
+Örnekler `curl` ile `http://localhost:46492` adresine gider. Bu, yönetim panelinin varsayılan adresidir.
 
 ## Adım 1: Giriş yapın
 
-`POST /api/login` bir session cookie'si döner:
+`POST /api/login` bir oturum cookie'si döner:
 
 ```bash
 $ curl -s -c cookies.txt \
@@ -22,13 +22,13 @@ $ curl -s -c cookies.txt \
 "success"
 ```
 
-Response cookie'yi taşır:
+Yanıt cookie'yi taşır:
 
 ```
 set-cookie: token=QWZ1uBQz5A9gAnmK2b18EZ7tD7CpkJ9I; HttpOnly; SameSite=Strict
 ```
 
-`"insecure": true`, cookie'den `Secure` attribute'unu kaldırır, böylece cookie düz HTTP'de de çalışır. Admin paneli HTTPS arkasındaysa bu alanı yazmayın.
+`"insecure": true`, cookie'den `Secure` özelliğini kaldırır, böylece cookie düz HTTP'de de çalışır. Yönetim paneli HTTPS arkasındaysa bu alanı yazmayın.
 
 Diğer her endpoint bu cookie'yi ister:
 
@@ -45,14 +45,14 @@ Yanlış parola 400 döner:
 {"message":"invalid login credentials","error":{"message":"invalid_login_credentials"}}
 ```
 
-`GET /api/session` kim olduğunuzu söyler, `GET /api/logout` session'ı bitirir. Logout'tan sonra cookie işe yaramaz:
+`GET /api/session` kim olduğunuzu söyler, `GET /api/logout` oturumu bitirir. Çıkıştan sonra cookie işe yaramaz:
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/session
 {"username":"admin","role":"admin","cert_expiry_warning":"14days"}
 ```
 
-Session'lar memory'dedir. r3v3rs3 yeniden başlayınca her session biter, bu yüzden uzun süre çalışan bir script 401 alınca yeniden giriş yapmalıdır.
+Oturumlar bellekte tutulur. r3v3rs3 yeniden başlayınca her oturum biter, bu yüzden uzun süre çalışan bir script 401 alınca yeniden giriş yapmalıdır.
 
 ## Adım 2: API dokümanını okuyun
 
@@ -61,7 +61,7 @@ r3v3rs3 OpenAPI dokümanını sunucu kodundan üretir, yani doküman her zaman �
 - OpenAPI dokümanı: `http://localhost:46492/api/openapi.json`
 - Swagger UI: `http://localhost:46492/api/docs/`
 
-İkisi de session cookie'si ister. WebUI'a giriş yaptığınız tarayıcıda açın; WebUI'ın alt kısmındaki API bağlantısı Swagger UI'ı açar.
+İkisi de oturum cookie'si ister. WebUI'a giriş yaptığınız tarayıcıda açın; WebUI'ın alt kısmındaki API bağlantısı Swagger UI'ı açar.
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/openapi.json | jq '.info.version, (.paths | length)'
@@ -69,7 +69,7 @@ $ curl -s -b cookies.txt http://localhost:46492/api/openapi.json | jq '.info.ver
 34
 ```
 
-Dokümanı bir client üretmek için veya bir endpoint'in body'sini tahmin etmek yerine görmek için kullanın.
+Dokümanı bir istemci üretmek için veya bir endpoint'in gövdesini tahmin etmek yerine görmek için kullanın.
 
 ## Adım 3: Port oluşturun
 
@@ -82,7 +82,7 @@ $ curl -s -b cookies.txt -X POST http://localhost:46492/api/ports \
 null
 ```
 
-`null` başarı body'sidir. Id'yi listeden okuyun:
+`null` başarılı yanıtın gövdesidir. Id'yi listeden okuyun:
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/ports | jq -r '.[] | select(.name=="api-demo") | .id'
@@ -110,14 +110,14 @@ $ curl -s -b cookies.txt -X POST http://localhost:46492/api/proxies \
 null
 ```
 
-Proxy restart olmadan, hemen cevap verir:
+Proxy yeniden başlatma olmadan, hemen cevap verir:
 
 ```bash
 $ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: demo.example.com' http://127.0.0.1:8475/
 200
 ```
 
-`protocol` alanı proxy tipini seçer: `http`, `tcp` veya `udp`. TCP ve UDP proxy'de `routes` yerine `upstream_servers` bulunur.
+`protocol` alanı proxy türünü seçer: `http`, `tcp` veya `udp`. TCP ve UDP proxy'de `routes` yerine `upstream_servers` bulunur.
 
 `GET /api/proxies/{id}/status` upstream sunucuları gösterir:
 
@@ -128,7 +128,7 @@ $ curl -s -b cookies.txt http://localhost:46492/api/proxies/jzr-pgf/status
 
 ## Adım 5: Deploy sonrası cache'i temizleyin
 
-Statik dosyaları değiştiren bir deploy, HTTP cache'inde eski body'ler bırakır. Tek bir çağrı bir proxy'nin cache'ini temizler:
+Statik dosyaları değiştiren bir deploy, HTTP cache'inde eski gövdeler bırakır. Tek bir çağrı bir proxy'nin cache'ini temizler:
 
 ```bash
 $ curl -s -b cookies.txt -X DELETE http://localhost:46492/api/proxies/jzr-pgf/cache
@@ -147,7 +147,7 @@ curl -sf -b "$PWD/j.txt" -X DELETE "$R3_URL/api/proxies/$R3_PROXY/cache" > /dev/
 curl -sf -b "$PWD/j.txt" "$R3_URL/api/logout" > /dev/null
 ```
 
-Parolayı CI'ın secret store'unda tutun, depoda değil. `-f` option'ı 4xx ve 5xx status'te işi başarısız yapar.
+Parolayı CI'ın secret deposunda tutun, repository'de değil. `-f` seçeneği, 4xx veya 5xx durum kodunda `curl`'ün işi başarısız yapmasını sağlar.
 
 ## Adım 6: İşe kendi hesabını verin
 
@@ -163,7 +163,7 @@ $ curl -s -b cookies.txt -X POST http://localhost:46492/api/accounts \
 
 | Rol | Ne yapabilir |
 |---|---|
-| `admin` | Her şeyi: hesaplar, ayarlar ve audit log dahil. |
+| `admin` | Her şeyi: hesaplar, ayarlar ve denetim kaydı dahil. |
 | `editor` | Kendi proxy listesindeki port ve proxy'leri değiştirir. |
 | `viewer` | Yalnız okur. |
 
@@ -174,9 +174,9 @@ $ curl -s -b ci.txt -X DELETE http://localhost:46492/api/proxies/jzr-pgf/cache
 {"message":"the role of the account does not allow this action","error":{"message":"forbidden"}}
 ```
 
-Bu request 403 döner. Cache temizleme en az `editor` rolü ister. `editor` rolü audit log'u ve hesapları okuyamaz, ikisi de 403 döner. Hesap başına proxy listesi ve TOTP için [Hesaplar](@/accounts.tr.md) sayfasına bakın.
+Bu istek 403 döner. Cache temizleme en az `editor` rolü ister. `editor` rolü denetim kaydını ve hesapları okuyamaz, ikisi de 403 döner. Hesap başına proxy listesi ve TOTP için [Hesaplar](@/accounts.tr.md) sayfasına bakın.
 
-## Adım 7: Audit log'u okuyun
+## Adım 7: Denetim kaydını okuyun
 
 WebUI veya API üzerinden yapılan her değişiklik kaydedilir. Kaydı yalnız admin hesabı okuyabilir:
 
@@ -188,7 +188,7 @@ $ curl -s -b cookies.txt 'http://localhost:46492/api/audit?limit=5' | jq -c '.[]
 {"time":1789647489459,"username":"admin","client":"127.0.0.1","action":"login"}
 ```
 
-`time` alanı Unix epoch'tan bu yana milisaniyedir. Summary hiçbir zaman parola, token veya key taşımaz. Query parametreleri için [Audit log](@/configuration.tr.md#audit-log) bölümüne bakın.
+`time` alanı Unix epoch'tan bu yana milisaniyedir. Özet hiçbir zaman parola, token veya key taşımaz. Sorgu parametreleri için [Denetim kaydı](@/configuration.tr.md#denetim-kaydi) bölümüne bakın.
 
 ## Adım 8: Değişiklikleri izleyin
 
@@ -205,16 +205,16 @@ data: {"event":"port_table_updated","entries":[...]}
 data: {"event":"port_status_updated","id":"dpv-ylj","status":{"state":{"socket":"listening","tls":null}}}
 ```
 
-Status endpoint'lerini döngüde sormak yerine bir dashboard veya alarm için bunu kullanın.
+Durum endpoint'lerini döngüde sormak yerine bir izleme paneli veya alarm için bunu kullanın.
 
 ## Referans
 
-- [Admin API](@/configuration.tr.md#yonetim-api-si): doküman adresi ve giriş.
-- [Audit log](@/configuration.tr.md#audit-log): alanlar ve saklama süresi.
+- [Yönetim API'si](@/configuration.tr.md#yonetim-api-si): doküman adresi ve giriş.
+- [Denetim kaydı](@/configuration.tr.md#denetim-kaydi): alanlar ve saklama süresi.
 - [Hesaplar](@/accounts.tr.md): roller, proxy listeleri ve TOTP.
 
 ## Sonraki adımlar
 
-- [Load balancing ve health check](@/tutorials/load-balancing.tr.md): status endpoint'inin kullanımı.
-- [Cache ve compression](@/tutorials/cache-and-compression.tr.md): purge'ün ne sildiği.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): cluster'daki her node'da aynı API.
+- [Yük dengeleme ve sağlık kontrolü](@/tutorials/load-balancing.tr.md): durum endpoint'inin kullanımı.
+- [Cache ve sıkıştırma](@/tutorials/cache-and-compression.tr.md): cache temizlemenin neyi sildiği.
+- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): cluster'daki her düğümde aynı API.

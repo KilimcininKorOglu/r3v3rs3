@@ -1,24 +1,24 @@
 +++
 title = "nginx veya Traefik'ten geçiş"
-description = "Config'inizi çevirin, iki proxy'yi yan yana çalıştırın ve trafiği devredin"
+description = "Yapılandırmanızı çevirin, iki proxy'yi yan yana çalıştırın ve geçişi yapın"
 weight = 16
 +++
 
 # nginx veya Traefik'ten geçiş
 
-Bu rehber, bir nginx veya Traefik config'inde bulunan parçaları çevirir ve trafiği kesintisiz devreder.
+Bu rehber, bir nginx veya Traefik yapılandırmasında bulunan parçaları çevirir ve geçişi kesintisiz yapar.
 
-Plan şudur: r3v3rs3'ü başka bir portta çalıştırın, config'i orada kurun, `Host` header'ı ile test edin, sonra portu taşıyın.
+Plan şudur: r3v3rs3'ü başka bir portta çalıştırın, yapılandırmayı orada kurun, `Host` header'ı ile test edin, sonra portu taşıyın.
 
 ## Adım 1: Elinizdekini listeleyin
 
-Mevcut config'inizdeki her maddeyi yazın. Çoğu kurulumda beş tür madde vardır:
+Mevcut yapılandırmanızdaki her maddeyi yazın. Çoğu kurulumda beş tür madde vardır:
 
 1. Server block'ları veya router'lar: hangi host nereye gidiyor.
-2. Location'lar veya rule'lar: hangi path nereye gidiyor ve path nasıl değişiyor.
+2. Location'lar veya kurallar: hangi yol nereye gidiyor ve yol nasıl değişiyor.
 3. Sertifikalar: dosya veya ACME.
-4. Ek özellikler: redirect, header, basic auth, rate limit, IP filtresi, cache.
-5. Upstream'ler: sunucular, weight değerleri ve health check'ler.
+4. Ek özellikler: yönlendirme, header, basic auth, rate limit, IP filtresi, cache.
+5. Upstream'ler: sunucular, ağırlıkları ve sağlık kontrolleri.
 
 Aşağıdaki tablolardaki her maddenin r3v3rs3 karşılığı vardır. Tabloda olmayan bir şeyin, örneğin bir Lua script'inin veya bir nginx modülünün, karşılığı yoktur; o parça için başka bir çözüm gerekir.
 
@@ -29,63 +29,63 @@ Aşağıdaki tablolardaki her maddenin r3v3rs3 karşılığı vardır. Tabloda o
 | `listen 443 ssl;` | **HTTPS** protokollü bir port ve **TLS Termination** |
 | `listen 443 quic;` | **QUIC üzerinden HTTP (HTTP/3)** protokollü bir port |
 | `server_name app.example.com;` | Proxy'nin **Virtual Host'lar** alanı |
-| `location /api { }` | Path'i `/api` olan bir route |
+| `location /api { }` | Yolu `/api` olan bir route |
 | `proxy_pass http://api:8080/v1/;` | Route'ta `http://api:8080/v1/` sunucusu |
 | `upstream app { server a; server b; }` | Bir route'ta iki sunucu |
-| `server a weight=3;` | Sunucunun **Weight** değeri `3` |
+| `server a weight=3;` | Sunucunun **Ağırlık** değeri `3` |
 | `return 301 https://$host$request_uri;` | **HTTP'yi Otomatik Olarak HTTPS'e Yönlendir** |
-| `rewrite ^/items/([0-9]+)$ /item/$1 break;` | Route'ta **Path Regex'i** ve **Yerine Yazılacak Değer** |
-| `add_header X-Frame-Options DENY;` | Response header kuralı: `set X-Frame-Options: DENY` |
+| `rewrite ^/items/([0-9]+)$ /item/$1 break;` | Route'ta **Yol Regex'i** ve **Yerine Yazılacak Değer** |
+| `add_header X-Frame-Options DENY;` | Yanıt header'ı kuralı: `set X-Frame-Options: DENY` |
 | `auth_basic` ve `auth_basic_user_file` | Proxy'de kullanıcılarıyla **Basic Auth** |
-| `auth_request /auth;` | Auth URL'i ile **Forward Auth** |
-| `allow` ve `deny` | **IP Filtresi** allow ve deny listeleri |
-| `limit_req_zone` ve `limit_req` | Request sayısı, süre ve burst ile **Rate Limit** |
-| `proxy_cache_path` ve `proxy_cache` | Memory limiti ve TTL ile **Cache** |
-| `gzip on;` | Algoritmalar ve minimum boyut ile **Compression** |
-| `return 404;` | **Sabit status kodu** route tipi |
-| `proxy_set_header X-Real-IP $remote_addr;` | Otomatiktir. [Client IP](@/configuration.tr.md#client-ip) bölümüne bakın |
-| `client_max_body_size 10m;` | **Request Body Limiti** |
-| `proxy_read_timeout 60s;` | Proxy'nin veya route'un **Request Timeout'u** |
+| `auth_request /auth;` | **Doğrulama URL'i** ile **Forward Auth** |
+| `allow` ve `deny` | **IP Filtresi** izin ve engelleme listeleri |
+| `limit_req_zone` ve `limit_req` | İstek sayısı, süre ve burst ile **Rate Limit** |
+| `proxy_cache_path` ve `proxy_cache` | Bellek limiti ve varsayılan TTL ile **Cache** |
+| `gzip on;` | Algoritmalar ve minimum boyut ile **Sıkıştırma** |
+| `return 404;` | **Sabit durum kodu** route türü |
+| `proxy_set_header X-Real-IP $remote_addr;` | Otomatiktir. [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümüne bakın |
+| `client_max_body_size 10m;` | **İstek Gövdesi Limiti** |
+| `proxy_read_timeout 60s;` | Proxy'nin veya route'un **İstek Timeout'u** |
 | `stream { server { proxy_pass db:5432; } }` | TCP proxy |
 
 Zaman kaybettiren iki fark:
 
-- **Location'ların sırası sonucu değiştirmez.** nginx, kendi öncelik kurallarına ve dosyadaki sıraya göre seçer. r3v3rs3 request'i her zaman, portun bütün proxy'leri içinde path'i en uzun eşleşen route'a gönderir. `/api`, `/api` ve `/api/users` ile eşleşir, `/apiv2` ile eşleşmez.
-- **Sondaki slash kuralı aynı değildir.** nginx'te `proxy_pass http://api:8080/` location prefix'ini kaldırır, `proxy_pass http://api:8080` ise korur. r3v3rs3'te route path'i her zaman kaldırılır ve kalan kısım sunucu URL'inin path'ine eklenir:
+- **Location'ların sırası sonucu değiştirmez.** nginx, kendi öncelik kurallarına ve dosyadaki sıraya göre seçer. r3v3rs3 isteği her zaman, portun bütün proxy'leri içinde yolu en uzun eşleşen route'a gönderir. `/api`, `/api` ve `/api/users` ile eşleşir, `/apiv2` ile eşleşmez.
+- **Sondaki eğik çizgi kuralı aynı değildir.** nginx'te `proxy_pass http://api:8080/` location önekini kaldırır, `proxy_pass http://api:8080` ise korur. r3v3rs3'te route yolu her zaman kaldırılır ve kalan kısım sunucu URL'inin yoluna eklenir:
 
 ```
-route /api, sunucu http://api:8080/v1/   ->  GET /api/users  =  /v1/users
-route /keep, Route Path'ini Kaldır kapalı ->  GET /keep/x    =  /keep/x
+route /api, sunucu http://api:8080/v1/    ->  GET /api/users  =  /v1/users
+route /keep, Route Yolunu Kaldır kapalı    ->  GET /keep/x    =  /keep/x
 ```
 
-Query string iki durumda da korunur.
+Sorgu iki durumda da korunur.
 
-## Adım 3: Traefik label'larını çevirin
+## Adım 3: Traefik etiketlerini çevirin
 
 | Traefik | r3v3rs3 |
 |---|---|
 | `entrypoints` | Portlar |
 | `Host(\`app.example.com\`)` | Proxy'nin **Virtual Host'lar** alanı |
-| `PathPrefix(\`/api\`)` | Path'i `/api` olan bir route |
-| `PathPrefix` olmayan router | Path'i `/` olan bir route |
+| `PathPrefix(\`/api\`)` | Yolu `/api` olan bir route |
+| `PathPrefix` olmayan router | Yolu `/` olan bir route |
 | `loadBalancer.servers` içeren `service` | Route'un sunucuları |
-| `loadBalancer.healthCheck` | Path ve aralık ile **Health Check** |
+| `loadBalancer.healthCheck` | **Sağlık Kontrolü Yolu** ve **Kontrol Aralığı (Saniye)** ile sağlık kontrolü |
 | `loadBalancer.sticky.cookie` | Cookie adıyla **Sticky Cookie'yi Aç** |
 | `middlewares.stripPrefix` | Route'un varsayılan davranışı |
-| `middlewares.addPrefix` | **Eklenecek Prefix** |
+| `middlewares.addPrefix` | **Eklenecek Önek** |
 | `middlewares.redirectScheme` | **HTTP'yi Otomatik Olarak HTTPS'e Yönlendir** |
-| `middlewares.redirectRegex` | `regex`, `target` ve `status` içeren redirect kuralı |
+| `middlewares.redirectRegex` | `regex`, `target` ve `status` içeren yönlendirme kuralı |
 | `middlewares.basicAuth` | **Basic Auth** |
 | `middlewares.forwardAuth` | **Forward Auth**. [Forward auth ile single sign-on](@/tutorials/forward-auth.tr.md) rehberine bakın |
 | `middlewares.ipAllowList` | **IP Filtresi** |
 | `middlewares.rateLimit` | **Rate Limit** |
 | `middlewares.headers` | Header kuralları |
-| `middlewares.compress` | **Compression** |
+| `middlewares.compress` | **Sıkıştırma** |
 | ACME ile `certresolver` | ACME kaydı. [Wildcard sertifika ile HTTPS](@/tutorials/https-certificates.tr.md) rehberine bakın |
-| Docker label'ları | Docker service discovery. [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md) rehberine bakın |
+| Docker etiketleri | Docker servis keşfi. [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md) rehberine bakın |
 | `tcp` router | TCP proxy |
 
-Docker label'larıyla kurulmuş bir Traefik kurulumu en az işi ister: Docker provider'ını açın ve `traefik.` label'larının yanına `r3v3rs3.` label'larını yazın. İki proxy de aynı container'ları okur, hiçbir şeyi silmeden ikisini karşılaştırabilirsiniz.
+Docker etiketleriyle kurulmuş bir Traefik kurulumu en az işi ister: Docker servis keşfini açın ve `traefik.` etiketlerinin yanına `r3v3rs3.` etiketlerini yazın. İki proxy de aynı container'ları okur, hiçbir şeyi silmeden ikisini karşılaştırabilirsiniz.
 
 ## Adım 4: Başka bir portta kurun
 
@@ -101,7 +101,7 @@ $ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: app.example.com' http://127
 $ curl -s -H 'Host: app.example.com' http://127.0.0.1:8080/api/users
 ```
 
-DNS'te hiçbir şey değişmez, kullanıcılarınız eski proxy'de kalır. Adım 1'deki listedeki her madde eskisi gibi cevap verene kadar çalışın.
+DNS'te hiçbir şey değişmez, kullanıcılarınız eski proxy'de kalır. Adım 1'deki listedeki her madde eskisi gibi yanıt verene kadar çalışın.
 
 HTTPS için `0.0.0.0:8443` portunu ekleyin ve `--resolve` kullanın:
 
@@ -109,9 +109,9 @@ HTTPS için `0.0.0.0:8443` portunu ekleyin ve `--resolve` kullanın:
 $ curl -sI --resolve app.example.com:8443:127.0.0.1 https://app.example.com:8443/
 ```
 
-## Adım 5: Response'ları karşılaştırın
+## Adım 5: Yanıtları karşılaştırın
 
-Status kodu yetmez. İki proxy'nin header'larını karşılaştırın:
+Durum kodu yetmez. İki proxy'nin header'larını karşılaştırın:
 
 ```bash
 $ curl -sI -H 'Host: app.example.com' http://127.0.0.1:8080/ > new.txt
@@ -119,7 +119,7 @@ $ curl -sI https://app.example.com/ > old.txt
 $ diff old.txt new.txt
 ```
 
-Cache header'larına, `Set-Cookie` attribute'larına, CORS header'larına ve redirect'lere bakın. r3v3rs3 upstream request'ine `via: r3v3rs3` ile `forwarded` ve `x-forwarded-*` header'larını ekler:
+Cache header'larına, `Set-Cookie` özniteliklerine, CORS header'larına ve yönlendirmelere bakın. r3v3rs3 upstream isteğine `via: r3v3rs3` ile `forwarded` ve `x-forwarded-*` header'larını ekler:
 
 ```json
 {
@@ -131,35 +131,35 @@ Cache header'larına, `Set-Cookie` attribute'larına, CORS header'larına ve red
 }
 ```
 
-`X-Real-IP` okuyan bir uygulama için bu header'ı yazan bir request header kuralı ekleyin, çünkü r3v3rs3 bu header'ı göndermez.
+`X-Real-IP` okuyan bir uygulama için bu header'ı yazan bir istek header'ı kuralı ekleyin, çünkü r3v3rs3 bu header'ı göndermez.
 
-CDN arkasındaysanız karşılaştırmadan önce CDN'i [Client IP](@/configuration.tr.md#client-ip) ayarlarında tanımlayın. Aksi halde her log satırı CDN'in adresini taşır.
+CDN arkasındaysanız karşılaştırmadan önce CDN'i [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) ayarlarında tanımlayın. Aksi halde her log satırı CDN'in adresini taşır.
 
-## Adım 6: Trafiği devredin
+## Adım 6: Geçişi yapın
 
 Şu sırayla yapın:
 
 1. Başka bir makineye geçiyorsanız bir gün önce DNS kayıtlarının TTL değerini beş dakikaya düşürün.
-2. Eski proxy'yi durdurun veya başka bir porta taşıyın. İki process aynı portu dinleyemez.
-3. r3v3rs3 portlarını `8080` ve `8443` yerine `80` ve `443` yapın. Değişiklik restart olmadan uygulanır.
-4. Sertifikaları kontrol edin. ACME'de HTTP-01 challenge'ı port 80'i, TLS-ALPN-01 challenge'ı port 443'ü ister, bu yüzden devirden önceki bir order başarısız olabilir.
+2. Eski proxy'yi durdurun veya başka bir porta taşıyın. İki süreç aynı portu dinleyemez.
+3. r3v3rs3 portlarını `8080` ve `8443` yerine `80` ve `443` yapın. Değişiklik yeniden başlatma olmadan uygulanır.
+4. Sertifikaları kontrol edin. ACME'de HTTP-01 challenge'ı port 80'i, TLS-ALPN-01 challenge'ı port 443'ü ister, bu yüzden geçişten önce verilen bir sertifika siparişi başarısız olabilir.
 5. Gerçek adresi test edin:
 
 ```bash
 $ curl -sI https://app.example.com/
 ```
 
-6. Birkaç dakika proxy listesini izleyin. Sağlıklı sunucu sayısı ve discovery provider'larının issue'ları orada görünür.
+6. Birkaç dakika proxy listesini izleyin. Sağlıklı sunucu sayısı ve servis keşfi sağlayıcılarının sorunları orada görünür.
 
-Geri dönmek için portları eski haline getirin ve eski proxy'yi başlatın. Emin olana kadar eski config dosyasını saklayın, çünkü geri dönüş yolu tam olarak budur.
+Geri dönmek için portları eski haline getirin ve eski proxy'yi başlatın. Emin olana kadar eski yapılandırma dosyasını saklayın, çünkü geri dönüş yolu tam olarak budur.
 
 ## Adım 7: Eski kurulumu kaldırın
 
 Birkaç gün sorunsuz geçtikten sonra:
 
-- Eski proxy'yi ve config'ini silin.
+- Eski proxy'yi ve yapılandırmasını silin.
 - r3v3rs3 kullanmıyorsa eski sertifika dosyalarını silin.
-- Docker service discovery'ye geçtiyseniz container'larınızdan `traefik.` label'larını kaldırın.
+- Docker servis keşfine geçtiyseniz container'larınızdan `traefik.` etiketlerini kaldırın.
 - r3v3rs3'ten `8080` ve `8443` portlarını silin.
 
 ## Karşılığı olmayanlar
@@ -167,20 +167,20 @@ Birkaç gün sorunsuz geçtikten sonra:
 | Özellik | Durum |
 |---|---|
 | Lua, njs ve diğer nginx modülleri | Yok. |
-| Tam path eşleşmesi | Yok. Path, segment bazında prefix olarak eşleşir. |
-| Response body değiştirme (`sub_filter`) | Yok. |
-| Disk cache | Yok. Cache memory'dedir. |
-| Upstream'e HTTP/3 | Yok. Upstream bağlantısı HTTP/2 veya HTTP/1.1 kullanır. |
+| Tam yol eşleşmesi | Yok. Yol, bütün segmentleriyle önek olarak eşleşir. |
+| Yanıt gövdesini değiştirme (`sub_filter`) | Yok. |
+| Disk cache | Yok. Cache bellektedir. |
+| Upstream sunucuya HTTP/3 | Yok. Upstream bağlantısı HTTP/2 veya HTTP/1.1 kullanır. |
 | WebTransport | Yok. |
 
 ## Referans
 
-- [Routing](@/configuration.tr.md#routing) ve [Path rewrite](@/configuration.tr.md#path-rewrite).
-- [Redirect kuralları](@/configuration.tr.md#redirect-kurallari) ve [Sabit response'lar](@/configuration.tr.md#sabit-response-lar).
-- [Client IP](@/configuration.tr.md#client-ip): header'lar ve güvenilen proxy'ler.
+- [Route seçimi](@/configuration.tr.md#route-secimi) ve [Yol yeniden yazma](@/configuration.tr.md#yol-yeniden-yazma).
+- [Yönlendirme kuralları](@/configuration.tr.md#yonlendirme-kurallari) ve [Sabit yanıtlar](@/configuration.tr.md#sabit-yanitlar).
+- [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi): header'lar ve güvenilen proxy'ler.
 
 ## Sonraki adımlar
 
-- [Load balancing ve health check](@/tutorials/load-balancing.tr.md): geçişin upstream tarafı.
+- [Yük dengeleme ve sağlık kontrolü](@/tutorials/load-balancing.tr.md): geçişin upstream tarafı.
 - [Wildcard sertifika ile HTTPS](@/tutorials/https-certificates.tr.md): sertifikalar.
-- [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md): config dosyası yerine label.
+- [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md): yapılandırma dosyası yerine etiketler.

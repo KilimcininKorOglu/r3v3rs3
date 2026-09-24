@@ -17,9 +17,9 @@ r3v3rs3 altı port türünü destekler:
 - TLS üzerinden TCP
 - UDP
 
-## Server Name'ler
+## Sunucu adları
 
-HTTPS, QUIC üzerinden HTTP ve TLS üzerinden TCP portlarında "Server Name'ler" alanı bulunur. r3v3rs3, server sertifikasını client'ın SNI (Server Name Indication) değerine göre seçer. Client SNI göndermediğinde r3v3rs3, bütün server name'leri taşıyan geçerli bir server sertifikası seçer. Liste boşsa ilk geçerli server sertifikasını seçer.
+HTTPS, QUIC üzerinden HTTP ve TLS üzerinden TCP portlarında "Sunucu Adları" alanı bulunur. r3v3rs3, sunucu sertifikasını istemcinin SNI (Server Name Indication) değerine göre seçer. İstemci SNI göndermediğinde r3v3rs3, bütün sunucu adlarını taşıyan geçerli bir sunucu sertifikası seçer. Liste boşsa ilk geçerli sunucu sertifikasını seçer.
 
 ```toml
 [my-port]
@@ -27,19 +27,19 @@ listen = "/ip4/0.0.0.0/tcp/443/https"
 tls_termination = { server_names = ["example.com", "*.example.com"] }
 ```
 
-## TLS client authentication
+## TLS istemci kimlik doğrulaması
 
-HTTPS, QUIC üzerinden HTTP ve TLS üzerinden TCP portları client'ın sertifikasını doğrulayabilir (mutual TLS). Modu "Client Authentication" alanından seçin:
+HTTPS, QUIC üzerinden HTTP ve TLS üzerinden TCP portları istemcinin sertifikasını doğrulayabilir (mutual TLS). Modu "İstemci Kimlik Doğrulaması" alanından seçin:
 
 | Mod | Davranış |
 |---|---|
-| Kapalı | Port client sertifikası istemez. Varsayılan mod budur. |
-| İsteğe bağlı | Port sertifika ister, fakat sertifikasız client'ları da kabul eder. Client'ın gönderdiği sertifika geçerli olmalıdır. |
-| Zorunlu | Client geçerli bir sertifika göndermezse TLS handshake başarısız olur. |
+| Kapalı | Port istemci sertifikası istemez. Varsayılan mod budur. |
+| İsteğe bağlı | Port sertifika ister, fakat sertifikasız istemcileri de kabul eder. İstemcinin gönderdiği sertifika geçerli olmalıdır. |
+| Zorunlu | İstemci geçerli bir sertifika göndermezse TLS handshake başarısız olur. |
 
-İsteğe bağlı ve Zorunlu modlarda "Client CA Sertifikaları" listesinden bir veya daha fazla root sertifika seçin. Client sertifikası bunlardan biriyle imzalanmış olmalıdır. Sistemin root sertifikaları kullanılmaz. r3v3rs3, root sertifika seçilmemiş veya root olmayan bir sertifika seçilmiş port config'ini reddeder. Bir portun kullandığı root sertifika silinemez.
+İsteğe bağlı ve Zorunlu modlarda "İstemci CA Sertifikaları" listesinden bir veya daha fazla kök sertifika seçin. İstemci sertifikası bunlardan biriyle imzalanmış olmalıdır. Sistemin kök sertifikaları kullanılmaz. r3v3rs3, kök sertifika seçilmemiş veya kök olmayan bir sertifika seçilmiş port ayarını reddeder. Bir portun kullandığı kök sertifika silinemez.
 
-Client authentication config'i geçersiz hale gelirse (örneğin root sertifika config dizininden silinirse) port bütün bağlantıları kapatır ve port listesi "TLS Hatası" gösterir.
+İstemci kimlik doğrulaması ayarı geçersiz hale gelirse (örneğin kök sertifika yapılandırma dizininden silinirse) port bütün bağlantıları kapatır ve port listesi "TLS Hatası" gösterir.
 
 HTTPS ve QUIC üzerinden HTTP portlarında header kuralları, doğrulanan sertifikayı `{client_cert_subject}` ve `{client_cert_fingerprint}` değişkenleriyle upstream sunucuya gönderebilir. "Header kuralları" bölümüne bakın.
 
@@ -51,17 +51,17 @@ tls_termination = { server_names = ["example.com"], client_auth = "required", cl
 
 ## PROXY protocol
 
-r3v3rs3 önündeki bir load balancer, client adresini PROXY protocol header'ı (versiyon 1 veya 2) ile gönderebilir. TCP, TLS üzerinden TCP, HTTP ve HTTPS portları bu header'ı okuyabilir. UDP ve QUIC üzerinden HTTP portları okuyamaz.
+r3v3rs3 önündeki bir yük dengeleyici, istemci adresini PROXY protocol header'ı (sürüm 1 veya 2) ile gönderebilir. TCP, TLS üzerinden TCP, HTTP ve HTTPS portları bu header'ı okuyabilir. UDP ve QUIC üzerinden HTTP portları okuyamaz.
 
-"PROXY Protocol Kabul Et" seçeneğini açın. Load balancer'ların IP adreslerini veya CIDR bloklarını "Güvenilen Load Balancer'lar" alanına yazın:
+"PROXY Protocol Kabul Et" seçeneğini açın. Yük dengeleyicilerin IP adreslerini veya CIDR bloklarını "Güvenilen Yük Dengeleyiciler" alanına yazın:
 
-- Güvenilen bir adresten gelen bağlantı geçerli bir header ile başlamalıdır. Header geçersizse, versiyonu "Kabul Edilen Versiyonlar" içinde yoksa veya header "Header Timeout" süresinde gelmezse r3v3rs3 bağlantıyı kapatır. Varsayılan timeout 5 saniyedir.
-- r3v3rs3 diğer adreslerden header okumaz. Bu bağlantıların client adresi peer adresidir.
-- Versiyon 2 `LOCAL` header'ı ve versiyon 1 `UNKNOWN` header'ı peer adresini korur. Load balancer'lar bunları health check'lerde gönderir.
+- Güvenilen bir adresten gelen bağlantı geçerli bir header ile başlamalıdır. Header geçersizse, sürümü "Kabul Edilen Sürümler" içinde yoksa veya header "Header Timeout (Saniye)" alanındaki sürede gelmezse r3v3rs3 bağlantıyı kapatır. Varsayılan timeout 5 saniyedir.
+- r3v3rs3 diğer adreslerden header okumaz. Bu bağlantıların istemci adresi peer adresidir.
+- Sürüm 2 `LOCAL` header'ı ve sürüm 1 `UNKNOWN` header'ı peer adresini korur. Yük dengeleyiciler bunları sağlık kontrollerinde gönderir.
 
-r3v3rs3 header'ı TLS handshake'ten önce okur. Header'daki adres bağlantının client adresi olur. IP filtreleri, rate limit'ler, client IP hash, `Forwarded` ve `X-Forwarded-For` header'ları ve access log bu adresi kullanır. Access log peer adresini de `peer` alanına yazar.
+r3v3rs3 header'ı TLS handshake'ten önce okur. Header'daki adres bağlantının istemci adresi olur. IP filtreleri, rate limit'ler, istemci IP hash'i, `Forwarded` ve `X-Forwarded-For` header'ları ve access log bu adresi kullanır. Access log peer adresini de `peer` alanına yazar.
 
-PROXY protocol header'ı ile başlayan bir ACME HTTP-01 challenge request'i challenge yanıtını almaz. Böyle bir load balancer'ın sunduğu sertifika için DNS-01 challenge kullanın.
+PROXY protocol header'ı ile başlayan bir ACME HTTP-01 challenge isteği challenge yanıtını almaz. Böyle bir yük dengeleyicinin sunduğu sertifika için DNS-01 challenge kullanın.
 
 ```toml
 [my-port]
@@ -74,7 +74,7 @@ proxy_protocol = { trusted = ["10.0.0.0/8"], accept = "v2", timeout = "5s" }
 
 ## Portu sıfırlama
 
-Port config'ini değiştirdiğinizde açık bağlantılar etkilenmez; bu bağlantılar eski config ile çalışmaya devam eder. Açık bağlantıları kapatmak için portu sıfırlayın.
+Port ayarını değiştirdiğinizde açık bağlantılar etkilenmez; bu bağlantılar eski ayarla çalışmaya devam eder. Açık bağlantıları kapatmak için portu sıfırlayın.
 
 # Proxy'ler
 
@@ -86,15 +86,15 @@ r3v3rs3 üç proxy türünü destekler:
 
 Bir proxy'ye birden fazla port bağlayabilirsiniz. Ancak HTTP / HTTPS proxy'sine TCP veya TLS üzerinden TCP portu bağlanamaz. TCP / TLS üzerinden TCP proxy'sine de HTTP veya HTTPS portu bağlanamaz.
 
-## Routing
+## Route seçimi
 
-Bir portu birden fazla HTTP / HTTPS proxy'si kullanıyorsa r3v3rs3, porttaki bütün proxy'lerin bütün route'larını karşılaştırır. Request'i en özel route'a gönderir. Proxy'lerin ve route'ların sırası sonucu değiştirmez.
+Bir portu birden fazla HTTP / HTTPS proxy'si kullanıyorsa r3v3rs3, porttaki bütün proxy'lerin bütün route'larını karşılaştırır. İsteği en özel route'a gönderir. Proxy'lerin ve route'ların sırası sonucu değiştirmez.
 
-1. Önce request'in host'u proxy'leri seçer. Host ile aynı olan virtual host (`app.example.com` veya bir IP adresi), wildcard'dan (`*.example.com`) önce gelir. Wildcard, regex pattern'den önce gelir. Regex pattern, virtual host'u olmayan proxy'den önce gelir. Virtual host'u olmayan proxy her host'u kabul eder.
-2. Host eşleşmesi aynı olan route'lar arasında path'i en uzun olan route kazanır. Path tam segment'lerle eşleşir. Bu yüzden `/api`, `/api` ve `/api/users` ile eşleşir, `/apiv2` ile eşleşmez.
-3. İki route'un host eşleşmesi ve path'i aynıysa önce gelen route kazanır.
+1. Önce isteğin host'u proxy'leri seçer. Host ile aynı olan virtual host (`app.example.com` veya bir IP adresi), wildcard'dan (`*.example.com`) önce gelir. Wildcard, regex kalıbından önce gelir. Regex kalıbı, virtual host'u olmayan proxy'den önce gelir. Virtual host'u olmayan proxy her host'u kabul eder.
+2. Host eşleşmesi aynı olan route'lar arasında yolu en uzun olan route kazanır. Yol tam bölümlerle eşleşir. Bu yüzden `/api`, `/api` ve `/api/users` ile eşleşir, `/apiv2` ile eşleşmez.
+3. İki route'un host eşleşmesi ve yolu aynıysa önce gelen route kazanır.
 
-Örneğin aşağıdaki route'larda `GET /api/users` request'i `http://api:8080/` sunucusuna, `GET /about` request'i `http://web:3000/` sunucusuna gider. `app.example.com` için gelen request, path'i `/api` olsa da `my-app` proxy'sine gider.
+Örneğin aşağıdaki route'larda `GET /api/users` isteği `http://api:8080/` sunucusuna, `GET /about` isteği `http://web:3000/` sunucusuna gider. `app.example.com` için gelen istek, yolu `/api` olsa da `my-app` proxy'sine gider.
 
 ```toml
 [my-default]
@@ -112,7 +112,7 @@ routes = [{ path = "/", servers = [{ url = "http://app:9000/" }] }]
 
 ### DNS SRV sunucuları
 
-`http+srv` veya `https+srv` şemalı bir sunucu URL'i, sunucularını host adının DNS SRV kayıtlarından alır. r3v3rs3 adı çözer ve route, her SRV hedefi için bir sunucu alır: `+srv` önündeki şema, hedefin `host:port` değeri ve URL'in path'i. Consul, Kubernetes headless service'leri ve diğer service registry'ler bu kayıtları yayınlar. URL'de port yazılmaz, portları SRV kayıtları verir.
+`http+srv` veya `https+srv` şemalı bir sunucu URL'i, sunucularını host adının DNS SRV kayıtlarından alır. r3v3rs3 adı çözer ve route, her SRV hedefi için bir sunucu alır: `+srv` önündeki şema, hedefin `host:port` değeri ve URL'in yolu. Consul, Kubernetes headless service'leri ve diğer service registry'ler bu kayıtları yayınlar. URL'de port yazılmaz, portları SRV kayıtları verir.
 
 ```toml
 [my-api]
@@ -120,25 +120,25 @@ protocol = "http"
 routes = [{ path = "/", servers = [{ url = "http+srv://_http._tcp.api.service.consul/v1" }] }]
 ```
 
-`_http._tcp.api.service.consul. 30 IN SRV 0 5 8080 api-1.node.consul.` ve `... 0 1 8080 api-2.node.consul.` kayıtlarıyla route, request'leri `http://api-1.node.consul:8080/v1` ve `http://api-2.node.consul:8080/v1` sunucularına `5` ve `1` weight değerleriyle gönderir.
+`_http._tcp.api.service.consul. 30 IN SRV 0 5 8080 api-1.node.consul.` ve `... 0 1 8080 api-2.node.consul.` kayıtlarıyla route, istekleri `http://api-1.node.consul:8080/v1` ve `http://api-2.node.consul:8080/v1` sunucularına `5` ve `1` ağırlıklarıyla gönderir.
 
-- Yalnız en düşük priority değerine sahip kayıtlar kullanılır. Daha yüksek değerli kayıtlar DNS'te yedektir ve r3v3rs3 bunları kullanmaz.
-- Kaydın SRV weight değeri, sunucunun `weight` değeri olur. `0` weight değeri `1` olur, çünkü r3v3rs3'te weight değeri `0` olan sunucu trafik almaz. SRV sunucusunun kendisine `weight` verilemez.
-- r3v3rs3, cevabın TTL süresi bitince adı yeniden çözer. En erken 5 saniye sonra çözer. Hedefler değişince route yeni sunucuları yeniden başlatmadan alır. Kalan sunucuların health durumu korunur. Başarısız bir sorgu son hedefleri korur ve 5 saniye sonra yeniden denenir.
-- SRV adının hedefi olmayan route 502 döner. Route'un başka sunucuları varsa request'leri onlar alır.
-- "Upstream DNS Resolver" ayarı ([Ayarlar](#ayarlar) bölümüne bakın) SRV sorgularının DNS sunucusunu seçer, örneğin Consul DNS için `127.0.0.1:8600`. Ayar boşsa r3v3rs3 sistem resolver'ını kullanır. Hedeflerin host adlarını bağlantı sırasında sistem resolver'ı çözer.
+- Yalnız en düşük öncelik değerine sahip kayıtlar kullanılır. Daha yüksek değerli kayıtlar DNS'te yedektir ve r3v3rs3 bunları kullanmaz.
+- Kaydın SRV ağırlığı, sunucunun `weight` değeri olur. `0` ağırlığı `1` olur, çünkü r3v3rs3'te ağırlığı `0` olan sunucu yeni istek almaz. SRV sunucusunun kendisine `weight` verilemez.
+- r3v3rs3, yanıtın TTL süresi bitince adı yeniden çözer. En erken 5 saniye sonra çözer. Hedefler değişince route yeni sunucuları yeniden başlatmadan alır. Kalan sunucuların sağlık durumu korunur. Başarısız bir sorgu son hedefleri korur ve 5 saniye sonra yeniden denenir.
+- SRV adının hedefi olmayan route 502 döner. Route'un başka sunucuları varsa istekleri onlar alır.
+- "Upstream DNS Çözümleyicisi" ayarı ([Ayarlar](#ayarlar) bölümüne bakın) SRV sorgularının DNS sunucusunu seçer, örneğin Consul DNS için `127.0.0.1:8600`. Ayar boşsa r3v3rs3 sistemin çözümleyicisini kullanır. Hedeflerin host adlarını bağlantı sırasında sistemin çözümleyicisi çözer.
 
-## Path Rewrite
+## Yol yeniden yazma
 
-r3v3rs3 varsayılan olarak route path'ini request path'inden kaldırır ve kalan kısmı sunucu URL'sinin path'ine ekler. Örneğin `path = "/api"` değerli bir route ve `http://api:8080/v1/` sunucusu için `GET /api/users` request'i `http://api:8080/v1/users` adresine gider. Route'un `rewrite` tablosu path'i şu sırayla değiştirir:
+r3v3rs3 varsayılan olarak route'un yolunu isteğin yolundan kaldırır ve kalan kısmı sunucu URL'sinin yoluna ekler. Örneğin `path = "/api"` değerli bir route ve `http://api:8080/v1/` sunucusu için `GET /api/users` isteği `http://api:8080/v1/users` adresine gider. Route'un `rewrite` tablosu yolu şu sırayla değiştirir:
 
-1. `strip_prefix = false` route path'ini korur. Bu durumda aynı request `http://api:8080/v1/api/users` adresine gider.
-2. `regex` path'teki ilk eşleşmeyi `replacement` değeriyle değiştirir. Path `/` ile başlar. `${1}` veya `${name}` bir capture group ekler. Eşleşme yoksa path değişmez.
-3. `add_prefix` path'in başına `/v2` gibi bir path ekler.
+1. `strip_prefix = false` route'un yolunu korur. Bu durumda aynı istek `http://api:8080/v1/api/users` adresine gider.
+2. `regex` yoldaki ilk eşleşmeyi `replacement` değeriyle değiştirir. Yol `/` ile başlar. `${1}` veya `${name}` bir capture group ekler. Eşleşme yoksa yol değişmez.
+3. `add_prefix` yolun başına `/v2` gibi bir yol ekler.
 
-r3v3rs3 query string'i korur. Kimlik doğrulama ve cache, client request'inin path'ini kullanır. r3v3rs3 geçersiz regex'i reddeder. `/` ile başlamayan veya `?` ya da `#` içeren `add_prefix` değerini de reddeder.
+r3v3rs3 sorgu dizesini korur. Kimlik doğrulama ve cache, istemci isteğinin yolunu kullanır. r3v3rs3 geçersiz regex'i reddeder. `/` ile başlamayan veya `?` ya da `#` içeren `add_prefix` değerini de reddeder.
 
-Aşağıdaki route'larda `GET /api/users` request'i `http://api:8080/v2/users` adresine, `GET /items/42` request'i `http://shop:9000/item/42` adresine gider.
+Aşağıdaki route'larda `GET /api/users` isteği `http://api:8080/v2/users` adresine, `GET /items/42` isteği `http://shop:9000/item/42` adresine gider.
 
 ```toml
 [my-shop]
@@ -149,17 +149,17 @@ routes = [
 ]
 ```
 
-## Redirect Kuralları
+## Yönlendirme kuralları
 
-HTTP / HTTPS proxy'sinin `redirects` değeri request'e bir redirect ile yanıt verir. Bu durumda request upstream sunucuya gitmez. Her kuralın `regex`, `target` ve `status` değerleri vardır:
+HTTP / HTTPS proxy'sinin `redirects` değeri isteğe bir yönlendirme ile yanıt verir. Bu durumda istek upstream sunucuya gitmez. Her kuralın `regex`, `target` ve `status` değerleri vardır:
 
-- `regex`; request'in port'suz host'u, path'i ve query'sinden oluşan değerle eşleşir, örneğin `example.com/old/page?id=1`.
-- `target` response'un `Location` header'ıdır. `${1}` veya `${name}` bir capture group ekler.
+- `regex`; isteğin portsuz host'u, yolu ve sorgusundan oluşan değerle eşleşir, örneğin `example.com/old/page?id=1`.
+- `target` yanıtın `Location` header'ıdır. `${1}` veya `${name}` bir capture group ekler.
 - `status` değeri `301`, `302` (varsayılan), `307` veya `308` olabilir.
 
-Eşleşen ilk kural yanıt verir. r3v3rs3; client IP filtresini, rate limit'i ve `upgrade_insecure` HTTPS redirect'ini kurallardan önce, kimlik doğrulamayı kurallardan sonra uygular. Geçerli bir header değeri oluşturmayan target eşleşme sayılmaz ve r3v3rs3 bir uyarı log'u yazar. r3v3rs3 başka bir status değerini reddeder. Boş olan veya kontrol karakteri içeren target değerini de reddeder.
+Eşleşen ilk kural yanıt verir. r3v3rs3; istemci IP filtresini, rate limit'i ve `upgrade_insecure` HTTPS yönlendirmesini kurallardan önce, kimlik doğrulamayı kurallardan sonra uygular. Geçerli bir header değeri oluşturmayan hedef eşleşme sayılmaz ve r3v3rs3 bir uyarı log'u yazar. r3v3rs3 başka bir durum kodunu reddeder. Boş olan veya kontrol karakteri içeren hedef değerini de reddeder.
 
-WebUI'da her satıra bir kuralı `status regex target` biçiminde yazın. Orada regex ve target boşluk içeremez. Regex içinde `\s`, target içinde `%20` kullanın.
+WebUI'da her satıra bir kuralı `status regex target` biçiminde yazın. Orada regex ve hedef boşluk içeremez. Regex içinde `\s`, hedef içinde `%20` kullanın.
 
 ```toml
 [my-site]
@@ -172,16 +172,16 @@ redirects = [
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:3000/" }] }]
 ```
 
-## Sabit Response'lar
+## Sabit yanıtlar
 
-HTTP / HTTPS proxy'sindeki bir route, request'i `servers` değerine göndermek yerine `response` ile her request'e kendisi yanıt verebilir. Bir route'ta `servers` veya `response` değerlerinden yalnız biri bulunur. Redirect host veya 404 host için sabit response kullanın.
+HTTP / HTTPS proxy'sindeki bir route, isteği `servers` değerine göndermek yerine `response` ile her isteğe kendisi yanıt verebilir. Bir route'ta `servers` veya `response` değerlerinden yalnız biri bulunur. Yönlendirme host'u veya 404 host'u için sabit yanıt kullanın.
 
-- `type = "redirect"` değeri `target` adresine bir redirect ile yanıt verir. `status` değeri `301`, `302` (varsayılan), `307` veya `308` olabilir. `preserve_path` (varsayılan `true`) request'in path'ini ve query'sini `target` sonuna ekler. Bu durumda `GET /a?b=1` request'i `https://example.com/a?b=1` adresine gider.
+- `type = "redirect"` değeri `target` adresine bir yönlendirme ile yanıt verir. `status` değeri `301`, `302` (varsayılan), `307` veya `308` olabilir. `preserve_path` (varsayılan `true`) isteğin yolunu ve sorgusunu `target` sonuna ekler. Bu durumda `GET /a?b=1` isteği `https://example.com/a?b=1` adresine gider.
 - `type = "status"` değeri `status` ile ve isteğe bağlı düz metin `body` ile yanıt verir. `body` en fazla 4096 byte olabilir. `status` değeri `200`, `400`, `403`, `404`, `410`, `429`, `451`, `500`, `502` veya `503` olabilir.
 
-r3v3rs3; client IP filtresini, rate limit'i, `upgrade_insecure` HTTPS redirect'ini, redirect kurallarını ve kimlik doğrulamayı sabit response'tan önce uygular. r3v3rs3 hem `servers` hem `response` içeren route'u reddeder. Geçersiz target, status veya body değerini de reddeder.
+r3v3rs3; istemci IP filtresini, rate limit'i, `upgrade_insecure` HTTPS yönlendirmesini, yönlendirme kurallarını ve kimlik doğrulamayı sabit yanıttan önce uygular. r3v3rs3 hem `servers` hem `response` içeren route'u reddeder. Geçersiz hedef, durum kodu veya gövde değerini de reddeder.
 
-WebUI'da her route için route tipini seçin. Yeni proxy sayfası "Redirect host" ve "404 host" şablonlarını sunar. Servis keşfi label'ları aynı alanları ayarlar, örneğin `r3v3rs3.http.old.routes.0.response.type=redirect` ve `r3v3rs3.http.old.routes.0.response.target=https://example.com`. `response` içeren route, container port'undan varsayılan server almaz.
+WebUI'da her route için route türünü seçin. Yeni proxy sayfası "Yönlendirme host'u" ve "404 host'u" şablonlarını sunar. Servis keşfi etiketleri aynı alanları ayarlar, örneğin `r3v3rs3.http.old.routes.0.response.type=redirect` ve `r3v3rs3.http.old.routes.0.response.target=https://example.com`. `response` içeren route, container portundan varsayılan sunucu almaz.
 
 ```toml
 [old-domain]
@@ -194,22 +194,22 @@ protocol = "http"
 routes = [{ path = "/", response = { type = "status", status = 404, body = "Not found" } }]
 ```
 
-## UDP Session'ları
+## UDP oturumları
 
-UDP proxy her client adresi için ayrı bir session açar. Her session'ın upstream sunucuya giden kendi socket'i vardır. Bu yüzden upstream sunucu her client'ı farklı bir kaynak porttan görür. r3v3rs3 upstream sunucunun yanıtlarını dinlediği porttan client'a geri gönderir.
+UDP proxy her istemci adresi için ayrı bir oturum açar. Her oturumun upstream sunucuya giden kendi socket'i vardır. Bu yüzden upstream sunucu her istemciyi farklı bir kaynak porttan görür. r3v3rs3 upstream sunucunun yanıtlarını dinlediği porttan istemciye geri gönderir.
 
-İki yönde de `session_idle_timeout` süresince (varsayılan `60s`) paket geçmezse session kapanır. Upstream socket hata verdiğinde veya portun upstream sunucuları ya da idle timeout değeri değiştiğinde de session kapanır. Client'ın sonraki paketi yeni bir session açar. Bir port en fazla 10.000 session tutar. Bu sınıra ulaşılınca r3v3rs3 yeni client'ların paketlerini düşürür.
+İki yönde de `session_idle_timeout` süresince (varsayılan `60s`) paket geçmezse oturum kapanır. Upstream socket hata verdiğinde veya portun upstream sunucuları ya da boşta kalma timeout'u değiştiğinde de oturum kapanır. İstemcinin sonraki paketi yeni bir oturum açar. Bir port en fazla 10.000 oturum tutar. Bu sınıra ulaşılınca r3v3rs3 yeni istemcilerin paketlerini düşürür.
 
-## Upstream Timeout'ları
+## Upstream timeout'ları
 
 r3v3rs3 upstream sunucuyu sınırlı bir süre bekler. Timeout değerlerini `500ms`, `10s` veya `1m` gibi yazın.
 
 - HTTP / HTTPS proxy'sinde `timeouts.connect`, TCP / TLS üzerinden TCP proxy'sinde `connect_timeout` değeri yeni bir upstream bağlantısının DNS sorgusunu, TCP bağlantısını ve TLS handshake'ini sınırlar. Varsayılan değer `10s`'dir.
-- HTTP / HTTPS proxy'sinde `timeouts.request` değeri, request başladıktan response header'ları gelene kadar geçen süreyi sınırlar. Yeni bağlantının kurulma süresi de buna dahildir. Varsayılan değer `60s`'dir. `0s` limiti kapatır. Response body'si, WebSocket ve diğer upgrade edilmiş bağlantılar için limit yoktur.
-- Bir route, proxy timeout'ları yerine kendi `timeouts` değerini kullanabilir. Route'ta yazılmayan değer proxy değerini değil, varsayılan değeri alır.
-- UDP proxy'sinde `session_idle_timeout` değeri boşta kalan client session'ını kapatır. "UDP Session'ları" bölümüne bakın.
+- HTTP / HTTPS proxy'sinde `timeouts.request` değeri, istek başladıktan yanıt header'ları gelene kadar geçen süreyi sınırlar. Yeni bağlantının kurulma süresi de buna dahildir. Varsayılan değer `60s`'dir. `0s` limiti kapatır. Yanıt gövdesi, WebSocket ve diğer upgrade edilmiş bağlantılar için limit yoktur.
+- Bir route, proxy'nin timeout'ları yerine kendi `timeouts` değerini kullanabilir. Route'ta yazılmayan değer proxy değerini değil, varsayılan değeri alır.
+- UDP proxy'sinde `session_idle_timeout` değeri boşta kalan istemci oturumunu kapatır. "UDP oturumları" bölümüne bakın.
 
-Timeout dolduğunda HTTP client'ı 504 Gateway Timeout alır, TCP client bağlantısı kapanır. r3v3rs3 sıfır olan connect timeout ve session idle timeout değerlerini reddeder.
+Timeout dolduğunda HTTP istemcisi 504 Gateway Timeout alır, TCP istemcisinin bağlantısı kapanır. r3v3rs3 sıfır olan bağlantı timeout'u ve oturum boşta kalma timeout'u değerlerini reddeder.
 
 ```toml
 [my-app]
@@ -227,11 +227,11 @@ upstream_servers = [{ addr = "/ip4/127.0.0.1/tcp/5432" }]
 connect_timeout = "3s"
 ```
 
-## Request Body Boyutu
+## İstek gövdesi boyutu
 
-HTTP / HTTPS proxy'sinde `max_body_size` değeri request body'sini byte cinsinden sınırlar. Varsayılan değer `0`'dır. `0` limiti kapatır. Bir route, proxy değeri yerine kendi `max_body_size` değerini kullanabilir. Route'taki `0` değeri o route için limiti kapatır.
+HTTP / HTTPS proxy'sinde `max_body_size` değeri istek gövdesini byte cinsinden sınırlar. Varsayılan değer `0`'dır. `0` limiti kapatır. Bir route, proxy değeri yerine kendi `max_body_size` değerini kullanabilir. Route'taki `0` değeri o route için limiti kapatır.
 
-r3v3rs3 `Content-Length` header'ını authentication'dan önce kontrol eder. Bu yüzden limitten büyük bir request 413 Payload Too Large alır ve upstream sunucuya ulaşmaz. `Content-Length` taşımayan body, örneğin chunked body, r3v3rs3 onu upstream sunucuya gönderirken sayılır. Body upstream sunucu yanıt vermeden limiti geçerse r3v3rs3 upstream request'ini durdurur ve client 413 alır. Upstream sunucu böyle bir body'nin başını alabilir. Limit HTTP/1.1, HTTP/2 ve HTTP/3 request'lerine uygulanır.
+r3v3rs3 `Content-Length` header'ını kimlik doğrulamadan önce kontrol eder. Bu yüzden limitten büyük bir istek 413 Payload Too Large alır ve upstream sunucuya ulaşmaz. `Content-Length` taşımayan gövde, örneğin chunked gövde, r3v3rs3 onu upstream sunucuya gönderirken sayılır. Gövde, upstream sunucu yanıt vermeden limiti geçerse r3v3rs3 upstream isteğini durdurur ve istemci 413 alır. Upstream sunucu böyle bir gövdenin başını alabilir. Limit HTTP/1.1, HTTP/2 ve HTTP/3 isteklerine uygulanır.
 
 ```toml
 [uploads]
@@ -244,15 +244,15 @@ routes = [
 ]
 ```
 
-## Trafik Mirroring
+## İstek yansıtma
 
-Route'un `mirror` değeri route request'lerinin bir kopyasını başka sunuculara gönderir. Örneğin yeni bir sürümü gerçek trafikle denemek için kullanılır. r3v3rs3 mirror sunucuların response'larını atar. Kopyayı retry etmez, health check'e ve circuit breaker'a saymaz ve kopyayı beklemez. Bu yüzden client, route sunucusunun response'unu önceki gibi alır.
+Route'un `mirror` değeri route isteklerinin bir kopyasını başka sunuculara gönderir. Örneğin yeni bir sürümü gerçek isteklerle denemek için kullanılır. r3v3rs3 yansıtma sunucularının yanıtlarını atar. Kopyayı yeniden denemez, sağlık kontrolüne ve circuit breaker'a saymaz ve kopyayı beklemez. Bu yüzden istemci, route sunucusunun yanıtını önceki gibi alır.
 
-- `servers` mirror sunucuların listesidir. Her sunucu her kopyayı alır. Weight değerinin etkisi yoktur. Kopyanın path'i, `rewrite` dahil, route sunucularının path'iyle aynı kurallara uyar.
-- `percent` r3v3rs3'ün kopyaladığı request oranıdır. Değer `1` ile `100` (varsayılan) arasındadır.
-- `max_body_size` r3v3rs3'ün kopyaladığı en büyük request body'sidir, byte cinsinden. Varsayılan değer `65536`'dır. Body'si daha uzun olan request kopyalanmaz. r3v3rs3 her kopya için memory'de en fazla bu kadar byte tutar.
+- `servers` yansıtma sunucularının listesidir. Her sunucu her kopyayı alır. Ağırlığın etkisi yoktur. Kopyanın yolu, `rewrite` dahil, route sunucularının yoluyla aynı kurallara uyar.
+- `percent` r3v3rs3'ün kopyaladığı isteklerin oranıdır. Değer `1` ile `100` (varsayılan) arasındadır.
+- `max_body_size` r3v3rs3'ün kopyaladığı en büyük istek gövdesidir, byte cinsinden. Varsayılan değer `65536`'dır. Gövdesi daha uzun olan istek kopyalanmaz. r3v3rs3 her kopya için bellekte en fazla bu kadar byte tutar.
 
-r3v3rs3 kopyayı request body'sinin tamamını okuduktan sonra gönderir. Hata veren veya client'ın tamamlamadığı body için kopya gönderilmez. Cache'ten gelen response, WebSocket gibi upgrade request'leri ve route'ta 64 kopya gönderilirken gelen request kopyalanmaz. Kopya, header kuralları uygulandıktan sonraki method ve header'ları taşır. Bu yüzden kimlik doğrulamanın kaldırmadığı cookie gibi credential'ları da taşır. Bu verilere güvendiğiniz bir mirror sunucu kullanın. r3v3rs3 `1` ile `100` dışındaki `percent` değerini reddeder.
+r3v3rs3 kopyayı istek gövdesinin tamamını okuduktan sonra gönderir. Hata veren veya istemcinin tamamlamadığı gövde için kopya gönderilmez. Cache'ten gelen yanıt, WebSocket gibi upgrade istekleri ve route'ta 64 kopya gönderilirken gelen istek kopyalanmaz. Kopya, header kuralları uygulandıktan sonraki method ve header'ları taşır. Bu yüzden kimlik doğrulamanın kaldırmadığı cookie gibi kimlik bilgilerini de taşır. Bu verilere güvendiğiniz bir yansıtma sunucusu kullanın. r3v3rs3 `1` ile `100` dışındaki `percent` değerini reddeder.
 
 ```toml
 [my-api]
@@ -263,44 +263,44 @@ routes = [
 ]
 ```
 
-## Load Balancing ve Health Check
+## Yük dengeleme ve sağlık kontrolü
 
-Birden fazla upstream sunucusu olan proxy veya HTTP route, trafiği `load_balancing` değerine göre dağıtır:
+Birden fazla upstream sunucusu olan proxy veya HTTP route, istekleri ve bağlantıları `load_balancing` değerine göre dağıtır:
 
 - `round_robin` (varsayılan) sunucuları sırayla kullanır.
 - `random` rastgele bir sunucu seçer.
 - `first` ilk sağlıklı sunucuyu kullanır. Diğer sunucular yedektir.
-- `client_ip_hash` her client IP adresini, o sunucu sağlıklı kaldıkça aynı sunucuya gönderir. HTTP proxy, belirlenen client IP adresini kullanır (bkz. [Client IP](#client-ip)). Bir sunucu sağlıksız olursa, drain edilirse veya silinirse yalnız o sunucunun client'ları diğer sunuculara geçer.
+- `client_ip_hash` her istemci IP adresini, o sunucu sağlıklı kaldıkça aynı sunucuya gönderir. HTTP proxy, belirlenen istemci IP adresini kullanır (bkz. [İstemci IP adresi](#istemci-ip-adresi)). Bir sunucu sağlıksız olursa, servis dışına alınırsa veya silinirse yalnız o sunucunun istemcileri diğer sunuculara geçer.
 
-Her sunucunun `0` ile `65535` arasında bir `weight` değeri vardır (varsayılan `1`). `round_robin` her sunucuyu weight değeri kadar kullanır. nginx'in smooth weighted round robin yöntemindeki gibi, bir sunucunun sıraları döngüye yayılır. Örneğin `3` ve `1` weight değerlerinde her dört request'in üçü ilk sunucuya gider. `random` sunucuyu weight değeriyle orantılı bir olasılıkla seçer. `client_ip_hash` her sunucuya, weight değeriyle orantılı sayıda client adresi verir. `first` weight değerini dikkate almaz. `weight = 0` olan sunucu, diğer bütün sunucular sağlıksız olsa da yeni trafik almaz. Bu yüzden bir sunucuyu silmeden servis dışına alabilirsiniz. Sunucunun açık TCP bağlantıları ve UDP session'ları devam eder. Her proxy'nin veya HTTP route'unun en az bir sunucusunun weight değeri `0`'dan büyük olmalıdır.
+Her sunucunun `0` ile `65535` arasında bir `weight` değeri vardır (varsayılan `1`). `round_robin` her sunucuyu ağırlığı kadar kullanır. nginx'in smooth weighted round robin yöntemindeki gibi, bir sunucunun sıraları döngüye yayılır. Örneğin `3` ve `1` ağırlıklarında her dört isteğin üçü ilk sunucuya gider. `random` sunucuyu ağırlığıyla orantılı bir olasılıkla seçer. `client_ip_hash` her sunucuya, ağırlığıyla orantılı sayıda istemci adresi verir. `first` ağırlığı dikkate almaz. `weight = 0` olan sunucu, diğer bütün sunucular sağlıksız olsa da yeni istek veya bağlantı almaz. Bu yüzden bir sunucuyu silmeden servis dışına alabilirsiniz. Sunucunun açık TCP bağlantıları ve UDP oturumları devam eder. Her proxy'nin veya HTTP route'unun en az bir sunucusunun ağırlığı `0`'dan büyük olmalıdır.
 
-HTTP proxy her request için, TCP proxy her bağlantı için, UDP proxy her client session'ı için bir sunucu seçer. Her HTTP route'unun sunucuları ayrı bir gruptur.
+HTTP proxy her istek için, TCP proxy her bağlantı için, UDP proxy her istemci oturumu için bir sunucu seçer. Her HTTP route'unun sunucuları ayrı bir gruptur.
 
-TCP proxy seçilen sunucuya bağlanamazsa veya connect timeout dolarsa r3v3rs3 bir kez sıradaki sunucuyu dener.
+TCP proxy seçilen sunucuya bağlanamazsa veya bağlantı timeout'u dolarsa r3v3rs3 bir kez sıradaki sunucuyu dener.
 
-HTTP proxy, başarısız request'i retry policy'sine göre sıradaki sunucuya yeniden gönderir. `retry.attempts` (varsayılan `2`), bir request'in ilk deneme dahil en fazla kaç kez gönderileceğini belirler ve `1` ile `10` arasında olmalıdır. `attempts = 1` retry'ı kapatır. `retry.retry_on` (varsayılan `["connect"]`) retry başlatan hataları listeler:
+HTTP proxy, başarısız isteği yeniden deneme ayarlarına göre sıradaki sunucuya yeniden gönderir. `retry.attempts` (varsayılan `2`), bir isteğin ilk deneme dahil en fazla kaç kez gönderileceğini belirler ve `1` ile `10` arasında olmalıdır. `attempts = 1` yeniden denemeyi kapatır. `retry.retry_on` (varsayılan `["connect"]`) yeniden denemeyi başlatan hataları listeler:
 
-- `connect`: bağlantı kurulamaz veya connect timeout dolar. Sunucuya hiçbir şey ulaşmadığı için r3v3rs3 her method'u retry eder.
-- `timeout`: request timeout dolar.
-- `http_502`, `http_503`, `http_504`: sunucu bu status ile yanıt verir.
+- `connect`: bağlantı kurulamaz veya bağlantı timeout'u dolar. Sunucuya hiçbir şey ulaşmadığı için r3v3rs3 her method'u yeniden dener.
+- `timeout`: istek timeout'u dolar.
+- `http_502`, `http_503`, `http_504`: sunucu bu durum koduyla yanıt verir.
 
-`timeout`, `http_502`, `http_503` ve `http_504` yalnız RFC 9110'daki idempotent method'ları retry eder: `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT` ve `DELETE`. Request timeout her denemeye ayrı uygulanır. Retry, policy sırasındaki sıradaki sunucuya gider ve circuit'i açık sunucuyu atlar. Son denemeden sonra client son response'u veya hatayı alır.
+`timeout`, `http_502`, `http_503` ve `http_504` yalnız RFC 9110'daki idempotent method'ları yeniden dener: `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT` ve `DELETE`. İstek timeout'u her denemeye ayrı uygulanır. Yeniden deneme, yük dengeleme yönteminin sırasındaki sıradaki sunucuya gider ve circuit'i açık sunucuyu atlar. Son denemeden sonra istemci son yanıtı veya hatayı alır.
 
-Body'si olan request yalnız body uzunluğu biliniyorsa (örneğin `Content-Length` ile) ve `retry.replay_body_limit` (varsayılan `0`) byte değerini aşmıyorsa retry edilir. r3v3rs3 bu body'yi memory'de tutar. Değer `0` ise yalnız body'si olmayan request'ler retry edilir. WebSocket gibi upgrade request'leri retry edilmez. Bir route kendi `retry` ayarıyla proxy'nin retry policy'sini değiştirebilir.
+Gövdesi olan istek yalnız gövde uzunluğu biliniyorsa (örneğin `Content-Length` ile) ve `retry.replay_body_limit` (varsayılan `0`) byte değerini aşmıyorsa yeniden denenir. r3v3rs3 bu gövdeyi bellekte tutar. Değer `0` ise yalnız gövdesi olmayan istekler yeniden denenir. WebSocket gibi upgrade istekleri yeniden denenmez. Bir route kendi `retry` ayarıyla proxy'nin yeniden deneme ayarlarını değiştirebilir.
 
-Pasif health check her sunucunun art arda aldığı hataları sayar. Hata, kurulamayan bir bağlantı veya response gelmeyen bir request'tir. `health_check.max_fails` (varsayılan `1`) kadar hatadan sonra sunucu `health_check.fail_timeout` (varsayılan `30s`) süresince sağlıksız sayılır. Sağlıksız sunucu yeni trafiği yalnız sağlıklı sunuculardan sonra alır. Bütün sunucular sağlıksızsa r3v3rs3 trafiği aynı sırayla yine onlara gönderir. Başarılı bir deneme hata sayısını sıfırlar. `max_fails = 0` kontrolü kapatır. 500 gibi hata status'lu bir HTTP response başarılı sayılır, çünkü sunucu yanıt vermiştir.
+Pasif sağlık kontrolü her sunucunun art arda aldığı hataları sayar. Hata, kurulamayan bir bağlantı veya yanıt gelmeyen bir istektir. `health_check.max_fails` (varsayılan `1`) kadar hatadan sonra sunucu `health_check.fail_timeout` (varsayılan `30s`) süresince sağlıksız sayılır. Sağlıksız sunucu yeni istekleri ve bağlantıları yalnız sağlıklı sunuculardan sonra alır. Bütün sunucular sağlıksızsa r3v3rs3 istekleri ve bağlantıları aynı sırayla yine onlara gönderir. Başarılı bir deneme hata sayısını sıfırlar. `max_fails = 0` kontrolü kapatır. 500 gibi hata durum kodlu bir HTTP yanıtı başarılı sayılır, çünkü sunucu yanıt vermiştir.
 
-Aktif health check, `health_check.interval` değeri `0s`'den büyükse çalışır (varsayılan `0s`, kapalı). r3v3rs3 her interval'de her sunucuyu kontrol eder:
+Aktif sağlık kontrolü, `health_check.interval` değeri `0s`'den büyükse çalışır (varsayılan `0s`, kapalı). r3v3rs3 her aralıkta her sunucuyu kontrol eder:
 
-- `health_check.path` verilen HTTP proxy, her sunucunun kök adresinden bu path'e `GET` gönderir. 2xx veya 3xx status kontrolü geçer. Path `/` ile başlamalıdır ve yalnız HTTP proxy path kullanır.
-- Path'i olmayan HTTP proxy ve TCP proxy her sunucuya TCP bağlantısı açar.
+- `health_check.path` verilen HTTP proxy, her sunucunun kök adresinden bu yola `GET` gönderir. 2xx veya 3xx durum kodu kontrolü geçer. Yol `/` ile başlamalıdır ve yolu yalnız HTTP proxy kullanır.
+- Yolu olmayan HTTP proxy ve TCP proxy her sunucuya TCP bağlantısı açar.
 - UDP proxy her sunucunun host adını çözümler.
 
-`health_check.timeout` (varsayılan `5s`) her kontrolü sınırlar. Kontrolü geçemeyen sunucu, bir kontrol başarılı olana kadar sağlıksız kalır. Bu kural `max_fails = 0` olduğunda da geçerlidir. Başarılı bir request bu durumu bitirmez.
+`health_check.timeout` (varsayılan `5s`) her kontrolü sınırlar. Kontrolü geçemeyen sunucu, bir kontrol başarılı olana kadar sağlıksız kalır. Bu kural `max_fails = 0` olduğunda da geçerlidir. Başarılı bir istek bu durumu bitirmez.
 
-Sunucular, weight değerleri, policy ve health check ayarları değişmediği sürece config reload sonrasında sunucuların sağlık durumu korunur.
+Sunucular, ağırlıkları, yük dengeleme yöntemi ve sağlık kontrolü ayarları değişmediği sürece ayarlar yeniden yüklendikten sonra sunucuların sağlık durumu korunur.
 
-Status API'si (`GET /api/proxies/{id}/status`), her upstream sunucusunun sağlık durumunu `upstreams` alanında listeler: adres, `weight`, `healthy`, art arda hata sayısı `failures` ve `last_error`. WebUI'daki proxy listesi sağlıklı sunucu sayısını gösterir ve status'leri 10 saniyede bir yeniler. Sayının title'ı sağlıksız sunucuları son hatalarıyla listeler.
+Durum API'si (`GET /api/proxies/{id}/status`), her upstream sunucusunun sağlık durumunu `upstreams` alanında listeler: adres, `weight`, `healthy`, art arda hata sayısı `failures` ve `last_error`. WebUI'daki proxy listesi sağlıklı sunucu sayısını gösterir ve durumları 10 saniyede bir yeniler. Sayının üzerine gelince görünen metin, sağlıksız sunucuları son hatalarıyla listeler.
 
 [DNS SRV sunucuları](#dns-srv-sunuculari) olan bir HTTP proxy'si her SRV adını `srv` alanında da listeler: `name`, son başarılı sorgunun hedefleri `targets` (`host:port`), son sorgu başarısızsa `error` ve son başarılı sorgunun Unix epoch'tan bu yana saniye cinsinden zamanı `refreshed_at`. WebUI'daki proxy listesi, sorgusu başarısız olan her SRV adı için bir satır gösterir.
 
@@ -326,14 +326,14 @@ upstream_servers = [
 
 ## Circuit Breaker
 
-Circuit breaker, HTTP veya TCP proxy'nin hata veren bir upstream sunucusuna giden trafiği bir süre durdurur. Varsayılan olarak kapalıdır. Her HTTP route'undaki her sunucunun kendi circuit'i vardır. UDP proxy'lerde circuit breaker yoktur.
+Circuit breaker, HTTP veya TCP proxy'nin hata veren bir upstream sunucusuna giden istekleri ve bağlantıları bir süre durdurur. Varsayılan olarak kapalıdır. Her HTTP route'undaki her sunucunun kendi circuit'i vardır. UDP proxy'lerde circuit breaker yoktur.
 
-- HTTP request'i şu durumlarda başarısız sayılır: bağlantı kurulamaz, connect veya request timeout dolar ya da sunucu 502, 503 veya 504 döner. TCP bağlantısı, kurulamazsa başarısız sayılır.
-- r3v3rs3 her sunucunun request'lerini `circuit_breaker.window` (varsayılan `10s`) uzunluğundaki window'larda sayar. Bir window en az `circuit_breaker.min_requests` (varsayılan `20`) request içeriyorsa ve bunların en az `circuit_breaker.failure_ratio` (varsayılan `50`) yüzdesi başarısız olduysa circuit açılır.
-- Açık circuit, `circuit_breaker.open_duration` (varsayılan `30s`) dolana kadar trafik almaz. Sonra circuit half-open olur ve sunucuya tek bir deneme request'i gider. Başarılı deneme circuit'i kapatır. Başarısız deneme circuit'i yeniden açar.
-- Bir HTTP route'unun bütün sunucularının circuit'i açıksa client, sunucuya request gitmeden 503 Service Unavailable alır. TCP client bağlantısı kapanır.
+- HTTP isteği şu durumlarda başarısız sayılır: bağlantı kurulamaz, bağlantı timeout'u veya istek timeout'u dolar ya da sunucu 502, 503 veya 504 döner. TCP bağlantısı, kurulamazsa başarısız sayılır.
+- r3v3rs3 her sunucunun isteklerini `circuit_breaker.window` (varsayılan `10s`) uzunluğundaki zaman pencerelerinde sayar. Bir zaman penceresi en az `circuit_breaker.min_requests` (varsayılan `20`) istek içeriyorsa ve bunların en az `circuit_breaker.failure_ratio` (varsayılan `50`) yüzdesi başarısız olduysa circuit açılır.
+- Açık circuit, `circuit_breaker.open_duration` (varsayılan `30s`) dolana kadar istek veya bağlantı almaz. Sonra circuit yarı açık olur ve sunucuya tek bir deneme isteği gider. Başarılı deneme circuit'i kapatır. Başarısız deneme circuit'i yeniden açar.
+- Bir HTTP route'unun bütün sunucularının circuit'i açıksa istemci, sunucuya istek gitmeden 503 Service Unavailable alır. TCP istemcisinin bağlantısı kapanır.
 
-Pasif health check 5xx response'u yine başarılı sayar, çünkü sunucu yanıt vermiştir. Status API'si circuit'i kapalı olmayan sunucu için `"circuit": "open"` veya `"circuit": "half_open"` gösterir. WebUI'daki proxy listesi böyle bir sunucuyu sağlıklı saymaz ve sayının title'ında circuit durumunu yazar.
+Pasif sağlık kontrolü 5xx yanıtını yine başarılı sayar, çünkü sunucu yanıt vermiştir. Durum API'si circuit'i kapalı olmayan sunucu için `"circuit": "open"` veya `"circuit": "half_open"` gösterir. WebUI'daki proxy listesi böyle bir sunucuyu sağlıklı saymaz ve sayının üzerine gelince görünen metinde circuit durumunu yazar.
 
 ```toml
 [my-app]
@@ -347,17 +347,17 @@ routes = [
 
 ## Sticky Session'lar
 
-`sticky`, HTTP proxy'nin her client'ını bir cookie ile tek bir upstream sunucusunda tutar. Varsayılan olarak kapalıdır.
+`sticky`, HTTP proxy'nin her istemcisini bir cookie ile tek bir upstream sunucusunda tutar. Varsayılan olarak kapalıdır.
 
-- Client'a giden ilk response `sticky.name` (varsayılan `r3v3rs3_affinity`) cookie'sini yazar. Cookie değeri proxy'nin, route'un ve sunucu URL'inin HMAC-SHA256 imzasıdır. Bu yüzden client sahte bir değerle sunucu seçemez. Route'un hiçbir sunucusuna uymayan değer dikkate alınmaz.
-- Geçerli cookie taşıyan request, sunucu sağlıklı olduğu ve circuit'i açık olmadığı sürece aynı sunucuya gider. `weight = 0` olan sunucu sticky client'larını korur, böylece drain edilen sunucu mevcut session'larını tamamlar. Aksi halde sunucuyu `load_balancing` seçer ve response yeni bir cookie yazar. Başka bir sunucuya giden retry de yeni bir cookie yazar.
-- r3v3rs3 cookie'yi request'ten siler, bu yüzden upstream sunucu cookie'yi almaz.
-- Cookie route'un `Path` değerini, `HttpOnly` ve `SameSite=Lax` özelliklerini taşır. HTTPS ve HTTP/3'te `Secure` de eklenir. `sticky.max_age`, `Max-Age` değerini belirler. `max_age` yoksa cookie browser kapanınca silinir.
+- İstemciye giden ilk yanıt `sticky.name` (varsayılan `r3v3rs3_affinity`) cookie'sini yazar. Cookie değeri proxy'nin, route'un ve sunucu URL'inin HMAC-SHA256 imzasıdır. Bu yüzden istemci sahte bir değerle sunucu seçemez. Route'un hiçbir sunucusuna uymayan değer dikkate alınmaz.
+- Geçerli cookie taşıyan istek, sunucu sağlıklı olduğu ve circuit'i açık olmadığı sürece aynı sunucuya gider. `weight = 0` olan sunucu sticky istemcilerini korur, böylece servis dışına alınan sunucu mevcut oturumlarını tamamlar. Aksi halde sunucuyu `load_balancing` seçer ve yanıt yeni bir cookie yazar. Başka bir sunucuya giden yeniden deneme de yeni bir cookie yazar.
+- r3v3rs3 cookie'yi istekten siler, bu yüzden upstream sunucu cookie'yi almaz.
+- Cookie route'un `Path` değerini, `HttpOnly` ve `SameSite=Lax` özelliklerini taşır. HTTPS ve HTTP/3'te `Secure` de eklenir. `sticky.max_age`, `Max-Age` değerini belirler. `max_age` yoksa cookie tarayıcı kapanınca silinir.
 - Ad, RFC 6265'teki cookie token kuralına uymalıdır: boşluk ve ayırıcı karakter içermeyen görünür ASCII karakterler.
-- r3v3rs3 her başlangıçta yeni bir imza key'i üretir. Yeniden başlatmadan sonra eski cookie'ler geçersiz olur ve her client sunucusunu yine `load_balancing` ile alır.
-- Cache'ten gelen response cookie yazmaz.
+- r3v3rs3 her başlangıçta yeni bir imza key'i üretir. Yeniden başlatmadan sonra eski cookie'ler geçersiz olur ve her istemci sunucusunu yine `load_balancing` ile alır.
+- Cache'ten gelen yanıt cookie yazmaz.
 
-TCP veya UDP proxy ve cookie saklamayan client'lar bunun yerine `load_balancing = "client_ip_hash"` kullanabilir.
+TCP veya UDP proxy ve cookie saklamayan istemciler bunun yerine `load_balancing = "client_ip_hash"` kullanabilir.
 
 ```toml
 [my-app]
@@ -369,34 +369,34 @@ routes = [
 ]
 ```
 
-## Client IP
+## İstemci IP adresi
 
-CDN veya load balancer arkasında r3v3rs3'ün TCP peer'ı ziyaretçi değil, edge sunucusudur. r3v3rs3 gerçek client IP adresini yalnız peer güvenilirse belirler:
+CDN veya yük dengeleyici arkasında r3v3rs3'ün TCP peer'ı ziyaretçi değil, edge sunucusudur. r3v3rs3 gerçek istemci IP adresini yalnız peer güvenilirse belirler:
 
-- **Bilinen CDN'ler**: Cloudflare, Fastly, Amazon CloudFront, Bunny CDN, Gcore, KeyCDN, Imperva ve Google Cloud Load Balancing. Bu özellik varsayılan olarak açıktır. Proxy ayarlarındaki "Bilinen CDN'lerin Client IP Header'larına Güven" seçeneğiyle kapatabilirsiniz.
-- **Güvenilen Proxy'ler**: Proxy'ye eklediğiniz IP adresleri veya CIDR blokları, örneğin yerel bir load balancer.
+- **Bilinen CDN'ler**: Cloudflare, Fastly, Amazon CloudFront, Bunny CDN, Gcore, KeyCDN, Imperva ve Google Cloud Load Balancing. Bu özellik varsayılan olarak açıktır. Proxy ayarlarındaki "Bilinen CDN'lerin İstemci IP Header'larına Güven" seçeneğiyle kapatabilirsiniz.
+- **Güvenilen Proxy'ler**: Proxy'ye eklediğiniz IP adresleri veya CIDR blokları, örneğin yerel bir yük dengeleyici.
 
-Peer güvenilirse r3v3rs3 client IP adresini şu sırayla okur:
+Peer güvenilirse r3v3rs3 istemci IP adresini şu sırayla okur:
 
 1. Sağlayıcı header'ı: Cloudflare için `CF-Connecting-IP`, Bunny CDN için `X-Real-IP`, Amazon CloudFront için `CloudFront-Viewer-Address`.
 2. `X-Forwarded-For` içinde güvenilen bir proxy'ye veya bilinen bir CDN edge'ine ait olmayan en sağdaki adres.
 
-r3v3rs3 bulduğu adresi upstream sunucuya `X-Real-IP` header'ında gönderir. Gelen `X-Forwarded-For` ve `Forwarded` zincirlerine dokunmaz. Peer güvenilir değilse r3v3rs3 `Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP`, `CloudFront-Viewer-Address`, `Fastly-Client-IP` ve `Incap-Client-IP` header'larını siler, çünkü client bu header'lara sahte değer yazabilir.
+r3v3rs3 bulduğu adresi upstream sunucuya `X-Real-IP` header'ında gönderir. Gelen `X-Forwarded-For` ve `Forwarded` zincirlerine dokunmaz. Peer güvenilir değilse r3v3rs3 `Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP`, `CloudFront-Viewer-Address`, `Fastly-Client-IP` ve `Incap-Client-IP` header'larını siler, çünkü istemci bu header'lara sahte değer yazabilir.
 
-CDN IP aralıkları binary'ye gömülüdür ve r3v3rs3 bu listeyi her gün yeniden indirir. Son indirilen liste config dizinindeki `cdn-ranges.json` dosyasına yazılır. İndirme başarısız olursa r3v3rs3 son başarılı listeyi kullanmaya devam eder. Listenin durumunu "Ayarlar" bölümünde görebilir, "Şimdi Yenile" butonuyla listeyi hemen yenileyebilirsiniz.
+CDN IP aralıkları binary'ye gömülüdür ve r3v3rs3 bu listeyi her gün yeniden indirir. Son indirilen liste yapılandırma dizinindeki `cdn-ranges.json` dosyasına yazılır. İndirme başarısız olursa r3v3rs3 son başarılı listeyi kullanmaya devam eder. Listenin durumunu "Ayarlar" bölümünde görebilir, "Şimdi Yenile" butonuyla listeyi hemen yenileyebilirsiniz.
 
 Akamai edge IP aralıklarını yayınlamaz. Akamai kullanıyorsanız Site Shield aralıklarınızı "Güvenilen Proxy'ler" listesine ekleyin.
 
 ## IP filtresi
 
-Her HTTP / HTTPS proxy'sinde client'ları IP adresine göre engelleyebilir veya yalnız belirli adreslere izin verebilirsiniz. Filtre, "Client IP" bölümünde belirlenen adrese bakar. Bu yüzden CDN veya güvenilen bir proxy arkasında da doğru çalışır.
+Her HTTP / HTTPS proxy'sinde istemcileri IP adresine göre engelleyebilir veya yalnız belirli adreslere izin verebilirsiniz. Filtre, "İstemci IP adresi" bölümünde belirlenen adrese bakar. Bu yüzden CDN veya güvenilen bir proxy arkasında da doğru çalışır.
 
-- **Engellenen IP Adresleri**: Bu IP adreslerinden veya CIDR bloklarından gelen client'lar `403 Forbidden` alır.
-- **İzin Verilen IP Adresleri**: Liste boş değilse proxy'ye yalnız bu IP adreslerinden veya CIDR bloklarından gelen client'lar erişebilir. Diğer client'lar `403 Forbidden` alır.
+- **Engellenen IP Adresleri**: Bu IP adreslerinden veya CIDR bloklarından gelen istemciler `403 Forbidden` alır.
+- **İzin Verilen IP Adresleri**: Liste boş değilse proxy'ye yalnız bu IP adreslerinden veya CIDR bloklarından gelen istemciler erişebilir. Diğer istemciler `403 Forbidden` alır.
 
 Bir adres iki listeye de uyuyorsa engellenir.
 
-Bir route, "Bu Route için Ayrı IP Filtresi Kullan" seçeneğiyle proxy listeleri yerine yalnız kendi listelerini kullanır. Route'un iki listesi de boşsa bu route'a her client erişebilir.
+Bir route, "Bu Route için Ayrı IP Filtresi Kullan" seçeneğiyle proxy listeleri yerine yalnız kendi listelerini kullanır. Route'un iki listesi de boşsa bu route'a her istemci erişebilir.
 
 ```toml
 [my-proxy]
@@ -411,17 +411,17 @@ routes = [
 
 ## Rate limit
 
-Her HTTP / HTTPS proxy'sinde bir client IP adresinin gönderebileceği request sayısını sınırlayabilirsiniz. r3v3rs3 request'leri "Client IP" bölümünde belirlenen adrese göre sayar.
+Her HTTP / HTTPS proxy'sinde bir istemci IP adresinin gönderebileceği istek sayısını sınırlayabilirsiniz. r3v3rs3 istekleri "İstemci IP adresi" bölümünde belirlenen adrese göre sayar.
 
-- **Request**: Belirlenen süre içinde izin verilen request sayısı. `0` limiti kapatır.
+- **İstek Sayısı**: Belirlenen süre içinde izin verilen istek sayısı. `0` limiti kapatır.
 - **Süre**: Sayacın süresi: saniye, dakika veya saat.
-- **Burst**: Bir client'ın limit devreye girmeden art arda gönderebileceği request sayısı. `0` girilirse "Request" değeri kullanılır.
+- **Burst**: Bir istemcinin limit devreye girmeden art arda gönderebileceği istek sayısı. `0` girilirse "İstek Sayısı" değeri kullanılır.
 
-Limiti aşan client, `Retry-After` header'ıyla birlikte `429 Too Many Requests` alır.
+Limiti aşan istemci, `Retry-After` header'ıyla birlikte `429 Too Many Requests` alır.
 
-Bir route, "Bu Route için Ayrı Rate Limit Kullan" seçeneğiyle proxy limiti yerine kendi limitini kullanabilir. Bu seçeneği açmayan route'lar her client için ortak bir sayaç kullanır. Route ayarında request değeri `0` ise o route'ta limit uygulanmaz.
+Bir route, "Bu Route için Ayrı Rate Limit Kullan" seçeneğiyle proxy limiti yerine kendi limitini kullanabilir. Bu seçeneği açmayan route'lar her istemci için ortak bir sayaç kullanır. Route ayarında istek sayısı `0` ise o route'ta limit uygulanmaz.
 
-r3v3rs3 sayaçları memory'de tutar. Config değiştiğinde sayaçlar korunur; yalnız limitin kendisi değişirse sıfırlanır. Sunucuyu yeniden başlatmak da sayaçları sıfırlar.
+r3v3rs3 sayaçları bellekte tutar. Ayarlar değiştiğinde sayaçlar korunur; yalnız limitin kendisi değişirse sıfırlanır. Sunucuyu yeniden başlatmak da sayaçları sıfırlar.
 
 ```toml
 [my-proxy]
@@ -436,20 +436,20 @@ routes = [
 
 ## Kimlik doğrulama
 
-Her HTTP / HTTPS proxy'sinde "Kimlik Doğrulama" bölümünden kimlik doğrulamayı zorunlu hale getirebilirsiniz. Bir route, "Bu Route için Ayrı Kimlik Doğrulama Kullan" seçeneğiyle proxy ayarı yerine kendi ayarını kullanabilir. O route'u bütün client'lara açmak için "Yok" seçin.
+Her HTTP / HTTPS proxy'sinde "Kimlik Doğrulama" bölümünden kimlik doğrulamayı zorunlu hale getirebilirsiniz. Bir route, "Bu Route için Ayrı Kimlik Doğrulama Kullan" seçeneğiyle proxy ayarı yerine kendi ayarını kullanabilir. O route'u bütün istemcilere açmak için "Yok" seçin.
 
-r3v3rs3 kimlik doğrulamayı IP filtresinden, rate limit'ten ve HTTPS redirect'inden sonra yapar. Bu sayede "HTTP'yi Otomatik Olarak HTTPS'e Yönlendir" seçeneği açıksa tarayıcı kimlik bilgilerini şifreli bağlantı üzerinden gönderir.
+r3v3rs3 kimlik doğrulamayı IP filtresinden, rate limit'ten ve HTTPS yönlendirmesinden sonra yapar. Bu sayede "HTTP'yi Otomatik Olarak HTTPS'e Yönlendir" seçeneği açıksa tarayıcı kimlik bilgilerini şifreli bağlantı üzerinden gönderir.
 
 ### Basic Auth
 
-Geçerli kullanıcı adı ve parola göndermeyen client'lar `WWW-Authenticate: Basic realm="..."` header'ıyla birlikte `401 Unauthorized` alır. Tarayıcı bunun üzerine giriş penceresini açar.
+Geçerli kullanıcı adı ve parola göndermeyen istemciler `WWW-Authenticate: Basic realm="..."` header'ıyla birlikte `401 Unauthorized` alır. Tarayıcı bunun üzerine giriş penceresini açar.
 
 - **Realm**: Tarayıcının giriş penceresinde gösterdiği ad. Boş bırakılırsa `r3v3rs3` kullanılır.
 - **Kullanıcılar**: Kullanıcı adları ve parolalar. Kullanıcı adında iki nokta üst üste bulunamaz.
 
-r3v3rs3 parolaları argon2 hash olarak saklar; düz metin parolayı hiçbir zaman kaydetmez. Admin API hash'i döndürmez. Parolası olan kullanıcı için `password_set: true` döndürür. Parolayı değiştirmek istemiyorsanız parola alanını boş bırakın. r3v3rs3, request'i upstream sunucuya göndermeden önce `Authorization` header'ını siler.
+r3v3rs3 parolaları argon2 hash olarak saklar; düz metin parolayı hiçbir zaman kaydetmez. Admin API hash'i döndürmez. Parolası olan kullanıcı için `password_set: true` döndürür. Parolayı değiştirmek istemiyorsanız parola alanını boş bırakın. r3v3rs3, isteği upstream sunucuya göndermeden önce `Authorization` header'ını siler.
 
-Argon2 kasıtlı olarak CPU harcar. r3v3rs3 her kimlik bilgisini bir kez doğrular ve sonucu config değişene kadar memory'de tutar. Parola denemelerini sınırlamak için rate limit kullanın.
+Argon2 kasıtlı olarak CPU harcar. r3v3rs3 her kimlik bilgisini bir kez doğrular ve sonucu ayarlar değişene kadar bellekte tutar. Parola denemelerini sınırlamak için rate limit kullanın.
 
 `proxies.toml` dosyasında `password_hash` yerine `password` yazabilirsiniz. r3v3rs3 başlarken bu değeri hash'e çevirir.
 
@@ -466,14 +466,14 @@ routes = [
 
 ### Bearer Token
 
-Client, proxy'de tanımlı token'lardan birini `Authorization: Bearer <token>` header'ıyla göndermelidir. Token göndermeyen client `WWW-Authenticate: Bearer realm="r3v3rs3"` ile birlikte `401 Unauthorized` alır. Yanlış token gönderen client da aynı response'u alır; bu response'ta ayrıca `error="invalid_token"` bulunur.
+İstemci, proxy'de tanımlı token'lardan birini `Authorization: Bearer <token>` header'ıyla göndermelidir. Token göndermeyen istemci `WWW-Authenticate: Bearer realm="r3v3rs3"` ile birlikte `401 Unauthorized` alır. Yanlış token gönderen istemci de aynı yanıtı alır; bu yanıtta ayrıca `error="invalid_token"` bulunur.
 
 - **Ad**: Token'ı tanımak için verdiğiniz ad.
 - **Token**: En az 16 karakterlik rastgele bir değer. Örneğin `openssl rand -hex 32` komutuyla üretebilirsiniz.
 
-r3v3rs3 her token'ın SHA-256 digest'ini saklar; düz metin token'ı hiçbir zaman kaydetmez. Digest'leri sabit sürede karşılaştırır. Admin API digest'i döndürmez. Değeri olan token için `token_set: true` döndürür. Token'ı değiştirmek istemiyorsanız token alanını boş bırakın. r3v3rs3, request'i upstream sunucuya göndermeden önce `Authorization` header'ını siler. Bu yüzden bearer kimlik doğrulaması kullanan bir route'ta upstream sunucuya kendi bearer token'ı ulaşmaz.
+r3v3rs3 her token'ın SHA-256 özetini saklar; düz metin token'ı hiçbir zaman kaydetmez. Özetleri sabit sürede karşılaştırır. Admin API özeti döndürmez. Değeri olan token için `token_set: true` döndürür. Token'ı değiştirmek istemiyorsanız token alanını boş bırakın. r3v3rs3, isteği upstream sunucuya göndermeden önce `Authorization` header'ını siler. Bu yüzden bearer kimlik doğrulaması kullanan bir route'ta upstream sunucuya kendi bearer token'ı ulaşmaz.
 
-`proxies.toml` dosyasında `token_hash` yerine `token` yazabilirsiniz. r3v3rs3 başlarken bu değeri digest'e çevirir.
+`proxies.toml` dosyasında `token_hash` yerine `token` yazabilirsiniz. r3v3rs3 başlarken bu değeri özete çevirir.
 
 ```toml
 [my-api]
@@ -485,23 +485,23 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 ### Forward Auth
 
-r3v3rs3 her request'e izin verilip verilmeyeceğini oauth2-proxy veya Authelia gibi harici bir servise sorar. Bu özellik nginx'teki `auth_request` gibi çalışır.
+r3v3rs3 her isteğe izin verilip verilmeyeceğini oauth2-proxy veya Authelia gibi harici bir servise sorar. Bu özellik nginx'teki `auth_request` gibi çalışır.
 
-r3v3rs3 her client request'inde auth URL'ine bir `GET` request'i gönderir. Bu request, bağlantı header'ları ve `Host` dışında client'ın bütün header'larını taşır. Bunlara ek olarak şu header'lar da eklenir:
+r3v3rs3 her istemci isteğinde doğrulama URL'ine bir `GET` isteği gönderir. Bu istek, bağlantı header'ları ve `Host` dışında istemcinin bütün header'larını taşır. Bunlara ek olarak şu header'lar da eklenir:
 
 | Header | Değer |
 |---|---|
-| `X-Forwarded-Method` | Client request'inin method'u. |
+| `X-Forwarded-Method` | İstemci isteğinin method'u. |
 | `X-Forwarded-Proto` | `http` veya `https`. |
-| `X-Forwarded-Host` | Client request'inin host'u. |
-| `X-Forwarded-Uri` | Client request'inin path ve query kısmı. |
-| `X-Forwarded-For` | "Client IP" bölümünde belirlenen client IP adresi. |
+| `X-Forwarded-Host` | İstemci isteğinin host'u. |
+| `X-Forwarded-Uri` | İstemci isteğinin yol ve sorgu kısmı. |
+| `X-Forwarded-For` | "İstemci IP adresi" bölümünde belirlenen istemci IP adresi. |
 
-- **2xx response**: r3v3rs3 request'i upstream sunucuya gönderir. "Kopyalanacak Response Header'ları" alanında listelenen header'ları auth response'undan upstream request'ine kopyalar. Client bu header'ları kendisi gönderemesin diye önce client request'indeki aynı adlı header'ları siler.
-- **Diğer response'lar**: r3v3rs3 auth response'unu (status, header'lar ve en fazla 64 KiB body) client'a gönderir. Bu sayede giriş sayfasına yapılan redirect'ler de çalışır.
-- **Timeout süresinde response gelmezse veya bağlantı hatası olursa**: Client `502 Bad Gateway` alır.
+- **2xx yanıt**: r3v3rs3 isteği upstream sunucuya gönderir. "Kopyalanacak Yanıt Header'ları" alanında listelenen header'ları doğrulama yanıtından upstream isteğine kopyalar. İstemci bu header'ları kendisi gönderemesin diye önce istemci isteğindeki aynı adlı header'ları siler.
+- **Diğer yanıtlar**: r3v3rs3 doğrulama yanıtını (durum kodu, header'lar ve en fazla 64 KiB gövde) istemciye gönderir. Bu sayede giriş sayfasına yapılan yönlendirmeler de çalışır.
+- **Timeout süresinde yanıt gelmezse veya bağlantı hatası olursa**: İstemci `502 Bad Gateway` alır.
 
-Auth request'i, upstream request'leriyle aynı root sertifikalarına güvenir. Proxy'nin client sertifikasını da gönderir. Ayrıntılar için "Upstream client sertifikaları" bölümüne bakın.
+Doğrulama isteği, upstream istekleriyle aynı kök sertifikalara güvenir. Proxy'nin istemci sertifikasını da gönderir. Ayrıntılar için "Upstream istemci sertifikaları" bölümüne bakın.
 
 ```toml
 [my-app]
@@ -511,31 +511,31 @@ auth = { type = "forward", url = "http://127.0.0.1:4180/oauth2/auth", response_h
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
-### Panel Session
+### Panel oturumu
 
-Client'lar, yönetim panelinde kullandığınız r3v3rs3 hesaplarıyla giriş yapar. Kendi kimlik doğrulaması olmayan bir web uygulamasını korumak için bu yöntemi kullanabilirsiniz.
+İstemciler, yönetim panelinde kullandığınız r3v3rs3 hesaplarıyla giriş yapar. Kendi kimlik doğrulaması olmayan bir web uygulamasını korumak için bu yöntemi kullanabilirsiniz.
 
-- Session'ı olmayan `GET` ve `HEAD` request'leri `302 Found` ile giriş sayfasına yönlendirilir. Giriş yapıldıktan sonra r3v3rs3 tarayıcıyı ilk istenen path'e geri gönderir.
-- Session'ı olmayan diğer request'ler `401 Unauthorized` alır.
+- Oturumu olmayan `GET` ve `HEAD` istekleri `302 Found` ile giriş sayfasına yönlendirilir. Giriş yapıldıktan sonra r3v3rs3 tarayıcıyı ilk istenen yola geri gönderir.
+- Oturumu olmayan diğer istekler `401 Unauthorized` alır.
 
-Bu kimlik doğrulamayı kullanan her route, kendi path'inin altında şu endpoint'leri sunar. `/` route'unun giriş sayfası `/.r3v3rs3/auth/login` adresindedir. `/admin` route'unda bu adres `/admin/.r3v3rs3/auth/login` olur.
+Bu kimlik doğrulamayı kullanan her route, kendi yolunun altında şu endpoint'leri sunar. `/` route'unun giriş sayfası `/.r3v3rs3/auth/login` adresindedir. `/admin` route'unda bu adres `/admin/.r3v3rs3/auth/login` olur.
 
 | Endpoint | Method | İşlem |
 |---|---|---|
 | `.r3v3rs3/auth/login` | `GET` | Giriş formunu gösterir. |
-| `.r3v3rs3/auth/login` | `POST` | Kullanıcı adını, parolayı ve TOTP kodunu kontrol eder, ardından session cookie'sini ayarlar. |
-| `.r3v3rs3/auth/logout` | `POST` | Session'ı sonlandırır ve session cookie'sini siler. |
+| `.r3v3rs3/auth/login` | `POST` | Kullanıcı adını, parolayı ve TOTP kodunu kontrol eder, ardından oturum cookie'sini ayarlar. |
+| `.r3v3rs3/auth/logout` | `POST` | Oturumu sonlandırır ve oturum cookie'sini siler. |
 
-TOTP kodu yalnız TOTP'si açık hesaplarda istenir. `r3v3rs3_session` cookie'si `HttpOnly` ve `SameSite=Lax` attribute'larını taşır; HTTPS ve HTTP/3 bağlantılarında `Secure` attribute'u da eklenir. Cookie'nin `Domain` attribute'u yoktur ve r3v3rs3 bir session'ı yalnız client'ın giriş yaptığı host'ta kabul eder. r3v3rs3, request'i upstream sunucuya göndermeden önce session cookie'sini siler.
+TOTP kodu yalnız TOTP'si açık hesaplarda istenir. `r3v3rs3_session` cookie'si `HttpOnly` ve `SameSite=Lax` özelliklerini taşır; HTTPS ve HTTP/3 bağlantılarında `Secure` özelliği de eklenir. Cookie'nin `Domain` özelliği yoktur ve r3v3rs3 bir oturumu yalnız istemcinin giriş yaptığı host'ta kabul eder. r3v3rs3, isteği upstream sunucuya göndermeden önce oturum cookie'sini siler.
 
-Yalnız proxy'yi görebilen hesaplar giriş yapar. Proxy listesi olan bir hesap yalnız listesindeki proxy'leri görür. r3v3rs3 hesabı her request'te kontrol eder. Hesap silinirse, hesap değişirse veya proxy hesabın listesinden çıkarılırsa session sona erer. r3v3rs3 session'ın hesabını kaydetmeye başlamadan önce açılan session'lar geçersizdir. Bu durumda client yeniden giriş yapar.
+Yalnız proxy'yi görebilen hesaplar giriş yapar. Proxy listesi olan bir hesap yalnız listesindeki proxy'leri görür. r3v3rs3 hesabı her istekte kontrol eder. Hesap silinirse, hesap değişirse veya proxy hesabın listesinden çıkarılırsa oturum sona erer. r3v3rs3 oturumun hesabını kaydetmeye başlamadan önce açılan oturumlar geçersizdir. Bu durumda istemci yeniden giriş yapar.
 
-`config.toml` dosyasındaki `[admin]` ayarları bu session'lara da uygulanır:
+`config.toml` dosyasındaki `[admin]` ayarları bu oturumlara da uygulanır:
 
-- `session_expiry`: Session'ın geçerlilik süresi. En az 5 dakika olabilir.
-- `max_login_attempts` ve `login_attempts_reset`: Her client IP adresi ve kullanıcı adı için başarısız giriş limiti. Engellenen client, sıfırlama süresi geçene kadar `429 Too Many Requests` alır.
+- `session_expiry`: Oturumun geçerlilik süresi. En az 5 dakika olabilir.
+- `max_login_attempts` ve `login_attempts_reset`: Her istemci IP adresi ve kullanıcı adı için başarısız giriş limiti. Engellenen istemci, sıfırlama süresi geçene kadar `429 Too Many Requests` alır.
 
-r3v3rs3 session'ları memory'de tutar. Sunucu yeniden başladığında bütün session'lar sona erer. Uygulamanıza çıkış butonu eklemek için şu formu kullanabilirsiniz:
+r3v3rs3 oturumları bellekte tutar. Sunucu yeniden başladığında bütün oturumlar sona erer. Uygulamanıza çıkış butonu eklemek için şu formu kullanabilirsiniz:
 
 ```html
 <form method="post" action="/.r3v3rs3/auth/logout"><button>Sign Out</button></form>
@@ -557,12 +557,12 @@ WebUI'daki "Erişim Listeleri" sayfası listeleri ekler, değiştirir ve siler. 
 
 - Proxy'nin listesi, proxy'nin "IP Filtresi" ve "Kimlik Doğrulama" ayarlarının yerini alır.
 - Route'un listesi, route'un IP filtresinin ve kimlik doğrulamasının yerini alır.
-- Kendi listesi veya override'ı olmayan route, proxy'nin ayarlarını kullanır. Proxy'nin listesi de bu ayarlara dahildir.
+- Kendi listesi veya kendi ayarı olmayan route, proxy'nin ayarlarını kullanır. Proxy'nin listesi de bu ayarlara dahildir.
 - Listesi olan proxy veya route kendi IP filtresini veya kimlik doğrulamasını ayarlayamaz. Yönetim API'si `400 access_list_conflict` döndürür.
-- Bilinmeyen bir listeyi kullanan proxy `400 access_list_not_found` alır. Liste runtime'da yoksa, örneğin henüz sync olmamış bir cluster'da, proxy veya route her client'a `403 Forbidden` döndürür.
+- Bilinmeyen bir listeyi kullanan proxy `400 access_list_not_found` alır. Liste çalışma sırasında yoksa, örneğin henüz eşitlenmemiş bir cluster'da, proxy veya route her istemciye `403 Forbidden` döndürür.
 - Bir proxy'nin veya route'un kullandığı liste silinemez. Yönetim API'si `400 access_list_in_use` döndürür.
 
-Config dizinindeki `access_lists.toml` dosyası listeleri tutar. Dosya parola hash'lerini ve token digest'lerini taşır. Bu yüzden r3v3rs3 dosyayı `0600` moduyla yazar. Yönetim API'si, proxy kimlik doğrulamasında olduğu gibi hash'leri döndürmez.
+Yapılandırma dizinindeki `access_lists.toml` dosyası listeleri tutar. Dosya parola hash'lerini ve token özetlerini taşır. Bu yüzden r3v3rs3 dosyayı `0600` moduyla yazar. Yönetim API'si, proxy kimlik doğrulamasında olduğu gibi hash'leri döndürmez.
 
 ```toml
 # access_lists.toml
@@ -595,7 +595,7 @@ Her hesap listeleri okur. Listeleri yalnız admin veya proxy listesi olmayan edi
 
 ## Header kuralları
 
-Proxy'den geçen request ve response'ların header'larını "Header Kuralları" bölümünden değiştirebilirsiniz. Bir route, "Bu Route için Ayrı Header Kuralları Kullan" seçeneğiyle proxy kuralları yerine kendi kurallarını kullanabilir.
+Proxy'den geçen isteklerin ve yanıtların header'larını "Header Kuralları" bölümünden değiştirebilirsiniz. Bir route, "Bu Route için Ayrı Header Kuralları Kullan" seçeneğiyle proxy kuralları yerine kendi kurallarını kullanabilir.
 
 Her satıra bir kural yazın:
 
@@ -607,24 +607,24 @@ Her satıra bir kural yazın:
 
 Boş satırlar ve `#` ile başlayan satırlar atlanır.
 
-- **Request Header'ları**: Kurallar, r3v3rs3'ün upstream sunucuya gönderdiği request'e uygulanır. r3v3rs3 önce `Forwarded`, `X-Forwarded-*` ve `Via` header'larını ayarlar, kurallar bundan sonra çalışır. Yani bir kural bu header'ları da değiştirebilir.
-- **Response Header'ları**: Kurallar, upstream response client'a gitmeden önce uygulanır. Hata sayfaları, redirect'ler ve giriş sayfaları gibi r3v3rs3'ün kendi ürettiği response'lara uygulanmaz.
+- **İstek Header'ları**: Kurallar, r3v3rs3'ün upstream sunucuya gönderdiği isteğe uygulanır. r3v3rs3 önce `Forwarded`, `X-Forwarded-*` ve `Via` header'larını ayarlar, kurallar bundan sonra çalışır. Yani bir kural bu header'ları da değiştirebilir.
+- **Yanıt Header'ları**: Kurallar, upstream yanıtı istemciye gitmeden önce uygulanır. Hata sayfaları, yönlendirmeler ve giriş sayfaları gibi r3v3rs3'ün kendi ürettiği yanıtlara uygulanmaz.
 
 Değerlerde şu değişkenleri kullanabilirsiniz. Süslü parantez yazmak için `{{` ve `}}` kullanın.
 
 | Değişken | Değer |
 |---|---|
-| `{client_ip}` | "Client IP" bölümünde belirlenen client IP adresi. |
+| `{client_ip}` | "İstemci IP adresi" bölümünde belirlenen istemci IP adresi. |
 | `{host}` | İstenen host adı. |
 | `{scheme}` | `http` veya `https`. |
-| `{request_id}` | Rastgele 32 karakterlik hex ID. Aynı request'in request ve response kuralları aynı ID'yi kullanır. |
-| `{route}` | Eşleşen route'un path'i, örneğin `/api`. |
-| `{client_cert_subject}` | Doğrulanan client sertifikasının subject değeri, örneğin `CN=client.example.com`. Client sertifikası yoksa boştur. |
-| `{client_cert_fingerprint}` | Doğrulanan client sertifikasının hex SHA-256 fingerprint'i. Client sertifikası yoksa boştur. |
+| `{request_id}` | Rastgele 32 karakterlik hex ID. Aynı isteğin istek ve yanıt kuralları aynı ID'yi kullanır. |
+| `{route}` | Eşleşen route'un yolu, örneğin `/api`. |
+| `{client_cert_subject}` | Doğrulanan istemci sertifikasının subject değeri, örneğin `CN=client.example.com`. İstemci sertifikası yoksa boştur. |
+| `{client_cert_fingerprint}` | Doğrulanan istemci sertifikasının hex SHA-256 fingerprint'i. İstemci sertifikası yoksa boştur. |
 
-Client aynı adlı bir header'ı kendisi de gönderebilir. Client sertifikası header'ları için `append` yerine `set` kullanın. Böylece kural client'ın gönderdiği değeri değiştirir.
+İstemci aynı adlı bir header'ı kendisi de gönderebilir. İstemci sertifikası header'ları için `append` yerine `set` kullanın. Böylece kural istemcinin gönderdiği değeri değiştirir.
 
-Kurallar `Connection`, `Content-Length`, `Host`, `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding` ve `Upgrade` header'larını değiştiremez, çünkü bu header'lar bağlantıyı ve mesajın framing'ini kontrol eder.
+Kurallar `Connection`, `Content-Length`, `Host`, `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding` ve `Upgrade` header'larını değiştiremez, çünkü bu header'lar bağlantıyı ve mesajın çerçeve yapısını kontrol eder.
 
 ```toml
 [my-app]
@@ -634,31 +634,31 @@ headers = { request = [{ action = "set", name = "X-Request-Id", value = "{reques
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
-## Compression
+## Sıkıştırma
 
-Proxy'den geçen response'ları "Compression" bölümünden sıkıştırabilirsiniz. Bir veya daha fazla encoding seçtiğinizde compression açılır. Hiçbir encoding seçili değilse compression kapalıdır.
+Proxy'den geçen yanıtları "Sıkıştırma" bölümünden sıkıştırabilirsiniz. Bir veya daha fazla encoding seçtiğinizde sıkıştırma açılır. Hiçbir encoding seçili değilse sıkıştırma kapalıdır.
 
 | Encoding | `Content-Encoding` | Seviye |
 |---|---|---|
-| Brotli | `br` | Quality 4 |
-| Zstandard | `zstd` | Level 3 |
-| Gzip | `gzip` | Level 6 |
+| Brotli | `br` | Kalite 4 |
+| Zstandard | `zstd` | Seviye 3 |
+| Gzip | `gzip` | Seviye 6 |
 
-r3v3rs3 request'in `Accept-Encoding` header'ını okur ve client'ın kabul ettiği encoding'lerden `q` değeri en yüksek olanı seçer. Birden fazla encoding aynı `q` değerine sahipse `algorithms` listesindeki sıra geçerli olur. Panelde bu sıra, encoding'leri seçtiğiniz sıradır.
+r3v3rs3 isteğin `Accept-Encoding` header'ını okur ve istemcinin kabul ettiği encoding'lerden `q` değeri en yüksek olanı seçer. Birden fazla encoding aynı `q` değerine sahipse `algorithms` listesindeki sıra geçerli olur. Panelde bu sıra, encoding'leri seçtiğiniz sıradır.
 
-r3v3rs3 bir response'u yalnız şu koşulların hepsi sağlanırsa sıkıştırır:
+r3v3rs3 bir yanıtı yalnız şu koşulların hepsi sağlanırsa sıkıştırır:
 
-- Status `1xx`, `204 No Content`, `206 Partial Content` veya `304 Not Modified` değildir.
-- Upstream sunucu response'u encode etmemiştir ve response'ta `Content-Range` header'ı yoktur.
+- Durum kodu `1xx`, `204 No Content`, `206 Partial Content` veya `304 Not Modified` değildir.
+- Upstream sunucu yanıta encoding uygulamamıştır ve yanıtta `Content-Range` header'ı yoktur.
 - `Cache-Control` içinde `no-transform` yoktur.
-- `Content-Type` header'ındaki media type `mime_types` listesindedir. `text/*` bütün text türleriyle eşleşir. r3v3rs3 `text/event-stream` türünü hiçbir zaman sıkıştırmaz, çünkü compression server-sent event'leri geciktirir.
-- `Content-Length` değeri en az `min_size` kadardır. `Content-Length` header'ı olmayan stream response'ları da sıkıştırılır.
+- `Content-Type` header'ındaki medya türü `mime_types` listesindedir. `text/*` bütün metin türleriyle eşleşir. r3v3rs3 `text/event-stream` türünü hiçbir zaman sıkıştırmaz, çünkü sıkıştırma server-sent event'leri geciktirir.
+- `Content-Length` değeri en az `min_size` kadardır. `Content-Length` header'ı olmayan stream yanıtları da sıkıştırılır.
 
-Bu koşulları sağlayan response'larda r3v3rs3 `Vary` header'ına `Accept-Encoding` ekler. Response'u sıkıştırdığında `Content-Length` ve `Accept-Ranges` header'larını da siler, strong `ETag` değerini weak `ETag` değerine çevirir. Response header kuralları compression'dan önce çalıştığı için bir kural `Cache-Control: no-transform` ayarlayarak compression'ı engelleyebilir.
+Bu koşulları sağlayan yanıtlarda r3v3rs3 `Vary` header'ına `Accept-Encoding` ekler. Yanıtı sıkıştırdığında `Content-Length` ve `Accept-Ranges` header'larını da siler, güçlü `ETag` değerini zayıf `ETag` değerine çevirir. Yanıt header kuralları sıkıştırmadan önce çalıştığı için bir kural `Cache-Control: no-transform` ayarlayarak sıkıştırmayı engelleyebilir.
 
 | Ayar | Varsayılan |
 |---|---|
-| `algorithms` | Boş. Compression kapalıdır. |
+| `algorithms` | Boş. Sıkıştırma kapalıdır. |
 | `min_size` | `1024` byte |
 | `mime_types` | `text/*`, `application/javascript`, `application/json`, `application/manifest+json`, `application/wasm`, `application/xml`, `application/xhtml+xml`, `application/rss+xml`, `application/atom+xml`, `image/svg+xml`, `font/otf`, `font/ttf` |
 
@@ -672,35 +672,35 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 ## Cache
 
-Proxy'den geçen response'ları "Cache" bölümünden memory'de saklayabilirsiniz. Cache'teki bir response, upstream sunucuya gidilmeden doğrudan client'a gönderilir. Her proxy'nin ayrı bir cache'i vardır ve proxy'nin bütün route'ları bu cache'i ortak kullanır.
+Proxy'den geçen yanıtları "Cache" bölümünden bellekte saklayabilirsiniz. Cache'teki bir yanıt, upstream sunucuya gidilmeden doğrudan istemciye gönderilir. Her proxy'nin ayrı bir cache'i vardır ve proxy'nin bütün route'ları bu cache'i ortak kullanır.
 
 | Ayar | Varsayılan | Açıklama |
 |---|---|---|
 | `enabled` | `false` | Cache'i açar. |
-| `max_size` | `67108864` (64 MiB) | Saklanan response'lar için byte cinsinden memory limiti. Cache dolunca r3v3rs3 en az kullanılan response'ları siler. |
-| `max_entry_size` | `1048576` (1 MiB) | Body'si bu değerden büyük response'lar saklanmaz. |
-| `default_ttl` | `0s` | `Cache-Control: max-age`, `s-maxage` veya `Expires` içermeyen response'un geçerlilik süresi. Değer `0s` ise r3v3rs3 böyle bir response'u yalnız `ETag` veya `Last-Modified` header'ı varsa saklar ve her request'te yeniden doğrular. |
+| `max_size` | `67108864` (64 MiB) | Saklanan yanıtlar için byte cinsinden bellek limiti. Cache dolunca r3v3rs3 en az kullanılan yanıtları siler. |
+| `max_entry_size` | `1048576` (1 MiB) | Gövdesi bu değerden büyük yanıtlar saklanmaz. |
+| `default_ttl` | `0s` | `Cache-Control: max-age`, `s-maxage` veya `Expires` içermeyen yanıtın geçerlilik süresi. Değer `0s` ise r3v3rs3 böyle bir yanıtı yalnız `ETag` veya `Last-Modified` header'ı varsa saklar ve her istekte yeniden doğrular. |
 
-r3v3rs3 cache'i yalnız `Range`, `Upgrade` ve `Cache-Control: no-store` içermeyen `GET` ve `HEAD` request'lerinde kullanır. `HEAD` request'ine saklanan `GET` response'u verilir. Client `Cache-Control: no-cache` veya `Pragma: no-cache` gönderirse r3v3rs3 cache'e bakmadan request'i upstream sunucuya iletir ve gelen yeni response'u saklar. Cache key, istenen host ile request'in path ve query değerinden oluşur. Bu yüzden load balancing'in seçtiği upstream sunucu key'i değiştirmez.
+r3v3rs3 cache'i yalnız `Range`, `Upgrade` ve `Cache-Control: no-store` içermeyen `GET` ve `HEAD` isteklerinde kullanır. `HEAD` isteğine saklanan `GET` yanıtı verilir. İstemci `Cache-Control: no-cache` veya `Pragma: no-cache` gönderirse r3v3rs3 cache'e bakmadan isteği upstream sunucuya iletir ve gelen yeni yanıtı saklar. Cache key, istenen host ile isteğin yol ve sorgu değerinden oluşur. Bu yüzden yük dengelemenin seçtiği upstream sunucu key'i değiştirmez.
 
-r3v3rs3 bir response'u yalnız şu koşulların hepsi sağlanırsa saklar:
+r3v3rs3 bir yanıtı yalnız şu koşulların hepsi sağlanırsa saklar:
 
-- Status `200`, `203`, `204`, `300`, `301`, `308`, `404`, `405`, `410`, `414` veya `501` değerlerinden biridir.
+- Durum kodu `200`, `203`, `204`, `300`, `301`, `308`, `404`, `405`, `410`, `414` veya `501` değerlerinden biridir.
 - `Cache-Control` içinde `no-store` veya `private` yoktur.
-- Response'ta `Set-Cookie` header'ı yoktur.
-- Response'ta `Vary: *` header'ı yoktur.
-- Request'te `Authorization` header'ı varsa `Cache-Control` içinde `public`, `s-maxage` veya `must-revalidate` bulunur.
-- Response'un geçerlilik süresi veya validator'ı vardır ve body'si `max_entry_size` değerini aşmaz.
+- Yanıtta `Set-Cookie` header'ı yoktur.
+- Yanıtta `Vary: *` header'ı yoktur.
+- İstekte `Authorization` header'ı varsa `Cache-Control` içinde `public`, `s-maxage` veya `must-revalidate` bulunur.
+- Yanıtın geçerlilik süresi veya validator'ı vardır ve gövdesi `max_entry_size` değerini aşmaz.
 
-Geçerlilik süresi için sırasıyla `s-maxage`, `max-age`, `Expires` ve `default_ttl` değerlerine bakılır. `Cache-Control: no-cache` bu süreyi sıfır yapar. Saklanan response'un yaşına upstream response'taki `Age` header'ının değeri de eklenir.
+Geçerlilik süresi için sırasıyla `s-maxage`, `max-age`, `Expires` ve `default_ttl` değerlerine bakılır. `Cache-Control: no-cache` bu süreyi sıfır yapar. Saklanan yanıtın yaşına upstream yanıtındaki `Age` header'ının değeri de eklenir.
 
-Saklanan response'un süresi dolmuşsa ve response'ta `ETag` veya `Last-Modified` header'ı varsa r3v3rs3 `If-None-Match` veya `If-Modified-Since` ile koşullu bir request gönderir. Upstream sunucu `304 Not Modified` dönerse r3v3rs3 saklanan header'ları günceller ve cache'teki response'u gönderir. Validator'ı olan response, süresi dolduktan sonra da bir saat cache'te kalır. Eşleşen `If-None-Match` veya `If-Modified-Since` header'ı gönderen client, cache'ten `304 Not Modified` alır.
+Saklanan yanıtın süresi dolmuşsa ve yanıtta `ETag` veya `Last-Modified` header'ı varsa r3v3rs3 `If-None-Match` veya `If-Modified-Since` ile koşullu bir istek gönderir. Upstream sunucu `304 Not Modified` dönerse r3v3rs3 saklanan header'ları günceller ve cache'teki yanıtı gönderir. Validator'ı olan yanıt, süresi dolduktan sonra da bir saat cache'te kalır. Eşleşen `If-None-Match` veya `If-Modified-Since` header'ı gönderen istemci, cache'ten `304 Not Modified` alır.
 
-Her cache key için tek bir response saklanır. Response'un `Vary` header'ı request header'larını listeliyorsa saklanan response yalnız bu header'larda aynı değerleri gönderen request'lere verilir.
+Her cache key için tek bir yanıt saklanır. Yanıtın `Vary` header'ı istek header'larını listeliyorsa saklanan yanıt yalnız bu header'larda aynı değerleri gönderen isteklere verilir.
 
-r3v3rs3, cache'i kullanabilecek request'lerdeki `Accept-Encoding` header'ını siler. Böylece upstream sunucu response'ları encode etmeden gönderir ve "Compression" ayarları response'u her client için ayrıca sıkıştırır. Bu request'lere verilen response'larda `X-Cache` header'ı bulunur: cache'ten gelen response için `HIT`, upstream sunucudan gelen response için `MISS`. Cache'ten gelen response'ta ayrıca `Age` header'ı vardır.
+r3v3rs3, cache'i kullanabilecek isteklerdeki `Accept-Encoding` header'ını siler. Böylece upstream sunucu yanıtları encoding uygulamadan gönderir ve "Sıkıştırma" ayarları yanıtı her istemci için ayrıca sıkıştırır. Bu isteklere verilen yanıtlarda `X-Cache` header'ı bulunur: cache'ten gelen yanıt için `HIT`, upstream sunucudan gelen yanıt için `MISS`. Cache'ten gelen yanıtta ayrıca `Age` header'ı vardır.
 
-Bir proxy'nin cache'ini boşaltmak için proxy listesindeki "Temizle" linkine tıklayın veya `DELETE /api/proxies/{id}/cache` request'i gönderin. Saklanan response'lar, cache ayarları değişene veya sunucu yeniden başlatılana kadar memory'de kalır.
+Bir proxy'nin cache'ini boşaltmak için proxy listesindeki "Temizle" linkine tıklayın veya `DELETE /api/proxies/{id}/cache` isteği gönderin. Saklanan yanıtlar, cache ayarları değişene veya sunucu yeniden başlatılana kadar bellekte kalır.
 
 ```toml
 [my-app]
@@ -714,9 +714,9 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 r3v3rs3, HTTP ve HTTPS proxy'lerinde hem upstream hem de downstream bağlantılarda HTTP/2 destekler.
 
-Downstream tarafında client destekliyorsa HTTP/2 otomatik olarak seçilir. Çoğu web tarayıcısı HTTP/2'yi yalnız TLS üzerinden kullanır, çünkü sunucunun HTTP/2 desteklediğini ALPN (Application-Layer Protocol Negotiation) ile öğrenir.
+Downstream tarafında istemci destekliyorsa HTTP/2 otomatik olarak seçilir. Çoğu web tarayıcısı HTTP/2'yi yalnız TLS üzerinden kullanır, çünkü sunucunun HTTP/2 desteklediğini ALPN (Application-Layer Protocol Negotiation) ile öğrenir.
 
-Upstream tarafında r3v3rs3, HTTPS sunucularına ALPN ile `h2` ve `http/1.1` önerir ve sunucunun seçtiği protokolü kullanır. Düz HTTP bağlantısında protokol seçimi yapılamadığı için düz HTTP sunucularına HTTP/1.1 ile bağlanılır. Proxy'nin düz HTTP sunucuları prior knowledge ile HTTP/2 (h2c) kabul ediyorsa `h2c = true` ayarlayın. WebSocket ve diğer upgrade request'leri her zaman HTTP/1.1 kullanır. Bir portta aynı client sertifikasını ve aynı connect timeout değerini kullanan proxy'ler upstream bağlantılarını ortak kullanır. Bu yüzden tek bir HTTP/2 upstream bağlantısı birçok client'ın request'lerini taşır.
+Upstream tarafında r3v3rs3, HTTPS sunucularına ALPN ile `h2` ve `http/1.1` önerir ve sunucunun seçtiği protokolü kullanır. Düz HTTP bağlantısında protokol seçimi yapılamadığı için düz HTTP sunucularına HTTP/1.1 ile bağlanılır. Proxy'nin düz HTTP sunucuları prior knowledge ile HTTP/2 (h2c) kabul ediyorsa `h2c = true` ayarlayın. WebSocket ve diğer upgrade istekleri her zaman HTTP/1.1 kullanır. Bir portta aynı istemci sertifikasını ve aynı bağlantı timeout'unu kullanan proxy'ler upstream bağlantılarını ortak kullanır. Bu yüzden tek bir HTTP/2 upstream bağlantısı birçok istemcinin isteklerini taşır.
 
 ```toml
 [my-app]
@@ -736,14 +736,14 @@ HTTP/3 proxy'lemeyi açmak için "Portlar" bölümünde bir QUIC portu bağlayı
 
 WebTransport desteklenmez.
 
-## Upstream client sertifikaları
+## Upstream istemci sertifikaları
 
-Upstream sunucu client sertifikası isteyebilir (mutual TLS). Sertifikayı HTTP / HTTPS proxy'sinin veya TCP / TLS üzerinden TCP proxy'sinin "Client Sertifikası" alanında seçin. Listede private key'i olan client sertifikaları görünür. Ayrıntılar için "Client sertifikaları" bölümüne bakın.
+Upstream sunucu istemci sertifikası isteyebilir (mutual TLS). Sertifikayı HTTP / HTTPS proxy'sinin veya TCP / TLS üzerinden TCP proxy'sinin "İstemci Sertifikası" alanında seçin. Listede private key'i olan istemci sertifikaları görünür. Ayrıntılar için "İstemci sertifikaları" bölümüne bakın.
 
 - Proxy sertifikayı, sertifika isteyen her TLS upstream sunucusuna gönderir. Düz HTTP veya düz TCP upstream sunucuları sertifikayı kullanmaz.
-- HTTP / HTTPS proxy'sinde forward auth request'i de aynı sertifikayı gönderir.
-- Sertifika yoksa, client sertifikası değilse veya private key'i yoksa r3v3rs3 proxy ayarını reddeder. Bir proxy'nin kullandığı client sertifikası silinemez.
-- Sertifika geçersiz hale gelirse, örneğin config dizininden silinirse, proxy sertifikasız bağlanmaz. HTTP / HTTPS proxy'si `502 Bad Gateway` döner, TCP proxy'si bağlantıyı kapatır.
+- HTTP / HTTPS proxy'sinde forward auth isteği de aynı sertifikayı gönderir.
+- Sertifika yoksa, istemci sertifikası değilse veya private key'i yoksa r3v3rs3 proxy ayarını reddeder. Bir proxy'nin kullandığı istemci sertifikası silinemez.
+- Sertifika geçersiz hale gelirse, örneğin yapılandırma dizininden silinirse, proxy sertifikasız bağlanmaz. HTTP / HTTPS proxy'si `502 Bad Gateway` döner, TCP proxy'si bağlantıyı kapatır.
 
 TCP proxy'sinde TLS bekleyen upstream sunucusu için "TLS ile Bağlan" seçeneğini açın. Bu sunucunun adresi `/tls` ile biter.
 
@@ -762,12 +762,12 @@ upstream_servers = [{ addr = "/dns/db.internal/tcp/5433/tls" }]
 
 ## PROXY protocol gönderme
 
-TCP / TLS üzerinden TCP proxy'si client adresini upstream sunuculara gönderebilir. Versiyonu "PROXY Protocol Gönder" alanında seçin. Bundan sonra her upstream bağlantısı bir PROXY protocol header'ı ile başlar. TLS upstream sunucusunda header TLS handshake'ten önce gider.
+TCP / TLS üzerinden TCP proxy'si istemci adresini upstream sunuculara gönderebilir. Sürümü "PROXY Protocol Gönder" alanında seçin. Bundan sonra her upstream bağlantısı bir PROXY protocol header'ı ile başlar. TLS upstream sunucusunda header TLS handshake'ten önce gider.
 
-- Kaynak adres bağlantının client adresidir. Port PROXY protocol alıyorsa bu adres o header'daki adrestir. "PROXY protocol" bölümüne bakın.
-- Hedef adres client'ın bağlandığı adrestir.
+- Kaynak adres bağlantının istemci adresidir. Port PROXY protocol alıyorsa bu adres o header'daki adrestir. "PROXY protocol" bölümüne bakın.
+- Hedef adres istemcinin bağlandığı adrestir.
 - İki adresin ailesi farklıysa ikisi de IPv6 adresi olarak yazılır. IPv4 adresi IPv4-mapped IPv6 adresine dönüşür.
-- Aktif health check versiyon 2 `LOCAL` header'ı gönderir.
+- Aktif sağlık kontrolü sürüm 2 `LOCAL` header'ı gönderir.
 
 Bunu yalnız bütün upstream sunucular header'ı okuyorsa açın, çünkü header'ı okumayan sunucu onu veri olarak alır. HTTP / HTTPS proxy'leri PROXY protocol göndermez. Onların yerine `Forwarded` ve `X-Forwarded-For` header'larını kullanın.
 
@@ -784,26 +784,26 @@ upstream_servers = [{ addr = "/dns/mail.internal/tcp/25" }]
 
 TLS üzerinden TCP ve HTTPS proxy'leri için bir sunucu sertifikası gerekir. Sunucu sertifikasını üç yolla ekleyebilirsiniz:
 
-1. Self-signed bir sertifika oluşturun.
+1. Kendinden imzalı bir sertifika oluşturun.
 2. Bir dosyadan sertifika içe aktarın (yalnız PEM formatı).
 3. Sertifikayı [ACME](https://letsencrypt.org/how-it-works/) ile otomatik alın.
 
 r3v3rs3, TLS client hello mesajındaki SNI (Server Name Indication) değerine göre uygun sertifikayı otomatik olarak seçer.
 
-## Client sertifikaları
+## İstemci sertifikaları
 
-TLS sunucusu, client'ı doğrulamak için client sertifikası isteyebilir. "Client Sertifikaları" sekmesinde client sertifikasını iki yolla ekleyebilirsiniz:
+TLS sunucusu, istemciyi doğrulamak için istemci sertifikası isteyebilir. "İstemci Sertifikaları" sekmesinde istemci sertifikasını iki yolla ekleyebilirsiniz:
 
-1. Self-signed bir sertifika oluşturun ve sertifika türü olarak "Client Sertifikası" seçin. r3v3rs3 sertifikaya `clientAuth` extended key usage değerini ekler. Seçilen CA sertifikası sertifikayı imzalar.
-2. Sertifika zincirini ve private key'i dosyadan içe aktarın (yalnız PEM formatı). Client sertifikası için private key gerekir.
+1. Kendinden imzalı bir sertifika oluşturun ve sertifika türü olarak "İstemci Sertifikası" seçin. r3v3rs3 sertifikaya `clientAuth` extended key usage değerini ekler. Seçilen CA sertifikası sertifikayı imzalar.
+2. Sertifika zincirini ve private key'i dosyadan içe aktarın (yalnız PEM formatı). İstemci sertifikası için private key gerekir.
 
-Proxy, client sertifikasını upstream sunucularına gönderir. Ayrıntılar için "Upstream client sertifikaları" bölümüne bakın.
+Proxy, istemci sertifikasını upstream sunucularına gönderir. Ayrıntılar için "Upstream istemci sertifikaları" bölümüne bakın.
 
-## Root sertifikaları
+## Kök sertifikalar
 
-Upstream sunucunuz sistemin güvenmediği sertifikalar kullanıyorsa bu sertifikaları root sertifika deposuna eklemeniz gerekir. r3v3rs3, sistemin root sertifikalarına ek olarak bu depodaki root sertifikalarının imzaladığı bütün sertifikalara da otomatik olarak güvenir.
+Upstream sunucunuz sistemin güvenmediği sertifikalar kullanıyorsa bu sertifikaları kök sertifika deposuna eklemeniz gerekir. r3v3rs3, sistemin kök sertifikalarına ek olarak bu depodaki kök sertifikaların imzaladığı bütün sertifikalara da otomatik olarak güvenir.
 
-Self-signed bir sertifika oluşturduğunuzda r3v3rs3 bir CA sertifikası da oluşturur ve onu root sertifika deposuna ekler.
+Kendinden imzalı bir sertifika oluşturduğunuzda r3v3rs3 bir CA sertifikası da oluşturur ve onu kök sertifika deposuna ekler.
 
 ## Süre uyarıları
 
@@ -824,10 +824,10 @@ r3v3rs3 şu olaylar için bildirim webhook'una bir JSON `POST` isteği gönderir
 {"event": "certificate_expiring", "time": 1757894400, "node": "proxy-1", "certificate": {"id": "a1b2c3d", "san": ["example.com"], "not_after": 1759104000}}
 ```
 
-- `time` saniye cinsinden Unix zamanıdır. `node` cluster node'unun adıdır. Cluster yoksa bu alan bulunmaz. `certificate` alanı sertifika olayının sertifikasını gösterir. `acme` alanı ACME kaydının `id` ve `identifiers` değerlerini taşır. `error` alanı `acme_order_failed` olayının hatasını açıklar.
+- `time` saniye cinsinden Unix zamanıdır. `node` cluster düğümünün adıdır. Cluster yoksa bu alan bulunmaz. `certificate` alanı sertifika olayının sertifikasını gösterir. `acme` alanı ACME kaydının `id` ve `identifiers` değerlerini taşır. `error` alanı `acme_order_failed` olayının hatasını açıklar.
 - Token varsa istek `Authorization: Bearer <token>` header'ını taşır. Admin API token'ı döndürmez.
-- 2xx status başarı sayılır. r3v3rs3 başarısız isteği en fazla üç kez gönderir: 1 saniye sonra bir kez daha, 2 saniye sonra bir kez daha. "Webhook Timeout" (varsayılan `10s`) her denemeyi sınırlar.
-- Leader sertifikaları her "Arka Plan Görevi Aralığı" süresinde kontrol eder. Bir sertifikanın her olayı bir kez gönderilir. Yenilenen sertifikanın fingerprint'i değişir. Bu yüzden onun olayları yeniden gönderilir. r3v3rs3 gönderilen olayları config dizinindeki `notifications.json` dosyasında veya cluster store'da tutar.
+- 2xx durum kodu başarı sayılır. r3v3rs3 başarısız isteği en fazla üç kez gönderir: 1 saniye sonra bir kez daha, 2 saniye sonra bir kez daha. "Webhook Timeout" (varsayılan `10s`) her denemeyi sınırlar.
+- Lider düğüm sertifikaları her "Arka Plan Görevi Aralığı" süresinde kontrol eder. Bir sertifikanın her olayı bir kez gönderilir. Yenilenen sertifikanın fingerprint'i değişir. Bu yüzden onun olayları yeniden gönderilir. r3v3rs3 gönderilen olayları yapılandırma dizinindeki `notifications.json` dosyasında veya cluster veri deposunda tutar.
 - r3v3rs3 bildirimleri arka planda gönderir. Kuyruk en fazla 64 bildirim tutar. Kuyruk doluysa r3v3rs3 bildirimi göndermez ve bir hata log'u yazar.
 - Webhook URL'i HTTPS kullanmalıdır. HTTP yalnız loopback adresinde kullanılabilir.
 
@@ -843,15 +843,15 @@ webhook = { url = "https://hooks.example.com/r3v3rs3", token = "<token>", timeou
 
 ## Birden fazla sertifikayı silme
 
-Listedeki checkbox'larla sertifikaları seçin ve "Seçilenleri Sil" butonuna tıklayın. `{"ids": [...]}` body'si ile gönderilen `POST /api/certs/delete` isteği en fazla 200 id için aynı işi yapar. Yanıt, istekteki sırayla her id için bir sonuç taşır:
+Listedeki onay kutularıyla sertifikaları seçin ve "Seçilenleri Sil" butonuna tıklayın. `{"ids": [...]}` gövdesi ile gönderilen `POST /api/certs/delete` isteği en fazla 200 id için aynı işi yapar. Yanıt, istekteki sırayla her id için bir sonuç taşır:
 
 | Sonuç | Anlamı |
 |---|---|
 | `deleted` | r3v3rs3 sertifikayı sildi. |
-| `in_use` | Bir port, proxy veya discovery provider sertifikayı kullanıyor. Sertifika kalır. |
+| `in_use` | Bir port, proxy veya servis keşfi sağlayıcısı sertifikayı kullanıyor. Sertifika kalır. |
 | `read_only` | Sertifikayı servis keşfi yönetiyor. Sertifika kalır. |
 | `not_found` | Bu id'ye sahip sertifika yok. |
-| `failed` | Storage sertifikayı silmedi. Sunucu log'u nedeni yazar. |
+| `failed` | Depolama katmanı sertifikayı silmedi. Sunucu log'u nedeni yazar. |
 
 İstekte tekrar eden bir id tek bir sonuç alır.
 
@@ -859,57 +859,57 @@ Listedeki checkbox'larla sertifikaları seçin ve "Seçilenleri Sil" butonuna t�
 
 r3v3rs3, sertifikaları [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment) ile otomatik alabilir. Let's Encrypt, ZeroSSL ve Google Trust Services gibi birçok sertifika otoritesi ACME'yi destekler.
 
-Bir ACME kaydı bir veya daha fazla domain adı içerir. Domain adlarını "Domain Adları" alanına virgülle ayırarak yazın, örneğin `example.com, *.example.com`. Sertifika her domain adını Subject Alternative Name olarak içerir. r3v3rs3 sertifikayı süresi dolmadan otomatik yeniler. Bir order başarısız olursa r3v3rs3 bir saat sonra yeniden order oluşturur.
+Bir ACME kaydı bir veya daha fazla alan adı içerir. Alan adlarını "Alan Adları" alanına virgülle ayırarak yazın, örneğin `example.com, *.example.com`. Sertifika her alan adını Subject Alternative Name olarak içerir. r3v3rs3 sertifikayı süresi dolmadan otomatik yeniler. Bir order başarısız olursa r3v3rs3 bir saat sonra yeniden order oluşturur.
 
 ## Challenge'lar
 
-Sertifika otoritesi, her domain adını sizin yönettiğinizi bir challenge ile doğrular. Challenge'ı "Challenge" alanından seçin.
+Sertifika otoritesi, her alan adını sizin yönettiğinizi bir challenge ile doğrular. Challenge'ı "Challenge" alanından seçin.
 
 | Challenge | Nasıl çalışır | Gereksinimler |
 |---|---|---|
-| HTTP-01 | Sertifika otoritesi `http://<domain>/.well-known/acme-challenge/<token>` adresine istek gönderir ve r3v3rs3 yanıt verir. | Her domain adı r3v3rs3'e çözümlenmeli, TCP 80 portu açık ve internetten erişilebilir olmalıdır. Wildcard domain adı kullanılamaz. |
-| TLS-ALPN-01 | Sertifika otoritesi, domain adının 443 portuna `acme-tls/1` ALPN protokolüyle bir TLS bağlantısı açar ve r3v3rs3 bir challenge sertifikasıyla yanıt verir. | Her domain adı r3v3rs3'e çözümlenmeli, TCP 443 portu açık ve internetten erişilebilir olmalıdır. Wildcard domain adı kullanılamaz. |
-| DNS-01 | r3v3rs3, DNS provider'ınızın API'si ile `_acme-challenge.<domain>` TXT kaydını oluşturur. | Aşağıdaki tablodaki DNS provider'larından biri ve zone'u düzenleyebilen bir API credential'ı. |
+| HTTP-01 | Sertifika otoritesi `http://<domain>/.well-known/acme-challenge/<token>` adresine istek gönderir ve r3v3rs3 yanıt verir. | Her alan adı r3v3rs3'e çözümlenmeli, TCP 80 portu açık ve internetten erişilebilir olmalıdır. Wildcard alan adı kullanılamaz. |
+| TLS-ALPN-01 | Sertifika otoritesi, alan adının 443 portuna `acme-tls/1` ALPN protokolüyle bir TLS bağlantısı açar ve r3v3rs3 bir challenge sertifikasıyla yanıt verir. | Her alan adı r3v3rs3'e çözümlenmeli, TCP 443 portu açık ve internetten erişilebilir olmalıdır. Wildcard alan adı kullanılamaz. |
+| DNS-01 | r3v3rs3, DNS sağlayıcınızın API'si ile `_acme-challenge.<domain>` TXT kaydını oluşturur. | Aşağıdaki tablodaki DNS sağlayıcılarından biri ve zone'u düzenleyebilen bir API kimlik bilgisi. |
 
-`*.example.com` gibi bir wildcard domain adı DNS-01 gerektirir. r3v3rs3, HTTP-01 veya TLS-ALPN-01 ile girilen wildcard domain adını reddeder.
+`*.example.com` gibi bir wildcard alan adı DNS-01 gerektirir. r3v3rs3, HTTP-01 veya TLS-ALPN-01 ile girilen wildcard alan adını reddeder.
 
-TLS-ALPN-01 challenge'ı sürerken her TLS portu ve her HTTPS portu, yalnız `acme-tls/1` sunan bir client'a challenge sertifikasıyla yanıt verir. Diğer client'lar portun sertifikasını alır. TLS portu, challenge bağlantısı için upstream sunucusuna bağlanmaz. Hiçbir TCP veya HTTP portu "TLS-ALPN Challenge Adresi" ayarındaki portu kullanmıyorsa r3v3rs3, challenge'lar bitene kadar bu adresi dinler. 443 portundaki TLS'siz bir HTTP portu challenge'a yanıt veremez.
+TLS-ALPN-01 challenge'ı sürerken her TLS portu ve her HTTPS portu, yalnız `acme-tls/1` sunan bir istemciye challenge sertifikasıyla yanıt verir. Diğer istemciler portun sertifikasını alır. TLS portu, challenge bağlantısı için upstream sunucusuna bağlanmaz. Hiçbir TCP veya HTTP portu "TLS-ALPN Challenge Adresi" ayarındaki portu kullanmıyorsa r3v3rs3, challenge'lar bitene kadar bu adresi dinler. 443 portundaki TLS'siz bir HTTP portu challenge'a yanıt veremez.
 
 ## DNS-01
 
-r3v3rs3 her domain adı için şu adımları uygular:
+r3v3rs3 her alan adı için şu adımları uygular:
 
-1. Provider API'si ile domain adının zone'unu bulur. Adı içeren en uzun zone kullanılır.
-2. `_acme-challenge.<domain>` TXT kaydını 60 saniyelik TTL ile oluşturur. Linode'da TTL, Linode'un kabul ettiği en düşük değer olan 300 saniyedir. Porkbun'a TTL gönderilmez, bu yüzden kayıt hesabın en düşük TTL değerini alır. Gandi'de TTL, Gandi'nin kabul ettiği en düşük değer olan 300 saniyedir. deSEC'te TTL 3600 saniyedir, çünkü deSEC domain'in minimum TTL değerinden düşük bir TTL'i reddeder. Gandi, deSEC, Azure DNS ve Google Cloud DNS bir adın bütün kayıt kümesini yazar. Bu yüzden r3v3rs3 kendi değerlerini mevcut TXT değerlerine ekler ve yalnız kendi değerlerini siler. `*.example.com` için kayıt adı `example.com` ile aynıdır: `_acme-challenge.example.com`. Bu yüzden kayıt iki değer taşır.
-3. TXT değerleri görünene kadar DNS'i 5 saniyede bir sorgular, en fazla 5 dakika bekler. Sorgulanan DNS sunucusunu "DNS Challenge Resolver" ayarı belirler. Ayar boşsa r3v3rs3 sistem resolver'ını kullanır.
+1. Sağlayıcının API'si ile alan adının zone'unu bulur. Adı içeren en uzun zone kullanılır.
+2. `_acme-challenge.<domain>` TXT kaydını 60 saniyelik TTL ile oluşturur. Linode'da TTL, Linode'un kabul ettiği en düşük değer olan 300 saniyedir. Porkbun'a TTL gönderilmez, bu yüzden kayıt hesabın en düşük TTL değerini alır. Gandi'de TTL, Gandi'nin kabul ettiği en düşük değer olan 300 saniyedir. deSEC'te TTL 3600 saniyedir, çünkü deSEC alan adının minimum TTL değerinden düşük bir TTL'i reddeder. Gandi, deSEC, Azure DNS ve Google Cloud DNS bir adın bütün kayıt kümesini yazar. Bu yüzden r3v3rs3 kendi değerlerini mevcut TXT değerlerine ekler ve yalnız kendi değerlerini siler. `*.example.com` için kayıt adı `example.com` ile aynıdır: `_acme-challenge.example.com`. Bu yüzden kayıt iki değer taşır.
+3. TXT değerleri görünene kadar DNS'i 5 saniyede bir sorgular, en fazla 5 dakika bekler. Sorgulanan DNS sunucusunu "DNS Challenge Çözümleyicisi" ayarı belirler. Ayar boşsa r3v3rs3 sistemin çözümleyicisini kullanır.
 4. Sertifika otoritesine challenge'ların hazır olduğunu bildirir ve doğrulama için en fazla 3 dakika bekler.
 5. TXT kayıtlarını siler. Order başarısız olsa da kayıtları siler.
 
-Sistem resolver'ı cache'teki eski yanıtları döndürebilir. Propagation kontrolü sık başarısız oluyorsa "DNS Challenge Resolver" ayarına `1.1.1.1:53` gibi public bir resolver veya zone'un authoritative name server'ını yazın.
+Sistemin çözümleyicisi cache'teki eski yanıtları döndürebilir. Yayılma kontrolü sık başarısız oluyorsa "DNS Challenge Çözümleyicisi" ayarına `1.1.1.1:53` gibi herkese açık bir çözümleyici veya zone'un yetkili (authoritative) DNS sunucusunu yazın.
 
-| DNS provider | Credential'lar | Gereken izinler |
+| DNS sağlayıcısı | Kimlik bilgileri | Gereken izinler |
 |---|---|---|
 | Cloudflare | API Token | Zone için `Zone:Read` ve `DNS:Edit`. |
 | Route 53 | Access Key ID, Secret Access Key | `route53:ListHostedZones` ve `route53:ChangeResourceRecordSets`. Private hosted zone'lar atlanır. |
 | Azure DNS | Tenant ID, Client ID, Client Secret, Subscription ID | Zone'larda DNS Zone Contributor rolü olan bir service principal. r3v3rs3, subscription'daki DNS zone'larını listeler ve resource group'u zone ID'sinden alır. |
 | Google Cloud DNS | Service Account Key (JSON), Project ID | Zone'ların projesinde DNS Administrator rolü (`roles/dns.admin`) olan bir service account'un JSON key dosyası. Project ID boşsa r3v3rs3 key'in projesini kullanır. Private zone'lar atlanır. |
 | deSEC | API Token | Hesabın bir token'ı. Policy ile sınırlanmış bir token, `_acme-challenge` TXT kayıt kümelerine yazma izni vermelidir. |
-| DigitalOcean | API Token | Domain'leri okuyabilen, domain kayıtlarını oluşturup silebilen bir token. |
-| Gandi | API Token | Domain'leri okuyabilen ve LiveDNS kayıtlarını değiştirebilen bir personal access token. |
+| DigitalOcean | API Token | Alan adlarını okuyabilen, alan adı kayıtlarını oluşturup silebilen bir token. |
+| Gandi | API Token | Alan adlarını okuyabilen ve LiveDNS kayıtlarını değiştirebilen bir personal access token. |
 | Hetzner Cloud | API Token | Okuma ve yazma yetkisi olan bir Hetzner Cloud proje token'ı. Zone, Hetzner Cloud DNS'te olmalıdır. |
 | Linode | API Token | Domains için okuma ve yazma yetkisi olan bir personal access token. |
 | Vultr | API Key | Hesabın API key'i. |
-| Porkbun | API Key, Secret API Key | Porkbun domain yönetiminde domain için "API Access" açık olmalıdır. |
-| OVHcloud | API Endpoint, Application Key, Application Secret, Consumer Key | `GET /domain/zone`, `POST /domain/zone/*` ve `DELETE /domain/zone/*` yetkileri olan bir consumer key. Endpoint `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` veya `soyoustart-ca` olabilir. r3v3rs3, kayıtları oluşturduktan sonra ve sildikten sonra zone'u refresh eder. |
+| Porkbun | API Key, Secret API Key | Porkbun alan adı yönetiminde alan adı için "API Access" açık olmalıdır. |
+| OVHcloud | API Endpoint, Application Key, Application Secret, Consumer Key | `GET /domain/zone`, `POST /domain/zone/*` ve `DELETE /domain/zone/*` yetkileri olan bir consumer key. Endpoint `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` veya `soyoustart-ca` olabilir. r3v3rs3, kayıtları oluşturduktan sonra ve sildikten sonra zone'u yeniler. |
 | Webhook | Webhook URL, Bearer Token | TXT kayıtlarını oluşturan ve silen kendi servisiniz. Aşağıdaki "DNS webhook" bölümüne bakın. |
 | Exec | Program Yolu | r3v3rs3 host'unda TXT kayıtlarını oluşturan ve silen bir program. Aşağıdaki "DNS exec" bölümüne bakın. |
-| RFC 2136 | DNS Sunucusu, Zone, TSIG Key Adı, TSIG Algoritması, TSIG Secret | Dynamic update kabul eden bir DNS sunucusu, örneğin BIND, Knot DNS veya PowerDNS. Aşağıdaki "RFC 2136" bölümüne bakın. |
+| RFC 2136 | DNS Sunucusu, Zone, TSIG Key Adı, TSIG Algoritması, TSIG Secret | Dinamik güncelleme (dynamic update) kabul eden bir DNS sunucusu, örneğin BIND, Knot DNS veya PowerDNS. Aşağıdaki "RFC 2136" bölümüne bakın. |
 
-r3v3rs3 bu API'lerin mock sunucularıyla ve [Pebble](https://github.com/letsencrypt/pebble) test sertifika otoritesiyle test edilir. Gerçek provider hesaplarıyla test edilmez.
+r3v3rs3 bu API'lerin mock sunucularıyla ve [Pebble](https://github.com/letsencrypt/pebble) test sertifika otoritesiyle test edilir. Gerçek sağlayıcı hesaplarıyla test edilmez.
 
 ## DNS webhook
 
-Webhook provider'ı TXT kayıtlarını bir DNS hosting servisinin API'si yerine kendi servisinize gönderir. r3v3rs3 her challenge adı için webhook URL'ine bu JSON body ile bir `POST` isteği gönderir:
+Webhook sağlayıcısı TXT kayıtlarını bir DNS barındırma servisinin API'si yerine kendi servisinize gönderir. r3v3rs3 her challenge adı için webhook URL'ine bu JSON gövdesiyle bir `POST` isteği gönderir:
 
 ```json
 {"action": "add", "fqdn": "_acme-challenge.example.com", "values": ["<TXT değeri>"]}
@@ -919,23 +919,23 @@ Webhook provider'ı TXT kayıtlarını bir DNS hosting servisinin API'si yerine 
 - `fqdn`, sondaki nokta olmadan TXT kaydının adıdır. `values`, adın bütün TXT değerlerini taşır.
 - Servis, adın diğer TXT değerlerini korumalıdır.
 - Bearer token varsa istek `Authorization: Bearer <token>` header'ını taşır.
-- 2xx status başarı sayılır. r3v3rs3 yanıt için en fazla 30 saniye bekler.
+- 2xx durum kodu başarı sayılır. r3v3rs3 yanıt için en fazla 30 saniye bekler.
 
 Webhook URL'i HTTPS kullanmalıdır. HTTP yalnız loopback adresinde kullanılabilir, örneğin `http://127.0.0.1:8080/acme`.
 
 ## DNS exec
 
-Exec provider'ı her TXT değeri için r3v3rs3 host'unda bir program çalıştırır:
+Exec sağlayıcısı her TXT değeri için r3v3rs3 host'unda bir program çalıştırır:
 
 ```
 <program> add <fqdn> <değer>
 <program> remove <fqdn> <değer>
 ```
 
-- r3v3rs3 programı shell kullanmadan doğrudan başlatır. Program boş bir environment alır ve standart girdi almaz.
+- r3v3rs3 programı shell kullanmadan doğrudan başlatır. Program hiçbir ortam değişkeni almaz ve standart girdi almaz.
 - `fqdn`, sondaki nokta olmadan TXT kaydının adıdır.
 - Program, adın diğer TXT değerlerini korumalıdır.
-- Exit status 0 başarı sayılır. Diğer her exit status başarısızlıktır ve hata mesajı standart hata çıktısının başını taşır.
+- Çıkış kodu 0 başarı sayılır. Diğer her çıkış kodu başarısızlıktır ve hata mesajı standart hata çıktısının başını taşır.
 - Bir `add` çağrısı başarısız olursa r3v3rs3, adın eklediği değerleri ve başarısız değer için `remove` çalıştırır.
 - Timeout dolunca r3v3rs3 programı durdurur ve çağrı başarısız olur.
 
@@ -948,16 +948,16 @@ timeout = "30s"
 ```
 
 - Bu bölümü yalnız dosya belirler. Admin API ve WebUI bu bölümü değiştiremez. Bölümü düzenledikten sonra r3v3rs3'ü yeniden başlatın.
-- Provider'ın programı ve `programs` listesindeki her giriş mutlak yol olmalıdır. r3v3rs3 sembolik link'leri çözer ve çözülen yolları karşılaştırır.
+- Sağlayıcının programı ve `programs` listesindeki her giriş mutlak yol olmalıdır. r3v3rs3 sembolik link'leri çözer ve çözülen yolları karşılaştırır.
 - r3v3rs3 programı ACME girişini eklediğinizde ve her çalıştırmadan önce kontrol eder.
 - `timeout`, tek bir çağrının en uzun çalışma süresidir. Varsayılan değer `30s`.
 
 ## RFC 2136
 
-RFC 2136 provider'ı, zone'un primary DNS sunucusuna dynamic update gönderir. Her mesaj bir TSIG imzası taşır.
+RFC 2136 sağlayıcısı, zone'un birincil (primary) DNS sunucusuna dinamik güncelleme (dynamic update) gönderir. Her mesaj bir TSIG imzası taşır.
 
-- **DNS Sunucusu**, primary sunucunun `host:port` biçimindeki adresidir, örneğin `ns1.example.com:53`. r3v3rs3 mesajları TCP üstünden gönderir.
-- **Zone**, adların zone'udur, örneğin `example.com`. Boş olursa r3v3rs3 her TXT adı için sunucudan SOA kaydını ister ve bu kaydın owner adını kullanır.
+- **DNS Sunucusu**, birincil sunucunun `host:port` biçimindeki adresidir, örneğin `ns1.example.com:53`. r3v3rs3 mesajları TCP üstünden gönderir.
+- **Zone**, adların zone'udur, örneğin `example.com`. Boş olursa r3v3rs3 her TXT adı için sunucudan SOA kaydını ister ve bu kaydın sahibi olan adı (owner name) kullanır.
 - **TSIG Key Adı**, **TSIG Algoritması** ve **TSIG Secret**, sunucudaki key ile aynı olmalıdır. Algoritma `hmac-sha256`, `hmac-sha384` veya `hmac-sha512` olabilir. Secret base64 biçimindedir.
 - Tek bir update, bir adın bütün TXT değerlerini ekler. Doğrulamadan sonra ikinci bir update yalnız bu değerleri siler. Adın diğer TXT değerleri kalır.
 - r3v3rs3 her yanıtın TSIG imzasını doğrular. r3v3rs3 ile sunucunun saatleri arasındaki fark en fazla 300 saniye olabilir.
@@ -983,7 +983,7 @@ Her challenge adı için bir `grant` kuralı ekleyin. `*.example.com` sertifikas
 
 ## Saklanan veriler
 
-r3v3rs3, ACME kayıtlarını config dizinindeki `acme.toml` dosyasında saklar. Dosya, her ACME hesabının private key'ini ve DNS provider credential'larını düz metin olarak içerir. Unix'te r3v3rs3 dosyayı `0600` izniyle oluşturur ve yazar. Böylece dosyayı yalnız process'in sahibi okuyabilir. Yönetim API'si ve WebUI credential'ları hiçbir zaman döndürmez. ACME listesi yalnız provider adını gösterir, örneğin `Let's Encrypt (DNS-01, Cloudflare)`.
+r3v3rs3, ACME kayıtlarını yapılandırma dizinindeki `acme.toml` dosyasında saklar. Dosya, her ACME hesabının private key'ini ve DNS sağlayıcısının kimlik bilgilerini düz metin olarak içerir. Unix'te r3v3rs3 dosyayı `0600` izniyle oluşturur ve yazar. Böylece dosyayı yalnız sürecin sahibi okuyabilir. Yönetim API'si ve WebUI kimlik bilgilerini hiçbir zaman döndürmez. ACME listesi yalnız sağlayıcının adını gösterir, örneğin `Let's Encrypt (DNS-01, Cloudflare)`.
 
 ACME kayıtlarını WebUI'dan oluşturun. r3v3rs3, ACME hesabını kayıt eklendiğinde oluşturur. `acme.toml` içindeki bir kayıt şöyle görünür:
 
@@ -1014,16 +1014,16 @@ WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütü
 
 | Ayar | Varsayılan | Açıklama |
 |---|---|---|
-| Session Süresi | `1h` | Yönetim paneli session'ının geçerlilik süresi. En az 5 dakika olabilir. |
-| Maksimum Giriş Denemesi | `10` | Her client IP adresi ve kullanıcı adı için izin verilen başarısız giriş sayısı. |
+| Oturum Süresi | `1h` | Yönetim paneli oturumunun geçerlilik süresi. En az 5 dakika olabilir. |
+| Maksimum Giriş Denemesi | `10` | Her istemci IP adresi ve kullanıcı adı için izin verilen başarısız giriş sayısı. |
 | Giriş Denemesi Sıfırlama Süresi | `15m` | Limite ulaşıldıktan sonraki bekleme süresi. |
 | Arka Plan Görevi Aralığı | `1h` | Sertifika yenileme ve log temizleme görevlerinin çalışma aralığı. |
 | HTTP Challenge Adresi | `0.0.0.0:80` | ACME HTTP challenge'larının dinlendiği adres. |
 | TLS-ALPN Challenge Adresi | `0.0.0.0:443` | Hiçbir port bu portu kullanmıyorsa ACME TLS-ALPN-01 challenge'larının dinlendiği adres. |
-| DNS Challenge Resolver | boş | r3v3rs3'ün DNS-01 challenge'ının TXT kayıtları görünene kadar sorguladığı DNS sunucusu, örneğin `1.1.1.1:53`. Boş bırakılırsa sistem resolver'ı kullanılır. |
-| Upstream DNS Resolver | boş | `http+srv` ve `https+srv` sunucu URL'lerinin SRV sorgularını yanıtlayan DNS sunucusu, örneğin Consul için `127.0.0.1:8600`. Boş bırakılırsa sistem resolver'ı kullanılır. Ayrıntılar için [DNS SRV sunucuları](#dns-srv-sunuculari) bölümüne bakın. |
+| DNS Challenge Çözümleyicisi | boş | r3v3rs3'ün DNS-01 challenge'ının TXT kayıtları görünene kadar sorguladığı DNS sunucusu, örneğin `1.1.1.1:53`. Boş bırakılırsa sistemin çözümleyicisi kullanılır. |
+| Upstream DNS Çözümleyicisi | boş | `http+srv` ve `https+srv` sunucu URL'lerinin SRV sorgularını yanıtlayan DNS sunucusu, örneğin Consul için `127.0.0.1:8600`. Boş bırakılırsa sistemin çözümleyicisi kullanılır. Ayrıntılar için [DNS SRV sunucuları](#dns-srv-sunuculari) bölümüne bakın. |
 | Veritabanı Log Saklama Süresi | `3months` | Log'ların log veritabanında ne kadar tutulacağı. |
-| Audit Log Saklama Süresi | `1year` | Audit log'daki bir kaydın ne kadar tutulacağı. Ayrıntılar için [Audit log](#audit-log) bölümüne bakın. |
+| Denetim Kaydı Saklama Süresi | `1year` | Denetim kaydındaki bir girdinin ne kadar tutulacağı. Ayrıntılar için [Denetim kaydı](#denetim-kaydi) bölümüne bakın. |
 | Sertifika Süre Uyarısı | `14days` | Sertifika listesi bu süre içinde sona erecek sertifikayı işaretler. Webhook bu sertifika için bildirim alır. Ayrıntılar için [Bildirimler](#bildirimler) bölümüne bakın. |
 | Webhook URL | boş | Bildirim webhook'u. Boşsa bildirim gönderilmez. |
 | Webhook Token | boş | Webhook isteklerinin bearer token'ı. Admin API bu değeri döndürmez. |
@@ -1031,31 +1031,31 @@ WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütü
 
 Süreleri `30s`, `15m`, `1h` veya `7days` gibi okunabilir bir biçimde yazın.
 
-# Config dosyaları
+# Yapılandırma dosyaları
 
-r3v3rs3 config'ini `$XDG_CONFIG_HOME/r3v3rs3` veya `$HOME/.config/r3v3rs3` dizinindeki TOML dosyalarında saklar.
+r3v3rs3 yapılandırmasını `$XDG_CONFIG_HOME/r3v3rs3` veya `$HOME/.config/r3v3rs3` dizinindeki TOML dosyalarında saklar.
 
-Varsayılan konumu `R3V3RS3_CONFIG_DIR` environment variable'ı veya `--config-dir` komut satırı seçeneğiyle değiştirebilirsiniz.
+Varsayılan konumu `R3V3RS3_CONFIG_DIR` ortam değişkeni veya `--config-dir` komut satırı seçeneğiyle değiştirebilirsiniz.
 
-Bu dosyaları elle de düzenleyebilirsiniz. Ancak r3v3rs3 config dosyalarındaki değişiklikleri kendiliğinden algılamaz. Değişikliklerin geçerli olması için dosyayı düzenledikten sonra sunucuyu yeniden başlatın.
+Bu dosyaları elle de düzenleyebilirsiniz. Ancak r3v3rs3 yapılandırma dosyalarındaki değişiklikleri kendiliğinden algılamaz. Değişikliklerin geçerli olması için dosyayı düzenledikten sonra sunucuyu yeniden başlatın.
 
-Cluster'daki bir node yalnız `config.toml` dosyasını okur. State'in geri kalanı etcd veya Consul'dadır. Ayrıntılar için [Cluster](@/cluster.tr.md) sayfasına bakın.
+Cluster'daki bir düğüm yalnız `config.toml` dosyasını okur. Düğümün diğer verileri etcd veya Consul'dadır. Ayrıntılar için [Cluster](@/cluster.tr.md) sayfasına bakın.
 
 # WebUI
 
-r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak localhost:46492 adresinde çalışır. Portu `R3V3RS3_WEBUI` environment variable'ı veya `--webui` komut satırı seçeneğiyle değiştirebilirsiniz. WebUI'ı kapatmak için `R3V3RS3_NO_WEBUI=1` environment variable'ını ayarlayın veya `--no-webui` komut satırı seçeneğini kullanın.
+r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak localhost:46492 adresinde çalışır. Portu `R3V3RS3_WEBUI` ortam değişkeni veya `--webui` komut satırı seçeneğiyle değiştirebilirsiniz. WebUI'ı kapatmak için `R3V3RS3_NO_WEBUI=1` ortam değişkenini ayarlayın veya `--no-webui` komut satırı seçeneğini kullanın.
 
-WebUI menüsü soldaki sidebar'dadır ve üç gruptan oluşur:
+WebUI menüsü soldaki kenar çubuğundadır ve üç gruptan oluşur:
 
 - **Proxy**: **Portlar**, **Proxy'ler**, **Erişim Listeleri** ve **Sertifikalar**.
 - **Platform**: **Uygulamalar**, yani [deploy platformu](@/platform.tr.md). Bu grubu yalnız proxy listesi olmayan hesap görür.
-- **Yönetim**: **Hesaplar**, **Audit Log** ve **Ayarlar**. Bu grubu yalnız admin hesabı görür.
+- **Yönetim**: **Hesaplar**, **Denetim Kaydı** ve **Ayarlar**. Bu grubu yalnız admin hesabı görür.
 
-Navbar logoyu, dil menüsünü, tema menüsünü ve **Çıkış Yap** butonunu içerir. Dar bir ekranda sidebar ve **Çıkış Yap** yerine navbar'da **Menü** butonu görünür. Bu buton aynı menüyü açar ve menünün sonunda **Çıkış Yap** bulunur.
+Üst çubuk logoyu, dil menüsünü, tema menüsünü ve **Çıkış Yap** butonunu içerir. Dar bir ekranda kenar çubuğu ve **Çıkış Yap** yerine üst çubukta **Menü** butonu görünür. Bu buton aynı menüyü açar ve menünün sonunda **Çıkış Yap** bulunur.
 
-WebUI dilini navbar'daki bayrak menüsünden seçebilirsiniz: İngilizce veya Türkçe. Tema menüsünde Sistem, Açık ve Koyu seçenekleri bulunur. WebUI bu seçimleri `r3v3rs3_lang` ve `r3v3rs3_theme` cookie'lerinde saklar. Bu cookie'ler yoksa WebUI İngilizce ve sistem temasıyla açılır.
+WebUI dilini üst çubuktaki bayrak menüsünden seçebilirsiniz: İngilizce veya Türkçe. Tema menüsünde Sistem, Açık ve Koyu seçenekleri bulunur. WebUI bu seçimleri `r3v3rs3_lang` ve `r3v3rs3_theme` cookie'lerinde saklar. Bu cookie'ler yoksa WebUI İngilizce ve sistem temasıyla açılır.
 
-r3v3rs3'ün hata sayfaları ve Panel Session giriş sayfası da bu cookie'lere bakar. Ancak tarayıcı bu cookie'leri yalnız WebUI'ın host'una gönderir. Bu yüzden başka bir host'taki proxy'nin sayfaları İngilizce ve sistem temasıyla açılır.
+r3v3rs3'ün hata sayfaları ve Panel Oturumu giriş sayfası da bu cookie'lere bakar. Ancak tarayıcı bu cookie'leri yalnız WebUI'ın host'una gönderir. Bu yüzden başka bir host'taki proxy'nin sayfaları İngilizce ve sistem temasıyla açılır.
 
 # Yönetim API'si
 
@@ -1064,9 +1064,9 @@ WebUI, `/api` altındaki yönetim API'sini kullanır. r3v3rs3 bu API'nin OpenAPI
 - OpenAPI dokümanı: `http://localhost:46492/api/openapi.json`
 - Swagger UI: `http://localhost:46492/api/docs/`
 
-İki adres de session ister. Önce WebUI'a giriş yapın, sonra adresleri aynı tarayıcıda açın. WebUI footer'ındaki API linki de Swagger UI'ı açar.
+İki adres de oturum ister. Önce WebUI'a giriş yapın, sonra adresleri aynı tarayıcıda açın. WebUI'ın alt bilgisindeki API linki de Swagger UI'ı açar.
 
-Bir script, `POST /api/login` ile giriş yapar ve cevaptaki `token` cookie'sini sonraki request'lerle gönderir:
+Bir script, `POST /api/login` ile giriş yapar ve yanıttaki `token` cookie'sini sonraki isteklerle gönderir:
 
 ```bash
 $ curl -c cookies.txt -H 'Content-Type: application/json' \
@@ -1077,21 +1077,21 @@ $ curl -b cookies.txt http://localhost:46492/api/ports
 
 `"insecure": true` değeri cookie'den `Secure` özelliğini kaldırır. Yönetim paneli düz HTTP kullanıyorsa bu değeri gönderin.
 
-# Audit log
+# Denetim kaydı
 
 r3v3rs3, bir hesabın WebUI veya yönetim API'si ile yaptığı değişiklikleri kaydeder: portlar, proxy'ler, erişim listeleri, sertifikalar, ACME kayıtları, ayarlar, CDN IP aralığı yenilemeleri ve hesaplar. Yönetim paneline her giriş, her başarısız giriş denemesi ve her çıkış da kaydedilir. r3v3rs3'ün kendi yaptığı değişiklikler kaydedilmez. Sertifika yenileme ve keşfedilen proxy'ler buna örnektir.
 
-Her kayıtta zaman, hesap, client IP adresi, işlem, değişen kaynağın id'si ve kısa bir özet bulunur. Özet isimleri, adresleri ve rolleri içerir. Parola, token veya key içermez.
+Her kayıtta zaman, hesap, istemci IP adresi, işlem, değişen kaynağın id'si ve kısa bir özet bulunur. Özet isimleri, adresleri ve rolleri içerir. Parola, token veya key içermez.
 
-Tek sunucu audit log'u log dizinindeki `log.db` dosyasının `audit_log` tablosunda tutar. Cluster audit log'u cluster store'da şifreli tutar. Böylece her node bütün node'ların kayıtlarını okur. Cluster'daki bir kayıt, onu yazan node'un adını da içerir.
+Tek sunucu denetim kaydını log dizinindeki `log.db` dosyasının `audit_log` tablosunda tutar. Cluster denetim kaydını cluster veri deposunda şifreli tutar. Böylece her düğüm bütün düğümlerin kayıtlarını okur. Cluster'daki bir kayıt, onu yazan düğümün adını da içerir.
 
-Bir kaydın ne kadar tutulacağını "Audit Log Saklama Süresi" ayarı belirler. Varsayılan değer `1year` olur. Cluster bir günün kayıtlarını birlikte siler. Silme, o gün saklama süresini geçtikten sonra yapılır.
+Bir kaydın ne kadar tutulacağını "Denetim Kaydı Saklama Süresi" ayarı belirler. Varsayılan değer `1year` olur. Cluster bir günün kayıtlarını birlikte siler. Silme, o gün saklama süresini geçtikten sonra yapılır.
 
-Audit log'a yazma başarısız olursa değişiklik geri alınmaz. r3v3rs3 hatayı log'a yazar.
+Denetim kaydına yazma başarısız olursa değişiklik geri alınmaz. r3v3rs3 hatayı log'a yazar.
 
-WebUI'daki Audit Log sayfası kayıtları en yeni kayıttan başlayarak listeler. Bu sayfayı yalnız admin hesabı açar. Sayfa kayıtları hesaba, kaynağa ve döneme göre filtreler. Sayfada en fazla 500 kayıt görünür.
+WebUI'daki Denetim Kaydı sayfası kayıtları en yeni kayıttan başlayarak listeler. Bu sayfayı yalnız admin hesabı açar. Sayfa kayıtları hesaba, kaynağa ve döneme göre filtreler. Sayfada en fazla 500 kayıt görünür.
 
-`GET /api/audit` aynı kayıtları döner. Bu endpoint'i yalnız admin hesabı çağırabilir. Query parametrelerinin hepsi isteğe bağlıdır:
+`GET /api/audit` aynı kayıtları döner. Bu endpoint'i yalnız admin hesabı çağırabilir. Sorgu parametrelerinin hepsi isteğe bağlıdır:
 
 | Parametre | Açıklama |
 |---|---|
@@ -1105,10 +1105,10 @@ Cluster, `until` değerinden en fazla 31 gün geriye okur. Bu yüzden daha uzun 
 
 # Log
 
-r3v3rs3 varsayılan olarak log'ları standart çıktıya yazar. Bunu `R3V3RS3_LOG`, `R3V3RS3_ACCESS_LOG` environment variable'larıyla veya `--log`, `--access-log` komut satırı seçenekleriyle değiştirebilirsiniz.
+r3v3rs3 varsayılan olarak log'ları standart çıktıya yazar. Bunu `R3V3RS3_LOG`, `R3V3RS3_ACCESS_LOG` ortam değişkenleriyle veya `--log`, `--access-log` komut satırı seçenekleriyle değiştirebilirsiniz.
 
 ```bash
 $ r3v3rs3 start --log /var/log/r3v3rs3.log --access-log /var/log/r3v3rs3-access.log
 ```
 
-Log seviyesini değiştirmek için `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` environment variable'larını veya `--log-level`, `--access-log-level` komut satırı seçeneklerini kullanın.
+Log seviyesini değiştirmek için `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` ortam değişkenlerini veya `--log-level`, `--access-log-level` komut satırı seçeneklerini kullanın.

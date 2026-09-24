@@ -1,12 +1,12 @@
 +++
-title = "Load balancing ve health check"
-description = "Trafiği birkaç uygulama sunucusuna dağıtın ve bozulan sunucuyu devre dışı bırakın"
+title = "Yük dengeleme ve sağlık kontrolü"
+description = "İstekleri birkaç uygulama sunucusuna dağıtın ve bozulan sunucuyu devre dışı bırakın"
 weight = 11
 +++
 
-# Load balancing ve health check
+# Yük dengeleme ve sağlık kontrolü
 
-Bu rehber bir uygulamanın üç kopyasını tek bir proxy'nin arkasına koyar. Her kopyaya trafiğin bir payını verirsiniz, bozulan kopyayı r3v3rs3 bulur, her client tek sunucuda kalır ve bir sunucuyu restart olmadan devre dışı bırakırsınız.
+Bu rehber bir uygulamanın üç kopyasını tek bir proxy'nin arkasına koyar. Her kopyaya isteklerin bir payını verirsiniz, bozulan kopyayı r3v3rs3 bulur, her istemci tek sunucuda kalır ve bir sunucuyu yeniden başlatma olmadan devre dışı bırakırsınız.
 
 [Başlangıç](@/tutorials/getting-started.tr.md) rehberindeki bir port ve bir proxy gerekir.
 
@@ -20,44 +20,44 @@ http://10.0.0.2:9000/
 http://10.0.0.3:9000/
 ```
 
-**Load Balancing** alanı proxy'nin policy'sini seçer:
+**Yük Dengeleme** alanı proxy'nin yük dengeleme yöntemini seçer:
 
-| Policy | Ne yapar |
+| Yöntem | Ne yapar |
 |---|---|
 | Round robin | Sunucuları sırayla kullanır. Varsayılan. |
 | Rastgele | Rastgele bir sunucu seçer. |
 | İlk sağlıklı sunucu | İlk sunucuyu kullanır, diğerleri yedektir. |
-| Client IP hash | Her client IP adresini aynı sunucuya gönderir. |
+| İstemci IP hash'i | Her istemci IP adresini aynı sunucuya gönderir. |
 
-HTTP proxy her request için, TCP proxy her bağlantı için, UDP proxy her client session'ı için sunucu seçer. Her HTTP route'unun sunucuları ayrı bir gruptur, yani bir proxy'nin iki route'u farklı sunucu listeleri kullanabilir.
+HTTP proxy her istek için, TCP proxy her bağlantı için, UDP proxy her istemci oturumu için sunucu seçer. Her HTTP route'unun sunucuları ayrı bir gruptur, yani bir proxy'nin iki route'u farklı sunucu listeleri kullanabilir.
 
-## Adım 2: Bir sunucuya daha çok trafik verin
+## Adım 2: Bir sunucuya daha çok istek verin
 
-Bir sunucunun **Weight** değeri 0 ile 65535 arasında bir tam sayıdır, varsayılanı 1'dir. Round robin her sunucuyu weight değeri kadar kullanır ve sıraları döngüye yayar, arka arkaya göndermez.
+Bir sunucunun **Ağırlık** değeri 0 ile 65535 arasında bir tam sayıdır, varsayılanı 1'dir. Round robin her sunucuyu ağırlığı kadar kullanır ve sıraları döngüye yayar, arka arkaya göndermez.
 
-Weight değerleri 1 ve 3 olan iki sunucu şu sırayla cevap verir:
+Ağırlıkları 1 ve 3 olan iki sunucu şu sırayla yanıt verir:
 
 ```
 server-2 server-1 server-2 server-2 server-2 server-1 server-2 server-2
 ```
 
-Her dört request'in üçü weight değeri 3 olan sunucuya gider. Bir makine diğerinden büyükse bunu kullanın.
+Her dört isteğin üçü ağırlığı 3 olan sunucuya gider. Bir makine diğerinden büyükse bunu kullanın.
 
-Rastgele seçeneği sunucuyu weight değeriyle orantılı bir olasılıkla seçer. Client IP hash her sunucuya client adreslerinin weight ile orantılı bir payını verir. İlk sağlıklı sunucu seçeneği weight değerini yok sayar.
+Rastgele seçeneği sunucuyu ağırlığıyla orantılı bir olasılıkla seçer. İstemci IP hash'i her sunucuya istemci adreslerinin ağırlığıyla orantılı bir payını verir. İlk sağlıklı sunucu seçeneği ağırlığı yok sayar.
 
 ## Adım 3: Bozulan sunucuyu bulun
 
-Aktif health check kapalıyken r3v3rs3 bir hatayı yalnız trafikten öğrenir. Art arda **Maksimum Hata Sayısı** kadar hata (varsayılan 1) alan sunucu, **Sağlıksız Kalma Süresi** boyunca (varsayılan 30 saniye) sağlıksız sayılır. Hata, kurulamayan bir bağlantı veya response gelmeyen bir request'tir. 500 response'u başarı sayılır, çünkü sunucu cevap vermiştir.
+Aktif sağlık kontrolü kapalıyken r3v3rs3 bir hatayı yalnız gelen isteklerden öğrenir. Art arda **Maksimum Hata Sayısı** kadar hata (varsayılan 1) alan sunucu, **Sağlıksız Kalma Süresi** boyunca (varsayılan 30 saniye) sağlıksız sayılır. Hata, kurulamayan bir bağlantı veya yanıtı gelmeyen bir istektir. 500 yanıtı başarı sayılır, çünkü sunucu yanıt vermiştir.
 
 Ayakta olan ama bozuk çalışan bir sunucuyu bulmak için aktif kontrolü açın:
 
 1. **Kontrol Aralığı (Saniye)** değerini `2` yapın.
-2. **Health Check Path** alanına `/health` yazın.
+2. **Sağlık Kontrolü Yolu** alanına `/health` yazın.
 3. **Kontrol Timeout'u (Saniye)** değerini `5` bırakın.
 
-r3v3rs3 her aralıkta her sunucuya `GET /health` gönderir. 2xx veya 3xx status kontrolü geçer. Path boşsa HTTP proxy ve TCP proxy bir TCP bağlantısı açar, UDP proxy sunucunun host adını çözer.
+r3v3rs3 her aralıkta her sunucuya `GET /health` gönderir. 2xx veya 3xx durum kodu kontrolü geçer. Yol boşsa HTTP proxy ve TCP proxy bir TCP bağlantısı açar, UDP proxy sunucunun host adını çözümler.
 
-Sonucu status API'sinden sorun:
+Sonucu durum API'sinden sorun:
 
 ```bash
 $ curl -s -b cookies.txt http://127.0.0.1:46492/api/proxies/<proxy-id>/status
@@ -75,80 +75,80 @@ $ curl -s -b cookies.txt http://127.0.0.1:46492/api/proxies/<proxy-id>/status
 }
 ```
 
-O andan sonra her request iki sağlıklı sunucuya gider. Sunucu ancak bir kontrolü geçince geri döner. Başarılı bir request bu durumu bitirmez, yalnız geçen bir kontrol bitirir.
+O andan sonra her istek iki sağlıklı sunucuya gider. Sunucu ancak bir kontrolü geçince geri döner. Başarılı bir istek bu durumu bitirmez, yalnız geçen bir kontrol bitirir.
 
 WebUI'daki proxy listesi `2/3 sağlıklı` yazar ve sağlıksız sunucuyu sayının başlığında gösterir. Liste 10 saniyede bir yenilenir.
 
-Bütün sunucular sağlıksızsa r3v3rs3 trafiği yine onlara gönderir. Kendiliğinden 503 dönmez.
+Bütün sunucular sağlıksızsa r3v3rs3 istekleri yine onlara gönderir. Kendiliğinden 503 dönmez.
 
-## Adım 4: Başarısız request'i tekrar gönderin
+## Adım 4: Başarısız isteği yeniden deneyin
 
-**Deneme Sayısı** (varsayılan 2), ilk deneme dahil bir request'in kaç kez denendiğidir. **Retry Koşulları** hangi hataların retry başlattığını belirler:
+**Deneme Sayısı** (varsayılan 2), ilk deneme dahil bir isteğin kaç kez denendiğidir. **Yeniden Deneme Koşulları** hangi hataların yeniden denemeyi başlattığını belirler:
 
-- Kurulamayan bağlantı: bağlantı kurulamaz veya connect timeout dolar. Sunucu hiçbir şey almadığı için her method tekrar denenir.
-- Request timeout, 502, 503, 504: yalnız idempotent method'lar (`GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`, `DELETE`) tekrar denenir.
+- Kurulamayan bağlantı: bağlantı kurulamaz veya bağlantı timeout'u dolar. Sunucu hiçbir şey almadığı için her method yeniden denenir.
+- İstek timeout'u, 502, 503, 504: yalnız idempotent method'lar (`GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`, `DELETE`) yeniden denenir.
 
-Retry sıradaki sunucuya gider ve circuit'i açık olan sunucuyu atlar. Üç deneme ve listede ölü bir sunucu varken her client yine 200 alır, status API'si o sunucunun hatalarını sayar:
+Yeniden deneme sıradaki sunucuya gider ve circuit'i açık olan sunucuyu atlar. Üç deneme ve listede ölü bir sunucu varken her istemci yine 200 alır, durum API'si o sunucunun hatalarını sayar:
 
 ```json
 { "url": "http://10.0.0.9:9000/", "healthy": false, "failures": 1, "last_error": "client error (Connect)" }
 ```
 
-Body'si olan bir request yalnız body uzunluğu biliniyorsa ve **Replay Body Limiti (Byte)** değerinden küçükse (varsayılan 0) tekrar denenir. r3v3rs3 böyle bir body'yi memory'de tutar. WebSocket ve diğer upgrade request'leri hiç tekrar denenmez. Bir route **Bu Route için Ayrı Retry Ayarları Kullan** seçeneğiyle kendi ayarlarını kullanabilir.
+Gövdesi olan bir istek yalnız gövde uzunluğu biliniyorsa ve **Yeniden Gönderim Gövde Limiti (Byte)** değerini aşmıyorsa (varsayılan 0) yeniden denenir. r3v3rs3 böyle bir gövdeyi bellekte tutar. WebSocket ve diğer upgrade istekleri hiç yeniden denenmez. Bir route **Bu Route için Ayrı Yeniden Deneme Ayarları Kullan** seçeneğiyle kendi ayarlarını kullanabilir.
 
-## Adım 5: Client'ı tek sunucuda tutun
+## Adım 5: İstemciyi tek sunucuda tutun
 
-Session'ı tek bir sunucunun memory'sinde tutan uygulama sticky session ister.
+Oturumu tek bir sunucunun belleğinde tutan uygulama sticky session ister.
 
 1. Route'ta **Sticky Cookie'yi Aç** seçeneğini işaretleyin.
 2. **Cookie Adı** alanına `app_server` yazın.
 3. **Cookie Max-Age (Saniye)** değerini `3600` yapın.
 
-İlk response cookie'yi yazar:
+İlk yanıt cookie'yi yazar:
 
 ```
 set-cookie: app_server=1f8a...; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600
 ```
 
-Bu cookie'yi taşıyan sonraki her request aynı sunucuya gider. Değer; proxy, route ve sunucu URL'inin HMAC imzasıdır, bu yüzden client sahte bir değerle sunucu seçemez. r3v3rs3 cookie'yi request'ten çıkarır, upstream sunucu onu hiç görmez.
+Bu cookie'yi taşıyan sonraki her istek aynı sunucuya gider. Değer; proxy, route ve sunucu URL'inin HMAC imzasıdır, bu yüzden istemci sahte bir değerle sunucu seçemez. r3v3rs3 cookie'yi istekten çıkarır, upstream sunucu onu hiç görmez.
 
-Sunucusu sağlıksız olan veya circuit'i açılan client başka sunucuya geçer. r3v3rs3 her başlangıçta yeni bir imza key'i üretir, yani restart bütün cookie'leri geçersiz kılar. Tarayıcı kapanınca silinen bir cookie için Max-Age değerini 0 yapın.
+Sunucusu sağlıksız olan veya circuit'i açılan istemci başka sunucuya geçer. r3v3rs3 her başlangıçta yeni bir imza key'i üretir, yani yeniden başlatma bütün cookie'leri geçersiz kılar. Tarayıcı kapanınca silinen bir cookie için Max-Age değerini 0 yapın.
 
-TCP ve UDP proxy'de cookie yoktur. Orada **Client IP hash** kullanın.
+TCP ve UDP proxy'de cookie yoktur. Orada **İstemci IP hash'i** kullanın.
 
 ## Adım 6: Bir sunucuyu devre dışı bırakın
 
-Sunucunun **Weight** değerini `0` yapın ve kaydedin. Sunucu yeni trafik almaz, diğer bütün sunucular sağlıksız olsa da almaz. Açık TCP bağlantıları ve UDP session'ları kalır, sticky client'ları da kalır, yani üzerindeki session'lar kendiliğinden biter.
+Sunucunun **Ağırlık** değerini `0` yapın ve kaydedin. Sunucu yeni istek almaz, diğer bütün sunucular sağlıksız olsa da almaz. Açık TCP bağlantıları ve UDP oturumları kalır, sticky istemcileri de kalır, yani üzerindeki oturumlar kendiliğinden biter.
 
-En az bir sunucunun weight değeri 0'dan büyük olmalıdır. r3v3rs3, bütün sunucuları devre dışı bırakılmış bir route'u kabul etmez.
+En az bir sunucunun ağırlığı 0'dan büyük olmalıdır. r3v3rs3, bütün sunucuları devre dışı bırakılmış bir route'u kabul etmez.
 
-Deployment böyle yapılır: bir sunucuyu devre dışı bırakın, session'larının bitmesini bekleyin, sunucuyu yükseltin, weight değerini geri verin.
+Deployment böyle yapılır: bir sunucuyu devre dışı bırakın, oturumlarının bitmesini bekleyin, sunucuyu yükseltin, ağırlığını geri verin.
 
-## Adım 7: Bozuk sunucuya trafiği kesin
+## Adım 7: Bozuk sunucuya giden istekleri kesin
 
 Circuit breaker varsayılan olarak kapalıdır. Proxy'de **Circuit Breaker'ı Aç** seçeneğini işaretleyin:
 
 | Alan | Varsayılan | Anlamı |
 |---|---|---|
-| **Hata Oranı (%)** | 50 | Circuit'i açan başarısız request oranı. |
-| **Minimum Request Sayısı** | 20 | Oranın sayılması için pencerede gereken request sayısı. |
+| **Hata Oranı (%)** | 50 | Circuit'i açan başarısız istek oranı. |
+| **Minimum İstek Sayısı** | 20 | Oranın sayılması için pencerede gereken istek sayısı. |
 | **Zaman Penceresi (Saniye)** | 10 | Bir sayma penceresinin uzunluğu. |
-| **Açık Kalma Süresi (Saniye)** | 30 | Circuit açıldıktan sonra trafiksiz geçen süre. |
+| **Açık Kalma Süresi (Saniye)** | 30 | Circuit açıldıktan sonra sunucunun istek almadığı süre. |
 
-Bağlantı kurulamazsa, bir timeout dolarsa veya sunucu 502, 503 ya da 504 dönerse request başarısız sayılır. Açık kalma süresi dolunca tek bir deneme request'i sunucuyu test eder: başarı circuit'i kapatır, hata yeniden açar. Bir route'un bütün sunucularının circuit'i açıksa client, hiçbir sunucuya request gitmeden 503 Service Unavailable alır.
+Bağlantı kurulamazsa, bir timeout dolarsa veya sunucu 502, 503 ya da 504 dönerse istek başarısız sayılır. Açık kalma süresi dolunca tek bir deneme isteği sunucuyu test eder: başarı circuit'i kapatır, hata yeniden açar. Bir route'un bütün sunucularının circuit'i açıksa istemci, hiçbir sunucuya istek gitmeden 503 Service Unavailable alır.
 
-Status API'si `"circuit": "open"` veya `"circuit": "half_open"` gösterir. UDP proxy'lerde circuit breaker yoktur.
+Durum API'si `"circuit": "open"` veya `"circuit": "half_open"` gösterir. UDP proxy'lerde circuit breaker yoktur.
 
-## Adım 8: Trafiğin kopyasını yeni sürüme gönderin
+## Adım 8: İsteklerin kopyasını yeni sürüme gönderin
 
-**Bu Route'un Request'lerini Mirror Sunuculara Kopyala** seçeneği route'un request'lerini başka sunuculara kopyalar, böylece yeni sürümü gerçek trafikle test edersiniz:
+**Bu Route'un İsteklerini Yansıtma Sunucularına Kopyala** seçeneği route'un isteklerini başka sunuculara kopyalar, böylece yeni sürümü gerçek isteklerle test edersiniz:
 
-1. Yeni sürümü **Mirror Sunucular** listesine ekleyin.
-2. **Kopyalanan Request'ler (%)** değerini `10` yapın.
+1. Yeni sürümü **Yansıtma Sunucuları** listesine ekleyin.
+2. **Kopyalanan İstekler (%)** değerini `10` yapın.
 
-Her mirror sunucu, kopyalanan request'in aynı method, header, path ve body ile bir kopyasını alır. r3v3rs3 onların response'larını atar, retry etmez, beklemez ve health check'lerde saymaz. Client, route sunucusunun response'unu önceki gibi alır.
+Her yansıtma sunucusu, kopyalanan isteğin aynı method, header, yol ve gövde ile bir kopyasını alır. r3v3rs3 onların yanıtlarını atar, yeniden denemez, beklemez ve sağlık kontrollerinde saymaz. İstemci, route sunucusunun yanıtını önceki gibi alır.
 
-Kopya, r3v3rs3 request body'sinin tamamını okuduktan sonra gider. Cache'ten gelen response'lar, upgrade request'leri, maksimum body boyutundan (varsayılan 65536 byte) büyük body'ler ve 64 kopya gönderilirken gelen request'ler kopyalanmaz. Kopya, kimlik doğrulamanın kaldırmadığı cookie gibi credential'ları taşır. Bu yüzden yalnız bu veriyle güvendiğiniz bir sunucuya mirror yapın.
+Kopya, r3v3rs3 istek gövdesinin tamamını okuduktan sonra gider. Cache'ten gelen yanıtlar, upgrade istekleri, maksimum gövde boyutundan (varsayılan 65536 byte) büyük gövdeler ve 64 kopya gönderilirken gelen istekler kopyalanmaz. Kopya, kimlik doğrulamanın kaldırmadığı cookie gibi kimlik bilgilerini taşır. Bu yüzden istekleri yalnız bu veriyle güvendiğiniz bir sunucuya yansıtın.
 
 ## WebSocket ve gRPC
 
@@ -165,32 +165,32 @@ wss://app.example.com/socket -> aynı route, HTTPS portunda
 
 WebSocket bağlantısında iki şey değişir:
 
-- Bağlantı hiç retry edilmez ve kopyalanmaz, çünkü body bitmez.
-- h2c açık olsa da upstream'e her zaman HTTP/1.1 ile gidilir.
+- Bağlantı hiç yeniden denenmez ve kopyalanmaz, çünkü gövde bitmez.
+- h2c açık olsa da upstream sunucuya her zaman HTTP/1.1 ile gidilir.
 
-Bağlantılarınız timeout'tan uzun süre açık kalıyorsa route'un request timeout değerini `0` yapın.
+Bağlantılarınız timeout'tan uzun süre açık kalıyorsa route'un istek timeout'unu `0` yapın.
 
 ### gRPC
 
 gRPC uçtan uca HTTP/2 ister.
 
-HTTPS portunda client'lar HTTP/2'yi ALPN ile alır. Upstream tarafında:
+HTTPS portunda istemciler HTTP/2'yi ALPN ile alır. Upstream tarafında:
 
 - HTTPS sunucu ALPN ile `h2` seçer, ek ayar gerekmez.
 - Düz HTTP sunucu HTTP/1.1 alır ve gRPC bunu kullanamaz. Proxy'de **Düz HTTP Sunucuları için HTTP/2 Kullan (h2c)** seçeneğini açın.
 
-h2c seçeneğini yalnız proxy'nin bütün düz HTTP sunucuları prior knowledge ile HTTP/2 kabul ediyorsa açın. Kabul etmeyen sunucu ilk request'te hata döner.
+h2c seçeneğini yalnız proxy'nin bütün düz HTTP sunucuları prior knowledge ile HTTP/2 kabul ediyorsa açın. Kabul etmeyen sunucu ilk istekte hata döner.
 
-Aynı client certificate'ı ve aynı connect timeout'u kullanan proxy'ler upstream bağlantılarını paylaşır, yani tek bir HTTP/2 bağlantısı çok sayıda client'ın stream'ini taşır.
+Bir portun aynı istemci sertifikasını ve aynı bağlantı timeout'unu kullanan proxy'leri upstream bağlantılarını paylaşır, yani tek bir HTTP/2 bağlantısı çok sayıda istemcinin stream'ini taşır.
 
 ## Referans
 
-- [Load Balancing ve Health Check](@/configuration.tr.md#load-balancing-ve-health-check): her alan ve varsayılanı.
-- [Circuit Breaker](@/configuration.tr.md#circuit-breaker) ve [Sticky Session'lar](@/configuration.tr.md#sticky-session-lar).
-- [HTTP/2](@/configuration.tr.md#http-2), [WebSocket](@/configuration.tr.md#websocket) ve [Trafik Mirroring](@/configuration.tr.md#trafik-mirroring).
+- [Yük dengeleme ve sağlık kontrolü](@/configuration.tr.md#yuk-dengeleme-ve-saglik-kontrolu): her alan ve varsayılanı.
+- [Circuit breaker](@/configuration.tr.md#circuit-breaker) ve [Sticky session'lar](@/configuration.tr.md#sticky-session-lar).
+- [HTTP/2](@/configuration.tr.md#http-2), [WebSocket](@/configuration.tr.md#websocket) ve [İstek yansıtma](@/configuration.tr.md#istek-yansitma).
 
 ## Sonraki adımlar
 
 - [Bir uygulamayı korumaya alma](@/tutorials/protect-an-app.tr.md): erişim listesi, kimlik doğrulama ve rate limit.
-- [Cache ve compression](@/tutorials/cache-and-compression.tr.md): sunuculara daha az request.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek state paylaşan birkaç r3v3rs3 node'u.
+- [Cache ve sıkıştırma](@/tutorials/cache-and-compression.tr.md): sunuculara daha az istek.
+- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek durum bilgisini paylaşan birkaç r3v3rs3 düğümü.

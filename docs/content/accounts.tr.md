@@ -6,7 +6,7 @@ weight = 0
 
 # Hesaplar
 
-Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir proxy listesi de olabilir. Yönetim paneli, yönetim API'si ve proxy'lerin [Panel Session](@/configuration.tr.md#panel-session) kimlik doğrulaması aynı hesapları kullanır.
+Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir proxy listesi de olabilir. Yönetim paneli, yönetim API'si ve proxy'lerin [Panel Oturumu](@/configuration.tr.md#panel-oturumu) kimlik doğrulaması aynı hesapları kullanır.
 
 ## Roller
 
@@ -17,9 +17,9 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 | Proxy'yi değiştirme, silme, cache'ini temizleme | evet | evet | listesindeki proxy'ler | hayır |
 | Portları, sertifikaları, ACME kayıtlarını ve erişim listelerini okuma | evet | evet | evet | evet |
 | Portları, sertifikaları, ACME kayıtlarını ve erişim listelerini değiştirme, sertifika indirme, CDN IP aralıklarını yenileme | evet | evet | hayır | hayır |
-| Ayarları ve hesapları okuma veya değiştirme, audit log'u okuma | evet | hayır | hayır | hayır |
-| Deploy platformunun uygulamalarını, target'larını ve deployment'larını okuma | evet | evet | hayır | evet, proxy listesi yoksa |
-| Uygulama ekleme, değiştirme veya silme, environment değişkenlerini okuma veya değiştirme, Git token'ını ayarlama veya silme, uygulamayı deploy etme, deployment'ı rollback etme | evet | evet | hayır | hayır |
+| Ayarları ve hesapları okuma veya değiştirme, denetim kaydını okuma | evet | hayır | hayır | hayır |
+| Deploy platformunun uygulamalarını, hedeflerini ve deployment'larını okuma | evet | evet | hayır | evet, proxy listesi yoksa |
+| Uygulama ekleme, değiştirme veya silme, ortam değişkenlerini okuma veya değiştirme, Git token'ını ayarlama veya silme, uygulamayı deploy etme, deployment'ı geri alma | evet | evet | hayır | hayır |
 
 - Proxy listesi olmayan hesap bütün proxy'leri görür. Admin her zaman bütün proxy'leri görür. Bu yüzden admin hesabının proxy listesi olamaz.
 - Hesabın listesinde olmayan proxy, bu hesap için yoktur. Yönetim API'si `404 id_not_found` döndürür.
@@ -28,7 +28,7 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 - Proxy listesi olan editör, kendi proxy'leri için bir erişim listesi seçebilir. Erişim listesinin içeriğini yalnız erişim listelerini değiştirebilen hesap değiştirir.
 - Bir hesap proxy'yi silince r3v3rs3 proxy'yi her hesabın proxy listesinden kaldırır.
 - Proxy listesi olan hesap, deploy platformuna gönderdiği her istek için `403 forbidden` alır.
-- Yönetim API'si secret environment değişkeninin değerini hiçbir zaman döndürmez.
+- Yönetim API'si secret ortam değişkeninin değerini hiçbir zaman döndürmez.
 - Uygulama değiştirebilen hesap, bir [Compose uygulamasının](@/platform.tr.md#compose-kaynagi) Compose dosyası üzerinden host'u ele geçirebilir, çünkü r3v3rs3 Compose dosyasının ayarlarını kısıtlamaz.
 
 ## Kurallar
@@ -37,14 +37,14 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 - Kullanıcı adı 1 ile 64 karakter arasındadır. `:`, `/`, boşluk veya kontrol karakteri içeremez.
 - En az bir admin hesabı kalır. Son admin'i kaldıran değişiklik `400 last_admin` alır.
 - Bir hesap kendini silemez ve kendi rolünü değiştiremez. Yönetim API'si `400 cannot_change_own_account` döndürür.
-- Rol, proxy listesi veya parola değişince değişiklikten önce açılan session'lar sona erer. Bu kural yönetim paneli session'larına ve proxy'lerin Panel Session girişlerine uygulanır.
-- Silinen hesabın session'ları sona erer.
+- Rol, proxy listesi veya parola değişince değişiklikten önce açılan oturumlar sona erer. Bu kural yönetim paneli oturumlarına ve proxy'lerin Panel Oturumu girişlerine uygulanır.
+- Silinen hesabın oturumları sona erer.
 
-Config dizinindeki `accounts.toml` dosyası hesapları parola hash'leriyle tutar. r3v3rs3 bu dosyayı `0600` moduyla yazar. Cluster, hesapları store'da şifreli tutar.
+Config dizinindeki `accounts.toml` dosyası hesapları parola hash'leriyle tutar. r3v3rs3 bu dosyayı `0600` moduyla yazar. Cluster, hesapları veri deposunda şifreli tutar.
 
 ## Hesap oluşturma
 
-WebUI'daki "Hesaplar" sayfası hesapları listeler, ekler, değiştirir ve siler. Bu sayfayı yalnız admin açar. TOTP'si açık bir hesap eklediğinizde sayfa TOTP secret'ını bir kez gösterir. Secret'ı o anda authenticator uygulamanıza ekleyin.
+WebUI'daki "Hesaplar" sayfası hesapları listeler, ekler, değiştirir ve siler. Bu sayfayı yalnız admin açar. TOTP'si açık bir hesap eklediğinizde sayfa TOTP secret'ını bir kez gösterir. Secret'ı o anda doğrulama uygulamanıza ekleyin.
 
 Komut satırında `add-user` bir hesap ekler. `--role` verilmezse hesap admin olur:
 
@@ -87,4 +87,4 @@ $ curl -b cookies.txt -X PUT -H 'Content-Type: application/json' \
 
 `GET /api/session`, giriş yapmış hesabın kullanıcı adını, rolünü ve proxy listesini döndürür.
 
-[Audit log](@/configuration.tr.md#audit-log) her hesap değişikliğini ve her girişi kaydeder.
+[Denetim kaydı](@/configuration.tr.md#denetim-kaydi) her hesap değişikliğini ve her girişi kaydeder.
