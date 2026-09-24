@@ -7,6 +7,7 @@ use crate::{
     },
     cluster::layout::StateKind,
     discovery::DiscoverySnapshot,
+    notify::Notification,
     server::rpc::ErasedRpcMethod,
 };
 use r3v3rs3_api::cluster::ClusterStatus;
@@ -53,6 +54,10 @@ pub enum ServerCommand {
     /// The targets of a DNS SRV name changed, so the proxies must be reloaded.
     SrvUpdated {
         name: String,
+    },
+    /// A deployment platform event for the webhook of the settings.
+    Notify {
+        notification: Notification,
     },
 }
 
@@ -101,6 +106,10 @@ impl std::fmt::Debug for ServerCommand {
                 f.debug_struct("SetLeader").field("leader", leader).finish()
             }
             Self::SrvUpdated { name } => f.debug_struct("SrvUpdated").field("name", name).finish(),
+            Self::Notify { notification } => f
+                .debug_struct("Notify")
+                .field("event", &notification.event)
+                .finish(),
         }
     }
 }

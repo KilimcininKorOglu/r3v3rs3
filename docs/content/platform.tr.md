@@ -196,6 +196,10 @@ Deploy eden istek `200` ve `{"outcome": "deployed", "deployment": {...}}` yanıt
 
 Gövde en fazla 5 MiB olabilir. Denetim kaydı, bir deployment başlatan veya kuyruğa alan her isteği göndericinin adresiyle ve hesapsız olarak kaydeder.
 
+## Bildirimler
+
+"Ayarlar" sayfasındaki bildirim webhook'u platformun olaylarını da alır: her deployment için `deployment_started`, `deployment_running` ve `deployment_failed`, her agent hedefi için `agent_online` ve `agent_offline`. JSON gövdesi için [Bildirimler](@/configuration.tr.md#bildirimler) bölümüne bakın.
+
 ## Yönlendirme
 
 Platform, en az bir alan adı olan her çalışan uygulama için bir proxy ekler. Bu proxy'ler `Platform` sağlayıcısından gelir. Bu yüzden [servis keşfi](@/discovery.tr.md) proxy'leri gibi salt okunurdur ve proxy listesi sağlayıcının durumunu gösterir. Her proxy:

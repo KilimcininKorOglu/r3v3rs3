@@ -10,6 +10,7 @@ pub mod deploy;
 #[cfg(test)]
 pub(crate) mod fake;
 pub mod hooks;
+mod notices;
 pub mod proxy;
 mod publish;
 #[cfg(test)]
@@ -179,7 +180,7 @@ impl Platform {
         let store = PlatformStore::open(&config_dir.join(DATABASE_FILE)).await?;
         let now = crate::clock::unix_ms();
         store.ensure_local_target(now).await?;
-        store.fail_unfinished(now).await?;
+        notices::notify_unfinished(&command, store.fail_unfinished(now).await?);
         let keys = open_keys(config_dir).await?;
         // A stopped server can leave the checkouts of its unfinished builds.
         let build_dir = config_dir.join(build::BUILD_DIR);

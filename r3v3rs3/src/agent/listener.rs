@@ -35,6 +35,12 @@ pub trait AgentDirectory: Send + Sync {
 
     /// Records the time of the last contact with the agent of `target`.
     async fn seen(&self, target: ShortId, now: u64) -> anyhow::Result<()>;
+
+    /// The agent of `target` connected, and no earlier session of it was open.
+    async fn online(&self, _target: ShortId) {}
+
+    /// The session of the agent of `target` ended, and no later session replaced it.
+    async fn offline(&self, _target: ShortId) {}
 }
 
 /// The durations of the link.
@@ -155,14 +161,22 @@ impl AgentListener {
         };
         info!(%target, version, "an agent connected");
         let now = unix_ms();
+        // A reconnect that replaces an open session is no change of the connection state.
+        let replaces = self.registry.status(target).is_some();
         let generation =
             self.registry
                 .insert(target, link.clone(), version, task.abort_handle(), now);
         self.record_contact(target, now).await;
+        if !replaces {
+            self.directory.online(target).await;
+        }
         self.heartbeat(target, generation, &link).await;
-        self.registry.remove(target, generation);
+        let ended = self.registry.remove(target, generation);
         self.record_contact(target, unix_ms()).await;
         info!(%target, "an agent disconnected");
+        if ended {
+            self.directory.offline(target).await;
+        }
         Ok(())
     }
 

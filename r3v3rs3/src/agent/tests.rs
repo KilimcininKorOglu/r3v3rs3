@@ -29,6 +29,8 @@ struct Directory {
     /// Certificate fingerprint to target.
     certificates: Mutex<HashMap<String, ShortId>>,
     contacts: Mutex<Vec<ShortId>>,
+    /// The online (`true`) and offline (`false`) events, in order.
+    changes: Mutex<Vec<(ShortId, bool)>>,
 }
 
 #[async_trait::async_trait]
@@ -61,6 +63,14 @@ impl AgentDirectory for Directory {
         self.contacts.lock().unwrap().push(target);
         Ok(())
     }
+
+    async fn online(&self, target: ShortId) {
+        self.changes.lock().unwrap().push((target, true));
+    }
+
+    async fn offline(&self, target: ShortId) {
+        self.changes.lock().unwrap().push((target, false));
+    }
 }
 
 struct Master {
@@ -81,6 +91,7 @@ impl Master {
             tokens: Mutex::default(),
             certificates: Mutex::default(),
             contacts: Mutex::default(),
+            changes: Mutex::default(),
         });
         let registry = Arc::new(AgentRegistry::default());
         let timing = LinkTiming {
@@ -195,6 +206,54 @@ async fn an_agent_enrolls_then_connects_with_its_certificate() -> anyhow::Result
     running.abort();
     master.wait_online(target(), false).await?;
     std::fs::remove_dir_all(dir)?;
+    Ok(())
+}
+
+impl Master {
+    fn changes(&self) -> Vec<(ShortId, bool)> {
+        self.directory.changes.lock().unwrap().clone()
+    }
+}
+
+#[tokio::test]
+async fn a_connection_reports_online_then_offline_once() -> anyhow::Result<()> {
+    let master = Master::start().await?;
+    let (agent, dir) = master.agent("changes");
+    let identity = agent.identity(Some(&master.token(target()))).await?;
+    let running = tokio::spawn(async move { agent.run(&identity).await });
+    master.wait_online(target(), true).await?;
+    assert_eq!(master.changes(), [(target(), true)]);
+    running.abort();
+    master.wait_online(target(), false).await?;
+    // The offline event follows the removal of the session.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(master.changes(), [(target(), true), (target(), false)]);
+    std::fs::remove_dir_all(dir)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_session_that_replaces_an_open_one_reports_nothing() -> anyhow::Result<()> {
+    let master = Master::start().await?;
+    let (first, first_dir) = master.agent("replace-a");
+    let identity = first.identity(Some(&master.token(target()))).await?;
+    let first_run = {
+        let identity = identity.clone();
+        tokio::spawn(async move { first.run(&identity).await })
+    };
+    master.wait_online(target(), true).await?;
+    // A second agent with the same identity replaces the session again and again.
+    let (second, second_dir) = master.agent("replace-b");
+    let second_run = tokio::spawn(async move { second.run(&identity).await });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(master.changes(), [(target(), true)]);
+    first_run.abort();
+    second_run.abort();
+    master.wait_online(target(), false).await?;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(master.changes(), [(target(), true), (target(), false)]);
+    std::fs::remove_dir_all(first_dir)?;
+    let _ = std::fs::remove_dir_all(second_dir);
     Ok(())
 }
 

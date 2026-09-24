@@ -196,6 +196,10 @@ A deploying request answers `200` with `{"outcome": "deployed", "deployment": {.
 
 The body can be up to 5 MiB. The audit log records every request that deployed or queued a deployment, with the address of the sender, and without an account.
 
+## Notifications
+
+The notification webhook of the "Settings" page also gets the events of the platform: `deployment_started`, `deployment_running` and `deployment_failed` for each deployment, and `agent_online` and `agent_offline` for each agent target. See [Notifications](@/configuration.md#notifications) for the JSON body.
+
 ## Routing
 
 The platform adds one proxy for each running app that has at least one domain. The proxies come from the `Platform` provider, so they are read-only like the proxies of [service discovery](@/discovery.md), and the proxy list shows the provider status. Each proxy:

@@ -819,12 +819,20 @@ r3v3rs3 şu olaylar için bildirim webhook'una bir JSON `POST` isteği gönderir
 | `certificate_expired` | Bir sertifikanın süresi dolmuştur. |
 | `acme_order_failed` | Bir ACME order başarısız olmuştur. Başarısız her order bir olay gönderir. |
 | `test` | Bir admin test bildirimi göndermiştir. |
+| `deployment_started` | [Deploy platformunun](@/platform.tr.md) bir deployment'ı başlamıştır. |
+| `deployment_running` | Bir deployment bitmiştir ve container'ı çalışır. |
+| `deployment_failed` | Bir deployment başarısız olmuştur. r3v3rs3 yeniden başlarken bitmemiş her deployment'ı başarısız sayar ve bu olayı da gönderir. |
+| `agent_online` | Bir agent master'a bağlanmıştır. Açık bir bağlantının yerini alan yeni bağlantı olay göndermez. |
+| `agent_offline` | Bir agent'ın bağlantısı kopmuştur. Silinen veya yeniden kaydedilen hedef olay göndermez. |
 
 ```json
 {"event": "certificate_expiring", "time": 1757894400, "node": "proxy-1", "certificate": {"id": "a1b2c3d", "san": ["example.com"], "not_after": 1759104000}}
+{"event": "deployment_failed", "time": 1757894400, "deployment": {"id": "kfd-mzq", "app": "bxv-tpw", "app_name": "shop", "trigger": "webhook"}, "error": "the health check failed"}
+{"event": "agent_offline", "time": 1757894400, "target": {"id": "fzn-txd", "name": "edge"}}
 ```
 
 - `time` saniye cinsinden Unix zamanıdır. `node` cluster düğümünün adıdır. Cluster yoksa bu alan bulunmaz. `certificate` alanı sertifika olayının sertifikasını gösterir. `acme` alanı ACME kaydının `id` ve `identifiers` değerlerini taşır. `error` alanı `acme_order_failed` olayının hatasını açıklar.
+- `deployment` alanı deployment'ı, uygulamasını ve tetikleyicisini (`manual`, `webhook`, `rollback` veya `api`) gösterir. `error` alanı `deployment_failed` olayının mesajını taşır. `target` alanı agent olayının agent hedefini gösterir.
 - Token varsa istek `Authorization: Bearer <token>` header'ını taşır. Admin API token'ı döndürmez.
 - 2xx durum kodu başarı sayılır. r3v3rs3 başarısız isteği en fazla üç kez gönderir: 1 saniye sonra bir kez daha, 2 saniye sonra bir kez daha. "Webhook Timeout" (varsayılan `10s`) her denemeyi sınırlar.
 - Lider düğüm sertifikaları her "Arka Plan Görevi Aralığı" süresinde kontrol eder. Bir sertifikanın her olayı bir kez gönderilir. Yenilenen sertifikanın fingerprint'i değişir. Bu yüzden onun olayları yeniden gönderilir. r3v3rs3 gönderilen olayları yapılandırma dizinindeki `notifications.json` dosyasında veya cluster veri deposunda tutar.

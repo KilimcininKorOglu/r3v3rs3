@@ -94,8 +94,9 @@ impl AgentRegistry {
         }
     }
 
-    /// Closes the session of `generation`. A later session of the same target stays.
-    pub fn remove(&self, target: ShortId, generation: u64) {
+    /// Closes the session of `generation`. A later session of the same target stays. Returns
+    /// whether the session of `generation` was still the session of the target.
+    pub fn remove(&self, target: ShortId, generation: u64) -> bool {
         let mut sessions = self.sessions();
         if sessions
             .get(&target)
@@ -103,7 +104,9 @@ impl AgentRegistry {
             && let Some(session) = sessions.remove(&target)
         {
             session.task.abort();
+            return true;
         }
+        false
     }
 
     /// Closes the session of a target, for example after its deletion.

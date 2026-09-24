@@ -1,6 +1,6 @@
 # Deployment platform design
 
-Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 is implemented too: the Git source with its Dockerfile build, the Compose source and the `-platform` image. Phase 5 is implemented: the container log route and the WebUI pages (the left sidebar, the app list, the app form with its environment variables and Git token, the deployment history with rollback, and the container log). Phases 6 and 7 are implemented as one: agent targets with the agent CA, the one-time enrollment, the mTLS link, the remote runtime, Compose and Git apps on an agent, the loopback forwarders of section 10.4, the target admin API, the Targets page and the agent mode of `install.sh`. The user reference is `docs/content/platform.md`.
+Status: phases 1 to 3 are implemented: the Docker runtime, the store and the admin API, and the blue-green pipeline of image apps on the local target. Phase 4 is implemented too: the Git source with its Dockerfile build, the Compose source and the `-platform` image. Phase 5 is implemented: the container log route and the WebUI pages (the left sidebar, the app list, the app form with its environment variables and Git token, the deployment history with rollback, and the container log). Phases 6 and 7 are implemented as one: agent targets with the agent CA, the one-time enrollment, the mTLS link, the remote runtime, Compose and Git apps on an agent, the loopback forwarders of section 10.4, the target admin API, the Targets page and the agent mode of `install.sh`. Phase 8 is implemented: the Git push webhook of each app and the deployment and agent notifications. The user reference is `docs/content/platform.md`.
 
 This document describes how r3v3rs3 grows from a reverse proxy into a self-hosted deployment platform, in the space of Coolify. It lives outside `docs/content/`, so the Zola site does not publish it.
 
@@ -373,7 +373,7 @@ Each phase ends with integration tests and docs, and is usable on its own.
 5. **WebUI.** Targets, Apps, App detail, live log.
 6. **Agent.** Agent CA, `agent_port` listener, enrollment, the request protocol, `agent::remote`, `r3v3rs3 agent` command.
 7. **Tunnel.** Loopback forwarders and tunnel streams, health checks through the tunnel. Implemented together with phase 6.
-8. **Webhooks and notifications.** Git push deploys, deploy events through `notify.rs`.
+8. **Webhooks and notifications.** Git push deploys, deploy events through `notify.rs`. Implemented: one sealed webhook secret per app, `POST /hooks/apps/{id}` for GitHub, GitLab, Gitea, Forgejo and a generic HMAC-SHA256 sender, one queued deployment per busy app, and the `deployment_*` and `agent_*` events on the notification webhook of the settings.
 9. **Later.** Cluster mode, managed databases, volume backups to S3, a template registry, PR preview environments, metrics history.
 
 ## 14. Decisions

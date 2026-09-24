@@ -5,10 +5,12 @@
 
 use super::build::GitBuild;
 use super::compose::{ComposeBuild, ComposeJob, SourceRevision};
+use super::notices::DeploymentRef;
 use super::store::{NewDeployment, StoredEnv};
 use super::{Backend, Platform, new_id, not_found, proxy};
 use crate::agent::executor::RESOURCE_PREFIX;
 use crate::clock::unix_ms;
+use crate::notify::NotificationEvent;
 use crate::runtime::ContainerRuntime;
 use anyhow::{Context as _, anyhow, bail};
 use r3v3rs3_api::container::{
@@ -66,6 +68,9 @@ impl Default for Timing {
 /// the deployment does not change it.
 struct Job {
     app: ShortId,
+    /// The name and the trigger name the deployment in its notifications.
+    app_name: AppName,
+    trigger: DeploymentTrigger,
     deployment: ShortId,
     /// The runtime and the Compose runner of the target of the app at the start of the
     /// deployment.
@@ -73,6 +78,17 @@ struct Job {
     spec: AppSpec,
     env: Vec<StoredEnv>,
     image: JobImage,
+}
+
+impl Job {
+    fn notice(&self) -> DeploymentRef<'_> {
+        DeploymentRef {
+            id: self.deployment,
+            app: self.app,
+            app_name: &self.app_name,
+            trigger: self.trigger,
+        }
+    }
 }
 
 /// Where the image of a deployment comes from.
@@ -172,7 +188,7 @@ impl Platform {
         let env = self.store.env(id).await?;
         let lock = self.lock_app(&app)?;
         let new = new_deployment(&app, trigger, username, &app.spec, &env, None)?;
-        self.start_job(lock, app.target, new, image).await
+        self.start_job(lock, &app, new, image).await
     }
 
     /// Starts a deployment that repeats the image digest, or for a Compose app the commit, the
@@ -194,13 +210,13 @@ impl Platform {
         let trigger = DeploymentTrigger::Rollback;
         let digest = source.image_digest.as_deref();
         let new = new_deployment(&app, trigger, username, &spec, &env, digest)?;
-        self.start_job(lock, app.target, new, image).await
+        self.start_job(lock, &app, new, image).await
     }
 
     async fn start_job(
         self: &Arc<Self>,
         lock: AppLock,
-        target: ShortId,
+        app: &AppEntry,
         new: NewDeployment<'_>,
         image: JobImage,
     ) -> anyhow::Result<DeploymentEntry> {
@@ -212,8 +228,10 @@ impl Platform {
             .context("the new deployment was not stored")?;
         let job = Job {
             app: new.app,
+            app_name: app.name.clone(),
+            trigger: new.trigger,
             deployment: new.id,
-            backend: self.backend(target),
+            backend: self.backend(app.target),
             spec: new.spec.clone(),
             env: new.env.to_vec(),
             image,
@@ -243,12 +261,16 @@ impl Platform {
 
     async fn run_pipeline(&self, job: &Job) {
         info!(app = %job.app, deployment = %job.deployment, "deployment started");
+        self.notify_deployment(NotificationEvent::DeploymentStarted, job.notice(), None)
+            .await;
         let result = match self.start_job_container(job).await {
             Ok(name) => self.switch(job, &name).await,
             Err(err) => Err(err),
         };
         let Err(err) = result else {
             info!(app = %job.app, deployment = %job.deployment, "deployment finished");
+            self.notify_deployment(NotificationEvent::DeploymentRunning, job.notice(), None)
+                .await;
             return;
         };
         let message = format!("{err:#}");
@@ -265,6 +287,10 @@ impl Platform {
         if let Err(err) = failed {
             error!(deployment = %job.deployment, "failed to store the failure: {err:#}");
         }
+        // The notification follows the stored state, so a reader of the API sees the failure.
+        let event = NotificationEvent::DeploymentFailed;
+        self.notify_deployment(event, job.notice(), Some(message))
+            .await;
     }
 
     /// Starts the container that receives the requests of the new deployment, and waits for its

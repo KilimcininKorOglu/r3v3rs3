@@ -8,6 +8,7 @@ use crate::agent::pki::{AgentPki, fingerprint, pem_certificates};
 use crate::agent::protocol::{EnrollRequest, Enrolled};
 use crate::agent::token::{EnrollmentToken, secret_hash};
 use crate::audit::AuditRecord;
+use crate::notify::NotificationEvent;
 use anyhow::{Context, anyhow};
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
@@ -213,6 +214,16 @@ impl AgentDirectory for Platform {
 
     async fn seen(&self, target: ShortId, now: u64) -> anyhow::Result<()> {
         self.store.target_seen(target, now).await
+    }
+
+    async fn online(&self, target: ShortId) {
+        self.notify_agent(NotificationEvent::AgentOnline, target)
+            .await;
+    }
+
+    async fn offline(&self, target: ShortId) {
+        self.notify_agent(NotificationEvent::AgentOffline, target)
+            .await;
     }
 }
 

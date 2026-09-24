@@ -324,6 +324,7 @@ impl ServerState {
                 info!(name, "reloading the proxies for the new SRV targets");
                 self.reload_proxies().await;
             }
+            ServerCommand::Notify { notification } => self.notify(notification),
             // `handle_command` handles the other commands before it calls this method.
             _ => {}
         }
@@ -422,6 +423,14 @@ impl ServerState {
         if sent != self.sent_notifications {
             log_save_error(self.storage.save_sent_notifications(&sent).await);
             self.sent_notifications = sent;
+        }
+    }
+
+    /// Queues a notification of the deployment platform when the settings name a webhook. The
+    /// queue does not wait, so the server loop stays free.
+    fn notify(&self, notification: Notification) {
+        if let Some(webhook) = self.config.notifications.webhook.as_ref() {
+            self.notifier.send(webhook, notification);
         }
     }
 

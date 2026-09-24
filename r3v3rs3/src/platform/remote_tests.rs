@@ -57,7 +57,8 @@ async fn setup_with(mut shop: AppRequest) -> anyhow::Result<Setup> {
         proxy_ports: vec!["http".into()],
         ..Default::default()
     };
-    let (command, commands) = mpsc::channel(4);
+    // Each deployment sends a snapshot and two notifications, and the tests read them later.
+    let (command, commands) = mpsc::channel(64);
     let (mut platform, local, dir) = platform_with(&config, command).await?;
     platform.fetcher = Arc::new(FakeFetcher::default());
     let edge: ShortId = "fzn-txd".parse()?;
@@ -95,11 +96,16 @@ async fn deploy(setup: &Setup) -> anyhow::Result<DeploymentEntry> {
     bail!("the deployment {} did not end", entry.id)
 }
 
-/// The port of the first route server of the last proxy snapshot.
+/// The port of the first route server of the last proxy snapshot. The notifications between the
+/// snapshots do not matter here.
 fn route_port(commands: &mut mpsc::Receiver<ServerCommand>) -> anyhow::Result<u16> {
-    let Ok(ServerCommand::SetDiscovery { snapshot }) = commands.try_recv() else {
-        bail!("no snapshot");
-    };
+    let mut last = None;
+    while let Ok(command) = commands.try_recv() {
+        if let ServerCommand::SetDiscovery { snapshot } = command {
+            last = Some(snapshot);
+        }
+    }
+    let snapshot = last.context("no snapshot")?;
     let proxies = snapshot.proxies.context("proxies")?;
     let servers = crate::discovery::first_route_servers(proxies.first().context("proxy")?);
     let server = servers.first().context("server")?;

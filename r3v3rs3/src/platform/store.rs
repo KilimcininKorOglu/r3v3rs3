@@ -106,6 +106,18 @@ pub struct NewDeployment<'a> {
     pub started_at: u64,
 }
 
+/// The failure message of a deployment that a stopped server left unfinished.
+pub const UNFINISHED_MESSAGE: &str = "the server stopped during the deployment";
+
+/// A deployment that a restart of the server failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnfinishedDeployment {
+    pub id: ShortId,
+    pub app: ShortId,
+    pub app_name: AppName,
+    pub trigger: DeploymentTrigger,
+}
+
 /// A deployment whose container serves its app.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningDeployment {
@@ -518,17 +530,27 @@ impl PlatformStore {
         Ok(())
     }
 
-    /// Ends the deployments that a stopped server left unfinished.
-    pub async fn fail_unfinished(&self, now: u64) -> anyhow::Result<()> {
+    /// Ends the deployments that a stopped server left unfinished, and returns them.
+    pub async fn fail_unfinished(&self, now: u64) -> anyhow::Result<Vec<UnfinishedDeployment>> {
+        let mut tx = self.pool.begin().await?;
+        let rows = sqlx::query(
+            "SELECT d.id, d.app_id, d.trigger, a.name FROM deployments d
+                JOIN apps a ON a.id = d.app_id
+            WHERE d.status IN ('queued', 'building', 'deploying')",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
         sqlx::query(
             "UPDATE deployments SET status = 'failed', finished_at = ?,
-                message = 'the server stopped during the deployment'
+                message = ?
             WHERE status IN ('queued', 'building', 'deploying')",
         )
         .bind(sql_int(now))
-        .execute(&self.pool)
+        .bind(UNFINISHED_MESSAGE)
+        .execute(&mut *tx)
         .await?;
-        Ok(())
+        tx.commit().await?;
+        rows.iter().map(unfinished_of).collect()
     }
 
     pub async fn deployment(&self, id: ShortId) -> anyhow::Result<Option<DeploymentEntry>> {
@@ -646,6 +668,15 @@ fn target_of(row: &SqliteRow) -> anyhow::Result<TargetEntry> {
         enrolled: local || row.try_get::<bool, _>("enrolled")?,
         online: local,
         version: None,
+    })
+}
+
+fn unfinished_of(row: &SqliteRow) -> anyhow::Result<UnfinishedDeployment> {
+    Ok(UnfinishedDeployment {
+        id: id_of(row, "id")?,
+        app: id_of(row, "app_id")?,
+        app_name: row.try_get::<&str, _>("name")?.parse()?,
+        trigger: parse_trigger(row.try_get("trigger")?)?,
     })
 }
 

@@ -63,6 +63,56 @@ async fn the_webhook_gets_each_certificate_event_once() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn the_server_sends_a_deployment_event_of_the_platform() -> anyhow::Result<()> {
+    use r3v3rs3::command::ServerCommand;
+    use r3v3rs3::notify::{DeploymentSummary, Notification, NotificationEvent};
+    let mut server = mockito::Server::new_async().await;
+    let body = json!({
+        "event": "deployment_running",
+        "deployment": {"id": "dep", "app": "app", "app_name": "shop", "trigger": "webhook"},
+    });
+    let mock = server
+        .mock("POST", "/")
+        .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+        .match_body(Matcher::PartialJson(body))
+        .expect(1)
+        .create_async()
+        .await;
+    // No certificate expires, so the deployment event is the only notification.
+    let config = AppConfig {
+        notifications: NotificationConfig {
+            webhook: Some(WebhookConfig {
+                url: server.url(),
+                token: Some(TOKEN.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let storage = TestStorage::builder().config(config).build();
+    with_server(storage, |channels| async move {
+        let summary = DeploymentSummary {
+            id: "dep".parse()?,
+            app: "app".parse()?,
+            app_name: "shop".into(),
+            trigger: "webhook",
+        };
+        let event = NotificationEvent::DeploymentRunning;
+        let notification = Notification::deployment(event, summary, None);
+        channels
+            .command
+            .send(ServerCommand::Notify { notification })
+            .await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        Ok(())
+    })
+    .await?;
+    mock.assert_async().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_failed_notification_is_sent_three_times() -> anyhow::Result<()> {
     let mut server = mockito::Server::new_async().await;
     let mock = server

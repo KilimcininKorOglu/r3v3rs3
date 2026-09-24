@@ -819,12 +819,20 @@ r3v3rs3 sends a JSON `POST` request to the notification webhook for these events
 | `certificate_expired` | A certificate has expired. |
 | `acme_order_failed` | An ACME order failed. Each failed order sends an event. |
 | `test` | An admin sent a test notification. |
+| `deployment_started` | A deployment of the [deployment platform](@/platform.md) started. |
+| `deployment_running` | A deployment ended, and its container runs. |
+| `deployment_failed` | A deployment failed. A restart of r3v3rs3 also fails each unfinished deployment and sends this event. |
+| `agent_online` | An agent connected to the master. A new connection that replaces an open one sends no event. |
+| `agent_offline` | The connection of an agent ended. A deleted or re-enrolled target sends no event. |
 
 ```json
 {"event": "certificate_expiring", "time": 1757894400, "node": "proxy-1", "certificate": {"id": "a1b2c3d", "san": ["example.com"], "not_after": 1759104000}}
+{"event": "deployment_failed", "time": 1757894400, "deployment": {"id": "kfd-mzq", "app": "bxv-tpw", "app_name": "shop", "trigger": "webhook"}, "error": "the health check failed"}
+{"event": "agent_offline", "time": 1757894400, "target": {"id": "fzn-txd", "name": "edge"}}
 ```
 
 - `time` is the Unix time in seconds. `node` is the name of the cluster node, and it is absent without a cluster. `certificate` names the certificate of a certificate event. `acme` holds the `id` and the `identifiers` of the ACME entry, and `error` describes the failure of an `acme_order_failed` event.
+- `deployment` names the deployment, its app and its trigger (`manual`, `webhook`, `rollback` or `api`). `error` holds the message of a `deployment_failed` event. `target` names the agent target of an agent event.
 - With a token, the request has the header `Authorization: Bearer <token>`. The admin API does not return the token.
 - A 2xx status is a success. r3v3rs3 sends a failed request at most three times: again after 1 second, and again 2 seconds later. "Webhook Timeout" (default `10s`) limits each try.
 - The leader checks the certificates at each "Background Task Interval". Each event of a certificate is sent once. A renewed certificate has a new fingerprint, so its events are sent again. r3v3rs3 keeps the sent events in `notifications.json` in the configuration directory, or in the cluster store.

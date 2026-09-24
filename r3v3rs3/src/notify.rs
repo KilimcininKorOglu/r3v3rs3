@@ -1,5 +1,5 @@
-//! The notifications about certificates and ACME orders that the leader sends to the webhook of
-//! the settings.
+//! The notifications about certificates, ACME orders, deployments and agents that r3v3rs3 sends
+//! to the webhook of the settings.
 
 use crate::cdn::fetch::build_client;
 use crate::certs::acme::AcmeTarget;
@@ -31,6 +31,11 @@ pub enum NotificationEvent {
     CertificateExpired,
     AcmeOrderFailed,
     Test,
+    DeploymentStarted,
+    DeploymentRunning,
+    DeploymentFailed,
+    AgentOnline,
+    AgentOffline,
 }
 
 impl NotificationEvent {
@@ -40,6 +45,11 @@ impl NotificationEvent {
             Self::CertificateExpired => "certificate_expired",
             Self::AcmeOrderFailed => "acme_order_failed",
             Self::Test => "test",
+            Self::DeploymentStarted => "deployment_started",
+            Self::DeploymentRunning => "deployment_running",
+            Self::DeploymentFailed => "deployment_failed",
+            Self::AgentOnline => "agent_online",
+            Self::AgentOffline => "agent_offline",
         }
     }
 }
@@ -58,7 +68,28 @@ pub struct Notification {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acme: Option<AcmeSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment: Option<DeploymentSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<TargetSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// A deployment of the platform, with the app that it deploys.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeploymentSummary {
+    pub id: ShortId,
+    pub app: ShortId,
+    pub app_name: String,
+    /// `manual`, `webhook`, `rollback` or `api`.
+    pub trigger: &'static str,
+}
+
+/// An agent target of the platform.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TargetSummary {
+    pub id: ShortId,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -83,7 +114,31 @@ impl Notification {
             node: node.to_string(),
             certificate: None,
             acme: None,
+            deployment: None,
+            target: None,
             error: None,
+        }
+    }
+
+    /// A deployment event. A failed deployment carries its message in `error`. The platform
+    /// never runs in a cluster, so the notification names no node.
+    pub fn deployment(
+        event: NotificationEvent,
+        deployment: DeploymentSummary,
+        error: Option<String>,
+    ) -> Self {
+        Self {
+            deployment: Some(deployment),
+            error,
+            ..Self::new(event, "")
+        }
+    }
+
+    /// The connection event of an agent.
+    pub fn agent(event: NotificationEvent, target: TargetSummary) -> Self {
+        Self {
+            target: Some(target),
+            ..Self::new(event, "")
         }
     }
 
@@ -285,6 +340,43 @@ mod tests {
                 "time": 5,
                 "node": "node-a",
                 "certificate": {"id": "web", "san": ["example.com"], "not_after": 7},
+            })
+        );
+    }
+
+    #[test]
+    fn platform_notifications_name_the_deployment_or_the_target() {
+        let summary = DeploymentSummary {
+            id: "dep".parse().unwrap(),
+            app: "app".parse().unwrap(),
+            app_name: "shop".into(),
+            trigger: "webhook",
+        };
+        let event = NotificationEvent::DeploymentFailed;
+        let mut failed = Notification::deployment(event, summary, Some("no image".into()));
+        failed.time = 5;
+        assert_eq!(
+            serde_json::to_value(&failed).unwrap(),
+            json!({
+                "event": "deployment_failed",
+                "time": 5,
+                "deployment": {"id": "dep", "app": "app", "app_name": "shop", "trigger": "webhook"},
+                "error": "no image",
+            })
+        );
+
+        let target = TargetSummary {
+            id: "edge".parse().unwrap(),
+            name: "edge-1".into(),
+        };
+        let mut offline = Notification::agent(NotificationEvent::AgentOffline, target);
+        offline.time = 5;
+        assert_eq!(
+            serde_json::to_value(&offline).unwrap(),
+            json!({
+                "event": "agent_offline",
+                "time": 5,
+                "target": {"id": "edge", "name": "edge-1"},
             })
         );
     }
