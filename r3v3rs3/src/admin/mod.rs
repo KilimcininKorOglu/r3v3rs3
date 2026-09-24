@@ -271,6 +271,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     platform::new_webhook_secret,
                     platform::delete_webhook_secret
                 ))
+                .routes(routes!(platform::install_hook))
                 .routes(routes!(platform::list_deployments))
                 .routes(routes!(platform::get_logs))
                 .routes(routes!(platform::deploy_app)),

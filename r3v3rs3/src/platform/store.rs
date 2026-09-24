@@ -6,7 +6,7 @@ use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppSpec, DeploymentEntry, DeploymentStatus, DeploymentTrigger, LOCAL_TARGET,
+    AppEntry, AppHook, AppSpec, DeploymentEntry, DeploymentStatus, DeploymentTrigger, LOCAL_TARGET,
     TargetEntry, TargetKind,
 };
 use serde_derive::{Deserialize, Serialize};
@@ -81,10 +81,20 @@ const SCHEMA: &[&str] = &[
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )",
+    "CREATE TABLE IF NOT EXISTS app_hooks (
+        app_id        TEXT PRIMARY KEY REFERENCES apps (id) ON DELETE CASCADE,
+        connection_id TEXT    NOT NULL,
+        repository    TEXT    NOT NULL,
+        remote_id     TEXT,
+        error         TEXT,
+        updated_at    INTEGER NOT NULL
+    )",
 ];
 
 mod connections;
+mod hooks;
 pub use connections::{PUBLIC_URL, StoredConnection, StoredTokens};
+pub use hooks::StoredHook;
 
 /// The secret of an app that holds its Git token.
 pub const GIT_TOKEN: &str = "git_token";
@@ -97,12 +107,15 @@ pub const WEBHOOK_SECRET: &str = "webhook_secret";
 macro_rules! select_apps {
     ($rest:literal) => {
         concat!(
-            "SELECT id, name, target_id, spec, created_at, updated_at,
+            "SELECT id, name, target_id, spec, created_at, apps.updated_at AS updated_at,
                 EXISTS (SELECT 1 FROM app_secrets s WHERE s.app_id = apps.id
                     AND s.name = 'git_token') AS git_token_set,
                 EXISTS (SELECT 1 FROM app_secrets s WHERE s.app_id = apps.id
-                    AND s.name = 'webhook_secret') AS webhook_secret_set
-            FROM apps ",
+                    AND s.name = 'webhook_secret') AS webhook_secret_set,
+                h.connection_id AS hook_connection, h.repository AS hook_repository,
+                h.remote_id AS hook_remote_id, h.error AS hook_error,
+                h.updated_at AS hook_updated_at
+            FROM apps LEFT JOIN app_hooks h ON h.app_id = apps.id ",
             $rest
         )
     };
@@ -705,7 +718,7 @@ fn unfinished_of(row: &SqliteRow) -> anyhow::Result<UnfinishedDeployment> {
 
 fn app_of(row: &SqliteRow) -> anyhow::Result<AppEntry> {
     let spec: AppSpec = serde_json::from_str(row.try_get("spec")?)?;
-    let (git_token_set, webhook_secret_set) = secret_flags(row)?;
+    let (git_token_set, webhook_secret_set, hook) = app_extras(row)?;
     Ok(AppEntry {
         id: id_of(row, "id")?,
         name: row.try_get::<&str, _>("name")?.parse::<AppName>()?,
@@ -713,16 +726,19 @@ fn app_of(row: &SqliteRow) -> anyhow::Result<AppEntry> {
         spec,
         git_token_set,
         webhook_secret_set,
+        hook,
         created_at: time_of(row, "created_at")?,
         updated_at: time_of(row, "updated_at")?,
     })
 }
 
-/// Whether the app has a Git token and whether it has a webhook secret.
-fn secret_flags(row: &SqliteRow) -> anyhow::Result<(bool, bool)> {
+/// Whether the app has a Git token, whether it has a webhook secret, and its webhook at its Git
+/// provider.
+fn app_extras(row: &SqliteRow) -> anyhow::Result<(bool, bool, Option<AppHook>)> {
     Ok((
         row.try_get("git_token_set")?,
         row.try_get("webhook_secret_set")?,
+        hooks::app_hook_of(row)?,
     ))
 }
 
@@ -814,6 +830,7 @@ mod tests {
             },
             git_token_set: false,
             webhook_secret_set: false,
+            hook: None,
             created_at: 10,
             updated_at: 10,
         }

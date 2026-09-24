@@ -171,21 +171,42 @@ impl Platform {
     }
 
     /// Creates a new webhook secret of an app, and returns the app with the secret. The old
-    /// secret stops working.
+    /// secret stops working, so the webhook that a connection installed is installed again.
     pub async fn new_webhook_secret(
         &self,
         id: ShortId,
     ) -> anyhow::Result<(AppEntry, WebhookSecret)> {
         self.app(id).await?;
-        let secret = hex::encode(rand::random::<[u8; 32]>());
-        let sealed = self.keys.seal(&webhook_secret_aad(id), secret.as_bytes())?;
-        self.store.set_secret(id, WEBHOOK_SECRET, &sealed).await?;
+        let secret = self.create_webhook_secret(id).await?;
+        if let Some(hook) = self.store.app_hook(id).await? {
+            self.reinstall_stored_hook(id, &hook, crate::clock::unix_ms())
+                .await?;
+        }
         Ok((self.app(id).await?, WebhookSecret { secret }))
     }
 
+    /// Stores a new webhook secret of an app and returns it.
+    async fn create_webhook_secret(&self, id: ShortId) -> anyhow::Result<String> {
+        let secret = hex::encode(rand::random::<[u8; 32]>());
+        let sealed = self.keys.seal(&webhook_secret_aad(id), secret.as_bytes())?;
+        self.store.set_secret(id, WEBHOOK_SECRET, &sealed).await?;
+        Ok(secret)
+    }
+
+    /// The webhook secret of an app, created when the app has none.
+    pub(super) async fn ensure_webhook_secret(&self, id: ShortId) -> anyhow::Result<String> {
+        match self.webhook_secret(id).await? {
+            Some(secret) => String::from_utf8(secret).context("the webhook secret is not UTF-8"),
+            None => self.create_webhook_secret(id).await,
+        }
+    }
+
     /// Deletes the webhook secret of an app, so that no request deploys it, and returns the app.
+    /// The webhook that a connection installed is removed too.
     pub async fn delete_webhook_secret(&self, id: ShortId) -> anyhow::Result<AppEntry> {
         self.app(id).await?;
+        self.drop_app_hook(id).await?;
+        self.store.delete_app_hook(id).await?;
         self.store.delete_secret(id, WEBHOOK_SECRET).await?;
         self.app(id).await
     }
@@ -311,6 +332,7 @@ mod tests {
     fn git_request(name: &str) -> r3v3rs3_api::platform::AppRequest {
         let mut request = request(name);
         request.spec.source = AppSource::Git {
+            connection: None,
             repository: "https://example.com/shop.git".parse().unwrap(),
             branch: "main".parse().unwrap(),
             context: ".".parse().unwrap(),

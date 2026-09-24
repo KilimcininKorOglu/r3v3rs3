@@ -555,6 +555,7 @@ async fn manage_connections(addr: SocketAddr) -> anyhow::Result<()> {
     let id = check_connection_add(addr, &admin, &editor).await?;
     check_authorization(addr, &admin, &editor, &id).await?;
     check_not_connected(addr, &editor, &id).await?;
+    check_connected_app(addr, &admin, &editor, &id).await?;
     check_connection_update(addr, &admin, &editor, &id).await?;
     check_platform_settings(addr, &admin, &editor).await?;
     check_connection_audit(addr, &admin, &id).await
@@ -657,6 +658,47 @@ async fn check_not_connected(addr: SocketAddr, editor: &str, id: &str) -> anyhow
     let unsafe_name = format!("{CONNECTIONS}/{id}/branches?repository=../app");
     let (status, _) = send(addr, Method::GET, &unsafe_name, editor, None).await?;
     assert_eq!(status, 400);
+    Ok(())
+}
+
+/// An editor adds an app with the connection. The app keeps the reason of its missing webhook,
+/// and the connection cannot be deleted while the app uses it.
+async fn check_connected_app(
+    addr: SocketAddr,
+    admin: &str,
+    editor: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let mut body = app("site", "local");
+    body["spec"]["source"] = json!({
+        "type": "git",
+        "repository": "https://git.example.com/team/site.git",
+        "connection": id,
+    });
+    let (status, text) = send(addr, Method::POST, APPS, editor, Some(body)).await?;
+    assert_eq!(status, 200, "{text}");
+    let added: Value = serde_json::from_str(&text)?;
+    assert_eq!(added["hook"]["repository"], "team/site");
+    assert_eq!(added["hook"]["installed"], false);
+    let app_id = added["id"].as_str().unwrap_or_default();
+
+    let hook = format!("{APPS}/{app_id}/hook");
+    let (status, text) = send(addr, Method::POST, &hook, editor, None).await?;
+    assert_eq!(status, 409, "{text}");
+    assert!(text.contains("public_url_missing"), "{text}");
+    let item = format!("{CONNECTIONS}/{id}");
+    let (status, text) = send(addr, Method::DELETE, &item, admin, None).await?;
+    assert_eq!(status, 409, "{text}");
+    assert!(text.contains("git_connection_in_use"), "{text}");
+    let (status, text) = send(
+        addr,
+        Method::DELETE,
+        &format!("{APPS}/{app_id}"),
+        editor,
+        None,
+    )
+    .await?;
+    assert_eq!(status, 200, "{text}");
     Ok(())
 }
 

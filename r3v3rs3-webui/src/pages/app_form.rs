@@ -54,6 +54,8 @@ pub struct AppForm {
     pub target: String,
     pub kind: SourceKind,
     pub image: String,
+    /// The id of the Git provider connection, or empty for none.
+    pub connection: String,
     pub repository: String,
     pub branch: String,
     pub context: String,
@@ -78,6 +80,7 @@ impl Default for AppForm {
             target: LOCAL_TARGET.to_string(),
             kind: SourceKind::default(),
             image: String::new(),
+            connection: String::new(),
             repository: String::new(),
             branch: GitRef::main().to_string(),
             context: RelPath::root().to_string(),
@@ -129,8 +132,10 @@ impl AppForm {
                 branch,
                 context,
                 dockerfile,
+                connection,
             } => Self {
                 kind: SourceKind::Git,
+                connection: optional(connection.as_ref()),
                 repository: repository.to_string(),
                 branch: branch.to_string(),
                 context: context.to_string(),
@@ -142,8 +147,10 @@ impl AppForm {
                 branch,
                 file,
                 service,
+                connection,
             } => Self {
                 kind: SourceKind::Compose,
+                connection: optional(connection.as_ref()),
                 repository: repository.to_string(),
                 branch: branch.to_string(),
                 compose_file: optional(file.as_ref()),
@@ -188,6 +195,7 @@ impl AppForm {
                 branch: parse(locale, self.branch.trim())?,
                 context: parse(locale, self.context.trim())?,
                 dockerfile: parse(locale, self.dockerfile.trim())?,
+                connection: self.connection(),
             }),
             SourceKind::Compose => self.compose_source(locale),
         }
@@ -202,7 +210,13 @@ impl AppForm {
             branch: parse(locale, self.branch.trim())?,
             file,
             service: parse(locale, self.service.trim())?,
+            connection: self.connection(),
         })
+    }
+
+    /// The selected connection. An empty value parses as the zero id, so it means none here.
+    fn connection(&self) -> Option<ShortId> {
+        non_empty(&self.connection).and_then(|id| id.parse().ok())
     }
 
     fn port(&self, locale: Locale) -> Result<u16, String> {
@@ -584,6 +598,7 @@ mod tests {
             spec: request.spec.clone(),
             git_token_set: false,
             webhook_secret_set: false,
+            hook: None,
             created_at: 0,
             updated_at: 0,
         };

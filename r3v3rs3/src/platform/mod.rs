@@ -4,6 +4,7 @@
 //! database query or a Docker call must not hold up the ports and the other RPC methods.
 
 mod agents;
+mod app_hooks;
 mod build;
 mod compose;
 mod connections;
@@ -28,7 +29,7 @@ use crate::agent::registry::AgentRegistry;
 use crate::agent::remote::RemoteRuntime;
 use crate::audit::AuditLog;
 use crate::build::compose::{ComposeRunner, DockerCompose};
-use crate::build::{GitFetcher, SourceFetcher};
+use crate::build::{GitCredential, GitFetcher, SourceFetcher};
 use crate::cluster::crypto::ClusterKeys;
 use crate::cluster::key_file::{load_keys, write_new_key_file};
 use crate::command::ServerCommand;
@@ -272,8 +273,10 @@ impl Platform {
         self.store.app(id).await?.ok_or_else(|| not_found(id))
     }
 
+    /// Adds an app. An app with a Git provider connection gets its webhook when the platform has
+    /// a public address.
     pub async fn add_app(&self, request: AppRequest, now: u64) -> anyhow::Result<AppEntry> {
-        self.check_request(&request).await?;
+        let hook = self.check_request(&request).await?;
         let app = AppEntry {
             id: self.free_id().await?,
             name: request.name,
@@ -281,14 +284,13 @@ impl Platform {
             spec: request.spec,
             git_token_set: false,
             webhook_secret_set: false,
+            hook: None,
             created_at: now,
             updated_at: now,
         };
-        match self.store.insert_app(&app).await? {
-            Write::Done => Ok(app),
-            Write::NameTaken => Err(name_taken(&app).into()),
-            Write::NotFound => Err(anyhow!("the app was not stored")),
-        }
+        written(self.store.insert_app(&app).await?, &app)?;
+        self.sync_app_hook(app.id, hook, now).await?;
+        self.app(app.id).await
     }
 
     /// A new id that no app uses.
@@ -308,7 +310,7 @@ impl Platform {
         request: AppRequest,
         now: u64,
     ) -> anyhow::Result<AppEntry> {
-        self.check_request(&request).await?;
+        let hook = self.check_request(&request).await?;
         let current = self.app(id).await?;
         // The containers of the deployments run on the old target.
         if request.target != current.target && !self.store.deployments(id, 1).await?.is_empty() {
@@ -324,14 +326,13 @@ impl Platform {
             spec: request.spec,
             git_token_set: current.git_token_set,
             webhook_secret_set: current.webhook_secret_set,
+            hook: None,
             created_at: current.created_at,
             updated_at: now,
         };
-        match self.store.update_app(&app).await? {
-            Write::Done => Ok(app),
-            Write::NameTaken => Err(name_taken(&app).into()),
-            Write::NotFound => Err(not_found(id)),
-        }
+        written(self.store.update_app(&app).await?, &app)?;
+        self.sync_app_hook(id, hook, now).await?;
+        self.app(id).await
     }
 
     /// Deletes an app with its containers, its network, its environment and its deployments.
@@ -343,6 +344,7 @@ impl Platform {
             self.remove_app_resources(&self.backend(app.target), id)
                 .await?;
         }
+        self.drop_app_hook(id).await?;
         if !self.store.delete_app(id).await? {
             return Err(not_found(id));
         }
@@ -413,6 +415,19 @@ impl Platform {
         self.app(id).await
     }
 
+    /// The credential that clones the repository of an app: the current token of its Git
+    /// provider connection, or its own Git token.
+    async fn git_credential(
+        &self,
+        app: ShortId,
+        connection: Option<ShortId>,
+    ) -> anyhow::Result<Option<GitCredential>> {
+        match connection {
+            Some(connection) => Ok(Some(self.connection_credential(connection).await?)),
+            None => Ok(self.git_token(app).await?.map(GitCredential::token)),
+        }
+    }
+
     /// The Git token of an app, opened for one clone.
     async fn git_token(&self, id: ShortId) -> anyhow::Result<Option<String>> {
         let Some(sealed) = self.store.secret(id, GIT_TOKEN).await? else {
@@ -453,12 +468,16 @@ impl Platform {
             .ok_or_else(|| not_found(id))
     }
 
-    async fn check_request(&self, request: &AppRequest) -> anyhow::Result<()> {
+    /// Checks a request and returns the webhook target of its connection.
+    async fn check_request(
+        &self,
+        request: &AppRequest,
+    ) -> anyhow::Result<Option<app_hooks::HookTarget>> {
         request.spec.validate()?;
         if !self.store.has_target(request.target).await? {
             return Err(not_found(request.target));
         }
-        Ok(())
+        self.hook_target(&request.spec).await
     }
 
     fn stored_env(
@@ -543,6 +562,15 @@ fn is_local(target: ShortId) -> bool {
 
 fn not_found(id: ShortId) -> anyhow::Error {
     Error::IdNotFound { id: id.to_string() }.into()
+}
+
+/// The result of a write of an app.
+fn written(write: Write, app: &AppEntry) -> anyhow::Result<()> {
+    match write {
+        Write::Done => Ok(()),
+        Write::NameTaken => Err(name_taken(app).into()),
+        Write::NotFound => Err(not_found(app.id)),
+    }
 }
 
 fn name_taken(app: &AppEntry) -> Error {

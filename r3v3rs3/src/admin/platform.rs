@@ -440,6 +440,35 @@ pub async fn delete_webhook_secret(
     Ok(Json(app))
 }
 
+/// Installs the webhook of an app at the Git provider of its connection again. The old webhook
+/// of the app is removed first. A failed installation shows in the `hook` of the returned app.
+#[utoipa::path(
+    post,
+    path = "/{id}/hook",
+    tag = "platform",
+    operation_id = "install_app_hook",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The app with its webhook.", body = AppEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn install_hook(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AppEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let app = platform
+        .reinstall_app_hook(id, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::InstallAppHook)
+        .id(id)
+        .summary(app.name.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(app))
+}
+
 /// Lists the latest deployments of an app, the newest first.
 #[utoipa::path(
     get,

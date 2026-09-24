@@ -1,5 +1,6 @@
 //! The OAuth endpoints and the REST APIs of GitHub, GitLab and Gitea.
 
+use crate::build::GitCredential;
 use crate::cdn::fetch::HttpClient;
 use crate::certs::dns::api::{ApiClient, ApiRequest};
 use anyhow::anyhow;
@@ -87,6 +88,21 @@ impl Site<'_> {
             .form(form);
         let (_, status, body) = client.exchange(request).await.map_err(GrantError::Failed)?;
         grant_of(status, &body)
+    }
+
+    /// The user name and the password that clone a repository with an OAuth token. GitLab takes
+    /// the token as the password of `oauth2`, and GitHub and Gitea take it as the user name.
+    pub fn credential(&self, token: String) -> GitCredential {
+        match self.provider {
+            GitProvider::Gitlab => GitCredential {
+                user: "oauth2".to_string(),
+                password: token,
+            },
+            GitProvider::Github | GitProvider::Gitea => GitCredential {
+                user: token,
+                password: "x-oauth-basic".to_string(),
+            },
+        }
     }
 
     /// The name of the account that owns the token.

@@ -281,6 +281,19 @@ fn check_repo_name(value: &str) -> Result<(), Error> {
     }
 }
 
+impl RepoName {
+    /// The name of the repository that `clone_url` clones from the provider at `provider`, for
+    /// example `owner/shop` of `https://github.com/owner/shop.git`. `None` when the address
+    /// belongs to another server.
+    pub fn of_clone_url(provider: &ProviderUrl, clone_url: &str) -> Option<Self> {
+        let path = clone_url
+            .strip_prefix(provider.as_str())?
+            .strip_prefix('/')?;
+        let name = path.strip_suffix(".git").unwrap_or(path);
+        name.parse().ok()
+    }
+}
+
 /// A repository that the account of a connection can read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct GitRepository {
@@ -407,6 +420,32 @@ mod tests {
             "owner/.git",
         ] {
             assert!(invalid.parse::<RepoName>().is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn a_clone_address_names_its_repository_at_its_own_provider() {
+        let github: ProviderUrl = GITHUB_URL.parse().unwrap();
+        let gitea: ProviderUrl = "https://h.example/gitea".parse().unwrap();
+        let cases = [
+            (
+                &github,
+                "https://github.com/owner/shop.git",
+                Some("owner/shop"),
+            ),
+            (&github, "https://github.com/owner/shop", Some("owner/shop")),
+            (
+                &gitea,
+                "https://h.example/gitea/team/app.git",
+                Some("team/app"),
+            ),
+            (&github, "https://github.company.com/owner/shop", None),
+            (&github, "https://gitlab.com/owner/shop", None),
+            (&gitea, "https://h.example/other/team/app", None),
+        ];
+        for (provider, url, expected) in cases {
+            let name = RepoName::of_clone_url(provider, url);
+            assert_eq!(name.as_ref().map(RepoName::as_str), expected, "{url}");
         }
     }
 

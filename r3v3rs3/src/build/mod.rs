@@ -31,6 +31,33 @@ impl Revision<'_> {
     }
 }
 
+/// The user name that GitHub, GitLab and Gitea accept together with an access token of an app.
+const TOKEN_USER: &str = "x-access-token";
+
+/// The user name and the password that clone a private repository over HTTPS.
+#[derive(Clone, PartialEq, Eq)]
+pub struct GitCredential {
+    pub user: String,
+    pub password: String,
+}
+
+impl GitCredential {
+    /// The credential of the Git token of an app.
+    pub fn token(token: String) -> Self {
+        Self {
+            user: TOKEN_USER.to_string(),
+            password: token,
+        }
+    }
+}
+
+/// The credential stays out of debug output and logs.
+impl std::fmt::Debug for GitCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitCredential").finish_non_exhaustive()
+    }
+}
+
 /// Fetches the source of an app into a directory.
 #[async_trait::async_trait]
 pub trait SourceFetcher: Send + Sync {
@@ -39,7 +66,7 @@ pub trait SourceFetcher: Send + Sync {
         &self,
         repository: &RepoUrl,
         revision: Revision<'_>,
-        token: Option<&str>,
+        credential: Option<&GitCredential>,
         dest: &Path,
     ) -> anyhow::Result<String>;
 }
@@ -53,10 +80,10 @@ impl SourceFetcher for GitFetcher {
         &self,
         repository: &RepoUrl,
         revision: Revision<'_>,
-        token: Option<&str>,
+        credential: Option<&GitCredential>,
         dest: &Path,
     ) -> anyhow::Result<String> {
-        git::clone(repository, revision, token, dest).await
+        git::clone(repository, revision, credential, dest).await
     }
 }
 

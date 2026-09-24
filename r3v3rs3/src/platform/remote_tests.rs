@@ -225,6 +225,7 @@ async fn a_rollback_on_an_agent_starts_the_old_image_there() -> anyhow::Result<(
 fn compose_request() -> anyhow::Result<AppRequest> {
     let mut stack = request("stack");
     stack.spec.source = AppSource::Compose {
+        connection: None,
         repository: "https://git.example.com/team/stack.git".parse()?,
         branch: "release".parse()?,
         file: None,
@@ -267,6 +268,7 @@ async fn a_compose_app_on_an_agent_runs_from_its_files_there() -> anyhow::Result
 async fn a_git_app_on_an_agent_is_built_there() -> anyhow::Result<()> {
     let mut shop = request("shop");
     shop.spec.source = AppSource::Git {
+        connection: None,
         repository: "https://git.example.com/team/shop.git".parse()?,
         branch: "main".parse()?,
         context: "app".parse()?,

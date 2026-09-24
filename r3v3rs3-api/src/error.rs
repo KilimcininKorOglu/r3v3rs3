@@ -161,6 +161,12 @@ pub enum Error {
     #[error("the Git provider failed: {reason}")]
     GitProviderFailed { reason: String },
 
+    #[error("the app {name} uses the Git provider connection")]
+    GitConnectionInUse { name: String },
+
+    #[error("the platform needs a public address before it installs a webhook")]
+    PublicUrlMissing,
+
     #[error("acme account creation failed")]
     AcmeAccountCreationFailed,
 
@@ -371,6 +377,8 @@ impl Error {
             | Self::TargetNameExists { .. }
             | Self::GitConnectionNameExists { .. }
             | Self::GitConnectionNotConnected { .. }
+            | Self::GitConnectionInUse { .. }
+            | Self::PublicUrlMissing
             | Self::TargetInUse { .. }
             | Self::AppTargetFixed { .. } => 409,
             Self::ClusterUnavailable

@@ -109,22 +109,26 @@ impl From<AppSource> for JobImage {
                 branch,
                 context,
                 dockerfile,
+                connection,
             } => Self::Build(GitBuild {
                 repository,
                 branch,
                 context,
                 dockerfile,
+                connection,
             }),
             AppSource::Compose {
                 repository,
                 branch,
                 file,
                 service,
+                connection,
             } => Self::Compose(ComposeBuild {
                 repository,
                 revision: SourceRevision::Branch(branch),
                 file,
                 service,
+                connection,
             }),
         }
     }
@@ -722,6 +726,7 @@ mod tests {
 
     fn compose_source() -> anyhow::Result<AppSource> {
         Ok(AppSource::Compose {
+            connection: None,
             repository: "https://git.example.com/team/stack.git".parse()?,
             branch: "release".parse()?,
             file: None,
@@ -965,6 +970,7 @@ mod tests {
     fn git_request() -> anyhow::Result<AppRequest> {
         let mut site = request("site");
         site.spec.source = AppSource::Git {
+            connection: None,
             repository: "https://git.example.com/team/site.git".parse()?,
             branch: "release".parse()?,
             context: "app".parse()?,
@@ -1082,7 +1088,8 @@ mod tests {
         let app = setup.platform.delete_git_token(setup.app.id).await?;
         assert!(!app.git_token_set);
         deploy(&setup).await?;
-        assert_eq!(fetched_tokens(&setup), [Some(TOKEN.to_string()), None]);
+        let credential = format!("x-access-token:{TOKEN}");
+        assert_eq!(fetched_tokens(&setup), [Some(credential), None]);
         Ok(())
     }
 

@@ -96,8 +96,15 @@ impl Platform {
         }
     }
 
+    /// Deletes a connection that no app uses.
     pub async fn delete_git_connection(&self, id: ShortId) -> anyhow::Result<GitConnectionEntry> {
         let entry = self.git_connection(id).await?;
+        if let Some(app) = self.store.app_using_connection(id).await? {
+            return Err(Error::GitConnectionInUse {
+                name: app.to_string(),
+            }
+            .into());
+        }
         if !self.store.delete_git_connection(id).await? {
             return Err(not_found(id));
         }

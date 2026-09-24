@@ -2,8 +2,8 @@
 //! validated type, and the process reads no configuration of the host, so a repository cannot run
 //! hooks or reach another protocol.
 
-use super::Revision;
 use super::process::run;
+use super::{GitCredential, Revision};
 use anyhow::{Context as _, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -15,19 +15,16 @@ use tokio::process::Command;
 /// The longest time of a clone.
 const CLONE_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// The user name that GitHub, GitLab and Gitea accept together with an access token.
-const TOKEN_USER: &str = "x-access-token";
-
 /// Checks out the revision into `dest`, which must not exist, and returns the commit SHA.
 pub async fn clone(
     repository: &RepoUrl,
     revision: Revision<'_>,
-    token: Option<&str>,
+    credential: Option<&GitCredential>,
     dest: &Path,
 ) -> anyhow::Result<String> {
     match revision {
-        Revision::Branch(branch) => clone_branch(repository, branch, token, dest).await?,
-        Revision::Commit(commit) => fetch_commit(repository, commit, token, dest).await?,
+        Revision::Branch(branch) => clone_branch(repository, branch, credential, dest).await?,
+        Revision::Commit(commit) => fetch_commit(repository, commit, credential, dest).await?,
     }
     let sha = head(dest).await?;
     if let Revision::Commit(commit) = revision
@@ -41,10 +38,13 @@ pub async fn clone(
 async fn clone_branch(
     repository: &RepoUrl,
     branch: &GitRef,
-    token: Option<&str>,
+    credential: Option<&GitCredential>,
     dest: &Path,
 ) -> anyhow::Result<()> {
-    let mut clone = git(token, dest.parent().context("the checkout has no parent")?);
+    let mut clone = git(
+        credential,
+        dest.parent().context("the checkout has no parent")?,
+    );
     clone
         .args(["clone", "--depth", "1", "--single-branch", "--no-tags"])
         .args(["--branch", branch.as_str(), "--", repository.as_str()])
@@ -58,14 +58,14 @@ async fn clone_branch(
 async fn fetch_commit(
     repository: &RepoUrl,
     commit: &CommitSha,
-    token: Option<&str>,
+    credential: Option<&GitCredential>,
     dest: &Path,
 ) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(dest).await?;
     let mut init = git(None, dest);
     init.args(["init", "--quiet"]);
     run(init, CLONE_TIMEOUT).await?;
-    let mut fetch = git(token, dest);
+    let mut fetch = git(credential, dest);
     fetch
         .args(["fetch", "--depth", "1", "--no-tags", "--"])
         .args([repository.as_str(), commit.as_str()]);
@@ -89,9 +89,9 @@ async fn head(dest: &Path) -> anyhow::Result<String> {
 }
 
 /// A `git` command that reads no global or system configuration, asks no questions, runs no
-/// hooks and speaks only HTTPS. The token travels in an environment variable, so it does not
+/// hooks and speaks only HTTPS. The credential travels in an environment variable, so it does not
 /// appear in the process list.
-fn git(token: Option<&str>, dir: &Path) -> Command {
+fn git(credential: Option<&GitCredential>, dir: &Path) -> Command {
     let mut command = Command::new("git");
     command
         .env_clear()
@@ -108,8 +108,8 @@ fn git(token: Option<&str>, dir: &Path) -> Command {
         ])
         .args(["-c", "core.hooksPath=/dev/null", "-c", "credential.helper="])
         .current_dir(dir);
-    if let Some(token) = token {
-        let basic = STANDARD.encode(format!("{TOKEN_USER}:{token}"));
+    if let Some(credential) = credential {
+        let basic = STANDARD.encode(format!("{}:{}", credential.user, credential.password));
         command
             .env("GIT_CONFIG_COUNT", "1")
             .env("GIT_CONFIG_KEY_0", "http.extraHeader")
@@ -145,7 +145,8 @@ mod tests {
     #[tokio::test]
     async fn the_token_reaches_git_only_through_the_environment() -> anyhow::Result<()> {
         let dir = temp_dir();
-        let command = git(Some("s3cr3t"), &dir.0);
+        let credential = GitCredential::token("s3cr3t".into());
+        let command = git(Some(&credential), &dir.0);
         let std = command.as_std();
         let args = std
             .get_args()

@@ -118,7 +118,7 @@ pub enum AppSource {
         image: ImageRef,
     },
     /// A branch of a Git repository that r3v3rs3 builds with its Dockerfile. A private
-    /// repository needs the Git token of the app.
+    /// repository needs a Git provider connection or the Git token of the app.
     Git {
         #[schema(value_type = String, example = "https://github.com/owner/shop.git")]
         repository: RepoUrl,
@@ -133,6 +133,11 @@ pub enum AppSource {
         #[serde(default = "RelPath::dockerfile")]
         #[schema(value_type = String, example = "Dockerfile")]
         dockerfile: RelPath,
+        /// The Git provider connection that clones the repository and installs its webhook.
+        /// Without it the Git token of the app clones a private repository.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schema(value_type = Option<String>)]
+        connection: Option<ShortId>,
     },
     /// A branch of a Git repository that r3v3rs3 starts with `docker compose`. A deployment
     /// recreates the changed services instead of running the new version next to the old one.
@@ -150,7 +155,31 @@ pub enum AppSource {
         /// The service that receives the requests of the domains on `port`.
         #[schema(value_type = String, example = "web")]
         service: ServiceName,
+        /// The Git provider connection that clones the repository and installs its webhook.
+        /// Without it the Git token of the app clones a private repository.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schema(value_type = Option<String>)]
+        connection: Option<ShortId>,
     },
+}
+
+impl AppSource {
+    /// The repository of a Git or a Compose source and its Git provider connection.
+    pub fn repository(&self) -> Option<(&RepoUrl, Option<ShortId>)> {
+        match self {
+            Self::Image { .. } => None,
+            Self::Git {
+                repository,
+                connection,
+                ..
+            }
+            | Self::Compose {
+                repository,
+                connection,
+                ..
+            } => Some((repository, *connection)),
+        }
+    }
 }
 
 /// What a deployment of an app runs.
@@ -281,9 +310,30 @@ pub struct AppEntry {
     /// admin API returns the secret only once, when it creates the secret.
     #[serde(default)]
     pub webhook_secret_set: bool,
+    /// The webhook that the Git provider connection of the app installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook: Option<AppHook>,
     /// The Unix time in milliseconds.
     pub created_at: u64,
     /// The Unix time in milliseconds.
+    pub updated_at: u64,
+}
+
+/// The webhook of an app at the Git provider of its connection. It sends the push events of the
+/// repository to `POST /hooks/apps/{id}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AppHook {
+    #[schema(value_type = String)]
+    pub connection: ShortId,
+    /// The repository at the provider.
+    #[schema(example = "owner/shop")]
+    pub repository: String,
+    /// Whether the provider holds the webhook.
+    pub installed: bool,
+    /// Why the last installation failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The Unix time in milliseconds of the last installation.
     pub updated_at: u64,
 }
 

@@ -57,6 +57,8 @@ pub(super) struct ComposeBuild {
     pub revision: SourceRevision,
     pub file: Option<RelPath>,
     pub service: ServiceName,
+    /// The Git provider connection that clones the repository.
+    pub connection: Option<ShortId>,
 }
 
 /// One deployment of a Compose app.
@@ -133,13 +135,13 @@ impl Platform {
 
     /// Checks out the revision of the deployment and records its commit.
     async fn check_out(&self, job: &ComposeJob<'_>, checkout: &Path) -> anyhow::Result<()> {
-        let token = self.git_token(job.app).await?;
+        let credential = self.git_credential(job.app, job.source.connection).await?;
         let sha = self
             .fetcher
             .fetch(
                 &job.source.repository,
                 job.source.revision.as_revision(),
-                token.as_deref(),
+                credential.as_ref(),
                 checkout,
             )
             .await?;
@@ -324,6 +326,7 @@ mod tests {
     #[test]
     fn the_override_names_the_variables_without_their_values() -> anyhow::Result<()> {
         let source = ComposeBuild {
+            connection: None,
             repository: "https://git.example.com/team/shop.git".parse()?,
             revision: SourceRevision::Branch(GitRef::main()),
             file: None,

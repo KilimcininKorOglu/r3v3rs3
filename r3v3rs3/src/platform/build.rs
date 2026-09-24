@@ -31,6 +31,8 @@ pub(super) struct GitBuild {
     pub branch: GitRef,
     pub context: RelPath,
     pub dockerfile: RelPath,
+    /// The Git provider connection that clones the repository.
+    pub connection: Option<ShortId>,
 }
 
 impl Platform {
@@ -66,13 +68,13 @@ impl Platform {
     ) -> anyhow::Result<String> {
         tokio::fs::create_dir_all(dir).await?;
         let checkout = dir.join("src");
-        let token = self.git_token(app).await?;
+        let credential = self.git_credential(app, source.connection).await?;
         let sha = self
             .fetcher
             .fetch(
                 &source.repository,
                 Revision::Branch(&source.branch),
-                token.as_deref(),
+                credential.as_ref(),
                 &checkout,
             )
             .await?;

@@ -4,6 +4,7 @@
 use super::Platform;
 use super::oauth::{provider_failed, site};
 use super::provider::NewHook;
+use crate::build::GitCredential;
 use r3v3rs3_api::git_connection::{GitRepository, RepoName, RepositoryQuery};
 use r3v3rs3_api::id::ShortId;
 
@@ -33,6 +34,12 @@ impl Platform {
             .branches(self.http().await?, &token, repository)
             .await
             .map_err(provider_failed)
+    }
+
+    /// The credential that clones a repository with the current token of the connection.
+    pub(super) async fn connection_credential(&self, id: ShortId) -> anyhow::Result<GitCredential> {
+        let (entry, token) = self.git_access_token(id).await?;
+        Ok(site(&entry).credential(token))
     }
 
     /// Adds a webhook to a repository of the connection that sends its push events to `url`

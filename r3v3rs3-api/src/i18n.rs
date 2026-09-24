@@ -254,6 +254,8 @@ mod tests {
                 id: "abc".parse().unwrap(),
             },
             Error::GitProviderFailed { reason: text() },
+            Error::GitConnectionInUse { name: text() },
+            Error::PublicUrlMissing,
             Error::AcmeAccountCreationFailed,
             Error::AcmeUnsupportedChallenge { challenge: text() },
             Error::AcmeIdentifiersMissing,

@@ -2,7 +2,7 @@
 //! platform.
 
 use crate::build::compose::{ComposeModel, ComposePort, ComposeProject, ComposeRunner};
-use crate::build::{Revision, SourceFetcher};
+use crate::build::{GitCredential, Revision, SourceFetcher};
 use crate::runtime::ContainerRuntime;
 use anyhow::{Context as _, bail};
 use r3v3rs3_api::container::{
@@ -83,7 +83,7 @@ impl SourceFetcher for FakeFetcher {
         &self,
         repository: &RepoUrl,
         revision: Revision<'_>,
-        token: Option<&str>,
+        credential: Option<&GitCredential>,
         dest: &Path,
     ) -> anyhow::Result<String> {
         let compose = {
@@ -94,7 +94,7 @@ impl SourceFetcher for FakeFetcher {
             let fetch = (
                 repository.to_string(),
                 revision.as_str().to_string(),
-                token.map(str::to_string),
+                credential.map(|c| format!("{}:{}", c.user, c.password)),
             );
             state.fetched.push(fetch);
             state.compose_file.clone()
