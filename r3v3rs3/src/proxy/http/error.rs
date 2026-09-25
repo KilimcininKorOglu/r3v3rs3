@@ -41,6 +41,9 @@ pub enum ProxyError {
 
     #[error("the request body is larger than the limit of the route")]
     PayloadTooLarge,
+
+    #[error("the request URI for the upstream server cannot be built")]
+    UpstreamUriInvalid,
 }
 
 impl ProxyError {
@@ -56,7 +59,8 @@ impl ProxyError {
             Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
             Self::AuthServiceUnavailable
             | Self::UpstreamClientCertInvalid
-            | Self::NoUpstreamServers => StatusCode::BAD_GATEWAY,
+            | Self::NoUpstreamServers
+            | Self::UpstreamUriInvalid => StatusCode::BAD_GATEWAY,
         }
     }
 }

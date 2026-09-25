@@ -867,7 +867,13 @@ where
     } = prepared;
     let resource_id = route.resource_id;
     let secure = info.proto != "http";
-    let sticky_cookie = upstream.select(&mut req, res.path_segments, client.ip, secure);
+    let sticky_cookie = match upstream.select(&mut req, res.path_segments, client.ip, secure) {
+        Ok(sticky_cookie) => sticky_cookie,
+        Err(err) => {
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
+            return (ProxiedRequest::Err(err), response_rewriter);
+        }
+    };
     let response_rewriter = response_rewriter.sticky_cookie(sticky_cookie);
     if route.h2c {
         req.extensions_mut().insert(UpstreamH2c);

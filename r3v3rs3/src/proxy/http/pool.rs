@@ -241,16 +241,17 @@ impl Upstream {
     /// Selects the upstream server of the request, and sets the request URI and the `Host` header
     /// for that server. A route without a server leaves the request unchanged. `client` is the
     /// IP address of the client, and `secure` is true for a TLS connection. Returns the slot of
-    /// the sticky cookie of the response when the route has sticky sessions.
+    /// the sticky cookie of the response when the route has sticky sessions. Fails when the
+    /// request URI for the server cannot be built.
     pub fn select<B>(
         &self,
         req: &mut Request<B>,
         path_segments: Vec<String>,
         client: IpAddr,
         secure: bool,
-    ) -> Option<CookieSlot> {
+    ) -> Result<Option<CookieSlot>, ProxyError> {
         if self.servers.is_empty() {
-            return None;
+            return Ok(None);
         }
         let mut candidates = self.group.candidates(client);
         let sticky = self
@@ -265,10 +266,10 @@ impl Upstream {
             sticky,
         };
         if let Some(&first) = target.candidates.first() {
-            self.apply(req, first, &target);
+            self.apply(req, first, &target)?;
         }
         req.extensions_mut().insert(target);
-        cookie
+        Ok(cookie)
     }
 
     /// Moves the server of the sticky cookie to the front of the candidates, and removes the
@@ -309,18 +310,23 @@ impl Upstream {
         *sticky.cookie.lock().unwrap_or_else(PoisonError::into_inner) = cookie;
     }
 
-    fn apply<B>(&self, req: &mut Request<B>, index: usize, target: &UpstreamTarget) {
-        let Some(server) = self.servers.get(index) else {
-            return;
-        };
-        let url = upstream_url(
+    /// Points the request at the server. The request must not be sent when this fails, because
+    /// it still carries the URI of the client.
+    fn apply<B>(
+        &self,
+        req: &mut Request<B>,
+        index: usize,
+        target: &UpstreamTarget,
+    ) -> Result<(), ProxyError> {
+        let server = self
+            .servers
+            .get(index)
+            .ok_or(ProxyError::NoUpstreamServers)?;
+        let uri = upstream_uri(
             &server.url.0,
             &target.path_segments,
             target.query.as_deref(),
-        );
-        let Ok(uri) = Uri::from_str(url.as_str()) else {
-            return;
-        };
+        )?;
         if let Some(host) = uri
             .authority()
             .and_then(|host| HeaderValue::from_str(host.as_str()).ok())
@@ -328,6 +334,7 @@ impl Upstream {
             req.headers_mut().insert(HOST, host);
         }
         *req.uri_mut() = uri;
+        Ok(())
     }
 
     /// Sends the request to the selected server. A failure that the retry policy names sends the
@@ -364,12 +371,12 @@ impl Upstream {
             .servers
             .iter()
             .filter_map(|server| {
-                let url = upstream_url(
+                upstream_uri(
                     &server.url.0,
                     &target.path_segments,
                     target.query.as_deref(),
-                );
-                Uri::from_str(url.as_str()).ok()
+                )
+                .ok()
             })
             .collect();
         mirror.tee(req, uris, permit)
@@ -397,7 +404,10 @@ impl Upstream {
             let Some(mut req) = replay.next() else {
                 break;
             };
-            let Some(permit) = self.claim(&mut req, target, &mut candidates) else {
+            let Some(permit) = self
+                .claim(&mut req, target, &mut candidates)
+                .map_err(SendError::other)?
+            else {
                 break;
             };
             if attempt > 1 {
@@ -429,18 +439,20 @@ impl Upstream {
     }
 
     /// Takes the next candidate whose circuit lets the request through, and points the request at
-    /// that server when `select` chose another server.
+    /// that server when `select` chose another server. Returns `None` when no candidate is left.
     fn claim<B>(
         &self,
         req: &mut Request<B>,
         target: &UpstreamTarget,
         candidates: &mut impl Iterator<Item = usize>,
-    ) -> Option<Permit> {
-        let permit = candidates.find_map(|index| self.group.acquire(index))?;
+    ) -> Result<Option<Permit>, ProxyError> {
+        let Some(permit) = candidates.find_map(|index| self.group.acquire(index)) else {
+            return Ok(None);
+        };
         if target.candidates.first() != Some(&permit.index()) {
-            self.apply(req, permit.index(), target);
+            self.apply(req, permit.index(), target)?;
         }
-        Some(permit)
+        Ok(Some(permit))
     }
 
     /// Sends the request and records the result in the health and the circuit of the server.
@@ -512,6 +524,14 @@ fn upstream_url(server: &Url, segments: &[String], query: Option<&str>) -> Url {
     }
     url.set_query(query);
     url
+}
+
+/// The URI of a request to a server, built as [`upstream_url`] builds its URL. A URL that is not
+/// a valid URI, for example one longer than the URI limit, fails with
+/// [`ProxyError::UpstreamUriInvalid`].
+fn upstream_uri(server: &Url, segments: &[String], query: Option<&str>) -> Result<Uri, ProxyError> {
+    Uri::from_str(upstream_url(server, segments, query).as_str())
+        .map_err(|_| ProxyError::UpstreamUriInvalid)
 }
 
 /// A `.` or `..` segment, also percent-encoded. The URL parser resolves these segments, so they
@@ -747,6 +767,20 @@ mod tests {
             joined("http://up/base/", &segments, None),
             "http://up/base/secret"
         );
+    }
+
+    #[test]
+    fn a_url_that_is_no_valid_uri_fails_the_request() {
+        let server = "http://up/base/".parse().unwrap();
+        let short = upstream_uri(&server, &["x".to_string()], None).unwrap();
+        assert_eq!(short, "http://up/base/x");
+
+        // The percent-encoding of `{` makes the path three times longer than the URI limit.
+        let long = vec!["{".repeat(u16::MAX as usize / 3 + 1)];
+        assert!(matches!(
+            upstream_uri(&server, &long, None),
+            Err(ProxyError::UpstreamUriInvalid)
+        ));
     }
 
     async fn prepared(req: Request<ProxyBody>, limit: u64) -> Replay {
