@@ -75,7 +75,7 @@ Both need the session cookie. Open them in the browser where you signed in to th
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/openapi.json | jq '.info.version, (.paths | length)'
-"1.5.4"
+"1.5.5"
 58
 ```
 
