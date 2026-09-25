@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-09-25
+
+### Changed
+- The version examples of the tutorials name 1.5.4.
+
+### Fixed
+- The WebUI treats every zero gzip quality, such as `gzip;q=0.0`, as a refusal and sends the plain body.
+- The proxy error page carries `Cache-Control: no-store`, so no cache in front of r3v3rs3 keeps it.
+- The immutable WebUI bundle files carry no ETag, because a browser never revalidates them.
+
 ## [1.5.3] - 2026-09-25
 
 ### Changed
