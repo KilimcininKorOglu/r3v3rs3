@@ -30,7 +30,7 @@ Script iki soru sorar:
 Çıktı bütün yolları yazar:
 
 ```text
-r3v3rs3 v1.5.3 is running.
+r3v3rs3 v1.5.4 is running.
 
   WebUI:    http://127.0.0.1:46492/
   Binary:   /usr/local/bin/r3v3rs3
@@ -44,7 +44,7 @@ Soru sormadan kurmak için iki seçenek de vardır:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
-    | sudo bash -s -- --version 1.5.3 --webui 0.0.0.0:46492
+    | sudo bash -s -- --version 1.5.4 --webui 0.0.0.0:46492
 ```
 
 Terminal olmadan, pipe içinden çalışan bir script hesap oluşturmaz. Onun yerine komutu yazar:
@@ -116,7 +116,7 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
 - WebUI sorusunda varsayılan olarak kurulu servisin adresini sunar, yani Enter adresi korur.
 - Servisi yeniden başlatır ve WebUI cevap verene kadar bekler. WebUI 30 saniye sessiz kalırsa `systemctl status` çıktısını ve son 50 journal satırını yazar, sonra durur.
 
-Bir filoyu adım adım yükseltirken sürümü `--version 1.5.3` ile sabitleyin.
+Bir filoyu adım adım yükseltirken sürümü `--version 1.5.4` ile sabitleyin.
 
 ## Kaldırma
 

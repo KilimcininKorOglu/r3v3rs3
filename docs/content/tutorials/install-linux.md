@@ -30,7 +30,7 @@ The script asks two questions:
 The output names every path:
 
 ```text
-r3v3rs3 v1.5.3 is running.
+r3v3rs3 v1.5.4 is running.
 
   WebUI:    http://127.0.0.1:46492/
   Binary:   /usr/local/bin/r3v3rs3
@@ -44,7 +44,7 @@ Both options also work without a question, for an unattended install:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
-    | sudo bash -s -- --version 1.5.3 --webui 0.0.0.0:46492
+    | sudo bash -s -- --version 1.5.4 --webui 0.0.0.0:46492
 ```
 
 A script that runs through a pipe without a terminal creates no account. It prints the command instead:
@@ -116,7 +116,7 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
 - The WebUI question offers the address of the installed service as its default, so pressing Enter keeps it.
 - It restarts the service and waits until the WebUI answers. When the WebUI stays silent for 30 seconds, it prints `systemctl status` and the last 50 journal lines, then stops.
 
-Pin a release with `--version 1.5.3` when you upgrade a fleet in steps.
+Pin a release with `--version 1.5.4` when you upgrade a fleet in steps.
 
 ## Remove
 
