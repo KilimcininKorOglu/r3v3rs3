@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-09-25
+
+### Changed
+- The version examples of the tutorials name 1.5.5.
+
+### Fixed
+- An HTTP route answers 502 when the request URI for the upstream server cannot be built, for example when the percent-encoded path is longer than the URI limit. Before, the proxy sent the request with the URI of the client.
+
 ## [1.5.4] - 2026-09-25
 
 ### Changed
