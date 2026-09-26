@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 
+# Both Rust stages use the compiler of `channel` in rust-toolchain.toml. Raise the tags with it.
 # The WebUI is WebAssembly, so it is built once on the build platform for every target platform.
-FROM --platform=$BUILDPLATFORM rust:1-trixie AS webui
+FROM --platform=$BUILDPLATFORM rust:1.98.1-trixie AS webui
 ARG BUILDARCH
 ARG TRUNK_VERSION=0.21.14
 RUN set -eu; \
@@ -24,7 +25,7 @@ COPY r3v3rs3-webui r3v3rs3-webui
 WORKDIR /usr/src/app/r3v3rs3-webui
 RUN trunk build --cargo-profile web-release --release
 
-FROM rust:1-trixie AS builder
+FROM rust:1.98.1-trixie AS builder
 WORKDIR /usr/src/app
 COPY Cargo.toml Cargo.lock ./
 COPY r3v3rs3 r3v3rs3
