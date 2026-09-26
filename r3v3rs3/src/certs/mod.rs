@@ -200,7 +200,7 @@ impl Cert {
         let issuer = x509.issuer().to_string();
         let root_cert = parsed_chain
             .last()
-            .filter(|_| chain.len() > 1)
+            .filter(|_| parsed_chain.len() > 1)
             .map(|cert| cert.subject().to_string());
 
         Ok(Self {
@@ -454,6 +454,19 @@ mod test {
             PrivateKeyDer::Sec1(_)
         ));
         assert!(reloaded.certified_key().is_ok());
+    }
+
+    #[test]
+    fn a_chain_names_its_last_certificate_as_the_root() {
+        let ca = Cert::new_ca().unwrap();
+        let single = Cert::new(CertKind::Root, ca.pem_chain.clone(), None).unwrap();
+        assert_eq!(single.root_cert, None);
+
+        let san = [SubjectName::from_str("chain.example.com").unwrap()];
+        let leaf = Cert::new_self_signed(&san, &ca).unwrap();
+        let chained = Cert::new(CertKind::Server, leaf.pem_chain.clone(), None).unwrap();
+        assert_eq!(chained.certificates().unwrap().len(), 2);
+        assert_eq!(chained.root_cert, Some(chained.issuer.clone()));
     }
 
     #[test]
