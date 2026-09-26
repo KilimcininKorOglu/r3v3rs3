@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use std::net::IpAddr;
 use std::time::Instant;
 use tokio_rustls::rustls::pki_types::PrivateKeyDer;
+use tokio_rustls::rustls::pki_types::pem::PemObject;
 
 /// The longest name of a GitHub App.
 const MAX_APP_NAME_LENGTH: usize = 34;
@@ -85,9 +86,7 @@ fn install_url(html_url: &str) -> String {
 
 /// A JWT of the GitHub App with the client id `client_id`, signed with its private key `pem`.
 fn app_jwt(client_id: &str, pem: &str, now_secs: u64) -> anyhow::Result<String> {
-    let key = rustls_pemfile::private_key(&mut pem.as_bytes())
-        .ok()
-        .flatten()
+    let key = PrivateKeyDer::from_pem_slice(pem.as_bytes())
         .context("the private key of the GitHub App is not PEM")?;
     let pair = match &key {
         PrivateKeyDer::Pkcs1(key) => RsaKeyPair::from_der(key.secret_pkcs1_der()),
@@ -348,7 +347,7 @@ mod tests {
             decoded(claims)?,
             json!({"iat": 999_940, "exp": 1_000_540, "iss": "Iv1.abc"})
         );
-        let der = rustls_pemfile::private_key(&mut pem.as_bytes())?.context("key")?;
+        let der = PrivateKeyDer::from_pem_slice(pem.as_bytes())?;
         let PrivateKeyDer::Pkcs1(der) = der else {
             bail!("not PKCS#1");
         };

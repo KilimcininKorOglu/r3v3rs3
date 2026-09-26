@@ -25,7 +25,8 @@ use tokio_rustls::rustls::client::danger::{
 use tokio_rustls::rustls::crypto::{
     CryptoProvider, ring, verify_tls12_signature, verify_tls13_signature,
 };
-use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use tokio_rustls::rustls::pki_types::pem::PemObject;
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use tokio_rustls::rustls::server::WebPkiClientVerifier;
 use tokio_rustls::rustls::{
     CertificateError, ClientConfig, DigitallySignedStruct, Error, RootCertStore, ServerConfig,
@@ -160,7 +161,8 @@ fn roots(certificates: &[CertificateDer<'static>]) -> anyhow::Result<RootCertSto
 }
 
 pub fn pem_certificates(pem: &str) -> anyhow::Result<Vec<CertificateDer<'static>>> {
-    let certificates = rustls_pemfile::certs(&mut pem.as_bytes()).collect::<Result<Vec<_>, _>>()?;
+    let certificates =
+        CertificateDer::pem_slice_iter(pem.as_bytes()).collect::<Result<Vec<_>, _>>()?;
     if certificates.is_empty() {
         anyhow::bail!("the PEM text holds no certificate");
     }
@@ -196,7 +198,7 @@ pub fn agent_client_config(
     certificate_pem: &str,
     key_pem: &str,
 ) -> anyhow::Result<ClientConfig> {
-    let key = rustls_pemfile::private_key(&mut key_pem.as_bytes())?
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
         .context("the agent key file holds no key")?;
     let mut config = ClientConfig::builder()
         .with_root_certificates(roots(&pem_certificates(ca_pem)?)?)
@@ -283,10 +285,8 @@ impl ServerCertVerifier for PinnedCa {
 
 /// The private key of a PEM text, for the tests of the link.
 #[cfg(test)]
-pub(crate) fn private_key(
-    pem: &str,
-) -> anyhow::Result<tokio_rustls::rustls::pki_types::PrivateKeyDer<'static>> {
-    rustls_pemfile::private_key(&mut pem.as_bytes())?.context("no key")
+pub(crate) fn private_key(pem: &str) -> anyhow::Result<PrivateKeyDer<'static>> {
+    PrivateKeyDer::from_pem_slice(pem.as_bytes()).context("no key")
 }
 
 #[cfg(test)]

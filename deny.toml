@@ -12,14 +12,15 @@ all-features = true
 [advisories]
 yanked = "deny"
 ignore = [
-    # rsa: Marvin Attack timing sidechannel. No patched release exists. The crate arrives through
-    # sqlx-mysql as a dev-dependency only, and the released binary does not carry it.
+    # rsa: Marvin Attack timing sidechannel. No patched release exists. rsa is a direct
+    # dev-dependency of r3v3rs3 that generates RSA test keys, so the released binary does not
+    # carry it.
     "RUSTSEC-2023-0071",
-    # The crates below have no maintained release. Each one is a transitive dependency.
-    "RUSTSEC-2025-0141", # bincode 1.x
-    "RUSTSEC-2024-0436", # paste
-    "RUSTSEC-2024-0370", # proc-macro-error
-    "RUSTSEC-2025-0134", # rustls-pemfile
+    # The crates below have no maintained release. Each one is a transitive dependency. Check
+    # for a new release of the crate that pulls it in before every release.
+    "RUSTSEC-2025-0141", # bincode 1.x, through gloo-worker of yew (WebUI)
+    "RUSTSEC-2024-0436", # paste, through utoipa-axum
+    "RUSTSEC-2024-0370", # proc-macro-error, through yew-macro and yewdux-macros (WebUI)
 ]
 
 [licenses]

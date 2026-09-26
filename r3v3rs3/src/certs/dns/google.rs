@@ -10,6 +10,8 @@ use hyper::Method;
 use ring::signature::RsaKeyPair;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
+use tokio_rustls::rustls::pki_types::PrivatePkcs8KeyDer;
+use tokio_rustls::rustls::pki_types::pem::PemObject;
 
 pub const API_URL: &str = "https://dns.googleapis.com/dns/v1";
 pub const AUTH_URL: &str = "https://oauth2.googleapis.com";
@@ -43,10 +45,8 @@ impl ServiceAccount {
             id => id.to_string(),
         };
         let pem = field("private_key")?;
-        let der = rustls_pemfile::pkcs8_private_keys(&mut pem.as_bytes())
-            .next()
-            .and_then(Result::ok)
-            .ok_or_else(|| anyhow!("the Google Cloud service account key has no PKCS#8 key"))?;
+        let der = PrivatePkcs8KeyDer::from_pem_slice(pem.as_bytes())
+            .map_err(|_| anyhow!("the Google Cloud service account key has no PKCS#8 key"))?;
         let key = RsaKeyPair::from_pkcs8(der.secret_pkcs8_der())
             .map_err(|_| anyhow!("the Google Cloud service account key is not an RSA key"))?;
         Ok(Self {

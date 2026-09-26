@@ -15,7 +15,11 @@ use tokio::{
 };
 use tokio_rustls::{
     TlsConnector,
-    rustls::{ClientConfig, RootCertStore, crypto::ring, pki_types::ServerName},
+    rustls::{
+        ClientConfig, RootCertStore,
+        crypto::ring,
+        pki_types::{CertificateDer, ServerName, pem::PemObject},
+    },
 };
 
 mod common;
@@ -339,7 +343,7 @@ async fn tcp_proxy_sends_the_header_to_the_upstream() -> anyhow::Result<()> {
 
 fn tls_connector(root: &Cert) -> anyhow::Result<TlsConnector> {
     let mut roots = RootCertStore::empty();
-    for cert in rustls_pemfile::certs(&mut &root.pem_chain[..]) {
+    for cert in CertificateDer::pem_slice_iter(&root.pem_chain) {
         roots.add(cert?)?;
     }
     let config = ClientConfig::builder_with_provider(Arc::new(ring::default_provider()))

@@ -14,6 +14,7 @@ use std::io::{BufRead, BufReader};
 use std::net::IpAddr;
 use std::str::FromStr;
 use tokio_rustls::rustls::crypto::ring::sign;
+use tokio_rustls::rustls::pki_types::pem::PemObject;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::rustls::sign::CertifiedKey;
 use tracing::error;
@@ -172,8 +173,7 @@ impl Cert {
         )
         .ok();
 
-        let mut chain = pem_chain.as_slice();
-        let certs = rustls_pemfile::certs(&mut chain)
+        let certs = CertificateDer::pem_slice_iter(&pem_chain)
             .map(|cert| cert.map_err(|_| Error::FailedToReadCertificate))
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -290,12 +290,8 @@ impl Cert {
     }
 
     pub fn certificates(&self) -> Result<Vec<CertificateDer<'static>>, Error> {
-        let mut chain = self.pem_chain.as_slice();
-        rustls_pemfile::certs(&mut chain)
-            .map(|cert| {
-                cert.map(|cert| cert.to_owned())
-                    .map_err(|_| Error::FailedToReadCertificate)
-            })
+        CertificateDer::pem_slice_iter(&self.pem_chain)
+            .map(|cert| cert.map_err(|_| Error::FailedToReadCertificate))
             .collect()
     }
 
@@ -348,11 +344,8 @@ fn generation_error(err: rcgen::Error) -> Error {
 
 /// Reads the first private key of a PEM text. rustls signs with PKCS#8, PKCS#1 (RSA) and SEC1 (EC)
 /// keys.
-fn parse_private_key(mut pem_key: &[u8]) -> Result<PrivateKeyDer<'static>, Error> {
-    match rustls_pemfile::private_key(&mut pem_key) {
-        Ok(Some(key)) => Ok(key),
-        Ok(None) | Err(_) => Err(Error::FailedToReadPrivateKey),
-    }
+fn parse_private_key(pem_key: &[u8]) -> Result<PrivateKeyDer<'static>, Error> {
+    PrivateKeyDer::from_pem_slice(pem_key).map_err(|_| Error::FailedToReadPrivateKey)
 }
 
 fn parse_chain<'a>(chain: &'a [CertificateDer]) -> Result<Vec<X509Certificate<'a>>, Error> {

@@ -10,6 +10,7 @@ use r3v3rs3_api::discovery::Endpoint;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio_rustls::rustls::pki_types::pem::PemObject;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
@@ -101,7 +102,7 @@ async fn root_certs(ca_file: Option<&Path>) -> anyhow::Result<RootCertStore> {
 }
 
 async fn read_certs(path: &Path) -> anyhow::Result<Vec<CertificateDer<'static>>> {
-    let certs = rustls_pemfile::certs(&mut read_pem(path).await?.as_slice())
+    let certs = CertificateDer::pem_slice_iter(&read_pem(path).await?)
         .collect::<Result<Vec<_>, _>>()
         .with_context(|| format!("invalid certificate in {}", path.display()))?;
     anyhow::ensure!(!certs.is_empty(), "{} has no certificate", path.display());
@@ -109,9 +110,8 @@ async fn read_certs(path: &Path) -> anyhow::Result<Vec<CertificateDer<'static>>>
 }
 
 async fn read_key(path: &Path) -> anyhow::Result<PrivateKeyDer<'static>> {
-    rustls_pemfile::private_key(&mut read_pem(path).await?.as_slice())
-        .with_context(|| format!("invalid private key in {}", path.display()))?
-        .with_context(|| format!("{} has no private key", path.display()))
+    PrivateKeyDer::from_pem_slice(&read_pem(path).await?)
+        .with_context(|| format!("{} has no valid private key", path.display()))
 }
 
 async fn read_pem(path: &Path) -> anyhow::Result<Vec<u8>> {
