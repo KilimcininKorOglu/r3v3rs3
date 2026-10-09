@@ -92,6 +92,49 @@ jobs:
     name: Test
     uses: ./.github/workflows/rust.yml
 
+  # Signs the checksums of the release assets, so a download verifies against the public key
+  # that the repository carries in dist/minisign.pub.
+  sign:
+    name: Sign the checksums
+    needs: [binary]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends minisign
+      - name: Write the signing key
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          test -n "$MINISIGN_SECRET_KEY" || { echo "the MINISIGN_SECRET_KEY secret is empty" >&2; exit 1; }
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
+          chmod 600 /tmp/minisign.key
+      - name: Download the release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir assets
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir assets
+          rm -f assets/SHA256SUMS assets/SHA256SUMS.minisig
+      - name: Sign the checksums
+        env:
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        working-directory: assets
+        run: |
+          sha256sum --binary * > ../SHA256SUMS
+          # minisign reads the password from stdin, not from the environment.
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -Sm ../SHA256SUMS -s /tmp/minisign.key
+      - name: Verify the signature
+        working-directory: assets
+        # The same command that the release verification docs give the users.
+        run: minisign -Vm ../SHA256SUMS -p "$GITHUB_WORKSPACE/dist/minisign.pub"
+      - name: Upload the checksums
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber SHA256SUMS SHA256SUMS.minisig
+
   # crates.io trusted publishing exchanges the GitHub OIDC token for a short-lived token,
   # so the repository stores no crates.io secret.
   crates:
@@ -136,7 +179,7 @@ jobs:
   publish:
     name: Publish release
     if: github.event_name == 'push'
-    needs: [binary, crates]
+    needs: [binary, crates, sign]
     runs-on: ubuntu-24.04
     steps:
       - name: Publish the draft release
