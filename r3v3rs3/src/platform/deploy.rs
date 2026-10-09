@@ -878,7 +878,9 @@ mod tests {
     }
 
     /// A Compose file whose traffic service publishes a port itself, which the override replaces.
-    const DOCKER_COMPOSE_FILE: &str = "services:\n  web:\n    image: traefik/whoami:v1.10.3\n    ports: [\"18080:80\"]\n  sidecar:\n    image: traefik/whoami:v1.10.3\n";
+    /// The image comes from the repository's GHCR mirror, which `mirror-images.yml` fills, so
+    /// the CI runners stay below the unauthenticated Docker Hub pull rate limit.
+    const DOCKER_COMPOSE_FILE: &str = "services:\n  web:\n    image: ghcr.io/kilimcininkoroglu/r3v3rs3/whoami:v1.10.3\n    ports: [\"18080:80\"]\n  sidecar:\n    image: ghcr.io/kilimcininkoroglu/r3v3rs3/whoami:v1.10.3\n";
 
     /// The app `stack` on the real Docker Engine, with a checkout that holds
     /// [`DOCKER_COMPOSE_FILE`].

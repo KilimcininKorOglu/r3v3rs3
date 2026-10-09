@@ -22,7 +22,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
 /// A small multi-platform image that serves HTTP on port 80 with its default command.
-const IMAGE: &str = "traefik/whoami:v1.10.3";
+/// `mirror-images.yml` copies it from Docker Hub into the repository's GHCR mirror, so the
+/// CI runners stay below the unauthenticated Docker Hub pull rate limit.
+const IMAGE: &str = "ghcr.io/kilimcininkoroglu/r3v3rs3/whoami:v1.10.3";
 
 fn docker_host() -> String {
     std::env::var("DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into())
@@ -260,7 +262,7 @@ async fn build(runtime: &DockerRuntime, tag: &ImageRef) -> anyhow::Result<()> {
 
 /// The project file and the file that publishes the service on 127.0.0.1, as the platform
 /// writes it.
-const COMPOSE_FILE: &str = "services:\n  web:\n    image: traefik/whoami:v1.10.3\n    environment:\n      WHOAMI_NAME: ${NAME}\n";
+const COMPOSE_FILE: &str = "services:\n  web:\n    image: ghcr.io/kilimcininkoroglu/r3v3rs3/whoami:v1.10.3\n    environment:\n      WHOAMI_NAME: ${NAME}\n";
 const OVERRIDE_FILE: &str = r#"{"services": {"web": {"ports": ["127.0.0.1::80"]}}}"#;
 
 #[tokio::test]

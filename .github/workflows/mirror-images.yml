@@ -1,0 +1,49 @@
+name: Mirror images
+
+# The Docker runtime tests pull their images from this repository's GHCR mirror,
+# so the CI runners stay below the unauthenticated Docker Hub pull rate limit.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 2 * *"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # One "source target" pair per line. The source sits on Docker Hub; the target
+  # is a package under ghcr.io/<owner>/.
+  IMAGES: "docker.io/traefik/whoami:v1.10.3 whoami:v1.10.3"
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install skopeo
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends skopeo
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Copy the images
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          echo "$IMAGES" | while read -r source target; do
+            [ -n "$target" ] || continue
+            echo "copying $source to ghcr.io/${OWNER,,}/$target"
+            skopeo copy --all "docker://$source" "docker://ghcr.io/${OWNER,,}/$target"
+          done
+      - name: Make the packages public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "$IMAGES" | while read -r source target; do
+            [ -n "$target" ] || continue
+            name="${target%%:*}"
+            gh api -X PATCH "/user/packages/container/$(printf %s "$name" | jq -Rr @uri)" -f visibility=public >/dev/null
+          done
