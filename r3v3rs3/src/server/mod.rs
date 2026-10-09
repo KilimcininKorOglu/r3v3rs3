@@ -19,6 +19,8 @@ mod connection;
 mod credentials;
 mod discovery;
 pub mod fdmanifest;
+pub mod fdpass;
+pub mod ipc;
 mod port_list;
 mod proxy_list;
 mod quic;

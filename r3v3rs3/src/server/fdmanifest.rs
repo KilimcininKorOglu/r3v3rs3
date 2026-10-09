@@ -4,7 +4,8 @@ use std::net::SocketAddr;
 use std::os::fd::OwnedFd;
 
 /// The protocol that a listening socket serves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ListenerProto {
     Tcp,
     Udp,
