@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-10-09
+
+### Changed
+- The version examples of the tutorials name 1.5.6.
+- The docs site serves the Merriweather Sans font itself instead of Google Fonts.
+
+### Fixed
+- The Docker image builds with the Rust compiler that `rust-toolchain.toml` pins instead of the latest stable.
+- An uploaded certificate chain names its last certificate as the root certificate again.
+- The unmaintained `rustls-pemfile` crate is replaced by the PEM parser of `rustls-pki-types`.
+
 ## [1.5.5] - 2026-09-25
 
 ### Changed
