@@ -44,6 +44,9 @@ enum Format {
     Lines,
     /// JSON arrays of strings under the given keys. No keys means a top-level array.
     Json(&'static [&'static str]),
+    /// JSON arrays of objects under the first key of each entry, whose string field is the
+    /// second key. One entry per CIDR block.
+    JsonNested(&'static [(&'static str, &'static str)]),
 }
 
 struct Source {
@@ -111,6 +114,12 @@ const SOURCES: &[Source] = &[
         form: Some("resp_format=text"),
         format: Format::Lines,
     },
+    Source {
+        provider: CdnProvider::GoogleCloud,
+        url: "https://www.gstatic.com/ipranges/cloud.json",
+        form: None,
+        format: Format::JsonNested(&[("prefixes", "ipv4Prefix"), ("prefixes", "ipv6Prefix")]),
+    },
 ];
 
 pub(crate) type HttpClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
@@ -149,7 +158,11 @@ pub async fn fetch_all(previous: &CdnRanges) -> anyhow::Result<FetchResult> {
             None => providers.remove(&provider),
         };
     }
-    providers.insert(CdnProvider::GoogleCloud, google_cloud_ranges()?);
+    // Google Cloud falls back to its documented ranges, which the list of every earlier
+    // refresh also carried, instead of to the ranges of a previous download.
+    if providers.get(&CdnProvider::GoogleCloud).map(Vec::is_empty) != Some(false) {
+        providers.insert(CdnProvider::GoogleCloud, google_cloud_ranges()?);
+    }
     for nets in providers.values_mut() {
         nets.sort();
         nets.dedup();
@@ -271,6 +284,7 @@ fn parse_list(text: &str, format: Format) -> anyhow::Result<Vec<IpNet>> {
     let entries = match format {
         Format::Lines => text.split_whitespace().map(str::to_string).collect(),
         Format::Json(keys) => json_entries(text, keys)?,
+        Format::JsonNested(paths) => json_nested_entries(text, paths)?,
     };
     let total = entries.len();
     let nets: Vec<IpNet> = entries
@@ -309,6 +323,25 @@ fn json_entries(text: &str, keys: &[&str]) -> anyhow::Result<Vec<String>> {
     Ok(entries)
 }
 
+/// Reads the CIDR string field of every object in the array of each key.
+fn json_nested_entries(text: &str, paths: &[(&str, &str)]) -> anyhow::Result<Vec<String>> {
+    let value: serde_json::Value = serde_json::from_str(text)?;
+    let mut entries = Vec::new();
+    for (array_key, field) in paths {
+        let items = value
+            .get(array_key)
+            .ok_or_else(|| anyhow!("missing key {array_key}"))?
+            .as_array()
+            .ok_or_else(|| anyhow!("expected a JSON array under {array_key}"))?;
+        entries.extend(items.iter().filter_map(|item| {
+            item.get(field)
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        }));
+    }
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,6 +364,25 @@ mod tests {
     fn parses_top_level_json_array() {
         let nets = parse_list(r#"["2400:52e0:1500::714:1"]"#, Format::Json(&[])).unwrap();
         assert_eq!(nets[0].to_string(), "2400:52e0:1500::714:1/128");
+    }
+
+    #[test]
+    fn parses_nested_json_fields() {
+        let text = r#"{"prefixes":[
+            {"ipv4Prefix":"34.1.208.0/20","service":"Google Cloud"},
+            {"scope":"europe-west1"},
+            {"ipv6Prefix":"2600:1900:8000::/44"}
+        ]}"#;
+        let format = Format::JsonNested(&[("prefixes", "ipv4Prefix"), ("prefixes", "ipv6Prefix")]);
+        let nets = parse_list(text, format).unwrap();
+        assert_eq!(nets.len(), 2);
+        assert_eq!(nets[0].to_string(), "34.1.208.0/20");
+    }
+
+    #[test]
+    fn rejects_a_missing_nested_key() {
+        let format = Format::JsonNested(&[("ranges", "ipv4Prefix")]);
+        assert!(parse_list(r#"{"prefixes":[]}"#, format).is_err());
     }
 
     #[test]
