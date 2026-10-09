@@ -612,6 +612,7 @@
   "settings.admin": "Yönetim",
   "settings.audit_log_retention": "Denetim Kaydı Saklama Süresi",
   "settings.background_task_interval": "Arka Plan Görevi Aralığı",
+  "settings.shutdown_graceful_timeout": "Graceful Shutdown Timeout",
   "settings.cdn_downloaded": "indirilen liste",
   "settings.cdn_embedded": "binary'deki liste",
   "settings.cdn_hint": "Bilinen CDN'lerin edge sunucu adresleri. Liste her gün yenilenir.",

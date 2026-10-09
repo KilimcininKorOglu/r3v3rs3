@@ -612,6 +612,7 @@
   "settings.admin": "Admin",
   "settings.audit_log_retention": "Audit Log Retention",
   "settings.background_task_interval": "Background Task Interval",
+  "settings.shutdown_graceful_timeout": "Graceful Shutdown Timeout",
   "settings.cdn_downloaded": "downloaded",
   "settings.cdn_embedded": "built-in snapshot",
   "settings.cdn_hint": "Edge server addresses of known CDNs. The list is refreshed every day.",

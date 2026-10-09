@@ -32,6 +32,7 @@ const LABEL_CLASS: &str =
 #[derive(Clone, PartialEq, Default)]
 struct Fields {
     background_task_interval: String,
+    shutdown_graceful_timeout: String,
     session_expiry: String,
     max_login_attempts: String,
     login_attempts_reset: String,
@@ -143,6 +144,7 @@ impl Fields {
             etcd_prefix: etcd.prefix.clone(),
             etcd_client_cert: etcd.client_cert,
             background_task_interval: text("/background_task_interval"),
+            shutdown_graceful_timeout: text("/shutdown_graceful_timeout"),
             session_expiry: text("/admin/session_expiry"),
             max_login_attempts: text("/admin/max_login_attempts"),
             login_attempts_reset: text("/admin/login_attempts_reset"),
@@ -236,6 +238,7 @@ pub fn settings() -> Html {
 
             <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.server")}</h2>
             { text_field(&fields, &errors, locale.t("settings.background_task_interval"), "background_task_interval", "1h", |f| &mut f.background_task_interval) }
+            { text_field(&fields, &errors, locale.t("settings.shutdown_graceful_timeout"), "shutdown_graceful_timeout", "30s", |f| &mut f.shutdown_graceful_timeout) }
             { text_field(&fields, &errors, locale.t("settings.http_challenge_addr"), "http_challenge_addr", "0.0.0.0:80", |f| &mut f.http_challenge_addr) }
             { text_field(&fields, &errors, locale.t("settings.tls_alpn_challenge_addr"), "tls_alpn_challenge_addr", "0.0.0.0:443", |f| &mut f.tls_alpn_challenge_addr) }
             { text_field(&fields, &errors, locale.t("settings.dns_challenge_resolver"), "dns_challenge_resolver", "1.1.1.1:53", |f| &mut f.dns_challenge_resolver) }
@@ -806,7 +809,10 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         &mut errors,
         "background_task_interval",
         invalid_duration,
-        json!({ "background_task_interval": fields.background_task_interval.trim() }),
+        json!({
+            "background_task_interval": fields.background_task_interval.trim(),
+            "shutdown_graceful_timeout": fields.shutdown_graceful_timeout.trim(),
+        }),
     );
     let notifications = parse_notifications(locale, fields, &mut errors);
     let addr = parse_addr(
@@ -852,6 +858,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             (Ok(resolver), Ok(upstream_resolver)),
         ) if errors.is_empty() => Ok(AppConfig {
             background_task_interval: interval.background_task_interval,
+            shutdown_graceful_timeout: interval.shutdown_graceful_timeout,
             admin: AdminConfig {
                 session_expiry: admin[0].session_expiry,
                 max_login_attempts,
