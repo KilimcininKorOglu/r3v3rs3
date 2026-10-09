@@ -13,9 +13,10 @@ permissions:
   packages: write
 
 env:
-  # One "source target" pair per line. The source sits on Docker Hub; the target
-  # is a package under ghcr.io/<owner>/.
-  IMAGES: "docker.io/traefik/whoami:v1.10.3 whoami:v1.10.3"
+  # One "source target" pair per line. The source sits on mirror.gcr.io, Google's read-only
+  # cache of Docker Hub, so the copy does not count against the Docker Hub pull rate limit.
+  # The target is a package under ghcr.io/<owner>/.
+  IMAGES: "mirror.gcr.io/traefik/whoami:v1.10.3 r3v3rs3/whoami:v1.10.3"
 
 jobs:
   mirror:
