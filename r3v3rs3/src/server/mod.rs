@@ -18,6 +18,7 @@ pub mod cert_list;
 mod connection;
 mod credentials;
 mod discovery;
+pub mod fdmanifest;
 mod port_list;
 mod proxy_list;
 mod quic;
@@ -160,6 +161,7 @@ async fn start_server(
         }
     }
 
+    server.drain().await;
     server.shutdown().await;
     Ok(())
 }

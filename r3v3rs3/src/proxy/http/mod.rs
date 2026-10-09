@@ -316,6 +316,7 @@ impl HttpPortContext {
 
         tokio::spawn(
             async move {
+                let _lease = crate::proxy::ConnectionLease::acquire();
                 match Self::accept_quic(conn, server_config).await {
                     Ok(conn) => {
                         let local = conn.local_ip();

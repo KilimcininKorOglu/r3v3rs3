@@ -34,7 +34,9 @@ where
         return;
     }
     let challenges = challenges.clone();
+    let lease = crate::proxy::ConnectionLease::acquire();
     tokio::spawn(async move {
+        let _lease = lease;
         match challenge_body(&challenges, &mut stream).await {
             Some(body) => serve_challenge(stream, body).await,
             None => start(stream),
@@ -86,7 +88,9 @@ pub fn serve_reserved(
     let Some(config) = tls_alpn.filter(|_| on_tls_alpn_port) else {
         return;
     };
+    let lease = crate::proxy::ConnectionLease::acquire();
     tokio::spawn(async move {
+        let _lease = lease;
         if let Err(err) = serve_tls_alpn(stream, config).await {
             error!(%err, "failed to serve the TLS-ALPN-01 challenge");
         }

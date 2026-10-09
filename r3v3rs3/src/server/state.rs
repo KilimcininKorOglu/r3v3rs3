@@ -44,7 +44,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::str;
 use std::sync::Arc;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::select;
 use tokio::{
     net::TcpStream,
@@ -1365,6 +1365,29 @@ impl ServerState {
                 return id;
             }
         }
+    }
+
+    /// Stops accepting new connections and waits for the open client connections until they end
+    /// or the graceful timeout of the config ends. The listeners drop, so the kernel refuses the
+    /// new connections while the old ones keep streaming.
+    pub async fn drain(&mut self) {
+        let timeout = self.config.shutdown_graceful_timeout;
+        self.tcp_pool = TcpListenerPool::new();
+        self.udp_pool = UdpListenerPool::new();
+        self.quic_pool = QuicListenerPool::new();
+        let started = std::time::Instant::now();
+        while crate::proxy::open_connections() > 0 {
+            if started.elapsed() >= timeout {
+                warn!(
+                    connections = crate::proxy::open_connections(),
+                    ?timeout,
+                    "graceful drain timed out with open connections"
+                );
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        info!("drained every open connection");
     }
 
     pub async fn shutdown(self) {

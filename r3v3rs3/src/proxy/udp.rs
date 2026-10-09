@@ -309,7 +309,13 @@ impl UdpSession {
         let socket = UdpSocket::bind(bind).await?;
         socket.connect(upstream).await?;
         let socket = Arc::new(socket);
-        let task = tokio::spawn(relay_replies(socket.clone(), context.clone()));
+        let lease = crate::proxy::ConnectionLease::acquire();
+        let relay_socket = socket.clone();
+        let relay_context = context.clone();
+        let task = tokio::spawn(async move {
+            let _lease = lease;
+            relay_replies(relay_socket, relay_context).await;
+        });
         Ok(Self {
             socket,
             context,

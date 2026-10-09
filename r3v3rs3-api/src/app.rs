@@ -11,6 +11,14 @@ pub struct AppConfig {
     #[schema(value_type = String, example = "1h")]
     pub background_task_interval: Duration,
 
+    /// The longest time that the server waits for the open client connections when it stops.
+    #[serde(
+        with = "humantime_serde",
+        default = "default_shutdown_graceful_timeout"
+    )]
+    #[schema(value_type = String, example = "30s")]
+    pub shutdown_graceful_timeout: Duration,
+
     #[serde(default)]
     pub admin: AdminConfig,
 
@@ -102,6 +110,10 @@ impl AppConfig {
 
 fn default_background_task_interval() -> Duration {
     Duration::from_secs(60 * 60)
+}
+
+fn default_shutdown_graceful_timeout() -> Duration {
+    Duration::from_secs(30)
 }
 
 fn default_http_challenge_addr() -> SocketAddr {

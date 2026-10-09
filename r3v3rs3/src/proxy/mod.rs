@@ -14,6 +14,7 @@ use r3v3rs3_api::{
 };
 use std::future::Future;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::{io::BufStream, net::TcpStream};
 use tokio_rustls::rustls::ServerConfig;
 use tracing::{Instrument, Span, error};
@@ -50,13 +51,40 @@ pub struct ProxyRegistries {
     pub srv: srv::SrvRegistry,
 }
 
+/// The number of the client connection tasks that are still running. The graceful drain waits
+/// for this count to reach zero.
+static OPEN_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
+
+/// Holds one open client connection. The count drops when the lease drops.
+pub(crate) struct ConnectionLease;
+
+impl ConnectionLease {
+    pub(crate) fn acquire() -> Self {
+        OPEN_CONNECTIONS.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for ConnectionLease {
+    fn drop(&mut self) {
+        OPEN_CONNECTIONS.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// The number of the client connections whose tasks still run.
+pub(crate) fn open_connections() -> usize {
+    OPEN_CONNECTIONS.load(Ordering::Relaxed)
+}
+
 /// Runs the task of a client connection in the span and logs its error.
 fn spawn_connection<F>(span: Span, task: F)
 where
     F: Future<Output = anyhow::Result<()>> + Send + 'static,
 {
+    let lease = ConnectionLease::acquire();
     tokio::spawn(
         async move {
+            let _lease = lease;
             if let Err(err) = task.await {
                 error!("{err}");
             }
