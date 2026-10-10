@@ -69,9 +69,15 @@ pub async fn run(ipc_fd: i32, config_dir: &Path, log_dir: &Path) -> anyhow::Resu
         certs.clone(),
     ));
     let (server, channels) = Server::new_worker(app_info, storage.clone(), listeners).await;
+    // The master publishes the status of this worker to its own event stream, so the admin
+    // API and the WebUI see the runtime state that the worker serves.
+    let _ = channels
+        .command
+        .send(crate::command::ServerCommand::SetBroadcastEvents { enabled: true })
+        .await;
     let server_task = tokio::spawn(server.start());
 
-    let result = serve_master(&mut ipc, &storage, &channels).await;
+    let result = serve_master(&mut ipc, &storage, &channels, &config).await;
     channels.shutdown();
     let _ = server_task.await;
     result
@@ -82,7 +88,14 @@ async fn serve_master(
     ipc: &mut UnixStream,
     storage: &Arc<MemoryStorage>,
     channels: &crate::server::ServerChannels,
+    config: &WorkerConfig,
 ) -> anyhow::Result<()> {
+    // The master reads this side of the channel since the handover, so this announcement
+    // reaches it even though nobody listened when the worker loaded its state.
+    let ready = WorkerEvent::Event(r3v3rs3_api::event::ServerEvent::AppConfigUpdated {
+        config: Box::new(config.app.clone().masked()),
+    });
+    write_frame(ipc, &ready).context("failed to announce the readiness of the worker")?;
     loop {
         let command = tokio::time::timeout(HEARTBEAT_TIMEOUT, read_command(ipc)).await;
         let Ok(Some(command)) = command else {

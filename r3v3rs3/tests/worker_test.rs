@@ -141,8 +141,14 @@ async fn a_worker_serves_the_listeners_of_the_master() -> anyhow::Result<()> {
 
     // The heartbeat of the master gets an answer.
     write_frame(&mut master, &WorkerCommand::Ping)?;
-    let event: WorkerEvent = read_frame(&mut master)?;
-    assert!(matches!(event, WorkerEvent::Pong));
+    // The worker announces its configuration over the same channel, so the events
+    // that arrive before the answer do not block it.
+    loop {
+        let frame: WorkerEvent = read_frame(&mut master)?;
+        if matches!(frame, WorkerEvent::Pong) {
+            break;
+        }
+    }
 
     // A new configuration replaces the state of the worker.
     let second_port = alloc_tcp_port().await?;
@@ -226,13 +232,30 @@ async fn the_supervisor_serves_the_ports_through_a_worker() -> anyhow::Result<()
         ..Default::default()
     };
     let supervisor = r3v3rs3::server::supervisor::run(
-        channels.event.subscribe(),
+        channels.event.clone(),
         channels.command.clone(),
+        std::path::PathBuf::from(env!("CARGO_BIN_EXE_r3v3rs3")),
         app_info,
         app,
         manifest,
     );
     let supervisor_task = tokio::spawn(supervisor);
+
+    // The runtime state of the worker flows into the event stream of the master: the worker
+    // announces its configuration over the IPC channel once it serves.
+    let mut bus = channels.event.subscribe();
+    let mut saw_worker_event = false;
+    for _ in 0..100 {
+        let event = tokio::time::timeout(Duration::from_millis(100), bus.recv()).await;
+        if let Ok(Ok(r3v3rs3_api::event::ServerEvent::AppConfigUpdated { .. })) = event {
+            saw_worker_event = true;
+            break;
+        }
+    }
+    assert!(
+        saw_worker_event,
+        "the event of the worker did not reach the master"
+    );
 
     let proxy_addr = proxy_port.socket_addr();
     let mut client = wait_for_proxy(&proxy_addr).await?;
@@ -242,7 +265,9 @@ async fn the_supervisor_serves_the_ports_through_a_worker() -> anyhow::Result<()
     assert_eq!(&buf, b"hello");
 
     channels.shutdown();
-    supervisor_task.abort();
+    if let Err(err) = supervisor_task.await {
+        panic!("the supervisor task failed: {err}");
+    }
     server_task.await??;
     std::fs::remove_dir_all(&log_dir).ok();
     Ok(())

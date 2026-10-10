@@ -233,8 +233,9 @@ async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()>
     if local.worker_mode == r3v3rs3_api::app::WorkerMode::Workers {
         let manifest = server.listener_manifest()?;
         let supervisor = r3v3rs3::server::supervisor::run(
-            channels.event.subscribe(),
+            channels.event.clone(),
             channels.command.clone(),
+            std::env::current_exe()?,
             app_info.clone(),
             read_local_config(&config_dir).await?,
             manifest,

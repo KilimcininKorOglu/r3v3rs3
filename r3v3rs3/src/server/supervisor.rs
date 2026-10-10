@@ -28,12 +28,14 @@ const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
 /// Runs the supervisor until the master shuts down.
 pub async fn run(
-    mut events: broadcast::Receiver<ServerEvent>,
+    bus_tx: broadcast::Sender<ServerEvent>,
     command: mpsc::Sender<ServerCommand>,
+    exe: std::path::PathBuf,
     app_info: AppInfo,
     app: AppConfig,
     manifest: Vec<ListenerFd>,
 ) -> anyhow::Result<()> {
+    let mut events = bus_tx.subscribe();
     if manifest.is_empty() {
         info!("no listeners to hand to a worker");
         return Ok(());
@@ -50,7 +52,7 @@ pub async fn run(
     // The workers serve the ports, so this process stops accepting.
     command.send(ServerCommand::SuspendListeners).await?;
 
-    let mut worker = None;
+    let mut worker: Option<KillOnDrop> = None;
     let mut backoff = FIRST_BACKOFF;
     let (events_tx, mut events_rx) = mpsc::channel::<WorkerEvent>(16);
     let (mut config_tx, mut config_rx) = mpsc::channel::<WorkerConfig>(1);
@@ -61,7 +63,9 @@ pub async fn run(
         if worker.is_none() {
             info!("starting a worker");
             let session =
-                match start_worker(&app_info, &app, &manifest, &config, events_tx.clone()).await {
+                match start_worker(&exe, &app_info, &app, &manifest, &config, events_tx.clone())
+                    .await
+                {
                     Ok(session) => session,
                     Err(err) => {
                         error!(%err, "failed to start a worker, retrying");
@@ -73,7 +77,7 @@ pub async fn run(
             backoff = FIRST_BACKOFF;
             config_tx = session.config_tx;
             ipc_tx = session.ipc_tx;
-            worker = Some(session.child);
+            worker = Some(KillOnDrop(session.child));
         }
         tokio::select! {
             event = events.recv() => {
@@ -83,7 +87,7 @@ pub async fn run(
             }
             _ = heartbeat.tick() => {
                 let exited = match worker.as_mut() {
-                    Some(child) => child.try_wait()?.is_some(),
+                    Some(child) => child.0.try_wait()?.is_some(),
                     None => false,
                 };
                 if exited {
@@ -103,12 +107,14 @@ pub async fn run(
                 match event {
                     Some(WorkerEvent::Fatal(reason)) => {
                         error!(%reason, "the worker gave up");
-                        if let Some(child) = worker.as_mut() {
-                            let _ = child.kill();
-                        }
+                        worker = None;
                     }
-                    // The master publishes its own state, so the events of the worker stay here.
-                    Some(WorkerEvent::Pong) | Some(WorkerEvent::Event(_)) | None => {}
+                    // The runtime state that the worker serves flows into the event stream of
+                    // the master, so the admin API and the WebUI see it.
+                    Some(WorkerEvent::Event(event)) => {
+                        let _ = bus_tx.send(event);
+                    }
+                    Some(WorkerEvent::Pong) | None => {}
                 }
             }
             config = config_rx.recv() => {
@@ -116,10 +122,6 @@ pub async fn run(
                 let _ = ipc_tx.send(IpcMessage::Config(Box::new(config))).await;
             }
         }
-    }
-    if let Some(mut child) = worker {
-        let _ = child.kill();
-        let _ = child.wait();
     }
     Ok(())
 }
@@ -151,6 +153,16 @@ enum IpcMessage {
     Config(Box<WorkerConfig>),
 }
 
+/// Stops the worker even when the supervisor stops early.
+struct KillOnDrop(Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// One running worker: its process and the tasks that drive its channel.
 struct WorkerSession {
     child: Child,
@@ -160,6 +172,7 @@ struct WorkerSession {
 
 /// Starts the worker process, sends the handshake and keeps the IPC half.
 async fn start_worker(
+    exe: &std::path::Path,
     app_info: &AppInfo,
     app: &AppConfig,
     manifest: &[ListenerFd],
@@ -168,7 +181,6 @@ async fn start_worker(
 ) -> anyhow::Result<WorkerSession> {
     let (ipc, worker_half) = UnixStream::pair()?;
     let raw = worker_half.as_raw_fd();
-    let exe = std::env::current_exe().context("failed to locate the server binary")?;
     let mut command = std::process::Command::new(exe);
     command
         .args([
@@ -268,9 +280,17 @@ fn spawn_writer(mut ipc: UnixStream, mut rx: mpsc::Receiver<IpcMessage>) {
 /// Reads the events of the worker on a blocking thread.
 fn spawn_reader(mut ipc: UnixStream, tx: mpsc::Sender<WorkerEvent>) {
     tokio::task::spawn_blocking(move || {
-        while let Ok(event) = read_frame::<WorkerEvent>(&mut ipc) {
-            if tx.blocking_send(event).is_err() {
-                break;
+        loop {
+            match read_frame::<WorkerEvent>(&mut ipc) {
+                Ok(event) => {
+                    if tx.blocking_send(event).is_err() {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    info!(%err, "the event channel of the worker ended");
+                    break;
+                }
             }
         }
     });
