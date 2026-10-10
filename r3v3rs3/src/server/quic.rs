@@ -81,7 +81,8 @@ impl QuicListenerPool {
             } else if let Some(listener) = listeners.remove(&bind) {
                 (Some(listener), SocketState::Listening)
             } else {
-                open_listener(bind, &tls_config, &span)
+                let limits = ctx.http3_limits().copied().unwrap_or_default();
+                open_listener(bind, &tls_config, &limits, &span)
             };
             if let Some(mut sock) = listener {
                 sock.config_index = index;
@@ -101,7 +102,8 @@ impl QuicListenerPool {
         let tls_config = ServerConfig::builder()
             .with_no_client_auth()
             .with_cert_resolver(resolver);
-        let server_config = quic_server_config(tls_config)?;
+        let server_config =
+            quic_server_config(tls_config, &r3v3rs3_api::app::Http3Limits::default())?;
         let runtime = quinn::default_runtime()
             .ok_or_else(|| io::Error::other("quinn runtime not available"))?;
         let socket = std::net::UdpSocket::from(fd.try_clone()?);
@@ -147,12 +149,13 @@ impl QuicListenerPool {
 fn open_listener(
     bind: SocketAddr,
     tls_config: &ServerConfig,
+    limits: &r3v3rs3_api::app::Http3Limits,
     span: &tracing::Span,
 ) -> (Option<QuicListenerStream>, SocketState) {
     span.in_scope(|| {
         info!(%bind, "listening on quic port");
     });
-    let server_config = match quic_server_config(tls_config.clone()) {
+    let server_config = match quic_server_config(tls_config.clone(), limits) {
         Ok(config) => config,
         Err(err) => {
             let _enter = span.enter();
@@ -212,20 +215,18 @@ fn spawn_accept_loop(sock: quinn::Endpoint, fd: OwnedFd) -> QuicListenerStream {
     }
 }
 
-/// The QUIC stream limits of every endpoint. A connection can only open this many streams, so a
-/// single peer cannot multiply work without bound. The receive windows stay at the quinn defaults.
-const QUIC_MAX_BIDI_STREAMS: u32 = 100;
-const QUIC_MAX_UNI_STREAMS: u32 = 10;
-
 /// Wraps the TLS config into the QUIC server config with the transport limits.
-fn quic_server_config(tls_config: ServerConfig) -> io::Result<quinn::ServerConfig> {
+fn quic_server_config(
+    tls_config: ServerConfig,
+    limits: &r3v3rs3_api::app::Http3Limits,
+) -> io::Result<quinn::ServerConfig> {
     let mut config = quinn::ServerConfig::with_crypto(Arc::new(
         QuicServerConfig::try_from(tls_config)
             .map_err(|_| io::Error::other("the QUIC TLS config has no cipher suite"))?,
     ));
     let mut transport = quinn::TransportConfig::default();
-    transport.max_concurrent_bidi_streams(QUIC_MAX_BIDI_STREAMS.into());
-    transport.max_concurrent_uni_streams(QUIC_MAX_UNI_STREAMS.into());
+    transport.max_concurrent_bidi_streams(limits.max_concurrent_bidi_streams.into());
+    transport.max_concurrent_uni_streams(limits.max_concurrent_uni_streams.into());
     config.transport_config(Arc::new(transport));
     Ok(config)
 }

@@ -38,6 +38,7 @@ use quinn::{
     crypto::rustls::QuicServerConfig,
     rustls::{ServerConfig, pki_types::CertificateDer, server::WebPkiClientVerifier},
 };
+use r3v3rs3_api::app::{Http2Limits, Http3Limits};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::port::{PortStatus, SocketState};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry, proxy_protocol::ProxyProtocolReceive};
@@ -81,23 +82,17 @@ pub use auth::SessionService;
 
 const MAX_BUFFER_SIZE: usize = 4096;
 const HTTP2_MAX_FRAME_SIZE: usize = 16384;
-/// Caps the total size of the HEADERS plus its CONTINUATION frames of one request. The h2 default
-/// is ~16 MB, which lets a client flood the connection with cheap CONTINUATION frames
-/// (CVE-2024-27316). 64 KiB covers every sane request.
-const H2_MAX_HEADER_LIST_SIZE: u32 = 65536;
-/// Caps the streams that a client can reset before a GOAWAY closes the connection. The h2 default
-/// of 20 lets a Rapid Reset attack (CVE-2023-44487) multiply streams faster than the server
-/// retires them. 128 keeps legitimate churn cheap to serve while a flood still trips the cap.
-const H2_MAX_PENDING_ACCEPT_RESET_STREAMS: usize = 128;
-
-/// Builds the server-side connection builder with the HTTP/2 flood limits. Every server-side
-/// connection of the admin API, the challenge handler and the proxies uses it.
-pub(crate) fn http_server_builder() -> hyper_util::server::conn::auto::Builder<TokioExecutor> {
+/// Builds the server-side connection builder with the HTTP/2 flood limits. The limits come from
+/// the global config or from the options of the port. Every server-side connection of the admin
+/// API, the challenge handler and the proxies uses this builder.
+pub(crate) fn http_server_builder(
+    limits: &r3v3rs3_api::app::Http2Limits,
+) -> hyper_util::server::conn::auto::Builder<TokioExecutor> {
     let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
     builder
         .http2()
-        .max_header_list_size(H2_MAX_HEADER_LIST_SIZE)
-        .max_pending_accept_reset_streams(H2_MAX_PENDING_ACCEPT_RESET_STREAMS);
+        .max_header_list_size(limits.max_header_list_size)
+        .max_pending_accept_reset_streams(limits.max_pending_accept_reset_streams);
     builder
 }
 
@@ -106,6 +101,7 @@ pub struct HttpStarter {
     /// `None` when the TLS config of the port is invalid.
     tls_acceptor: Option<Option<TlsAcceptor>>,
     proxy_protocol: Option<Arc<ProxyProtocolReceive>>,
+    http2: Http2Limits,
     shared: Arc<ArcSwap<SharedContext>>,
     stop_notifier: Arc<Notify>,
     span: Span,
@@ -119,9 +115,10 @@ impl HttpStarter {
         };
         let (shared, stop_notifier) = (Cache::new(self.shared), self.stop_notifier);
         let (proxy_protocol, span) = (self.proxy_protocol, self.span.clone());
+        let http2 = self.http2;
         let task = async move {
             let client = proxy_protocol::accept(stream, proxy_protocol.as_deref()).await?;
-            start(client, tls, shared, stop_notifier, span).await
+            start(client, tls, http2, shared, stop_notifier, span).await
         };
         spawn_connection(self.span, task);
     }
@@ -134,13 +131,21 @@ pub struct HttpPortContext {
     span: Span,
     tls_termination: Option<TlsTermination>,
     proxy_protocol: Option<Arc<ProxyProtocolReceive>>,
+    /// The effective HTTP/2 flood limits: the port override or the global config.
+    http2_limits: Http2Limits,
+    /// The effective HTTP/3 stream limits: the port override or the global config.
+    http3_limits: Http3Limits,
     h3_server_config: Option<Arc<quinn::ServerConfig>>,
     shared: Arc<ArcSwap<SharedContext>>,
     stop_notifier: Arc<Notify>,
 }
 
 impl HttpPortContext {
-    pub fn new(entry: &PortEntry) -> Result<Self, Error> {
+    pub fn new(
+        entry: &PortEntry,
+        global_http2: &Http2Limits,
+        global_http3: &Http3Limits,
+    ) -> Result<Self, Error> {
         let span = span!(
             Level::INFO,
             "proxy",
@@ -168,6 +173,8 @@ impl HttpPortContext {
             span,
             tls_termination,
             proxy_protocol: entry.port.opts.proxy_protocol.clone().map(Arc::new),
+            http2_limits: entry.port.opts.http2_limits.unwrap_or(*global_http2),
+            http3_limits: entry.port.opts.http3_limits.unwrap_or(*global_http3),
             h3_server_config: None,
             shared: Arc::new(ArcSwap::from_pointee(SharedContext {
                 router: Default::default(),
@@ -175,6 +182,16 @@ impl HttpPortContext {
             })),
             stop_notifier: Arc::new(Notify::new()),
         })
+    }
+
+    /// The effective HTTP/3 stream limits of this port.
+    pub fn http3_limits(&self) -> &Http3Limits {
+        &self.http3_limits
+    }
+
+    /// The effective HTTP/2 flood limits of this port.
+    pub fn http2_limits(&self) -> &Http2Limits {
+        &self.http2_limits
     }
 
     pub async fn setup(
@@ -305,6 +322,7 @@ impl HttpPortContext {
         HttpStarter {
             tls_acceptor: port_acceptor(self.tls_termination.as_ref()),
             proxy_protocol: self.proxy_protocol.clone(),
+            http2: self.http2_limits,
             shared: Arc::clone(&self.shared),
             stop_notifier: self.stop_notifier.clone(),
             span: self.span.clone(),
@@ -426,6 +444,7 @@ fn quic_client_cert(conn: &quinn::Connection) -> Option<Arc<ClientCertInfo>> {
 async fn start(
     client: Client,
     tls: Option<PortTls>,
+    http2: Http2Limits,
     shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
     stop_notifier: Arc<Notify>,
     span: Span,
@@ -444,7 +463,7 @@ async fn start(
     spawn_pipe(stream, client_stream, stop_notifier, span.clone());
 
     if tls.is_some() && local.port() != 80 && first_byte != 0x16 {
-        spawn_redirect(server_stream, span.clone());
+        spawn_redirect(server_stream, http2, span.clone());
         return Ok(());
     }
 
@@ -484,14 +503,14 @@ async fn start(
         .instrument(span)
     });
 
-    spawn_http(stream, service, server_http2, span.clone());
+    spawn_http(stream, service, server_http2, http2, span.clone());
 
     Ok(())
 }
 
 /// Serves the connection with the HTTP service. `http2_only` skips the protocol detection, because
 /// the TLS handshake already selected HTTP/2 through ALPN.
-fn spawn_http<I, S, B>(stream: I, service: S, http2_only: bool, span: Span)
+fn spawn_http<I, S, B>(stream: I, service: S, http2_only: bool, limits: Http2Limits, span: Span)
 where
     I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     S: hyper::service::Service<Request<Incoming>, Response = Response<B>> + Send + 'static,
@@ -504,7 +523,7 @@ where
     tokio::task::spawn(
         async move {
             let stream = TokioIo::new(stream);
-            let builder = http_server_builder();
+            let builder = http_server_builder(&limits);
             let builder = if http2_only {
                 builder.http2_only()
             } else {
@@ -545,11 +564,11 @@ fn spawn_pipe(
 }
 
 /// Answers a plain HTTP request on a TLS port with a redirect to the secure address.
-fn spawn_redirect(server_stream: tokio::io::DuplexStream, span: Span) {
+fn spawn_redirect(server_stream: tokio::io::DuplexStream, limits: Http2Limits, span: Span) {
     tokio::task::spawn(
         async move {
             let server_stream = TokioIo::new(server_stream);
-            if let Err(err) = http_server_builder()
+            if let Err(err) = http_server_builder(&limits)
                 .serve_connection(server_stream, service_fn(redirect))
                 .await
             {

@@ -22,9 +22,14 @@ const HTTP_CHALLENGE_HEADER: &[u8] = b"GET /.well-known/acme-challenge/";
 
 /// Starts the connection without waiting for the client. While a challenge is active, a new task
 /// reads the first bytes: a challenge request receives its key authorization, and every other
-/// connection goes to `start` with the bytes that it sent.
-pub fn accept<F>(stream: TcpStream, challenges: &HttpChallenges, start: F)
-where
+/// connection goes to `start` with the bytes that it sent. `limits` is the effective HTTP/2
+/// flood limit config of the port that owns the listener.
+pub fn accept<F>(
+    stream: TcpStream,
+    challenges: &HttpChallenges,
+    limits: r3v3rs3_api::app::Http2Limits,
+    start: F,
+) where
     F: FnOnce(BufStream<TcpStream>) + Send + 'static,
 {
     let mut stream = BufStream::new(stream);
@@ -37,7 +42,7 @@ where
     tokio::spawn(async move {
         let _lease = lease;
         match challenge_body(&challenges, &mut stream).await {
-            Some(body) => serve_challenge(stream, body).await,
+            Some(body) => serve_challenge(stream, body, limits).await,
             None => start(stream),
         }
     });
@@ -60,12 +65,16 @@ async fn challenge_body(
     challenges.get(std::str::from_utf8(token).ok()?).cloned()
 }
 
-async fn serve_challenge(stream: BufStream<TcpStream>, body: String) {
+async fn serve_challenge(
+    stream: BufStream<TcpStream>,
+    body: String,
+    limits: r3v3rs3_api::app::Http2Limits,
+) {
     let service = service_fn(move |_| {
         let body = body.clone();
         async move { Ok::<_, Infallible>(Response::new(body)) }
     });
-    if let Err(err) = crate::proxy::http::http_server_builder()
+    if let Err(err) = crate::proxy::http::http_server_builder(&limits)
         .serve_connection(TokioIo::new(stream), service)
         .await
     {
@@ -138,15 +147,21 @@ mod tests {
 
         let (_idle, accepted) = connect(&listener).await;
         let flag = started.clone();
-        accept(accepted, &challenges(), move |_| {
-            flag.store(true, Ordering::Relaxed)
-        });
+        accept(
+            accepted,
+            &challenges(),
+            r3v3rs3_api::app::Http2Limits::default(),
+            move |_| flag.store(true, Ordering::Relaxed),
+        );
 
         let (mut client, accepted) = connect(&listener).await;
         let flag = started.clone();
-        accept(accepted, &challenges(), move |_| {
-            flag.store(true, Ordering::Relaxed)
-        });
+        accept(
+            accepted,
+            &challenges(),
+            r3v3rs3_api::app::Http2Limits::default(),
+            move |_| flag.store(true, Ordering::Relaxed),
+        );
         let request = b"GET /.well-known/acme-challenge/token HTTP/1.1\r\nHost: a.test\r\nConnection: close\r\n\r\n";
         let exchange = async {
             client.write_all(request).await?;
@@ -173,9 +188,14 @@ mod tests {
                 .await
                 .unwrap();
             let (sender, receiver) = oneshot::channel();
-            accept(accepted, &challenges, move |stream| {
-                let _ = sender.send(stream);
-            });
+            accept(
+                accepted,
+                &challenges,
+                r3v3rs3_api::app::Http2Limits::default(),
+                move |stream| {
+                    let _ = sender.send(stream);
+                },
+            );
             let mut stream = receiver.await.unwrap();
             let mut line = String::new();
             stream.read_line(&mut line).await.unwrap();

@@ -72,6 +72,106 @@ pub struct AppConfig {
     /// Only `config.toml` sets this section. An update through the admin API keeps it.
     #[serde(default)]
     pub mcp: McpConfig,
+
+    /// The default HTTP/2 flood limits of every server-side connection. A port can override
+    /// them in its options.
+    #[serde(default)]
+    pub http2: Http2Limits,
+
+    /// The default HTTP/3 stream limits of every QUIC endpoint. A port can override them in
+    /// its options.
+    #[serde(default)]
+    pub http3: Http3Limits,
+}
+
+/// The HTTP/2 flood limits of a server-side connection.
+#[derive(Debug, DefaultFromSerde, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Http2Limits {
+    /// The largest HEADERS plus CONTINUATION size of one request, in bytes.
+    #[serde(default = "default_max_header_list_size")]
+    pub max_header_list_size: u32,
+    /// The streams that a client can reset before a GOAWAY closes the connection.
+    #[serde(default = "default_max_pending_accept_reset_streams")]
+    pub max_pending_accept_reset_streams: usize,
+}
+
+impl Http2Limits {
+    /// Checks the range of every limit.
+    pub fn validate(&self) -> Result<(), Error> {
+        const HEADER_LIST_MIN: u64 = 1024;
+        const HEADER_LIST_MAX: u64 = 1024 * 1024;
+        if !(HEADER_LIST_MIN..=HEADER_LIST_MAX).contains(&(self.max_header_list_size as u64)) {
+            return Err(Error::InvalidHttpLimits {
+                name: "max_header_list_size".into(),
+                min: HEADER_LIST_MIN,
+                max: HEADER_LIST_MAX,
+            });
+        }
+        const RESET_STREAMS_MIN: u64 = 1;
+        const RESET_STREAMS_MAX: u64 = 65536;
+        if !(RESET_STREAMS_MIN..=RESET_STREAMS_MAX)
+            .contains(&(self.max_pending_accept_reset_streams as u64))
+        {
+            return Err(Error::InvalidHttpLimits {
+                name: "max_pending_accept_reset_streams".into(),
+                min: RESET_STREAMS_MIN,
+                max: RESET_STREAMS_MAX,
+            });
+        }
+        Ok(())
+    }
+}
+
+fn default_max_header_list_size() -> u32 {
+    65536
+}
+
+fn default_max_pending_accept_reset_streams() -> usize {
+    128
+}
+
+/// The HTTP/3 stream limits of a QUIC endpoint.
+#[derive(Debug, DefaultFromSerde, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Http3Limits {
+    /// The request streams that one QUIC connection can open.
+    #[serde(default = "default_max_concurrent_bidi_streams")]
+    pub max_concurrent_bidi_streams: u32,
+    /// The control streams that one QUIC connection can open.
+    #[serde(default = "default_max_concurrent_uni_streams")]
+    pub max_concurrent_uni_streams: u32,
+}
+
+impl Http3Limits {
+    /// Checks the range of every limit.
+    pub fn validate(&self) -> Result<(), Error> {
+        for (name, value) in [
+            (
+                "max_concurrent_bidi_streams",
+                self.max_concurrent_bidi_streams,
+            ),
+            (
+                "max_concurrent_uni_streams",
+                self.max_concurrent_uni_streams,
+            ),
+        ] {
+            if !(1..=100000).contains(&value) {
+                return Err(Error::InvalidHttpLimits {
+                    name: name.into(),
+                    min: 1,
+                    max: 100000,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+fn default_max_concurrent_bidi_streams() -> u32 {
+    100
+}
+
+fn default_max_concurrent_uni_streams() -> u32 {
+    10
 }
 
 /// The programs that the exec DNS provider can run.

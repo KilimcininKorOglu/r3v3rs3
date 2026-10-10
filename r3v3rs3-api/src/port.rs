@@ -141,6 +141,12 @@ pub struct PortOptions {
     pub tls_termination: Option<TlsTermination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_protocol: Option<ProxyProtocolReceive>,
+    /// Overrides the global HTTP/2 flood limits of the config for this port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http2_limits: Option<crate::app::Http2Limits>,
+    /// Overrides the global HTTP/3 stream limits of the config for this port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http3_limits: Option<crate::app::Http3Limits>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

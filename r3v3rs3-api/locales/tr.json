@@ -310,6 +310,7 @@
   "error.invalid_redirect_status": "Yönlendirme durum kodu 301, 302, 307 veya 308 olmalıdır: {status}",
   "error.invalid_redirect_target": "Yönlendirme hedefi boş olamaz ve kontrol karakteri içeremez: {target}",
   "error.invalid_retry_attempts": "Deneme sayısı 1 ile 10 arasında bir tam sayı olmalıdır.",
+  "error.invalid_http_limits": "{name} limiti {min} ile {max} arasında bir tam sayı olmalıdır.",
   "error.invalid_server_address": "Geçersiz sunucu adresi: {addr}",
   "error.invalid_server_url": "Geçersiz sunucu URL'i: {url}",
   "error.invalid_short_id": "Geçersiz kısa ID: {id}",

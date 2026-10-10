@@ -5,6 +5,7 @@ use self::{
 };
 use crate::server::cert_list::CertList;
 use once_cell::sync::OnceCell;
+use r3v3rs3_api::app::{Http2Limits, Http3Limits};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::multiaddr::Multiaddr;
 use r3v3rs3_api::port::{PortStatus, SocketState};
@@ -106,20 +107,43 @@ pub struct PortContext {
 }
 
 impl PortContext {
-    pub fn new(entry: PortEntry) -> Result<Self, Error> {
+    /// Builds the context of a port. `global_http2` and `global_http3` are the config defaults
+    /// that a port without its own limits options uses.
+    pub fn new(
+        entry: PortEntry,
+        global_http2: &Http2Limits,
+        global_http3: &Http3Limits,
+    ) -> Result<Self, Error> {
         if let Some(proxy_protocol) = &entry.port.opts.proxy_protocol {
             proxy_protocol.validate(&entry.port.listen)?;
         }
         let kind = if entry.port.listen.is_quic() {
-            PortContextKind::Http3(HttpPortContext::new(&entry)?)
+            PortContextKind::Http3(HttpPortContext::new(&entry, global_http2, global_http3)?)
         } else if entry.port.listen.is_udp() {
             PortContextKind::Udp(UdpPortContext::new(&entry)?)
         } else if entry.port.listen.is_http() {
-            PortContextKind::Http(HttpPortContext::new(&entry)?)
+            PortContextKind::Http(HttpPortContext::new(&entry, global_http2, global_http3)?)
         } else {
             PortContextKind::Tcp(TcpPortContext::new(&entry)?)
         };
         Ok(Self { entry, kind })
+    }
+
+    /// The effective HTTP/3 stream limits of this port.
+    pub fn http3_limits(&self) -> Option<&Http3Limits> {
+        match &self.kind {
+            PortContextKind::Http3(ctx) => Some(ctx.http3_limits()),
+            _ => None,
+        }
+    }
+
+    /// The effective HTTP/2 flood limits of this port.
+    pub fn http2_limits(&self) -> Option<&Http2Limits> {
+        match &self.kind {
+            PortContextKind::Http(ctx) => Some(ctx.http2_limits()),
+            PortContextKind::Http3(ctx) => Some(ctx.http2_limits()),
+            _ => None,
+        }
     }
 
     pub fn reserved() -> Self {

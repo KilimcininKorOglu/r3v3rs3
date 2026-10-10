@@ -91,6 +91,8 @@ pub fn tls_port(
             client_ca_certs: roots,
         }),
         proxy_protocol: None,
+        http2_limits: None,
+        http3_limits: None,
     };
     entry
 }

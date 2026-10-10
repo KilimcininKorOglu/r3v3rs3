@@ -301,6 +301,11 @@ mod tests {
             Error::AllServersDrained,
             Error::InvalidCircuitBreaker,
             Error::InvalidRetryAttempts,
+            Error::InvalidHttpLimits {
+                name: text(),
+                min: 1,
+                max: 10,
+            },
             Error::InvalidStickyCookieName { name: text() },
             Error::InvalidPathRegex { pattern: text() },
             Error::InvalidPathPrefix { prefix: text() },

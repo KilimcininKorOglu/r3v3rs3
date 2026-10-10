@@ -270,6 +270,8 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                             ..Default::default()
                         }),
                         proxy_protocol: None,
+                        http2_limits: None,
+                        http3_limits: None,
                     },
                 },
             },

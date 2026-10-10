@@ -52,6 +52,8 @@ async fn wss_proxy() -> anyhow::Result<()> {
                         ..Default::default()
                     }),
                     proxy_protocol: None,
+                    http2_limits: None,
+                    http3_limits: None,
                 },
             },
         }])

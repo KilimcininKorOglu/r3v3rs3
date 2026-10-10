@@ -276,7 +276,7 @@ impl ServerState {
 
         let mut ports = PortList::default();
         for entry in storage.load_ports().await {
-            match PortContext::new(entry) {
+            match PortContext::new(entry, &config.http2, &config.http3) {
                 Ok(ctx) => {
                     ports.update(ctx);
                 }
@@ -751,7 +751,7 @@ impl ServerState {
             changed |= self.ports.delete(id);
         }
         for entry in entries {
-            match PortContext::new(entry) {
+            match PortContext::new(entry, &self.config.http2, &self.config.http3) {
                 Ok(ctx) => changed |= self.ports.update(ctx),
                 Err(err) => error!(%err, "failed to create proxy state"),
             }
@@ -1031,10 +1031,22 @@ impl ServerState {
             .and_then(PortContext::starter);
         let challenge = self.tls_alpn_challenge.clone();
         let tls_alpn_port = self.config.tls_alpn_challenge_addr.port();
-        connection::accept(stream, &self.http_challenges, move |stream| match starter {
-            Some(starter) => starter.start(stream, challenge),
-            None => connection::serve_reserved(stream, challenge, tls_alpn_port),
-        });
+        let limits = self
+            .ports
+            .as_slice()
+            .get(index)
+            .and_then(PortContext::http2_limits)
+            .copied()
+            .unwrap_or_default();
+        connection::accept(
+            stream,
+            &self.http_challenges,
+            limits,
+            move |stream| match starter {
+                Some(starter) => starter.start(stream, challenge),
+                None => connection::serve_reserved(stream, challenge, tls_alpn_port),
+            },
+        );
     }
 
     pub async fn handle_udp_packet(
@@ -1508,6 +1520,8 @@ impl ServerState {
     pub async fn set_config(&mut self, mut config: AppConfig) -> Result<(), Error> {
         config.keep_secrets(&self.config);
         config.keep_file_only(&self.config);
+        config.http2.validate()?;
+        config.http3.validate()?;
         discovery::validate_config(&config.discovery, &self.certs)?;
         config.notifications.validate()?;
         self.storage.save_app_config(&config).await?;
@@ -1522,6 +1536,9 @@ impl ServerState {
         for provider in changed {
             self.restart_discovery(provider).await;
         }
+        // The ports carry their effective HTTP/2 and HTTP/3 limits from the build, so a limit
+        // change rebuilds every port context.
+        let limits_changed = self.config.http2 != config.http2 || self.config.http3 != config.http3;
         self.config.clone_from(&config);
         if self
             .registries
@@ -1529,6 +1546,9 @@ impl ServerState {
             .set_nameserver(config.upstream_dns_resolver)
         {
             self.reload_proxies().await;
+        }
+        if limits_changed {
+            self.reload_ports().await;
         }
         self.sessions.set_config(config.admin);
         let _ = self.br_sender.send(ServerEvent::AppConfigUpdated {

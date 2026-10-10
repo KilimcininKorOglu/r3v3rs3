@@ -103,7 +103,7 @@ impl RpcMethod for AddPort {
             Err(Error::IdAlreadyExists { id: entry.id })
         } else {
             validate_port(&entry.port, state)?;
-            let ctx = PortContext::new(entry)?;
+            let ctx = PortContext::new(entry, &state.config().http2, &state.config().http3)?;
             save_port(state, &ctx).await?;
             state.update_port(ctx).await
         }
@@ -117,6 +117,12 @@ impl RpcMethod for AddPort {
 
 /// Checks the parts of the port config that depend on the certificates.
 fn validate_port(port: &Port, state: &ServerState) -> Result<(), Error> {
+    if let Some(limits) = &port.opts.http2_limits {
+        limits.validate()?;
+    }
+    if let Some(limits) = &port.opts.http3_limits {
+        limits.validate()?;
+    }
     match &port.opts.tls_termination {
         Some(tls) => validate_client_auth(tls, &state.certs),
         None => Ok(()),
@@ -153,7 +159,7 @@ impl RpcMethod for UpdatePort {
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         if state.ports.get(self.entry.id).is_some() {
             validate_port(&self.entry.port, state)?;
-            let ctx = PortContext::new(self.entry)?;
+            let ctx = PortContext::new(self.entry, &state.config().http2, &state.config().http3)?;
             save_port(state, &ctx).await?;
             state.update_port(ctx).await
         } else {

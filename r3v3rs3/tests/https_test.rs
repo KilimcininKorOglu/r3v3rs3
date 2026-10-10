@@ -48,6 +48,8 @@ async fn https_proxy() -> anyhow::Result<()> {
                         ..Default::default()
                     }),
                     proxy_protocol: None,
+                    http2_limits: None,
+                    http3_limits: None,
                 },
             },
         }])
@@ -172,6 +174,8 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                         ..Default::default()
                     }),
                     proxy_protocol: None,
+                    http2_limits: None,
+                    http3_limits: None,
                 },
             },
         }])
@@ -277,6 +281,8 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                         ..Default::default()
                     }),
                     proxy_protocol: None,
+                    http2_limits: None,
+                    http3_limits: None,
                 },
             },
         }])
@@ -397,6 +403,8 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                         ..Default::default()
                     }),
                     proxy_protocol: None,
+                    http2_limits: None,
+                    http3_limits: None,
                 },
             },
         }])

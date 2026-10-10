@@ -232,7 +232,8 @@ mod tests {
                 opts: Default::default(),
             },
         };
-        let mut ports = [PortContext::new(entry).unwrap()];
+        let mut ports =
+            [PortContext::new(entry, &Default::default(), &Default::default()).unwrap()];
         let mut pool = TcpListenerPool::new();
         // The HTTP-01 and the TLS-ALPN-01 challenges each get a listener.
         let addr = "127.0.0.1:0".parse().unwrap();
