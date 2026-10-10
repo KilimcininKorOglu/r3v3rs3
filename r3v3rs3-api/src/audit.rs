@@ -65,10 +65,12 @@ pub enum AuditAction {
     ConnectGitConnection,
     /// An account installed the webhook of an app at its Git provider again.
     InstallAppHook,
+    /// An account approved an MCP client in the OAuth authorization flow.
+    AuthorizeMcpClient,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 45] = [
+    pub const ALL: [AuditAction; 46] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -114,6 +116,7 @@ impl AuditAction {
         Self::UpdatePlatformSettings,
         Self::ConnectGitConnection,
         Self::InstallAppHook,
+        Self::AuthorizeMcpClient,
     ];
 }
 

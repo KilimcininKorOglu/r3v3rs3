@@ -3,6 +3,7 @@ use crate::error::Error;
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
 use std::{fmt, net::SocketAddr, path::PathBuf, time::Duration};
+use url::Url;
 use utoipa::ToSchema;
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -67,6 +68,10 @@ pub struct AppConfig {
     /// Only `config.toml` sets this section. An update through the admin API keeps it.
     #[serde(default)]
     pub platform: crate::platform::PlatformConfig,
+
+    /// Only `config.toml` sets this section. An update through the admin API keeps it.
+    #[serde(default)]
+    pub mcp: McpConfig,
 }
 
 /// The programs that the exec DNS provider can run.
@@ -109,6 +114,7 @@ impl AppConfig {
         self.acme_exec.clone_from(&current.acme_exec);
         self.cluster.clone_from(&current.cluster);
         self.platform.clone_from(&current.platform);
+        self.mcp.clone_from(&current.mcp);
     }
 }
 
@@ -118,6 +124,59 @@ fn default_background_task_interval() -> Duration {
 
 fn default_shutdown_graceful_timeout() -> Duration {
     Duration::from_secs(30)
+}
+
+/// The Model Context Protocol server of the admin API and the clients that may sign in to it.
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpConfig {
+    /// The MCP endpoint answers only when this is on.
+    #[serde(default)]
+    pub enabled: bool,
+    /// The clients that may run the authorization code flow. A client that is not in this
+    /// list cannot sign in.
+    #[serde(default)]
+    pub clients: Vec<McpClientConfig>,
+}
+
+/// One pre-registered MCP client.
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpClientConfig {
+    /// The `client_id` that the client sends.
+    pub id: String,
+    /// The name that the consent form shows.
+    pub name: String,
+    /// The redirect URIs that the authorization request may use. `http` is allowed on the
+    /// loopback addresses only, per RFC 8252.
+    pub redirect_uris: Vec<String>,
+}
+
+impl McpClientConfig {
+    /// The registered client with this id.
+    pub fn find<'a>(clients: &'a [McpClientConfig], id: &str) -> Option<&'a McpClientConfig> {
+        clients.iter().find(|client| client.id == id)
+    }
+
+    /// Whether the redirect URI belongs to this client. A loopback redirect may use any port,
+    /// per RFC 8252.
+    pub fn allows_redirect(&self, redirect_uri: &str) -> bool {
+        self.redirect_uris.iter().any(|registered| {
+            registered == redirect_uri || is_loopback_redirect(registered, redirect_uri)
+        })
+    }
+}
+
+/// Matches a registered loopback redirect against one with another port.
+fn is_loopback_redirect(registered: &str, redirect_uri: &str) -> bool {
+    let (Ok(registered), Ok(uri)) = (Url::parse(registered), Url::parse(redirect_uri)) else {
+        return false;
+    };
+    let loopback = |host: &str| matches!(host, "127.0.0.1" | "[::1]" | "localhost");
+    registered.scheme() == "http"
+        && uri.scheme() == "http"
+        && registered.host_str().is_some_and(loopback)
+        && uri.host_str().is_some_and(loopback)
+        && registered.path() == uri.path()
+        && registered.query() == uri.query()
 }
 
 /// How the proxy ports are served.

@@ -62,6 +62,7 @@ mod git;
 mod hooks;
 mod logs;
 mod oauth;
+mod oauth2;
 mod openapi;
 mod platform;
 mod ports;
@@ -173,12 +174,24 @@ async fn load_server_state(app_state: &AppState) -> anyhow::Result<()> {
 /// other endpoints under `/api` except sign-in and sign-out.
 fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
     let verify = middleware::from_fn_with_state(app_state.clone(), auth::verify);
+    // The consent form needs the signed-in account; the token endpoint and the metadata
+    // documents do not.
+    let mcp_oauth = OpenApiRouter::new()
+        .routes(routes!(oauth2::authorize).layer(verify.clone()))
+        .routes(routes!(oauth2::consent).layer(verify.clone()))
+        .routes(routes!(oauth2::token));
     let (api, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api", auth_routes()?)
         .nest("/api", resource_routes().route_layer(verify.clone()))
         // The webhooks and the OAuth callback carry a signature or a one-time state instead of a
         // session.
         .merge(public_routes()?)
+        .merge(
+            OpenApiRouter::new()
+                .routes(routes!(oauth2::authorization_server_metadata))
+                .routes(routes!(oauth2::protected_resource_metadata))
+                .nest("/oauth", mcp_oauth),
+        )
         .split_for_parts();
     let docs: Router<AppState> =
         Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi)).route_layer(verify);
@@ -641,6 +654,8 @@ pub struct Data {
 
     pub rpc_counter: usize,
     pub rpc_callbacks: HashMap<usize, oneshot::Sender<CallbackData>>,
+    /// The authorization codes and tokens of the MCP clients.
+    pub mcp: oauth2::McpAuthorizations,
 }
 
 impl Data {
@@ -656,6 +671,7 @@ impl Data {
             platform: PlatformHandle::default(),
             rpc_counter: 0,
             rpc_callbacks: HashMap::new(),
+            mcp: oauth2::McpAuthorizations::default(),
         })
     }
 }

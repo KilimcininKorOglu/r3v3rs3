@@ -85,9 +85,12 @@ pub async fn login(
         .create(scope, SessionRecord::new(&username), expiry)
         .await?;
 
+    // Lax instead of Strict, because the MCP authorization flow reaches /oauth/authorize as a
+    // cross-site top-level navigation. State-changing requests are POST, PUT or DELETE, which
+    // Lax does not send on a cross-site navigation.
     let cookie = Cookie::build(("token", token))
         .http_only(true)
-        .same_site(SameSite::Strict)
+        .same_site(SameSite::Lax)
         .secure(!insecure)
         .build();
 

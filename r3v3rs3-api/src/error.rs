@@ -209,6 +209,18 @@ pub enum Error {
     #[error("unauthorized")]
     Unauthorized,
 
+    #[error("the MCP server is disabled in config.toml")]
+    McpDisabled,
+
+    #[error("unknown MCP client: {id}")]
+    McpClientUnknown { id: String },
+
+    #[error("the redirect URI does not belong to the MCP client")]
+    McpRedirectInvalid,
+
+    #[error("the MCP authorization request is invalid or was used already, start it again")]
+    McpGrantInvalid,
+
     #[error("the role of the account does not allow this action")]
     Forbidden,
 
