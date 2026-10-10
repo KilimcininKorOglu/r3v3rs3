@@ -17,7 +17,7 @@ use tokio_rustls::{
     TlsConnector,
     rustls::{
         ClientConfig, RootCertStore,
-        crypto::ring,
+        crypto::aws_lc_rs as ring,
         pki_types::{CertificateDer, ServerName, pem::PemObject},
     },
 };

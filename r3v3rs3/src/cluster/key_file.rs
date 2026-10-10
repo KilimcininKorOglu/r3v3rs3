@@ -3,8 +3,8 @@
 
 use super::crypto::{ClusterKey, ClusterKeys, KEY_LEN, KeyId};
 use anyhow::{Context as _, anyhow};
+use aws_lc_rs::rand::{SecureRandom, SystemRandom};
 use base64::prelude::{BASE64_STANDARD, Engine as _};
-use ring::rand::{SecureRandom, SystemRandom};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 

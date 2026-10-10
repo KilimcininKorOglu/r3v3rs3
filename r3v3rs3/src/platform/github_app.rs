@@ -10,6 +10,7 @@ use super::store::{StoredGithubApp, StoredTokens, Write};
 use super::{Platform, not_found};
 use crate::clock::unix_ms;
 use anyhow::{Context as _, anyhow, bail};
+use aws_lc_rs::signature::RsaKeyPair;
 use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git_connection::{
@@ -17,7 +18,6 @@ use r3v3rs3_api::git_connection::{
     GithubAppRequest, OAUTH_CALLBACK_PATH, ProviderUrl, RedirectUri,
 };
 use r3v3rs3_api::id::ShortId;
-use ring::signature::RsaKeyPair;
 use serde_json::{Value, json};
 use std::net::IpAddr;
 use std::time::Instant;
@@ -315,10 +315,10 @@ impl Platform {
 mod tests {
     use super::super::tests::{TempDir, platform};
     use super::*;
+    use aws_lc_rs::signature::{KeyPair as _, RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use mockito::ServerGuard;
-    use ring::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
     use rsa::pkcs1::EncodeRsaPrivateKey;
     use std::sync::Arc;
 
@@ -352,7 +352,8 @@ mod tests {
             bail!("not PKCS#1");
         };
         let pair = RsaKeyPair::from_der(der.secret_pkcs1_der()).map_err(|err| anyhow!("{err}"))?;
-        let public = UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, pair.public().as_ref());
+        let public =
+            UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, pair.public_key().as_ref());
         public
             .verify(
                 format!("{header}.{claims}").as_bytes(),

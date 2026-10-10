@@ -3,8 +3,8 @@
 //! data, so a sealed value does not open under another KV key.
 
 use anyhow::{Context as _, anyhow};
-use ring::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
-use ring::rand::{SecureRandom, SystemRandom};
+use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
+use aws_lc_rs::rand::{SecureRandom, SystemRandom};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fmt;

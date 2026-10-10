@@ -4,7 +4,7 @@ use rcgen::{CertificateParams, CustomExtension, KeyPair};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_rustls::rustls::ServerConfig;
-use tokio_rustls::rustls::crypto::ring::sign;
+use tokio_rustls::rustls::crypto::aws_lc_rs::sign;
 use tokio_rustls::rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::server::{ClientHello, ResolvesServerCert};
 use tokio_rustls::rustls::sign::CertifiedKey;

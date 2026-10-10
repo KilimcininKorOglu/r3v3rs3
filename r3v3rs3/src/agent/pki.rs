@@ -23,7 +23,7 @@ use tokio_rustls::rustls::client::danger::{
     HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
 };
 use tokio_rustls::rustls::crypto::{
-    CryptoProvider, ring, verify_tls12_signature, verify_tls13_signature,
+    CryptoProvider, aws_lc_rs, verify_tls12_signature, verify_tls13_signature,
 };
 use tokio_rustls::rustls::pki_types::pem::PemObject;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
@@ -181,7 +181,7 @@ pub fn new_agent_key() -> anyhow::Result<(String, String)> {
 pub fn enrollment_client_config(ca_hash: &str) -> ClientConfig {
     let verifier = PinnedCa {
         ca_hash: ca_hash.to_string(),
-        provider: Arc::new(ring::default_provider()),
+        provider: Arc::new(aws_lc_rs::default_provider()),
     };
     let mut config = ClientConfig::builder()
         .dangerous()

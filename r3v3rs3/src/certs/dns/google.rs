@@ -6,8 +6,8 @@ use super::{
 };
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
+use aws_lc_rs::signature::RsaKeyPair;
 use hyper::Method;
-use ring::signature::RsaKeyPair;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use tokio_rustls::rustls::pki_types::PrivatePkcs8KeyDer;

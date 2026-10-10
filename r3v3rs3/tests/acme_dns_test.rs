@@ -1,3 +1,4 @@
+use aws_lc_rs::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
 use axum::{
     Router,
     http::{HeaderMap, Method, StatusCode, Uri},
@@ -12,7 +13,6 @@ use r3v3rs3_api::{
     app::AcmeExecConfig,
     error::Error,
 };
-use ring::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
 use rsa::{
     pkcs1::EncodeRsaPublicKey,
     pkcs8::{EncodePrivateKey, LineEnding},

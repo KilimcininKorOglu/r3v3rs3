@@ -2,11 +2,11 @@
 //! to their token endpoints.
 
 use anyhow::anyhow;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use ring::{
+use aws_lc_rs::{
     rand::SystemRandom,
-    signature::{RSA_PKCS1_SHA256, RsaKeyPair},
+    signature::{KeyPair as _, RSA_PKCS1_SHA256, RsaKeyPair},
 };
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
 
 /// A JWT with `claims`, signed with `key`. The error message never contains the key.
@@ -17,7 +17,7 @@ pub fn rs256(key: &RsaKeyPair, claims: &Value) -> anyhow::Result<String> {
         URL_SAFE_NO_PAD.encode(header.to_string()),
         URL_SAFE_NO_PAD.encode(claims.to_string())
     );
-    let mut signature = vec![0; key.public().modulus_len()];
+    let mut signature = vec![0; key.public_key().modulus_len()];
     key.sign(
         &RSA_PKCS1_SHA256,
         &SystemRandom::new(),

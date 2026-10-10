@@ -96,7 +96,7 @@ async fn access_token_of(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // The reqwest client of the transport builds on rustls without a default provider.
-    rustls::crypto::ring::default_provider()
+    rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .expect("failed to install the rustls crypto provider");
     let args = Args::parse();

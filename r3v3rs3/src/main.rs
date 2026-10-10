@@ -29,6 +29,11 @@ use tracing_subscriber::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // The provider pins the key exchange groups of every TLS config, including the post-quantum
+    // X25519MLKEM768 hybrid.
+    tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("failed to install the rustls crypto provider");
     let args = r3v3rs3::args::Cli::parse();
     let exe_args: Vec<String> = std::env::args().skip(1).collect();
 

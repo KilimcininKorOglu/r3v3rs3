@@ -488,7 +488,7 @@ pub(crate) mod testing {
     use tokio_rustls::rustls::client::danger::{
         HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
     };
-    use tokio_rustls::rustls::crypto::ring;
+    use tokio_rustls::rustls::crypto::aws_lc_rs as ring;
     use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
     use tokio_rustls::rustls::{ClientConfig, DigitallySignedStruct, Error, SignatureScheme};
 

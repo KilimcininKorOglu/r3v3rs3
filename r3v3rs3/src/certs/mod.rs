@@ -13,7 +13,7 @@ use std::fmt;
 use std::io::{BufRead, BufReader};
 use std::net::IpAddr;
 use std::str::FromStr;
-use tokio_rustls::rustls::crypto::ring::sign;
+use tokio_rustls::rustls::crypto::aws_lc_rs::sign;
 use tokio_rustls::rustls::pki_types::pem::PemObject;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::rustls::sign::CertifiedKey;
