@@ -544,3 +544,62 @@ pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -
         ),
     }
 }
+
+/// The 401 response that points the client at the resource metadata, per RFC 9728.
+fn unauthorized(headers: &HeaderMap) -> Response {
+    let origin = base_origin(headers);
+    let mut response = (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({ "error": "unauthorized" })),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        header::WWW_AUTHENTICATE,
+        HeaderValue::from_str(&format!(
+            "Bearer resource_metadata=\"{origin}/.well-known/oauth-protected-resource\""
+        ))
+        .unwrap_or(HeaderValue::from_static("Bearer")),
+    );
+    response
+}
+
+/// The middleware of the MCP endpoint: the request needs an access token with a live grant of a
+/// signed-in account. The token scopes travel with the caller in the request extensions.
+pub async fn verify_bearer(
+    State(state): State<AppState>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: HeaderMap,
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let config = state.data.lock().await.config.mcp.clone();
+    if !config.enabled {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "access_denied" })),
+        )
+            .into_response();
+    }
+    let Some(token) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+    else {
+        return unauthorized(&headers);
+    };
+    let (username, scope) = {
+        let data = state.data.lock().await;
+        match data.mcp.verify(token) {
+            Some(grant) => (grant.username.clone(), grant.scope.clone()),
+            None => return unauthorized(&headers),
+        }
+    };
+    let record = crate::sessions::SessionRecord::new(&username);
+    let Some(mut caller) = state.accounts.borrow().caller(&record) else {
+        return unauthorized(&headers);
+    };
+    caller.client = Some(addr.ip());
+    request.extensions_mut().insert(caller);
+    request.extensions_mut().insert(super::McpScope(scope));
+    next.run(request).await
+}

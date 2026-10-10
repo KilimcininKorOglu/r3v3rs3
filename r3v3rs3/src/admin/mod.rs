@@ -61,6 +61,7 @@ mod discovery;
 mod git;
 mod hooks;
 mod logs;
+mod mcp;
 mod oauth;
 mod oauth2;
 mod openapi;
@@ -69,6 +70,10 @@ mod ports;
 mod proxies;
 mod static_file;
 mod workers;
+
+/// The scopes of the access token that a request to the MCP endpoint carried.
+#[derive(Clone, Debug)]
+pub struct McpScope(pub String);
 
 pub async fn start_admin(
     app_info: AppInfo,
@@ -195,7 +200,20 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .split_for_parts();
     let docs: Router<AppState> =
         Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi)).route_layer(verify);
+    let mcp_verify = middleware::from_fn_with_state(app_state.clone(), oauth2::verify_bearer);
+    let mcp_service = mcp::StreamableHttpService::new(
+        {
+            let state = app_state.clone();
+            move || Ok(mcp::McpServer::new(state.clone()))
+        },
+        mcp::LocalSessionManager::default().into(),
+        Default::default(),
+    );
+    let mcp_router: Router<AppState> = Router::new()
+        .nest_service("/api/mcp", mcp_service)
+        .route_layer(mcp_verify);
     Ok(api
+        .merge(mcp_router)
         .merge(docs)
         // Every admin response carries the config of the server, so no cache may keep it. The
         // layer sits above the fallback, which sets its own Cache-Control for the WebUI files.

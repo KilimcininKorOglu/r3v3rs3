@@ -328,3 +328,131 @@ async fn a_denied_consent_sends_an_access_denied_error() -> anyhow::Result<()> {
     })
     .await
 }
+
+/// Completes the authorization flow and returns an access token with the edit scope.
+async fn access_token(addr: &SocketAddr) -> anyhow::Result<String> {
+    let client = Client::new();
+    let cookie = session(&client, addr).await?;
+    let (verifier, challenge) = pkce();
+    let consent = no_redirect()
+        .post(format!("http://{addr}/oauth/authorize"))
+        .header("cookie", &cookie)
+        .form(&[
+            ("client_id", CLIENT_ID),
+            ("redirect_uri", REDIRECT_URI),
+            ("state", "st"),
+            ("code_challenge", challenge.as_str()),
+            ("scope", "read edit"),
+            ("decision", "approve"),
+        ])
+        .send()
+        .await?;
+    let location = consent
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()?
+        .to_string();
+    let code = location
+        .split("code=")
+        .nth(1)
+        .and_then(|rest| rest.split('&').next())
+        .unwrap()
+        .to_string();
+    let tokens: Value = Client::new()
+        .post(format!("http://{addr}/oauth/token"))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code.as_str()),
+            ("redirect_uri", REDIRECT_URI),
+            ("client_id", CLIENT_ID),
+            ("code_verifier", verifier.as_str()),
+        ])
+        .send()
+        .await?
+        .json()
+        .await?;
+    Ok(tokens["access_token"].as_str().unwrap().to_string())
+}
+
+/// A silent MCP client for the test.
+#[derive(Clone, Default)]
+struct TestClient;
+
+impl rmcp::ClientHandler for TestClient {}
+
+#[tokio::test]
+async fn the_mcp_endpoint_serves_the_tools() -> anyhow::Result<()> {
+    use rmcp::model::CallToolRequestParams;
+    use rmcp::service::serve_client;
+    use rmcp::transport::streamable_http_client::{
+        StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+    };
+
+    let dir = TempDir::new("mcp-server")?;
+    with_admin(&dir.0, |addr| async move {
+        let token = access_token(&addr).await?;
+
+        // Without a token the endpoint points at the resource metadata.
+        let anonymous = Client::new()
+            .post(format!("http://{addr}/api/mcp"))
+            .header("accept", "application/json")
+            .body("{}")
+            .send()
+            .await?;
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+        let www = anonymous
+            .headers()
+            .get("www-authenticate")
+            .unwrap()
+            .to_str()?;
+        assert!(www.contains("oauth-protected-resource"), "{www}");
+
+        // The raw request with the token must pass the middleware.
+        let authorized = Client::new()
+            .post(format!("http://{addr}/api/mcp"))
+            .header("authorization", format!("Bearer {token}"))
+            .header("accept", "application/json, text/event-stream")
+            .json(&json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "r3v3rs3-test", "version": "0.0.1"},
+                }
+            }))
+            .send()
+            .await?;
+        let status = authorized.status();
+        let body = authorized.text().await?;
+        eprintln!("raw initialize: status={status} body={body}");
+        assert!(status.is_success(), "{status} {body}");
+
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(format!("http://{addr}/api/mcp"))
+                // The transport adds the `Bearer ` prefix itself.
+                .auth_header(&token),
+        );
+        let client = serve_client(TestClient, transport).await?;
+
+        let tools = client.list_tools(Default::default()).await?;
+        let names: Vec<&str> = tools.tools.iter().map(|tool| tool.name.as_ref()).collect();
+        assert!(names.contains(&"list_proxies"), "{names:?}");
+        assert!(names.contains(&"server_status"), "{names:?}");
+
+        let result = client
+            .call_tool(CallToolRequestParams::new("server_status"))
+            .await?;
+        let text = result
+            .content
+            .first()
+            .and_then(|content| content.as_text())
+            .map(|text| text.text.clone())
+            .unwrap_or_default();
+        assert!(text.contains("workers"), "{text}");
+
+        client.cancel().await?;
+        Ok(())
+    })
+    .await
+}
