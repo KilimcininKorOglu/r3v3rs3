@@ -1032,16 +1032,30 @@ Devir tek bir kurulumun içinde çalışır: eski süreç yeni binary'yi aynı m
 
 ## HTTP/2 ve HTTP/3 limitleri
 
-Sunucu tarafındaki her bağlantı sabit flood limitleri taşır. Bu limitler yapılandırılamaz, çünkü değerleri her kurulum için güvenli varsayılanlardır:
+Sunucu tarafındaki her bağlantı flood limitleri taşır. `config.toml`'un `[http2]` ve `[http3]` bölümleri, "Ayarlar" sayfasının düzenlediği, her port için varsayılanları tutar:
 
-| Limit | Değer | Sınırladığı şey |
-|---|---|---|
-| HTTP/2 header listesi boyutu | 64 KiB | Bir isteğin `HEADERS` artı CONTINUATION frame'leri (CVE-2024-27316). |
-| HTTP/2 bekleyen kabul edilmiş reset stream'leri | 128 | Bir istemcinin `GOAWAY` bağlantıyı kapatmadan önce reset'leyebileceği stream sayısı (CVE-2023-44487). |
-| HTTP/3 eşzamanlı bidi stream | 100 | Bir QUIC bağlantısının açabileceği istek stream'leri. |
-| HTTP/3 eşzamanlı uni stream | 10 | Bir QUIC bağlantısının açabileceği kontrol stream'leri. |
+| Ayar | Varsayılan | Aralık | Sınırladığı şey |
+|---|---|---|---|
+| `http2.max_header_list_size` | 65536 | 1024 ila 1048576 | Bir isteğin `HEADERS` artı CONTINUATION frame'lerinin bayt cinsinden boyutu (CVE-2024-27316). |
+| `http2.max_pending_accept_reset_streams` | 128 | 1 ila 65536 | İstemcinin `GOAWAY` bağlantıyı kapatmadan önce reset'leyebileceği stream sayısı (CVE-2023-44487). |
+| `http3.max_concurrent_bidi_streams` | 100 | 1 ila 100000 | Bir QUIC bağlantısının açabileceği istek stream'leri. |
+| `http3.max_concurrent_uni_streams` | 10 | 1 ila 100000 | Bir QUIC bağlantısının açabileceği kontrol stream'leri. |
 
 Header limitinin üstündeki bir isteğin stream'i reset'lenir ve port yeni bağlantılara hizmet vermeye devam eder.
+
+Bir port, kendi `http2_limits` ve `http3_limits` seçenekleriyle varsayılanları geçersiz kılabilir; port formu bu bölümleri HTTP ve QUIC protokolleri için gösterir. Kapalı kalan bir bölüm sunucu ayarlarındaki limitleri kullanır.
+
+```toml
+[http2]
+max_header_list_size = 65536
+max_pending_accept_reset_streams = 128
+
+[http3]
+max_concurrent_bidi_streams = 100
+max_concurrent_uni_streams = 10
+```
+
+Varsayılanlarda yapılan bir değişiklik her portu yeniden kurar, yani restart olmadan geçerli olur. Bir yükseltmenin başka bir süreçten devraldığı QUIC endpoint'leri global varsayılanları kullanır.
 
 ## Metrics
 

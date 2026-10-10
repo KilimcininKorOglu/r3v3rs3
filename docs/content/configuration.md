@@ -1032,16 +1032,30 @@ The handover works only inside one installation: the old process starts the new 
 
 ## HTTP/2 and HTTP/3 Limits
 
-Every server-side connection carries fixed flood limits. They are not configurable, because their values are safe defaults for every installation:
+Every server-side connection carries flood limits. The `[http2]` and `[http3]` sections of `config.toml`, which the "Settings" page edits, hold the defaults for every port:
 
-| Limit | Value | What it bounds |
-|---|---|---|
-| HTTP/2 header list size | 64 KiB | The `HEADERS` plus CONTINUATION frames of one request (CVE-2024-27316). |
-| HTTP/2 pending accepted reset streams | 128 | The streams a client can reset before a `GOAWAY` closes the connection (CVE-2023-44487). |
-| HTTP/3 concurrent bidi streams | 100 | The request streams one QUIC connection can open. |
-| HTTP/3 concurrent uni streams | 10 | The control streams one QUIC connection can open. |
+| Setting | Default | Range | What it bounds |
+|---|---|---|---|
+| `http2.max_header_list_size` | 65536 | 1024 to 1048576 | The `HEADERS` plus CONTINUATION frames of one request, in bytes (CVE-2024-27316). |
+| `http2.max_pending_accept_reset_streams` | 128 | 1 to 65536 | The streams a client can reset before a `GOAWAY` closes the connection (CVE-2023-44487). |
+| `http3.max_concurrent_bidi_streams` | 100 | 1 to 100000 | The request streams one QUIC connection can open. |
+| `http3.max_concurrent_uni_streams` | 10 | 1 to 100000 | The control streams one QUIC connection can open. |
 
 A request above the header limit gets its stream reset, and the port keeps serving new connections.
+
+A port can override the defaults with its own `http2_limits` and `http3_limits` options, which the port form exposes for the HTTP and QUIC protocols. A section that stays off uses the limits of the server settings.
+
+```toml
+[http2]
+max_header_list_size = 65536
+max_pending_accept_reset_streams = 128
+
+[http3]
+max_concurrent_bidi_streams = 100
+max_concurrent_uni_streams = 10
+```
+
+A change of the defaults rebuilds every port, so it takes effect without a restart. The QUIC endpoints that an upgrade adopts from another process keep the global defaults.
 
 ## Metrics
 

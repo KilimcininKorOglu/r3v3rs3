@@ -4,7 +4,7 @@ use r3v3rs3::{
     config::storage::Storage,
     server::rpc::{ErasedRpcMethod, RpcWrapper, config::SetConfig},
 };
-use r3v3rs3_api::app::{AcmeExecConfig, AppConfig};
+use r3v3rs3_api::app::{AcmeExecConfig, AppConfig, Http2Limits, Http3Limits};
 use std::time::Duration;
 
 mod common;
@@ -19,6 +19,14 @@ async fn set_config_persists_to_storage() -> anyhow::Result<()> {
     config.admin.login_attempts_reset = Duration::from_secs(120);
     config.background_task_interval = Duration::from_secs(600);
     config.upstream_dns_resolver = Some("127.0.0.1:8600".parse()?);
+    config.http2 = Http2Limits {
+        max_header_list_size: 128 * 1024,
+        max_pending_accept_reset_streams: 256,
+    };
+    config.http3 = Http3Limits {
+        max_concurrent_bidi_streams: 200,
+        max_concurrent_uni_streams: 20,
+    };
 
     let expected = config.clone();
     with_server(storage.clone(), |mut channels| async move {
