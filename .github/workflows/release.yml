@@ -116,7 +116,8 @@ jobs:
             cargo build --release --locked -p r3v3rs3
           '
       - name: Check the static binary
-        run: file target/release/r3v3rs3 | grep -q statically
+        # A static PIE binary reports "static-pie linked" instead of "statically linked".
+        run: file target/release/r3v3rs3 | grep -qE "statically|static-pie"
       - name: Make archive
         run: tar -C target/release -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
       - name: Upload archive

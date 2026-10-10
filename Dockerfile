@@ -21,15 +21,21 @@ WORKDIR /usr/src/app
 COPY Cargo.toml Cargo.lock ./
 COPY r3v3rs3 r3v3rs3
 COPY r3v3rs3-api r3v3rs3-api
+COPY r3v3rs3-mcp r3v3rs3-mcp
 COPY r3v3rs3-webui r3v3rs3-webui
 WORKDIR /usr/src/app/r3v3rs3-webui
 RUN trunk build --cargo-profile web-release --release
 
 FROM rust:1.98.1-trixie AS builder
+# aws-lc-sys builds its C sources with cmake and perl, and bindgen needs libclang.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends cmake perl libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /usr/src/app
 COPY Cargo.toml Cargo.lock ./
 COPY r3v3rs3 r3v3rs3
 COPY r3v3rs3-api r3v3rs3-api
+COPY r3v3rs3-mcp r3v3rs3-mcp
 COPY r3v3rs3-webui r3v3rs3-webui
 COPY --from=webui /usr/src/app/r3v3rs3/dist/webui r3v3rs3/dist/webui
 RUN cargo build --release --locked -p r3v3rs3
