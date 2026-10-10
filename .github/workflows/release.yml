@@ -74,7 +74,7 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - name: Download webui
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: webui
           path: r3v3rs3/dist/webui
@@ -133,7 +133,7 @@ jobs:
   # that the repository carries in dist/minisign.pub.
   sign:
     name: Sign the checksums
-    needs: [binary]
+    needs: [binary, binary-musl]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
@@ -189,7 +189,7 @@ jobs:
         # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
         run: rustup toolchain install
       - name: Download webui
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: webui
           path: r3v3rs3/dist/webui
