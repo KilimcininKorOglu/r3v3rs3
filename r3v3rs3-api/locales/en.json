@@ -925,5 +925,8 @@
   "deployments.duration_value": "{minutes} min {seconds} s",
   "deployments.message": "Message",
   "deployments.rollback": "Roll back",
-  "deployments.confirm_rollback": "Start deployment {id} again?"
+  "deployments.confirm_rollback": "Start deployment {id} again?",
+  "workers.title": "Workers",
+  "workers.status": "pid {pid}, up {uptime} s, {connections} open connections",
+  "workers.unreachable": "unreachable"
 }

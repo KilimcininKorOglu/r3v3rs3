@@ -68,6 +68,12 @@ pub enum ServerCommand {
     WorkerConfigSnapshot {
         reply: tokio::sync::mpsc::Sender<crate::server::ipc::WorkerConfig>,
     },
+    /// A supervisor reports what the worker with this pid serves. A `None` status marks the
+    /// worker as unreachable.
+    SetWorkerStatus {
+        pid: u32,
+        status: Option<crate::server::ipc::WorkerStatus>,
+    },
 }
 
 impl std::fmt::Debug for ServerCommand {
@@ -122,6 +128,14 @@ impl std::fmt::Debug for ServerCommand {
             Self::WorkerApply => f.debug_struct("WorkerApply").finish(),
             Self::SuspendListeners => f.debug_struct("SuspendListeners").finish(),
             Self::WorkerConfigSnapshot { .. } => f.debug_struct("WorkerConfigSnapshot").finish(),
+            Self::SetWorkerStatus { pid, status } => f
+                .debug_struct("SetWorkerStatus")
+                .field("pid", pid)
+                .field(
+                    "open_connections",
+                    &status.as_ref().map(|s| s.open_connections),
+                )
+                .finish(),
         }
     }
 }

@@ -45,6 +45,8 @@ pub enum WorkerCommand {
     Shutdown,
     /// The worker answers with [`WorkerEvent::Pong`].
     Ping,
+    /// The worker answers with [`WorkerEvent::Status`].
+    Status,
 }
 
 /// The configuration that a worker needs. It reads nothing from the storage.
@@ -79,8 +81,19 @@ pub enum WorkerEvent {
     Pong,
     /// The worker gave up. The master restarts it.
     Fatal(String),
+    /// The runtime state that the worker serves, the answer to [`WorkerCommand::Status`].
+    Status(Box<WorkerStatus>),
     /// A server event of the worker, for example a status update.
     Event(ServerEvent),
+}
+
+/// The live state of a worker process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerStatus {
+    pub pid: u32,
+    /// Seconds since the worker process started.
+    pub uptime_secs: u64,
+    pub open_connections: u64,
 }
 
 /// Writes one JSON frame.

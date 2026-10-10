@@ -15,6 +15,7 @@ pub mod config;
 pub mod discovery;
 pub mod ports;
 pub mod proxies;
+pub mod workers;
 
 #[async_trait::async_trait]
 pub trait RpcMethod: Any + Send + Sync {

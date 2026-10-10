@@ -35,7 +35,7 @@ pub async fn run(
     app: AppConfig,
     manifest: Vec<ListenerFd>,
 ) -> anyhow::Result<()> {
-    let mut events = bus_tx.subscribe();
+    let events = bus_tx.subscribe();
     if manifest.is_empty() {
         info!("no listeners to hand to a worker");
         return Ok(());
@@ -52,29 +52,46 @@ pub async fn run(
     // The workers serve the ports, so this process stops accepting.
     command.send(ServerCommand::SuspendListeners).await?;
 
+    supervise(
+        events, bus_tx, command, exe, app_info, app, manifest, config,
+    )
+    .await
+}
+
+/// Serves the listeners through one worker at a time until the master shuts down.
+#[allow(clippy::too_many_arguments)]
+async fn supervise(
+    mut events: broadcast::Receiver<ServerEvent>,
+    bus_tx: broadcast::Sender<ServerEvent>,
+    command: mpsc::Sender<ServerCommand>,
+    exe: std::path::PathBuf,
+    app_info: AppInfo,
+    app: AppConfig,
+    manifest: Vec<ListenerFd>,
+    config: WorkerConfig,
+) -> anyhow::Result<()> {
     let mut worker: Option<KillOnDrop> = None;
     let mut backoff = FIRST_BACKOFF;
+    // A heartbeat with no answer since the last tick marks the worker as unreachable.
+    let mut awaiting_status = false;
     let (events_tx, mut events_rx) = mpsc::channel::<WorkerEvent>(16);
     let (mut config_tx, mut config_rx) = mpsc::channel::<WorkerConfig>(1);
     let (mut ipc_tx, _ipc_rx) = mpsc::channel::<IpcMessage>(16);
     let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
-        if worker.is_none() {
-            info!("starting a worker");
-            let session =
-                match start_worker(&exe, &app_info, &app, &manifest, &config, events_tx.clone())
-                    .await
-                {
-                    Ok(session) => session,
-                    Err(err) => {
-                        error!(%err, "failed to start a worker, retrying");
-                        tokio::time::sleep(backoff).await;
-                        backoff = (backoff * 2).min(MAX_BACKOFF);
-                        continue;
-                    }
-                };
-            backoff = FIRST_BACKOFF;
+        if worker.is_none()
+            && let Some(session) = spawn_worker(
+                &exe,
+                &app_info,
+                &app,
+                &manifest,
+                &config,
+                events_tx.clone(),
+                &mut backoff,
+            )
+            .await
+        {
             config_tx = session.config_tx;
             ipc_tx = session.ipc_tx;
             worker = Some(KillOnDrop(session.child));
@@ -86,36 +103,21 @@ pub async fn run(
                 }
             }
             _ = heartbeat.tick() => {
-                let exited = match worker.as_mut() {
-                    Some(child) => child.0.try_wait()?.is_some(),
-                    None => false,
-                };
-                if exited {
-                    warn!("the worker exited, restarting it");
-                    worker = None;
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
-                } else if ipc_tx
-                    .send(IpcMessage::Command(WorkerCommand::Ping))
-                    .await
-                    .is_err()
+                if heartbeat_tick(&mut worker, &command, &ipc_tx, &mut awaiting_status)
+                    .await?
                 {
-                    warn!("the IPC task of the worker is gone");
+                    restart_dead_worker(&mut worker, &mut backoff).await;
                 }
             }
             event = events_rx.recv() => {
-                match event {
-                    Some(WorkerEvent::Fatal(reason)) => {
-                        error!(%reason, "the worker gave up");
-                        worker = None;
-                    }
-                    // The runtime state that the worker serves flows into the event stream of
-                    // the master, so the admin API and the WebUI see it.
-                    Some(WorkerEvent::Event(event)) => {
-                        let _ = bus_tx.send(event);
-                    }
-                    Some(WorkerEvent::Pong) | None => {}
-                }
+                handle_worker_event(
+                    event,
+                    &bus_tx,
+                    &command,
+                    &mut awaiting_status,
+                    &mut worker,
+                )
+                .await;
             }
             config = config_rx.recv() => {
                 let Some(config) = config else { continue };
@@ -124,6 +126,112 @@ pub async fn run(
         }
     }
     Ok(())
+}
+
+/// Starts a worker and returns it. A failed start waits out the backoff and returns `None`,
+/// so the loop tries again.
+async fn spawn_worker(
+    exe: &std::path::Path,
+    app_info: &AppInfo,
+    app: &AppConfig,
+    manifest: &[ListenerFd],
+    config: &WorkerConfig,
+    events_tx: mpsc::Sender<WorkerEvent>,
+    backoff: &mut Duration,
+) -> Option<WorkerSession> {
+    info!("starting a worker");
+    match start_worker(exe, app_info, app, manifest, config, events_tx).await {
+        Ok(session) => {
+            *backoff = FIRST_BACKOFF;
+            Some(session)
+        }
+        Err(err) => {
+            error!(%err, "failed to start a worker, retrying");
+            tokio::time::sleep(*backoff).await;
+            *backoff = (*backoff * 2).min(MAX_BACKOFF);
+            None
+        }
+    }
+}
+
+/// Drops a worker that the heartbeat found dead and waits out the backoff.
+async fn restart_dead_worker(worker: &mut Option<KillOnDrop>, backoff: &mut Duration) {
+    *worker = None;
+    tokio::time::sleep(*backoff).await;
+    *backoff = (*backoff * 2).min(MAX_BACKOFF);
+}
+
+/// Runs one heartbeat. `true` means the worker exited, so the caller restarts it.
+async fn heartbeat_tick(
+    worker: &mut Option<KillOnDrop>,
+    command: &mpsc::Sender<ServerCommand>,
+    ipc_tx: &mpsc::Sender<IpcMessage>,
+    awaiting_status: &mut bool,
+) -> anyhow::Result<bool> {
+    let Some(child) = worker.as_mut() else {
+        return ping(ipc_tx).await;
+    };
+    if child.0.try_wait()?.is_some() {
+        warn!("the worker exited, restarting it");
+        *awaiting_status = false;
+        return Ok(true);
+    }
+    let pid = child.0.id();
+    if *awaiting_status {
+        warn!("the worker missed its heartbeat answer");
+        let _ = command
+            .send(ServerCommand::SetWorkerStatus { pid, status: None })
+            .await;
+    }
+    *awaiting_status = ipc_tx
+        .send(IpcMessage::Command(WorkerCommand::Status))
+        .await
+        .is_ok();
+    Ok(false)
+}
+
+/// A worker that has no process yet only gets a plain ping.
+async fn ping(ipc_tx: &mpsc::Sender<IpcMessage>) -> anyhow::Result<bool> {
+    if ipc_tx
+        .send(IpcMessage::Command(WorkerCommand::Ping))
+        .await
+        .is_err()
+    {
+        warn!("the IPC task of the worker is gone");
+    }
+    Ok(false)
+}
+
+/// Carries one event of the worker into the state of the master.
+async fn handle_worker_event(
+    event: Option<WorkerEvent>,
+    bus_tx: &broadcast::Sender<ServerEvent>,
+    command: &mpsc::Sender<ServerCommand>,
+    awaiting_status: &mut bool,
+    worker: &mut Option<KillOnDrop>,
+) {
+    match event {
+        Some(WorkerEvent::Fatal(reason)) => {
+            error!(%reason, "the worker gave up");
+            *worker = None;
+        }
+        // The runtime state that the worker serves flows into the event stream of the master,
+        // so the admin API and the WebUI see it.
+        Some(WorkerEvent::Event(event)) => {
+            let _ = bus_tx.send(event);
+        }
+        Some(WorkerEvent::Status(status)) => {
+            *awaiting_status = false;
+            let pid = status.pid;
+            let _ = command
+                .send(ServerCommand::SetWorkerStatus {
+                    pid,
+                    status: Some(*status),
+                })
+                .await;
+        }
+        Some(WorkerEvent::Pong) | None => {}
+    }
 }
 
 /// `true` ends the supervisor, because the master shuts down.
@@ -180,30 +288,9 @@ async fn start_worker(
     events_tx: mpsc::Sender<WorkerEvent>,
 ) -> anyhow::Result<WorkerSession> {
     let (ipc, worker_half) = UnixStream::pair()?;
-    let raw = worker_half.as_raw_fd();
-    let mut command = std::process::Command::new(exe);
-    command
-        .args([
-            "worker",
-            "--ipc",
-            "3",
-            "--config-dir",
-            &app_info.config_path.display().to_string(),
-            "--log-dir",
-            &app_info.log_path.display().to_string(),
-        ])
-        .stdin(std::process::Stdio::null());
-    unsafe {
-        use std::os::unix::process::CommandExt;
-        command.pre_exec(move || {
-            if libc::dup2(raw, 3) == -1 {
-                Err(std::io::Error::last_os_error())
-            } else {
-                Ok(())
-            }
-        });
-    }
-    let child = command.spawn().context("failed to spawn the worker")?;
+    let child = worker_command(exe, app_info, worker_half.as_raw_fd())
+        .spawn()
+        .context("failed to spawn the worker")?;
     std::mem::drop(worker_half);
 
     let (mut ipc, config, app) = (ipc, config.clone(), app.clone());
@@ -227,6 +314,37 @@ async fn start_worker(
     .await
     .context("the worker task failed")??;
     Ok(session)
+}
+
+/// Builds the worker process command that reads its IPC socket on descriptor 3.
+fn worker_command(
+    exe: &std::path::Path,
+    app_info: &AppInfo,
+    ipc_fd: std::os::fd::RawFd,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(exe);
+    command
+        .args([
+            "worker",
+            "--ipc",
+            "3",
+            "--config-dir",
+            &app_info.config_path.display().to_string(),
+            "--log-dir",
+            &app_info.log_path.display().to_string(),
+        ])
+        .stdin(std::process::Stdio::null());
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        command.pre_exec(move || {
+            if libc::dup2(ipc_fd, 3) == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+    command
 }
 
 /// Sends the handshake, the configuration and the descriptors to the worker.

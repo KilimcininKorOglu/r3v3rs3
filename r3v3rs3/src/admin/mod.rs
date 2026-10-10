@@ -67,6 +67,7 @@ mod platform;
 mod ports;
 mod proxies;
 mod static_file;
+mod workers;
 
 pub async fn start_admin(
     app_info: AppInfo,
@@ -411,6 +412,10 @@ fn state_routes() -> OpenApiRouter<AppState> {
         .nest(
             "/cluster",
             OpenApiRouter::new().routes(routes!(cluster::status)),
+        )
+        .nest(
+            "/workers",
+            OpenApiRouter::new().routes(routes!(workers::list)),
         )
 }
 

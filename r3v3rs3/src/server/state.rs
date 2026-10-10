@@ -30,7 +30,7 @@ use crate::{
 };
 use quinn::Incoming;
 use r3v3rs3_api::access_list::{AccessListEntry, apply_access_lists};
-use r3v3rs3_api::app::{AppConfig, AppInfo};
+use r3v3rs3_api::app::{AppConfig, AppInfo, WorkerEntry, WorkerStatusEntry, WorkerStatusReport};
 use r3v3rs3_api::cluster::ClusterStatus;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
@@ -95,6 +95,8 @@ pub struct ServerState {
     /// The keys of the certificate events that the webhook got.
     sent_notifications: HashSet<String>,
     platform: PlatformHandle,
+    /// What the supervised worker serves, as its supervisor reports it.
+    worker_status: Option<WorkerEntry>,
 }
 
 pub enum Received {
@@ -328,6 +330,7 @@ impl ServerState {
             notifier: Notifier::spawn(),
             sent_notifications,
             platform,
+            worker_status: None,
         };
 
         if let Some(exchange) = this.storage.clone().rate_count_exchange() {
@@ -398,6 +401,16 @@ impl ServerState {
             ServerCommand::WorkerConfigSnapshot { reply } => {
                 let _ = reply.send(self.worker_config()).await;
             }
+            ServerCommand::SetWorkerStatus { pid, status } => {
+                self.worker_status = Some(WorkerEntry {
+                    id: pid.to_string(),
+                    status: status.map(|status| WorkerStatusEntry {
+                        pid: status.pid,
+                        uptime_secs: status.uptime_secs,
+                        open_connections: status.open_connections,
+                    }),
+                });
+            }
             other => self.handle_topology_command(other).await,
         }
     }
@@ -466,6 +479,15 @@ impl ServerState {
 
     pub fn cluster_status(&self) -> ClusterStatus {
         self.cluster.clone()
+    }
+
+    /// Reports the workers that serve the ports. A worker without a live status stays listed
+    /// as unreachable, so the admin API never hides a worker that stopped answering.
+    pub fn workers_status(&self) -> WorkerStatusReport {
+        WorkerStatusReport {
+            mode: self.config.worker_mode,
+            workers: self.worker_status.iter().cloned().collect(),
+        }
     }
 
     pub fn session_backend(&self) -> Arc<dyn SessionBackend> {

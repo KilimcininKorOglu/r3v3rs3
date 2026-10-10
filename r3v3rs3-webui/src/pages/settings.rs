@@ -2,6 +2,7 @@ use crate::components::cluster_status::ClusterStatusCard;
 use crate::components::http_proxy_config::{
     client_cert_label, parse_optional_id, use_client_certs,
 };
+use crate::components::worker_status::WorkerStatusCard;
 use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale};
 use gloo_net::http::{Request, RequestBuilder, Response};
 use r3v3rs3_api::{
@@ -265,6 +266,7 @@ pub fn settings() -> Html {
         </form>
         <ClusterStatusCard />
         <CdnStatusCard />
+        <WorkerStatusCard />
         </>
     }
 }
@@ -879,11 +881,12 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 consul,
                 etcd,
             },
-            // The server keeps the programs, the cluster and the platform settings of
-            // config.toml.
+            // The server keeps the programs, the cluster, the platform and the worker mode
+            // settings of config.toml.
             acme_exec: Default::default(),
             cluster: Default::default(),
             platform: Default::default(),
+            worker_mode: Default::default(),
         }),
         _ => Err(errors),
     }

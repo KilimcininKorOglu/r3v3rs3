@@ -8,7 +8,8 @@
 use super::fdmanifest::ListenerFd;
 use super::fdpass::recv_fds;
 use super::ipc::{
-    Handshake, PROTOCOL_VERSION, WorkerCommand, WorkerConfig, WorkerEvent, read_frame, write_frame,
+    Handshake, PROTOCOL_VERSION, WorkerCommand, WorkerConfig, WorkerEvent, WorkerStatus,
+    read_frame, write_frame,
 };
 use crate::config::memory::MemoryStorage;
 use crate::server::Server;
@@ -69,6 +70,7 @@ pub async fn run(ipc_fd: i32, config_dir: &Path, log_dir: &Path) -> anyhow::Resu
         certs.clone(),
     ));
     let (server, channels) = Server::new_worker(app_info, storage.clone(), listeners).await;
+    let started_at = std::time::Instant::now();
     // The master publishes the status of this worker to its own event stream, so the admin
     // API and the WebUI see the runtime state that the worker serves.
     let _ = channels
@@ -77,7 +79,7 @@ pub async fn run(ipc_fd: i32, config_dir: &Path, log_dir: &Path) -> anyhow::Resu
         .await;
     let server_task = tokio::spawn(server.start());
 
-    let result = serve_master(&mut ipc, &storage, &channels, &config).await;
+    let result = serve_master(&mut ipc, &storage, &channels, &config, started_at).await;
     channels.shutdown();
     let _ = server_task.await;
     result
@@ -89,6 +91,7 @@ async fn serve_master(
     storage: &Arc<MemoryStorage>,
     channels: &crate::server::ServerChannels,
     config: &WorkerConfig,
+    started_at: std::time::Instant,
 ) -> anyhow::Result<()> {
     // The master reads this side of the channel since the handover, so this announcement
     // reaches it even though nobody listened when the worker loaded its state.
@@ -125,6 +128,15 @@ async fn serve_master(
             }
             WorkerCommand::Ping => {
                 write_frame(ipc, &WorkerEvent::Pong).context("failed to answer the heartbeat")?;
+            }
+            WorkerCommand::Status => {
+                let status = WorkerStatus {
+                    pid: std::process::id(),
+                    uptime_secs: started_at.elapsed().as_secs(),
+                    open_connections: crate::proxy::open_connections() as u64,
+                };
+                write_frame(ipc, &WorkerEvent::Status(Box::new(status)))
+                    .context("failed to answer the status request")?;
             }
         }
     }

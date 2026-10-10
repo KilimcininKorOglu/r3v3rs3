@@ -131,6 +131,31 @@ pub enum WorkerMode {
     Workers,
 }
 
+/// What one worker process serves right now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WorkerStatusEntry {
+    pub pid: u32,
+    /// Seconds since the worker process started.
+    pub uptime_secs: u64,
+    pub open_connections: u64,
+}
+
+/// The workers of this master and what each one reports. A worker that missed its
+/// heartbeat answer stays listed as `unreachable` instead of disappearing.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WorkerStatusReport {
+    pub mode: WorkerMode,
+    pub workers: Vec<WorkerEntry>,
+}
+
+/// One worker slot. An unreachable worker holds only its id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WorkerEntry {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<WorkerStatusEntry>,
+}
+
 fn default_http_challenge_addr() -> SocketAddr {
     SocketAddr::from(([0, 0, 0, 0], 80))
 }

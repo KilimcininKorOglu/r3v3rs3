@@ -150,6 +150,14 @@ async fn a_worker_serves_the_listeners_of_the_master() -> anyhow::Result<()> {
         }
     }
 
+    // The status request reports the live state of the worker process.
+    write_frame(&mut master, &WorkerCommand::Status)?;
+    let WorkerEvent::Status(status) = read_frame(&mut master)? else {
+        anyhow::bail!("the worker did not answer the status request");
+    };
+    assert!(status.pid > 0);
+    assert!(status.open_connections > 0);
+
     // A new configuration replaces the state of the worker.
     let second_port = alloc_tcp_port().await?;
     let second_addr = second_port.socket_addr();
@@ -268,6 +276,58 @@ async fn the_supervisor_serves_the_ports_through_a_worker() -> anyhow::Result<()
     if let Err(err) = supervisor_task.await {
         panic!("the supervisor task failed: {err}");
     }
+    server_task.await??;
+    std::fs::remove_dir_all(&log_dir).ok();
+    Ok(())
+}
+
+/// The admin status holds what the supervisor reports: the live state of a worker and, after
+/// a missed heartbeat answer, the same worker as unreachable.
+#[tokio::test]
+async fn the_admin_status_reports_the_workers_of_the_master() -> anyhow::Result<()> {
+    use r3v3rs3::command::ServerCommand;
+    use r3v3rs3::server::rpc::workers::GetWorkers;
+    use r3v3rs3::server::{Server, ipc::WorkerStatus};
+    use r3v3rs3_api::app::WorkerMode;
+
+    let log_dir = std::env::temp_dir().join(format!("r3v3rs3-wstatus-{}", std::process::id()));
+    std::fs::create_dir_all(&log_dir)?;
+    let storage = common::TestStorage::builder().build();
+    let app_info = r3v3rs3::config::new_appinfo(&log_dir, &log_dir);
+    let (server, mut channels) = Server::new_shared(app_info, std::sync::Arc::new(storage)).await;
+    let server_task = tokio::spawn(server.start());
+
+    let pid = 4242;
+    channels
+        .command
+        .send(ServerCommand::SetWorkerStatus {
+            pid,
+            status: Some(WorkerStatus {
+                pid,
+                uptime_secs: 5,
+                open_connections: 3,
+            }),
+        })
+        .await?;
+    let report = common::call(&mut channels, GetWorkers).await??;
+    assert_eq!(report.mode, WorkerMode::Off);
+    assert_eq!(report.workers.len(), 1);
+    assert_eq!(report.workers[0].id, "4242");
+    assert_eq!(
+        report.workers[0].status.as_ref().unwrap().open_connections,
+        3
+    );
+
+    // A heartbeat with no answer keeps the worker listed with no status.
+    channels
+        .command
+        .send(ServerCommand::SetWorkerStatus { pid, status: None })
+        .await?;
+    let report = common::call(&mut channels, GetWorkers).await??;
+    assert_eq!(report.workers.len(), 1);
+    assert!(report.workers[0].status.is_none());
+
+    channels.shutdown();
     server_task.await??;
     std::fs::remove_dir_all(&log_dir).ok();
     Ok(())

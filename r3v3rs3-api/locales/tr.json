@@ -925,5 +925,8 @@
   "deployments.duration_value": "{minutes} dk {seconds} sn",
   "deployments.message": "Mesaj",
   "deployments.rollback": "Geri al",
-  "deployments.confirm_rollback": "{id} deployment'ı yeniden başlatılsın mı?"
+  "deployments.confirm_rollback": "{id} deployment'ı yeniden başlatılsın mı?",
+  "workers.title": "Worker'lar",
+  "workers.status": "pid {pid}, {uptime} sn açık, {connections} açık bağlantı",
+  "workers.unreachable": "yanıt vermiyor"
 }
