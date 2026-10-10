@@ -75,7 +75,7 @@ r3v3rs3 OpenAPI dokümanını sunucu kodundan üretir, yani doküman her zaman �
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/openapi.json | jq '.info.version, (.paths | length)'
-"1.6.0"
+"1.6.5"
 58
 ```
 
