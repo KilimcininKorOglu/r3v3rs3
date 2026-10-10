@@ -138,7 +138,7 @@ $ docker compose pull
 $ docker compose up -d
 ```
 
-Volume'lar yapılandırmayı ve hesapları korur, yani hiçbir hesap yeniden oluşturulmaz. Birkaç host'u adım adım yükseltirken sürümü tag ile sabitleyin, örneğin `:v1.5.6`.
+Volume'lar yapılandırmayı ve hesapları korur, yani hiçbir hesap yeniden oluşturulmaz. Birkaç host'u adım adım yükseltirken sürümü tag ile sabitleyin, örneğin `:v1.6.0`.
 
 ## Yeniden başlatma ne yapar
 
