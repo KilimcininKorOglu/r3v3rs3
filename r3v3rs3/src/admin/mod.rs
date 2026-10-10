@@ -62,6 +62,7 @@ mod git;
 mod hooks;
 mod logs;
 mod mcp;
+mod metrics;
 mod oauth;
 mod oauth2;
 mod openapi;
@@ -197,6 +198,7 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
                 .routes(routes!(oauth2::protected_resource_metadata))
                 .nest("/oauth", mcp_oauth),
         )
+        .merge(metrics_routes(&app_state))
         .split_for_parts();
     let docs: Router<AppState> =
         Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi)).route_layer(verify);
@@ -267,6 +269,15 @@ fn public_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
     Ok(OpenApiRouter::new()
         .nest("/hooks", hooks)
         .nest("/oauth", oauth))
+}
+
+/// The Prometheus metrics route. It accepts an admin session or an MCP Bearer token.
+fn metrics_routes(state: &AppState) -> OpenApiRouter<AppState> {
+    let verify = middleware::from_fn_with_state(state.clone(), metrics::verify_metrics);
+    OpenApiRouter::new().nest(
+        "/api/metrics",
+        OpenApiRouter::new().routes(routes!(metrics::metrics).layer(verify)),
+    )
 }
 
 fn resource_routes() -> OpenApiRouter<AppState> {

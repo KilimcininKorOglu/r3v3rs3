@@ -237,7 +237,7 @@ pub async fn verify(
 
 /// The account of an active admin session. The account must exist, and its last change must not
 /// be later than the start of the session.
-async fn session_caller(state: &AppState, token: &str) -> Result<Caller, Error> {
+pub(crate) async fn session_caller(state: &AppState, token: &str) -> Result<Caller, Error> {
     let (backend, expiry) = session_backend(state).await;
     let record = backend
         .get(SessionScope::Admin, token)

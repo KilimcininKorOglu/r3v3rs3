@@ -62,6 +62,13 @@ pub struct AccessToken {
     refresh_token: String,
 }
 
+impl AccessToken {
+    /// The username of the account that approved the grant.
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+}
+
 /// The codes and tokens of the signed-in MCP clients, in memory only.
 #[derive(Default)]
 pub struct McpAuthorizations {

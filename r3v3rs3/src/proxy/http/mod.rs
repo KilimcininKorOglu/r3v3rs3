@@ -567,6 +567,7 @@ async fn proxied_response(
     info: &RequestInfo<'_>,
     fronting: bool,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
+    crate::proxy::stats::count_http_request();
     let (req, response_rewriter) = if fronting {
         (
             ProxiedRequest::Err(ProxyError::DomainFrontingDetected),
@@ -1054,6 +1055,7 @@ where
     let enter = span.clone();
     let _enter = enter.enter();
 
+    crate::proxy::stats::count_h3_request();
     let shared = shared_cache.load();
     let info = RequestInfo {
         remote: ctx.remote,
@@ -1130,7 +1132,10 @@ where
                 .await
         }
         ProxiedRequest::Respond(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
-        ProxiedRequest::Err(err) => Err(err.into()),
+        ProxiedRequest::Err(err) => {
+            crate::proxy::stats::count_upstream_error();
+            Err(err.into())
+        }
     }
 }
 

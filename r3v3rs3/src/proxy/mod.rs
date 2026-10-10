@@ -24,6 +24,7 @@ pub mod http;
 pub mod proxy_protocol;
 pub mod registry;
 pub mod srv;
+pub mod stats;
 pub mod tcp;
 pub mod tls;
 pub mod udp;
