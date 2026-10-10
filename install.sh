@@ -234,11 +234,14 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 Environment=R3V3RS3_CONFIG_DIR=$CONFIG_DIR
 Environment=R3V3RS3_LOG_DIR=$LOG_DIR
 Environment=R3V3RS3_WEBUI=$webui
 ExecStart=$BIN start
+# SIGUSR2 hands the listeners to a new process without dropping the connections.
+ExecReload=/bin/kill -USR2 $MAINPID
 # The server shuts down gracefully on SIGINT.
 KillSignal=SIGINT
 Restart=on-failure

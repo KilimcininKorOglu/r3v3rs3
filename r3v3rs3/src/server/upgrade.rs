@@ -19,6 +19,9 @@ const READY: u8 = b'R';
 /// The longest time that the old process waits for the new one to become ready.
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The largest number of listeners that one handover passes.
+const MAX_LISTENERS: usize = 1024;
+
 /// The side of the new process: announces that it is ready and inherits the listeners.
 pub async fn child_handover(ipc_fd: i32) -> anyhow::Result<Vec<ListenerFd>> {
     let mut ipc = UnixStream::from(unsafe { OwnedFd::from_raw_fd(ipc_fd) });
@@ -27,21 +30,25 @@ pub async fn child_handover(ipc_fd: i32) -> anyhow::Result<Vec<ListenerFd>> {
     use std::io::Write as _;
     ipc.write_all(&[READY])
         .context("failed to announce the readiness")?;
+    // The descriptors travel before the metadata, so that every read of this socket starts
+    // at the beginning of one message. A read that starts inside another message drops the
+    // ancillary data that the descriptor message carries.
+    let fds = recv_fds(&ipc, MAX_LISTENERS).context("failed to receive the listeners")?;
     let handshake: Handshake = read_frame(&mut ipc)?;
     if handshake.protocol != super::ipc::PROTOCOL_VERSION {
         bail!("the previous process speaks another upgrade protocol");
     }
-    let fds = recv_fds(&ipc, handshake.listeners.len())?;
     Ok(handshake
         .listeners
         .iter()
+        .cloned()
         .zip(fds)
         .map(|(meta, fd)| ListenerFd::new(meta.proto, meta.addr, fd))
         .collect())
 }
 
 /// The side of the old process: starts the new one and hands the listeners over.
-pub async fn hand_over(exe_args: &[String], manifest: Vec<ListenerFd>) -> anyhow::Result<()> {
+pub async fn hand_over(exe_args: &[String], manifest: &[ListenerFd]) -> anyhow::Result<()> {
     let (mut ipc, child_half) = UnixStream::pair()?;
     let mut command = new_upgrade_command(exe_args, child_half.as_raw_fd())?;
     // The new process runs on its own; this one only hands the listeners over and drains.
@@ -50,7 +57,18 @@ pub async fn hand_over(exe_args: &[String], manifest: Vec<ListenerFd>) -> anyhow
     std::mem::drop(child);
     std::mem::drop(child_half);
 
-    let handover = tokio::task::spawn_blocking(move || write_handover(&mut ipc, &manifest));
+    let metas = manifest
+        .iter()
+        .map(|listener| super::ipc::ListenerMeta {
+            proto: listener.proto,
+            addr: listener.addr,
+        })
+        .collect::<Vec<_>>();
+    let fds = manifest
+        .iter()
+        .map(|listener| listener.raw_fd())
+        .collect::<Vec<_>>();
+    let handover = tokio::task::spawn_blocking(move || write_handover(&mut ipc, &metas, &fds));
     match tokio::time::timeout(READY_TIMEOUT, handover).await {
         Ok(result) => {
             result.map_err(|err| anyhow::anyhow!("the handover task failed: {err}"))??
@@ -63,6 +81,9 @@ pub async fn hand_over(exe_args: &[String], manifest: Vec<ListenerFd>) -> anyhow
         }
     }
     info!("the listeners went to the new process, this one drains");
+    // systemd tracks the old process as the main one, so it must learn the successor before
+    // this process exits and the cgroup of the service stays alive.
+    super::notify::hand_over_main_pid(new_pid as u32);
     Ok(())
 }
 
@@ -90,8 +111,14 @@ fn new_upgrade_command(
     Ok(command)
 }
 
-/// Waits for the ready byte of the new process and sends the listeners.
-fn write_handover(ipc: &mut UnixStream, manifest: &[ListenerFd]) -> anyhow::Result<()> {
+/// Waits for the ready byte of the new process, sends the descriptors, and then the metadata.
+/// The descriptors go first, so that the read of the other end starts at the beginning of the
+/// descriptor message and keeps its ancillary data.
+fn write_handover(
+    ipc: &mut UnixStream,
+    listeners: &[super::ipc::ListenerMeta],
+    fds: &[std::os::fd::RawFd],
+) -> anyhow::Result<()> {
     use std::io::Read as _;
     let mut ready = [0u8; 1];
     ipc.read_exact(&mut ready)
@@ -99,23 +126,13 @@ fn write_handover(ipc: &mut UnixStream, manifest: &[ListenerFd]) -> anyhow::Resu
     if ready[0] != READY {
         bail!("the new process sent an unexpected answer");
     }
+    super::fdpass::send_fds(ipc, fds)?;
     write_frame(
         ipc,
         &Handshake {
             protocol: super::ipc::PROTOCOL_VERSION,
-            listeners: manifest
-                .iter()
-                .map(|listener| super::ipc::ListenerMeta {
-                    proto: listener.proto,
-                    addr: listener.addr,
-                })
-                .collect(),
+            listeners: listeners.to_vec(),
         },
     )?;
-    let fds = manifest
-        .iter()
-        .map(|listener| listener.raw_fd())
-        .collect::<Vec<_>>();
-    super::fdpass::send_fds(ipc, &fds)?;
     Ok(())
 }

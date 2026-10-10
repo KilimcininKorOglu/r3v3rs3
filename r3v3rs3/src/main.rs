@@ -220,6 +220,8 @@ async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()>
     };
     let server_task = tokio::spawn(server.start());
     let event_send = channels.event.clone();
+    // The listeners are bound, so systemd may mark the service active (Type=notify).
+    r3v3rs3::server::notify::ready();
 
     serve_admin(app_info, &args, channels, exe_args, manifest).await?;
 
@@ -307,32 +309,57 @@ async fn serve_admin(
     let webui_enabled = !args.no_webui;
     let mut upgrade = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined2())
         .context("failed to install the SIGUSR2 handler")?;
+    // The signal loop outlives failed upgrades: a failed handover returns to the loop and
+    // this process keeps serving.
+    let signals = async {
+        loop {
+            tokio::select! {
+                _ = upgrade.recv() => {
+                    info!("received the upgrade signal");
+                    if try_hand_over(&exe_args, manifest.as_deref()).await {
+                        return;
+                    }
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    info!("received ctrl-c signal");
+                    return;
+                }
+            }
+        }
+    };
+    tokio::pin!(signals);
     tokio::select! {
         r = r3v3rs3::admin::start_admin(app_info, args.webui, channels.command, channels.callback, channels.event, channels.accounts), if webui_enabled => {
             if let Err(err) = r {
                 error!("admin error: {}", err);
             }
         }
-        _ =  tokio::signal::ctrl_c() => {
-            info!("received ctrl-c signal");
-        }
-        _ = upgrade.recv() => {
-            info!("received the upgrade signal");
-            match manifest {
-                Some(manifest) => {
-                    if let Err(err) = r3v3rs3::server::upgrade::hand_over(&exe_args, manifest).await {
-                        error!(%err, "the upgrade failed, this process keeps serving");
-                    }
-                }
-                None => {
-                    // This process already inherited its listeners, so an upgrade at the same
-                    // address would fight the process before it.
-                    error!("this process started from an upgrade, so it does not upgrade again");
-                }
-            }
-        }
+        _ = &mut signals => {}
     };
     Ok(())
+}
+
+/// Hands the listeners to a new process. Returns `false` when the handover failed and this
+/// process must keep serving, for example when the process itself started from an upgrade.
+async fn try_hand_over(
+    exe_args: &[String],
+    manifest: Option<&[r3v3rs3::server::fdmanifest::ListenerFd]>,
+) -> bool {
+    match manifest {
+        Some(manifest) => match r3v3rs3::server::upgrade::hand_over(exe_args, manifest).await {
+            Ok(()) => true,
+            Err(err) => {
+                error!(err = ?err, "the upgrade failed, this process keeps serving");
+                false
+            }
+        },
+        None => {
+            // This process already inherited its listeners, so an upgrade at the same
+            // address would fight the process before it.
+            error!("this process started from an upgrade, so it does not upgrade again");
+            false
+        }
+    }
 }
 
 /// Writes the account to the store of a cluster node, or to the config directory of every other

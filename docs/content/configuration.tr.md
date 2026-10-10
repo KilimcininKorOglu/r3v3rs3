@@ -1021,12 +1021,7 @@ Master, güncel yapılandırmayı ve dinleme socket'lerinin descriptor'larını 
 
 Yeni süreç aynı dizinden yapılandırmayı okur, bu yüzden yükseltme `config.toml` içindeki her ayar için geçerli olur. `worker_mode = "workers"` ile portları worker'lar tuttuğu için yükseltme devredilecek bir şey bulmaz ve master'ın sıralı yeniden başlatması worker'ın açık bağlantılarına dokunmadan olur.
 
-systemd ile servisi yeniden başlatmadan yeniden yükleyin:
-
-```ini
-[Service]
-ExecReload=/bin/kill -USR2 $MAINPID
-```
+systemd ile `install.sh`, servisi `Type=notify` ve `ExecReload=/bin/kill -USR2 $MAINPID` olarak yazar; `systemctl reload r3v3rs3` yeniden başlatmadan yükseltir. Sunucu hazır olduğunda systemd'ye haber verir ve devir, ana süreci yeni sürece taşır, böylece eski süreç bağlantılarını boşaltırken systemd servisi takip etmeye devam eder.
 
 Devir tek bir kurulumun içinde çalışır: eski süreç yeni binary'yi aynı makineden başlatır ve descriptor'ları ona geçirir. Docker yükseltmesi container'ın bütünüyle yeni image ile değiştirir, bu yüzden devredecek bir şey bulamaz ve bağlantılar her durumda yeniden başlar. Docker'da kesintisiz yükseltme için iki r3v3rs3 container'ını bir load balancer arkasında çalıştırın ve bunları sırayla güncelleyin. Container yeniden başlaması yine de açık bağlantıları `shutdown_graceful_timeout` süresince düzgün kapatır.
 

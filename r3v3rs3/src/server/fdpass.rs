@@ -44,9 +44,10 @@ pub fn send_fds(stream: &UnixStream, fds: &[RawFd]) -> Result<()> {
     Ok(())
 }
 
-/// Receives `count` descriptors from the other end of `stream`. An end of stream before the
-/// descriptors arrive is an error.
-pub fn recv_fds(stream: &UnixStream, count: usize) -> Result<Vec<OwnedFd>> {
+/// Receives the descriptors from the other end of `stream`, at most `max_fds` of them, and
+/// returns however many arrived. The read must start at the beginning of one message, because
+/// a read that starts inside an earlier message drops its ancillary data.
+pub fn recv_fds(stream: &UnixStream, max_fds: usize) -> Result<Vec<OwnedFd>> {
     let mut data = [0u8; 16];
     let mut io = iovec {
         iov_base: data.as_mut_ptr() as *mut libc::c_void,
@@ -55,7 +56,7 @@ pub fn recv_fds(stream: &UnixStream, count: usize) -> Result<Vec<OwnedFd>> {
     let mut control =
         vec![
             0u8;
-            unsafe { libc::CMSG_SPACE((count * std::mem::size_of::<RawFd>()) as _) as usize }
+            unsafe { libc::CMSG_SPACE((max_fds * std::mem::size_of::<RawFd>()) as _) as usize }
         ];
     // A struct literal would not compile on musl, where msghdr has extra padding fields.
     let mut message: msghdr = unsafe { std::mem::zeroed() };
@@ -118,6 +119,14 @@ mod tests {
         let mut buf = [0u8; 4];
         conn.read_exact(&mut buf).unwrap();
         assert_eq!(&buf, b"ping");
+    }
+
+    #[test]
+    fn a_message_that_carries_more_descriptors_than_asked_still_reads_them() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        send_fds(&sender, &[listener.as_raw_fd()]).unwrap();
+        assert_eq!(recv_fds(&receiver, 16).unwrap().len(), 1);
     }
 
     #[test]

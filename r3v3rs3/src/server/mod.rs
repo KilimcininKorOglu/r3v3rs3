@@ -21,6 +21,7 @@ mod discovery;
 pub mod fdmanifest;
 pub mod fdpass;
 pub mod ipc;
+pub mod notify;
 mod port_list;
 mod proxy_list;
 mod quic;
