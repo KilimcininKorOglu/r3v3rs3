@@ -1028,6 +1028,36 @@ systemd ile servisi yeniden başlatmadan yeniden yükleyin:
 ExecReload=/bin/kill -USR2 $MAINPID
 ```
 
+## MCP Sunucusu
+
+Admin API, araçlarını `/api/mcp` üzerinde Model Context Protocol ile yayınlar. AI client'lar böylece portları, proxy'leri ve sertifikaları inceleyebilir ve proxy'leri, admin API ile aynı yetki kontrolleri ve aynı audit log üzerinden değiştirebilir.
+
+MCP sunucusu varsayılan olarak kapalıdır. `config.toml` içinde açın ve giriş yapmasına izin verilecek client'ları kaydedin:
+
+```toml
+[mcp]
+enabled = true
+
+[[mcp.clients]]
+id = "r3v3rs3-mcp"
+name = "r3v3rs3 MCP client"
+redirect_uris = ["http://127.0.0.1:8765/callback"]
+```
+
+Client, PKCE'li OAuth 2.1 authorization code akışıyla giriş yapar: client `/oauth/authorize` adresini tarayıcıda açar, oturum açmış hesap onay formundan client'a izin verir ve client tek kullanımlık kodu `/oauth/token` üzerinde access token ile değiştirir. Token, onayın kapsamını taşır: `read` durumu görür, `edit` ayrıca proxy'leri değiştirir. Metadata belkeleri `/.well-known/oauth-authorization-server` ve `/.well-known/oauth-protected-resource` adreslerindedir.
+
+Token'lar yalnız bellekte tutulur, bu yüzden sunucunun yeniden başlaması her MCP client'ının oturumunu düşürür ve client'ın refresh token'ları geçersiz olur.
+
+Depo, `r3v3rs3-mcp` içinde bir komut satırı client'ı ile gelir:
+
+```sh
+cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 login
+cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 tools
+cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 call server_status
+```
+
+`login`, onay sayfasını tarayıcıda açar ve token'ları yapılandırma dizinine kaydeder. Bir script, access token'ı doğrudan `--token` ile verebilir.
+
 ## Saklanan veriler
 
 r3v3rs3, ACME kayıtlarını yapılandırma dizinindeki `acme.toml` dosyasında saklar. Dosya, her ACME hesabının private key'ini ve DNS sağlayıcısının kimlik bilgilerini düz metin olarak içerir. Unix'te r3v3rs3 dosyayı `0600` izniyle oluşturur ve yazar. Böylece dosyayı yalnız sürecin sahibi okuyabilir. Yönetim API'si ve WebUI kimlik bilgilerini hiçbir zaman döndürmez. ACME listesi yalnız sağlayıcının adını gösterir, örneğin `Let's Encrypt (DNS-01, Cloudflare)`.

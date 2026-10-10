@@ -1028,6 +1028,36 @@ With systemd, reload the service without a restart:
 ExecReload=/bin/kill -USR2 $MAINPID
 ```
 
+## MCP Server
+
+The admin API exposes its tools over the Model Context Protocol at `/api/mcp`. AI clients can then inspect the ports, the proxies and the certificates, and change the proxies, with the same permission checks and the same audit log as the admin API.
+
+The MCP server is off by default. Turn it on in `config.toml` and register the clients that may sign in:
+
+```toml
+[mcp]
+enabled = true
+
+[[mcp.clients]]
+id = "r3v3rs3-mcp"
+name = "r3v3rs3 MCP client"
+redirect_uris = ["http://127.0.0.1:8765/callback"]
+```
+
+A client signs in through the OAuth 2.1 authorization code flow with PKCE: the client opens `/oauth/authorize` in the browser, the signed-in account approves the client on a consent form, and the client trades the one-time code for an access token at `/oauth/token`. The token carries the scopes of the approval: `read` sees the state, `edit` also changes proxies. The metadata documents live at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource`.
+
+The tokens live in memory only, so a restart of the server signs every MCP client out, and the refresh tokens of a client stop working.
+
+The repository ships a command line client in `r3v3rs3-mcp`:
+
+```sh
+cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 login
+cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 tools
+cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 call server_status
+```
+
+`login` opens the consent page in the browser and stores the tokens in the config directory. A script can pass an access token directly with `--token`.
+
 ## Stored data
 
 r3v3rs3 stores ACME entries in `acme.toml` in the configuration directory. The file contains the private key of each ACME account and the DNS provider credentials in plain text. On Unix, r3v3rs3 creates and writes the file with mode `0600`, so only the owner of the process can read it. The admin API and the WebUI never return the credentials. The ACME list shows only the provider name, for example `Let's Encrypt (DNS-01, Cloudflare)`.
