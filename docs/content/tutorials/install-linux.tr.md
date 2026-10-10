@@ -22,12 +22,11 @@ Script şunları ister:
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-Script iki soru sorar:
+Script bir soru sorar:
 
 1. **Admin WebUI adresi.** Varsayılan `127.0.0.1:46492` değeridir, yani panel yalnız sunucunun kendisinde cevap verir. `0.0.0.0:46492` değerini yalnız o portu bir firewall veya bir VPN koruyorsa yazın.
-2. **Admin kullanıcı adı**, sonra parola. Başarısız denemeden sonra tekrar sorar, toplam üç kez.
 
-Çıktı bütün yolları yazar:
+Kurulumun son adımı `admin` hesabını oluşturur. `--password` verilmezse script güçlü rastgele bir parola üretir ve bir kez basar:
 
 ```text
 r3v3rs3 v1.6.6 is running.
@@ -38,19 +37,27 @@ r3v3rs3 v1.6.6 is running.
   Logs:     /var/log/r3v3rs3 and journalctl -u r3v3rs3
   Service:  systemctl status|restart|stop r3v3rs3
   Add user: /usr/local/bin/r3v3rs3 add-user --config-dir /etc/r3v3rs3 <name>
+
+  Admin:    admin
+  Password: C579ts1HwZwMB2DpbtvhDTMk
+
+  The script printed the password only here. Store it in a password manager now.
 ```
 
-Soru sormadan kurmak için iki seçenek de vardır:
+Yeni hesabın parolasını seçmek için `--password` verin:
+
+```bash
+$ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
+    | sudo bash -s -- --password s3cret-PASSWORD
+```
+
+Yükseltme mevcut hesapları korur ve parola basmaz. Script, adres loopback dışına bağlanıyorsa WebUI portunu local firewall'da açar: çalışan bir firewalld'a veya aktif bir ufw'ya kural ekler, başka araç yoksa catch-all REJECT veya DROP kuralı portu engelliyorsa bir `iptables` accept kuralı ekler ve kuralı `netfilter-persistent` varken kaydeder.
+
+Tüm seçenekler soru sormadan kurmak için de çalışır:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
     | sudo bash -s -- --version 1.6.6 --webui 0.0.0.0:46492
-```
-
-Terminal olmadan, pipe içinden çalışan bir script hesap oluşturmaz. Onun yerine komutu yazar:
-
-```bash
-$ sudo r3v3rs3 add-user --config-dir /etc/r3v3rs3 admin
 ```
 
 ## Adım 2: Servisi kontrol edin

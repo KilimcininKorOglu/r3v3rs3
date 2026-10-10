@@ -22,12 +22,11 @@ The script needs:
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-The script asks two questions:
+The script asks one question:
 
 1. **Admin WebUI address.** The default is `127.0.0.1:46492`, so the panel answers only on the server itself. Write `0.0.0.0:46492` only when a firewall or a VPN protects that port.
-2. **Admin user name**, and then the password. It asks again after a failed try, three times in all.
 
-The output names every path:
+The last step of an install creates the admin account `admin`. Without a `--password` option the script generates a strong random password and prints it once:
 
 ```text
 r3v3rs3 v1.6.6 is running.
@@ -38,19 +37,27 @@ r3v3rs3 v1.6.6 is running.
   Logs:     /var/log/r3v3rs3 and journalctl -u r3v3rs3
   Service:  systemctl status|restart|stop r3v3rs3
   Add user: /usr/local/bin/r3v3rs3 add-user --config-dir /etc/r3v3rs3 <name>
+
+  Admin:    admin
+  Password: C579ts1HwZwMB2DpbtvhDTMk
+
+  The script printed the password only here. Store it in a password manager now.
 ```
 
-Both options also work without a question, for an unattended install:
+Pass `--password` to choose the password of the new account:
+
+```bash
+$ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
+    | sudo bash -s -- --password s3cret-PASSWORD
+```
+
+An upgrade keeps the existing accounts and prints no password. The script opens the WebUI port in the local firewall when the address binds beyond the loopback interface: it adds a rule to a running firewalld or an active ufw, and otherwise inserts an `iptables` accept rule when a catch-all REJECT or DROP rule would block the port, and saves the rule with `netfilter-persistent` when that tool exists.
+
+All options also work without a question, for an unattended install:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
     | sudo bash -s -- --version 1.6.6 --webui 0.0.0.0:46492
-```
-
-A script that runs through a pipe without a terminal creates no account. It prints the command instead:
-
-```bash
-$ sudo r3v3rs3 add-user --config-dir /etc/r3v3rs3 admin
 ```
 
 ## Step 2: Check the Service

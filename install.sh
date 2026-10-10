@@ -3,6 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 #   curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --version 1.0.1 --webui 0.0.0.0:46492
+#   curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --password s3cret-PASSWORD
 #   curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --agent --master master.example.com:9443 --token TOKEN
 set -euo pipefail
 
@@ -21,19 +22,22 @@ AGENT_IDENTITY_FILES="agent.key agent.pem ca.pem target"
 
 version=""
 webui=""
+password=""
 agent=false
 master=""
 token=""
 
 usage() {
 	cat <<EOF
-Usage: install.sh [--version X.Y.Z] [--webui ADDR]
+Usage: install.sh [--version X.Y.Z] [--webui ADDR] [--password PASSWORD]
        install.sh --agent [--version X.Y.Z] [--master HOST:PORT] [--token TOKEN]
 
   --version X.Y.Z    Install this release. The default is the latest release.
   --webui ADDR       The admin WebUI address, for example 127.0.0.1:46492 or 0.0.0.0:46492.
                      Without this option the script asks for it. The default is the address of
                      the installed service, or $DEFAULT_WEBUI.
+  --password PASS    The password of the admin account that the install creates. Without this
+                     option the script generates a strong random password and prints it.
   --agent            Install the agent of a deployment platform target instead of the server.
   --master HOST:PORT The agent port of the master. An upgrade keeps the installed address.
   --token TOKEN      The enrollment token of the target from the Targets page. A new token
@@ -80,6 +84,11 @@ parse_args() {
 			webui="$2"
 			shift 2
 			;;
+		--password)
+			[ $# -ge 2 ] || die "--password needs a value"
+			password="$2"
+			shift 2
+			;;
 		--agent)
 			agent=true
 			shift
@@ -103,6 +112,7 @@ parse_args() {
 	done
 	if [ "$agent" = true ]; then
 		[ -z "$webui" ] || die "--webui is an option of the server, not of the agent"
+		[ -z "$password" ] || die "--password is an option of the server, not of the agent"
 	else
 		[ -z "$master$token" ] || die "--master and --token need --agent"
 	fi
@@ -192,23 +202,27 @@ choose_webui() {
 	[ "$port" -ge 1 ] && [ "$port" -le 65535 ] || die "the WebUI port must be between 1 and 65535"
 }
 
+# Generates a strong random password. base64 of 48 random bytes, stripped of the
+# punctuation that a terminal or a password manager may mangle, cut to 24 characters.
+generate_password() {
+	local raw
+	raw=$(head -c 48 /dev/urandom | base64 | tr -d '/+=')
+	printf '%s' "${raw:0:24}"
+}
+
+# Creates the admin account as the last step of an install. An upgrade keeps the
+# existing accounts and creates no account.
 create_admin() {
 	if [ -s "$CONFIG_DIR/accounts.toml" ]; then
 		return
 	fi
-	if ! has_tty; then
-		echo "No account exists. Create one with: $BIN add-user --config-dir $CONFIG_DIR admin"
-		return
+	if [ -z "$password" ]; then
+		password=$(generate_password)
 	fi
-	local name attempt
-	name=$(ask "Admin user name" "admin")
-	for attempt in 1 2 3; do
-		if "$BIN" add-user --config-dir "$CONFIG_DIR" "$name" </dev/tty; then
-			return
-		fi
-		echo "Account creation failed (attempt $attempt of 3)." >&2
-	done
-	die "cannot create the admin account"
+	if ! "$BIN" add-user --config-dir "$CONFIG_DIR" --password "$password" admin </dev/null; then
+		die "cannot create the admin account"
+	fi
+	account_created=true
 }
 
 write_unit() {
@@ -252,6 +266,62 @@ wait_for_webui() {
 	systemctl --no-pager status r3v3rs3 || true
 	journalctl --no-pager -u r3v3rs3 -n 50 || true
 	die "the WebUI did not answer on http://$host:$port/ after $attempt seconds"
+}
+
+# Inserts one accept rule for the WebUI port into the INPUT chain of one iptables
+# backend, and keeps the rule over a reboot. A no-op when the tool is missing, when a
+# rule already accepts the port, and when no catch-all REJECT or DROP blocks it.
+open_iptables() {
+	local cmd=$1 conf=$2 port=$3 rules
+	command -v "$cmd" >/dev/null 2>&1 || return 0
+	rules=$("$cmd" -S INPUT 2>/dev/null) || return 0
+	if printf '%s\n' "$rules" | grep -q -- "--dport $port "; then
+		return 0
+	fi
+	# A policy other than ACCEPT, or a REJECT or DROP rule, needs an explicit accept.
+	if printf '%s\n' "$rules" | grep -Eq -- '^(-P INPUT (DROP|REJECT)|-A INPUT .*(-j|--jump) (REJECT|DROP))'; then
+		if "$cmd" -I INPUT -p tcp -m state --state NEW -m tcp --dport "$port" -j ACCEPT; then
+			info "Opened port $port/tcp in $cmd"
+		else
+			warn "$cmd did not open port $port; open it by hand"
+			return 0
+		fi
+	fi
+	if command -v netfilter-persistent >/dev/null 2>&1; then
+		netfilter-persistent save >/dev/null 2>&1
+	elif [ -d "$conf" ]; then
+		"$cmd"-save >"$conf/rules.v4"
+	else
+		warn "the $cmd rule does not survive a reboot; no persistence tool found"
+	fi
+}
+
+# Opens the WebUI port in the local firewall. Cloud images such as the Oracle Ubuntu
+# one ship a firewall that rejects every port no rule accepts, so a WebUI bound beyond
+# the loopback interface stays unreachable without this step.
+open_firewall() {
+	local host=${webui%:*} port=${webui##*:}
+	case "$host" in
+	127.* | ::1 | "[::1]") return 0 ;;
+	esac
+	if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+		if firewall-cmd --add-port="$port/tcp" >/dev/null && firewall-cmd --runtime-to-permanent >/dev/null; then
+			info "Opened port $port/tcp in firewalld"
+		else
+			warn "firewalld did not open port $port; open it by hand"
+		fi
+	elif command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+		if ufw allow "$port/tcp" >/dev/null; then
+			info "Opened port $port/tcp in ufw"
+		else
+			warn "ufw did not open port $port; open it by hand"
+		fi
+	else
+		open_iptables iptables /etc/iptables "$port"
+		case "$host" in
+		"["*) open_iptables ip6tables /etc/iptables "$port" ;;
+		esac
+	fi
 }
 
 check_docker() {
@@ -441,7 +511,9 @@ main() {
 	systemctl daemon-reload
 	systemctl enable r3v3rs3 >/dev/null 2>&1
 	systemctl restart r3v3rs3
+	open_firewall
 	wait_for_webui
+	create_admin
 
 	cat <<EOF
 
@@ -453,10 +525,22 @@ r3v3rs3 $installed_tag is running.
   Logs:     $LOG_DIR and journalctl -u r3v3rs3
   Service:  systemctl status|restart|stop r3v3rs3
   Add user: $BIN add-user --config-dir $CONFIG_DIR <name>
+EOF
+	if [ "$account_created" = true ]; then
+		cat <<EOF
+
+  Admin:    admin
+  Password: $password
+
+  The script printed the password only here. Store it in a password manager now.
+EOF
+	fi
+	cat <<EOF
 
 Run the script again to upgrade.
 EOF
 }
 
 installed_tag=""
+account_created=false
 main "$@"
