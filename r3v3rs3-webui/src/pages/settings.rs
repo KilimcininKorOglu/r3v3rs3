@@ -7,7 +7,10 @@ use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale};
 use gloo_net::http::{Request, RequestBuilder, Response};
 use r3v3rs3_api::{
     acme::webhook_url_allowed,
-    app::{AdminConfig, AppConfig, LogConfig, NotificationConfig, WebhookConfig},
+    app::{
+        AdminConfig, AppConfig, Http2Limits, Http3Limits, LogConfig, NotificationConfig,
+        WebhookConfig,
+    },
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
     discovery::{
@@ -88,6 +91,10 @@ struct Fields {
     etcd_clear_password: bool,
     etcd_prefix: String,
     etcd_client_cert: Option<ShortId>,
+    http2_max_header_list_size: String,
+    http2_max_pending_accept_reset_streams: String,
+    http3_max_concurrent_bidi_streams: String,
+    http3_max_concurrent_uni_streams: String,
 }
 
 impl Fields {
@@ -156,6 +163,10 @@ impl Fields {
             tls_alpn_challenge_addr: text("/tls_alpn_challenge_addr"),
             dns_challenge_resolver: text("/dns_challenge_resolver"),
             upstream_dns_resolver: text("/upstream_dns_resolver"),
+            http2_max_header_list_size: text("/http2/max_header_list_size"),
+            http2_max_pending_accept_reset_streams: text("/http2/max_pending_accept_reset_streams"),
+            http3_max_concurrent_bidi_streams: text("/http3/max_concurrent_bidi_streams"),
+            http3_max_concurrent_uni_streams: text("/http3/max_concurrent_uni_streams"),
         }
     }
 }
@@ -251,6 +262,16 @@ pub fn settings() -> Html {
             { text_field(&fields, &errors, locale.t("settings.cert_expiry_warning"), "cert_expiry_warning", "14days", |f| &mut f.cert_expiry_warning) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.cert_expiry_warning_hint")}</p>
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.duration_hint")}</p>
+
+            <h2 class="mt-8 mb-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">{locale.t("settings.http_limits")}</h2>
+            { text_field(&fields, &errors, locale.t("settings.http2_max_header_list_size"), "http2_max_header_list_size", "65536", |f| &mut f.http2_max_header_list_size) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.http2_max_header_list_size_hint")}</p>
+            { text_field(&fields, &errors, locale.t("settings.http2_max_pending_accept_reset_streams"), "http2_max_pending_accept_reset_streams", "128", |f| &mut f.http2_max_pending_accept_reset_streams) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.http2_max_pending_accept_reset_streams_hint")}</p>
+            { text_field(&fields, &errors, locale.t("settings.http3_max_concurrent_bidi_streams"), "http3_max_concurrent_bidi_streams", "100", |f| &mut f.http3_max_concurrent_bidi_streams) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.http3_max_concurrent_bidi_streams_hint")}</p>
+            { text_field(&fields, &errors, locale.t("settings.http3_max_concurrent_uni_streams"), "http3_max_concurrent_uni_streams", "10", |f| &mut f.http3_max_concurrent_uni_streams) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.http3_max_concurrent_uni_streams_hint")}</p>
 
             { notifications_section(locale, &fields, &errors, &test_notice) }
             { docker_section(locale, &fields, &errors, &client_certs) }
@@ -845,12 +866,15 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         "upstream_dns_resolver",
         &fields.upstream_dns_resolver,
     );
+    let http2 = parse_http2_limits(locale, fields, &mut errors);
+    let http3 = parse_http3_limits(locale, fields, &mut errors);
     match (
         admin,
         (log, notifications),
         interval,
         (addr, tls_alpn_addr),
         (resolver, upstream_resolver),
+        (http2, http3),
     ) {
         (
             Some(admin),
@@ -858,6 +882,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             Some(interval),
             (Some(addr), Some(tls_alpn_addr)),
             (Ok(resolver), Ok(upstream_resolver)),
+            (Some(http2), Some(http3)),
         ) if errors.is_empty() => Ok(AppConfig {
             background_task_interval: interval.background_task_interval,
             shutdown_graceful_timeout: interval.shutdown_graceful_timeout,
@@ -888,9 +913,87 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             platform: Default::default(),
             worker_mode: Default::default(),
             mcp: Default::default(),
+            http2,
+            http3,
         }),
         _ => Err(errors),
     }
+}
+
+/// Parses one unsigned integer field with its range. `None` marks an invalid value.
+fn parse_limit(
+    locale: Locale,
+    errors: &mut HashMap<String, String>,
+    field: &str,
+    value: &str,
+    min: u64,
+    max: u64,
+) -> Option<u64> {
+    match value.trim().parse::<u64>() {
+        Ok(n) if (min..=max).contains(&n) => Some(n),
+        _ => {
+            let (min, max) = (min.to_string(), max.to_string());
+            errors.insert(
+                field.into(),
+                locale.tf("settings.limits_range", &[("min", &min), ("max", &max)]),
+            );
+            None
+        }
+    }
+}
+
+fn parse_http2_limits(
+    locale: Locale,
+    fields: &Fields,
+    errors: &mut HashMap<String, String>,
+) -> Option<Http2Limits> {
+    let max_header_list_size = parse_limit(
+        locale,
+        errors,
+        "http2_max_header_list_size",
+        &fields.http2_max_header_list_size,
+        1024,
+        1024 * 1024,
+    )? as u32;
+    let max_pending_accept_reset_streams = parse_limit(
+        locale,
+        errors,
+        "http2_max_pending_accept_reset_streams",
+        &fields.http2_max_pending_accept_reset_streams,
+        1,
+        65536,
+    )? as usize;
+    Some(Http2Limits {
+        max_header_list_size,
+        max_pending_accept_reset_streams,
+    })
+}
+
+fn parse_http3_limits(
+    locale: Locale,
+    fields: &Fields,
+    errors: &mut HashMap<String, String>,
+) -> Option<Http3Limits> {
+    let max_concurrent_bidi_streams = parse_limit(
+        locale,
+        errors,
+        "http3_max_concurrent_bidi_streams",
+        &fields.http3_max_concurrent_bidi_streams,
+        1,
+        100000,
+    )? as u32;
+    let max_concurrent_uni_streams = parse_limit(
+        locale,
+        errors,
+        "http3_max_concurrent_uni_streams",
+        &fields.http3_max_concurrent_uni_streams,
+        1,
+        100000,
+    )? as u32;
+    Some(Http3Limits {
+        max_concurrent_bidi_streams,
+        max_concurrent_uni_streams,
+    })
 }
 
 fn parse_notifications(

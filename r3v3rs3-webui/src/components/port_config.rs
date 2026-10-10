@@ -7,6 +7,7 @@ use crate::i18n::use_locale;
 use crate::pages::cert_list::get_cert_list;
 use gloo_net::http::Request;
 use r3v3rs3_api::{
+    app::{Http2Limits, Http3Limits},
     cert::{CertInfo, CertKind},
     cidr::{format_cidr_list, parse_cidr_list},
     error::Error,
@@ -90,6 +91,16 @@ fn supports_proxy_protocol(protocol: &str) -> bool {
     matches!(protocol, "tcp" | "tls" | "http" | "https")
 }
 
+/// HTTP ports speak HTTP/2 on TCP, TLS and QUIC.
+fn supports_http2(protocol: &str) -> bool {
+    matches!(protocol, "http" | "https" | "http3")
+}
+
+/// Only a QUIC port speaks HTTP/3.
+fn supports_http3(protocol: &str) -> bool {
+    protocol == "http3"
+}
+
 #[derive(Clone, PartialEq)]
 struct PortForm {
     active: bool,
@@ -101,6 +112,46 @@ struct PortForm {
     client_auth: ClientAuthMode,
     client_ca_certs: Vec<ShortId>,
     proxy_protocol: ProxyProtocolForm,
+    http2_limits: Http2LimitsForm,
+    http3_limits: Http3LimitsForm,
+}
+
+#[derive(Clone, PartialEq)]
+struct Http2LimitsForm {
+    enabled: bool,
+    max_header_list_size: String,
+    max_pending_accept_reset_streams: String,
+}
+
+impl Http2LimitsForm {
+    fn new(config: Option<&Http2Limits>) -> Self {
+        let default = Http2Limits::default();
+        let saved = config.unwrap_or(&default);
+        Self {
+            enabled: config.is_some(),
+            max_header_list_size: saved.max_header_list_size.to_string(),
+            max_pending_accept_reset_streams: saved.max_pending_accept_reset_streams.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct Http3LimitsForm {
+    enabled: bool,
+    max_concurrent_bidi_streams: String,
+    max_concurrent_uni_streams: String,
+}
+
+impl Http3LimitsForm {
+    fn new(config: Option<&Http3Limits>) -> Self {
+        let default = Http3Limits::default();
+        let saved = config.unwrap_or(&default);
+        Self {
+            enabled: config.is_some(),
+            max_concurrent_bidi_streams: saved.max_concurrent_bidi_streams.to_string(),
+            max_concurrent_uni_streams: saved.max_concurrent_uni_streams.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -205,6 +256,8 @@ pub fn port_config(props: &Props) -> Html {
     let tls_fields = use_tls_fields(&tls_termination);
     let proxy_protocol =
         use_state(|| ProxyProtocolForm::new(props.port.opts.proxy_protocol.as_ref()));
+    let http2_limits = use_state(|| Http2LimitsForm::new(props.port.opts.http2_limits.as_ref()));
+    let http3_limits = use_state(|| Http3LimitsForm::new(props.port.opts.http3_limits.as_ref()));
 
     let form = PortForm {
         active: *active,
@@ -216,6 +269,8 @@ pub fn port_config(props: &Props) -> Html {
         client_auth: *tls_fields.client_auth,
         client_ca_certs: (*tls_fields.client_ca_certs).clone(),
         proxy_protocol: (*proxy_protocol).clone(),
+        http2_limits: (*http2_limits).clone(),
+        http3_limits: (*http3_limits).clone(),
     };
     let prev_entry =
         use_state::<Result<Port, HashMap<String, String>>, _>(|| Err(Default::default()));
@@ -248,7 +303,15 @@ pub fn port_config(props: &Props) -> Html {
                 { protocol_options(locale, &protocol) }
             </select>
 
-            { protocol_view(locale, &protocol, &tls_fields, &proxy_protocol, &errors) }
+            { protocol_view(
+                locale,
+                &protocol,
+                &tls_fields,
+                &proxy_protocol,
+                &http2_limits,
+                &http3_limits,
+                &errors,
+            ) }
         </>
     }
 }
@@ -458,6 +521,8 @@ fn get_port(
     tls_termination.client_auth = form.client_auth;
     tls_termination.client_ca_certs = client_ca_certs(locale, form, &mut errors);
     let proxy_protocol = proxy_protocol(locale, form, &mut errors);
+    let http2_limits = http2_limits(locale, form, &mut errors);
+    let http3_limits = http3_limits(locale, form, &mut errors);
 
     match listen {
         Some(listen) if errors.is_empty() => Ok(Port {
@@ -467,9 +532,97 @@ fn get_port(
             opts: PortOptions {
                 tls_termination: is_tls_protocol(&form.protocol).then_some(tls_termination),
                 proxy_protocol,
+                http2_limits,
+                http3_limits,
             },
         }),
         _ => Err(errors),
+    }
+}
+
+/// Returns the HTTP/2 limit override of an enabled section on a port that speaks HTTP/2.
+fn http2_limits(
+    locale: Locale,
+    form: &PortForm,
+    errors: &mut HashMap<String, String>,
+) -> Option<Http2Limits> {
+    let section = &form.http2_limits;
+    if !section.enabled || !supports_http2(&form.protocol) {
+        return None;
+    }
+    let max_header_list_size = parse_limit_field(
+        locale,
+        errors,
+        "http2_max_header_list_size",
+        &section.max_header_list_size,
+        1024,
+        1024 * 1024,
+    )? as u32;
+    let max_pending_accept_reset_streams = parse_limit_field(
+        locale,
+        errors,
+        "http2_max_pending_accept_reset_streams",
+        &section.max_pending_accept_reset_streams,
+        1,
+        65536,
+    )? as usize;
+    Some(Http2Limits {
+        max_header_list_size,
+        max_pending_accept_reset_streams,
+    })
+}
+
+/// Returns the HTTP/3 limit override of an enabled section on a QUIC port.
+fn http3_limits(
+    locale: Locale,
+    form: &PortForm,
+    errors: &mut HashMap<String, String>,
+) -> Option<Http3Limits> {
+    let section = &form.http3_limits;
+    if !section.enabled || !supports_http3(&form.protocol) {
+        return None;
+    }
+    let max_concurrent_bidi_streams = parse_limit_field(
+        locale,
+        errors,
+        "http3_max_concurrent_bidi_streams",
+        &section.max_concurrent_bidi_streams,
+        1,
+        100000,
+    )? as u32;
+    let max_concurrent_uni_streams = parse_limit_field(
+        locale,
+        errors,
+        "http3_max_concurrent_uni_streams",
+        &section.max_concurrent_uni_streams,
+        1,
+        100000,
+    )? as u32;
+    Some(Http3Limits {
+        max_concurrent_bidi_streams,
+        max_concurrent_uni_streams,
+    })
+}
+
+/// Parses one limit field with its range. `None` marks an invalid value with the error set.
+fn parse_limit_field(
+    locale: Locale,
+    errors: &mut HashMap<String, String>,
+    field: &str,
+    value: &str,
+    min: u64,
+    max: u64,
+) -> Option<u64> {
+    match value.trim().parse::<u64>() {
+        Ok(n) if (min..=max).contains(&n) => Some(n),
+        _ => {
+            let (min, max) = (min.to_string(), max.to_string());
+            errors.insert(
+                field.into(),
+                locale.tf("settings.limits_range", &[("min", &min), ("max", &max)]),
+            );
+            None
+        }
     }
 }
 
@@ -613,12 +766,14 @@ fn emit_change(
     }
 }
 
-/// The fields of the protocol: the TLS fields and the PROXY protocol fields.
+/// The fields of the protocol: the TLS fields, the PROXY protocol fields and the limit overrides.
 fn protocol_view(
     locale: Locale,
     protocol: &str,
     tls_fields: &TlsFields,
     proxy_protocol: &UseStateHandle<ProxyProtocolForm>,
+    http2_limits: &UseStateHandle<Http2LimitsForm>,
+    http3_limits: &UseStateHandle<Http3LimitsForm>,
     errors: &HashMap<String, String>,
 ) -> Html {
     html! {
@@ -628,6 +783,77 @@ fn protocol_view(
             }
             if supports_proxy_protocol(protocol) {
                 { proxy_protocol_view(locale, proxy_protocol, errors) }
+            }
+            if supports_http2(protocol) {
+                { http2_limits_view(locale, http2_limits, errors) }
+            }
+            if supports_http3(protocol) {
+                { http3_limits_view(locale, http3_limits, errors) }
+            }
+        </>
+    }
+}
+
+fn http2_limits_view(
+    locale: Locale,
+    state: &UseStateHandle<Http2LimitsForm>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    let enabled_onchange = state_input(state, checked, |form, enabled| form.enabled = enabled);
+    let header_list_onchange =
+        state_input(state, text, |form, value| form.max_header_list_size = value);
+    let reset_streams_onchange = state_input(state, text, |form, value| {
+        form.max_pending_accept_reset_streams = value
+    });
+    html! {
+        <>
+            <div class="mt-6">
+                { toggle(enabled_onchange, state.enabled, locale.t("ports.http2_limits"), "") }
+            </div>
+            <p class={HINT_CLASS}>{locale.t("ports.http_limits_hint")}</p>
+            if state.enabled {
+                <label class={LABEL_CLASS}>{locale.t("settings.http2_max_header_list_size")}</label>
+                <input type="text" autocapitalize="off" value={state.max_header_list_size.clone()} onchange={header_list_onchange} class={INPUT_CLASS} placeholder="65536" />
+                { error_view(errors.get("http2_max_header_list_size")) }
+                <p class={HINT_CLASS}>{locale.t("settings.http2_max_header_list_size_hint")}</p>
+
+                <label class={LABEL_CLASS}>{locale.t("settings.http2_max_pending_accept_reset_streams")}</label>
+                <input type="text" autocapitalize="off" value={state.max_pending_accept_reset_streams.clone()} onchange={reset_streams_onchange} class={INPUT_CLASS} placeholder="128" />
+                { error_view(errors.get("http2_max_pending_accept_reset_streams")) }
+                <p class={HINT_CLASS}>{locale.t("settings.http2_max_pending_accept_reset_streams_hint")}</p>
+            }
+        </>
+    }
+}
+
+fn http3_limits_view(
+    locale: Locale,
+    state: &UseStateHandle<Http3LimitsForm>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    let enabled_onchange = state_input(state, checked, |form, enabled| form.enabled = enabled);
+    let bidi_onchange = state_input(state, text, |form, value| {
+        form.max_concurrent_bidi_streams = value
+    });
+    let uni_onchange = state_input(state, text, |form, value| {
+        form.max_concurrent_uni_streams = value
+    });
+    html! {
+        <>
+            <div class="mt-6">
+                { toggle(enabled_onchange, state.enabled, locale.t("ports.http3_limits"), "") }
+            </div>
+            <p class={HINT_CLASS}>{locale.t("ports.http_limits_hint")}</p>
+            if state.enabled {
+                <label class={LABEL_CLASS}>{locale.t("settings.http3_max_concurrent_bidi_streams")}</label>
+                <input type="text" autocapitalize="off" value={state.max_concurrent_bidi_streams.clone()} onchange={bidi_onchange} class={INPUT_CLASS} placeholder="100" />
+                { error_view(errors.get("http3_max_concurrent_bidi_streams")) }
+                <p class={HINT_CLASS}>{locale.t("settings.http3_max_concurrent_bidi_streams_hint")}</p>
+
+                <label class={LABEL_CLASS}>{locale.t("settings.http3_max_concurrent_uni_streams")}</label>
+                <input type="text" autocapitalize="off" value={state.max_concurrent_uni_streams.clone()} onchange={uni_onchange} class={INPUT_CLASS} placeholder="10" />
+                { error_view(errors.get("http3_max_concurrent_uni_streams")) }
+                <p class={HINT_CLASS}>{locale.t("settings.http3_max_concurrent_uni_streams_hint")}</p>
             }
         </>
     }
@@ -680,6 +906,8 @@ mod tests {
             client_auth: ClientAuthMode::Off,
             client_ca_certs: Vec::new(),
             proxy_protocol: ProxyProtocolForm::new(None),
+            http2_limits: Http2LimitsForm::new(None),
+            http3_limits: Http3LimitsForm::new(None),
         }
     }
 
