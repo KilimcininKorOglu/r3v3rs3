@@ -1,6 +1,7 @@
 //! The OAuth 2.1 authorization server of the admin API: the metadata documents, the consent
 //! flow with PKCE and the token endpoint.
 
+use anyhow::Context as _;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use r3v3rs3::server::Server;
@@ -452,6 +453,64 @@ async fn the_mcp_endpoint_serves_the_tools() -> anyhow::Result<()> {
         assert!(text.contains("workers"), "{text}");
 
         client.cancel().await?;
+        Ok(())
+    })
+    .await
+}
+
+/// The command line client connects with an explicit `--token` and prints the tools.
+#[tokio::test]
+async fn the_client_binary_lists_the_tools() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli")?;
+    with_admin(&dir.0, |addr| async move {
+        let token = access_token(&addr).await?;
+
+        // The client binary of the workspace, built up to date before the test runs it.
+        let binary =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/debug/r3v3rs3-mcp");
+        let status = std::process::Command::new("cargo")
+            .args(["build", "-p", "r3v3rs3-mcp"])
+            .status()
+            .context("failed to run cargo")?;
+        assert!(status.success());
+        // The child waits for the server of this test process, so the blocking wait runs on a
+        // separate thread and the runtime keeps serving.
+        async fn run_client(
+            binary: &std::path::Path,
+            addr: &SocketAddr,
+            token: &str,
+            args: &[&str],
+        ) -> anyhow::Result<std::process::Output> {
+            let mut command = std::process::Command::new(binary);
+            command
+                .arg(format!("http://{addr}"))
+                .arg("--token")
+                .arg(token);
+            command.args(args);
+            tokio::task::spawn_blocking(move || {
+                command.output().context("failed to run the client binary")
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("the client task failed: {err}"))?
+        }
+        let output = run_client(&binary, &addr, &token, &["tools"]).await?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            stdout,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(stdout.contains("server_status"), "{stdout}");
+        assert!(stdout.contains("list_proxies"), "{stdout}");
+
+        let output = run_client(&binary, &addr, &token, &["call", "server_status"]).await?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        assert!(
+            output.status.success() && stdout.contains("workers"),
+            "{stdout} {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         Ok(())
     })
     .await
