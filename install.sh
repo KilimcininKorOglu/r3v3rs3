@@ -50,6 +50,10 @@ info() {
 	echo "==> $*"
 }
 
+warn() {
+	echo "warning: $*" >&2
+}
+
 # Reads from the terminal, so the prompts also work when the script comes through a pipe.
 has_tty() {
 	[ -c /dev/tty ] && { : </dev/tty; } 2>/dev/null
@@ -115,11 +119,18 @@ check_system() {
 }
 
 detect_target() {
+	local arch
 	case "$(uname -m)" in
-	x86_64 | amd64) echo "x86_64-unknown-linux-gnu" ;;
-	aarch64 | arm64) echo "aarch64-unknown-linux-gnu" ;;
+	x86_64 | amd64) arch=x86_64 ;;
+	aarch64 | arm64) arch=aarch64 ;;
 	*) die "no release binary exists for $(uname -m); use x86_64 or aarch64" ;;
 	esac
+	# A musl system cannot run the glibc binary, so the static build is preferred there.
+	if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then
+		echo "$arch-unknown-linux-musl"
+	else
+		echo "$arch-unknown-linux-gnu"
+	fi
 }
 
 fetch_release_json() {
@@ -145,6 +156,12 @@ install_binary() {
 	[ -n "$tag" ] || die "the release information has no tag"
 	file="r3v3rs3-$target.tar.xz"
 	digest=$(asset_digest "$json" "$file")
+	if [ -z "$digest" ] && [ "$target" != "${target%-musl}" ]; then
+		# The release of an older version has no musl archive; the glibc build still runs there.
+		warn "release $tag has no $file; falling back to the glibc build"
+		install_binary "${target%-musl}-gnu"
+		return
+	fi
 	[ -n "$digest" ] || die "release $tag has no sha256 digest for $file"
 
 	tmp=$(mktemp -d)

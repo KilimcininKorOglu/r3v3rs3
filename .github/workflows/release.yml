@@ -88,6 +88,43 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz
 
+  # Each musl target builds inside an Alpine container of the matching architecture, so the
+  # static binary needs no cross toolchain. aws-lc-rs compiles its C code with cmake and perl.
+  binary-musl:
+    name: Upload Release Assets (${{ matrix.target }})
+    needs: webui
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Download webui
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: webui
+          path: r3v3rs3/dist/webui
+      - name: Build project
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work rust:1-alpine sh -ec '
+            apk add --no-cache musl-dev perl cmake make clang
+            cargo build --release --locked -p r3v3rs3
+          '
+      - name: Check the static binary
+        run: file target/release/r3v3rs3 | grep -q statically
+      - name: Make archive
+        run: tar -C target/release -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
+      - name: Upload archive
+        if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz
+
   test:
     name: Test
     uses: ./.github/workflows/rust.yml

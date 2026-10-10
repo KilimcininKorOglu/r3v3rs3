@@ -25,15 +25,12 @@ pub fn send_fds(stream: &UnixStream, fds: &[RawFd]) -> Result<()> {
         iov_len: data.len(),
     };
     let mut control = vec![0u8; unsafe { libc::CMSG_SPACE(cmsg_data_len(fds) as _) as usize }];
-    let message = msghdr {
-        msg_name: ptr::null_mut(),
-        msg_namelen: 0,
-        msg_iov: &mut io,
-        msg_iovlen: 1,
-        msg_control: control.as_mut_ptr() as *mut libc::c_void,
-        msg_controllen: control.len() as _,
-        msg_flags: 0,
-    };
+    // A struct literal would not compile on musl, where msghdr has extra padding fields.
+    let mut message: msghdr = unsafe { std::mem::zeroed() };
+    message.msg_iov = &mut io;
+    message.msg_iovlen = 1;
+    message.msg_control = control.as_mut_ptr() as *mut libc::c_void;
+    message.msg_controllen = control.len() as _;
     unsafe {
         let header = message.msg_control as *mut libc::cmsghdr;
         (*header).cmsg_level = SOL_SOCKET;
@@ -60,15 +57,12 @@ pub fn recv_fds(stream: &UnixStream, count: usize) -> Result<Vec<OwnedFd>> {
             0u8;
             unsafe { libc::CMSG_SPACE((count * std::mem::size_of::<RawFd>()) as _) as usize }
         ];
-    let mut message = msghdr {
-        msg_name: ptr::null_mut(),
-        msg_namelen: 0,
-        msg_iov: &mut io,
-        msg_iovlen: 1,
-        msg_control: control.as_mut_ptr() as *mut libc::c_void,
-        msg_controllen: control.len() as _,
-        msg_flags: 0,
-    };
+    // A struct literal would not compile on musl, where msghdr has extra padding fields.
+    let mut message: msghdr = unsafe { std::mem::zeroed() };
+    message.msg_iov = &mut io;
+    message.msg_iovlen = 1;
+    message.msg_control = control.as_mut_ptr() as *mut libc::c_void;
+    message.msg_controllen = control.len() as _;
     unsafe {
         if recvmsg(stream.as_raw_fd(), &mut message, 0) < 0 {
             return Err(std::io::Error::last_os_error());
