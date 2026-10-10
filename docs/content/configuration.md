@@ -385,7 +385,7 @@ Behind a CDN or a load balancer, the TCP peer of r3v3rs3 is the edge server, not
 For a trusted peer, r3v3rs3 reads the client IP in this order:
 
 1. The provider header: `CF-Connecting-IP` for Cloudflare, `X-Real-IP` for Bunny CDN, `CloudFront-Viewer-Address` for Amazon CloudFront.
-2. The rightmost address in `X-Forwarded-For` that is not a trusted proxy or a known CDN edge.
+2. The rightmost address in `X-Forwarded-For` and the RFC 7239 `Forwarded` header that is not a trusted proxy or a known CDN edge. The `for=` elements of `Forwarded`, including quoted IPv6 addresses with a port, join the same chain.
 
 r3v3rs3 then sends the resolved address to the upstream server in `X-Real-IP` and keeps the incoming `X-Forwarded-For` and `Forwarded` chains. For an untrusted peer, r3v3rs3 removes `Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP`, `CloudFront-Viewer-Address`, `Fastly-Client-IP` and `Incap-Client-IP`, because the client can forge them.
 
@@ -1029,6 +1029,30 @@ ExecReload=/bin/kill -USR2 $MAINPID
 ```
 
 The handover works only inside one installation: the old process starts the new binary from the same machine and passes the descriptors to it. A Docker upgrade replaces the whole container with a new image, so it cannot hand anything over and always restarts the connections. For a restart-free upgrade in Docker, run two r3v3rs3 containers behind a load balancer and roll them one at a time. A container restart still closes the open connections gracefully, up to `shutdown_graceful_timeout`.
+
+## HTTP/2 and HTTP/3 Limits
+
+Every server-side connection carries fixed flood limits. They are not configurable, because their values are safe defaults for every installation:
+
+| Limit | Value | What it bounds |
+|---|---|---|
+| HTTP/2 header list size | 64 KiB | The `HEADERS` plus CONTINUATION frames of one request (CVE-2024-27316). |
+| HTTP/2 pending accepted reset streams | 128 | The streams a client can reset before a `GOAWAY` closes the connection (CVE-2023-44487). |
+| HTTP/3 concurrent bidi streams | 100 | The request streams one QUIC connection can open. |
+| HTTP/3 concurrent uni streams | 10 | The control streams one QUIC connection can open. |
+
+A request above the header limit gets its stream reset, and the port keeps serving new connections.
+
+## Metrics
+
+`GET /api/metrics` returns the counters of the running process in the Prometheus text format (`text/plain; version=0.0.4`):
+
+- `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: the proxied requests.
+- `r3v3rs3_upstream_errors_total`: the requests that were answered without a successful upstream response.
+- `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`: the cache decisions of the cached proxies.
+- `r3v3rs3_open_connections`: the client connection tasks that still run.
+
+An admin session cookie or a valid MCP Bearer token authorizes the request, so a Prometheus job can scrape it with `bearer_token` while the WebUI uses its cookie. The counters count one process: with worker mode, the worker serves the ports and keeps its own counters, which `GET /api/workers` reports separately.
 
 ## MCP Server
 

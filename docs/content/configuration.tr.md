@@ -385,7 +385,7 @@ CDN veya yük dengeleyici arkasında r3v3rs3'ün TCP peer'ı ziyaretçi değil, 
 Peer güvenilirse r3v3rs3 istemci IP adresini şu sırayla okur:
 
 1. Sağlayıcı header'ı: Cloudflare için `CF-Connecting-IP`, Bunny CDN için `X-Real-IP`, Amazon CloudFront için `CloudFront-Viewer-Address`.
-2. `X-Forwarded-For` içinde güvenilen bir proxy'ye veya bilinen bir CDN edge'ine ait olmayan en sağdaki adres.
+2. `X-Forwarded-For` ve RFC 7239 `Forwarded` header'ı içinde güvenilen bir proxy'ye veya bilinen bir CDN edge'ine ait olmayan en sağdaki adres. `Forwarded` içindeki `for=` elemanları, portlu ve tırnaklı IPv6 adresleri dahil, aynı zincire katılır.
 
 r3v3rs3 bulduğu adresi upstream sunucuya `X-Real-IP` header'ında gönderir. Gelen `X-Forwarded-For` ve `Forwarded` zincirlerine dokunmaz. Peer güvenilir değilse r3v3rs3 `Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP`, `CloudFront-Viewer-Address`, `Fastly-Client-IP` ve `Incap-Client-IP` header'larını siler, çünkü istemci bu header'lara sahte değer yazabilir.
 
@@ -1029,6 +1029,30 @@ ExecReload=/bin/kill -USR2 $MAINPID
 ```
 
 Devir tek bir kurulumun içinde çalışır: eski süreç yeni binary'yi aynı makineden başlatır ve descriptor'ları ona geçirir. Docker yükseltmesi container'ın bütünüyle yeni image ile değiştirir, bu yüzden devredecek bir şey bulamaz ve bağlantılar her durumda yeniden başlar. Docker'da kesintisiz yükseltme için iki r3v3rs3 container'ını bir load balancer arkasında çalıştırın ve bunları sırayla güncelleyin. Container yeniden başlaması yine de açık bağlantıları `shutdown_graceful_timeout` süresince düzgün kapatır.
+
+## HTTP/2 ve HTTP/3 limitleri
+
+Sunucu tarafındaki her bağlantı sabit flood limitleri taşır. Bu limitler yapılandırılamaz, çünkü değerleri her kurulum için güvenli varsayılanlardır:
+
+| Limit | Değer | Sınırladığı şey |
+|---|---|---|
+| HTTP/2 header listesi boyutu | 64 KiB | Bir isteğin `HEADERS` artı CONTINUATION frame'leri (CVE-2024-27316). |
+| HTTP/2 bekleyen kabul edilmiş reset stream'leri | 128 | Bir istemcinin `GOAWAY` bağlantıyı kapatmadan önce reset'leyebileceği stream sayısı (CVE-2023-44487). |
+| HTTP/3 eşzamanlı bidi stream | 100 | Bir QUIC bağlantısının açabileceği istek stream'leri. |
+| HTTP/3 eşzamanlı uni stream | 10 | Bir QUIC bağlantısının açabileceği kontrol stream'leri. |
+
+Header limitinin üstündeki bir isteğin stream'i reset'lenir ve port yeni bağlantılara hizmet vermeye devam eder.
+
+## Metrics
+
+`GET /api/metrics` çalışan sürecin sayaçlarını Prometheus text formatında (`text/plain; version=0.0.4`) döndürür:
+
+- `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: proxy'lenen istekler.
+- `r3v3rs3_upstream_errors_total`: başarılı bir upstream yanıtı olmadan cevaplanan istekler.
+- `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`: cache'i açık proxy'lerin cache kararları.
+- `r3v3rs3_open_connections`: hâlâ çalışan istemci bağlantı task'leri.
+
+İsteği bir admin session cookie'si veya geçerli bir MCP Bearer token'ı yetkilendirir, yani bir Prometheus job'ı `bearer_token` ile scrape ederken WebUI cookie'sini kullanmaya devam eder. Sayaçlar tek süreci sayar: worker modunda portları worker sunar ve kendi sayaçlarını tutar, worker durumu ayrıca `GET /api/workers` üzerinden raporlanır.
 
 ## MCP Sunucusu
 
