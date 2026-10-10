@@ -140,6 +140,8 @@ $ docker compose up -d
 
 Volume'lar yapılandırmayı ve hesapları korur, yani hiçbir hesap yeniden oluşturulmaz. Birkaç host'u adım adım yükseltirken sürümü tag ile sabitleyin, örneğin `:v1.6.0`.
 
+Yükseltme container'ı değiştirir, bu yüzden açık bağlantılar kapanır ve istemciler yeniden bağlanır. SIGUSR2 ile kesintisiz yükseltme Docker'da geçerli değildir, çünkü devir için eski ve yeni binary'nin tek bir kurulumda olması gerekir. Bağlantı düşürmeden yükseltmek için iki r3v3rs3 container'ını bir load balancer arkasında çalıştırın ve bunları sırayla güncelleyin.
+
 ## Yeniden başlatma ne yapar
 
 - Hesaplar, portlar, proxy'ler ve sertifikalar yapılandırma volume'ünden geri gelir.

@@ -1028,6 +1028,8 @@ With systemd, reload the service without a restart:
 ExecReload=/bin/kill -USR2 $MAINPID
 ```
 
+The handover works only inside one installation: the old process starts the new binary from the same machine and passes the descriptors to it. A Docker upgrade replaces the whole container with a new image, so it cannot hand anything over and always restarts the connections. For a restart-free upgrade in Docker, run two r3v3rs3 containers behind a load balancer and roll them one at a time. A container restart still closes the open connections gracefully, up to `shutdown_graceful_timeout`.
+
 ## MCP Server
 
 The admin API exposes its tools over the Model Context Protocol at `/api/mcp`. AI clients can then inspect the ports, the proxies and the certificates, and change the proxies, with the same permission checks and the same audit log as the admin API.

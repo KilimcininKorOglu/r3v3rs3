@@ -1028,6 +1028,8 @@ systemd ile servisi yeniden başlatmadan yeniden yükleyin:
 ExecReload=/bin/kill -USR2 $MAINPID
 ```
 
+Devir tek bir kurulumun içinde çalışır: eski süreç yeni binary'yi aynı makineden başlatır ve descriptor'ları ona geçirir. Docker yükseltmesi container'ın bütünüyle yeni image ile değiştirir, bu yüzden devredecek bir şey bulamaz ve bağlantılar her durumda yeniden başlar. Docker'da kesintisiz yükseltme için iki r3v3rs3 container'ını bir load balancer arkasında çalıştırın ve bunları sırayla güncelleyin. Container yeniden başlaması yine de açık bağlantıları `shutdown_graceful_timeout` süresince düzgün kapatır.
+
 ## MCP Sunucusu
 
 Admin API, araçlarını `/api/mcp` üzerinde Model Context Protocol ile yayınlar. AI client'lar böylece portları, proxy'leri ve sertifikaları inceleyebilir ve proxy'leri, admin API ile aynı yetki kontrolleri ve aynı audit log üzerinden değiştirebilir.
