@@ -3,6 +3,7 @@ use std::path::Path;
 
 pub mod account;
 pub mod file;
+pub mod memory;
 pub mod storage;
 
 mod build_info {

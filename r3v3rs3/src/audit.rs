@@ -10,7 +10,7 @@ use sqlx::{Row, SqlitePool};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex, OnceCell};
 use tracing::error;
 
 /// One day in milliseconds.
@@ -75,6 +75,35 @@ pub trait AuditStore: Send + Sync {
 
     /// Deletes the entries before the time in Unix milliseconds.
     async fn remove_before(&self, time: u64) -> anyhow::Result<()>;
+}
+
+/// An audit log that a worker process keeps in memory. The master owns the real audit log.
+#[derive(Default)]
+pub struct MemoryAuditStore {
+    entries: Mutex<Vec<AuditEntry>>,
+}
+
+impl MemoryAuditStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait::async_trait]
+impl AuditStore for MemoryAuditStore {
+    async fn append(&self, entry: &AuditEntry) -> anyhow::Result<()> {
+        self.entries.lock().await.push(entry.clone());
+        Ok(())
+    }
+
+    async fn query(&self, _filter: &AuditFilter) -> anyhow::Result<Vec<AuditEntry>> {
+        Ok(self.entries.lock().await.clone())
+    }
+
+    async fn remove_before(&self, time: u64) -> anyhow::Result<()> {
+        self.entries.lock().await.retain(|entry| entry.time >= time);
+        Ok(())
+    }
 }
 
 /// An action to record. The audit log adds the account, the time and the node.

@@ -19,6 +19,8 @@ pub enum Command {
     Cluster(ClusterArgs),
     /// Run the containers of a deployment platform target for a master
     Agent(AgentArgs),
+    /// Serve the listeners that a master hands over over IPC
+    Worker(WorkerArgs),
 }
 
 #[derive(Args)]
@@ -55,6 +57,28 @@ pub struct AgentArgs {
         value_name = "LEVEL",
         default_value = "info",
         env = "R3V3RS3_AGENT_LOG_LEVEL"
+    )]
+    pub log_level: LevelFilter,
+}
+
+#[derive(Args)]
+pub struct WorkerArgs {
+    /// The file descriptor of the IPC socket that the master opened.
+    #[clap(long, value_name = "FD", env = "R3V3RS3_WORKER_IPC")]
+    pub ipc: i32,
+
+    #[clap(long, short, value_name = "DIR", env = "R3V3RS3_CONFIG_DIR")]
+    pub config_dir: Option<PathBuf>,
+
+    #[clap(long, short = 'd', value_name = "DIR", env = "R3V3RS3_LOG_DIR")]
+    pub log_dir: Option<PathBuf>,
+
+    #[clap(
+        long,
+        short,
+        value_name = "LEVEL",
+        default_value = "info",
+        env = "R3V3RS3_LOG_LEVEL"
     )]
     pub log_level: LevelFilter,
 }

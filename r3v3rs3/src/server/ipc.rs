@@ -4,6 +4,7 @@
 //! listening sockets travel out of band as file descriptors, so a frame carries only their
 //! addresses.
 
+use r3v3rs3_api::access_list::AccessListEntry;
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::port::PortEntry;
@@ -51,7 +52,25 @@ pub enum WorkerCommand {
 pub struct WorkerConfig {
     pub ports: Vec<PortEntry>,
     pub proxies: Vec<ProxyEntry>,
+    pub access_lists: Vec<AccessListEntry>,
+    /// The certificates as PEM, from which the worker rebuilds the parsed certificates.
+    pub certs: Vec<WorkerCert>,
     pub app: AppConfig,
+}
+
+/// One certificate of a worker configuration in its stored PEM form.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerCert {
+    pub kind: r3v3rs3_api::cert::CertKind,
+    pub pem_chain: Vec<u8>,
+    pub pem_key: Option<Vec<u8>>,
+}
+
+impl WorkerCert {
+    /// Parses the PEM into the certificate of the server.
+    pub fn into_cert(self) -> std::result::Result<crate::certs::Cert, r3v3rs3_api::error::Error> {
+        crate::certs::Cert::new(self.kind, self.pem_chain, self.pem_key)
+    }
 }
 
 /// What a worker tells the master.
@@ -101,6 +120,8 @@ mod tests {
         let command = WorkerCommand::Config(Box::new(WorkerConfig {
             ports: Vec::new(),
             proxies: Vec::new(),
+            access_lists: Vec::new(),
+            certs: Vec::new(),
             app: AppConfig::default(),
         }));
         write_frame(&mut sender, &command).unwrap();

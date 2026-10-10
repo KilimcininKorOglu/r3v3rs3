@@ -59,6 +59,9 @@ pub enum ServerCommand {
     Notify {
         notification: Notification,
     },
+    /// The worker wrote the new configuration into its storage, so the ports, the proxies, the
+    /// access lists and the certificates must reload from it.
+    WorkerApply,
 }
 
 impl std::fmt::Debug for ServerCommand {
@@ -110,6 +113,7 @@ impl std::fmt::Debug for ServerCommand {
                 .debug_struct("Notify")
                 .field("event", &notification.event)
                 .finish(),
+            Self::WorkerApply => f.debug_struct("WorkerApply").finish(),
         }
     }
 }

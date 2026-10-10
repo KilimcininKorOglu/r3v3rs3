@@ -34,6 +34,15 @@ impl TcpListenerPool {
         !self.listeners.is_empty()
     }
 
+    /// Adds a listener that another process opened. The next `update` keeps it, because its
+    /// address is among the addresses that the ports use.
+    pub fn adopt(&mut self, listener: TcpListener) {
+        self.listeners.push(TcpListenerStream {
+            index: 0,
+            inner: listener,
+        });
+    }
+
     pub async fn remove_unused_ports(&mut self, ports: &[PortContext]) {
         let used_addrs = ports.iter().filter_map(listen_addr).collect::<HashSet<_>>();
 

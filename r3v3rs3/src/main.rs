@@ -35,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
         Command::AddUser(args) => add_user(args).await?,
         Command::Cluster(args) => cluster(args).await?,
         Command::Agent(args) => agent(args).await?,
+        Command::Worker(args) => worker(args).await?,
     }
 
     Ok(())
@@ -77,6 +78,19 @@ async fn agent(args: AgentArgs) -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// Serves the listeners that a master process hands over over the IPC socket.
+async fn worker(args: r3v3rs3::args::WorkerArgs) -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(args.log_level)
+        .with_ansi(std::io::stdout().is_terminal())
+        .init();
+    let config_dir = get_config_dir(args.config_dir)?;
+    let log_dir = get_log_dir(args.log_dir)?;
+    r3v3rs3::server::worker::ensure_dirs(&config_dir, &log_dir)?;
+    info!("the worker starts");
+    r3v3rs3::server::worker::run(args.ipc, &config_dir, &log_dir).await
 }
 
 async fn cluster(args: ClusterArgs) -> anyhow::Result<()> {

@@ -28,6 +28,7 @@ pub mod rpc;
 mod state;
 mod tcp;
 mod udp;
+pub mod worker;
 
 pub struct Server {
     app_info: AppInfo,
@@ -89,6 +90,43 @@ impl Server {
             self.event_recv,
         )
         .await
+    }
+
+    /// A worker server of a master process. It serves the listeners that the master hands over
+    /// and starts no platform, discovery or ACME task.
+    pub async fn new_worker(
+        app_info: AppInfo,
+        storage: Arc<dyn Storage>,
+        listeners: Vec<fdmanifest::ListenerFd>,
+    ) -> (Self, ServerChannels) {
+        let (command_send, command_recv) = mpsc::channel(1);
+        let (callback_send, callback_recv) = mpsc::channel(16);
+        let (event_send, _) = broadcast::channel(16);
+        let audit_store = Arc::new(crate::audit::MemoryAuditStore::new()) as Arc<dyn AuditStore>;
+        let server_state = state::ServerState::new_worker(
+            storage,
+            audit_store,
+            &app_info.config_path,
+            command_send.clone(),
+            callback_send,
+            event_send.clone(),
+            listeners,
+        )
+        .await;
+        let accounts = server_state.account_directory();
+        let server = Self {
+            app_info,
+            server_state,
+            command_recv,
+            event_recv: event_send.subscribe(),
+        };
+        let channels = ServerChannels {
+            command: command_send,
+            callback: callback_recv,
+            event: event_send,
+            accounts,
+        };
+        (server, channels)
     }
 }
 

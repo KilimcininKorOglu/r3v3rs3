@@ -103,6 +103,13 @@ pub enum Received {
     Quic(usize, Box<Incoming>),
 }
 
+/// The role of this process. A worker serves listeners and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerRole {
+    Master,
+    Worker,
+}
+
 /// Logs a write that the server cannot report to a caller.
 fn log_save_error(result: Result<(), Error>) {
     if let Err(err) = result {
@@ -166,16 +173,68 @@ impl ServerState {
         callback_sender: mpsc::Sender<RpcCallback>,
         br_sender: broadcast::Sender<ServerEvent>,
     ) -> Self {
+        Self::build(
+            ServerRole::Master,
+            storage,
+            audit_store,
+            config_dir,
+            command_sender,
+            callback_sender,
+            br_sender,
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// A worker process serves the listeners that the master hands over. It runs no platform, no
+    /// discovery, no ACME orders and no leader tasks; the master owns all of them.
+    pub async fn new_worker(
+        storage: Arc<dyn Storage>,
+        audit_store: Arc<dyn AuditStore>,
+        config_dir: &Path,
+        command_sender: mpsc::Sender<ServerCommand>,
+        callback_sender: mpsc::Sender<RpcCallback>,
+        br_sender: broadcast::Sender<ServerEvent>,
+        listeners: Vec<super::fdmanifest::ListenerFd>,
+    ) -> Self {
+        Self::build(
+            ServerRole::Worker,
+            storage,
+            audit_store,
+            config_dir,
+            command_sender,
+            callback_sender,
+            br_sender,
+            listeners,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn build(
+        role: ServerRole,
+        storage: Arc<dyn Storage>,
+        audit_store: Arc<dyn AuditStore>,
+        config_dir: &Path,
+        command_sender: mpsc::Sender<ServerCommand>,
+        callback_sender: mpsc::Sender<RpcCallback>,
+        br_sender: broadcast::Sender<ServerEvent>,
+        listeners: Vec<super::fdmanifest::ListenerFd>,
+    ) -> Self {
         let config = storage.load_app_config().await;
         let audit = Arc::new(AuditLog::new(audit_store, config.cluster.node_name.clone()));
-        let platform = PlatformHandle::start(
-            &config,
-            config_dir,
-            command_sender.clone(),
-            &br_sender,
-            audit.clone(),
-        )
-        .await;
+        let platform = if role == ServerRole::Worker {
+            PlatformHandle::Disabled
+        } else {
+            PlatformHandle::start(
+                &config,
+                config_dir,
+                command_sender.clone(),
+                &br_sender,
+                audit.clone(),
+            )
+            .await
+        };
         let _ = br_sender.send(ServerEvent::AppConfigUpdated {
             config: Box::new(config.masked()),
         });
@@ -212,7 +271,7 @@ impl ServerState {
             accounts.subscribe(),
             config.admin,
         ));
-        let leader = !config.cluster.enabled;
+        let leader = !config.cluster.enabled && role == ServerRole::Master;
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
             access_lists,
@@ -258,13 +317,20 @@ impl ServerState {
         this.registries
             .srv
             .set_nameserver(this.config.upstream_dns_resolver);
+        if !listeners.is_empty()
+            && let Err(err) = this.adopt_listeners(listeners).await
+        {
+            error!(%err, "failed to adopt the listeners of the master");
+        }
         log_save_error(this.update_ports().await);
         this.update_certs().await;
         log_save_error(this.update_proxies().await);
         this.update_acmes().await;
         this.reload_proxies().await;
-        for provider in DiscoveryProvider::ALL {
-            this.restart_discovery(provider).await;
+        if role == ServerRole::Master {
+            for provider in DiscoveryProvider::ALL {
+                this.restart_discovery(provider).await;
+            }
         }
         this
     }
@@ -296,6 +362,9 @@ impl ServerState {
                 if self.leader && crate::cdn::install(ranges.clone()) {
                     log_save_error(self.storage.save_cdn_ranges(&ranges).await);
                 }
+            }
+            ServerCommand::WorkerApply => {
+                self.apply_worker_state().await;
             }
             other => self.handle_topology_command(other).await,
         }
@@ -463,6 +532,19 @@ impl ServerState {
     /// Reads the parts of the state that the cluster store changed again, and applies them.
     async fn apply_cluster_changes(&mut self, kinds: Vec<StateKind>) {
         for kind in kinds {
+            self.reload_kind(kind).await;
+        }
+    }
+
+    /// Reloads the parts of the state that the configuration of the master replaces. Only the
+    /// worker process receives this command, because only its storage is a memory storage.
+    async fn apply_worker_state(&mut self) {
+        for kind in [
+            StateKind::Ports,
+            StateKind::Proxies,
+            StateKind::AccessLists,
+            StateKind::Certs,
+        ] {
             self.reload_kind(kind).await;
         }
     }
@@ -888,6 +970,37 @@ impl ServerState {
                 http.start_quic_proxy(stream);
             }
         }
+    }
+
+    /// Takes over the listeners that the master process opened. The next `update_ports` keeps
+    /// them, because their addresses are the addresses of the ports.
+    async fn adopt_listeners(
+        &mut self,
+        listeners: Vec<super::fdmanifest::ListenerFd>,
+    ) -> anyhow::Result<()> {
+        use std::os::fd::{FromRawFd, IntoRawFd};
+        for listener in listeners {
+            match listener.proto {
+                super::fdmanifest::ListenerProto::Tcp => {
+                    let listener =
+                        unsafe { std::net::TcpListener::from_raw_fd(listener.fd.into_raw_fd()) };
+                    listener.set_nonblocking(true)?;
+                    self.tcp_pool
+                        .adopt(tokio::net::TcpListener::from_std(listener)?);
+                }
+                super::fdmanifest::ListenerProto::Udp => {
+                    let socket =
+                        unsafe { std::net::UdpSocket::from_raw_fd(listener.fd.into_raw_fd()) };
+                    socket.set_nonblocking(true)?;
+                    self.udp_pool
+                        .adopt(tokio::net::UdpSocket::from_std(socket)?);
+                }
+                super::fdmanifest::ListenerProto::Quic => {
+                    self.quic_pool.adopt(listener.fd)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Applies the port list to the listeners. The callers save the ports before they change the

@@ -7,6 +7,7 @@ use r3v3rs3_api::port::SocketState;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::SocketAddr;
+use std::os::fd::OwnedFd;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -91,6 +92,32 @@ impl QuicListenerPool {
 
     pub fn has_active_listeners(&self) -> bool {
         !self.listeners.is_empty()
+    }
+
+    /// Adds a QUIC endpoint over a UDP socket that another process opened.
+    pub fn adopt(&mut self, fd: OwnedFd) -> io::Result<()> {
+        let resolver: Arc<dyn ResolvesServerCert> = Arc::new(CertResolver::default());
+        let tls_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(resolver);
+        let server_config = quinn::ServerConfig::with_crypto(Arc::new(
+            QuicServerConfig::try_from(tls_config.clone())
+                .map_err(|_| io::Error::other("the QUIC TLS config has no cipher suite"))?,
+        ));
+        let runtime = quinn::default_runtime()
+            .ok_or_else(|| io::Error::other("quinn runtime not available"))?;
+        let socket = std::net::UdpSocket::from(fd);
+        socket.set_nonblocking(true)?;
+        let endpoint = quinn::Endpoint::new_with_abstract_socket(
+            quinn::EndpointConfig::default(),
+            Some(server_config),
+            runtime.wrap_udp_socket(socket)?,
+            runtime,
+        )?;
+        let addr = endpoint.local_addr()?;
+        info!(%addr, "adopted a quic listener");
+        self.listeners.push(spawn_accept_loop(endpoint));
+        Ok(())
     }
 
     pub async fn select(&mut self) -> Option<(usize, Incoming)> {

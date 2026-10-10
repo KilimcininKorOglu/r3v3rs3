@@ -26,6 +26,16 @@ impl UdpListenerPool {
         !self.listeners.is_empty()
     }
 
+    /// Adds a socket that another process opened. The next `update` keeps it, because its
+    /// address is among the addresses that the ports use.
+    pub fn adopt(&mut self, socket: UdpSocket) {
+        self.listeners.push(UdpListenerStream {
+            index: self.listeners.len(),
+            config_index: 0,
+            inner: Arc::new(socket),
+        });
+    }
+
     pub async fn remove_unused_ports(&mut self, ports: &[PortContext]) {
         let used_addrs = ports
             .iter()
