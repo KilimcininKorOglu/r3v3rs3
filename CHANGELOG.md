@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-10
+
+### Added
+- Worker processes: the listeners of a master can run in a supervised worker process, with IPC descriptor passing, a worker event bridge into the master event stream, and a worker status report through the admin API and the WebUI.
+- Zero-downtime upgrade: SIGUSR2 hands the listeners to a new process without dropping connections.
+- Graceful shutdown: the open connections drain before the server stops, and the timeout is configurable in the settings.
+- MCP server: the admin API tools are served over MCP at `/api/mcp`.
+- OAuth 2.1 authorization server for MCP clients, with PKCE, a WebUI consent form and refresh token rotation.
+- A command line MCP client (`r3v3rs3-mcp`) with login, tools and call commands.
+- The CDN fetch downloads the Google Cloud load balancer IP ranges.
+
+### Changed
+- The version examples of the tutorials name 1.6.0.
+- The release checksums are signed with minisign.
+- The Docker test images are pulled from the GHCR mirror and the mirror images from mirror.gcr.io.
+- The docs document the worker processes, the zero-downtime upgrade, the MCP server and the MCP client.
+- Functions that exceed the complexity limit are split into smaller functions.
+
 ## [1.5.6] - 2026-10-09
 
 ### Changed
