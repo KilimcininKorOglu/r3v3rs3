@@ -1005,6 +1005,29 @@ zone "example.com" {
 
 Her challenge adı için bir `grant` kuralı ekleyin. `*.example.com` sertifikası da `_acme-challenge.example.com` adını kullanır.
 
+## Worker Süreçleri
+
+Varsayılan olarak admin API'yi çalıştıran aynı süreç her portu da servis eder. `config.toml` içinde `worker_mode = "workers"` ayarıyla r3v3rs3 portları servise eden bir worker süreci başlatır; master süreç storage'ı, admin API'yi, WebUI'yi, cluster'ı ve deployment platformunu tutar. Worker'ın çökmesi admin API'yi düşürmez ve master worker'ı bir backoff ile yeniden başlatır.
+
+```toml
+worker_mode = "workers"
+```
+
+Master, güncel yapılandırmayı ve dinleme socket'lerinin descriptor'larını worker'a özel bir Unix socket üzerinden gönderir, bu yüzden worker'ın yapılandırma dizinine erişimi gerekmez. Worker'ın raporladığı durum, process id'si, uptime'ı ve açık bağlantı sayısı WebUI ayarlar sayfasında ve `GET /api/workers` üzerinde görünür. Yanıt vermeyi bırakan bir worker, durumu olmadan listede kalır.
+
+## Kesintisiz Yükseltme
+
+`kill -USR2 <pid>` dinleyicileri yeni bir sürece devreder. Eski süreç yeni binary'yi başlatır, yeni sürecin durumunu yüklemesini bekler, dinleme socket'lerinin descriptor'larını bir Unix socket üzerinden geçirir ve ardından açık bağlantılarını `shutdown_graceful_timeout` (varsayılan 30 saniye) süresince boşaltıp 0 çıkış koduyla çıkar.
+
+Yeni süreç aynı dizinden yapılandırmayı okur, bu yüzden yükseltme `config.toml` içindeki her ayar için geçerli olur. `worker_mode = "workers"` ile portları worker'lar tuttuğu için yükseltme devredilecek bir şey bulmaz ve master'ın sıralı yeniden başlatması worker'ın açık bağlantılarına dokunmadan olur.
+
+systemd ile servisi yeniden başlatmadan yeniden yükleyin:
+
+```ini
+[Service]
+ExecReload=/bin/kill -USR2 $MAINPID
+```
+
 ## Saklanan veriler
 
 r3v3rs3, ACME kayıtlarını yapılandırma dizinindeki `acme.toml` dosyasında saklar. Dosya, her ACME hesabının private key'ini ve DNS sağlayıcısının kimlik bilgilerini düz metin olarak içerir. Unix'te r3v3rs3 dosyayı `0600` izniyle oluşturur ve yazar. Böylece dosyayı yalnız sürecin sahibi okuyabilir. Yönetim API'si ve WebUI kimlik bilgilerini hiçbir zaman döndürmez. ACME listesi yalnız sağlayıcının adını gösterir, örneğin `Let's Encrypt (DNS-01, Cloudflare)`.

@@ -1005,6 +1005,29 @@ zone "example.com" {
 
 Add a `grant` rule for each challenge name. A certificate for `*.example.com` uses the `_acme-challenge.example.com` name too.
 
+## Worker Processes
+
+By default the same process that runs the admin API also serves every port. With `worker_mode = "workers"` in `config.toml`, r3v3rs3 starts one worker process that serves the ports while the master process keeps the storage, the admin API, the WebUI, the cluster and the deployment platform. A crash of the worker does not take the admin API down, and the master restarts the worker with a backoff.
+
+```toml
+worker_mode = "workers"
+```
+
+The master sends the current configuration and the descriptors of the listening sockets to the worker over a private Unix socket, so the worker needs no access to the configuration directory. The status that the worker reports, its process id, its uptime and the number of its open connections, appears in the WebUI settings page and on `GET /api/workers`. A worker that stopped answering stays listed without a status.
+
+## Zero-Downtime Upgrade
+
+`kill -USR2 <pid>` hands the listeners to a new process. The old process starts the new binary, waits until the new process loads its state, passes the descriptors of the listening sockets over a Unix socket, and then drains its open connections up to `shutdown_graceful_timeout` (30 seconds by default) before it exits with status 0.
+
+The new process reads the configuration from the same directory, so the upgrade takes effect for every setting that `config.toml` holds. With `worker_mode = "workers"` the workers keep the ports, so an upgrade hands over nothing and a rolling restart of the master happens without touching the open connections of the worker.
+
+With systemd, reload the service without a restart:
+
+```ini
+[Service]
+ExecReload=/bin/kill -USR2 $MAINPID
+```
+
 ## Stored data
 
 r3v3rs3 stores ACME entries in `acme.toml` in the configuration directory. The file contains the private key of each ACME account and the DNS provider credentials in plain text. On Unix, r3v3rs3 creates and writes the file with mode `0600`, so only the owner of the process can read it. The admin API and the WebUI never return the credentials. The ACME list shows only the provider name, for example `Let's Encrypt (DNS-01, Cloudflare)`.
