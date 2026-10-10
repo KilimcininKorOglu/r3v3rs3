@@ -8,7 +8,7 @@ use super::fdmanifest::ListenerFd;
 use super::fdpass::recv_fds;
 use super::ipc::{Handshake, read_frame, write_frame};
 use anyhow::{Context, bail};
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{AsRawFd as _, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 use tracing::info;
@@ -43,7 +43,34 @@ pub async fn child_handover(ipc_fd: i32) -> anyhow::Result<Vec<ListenerFd>> {
 /// The side of the old process: starts the new one and hands the listeners over.
 pub async fn hand_over(exe_args: &[String], manifest: Vec<ListenerFd>) -> anyhow::Result<()> {
     let (mut ipc, child_half) = UnixStream::pair()?;
-    let raw = std::os::fd::AsRawFd::as_raw_fd(&child_half);
+    let mut command = new_upgrade_command(exe_args, child_half.as_raw_fd())?;
+    // The new process runs on its own; this one only hands the listeners over and drains.
+    let child = command.spawn().context("failed to start the new process")?;
+    let new_pid = child.id() as i32;
+    std::mem::drop(child);
+    std::mem::drop(child_half);
+
+    let handover = tokio::task::spawn_blocking(move || write_handover(&mut ipc, &manifest));
+    match tokio::time::timeout(READY_TIMEOUT, handover).await {
+        Ok(result) => {
+            result.map_err(|err| anyhow::anyhow!("the handover task failed: {err}"))??
+        }
+        Err(_) => {
+            unsafe {
+                libc::kill(new_pid, libc::SIGKILL);
+            }
+            bail!("the new process did not become ready in time");
+        }
+    }
+    info!("the listeners went to the new process, this one drains");
+    Ok(())
+}
+
+/// The command of the new process that reads its IPC socket on descriptor 3.
+fn new_upgrade_command(
+    exe_args: &[String],
+    ipc_fd: std::os::fd::RawFd,
+) -> anyhow::Result<std::process::Command> {
     let exe = std::env::current_exe().context("failed to locate the server binary")?;
     let mut command = std::process::Command::new(exe);
     command
@@ -53,56 +80,42 @@ pub async fn hand_over(exe_args: &[String], manifest: Vec<ListenerFd>) -> anyhow
     unsafe {
         use std::os::unix::process::CommandExt;
         command.pre_exec(move || {
-            if libc::dup2(raw, 3) == -1 {
+            if libc::dup2(ipc_fd, 3) == -1 {
                 Err(std::io::Error::last_os_error())
             } else {
                 Ok(())
             }
         });
     }
-    // The new process runs on its own; this one only hands the listeners over and drains.
-    let child = command.spawn().context("failed to start the new process")?;
-    let new_pid = child.id() as i32;
-    std::mem::drop(child);
-    std::mem::drop(child_half);
+    Ok(command)
+}
 
-    let handover = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-        use std::io::Read as _;
-        let mut ready = [0u8; 1];
-        ipc.read_exact(&mut ready)
-            .context("the new process did not answer")?;
-        if ready[0] != READY {
-            bail!("the new process sent an unexpected answer");
-        }
-        write_frame(
-            &mut ipc,
-            &Handshake {
-                protocol: super::ipc::PROTOCOL_VERSION,
-                listeners: manifest
-                    .iter()
-                    .map(|listener| super::ipc::ListenerMeta {
-                        proto: listener.proto,
-                        addr: listener.addr,
-                    })
-                    .collect(),
-            },
-        )?;
-        let fds = manifest
-            .iter()
-            .map(|listener| listener.raw_fd())
-            .collect::<Vec<_>>();
-        super::fdpass::send_fds(&ipc, &fds)?;
-        Ok(())
-    });
-    match tokio::time::timeout(READY_TIMEOUT, handover).await {
-        Ok(result) => result??,
-        Err(_) => {
-            unsafe {
-                libc::kill(new_pid, libc::SIGKILL);
-            }
-            bail!("the new process did not become ready in time");
-        }
+/// Waits for the ready byte of the new process and sends the listeners.
+fn write_handover(ipc: &mut UnixStream, manifest: &[ListenerFd]) -> anyhow::Result<()> {
+    use std::io::Read as _;
+    let mut ready = [0u8; 1];
+    ipc.read_exact(&mut ready)
+        .context("the new process did not answer")?;
+    if ready[0] != READY {
+        bail!("the new process sent an unexpected answer");
     }
-    info!("the listeners went to the new process, this one drains");
+    write_frame(
+        ipc,
+        &Handshake {
+            protocol: super::ipc::PROTOCOL_VERSION,
+            listeners: manifest
+                .iter()
+                .map(|listener| super::ipc::ListenerMeta {
+                    proto: listener.proto,
+                    addr: listener.addr,
+                })
+                .collect(),
+        },
+    )?;
+    let fds = manifest
+        .iter()
+        .map(|listener| listener.raw_fd())
+        .collect::<Vec<_>>();
+    super::fdpass::send_fds(ipc, &fds)?;
     Ok(())
 }

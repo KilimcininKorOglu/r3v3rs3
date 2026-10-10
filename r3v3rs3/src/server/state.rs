@@ -332,33 +332,42 @@ impl ServerState {
             platform,
             worker_status: None,
         };
+        this.initialize(role, listeners).await;
+        this
+    }
 
-        if let Some(exchange) = this.storage.clone().rate_count_exchange() {
-            let interval = this.config.cluster.rate_limit_sync_interval;
-            this.registries.limiters.start_sharing(exchange, interval);
+    /// Shares the counters and the cache, adopts the listeners of a worker and loads the
+    /// stored state into the registries.
+    async fn initialize(
+        &mut self,
+        role: ServerRole,
+        listeners: Vec<super::fdmanifest::ListenerFd>,
+    ) {
+        if let Some(exchange) = self.storage.clone().rate_count_exchange() {
+            let interval = self.config.cluster.rate_limit_sync_interval;
+            self.registries.limiters.start_sharing(exchange, interval);
         }
-        if let Some(store) = this.storage.clone().shared_cache_store() {
-            this.registries.caches.start_sharing(store);
+        if let Some(store) = self.storage.clone().shared_cache_store() {
+            self.registries.caches.start_sharing(store);
         }
-        this.registries
+        self.registries
             .srv
-            .set_nameserver(this.config.upstream_dns_resolver);
+            .set_nameserver(self.config.upstream_dns_resolver);
         if !listeners.is_empty()
-            && let Err(err) = this.adopt_listeners(listeners).await
+            && let Err(err) = self.adopt_listeners(listeners).await
         {
             error!(%err, "failed to adopt the listeners of the master");
         }
-        log_save_error(this.update_ports().await);
-        this.update_certs().await;
-        log_save_error(this.update_proxies().await);
-        this.update_acmes().await;
-        this.reload_proxies().await;
+        log_save_error(self.update_ports().await);
+        self.update_certs().await;
+        log_save_error(self.update_proxies().await);
+        self.update_acmes().await;
+        self.reload_proxies().await;
         if role == ServerRole::Master {
             for provider in DiscoveryProvider::ALL {
-                this.restart_discovery(provider).await;
+                self.restart_discovery(provider).await;
             }
         }
-        this
     }
 
     pub async fn handle_command(&mut self, cmd: ServerCommand) {

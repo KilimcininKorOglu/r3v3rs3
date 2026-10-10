@@ -203,49 +203,11 @@ async fn new_server(
 }
 
 async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()> {
-    let log_dir = get_log_dir(args.log_dir.take())?;
-    fs::create_dir_all(&log_dir)?;
-    let _guards = init_logging(&mut args, &log_dir).await?;
-
-    let config_dir = get_config_dir(args.config_dir.take())?;
-    fs::create_dir_all(&config_dir)?;
-
-    let app_info = new_appinfo(&config_dir, &log_dir);
-    let local = read_local_config(&config_dir).await?;
-
-    // After a SIGUSR2 the new process inherits the listeners of the previous one.
-    let listeners = match std::env::var("R3V3RS3_UPGRADE_IPC_FD") {
-        Ok(fd) => {
-            let fd: i32 = fd.parse()?;
-            let listeners = r3v3rs3::server::upgrade::child_handover(fd).await?;
-            info!(
-                listeners = listeners.len(),
-                "inherited the listeners of the previous process"
-            );
-            listeners
-        }
-        Err(_) => Vec::new(),
-    };
-
-    let (server, channels) =
-        new_server(app_info.clone(), local.clone(), &config_dir, listeners).await?;
+    let (app_info, local, server, channels) = prepare(&mut args).await?;
     r3v3rs3::cdn::fetch::spawn_refresh_task(channels.command.clone());
-    if local.worker_mode == r3v3rs3_api::app::WorkerMode::Workers {
-        let manifest = server.listener_manifest()?;
-        let supervisor = r3v3rs3::server::supervisor::run(
-            channels.event.clone(),
-            channels.command.clone(),
-            std::env::current_exe()?,
-            app_info.clone(),
-            read_local_config(&config_dir).await?,
-            manifest,
-        );
-        tokio::spawn(async move {
-            if let Err(err) = supervisor.await {
-                error!(%err, "the worker supervisor stopped");
-            }
-        });
-    }
+    spawn_supervisor(&app_info, &local, &server, &channels).await?;
+    // The workers serve the ports, so the listeners of this process stay out of the upgrade
+    // manifest and this process cannot upgrade again.
     let manifest = if std::env::var_os("R3V3RS3_UPGRADE_IPC_FD").is_none() {
         Some(server.listener_manifest()?)
     } else {
@@ -259,6 +221,72 @@ async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()>
     let _ = event_send.send(r3v3rs3_api::event::ServerEvent::Shutdown);
     server_task.await??;
 
+    Ok(())
+}
+
+/// The logging, the directories, the config and the server of a fresh start.
+async fn prepare(
+    args: &mut StartArgs,
+) -> anyhow::Result<(
+    AppInfo,
+    r3v3rs3_api::app::AppConfig,
+    r3v3rs3::server::Server,
+    ServerChannels,
+)> {
+    let log_dir = get_log_dir(args.log_dir.take())?;
+    fs::create_dir_all(&log_dir)?;
+    let _guards = init_logging(args, &log_dir).await?;
+
+    let config_dir = get_config_dir(args.config_dir.take())?;
+    fs::create_dir_all(&config_dir)?;
+
+    let app_info = new_appinfo(&config_dir, &log_dir);
+    let local = read_local_config(&config_dir).await?;
+    let listeners = inherit_listeners().await?;
+
+    let (server, channels) =
+        new_server(app_info.clone(), local.clone(), &config_dir, listeners).await?;
+    Ok((app_info, local, server, channels))
+}
+
+/// After a SIGUSR2 the new process inherits the listeners of the previous one.
+async fn inherit_listeners() -> anyhow::Result<Vec<r3v3rs3::server::fdmanifest::ListenerFd>> {
+    let Ok(fd) = std::env::var("R3V3RS3_UPGRADE_IPC_FD") else {
+        return Ok(Vec::new());
+    };
+    let listeners = r3v3rs3::server::upgrade::child_handover(fd.parse()?).await?;
+    info!(
+        listeners = listeners.len(),
+        "inherited the listeners of the previous process"
+    );
+    Ok(listeners)
+}
+
+/// Runs the worker supervisor in the background when the worker mode is on.
+async fn spawn_supervisor(
+    app_info: &AppInfo,
+    local: &r3v3rs3_api::app::AppConfig,
+    server: &r3v3rs3::server::Server,
+    channels: &ServerChannels,
+) -> anyhow::Result<()> {
+    if local.worker_mode != r3v3rs3_api::app::WorkerMode::Workers {
+        return Ok(());
+    }
+    let config_dir = app_info.config_path.clone();
+    let manifest = server.listener_manifest()?;
+    let supervisor = r3v3rs3::server::supervisor::run(
+        channels.event.clone(),
+        channels.command.clone(),
+        std::env::current_exe()?,
+        app_info.clone(),
+        read_local_config(&config_dir).await?,
+        manifest,
+    );
+    tokio::spawn(async move {
+        if let Err(err) = supervisor.await {
+            error!(%err, "the worker supervisor stopped");
+        }
+    });
     Ok(())
 }
 

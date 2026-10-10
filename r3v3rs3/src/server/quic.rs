@@ -214,6 +214,20 @@ fn create_quic_endpoint(
     addr: SocketAddr,
     server_config: quinn::ServerConfig,
 ) -> io::Result<(quinn::Endpoint, OwnedFd)> {
+    let (socket, fd) = new_udp_socket(addr)?;
+    let runtime =
+        quinn::default_runtime().ok_or_else(|| io::Error::other("quinn runtime not available"))?;
+    let endpoint = quinn::Endpoint::new_with_abstract_socket(
+        quinn::EndpointConfig::default(),
+        Some(server_config),
+        runtime.wrap_udp_socket(socket.into())?,
+        runtime,
+    )?;
+    Ok((endpoint, fd))
+}
+
+/// The reusable UDP socket of a QUIC endpoint, plus its descriptor for the handover.
+fn new_udp_socket(addr: SocketAddr) -> io::Result<(socket2::Socket, OwnedFd)> {
     let socket = socket2::Socket::new(
         socket2::Domain::for_address(addr),
         socket2::Type::DGRAM,
@@ -226,15 +240,7 @@ fn create_quic_endpoint(
     socket.set_nonblocking(true)?;
     socket.bind(&addr.into())?;
     let fd = socket.try_clone()?.into();
-    let runtime =
-        quinn::default_runtime().ok_or_else(|| io::Error::other("quinn runtime not available"))?;
-    let endpoint = quinn::Endpoint::new_with_abstract_socket(
-        quinn::EndpointConfig::default(),
-        Some(server_config),
-        runtime.wrap_udp_socket(socket.into())?,
-        runtime,
-    )?;
-    Ok((endpoint, fd))
+    Ok((socket, fd))
 }
 
 #[derive(Debug)]

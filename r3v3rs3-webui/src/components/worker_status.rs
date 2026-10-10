@@ -85,7 +85,6 @@ async fn get_workers() -> Result<WorkerStatusReport, gloo_net::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use r3v3rs3_api::i18n::Locale;
 
     #[test]
