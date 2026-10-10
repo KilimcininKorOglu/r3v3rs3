@@ -87,15 +87,17 @@ impl ClientIpResolver {
         table.lookup(ip).map(Trust::Cdn)
     }
 
-    /// Returns the rightmost untrusted address of X-Forwarded-For.
+    /// Returns the rightmost untrusted address of X-Forwarded-For and of the RFC 7239 Forwarded
+    /// header.
     fn forwarded_for_ip(&self, headers: &HeaderMap, table: &CdnTable) -> Option<IpAddr> {
-        let entries: Vec<IpAddr> = headers
+        let mut entries: Vec<IpAddr> = headers
             .get_all("x-forwarded-for")
             .iter()
             .filter_map(|value| value.to_str().ok())
             .flat_map(|value| value.split(','))
             .filter_map(parse_forwarded_ip)
             .collect();
+        entries.extend(rfc7239_forwarded_ips(headers));
         entries
             .iter()
             .rev()
@@ -103,6 +105,31 @@ impl ClientIpResolver {
             .or(entries.first())
             .copied()
     }
+}
+
+/// The `for` addresses of the RFC 7239 `Forwarded` header, in chain order. A `for=unknown`
+/// element carries no address and is skipped.
+fn rfc7239_forwarded_ips(headers: &HeaderMap) -> Vec<IpAddr> {
+    headers
+        .get_all("forwarded")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .filter_map(|element| {
+            let directive = element.split(';').find(|directive| {
+                directive
+                    .trim()
+                    .get(..4)
+                    .is_some_and(|head| head.eq_ignore_ascii_case("for="))
+            })?;
+            let value = directive.trim()[4..].trim();
+            let value = value
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .unwrap_or(value);
+            parse_forwarded_ip(value)
+        })
+        .collect()
 }
 
 fn provider_header_ip(provider: CdnProvider, headers: &HeaderMap) -> Option<IpAddr> {
@@ -245,6 +272,36 @@ mod tests {
         ]);
         let client = resolver(true, &[]).resolve(ip(FASTLY_EDGE), &headers, &table());
         assert_eq!(client.ip, ip("203.0.113.9"));
+    }
+
+    #[test]
+    fn forwarded_header_carries_the_client_ip() {
+        // The client spoofed 1.2.3.4. The trusted load balancer appended its own element.
+        let headers = headers(&[("forwarded", "for=1.2.3.4, for=203.0.113.9;proto=https")]);
+        let client = resolver(true, &["10.0.0.0/8"]).resolve(ip("10.0.0.5"), &headers, &table());
+        assert_eq!(client.ip, ip("203.0.113.9"));
+        assert!(client.trusted_peer);
+    }
+
+    #[test]
+    fn forwarded_header_supports_quoted_ipv6_and_unknown() {
+        let headers = headers(&[
+            ("forwarded", "for=unknown"),
+            ("forwarded", "for=\"[2001:db8::1]:443\""),
+        ]);
+        let client = resolver(true, &["10.0.0.0/8"]).resolve(ip("10.0.0.5"), &headers, &table());
+        assert_eq!(client.ip, ip("2001:db8::1"));
+    }
+
+    #[test]
+    fn forwarded_header_joins_the_x_forwarded_for_chain() {
+        // Both headers carry the chain; the rightmost untrusted address wins over both.
+        let headers = headers(&[
+            ("x-forwarded-for", "1.2.3.4, 203.0.113.9"),
+            ("forwarded", "for=198.51.100.7"),
+        ]);
+        let client = resolver(true, &["10.0.0.0/8"]).resolve(ip("10.0.0.5"), &headers, &table());
+        assert_eq!(client.ip, ip("198.51.100.7"));
     }
 
     #[test]
