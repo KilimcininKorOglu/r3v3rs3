@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.7] - 2026-10-11
+
+### Added
+- A fresh `install.sh` run creates the `admin` account as its last step, with a `--password` option or a generated random password that the summary prints once, and opens the WebUI port in the local firewall when the address binds beyond loopback, through firewalld, ufw or an iptables accept rule with persistence.
+
+### Fixed
+- The WebUI shows the sign-in page without flashing the target page first: the app checks the session before it renders any page.
+
 ## [1.6.6] - 2026-10-11
 
 ### Changed
