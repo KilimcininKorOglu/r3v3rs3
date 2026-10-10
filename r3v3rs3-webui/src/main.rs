@@ -1,12 +1,15 @@
 #![recursion_limit = "1024"]
 
+use auth::LoginQuery;
 use components::cluster_status::ClusterBanner;
 use components::footer::Footer;
 use components::navbar::Navbar;
 use components::sidebar::Sidebar;
 use console_error_panic_hook::set_once as set_panic_hook;
+use store::SessionStore;
 use yew::prelude::*;
 use yew_router::prelude::*;
+use yewdux::prelude::*;
 
 mod auth;
 mod components;
@@ -20,11 +23,55 @@ mod store;
 
 const API_ENDPOINT: &str = "/api";
 
+/// The result of the session check that runs before a page renders.
+#[derive(Clone, Copy, PartialEq)]
+enum Auth {
+    Pending,
+    SignedIn,
+    SignedOut,
+}
+
 #[function_component(App)]
 pub fn app() -> Html {
     event::use_event_subscriber();
+    let navigator = use_navigator().unwrap();
+    let route = use_route::<pages::Route>();
+    let auth = use_state(|| Auth::Pending);
+    let (_, set_session) = use_store::<SessionStore>();
+    {
+        let auth = auth.clone();
+        let set_session = set_session.clone();
+        use_effect_with((), move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                match auth::get_session().await {
+                    Some(info) => {
+                        set_session.set(SessionStore { info: Some(info) });
+                        auth.set(Auth::SignedIn);
+                    }
+                    None => auth.set(Auth::SignedOut),
+                }
+            });
+            || {}
+        });
+    }
+    {
+        let navigator = navigator.clone();
+        let route = route.clone();
+        use_effect_with((auth.clone(), route), move |(auth, route)| {
+            if **auth == Auth::SignedOut && route.as_ref() != Some(&pages::Route::Login) {
+                navigator
+                    .replace_with_query(&pages::Route::Login, &LoginQuery::new(route.clone()))
+                    .ok();
+            }
+            || {}
+        });
+    }
+    // No page renders until the session check is over, so the target page of a
+    // signed-out client never flashes without a session.
+    if *auth == Auth::Pending && route.as_ref() != Some(&pages::Route::Login) {
+        return html!();
+    }
     html! {
-        <>
         <BrowserRouter>
             <div class="min-h-screen flex flex-col">
                 <Navbar />
@@ -38,7 +85,6 @@ pub fn app() -> Html {
                 <Footer />
             </div>
         </BrowserRouter>
-        </>
     }
 }
 

@@ -69,7 +69,7 @@ pub async fn test_token() -> bool {
 }
 
 /// The account of the session. `None` without a valid session.
-async fn get_session() -> Option<SessionInfo> {
+pub async fn get_session() -> Option<SessionInfo> {
     let res = Request::get(&format!("{API_ENDPOINT}/session"))
         .send()
         .await
