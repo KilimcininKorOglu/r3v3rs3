@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.6] - 2026-10-11
+
+### Changed
+- The Docker image builds again: the Dockerfile copies the `r3v3rs3-mcp` workspace member, and the builder stage installs `cmake`, `perl` and `libclang-dev` for the aws-lc-sys build.
+- The static binary check of the musl release jobs accepts a static PIE binary, whose `file` output names `static-pie linked` instead of `statically linked`.
+- The version examples of the tutorials name 1.6.6.
+
 ## [1.6.5] - 2026-10-10
 
 ### Added
