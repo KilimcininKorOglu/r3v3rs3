@@ -33,10 +33,7 @@ use hyper::{
     },
     service::service_fn,
 };
-use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
-    server::conn::auto,
-};
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use quinn::{
     crypto::rustls::QuicServerConfig,
     rustls::{ServerConfig, pki_types::CertificateDer, server::WebPkiClientVerifier},
@@ -84,6 +81,25 @@ pub use auth::SessionService;
 
 const MAX_BUFFER_SIZE: usize = 4096;
 const HTTP2_MAX_FRAME_SIZE: usize = 16384;
+/// Caps the total size of the HEADERS plus its CONTINUATION frames of one request. The h2 default
+/// is ~16 MB, which lets a client flood the connection with cheap CONTINUATION frames
+/// (CVE-2024-27316). 64 KiB covers every sane request.
+const H2_MAX_HEADER_LIST_SIZE: u32 = 65536;
+/// Caps the streams that a client can reset before a GOAWAY closes the connection. The h2 default
+/// of 20 lets a Rapid Reset attack (CVE-2023-44487) multiply streams faster than the server
+/// retires them. 128 keeps legitimate churn cheap to serve while a flood still trips the cap.
+const H2_MAX_PENDING_ACCEPT_RESET_STREAMS: usize = 128;
+
+/// Builds the server-side connection builder with the HTTP/2 flood limits. Every server-side
+/// connection of the admin API, the challenge handler and the proxies uses it.
+pub(crate) fn http_server_builder() -> hyper_util::server::conn::auto::Builder<TokioExecutor> {
+    let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    builder
+        .http2()
+        .max_header_list_size(H2_MAX_HEADER_LIST_SIZE)
+        .max_pending_accept_reset_streams(H2_MAX_PENDING_ACCEPT_RESET_STREAMS);
+    builder
+}
 
 /// Starts a client connection of an HTTP port.
 pub struct HttpStarter {
@@ -488,7 +504,7 @@ where
     tokio::task::spawn(
         async move {
             let stream = TokioIo::new(stream);
-            let builder = auto::Builder::new(TokioExecutor::new());
+            let builder = http_server_builder();
             let builder = if http2_only {
                 builder.http2_only()
             } else {
@@ -533,7 +549,7 @@ fn spawn_redirect(server_stream: tokio::io::DuplexStream, span: Span) {
     tokio::task::spawn(
         async move {
             let server_stream = TokioIo::new(server_stream);
-            if let Err(err) = auto::Builder::new(TokioExecutor::new())
+            if let Err(err) = http_server_builder()
                 .serve_connection(server_stream, service_fn(redirect))
                 .await
             {

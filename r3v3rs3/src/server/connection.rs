@@ -2,8 +2,7 @@
 
 use hyper::Response;
 use hyper::service::service_fn;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto;
+use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -66,7 +65,7 @@ async fn serve_challenge(stream: BufStream<TcpStream>, body: String) {
         let body = body.clone();
         async move { Ok::<_, Infallible>(Response::new(body)) }
     });
-    if let Err(err) = auto::Builder::new(TokioExecutor::new())
+    if let Err(err) = crate::proxy::http::http_server_builder()
         .serve_connection(TokioIo::new(stream), service)
         .await
     {

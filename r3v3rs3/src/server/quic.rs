@@ -101,10 +101,7 @@ impl QuicListenerPool {
         let tls_config = ServerConfig::builder()
             .with_no_client_auth()
             .with_cert_resolver(resolver);
-        let server_config = quinn::ServerConfig::with_crypto(Arc::new(
-            QuicServerConfig::try_from(tls_config.clone())
-                .map_err(|_| io::Error::other("the QUIC TLS config has no cipher suite"))?,
-        ));
+        let server_config = quic_server_config(tls_config)?;
         let runtime = quinn::default_runtime()
             .ok_or_else(|| io::Error::other("quinn runtime not available"))?;
         let socket = std::net::UdpSocket::from(fd.try_clone()?);
@@ -155,9 +152,14 @@ fn open_listener(
     span.in_scope(|| {
         info!(%bind, "listening on quic port");
     });
-    let server_config = quinn::ServerConfig::with_crypto(Arc::new(
-        QuicServerConfig::try_from(tls_config.clone()).unwrap(),
-    ));
+    let server_config = match quic_server_config(tls_config.clone()) {
+        Ok(config) => config,
+        Err(err) => {
+            let _enter = span.enter();
+            error!(%bind, %err, "failed to prepare the QUIC server config");
+            return (None, SocketState::Error);
+        }
+    };
     match create_quic_endpoint(bind, server_config) {
         Ok((sock, fd)) => (Some(spawn_accept_loop(sock, fd)), SocketState::Listening),
         Err(err) => {
@@ -208,6 +210,24 @@ fn spawn_accept_loop(sock: quinn::Endpoint, fd: OwnedFd) -> QuicListenerStream {
         closed: closed_recv,
         fd,
     }
+}
+
+/// The QUIC stream limits of every endpoint. A connection can only open this many streams, so a
+/// single peer cannot multiply work without bound. The receive windows stay at the quinn defaults.
+const QUIC_MAX_BIDI_STREAMS: u32 = 100;
+const QUIC_MAX_UNI_STREAMS: u32 = 10;
+
+/// Wraps the TLS config into the QUIC server config with the transport limits.
+fn quic_server_config(tls_config: ServerConfig) -> io::Result<quinn::ServerConfig> {
+    let mut config = quinn::ServerConfig::with_crypto(Arc::new(
+        QuicServerConfig::try_from(tls_config)
+            .map_err(|_| io::Error::other("the QUIC TLS config has no cipher suite"))?,
+    ));
+    let mut transport = quinn::TransportConfig::default();
+    transport.max_concurrent_bidi_streams(QUIC_MAX_BIDI_STREAMS.into());
+    transport.max_concurrent_uni_streams(QUIC_MAX_UNI_STREAMS.into());
+    config.transport_config(Arc::new(transport));
+    Ok(config)
 }
 
 fn create_quic_endpoint(
