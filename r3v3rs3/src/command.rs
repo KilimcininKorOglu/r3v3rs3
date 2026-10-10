@@ -62,6 +62,12 @@ pub enum ServerCommand {
     /// The worker wrote the new configuration into its storage, so the ports, the proxies, the
     /// access lists and the certificates must reload from it.
     WorkerApply,
+    /// This process stops accepting connections, because the workers serve the ports.
+    SuspendListeners,
+    /// A supervisor asks for the configuration that a worker serves.
+    WorkerConfigSnapshot {
+        reply: tokio::sync::mpsc::Sender<crate::server::ipc::WorkerConfig>,
+    },
 }
 
 impl std::fmt::Debug for ServerCommand {
@@ -114,6 +120,8 @@ impl std::fmt::Debug for ServerCommand {
                 .field("event", &notification.event)
                 .finish(),
             Self::WorkerApply => f.debug_struct("WorkerApply").finish(),
+            Self::SuspendListeners => f.debug_struct("SuspendListeners").finish(),
+            Self::WorkerConfigSnapshot { .. } => f.debug_struct("WorkerConfigSnapshot").finish(),
         }
     }
 }

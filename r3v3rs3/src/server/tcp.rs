@@ -1,9 +1,11 @@
+use super::fdmanifest::{ListenerFd, ListenerProto};
 use crate::proxy::{PortContext, PortContextEvent, PortContextKind};
 use futures::{Stream, StreamExt};
 use r3v3rs3_api::port::SocketState;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::SocketAddr;
+use std::os::fd::OwnedFd;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::net::{TcpListener, TcpStream};
@@ -41,6 +43,18 @@ impl TcpListenerPool {
             index: 0,
             inner: listener,
         });
+    }
+
+    /// Duplicates of the file descriptors of the listening sockets.
+    pub fn listener_fds(&self) -> io::Result<Vec<ListenerFd>> {
+        self.listeners
+            .iter()
+            .map(|listener| {
+                let addr = listener.inner.local_addr()?;
+                let fd = listener.dup_fd()?;
+                Ok(ListenerFd::new(ListenerProto::Tcp, addr, fd))
+            })
+            .collect()
     }
 
     pub async fn remove_unused_ports(&mut self, ports: &[PortContext]) {
@@ -177,6 +191,14 @@ fn create_tcp_listener(addr: SocketAddr) -> io::Result<TcpListener> {
 struct TcpListenerStream {
     index: usize,
     inner: TcpListener,
+}
+
+impl TcpListenerStream {
+    /// A duplicate of the file descriptor of the listener.
+    fn dup_fd(&self) -> io::Result<OwnedFd> {
+        use std::os::fd::{AsRawFd, BorrowedFd};
+        unsafe { BorrowedFd::borrow_raw(self.inner.as_raw_fd()) }.try_clone_to_owned()
+    }
 }
 
 impl Stream for TcpListenerStream {

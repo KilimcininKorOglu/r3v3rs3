@@ -56,6 +56,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub acme_exec: AcmeExecConfig,
 
+    /// The proxy worker processes. The default serves every port in this process.
+    #[serde(default)]
+    pub worker_mode: WorkerMode,
+
     /// Only `config.toml` sets this section. An update through the admin API keeps it.
     #[serde(default)]
     pub cluster: crate::cluster::ClusterConfig,
@@ -114,6 +118,17 @@ fn default_background_task_interval() -> Duration {
 
 fn default_shutdown_graceful_timeout() -> Duration {
     Duration::from_secs(30)
+}
+
+/// How the proxy ports are served.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerMode {
+    /// This process serves every port.
+    #[default]
+    Off,
+    /// The ports are served by worker processes that this process supervises.
+    Workers,
 }
 
 fn default_http_challenge_addr() -> SocketAddr {

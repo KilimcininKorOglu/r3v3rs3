@@ -184,3 +184,66 @@ async fn wait_for_proxy(addr: &SocketAddr) -> anyhow::Result<tokio::net::TcpStre
     }
     anyhow::bail!("the worker does not listen on {addr}")
 }
+
+/// The supervisor hands the listeners of a real master to a worker, and the master stops
+/// accepting while the worker serves the port.
+#[tokio::test]
+async fn the_supervisor_serves_the_ports_through_a_worker() -> anyhow::Result<()> {
+    use r3v3rs3::server::Server;
+    use r3v3rs3_api::app::{AppConfig, WorkerMode};
+
+    let upstream_port = alloc_tcp_port().await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let upstream_addr = upstream_port.socket_addr();
+    tokio::spawn(async move {
+        let upstream = tokio::net::TcpListener::bind(upstream_addr).await.unwrap();
+        loop {
+            if let Ok((socket, _)) = upstream.accept().await {
+                tokio::spawn(echo_upstream(socket));
+            }
+        }
+    });
+
+    let log_dir = std::env::temp_dir().join(format!("r3v3rs3-supervisor-{}", std::process::id()));
+    std::fs::create_dir_all(&log_dir)?;
+    let storage = common::TestStorage::builder()
+        .ports(vec![port_entry("test", proxy_port.multiaddr_tcp())])
+        .proxies(vec![ProxyEntry {
+            id: "test2".parse().unwrap(),
+            source: None,
+            proxy: tcp_proxy_to(&upstream_port.socket_addr()),
+        }])
+        .build();
+    let app_info = r3v3rs3::config::new_appinfo(&log_dir, &log_dir);
+    let (server, channels) =
+        Server::new_shared(app_info.clone(), std::sync::Arc::new(storage)).await;
+    let manifest = server.listener_manifest()?;
+    assert_eq!(manifest.len(), 1);
+    let server_task = tokio::spawn(server.start());
+
+    let app = AppConfig {
+        worker_mode: WorkerMode::Workers,
+        ..Default::default()
+    };
+    let supervisor = r3v3rs3::server::supervisor::run(
+        channels.event.subscribe(),
+        channels.command.clone(),
+        app_info,
+        app,
+        manifest,
+    );
+    let supervisor_task = tokio::spawn(supervisor);
+
+    let proxy_addr = proxy_port.socket_addr();
+    let mut client = wait_for_proxy(&proxy_addr).await?;
+    client.write_all(b"hello").await?;
+    let mut buf = [0u8; 5];
+    client.read_exact(&mut buf).await?;
+    assert_eq!(&buf, b"hello");
+
+    channels.shutdown();
+    supervisor_task.abort();
+    server_task.await??;
+    std::fs::remove_dir_all(&log_dir).ok();
+    Ok(())
+}

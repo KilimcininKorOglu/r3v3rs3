@@ -25,6 +25,13 @@ impl ListenerFd {
     pub fn new(proto: ListenerProto, addr: SocketAddr, fd: OwnedFd) -> Self {
         Self { proto, addr, fd }
     }
+
+    /// A duplicate of the descriptor, for a second worker that takes the listener over.
+    pub fn try_clone(&self) -> std::io::Result<Self> {
+        use std::os::fd::{AsRawFd, BorrowedFd};
+        let fd = unsafe { BorrowedFd::borrow_raw(self.fd.as_raw_fd()) }.try_clone_to_owned()?;
+        Ok(Self::new(self.proto, self.addr, fd))
+    }
 }
 
 #[cfg(test)]

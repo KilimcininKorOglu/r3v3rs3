@@ -1,3 +1,4 @@
+use super::fdmanifest::{ListenerFd, ListenerProto};
 use crate::proxy::{PortContext, PortContextEvent, PortContextKind};
 use futures::{Stream, StreamExt};
 use r3v3rs3_api::port::SocketState;
@@ -34,6 +35,20 @@ impl UdpListenerPool {
             config_index: 0,
             inner: Arc::new(socket),
         });
+    }
+
+    /// Duplicates of the file descriptors of the listening sockets.
+    pub fn listener_fds(&self) -> io::Result<Vec<ListenerFd>> {
+        use std::os::fd::{AsRawFd, BorrowedFd};
+        self.listeners
+            .iter()
+            .map(|listener| {
+                let addr = listener.inner.local_addr()?;
+                let fd = unsafe { BorrowedFd::borrow_raw(listener.inner.as_ref().as_raw_fd()) }
+                    .try_clone_to_owned()?;
+                Ok(ListenerFd::new(ListenerProto::Udp, addr, fd))
+            })
+            .collect()
     }
 
     pub async fn remove_unused_ports(&mut self, ports: &[PortContext]) {

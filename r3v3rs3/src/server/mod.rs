@@ -26,6 +26,7 @@ mod proxy_list;
 mod quic;
 pub mod rpc;
 mod state;
+pub mod supervisor;
 mod tcp;
 mod udp;
 pub mod worker;
@@ -80,6 +81,11 @@ impl Server {
             accounts,
         };
         (server, channels)
+    }
+
+    /// The listeners that the worker processes take over.
+    pub fn listener_manifest(&self) -> std::io::Result<Vec<fdmanifest::ListenerFd>> {
+        self.server_state.listener_manifest()
     }
 
     pub async fn start(self) -> anyhow::Result<()> {

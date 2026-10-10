@@ -366,6 +366,15 @@ impl ServerState {
             ServerCommand::WorkerApply => {
                 self.apply_worker_state().await;
             }
+            ServerCommand::SuspendListeners => {
+                info!("the workers serve the ports, so this process stops accepting");
+                self.tcp_pool = TcpListenerPool::new();
+                self.udp_pool = UdpListenerPool::new();
+                self.quic_pool = QuicListenerPool::new();
+            }
+            ServerCommand::WorkerConfigSnapshot { reply } => {
+                let _ = reply.send(self.worker_config()).await;
+            }
             other => self.handle_topology_command(other).await,
         }
     }
@@ -546,6 +555,33 @@ impl ServerState {
             StateKind::Certs,
         ] {
             self.reload_kind(kind).await;
+        }
+    }
+
+    /// The listeners that the worker processes take over.
+    pub fn listener_manifest(&self) -> std::io::Result<Vec<super::fdmanifest::ListenerFd>> {
+        let mut fds = self.tcp_pool.listener_fds()?;
+        fds.extend(self.udp_pool.listener_fds()?);
+        fds.extend(self.quic_pool.listener_fds()?);
+        Ok(fds)
+    }
+
+    /// The configuration that a worker process serves.
+    pub fn worker_config(&self) -> super::ipc::WorkerConfig {
+        super::ipc::WorkerConfig {
+            ports: self.ports.entries().cloned().collect(),
+            proxies: self.proxies.entries().cloned().collect(),
+            access_lists: self.access_lists.clone(),
+            certs: self
+                .certs
+                .iter()
+                .map(|cert| super::ipc::WorkerCert {
+                    kind: cert.kind,
+                    pem_chain: cert.pem_chain.clone(),
+                    pem_key: cert.pem_key.clone(),
+                })
+                .collect(),
+            app: self.config.clone(),
         }
     }
 

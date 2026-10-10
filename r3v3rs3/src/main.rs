@@ -201,8 +201,23 @@ async fn start(mut args: StartArgs) -> anyhow::Result<()> {
     let app_info = new_appinfo(&config_dir, &log_dir);
     let local = read_local_config(&config_dir).await?;
 
-    let (server, channels) = new_server(app_info.clone(), local, &config_dir).await?;
+    let (server, channels) = new_server(app_info.clone(), local.clone(), &config_dir).await?;
     r3v3rs3::cdn::fetch::spawn_refresh_task(channels.command.clone());
+    if local.worker_mode == r3v3rs3_api::app::WorkerMode::Workers {
+        let manifest = server.listener_manifest()?;
+        let supervisor = r3v3rs3::server::supervisor::run(
+            channels.event.subscribe(),
+            channels.command.clone(),
+            app_info.clone(),
+            read_local_config(&config_dir).await?,
+            manifest,
+        );
+        tokio::spawn(async move {
+            if let Err(err) = supervisor.await {
+                error!(%err, "the worker supervisor stopped");
+            }
+        });
+    }
     let server_task = tokio::spawn(server.start());
     let event_send = channels.event.clone();
 

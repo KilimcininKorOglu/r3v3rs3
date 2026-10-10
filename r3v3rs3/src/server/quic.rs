@@ -1,3 +1,4 @@
+use super::fdmanifest::{ListenerFd, ListenerProto};
 use crate::proxy::tls::CertResolver;
 use crate::proxy::{PortContext, PortContextEvent, PortContextKind};
 use futures::{Stream, StreamExt};
@@ -106,7 +107,7 @@ impl QuicListenerPool {
         ));
         let runtime = quinn::default_runtime()
             .ok_or_else(|| io::Error::other("quinn runtime not available"))?;
-        let socket = std::net::UdpSocket::from(fd);
+        let socket = std::net::UdpSocket::from(fd.try_clone()?);
         socket.set_nonblocking(true)?;
         let endpoint = quinn::Endpoint::new_with_abstract_socket(
             quinn::EndpointConfig::default(),
@@ -116,7 +117,8 @@ impl QuicListenerPool {
         )?;
         let addr = endpoint.local_addr()?;
         info!(%addr, "adopted a quic listener");
-        self.listeners.push(spawn_accept_loop(endpoint));
+        self.listeners
+            .push(spawn_accept_loop(endpoint, fd.try_clone()?));
         Ok(())
     }
 
@@ -126,6 +128,21 @@ impl QuicListenerPool {
             Some((index, incoming)) => Some((index, incoming)),
             _ => None,
         }
+    }
+
+    /// Duplicates of the file descriptors of the listening sockets.
+    pub fn listener_fds(&self) -> io::Result<Vec<ListenerFd>> {
+        self.listeners
+            .iter()
+            .map(|listener| {
+                let fd = listener.fd.try_clone()?;
+                Ok(ListenerFd::new(
+                    ListenerProto::Quic,
+                    listener.local_addr,
+                    fd,
+                ))
+            })
+            .collect()
     }
 }
 
@@ -142,7 +159,7 @@ fn open_listener(
         QuicServerConfig::try_from(tls_config.clone()).unwrap(),
     ));
     match create_quic_endpoint(bind, server_config) {
-        Ok(sock) => (Some(spawn_accept_loop(sock)), SocketState::Listening),
+        Ok((sock, fd)) => (Some(spawn_accept_loop(sock, fd)), SocketState::Listening),
         Err(err) => {
             let _enter = span.enter();
             error!(%bind, %err, "failed to listen on quic port");
@@ -161,7 +178,7 @@ fn socket_state_of(err: &io::Error) -> SocketState {
 }
 
 /// Accepts the connections of the endpoint into a channel until the caller closes the listener.
-fn spawn_accept_loop(sock: quinn::Endpoint) -> QuicListenerStream {
+fn spawn_accept_loop(sock: quinn::Endpoint, fd: OwnedFd) -> QuicListenerStream {
     let local_addr = sock.local_addr().unwrap();
     let (send, recv) = tokio::sync::mpsc::channel(1);
     let (close_send, mut close_recv) = tokio::sync::mpsc::channel::<()>(1);
@@ -189,13 +206,14 @@ fn spawn_accept_loop(sock: quinn::Endpoint) -> QuicListenerStream {
         inner: recv,
         close: close_send,
         closed: closed_recv,
+        fd,
     }
 }
 
 fn create_quic_endpoint(
     addr: SocketAddr,
     server_config: quinn::ServerConfig,
-) -> io::Result<quinn::Endpoint> {
+) -> io::Result<(quinn::Endpoint, OwnedFd)> {
     let socket = socket2::Socket::new(
         socket2::Domain::for_address(addr),
         socket2::Type::DGRAM,
@@ -207,14 +225,16 @@ fn create_quic_endpoint(
     socket.set_reuse_address(true)?;
     socket.set_nonblocking(true)?;
     socket.bind(&addr.into())?;
+    let fd = socket.try_clone()?.into();
     let runtime =
         quinn::default_runtime().ok_or_else(|| io::Error::other("quinn runtime not available"))?;
-    quinn::Endpoint::new_with_abstract_socket(
+    let endpoint = quinn::Endpoint::new_with_abstract_socket(
         quinn::EndpointConfig::default(),
         Some(server_config),
         runtime.wrap_udp_socket(socket.into())?,
         runtime,
-    )
+    )?;
+    Ok((endpoint, fd))
 }
 
 #[derive(Debug)]
@@ -224,6 +244,8 @@ struct QuicListenerStream {
     inner: Receiver<Incoming>,
     close: Sender<()>,
     closed: Receiver<()>,
+    /// A duplicate of the file descriptor of the endpoint's UDP socket.
+    fd: OwnedFd,
 }
 
 impl Stream for QuicListenerStream {
