@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5] - 2026-10-10
+
+### Added
+- Prometheus metrics at `GET /api/metrics`: proxied HTTP and HTTP/3 requests, upstream errors, cache hits and misses, and open connections, authorized by an admin session or an MCP Bearer token.
+- The client IP resolution reads the RFC 7239 `Forwarded` header, including quoted IPv6 addresses with a port.
+- Statically linked musl binaries for x86_64 and aarch64, and `install.sh` picks the musl build on a musl system and falls back to the glibc build.
+
+### Changed
+- The HTTP/2 and HTTP/3 flood limits are configurable: the `[http2]` and `[http3]` config sections hold the defaults, a port can override them with its own options, and the WebUI forms expose both.
+- The TLS crypto provider is aws-lc-rs, so a TLS handshake negotiates the post-quantum X25519MLKEM768 hybrid.
+- The version examples of the tutorials name 1.6.5.
+- The docs document the limits, the metrics endpoint and the Docker upgrade behavior.
+
 ## [1.6.0] - 2026-10-10
 
 ### Added
