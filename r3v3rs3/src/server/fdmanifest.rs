@@ -32,6 +32,12 @@ impl ListenerFd {
         let fd = unsafe { BorrowedFd::borrow_raw(self.fd.as_raw_fd()) }.try_clone_to_owned()?;
         Ok(Self::new(self.proto, self.addr, fd))
     }
+
+    /// The raw descriptor that a handover sends to the other process.
+    pub fn raw_fd(&self) -> std::os::fd::RawFd {
+        use std::os::fd::AsRawFd;
+        self.fd.as_raw_fd()
+    }
 }
 
 #[cfg(test)]

@@ -186,6 +186,29 @@ impl ServerState {
         .await
     }
 
+    /// A master that takes the listeners of the process before it over, after an upgrade.
+    pub async fn new_inheriting(
+        storage: Arc<dyn Storage>,
+        audit_store: Arc<dyn AuditStore>,
+        config_dir: &Path,
+        command_sender: mpsc::Sender<ServerCommand>,
+        callback_sender: mpsc::Sender<RpcCallback>,
+        br_sender: broadcast::Sender<ServerEvent>,
+        listeners: Vec<super::fdmanifest::ListenerFd>,
+    ) -> Self {
+        Self::build(
+            ServerRole::Master,
+            storage,
+            audit_store,
+            config_dir,
+            command_sender,
+            callback_sender,
+            br_sender,
+            listeners,
+        )
+        .await
+    }
+
     /// A worker process serves the listeners that the master hands over. It runs no platform, no
     /// discovery, no ACME orders and no leader tasks; the master owns all of them.
     pub async fn new_worker(

@@ -29,6 +29,7 @@ mod state;
 pub mod supervisor;
 mod tcp;
 mod udp;
+pub mod upgrade;
 pub mod worker;
 
 pub struct Server {
@@ -96,6 +97,47 @@ impl Server {
             self.event_recv,
         )
         .await
+    }
+
+    /// A master that inherits the listeners of the process before it, after an upgrade.
+    pub async fn new_shared_inheriting(
+        app_info: AppInfo,
+        storage: Arc<dyn Storage>,
+        listeners: Vec<fdmanifest::ListenerFd>,
+    ) -> (Self, ServerChannels) {
+        let (command_send, command_recv) = mpsc::channel(1);
+        let (callback_send, callback_recv) = mpsc::channel(16);
+        let (event_send, _) = broadcast::channel(16);
+        // A cluster keeps the audit log in its store, and a single server in its log database.
+        let audit_store = storage.clone().audit_store().unwrap_or_else(|| {
+            Arc::new(crate::audit::SqliteAuditStore::new(
+                app_info.log_path.join("log.db"),
+            )) as Arc<dyn AuditStore>
+        });
+        let server_state = state::ServerState::new_inheriting(
+            storage,
+            audit_store,
+            &app_info.config_path,
+            command_send.clone(),
+            callback_send,
+            event_send.clone(),
+            listeners,
+        )
+        .await;
+        let accounts = server_state.account_directory();
+        let server = Self {
+            app_info,
+            server_state,
+            command_recv,
+            event_recv: event_send.subscribe(),
+        };
+        let channels = ServerChannels {
+            command: command_send,
+            callback: callback_recv,
+            event: event_send,
+            accounts,
+        };
+        (server, channels)
     }
 
     /// A worker server of a master process. It serves the listeners that the master hands over

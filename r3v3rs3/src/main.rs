@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use anyhow::Context as _;
 use clap::Parser;
 use directories::ProjectDirs;
 use r3v3rs3::agent::client::{AgentClient, AgentTiming};
@@ -29,9 +30,10 @@ use tracing_subscriber::prelude::*;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = r3v3rs3::args::Cli::parse();
+    let exe_args: Vec<String> = std::env::args().skip(1).collect();
 
     match args.command {
-        Command::Start(args) => start(args).await?,
+        Command::Start(args) => start(args, exe_args).await?,
         Command::AddUser(args) => add_user(args).await?,
         Command::Cluster(args) => cluster(args).await?,
         Command::Agent(args) => agent(args).await?,
@@ -180,17 +182,27 @@ async fn new_server(
     app_info: AppInfo,
     local: AppConfig,
     config_dir: &Path,
+    listeners: Vec<r3v3rs3::server::fdmanifest::ListenerFd>,
 ) -> anyhow::Result<(Server, ServerChannels)> {
     if !local.cluster.enabled {
-        return Ok(Server::new(app_info, FileStorage::new(config_dir)).await);
+        return Ok(Server::new_shared_inheriting(
+            app_info,
+            Arc::new(FileStorage::new(config_dir)),
+            listeners,
+        )
+        .await);
     }
     let storage = Arc::new(KvStorage::open(local).await?);
-    let (server, channels) = Server::new_shared(app_info, storage.clone()).await;
+    let (server, channels) = if listeners.is_empty() {
+        Server::new_shared(app_info, storage.clone()).await
+    } else {
+        Server::new_shared_inheriting(app_info, storage.clone(), listeners).await
+    };
     r3v3rs3::cluster::spawn_tasks(storage, channels.command.clone());
     Ok((server, channels))
 }
 
-async fn start(mut args: StartArgs) -> anyhow::Result<()> {
+async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()> {
     let log_dir = get_log_dir(args.log_dir.take())?;
     fs::create_dir_all(&log_dir)?;
     let _guards = init_logging(&mut args, &log_dir).await?;
@@ -201,7 +213,22 @@ async fn start(mut args: StartArgs) -> anyhow::Result<()> {
     let app_info = new_appinfo(&config_dir, &log_dir);
     let local = read_local_config(&config_dir).await?;
 
-    let (server, channels) = new_server(app_info.clone(), local.clone(), &config_dir).await?;
+    // After a SIGUSR2 the new process inherits the listeners of the previous one.
+    let listeners = match std::env::var("R3V3RS3_UPGRADE_IPC_FD") {
+        Ok(fd) => {
+            let fd: i32 = fd.parse()?;
+            let listeners = r3v3rs3::server::upgrade::child_handover(fd).await?;
+            info!(
+                listeners = listeners.len(),
+                "inherited the listeners of the previous process"
+            );
+            listeners
+        }
+        Err(_) => Vec::new(),
+    };
+
+    let (server, channels) =
+        new_server(app_info.clone(), local.clone(), &config_dir, listeners).await?;
     r3v3rs3::cdn::fetch::spawn_refresh_task(channels.command.clone());
     if local.worker_mode == r3v3rs3_api::app::WorkerMode::Workers {
         let manifest = server.listener_manifest()?;
@@ -218,10 +245,15 @@ async fn start(mut args: StartArgs) -> anyhow::Result<()> {
             }
         });
     }
+    let manifest = if std::env::var_os("R3V3RS3_UPGRADE_IPC_FD").is_none() {
+        Some(server.listener_manifest()?)
+    } else {
+        None
+    };
     let server_task = tokio::spawn(server.start());
     let event_send = channels.event.clone();
 
-    serve_admin(app_info, &args, channels).await;
+    serve_admin(app_info, &args, channels, exe_args, manifest).await?;
 
     let _ = event_send.send(r3v3rs3_api::event::ServerEvent::Shutdown);
     server_task.await??;
@@ -229,10 +261,18 @@ async fn start(mut args: StartArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Runs the admin API until it fails or the process gets SIGINT. With `--no-webui` it waits for
-/// the signal only.
-async fn serve_admin(app_info: AppInfo, args: &StartArgs, channels: ServerChannels) {
+/// Runs the admin API until it fails or the process gets SIGINT, or hands the listeners to a
+/// new process on SIGUSR2. With `--no-webui` it waits for a signal only.
+async fn serve_admin(
+    app_info: AppInfo,
+    args: &StartArgs,
+    channels: ServerChannels,
+    exe_args: Vec<String>,
+    manifest: Option<Vec<r3v3rs3::server::fdmanifest::ListenerFd>>,
+) -> anyhow::Result<()> {
     let webui_enabled = !args.no_webui;
+    let mut upgrade = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined2())
+        .context("failed to install the SIGUSR2 handler")?;
     tokio::select! {
         r = r3v3rs3::admin::start_admin(app_info, args.webui, channels.command, channels.callback, channels.event, channels.accounts), if webui_enabled => {
             if let Err(err) = r {
@@ -242,7 +282,23 @@ async fn serve_admin(app_info: AppInfo, args: &StartArgs, channels: ServerChanne
         _ =  tokio::signal::ctrl_c() => {
             info!("received ctrl-c signal");
         }
+        _ = upgrade.recv() => {
+            info!("received the upgrade signal");
+            match manifest {
+                Some(manifest) => {
+                    if let Err(err) = r3v3rs3::server::upgrade::hand_over(&exe_args, manifest).await {
+                        error!(%err, "the upgrade failed, this process keeps serving");
+                    }
+                }
+                None => {
+                    // This process already inherited its listeners, so an upgrade at the same
+                    // address would fight the process before it.
+                    error!("this process started from an upgrade, so it does not upgrade again");
+                }
+            }
+        }
     };
+    Ok(())
 }
 
 /// Writes the account to the store of a cluster node, or to the config directory of every other
