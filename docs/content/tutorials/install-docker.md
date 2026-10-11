@@ -138,7 +138,7 @@ $ docker compose pull
 $ docker compose up -d
 ```
 
-The volumes keep the configuration and the accounts, so no account is created again. Pin a version with the tag, for example `:v1.6.11`, when you upgrade several hosts in steps.
+The volumes keep the configuration and the accounts, so no account is created again. Pin a version with the tag, for example `:v1.6.12`, when you upgrade several hosts in steps.
 
 The upgrade replaces the container, so the open connections close and the clients reconnect. The SIGUSR2 zero-downtime upgrade does not apply in Docker, because the handover needs the old and the new binary in one installation. To upgrade without dropped connections, run two r3v3rs3 containers behind a load balancer and roll them one at a time.
 
