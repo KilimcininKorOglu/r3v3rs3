@@ -65,39 +65,7 @@ fn shell() -> Html {
             || {}
         });
     }
-    {
-        let navigator = navigator.clone();
-        let route = route.clone();
-        let auth = auth.clone();
-        let set_session = set_session.clone();
-        use_effect_with((auth.clone(), route), move |(auth, route)| {
-            if **auth == Auth::SignedOut
-                && route.as_ref() != Some(&pages::Route::Login)
-                && let Some(navigator) = navigator.as_ref()
-            {
-                // A sign-in that just finished has changed the session behind this stale
-                // SignedOut state, so the redirect waits for a fresh answer first.
-                let navigator = navigator.clone();
-                let route = route.clone();
-                let auth = auth.clone();
-                let set_session = set_session.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    match auth::get_session().await {
-                        Some(info) => {
-                            set_session.set(SessionStore { info: Some(info) });
-                            auth.set(Auth::SignedIn);
-                        }
-                        None => {
-                            navigator
-                                .replace_with_query(&pages::Route::Login, &LoginQuery::new(route))
-                                .ok();
-                        }
-                    }
-                });
-            }
-            || {}
-        });
-    }
+    use_signed_out_redirect(&auth, &set_session, &navigator, &route);
     // No page renders until the session check is over, so the target page of a
     // signed-out client never flashes without a session.
     if *auth == Auth::Pending && route.as_ref() != Some(&pages::Route::Login) {
@@ -121,4 +89,45 @@ fn shell() -> Html {
 fn main() {
     set_panic_hook();
     yew::Renderer::<App>::new().render();
+}
+
+/// Sends a client that the session store says is signed out to the sign-in page. A sign-in
+/// that just finished has changed the session behind the stale state, so the redirect waits
+/// for a fresh answer first and trusts a new session.
+#[hook]
+fn use_signed_out_redirect(
+    auth: &UseStateHandle<Auth>,
+    set_session: &Dispatch<SessionStore>,
+    navigator: &Option<Navigator>,
+    route: &Option<pages::Route>,
+) {
+    let navigator = navigator.clone();
+    let route = route.clone();
+    let auth = auth.clone();
+    let set_session = set_session.clone();
+    use_effect_with((auth.clone(), route), move |(auth, route)| {
+        if **auth == Auth::SignedOut
+            && route.as_ref() != Some(&pages::Route::Login)
+            && let Some(navigator) = navigator.as_ref()
+        {
+            let navigator = navigator.clone();
+            let route = route.clone();
+            let auth = auth.clone();
+            let set_session = set_session.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match auth::get_session().await {
+                    Some(info) => {
+                        set_session.set(SessionStore { info: Some(info) });
+                        auth.set(Auth::SignedIn);
+                    }
+                    None => {
+                        navigator
+                            .replace_with_query(&pages::Route::Login, &LoginQuery::new(route))
+                            .ok();
+                    }
+                }
+            });
+        }
+        || {}
+    });
 }
