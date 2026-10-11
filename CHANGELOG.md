@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.8] - 2026-10-11
+
+### Fixed
+- The zero-downtime upgrade works again: the handover passes the descriptors before the handshake frame, so a read no longer drops them, a failed handover keeps the old process serving, and the server tells systemd `READY=1` and hands the main process over with `MAINPID`, which `install.sh` now writes as `Type=notify` with a reload that upgrades in place.
+- The sign-in page opens without flashing the target page first.
+
+### Added
+- A fresh `install.sh` run creates the `admin` account as its last step, with a `--password` option or a generated random password that the summary prints once, and opens the WebUI port in the local firewall when the address binds beyond loopback, through firewalld, ufw or an iptables accept rule with persistence.
+
 ## [1.6.7] - 2026-10-11
 
 ### Added
