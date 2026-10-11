@@ -55,7 +55,8 @@ async fn set_config_persists_to_storage() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn set_config_keeps_the_exec_programs_of_the_file() -> anyhow::Result<()> {
+async fn set_config_carries_the_exec_programs_and_keeps_the_cluster_of_the_file()
+-> anyhow::Result<()> {
     let file_config = AppConfig {
         acme_exec: AcmeExecConfig {
             programs: vec!["/usr/local/bin/r3v3rs3-dns-hook".into()],
@@ -65,9 +66,11 @@ async fn set_config_keeps_the_exec_programs_of_the_file() -> anyhow::Result<()> 
     };
     let storage = TestStorage::builder().config(file_config.clone()).build();
 
-    // An update through the admin API cannot add a program.
+    // The exec allowlist travels with the settings; the cluster needs a restart and the
+    // update cannot change it.
     let mut config = AppConfig::default();
     config.acme_exec.programs = vec!["/bin/sh".into()];
+    config.acme_exec.timeout = Duration::from_secs(9);
     config.background_task_interval = Duration::from_secs(600);
 
     with_server(storage.clone(), |mut channels| async move {
@@ -91,7 +94,13 @@ async fn set_config_keeps_the_exec_programs_of_the_file() -> anyhow::Result<()> 
     .await?;
 
     let saved = storage.load_app_config().await;
-    assert_eq!(saved.acme_exec, file_config.acme_exec);
+    assert_eq!(
+        saved.acme_exec,
+        AcmeExecConfig {
+            programs: vec!["/bin/sh".into()],
+            timeout: Duration::from_secs(9),
+        }
+    );
     assert_eq!(saved.background_task_interval, Duration::from_secs(600));
     Ok(())
 }
