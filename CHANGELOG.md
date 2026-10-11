@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.14] - 2026-10-11
+
+### Changed
+- The WebUI reads the router hooks of every page without `unwrap`, so a component that renders outside the router context fails gracefully instead of panicking on the first render.
+
 ## [1.6.13] - 2026-10-11
 
 ### Added
