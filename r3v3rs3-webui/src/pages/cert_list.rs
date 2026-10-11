@@ -660,7 +660,7 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator, can_edit: b
                 Err(_) => dialog::Icon::Error,
             };
             let text = locale.t("certs.acme_ordered");
-            dialog::message(locale, text.as_str(), icon).await;
+            dialog::message(locale, text, icon).await;
         });
     });
 
