@@ -196,6 +196,7 @@ fn app_info(config_dir: &Path, log_dir: &Path) -> AppInfo {
         rustc: "",
         config_path: config_dir.to_path_buf(),
         log_path: log_dir.to_path_buf(),
+        platform_enabled: false,
     }
 }
 

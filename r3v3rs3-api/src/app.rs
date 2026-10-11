@@ -213,7 +213,6 @@ impl AppConfig {
     pub fn keep_file_only(&mut self, current: &Self) {
         self.acme_exec.clone_from(&current.acme_exec);
         self.cluster.clone_from(&current.cluster);
-        self.platform.clone_from(&current.platform);
         self.mcp.clone_from(&current.mcp);
     }
 }
@@ -339,6 +338,9 @@ pub struct AppInfo {
     pub config_path: PathBuf,
     #[schema(value_type = String, example = "/home/r3v3rs3/.config/r3v3rs3")]
     pub log_path: PathBuf,
+    /// Whether the deployment platform serves the admin API of this server.
+    #[serde(default)]
+    pub platform_enabled: bool,
 }
 
 /// The answer of the server upgrade endpoint: the version that the next process starts.

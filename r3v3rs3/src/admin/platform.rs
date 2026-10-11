@@ -31,7 +31,12 @@ impl AppState {
         permission: Permission,
     ) -> Result<Arc<Platform>, AppError> {
         caller.authorize_platform(permission)?;
-        Ok(self.data.lock().await.platform.get()?.clone())
+        // The settings page opens and closes the platform while the server runs, so the
+        // handle comes from the server loop and not from the snapshot of the start.
+        let handle = self
+            .call_system(crate::server::rpc::auth::GetPlatform)
+            .await?;
+        Ok(handle.get()?.clone())
     }
 }
 

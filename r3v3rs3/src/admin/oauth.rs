@@ -47,7 +47,11 @@ pub async fn git_callback(
     State(state): State<AppState>,
     Query(query): Query<CallbackQuery>,
 ) -> Result<Response, AppError> {
-    let platform = state.data.lock().await.platform.get()?.clone();
+    let platform = state
+        .call_system(crate::server::rpc::auth::GetPlatform)
+        .await?
+        .get()?
+        .clone();
     let target = match finish(&platform, query).await {
         Ok(authorized) => {
             record(&state, &authorized).await;

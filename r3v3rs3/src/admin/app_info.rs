@@ -12,5 +12,12 @@ use r3v3rs3_api::app::AppInfo;
     responses((status = 200, description = "The server information.", body = AppInfo), ErrorResponses)
 )]
 pub async fn get(State(state): State<AppState>) -> Result<Json<AppInfo>, AppError> {
-    Ok(Json(state.data.lock().await.app_info.clone()))
+    let mut info = state.data.lock().await.app_info.clone();
+    // The platform opens and closes while the server runs, so the state comes from the
+    // server loop and not from the snapshot that the admin API read at its start.
+    let platform = state
+        .call_system(crate::server::rpc::auth::GetPlatform)
+        .await?;
+    info.platform_enabled = platform.get().is_ok();
+    Ok(Json(info))
 }

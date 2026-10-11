@@ -20,6 +20,7 @@ use r3v3rs3_api::{
     error::ErrorMessage,
     i18n::Locale,
     id::ShortId,
+    platform::PlatformConfig,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
@@ -95,6 +96,14 @@ struct Fields {
     http2_max_pending_accept_reset_streams: String,
     http3_max_concurrent_bidi_streams: String,
     http3_max_concurrent_uni_streams: String,
+    platform_enabled: bool,
+    platform_docker: String,
+    /// Comma-separated port names or ids.
+    platform_proxy_ports: String,
+    /// The settings of the platform that this form does not edit.
+    platform_acme: Option<ShortId>,
+    platform_agent_port: Option<u16>,
+    platform_agent_host: Option<String>,
 }
 
 impl Fields {
@@ -114,6 +123,7 @@ impl Fields {
         let consul = &config.discovery.consul;
         let etcd = &config.discovery.etcd;
         let webhook = config.notifications.webhook.as_ref();
+        let platform = &config.platform;
         Self {
             webhook_url: webhook.map(|w| w.url.clone()).unwrap_or_default(),
             webhook_token: String::new(),
@@ -167,6 +177,12 @@ impl Fields {
             http2_max_pending_accept_reset_streams: text("/http2/max_pending_accept_reset_streams"),
             http3_max_concurrent_bidi_streams: text("/http3/max_concurrent_bidi_streams"),
             http3_max_concurrent_uni_streams: text("/http3/max_concurrent_uni_streams"),
+            platform_enabled: platform.enabled,
+            platform_docker: platform.docker.clone(),
+            platform_proxy_ports: platform.proxy_ports.join(","),
+            platform_acme: platform.acme,
+            platform_agent_port: platform.agent_port,
+            platform_agent_host: platform.agent_host.clone(),
         }
     }
 }
@@ -274,6 +290,7 @@ pub fn settings() -> Html {
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.http3_max_concurrent_uni_streams_hint")}</p>
 
             { notifications_section(locale, &fields, &errors, &test_notice) }
+            { platform_section(locale, &fields, &errors) }
             { docker_section(locale, &fields, &errors, &client_certs) }
             { kubernetes_section(locale, &fields, &errors) }
             { consul_section(locale, &fields, &errors, &client_certs) }
@@ -435,6 +452,23 @@ fn etcd_section(
             { text_field(fields, errors, locale.t("settings.etcd_prefix"), "etcd_prefix", "r3v3rs3", |f| &mut f.etcd_prefix) }
             <p class={HINT_CLASS}>{locale.t("settings.etcd_prefix_hint")}</p>
             { client_cert_field(locale, fields, certs, "settings.etcd_client_cert", "settings.etcd_client_cert_hint", |f| &mut f.etcd_client_cert) }
+        </>
+    }
+}
+
+fn platform_section(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    html! {
+        <>
+            { section_title(locale.t("settings.platform_title")) }
+            { checkbox_field(fields, locale.t("settings.platform_enabled"), |f| &mut f.platform_enabled) }
+            <p class={HINT_CLASS}>{locale.t("settings.platform_enabled_hint")}</p>
+            { text_field(fields, errors, locale.t("settings.platform_docker"), "platform_docker", "unix:///var/run/docker.sock", |f| &mut f.platform_docker) }
+            { text_field(fields, errors, locale.t("settings.platform_proxy_ports"), "platform_proxy_ports", "http,https", |f| &mut f.platform_proxy_ports) }
+            <p class={HINT_CLASS}>{locale.t("settings.platform_proxy_ports_hint")}</p>
         </>
     }
 }
@@ -909,11 +943,18 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 consul,
                 etcd,
             },
-            // The server keeps the programs, the cluster, the platform, the worker mode and the
-            // MCP settings of config.toml.
+            // The server keeps the programs, the cluster, the worker mode and the MCP settings
+            // of config.toml.
             acme_exec: Default::default(),
             cluster: Default::default(),
-            platform: Default::default(),
+            platform: PlatformConfig {
+                enabled: fields.platform_enabled,
+                docker: fields.platform_docker.trim().to_string(),
+                proxy_ports: comma_list(&fields.platform_proxy_ports),
+                acme: fields.platform_acme,
+                agent_port: fields.platform_agent_port,
+                agent_host: fields.platform_agent_host.clone(),
+            },
             worker_mode: Default::default(),
             mcp: Default::default(),
             http2,

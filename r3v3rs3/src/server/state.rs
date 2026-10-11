@@ -42,6 +42,7 @@ use rand::seq::IndexedRandom;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::path::PathBuf;
 use std::str;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -95,6 +96,8 @@ pub struct ServerState {
     /// The keys of the certificate events that the webhook got.
     sent_notifications: HashSet<String>,
     platform: PlatformHandle,
+    /// The directory that holds the config files, the platform database and its key.
+    config_dir: PathBuf,
     /// What the supervised worker serves, as its supervisor reports it.
     worker_status: Option<WorkerEntry>,
 }
@@ -330,6 +333,7 @@ impl ServerState {
             notifier: Notifier::spawn(),
             sent_notifications,
             platform,
+            config_dir: config_dir.to_path_buf(),
             worker_status: None,
         };
         this.initialize(role, listeners).await;
@@ -1539,6 +1543,7 @@ impl ServerState {
         // The ports carry their effective HTTP/2 and HTTP/3 limits from the build, so a limit
         // change rebuilds every port context.
         let limits_changed = self.config.http2 != config.http2 || self.config.http3 != config.http3;
+        let platform_changed = self.config.platform != config.platform;
         self.config.clone_from(&config);
         if self
             .registries
@@ -1550,10 +1555,30 @@ impl ServerState {
         if limits_changed {
             self.reload_ports().await;
         }
+        if platform_changed {
+            self.restart_platform().await;
+        }
         self.sessions.set_config(config.admin);
         let _ = self.br_sender.send(ServerEvent::AppConfigUpdated {
             config: Box::new(config.masked()),
         });
+    }
+
+    /// Opens or closes the platform for the config that `apply_config` keeps, so the
+    /// settings page turns the deployment platform on and off while the server runs.
+    async fn restart_platform(&mut self) {
+        self.platform = PlatformHandle::Disabled;
+        if !self.config.platform.enabled || self.config.cluster.enabled {
+            return;
+        }
+        self.platform = PlatformHandle::start(
+            &self.config,
+            &self.config_dir,
+            self.command_sender.clone(),
+            &self.br_sender,
+            self.audit.clone(),
+        )
+        .await;
     }
 
     /// A new id that no ACME entry, port, proxy or access list uses. The audit log entry of the

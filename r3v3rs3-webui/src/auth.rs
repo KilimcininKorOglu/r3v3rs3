@@ -46,7 +46,11 @@ pub fn use_ensure_auth() {
         match get_session().await {
             Some(info) => {
                 if session.get().info.as_ref() != Some(&info) {
-                    session.set(SessionStore { info: Some(info) });
+                    let platform_enabled = get_platform_enabled().await;
+                    session.set(SessionStore {
+                        info: Some(info),
+                        platform_enabled,
+                    });
                 }
             }
             None => {
@@ -57,6 +61,24 @@ pub fn use_ensure_auth() {
             }
         }
     });
+}
+
+/// Whether the deployment platform serves. The sidebar reads it with the session.
+pub async fn get_platform_enabled() -> bool {
+    let Ok(res) = Request::get(&format!("{API_ENDPOINT}/app_info"))
+        .send()
+        .await
+    else {
+        return false;
+    };
+    if res.status() != 200 {
+        return false;
+    }
+    res.json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|value| value.get("platform_enabled").and_then(|v| v.as_bool()))
+        .unwrap_or(false)
 }
 
 pub async fn test_token() -> bool {

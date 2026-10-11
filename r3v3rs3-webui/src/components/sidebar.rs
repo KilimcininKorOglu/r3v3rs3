@@ -114,8 +114,8 @@ impl Access {
         match self {
             Access::All => true,
             Access::AdminOnly => session.is_admin(),
-            Access::Platform => session.can_read_platform(),
-            Access::PlatformEdit => session.can_read_platform() && session.can_edit(),
+            Access::Platform => session.can_see_platform(),
+            Access::PlatformEdit => session.can_see_platform() && session.can_edit(),
         }
     }
 }

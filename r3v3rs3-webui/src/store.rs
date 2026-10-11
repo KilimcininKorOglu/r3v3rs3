@@ -53,11 +53,19 @@ pub struct ClusterStore {
 #[derive(Default, Clone, PartialEq, Store)]
 pub struct SessionStore {
     pub info: Option<SessionInfo>,
+    /// Whether the deployment platform serves on this server. The sidebar hides the platform
+    /// group while it is off.
+    pub platform_enabled: bool,
 }
 
 impl SessionStore {
     pub fn is_admin(&self) -> bool {
         self.info.as_ref().is_some_and(|info| info.role.is_admin())
+    }
+
+    /// Whether the account sees the platform group: the platform serves and the role reads it.
+    pub fn can_see_platform(&self) -> bool {
+        self.platform_enabled && self.can_read_platform()
     }
 
     /// Whether the account changes the proxies that it sees.
@@ -97,6 +105,7 @@ mod tests {
                 proxies,
                 cert_expiry_warning: Default::default(),
             }),
+            platform_enabled: true,
         };
         let restricted = Some(BTreeSet::from(["web".parse().unwrap()]));
         let cases = [

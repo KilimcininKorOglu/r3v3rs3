@@ -46,7 +46,11 @@ pub async fn app_hook(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, AppError> {
-    let platform = state.data.lock().await.platform.get()?.clone();
+    let platform = state
+        .call_system(crate::server::rpc::auth::GetPlatform)
+        .await?
+        .get()?
+        .clone();
     let (app, provider, response) = platform
         .hook(id, &headers, &body)
         .await
