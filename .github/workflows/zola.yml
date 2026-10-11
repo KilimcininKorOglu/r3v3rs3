@@ -62,3 +62,18 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+      # IndexNow tells Bing (which powers ChatGPT web search) that the docs changed. The key file
+      # sits at the site root, so Bing verifies ownership by fetching it. The key must equal the
+      # name and the content of docs/static/<key>.txt, so a key change touches three places:
+      # the secret, the file name and the file content.
+      - name: Submit the docs to IndexNow
+        env:
+          KEY: ${{ secrets.INDEXNOW_KEY }}
+        run: |
+          code=$(curl -sS -o /tmp/indexnow.out -w '%{http_code}' \
+            --data-urlencode "url=https://r3v3rs3.keremgok.tr/" \
+            --data-urlencode "key=${KEY}" \
+            --data-urlencode "keyLocation=https://r3v3rs3.keremgok.tr/${KEY}.txt" \
+            -G "https://api.indexnow.org/indexnow")
+          echo "IndexNow answered ${code}: $(cat /tmp/indexnow.out)"
+          [ "$code" = 200 ] || [ "$code" = 202 ]
