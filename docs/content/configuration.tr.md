@@ -4,6 +4,12 @@ description = "Yapılandırma"
 weight = 0
 +++
 
+# Config Dosyası
+
+Config dizinindeki `config.toml` sunucunun ayarlarını taşır. Dosya yoksa sunucu, başlangıçta bütün ayarları varsayılan değerleriyle dosyaya yazar; böylece yeni bir kurulum sunucunun neyi okuduğunu görür. Var olan bir dosyanın üzerine asla yazılmaz.
+
+Panelin ayarlar sayfası bütün bölümleri sunucu çalışırken yönetir ve bir kayıt restart olmadan uygulanır. İstisnalar `[cluster]` bölümü ve `worker_mode`'dur: bunlar process'in kendisini değiştirir, yalnız `config.toml` belirler ve bir değişiklik restart ile uygulanır.
+
 # Portlar
 
 Proxy eklemeden önce dinlenecek bir port bağlamanız gerekir. Bunu "Portlar" bölümünden yapabilirsiniz.
@@ -963,7 +969,7 @@ Exec sağlayıcısı her TXT değeri için r3v3rs3 host'unda bir program çalı�
 - Bir `add` çağrısı başarısız olursa r3v3rs3, adın eklediği değerleri ve başarısız değer için `remove` çalıştırır.
 - Timeout dolunca r3v3rs3 programı durdurur ve çağrı başarısız olur.
 
-Program, `config.toml` dosyasının `[acme_exec]` bölümünde olmalıdır:
+Program, exec DNS provider'ının izin listesinde olmalıdır. Ayarlar sayfası bu listeyi **Exec DNS Provider** kartında sunucu çalışırken tutar, `config.toml` aynı bölümü taşır:
 
 ```toml
 [acme_exec]
@@ -971,7 +977,6 @@ programs = ["/usr/local/bin/r3v3rs3-dns-hook"]
 timeout = "30s"
 ```
 
-- Bu bölümü yalnız dosya belirler. Admin API ve WebUI bu bölümü değiştiremez. Bölümü düzenledikten sonra r3v3rs3'ü yeniden başlatın.
 - Sağlayıcının programı ve `programs` listesindeki her giriş mutlak yol olmalıdır. r3v3rs3 sembolik link'leri çözer ve çözülen yolları karşılaştırır.
 - r3v3rs3 programı ACME girişini eklediğinizde ve her çalıştırmadan önce kontrol eder.
 - `timeout`, tek bir çağrının en uzun çalışma süresidir. Varsayılan değer `30s`.
@@ -1071,7 +1076,7 @@ Varsayılanlarda yapılan bir değişiklik her portu yeniden kurar, yani restart
 
 Admin API, araçlarını `/api/mcp` üzerinde Model Context Protocol ile yayınlar. AI client'lar böylece portları, proxy'leri ve sertifikaları inceleyebilir ve proxy'leri, admin API ile aynı yetki kontrolleri ve aynı audit log üzerinden değiştirebilir.
 
-MCP sunucusu varsayılan olarak kapalıdır. `config.toml` içinde açın ve giriş yapmasına izin verilecek client'ları kaydedin:
+MCP sunucusu varsayılan olarak kapalıdır. Panelin ayarlar sayfası onu sunucu çalışırken açar ve giriş yapmasına izin verilecek client'ları tutar. `config.toml` aynı bölümü taşır:
 
 ```toml
 [mcp]

@@ -4,6 +4,12 @@ description = "Configuration"
 weight = 0
 +++
 
+# Config File
+
+`config.toml` in the config directory holds the settings of the server. When the file is missing, the server writes it on its start with every setting and its default value, so a fresh install shows what the server reads. A file that exists is never overwritten.
+
+The settings page of the panel manages every section while the server runs, and a save applies it without a restart. The exceptions are the `[cluster]` section and the `worker_mode`, which change the process itself: only `config.toml` sets them, and a restart applies a change.
+
 # Ports
 
 Before configuring a proxy, you need to bind a port to listen on. You can do this in the "Ports" section.
@@ -963,7 +969,7 @@ The exec provider runs a program on the r3v3rs3 host for each TXT value:
 - When an `add` call fails, r3v3rs3 runs `remove` for the values of the name that it added and for the failed value.
 - r3v3rs3 stops the program when the timeout expires, and the call fails.
 
-The program must be in the `[acme_exec]` section of `config.toml`:
+The program must be in the allowlist of the exec DNS provider. The settings page holds it in the **Exec DNS Provider** card while the server runs, and `config.toml` carries the same section:
 
 ```toml
 [acme_exec]
@@ -971,7 +977,6 @@ programs = ["/usr/local/bin/r3v3rs3-dns-hook"]
 timeout = "30s"
 ```
 
-- Only the file sets this section. The admin API and the WebUI cannot change it. Restart r3v3rs3 after you edit it.
 - The program of the provider and each entry of `programs` must be absolute paths. r3v3rs3 resolves symbolic links and compares the resolved paths.
 - r3v3rs3 checks the program when you add the ACME entry and before each run.
 - `timeout` is the longest run time of one call. The default is `30s`.
@@ -1071,7 +1076,7 @@ An admin session cookie or a valid MCP Bearer token authorizes the request, so a
 
 The admin API exposes its tools over the Model Context Protocol at `/api/mcp`. AI clients can then inspect the ports, the proxies and the certificates, and change the proxies, with the same permission checks and the same audit log as the admin API.
 
-The MCP server is off by default. Turn it on in `config.toml` and register the clients that may sign in:
+The MCP server is off by default. The settings page of the panel turns it on while the server runs and holds the clients that may sign in. `config.toml` carries the same section:
 
 ```toml
 [mcp]
