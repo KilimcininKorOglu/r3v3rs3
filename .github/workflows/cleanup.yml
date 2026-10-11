@@ -1,5 +1,9 @@
 name: Clean up build leftovers
 
+# The single cleanup workflow of the repository: untagged container images, old workflow
+# runs, idle caches, the caches of dead branches and closed pull requests, and stale
+# artifacts. One run a day keeps the storage quota free.
+
 on:
   schedule:
     # Daily, at an off-peak minute so the run does not queue behind every other repository.
@@ -15,6 +19,8 @@ permissions:
   actions: write
   contents: read
   packages: write
+  # The dead-ref cache step reads the state of pull requests.
+  pull-requests: read
 
 concurrency:
   group: cleanup
@@ -26,9 +32,11 @@ env:
   # A GitHub Actions cache entry that was not read for this many days is deleted. GitHub evicts an
   # unread entry after 7 days on its own, so this only removes what the eviction missed.
   CACHE_IDLE_DAYS: 14
-  # An artifact older than this many days is deleted. Both upload steps set retention-days: 1, so
-  # this only removes an artifact that outlived its own retention.
-  ARTIFACT_RETENTION_DAYS: 2
+  # An artifact older than this many days is deleted, and an expired artifact is deleted
+  # regardless of its age, because it still occupies the quota until it is removed. Both
+  # upload steps of the repository set retention-days: 1, so this only removes an artifact
+  # that outlived its own retention.
+  ARTIFACT_RETENTION_DAYS: 1
 
 jobs:
   images:
@@ -39,7 +47,7 @@ jobs:
       # working set. A child of a tagged image is never deleted, so a release tag and latest stay
       # complete.
       - name: Delete untagged images
-        uses: dataaxiom/ghcr-cleanup-action@v1.2.2
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:
           packages: r3v3rs3
           keep-n-untagged: 5
@@ -73,7 +81,7 @@ jobs:
           done < runs.txt
 
   caches:
-    name: Idle caches and stale artifacts
+    name: Idle caches and caches of dead refs
     runs-on: ubuntu-24.04
     steps:
       - name: Delete caches that were not read recently
@@ -95,6 +103,90 @@ jobs:
             fi
           done < caches.txt
 
+      - name: Delete caches of dead branches and closed pull requests
+        # A cache written for a ref nobody builds again occupies the 10 GB limit until a
+        # build of that ref evicts it, and that build never comes. A live branch and an open
+        # pull request keep their caches, so the next CI run still starts warm.
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            const caches = await github.paginate(
+              github.rest.actions.getActionsCacheList,
+              { owner, repo, per_page: 100 }
+            );
+
+            const branchRefs = new Set(
+              (await github.paginate(
+                github.rest.repos.listBranches,
+                { owner, repo, per_page: 100 }
+              )).map((branch) => `refs/heads/${branch.name}`)
+            );
+
+            async function pullIsOpen(number) {
+              try {
+                const { data } = await github.rest.pulls.get({
+                  owner, repo, pull_number: number,
+                });
+                return data.state === 'open';
+              } catch (err) {
+                // A deleted pull request cannot receive another build.
+                if (err.status === 404) return false;
+                throw err;
+              }
+            }
+
+            async function refIsLive(ref) {
+              const pull = ref.match(/^refs\/pull\/(\d+)\//);
+              if (pull) return pullIsOpen(Number(pull[1]));
+              if (ref.startsWith('refs/heads/')) return branchRefs.has(ref);
+              // A tag ref or a shape this step does not know: never guess, keep it.
+              return true;
+            }
+
+            // Cache the verdict per ref, because one ref carries many caches.
+            const verdicts = new Map();
+            let deleted = 0, freed = 0, kept = 0, failed = 0;
+
+            for (const entry of caches) {
+              if (!verdicts.has(entry.ref)) {
+                verdicts.set(entry.ref, await refIsLive(entry.ref));
+              }
+              if (verdicts.get(entry.ref)) { kept++; continue; }
+              try {
+                await github.rest.actions.deleteActionsCacheById({
+                  owner, repo, cache_id: entry.id,
+                });
+                deleted++;
+                freed += entry.size_in_bytes;
+              } catch (err) {
+                // A concurrent run may delete the same cache first. Report the
+                // count instead of failing the whole job.
+                failed++;
+                core.warning(`delete cache ${entry.id} (${entry.key} @ ${entry.ref}): ${err.message}`);
+              }
+            }
+
+            const mib = (freed / 1024 / 1024).toFixed(1);
+            core.info(`scanned=${caches.length} deleted=${deleted} kept=${kept} failed=${failed} freed=${mib} MiB`);
+            await core.summary
+              .addHeading('Cache cleanup')
+              .addTable([
+                [{ data: 'Metric', header: true }, { data: 'Value', header: true }],
+                ['Scanned', String(caches.length)],
+                ['Deleted', String(deleted)],
+                ['Kept', String(kept)],
+                ['Failed', String(failed)],
+                ['Freed', `${mib} MiB`],
+              ])
+              .write();
+
+  artifacts:
+    name: Stale artifacts
+    runs-on: ubuntu-24.04
+    steps:
       - name: Delete artifacts that outlived their retention
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -103,7 +195,7 @@ jobs:
           set -euo pipefail
           cutoff=$(date -u -d "-${ARTIFACT_RETENTION_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
           gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
-            --jq ".artifacts[] | select(.expired == false) | select(.created_at < \"${cutoff}\") | \"\(.id) \(.name)\"" \
+            --jq ".artifacts[] | select(.created_at < \"${cutoff}\" or .expired == true) | \"\(.id) \(.name)\"" \
             > artifacts.txt || true
           echo "Artifacts to delete: $(wc -l < artifacts.txt)"
           while read -r id name; do
