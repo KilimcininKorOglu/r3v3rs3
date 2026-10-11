@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-11
+
+### Added
+- "Order again" in the ACME tab of the certificates page, and `POST /api/acme/{id}/order`, order the certificates of an ACME entry at once without waiting for the renewal time or the one hour retry. The action is recorded as `request_acme` in the audit log.
+- The four tabs of the certificates page (server, client, root and ACME) appear as a submenu below Certificates in the sidebar.
+- The docs site publishes `llms-full.txt`, adds a `WebSite` JSON-LD document to the home pages, and submits itself to IndexNow after every deploy.
+
+### Changed
+- The README overview, the docs feature list and every product tagline now list the complete feature set, including the HTTP/2 and HTTP/3 flood limits, the Prometheus metrics endpoint, the MCP server, the worker process mode and the zero-downtime upgrade.
+
 ## [1.6.26] - 2026-10-11
 
 ### Added
