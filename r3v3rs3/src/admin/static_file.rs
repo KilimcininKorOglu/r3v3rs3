@@ -1,5 +1,6 @@
 use axum::{
     body::Bytes,
+    extract::{RawQuery, State},
     http::{
         HeaderMap, HeaderValue, StatusCode, Uri,
         header::{
@@ -7,14 +8,16 @@ use axum::{
             VARY,
         },
     },
-    response::IntoResponse,
+    response::{IntoResponse, Redirect, Response},
 };
+use axum_extra::extract::CookieJar;
 use flate2::read::GzDecoder;
 use fnv::FnvHasher;
 use include_dir::{Dir, include_dir};
+use percent_encoding::utf8_percent_encode;
 use std::{collections::HashMap, hash::Hasher, io::Read, path::Path, sync::LazyLock};
 
-use super::AppError;
+use super::{AppError, AppState};
 
 static STATIC_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/dist");
 
@@ -39,12 +42,28 @@ static ETAGS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     etags
 });
 
-pub async fn fallback(uri: Uri, req_headers: HeaderMap) -> Result<impl IntoResponse, AppError> {
+pub async fn fallback(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    RawQuery(query): RawQuery,
+    uri: Uri,
+    req_headers: HeaderMap,
+) -> Result<Response, AppError> {
     let path = uri.path();
     if path.starts_with("/api/") {
         return Err(AppError::NotFound);
     }
     let file_name = requested_file_name(path);
+    if is_webui_shell(path) && !is_signed_in(&state, &jar).await {
+        // The shell of a WebUI route reaches the browser only with a session, so a
+        // signed-out navigation never renders a page, not for a moment.
+        return Ok(Redirect::to(&login_target(path, query.as_deref())).into_response());
+    }
+    serve_file(file_name, &req_headers).await
+}
+
+/// Answers a file of the embedded WebUI bundle.
+async fn serve_file(file_name: &str, req_headers: &HeaderMap) -> Result<Response, AppError> {
     let file_path = Path::new("webui").join(format!("{file_name}.gz"));
 
     let Some(file) = STATIC_DIR.get_file(&file_path) else {
@@ -54,7 +73,7 @@ pub async fn fallback(uri: Uri, req_headers: HeaderMap) -> Result<impl IntoRespo
     let hash = ETAGS
         .get(file_path.to_string_lossy().as_ref())
         .ok_or(AppError::NotFound)?;
-    let gzip = accepts_gzip(&req_headers);
+    let gzip = accepts_gzip(req_headers);
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -69,8 +88,8 @@ pub async fn fallback(uri: Uri, req_headers: HeaderMap) -> Result<impl IntoRespo
 
     if let Some(etag) = validator(file_name, hash, gzip) {
         headers.insert(ETAG, header_value(&etag)?);
-        if matches_etag(&req_headers, &etag) {
-            return Ok((StatusCode::NOT_MODIFIED, headers, Bytes::new()));
+        if matches_etag(req_headers, &etag) {
+            return Ok((StatusCode::NOT_MODIFIED, headers, Bytes::new()).into_response());
         }
     }
 
@@ -87,7 +106,36 @@ pub async fn fallback(uri: Uri, req_headers: HeaderMap) -> Result<impl IntoRespo
     } else {
         Bytes::from(gunzip(file.contents())?)
     };
-    Ok((StatusCode::OK, headers, body))
+    Ok((StatusCode::OK, headers, body).into_response())
+}
+
+/// A WebUI route loads the SPA shell. The sign-in page is the only shell a signed-out
+/// client may load, and the hashed bundle files are not shells.
+fn is_webui_shell(path: &str) -> bool {
+    requested_file_name(path) == "index.html" && path != "/login"
+}
+
+/// Checks the session cookie the way the admin API does.
+async fn is_signed_in(state: &AppState, jar: &CookieJar) -> bool {
+    match jar.get("token").map(|cookie| cookie.value()) {
+        Some(token) => super::auth::session_caller(state, token).await.is_ok(),
+        None => false,
+    }
+}
+
+/// The sign-in target that returns the client to the page it asked for.
+fn login_target(path: &str, query: Option<&str>) -> String {
+    let target = match query {
+        Some(query) => format!("{path}?{query}"),
+        None => path.to_string(),
+    };
+    if target == "/" {
+        return "/login".to_string();
+    }
+    format!(
+        "/login?redirect={}",
+        utf8_percent_encode(&target, percent_encoding::NON_ALPHANUMERIC)
+    )
 }
 
 /// The ETag of a file that a browser revalidates. A hashed bundle file is immutable, so the
@@ -271,9 +319,28 @@ mod tests {
         assert!(!accepts_gzip(&HeaderMap::new()));
     }
 
-    #[tokio::test]
-    async fn api_paths_are_not_served() {
-        let uri: Uri = "/api/unknown".parse().unwrap();
-        assert!(fallback(uri, HeaderMap::new()).await.is_err());
+    #[test]
+    fn a_webui_route_is_a_shell_and_the_sign_in_page_is_not() {
+        for path in ["/", "/ports", "/proxies/abc", "/proxies/a.b/edit"] {
+            assert!(is_webui_shell(path), "{path}");
+        }
+        for path in [
+            "/login",
+            "/r3v3rs3-webui-f5ed843114223c55.js",
+            "/tailwind-cd802f743c089f72.css",
+            "/robots.txt",
+        ] {
+            assert!(!is_webui_shell(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn the_login_target_keeps_the_requested_page() {
+        assert_eq!(login_target("/", None), "/login");
+        assert_eq!(login_target("/ports", None), "/login?redirect=%2Fports");
+        assert_eq!(
+            login_target("/ports", Some("a=1")),
+            "/login?redirect=%2Fports%3Fa%3D1"
+        );
     }
 }

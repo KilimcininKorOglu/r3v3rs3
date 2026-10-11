@@ -56,7 +56,13 @@ fn shell() -> Html {
             wasm_bindgen_futures::spawn_local(async move {
                 match auth::get_session().await {
                     Some(info) => {
-                        set_session.set(SessionStore { info: Some(info) });
+                        // The sidebar hides the platform group while the platform is off,
+                        // so the app information travels with the session.
+                        let platform_enabled = auth::get_platform_enabled().await;
+                        set_session.set(SessionStore {
+                            info: Some(info),
+                            platform_enabled,
+                        });
                         auth.set(Auth::SignedIn);
                     }
                     None => auth.set(Auth::SignedOut),
@@ -66,9 +72,10 @@ fn shell() -> Html {
         });
     }
     use_signed_out_redirect(&auth, &set_session, &navigator, &route);
-    // No page renders until the session check is over, so the target page of a
-    // signed-out client never flashes without a session.
-    if *auth == Auth::Pending && route.as_ref() != Some(&pages::Route::Login) {
+    // Only a signed-in client sees a page, and the sign-in page is the only page a
+    // signed-out client sees. The server already refuses the shell of every other
+    // route to a signed-out navigation; this covers the routes inside the SPA.
+    if *auth != Auth::SignedIn && route.as_ref() != Some(&pages::Route::Login) {
         return html!();
     }
     html! {
@@ -117,7 +124,11 @@ fn use_signed_out_redirect(
             wasm_bindgen_futures::spawn_local(async move {
                 match auth::get_session().await {
                     Some(info) => {
-                        set_session.set(SessionStore { info: Some(info) });
+                        let platform_enabled = auth::get_platform_enabled().await;
+                        set_session.set(SessionStore {
+                            info: Some(info),
+                            platform_enabled,
+                        });
                         auth.set(Auth::SignedIn);
                     }
                     None => {
