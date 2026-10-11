@@ -1,5 +1,7 @@
 use crate::i18n::use_locale;
 use crate::pages::Route;
+use crate::pages::cert_list::CertsQuery;
+use crate::pages::cert_list::CertsTab;
 use crate::store::SessionStore;
 use r3v3rs3_api::i18n::Locale;
 use yew::prelude::*;
@@ -17,12 +19,20 @@ enum Access {
     PlatformEdit,
 }
 
+/// A page of one menu item, for example a tab of the certificates page.
+struct MenuSubItem {
+    /// The translation key of the name.
+    name: &'static str,
+}
+
 struct MenuItem {
     /// The translation key of the name.
     name: &'static str,
     icon: &'static str,
     route: Route,
     access: Access,
+    /// The pages below the item, indented in the sidebar.
+    subs: &'static [MenuSubItem],
 }
 
 struct MenuGroup {
@@ -30,6 +40,24 @@ struct MenuGroup {
     name: &'static str,
     items: &'static [MenuItem],
 }
+
+/// The sub items of the certificates page: its tabs.
+const CERT_SUBS: &[MenuSubItem] = &[
+    MenuSubItem {
+        name: "certs.tab_server",
+    },
+    MenuSubItem {
+        name: "certs.tab_client",
+    },
+    MenuSubItem {
+        name: "certs.tab_root",
+    },
+    MenuSubItem {
+        name: "certs.tab_acme",
+    },
+];
+
+const NO_SUBS: &[MenuSubItem] = &[];
 
 const GROUPS: &[MenuGroup] = &[
     MenuGroup {
@@ -40,24 +68,28 @@ const GROUPS: &[MenuGroup] = &[
                 icon: "/assets/icons/wifi.svg",
                 route: Route::Ports,
                 access: Access::All,
+                subs: NO_SUBS,
             },
             MenuItem {
                 name: "nav.proxies",
                 icon: "/assets/icons/swap-horizontal.svg",
                 route: Route::Proxies,
                 access: Access::All,
+                subs: NO_SUBS,
             },
             MenuItem {
                 name: "nav.access_lists",
                 icon: "/assets/icons/shield-checkmark.svg",
                 route: Route::AccessLists,
                 access: Access::All,
+                subs: NO_SUBS,
             },
             MenuItem {
                 name: "nav.certificates",
                 icon: "/assets/icons/ribbon.svg",
                 route: Route::Certs,
                 access: Access::All,
+                subs: CERT_SUBS,
             },
         ],
     },
@@ -69,18 +101,21 @@ const GROUPS: &[MenuGroup] = &[
                 icon: "/assets/icons/cube.svg",
                 route: Route::Apps,
                 access: Access::Platform,
+                subs: NO_SUBS,
             },
             MenuItem {
                 name: "nav.targets",
                 icon: "/assets/icons/server.svg",
                 route: Route::Targets,
                 access: Access::Platform,
+                subs: NO_SUBS,
             },
             MenuItem {
                 name: "nav.git_connections",
                 icon: "/assets/icons/git-branch.svg",
                 route: Route::GitConnections,
                 access: Access::PlatformEdit,
+                subs: NO_SUBS,
             },
         ],
     },
@@ -92,18 +127,21 @@ const GROUPS: &[MenuGroup] = &[
                 icon: "/assets/icons/person.svg",
                 route: Route::Accounts,
                 access: Access::AdminOnly,
+                subs: NO_SUBS,
             },
             MenuItem {
                 name: "nav.audit",
                 icon: "/assets/icons/document-text.svg",
                 route: Route::Audit,
                 access: Access::AdminOnly,
+                subs: NO_SUBS,
             },
             MenuItem {
                 name: "nav.settings",
                 icon: "/assets/icons/settings.svg",
                 route: Route::Settings,
                 access: Access::AdminOnly,
+                subs: NO_SUBS,
             },
         ],
     },
@@ -128,6 +166,7 @@ pub struct MenuProps {
 }
 
 /// The menu items in their groups. Groups without an item that the account sees are left out.
+/// A sub item of the active item is indented below it.
 #[function_component(Menu)]
 pub fn menu(props: &MenuProps) -> Html {
     let locale = use_locale();
@@ -137,6 +176,10 @@ pub fn menu(props: &MenuProps) -> Html {
     let Some(route) = use_route::<Route>() else {
         return html! {};
     };
+    let tab = use_location()
+        .and_then(|location| location.query::<CertsQuery>().ok())
+        .map(|query| query.tab)
+        .unwrap_or_default();
     let (session, _) = use_store::<SessionStore>();
     let root = route.root();
 
@@ -149,7 +192,7 @@ pub fn menu(props: &MenuProps) -> Html {
                 .filter(|item| item.access.allows(&session))
                 .map(|item| {
                     let active = root.as_ref() == Some(&item.route);
-                    menu_item(locale, item, active, &navigator, &props.onselect)
+                    menu_item(locale, item, active, tab, &navigator, &props.onselect)
                 })
                 .collect::<Vec<_>>();
             if items.is_empty() {
@@ -171,20 +214,63 @@ fn menu_item(
     locale: Locale,
     item: &'static MenuItem,
     active: bool,
+    tab: CertsTab,
+    navigator: &Navigator,
+    onselect: &Callback<()>,
+) -> Html {
+    let nav = navigator.clone();
+    let select = onselect.clone();
+    let onclick = Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        select.emit(());
+        nav.push(&item.route);
+    });
+    let subs = active.then(|| {
+        item.subs
+            .iter()
+            .map(|sub| menu_sub_item(locale, sub, tab, item.route.clone(), navigator, onselect))
+            .collect::<Vec<_>>()
+    });
+    html! {
+        <>
+            <button type="button" class={classes!("w-full", "px-4", "py-2", "flex", "items-center", "gap-3", "cursor-pointer", "border-l-4", "hover:bg-neutral-600", if active { "bg-neutral-700 border-neutral-100" } else { "border-transparent" })} {onclick} aria-current={active.then_some("page")}>
+                <img src={item.icon} class="w-5 h-5" />
+                <span>{locale.t(item.name)}</span>
+            </button>
+            { for subs.unwrap_or_default() }
+        </>
+    }
+}
+
+fn menu_sub_item(
+    locale: Locale,
+    sub: &'static MenuSubItem,
+    tab: CertsTab,
+    route: Route,
     navigator: &Navigator,
     onselect: &Callback<()>,
 ) -> Html {
     let navigator = navigator.clone();
     let onselect = onselect.clone();
+    // The only page with sub items today is the certificates page, whose sub items select a tab
+    // through the query of the same route.
+    let query = CertsQuery {
+        tab: match sub.name {
+            "certs.tab_server" => CertsTab::Server,
+            "certs.tab_client" => CertsTab::Client,
+            "certs.tab_root" => CertsTab::Root,
+            _ => CertsTab::Acme,
+        },
+    };
+    let active = query.tab == tab;
     let onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
         onselect.emit(());
-        navigator.push(&item.route);
+        let _ = navigator.push_with_query(&route, &query);
     });
     html! {
-        <button type="button" class={classes!("w-full", "px-4", "py-2", "flex", "items-center", "gap-3", "cursor-pointer", "border-l-4", "hover:bg-neutral-600", if active { "bg-neutral-700 border-neutral-100" } else { "border-transparent" })} {onclick} aria-current={active.then_some("page")}>
-            <img src={item.icon} class="w-5 h-5" />
-            <span>{locale.t(item.name)}</span>
+        <button type="button" class={classes!("w-full", "pl-11", "pr-4", "py-1.5", "flex", "items-center", "cursor-pointer", "text-sm", "text-left", "hover:bg-neutral-600", if active { "bg-neutral-700 text-neutral-100" } else { "text-neutral-300" })} {onclick} aria-current={active.then_some("page")}>
+            {locale.t(sub.name)}
         </button>
     }
 }
