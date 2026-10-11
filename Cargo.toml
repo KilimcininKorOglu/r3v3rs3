@@ -7,7 +7,9 @@ r3v3rs3-api = { path = "./r3v3rs3-api" }
 
 [profile.release]
 strip = true
-lto = true
+# Thin LTO keeps most of the size and runtime benefit of full LTO at a fraction of the
+# link time, which shortens every release build.
+lto = "thin"
 
 [profile.dev.package.argon2]
 opt-level = 3

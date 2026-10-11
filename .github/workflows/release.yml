@@ -30,6 +30,13 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.23.0
       - name: Install trunk
         run: cargo binstall trunk@0.21.14 --force -y
+      - name: Cache
+        # The WebUI builds in r3v3rs3-webui with its own wasm target, so its cache is
+        # separate from the server caches of the binary jobs.
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: r3v3rs3-webui
+          key: wasm
       - name: Build webui
         run: cd r3v3rs3-webui && trunk build --cargo-profile web-release --release
       - name: Upload webui
@@ -88,25 +95,34 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz
 
-  # Each musl target builds inside an Alpine container of the matching architecture, so the
-  # static binary needs no cross toolchain. aws-lc-rs compiles its C code with cmake and perl.
+  # Each musl target cross-compiles on one amd64 runner with cargo zigbuild, so no Alpine
+  # container and no arm runner is needed. zig supplies the musl libc and the C compiler;
+  # aws-lc-rs compiles its C code through it, with the cmake and perl of the runner.
   binary-musl:
     name: Upload Release Assets (${{ matrix.target }})
     needs: webui
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-22.04
-          - target: aarch64-unknown-linux-musl
-            runner: ubuntu-22.04-arm
-    runs-on: ${{ matrix.runner }}
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Rust
+        # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
+        run: |
+          rustup toolchain install
+          rustup target add "${{ matrix.target }}"
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
+      - name: Install zig and cargo-zigbuild
+        run: |
+          python3 -m pip install ziglang==0.17.0
+          cargo binstall cargo-zigbuild@0.23.4 --force -y
       - name: Cache
-        # The build runs inside the container, so the registry and the target directory are
-        # mounted from the runner and cached per target.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: ${{ matrix.target }}-musl
@@ -116,18 +132,12 @@ jobs:
           name: webui
           path: r3v3rs3/dist/webui
       - name: Build project
-        run: |
-          docker run --rm -v "$PWD:/work" -w /work \
-            -v "$HOME/.cargo:/root/.cargo" \
-            rust:1-alpine sh -ec '
-              apk add --no-cache musl-dev perl cmake make clang
-              cargo build --release --locked -p r3v3rs3
-            '
+        run: cargo zigbuild --release --locked -p r3v3rs3 --target ${{ matrix.target }}
       - name: Check the static binary
         # A static PIE binary reports "static-pie linked" instead of "statically linked".
-        run: file target/release/r3v3rs3 | grep -qE "statically|static-pie"
+        run: file "target/${{ matrix.target }}/release/r3v3rs3" | grep -qE "statically|static-pie"
       - name: Make archive
-        run: tar -C target/release -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
+        run: tar -C "target/${{ matrix.target }}/release" -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
       - name: Upload archive
         if: github.event_name == 'push'
         env:
