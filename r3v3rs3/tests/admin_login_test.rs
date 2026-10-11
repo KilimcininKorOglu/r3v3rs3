@@ -28,6 +28,32 @@ async fn login(addr: SocketAddr, username: &str, password: &str) -> anyhow::Resu
     Ok(res.status().as_u16())
 }
 
+async fn login_response(
+    addr: SocketAddr,
+    username: &str,
+    password: &str,
+) -> anyhow::Result<String> {
+    let res = reqwest::Client::new()
+        .post(format!("http://{addr}/api/login"))
+        .json(&LoginRequest {
+            username: username.to_string(),
+            method: LoginMethod::Password {
+                password: password.to_string(),
+            },
+            insecure: true,
+        })
+        .send()
+        .await?;
+    let cookie = res
+        .error_for_status()?
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| anyhow::anyhow!("login response has no session cookie"))?
+        .to_string();
+    Ok(cookie)
+}
+
 #[tokio::test]
 async fn login_is_blocked_after_max_attempts() -> anyhow::Result<()> {
     let dir = std::env::temp_dir().join(format!("r3v3rs3-admin-login-{}", std::process::id()));
@@ -71,6 +97,44 @@ async fn login_is_blocked_after_max_attempts() -> anyhow::Result<()> {
         // Another username from the same client IP is not blocked.
         tokio::time::sleep(GOVERNOR_REPLENISH).await;
         assert_eq!(login(addr, "other", "secret").await?, 200);
+        Ok(())
+    })
+    .await?;
+
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_session_cookie_covers_the_whole_panel() -> anyhow::Result<()> {
+    let dir = std::env::temp_dir().join(format!("r3v3rs3-admin-cookie-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
+
+    let admin_port = alloc_tcp_port().await?;
+    let addr = admin_port.socket_addr();
+    let storage = TestStorage::builder()
+        .accounts(HashMap::from([("admin".to_string(), "secret".to_string())]))
+        .build();
+    let app_info = new_appinfo(&dir, &dir);
+    with_server(storage, |channels| async move {
+        tokio::spawn(start_admin(
+            app_info,
+            addr,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+            channels.accounts.clone(),
+        ));
+        wait_for_listener(addr).await?;
+
+        // A cookie without a path stays on /api, and a reload of a panel page signs the
+        // client out.
+        let cookie = login_response(addr, "admin", "secret").await?;
+        assert!(
+            cookie.contains("Path=/"),
+            "the session cookie has no path: {cookie}"
+        );
         Ok(())
     })
     .await?;

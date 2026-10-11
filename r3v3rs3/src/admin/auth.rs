@@ -87,10 +87,12 @@ pub async fn login(
 
     // Lax instead of Strict, because the MCP authorization flow reaches /oauth/authorize as a
     // cross-site top-level navigation. State-changing requests are POST, PUT or DELETE, which
-    // Lax does not send on a cross-site navigation.
+    // Lax does not send on a cross-site navigation. The path covers the whole panel, because
+    // a cookie without a path would stay on /api and a page reload would sign the client out.
     let cookie = Cookie::build(("token", token))
         .http_only(true)
         .same_site(SameSite::Lax)
+        .path("/")
         .secure(!insecure)
         .build();
 
@@ -163,7 +165,8 @@ pub async fn logout(
             }
         }
     }
-    jar.remove("token")
+    // The removal cookie carries the path of the sign-in cookie, so the browser deletes it.
+    jar.add(Cookie::build(("token", "")).path("/").build())
 }
 
 /// Records the sign-out of the account of an admin session.
