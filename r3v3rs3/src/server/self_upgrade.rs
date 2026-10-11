@@ -129,25 +129,40 @@ pub async fn fetch_latest(
     Ok(body)
 }
 
-/// Downloads the archive of the release.
+/// Downloads the archive of the release. GitHub answers the asset URL with a redirect to its
+/// CDN, and the shared client follows no redirects, so this loop walks them itself.
 pub async fn download(
     client: &crate::cdn::fetch::HttpClient,
     url: &str,
 ) -> anyhow::Result<hyper::body::Bytes> {
-    let request = hyper::Request::builder()
-        .method(hyper::Method::GET)
-        .uri(url)
-        .header("User-Agent", USER_AGENT)
-        .body(http_body_util::Full::new(hyper::body::Bytes::new()))?;
-    let response = client.request(request).await?;
-    let status = response.status();
-    let body = http_body_util::BodyExt::collect(response.into_body())
-        .await?
-        .to_bytes();
-    if !status.is_success() {
-        bail!("the archive download answered {status}");
+    let mut next = url.to_string();
+    for hop in 0..10 {
+        let request = hyper::Request::builder()
+            .method(hyper::Method::GET)
+            .uri(&next)
+            .header("User-Agent", USER_AGENT)
+            .body(http_body_util::Full::new(hyper::body::Bytes::new()))?;
+        let response = client.request(request).await?;
+        let status = response.status();
+        if !status.is_redirection() {
+            let body = http_body_util::BodyExt::collect(response.into_body())
+                .await?
+                .to_bytes();
+            if !status.is_success() {
+                bail!("the archive download answered {status}");
+            }
+            return Ok(body);
+        }
+        let location = response
+            .headers()
+            .get(hyper::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .context("the redirect carries no location")?
+            .to_string();
+        tracing::debug!(hop, %location, "the archive download redirects");
+        next = location;
     }
-    Ok(body)
+    bail!("the archive download redirected more than 10 times")
 }
 
 /// Verifies the digest of the archive and installs it at the path of the running binary.
