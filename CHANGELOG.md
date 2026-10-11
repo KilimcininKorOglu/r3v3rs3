@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.20] - 2026-10-11
+
+### Fixed
+- The in-panel upgrade writes the new binary to the disk again: the archive is extracted into a staging directory, because GNU tar refuses to replace an existing file when the member is named on the command line, and the installed binary is verified against the release digest before the upgrade reports success.
+
 ## [1.6.19] - 2026-10-11
 
 ### Added
