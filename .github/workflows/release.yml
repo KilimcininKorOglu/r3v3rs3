@@ -179,7 +179,7 @@ jobs:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         working-directory: assets
         run: |
-          sha256sum --binary * > ../SHA256SUMS
+          sha256sum --binary ./* > ../SHA256SUMS
           # minisign reads the password from stdin, not from the environment.
           printf '%s\n' "$MINISIGN_PASSWORD" | minisign -Sm ../SHA256SUMS -s /tmp/minisign.key
       - name: Verify the signature

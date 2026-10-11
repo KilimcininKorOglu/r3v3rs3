@@ -43,7 +43,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          echo "$IMAGES" | while read -r source target; do
+          echo "$IMAGES" | while read -r _ target; do
             [ -n "$target" ] || continue
             name="${target%%:*}"
             gh api -X PATCH "/user/packages/container/$(printf %s "$name" | jq -Rr @uri)" -f visibility=public >/dev/null
