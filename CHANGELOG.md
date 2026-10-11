@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-10-11
+
+### Fixed
+- The release 1.7.0 build failed on the dialog text of the ACME "Order again" action, so no binaries, images or crates were published for it. This release carries the fix and everything of 1.7.0.
+- The settings page named the platform toggle "Deploy apps on this server", although the platform also deploys to agent targets. It now reads "Enable the deployment feature" and its hint names the agent targets.
+
+### Changed
+- The IP filter hints of the access list and proxy forms show an example of a mixed comma separated list of single addresses and CIDR blocks.
+
 ## [1.7.0] - 2026-10-11
 
 ### Added
