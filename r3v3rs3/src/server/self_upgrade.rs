@@ -168,34 +168,77 @@ pub async fn download(
 /// Verifies the digest of the archive and installs it at the path of the running binary.
 /// Returns the version tag that the installation brought.
 pub fn install(release: &Release, archive: &[u8]) -> anyhow::Result<()> {
-    use sha2::Digest as _;
-    let digest = hex::encode(sha2::Sha256::digest(archive));
-    if digest != release.digest {
-        bail!("the sha256 digest of {} does not match", release.file);
-    }
+    verify_archive_digest(release, archive)?;
 
     let exe = upgrade_exe_path()?;
     let dir = exe
         .parent()
         .context("the binary has no parent directory")?
         .to_path_buf();
-    let tmp = tempfile_dir(&dir, &release.file);
+    let installed = stage_binary(release, archive, &dir)?;
+    // A rename keeps the old inode open for the running process and puts the new binary at
+    // the path that the upgrade spawns.
+    std::fs::rename(&installed, &exe).context("failed to replace the running binary")?;
+    verify_installed_digest(release, &exe)?;
+    info!(tag = %release.tag, exe = %exe.display(), "installed the new release");
+    Ok(())
+}
+
+/// Writes the archive into `dir`, extracts the binary and stages it as `r3v3rs3.new`.
+fn stage_binary(
+    release: &Release,
+    archive: &[u8],
+    dir: &std::path::Path,
+) -> anyhow::Result<PathBuf> {
+    let tmp = tempfile_dir(dir, &release.file);
     std::fs::write(&tmp, archive).context("failed to write the downloaded archive")?;
-    let extracted = extract(&tmp, &dir).context("failed to extract the archive")?;
+    let extracted = extract(&tmp, dir).context("failed to extract the archive")?;
     std::fs::remove_file(&tmp).ok();
 
     let installed = dir.join("r3v3rs3.new");
     std::fs::rename(&extracted, &installed).context("failed to stage the new binary")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&installed, std::fs::Permissions::from_mode(0o755))
-            .context("failed to set the permissions of the new binary")?;
+    if let Some(staging) = extracted.parent() {
+        std::fs::remove_dir(staging).ok();
     }
-    // A rename keeps the old inode open for the running process and puts the new binary at
-    // the path that the upgrade spawns.
-    std::fs::rename(&installed, &exe).context("failed to replace the running binary")?;
-    info!(tag = %release.tag, exe = %exe.display(), "installed the new release");
+    set_executable_permissions(&installed)?;
+    Ok(installed)
+}
+
+/// Checks the sha256 digest of the downloaded archive against the digest of the release.
+fn verify_archive_digest(release: &Release, archive: &[u8]) -> anyhow::Result<()> {
+    use sha2::Digest as _;
+    let digest = hex::encode(sha2::Sha256::digest(archive));
+    if digest != release.digest {
+        bail!("the sha256 digest of {} does not match", release.file);
+    }
+    Ok(())
+}
+
+/// Checks the binary at `exe` against the digest of the release, so a silent extraction
+/// failure cannot pass for an installation.
+fn verify_installed_digest(release: &Release, exe: &std::path::Path) -> anyhow::Result<()> {
+    use sha2::Digest as _;
+    let bytes = std::fs::read(exe).context("failed to read the installed binary")?;
+    let digest = hex::encode(sha2::Sha256::digest(&bytes));
+    if digest != release.digest {
+        bail!(
+            "the installed binary does not match the digest of {}",
+            release.file
+        );
+    }
+    Ok(())
+}
+
+/// Makes the staged binary executable.
+#[cfg(unix)]
+fn set_executable_permissions(installed: &std::path::Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(installed, std::fs::Permissions::from_mode(0o755))
+        .context("failed to set the permissions of the new binary")
+}
+
+#[cfg(not(unix))]
+fn set_executable_permissions(_installed: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
@@ -215,20 +258,26 @@ fn tempfile_dir(dir: &std::path::Path, name: &str) -> PathBuf {
     dir.join(format!(".{name}.{}", std::process::id()))
 }
 
-/// Extracts the single binary that the archive carries into `dir`.
+/// Extracts the single binary that the archive carries into a staging directory of `dir`.
+/// The archive is extracted without a member name: GNU tar refuses to replace an existing
+/// file of a named member, and the target of an upgrade always exists.
 fn extract(archive: &std::path::Path, dir: &std::path::Path) -> anyhow::Result<PathBuf> {
+    let staging = dir.join(format!(".upgrade-extract.{}", std::process::id()));
+    std::fs::remove_dir_all(&staging).ok();
+    std::fs::create_dir_all(&staging).context("failed to create the extraction directory")?;
     let status = std::process::Command::new("tar")
         .arg("-xJf")
         .arg(archive)
-        .arg("r3v3rs3")
         .arg("-C")
-        .arg(dir)
+        .arg(&staging)
         .status()
         .context("tar is not available")?;
+    let extracted = staging.join("r3v3rs3");
     if !status.success() {
+        std::fs::remove_dir_all(&staging).ok();
         bail!("tar exited with {status}");
     }
-    Ok(dir.join("r3v3rs3"))
+    Ok(extracted)
 }
 
 #[cfg(test)]
@@ -308,5 +357,27 @@ mod tests {
             .await
             .expect("download failed");
         assert_eq!(&body[..], b"body");
+    }
+
+    #[test]
+    fn the_extract_replaces_an_existing_binary() {
+        let dir = std::env::temp_dir().join(format!("r33-extract-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("r3v3rs3"), b"the old binary").unwrap();
+        let staging = dir.join("archive-source");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("r3v3rs3"), b"the new binary").unwrap();
+        let status = std::process::Command::new("tar")
+            .arg("-cJf")
+            .arg(dir.join("archive.tar.xz"))
+            .arg("-C")
+            .arg(&staging)
+            .arg("r3v3rs3")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let extracted = extract(&dir.join("archive.tar.xz"), &dir).unwrap();
+        assert_eq!(std::fs::read(&extracted).unwrap(), b"the new binary");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
