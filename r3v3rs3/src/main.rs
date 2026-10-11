@@ -212,13 +212,14 @@ async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()>
     let (app_info, local, server, channels, webui_listener) = prepare(&mut args).await?;
     r3v3rs3::cdn::fetch::spawn_refresh_task(channels.command.clone());
     spawn_supervisor(&app_info, &local, &server, &channels).await?;
-    // The workers serve the ports, so the listeners of this process stay out of the upgrade
-    // manifest and this process cannot upgrade again. The listener of the WebUI travels with
-    // the ports, so the new process serves the panel without a bind that the old one holds.
-    let manifest = if std::env::var_os("R3V3RS3_UPGRADE_IPC_FD").is_none() {
-        Some(manifest_with_webui(&server, webui_listener.as_ref())?)
-    } else {
+    // The workers serve the ports, so the worker master keeps the ports out of the manifest of
+    // the workers. The listener of the WebUI travels with the ports of a master upgrade, so the
+    // new process serves the panel without a bind that the old one holds. A process that
+    // started from an upgrade owns its inherited listeners and hands their copies over again.
+    let manifest = if local.worker_mode == r3v3rs3_api::app::WorkerMode::Workers {
         None
+    } else {
+        Some(manifest_with_webui(&server, webui_listener.as_ref())?)
     };
     let server_task = tokio::spawn(server.start());
     let event_send = channels.event.clone();
@@ -413,9 +414,8 @@ async fn try_hand_over(
             }
         },
         None => {
-            // This process already inherited its listeners, so an upgrade at the same
-            // address would fight the process before it.
-            error!("this process started from an upgrade, so it does not upgrade again");
+            // The workers hold the listeners, so a master upgrade would hand over nothing.
+            error!("the workers hold the listeners, so this master does not upgrade");
             false
         }
     }
