@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.12] - 2026-10-11
+
+### Fixed
+- A process that started from an upgrade hands its inherited listeners to the next one again, so every `systemctl reload` upgrades and none needs a restart in between.
+- The router of the WebUI is read without `unwrap` in the auth gate.
+
 ## [1.6.11] - 2026-10-11
 
 ### Fixed
