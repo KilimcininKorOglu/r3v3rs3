@@ -1400,7 +1400,39 @@ impl ServerState {
         for (_, target) in &targets {
             self.acme_schedule.start(target.clone());
         }
+        self.spawn_acme_orders(targets);
+    }
 
+    /// Orders the targets of one ACME entry at once, regardless of the renewal time and of a
+    /// previous failure. An inactive entry is ordered too, because the caller asks for it.
+    pub async fn request_acme_now(&mut self, id: ShortId) -> Result<(), Error> {
+        let entry = self
+            .acmes
+            .get(id)
+            .ok_or_else(|| Error::IdNotFound { id: id.to_string() })?
+            .clone();
+        let mut targets = vec![entry.target()];
+        for (known, target, _) in self.acme_renewals() {
+            if known.id == id && !targets.contains(&target) {
+                targets.push(target);
+            }
+        }
+        self.acme_schedule.reset(&targets);
+        for target in &targets {
+            self.acme_schedule.start(target.clone());
+        }
+        self.spawn_acme_orders(
+            targets
+                .into_iter()
+                .map(|target| (entry.clone(), target))
+                .collect(),
+        );
+        Ok(())
+    }
+
+    /// Sends the orders of the targets in the background. The results come back as
+    /// `ServerCommand::AddAcmeOrders` and `ServerCommand::AcmeOrderFinished`.
+    fn spawn_acme_orders(&self, targets: Vec<(AcmeEntry, AcmeTarget)>) {
         let dns_resolver = self.config.dns_challenge_resolver;
         let acme_exec = self.config.acme_exec.clone();
         let command = self.command_sender.clone();

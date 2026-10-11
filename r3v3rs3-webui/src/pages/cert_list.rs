@@ -652,6 +652,18 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator, can_edit: b
         navigator.push(&Route::CertLogView { id });
     });
 
+    let order_onclick = Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        wasm_bindgen_futures::spawn_local(async move {
+            let icon = match order_acme(id).await {
+                Ok(()) => dialog::Icon::Success,
+                Err(_) => dialog::Icon::Error,
+            };
+            let text = locale.t("certs.acme_ordered");
+            dialog::message(locale, text.as_str(), icon).await;
+        });
+    });
+
     let onchange = Callback::from(move |_: Event| {
         wasm_bindgen_futures::spawn_local(async move {
             let _ = toggle_acme(id).await;
@@ -674,6 +686,7 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator, can_edit: b
             <>
                 <a class={LINK_CLASS} onclick={log_onclick}>{locale.t("common.log")}</a>
                 if can_edit {
+                    <a class={LINK_CLASS} onclick={order_onclick}>{locale.t("certs.order_now")}</a>
                     <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
                 }
             </>
@@ -722,6 +735,21 @@ async fn delete_acme(id: ShortId) -> Result<(), gloo_net::Error> {
         .send()
         .await?;
     Ok(())
+}
+
+/// Orders the certificates of the ACME entry again. A 404 means that the entry is gone.
+async fn order_acme(id: ShortId) -> Result<(), gloo_net::Error> {
+    let response = Request::post(&format!("{API_ENDPOINT}/acme/{id}/order"))
+        .send()
+        .await?;
+    if response.ok() {
+        Ok(())
+    } else {
+        Err(gloo_net::Error::GlooError(format!(
+            "the order failed: {}",
+            response.status()
+        )))
+    }
 }
 
 async fn toggle_acme(id: ShortId) -> Result<(), gloo_net::Error> {

@@ -74,7 +74,7 @@ The **Server Certs** tab shows the certificate after the order. It names the iss
 A failed order writes the reason to the server log, and r3v3rs3 orders again one hour later. Two causes are common:
 
 - The credential cannot write the zone. The log names the API error of the provider.
-- The TXT record is not visible after 5 minutes. A cached answer of the system resolver causes this. Set **DNS Challenge Resolver** in **Settings** to `1.1.1.1:53` or to an authoritative name server of the zone.
+- The TXT record is not visible after 5 minutes. A cached answer of the system resolver causes this. Set **DNS Challenge Resolver** in **Settings** to `1.1.1.1:53` or to an authoritative name server of the zone. After you fix the cause, click **Order again** on the entry in the ACME tab, or wait for the retry after one hour.
 
 ## Step 5: Create the Proxy
 

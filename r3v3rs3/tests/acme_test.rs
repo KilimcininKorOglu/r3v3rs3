@@ -1,11 +1,15 @@
 use r3v3rs3::{
     accounts::Caller,
     command::ServerCommand,
-    server::rpc::{ErasedRpcMethod, RpcWrapper, acme::AddAcme},
+    server::rpc::{
+        ErasedRpcMethod, RpcWrapper,
+        acme::{AddAcme, RequestAcme},
+    },
 };
 use r3v3rs3_api::{
     acme::{Acme, AcmeConfig, AcmeRequest, DNS_01, DnsProvider, HTTP_01, LocalProvider},
     error::Error,
+    id::ShortId,
     subject_name::SubjectName,
 };
 
@@ -32,12 +36,11 @@ fn request(
     }
 }
 
-/// Sends the request to a server and returns the result of the call.
-async fn add_acme(request: AcmeRequest) -> anyhow::Result<Result<(), Error>> {
+/// Sends an RPC method whose output is `()` to a server and returns the result of the call.
+async fn call_rpc_unit(arg: Box<dyn ErasedRpcMethod>) -> anyhow::Result<Result<(), Error>> {
     let storage = TestStorage::builder().build();
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    with_server(storage, |mut channels| async move {
-        let arg = Box::new(RpcWrapper::new(AddAcme { request })) as Box<dyn ErasedRpcMethod>;
+    with_server(storage, move |mut channels| async move {
         channels
             .command
             .send(ServerCommand::CallMethod {
@@ -56,6 +59,17 @@ async fn add_acme(request: AcmeRequest) -> anyhow::Result<Result<(), Error>> {
     })
     .await?;
     Ok(receiver.await?)
+}
+
+/// Sends the request to a server and returns the result of the call.
+async fn add_acme(request: AcmeRequest) -> anyhow::Result<Result<(), Error>> {
+    call_rpc_unit(Box::new(RpcWrapper::new(AddAcme { request }))).await
+}
+
+/// Sends the order request to a server and returns the result of the call.
+async fn request_acme(id: &str) -> anyhow::Result<Result<(), Error>> {
+    let id: ShortId = id.parse()?;
+    call_rpc_unit(Box::new(RpcWrapper::new(RequestAcme { id }))).await
 }
 
 #[tokio::test]
@@ -86,5 +100,12 @@ async fn an_exec_program_outside_the_allowlist_is_rejected_before_the_account_is
         result,
         Err(Error::AcmeExecProgramNotAllowed { program }) if program == "/bin/sh"
     ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_order_request_for_an_unknown_entry_answers_id_not_found() -> anyhow::Result<()> {
+    let result = request_acme("zzz-zzz").await?;
+    assert!(matches!(result, Err(Error::IdNotFound { id }) if id == "zzz-zzz"));
     Ok(())
 }

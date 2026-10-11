@@ -44,6 +44,14 @@ impl AcmeSchedule {
         }
     }
 
+    /// Forgets the state of the targets, so an explicit request orders them again at once.
+    pub fn reset(&mut self, targets: &[AcmeTarget]) {
+        for target in targets {
+            self.in_progress.remove(target);
+            self.retry_after.remove(target);
+        }
+    }
+
     pub fn is_idle(&self) -> bool {
         self.in_progress.is_empty()
     }
@@ -85,6 +93,23 @@ mod test {
 
         assert!(!schedule.is_due(&target(), None, now));
         assert!(schedule.is_due(&target(), None, now + RETRY_AFTER_FAILURE));
+    }
+
+    #[test]
+    fn a_reset_target_is_due_again_at_once() {
+        let mut schedule = a_failed_schedule(Instant::now());
+        assert!(!schedule.is_due(&target(), None, Instant::now()));
+
+        schedule.reset(&[target()]);
+        assert!(schedule.is_due(&target(), None, Instant::now()));
+    }
+
+    /// A schedule with one target that just failed its order.
+    fn a_failed_schedule(now: Instant) -> AcmeSchedule {
+        let mut schedule = AcmeSchedule::default();
+        schedule.start(target());
+        schedule.finish(&target(), false, now);
+        schedule
     }
 
     #[test]

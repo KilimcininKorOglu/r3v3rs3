@@ -443,6 +443,7 @@ fn acme_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(acme::list, acme::add))
         .routes(routes!(acme::get, acme::put, acme::delete))
+        .routes(routes!(acme::order))
 }
 
 /// The read-only views of the server plus the settings and the audit log.

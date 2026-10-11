@@ -41,6 +41,8 @@ pub enum AuditAction {
     AddAcme,
     UpdateAcme,
     DeleteAcme,
+    /// An account ordered the certificates of an ACME entry again at once.
+    RequestAcme,
     AddApp,
     UpdateApp,
     DeleteApp,

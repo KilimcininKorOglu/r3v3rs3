@@ -109,6 +109,25 @@ pub struct DeleteAcme {
     pub id: ShortId,
 }
 
+/// Orders the certificates of an ACME entry again at once.
+pub struct RequestAcme {
+    pub id: ShortId,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for RequestAcme {
+    type Output = ();
+    const MUTATES: bool = true;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        state.request_acme_now(self.id).await
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::RequestAcme).id(self.id))
+    }
+}
+
 #[async_trait::async_trait]
 impl RpcMethod for DeleteAcme {
     type Output = ();

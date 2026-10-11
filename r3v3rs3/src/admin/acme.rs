@@ -1,7 +1,9 @@
 use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
 use crate::accounts::Caller;
-use crate::server::rpc::acme::{AddAcme, DeleteAcme, GetAcme, GetAcmeList, UpdateAcme};
+use crate::server::rpc::acme::{
+    AddAcme, DeleteAcme, GetAcme, GetAcmeList, RequestAcme, UpdateAcme,
+};
 use axum::{
     Extension, Json,
     extract::{Path, State},
@@ -94,4 +96,21 @@ pub async fn delete(
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<()>>, AppError> {
     Ok(Json(state.call(&caller, DeleteAcme { id }).await?))
+}
+
+/// Orders the certificates of an ACME request again, without waiting for the renewal time.
+#[utoipa::path(
+    post,
+    path = "/{id}/order",
+    tag = "acme",
+    operation_id = "request_acme",
+    params(("id" = ShortId, Path, description = "ACME request id.")),
+    responses((status = 200, description = "The order started."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn order(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Box<()>>, AppError> {
+    Ok(Json(state.call(&caller, RequestAcme { id }).await?))
 }

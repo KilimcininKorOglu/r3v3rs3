@@ -74,7 +74,7 @@ Siparişten sonra **Sunucu Sertifikaları** sekmesi sertifikayı gösterir. Sekm
 Başarısız bir sipariş nedenini sunucu log'una yazar, r3v3rs3 bir saat sonra yeniden sipariş verir. İki neden sık görülür:
 
 - Kimlik bilgisi zone'a yazamıyordur. Log, sağlayıcının API hatasını yazar.
-- TXT kaydı 5 dakika sonra hâlâ görünmüyordur. Bunun nedeni sistem çözümleyicisinin cache'te tuttuğu yanıttır. **Ayarlar** sayfasındaki **DNS Challenge Çözümleyicisi** alanını `1.1.1.1:53` yapın veya zone'un authoritative name server'ını yazın.
+- TXT kaydı 5 dakika sonra hâlâ görünmüyordur. Bunun nedeni sistem çözümleyicisinin cache'te tuttuğu yanıttır. **Ayarlar** sayfasındaki **DNS Challenge Çözümleyicisi** alanını `1.1.1.1:53` yapın veya zone'un authoritative name server'ını yazın. Nedeni giderdikten sonra ACME sekmesindeki kayıtta **Yeniden iste**'e tıklayın veya bir saat sonra kendiliğinden gelen yeniden denemeyi bekleyin.
 
 ## Adım 5: Proxy'yi oluşturun
 
