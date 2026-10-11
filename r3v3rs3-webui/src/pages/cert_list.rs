@@ -61,23 +61,7 @@ impl CertsTab {
             CertsTab::Acme => None,
         }
     }
-
-    fn label_key(self) -> &'static str {
-        match self {
-            CertsTab::Server => "certs.tab_server",
-            CertsTab::Client => "certs.tab_client",
-            CertsTab::Root => "certs.tab_root",
-            CertsTab::Acme => "certs.tab_acme",
-        }
-    }
 }
-
-const TABS: [CertsTab; 4] = [
-    CertsTab::Server,
-    CertsTab::Client,
-    CertsTab::Root,
-    CertsTab::Acme,
-];
 
 const SERVER_COLUMNS: [Column; 4] = [
     Column {
@@ -147,7 +131,9 @@ pub fn cert_list() -> Html {
         return html!();
     };
     let query = location.query::<CertsQuery>().unwrap_or_default();
-    let tab = use_state(|| query.tab);
+    // The tab comes from the query of the link, so a sidebar click switches the tab while
+    // the page is already open.
+    let tab = query.tab;
 
     let (certs, certs_dispatcher) = use_store::<CertStore>();
     let (acme, acme_dispatcher) = use_store::<AcmeStore>();
@@ -169,7 +155,7 @@ pub fn cert_list() -> Html {
     };
 
     let navigator_cloned = navigator.clone();
-    let self_sign_kind = match *tab == CertsTab::Client {
+    let self_sign_kind = match tab == CertsTab::Client {
         true => SelfSignedCertKind::Client,
         false => SelfSignedCertKind::Server,
     };
@@ -209,7 +195,7 @@ pub fn cert_list() -> Html {
     let delete_selected = delete_selected_onclick(locale, chosen.clone(), &selected, &notice);
     let body = body_view(
         locale,
-        *tab,
+        tab,
         &CertLists {
             certs: &certs,
             acme: &acme,
@@ -220,17 +206,8 @@ pub fn cert_list() -> Html {
         CertRowOpts { can_edit, warning },
     );
 
-    let active_index = use_state(|| -1);
     html! {
         <>
-        <div class="flex flex-col mb-4 lg:float-left">
-            <div class="text-sm font-medium text-center text-neutral-500 dark:text-neutral-300">
-                <ul class="flex overflow-x-auto lg:flex-col lg:w-48 lg:mr-2 -mb-px">
-                    { tabs_view(locale, &navigator, &TabStates { tab: tab.clone(), selected: selected.clone(), notice: notice.clone(), active_index: active_index.clone() }) }
-
-                </ul>
-            </div>
-        </div>
             { delete_notice(&notice) }
             { body }
             if can_edit && !chosen.is_empty() {
@@ -242,7 +219,7 @@ pub fn cert_list() -> Html {
             }
             if can_edit {
             <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
-                if matches!(*tab, CertsTab::Server | CertsTab::Client) {
+                if matches!(tab, CertsTab::Server | CertsTab::Client) {
                     <button onclick={self_sign_onclick} class="inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-l-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
                         <img src="/assets/icons/create.svg" class="w-4 h-4 mr-1 text-neutral-500" />
                         {locale.t("certs.self_sign")}
@@ -251,7 +228,7 @@ pub fn cert_list() -> Html {
                         <img src="/assets/icons/cloud-upload.svg" class="w-4 h-4 mr-1" />
                         {locale.t("common.upload")}
                     </button>
-                } else if *tab == CertsTab::Root {
+                } else if tab == CertsTab::Root {
                     <button onclick={upload_onclick} class="inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
                         <img src="/assets/icons/cloud-upload.svg" class="w-4 h-4 mr-1" />
                         {locale.t("common.upload")}
@@ -355,60 +332,6 @@ fn cert_rows(
             row(locale, entry, opts.can_edit, opts.warning, select)
         })
         .collect()
-}
-
-/// The states that a tab change resets.
-struct TabStates {
-    tab: UseStateHandle<CertsTab>,
-    selected: UseStateHandle<HashSet<ShortId>>,
-    notice: UseStateHandle<Option<Result<String, String>>>,
-    active_index: UseStateHandle<i32>,
-}
-
-impl TabStates {
-    /// Opens the tab and resets the selection, the notice and the open menu.
-    fn onclick(&self, navigator: &Navigator, item: CertsTab) -> Callback<MouseEvent> {
-        let navigator = navigator.clone();
-        let tab = self.tab.clone();
-        let active_index = self.active_index.clone();
-        let selected = self.selected.clone();
-        let notice = self.notice.clone();
-        Callback::from(move |_| {
-            tab.set(item);
-            active_index.set(-1);
-            selected.set(HashSet::new());
-            notice.set(None);
-            let _ = navigator.push_with_query(&Route::Certs, &CertsQuery { tab: item });
-        })
-    }
-}
-
-fn tabs_view(locale: Locale, navigator: &Navigator, states: &TabStates) -> Html {
-    TABS.into_iter()
-        .map(|item| {
-            let onclick = states.onclick(navigator, item);
-            let class = tab_class(item == *states.tab);
-            html! {
-                <li class="mr-2 shrink-0 lg:mr-0">
-                    <a {onclick} class={classes!("inline-block", "cursor-pointer", "border-2", "border-neutral-400", "px-4", "py-2", "rounded-md", "hover:bg-neutral-100", "dark:hover:bg-neutral-800", "whitespace-nowrap", "w-full", "lg:py-3", "lg:mb-2", class)}>{locale.t(item.label_key())}</a>
-                </li>
-            }
-        })
-        .collect()
-}
-
-fn tab_class(is_active: bool) -> Vec<&'static str> {
-    match is_active {
-        true => vec![
-            "bg-neutral-100",
-            "dark:bg-neutral-800",
-            "text-neutral-600",
-            "dark:text-neutral-200",
-            "dark:text-neutral-100",
-            "active",
-        ],
-        false => vec!["border-transparent", "dark:border-transparent"],
-    }
 }
 
 fn delete_cert_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
