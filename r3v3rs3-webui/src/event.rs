@@ -21,6 +21,7 @@ const RETRY_DELAY_MS: u32 = 5000;
 /// The stores that the server events update.
 #[derive(Clone)]
 struct Dispatchers {
+    session: Dispatch<SessionStore>,
     ports: Dispatch<PortStore>,
     certs: Dispatch<CertStore>,
     acme: Dispatch<AcmeStore>,
@@ -35,6 +36,7 @@ struct Dispatchers {
 pub fn use_event_subscriber() {
     let (session, _) = use_store::<SessionStore>();
     let dispatchers = Dispatchers {
+        session: use_store::<SessionStore>().1,
         ports: use_store::<PortStore>().1,
         certs: use_store::<CertStore>().1,
         acme: use_store::<AcmeStore>().1,
@@ -104,8 +106,23 @@ async fn read_events(dispatchers: &Dispatchers) {
     }
 }
 
+/// Refreshes the platform flag of the session store, so the sidebar hides or shows the
+/// platform group as soon as a settings change reaches the event stream.
+fn set_platform_enabled(stores: &Dispatchers, enabled: bool) {
+    stores.session.reduce(|state| {
+        SessionStore {
+            info: state.info.clone(),
+            platform_enabled: enabled,
+        }
+        .into()
+    });
+}
+
 fn apply_event(stores: &Dispatchers, event: ServerEvent) {
     match event {
+        ServerEvent::AppConfigUpdated { config } => {
+            set_platform_enabled(stores, config.platform.enabled)
+        }
         ServerEvent::PortTableUpdated { entries } => {
             stores.ports.reduce(|state| {
                 PortStore {
