@@ -175,25 +175,32 @@ pub fn install(release: &Release, archive: &[u8]) -> anyhow::Result<()> {
         .parent()
         .context("the binary has no parent directory")?
         .to_path_buf();
-    let installed = stage_binary(release, archive, &dir)?;
+    let (installed, extracted_digest) = stage_binary(release, archive, &dir)?;
     // A rename keeps the old inode open for the running process and puts the new binary at
     // the path that the upgrade spawns.
     std::fs::rename(&installed, &exe).context("failed to replace the running binary")?;
-    verify_installed_digest(release, &exe)?;
+    // The release digest belongs to the compressed archive, so the binary at the path is
+    // checked against the bytes that the extraction produced, not against that digest.
+    verify_installed_matches(&extracted_digest, &exe)?;
     info!(tag = %release.tag, exe = %exe.display(), "installed the new release");
     Ok(())
 }
 
-/// Writes the archive into `dir`, extracts the binary and stages it as `r3v3rs3.new`.
+/// Writes the archive into `dir`, extracts the binary and stages it as `r3v3rs3.new`. Returns
+/// the staged path and the sha256 digest of the extracted bytes.
 fn stage_binary(
     release: &Release,
     archive: &[u8],
     dir: &std::path::Path,
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<(PathBuf, String)> {
     let tmp = tempfile_dir(dir, &release.file);
     std::fs::write(&tmp, archive).context("failed to write the downloaded archive")?;
     let extracted = extract(&tmp, dir).context("failed to extract the archive")?;
     std::fs::remove_file(&tmp).ok();
+
+    use sha2::Digest as _;
+    let bytes = std::fs::read(&extracted).context("failed to read the extracted binary")?;
+    let extracted_digest = hex::encode(sha2::Sha256::digest(&bytes));
 
     let installed = dir.join("r3v3rs3.new");
     std::fs::rename(&extracted, &installed).context("failed to stage the new binary")?;
@@ -201,7 +208,7 @@ fn stage_binary(
         std::fs::remove_dir(staging).ok();
     }
     set_executable_permissions(&installed)?;
-    Ok(installed)
+    Ok((installed, extracted_digest))
 }
 
 /// Checks the sha256 digest of the downloaded archive against the digest of the release.
@@ -214,17 +221,14 @@ fn verify_archive_digest(release: &Release, archive: &[u8]) -> anyhow::Result<()
     Ok(())
 }
 
-/// Checks the binary at `exe` against the digest of the release, so a silent extraction
-/// failure cannot pass for an installation.
-fn verify_installed_digest(release: &Release, exe: &std::path::Path) -> anyhow::Result<()> {
+/// Checks the binary at the install path against the bytes that the extraction produced, so a
+/// replacement that races the rename cannot pass for an installation.
+fn verify_installed_matches(extracted_digest: &str, exe: &std::path::Path) -> anyhow::Result<()> {
     use sha2::Digest as _;
     let bytes = std::fs::read(exe).context("failed to read the installed binary")?;
     let digest = hex::encode(sha2::Sha256::digest(&bytes));
-    if digest != release.digest {
-        bail!(
-            "the installed binary does not match the digest of {}",
-            release.file
-        );
+    if digest != extracted_digest {
+        bail!("the installed binary does not match the extracted binary");
     }
     Ok(())
 }
