@@ -283,4 +283,30 @@ mod tests {
         assert!(target().starts_with(std::env::consts::ARCH));
         assert!(target().ends_with("gnu") || target().ends_with("musl"));
     }
+
+    #[tokio::test]
+    async fn the_download_follows_a_redirect() {
+        use std::io::Write as _;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base = format!("http://{addr}");
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            std::io::Read::read(&mut stream, &mut buf).ok();
+            let redirect = format!("HTTP/1.1 302 Found\r\nLocation: {base}/file\r\n\r\n");
+            stream.write_all(redirect.as_bytes()).unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            std::io::Read::read(&mut stream, &mut buf).ok();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbody")
+                .unwrap();
+        });
+        let client = crate::cdn::fetch::build_client().await.unwrap();
+        let body = download(&client, &format!("http://{addr}/asset"))
+            .await
+            .expect("download failed");
+        assert_eq!(&body[..], b"body");
+    }
 }
