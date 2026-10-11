@@ -241,7 +241,7 @@ Environment=R3V3RS3_LOG_DIR=$LOG_DIR
 Environment=R3V3RS3_WEBUI=$webui
 ExecStart=$BIN start
 # SIGUSR2 hands the listeners to a new process without dropping the connections.
-ExecReload=/bin/kill -USR2 $MAINPID
+ExecReload=/bin/kill -USR2 \$MAINPID
 # The server shuts down gracefully on SIGINT.
 KillSignal=SIGINT
 Restart=on-failure

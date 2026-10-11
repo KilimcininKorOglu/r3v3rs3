@@ -20,6 +20,7 @@ use r3v3rs3_api::app::{AppConfig, AppInfo};
 use r3v3rs3_api::auth::MIN_PASSWORD_LENGTH;
 use std::fs;
 use std::io::IsTerminal;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info};
@@ -208,13 +209,14 @@ async fn new_server(
 }
 
 async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()> {
-    let (app_info, local, server, channels) = prepare(&mut args).await?;
+    let (app_info, local, server, channels, webui_listener) = prepare(&mut args).await?;
     r3v3rs3::cdn::fetch::spawn_refresh_task(channels.command.clone());
     spawn_supervisor(&app_info, &local, &server, &channels).await?;
     // The workers serve the ports, so the listeners of this process stay out of the upgrade
-    // manifest and this process cannot upgrade again.
+    // manifest and this process cannot upgrade again. The listener of the WebUI travels with
+    // the ports, so the new process serves the panel without a bind that the old one holds.
     let manifest = if std::env::var_os("R3V3RS3_UPGRADE_IPC_FD").is_none() {
-        Some(server.listener_manifest()?)
+        Some(manifest_with_webui(&server, webui_listener.as_ref())?)
     } else {
         None
     };
@@ -223,7 +225,14 @@ async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()>
     // The listeners are bound, so systemd may mark the service active (Type=notify).
     r3v3rs3::server::notify::ready();
 
-    serve_admin(app_info, &args, channels, exe_args, manifest).await?;
+    serve_admin(
+        app_info,
+        channels,
+        exe_args,
+        manifest,
+        webui_listener,
+    )
+    .await?;
 
     let _ = event_send.send(r3v3rs3_api::event::ServerEvent::Shutdown);
     server_task.await??;
@@ -231,7 +240,27 @@ async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()>
     Ok(())
 }
 
-/// The logging, the directories, the config and the server of a fresh start.
+/// The listeners of an upgrade: the ports of the server plus the listener of the WebUI.
+fn manifest_with_webui(
+    server: &r3v3rs3::server::Server,
+    webui_listener: Option<&tokio::net::TcpListener>,
+) -> std::io::Result<Vec<r3v3rs3::server::fdmanifest::ListenerFd>> {
+    use std::os::fd::AsFd as _;
+    let mut manifest = server.listener_manifest()?;
+    let Some(listener) = webui_listener else {
+        return Ok(manifest);
+    };
+    let fd = listener.as_fd().try_clone_to_owned()?;
+    manifest.push(r3v3rs3::server::fdmanifest::ListenerFd::new(
+        r3v3rs3::server::fdmanifest::ListenerProto::Tcp,
+        listener.local_addr()?,
+        fd,
+    ));
+    Ok(manifest)
+}
+
+/// The logging, the directories, the config and the server of a fresh start. Also returns the
+/// listener of the WebUI: the one that an upgrade inherited, or a fresh bind.
 async fn prepare(
     args: &mut StartArgs,
 ) -> anyhow::Result<(
@@ -239,6 +268,7 @@ async fn prepare(
     r3v3rs3_api::app::AppConfig,
     r3v3rs3::server::Server,
     ServerChannels,
+    Option<tokio::net::TcpListener>,
 )> {
     let log_dir = get_log_dir(args.log_dir.take())?;
     fs::create_dir_all(&log_dir)?;
@@ -249,24 +279,55 @@ async fn prepare(
 
     let app_info = new_appinfo(&config_dir, &log_dir);
     let local = read_local_config(&config_dir).await?;
-    let listeners = inherit_listeners().await?;
+    let (listeners, inherited_webui) = inherit_listeners(args.webui).await?;
+    let webui_listener = webui_listener(args, inherited_webui).await?;
 
     let (server, channels) =
         new_server(app_info.clone(), local.clone(), &config_dir, listeners).await?;
-    Ok((app_info, local, server, channels))
+    Ok((app_info, local, server, channels, webui_listener))
 }
 
-/// After a SIGUSR2 the new process inherits the listeners of the previous one.
-async fn inherit_listeners() -> anyhow::Result<Vec<r3v3rs3::server::fdmanifest::ListenerFd>> {
+/// The listener of the WebUI: the one that an upgrade inherited, or a fresh bind.
+async fn webui_listener(
+    args: &StartArgs,
+    inherited: Option<tokio::net::TcpListener>,
+) -> anyhow::Result<Option<tokio::net::TcpListener>> {
+    match inherited {
+        Some(listener) => Ok(Some(listener)),
+        None if !args.no_webui => Ok(Some(tokio::net::TcpListener::bind(args.webui).await?)),
+        None => Ok(None),
+    }
+}
+
+/// After a SIGUSR2 the new process inherits the listeners of the previous one. The entry that
+/// carries the WebUI address becomes the listener of the admin server, the rest are the ports.
+async fn inherit_listeners(
+    webui: SocketAddr,
+) -> anyhow::Result<(
+    Vec<r3v3rs3::server::fdmanifest::ListenerFd>,
+    Option<tokio::net::TcpListener>,
+)> {
     let Ok(fd) = std::env::var("R3V3RS3_UPGRADE_IPC_FD") else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     };
     let listeners = r3v3rs3::server::upgrade::child_handover(fd.parse()?).await?;
     info!(
         listeners = listeners.len(),
         "inherited the listeners of the previous process"
     );
-    Ok(listeners)
+    let mut ports = Vec::new();
+    let mut webui_listener = None;
+    for listener in listeners {
+        if listener.addr == webui {
+            let r3v3rs3::server::fdmanifest::ListenerFd { fd, .. } = listener;
+            let std_listener = std::net::TcpListener::from(fd);
+            std_listener.set_nonblocking(true)?;
+            webui_listener = Some(tokio::net::TcpListener::from_std(std_listener)?);
+        } else {
+            ports.push(listener);
+        }
+    }
+    Ok((ports, webui_listener))
 }
 
 /// Runs the worker supervisor in the background when the worker mode is on.
@@ -297,16 +358,16 @@ async fn spawn_supervisor(
     Ok(())
 }
 
-/// Runs the admin API until it fails or the process gets SIGINT, or hands the listeners to a
-/// new process on SIGUSR2. With `--no-webui` it waits for a signal only.
+/// Runs the admin API on the listener that `start` bound, until it fails or the process gets
+/// SIGINT, or hands the listeners to a new process on SIGUSR2. Without the listener it waits
+/// for a signal only.
 async fn serve_admin(
     app_info: AppInfo,
-    args: &StartArgs,
     channels: ServerChannels,
     exe_args: Vec<String>,
     manifest: Option<Vec<r3v3rs3::server::fdmanifest::ListenerFd>>,
+    webui_listener: Option<tokio::net::TcpListener>,
 ) -> anyhow::Result<()> {
-    let webui_enabled = !args.no_webui;
     let mut upgrade = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined2())
         .context("failed to install the SIGUSR2 handler")?;
     // The signal loop outlives failed upgrades: a failed handover returns to the loop and
@@ -328,14 +389,19 @@ async fn serve_admin(
         }
     };
     tokio::pin!(signals);
-    tokio::select! {
-        r = r3v3rs3::admin::start_admin(app_info, args.webui, channels.command, channels.callback, channels.event, channels.accounts), if webui_enabled => {
-            if let Err(err) = r {
-                error!("admin error: {}", err);
+    match webui_listener {
+        Some(listener) => {
+            tokio::select! {
+                r = r3v3rs3::admin::start_admin_on(app_info, listener, channels.command, channels.callback, channels.event, channels.accounts) => {
+                    if let Err(err) = r {
+                        error!("admin error: {}", err);
+                    }
+                }
+                _ = &mut signals => {}
             }
         }
-        _ = &mut signals => {}
-    };
+        None => (&mut signals).await,
+    }
     Ok(())
 }
 

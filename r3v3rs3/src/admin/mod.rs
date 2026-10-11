@@ -80,6 +80,20 @@ pub async fn start_admin(
     app_info: AppInfo,
     addr: SocketAddr,
     command: mpsc::Sender<ServerCommand>,
+    callback: mpsc::Receiver<RpcCallback>,
+    event: broadcast::Sender<ServerEvent>,
+    accounts: watch::Receiver<Arc<AccountDirectory>>,
+) -> anyhow::Result<()> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    start_admin_on(app_info, listener, command, callback, event, accounts).await
+}
+
+/// The admin API on a listener that the caller bound, for example one that an upgrade
+/// inherited.
+pub async fn start_admin_on(
+    app_info: AppInfo,
+    listener: tokio::net::TcpListener,
+    command: mpsc::Sender<ServerCommand>,
     mut callback: mpsc::Receiver<RpcCallback>,
     event: broadcast::Sender<ServerEvent>,
     accounts: watch::Receiver<Arc<AccountDirectory>>,
@@ -124,7 +138,6 @@ pub async fn start_admin(
 
     let mut event_recv = event.subscribe();
     let app = admin_router(app_state)?;
-    let listener = tokio::net::TcpListener::bind(addr).await?;
 
     axum::serve(
         listener,
