@@ -41,6 +41,7 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 ### Operations
 
 - A single binary with a built-in WebUI in English and Turkish. Configuration changes apply without a restart
+- An hourly check for a newer release. While one exists, a banner on every page of the panel names it and links to the settings page, which upgrades without dropping the connections
 - An admin API with an OpenAPI document and a Swagger UI
 - Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists and an audit log
 - Service discovery from Docker labels, Kubernetes Ingress and `R3v3rs3Proxy` resources, Consul and etcd
@@ -87,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/inst
 The script asks for the admin WebUI address. The default is `127.0.0.1:46492`. To install a specific release or to skip the question, pass the options:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --version 1.0.1 --webui 0.0.0.0:46492
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --version 1.6.26 --webui 0.0.0.0:46492
 ```
 
 The config is in `/etc/r3v3rs3` and the logs are in `/var/log/r3v3rs3`. Run the script again to upgrade.
