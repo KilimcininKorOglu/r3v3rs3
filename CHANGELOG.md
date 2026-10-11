@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.9] - 2026-10-11
+
+### Fixed
+- The zero-downtime upgrade also hands the listener of the WebUI to the new process, so the panel keeps serving an upgrade of a server whose only listener is the panel, and the new process never races the old one for the WebUI port.
+
 ## [1.6.8] - 2026-10-11
 
 ### Fixed
