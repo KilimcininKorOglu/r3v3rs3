@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.11] - 2026-10-11
+
+### Fixed
+- The WebUI panics no more on the first render: the auth gate reads the router inside the router context that wraps it.
+
 ## [1.6.10] - 2026-10-11
 
 ### Fixed
