@@ -49,6 +49,19 @@ impl RpcMethod for GetPlatform {
     }
 }
 
+/// The tag of the newest release, when the update check found a newer one.
+pub struct GetUpdateAvailable;
+
+#[async_trait::async_trait]
+impl RpcMethod for GetUpdateAvailable {
+    type Output = Option<String>;
+    const PERMISSION: Permission = Permission::Read;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        Ok(state.update_available())
+    }
+}
+
 pub struct VerifyAccount {
     pub request: LoginRequest,
 }

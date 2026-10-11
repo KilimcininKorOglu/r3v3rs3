@@ -16,4 +16,5 @@ pub mod sidebar;
 pub mod tcp_proxy_config;
 pub mod theme_menu;
 pub mod udp_proxy_config;
+pub mod update_banner;
 pub mod worker_status;

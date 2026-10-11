@@ -36,6 +36,10 @@ pub enum ServerCommand {
     SetCdnRanges {
         ranges: CdnRanges,
     },
+    /// The update check learned the newest release, or that this build is current again.
+    SetUpdateAvailable {
+        tag: Option<String>,
+    },
     /// Replaces the state and the proxies of a discovery provider.
     SetDiscovery {
         snapshot: DiscoverySnapshot,
@@ -101,6 +105,10 @@ impl std::fmt::Debug for ServerCommand {
             Self::SetCdnRanges { ranges } => f
                 .debug_struct("SetCdnRanges")
                 .field("updated_at", &ranges.updated_at)
+                .finish(),
+            Self::SetUpdateAvailable { tag } => f
+                .debug_struct("SetUpdateAvailable")
+                .field("tag", tag)
                 .finish(),
             // The definitions can hold plain text passwords, so only the counts are printed.
             Self::SetDiscovery { snapshot } => f

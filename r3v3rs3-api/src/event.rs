@@ -14,14 +14,38 @@ use utoipa::ToSchema;
 #[serde(rename_all = "snake_case", tag = "event")]
 #[non_exhaustive]
 pub enum ServerEvent {
-    AppConfigUpdated { config: Box<AppConfig> },
-    PortTableUpdated { entries: Vec<PortEntry> },
-    PortStatusUpdated { id: ShortId, status: PortStatus },
-    CertsUpdated { entries: Vec<CertInfo> },
-    ProxiesUpdated { entries: Vec<ProxyEntry> },
-    ProxyStatusUpdated { id: ShortId, status: ProxyStatus },
-    AcmeUpdated { entries: Vec<AcmeInfo> },
-    DiscoveryStatusUpdated { entries: Vec<DiscoveryStatus> },
-    ClusterStatusUpdated { status: ClusterStatus },
+    AppConfigUpdated {
+        config: Box<AppConfig>,
+    },
+    /// The update check found a newer release, or learned that this build is current again.
+    UpdateAvailable {
+        tag: Option<String>,
+    },
+    PortTableUpdated {
+        entries: Vec<PortEntry>,
+    },
+    PortStatusUpdated {
+        id: ShortId,
+        status: PortStatus,
+    },
+    CertsUpdated {
+        entries: Vec<CertInfo>,
+    },
+    ProxiesUpdated {
+        entries: Vec<ProxyEntry>,
+    },
+    ProxyStatusUpdated {
+        id: ShortId,
+        status: ProxyStatus,
+    },
+    AcmeUpdated {
+        entries: Vec<AcmeInfo>,
+    },
+    DiscoveryStatusUpdated {
+        entries: Vec<DiscoveryStatus>,
+    },
+    ClusterStatusUpdated {
+        status: ClusterStatus,
+    },
     Shutdown,
 }

@@ -8,10 +8,18 @@
 use anyhow::{Context, bail};
 use serde_derive::Deserialize;
 use std::path::PathBuf;
-use tracing::info;
+use std::time::Duration;
+use tokio::sync::{mpsc, watch};
+use tracing::{info, warn};
+
+use super::ServerCommand;
 
 const RELEASES_API: &str = "https://api.github.com/repos/KilimcininKorOglu/r3v3rs3/releases/latest";
 const USER_AGENT: &str = concat!("r3v3rs3-self-upgrade/", env!("CARGO_PKG_VERSION"));
+/// The wait before the first check, so the startup of the server does not wait for GitHub.
+const FIRST_CHECK_DELAY: Duration = Duration::from_secs(10);
+/// The shortest check interval, so a mistyped setting cannot turn into a request loop.
+const MIN_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The newest release that this platform can run, read from the JSON of the releases API.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +135,46 @@ pub async fn fetch_latest(
         bail!("the releases API answered {status}");
     }
     Ok(body)
+}
+
+/// Checks the releases API on every interval and tells the server loop whether a newer
+/// release exists. The server loop turns a change into the event that the panel banner
+/// shows. The interval watcher carries the setting, so a settings change applies from the
+/// next round on.
+pub fn spawn_check_task(
+    command: mpsc::Sender<ServerCommand>,
+    mut interval: watch::Receiver<Duration>,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(FIRST_CHECK_DELAY).await;
+        let mut last: Option<String> = None;
+        loop {
+            let delay = (*interval.borrow_and_update()).max(MIN_CHECK_INTERVAL);
+            tokio::time::sleep(delay).await;
+            match newest_release().await {
+                Ok(tag) if tag != last => {
+                    if command
+                        .send(ServerCommand::SetUpdateAvailable { tag: tag.clone() })
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                    last = tag;
+                }
+                Ok(_) => {}
+                Err(err) => warn!(%err, "the update check failed"),
+            }
+        }
+    });
+}
+
+/// The tag of the newest release, when it is newer than this build.
+async fn newest_release() -> anyhow::Result<Option<String>> {
+    let client = crate::cdn::fetch::build_client().await?;
+    let json = fetch_latest(&client).await?;
+    let release = parse_release(&String::from_utf8_lossy(&json), env!("CARGO_PKG_VERSION"))?;
+    Ok(release.map(|release| release.tag))
 }
 
 /// Downloads the archive of the release. GitHub answers the asset URL with a redirect to its

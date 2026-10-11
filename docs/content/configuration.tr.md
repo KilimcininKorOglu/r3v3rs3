@@ -1034,6 +1034,8 @@ Devir tek bir kurulumun içinde çalışır: eski süreç yeni binary'yi aynı m
 
 Admin, shell'e girmeden yükseltebilir: "Ayarlar" sayfasında "Sunucu Yükseltmesi" kartı durur. Düğme en yeni GitHub release'ini okur, bu platformun arşivini seçer, release API'sinin bildirdiği sha256 özetini doğrular, çalışan binary'yi değiştirir ve dinleyicileri yukarıdaki kesintisiz yükseltme yoluyla yeni sürece devreder. Panel birkaç saniye sonra yeni sürüme yenilenir. Daha yeni bir release bulamayan yükseltme hata yanıtlar ve çalışan sunucu değişmez. Denetim kaydı yükseltmeyi yazar.
 
+Sunucu daha yeni bir release'i kendi başına da kontrol eder. "Ayarlar" sayfasının düzenlediği `upgrade.check_interval` ayarı, sunucunun release API'sini hangi sıklıkla sorduğunu belirler (varsayılan bir saat, en az bir dakika). Daha yeni bir release varken panelin her sayfasındaki banner onu adlandırır ve "Ayarlar" sayfasına bağlanır; sunucu yeniden en yeni sürümü çalıştırdığında banner kaybolur.
+
 ## HTTP/2 ve HTTP/3 limitleri
 
 Sunucu tarafındaki her bağlantı flood limitleri taşır. `config.toml`'un `[http2]` ve `[http3]` bölümleri, "Ayarlar" sayfasının düzenlediği, her port için varsayılanları tutar:

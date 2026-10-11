@@ -100,6 +100,10 @@ pub struct ServerState {
     config_dir: PathBuf,
     /// What the supervised worker serves, as its supervisor reports it.
     worker_status: Option<WorkerEntry>,
+    /// The tag of the newest release, when it is newer than this build.
+    update_available: Option<String>,
+    /// The check interval that the update check task reads again on every round.
+    update_interval: watch::Sender<std::time::Duration>,
 }
 
 pub enum Received {
@@ -300,6 +304,7 @@ impl ServerState {
             config.admin,
         ));
         let leader = !config.cluster.enabled && role == ServerRole::Master;
+        let check_interval = config.upgrade.check_interval;
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
             access_lists,
@@ -335,6 +340,8 @@ impl ServerState {
             platform,
             config_dir: config_dir.to_path_buf(),
             worker_status: None,
+            update_available: None,
+            update_interval: watch::Sender::new(check_interval),
         };
         this.initialize(role, listeners).await;
         this
@@ -400,6 +407,12 @@ impl ServerState {
                 // In a cluster the other nodes read the ranges of the leader from the store.
                 if self.leader && crate::cdn::install(ranges.clone()) {
                     log_save_error(self.storage.save_cdn_ranges(&ranges).await);
+                }
+            }
+            ServerCommand::SetUpdateAvailable { tag } => {
+                if self.update_available != tag {
+                    self.update_available = tag.clone();
+                    let _ = self.br_sender.send(ServerEvent::UpdateAvailable { tag });
                 }
             }
             ServerCommand::WorkerApply => {
@@ -1544,7 +1557,11 @@ impl ServerState {
         // change rebuilds every port context.
         let limits_changed = self.config.http2 != config.http2 || self.config.http3 != config.http3;
         let platform_changed = self.config.platform != config.platform;
+        let upgrade_changed = self.config.upgrade != config.upgrade;
         self.config.clone_from(&config);
+        if upgrade_changed {
+            let _ = self.update_interval.send(config.upgrade.check_interval);
+        }
         if self
             .registries
             .srv
@@ -1613,6 +1630,16 @@ impl ServerState {
                 return id;
             }
         }
+    }
+
+    /// The tag of the newest release, when the update check found a newer one.
+    pub fn update_available(&self) -> Option<String> {
+        self.update_available.clone()
+    }
+
+    /// The check interval that the update check task reads again on every round.
+    pub fn update_check_interval(&self) -> watch::Receiver<std::time::Duration> {
+        self.update_interval.subscribe()
     }
 
     /// Stops accepting new connections and waits for the open client connections until they end

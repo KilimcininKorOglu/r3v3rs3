@@ -91,6 +91,11 @@ impl Server {
         self.server_state.listener_manifest()
     }
 
+    /// The check interval that the update check task reads again on every round.
+    pub fn update_check_interval(&self) -> watch::Receiver<std::time::Duration> {
+        self.server_state.update_check_interval()
+    }
+
     pub async fn start(self) -> anyhow::Result<()> {
         start_server(
             self.app_info,

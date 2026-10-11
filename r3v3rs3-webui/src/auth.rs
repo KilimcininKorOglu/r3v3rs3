@@ -46,10 +46,11 @@ pub fn use_ensure_auth() {
         match get_session().await {
             Some(info) => {
                 if session.get().info.as_ref() != Some(&info) {
-                    let platform_enabled = get_platform_enabled().await;
+                    let (platform_enabled, update_available) = get_session_flags().await;
                     session.set(SessionStore {
                         info: Some(info),
                         platform_enabled,
+                        update_available,
                     });
                 }
             }
@@ -63,22 +64,35 @@ pub fn use_ensure_auth() {
     });
 }
 
-/// Whether the deployment platform serves. The sidebar reads it with the session.
-pub async fn get_platform_enabled() -> bool {
+/// The session flags of one app_info answer, so the sign-in needs one request for both: the
+/// platform flag that the sidebar reads, and the newest release that the banner shows.
+pub async fn get_session_flags() -> (bool, Option<String>) {
+    let value = app_info_flag("platform_enabled").await;
+    match value {
+        Some(platform) => (
+            platform.as_bool().unwrap_or(false),
+            app_info_flag("update_available")
+                .await
+                .and_then(|value| value.as_str().map(str::to_owned)),
+        ),
+        None => (false, None),
+    }
+}
+
+async fn app_info_flag(name: &str) -> Option<serde_json::Value> {
     let Ok(res) = Request::get(&format!("{API_ENDPOINT}/app_info"))
         .send()
         .await
     else {
-        return false;
+        return None;
     };
     if res.status() != 200 {
-        return false;
+        return None;
     }
     res.json::<serde_json::Value>()
         .await
         .ok()
-        .and_then(|value| value.get("platform_enabled").and_then(|v| v.as_bool()))
-        .unwrap_or(false)
+        .and_then(|value| value.get(name).cloned())
 }
 
 pub async fn test_token() -> bool {

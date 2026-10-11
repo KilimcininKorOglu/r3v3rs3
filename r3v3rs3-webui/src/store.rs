@@ -56,6 +56,9 @@ pub struct SessionStore {
     /// Whether the deployment platform serves on this server. The sidebar hides the platform
     /// group while it is off.
     pub platform_enabled: bool,
+    /// The tag of the newest release, when the update check found a newer one. The banner on
+    /// every page shows it.
+    pub update_available: Option<String>,
 }
 
 impl SessionStore {
@@ -106,6 +109,7 @@ mod tests {
                 cert_expiry_warning: Default::default(),
             }),
             platform_enabled: true,
+            update_available: None,
         };
         let restricted = Some(BTreeSet::from(["web".parse().unwrap()]));
         let cases = [

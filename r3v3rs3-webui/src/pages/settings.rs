@@ -9,7 +9,8 @@ use r3v3rs3_api::{
     acme::webhook_url_allowed,
     app::{
         AcmeExecConfig, AdminConfig, AppConfig, Http2Limits, Http3Limits, LogConfig,
-        McpClientConfig, McpConfig, NotificationConfig, UpgradeStarted, WebhookConfig,
+        McpClientConfig, McpConfig, NotificationConfig, UpgradeConfig, UpgradeStarted,
+        WebhookConfig,
     },
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
@@ -38,6 +39,7 @@ const LABEL_CLASS: &str =
 struct Fields {
     background_task_interval: String,
     shutdown_graceful_timeout: String,
+    upgrade_check_interval: String,
     session_expiry: String,
     max_login_attempts: String,
     login_attempts_reset: String,
@@ -169,6 +171,7 @@ impl Fields {
             etcd_client_cert: etcd.client_cert,
             background_task_interval: text("/background_task_interval"),
             shutdown_graceful_timeout: text("/shutdown_graceful_timeout"),
+            upgrade_check_interval: text("/upgrade/check_interval"),
             session_expiry: text("/admin/session_expiry"),
             max_login_attempts: text("/admin/max_login_attempts"),
             login_attempts_reset: text("/admin/login_attempts_reset"),
@@ -296,6 +299,8 @@ pub fn settings() -> Html {
             <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.server")}</h2>
             { text_field(&fields, &errors, locale.t("settings.background_task_interval"), "background_task_interval", "1h", |f| &mut f.background_task_interval) }
             { text_field(&fields, &errors, locale.t("settings.shutdown_graceful_timeout"), "shutdown_graceful_timeout", "30s", |f| &mut f.shutdown_graceful_timeout) }
+            { text_field(&fields, &errors, locale.t("settings.upgrade_check_interval"), "upgrade_check_interval", "1h", |f| &mut f.upgrade_check_interval) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.upgrade_check_interval_hint")}</p>
             { text_field(&fields, &errors, locale.t("settings.http_challenge_addr"), "http_challenge_addr", "0.0.0.0:80", |f| &mut f.http_challenge_addr) }
             { text_field(&fields, &errors, locale.t("settings.tls_alpn_challenge_addr"), "tls_alpn_challenge_addr", "0.0.0.0:443", |f| &mut f.tls_alpn_challenge_addr) }
             { text_field(&fields, &errors, locale.t("settings.dns_challenge_resolver"), "dns_challenge_resolver", "1.1.1.1:53", |f| &mut f.dns_challenge_resolver) }
@@ -1019,6 +1024,16 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             "shutdown_graceful_timeout": fields.shutdown_graceful_timeout.trim(),
         }),
     );
+    let upgrade = parse_part::<AppConfig>(
+        &mut errors,
+        "upgrade_check_interval",
+        invalid_duration,
+        json!({
+            "upgrade": {
+                "check_interval": fields.upgrade_check_interval.trim(),
+            },
+        }),
+    );
     let notifications = parse_notifications(locale, fields, &mut errors);
     let addr = parse_addr(
         locale,
@@ -1054,6 +1069,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         admin,
         (log, notifications),
         interval,
+        upgrade,
         (addr, tls_alpn_addr),
         (resolver, upstream_resolver),
         (http2, http3),
@@ -1062,6 +1078,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             Some(admin),
             (Some(log), Some(notifications)),
             Some(interval),
+            Some(upgrade),
             (Some(addr), Some(tls_alpn_addr)),
             (Ok(resolver), Ok(upstream_resolver)),
             (Some(http2), Some(http3)),
@@ -1104,6 +1121,9 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             mcp: parse_mcp(locale, fields, &mut errors),
             http2,
             http3,
+            upgrade: UpgradeConfig {
+                check_interval: upgrade.upgrade.check_interval,
+            },
         }),
         _ => Err(errors),
     }
@@ -1519,6 +1539,24 @@ pub async fn fetch_json<T: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_upgrade_check_interval_round_trips_and_rejects_an_invalid_duration() {
+        let mut fields = Fields::from_config(&AppConfig::default());
+        fields.upgrade_check_interval = "90m".into();
+        let parsed = parse_fields(Locale::En, &fields).unwrap();
+        assert_eq!(
+            parsed.upgrade.check_interval,
+            std::time::Duration::from_secs(90 * 60)
+        );
+
+        fields.upgrade_check_interval = "soon".into();
+        let errors = parse_fields(Locale::En, &fields).unwrap_err();
+        assert_eq!(
+            errors.get("upgrade_check_interval").map(String::as_str),
+            Some(Locale::En.t("settings.invalid_duration"))
+        );
+    }
 
     #[test]
     fn docker_settings_round_trip_and_the_endpoint_is_validated() {

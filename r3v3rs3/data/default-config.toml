@@ -137,6 +137,11 @@ max_concurrent_bidi_streams = 100
 # The control streams that one QUIC connection can open.
 max_concurrent_uni_streams = 10
 
+[upgrade]
+# How often the server asks the release API whether a newer version exists. When one does,
+# the panel shows a banner on every page. The shortest interval is one minute.
+check_interval = "1h"
+
 # The worker processes serve the ports instead of this process. This setting and the cluster
 # below are file-only: a change applies after a restart. Everything else is managed live from
 # the settings page of the panel.

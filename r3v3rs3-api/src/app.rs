@@ -82,6 +82,23 @@ pub struct AppConfig {
     /// its options.
     #[serde(default)]
     pub http3: Http3Limits,
+
+    /// The update check of the panel.
+    #[serde(default)]
+    pub upgrade: UpgradeConfig,
+}
+
+/// How often the server asks the release API whether a newer version exists. When one does,
+/// the panel shows a banner on every page.
+#[derive(Debug, DefaultFromSerde, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct UpgradeConfig {
+    #[serde(with = "humantime_serde", default = "default_upgrade_check_interval")]
+    #[schema(value_type = String, example = "1h")]
+    pub check_interval: Duration,
+}
+
+fn default_upgrade_check_interval() -> Duration {
+    Duration::from_secs(60 * 60)
 }
 
 /// The HTTP/2 flood limits of a server-side connection.
@@ -341,6 +358,10 @@ pub struct AppInfo {
     /// Whether the deployment platform serves the admin API of this server.
     #[serde(default)]
     pub platform_enabled: bool,
+    /// The tag of the newest release, when it is newer than this build. `None` means that
+    /// this build is current or that no check has answered yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_available: Option<String>,
 }
 
 /// The answer of the server upgrade endpoint: the version that the next process starts.

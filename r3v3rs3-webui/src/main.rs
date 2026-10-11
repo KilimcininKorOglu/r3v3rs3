@@ -5,6 +5,7 @@ use components::cluster_status::ClusterBanner;
 use components::footer::Footer;
 use components::navbar::Navbar;
 use components::sidebar::Sidebar;
+use components::update_banner::UpdateBanner;
 use console_error_panic_hook::set_once as set_panic_hook;
 use store::SessionStore;
 use yew::prelude::*;
@@ -56,12 +57,14 @@ fn shell() -> Html {
             wasm_bindgen_futures::spawn_local(async move {
                 match auth::get_session().await {
                     Some(info) => {
-                        // The sidebar hides the platform group while the platform is off,
-                        // so the app information travels with the session.
-                        let platform_enabled = auth::get_platform_enabled().await;
+                        // The sidebar hides the platform group while the platform is off and
+                        // the banner names the newest release, so the app information travels
+                        // with the session.
+                        let (platform_enabled, update_available) = auth::get_session_flags().await;
                         set_session.set(SessionStore {
                             info: Some(info),
                             platform_enabled,
+                            update_available,
                         });
                         auth.set(Auth::SignedIn);
                     }
@@ -85,6 +88,7 @@ fn shell() -> Html {
                 <Sidebar />
                 <main class="flex-1 min-w-0">
                     <ClusterBanner />
+                    <UpdateBanner />
                     <Switch<pages::Route> render={pages::switch} />
                 </main>
             </div>
@@ -124,10 +128,11 @@ fn use_signed_out_redirect(
             wasm_bindgen_futures::spawn_local(async move {
                 match auth::get_session().await {
                     Some(info) => {
-                        let platform_enabled = auth::get_platform_enabled().await;
+                        let (platform_enabled, update_available) = auth::get_session_flags().await;
                         set_session.set(SessionStore {
                             info: Some(info),
                             platform_enabled,
+                            update_available,
                         });
                         auth.set(Auth::SignedIn);
                     }

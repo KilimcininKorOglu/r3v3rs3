@@ -20,5 +20,6 @@ pub fn new_appinfo(config_path: &Path, log_path: &Path) -> AppInfo {
         config_path: config_path.to_owned(),
         log_path: log_path.to_owned(),
         platform_enabled: false,
+        update_available: None,
     }
 }

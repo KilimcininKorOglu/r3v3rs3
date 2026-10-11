@@ -106,22 +106,38 @@ async fn read_events(dispatchers: &Dispatchers) {
     }
 }
 
-/// Refreshes the platform flag of the session store, so the sidebar hides or shows the
-/// platform group as soon as a settings change reaches the event stream.
-fn set_platform_enabled(stores: &Dispatchers, enabled: bool) {
+/// Replaces one flag of the session store: the platform flag that the sidebar reads, or the
+/// newest release that the banner shows. A settings change or an update check reaches the
+/// event stream before the page that shows the flag reloads.
+fn set_session_flag(stores: &Dispatchers, change: impl FnOnce(&mut SessionStore)) {
     stores.session.reduce(|state| {
-        SessionStore {
+        let mut next = SessionStore {
             info: state.info.clone(),
-            platform_enabled: enabled,
-        }
-        .into()
+            platform_enabled: state.platform_enabled,
+            update_available: state.update_available.clone(),
+        };
+        change(&mut next);
+        next.into()
     });
+}
+
+/// The events that replace one flag of the session store instead of a list store.
+fn apply_session_event(stores: &Dispatchers, event: ServerEvent) {
+    match event {
+        ServerEvent::AppConfigUpdated { config } => set_session_flag(stores, |session| {
+            session.platform_enabled = config.platform.enabled
+        }),
+        ServerEvent::UpdateAvailable { tag } => {
+            set_session_flag(stores, |session| session.update_available = tag)
+        }
+        other => panic!("not a session event: {other:?}"),
+    }
 }
 
 fn apply_event(stores: &Dispatchers, event: ServerEvent) {
     match event {
-        ServerEvent::AppConfigUpdated { config } => {
-            set_platform_enabled(stores, config.platform.enabled)
+        event @ (ServerEvent::AppConfigUpdated { .. } | ServerEvent::UpdateAvailable { .. }) => {
+            apply_session_event(stores, event)
         }
         ServerEvent::PortTableUpdated { entries } => {
             stores.ports.reduce(|state| {

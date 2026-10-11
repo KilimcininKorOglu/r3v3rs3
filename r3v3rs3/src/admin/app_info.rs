@@ -19,5 +19,8 @@ pub async fn get(State(state): State<AppState>) -> Result<Json<AppInfo>, AppErro
         .call_system(crate::server::rpc::auth::GetPlatform)
         .await?;
     info.platform_enabled = platform.get().is_ok();
+    info.update_available = *state
+        .call_system(crate::server::rpc::auth::GetUpdateAvailable)
+        .await?;
     Ok(Json(info))
 }
