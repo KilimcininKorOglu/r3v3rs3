@@ -21,7 +21,7 @@ Bu sayfa referanstır. Sıfırdan kuruyorsanız [Yüksek erişilebilirlik](@/tut
 - Deploy platformu cluster açık olan düğümde çalışmaz. Platform API'si `503 platform_in_cluster` döner.
 - Düğümlerin önündeki bir yük dengeleyici her isteği herhangi bir düğüme gönderebilir.
 
-WebUI'daki **Ayarlar** sayfası düğümün durumunu, rolünü ve uyguladığı revizyonu gösterir. `GET /api/cluster/status` aynı veriyi döner.
+WebUI'daki **Ayarlar** sayfası düğümün durumunu, rolünü ve uyguladığı revizyonu gösterir. `GET /api/cluster/status` aynı veriyi döndürür.
 
 | Durum | Anlamı |
 |---|---|

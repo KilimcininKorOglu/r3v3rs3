@@ -12,7 +12,7 @@ The settings page of the panel manages every section while the server runs, and 
 
 # Ports
 
-Before configuring a proxy, you need to bind a port to listen on. You can do this in the "Ports" section.
+A proxy needs a port. Add one in the "Ports" section.
 
 r3v3rs3 supports six types of ports:
 
@@ -802,13 +802,13 @@ upstream_servers = [{ addr = "/dns/mail.internal/tcp/25" }]
 
 ## Server Certificates
 
-For TCP over TLS and HTTPS proxy, r3v3rs3 requires a server certificate. There are three ways to install a server certificate:
+A TCP over TLS or HTTPS proxy needs a server certificate. There are three ways to install one:
 
 1. Generate a self-signed certificate
 2. Import a certificate from a file (PEM format only)
 3. Use [ACME](https://letsencrypt.org/how-it-works/) to automatically provision a certificate
 
-r3v3rs3 will automatically search for a certificate from SNI (Server Name Indication) in the TLS client hello message.
+r3v3rs3 selects the certificate from the SNI (Server Name Indication) in the TLS client hello message.
 
 ## Client Certificates
 
@@ -821,9 +821,9 @@ A proxy sends a client certificate to its upstream servers. See "Upstream Client
 
 ## Root Certificates
 
-If your upstream server uses certificates not trusted by the system, you will need to add them to the root certificate store. r3v3rs3 automatically trusts all certificates signed by the root certificate, in addition to the system's root certificates.
+If your upstream server uses certificates that the system does not trust, add them to the root certificate store. r3v3rs3 trusts every certificate that the root certificate signs, in addition to the system root certificates.
 
-Also, if you generate a self-signed certificate, r3v3rs3 will automatically generate a CA certificate and add it to the root certificate store.
+A generated self-signed certificate also gets a CA certificate, and r3v3rs3 adds that CA certificate to the root certificate store.
 
 ## Expiry Warnings
 
@@ -1160,7 +1160,7 @@ r3v3rs3 stores its configuration in TOML files in `$XDG_CONFIG_HOME/r3v3rs3` or 
 
 You can override the default location by setting the `R3V3RS3_CONFIG_DIR` environment variable or the `--config-dir` command-line option.
 
-If needed, these files can be edited manually. Note, however, that r3v3rs3 does not automatically detect changes made to the configuration files. To ensure any changes take effect, you must restart the server after editing a configuration file.
+These files can be edited manually, but r3v3rs3 does not detect the change. Restart the server after editing a configuration file.
 
 A node of a cluster reads only `config.toml`. The rest of its state is in etcd or Consul. See [Cluster](@/cluster.md).
 
@@ -1246,4 +1246,4 @@ A path with a directory writes into that directory, and a bare file name writes 
 
 The log directory holds these files and `log.db`, the database of the log page and the audit log. The `R3V3RS3_LOG_DIR` environment variable or the `--log-dir` command-line option sets it. The default is `$XDG_DATA_HOME/r3v3rs3/logs` or `$HOME/.local/share/r3v3rs3/logs`.
 
-If you want to adjust the log level, you can do so by setting the `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` environment variable or using the `--log-level`, `--access-log-level` command-line option. The default level is `info`, and `off` turns a log off. `R3V3RS3_LOG_FORMAT` or `--log-format` selects `text` (the default) or `json` for both logs.
+Set the log level with the `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` environment variable or the `--log-level`, `--access-log-level` command-line option. The default level is `info`, and `off` turns a log off. `R3V3RS3_LOG_FORMAT` or `--log-format` selects `text` (the default) or `json` for both logs.

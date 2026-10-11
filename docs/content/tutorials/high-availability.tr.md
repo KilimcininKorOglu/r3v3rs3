@@ -268,7 +268,7 @@ $ curl -b session.txt http://10.0.0.11:46492/api/cluster/status
 {"state":"synced","node_name":"proxy-1","leader":false,"revision":247}
 ```
 
-Her düğüm `synced` demelidir ve tam bir düğüm `"leader":true` demelidir. Başlamayan veya `degraded` diyen bir düğüm veri deposunu okuyamıyordur: log'unda kimlik bilgilerini ve endpoint'leri kontrol edin.
+Her düğüm `synced` demelidir ve tam olarak bir düğüm `"leader":true` demelidir. Başlamayan veya `degraded` diyen bir düğüm veri deposunu okuyamıyordur: log'unda kimlik bilgilerini ve endpoint'leri kontrol edin.
 
 ## Adım 8: Sağlık kontrolü route'u ekleyin
 

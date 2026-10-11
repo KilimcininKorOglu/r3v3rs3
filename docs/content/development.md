@@ -4,11 +4,11 @@ description = "Development"
 weight = 0
 +++
 
-Our project's source code is available on [GitHub](https://github.com/KilimcininKorOglu/r3v3rs3).
+The source code of r3v3rs3 is on [GitHub](https://github.com/KilimcininKorOglu/r3v3rs3).
 
 # Prerequisites
 
-Before getting started, make sure to install the following prerequisites:
+Install these before you build:
 
 - Rust toolchain: install [rustup](https://rustup.rs/). `rust-toolchain.toml` pins the compiler, clippy, rustfmt and the `wasm32-unknown-unknown` target, and rustup installs them at the first build.
 - [Trunk](https://trunkrs.dev/): Visit the website for installation instructions

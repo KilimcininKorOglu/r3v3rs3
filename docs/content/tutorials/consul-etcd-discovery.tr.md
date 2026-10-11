@@ -196,8 +196,8 @@ $ curl -s -b cookies.txt -X DELETE http://localhost:46492/api/proxies/cfr-kpm
 
 WebUI proxy'yi kaynağıyla birlikte ve düzenleme işlemleri olmadan gösterir. Değiştirmek için etiketi veya key'i değiştirin.
 
-- r3v3rs3 keşfedilen proxy'leri `proxies.toml` dosyasına yazmaz. Sağlayıcı onları yeniden başlatmadan sonra tekrar gönderir.
-- Id, sağlayıcıdan ve tanımın key'inden gelir, bu yüzden yeniden başlatmadan sonra da aynı kalır.
+- r3v3rs3 keşfedilen proxy'leri `proxies.toml` dosyasına yazmaz. Sağlayıcı onları yeniden başlattıktan sonra tekrar gönderir.
+- Id, sağlayıcıdan ve tanımın key'inden gelir, bu yüzden yeniden başlattıktan sonra da aynı kalır.
 - Sağlayıcı port açmaz. Port adı tam olarak bir portu seçmelidir ve port, proxy'nin protokolünü kabul etmelidir.
 - Etiket veya key içindeki düz metin parola ve token kaynakta düz metin kalır. `password_hash` ve `token_hash` kullanın.
 

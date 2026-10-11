@@ -39,6 +39,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 ## Operations
 
 - A single binary with a built-in WebUI in English and Turkish. Configuration changes apply without a restart
+- An hourly check for a newer release. While one exists, a banner on every page of the panel names it and links to the settings page, which upgrades without dropping the connections
 - An admin API with an OpenAPI document and a Swagger UI ([Admin API](@/configuration.md#admin-api))
 - Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists and an audit log ([Accounts](@/accounts.md))
 - Service discovery from Docker labels, Kubernetes Ingress and `R3v3rs3Proxy` resources, Consul and etcd ([Service Discovery](@/discovery.md))
@@ -64,7 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/inst
 
 # Development
 
-Please refer to the [Development](@/development.md) section for details.
+See [Development](@/development.md).
 
 # First Setup
 

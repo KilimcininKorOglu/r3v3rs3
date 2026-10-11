@@ -35,7 +35,7 @@ agent_host = "master.example.com"
 | `agent_port` | none | The TCP port on every IPv4 address that the agents of remote servers connect to. Without it the server accepts no agent. See [Agent targets](#agent-targets). The settings card keeps this value. |
 | `agent_host` | none | The host name or the address of this server in the agent commands of the **Targets** page. Without it the page uses the host name of its own address. The settings card keeps this value. |
 
-The admin API does not change the `[platform]` section. A change takes effect after a restart.
+The settings card applies `enabled`, `docker` and `proxy_ports` while the server runs. `acme`, `agent_port` and `agent_host` stay as they are in the card; a manual change of `config.toml` applies after a restart.
 
 At its first start the platform creates two files in the config directory:
 

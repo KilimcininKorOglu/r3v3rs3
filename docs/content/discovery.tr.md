@@ -21,7 +21,7 @@ Bu sayfa referanstır. Docker etiketleriyle çalışan bir kurulum için [Docker
 
 ## Sağlayıcı durumu
 
-Proxy listesi her sağlayıcının durumunu, eklediği proxy sayısını ve proxy olamayan tanımları gösterir. Yönetim API'si aynı veriyi `GET /api/discovery` adresinde döner.
+Proxy listesi her sağlayıcının durumunu, eklediği proxy sayısını ve proxy olamayan tanımları gösterir. Yönetim API'si aynı veriyi `GET /api/discovery` adresinde döndürür.
 
 | Durum | Anlamı |
 |---|---|

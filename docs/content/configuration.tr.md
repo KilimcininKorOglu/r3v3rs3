@@ -1090,7 +1090,7 @@ name = "r3v3rs3 MCP client"
 redirect_uris = ["http://127.0.0.1:8765/callback"]
 ```
 
-Client, PKCE'li OAuth 2.1 authorization code akışıyla giriş yapar: client `/oauth/authorize` adresini tarayıcıda açar, oturum açmış hesap onay formundan client'a izin verir ve client tek kullanımlık kodu `/oauth/token` üzerinde access token ile değiştirir. Token, onayın kapsamını taşır: `read` durumu görür, `edit` ayrıca proxy'leri değiştirir. Metadata belkeleri `/.well-known/oauth-authorization-server` ve `/.well-known/oauth-protected-resource` adreslerindedir.
+Client, PKCE'li OAuth 2.1 authorization code akışıyla giriş yapar: client `/oauth/authorize` adresini tarayıcıda açar, oturum açmış hesap onay formundan client'a izin verir ve client tek kullanımlık kodu `/oauth/token` üzerinde access token ile değiştirir. Token, onayın kapsamını taşır: `read` durumu görür, `edit` ayrıca proxy'leri değiştirir. Metadata belgeleri `/.well-known/oauth-authorization-server` ve `/.well-known/oauth-protected-resource` adreslerindedir.
 
 Token'lar yalnız bellekte tutulur, bu yüzden sunucunun yeniden başlaması her MCP client'ının oturumunu düşürür ve client'ın refresh token'ları geçersiz olur.
 

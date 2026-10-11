@@ -39,6 +39,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 ## Yönetim
 
 - WebUI'ı içinde taşıyan tek bir binary. WebUI İngilizce ve Türkçedir. Ayar değişiklikleri yeniden başlatmadan uygulanır.
+- Saat başı daha yeni bir release kontrolü. Yeni bir release varken panelin her sayfasındaki banner onu adlandırır ve Ayarlar sayfasına bağlanır; yükseltme bağlantıları kesmeden yapılır.
 - OpenAPI dokümanı ve Swagger UI sunan yönetim API'si ([Yönetim API'si](@/configuration.tr.md#yonetim-api-si)).
 - `admin`, `editor` ve `viewer` rolleri olan hesaplar, hesap başına proxy listesi ve denetim kaydı ([Hesaplar](@/accounts.tr.md)).
 - Docker etiketleri, Kubernetes Ingress ve `R3v3rs3Proxy` kaynakları, Consul ve etcd ile servis keşfi ([Servis keşfi](@/discovery.tr.md)).
