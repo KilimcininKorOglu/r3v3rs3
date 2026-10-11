@@ -27,7 +27,7 @@ jobs:
         # declared targets.
         run: rustup toolchain install
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@v1.23.0
+        uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
       - name: Install trunk
         run: cargo binstall trunk@0.21.14 --force -y
       - name: Cache
