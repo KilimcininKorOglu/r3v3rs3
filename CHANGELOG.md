@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.3] - 2026-10-12
+
+### Fixed
+- The certificates page showed its four tabs twice: once in the sidebar submenu and once inside the page. The in-page tabs are gone, and the tab follows the link of the sidebar directly, so a sidebar click switches the tab while the page is already open.
+
 ## [1.7.2] - 2026-10-12
 
 ### Added
