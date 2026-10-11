@@ -8,8 +8,8 @@ use gloo_net::http::{Request, RequestBuilder, Response};
 use r3v3rs3_api::{
     acme::webhook_url_allowed,
     app::{
-        AdminConfig, AppConfig, Http2Limits, Http3Limits, LogConfig, NotificationConfig,
-        UpgradeStarted, WebhookConfig,
+        AcmeExecConfig, AdminConfig, AppConfig, Http2Limits, Http3Limits, LogConfig,
+        McpClientConfig, McpConfig, NotificationConfig, UpgradeStarted, WebhookConfig,
     },
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
@@ -27,7 +27,7 @@ use serde_json::json;
 use std::{collections::HashMap, net::SocketAddr};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
-use web_sys::{HtmlInputElement, HtmlSelectElement};
+use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
 const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
@@ -104,6 +104,12 @@ struct Fields {
     platform_acme: Option<ShortId>,
     platform_agent_port: Option<u16>,
     platform_agent_host: Option<String>,
+    mcp_enabled: bool,
+    /// One client per line: `id, name, redirect_uri[, redirect_uri...]`.
+    mcp_clients: String,
+    /// One absolute path per line.
+    acme_exec_programs: String,
+    acme_exec_timeout: String,
 }
 
 impl Fields {
@@ -183,6 +189,29 @@ impl Fields {
             platform_acme: platform.acme,
             platform_agent_port: platform.agent_port,
             platform_agent_host: platform.agent_host.clone(),
+            mcp_enabled: config.mcp.enabled,
+            mcp_clients: config
+                .mcp
+                .clients
+                .iter()
+                .map(|client| {
+                    format!(
+                        "{}, {}, {}",
+                        client.id,
+                        client.name,
+                        client.redirect_uris.join(", ")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            acme_exec_programs: config
+                .acme_exec
+                .programs
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            acme_exec_timeout: text("/acme_exec/timeout"),
         }
     }
 }
@@ -291,6 +320,8 @@ pub fn settings() -> Html {
 
             { notifications_section(locale, &fields, &errors, &test_notice) }
             { platform_section(locale, &fields, &errors) }
+            { mcp_section(locale, &fields, &errors) }
+            { acme_exec_section(locale, &fields, &errors) }
             { docker_section(locale, &fields, &errors, &client_certs) }
             { kubernetes_section(locale, &fields, &errors) }
             { consul_section(locale, &fields, &errors, &client_certs) }
@@ -351,6 +382,35 @@ fn text_field(
         <>
             <label class={LABEL_CLASS}>{label}</label>
             <input type="text" autocapitalize="off" {value} {onchange} class={INPUT_CLASS} placeholder={placeholder} />
+            if let Some(err) = errors.get(key) {
+                <p class="mt-2 text-sm text-red-600 dark:text-red-500">{err}</p>
+            }
+        </>
+    }
+}
+
+/// A multi-line text field, one value per line.
+fn textarea_field(
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+    label: &'static str,
+    key: &'static str,
+    placeholder: &'static str,
+    select: fn(&mut Fields) -> &mut String,
+) -> Html {
+    let mut current = (**fields).clone().unwrap_or_default();
+    let value = select(&mut current).clone();
+    let fields = fields.clone();
+    let onchange = Callback::from(move |event: Event| {
+        let target: HtmlTextAreaElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        let mut updated = (*fields).clone().unwrap_or_default();
+        *select(&mut updated) = target.value();
+        fields.set(Some(updated));
+    });
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{label}</label>
+            <textarea rows="4" autocapitalize="off" value={value} onchange={onchange} class={INPUT_CLASS} placeholder={placeholder} />
             if let Some(err) = errors.get(key) {
                 <p class="mt-2 text-sm text-red-600 dark:text-red-500">{err}</p>
             }
@@ -469,6 +529,37 @@ fn platform_section(
             { text_field(fields, errors, locale.t("settings.platform_docker"), "platform_docker", "unix:///var/run/docker.sock", |f| &mut f.platform_docker) }
             { text_field(fields, errors, locale.t("settings.platform_proxy_ports"), "platform_proxy_ports", "http,https", |f| &mut f.platform_proxy_ports) }
             <p class={HINT_CLASS}>{locale.t("settings.platform_proxy_ports_hint")}</p>
+        </>
+    }
+}
+
+fn mcp_section(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    html! {
+        <>
+            { section_title(locale.t("settings.mcp_title")) }
+            { checkbox_field(fields, locale.t("settings.mcp_enabled"), |f| &mut f.mcp_enabled) }
+            <p class={HINT_CLASS}>{locale.t("settings.mcp_enabled_hint")}</p>
+            { textarea_field(fields, errors, locale.t("settings.mcp_clients"), "mcp_clients", "r3v3rs3-mcp, r3v3rs3 MCP client, http://127.0.0.1:8765/callback", |f| &mut f.mcp_clients) }
+            <p class={HINT_CLASS}>{locale.t("settings.mcp_clients_hint")}</p>
+        </>
+    }
+}
+
+fn acme_exec_section(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    html! {
+        <>
+            { section_title(locale.t("settings.acme_exec_title")) }
+            { textarea_field(fields, errors, locale.t("settings.acme_exec_programs"), "acme_exec_programs", "/usr/local/bin/r3v3rs3-dns-hook", |f| &mut f.acme_exec_programs) }
+            <p class={HINT_CLASS}>{locale.t("settings.acme_exec_programs_hint")}</p>
+            { text_field(fields, errors, locale.t("settings.acme_exec_timeout"), "acme_exec_timeout", "30s", |f| &mut f.acme_exec_timeout) }
         </>
     }
 }
@@ -742,6 +833,60 @@ fn comma_list(value: &str) -> Vec<String> {
         .collect()
 }
 
+/// Parses the MCP clients, one client per line: `id, name, redirect_uri[, redirect_uri...]`.
+fn parse_mcp(locale: Locale, fields: &Fields, errors: &mut HashMap<String, String>) -> McpConfig {
+    let mut clients = Vec::new();
+    let lines = fields
+        .mcp_clients
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    for line in lines {
+        let parts = line.split(',').map(str::trim).collect::<Vec<_>>();
+        if parts.len() < 3 || parts.iter().any(|part| part.is_empty()) {
+            errors.insert(
+                "mcp_clients".into(),
+                locale.t("settings.mcp_clients_line").into(),
+            );
+            continue;
+        }
+        clients.push(McpClientConfig {
+            id: parts[0].to_string(),
+            name: parts[1].to_string(),
+            redirect_uris: parts[2..].iter().map(|uri| uri.to_string()).collect(),
+        });
+    }
+    McpConfig {
+        enabled: fields.mcp_enabled,
+        clients,
+    }
+}
+
+/// Parses the allowlist of the exec DNS provider and the timeout of one program call.
+fn parse_acme_exec(
+    locale: Locale,
+    fields: &Fields,
+    errors: &mut HashMap<String, String>,
+) -> AcmeExecConfig {
+    let programs = fields
+        .acme_exec_programs
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect();
+    let timeout = parse_part::<AcmeExecConfig>(
+        errors,
+        "acme_exec_timeout",
+        locale.t("settings.invalid_duration"),
+        json!({ "timeout": fields.acme_exec_timeout.trim() }),
+    );
+    AcmeExecConfig {
+        programs,
+        timeout: timeout.map(|parsed| parsed.timeout).unwrap_or_default(),
+    }
+}
+
 fn parse_kubernetes(fields: &Fields) -> KubernetesDiscoveryConfig {
     KubernetesDiscoveryConfig {
         enabled: fields.kubernetes_enabled,
@@ -943,9 +1088,9 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 consul,
                 etcd,
             },
-            // The server keeps the programs, the cluster, the worker mode and the MCP settings
-            // of config.toml.
-            acme_exec: Default::default(),
+            // The server keeps the cluster and the worker mode of config.toml; a restart
+            // applies them.
+            acme_exec: parse_acme_exec(locale, fields, &mut errors),
             cluster: Default::default(),
             platform: PlatformConfig {
                 enabled: fields.platform_enabled,
@@ -956,7 +1101,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 agent_host: fields.platform_agent_host.clone(),
             },
             worker_mode: Default::default(),
-            mcp: Default::default(),
+            mcp: parse_mcp(locale, fields, &mut errors),
             http2,
             http3,
         }),

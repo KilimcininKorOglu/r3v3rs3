@@ -209,11 +209,11 @@ impl AppConfig {
         self.discovery.keep_secrets(&current.discovery);
     }
 
-    /// Takes the settings that only `config.toml` sets from the current settings.
+    /// Takes the settings that only `config.toml` sets from the current settings. The cluster
+    /// and the worker mode change the process itself, so a restart applies them.
     pub fn keep_file_only(&mut self, current: &Self) {
-        self.acme_exec.clone_from(&current.acme_exec);
         self.cluster.clone_from(&current.cluster);
-        self.mcp.clone_from(&current.mcp);
+        self.worker_mode.clone_from(&current.worker_mode);
     }
 }
 

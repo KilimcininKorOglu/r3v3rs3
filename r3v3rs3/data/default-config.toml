@@ -1,0 +1,151 @@
+# The settings of r3v3rs3 with their default values. The server writes this file on its first
+# start. The settings page of the panel manages every section except [cluster] and the
+# worker_mode, which need a restart, and shows the same values.
+
+# How often the background tasks run: the log cleanup, the certificate expiry check and the
+# certificate cleanup.
+background_task_interval = "1h"
+
+# How long the server waits for the open client connections when it stops.
+shutdown_graceful_timeout = "30s"
+
+[admin]
+# How long an admin session stays valid.
+session_expiry = "1h"
+# Failed logins allowed per client address and username before the sign-in is blocked.
+max_login_attempts = 10
+# How long a blocked client address and username waits before the next sign-in attempt.
+login_attempts_reset = "15m"
+
+[log]
+# How long the log database keeps an entry.
+database_log_retention = "3months"
+# How long the audit log keeps an entry.
+audit_log_retention = "1year"
+
+[notifications]
+# The certificate list marks a certificate that expires within this time.
+cert_expiry_warning = "14days"
+# A webhook that receives the notifications, for example:
+# [notifications.webhook]
+# url = "https://hooks.example.com/r3v3rs3"
+# token = "secret"
+# timeout = "10s"
+
+# The listening address of the ACME HTTP-01 challenges.
+http_challenge_addr = "0.0.0.0:80"
+# The listening address of the ACME TLS-ALPN-01 challenges.
+tls_alpn_challenge_addr = "0.0.0.0:443"
+# A DNS server that is asked whether the TXT records of a DNS-01 challenge are visible.
+# dns_challenge_resolver = "1.1.1.1:53"
+# A DNS server that answers the SRV lookups of http+srv and https+srv server URLs.
+# upstream_dns_resolver = "127.0.0.1:8600"
+
+[discovery.docker]
+# Reads proxies from the Docker labels.
+enabled = false
+endpoint = "unix:///var/run/docker.sock"
+# The Docker network of the upstream addresses. Empty uses the only network of a container.
+network = ""
+# Reads every container. Otherwise only the containers with r3v3rs3.enable=true.
+exposed_by_default = false
+
+[discovery.kubernetes]
+# Reads proxies from Kubernetes.
+enabled = false
+# The kubeconfig file. Empty uses KUBECONFIG or ~/.kube/config.
+kubeconfig = ""
+# The namespaces to read. Empty reads every namespace.
+namespaces = []
+# Reads the Ingress resources.
+ingress = true
+# Reads the R3v3rs3Proxy custom resources.
+crd = false
+# The class of the Ingress resources to read. Empty reads every Ingress.
+ingress_class = ""
+# The port names or ids of an Ingress without the r3v3rs3.io/ports annotation.
+ports = []
+
+[discovery.consul]
+# Reads proxies from the Consul catalog and key-value store.
+enabled = false
+address = "http://127.0.0.1:8500"
+# The ACL token of the API.
+# token = "secret"
+datacenter = ""
+# Reads the r3v3rs3.* tags of the catalog services.
+catalog = true
+# Reads the keys under the prefix of the key-value store.
+kv = true
+prefix = "r3v3rs3"
+# Reads every service. Otherwise only the services with r3v3rs3.enable=true.
+exposed_by_default = false
+
+[discovery.etcd]
+# Reads proxies from the etcd keys.
+enabled = false
+endpoints = ["http://127.0.0.1:2379"]
+# The user of etcd authentication.
+# username = "r3v3rs3"
+# The password of the user.
+# password = "secret"
+prefix = "r3v3rs3"
+
+[platform]
+# The server builds and runs apps and routes their domains itself. The settings page turns
+# the platform on and off while the server runs. A cluster does not run the platform.
+enabled = false
+# The Docker Engine API of the local target.
+docker = "unix:///var/run/docker.sock"
+# The names or the ids of the ports that serve the apps.
+proxy_ports = []
+# The ACME entry that orders the certificates of the app domains.
+# acme = "abc-def"
+# The TCP port that the agents of remote servers connect to.
+# agent_port = 9443
+# The host name of this server in the agent commands of the Targets page.
+# agent_host = "master.example.com"
+
+[mcp]
+# The MCP endpoint at /api/mcp answers only when this is on.
+enabled = false
+# The clients that may run the authorization code flow, for example:
+# [[mcp.clients]]
+# id = "r3v3rs3-mcp"
+# name = "r3v3rs3 MCP client"
+# redirect_uris = ["http://127.0.0.1:8765/callback"]
+
+[acme_exec]
+# The absolute paths of the programs that the exec DNS provider can run.
+programs = []
+# The longest run time of one program call.
+timeout = "30s"
+
+# The default HTTP/2 flood limits of every server-side connection. A port can override them
+# in its options.
+[http2]
+# The largest HEADERS plus CONTINUATION size of one request, in bytes.
+max_header_list_size = 65536
+# The streams that a client can reset before the connection closes with a GOAWAY.
+max_pending_accept_reset_streams = 128
+
+# The default HTTP/3 stream limits of every QUIC endpoint. A port can override them in its
+# options.
+[http3]
+# The request streams that one QUIC connection can open.
+max_concurrent_bidi_streams = 100
+# The control streams that one QUIC connection can open.
+max_concurrent_uni_streams = 10
+
+# The worker processes serve the ports instead of this process. This setting and the cluster
+# below are file-only: a change applies after a restart. Everything else is managed live from
+# the settings page of the panel.
+# worker_mode = "workers"
+
+# The settings of a cluster whose nodes share their state in etcd or Consul. File-only: a
+# change applies after a restart. See https://r3v3rs3.keremgok.tr/configuration/ for every key.
+# [cluster]
+# enabled = true
+# backend = "etcd"
+# endpoints = ["https://10.0.0.1:2379"]
+# node_name = "node-1"

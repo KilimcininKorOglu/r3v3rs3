@@ -6,6 +6,9 @@ use crate::certs::{
 };
 use anyhow::Context as _;
 use indexmap::map::IndexMap;
+
+/// The config file that the server writes on its first start, with every setting and its default.
+const DEFAULT_CONFIG: &str = include_str!("../../data/default-config.toml");
 use r3v3rs3_api::{
     access_list::{AccessList, AccessListEntry},
     app::AppConfig,
@@ -238,6 +241,19 @@ impl FileStorage {
     pub async fn read_app_config(&self) -> anyhow::Result<AppConfig> {
         self.load_app_config_impl(&self.dir.join("config.toml"))
             .await
+    }
+
+    /// Writes `config.toml` with every setting and its default when the file is missing, so a
+    /// fresh install shows what the server reads. A file that exists is never overwritten,
+    /// because a broken file is a mistake that the operator has to see.
+    async fn write_default_config(&self, path: &Path) {
+        if fs::try_exists(path).await.unwrap_or(true) {
+            return;
+        }
+        match fs::write(path, DEFAULT_CONFIG).await {
+            Ok(()) => info!(?path, "wrote the default config"),
+            Err(err) => error!(?path, "failed to write the default config: {err}"),
+        }
     }
 
     /// Removes the directory of the certificate below each kind directory.
@@ -556,6 +572,7 @@ impl Storage for FileStorage {
             Ok(config) => config,
             Err(err) => {
                 warn!(?path, "failed to load: {err}");
+                self.write_default_config(&path).await;
                 Default::default()
             }
         }
@@ -779,5 +796,24 @@ mod test {
             assert_eq!(found.kind, cert.kind);
             assert!(found.key.is_some());
         }
+    }
+
+    #[test]
+    fn the_default_config_template_holds_the_default_values() {
+        let config: AppConfig = toml::from_str(DEFAULT_CONFIG).unwrap();
+        assert_eq!(config, AppConfig::default());
+    }
+
+    #[tokio::test]
+    async fn a_fresh_directory_gets_the_default_config() {
+        let dir = std::env::temp_dir().join(format!("r33-default-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = FileStorage::new(&dir);
+        let config = storage.load_app_config().await;
+        assert_eq!(config, AppConfig::default());
+        let written = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        let parsed: AppConfig = toml::from_str(&written).unwrap();
+        assert_eq!(parsed, AppConfig::default());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
