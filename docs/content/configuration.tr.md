@@ -1025,6 +1025,10 @@ systemd ile `install.sh`, servisi `Type=notify` ve `ExecReload=/bin/kill -USR2 $
 
 Devir tek bir kurulumun içinde çalışır: eski süreç yeni binary'yi aynı makineden başlatır ve descriptor'ları ona geçirir. Docker yükseltmesi container'ın bütünüyle yeni image ile değiştirir, bu yüzden devredecek bir şey bulamaz ve bağlantılar her durumda yeniden başlar. Docker'da kesintisiz yükseltme için iki r3v3rs3 container'ını bir load balancer arkasında çalıştırın ve bunları sırayla güncelleyin. Container yeniden başlaması yine de açık bağlantıları `shutdown_graceful_timeout` süresince düzgün kapatır.
 
+## Panelden yükseltme
+
+Admin, shell'e girmeden yükseltebilir: "Ayarlar" sayfasında "Sunucu Yükseltmesi" kartı durur. Düğme en yeni GitHub release'ini okur, bu platformun arşivini seçer, release API'sinin bildirdiği sha256 özetini doğrular, çalışan binary'yi değiştirir ve dinleyicileri yukarıdaki kesintisiz yükseltme yoluyla yeni sürece devreder. Panel birkaç saniye sonra yeni sürüme yenilenir. Daha yeni bir release bulamayan yükseltme hata yanıtlar ve çalışan sunucu değişmez. Denetim kaydı yükseltmeyi yazar.
+
 ## HTTP/2 ve HTTP/3 limitleri
 
 Sunucu tarafındaki her bağlantı flood limitleri taşır. `config.toml`'un `[http2]` ve `[http3]` bölümleri, "Ayarlar" sayfasının düzenlediği, her port için varsayılanları tutar:

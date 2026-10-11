@@ -1025,6 +1025,10 @@ With systemd, `install.sh` writes the service as `Type=notify` with `ExecReload=
 
 The handover works only inside one installation: the old process starts the new binary from the same machine and passes the descriptors to it. A Docker upgrade replaces the whole container with a new image, so it cannot hand anything over and always restarts the connections. For a restart-free upgrade in Docker, run two r3v3rs3 containers behind a load balancer and roll them one at a time. A container restart still closes the open connections gracefully, up to `shutdown_graceful_timeout`.
 
+## In-Panel Upgrade
+
+An admin can upgrade without a shell: the "Settings" page carries a "Server Upgrade" card. Its button reads the latest GitHub release, picks the archive of this platform, verifies the sha256 digest that the release API reports, replaces the running binary, and hands the listeners to the new process over the zero-downtime upgrade above. The panel reloads onto the new version a few seconds later. An upgrade that finds no newer release answers with an error, and the running server is not changed. The audit log records the upgrade.
+
 ## HTTP/2 and HTTP/3 Limits
 
 Every server-side connection carries flood limits. The `[http2]` and `[http3]` sections of `config.toml`, which the "Settings" page edits, hold the defaults for every port:
