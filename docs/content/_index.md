@@ -25,7 +25,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 - Active and passive health checks, a circuit breaker with a half-open trial, sticky sessions with an HMAC-signed cookie, retries with idempotent-method rules and a body replay limit, and traffic mirroring with a percentage
 - Upstream connect and request timeouts per proxy and per route, and upstream servers from DNS SRV records (`http+srv://` URLs), refreshed when the TTL expires
 - UDP client sessions with an idle timeout and at most 10,000 sessions per port
-- HTTP/2 toward plain HTTP servers with h2c, and shared upstream connection pools that carry many clients over one HTTP/2 connection
+- HTTP/2 toward plain HTTP servers with h2c for gRPC, and shared upstream connection pools that carry many clients over one HTTP/2 connection
 - Configurable HTTP/2 and HTTP/3 flood limits, globally and per port
 - The PROXY protocol v1 and v2, received from trusted load balancers and sent to upstream servers
 
@@ -55,7 +55,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 - Access and server logs with hourly file rotation, a text or JSON format, and the `log.db` database behind the log and audit pages ([Logging](@/configuration.md#logging))
 - An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down ([Worker Processes](@/configuration.md#worker-processes))
 - A zero-downtime upgrade over SIGUSR2 (`systemctl reload r3v3rs3`), an in-panel upgrade button that verifies the sha256 digest, and an hourly check for a newer release with a banner on every page of the panel ([Zero-Downtime Upgrade](@/configuration.md#zero-downtime-upgrade), [In-Panel Upgrade](@/configuration.md#in-panel-upgrade))
-- Service discovery from Docker labels, Kubernetes Ingress and `R3v3rs3Proxy` resources, Consul and etcd ([Service Discovery](@/discovery.md))
+- Service discovery from Docker labels, Kubernetes Ingress and `R3v3rs3Proxy` resources, Consul and etcd. Discovered proxies are read-only, and a definition that fails to become a proxy is reported as an issue in the proxy list ([Service Discovery](@/discovery.md))
 - High availability with cluster mode: several nodes share one encrypted state in etcd or Consul ([Setup guide](@/tutorials/high-availability.md), [Cluster](@/cluster.md))
 
 ## Deployment platform

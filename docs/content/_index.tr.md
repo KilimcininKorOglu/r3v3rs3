@@ -25,7 +25,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - Aktif ve pasif sağlık kontrolü, half-open denemesiyle circuit breaker, HMAC imzalı cookie ile sticky session, idempotent method kuralları ve gövde replay limitiyle yeniden deneme ve yüzde ile istek yansıtma.
 - Proxy ve route başına upstream connect ve request timeout'ları. TTL bitince yenilenen DNS SRV kayıtlarından gelen upstream sunucuları (`http+srv://` URL'leri).
 - İstemci başına UDP oturumları: boşta kalma timeout'u ve port başına en çok 10.000 oturum.
-- Düz HTTP sunuculara h2c ile HTTP/2. Bir HTTP/2 upstream bağlantısını çok sayıda istemciye taşıyan paylaşılan upstream bağlantı havuzları.
+- Düz HTTP sunuculara gRPC için h2c ile HTTP/2. Bir HTTP/2 upstream bağlantısını çok sayıda istemciye taşıyan paylaşılan upstream bağlantı havuzları.
 - Genel ve port başına ayarlanabilir HTTP/2 ve HTTP/3 flood limitleri.
 - Güvenilen yük dengeleyicilerden kabul edilen ve upstream sunuculara gönderilen PROXY protocol v1 ve v2.
 
@@ -55,7 +55,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - Saatlik dosya döndürmesi, text veya JSON biçimi olan erişim ve sunucu log'ları. Log ve denetim sayfalarının arkasındaki `log.db` veritabanı ([Loglama](@/configuration.tr.md#log)).
 - Portları sunan, master admin API'sini tutan isteğe bağlı worker süreci. Worker çökmesi paneli düşürmez ([Worker süreçleri](@/configuration.tr.md#worker-surecleri)).
 - SIGUSR2 ile kesintisiz yükseltme (`systemctl reload r3v3rs3`), sha256 özetini doğrulayan panel içi yükseltme butonu ve panelin her sayfasında banner'la saat başı daha yeni bir release kontrolü ([Kesintisiz yükseltme](@/configuration.tr.md#kesintisiz-yukseltme), [Panelden yükseltme](@/configuration.tr.md#panelden-yukseltme)).
-- Docker etiketleri, Kubernetes Ingress ve `R3v3rs3Proxy` kaynakları, Consul ve etcd ile servis keşfi ([Servis keşfi](@/discovery.tr.md)).
+- Docker etiketleri, Kubernetes Ingress ve `R3v3rs3Proxy` kaynakları, Consul ve etcd ile servis keşfi. Keşfedilen proxy'ler salt okunurdur ve proxy olamayan bir tanım, proxy listesinde sorun olarak raporlanır ([Servis keşfi](@/discovery.tr.md)).
 - Cluster modu ile yüksek erişilebilirlik: birden fazla düğüm, etcd veya Consul'da şifreli tek bir durum bilgisini paylaşır ([Kurulum rehberi](@/tutorials/high-availability.tr.md), [Cluster](@/cluster.tr.md)).
 
 ## Deploy platformu
