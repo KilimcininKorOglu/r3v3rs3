@@ -10,6 +10,7 @@ The documentation is published in English at the root and in Turkish under `/tr/
 
 ## Documentation
 
+- [Full documentation](https://r3v3rs3.keremgok.tr/llms-full.txt): every page with an extended description of its content
 - [Overview](https://r3v3rs3.keremgok.tr/): what r3v3rs3 does and the feature list
 - [Configuration](https://r3v3rs3.keremgok.tr/configuration/): every port and proxy field, with its default
 - [Accounts](https://r3v3rs3.keremgok.tr/accounts/): the roles, the permissions and the proxy list of a panel account

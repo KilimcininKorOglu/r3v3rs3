@@ -120,6 +120,16 @@
   ]
 }
 </script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "r3v3rs3",
+  "url": "{{ config.base_url | safe }}/",
+  "description": "{{ trans(key="description", lang=lang) }}",
+  "inLanguage": "{{ lang }}"
+}
+</script>
 {% endif %}
 {% endblock head %}
 
