@@ -89,10 +89,7 @@ fn shell() -> Html {
                         }
                         None => {
                             navigator
-                                .replace_with_query(
-                                    &pages::Route::Login,
-                                    &LoginQuery::new(route),
-                                )
+                                .replace_with_query(&pages::Route::Login, &LoginQuery::new(route))
                                 .ok();
                         }
                     }
