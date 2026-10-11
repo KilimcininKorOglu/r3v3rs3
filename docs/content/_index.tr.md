@@ -17,31 +17,44 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 ## Proxy
 
 - TCP, UDP, TLS, HTTP/1.1 ve HTTP/2 proxy'leri. HTTP upgrade ve WebSocket bağlantıları da buna dahildir.
-- HTTP/3 desteği kısmidir: yalnız gelen QUIC bağlantıları kabul edilir. Upstream bağlantıları HTTP/2 veya HTTP/1.1 kullanır. WebTransport desteği yoktur.
-- Host adına (tam, wildcard veya regex) ve yola göre routing. Yol yeniden yazma, yönlendirme kuralları ve yönlendirme host'u ya da 404 host'u gibi sabit yanıtlar.
-- Yük dengeleme, aktif ve pasif sağlık kontrolü, circuit breaker, sticky session, yeniden deneme, upstream timeout ve istek yansıtma.
-- DNS SRV kayıtlarından gelen upstream sunucuları (`http+srv://` URL'leri). TTL bitince yenilenir.
-- Gelen bağlantılarda ve upstream sunuculara giden bağlantılarda PROXY protocol.
+- HTTP/3 desteği kısmidir: yalnız gelen QUIC bağlantıları kabul edilir. Bir `alt-svc` header'ı tarayıcıya QUIC portunu bildirir. Upstream bağlantıları HTTP/2 veya HTTP/1.1 kullanır. WebTransport desteği yoktur.
+- Host adına (tam, wildcard veya regex) ve yola göre routing. Porttaki bütün proxy'ler içinde yolu en uzun eşleşen route kazanır, yani proxy'lerin ve route'ların sırası sonucu değiştirmez.
+- Yol yeniden yazma (prefix silme, regex değiştirme, prefix ekleme), yönlendirme kuralları ve sabit yanıtlar: yönlendirme host'u, durum kodu host'u ve 404 host'u şablonları.
+- Bir route, proxy'sinin ayarlarının yerine kendi ayarını koyabilir: timeout'lar, yeniden deneme, rate limit, IP filtresi, kimlik doğrulama, header kuralları ve gövde boyutu.
+- Round robin (smooth weighted), rastgele, ilk sağlıklı sunucu ve istemci IP hash'i ile yük dengeleme. Sunucuyu devre dışı bırakmak için 0 ile 65535 arası ağırlık.
+- Aktif ve pasif sağlık kontrolü, half-open denemesiyle circuit breaker, HMAC imzalı cookie ile sticky session, idempotent method kuralları ve gövde replay limitiyle yeniden deneme ve yüzde ile istek yansıtma.
+- Proxy ve route başına upstream connect ve request timeout'ları. TTL bitince yenilenen DNS SRV kayıtlarından gelen upstream sunucuları (`http+srv://` URL'leri).
+- İstemci başına UDP oturumları: boşta kalma timeout'u ve port başına en çok 10.000 oturum.
+- Düz HTTP sunuculara h2c ile HTTP/2. Bir HTTP/2 upstream bağlantısını çok sayıda istemciye taşıyan paylaşılan upstream bağlantı havuzları.
+- Genel ve port başına ayarlanabilir HTTP/2 ve HTTP/3 flood limitleri.
+- Güvenilen yük dengeleyicilerden kabul edilen ve upstream sunuculara gönderilen PROXY protocol v1 ve v2.
 
 ## Güvenlik ve istek kontrolü
 
-- IP izin ve engelleme listeleri, istemci başına rate limit, istek gövdesi boyut limiti. Bilinen CDN'lerin ve güvenilen proxy'lerin arkasında gerçek istemci IP'si bulunur.
-- Basic, Bearer, forward ve yönetim paneli oturumu ile kimlik doğrulama. Proxy'ler arasında paylaşılan erişim listeleri.
-- İstek ve yanıt header kuralları, yanıt sıkıştırma (brotli, zstd ve gzip) ve bellekte tutulan HTTP cache.
+- Proxy ve route başına IP izin ve engelleme listeleri. Tek bir adın altında IP filtresi ve kimlik doğrulamayı taşıyan, paylaşılan erişim listeleri.
+- Saniye, dakika veya saat periyotlu, burst'ü ve `Retry-After` header'ı olan istemci başına rate limit. `413` ile istek gövdesi boyut limiti.
+- Argon2 hash'iyle Basic auth, SHA-256 özeti olarak saklanan ve sabit sürede karşılaştırılan Bearer token'ları, forward auth (oauth2-proxy, Authelia) ve TOTP'li yönetim paneli oturumu ile kimlik doğrulama. Ayrıca giriş denemesi limitleri.
+- Sekiz bilinen CDN (Cloudflare, Fastly, Amazon CloudFront, Bunny, Gcore, KeyCDN, Imperva, Google Cloud Load Balancing) ve güvenilen proxy'lerin arkasında gerçek istemci IP'si bulunur. CDN aralıkları her gün yenilenir, güvenilmeyen karşı uçlardan sahte istemci IP header'ları silinir.
+- Değişken kullanan istek ve yanıt header kuralları: `{client_ip}`, `{host}`, `{request_id}`, `{route}`, `{client_cert_subject}` ve `{client_cert_fingerprint}`.
+- Yanıt sıkıştırma (brotli, zstd ve gzip) ve ETag ve Last-Modified yenilemesi, `304` yanıtları, `X-Cache` ve `Age` header'ları ve purge API'si olan bellekte tutulan HTTP cache.
+- Mutual TLS: TLS portlarında istemci sertifikası doğrulaması (kapalı, isteğe bağlı veya zorunlu) ve upstream sunuculara istemci sertifikası.
 
 ## Sertifikalar
 
 - Yüklenen veya kendinden imzalı sunucu, istemci ve kök sertifikaları.
-- Mutual TLS: TLS portlarında istemci sertifikası doğrulanır, upstream sunuculara istemci sertifikası gönderilir.
-- HTTP-01, TLS-ALPN-01 ve DNS-01 challenge'larıyla ACME v2 (örneğin Let's Encrypt). DNS-01, wildcard sertifikaları 12 DNS sağlayıcısının API'si, webhook, exec komutu veya RFC 2136 ile alır.
-- Sertifika süresi uyarıları ve webhook bildirimleri.
+- HTTP-01, TLS-ALPN-01 ve DNS-01 challenge'larıyla ACME v2 (örneğin Let's Encrypt). DNS-01, wildcard sertifikaları 12 DNS sağlayıcısının API'si, webhook, program allowlist'li exec komutu veya TSIG ile RFC 2136 ile alır.
+- Sertifika süresi uyarları ve bearer token'lı, yeniden denemeli, sertifika, deployment ve agent olaylarını bildiren webhook bildirimleri.
 
 ## Yönetim
 
-- WebUI'ı içinde taşıyan tek bir binary. WebUI İngilizce ve Türkçedir. Ayar değişiklikleri yeniden başlatmadan uygulanır.
-- Saat başı daha yeni bir release kontrolü. Yeni bir release varken panelin her sayfasındaki banner onu adlandırır ve Ayarlar sayfasına bağlanır; yükseltme bağlantıları kesmeden yapılır.
+- WebUI'ı içinde taşıyan tek bir binary. WebUI İngilizce ve Türkçedir ve açık, koyu ve sistem temaları vardır. Ayar değişiklikleri yeniden başlatmadan uygulanır.
 - OpenAPI dokümanı ve Swagger UI sunan yönetim API'si ([Yönetim API'si](@/configuration.tr.md#yonetim-api-si)).
-- `admin`, `editor` ve `viewer` rolleri olan hesaplar, hesap başına proxy listesi ve denetim kaydı ([Hesaplar](@/accounts.tr.md)).
+- İstek, cache ve bağlantı sayaçlarıyla Prometheus metrics endpoint'i: `GET /api/metrics` ([Metrics](@/configuration.tr.md#metrics)).
+- OAuth 2.1 ve PKCE ile `read` ve `edit` scope'lu `/api/mcp` üzerindeki MCP sunucusu ve `r3v3rs3-mcp` komut satırı istemcisi ([MCP sunucusu](@/configuration.tr.md#mcp-sunucusu)).
+- `admin`, `editor` ve `viewer` rolleri olan hesaplar, hesap başına proxy listesi, TOTP ve saklama süreli denetim kaydı ([Hesaplar](@/accounts.tr.md)).
+- Saatlik dosya döndürmesi, text veya JSON biçimi olan erişim ve sunucu log'ları. Log ve denetim sayfalarının arkasındaki `log.db` veritabanı ([Loglama](@/configuration.tr.md#log)).
+- Portları sunan, master admin API'sini tutan isteğe bağlı worker süreci. Worker çökmesi paneli düşürmez ([Worker süreçleri](@/configuration.tr.md#worker-surecleri)).
+- SIGUSR2 ile kesintisiz yükseltme (`systemctl reload r3v3rs3`), sha256 özetini doğrulayan panel içi yükseltme butonu ve panelin her sayfasında banner'la saat başı daha yeni bir release kontrolü ([Kesintisiz yükseltme](@/configuration.tr.md#kesintisiz-yukseltme), [Panelden yükseltme](@/configuration.tr.md#panelden-yukseltme)).
 - Docker etiketleri, Kubernetes Ingress ve `R3v3rs3Proxy` kaynakları, Consul ve etcd ile servis keşfi ([Servis keşfi](@/discovery.tr.md)).
 - Cluster modu ile yüksek erişilebilirlik: birden fazla düğüm, etcd veya Consul'da şifreli tek bir durum bilgisini paylaşır ([Kurulum rehberi](@/tutorials/high-availability.tr.md), [Cluster](@/cluster.tr.md)).
 

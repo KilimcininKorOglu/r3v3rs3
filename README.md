@@ -19,31 +19,44 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 ### Proxying
 
 - TCP, UDP, TLS, HTTP/1.1 and HTTP/2 proxies, including HTTP upgrades and WebSocket
-- Partial HTTP/3 support: incoming QUIC connections only. Upstream connections use HTTP/2 or HTTP/1.1, and WebTransport is not supported
-- Routing by host name (exact, wildcard or regex) and path, with path rewrite, redirect rules and fixed responses such as a redirect host or a 404 host
-- Load balancing, active and passive health checks, a circuit breaker, sticky sessions, retries, upstream timeouts and traffic mirroring
-- Upstream servers from DNS SRV records (`http+srv://` URLs), refreshed when the TTL expires
-- The PROXY protocol on incoming connections and toward upstream servers
+- Partial HTTP/3 support: incoming QUIC connections only, with an `alt-svc` header so browsers learn the QUIC port. Upstream connections use HTTP/2 or HTTP/1.1, and WebTransport is not supported
+- Routing by host name (exact, wildcard or regex) and path. The longest matching path wins across every proxy of a port, so the order of the proxies and routes does not change the result
+- Path rewrite (strip prefix, regex replacement, add prefix), redirect rules and fixed responses: a redirection host, a status host and 404 host templates
+- A route can replace the settings of its proxy: timeouts, retries, rate limit, IP filter, authentication, header rules and body size
+- Load balancing with round robin (smooth weighted), random, first healthy server and client IP hash, and weights from 0 to 65535 for draining a server
+- Active and passive health checks, a circuit breaker with a half-open trial, sticky sessions with an HMAC-signed cookie, retries with idempotent-method rules and a body replay limit, and traffic mirroring with a percentage
+- Upstream connect and request timeouts per proxy and per route, and upstream servers from DNS SRV records (`http+srv://` URLs), refreshed when the TTL expires
+- UDP client sessions with an idle timeout and at most 10,000 sessions per port
+- HTTP/2 toward plain HTTP servers with h2c, and shared upstream connection pools that carry many clients over one HTTP/2 connection
+- Configurable HTTP/2 and HTTP/3 flood limits, globally and per port
+- The PROXY protocol v1 and v2, received from trusted load balancers and sent to upstream servers
 
 ### Security and traffic control
 
-- IP allow and deny lists, per-client rate limits, a request body size limit and real client IP resolution behind known CDNs and trusted proxies
-- Basic, Bearer, forward and admin session authentication, and shared access lists
-- Request and response header rules, response compression (brotli, zstd and gzip) and an in-memory HTTP cache
+- IP allow and deny lists per proxy and per route, and shared access lists that carry an IP filter and an authentication under one name
+- Per-client rate limits with second, minute or hour periods, a burst and a `Retry-After` header, and a request body size limit with `413`
+- Basic auth with argon2 hashes, Bearer tokens stored as SHA-256 digests and compared in constant time, forward auth (oauth2-proxy, Authelia) and admin session authentication with TOTP, plus sign-in attempt limits
+- Real client IP resolution behind eight known CDNs (Cloudflare, Fastly, Amazon CloudFront, Bunny, Gcore, KeyCDN, Imperva, Google Cloud Load Balancing) and trusted proxies. The CDN ranges refresh daily, and the forged client IP headers are removed from untrusted peers
+- Request and response header rules with variables: `{client_ip}`, `{host}`, `{request_id}`, `{route}`, `{client_cert_subject}` and `{client_cert_fingerprint}`
+- Response compression (brotli, zstd and gzip) and an in-memory HTTP cache with ETag and Last-Modified revalidation, `304` answers, `X-Cache` and `Age` headers and a purge API
+- Mutual TLS: client certificate verification on TLS ports (off, optional or required) and client certificates toward upstream servers
 
 ### Certificates
 
 - Server, client and root certificates, uploaded or self-signed
-- Mutual TLS: client certificate verification on TLS ports and client certificates toward upstream servers
-- ACME v2 (for example Let's Encrypt) with the HTTP-01, TLS-ALPN-01 and DNS-01 challenges. DNS-01 issues wildcard certificates through 12 DNS provider APIs, a webhook, an exec command or RFC 2136
-- Certificate expiry warnings and webhook notifications
+- ACME v2 (for example Let's Encrypt) with the HTTP-01, TLS-ALPN-01 and DNS-01 challenges. DNS-01 issues wildcard certificates through 12 DNS provider APIs, a webhook, an exec command with a program allowlist, or RFC 2136 with TSIG
+- Certificate expiry warnings, and webhook notifications for certificate, deployment and agent events with a bearer token and retries
 
 ### Operations
 
-- A single binary with a built-in WebUI in English and Turkish. Configuration changes apply without a restart
-- An hourly check for a newer release. While one exists, a banner on every page of the panel names it and links to the settings page, which upgrades without dropping the connections
+- A single binary with a built-in WebUI in English and Turkish, with light, dark and system themes. Configuration changes apply without a restart
 - An admin API with an OpenAPI document and a Swagger UI
-- Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists and an audit log
+- A Prometheus metrics endpoint at `GET /api/metrics` with request, cache and connection counters
+- An MCP server at `/api/mcp` over OAuth 2.1 with PKCE and `read` and `edit` scopes, and the `r3v3rs3-mcp` command line client
+- Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists, TOTP and an audit log with retention
+- Access and server logs with hourly file rotation, a text or JSON format, and the `log.db` database behind the log and audit pages
+- An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down
+- A zero-downtime upgrade over SIGUSR2 (`systemctl reload r3v3rs3`), an in-panel upgrade button that verifies the sha256 digest, and an hourly check for a newer release with a banner on every page of the panel
 - Service discovery from Docker labels, Kubernetes Ingress and `R3v3rs3Proxy` resources, Consul and etcd
 - High availability with cluster mode: several nodes share one encrypted state in etcd or Consul
 
