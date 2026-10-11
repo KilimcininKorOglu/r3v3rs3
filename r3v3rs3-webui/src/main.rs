@@ -68,14 +68,35 @@ fn shell() -> Html {
     {
         let navigator = navigator.clone();
         let route = route.clone();
+        let auth = auth.clone();
+        let set_session = set_session.clone();
         use_effect_with((auth.clone(), route), move |(auth, route)| {
             if **auth == Auth::SignedOut
                 && route.as_ref() != Some(&pages::Route::Login)
                 && let Some(navigator) = navigator.as_ref()
             {
-                navigator
-                    .replace_with_query(&pages::Route::Login, &LoginQuery::new(route.clone()))
-                    .ok();
+                // A sign-in that just finished has changed the session behind this stale
+                // SignedOut state, so the redirect waits for a fresh answer first.
+                let navigator = navigator.clone();
+                let route = route.clone();
+                let auth = auth.clone();
+                let set_session = set_session.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    match auth::get_session().await {
+                        Some(info) => {
+                            set_session.set(SessionStore { info: Some(info) });
+                            auth.set(Auth::SignedIn);
+                        }
+                        None => {
+                            navigator
+                                .replace_with_query(
+                                    &pages::Route::Login,
+                                    &LoginQuery::new(route),
+                                )
+                                .ok();
+                        }
+                    }
+                });
             }
             || {}
         });
