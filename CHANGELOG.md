@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.10] - 2026-10-11
+
+### Fixed
+- A zero-downtime upgrade starts the new process again after the binary was replaced on disk: the kernel reports the old inode as `<path> (deleted)` and the old path made the spawn fail.
+
 ## [1.6.9] - 2026-10-11
 
 ### Fixed
