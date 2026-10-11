@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.15] - 2026-10-11
+
+### Fixed
+- A fresh sign-in reaches the panel again: the signed-out redirect rechecks the session before it sends a route back to the sign-in page.
+
 ## [1.6.14] - 2026-10-11
 
 ### Changed
