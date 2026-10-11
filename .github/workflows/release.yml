@@ -104,6 +104,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Cache
+        # The build runs inside the container, so the registry and the target directory are
+        # mounted from the runner and cached per target.
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: ${{ matrix.target }}-musl
       - name: Download webui
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -111,10 +117,12 @@ jobs:
           path: r3v3rs3/dist/webui
       - name: Build project
         run: |
-          docker run --rm -v "$PWD:/work" -w /work rust:1-alpine sh -ec '
-            apk add --no-cache musl-dev perl cmake make clang
-            cargo build --release --locked -p r3v3rs3
-          '
+          docker run --rm -v "$PWD:/work" -w /work \
+            -v "$HOME/.cargo:/root/.cargo" \
+            rust:1-alpine sh -ec '
+              apk add --no-cache musl-dev perl cmake make clang
+              cargo build --release --locked -p r3v3rs3
+            '
       - name: Check the static binary
         # A static PIE binary reports "static-pie linked" instead of "statically linked".
         run: file target/release/r3v3rs3 | grep -qE "statically|static-pie"
