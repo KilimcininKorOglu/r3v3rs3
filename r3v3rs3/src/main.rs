@@ -225,14 +225,7 @@ async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()>
     // The listeners are bound, so systemd may mark the service active (Type=notify).
     r3v3rs3::server::notify::ready();
 
-    serve_admin(
-        app_info,
-        channels,
-        exe_args,
-        manifest,
-        webui_listener,
-    )
-    .await?;
+    serve_admin(app_info, channels, exe_args, manifest, webui_listener).await?;
 
     let _ = event_send.send(r3v3rs3_api::event::ServerEvent::Shutdown);
     server_task.await??;

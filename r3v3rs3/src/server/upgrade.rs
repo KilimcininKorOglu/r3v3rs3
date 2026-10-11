@@ -87,12 +87,29 @@ pub async fn hand_over(exe_args: &[String], manifest: &[ListenerFd]) -> anyhow::
     Ok(())
 }
 
+/// The path of the binary that the next process runs. When the file on disk was replaced,
+/// the kernel reports the old inode as `<path> (deleted)`; the upgrade wants the binary that
+/// carries the path now, so the suffix goes.
+fn upgrade_exe() -> anyhow::Result<std::path::PathBuf> {
+    let exe = std::env::current_exe().context("failed to locate the server binary")?;
+    Ok(strip_deleted(exe))
+}
+
+/// Strips the `(deleted)` marker that the kernel appends to a replaced binary path.
+fn strip_deleted(exe: std::path::PathBuf) -> std::path::PathBuf {
+    let path = exe.to_string_lossy();
+    match path.strip_suffix(" (deleted)") {
+        Some(path) => path.into(),
+        None => exe,
+    }
+}
+
 /// The command of the new process that reads its IPC socket on descriptor 3.
 fn new_upgrade_command(
     exe_args: &[String],
     ipc_fd: std::os::fd::RawFd,
 ) -> anyhow::Result<std::process::Command> {
-    let exe = std::env::current_exe().context("failed to locate the server binary")?;
+    let exe = upgrade_exe()?;
     let mut command = std::process::Command::new(exe);
     command
         .args(exe_args)
@@ -135,4 +152,20 @@ fn write_handover(
         },
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_replaced_binary_path_loses_its_deleted_marker() {
+        let path = std::path::PathBuf::from("/usr/local/bin/r3v3rs3 (deleted)");
+        assert_eq!(
+            strip_deleted(path),
+            std::path::PathBuf::from("/usr/local/bin/r3v3rs3")
+        );
+        let path = std::path::PathBuf::from("/usr/local/bin/r3v3rs3");
+        assert_eq!(strip_deleted(path.clone()), path);
+    }
 }
