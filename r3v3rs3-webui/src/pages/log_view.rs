@@ -27,7 +27,9 @@ pub fn log_view(props: &Props) -> Html {
         poll_log(id.clone(), ul_ref_cloned.clone(), log_cloned, vec![], None);
     });
 
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let back_onclick = Callback::from(move |_| {
         navigator.back();
     });
@@ -44,7 +46,7 @@ pub fn log_view(props: &Props) -> Html {
             </div>
             <ul ref={ul_ref.clone()} class="overflow-auto max-h-[70vh] bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 rounded-md">
             { log.iter().map(|entry| {
-                let timestamp = entry.timestamp.format(&Rfc3339).unwrap();
+                let timestamp = entry.timestamp.format(&Rfc3339).unwrap_or_default();
                 let fields = entry.fields.iter().map(|(k, v)| {
                     format!("{}={}", k, v)
                 }).collect::<Vec<String>>().join(" ");

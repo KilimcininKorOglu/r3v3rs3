@@ -37,11 +37,15 @@ pub fn self_sign() -> Html {
     use_ensure_auth();
     let locale = use_locale();
 
-    let location = use_location().unwrap();
+    let Some(location) = use_location() else {
+        return html!();
+    };
     let query = location.query::<SelfSignQuery>().unwrap_or_default();
     let kind = use_state(|| query.kind);
 
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let cancel_onclick = Callback::from({
         let navigator = navigator.clone();
         let kind = *kind;

@@ -82,7 +82,9 @@ pub fn app_list() -> Html {
     });
 
     let can_edit = session.can_edit();
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let deploy = deploy_callback(locale, &failure, &reload);
 
     let (loaded, list, error) = match &*rows {

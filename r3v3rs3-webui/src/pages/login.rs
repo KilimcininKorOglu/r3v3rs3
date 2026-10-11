@@ -39,12 +39,16 @@ const MENU_BUTTON_CLASS: [&str; 6] = [
 
 #[function_component(Login)]
 pub fn login() -> Html {
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let locale = use_locale();
 
     use_logout_on_hide();
 
-    let location = use_location().unwrap();
+    let Some(location) = use_location() else {
+        return html!();
+    };
     let query = location.query::<LoginQuery>().unwrap_or_default();
 
     let username = use_state(String::new);
@@ -197,17 +201,34 @@ async fn send_login(username: String, method: LoginMethod) -> ApiResult<LoginRes
         .and_then(|window| window.location().protocol().ok())
         .unwrap_or_default()
         != "https:";
-    Request::post(&format!("{API_ENDPOINT}/login"))
-        .json(&LoginRequest {
-            username,
-            method,
-            insecure,
-        })
-        .unwrap()
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap()
+    let request = Request::post(&format!("{API_ENDPOINT}/login"));
+    let request = match request.json(&LoginRequest {
+        username,
+        method,
+        insecure,
+    }) {
+        Ok(request) => request,
+        Err(err) => {
+            return ApiResult::Err(ErrorMessage {
+                message: err.to_string(),
+                error: None,
+            });
+        }
+    };
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(err) => {
+            return ApiResult::Err(ErrorMessage {
+                message: err.to_string(),
+                error: None,
+            });
+        }
+    };
+    match response.json::<LoginResponse>().await {
+        Ok(response) => ApiResult::Ok(response),
+        Err(err) => ApiResult::Err(ErrorMessage {
+            message: err.to_string(),
+            error: None,
+        }),
+    }
 }

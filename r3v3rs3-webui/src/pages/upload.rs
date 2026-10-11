@@ -19,10 +19,14 @@ pub fn upload() -> Html {
     use_ensure_auth();
     let locale = use_locale();
 
-    let location = use_location().unwrap();
+    let Some(location) = use_location() else {
+        return html!();
+    };
     let query = location.query::<UploadQuery>().unwrap_or_default();
 
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let navigator_cloned = navigator.clone();
     let cancel_onclick = Callback::from(move |_| {
         let _ = navigator_cloned.push_with_query(
@@ -112,18 +116,25 @@ async fn upload_cert(
     chain: &web_sys::File,
     key: Option<&web_sys::File>,
     kind: CertKind,
-) -> Result<(), gloo_net::Error> {
-    let form_data = web_sys::FormData::new().unwrap();
-    form_data.append_with_blob("chain", chain).unwrap();
+) -> Result<(), String> {
+    let form_data =
+        web_sys::FormData::new().map_err(|err| format!("the form could not be built: {err:?}"))?;
+    form_data
+        .append_with_blob("chain", chain)
+        .map_err(|err| format!("the chain could not be attached: {err:?}"))?;
     if let Some(key) = key {
-        form_data.append_with_blob("key", key).unwrap();
+        form_data
+            .append_with_blob("key", key)
+            .map_err(|err| format!("the key could not be attached: {err:?}"))?;
     }
 
     Request::post(&format!("{API_ENDPOINT}/certs/upload"))
         .query([("kind", kind.to_string())])
-        .body(form_data)?
+        .body(form_data)
+        .map_err(|err| err.to_string())?
         .send()
-        .await?;
+        .await
+        .map_err(|err| err.to_string())?;
 
     Ok(())
 }

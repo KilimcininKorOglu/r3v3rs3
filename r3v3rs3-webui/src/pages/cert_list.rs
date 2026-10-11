@@ -143,7 +143,9 @@ pub fn cert_list() -> Html {
     use_ensure_auth();
     let locale = use_locale();
 
-    let location = use_location().unwrap();
+    let Some(location) = use_location() else {
+        return html!();
+    };
     let query = location.query::<CertsQuery>().unwrap_or_default();
     let tab = use_state(|| query.tab);
 
@@ -162,7 +164,9 @@ pub fn cert_list() -> Html {
 
     use_cert_lists(certs_dispatcher, acme_dispatcher);
 
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
 
     let navigator_cloned = navigator.clone();
     let self_sign_kind = match *tab == CertsTab::Client {

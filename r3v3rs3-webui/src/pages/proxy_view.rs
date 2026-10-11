@@ -31,7 +31,9 @@ pub fn proxy_view(props: &Props) -> Html {
     let can_edit = session.can_edit_proxies();
     let site = use_loaded_proxy(props.id, &proxies);
 
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
 
     let navigator_cloned = navigator.clone();
     let cancel_onclick = Callback::from(move |_| {

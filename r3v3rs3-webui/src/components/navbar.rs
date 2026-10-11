@@ -19,8 +19,12 @@ const MENU_BUTTON_CLASS: [&str; 5] = [
 /// sidebar, and a narrow screen opens it from the menu button of the header.
 #[function_component(Navbar)]
 pub fn navbar() -> Html {
-    let navigator = use_navigator().unwrap();
-    let route = use_route::<Route>().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
+    let Some(route) = use_route::<Route>() else {
+        return html!();
+    };
     let menu_open = use_state(|| false);
     let locale = use_locale();
 

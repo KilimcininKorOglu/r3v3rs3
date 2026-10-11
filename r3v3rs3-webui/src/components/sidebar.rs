@@ -131,8 +131,12 @@ pub struct MenuProps {
 #[function_component(Menu)]
 pub fn menu(props: &MenuProps) -> Html {
     let locale = use_locale();
-    let navigator = use_navigator().unwrap();
-    let route = use_route::<Route>().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html! {};
+    };
+    let Some(route) = use_route::<Route>() else {
+        return html! {};
+    };
     let (session, _) = use_store::<SessionStore>();
     let root = route.root();
 
@@ -189,7 +193,9 @@ fn menu_item(
 /// header.
 #[function_component(Sidebar)]
 pub fn sidebar() -> Html {
-    let route = use_route::<Route>().unwrap();
+    let Some(route) = use_route::<Route>() else {
+        return html! {};
+    };
     if route == Route::Login {
         return html! {};
     }

@@ -83,7 +83,9 @@ pub fn app_deployments(props: &Props) -> Html {
     use_ensure_auth();
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let history = use_state(|| Loaded::None);
     let failure = use_state(|| Option::<String>::None);
     let reload = use_state(|| 0_u32);

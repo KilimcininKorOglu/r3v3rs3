@@ -88,7 +88,9 @@ pub fn new_proxy() -> Html {
     use_ensure_auth();
     let locale = use_locale();
 
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let preset = use_state(Preset::default);
 
     let entry = use_state::<Result<Proxy, HashMap<String, String>>, _>(|| Err(Default::default()));

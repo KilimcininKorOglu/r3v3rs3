@@ -50,9 +50,10 @@ where
     S: serde::Serializer,
 {
     if let Some(started_at) = started_at {
+        // A time before the epoch serializes as zero instead of failing the response.
         let started_at = started_at
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         serializer.serialize_some(&started_at)
     } else {

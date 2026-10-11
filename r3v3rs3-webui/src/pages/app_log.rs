@@ -39,7 +39,9 @@ pub fn app_log_view(props: &Props) -> Html {
     use_ensure_auth();
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let page = use_state(|| Loaded::None);
     let pre_ref = use_node_ref();
 

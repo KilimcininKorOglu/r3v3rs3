@@ -39,7 +39,7 @@ fn create_default_port() -> Port {
     Port {
         active: true,
         name: String::new(),
-        listen: "/ip4/0.0.0.0/tcp/8080/http".parse().unwrap(),
+        listen: "/ip4/0.0.0.0/tcp/8080/http".parse().unwrap_or_default(),
         opts: Default::default(),
     }
 }
@@ -231,8 +231,12 @@ pub fn port_config(props: &Props) -> Html {
     let http = stack.is_http();
     let udp = stack.is_udp();
     let quic = stack.is_quic();
-    let interface = stack.host().unwrap();
-    let port = stack.port().unwrap();
+    let Ok(interface) = stack.host() else {
+        return html!();
+    };
+    let Ok(port) = stack.port() else {
+        return html!();
+    };
 
     let active = use_state(|| props.port.active);
     let active_onchange = checkbox_onchange(active.clone());

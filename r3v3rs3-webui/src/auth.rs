@@ -35,7 +35,9 @@ impl LoginQuery {
 /// the session store.
 #[hook]
 pub fn use_ensure_auth() {
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return;
+    };
     let (_, session) = use_store::<SessionStore>();
 
     let query = LoginQuery::new(use_route::<Route>().filter(|route| route != &Route::Login));

@@ -70,7 +70,9 @@ pub fn new_acme() -> Html {
     use_ensure_auth();
     let locale = use_locale();
 
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
 
     let navigator_cloned = navigator.clone();
     let cancel_onclick = Callback::from(move |_| show_acme(&navigator_cloned));

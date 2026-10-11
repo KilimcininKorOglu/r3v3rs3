@@ -46,7 +46,9 @@ pub fn app_view(props: &Props) -> Html {
     use_ensure_auth();
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let app = use_state(|| Option::<AppEntry>::None);
     let form = use_state(AppForm::default);
     let targets = use_state(Vec::<TargetEntry>::new);

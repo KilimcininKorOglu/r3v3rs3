@@ -77,7 +77,9 @@ pub fn proxy_list() -> Html {
         });
     });
 
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
 
     let navigator_cloned = navigator.clone();
     let new_proxy_onclick = Callback::from(move |_| {

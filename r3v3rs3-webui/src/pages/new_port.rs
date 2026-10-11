@@ -13,7 +13,9 @@ pub fn new_port() -> Html {
     use_ensure_auth();
     let locale = use_locale();
 
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let entry = use_state::<Result<Port, HashMap<String, String>>, _>(|| Err(Default::default()));
     let entry_cloned = entry.clone();
     let onchanged: Callback<Result<Port, HashMap<String, String>>> =
