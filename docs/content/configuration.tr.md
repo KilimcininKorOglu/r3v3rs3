@@ -1094,15 +1094,28 @@ Client, PKCE'li OAuth 2.1 authorization code akışıyla giriş yapar: client `/
 
 Token'lar yalnız bellekte tutulur, bu yüzden sunucunun yeniden başlaması her MCP client'ının oturumunu düşürür ve client'ın refresh token'ları geçersiz olur.
 
-Depo, `r3v3rs3-mcp` içinde bir komut satırı client'ı ile gelir:
+Depo, `r3v3rs3-mcp` içinde bir komut satırı client'ı ile gelir. Üç yoldan biriyle kurun:
 
 ```sh
-cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 login
-cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 tools
-cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 call server_status
+# npm ile; kurulum GitHub release'lerinden derlenmiş binary'yi indirir:
+npm install -g r3v3rs3-mcp
+
+# cargo ile; crates.io'dan derler (ya da cargo binstall aynı derlenmiş
+# binary'yi indirir):
+cargo install r3v3rs3-mcp
+
+# Ya da releases sayfasından mimarinizin release arşivi.
 ```
 
-`login`, onay sayfasını tarayıcıda açar ve token'ları yapılandırma dizinine kaydeder. Bir script, access token'ı doğrudan `--token` ile verebilir.
+Sonra:
+
+```sh
+r3v3rs3-mcp http://127.0.0.1:46492 login
+r3v3rs3-mcp http://127.0.0.1:46492 tools
+r3v3rs3-mcp http://127.0.0.1:46492 call server_status
+```
+
+`login`, onay sayfasını tarayıcıda açar ve token'ları yapılandırma dizinine kaydeder. Bir script, access token'ı doğrudan `--token` ile verebilir. `update` komutu, çalışan binary'nin yerine daha yeni bir release kurar ve sha256 özetini release'in checksum'larıyla doğrular.
 
 ## Saklanan veriler
 

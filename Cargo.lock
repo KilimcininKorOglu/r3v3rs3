@@ -3775,12 +3775,14 @@ dependencies = [
 
 [[package]]
 name = "r3v3rs3-mcp"
-version = "0.1.0"
+version = "1.7.3"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
  "clap",
  "dirs",
+ "flate2",
+ "hex",
  "rand 0.10.2",
  "reqwest",
  "rmcp",
@@ -3788,6 +3790,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "tar",
  "tokio",
  "url",
  "webbrowser",

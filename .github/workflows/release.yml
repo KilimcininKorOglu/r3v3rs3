@@ -86,14 +86,16 @@ jobs:
           name: webui
           path: r3v3rs3/dist/webui
       - name: Build project
-        run: cargo build --release --locked -p r3v3rs3
+        run: cargo build --release --locked -p r3v3rs3 -p r3v3rs3-mcp
       - name: Make archive
         run: tar -C target/release -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
+      - name: Make the archive of the MCP client
+        run: tar -C target/release -zcvf r3v3rs3-mcp-${{ matrix.target }}.tar.gz r3v3rs3-mcp
       - name: Upload archive
         if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz
+        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-mcp-${{ matrix.target }}.tar.gz
 
   # Each musl target cross-compiles on one amd64 runner with cargo zigbuild, so no Alpine
   # container and no arm runner is needed. zig supplies the musl libc and the C compiler;
@@ -132,17 +134,19 @@ jobs:
           name: webui
           path: r3v3rs3/dist/webui
       - name: Build project
-        run: cargo zigbuild --release --locked -p r3v3rs3 --target ${{ matrix.target }}
+        run: cargo zigbuild --release --locked -p r3v3rs3 -p r3v3rs3-mcp --target ${{ matrix.target }}
       - name: Check the static binary
         # A static PIE binary reports "static-pie linked" instead of "statically linked".
         run: file "target/${{ matrix.target }}/release/r3v3rs3" | grep -qE "statically|static-pie"
       - name: Make archive
         run: tar -C "target/${{ matrix.target }}/release" -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
+      - name: Make the archive of the MCP client
+        run: tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-mcp-${{ matrix.target }}.tar.gz r3v3rs3-mcp
       - name: Upload archive
         if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz
+        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-mcp-${{ matrix.target }}.tar.gz
 
   test:
     name: Test
@@ -226,16 +230,56 @@ jobs:
             404) cargo publish -p r3v3rs3-api --locked ;;
             *) echo "crates.io returned $code for r3v3rs3-api $version" >&2; exit 1 ;;
           esac
+      - name: Publish r3v3rs3-mcp
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "r3v3rs3-mcp") | .version')
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -A "r3v3rs3-release (github.com/KilimcininKorOglu/r3v3rs3)" "https://crates.io/api/v1/crates/r3v3rs3-mcp/$version")
+          case "$code" in
+            200) echo "r3v3rs3-mcp $version is already published" ;;
+            404) cargo publish -p r3v3rs3-mcp --locked ;;
+            *) echo "crates.io returned $code for r3v3rs3-mcp $version" >&2; exit 1 ;;
+          esac
       - name: Publish r3v3rs3
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         # dist/webui is gitignored but the package ships it.
         run: cargo publish -p r3v3rs3 --locked --allow-dirty
 
+  # The npm package carries no binary; its install script downloads the archive of the
+  # musl build from this release. The NPM_TOKEN secret needs the publish right.
+  npm:
+    name: Publish npm package
+    if: github.event_name == 'push'
+    needs: [binary-musl, test]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Node
+        uses: actions/setup-node@6044e4b27e698c2ac6dbcb170b68f7aeea5a9da4 # v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Publish r3v3rs3-mcp
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        working-directory: npm
+        run: |
+          test -n "$NODE_AUTH_TOKEN" || { echo "the NPM_TOKEN secret is empty" >&2; exit 1; }
+          version=$(node -p 'require("./package.json").version')
+          published=$(npm view "r3v3rs3-mcp@$version" version 2>/dev/null || true)
+          if [ "$published" = "$version" ]; then
+            echo "r3v3rs3-mcp $version is already published"
+          else
+            npm publish
+          fi
+
   publish:
     name: Publish release
     if: github.event_name == 'push'
-    needs: [binary, crates, sign]
+    needs: [binary, crates, sign, npm]
     runs-on: ubuntu-24.04
     steps:
       - name: Publish the draft release

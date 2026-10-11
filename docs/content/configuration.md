@@ -1094,15 +1094,28 @@ A client signs in through the OAuth 2.1 authorization code flow with PKCE: the c
 
 The tokens live in memory only, so a restart of the server signs every MCP client out, and the refresh tokens of a client stop working.
 
-The repository ships a command line client in `r3v3rs3-mcp`:
+The repository ships a command line client in `r3v3rs3-mcp`. Install it in one of three ways:
 
 ```sh
-cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 login
-cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 tools
-cargo run -p r3v3rs3-mcp -- http://127.0.0.1:46492 call server_status
+# With npm, which downloads the prebuilt binary from the GitHub releases:
+npm install -g r3v3rs3-mcp
+
+# With cargo, which compiles it from crates.io (or cargo binstall, which
+# downloads the same prebuilt binary):
+cargo install r3v3rs3-mcp
+
+# From the release archive of your architecture on the releases page.
 ```
 
-`login` opens the consent page in the browser and stores the tokens in the config directory. A script can pass an access token directly with `--token`.
+Then:
+
+```sh
+r3v3rs3-mcp http://127.0.0.1:46492 login
+r3v3rs3-mcp http://127.0.0.1:46492 tools
+r3v3rs3-mcp http://127.0.0.1:46492 call server_status
+```
+
+`login` opens the consent page in the browser and stores the tokens in the config directory. A script can pass an access token directly with `--token`. The `update` command installs a newer release over the running binary and verifies its sha256 digest against the checksums of the release.
 
 ## Stored data
 

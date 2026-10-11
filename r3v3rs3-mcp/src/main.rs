@@ -12,6 +12,7 @@ use rmcp::service::serve_client;
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
 };
+use sha2::Digest;
 use std::time::Duration;
 
 #[derive(Debug, Parser)]
@@ -20,8 +21,9 @@ use std::time::Duration;
     about = "An MCP client for the r3v3rs3 admin API"
 )]
 struct Args {
-    /// The origin of the admin API, for example http://127.0.0.1:46492.
-    server: String,
+    /// The origin of the admin API, for example http://127.0.0.1:46492. Every command
+    /// except `update` needs it.
+    server: Option<String>,
 
     /// An access token instead of the stored tokens, for scripts. The token must carry the
     /// scopes that the tool needs.
@@ -44,6 +46,8 @@ enum Command {
         #[clap(default_value = "{}")]
         arguments: String,
     },
+    /// Installs the newest release of this client over the running binary.
+    Update,
 }
 
 /// A silent MCP client: this program prints the results itself.
@@ -100,13 +104,21 @@ async fn main() -> anyhow::Result<()> {
         .install_default()
         .expect("failed to install the rustls crypto provider");
     let args = Args::parse();
-    let server = origin(&args.server)?;
     let client = http_client()?;
     match args.command {
-        Command::Login => login(&client, &server).await?,
-        Command::Tools => tools(&client, &server, args.token).await?,
-        Command::Call { name, arguments } => {
-            call(&client, &server, args.token, &name, &arguments).await?
+        Command::Update => update(&client).await?,
+        _ => {
+            let server = origin(args.server.as_deref().context(
+                "this command needs the server origin, for example http://127.0.0.1:46492",
+            )?)?;
+            match args.command {
+                Command::Login => login(&client, &server).await?,
+                Command::Tools => tools(&client, &server, args.token).await?,
+                Command::Call { name, arguments } => {
+                    call(&client, &server, args.token, &name, &arguments).await?
+                }
+                Command::Update => unreachable!("handled above"),
+            }
         }
     }
     Ok(())
@@ -178,4 +190,167 @@ async fn call(
         bail!("the tool answered with an error");
     }
     Ok(())
+}
+
+/// The GitHub repository that ships the releases of this client.
+const RELEASES_API: &str = "https://api.github.com/repos/KilimcininKorOglu/r3v3rs3/releases/latest";
+
+/// The release archive of this platform. The musl build is static, so it runs on every
+/// Linux regardless of the installed libc.
+fn asset_name() -> anyhow::Result<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Ok("r3v3rs3-mcp-x86_64-unknown-linux-musl.tar.gz"),
+        ("linux", "aarch64") => Ok("r3v3rs3-mcp-aarch64-unknown-linux-musl.tar.gz"),
+        (os, arch) => bail!("no release archive exists for {os}/{arch}"),
+    }
+}
+
+/// Compares two `major.minor.patch` version strings without a semver crate.
+fn newer_than(latest: &str, current: &str) -> Option<bool> {
+    let parse = |text: &str| -> Option<Vec<u64>> {
+        text.split('.')
+            .map(|part| part.parse().ok())
+            .collect::<Option<Vec<_>>>()
+    };
+    let (latest, current) = (parse(latest)?, parse(current)?);
+    Some(latest > current)
+}
+
+/// The `tag_name` of the newest release, without its `v` prefix.
+async fn latest_version(client: &reqwest::Client) -> anyhow::Result<String> {
+    let release: serde_json::Value = client
+        .get(RELEASES_API)
+        .header(reqwest::header::USER_AGENT, "r3v3rs3-mcp")
+        .send()
+        .await
+        .context("the release API did not answer")?
+        .error_for_status()
+        .context("the release API answered with an error")?
+        .json()
+        .await
+        .context("the release API did not answer with JSON")?;
+    let tag = release["tag_name"]
+        .as_str()
+        .context("the release API named no tag")?;
+    Ok(tag.trim_start_matches('v').to_string())
+}
+
+/// Reads the sha256 digest of `asset` out of the SHA256SUMS file of the release.
+fn digest_of(sums: &str, asset: &str) -> anyhow::Result<String> {
+    for line in sums.lines() {
+        let mut parts = line.split_whitespace();
+        if let (Some(digest), Some(name)) = (parts.next(), parts.next()) {
+            // The sum file lists the names as `./r3v3rs3-mcp-...`.
+            if name.trim_start_matches("./") == asset {
+                return Ok(digest.to_string());
+            }
+        }
+    }
+    bail!("{asset} is not in the checksums of the release")
+}
+
+/// Installs the newest release of this client over the running binary.
+async fn update(client: &reqwest::Client) -> anyhow::Result<()> {
+    let asset = asset_name()?;
+    let latest = latest_version(client).await?;
+    let current = env!("CARGO_PKG_VERSION");
+    match newer_than(&latest, current) {
+        Some(false) => {
+            println!("r3v3rs3-mcp {current} is the newest release.");
+            return Ok(());
+        }
+        None => bail!("the release version {latest} is not three numbers"),
+        Some(true) => {}
+    }
+    println!("Downloading r3v3rs3-mcp {latest}...");
+    let base = format!("https://github.com/KilimcininKorOglu/r3v3rs3/releases/download/v{latest}");
+    let sums = download(client, &format!("{base}/SHA256SUMS")).await?;
+    let archive = download(client, &format!("{base}/{asset}")).await?;
+    let sums = String::from_utf8(sums).context("the checksums are not UTF-8 text")?;
+    let expected = digest_of(&sums, asset)?;
+    let actual = hex::encode(sha2::Sha256::digest(&archive));
+    if actual != expected {
+        bail!("the sha256 digest of {asset} does not match the checksums of the release");
+    }
+    install(&archive)?;
+    println!("r3v3rs3-mcp {latest} is installed. The next run uses it.");
+    Ok(())
+}
+
+/// Downloads one release file as bytes.
+async fn download(client: &reqwest::Client, url: &str) -> anyhow::Result<Vec<u8>> {
+    client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, "r3v3rs3-mcp")
+        .send()
+        .await
+        .with_context(|| format!("{url} did not answer"))?
+        .error_for_status()
+        .with_context(|| format!("{url} answered with an error"))?
+        .bytes()
+        .await
+        .map(|bytes| bytes.to_vec())
+        .with_context(|| format!("{url} could not be read"))
+}
+
+/// Extracts the binary from the archive and replaces the running file atomically.
+fn install(archive: &[u8]) -> anyhow::Result<()> {
+    let exe = std::env::current_exe().context("the path of the running binary is unknown")?;
+    let dir = exe
+        .parent()
+        .context("the running binary has no directory")?
+        .to_path_buf();
+    let temporary = dir.join(format!(".r3v3rs3-mcp.new.{}", std::process::id()));
+    let reader = flate2::read::GzDecoder::new(archive);
+    let mut tar = tar::Archive::new(reader);
+    for entry in tar.entries().context("the archive is not readable")? {
+        let mut entry = entry.context("the archive is not readable")?;
+        if entry
+            .path()
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+            .to_string_lossy()
+            == "r3v3rs3-mcp"
+        {
+            let mut out = std::fs::File::create(&temporary)
+                .context("the binary could not be written next to the running one")?;
+            std::io::copy(&mut entry, &mut out).context("the archive could not be unpacked")?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o755))
+                    .context("the new binary could not be made executable")?;
+            }
+            // A rename over the running binary is allowed on Linux; the old file keeps
+            // serving this process until it exits.
+            std::fs::rename(&temporary, &exe)
+                .context("the running binary could not be replaced")?;
+            return Ok(());
+        }
+    }
+    let _ = std::fs::remove_file(&temporary);
+    bail!("the archive holds no r3v3rs3-mcp binary")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_newer_version_is_detected_by_number_not_by_text() {
+        assert_eq!(newer_than("1.7.4", "1.7.3"), Some(true));
+        assert_eq!(newer_than("1.8.0", "1.7.99"), Some(true));
+        assert_eq!(newer_than("1.7.3", "1.7.3"), Some(false));
+        assert_eq!(newer_than("1.7.2", "1.7.10"), Some(false));
+        assert_eq!(newer_than("unknown", "1.7.3"), None);
+    }
+
+    #[test]
+    fn the_digest_is_read_from_the_sum_file_with_or_without_a_dot_prefix() {
+        let sums = "abc123  ./r3v3rs3-mcp-x86_64-unknown-linux-musl.tar.gz\ndef456  SHA256SUMS\n";
+        assert_eq!(
+            digest_of(sums, "r3v3rs3-mcp-x86_64-unknown-linux-musl.tar.gz").unwrap(),
+            "abc123"
+        );
+        assert!(digest_of(sums, "r3v3rs3-mcp-aarch64-unknown-linux-musl.tar.gz").is_err());
+    }
 }
