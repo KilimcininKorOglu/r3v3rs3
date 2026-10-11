@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.17] - 2026-10-11
+
+### Changed
+- The auth gate of the panel stays within the complexity limit: its redirect lives in a hook of its own.
+
 ## [1.6.16] - 2026-10-11
 
 ### Added
