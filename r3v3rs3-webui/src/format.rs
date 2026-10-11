@@ -6,16 +6,8 @@ use web_time::{SystemTime, UNIX_EPOCH};
 const HOUR: u64 = 3600;
 const DAY: u64 = 24 * HOUR;
 
-/// Units of the remaining time, largest first, with the keys of one and of several units.
-const UNITS: [(u64, &str, &str); 5] = [
-    (365 * DAY, "time.year", "time.years"),
-    (30 * DAY, "time.month", "time.months"),
-    (7 * DAY, "time.week", "time.weeks"),
-    (DAY, "time.day", "time.days"),
-    (HOUR, "time.hour", "time.hours"),
-];
-
-/// Formats a Unix time as its date and the time left until it, e.g. `2026-12-01 (2 months)`.
+/// Formats a Unix time as its date and the exact days left until it,
+/// e.g. `2026-12-01 (59 days)`. A time less than a day away names its hours.
 pub fn format_duration(locale: Locale, unix_time: i64) -> String {
     let time = OffsetDateTime::from_unix_timestamp(unix_time).unwrap_throw();
     let timestamp = time.format(&Rfc3339).unwrap_throw();
@@ -43,19 +35,18 @@ pub fn unix_now() -> i64 {
         .unwrap_or_default()
 }
 
-/// Names the remaining time in its largest whole unit.
+/// Names the remaining time in exact days, or in hours when less than a day is left.
 fn time_left(locale: Locale, seconds: Option<u64>) -> String {
     let Some(seconds) = seconds.filter(|seconds| *seconds > 0) else {
         return locale.t("time.expired").to_string();
     };
-    UNITS
-        .iter()
-        .find_map(|&(size, one, many)| {
-            let count = seconds / size;
-            let key = if count == 1 { one } else { many };
-            (count > 0).then(|| locale.tf(key, &[("count", &count.to_string())]))
-        })
-        .unwrap_or_else(|| locale.t("time.less_than_hour").to_string())
+    if seconds >= DAY {
+        return locale.tf("time.days", &[("count", &(seconds / DAY).to_string())]);
+    }
+    if seconds >= HOUR {
+        return locale.tf("time.hours", &[("count", &(seconds / HOUR).to_string())]);
+    }
+    locale.t("time.less_than_hour").to_string()
 }
 
 #[cfg(test)]
@@ -63,11 +54,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn time_left_uses_the_largest_whole_unit() {
-        assert_eq!(time_left(Locale::En, Some(400 * DAY)), "1 year");
-        assert_eq!(time_left(Locale::En, Some(90 * DAY)), "3 months");
-        assert_eq!(time_left(Locale::En, Some(20 * DAY)), "2 weeks");
-        assert_eq!(time_left(Locale::En, Some(DAY)), "1 day");
+    fn time_left_names_the_exact_days_and_hours() {
+        assert_eq!(time_left(Locale::En, Some(400 * DAY)), "400 days");
+        assert_eq!(time_left(Locale::En, Some(59 * DAY + 12 * HOUR)), "59 days");
+        assert_eq!(time_left(Locale::Tr, Some(2 * DAY)), "2 gün");
         assert_eq!(time_left(Locale::Tr, Some(2 * HOUR + 5)), "2 saat");
         assert_eq!(time_left(Locale::Tr, Some(60)), "bir saatten az");
         assert_eq!(time_left(Locale::En, Some(0)), "Expired");
