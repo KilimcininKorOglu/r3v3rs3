@@ -45,7 +45,7 @@ pub fn app() -> Html {
 /// signed-out client needs the router context.
 #[function_component(Shell)]
 fn shell() -> Html {
-    let navigator = use_navigator().unwrap();
+    let navigator = use_navigator();
     let route = use_route::<pages::Route>();
     let auth = use_state(|| Auth::Pending);
     let (_, set_session) = use_store::<SessionStore>();
@@ -70,9 +70,11 @@ fn shell() -> Html {
         let route = route.clone();
         use_effect_with((auth.clone(), route), move |(auth, route)| {
             if **auth == Auth::SignedOut && route.as_ref() != Some(&pages::Route::Login) {
-                navigator
-                    .replace_with_query(&pages::Route::Login, &LoginQuery::new(route.clone()))
-                    .ok();
+                if let Some(navigator) = navigator.as_ref() {
+                    navigator
+                        .replace_with_query(&pages::Route::Login, &LoginQuery::new(route.clone()))
+                        .ok();
+                }
             }
             || {}
         });
