@@ -12,7 +12,9 @@ Platform geliştirme aşamasındadır. Bu sürüm, WebUI veya yönetim API'si ü
 
 ## Platformu açma
 
-`config.toml` dosyasına bir `[platform]` bölümü ekleyin ve sunucuyu yeniden başlatın:
+Web panelinin ayarlar sayfasında bir **Deployment Platform** kartı vardır. Bu kart platformu sunucu çalışırken açar ve kapatır, Docker Engine adresini ve uygulamalara hizmet veren portları tutar. Sidebar, platform kapalıyken platform sayfalarını göstermez.
+
+`config.toml` bölümü katılımsız kurulumlar için yerinde kalır ve sunucu başlangıçta onu okur:
 
 ```toml
 [platform]
@@ -29,11 +31,11 @@ agent_host = "master.example.com"
 | `enabled` | `false` | Platformu başlatır. Cluster düğümü platformu çalıştırmaz. |
 | `docker` | `unix:///var/run/docker.sock` | Docker Engine API'si: bir Unix socket'i veya düz TCP. TLS desteklenmez. |
 | `proxy_ports` | boş | Uygulamaları sunan portların adları veya id'leri, örneğin HTTP portu ve HTTPS portu. |
-| `acme` | yok | Uygulamaların alan adlarına sertifika sipariş eden ACME kaydının id'si. Bu değer yoksa uygulamalar sertifika almaz. |
-| `agent_port` | yok | Uzak sunuculardaki agent'ların bağlandığı TCP portu. Sunucu bu portu bütün IPv4 adreslerinde dinler. Bu değer yoksa sunucu hiçbir agent'ı kabul etmez. [Agent hedefleri](#agent-hedefleri) bölümüne bakın. |
-| `agent_host` | yok | **Hedefler** sayfasındaki agent komutlarında bu sunucunun host adı veya adresi. Bu değer yoksa sayfa kendi adresindeki host adını kullanır. |
+| `acme` | yok | Uygulamaların alan adlarına sertifika sipariş eden ACME kaydının id'si. Bu değer yoksa uygulamalar sertifika almaz. Ayarlar kartı bu değeri korur; kayıtları ACME sayfası yönetir. |
+| `agent_port` | yok | Uzak sunuculardaki agent'ların bağlandığı TCP portu. Sunucu bu portu bütün IPv4 adreslerinde dinler. Bu değer yoksa sunucu hiçbir agent'ı kabul etmez. [Agent hedefleri](#agent-hedefleri) bölümüne bakın. Ayarlar kartı bu değeri korur. |
+| `agent_host` | yok | **Hedefler** sayfasındaki agent komutlarında bu sunucunun host adı veya adresi. Bu değer yoksa sayfa kendi adresindeki host adını kullanır. Ayarlar kartı bu değeri korur. |
 
-Yönetim API'si `[platform]` bölümünü değiştirmez. Bir değişiklik yeniden başlatmadan sonra geçerli olur.
+Ayar kartı `enabled`, `docker` ve `proxy_ports` değerlerini değiştirir; değişiklik sunucu yeniden başlatılmadan geçerli olur. `acme`, `agent_port` ve `agent_host` değerleri kartta korunur, ama kart onları düzenlemez.
 
 Platform ilk başlangıçta config dizininde iki dosya oluşturur:
 
@@ -353,7 +355,7 @@ Agent, 1 saniyeden 60 saniyeye kadar uzayan bir beklemeden sonra yeniden bağlan
 
 ## WebUI
 
-Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **Hedefler** ve **Git Sağlayıcıları** sayfalarını içerir. **Git Sağlayıcıları** sayfası Edit izni olan hesaba görünür. Orada bağlantı ekleme, değiştirme, bağlama, silme ve genel adresi değiştirme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
+Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **Hedefler** ve **Git Sağlayıcıları** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** sayfası Edit izni olan hesaba görünür. Orada bağlantı ekleme, değiştirme, bağlama, silme ve genel adresi değiştirme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
 
 ### Uygulamalar
 

@@ -1164,7 +1164,7 @@ r3v3rs3 includes a built-in WebUI. By default, it is served on `127.0.0.1:46492`
 The menu of the WebUI is a sidebar on the left with three groups:
 
 - **Proxy**: **Ports**, **Proxies**, **Access Lists** and **Certificates**.
-- **Platform**: **Apps**, **Targets** and **Git Providers**, the [deployment platform](@/platform.md). Only an account without a proxy list sees this group, and only an admin or an editor sees **Git Providers**.
+- **Platform**: **Apps**, **Targets** and **Git Providers**, the [deployment platform](@/platform.md). The group shows only while the platform is on, and only an account without a proxy list sees it; only an admin or an editor sees **Git Providers**.
 - **Administration**: **Accounts**, **Audit Log** and **Settings**. Only an admin account sees this group.
 
 The navbar holds the logo, the language menu, the theme menu and **Logout**. On a narrow screen the **Menu** button of the navbar replaces the sidebar and **Logout**, and opens the same menu with **Logout** at its end.

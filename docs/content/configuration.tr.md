@@ -1164,7 +1164,7 @@ r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak `127.0.0.1:46492`
 WebUI menüsü soldaki kenar çubuğundadır ve üç gruptan oluşur:
 
 - **Proxy**: **Portlar**, **Proxy'ler**, **Erişim Listeleri** ve **Sertifikalar**.
-- **Platform**: **Uygulamalar**, **Hedefler** ve **Git Sağlayıcıları**, yani [deploy platformu](@/platform.tr.md). Bu grubu yalnız proxy listesi olmayan hesap görür. **Git Sağlayıcıları** öğesini yalnız admin veya editör görür.
+- **Platform**: **Uygulamalar**, **Hedefler** ve **Git Sağlayıcıları**, yani [deploy platformu](@/platform.tr.md). Bu grup yalnız platform açıkken görünür ve proxy listesi olmayan hesap tarafından görülür. **Git Sağlayıcıları** öğesini yalnız admin veya editör görür.
 - **Yönetim**: **Hesaplar**, **Denetim Kaydı** ve **Ayarlar**. Bu grubu yalnız admin hesabı görür.
 
 Üst çubuk logoyu, dil menüsünü, tema menüsünü ve **Çıkış Yap** butonunu içerir. Dar bir ekranda kenar çubuğu ve **Çıkış Yap** yerine üst çubukta **Menü** butonu görünür. Bu buton aynı menüyü açar ve menünün sonunda **Çıkış Yap** bulunur.

@@ -12,7 +12,9 @@ The platform is under development. This version deploys a ready image from a reg
 
 ## Enable the Platform
 
-Add a `[platform]` section to `config.toml` and restart the server:
+The settings page of the panel carries a **Deployment Platform** card. It turns the platform on and off while the server runs, and holds the Docker Engine address and the ports that serve the apps. The sidebar shows the platform pages only while the platform is on.
+
+`config.toml` still carries the section for an unattended install, and the server reads it at its start:
 
 ```toml
 [platform]
@@ -29,9 +31,9 @@ agent_host = "master.example.com"
 | `enabled` | `false` | Starts the platform. A cluster node does not run the platform. |
 | `docker` | `unix:///var/run/docker.sock` | The Docker Engine API: a Unix socket or plain TCP. TLS is not supported. |
 | `proxy_ports` | empty | The names or the ids of the ports that serve the apps, for example the HTTP port and the HTTPS port. |
-| `acme` | none | The id of the ACME entry that orders the certificates of the app domains. Without it the apps get no certificate. |
-| `agent_port` | none | The TCP port on every IPv4 address that the agents of remote servers connect to. Without it the server accepts no agent. See [Agent targets](#agent-targets). |
-| `agent_host` | none | The host name or the address of this server in the agent commands of the **Targets** page. Without it the page uses the host name of its own address. |
+| `acme` | none | The id of the ACME entry that orders the certificates of the app domains. Without it the apps get no certificate. The settings card keeps this value; the ACME page manages the entries. |
+| `agent_port` | none | The TCP port on every IPv4 address that the agents of remote servers connect to. Without it the server accepts no agent. See [Agent targets](#agent-targets). The settings card keeps this value. |
+| `agent_host` | none | The host name or the address of this server in the agent commands of the **Targets** page. Without it the page uses the host name of its own address. The settings card keeps this value. |
 
 The admin API does not change the `[platform]` section. A change takes effect after a restart.
 
@@ -353,7 +355,7 @@ The agent connects again after a pause that grows from 1 to 60 seconds. When it 
 
 ## WebUI
 
-The **Platform** group of the sidebar holds the **Apps**, **Targets** and **Git Providers** pages. The **Git Providers** page appears for an account with the Edit permission, and only an admin adds, changes, connects or deletes a connection there or changes the public address. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+The **Platform** group of the sidebar holds the **Apps**, **Targets** and **Git Providers** pages, and appears only while the platform is on. The **Git Providers** page appears for an account with the Edit permission, and only an admin adds, changes, connects or deletes a connection there or changes the public address. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
 
 ### Apps
 
