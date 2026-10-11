@@ -371,6 +371,36 @@ pub struct UpgradeStarted {
     pub tag: String,
 }
 
+/// The step of the server upgrade that runs at the moment. `None` means that no upgrade runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UpgradeStage {
+    /// The release information is fetched from the release API.
+    CheckingRelease,
+    /// The release archive is downloaded.
+    Downloading,
+    /// The archive is verified and installed.
+    Installing,
+    /// The new process starts and takes the listeners over.
+    HandingOver,
+    /// The upgrade finished; the new version serves.
+    Done,
+}
+
+/// The answer of the upgrade status endpoint.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UpgradeStageResponse {
+    pub stage: Option<UpgradeStage>,
+}
+
+/// The query parameters the update banner adds to the settings page link, so the page
+/// scrolls to the upgrade card.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UpgradeQuery {
+    /// The page section the link points at.
+    pub section: String,
+}
+
 #[derive(Debug, DefaultFromSerde, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AdminConfig {
     #[serde(with = "humantime_serde", default = "default_admin_session_expiry")]

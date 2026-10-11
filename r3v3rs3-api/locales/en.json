@@ -975,5 +975,12 @@
   "deployments.confirm_rollback": "Start deployment {id} again?",
   "workers.title": "Workers",
   "workers.status": "pid {pid}, up {uptime} s, {connections} open connections",
-  "workers.unreachable": "unreachable"
+  "workers.unreachable": "unreachable",
+  "settings.upgrade_dialog_title": "Upgrading the server",
+  "settings.upgrade_dialog_wait": "The upgrade runs. Please wait; the page reloads when it finishes.",
+  "settings.upgrade_stage_checking_release": "Checking the newest release",
+  "settings.upgrade_stage_downloading": "Downloading the release",
+  "settings.upgrade_stage_installing": "Installing the release",
+  "settings.upgrade_stage_handing_over": "Starting the new version",
+  "settings.upgrade_stage_done": "The upgrade finished. Reloading."
 }

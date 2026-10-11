@@ -975,5 +975,12 @@
   "deployments.confirm_rollback": "{id} deployment'ı yeniden başlatılsın mı?",
   "workers.title": "Worker'lar",
   "workers.status": "pid {pid}, {uptime} sn açık, {connections} açık bağlantı",
-  "workers.unreachable": "yanıt vermiyor"
+  "workers.unreachable": "yanıt vermiyor",
+  "settings.upgrade_dialog_title": "Sunucu güncelleniyor",
+  "settings.upgrade_dialog_wait": "Güncelleme çalışıyor. Lütfen bekleyin; sayfa bitince yeniden yüklenecek.",
+  "settings.upgrade_stage_checking_release": "En yeni release kontrol ediliyor",
+  "settings.upgrade_stage_downloading": "Release indiriliyor",
+  "settings.upgrade_stage_installing": "Release kuruluyor",
+  "settings.upgrade_stage_handing_over": "Yeni sürüm başlatılıyor",
+  "settings.upgrade_stage_done": "Güncelleme tamamlandı. Sayfa yeniden yükleniyor."
 }

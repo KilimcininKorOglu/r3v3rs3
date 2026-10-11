@@ -9,8 +9,8 @@ use r3v3rs3_api::{
     acme::webhook_url_allowed,
     app::{
         AcmeExecConfig, AdminConfig, AppConfig, Http2Limits, Http3Limits, LogConfig,
-        McpClientConfig, McpConfig, NotificationConfig, UpgradeConfig, UpgradeStarted,
-        WebhookConfig,
+        McpClientConfig, McpConfig, NotificationConfig, UpgradeConfig, UpgradeQuery, UpgradeStage,
+        UpgradeStageResponse, UpgradeStarted, WebhookConfig,
     },
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
@@ -30,6 +30,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
+use yew_router::prelude::use_location;
 
 const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
 const LABEL_CLASS: &str =
@@ -225,6 +226,17 @@ enum Notice {
     Failed(String),
 }
 
+/// Scrolls the upgrade card into the view when the page opens through the link of the
+/// update banner, after the form state has loaded.
+fn scroll_to_upgrade_card(card: &NodeRef, loaded: bool, wanted: bool) {
+    if !loaded || !wanted {
+        return;
+    }
+    if let Some(element) = card.cast::<web_sys::Element>() {
+        element.scroll_into_view();
+    }
+}
+
 #[function_component(Settings)]
 pub fn settings() -> Html {
     use_ensure_auth();
@@ -235,6 +247,18 @@ pub fn settings() -> Html {
     let test_notice = use_state(|| Option::<Notice>::None);
     let is_loading = use_state(|| false);
     let client_certs = use_client_certs();
+    // The update banner links here with ?section=upgrade, so the page opens on the
+    // upgrade card at the bottom instead of at the top.
+    let scroll_to_upgrade = use_location()
+        .and_then(|location| location.query::<UpgradeQuery>().ok())
+        .map(|query| query.section == "upgrade")
+        .unwrap_or(false);
+    let upgrade_card_ref = use_node_ref();
+    let effect_card_ref = upgrade_card_ref.clone();
+    use_effect_with(
+        ((*fields).is_some(), scroll_to_upgrade),
+        move |(loaded, scroll)| scroll_to_upgrade_card(&effect_card_ref, *loaded, *scroll),
+    );
 
     let fields_cloned = fields.clone();
     use_effect_with((), move |_| {
@@ -341,7 +365,9 @@ pub fn settings() -> Html {
         <ClusterStatusCard />
         <CdnStatusCard />
         <WorkerStatusCard />
-        <UpgradeCard />
+        <div ref={upgrade_card_ref}>
+            <UpgradeCard />
+        </div>
         </>
     }
 }
@@ -1454,41 +1480,60 @@ async fn get_cdn_status() -> Result<CdnStatus, gloo_net::Error> {
 }
 
 /// The card of the server upgrade: it installs the newest release and restarts the server
-/// without dropping the connections.
+/// without dropping the connections. While the upgrade runs, a blocking dialog covers the
+/// page and shows the step that runs at the moment.
 #[function_component(UpgradeCard)]
 fn upgrade_card() -> Html {
     let locale = use_locale();
     let notice = use_state(|| Option::<Notice>::None);
-    let is_loading = use_state(|| false);
+    let is_running = use_state(|| false);
+    let stage = use_state(|| Option::<UpgradeStage>::None);
 
     let onclick = {
         let notice = notice.clone();
-        let is_loading = is_loading.clone();
+        let is_running = is_running.clone();
+        let stage = stage.clone();
         Callback::from(move |_: MouseEvent| {
-            if *is_loading {
+            if *is_running {
                 return;
             }
-            is_loading.set(true);
             notice.set(None);
+            stage.set(Some(UpgradeStage::CheckingRelease));
+            is_running.set(true);
             let notice = notice.clone();
-            let is_loading = is_loading.clone();
+            let task_running = is_running.clone();
+            let task_stage = stage.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match upgrade_server(locale).await {
                     Ok(started) => {
-                        let tag = started.tag;
                         notice.set(Some(Notice::Success(
-                            locale.tf("settings.upgrade_started", &[("tag", tag.as_str())]),
+                            locale.tf("settings.upgrade_started", &[("tag", started.tag.as_str())]),
                         )));
+                        task_stage.set(Some(UpgradeStage::Done));
                         // The old process drains and the new one serves, so the panel loads
                         // the bundle of the new version after a short wait.
-                        gloo_timers::future::TimeoutFuture::new(4000).await;
+                        gloo_timers::future::TimeoutFuture::new(2000).await;
                         if let Some(window) = web_sys::window() {
                             let _ = window.location().reload();
                         }
                     }
                     Err(message) => {
                         notice.set(Some(Notice::Failed(message)));
-                        is_loading.set(false);
+                        task_stage.set(None);
+                        task_running.set(false);
+                    }
+                }
+            });
+            let poll_stage = stage.clone();
+            let poll_running = is_running.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                loop {
+                    gloo_timers::future::TimeoutFuture::new(1000).await;
+                    if !*poll_running {
+                        return;
+                    }
+                    if let Ok(status) = upgrade_status().await {
+                        poll_stage.set(status.stage);
                     }
                 }
             });
@@ -1501,11 +1546,42 @@ fn upgrade_card() -> Html {
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.upgrade_title")}</h2>
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.upgrade_hint")}</p>
             <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
-                <button type="button" {onclick} disabled={*is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                <button type="button" {onclick} disabled={*is_running} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
                     {locale.t("settings.upgrade_button")}
                 </button>
             </div>
+            if *is_running {
+                { upgrade_dialog(locale, *stage) }
+            }
         </div>
+    }
+}
+
+/// The blocking dialog of a running upgrade: it covers the page until the panel reloads.
+fn upgrade_dialog(locale: Locale, stage: Option<UpgradeStage>) -> Html {
+    let message = match stage {
+        Some(step) => locale.t(step_label(step)).to_string(),
+        None => locale.t("settings.upgrade_dialog_wait").to_string(),
+    };
+    html! {
+        <div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
+            <div class="bg-white dark:bg-neutral-800 p-6 border border-neutral-300 dark:border-neutral-700 rounded-md shadow-lg text-center">
+                <div class="mx-auto h-10 w-10 border-4 border-neutral-300 dark:border-neutral-600 border-t-blue-600 rounded-full animate-spin" role="status"></div>
+                <h3 class="mt-4 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.upgrade_dialog_title")}</h3>
+                <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{message}</p>
+            </div>
+        </div>
+    }
+}
+
+/// The locale key of the label of an upgrade step.
+fn step_label(step: UpgradeStage) -> &'static str {
+    match step {
+        UpgradeStage::CheckingRelease => "settings.upgrade_stage_checking_release",
+        UpgradeStage::Downloading => "settings.upgrade_stage_downloading",
+        UpgradeStage::Installing => "settings.upgrade_stage_installing",
+        UpgradeStage::HandingOver => "settings.upgrade_stage_handing_over",
+        UpgradeStage::Done => "settings.upgrade_stage_done",
     }
 }
 
@@ -1520,6 +1596,15 @@ async fn refresh_cdn_ranges(locale: Locale) -> Result<CdnStatus, String> {
 /// Asks the server to install the newest release and hand over to it.
 async fn upgrade_server(locale: Locale) -> Result<UpgradeStarted, String> {
     fetch_json(locale, Request::post(&format!("{API_ENDPOINT}/upgrade"))).await
+}
+
+/// Reads the step of the upgrade that runs at the moment.
+async fn upgrade_status() -> Result<UpgradeStageResponse, gloo_net::Error> {
+    Request::get(&format!("{API_ENDPOINT}/upgrade/status"))
+        .send()
+        .await?
+        .json()
+        .await
 }
 
 /// Sends a request without a body and reads the JSON of the response. A failed request gives the

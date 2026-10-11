@@ -1032,7 +1032,7 @@ The handover works only inside one installation: the old process starts the new 
 
 ## In-Panel Upgrade
 
-An admin can upgrade without a shell: the "Settings" page carries a "Server Upgrade" card. Its button reads the latest GitHub release, picks the archive of this platform, verifies the sha256 digest that the release API reports, replaces the running binary, and hands the listeners to the new process over the zero-downtime upgrade above. The panel reloads onto the new version a few seconds later. An upgrade that finds no newer release answers with an error, and the running server is not changed. The audit log records the upgrade.
+An admin can upgrade without a shell: the "Settings" page carries a "Server Upgrade" card. Its button reads the latest GitHub release, picks the archive of this platform, verifies the sha256 digest that the release API reports, replaces the running binary, and hands the listeners to the new process over the zero-downtime upgrade above. The panel reloads onto the new version a few seconds later. While the upgrade runs, a dialog covers the panel and shows the step of the upgrade, which `GET /api/upgrade/status` reports. An upgrade that finds no newer release answers with an error, and the running server is not changed. The audit log records the upgrade.
 
 The server also checks for a newer release on its own. The `upgrade.check_interval` setting of `config.toml`, which the "Settings" page edits, sets how often the server asks the release API (one hour by default, at least one minute). While a newer release exists, a banner on every page of the panel names it and links to the "Settings" page; the banner disappears when the server runs the newest release again.
 

@@ -21,7 +21,7 @@ use axum::{
 use futures::{Stream, StreamExt};
 use logs::LogReader;
 use openapi::{ApiDoc, DOCS_PATH, ErrorResponses, OPENAPI_PATH};
-use r3v3rs3_api::app::{AppConfig, AppInfo};
+use r3v3rs3_api::app::{AppConfig, AppInfo, UpgradeStage};
 use r3v3rs3_api::error::{Error, ErrorMessage};
 use r3v3rs3_api::event::ServerEvent;
 use std::any::Any;
@@ -114,6 +114,7 @@ pub async fn start_admin_on(
         event_listener_counter: Arc::new(AtomicUsize::new(0)),
         accounts,
         upgrade,
+        upgrade_stage: Arc::new(std::sync::Mutex::new(None)),
         data: data.clone(),
     };
 
@@ -311,7 +312,7 @@ fn resource_routes() -> OpenApiRouter<AppState> {
         .merge(platform_routes())
         .nest(
             "/upgrade",
-            OpenApiRouter::new().routes(routes!(upgrade::upgrade)),
+            OpenApiRouter::new().routes(routes!(upgrade::upgrade, upgrade::status)),
         )
 }
 
@@ -643,6 +644,8 @@ pub struct AppState {
     pub accounts: watch::Receiver<Arc<AccountDirectory>>,
     /// Wakes the signal loop of the server for an upgrade that the endpoint installed.
     pub upgrade: mpsc::Sender<()>,
+    /// The step of the upgrade that runs at the moment, for the status endpoint.
+    pub upgrade_stage: Arc<std::sync::Mutex<Option<UpgradeStage>>>,
     pub data: Arc<Mutex<Data>>,
 }
 
