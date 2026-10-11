@@ -34,6 +34,17 @@ enum Auth {
 #[function_component(App)]
 pub fn app() -> Html {
     event::use_event_subscriber();
+    html! {
+        <BrowserRouter>
+            <Shell />
+        </BrowserRouter>
+    }
+}
+
+/// The layout and the auth gate. It lives inside the router, because the redirect of a
+/// signed-out client needs the router context.
+#[function_component(Shell)]
+fn shell() -> Html {
     let navigator = use_navigator().unwrap();
     let route = use_route::<pages::Route>();
     let auth = use_state(|| Auth::Pending);
@@ -72,19 +83,17 @@ pub fn app() -> Html {
         return html!();
     }
     html! {
-        <BrowserRouter>
-            <div class="min-h-screen flex flex-col">
-                <Navbar />
-                <div class="w-full max-w-7xl mx-auto px-4 sm:px-6 py-4 flex-1 flex gap-6">
-                    <Sidebar />
-                    <main class="flex-1 min-w-0">
-                        <ClusterBanner />
-                        <Switch<pages::Route> render={pages::switch} />
-                    </main>
-                </div>
-                <Footer />
+        <div class="min-h-screen flex flex-col">
+            <Navbar />
+            <div class="w-full max-w-7xl mx-auto px-4 sm:px-6 py-4 flex-1 flex gap-6">
+                <Sidebar />
+                <main class="flex-1 min-w-0">
+                    <ClusterBanner />
+                    <Switch<pages::Route> render={pages::switch} />
+                </main>
             </div>
-        </BrowserRouter>
+            <Footer />
+        </div>
     }
 }
 
