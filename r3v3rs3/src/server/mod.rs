@@ -26,6 +26,7 @@ mod port_list;
 mod proxy_list;
 mod quic;
 pub mod rpc;
+pub mod self_upgrade;
 mod state;
 pub mod supervisor;
 mod tcp;

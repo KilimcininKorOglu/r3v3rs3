@@ -9,7 +9,7 @@ use r3v3rs3_api::{
     acme::webhook_url_allowed,
     app::{
         AdminConfig, AppConfig, Http2Limits, Http3Limits, LogConfig, NotificationConfig,
-        WebhookConfig,
+        UpgradeStarted, WebhookConfig,
     },
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
@@ -173,7 +173,7 @@ impl Fields {
 
 #[derive(Clone, PartialEq)]
 enum Notice {
-    Success(&'static str),
+    Success(String),
     Failed(String),
 }
 
@@ -226,7 +226,7 @@ pub fn settings() -> Html {
                     fields.set(Some(Fields::from_config(&saved)));
                 }
                 notice.set(Some(match result {
-                    Ok(()) => Notice::Success(locale.t("settings.saved")),
+                    Ok(()) => Notice::Success(locale.t("settings.saved").to_string()),
                     Err(message) => Notice::Failed(message),
                 }));
                 is_loading.set(false);
@@ -288,6 +288,7 @@ pub fn settings() -> Html {
         <ClusterStatusCard />
         <CdnStatusCard />
         <WorkerStatusCard />
+        <UpgradeCard />
         </>
     }
 }
@@ -295,7 +296,7 @@ pub fn settings() -> Html {
 fn notice_view(notice: &UseStateHandle<Option<Notice>>) -> Html {
     match &**notice {
         Some(Notice::Success(message)) => {
-            success_box(html! { <span class="block sm:inline">{*message}</span> })
+            success_box(html! { <span class="block sm:inline">{message}</span> })
         }
         Some(Notice::Failed(message)) => failure_box(message),
         None => html! {},
@@ -483,7 +484,9 @@ fn send_test_notification(
             let url = format!("{API_ENDPOINT}/config/notifications/test");
             notice.set(Some(
                 match fetch_json::<()>(locale, Request::post(&url)).await {
-                    Ok(()) => Notice::Success(locale.t("settings.notification_test_sent")),
+                    Ok(()) => {
+                        Notice::Success(locale.t("settings.notification_test_sent").to_string())
+                    }
                     Err(message) => Notice::Failed(message),
                 },
             ));
@@ -1171,7 +1174,9 @@ fn cdn_status_card() -> Html {
                 match refresh_cdn_ranges(locale).await {
                     Ok(value) => {
                         status.set(Some(value));
-                        notice.set(Some(Notice::Success(locale.t("settings.cdn_refreshed"))));
+                        notice.set(Some(Notice::Success(
+                            locale.t("settings.cdn_refreshed").to_string(),
+                        )));
                     }
                     Err(message) => notice.set(Some(Notice::Failed(message))),
                 }
@@ -1242,12 +1247,73 @@ async fn get_cdn_status() -> Result<CdnStatus, gloo_net::Error> {
         .await
 }
 
+/// The card of the server upgrade: it installs the newest release and restarts the server
+/// without dropping the connections.
+#[function_component(UpgradeCard)]
+fn upgrade_card() -> Html {
+    let locale = use_locale();
+    let notice = use_state(|| Option::<Notice>::None);
+    let is_loading = use_state(|| false);
+
+    let onclick = {
+        let notice = notice.clone();
+        let is_loading = is_loading.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *is_loading {
+                return;
+            }
+            is_loading.set(true);
+            notice.set(None);
+            let notice = notice.clone();
+            let is_loading = is_loading.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match upgrade_server(locale).await {
+                    Ok(started) => {
+                        let tag = started.tag;
+                        notice.set(Some(Notice::Success(
+                            locale.tf("settings.upgrade_started", &[("tag", tag.as_str())]),
+                        )));
+                        // The old process drains and the new one serves, so the panel loads
+                        // the bundle of the new version after a short wait.
+                        gloo_timers::future::TimeoutFuture::new(4000).await;
+                        if let Some(window) = web_sys::window() {
+                            let _ = window.location().reload();
+                        }
+                    }
+                    Err(message) => {
+                        notice.set(Some(Notice::Failed(message)));
+                        is_loading.set(false);
+                    }
+                }
+            });
+        })
+    };
+
+    html! {
+        <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
+            { notice_view(&notice) }
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.upgrade_title")}</h2>
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.upgrade_hint")}</p>
+            <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
+                <button type="button" {onclick} disabled={*is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                    {locale.t("settings.upgrade_button")}
+                </button>
+            </div>
+        </div>
+    }
+}
+
 async fn refresh_cdn_ranges(locale: Locale) -> Result<CdnStatus, String> {
     fetch_json(
         locale,
         Request::post(&format!("{API_ENDPOINT}/cdn/refresh")),
     )
     .await
+}
+
+/// Asks the server to install the newest release and hand over to it.
+async fn upgrade_server(locale: Locale) -> Result<UpgradeStarted, String> {
+    fetch_json(locale, Request::post(&format!("{API_ENDPOINT}/upgrade"))).await
 }
 
 /// Sends a request without a body and reads the JSON of the response. A failed request gives the

@@ -341,6 +341,13 @@ pub struct AppInfo {
     pub log_path: PathBuf,
 }
 
+/// The answer of the server upgrade endpoint: the version that the next process starts.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UpgradeStarted {
+    #[schema(example = "v1.6.12")]
+    pub tag: String,
+}
+
 #[derive(Debug, DefaultFromSerde, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AdminConfig {
     #[serde(with = "humantime_serde", default = "default_admin_session_expiry")]

@@ -226,7 +226,18 @@ async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()>
     // The listeners are bound, so systemd may mark the service active (Type=notify).
     r3v3rs3::server::notify::ready();
 
-    serve_admin(app_info, channels, exe_args, manifest, webui_listener).await?;
+    // The upgrade endpoint installs a release and asks this loop for the handover.
+    let (upgrade_requests, upgrade_receiver) = tokio::sync::mpsc::channel(1);
+    serve_admin(
+        app_info,
+        channels,
+        exe_args,
+        manifest,
+        webui_listener,
+        upgrade_requests,
+        upgrade_receiver,
+    )
+    .await?;
 
     let _ = event_send.send(r3v3rs3_api::event::ServerEvent::Shutdown);
     server_task.await??;
@@ -353,14 +364,17 @@ async fn spawn_supervisor(
 }
 
 /// Runs the admin API on the listener that `start` bound, until it fails or the process gets
-/// SIGINT, or hands the listeners to a new process on SIGUSR2. Without the listener it waits
-/// for a signal only.
+/// SIGINT, or hands the listeners to a new process. The endpoint that installs a release asks
+/// for the handover over `upgrade_receiver`; SIGUSR2 asks for the same handover. Without the
+/// listener of the panel it waits for a signal only.
 async fn serve_admin(
     app_info: AppInfo,
     channels: ServerChannels,
     exe_args: Vec<String>,
     manifest: Option<Vec<r3v3rs3::server::fdmanifest::ListenerFd>>,
     webui_listener: Option<tokio::net::TcpListener>,
+    upgrade_sender: tokio::sync::mpsc::Sender<()>,
+    mut upgrade_receiver: tokio::sync::mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
     let mut upgrade = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined2())
         .context("failed to install the SIGUSR2 handler")?;
@@ -371,6 +385,12 @@ async fn serve_admin(
             tokio::select! {
                 _ = upgrade.recv() => {
                     info!("received the upgrade signal");
+                    if try_hand_over(&exe_args, manifest.as_deref()).await {
+                        return;
+                    }
+                }
+                _ = upgrade_receiver.recv() => {
+                    info!("received the upgrade request of the panel");
                     if try_hand_over(&exe_args, manifest.as_deref()).await {
                         return;
                     }
@@ -386,7 +406,7 @@ async fn serve_admin(
     match webui_listener {
         Some(listener) => {
             tokio::select! {
-                r = r3v3rs3::admin::start_admin_on(app_info, listener, channels.command, channels.callback, channels.event, channels.accounts) => {
+                r = r3v3rs3::admin::start_admin_on(app_info, listener, channels.command, channels.callback, channels.event, channels.accounts, upgrade_sender) => {
                     if let Err(err) = r {
                         error!("admin error: {}", err);
                     }

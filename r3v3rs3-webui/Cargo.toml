@@ -19,9 +19,9 @@ gloo-utils = "0.3.0"
 serde_derive = "1.0.171"
 serde = "1.0.171"
 yewdux = "0.13.0"
-web-sys = { version = "0.3.64", features = ["console", "Document", "DomTokenList", "Element", "HtmlDocument", "HtmlElement", "HtmlFormElement", "HtmlInputElement", "HtmlSelectElement", "HtmlTextAreaElement", "MediaQueryList", "Window"] }
+web-sys = { version = "0.3.64", features = ["console", "Document", "DomTokenList", "Element", "HtmlDocument", "HtmlElement", "HtmlFormElement", "HtmlInputElement", "HtmlSelectElement", "HtmlTextAreaElement", "Location", "MediaQueryList", "Window"] }
 futures = "0.3.28"
-gloo-timers = "0.4.0"
+gloo-timers = { version = "0.4.0", features = ["futures"] }
 url = "2.4.0"
 base64 = "0.23.1"
 time = { version = "0.3.36", features = ["formatting"] }

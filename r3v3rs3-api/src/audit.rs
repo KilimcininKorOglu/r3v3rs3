@@ -53,6 +53,7 @@ pub enum AuditAction {
     DeleteTarget,
     NewTargetToken,
     EnrollAgent,
+    UpgradeServer,
     NewAppWebhookSecret,
     DeleteAppWebhookSecret,
     /// A signed webhook request of a Git provider started or queued a deployment.

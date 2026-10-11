@@ -70,6 +70,7 @@ mod platform;
 mod ports;
 mod proxies;
 mod static_file;
+mod upgrade;
 mod workers;
 
 /// The scopes of the access token that a request to the MCP endpoint carried.
@@ -85,7 +86,13 @@ pub async fn start_admin(
     accounts: watch::Receiver<Arc<AccountDirectory>>,
 ) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    start_admin_on(app_info, listener, command, callback, event, accounts).await
+    // The tests that start the admin API never call the upgrade endpoint, so the receiver of
+    // this channel stays unread and an upgrade request answers with an error.
+    let (upgrade, _) = mpsc::channel(1);
+    start_admin_on(
+        app_info, listener, command, callback, event, accounts, upgrade,
+    )
+    .await
 }
 
 /// The admin API on a listener that the caller bound, for example one that an upgrade
@@ -97,6 +104,7 @@ pub async fn start_admin_on(
     mut callback: mpsc::Receiver<RpcCallback>,
     event: broadcast::Sender<ServerEvent>,
     accounts: watch::Receiver<Arc<AccountDirectory>>,
+    upgrade: mpsc::Sender<()>,
 ) -> anyhow::Result<()> {
     let data = Data::new(app_info).await?;
     let data = Arc::new(Mutex::new(data));
@@ -105,6 +113,7 @@ pub async fn start_admin_on(
         event: event.clone(),
         event_listener_counter: Arc::new(AtomicUsize::new(0)),
         accounts,
+        upgrade,
         data: data.clone(),
     };
 
@@ -300,6 +309,10 @@ fn resource_routes() -> OpenApiRouter<AppState> {
         .merge(cert_routes())
         .merge(info_routes())
         .merge(platform_routes())
+        .nest(
+            "/upgrade",
+            OpenApiRouter::new().routes(routes!(upgrade::upgrade)),
+        )
 }
 
 /// The targets and the apps of the deployment platform.
@@ -627,6 +640,8 @@ pub struct AppState {
     pub event_listener_counter: Arc<AtomicUsize>,
     /// The accounts that the sessions belong to.
     pub accounts: watch::Receiver<Arc<AccountDirectory>>,
+    /// Wakes the signal loop of the server for an upgrade that the endpoint installed.
+    pub upgrade: mpsc::Sender<()>,
     pub data: Arc<Mutex<Data>>,
 }
 

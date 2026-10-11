@@ -69,12 +69,13 @@ fn shell() -> Html {
         let navigator = navigator.clone();
         let route = route.clone();
         use_effect_with((auth.clone(), route), move |(auth, route)| {
-            if **auth == Auth::SignedOut && route.as_ref() != Some(&pages::Route::Login) {
-                if let Some(navigator) = navigator.as_ref() {
-                    navigator
-                        .replace_with_query(&pages::Route::Login, &LoginQuery::new(route.clone()))
-                        .ok();
-                }
+            if **auth == Auth::SignedOut
+                && route.as_ref() != Some(&pages::Route::Login)
+                && let Some(navigator) = navigator.as_ref()
+            {
+                navigator
+                    .replace_with_query(&pages::Route::Login, &LoginQuery::new(route.clone()))
+                    .ok();
             }
             || {}
         });
