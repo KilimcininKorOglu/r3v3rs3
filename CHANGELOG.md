@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] - 2026-10-12
+
+### Added
+- `GET /api/upgrade/status` reports the step of the server upgrade that runs at the moment.
+- While the in-panel upgrade runs, a blocking dialog covers the panel and shows the current step. The panel reloads onto the new version when the upgrade finishes.
+- The link of the update banner opens the settings page on the Server Upgrade card instead of at the top of the page.
+
 ## [1.7.1] - 2026-10-11
 
 ### Fixed
