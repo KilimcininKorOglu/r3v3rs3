@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.22] - 2026-10-11
+
+### Added
+- The settings page manages the MCP endpoint and its clients, and the allowlist of the exec DNS provider; both apply while the server runs.
+- A fresh start writes `config.toml` with every setting and its default value when the file is missing.
+
+### Fixed
+- The in-panel upgrade installs again: the verification compared the installed binary with the digest of the compressed archive, and it compares the binary with the bytes that the extraction produced now.
+
 ## [1.6.21] - 2026-10-11
 
 ### Added

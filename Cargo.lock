@@ -3653,7 +3653,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r3v3rs3"
-version = "1.6.21"
+version = "1.6.22"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3755,7 +3755,7 @@ dependencies = [
 
 [[package]]
 name = "r3v3rs3-api"
-version = "0.2.12"
+version = "0.2.13"
 dependencies = [
  "base64 0.23.1",
  "hex",
