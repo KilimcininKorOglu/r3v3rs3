@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.25] - 2026-10-11
+
+### Fixed
+- Toggling the deployment platform on the settings page hides or shows the platform group of the sidebar without a reload: the config update event now refreshes the flag that the sidebar reads.
+
+### Changed
+- The release builds the musl binaries with cargo zigbuild on one runner instead of two Alpine containers, caches the WebUI build, and links with thin LTO, so a release finishes sooner.
+
 ## [1.6.24] - 2026-10-11
 
 ### Fixed
