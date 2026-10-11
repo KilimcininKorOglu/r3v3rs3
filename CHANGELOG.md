@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.18] - 2026-10-11
+
+### Fixed
+- The in-panel upgrade installs the new release again: the archive download of GitHub answers with a redirect, and the upgrade follows it now. Every failed upgrade step also logs its cause.
+
 ## [1.6.17] - 2026-10-11
 
 ### Changed
