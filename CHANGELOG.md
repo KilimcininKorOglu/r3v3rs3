@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.21] - 2026-10-11
+
+### Added
+- The settings page turns the deployment platform on and off while the server runs: the platform section travels with the settings of the panel, the sidebar hides the platform pages while it is off, and the app information carries the state.
+- The settings page of the panel and this document describe the platform card.
+
+### Fixed
+- A signed-out navigation to a panel page renders nothing: the server answers the shell of a WebUI route with a redirect to the sign-in page, and the SPA draws no page outside it.
+
 ## [1.6.20] - 2026-10-11
 
 ### Fixed
