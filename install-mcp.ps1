@@ -43,8 +43,13 @@ try {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     Copy-Item "$Work\unpack\r3v3rs3-mcp.exe" "$InstallDir\r3v3rs3-mcp.exe" -Force
     Write-Host "r3v3rs3-mcp $Version is installed in $InstallDir."
-    if ($env:PATH -notlike "*$InstallDir*") {
-        Write-Host "Add $InstallDir to your PATH to run r3v3rs3-mcp from any directory."
+    # The user Path of the registry carries the directory across sessions; the running
+    # session gets it too, so the binary works without a restart of the terminal.
+    $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if (($UserPath -split ";") -notcontains $InstallDir) {
+        [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
+        $env:PATH += ";$InstallDir"
+        Write-Host "$InstallDir was added to your user PATH."
     }
     Write-Host "Run 'r3v3rs3-mcp update' to upgrade it later."
 }
