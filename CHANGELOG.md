@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.6] - 2026-10-13
+
+### Fixed
+- The first visit of the DNS credentials page on a server without `dns-credentials.toml` failed with `failed_to_load_dns_credentials`. The reader now treats the missing file as an empty store.
+
 ## [1.7.5] - 2026-10-13
 
 ### Added
