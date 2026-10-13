@@ -1145,6 +1145,27 @@ directory = "https://acme-v02.api.letsencrypt.org/directory"
 
 The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun`, `ovh`, `azure`, `google_cloud`, `webhook`, `exec` or `rfc2136`. Route 53 uses `access_key_id` and `secret_access_key` instead of `api_token`. Porkbun uses `api_key` and `secret_api_key`. OVHcloud uses `endpoint`, `application_key`, `application_secret` and `consumer_key`. Azure DNS uses `tenant_id`, `client_id`, `client_secret` and `subscription_id`. Google Cloud DNS uses `service_account_key` and an optional `project_id`. The webhook uses `url` and an optional `token`. Exec uses `program`. RFC 2136 uses `server`, an optional `zone`, `key_name`, `key_algorithm` and `key_secret`. The Vultr API key goes in `api_token`.
 
+## DNS Credentials
+
+The "DNS Credentials" page below "Certificates" in the WebUI stores the credentials of the DNS providers under a name. A provider can hold several credentials, for example one Cloudflare token per account. The ACME form then picks a stored credential for the DNS-01 challenge instead of typing the provider credentials again, and every entry that uses the credential picks up a token change with it.
+
+The admin API and the WebUI never return the stored credentials, and the list shows only the name and the provider of a credential. r3v3rs3 seals the credentials with the key in `platform.key` in the configuration directory and creates that key on the first credential when it does not exist yet. The credentials live in `dns-credentials.toml`, which r3v3rs3 writes with mode `0600`.
+
+An ACME entry in `acme.toml` references a credential by its id and carries no provider of its own:
+
+```toml
+[acme1]
+provider = "Let's Encrypt"
+renewal_days = 60
+identifiers = ["example.com", "*.example.com"]
+challenge_type = "dns-01"
+dns_credential = "<credential id>"
+```
+
+An entry names a `dns_provider` or a `dns_credential`, never both. Entries with an inline `dns_provider` keep working. The panel edits an entry that references a credential without showing the secrets; an edit that leaves the fields of the credential empty keeps the stored values.
+
+A credential that an ACME entry still references cannot be deleted. Delete the reference in the entry first.
+
 # Settings
 
 The "Settings" section of the WebUI edits the server-wide options stored in `config.toml`. Changes take effect immediately and are saved to the file.

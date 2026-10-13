@@ -1145,6 +1145,27 @@ directory = "https://acme-v02.api.letsencrypt.org/directory"
 
 `dns_provider` altındaki `provider` değeri `cloudflare`, `route53`, `digitalocean`, `hetzner`, `linode`, `vultr`, `gandi`, `desec`, `porkbun`, `ovh`, `azure`, `google_cloud`, `webhook`, `exec` veya `rfc2136` olabilir. Route 53, `api_token` yerine `access_key_id` ve `secret_access_key` kullanır. Porkbun, `api_key` ve `secret_api_key` kullanır. OVHcloud, `endpoint`, `application_key`, `application_secret` ve `consumer_key` kullanır. Azure DNS, `tenant_id`, `client_id`, `client_secret` ve `subscription_id` kullanır. Google Cloud DNS, `service_account_key` ve isteğe bağlı `project_id` kullanır. Webhook, `url` ve isteğe bağlı `token` kullanır. Exec, `program` kullanır. RFC 2136; `server`, isteğe bağlı `zone`, `key_name`, `key_algorithm` ve `key_secret` kullanır. Vultr API key'i `api_token` alanına yazılır.
 
+## DNS Kimlik Bilgileri
+
+WebUI'daki "Sertifikalar" altındaki "DNS Kimlik Bilgileri" sayfası, DNS sağlayıcılarının kimlik bilgilerini bir ad altında saklar. Bir sağlayıcı birden çok kimlik bilgisi tutabilir, örneğin hesap başına bir Cloudflare token'ı. ACME formu, DNS-01 challenge için provider bilgilerini yeniden yazmak yerine saklanmış bir kimlik bilgisi seçer. Kimlik bilgisini kullanan her kayıt, token değişikliğini onunla birlikte alır.
+
+Yönetim API'si ve WebUI saklanan kimlik bilgilerini hiçbir zaman döndürmez. Liste, bir kimlik bilgisinin yalnız adını ve sağlayıcısını gösterir. r3v3rs3, kimlik bilgilerini yapılandırma dizinindeki `platform.key` dosyasındaki key ile mühürler ve bu key henüz yoksa ilk kimlik bilgisinde onu oluşturur. Kimlik bilgileri `dns-credentials.toml` dosyasında durur. r3v3rs3 bu dosyayı `0600` izniyle yazar.
+
+`acme.toml` içindeki bir ACME kaydı, bir kimlik bilgisine id'siyle referans verir ve kendi provider'ını taşımaz:
+
+```toml
+[acme1]
+provider = "Let's Encrypt"
+renewal_days = 60
+identifiers = ["example.com", "*.example.com"]
+challenge_type = "dns-01"
+dns_credential = "<kimlik bilgisi id'si>"
+```
+
+Bir kayıt ya `dns_provider` ya `dns_credential` taşır, ikisini birden taşıyamaz. İçinde `dns_provider` olan kayıtlar çalışmayı sürdürür. Panel, bir kimlik bilgisine referans veren kaydı secret'ları göstermeden düzenler. Kimlik bilgisinin alanlarını boş bırakan bir düzenleme saklanan değerleri korur.
+
+Bir ACME kaydının hâlâ referans verdiği kimlik bilgi silinemez. Önce kayıttaki referansı silin.
+
 # Ayarlar
 
 WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütün sunucuyu etkileyen seçenekleri değiştirebilirsiniz. Değişiklikler hemen uygulanır ve dosyaya yazılır.
