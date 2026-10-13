@@ -285,7 +285,9 @@ jobs:
         if: github.event_name == 'push' && matrix.archive == 'zip'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" "r3v3rs3-mcp-${{ matrix.target }}.zip"
+        # The default shell here is pwsh, where $GITHUB_REF_NAME is not a PowerShell
+        # variable, so the tag comes from the context.
+        run: gh release upload "${{ github.ref_name }}" "r3v3rs3-mcp-${{ matrix.target }}.zip"
 
   publish:
     name: Publish release
