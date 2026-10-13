@@ -586,15 +586,8 @@ mod tests {
         // The order of the entry validates only when the reference is gone.
         entry.acme_for(&entry.target()).unwrap();
         assert!(entry.acme.dns_credential.is_none());
-        assert_eq!(
-            entry
-                .acme
-                .dns_provider
-                .as_ref()
-                .map(|p| p.name())
-                .as_deref(),
-            Some("cloudflare")
-        );
+        let name = entry.acme.dns_provider.as_ref().map(|p| p.name());
+        assert_eq!(name.as_deref(), Some("cloudflare"));
 
         let missing_acme = Acme {
             dns_credential: Some("abcdef12".parse().unwrap()),
