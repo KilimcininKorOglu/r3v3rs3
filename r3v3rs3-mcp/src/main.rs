@@ -329,8 +329,7 @@ fn install(archive: &[u8]) -> anyhow::Result<()> {
         let aside = dir.join("r3v3rs3-mcp.old");
         let _ = std::fs::remove_file(&aside);
         std::fs::rename(&exe, &aside).context("the old binary could not be moved aside")?;
-        std::fs::rename(&temporary, &exe)
-            .context("the running binary could not be replaced")?;
+        std::fs::rename(&temporary, &exe).context("the running binary could not be replaced")?;
     }
     Ok(())
 }
