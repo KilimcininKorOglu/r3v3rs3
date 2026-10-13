@@ -468,7 +468,7 @@ pub struct DnsCredentialInfo {
 
 /// The body of a create or an update of a named DNS credential. An update without
 /// `dns_provider` keeps the stored credentials.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct DnsCredentialRequest {
     #[schema(example = "Cloudflare - hermestech")]
     pub name: String,

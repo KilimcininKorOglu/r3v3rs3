@@ -1,6 +1,6 @@
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
-use crate::components::acme_form::dns_provider_label;
+use crate::components::acme_form::{dns_provider_label, use_dns_credentials};
 use crate::components::data_list::{
     Column, DANGER_LINK_CLASS, LINK_CLASS, Row, active_toggle, list_card, status_badge,
 };
@@ -12,7 +12,7 @@ use crate::pages::self_sign::SelfSignQuery;
 use crate::pages::settings::{failure_box, send_request, success_box};
 use crate::store::{AcmeStore, CertStore, SessionStore};
 use gloo_net::http::Request;
-use r3v3rs3_api::acme::AcmeInfo;
+use r3v3rs3_api::acme::{AcmeInfo, DnsCredentialInfo};
 use r3v3rs3_api::cert::{
     CertInfo, CertKind, DeleteCertResult, DeleteCertStatus, DeleteCertsRequest, ExpiryState,
     SelfSignedCertKind, UploadQuery, expiry_state,
@@ -147,6 +147,7 @@ pub fn cert_list() -> Html {
         .unwrap_or_default();
     let selected = use_state(HashSet::<ShortId>::new);
     let notice = use_state(|| Option::<Result<String, String>>::None);
+    let credentials = use_dns_credentials();
 
     use_cert_lists(certs_dispatcher, acme_dispatcher);
 
@@ -200,6 +201,7 @@ pub fn cert_list() -> Html {
             certs: &certs,
             acme: &acme,
             filtered: &cert_list,
+            credentials: &credentials,
         },
         &selected,
         &navigator,
@@ -271,6 +273,8 @@ struct CertLists<'a> {
     certs: &'a CertStore,
     acme: &'a AcmeStore,
     filtered: &'a [&'a CertInfo],
+    /// The named DNS credentials, for the provider cell of the ACME rows.
+    credentials: &'a [DnsCredentialInfo],
 }
 
 /// The options that every row of the list shares.
@@ -310,7 +314,7 @@ fn body_view(
                 .acme
                 .entries
                 .iter()
-                .map(|entry| acme_row(locale, entry, navigator, opts.can_edit))
+                .map(|entry| acme_row(locale, entry, navigator, opts.can_edit, lists.credentials))
                 .collect::<Vec<_>>();
             list_card(locale, lists.acme.loaded, EMPTY_LIST, &ACME_COLUMNS, &rows)
         }
@@ -559,7 +563,13 @@ fn root_row(
     }
 }
 
-fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator, can_edit: bool) -> Row {
+fn acme_row(
+    locale: Locale,
+    entry: &AcmeInfo,
+    navigator: &Navigator,
+    can_edit: bool,
+    credentials: &[DnsCredentialInfo],
+) -> Row {
     let id = entry.id;
     let delete_onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
@@ -601,7 +611,7 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator, can_edit: b
         key: id.to_string(),
         cells: vec![
             html! { <>{entry.identifiers.join(", ")}</> },
-            html! { <>{acme_provider_text(entry)}</> },
+            html! { <>{acme_provider_text(entry, credentials)}</> },
             html! { <>{renewal}</> },
             active_toggle(entry.config.active, !can_edit, onchange),
         ],
@@ -617,9 +627,18 @@ fn acme_row(locale: Locale, entry: &AcmeInfo, navigator: &Navigator, can_edit: b
     }
 }
 
-/// The provider with the challenge, for example `Let's Encrypt (DNS-01, Cloudflare)`.
-fn acme_provider_text(entry: &AcmeInfo) -> String {
+/// The provider with the challenge and the credential, for example
+/// `Let's Encrypt (DNS-01, Cloudflare main)`.
+fn acme_provider_text(entry: &AcmeInfo, credentials: &[DnsCredentialInfo]) -> String {
     let challenge = entry.challenge_type.to_uppercase();
+    if let Some(id) = entry.dns_credential.as_ref() {
+        let name = credentials
+            .iter()
+            .find(|credential| &credential.id == id)
+            .map(|credential| credential.name.clone())
+            .unwrap_or_else(|| id.to_string());
+        return format!("{} ({challenge}, {name})", entry.config.provider);
+    }
     match &entry.dns_provider {
         Some(name) => format!(
             "{} ({challenge}, {})",
@@ -762,16 +781,50 @@ mod tests {
             identifiers: vec!["*.example.com".into()],
             challenge_type: "dns-01".into(),
             dns_provider: Some("route53".into()),
+            dns_credential: None,
             next_renewal: None,
         };
         assert_eq!(
-            acme_provider_text(&entry),
+            acme_provider_text(&entry, &[]),
             "Let's Encrypt (DNS-01, Route 53)"
         );
         entry.challenge_type = "http-01".into();
         entry.dns_provider = None;
-        assert_eq!(acme_provider_text(&entry), "Let's Encrypt (HTTP-01)");
+        assert_eq!(acme_provider_text(&entry, &[]), "Let's Encrypt (HTTP-01)");
         entry.challenge_type = "tls-alpn-01".into();
-        assert_eq!(acme_provider_text(&entry), "Let's Encrypt (TLS-ALPN-01)");
+        assert_eq!(
+            acme_provider_text(&entry, &[]),
+            "Let's Encrypt (TLS-ALPN-01)"
+        );
+    }
+
+    #[test]
+    fn the_provider_cell_names_the_dns_credential() {
+        let entry = AcmeInfo {
+            id: "acme1".parse().unwrap(),
+            config: r3v3rs3_api::acme::AcmeConfig {
+                provider: "Let's Encrypt".into(),
+                ..Default::default()
+            },
+            identifiers: vec!["*.example.com".into()],
+            challenge_type: "dns-01".into(),
+            dns_provider: None,
+            dns_credential: Some("cred12".parse().unwrap()),
+            next_renewal: None,
+        };
+        let credentials = [DnsCredentialInfo {
+            id: "cred12".parse().unwrap(),
+            name: "Cloudflare main".into(),
+            provider: "cloudflare".into(),
+        }];
+        assert_eq!(
+            acme_provider_text(&entry, &credentials),
+            "Let's Encrypt (DNS-01, Cloudflare main)"
+        );
+        // An unknown credential falls back to its id.
+        assert_eq!(
+            acme_provider_text(&entry, &[]),
+            "Let's Encrypt (DNS-01, cred12)"
+        );
     }
 }

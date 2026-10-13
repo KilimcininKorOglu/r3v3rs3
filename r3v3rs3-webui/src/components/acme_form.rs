@@ -1,16 +1,19 @@
 //! The account, challenge and domain name fields that every ACME provider form shares.
 
+use crate::API_ENDPOINT;
 use crate::components::http_proxy_config::{
     HINT_CLASS, INPUT_CLASS, LABEL_CLASS, error_view, parse_comma_list,
 };
 use base64::{Engine, engine::general_purpose};
+use gloo_net::http::Request;
 use r3v3rs3_api::{
     acme::{
-        Acme, AcmeConfig, AcmeRequest, DNS_01, DnsProvider, ExternalAccountBinding, HTTP_01,
-        TLS_ALPN_01,
+        Acme, AcmeConfig, AcmeRequest, DNS_01, DnsCredentialInfo, DnsProvider,
+        ExternalAccountBinding, HTTP_01, TLS_ALPN_01,
     },
     error::Error,
     i18n::Locale,
+    id::ShortId,
     subject_name::SubjectName,
 };
 use std::{
@@ -19,6 +22,7 @@ use std::{
     str::FromStr,
 };
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
+use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
@@ -201,7 +205,7 @@ fn find_provider(name: &str) -> Option<&'static DnsProviderInfo> {
 }
 
 /// The selected DNS provider. An unknown name selects the first provider.
-fn provider_info(name: &str) -> &'static DnsProviderInfo {
+pub fn provider_info(name: &str) -> &'static DnsProviderInfo {
     find_provider(name).unwrap_or(&DNS_PROVIDERS[0])
 }
 
@@ -209,6 +213,33 @@ pub type AcmeResult = Result<AcmeRequest, HashMap<String, String>>;
 
 /// The labels of the EAB fields. `None` hides the fields.
 pub type EabLabels = Option<(&'static str, &'static str)>;
+
+/// Loads the named DNS credentials of the store once. A failed load keeps an empty list, and
+/// the manual entry of the form stays usable.
+#[hook]
+pub fn use_dns_credentials() -> Vec<DnsCredentialInfo> {
+    let state = use_state(Vec::new);
+    {
+        let state = state.clone();
+        use_effect_with((), move |_| {
+            spawn_local(async move {
+                if let Some(list) = load_credentials().await {
+                    state.set(list);
+                }
+            });
+        });
+    }
+    (*state).clone()
+}
+
+/// The named DNS credentials, or `None` when the read failed.
+async fn load_credentials() -> Option<Vec<DnsCredentialInfo>> {
+    let response = Request::get(&format!("{API_ENDPOINT}/dns_credentials"))
+        .send()
+        .await
+        .ok()?;
+    response.json().await.ok()
+}
 
 #[derive(Clone, PartialEq)]
 pub struct AcmeFields {
@@ -218,6 +249,9 @@ pub struct AcmeFields {
     pub domain_names: String,
     pub challenge_type: String,
     pub dns_provider: String,
+    /// The id of the named DNS credential that the entry references. Empty names the provider
+    /// of `dns_provider` with the credentials of the form.
+    pub dns_credential: String,
     /// The credentials of the DNS providers by their field names in the API.
     pub credentials: HashMap<&'static str, String>,
     /// The error keys of the fields that the user changed.
@@ -233,6 +267,7 @@ impl Default for AcmeFields {
             domain_names: String::new(),
             challenge_type: HTTP_01.to_string(),
             dns_provider: DNS_PROVIDERS[0].name.to_string(),
+            dns_credential: String::new(),
             credentials: HashMap::new(),
             touched: HashSet::new(),
         }
@@ -313,13 +348,15 @@ fn field_error(
     error_view(errors.get(key).filter(|_| visible))
 }
 
-/// The EAB, email, challenge and domain name fields.
+/// The EAB, email, challenge and domain name fields. `credentials` is the store of the named
+/// DNS credentials that the entry can reference instead of naming a provider.
 pub fn fields_view(
     locale: Locale,
     fields: &UseReducerHandle<AcmeFields>,
     errors: &HashMap<String, String>,
     show_errors: bool,
     eab: EabLabels,
+    credentials: &[DnsCredentialInfo],
 ) -> Html {
     html! {
         <>
@@ -329,7 +366,7 @@ pub fn fields_view(
             <input type="email" placeholder="admin@example.com" value={fields.email.clone()} onchange={setter(fields, "email", |f, v| f.email = v)} class={INPUT_CLASS} />
             { field_error(fields, errors, show_errors, "email") }
 
-            { challenge_view(locale, fields, errors, show_errors) }
+            { challenge_view(locale, fields, errors, show_errors, credentials) }
 
             <label class={LABEL_CLASS}>{locale.t("acme.domain_names")}</label>
             <input type="text" autocapitalize="off" placeholder="example.com, *.example.com" value={fields.domain_names.clone()} onchange={setter(fields, "domain_names", |f, v| f.domain_names = v)} class={INPUT_CLASS} />
@@ -367,6 +404,7 @@ fn challenge_view(
     fields: &UseReducerHandle<AcmeFields>,
     errors: &HashMap<String, String>,
     show_errors: bool,
+    credentials: &[DnsCredentialInfo],
 ) -> Html {
     let challenge = fields.challenge_type.as_str();
     html! {
@@ -380,7 +418,7 @@ fn challenge_view(
             <p class={HINT_CLASS}>{locale.t("acme.challenge_hint")}</p>
 
             if challenge == DNS_01 {
-                { dns_provider_view(locale, fields, errors, show_errors) }
+                { dns_provider_view(locale, fields, errors, show_errors, credentials) }
             }
         </>
     }
@@ -391,20 +429,36 @@ fn dns_provider_view(
     fields: &UseReducerHandle<AcmeFields>,
     errors: &HashMap<String, String>,
     show_errors: bool,
+    credentials: &[DnsCredentialInfo],
 ) -> Html {
     let provider = provider_info(&fields.dns_provider);
+    let manual = fields.dns_credential.is_empty();
     html! {
         <>
-            <label class={LABEL_CLASS}>{locale.t("acme.dns_provider")}</label>
-            <select onchange={setter(fields, "dns_provider", |f, v| f.dns_provider = v)} class={INPUT_CLASS}>
-                { DNS_PROVIDERS.iter().map(|info| html! {
-                    <option selected={provider.name == info.name} value={info.name}>{info.label}</option>
+            <label class={LABEL_CLASS}>{locale.t("acme.dns_credential")}</label>
+            <select onchange={setter(fields, "dns_credential", |f, v| f.dns_credential = v)} class={INPUT_CLASS}>
+                <option selected={manual} value="">{locale.t("acme.dns_credential_manual")}</option>
+                { credentials.iter().map(|credential| html! {
+                    <option selected={fields.dns_credential == credential.id.to_string()} value={credential.id.to_string()}>
+                        {format!("{} ({})", credential.name, dns_provider_label(&credential.provider))}
+                    </option>
                 }).collect::<Html>() }
             </select>
+            <p class={HINT_CLASS}>{locale.t("acme.dns_credential_hint")}</p>
+            { field_error(fields, errors, show_errors, "dns_credential") }
 
-            { provider.fields.iter().map(|field| credential_view(locale, fields, field)).collect::<Html>() }
-            { field_error(fields, errors, show_errors, "dns_provider") }
-            <p class={HINT_CLASS}>{locale.t("acme.dns_credentials_hint")}</p>
+            if manual {
+                <label class={LABEL_CLASS}>{locale.t("acme.dns_provider")}</label>
+                <select onchange={setter(fields, "dns_provider", |f, v| f.dns_provider = v)} class={INPUT_CLASS}>
+                    { DNS_PROVIDERS.iter().map(|info| html! {
+                        <option selected={provider.name == info.name} value={info.name}>{info.label}</option>
+                    }).collect::<Html>() }
+                </select>
+
+                { provider.fields.iter().map(|field| credential_view(locale, fields, field)).collect::<Html>() }
+                { field_error(fields, errors, show_errors, "dns_provider") }
+                <p class={HINT_CLASS}>{locale.t("acme.dns_credentials_hint")}</p>
+            }
         </>
     }
 }
@@ -477,11 +531,19 @@ pub fn build_request(
         &mut errors,
         SubjectName::from_str,
     );
+    let dns_credential = dns_credential_of(locale, fields, &mut errors);
+    let dns_provider = if dns_credential.is_some() {
+        // The credential of the store carries the provider and its secrets.
+        None
+    } else {
+        dns_provider(fields)
+    };
     let acme = Acme {
         config,
         identifiers,
         challenge_type: fields.challenge_type.clone(),
-        dns_provider: dns_provider(fields),
+        dns_provider,
+        dns_credential,
     };
     if let Err(err) = acme.validate() {
         let key = match err {
@@ -550,6 +612,30 @@ fn dns_provider(fields: &AcmeFields) -> Option<DnsProvider> {
         object.insert(field.key.into(), credential(fields, field).into());
     }
     serde_json::from_value(object.into()).ok()
+}
+
+/// The id of the selected named credential. A reference and an inline provider exclude each
+/// other, and the server rejects an unknown id.
+fn dns_credential_of(
+    locale: Locale,
+    fields: &AcmeFields,
+    errors: &mut HashMap<String, String>,
+) -> Option<ShortId> {
+    if fields.challenge_type != DNS_01 || fields.dns_credential.is_empty() {
+        return None;
+    }
+    match ShortId::from_str(&fields.dns_credential) {
+        Ok(id) => Some(id),
+        Err(_) => {
+            errors.insert(
+                "dns_credential".into(),
+                locale.error_message(&Error::DnsCredentialNotFound {
+                    name: fields.dns_credential.clone(),
+                }),
+            );
+            None
+        }
+    }
 }
 
 #[cfg(test)]

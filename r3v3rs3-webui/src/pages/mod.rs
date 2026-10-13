@@ -16,6 +16,7 @@ mod app_view;
 mod app_webhook;
 mod audit;
 pub mod cert_list;
+mod dns_credentials;
 mod git_connections;
 mod github_app;
 mod log_view;
@@ -63,6 +64,8 @@ pub enum Route {
     Upload,
     #[at("/certs/new_acme")]
     NewAcme,
+    #[at("/certs/dns_credentials")]
+    DnsCredentials,
     #[at("/certs/:id/log")]
     CertLogView { id: String },
     #[at("/proxies/new")]
@@ -107,6 +110,7 @@ impl Route {
             | Route::SelfSign
             | Route::Upload
             | Route::NewAcme
+            | Route::DnsCredentials
             | Route::CertLogView { .. } => Some(Route::Certs),
             Route::Proxies
             | Route::NewProxy
@@ -152,6 +156,7 @@ pub fn switch(routes: Route) -> Html {
         Route::Certs => html! { <cert_list::CertList /> },
         Route::SelfSign => html! { <self_sign::SelfSign /> },
         Route::NewAcme => html! { <new_acme::NewAcme /> },
+        Route::DnsCredentials => html! { <dns_credentials::DnsCredentials /> },
         Route::CertLogView { id } => html! { <log_view::LogView {id} /> },
         Route::Upload => html! { <upload::Upload /> },
         Route::Settings => html! { <settings::Settings /> },

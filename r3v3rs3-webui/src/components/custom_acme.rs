@@ -1,4 +1,6 @@
-use crate::components::acme_form::{AcmeFields, AcmeResult, build_request, fields_view};
+use crate::components::acme_form::{
+    AcmeFields, AcmeResult, build_request, fields_view, use_dns_credentials,
+};
 use crate::components::http_proxy_config::{
     INPUT_CLASS, LABEL_CLASS, error_view, input_element, text_setter, use_entry_errors,
 };
@@ -23,6 +25,7 @@ pub fn custom_acme(props: &Props) -> Html {
     let name = use_state(String::new);
     let server_url = use_state(String::new);
     let fields = use_reducer_eq(AcmeFields::default);
+    let credentials = use_dns_credentials();
 
     let renewal = use_state(|| DEFAULT_RENEWAL_DAYS);
     let renewal_onchange = Callback::from({
@@ -54,7 +57,7 @@ pub fn custom_acme(props: &Props) -> Html {
             <input type="url" placeholder="https://example.com/" onchange={text_setter(&server_url)} class={INPUT_CLASS} />
             { show("server_url", &server_url) }
 
-            { fields_view(locale, &fields, &errors, props.show_errors, eab) }
+            { fields_view(locale, &fields, &errors, props.show_errors, eab, &credentials) }
 
             <label class={LABEL_CLASS}>{locale.t("acme.renewal_interval")}</label>
             <input type="number" value={renewal.to_string()} min="1" onchange={renewal_onchange} class={INPUT_CLASS} />

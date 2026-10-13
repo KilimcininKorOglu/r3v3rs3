@@ -269,6 +269,7 @@ mod tests {
             Error::DnsCredentialNotFound { name: text() },
             Error::DnsCredentialInUse { name: text() },
             Error::DnsCredentialNameTaken { name: text() },
+            Error::DnsCredentialNameRequired,
             Error::FailedToLoadDnsCredentials,
             Error::AcmeWebhookUrlInvalid { url: text() },
             Error::NotificationWebhookUrlInvalid { url: text() },

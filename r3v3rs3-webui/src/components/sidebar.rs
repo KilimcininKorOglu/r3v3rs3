@@ -23,6 +23,8 @@ enum Access {
 struct MenuSubItem {
     /// The translation key of the name.
     name: &'static str,
+    /// The route of a page below the item. `None` selects a tab of the page of the item.
+    route: Option<Route>,
 }
 
 struct MenuItem {
@@ -41,19 +43,27 @@ struct MenuGroup {
     items: &'static [MenuItem],
 }
 
-/// The sub items of the certificates page: its tabs.
+/// The sub items of the certificates page: its tabs and the DNS credentials page.
 const CERT_SUBS: &[MenuSubItem] = &[
     MenuSubItem {
         name: "certs.tab_server",
+        route: None,
     },
     MenuSubItem {
         name: "certs.tab_client",
+        route: None,
     },
     MenuSubItem {
         name: "certs.tab_root",
+        route: None,
     },
     MenuSubItem {
         name: "certs.tab_acme",
+        route: None,
+    },
+    MenuSubItem {
+        name: "certs.tab_dns_credentials",
+        route: Some(Route::DnsCredentials),
     },
 ];
 
@@ -192,7 +202,7 @@ pub fn menu(props: &MenuProps) -> Html {
                 .filter(|item| item.access.allows(&session))
                 .map(|item| {
                     let active = root.as_ref() == Some(&item.route);
-                    menu_item(locale, item, active, tab, &navigator, &props.onselect)
+                    menu_item(locale, item, active, tab, &route, &navigator, &props.onselect)
                 })
                 .collect::<Vec<_>>();
             if items.is_empty() {
@@ -215,6 +225,7 @@ fn menu_item(
     item: &'static MenuItem,
     active: bool,
     tab: CertsTab,
+    route: &Route,
     navigator: &Navigator,
     onselect: &Callback<()>,
 ) -> Html {
@@ -228,7 +239,7 @@ fn menu_item(
     let subs = active.then(|| {
         item.subs
             .iter()
-            .map(|sub| menu_sub_item(locale, sub, tab, item.route.clone(), navigator, onselect))
+            .map(|sub| menu_sub_item(locale, sub, tab, route, navigator, onselect))
             .collect::<Vec<_>>()
     });
     html! {
@@ -246,28 +257,44 @@ fn menu_sub_item(
     locale: Locale,
     sub: &'static MenuSubItem,
     tab: CertsTab,
-    route: Route,
+    route: &Route,
     navigator: &Navigator,
     onselect: &Callback<()>,
 ) -> Html {
     let navigator = navigator.clone();
     let onselect = onselect.clone();
-    // The only page with sub items today is the certificates page, whose sub items select a tab
-    // through the query of the same route.
-    let query = CertsQuery {
-        tab: match sub.name {
-            "certs.tab_server" => CertsTab::Server,
-            "certs.tab_client" => CertsTab::Client,
-            "certs.tab_root" => CertsTab::Root,
-            _ => CertsTab::Acme,
-        },
+    // The tabs of the certificates page select a tab through the query of the same route,
+    // while a page below the item has a route of its own.
+    let (onclick, active) = match &sub.route {
+        Some(target) => {
+            let target = target.clone();
+            let active = route == &target;
+            let onclick = Callback::from(move |e: MouseEvent| {
+                e.prevent_default();
+                onselect.emit(());
+                navigator.push(&target);
+            });
+            (onclick, active)
+        }
+        None => {
+            let query = CertsQuery {
+                tab: match sub.name {
+                    "certs.tab_server" => CertsTab::Server,
+                    "certs.tab_client" => CertsTab::Client,
+                    "certs.tab_root" => CertsTab::Root,
+                    _ => CertsTab::Acme,
+                },
+            };
+            let active = query.tab == tab;
+            let route = route.clone();
+            let onclick = Callback::from(move |e: MouseEvent| {
+                e.prevent_default();
+                onselect.emit(());
+                let _ = navigator.push_with_query(&route, &query);
+            });
+            (onclick, active)
+        }
     };
-    let active = query.tab == tab;
-    let onclick = Callback::from(move |e: MouseEvent| {
-        e.prevent_default();
-        onselect.emit(());
-        let _ = navigator.push_with_query(&route, &query);
-    });
     html! {
         <button type="button" class={classes!("w-full", "pl-11", "pr-4", "py-1.5", "flex", "items-center", "cursor-pointer", "text-sm", "text-left", "hover:bg-neutral-600", if active { "bg-neutral-700 text-neutral-100" } else { "text-neutral-300" })} {onclick} aria-current={active.then_some("page")}>
             {locale.t(sub.name)}

@@ -206,6 +206,9 @@ pub enum Error {
     #[error("a dns credential with the name {name} exists already")]
     DnsCredentialNameTaken { name: String },
 
+    #[error("a dns credential needs a name")]
+    DnsCredentialNameRequired,
+
     #[error("the dns credentials could not be read")]
     FailedToLoadDnsCredentials,
 

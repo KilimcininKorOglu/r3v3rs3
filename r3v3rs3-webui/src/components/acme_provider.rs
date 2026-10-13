@@ -1,4 +1,6 @@
-use crate::components::acme_form::{AcmeFields, AcmeResult, build_request, fields_view};
+use crate::components::acme_form::{
+    AcmeFields, AcmeResult, build_request, fields_view, use_dns_credentials,
+};
 use crate::components::http_proxy_config::use_entry_errors;
 use crate::i18n::use_locale;
 use r3v3rs3_api::acme::AcmeConfig;
@@ -20,6 +22,7 @@ pub struct Props {
 pub fn acme_provider(props: &Props) -> Html {
     let locale = use_locale();
     let fields = use_reducer_eq(AcmeFields::default);
+    let credentials = use_dns_credentials();
 
     let config = AcmeConfig {
         active: true,
@@ -38,5 +41,12 @@ pub fn acme_provider(props: &Props) -> Html {
     let eab = props
         .eab
         .then_some(("acme.eab_key_id", "acme.eab_hmac_key"));
-    fields_view(locale, &fields, &errors, props.show_errors, eab)
+    fields_view(
+        locale,
+        &fields,
+        &errors,
+        props.show_errors,
+        eab,
+        &credentials,
+    )
 }
