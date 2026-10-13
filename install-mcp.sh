@@ -75,4 +75,20 @@ if [ ! -w "$INSTALL_DIR" ]; then
 else
     install -m 755 "$WORK/unpack/r3v3rs3-mcp" "$INSTALL_DIR/r3v3rs3-mcp"
 fi
+
+# The login shells read ~/.profile, zsh reads ~/.zshrc, so the directory lands in the
+# PATH of every common setup. A directory that is already in the PATH stays untouched.
+case ":$PATH:" in
+    *":$INSTALL_DIR:"*) ;;
+    *)
+        LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
+        for RC in "${HOME}/.profile" "${HOME}/.zshrc"; do
+            [ -f "$RC" ] || continue
+            if ! grep -qF "$INSTALL_DIR" "$RC" 2>/dev/null; then
+                printf '\n# added by the r3v3rs3-mcp installer\n%s\n' "$LINE" >> "$RC"
+                echo "$INSTALL_DIR was added to your PATH through $RC."
+            fi
+        done
+        ;;
+esac
 echo "r3v3rs3-mcp $VERSION is installed in $INSTALL_DIR. Run 'r3v3rs3-mcp update' to upgrade it later."
