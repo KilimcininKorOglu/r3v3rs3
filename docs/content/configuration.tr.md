@@ -1094,18 +1094,19 @@ Client, PKCE'li OAuth 2.1 authorization code akışıyla giriş yapar: client `/
 
 Token'lar yalnız bellekte tutulur, bu yüzden sunucunun yeniden başlaması her MCP client'ının oturumunu düşürür ve client'ın refresh token'ları geçersiz olur.
 
-Depo, `r3v3rs3-mcp` içinde bir komut satırı client'ı ile gelir. Üç yoldan biriyle kurun:
+Depo, `r3v3rs3-mcp` içinde bir komut satırı client'ı ile gelir. Kurulum script'i en yeni release'in derlenmiş binary'sini GitHub'dan indirir, sha256 özetini doğrular ve kurar:
 
 ```sh
-# npm ile; kurulum GitHub release'lerinden derlenmiş binary'yi indirir:
-npm install -g r3v3rs3-mcp
-
-# cargo ile; crates.io'dan derler (ya da cargo binstall aynı derlenmiş
-# binary'yi indirir):
-cargo install r3v3rs3-mcp
-
-# Ya da releases sayfasından mimarinizin release arşivi.
+# Linux ve macOS:
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-mcp.sh | sh
 ```
+
+```powershell
+# Windows (PowerShell):
+irm https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-mcp.ps1 | iex
+```
+
+Windows'ta binary `%LOCALAPPDATA%\Programs\r3v3rs3-mcp` içine düşer; onu `PATH`'e eklersiniz. Script Linux ve macOS'ta `/usr/local/bin`'e kurar, `INSTALL_DIR` bu dizini değiştirir. Belirli bir release `--version vX.Y.Z` ile kurulur; her platformun arşivi ayrıca [releases sayfasında](https://github.com/KilimcininKorOglu/r3v3rs3/releases) durur.
 
 Sonra:
 

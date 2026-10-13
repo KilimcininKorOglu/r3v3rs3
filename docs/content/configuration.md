@@ -1094,18 +1094,19 @@ A client signs in through the OAuth 2.1 authorization code flow with PKCE: the c
 
 The tokens live in memory only, so a restart of the server signs every MCP client out, and the refresh tokens of a client stop working.
 
-The repository ships a command line client in `r3v3rs3-mcp`. Install it in one of three ways:
+The repository ships a command line client in `r3v3rs3-mcp`. The installer script downloads the prebuilt binary of the newest release from GitHub, verifies its sha256 digest, and installs it:
 
 ```sh
-# With npm, which downloads the prebuilt binary from the GitHub releases:
-npm install -g r3v3rs3-mcp
-
-# With cargo, which compiles it from crates.io (or cargo binstall, which
-# downloads the same prebuilt binary):
-cargo install r3v3rs3-mcp
-
-# From the release archive of your architecture on the releases page.
+# Linux and macOS:
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-mcp.sh | sh
 ```
+
+```powershell
+# Windows (PowerShell):
+irm https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-mcp.ps1 | iex
+```
+
+On Windows the binary lands in `%LOCALAPPDATA%\Programs\r3v3rs3-mcp`, which you add to your `PATH`. The script installs into `/usr/local/bin` on Linux and macOS, and `INSTALL_DIR` overrides that directory. A specific release installs with `--version vX.Y.Z`, and the archives of every platform are on the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases) as well.
 
 Then:
 

@@ -195,13 +195,25 @@ async fn call(
 /// The GitHub repository that ships the releases of this client.
 const RELEASES_API: &str = "https://api.github.com/repos/KilimcininKorOglu/r3v3rs3/releases/latest";
 
-/// The release archive of this platform. The musl build is static, so it runs on every
-/// Linux regardless of the installed libc.
+/// The release archive of this platform. The Linux archives hold the static musl build,
+/// so they run on every distribution regardless of the installed libc.
 fn asset_name() -> anyhow::Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Ok("r3v3rs3-mcp-x86_64-unknown-linux-musl.tar.gz"),
         ("linux", "aarch64") => Ok("r3v3rs3-mcp-aarch64-unknown-linux-musl.tar.gz"),
+        ("macos", "x86_64") => Ok("r3v3rs3-mcp-x86_64-apple-darwin.tar.gz"),
+        ("macos", "aarch64") => Ok("r3v3rs3-mcp-aarch64-apple-darwin.tar.gz"),
+        ("windows", "x86_64") => Ok("r3v3rs3-mcp-x86_64-pc-windows-msvc.zip"),
         (os, arch) => bail!("no release archive exists for {os}/{arch}"),
+    }
+}
+
+/// The name of the executable inside the archive of this platform.
+fn binary_name() -> &'static str {
+    if std::env::consts::OS == "windows" {
+        "r3v3rs3-mcp.exe"
+    } else {
+        "r3v3rs3-mcp"
     }
 }
 
@@ -301,6 +313,42 @@ fn install(archive: &[u8]) -> anyhow::Result<()> {
         .context("the running binary has no directory")?
         .to_path_buf();
     let temporary = dir.join(format!(".r3v3rs3-mcp.new.{}", std::process::id()));
+    let bytes = unpack(archive)?;
+    std::fs::write(&temporary, &bytes)
+        .context("the binary could not be written next to the running one")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o755))
+            .context("the new binary could not be made executable")?;
+    }
+    // A rename over the running binary is allowed on Unix, and the old file keeps serving
+    // this process until it exits. Windows locks the running file, so the old binary
+    // moves aside first and the next update removes it.
+    if std::fs::rename(&temporary, &exe).is_err() {
+        let aside = dir.join("r3v3rs3-mcp.old");
+        let _ = std::fs::remove_file(&aside);
+        std::fs::rename(&exe, &aside).context("the old binary could not be moved aside")?;
+        std::fs::rename(&temporary, &exe)
+            .context("the running binary could not be replaced")?;
+    }
+    Ok(())
+}
+
+/// Reads the executable out of the tar.gz or the zip archive of this platform.
+fn unpack(archive: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let name = binary_name();
+    if std::env::consts::OS == "windows" {
+        let reader = std::io::Cursor::new(archive);
+        let mut zip = zip::ZipArchive::new(reader).context("the archive is not readable")?;
+        let mut file = zip
+            .by_name(name)
+            .context("the archive holds no r3v3rs3-mcp binary")?;
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut file, &mut bytes)
+            .context("the archive could not be unpacked")?;
+        return Ok(bytes);
+    }
     let reader = flate2::read::GzDecoder::new(archive);
     let mut tar = tar::Archive::new(reader);
     for entry in tar.entries().context("the archive is not readable")? {
@@ -309,25 +357,14 @@ fn install(archive: &[u8]) -> anyhow::Result<()> {
             .path()
             .map_err(|err| anyhow::anyhow!("{err}"))?
             .to_string_lossy()
-            == "r3v3rs3-mcp"
+            == name
         {
-            let mut out = std::fs::File::create(&temporary)
-                .context("the binary could not be written next to the running one")?;
-            std::io::copy(&mut entry, &mut out).context("the archive could not be unpacked")?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o755))
-                    .context("the new binary could not be made executable")?;
-            }
-            // A rename over the running binary is allowed on Linux; the old file keeps
-            // serving this process until it exits.
-            std::fs::rename(&temporary, &exe)
-                .context("the running binary could not be replaced")?;
-            return Ok(());
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut entry, &mut bytes)
+                .context("the archive could not be unpacked")?;
+            return Ok(bytes);
         }
     }
-    let _ = std::fs::remove_file(&temporary);
     bail!("the archive holds no r3v3rs3-mcp binary")
 }
 

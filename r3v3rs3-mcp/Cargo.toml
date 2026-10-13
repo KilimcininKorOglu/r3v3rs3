@@ -2,16 +2,11 @@
 name = "r3v3rs3-mcp"
 version = "1.7.3"
 edition = "2024"
+publish = false
 license = "MIT"
 repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
 description = "A command line MCP client for the r3v3rs3 admin API"
 authors = ["picoHz <picoHz@outlook.com>", "KilimcininKorOglu <k@keremgok.tr>"]
-
-# `cargo binstall r3v3rs3-mcp` downloads the release archive instead of compiling.
-[package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/r3v3rs3-mcp-{ target }.tar.gz"
-pkg-fmt = "tgz"
-bin-dir = "r3v3rs3-mcp"
 
 [dependencies]
 anyhow = "1.0.71"
@@ -38,3 +33,4 @@ tar = "0.4.38"
 tokio = { version = "1.29.1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 url = "2.4.0"
 webbrowser = "1.0.0"
+zip = { version = "9.0.2", default-features = false, features = ["deflate"] }

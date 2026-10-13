@@ -156,7 +156,7 @@ jobs:
   # that the repository carries in dist/minisign.pub.
   sign:
     name: Sign the checksums
-    needs: [binary, binary-musl]
+    needs: [binary, binary-musl, binary-mcp]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
@@ -230,56 +230,67 @@ jobs:
             404) cargo publish -p r3v3rs3-api --locked ;;
             *) echo "crates.io returned $code for r3v3rs3-api $version" >&2; exit 1 ;;
           esac
-      - name: Publish r3v3rs3-mcp
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "r3v3rs3-mcp") | .version')
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -A "r3v3rs3-release (github.com/KilimcininKorOglu/r3v3rs3)" "https://crates.io/api/v1/crates/r3v3rs3-mcp/$version")
-          case "$code" in
-            200) echo "r3v3rs3-mcp $version is already published" ;;
-            404) cargo publish -p r3v3rs3-mcp --locked ;;
-            *) echo "crates.io returned $code for r3v3rs3-mcp $version" >&2; exit 1 ;;
-          esac
       - name: Publish r3v3rs3
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         # dist/webui is gitignored but the package ships it.
         run: cargo publish -p r3v3rs3 --locked --allow-dirty
 
-  # The npm package carries no binary; its install script downloads the archive of the
-  # musl build from this release. The NPM_TOKEN secret needs the publish right.
-  npm:
-    name: Publish npm package
-    if: github.event_name == 'push'
-    needs: [binary-musl, test]
-    runs-on: ubuntu-24.04
+  # The MCP client also runs on the laptop of the admin, so macOS and Windows get their
+  # own archives. The server itself stays Linux only.
+  binary-mcp:
+    name: Upload Release Assets (r3v3rs3-mcp, ${{ matrix.target }})
+    needs: webui
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-15
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            archive: zip
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Set up Node
-        uses: actions/setup-node@6044e4b27e698c2ac6dbcb170b68f7aeea5a9da4 # v6
+      - name: Install Rust
+        # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
+        run: rustup toolchain install
+      - name: Add the target
+        run: rustup target add "${{ matrix.target }}"
+      - name: Cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-      - name: Publish r3v3rs3-mcp
+          key: ${{ matrix.target }}-mcp
+      - name: Build the MCP client
+        run: cargo build --release --locked -p r3v3rs3-mcp --target ${{ matrix.target }}
+      - name: Make archive
+        if: matrix.archive == 'tar.gz'
+        run: tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-mcp-${{ matrix.target }}.tar.gz r3v3rs3-mcp
+      - name: Make archive
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: Compress-Archive -Path "target/${{ matrix.target }}/release/r3v3rs3-mcp.exe" -DestinationPath "r3v3rs3-mcp-${{ matrix.target }}.zip"
+      - name: Upload the archive
+        if: github.event_name == 'push' && matrix.archive == 'tar.gz'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        working-directory: npm
-        run: |
-          test -n "$NODE_AUTH_TOKEN" || { echo "the NPM_TOKEN secret is empty" >&2; exit 1; }
-          version=$(node -p 'require("./package.json").version')
-          published=$(npm view "r3v3rs3-mcp@$version" version 2>/dev/null || true)
-          if [ "$published" = "$version" ]; then
-            echo "r3v3rs3-mcp $version is already published"
-          else
-            npm publish
-          fi
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" "r3v3rs3-mcp-${{ matrix.target }}.tar.gz"
+      - name: Upload the archive
+        if: github.event_name == 'push' && matrix.archive == 'zip'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" "r3v3rs3-mcp-${{ matrix.target }}.zip"
 
   publish:
     name: Publish release
     if: github.event_name == 'push'
-    needs: [binary, crates, sign, npm]
+    needs: [binary, binary-mcp, crates, sign]
     runs-on: ubuntu-24.04
     steps:
       - name: Publish the draft release
