@@ -587,7 +587,7 @@ mod tests {
         entry.acme_for(&entry.target()).unwrap();
         assert!(entry.acme.dns_credential.is_none());
         let name = entry.acme.dns_provider.as_ref().map(|p| p.name());
-        assert_eq!(name.as_deref(), Some("cloudflare"));
+        assert_eq!(name, Some("cloudflare"));
 
         let missing_acme = Acme {
             dns_credential: Some("abcdef12".parse().unwrap()),
