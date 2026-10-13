@@ -165,13 +165,11 @@ async fn resolve_dns_credential(
     storage: &dyn Storage,
     mut entry: AcmeEntry,
 ) -> Result<AcmeEntry, Error> {
-    if let Some(id) = entry.acme.dns_credential {
-        entry.acme.dns_provider = Some(storage.dns_provider_of(id).await?.ok_or_else(|| {
-            Error::DnsCredentialNotFound {
-                name: id.to_string(),
-            }
-        })?);
-    }
+    let provider = match entry.acme.dns_credential {
+        Some(id) => storage.dns_provider_of(id).await?,
+        None => None,
+    };
+    entry.resolve_dns_credential(provider)?;
     Ok(entry)
 }
 

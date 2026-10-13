@@ -186,6 +186,18 @@ impl AcmeEntry {
         Ok(acme)
     }
 
+    /// Replaces the credential reference with the stored provider, read by the caller. The
+    /// reference is removed, because an entry names a provider or a credential, never both.
+    pub fn resolve_dns_credential(&mut self, provider: Option<DnsProvider>) -> Result<(), Error> {
+        if let Some(id) = self.acme.dns_credential.take() {
+            let provider = provider.ok_or_else(|| Error::DnsCredentialNotFound {
+                name: id.to_string(),
+            })?;
+            self.acme.dns_provider = Some(provider);
+        }
+        Ok(())
+    }
+
     pub fn info(&self, certs: &CertList) -> AcmeInfo {
         AcmeInfo {
             id: self.id,
@@ -545,6 +557,56 @@ mod tests {
     use r3v3rs3_api::acme::{AcmeConfig, KeyedProvider, TokenApi, TokenProvider};
     use sha2::{Digest, Sha256};
     use std::sync::Mutex;
+
+    #[test]
+    fn a_resolved_credential_reference_validates_and_keeps_the_order() {
+        #[derive(Deserialize)]
+        struct Stored {
+            account: AccountCredentials,
+        }
+        let account = Arc::new(toml::from_str::<Stored>(STORED_BY_0_7).unwrap().account);
+        let mut entry = AcmeEntry {
+            id: "abc12345".parse().unwrap(),
+            acme: Acme {
+                config: AcmeConfig::default(),
+                identifiers: vec!["*.example.com".parse().unwrap()],
+                challenge_type: DNS_01.to_string(),
+                dns_provider: None,
+                dns_credential: Some("abcdef12".parse().unwrap()),
+            },
+            account,
+        };
+        // The stored provider of the reference, read from the credential store.
+        let provider = Some(DnsProvider::Token(TokenProvider {
+            provider: TokenApi::Cloudflare,
+            api_token: "token".to_string(),
+            api_url: None,
+        }));
+        entry.resolve_dns_credential(provider).unwrap();
+        // The order of the entry validates only when the reference is gone.
+        entry.acme_for(&entry.target()).unwrap();
+        assert!(entry.acme.dns_credential.is_none());
+        assert_eq!(
+            entry
+                .acme
+                .dns_provider
+                .as_ref()
+                .map(|p| p.name())
+                .as_deref(),
+            Some("cloudflare")
+        );
+
+        let missing_acme = Acme {
+            dns_credential: Some("abcdef12".parse().unwrap()),
+            ..entry.acme.clone()
+        };
+        let mut missing = AcmeEntry {
+            id: "abc12345".parse().unwrap(),
+            acme: missing_acme,
+            account: entry.account.clone(),
+        };
+        assert!(missing.resolve_dns_credential(None).is_err());
+    }
 
     #[test]
     fn a_dns_provider_survives_the_acme_toml_round_trip() {
