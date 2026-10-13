@@ -49,7 +49,9 @@ fn flag(locale: Locale) -> Html {
         Locale::En => "/assets/flags/gb.svg",
         Locale::Tr => "/assets/flags/tr.svg",
     };
+    // The width and the height attributes keep the box fixed. Firefox sizes an SVG in an
+    // img from the attributes of the SVG file, and an object-fit alone can squash it.
     html! {
-        <img {src} alt="" class="w-6 h-4 shrink-0 rounded-sm object-cover shadow-sm" />
+        <img {src} alt="" width="24" height="16" class="w-6 h-4 shrink-0 rounded-sm object-cover shadow-sm" />
     }
 }
