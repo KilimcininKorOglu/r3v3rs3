@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.4] - 2026-10-13
+
+### Added
+- `r3v3rs3-mcp update` installs a newer release of the command line MCP client over the running binary and verifies the sha256 digest of the release.
+
+### Changed
+- The command line MCP client is distributed from the GitHub releases only. The release workflow builds it for macOS and Windows besides Linux, and `install-mcp.sh` plus `install-mcp.ps1` install the newest release with its sha256 verification. The npm package and the crates.io publish of the client are gone, so a release needs no registry secret.
+- The expiry and renewal dates on the certificates page name the exact days left instead of the largest whole unit, so 59 days no longer read as 1 month.
+
 ## [1.7.3] - 2026-10-12
 
 ### Fixed
