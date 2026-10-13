@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.5] - 2026-10-13
+
+### Added
+- Named DNS credentials: the panel stores the credentials of every DNS provider under a name, several per provider, and an ACME entry references one for the DNS-01 challenge instead of carrying its own provider credentials. The admin API never returns the stored credentials, r3v3rs3 seals them with the key in `platform.key`, and a credential that an ACME entry still references cannot be deleted. Entries with an inline provider keep working.
+- The DNS Credentials page below Certificates lists the stored credentials and adds or edits them. The ACME forms pick a stored credential or keep the manual entry, and the ACME tab names the credential of an entry in its provider cell.
+- The install scripts of the command line MCP client add the install directory to `PATH` themselves.
+
+### Fixed
+- The language flags of the WebUI rendered as narrow strips in Firefox, because Firefox sizes an SVG inside an img from the attributes of the SVG file. The flags now carry fixed width and height attributes and crop themselves with `preserveAspectRatio`.
+
+### Changed
+- The docs describe the DNS credentials store in the configuration reference.
+
 ## [1.7.4] - 2026-10-13
 
 ### Added
