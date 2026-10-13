@@ -1,4 +1,4 @@
-use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::{cert::CertKind, id::ShortId};
 use serde_derive::{Deserialize, Serialize};
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -58,6 +58,12 @@ pub enum Route {
     ProxyLogView { id: ShortId },
     #[at("/certs")]
     Certs,
+    #[at("/certs/client")]
+    ClientCerts,
+    #[at("/certs/root")]
+    RootCerts,
+    #[at("/certs/acme")]
+    AcmeCerts,
     #[at("/certs/self_sign")]
     SelfSign,
     #[at("/certs/upload")]
@@ -107,6 +113,9 @@ impl Route {
                 Some(Route::Ports)
             }
             Route::Certs
+            | Route::ClientCerts
+            | Route::RootCerts
+            | Route::AcmeCerts
             | Route::SelfSign
             | Route::Upload
             | Route::NewAcme
@@ -153,7 +162,16 @@ pub fn switch(routes: Route) -> Html {
         Route::AppLog { id } => html! { <app_log::AppLogView {id} /> },
         Route::Targets => html! { <targets::Targets /> },
         Route::GitConnections => html! { <git_connections::GitConnections /> },
-        Route::Certs => html! { <cert_list::CertList /> },
+        Route::Certs => {
+            html! { <cert_list::CertList kind={Some(CertKind::Server)} acme={false} /> }
+        }
+        Route::ClientCerts => {
+            html! { <cert_list::CertList kind={Some(CertKind::Client)} acme={false} /> }
+        }
+        Route::RootCerts => {
+            html! { <cert_list::CertList kind={Some(CertKind::Root)} acme={false} /> }
+        }
+        Route::AcmeCerts => html! { <cert_list::CertList kind={None} acme={true} /> },
         Route::SelfSign => html! { <self_sign::SelfSign /> },
         Route::NewAcme => html! { <new_acme::NewAcme /> },
         Route::DnsCredentials => html! { <dns_credentials::DnsCredentials /> },

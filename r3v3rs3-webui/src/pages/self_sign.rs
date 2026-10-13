@@ -5,10 +5,7 @@ use crate::{
         HINT_CLASS, INPUT_CLASS, LABEL_CLASS, error_view, select_field, select_setter,
     },
     i18n::use_locale,
-    pages::{
-        Route,
-        cert_list::{CertsQuery, CertsTab, get_cert_list},
-    },
+    pages::{Route, cert_list::get_cert_list},
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::{
@@ -148,14 +145,13 @@ fn submit_callback(
     })
 }
 
-/// Opens the certificate tab that lists certificates of this kind.
+/// Opens the page that lists certificates of this kind.
 fn show_certs(navigator: &Navigator, kind: SelfSignedCertKind) {
-    let _ = navigator.push_with_query(
-        &Route::Certs,
-        &CertsQuery {
-            tab: CertsTab::for_kind(kind.into()),
-        },
-    );
+    let route = match kind {
+        SelfSignedCertKind::Client => Route::ClientCerts,
+        SelfSignedCertKind::Server => Route::Certs,
+    };
+    navigator.push(&route);
 }
 
 fn kind_view(locale: Locale, kind: &UseStateHandle<SelfSignedCertKind>) -> Html {

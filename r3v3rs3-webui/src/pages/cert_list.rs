@@ -20,47 +20,17 @@ use r3v3rs3_api::cert::{
 use r3v3rs3_api::discovery::DiscoverySource;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use serde_derive::{Deserialize, Serialize};
 use std::{collections::HashSet, time::Duration};
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
 
-#[derive(Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum CertsTab {
-    #[default]
-    Server,
-    Client,
-    Root,
-    Acme,
-}
-
-#[derive(Default, Clone, Serialize, Deserialize)]
-pub struct CertsQuery {
-    #[serde(default)]
-    pub tab: CertsTab,
-}
-
-impl CertsTab {
-    /// Returns the tab that lists certificates of this kind.
-    pub fn for_kind(kind: CertKind) -> Self {
-        match kind {
-            CertKind::Server => CertsTab::Server,
-            CertKind::Client => CertsTab::Client,
-            CertKind::Root => CertsTab::Root,
-        }
-    }
-
-    /// Returns the kind of the certificates in this tab. The ACME tab lists no certificates.
-    fn cert_kind(self) -> Option<CertKind> {
-        match self {
-            CertsTab::Server => Some(CertKind::Server),
-            CertsTab::Client => Some(CertKind::Client),
-            CertsTab::Root => Some(CertKind::Root),
-            CertsTab::Acme => None,
-        }
-    }
+/// The properties of a certificate list page. `kind` selects the certificates of the page,
+/// and `acme` shows the ACME requests instead of uploaded certificates.
+#[derive(Properties, PartialEq)]
+pub struct CertListProps {
+    pub kind: Option<CertKind>,
+    pub acme: bool,
 }
 
 const SERVER_COLUMNS: [Column; 4] = [
@@ -123,17 +93,12 @@ const ACME_COLUMNS: [Column; 4] = [
 const EMPTY_LIST: &str = "common.list_empty";
 
 #[function_component(CertList)]
-pub fn cert_list() -> Html {
+pub fn cert_list(props: &CertListProps) -> Html {
     use_ensure_auth();
     let locale = use_locale();
 
-    let Some(location) = use_location() else {
-        return html!();
-    };
-    let query = location.query::<CertsQuery>().unwrap_or_default();
-    // The tab comes from the query of the link, so a sidebar click switches the tab while
-    // the page is already open.
-    let tab = query.tab;
+    let kind = props.kind;
+    let acme_page = props.acme;
 
     let (certs, certs_dispatcher) = use_store::<CertStore>();
     let (acme, acme_dispatcher) = use_store::<AcmeStore>();
@@ -156,7 +121,7 @@ pub fn cert_list() -> Html {
     };
 
     let navigator_cloned = navigator.clone();
-    let self_sign_kind = match tab == CertsTab::Client {
+    let self_sign_kind = match kind == Some(CertKind::Client) {
         true => SelfSignedCertKind::Client,
         false => SelfSignedCertKind::Server,
     };
@@ -170,7 +135,7 @@ pub fn cert_list() -> Html {
     });
 
     let navigator_cloned = navigator.clone();
-    let upload_kind = tab.cert_kind().unwrap_or(CertKind::Server);
+    let upload_kind = kind.unwrap_or(CertKind::Server);
     let upload_onclick = Callback::from(move |_| {
         let _ =
             navigator_cloned.push_with_query(&Route::Upload, &UploadQuery { kind: upload_kind });
@@ -181,13 +146,12 @@ pub fn cert_list() -> Html {
         navigator_cloned.push(&Route::NewAcme);
     });
 
-    let kind = tab.cert_kind();
     let cert_list = certs
         .entries
         .iter()
         .filter(|cert| Some(cert.kind) == kind)
         .collect::<Vec<_>>();
-    // A deleted certificate or a certificate of another tab is no longer selected.
+    // A deleted certificate or a certificate of another page is no longer selected.
     let chosen = cert_list
         .iter()
         .map(|cert| cert.id)
@@ -196,7 +160,8 @@ pub fn cert_list() -> Html {
     let delete_selected = delete_selected_onclick(locale, chosen.clone(), &selected, &notice);
     let body = body_view(
         locale,
-        tab,
+        kind,
+        acme_page,
         &CertLists {
             certs: &certs,
             acme: &acme,
@@ -221,7 +186,7 @@ pub fn cert_list() -> Html {
             }
             if can_edit {
             <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
-                if matches!(tab, CertsTab::Server | CertsTab::Client) {
+                if matches!(kind, Some(CertKind::Server) | Some(CertKind::Client)) {
                     <button onclick={self_sign_onclick} class="inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-l-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
                         <img src="/assets/icons/create.svg" class="w-4 h-4 mr-1 text-neutral-500" />
                         {locale.t("certs.self_sign")}
@@ -230,7 +195,7 @@ pub fn cert_list() -> Html {
                         <img src="/assets/icons/cloud-upload.svg" class="w-4 h-4 mr-1" />
                         {locale.t("common.upload")}
                     </button>
-                } else if tab == CertsTab::Root {
+                } else if kind == Some(CertKind::Root) {
                     <button onclick={upload_onclick} class="inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
                         <img src="/assets/icons/cloud-upload.svg" class="w-4 h-4 mr-1" />
                         {locale.t("common.upload")}
@@ -285,17 +250,31 @@ struct CertRowOpts {
     warning: Duration,
 }
 
-/// The list of the open tab.
+/// The list of the open page.
 fn body_view(
     locale: Locale,
-    tab: CertsTab,
+    kind: Option<CertKind>,
+    acme: bool,
     lists: &CertLists<'_>,
     selected: &UseStateHandle<HashSet<ShortId>>,
     navigator: &Navigator,
     opts: CertRowOpts,
 ) -> Html {
-    match tab {
-        CertsTab::Server | CertsTab::Client => {
+    if acme {
+        let rows = lists
+            .acme
+            .entries
+            .iter()
+            .map(|entry| acme_row(locale, entry, navigator, opts.can_edit, lists.credentials))
+            .collect::<Vec<_>>();
+        return list_card(locale, lists.acme.loaded, EMPTY_LIST, &ACME_COLUMNS, &rows);
+    }
+    match kind {
+        Some(CertKind::Root) => {
+            let rows = cert_rows(locale, lists.filtered, selected, opts, root_row);
+            list_card(locale, lists.certs.loaded, EMPTY_LIST, &ROOT_COLUMNS, &rows)
+        }
+        _ => {
             let rows = cert_rows(locale, lists.filtered, selected, opts, server_row);
             list_card(
                 locale,
@@ -304,19 +283,6 @@ fn body_view(
                 &SERVER_COLUMNS,
                 &rows,
             )
-        }
-        CertsTab::Root => {
-            let rows = cert_rows(locale, lists.filtered, selected, opts, root_row);
-            list_card(locale, lists.certs.loaded, EMPTY_LIST, &ROOT_COLUMNS, &rows)
-        }
-        CertsTab::Acme => {
-            let rows = lists
-                .acme
-                .entries
-                .iter()
-                .map(|entry| acme_row(locale, entry, navigator, opts.can_edit, lists.credentials))
-                .collect::<Vec<_>>();
-            list_card(locale, lists.acme.loaded, EMPTY_LIST, &ACME_COLUMNS, &rows)
         }
     }
 }
@@ -721,14 +687,6 @@ mod location {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn every_certificate_kind_has_its_own_tab() {
-        for kind in [CertKind::Server, CertKind::Client, CertKind::Root] {
-            assert_eq!(CertsTab::for_kind(kind).cert_kind(), Some(kind));
-        }
-        assert_eq!(CertsTab::Acme.cert_kind(), None);
-    }
 
     #[test]
     fn the_title_of_a_discovered_certificate_names_its_resource() {

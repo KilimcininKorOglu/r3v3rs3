@@ -2,7 +2,6 @@ use crate::components::acme_form::AcmeResult;
 use crate::components::acme_provider::AcmeProvider;
 use crate::components::custom_acme::CustomAcme;
 use crate::components::http_proxy_config::error_view;
-use crate::pages::cert_list::{CertsQuery, CertsTab};
 use crate::pages::settings::send_json;
 use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale, pages::Route};
 use gloo_net::http::Request;
@@ -132,14 +131,9 @@ pub fn new_acme() -> Html {
     }
 }
 
-/// Opens the ACME tab of the certificate list.
+/// Opens the page of the ACME requests.
 fn show_acme(navigator: &Navigator) {
-    let _ = navigator.push_with_query(
-        &Route::Certs,
-        &CertsQuery {
-            tab: CertsTab::Acme,
-        },
-    );
+    navigator.push(&Route::AcmeCerts);
 }
 
 /// The states of the form that the submit changes.

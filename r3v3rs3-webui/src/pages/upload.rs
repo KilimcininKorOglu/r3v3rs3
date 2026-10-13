@@ -1,18 +1,19 @@
-use crate::{
-    API_ENDPOINT,
-    auth::use_ensure_auth,
-    i18n::use_locale,
-    pages::{
-        Route,
-        cert_list::{CertsQuery, CertsTab},
-    },
-};
+use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale, pages::Route};
 use gloo_net::http::Request;
 use r3v3rs3_api::cert::{CertKind, UploadQuery};
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yew_router::prelude::*;
+
+/// The page that lists the certificates of this kind.
+fn certs_route(kind: CertKind) -> Route {
+    match kind {
+        CertKind::Client => Route::ClientCerts,
+        CertKind::Root => Route::RootCerts,
+        CertKind::Server => Route::Certs,
+    }
+}
 
 #[function_component(Upload)]
 pub fn upload() -> Html {
@@ -29,12 +30,7 @@ pub fn upload() -> Html {
     };
     let navigator_cloned = navigator.clone();
     let cancel_onclick = Callback::from(move |_| {
-        let _ = navigator_cloned.push_with_query(
-            &Route::Certs,
-            &CertsQuery {
-                tab: CertsTab::for_kind(query.kind),
-            },
-        );
+        navigator_cloned.push(&certs_route(query.kind));
     });
 
     let chain = use_state(|| Option::<web_sys::File>::None);
@@ -76,12 +72,7 @@ pub fn upload() -> Html {
                     .await
                     .is_ok()
                 {
-                    let _ = navigator.push_with_query(
-                        &Route::Certs,
-                        &CertsQuery {
-                            tab: CertsTab::for_kind(query.kind),
-                        },
-                    );
+                    navigator.push(&certs_route(query.kind));
                 }
                 is_loading_cloned.set(false);
             });
