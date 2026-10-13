@@ -1,6 +1,6 @@
 [package]
 name = "r3v3rs3-mcp"
-version = "1.7.6"
+version = "1.7.7"
 edition = "2024"
 publish = false
 license = "MIT"

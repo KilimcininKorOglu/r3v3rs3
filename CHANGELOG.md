@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.7] - 2026-10-14
+
+### Fixed
+- The order of an ACME entry that references a DNS credential failed with `an ACME entry names a dns provider and a dns credential, not both`, because the resolved entry kept the reference next to the provider. The resolution now clears the reference, and a regression test runs the resolution and the validation of the entry.
+
+### Changed
+- Every certificate list is its own page: `/certs`, `/certs/client`, `/certs/root` and `/certs/acme`. The sidebar opens those routes directly, and the upload, self-sign and new ACME pages return to the route of the list they belong to.
+
 ## [1.7.6] - 2026-10-13
 
 ### Fixed
