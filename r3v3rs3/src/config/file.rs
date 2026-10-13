@@ -263,6 +263,10 @@ impl FileStorage {
         &self,
         path: &Path,
     ) -> anyhow::Result<Vec<(ShortId, StoredDnsCredential)>> {
+        // The store starts empty, so a missing file holds no credentials.
+        if !fs::try_exists(path).await? {
+            return Ok(Vec::new());
+        }
         info!(?path, "load config");
         let content = fs::read_to_string(path).await?;
         let table: Versioned<IndexMap<ShortId, StoredDnsCredential>> = toml::from_str(&content)?;
@@ -935,6 +939,15 @@ mod test {
         let written = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         let parsed: AppConfig = toml::from_str(&written).unwrap();
         assert_eq!(parsed, AppConfig::default());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_fresh_directory_holds_no_dns_credentials() {
+        let dir = std::env::temp_dir().join(format!("r33-dns-credentials-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = FileStorage::new(&dir);
+        assert!(storage.load_dns_credentials().await.unwrap().is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
