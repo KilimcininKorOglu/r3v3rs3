@@ -21,6 +21,10 @@ pub struct Acme {
     /// The DNS provider that publishes the TXT records of the `dns-01` challenge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns_provider: Option<DnsProvider>,
+    /// The id of a named DNS credential of the credential store. A reference and an inline
+    /// provider exclude each other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns_credential: Option<ShortId>,
 }
 
 impl Acme {
@@ -28,8 +32,10 @@ impl Acme {
     pub fn validate(&self) -> Result<(), Error> {
         match self.challenge_type.as_str() {
             HTTP_01 | TLS_ALPN_01 => {}
-            DNS_01 => match &self.dns_provider {
-                Some(provider) if provider.has_credentials() => provider.validate()?,
+            DNS_01 => match (&self.dns_provider, &self.dns_credential) {
+                (Some(provider), None) if provider.has_credentials() => provider.validate()?,
+                (None, Some(_)) => {}
+                (Some(_), Some(_)) => return Err(Error::AcmeCredentialConflict),
                 _ => return Err(Error::AcmeDnsProviderRequired),
             },
             _ => {
@@ -443,7 +449,31 @@ pub struct AcmeInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(example = "cloudflare")]
     pub dns_provider: Option<String>,
+    /// The id of the named DNS credential that this entry references.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns_credential: Option<ShortId>,
     pub next_renewal: Option<i64>,
+}
+
+/// One named DNS credential of the store, without its secrets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DnsCredentialInfo {
+    pub id: ShortId,
+    #[schema(example = "Cloudflare - hermestech")]
+    pub name: String,
+    /// The `provider` name of the stored credentials, for example `cloudflare`.
+    #[schema(example = "cloudflare")]
+    pub provider: String,
+}
+
+/// The body of a create or an update of a named DNS credential. An update without
+/// `dns_provider` keeps the stored credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ToSchema)]
+pub struct DnsCredentialRequest {
+    #[schema(example = "Cloudflare - hermestech")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns_provider: Option<DnsProvider>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
@@ -499,6 +529,7 @@ mod test {
             identifiers: identifiers.iter().map(|id| id.parse().unwrap()).collect(),
             challenge_type: challenge_type.to_string(),
             dns_provider: None,
+            dns_credential: None,
         }
     }
 

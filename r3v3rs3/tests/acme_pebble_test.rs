@@ -163,6 +163,7 @@ async fn pebble_setup(
                 api_token: "test-token".to_string(),
                 api_url: Some(provider_url),
             })),
+            dns_credential: None,
         },
     };
     Ok((provider, storage, request))
@@ -228,6 +229,7 @@ async fn tls_alpn_01_issues_a_certificate_without_a_port() -> anyhow::Result<()>
             identifiers: vec!["alpn.test".parse()?],
             challenge_type: TLS_ALPN_01.to_string(),
             dns_provider: None,
+            dns_credential: None,
         },
     };
     let cert_storage = storage.clone();

@@ -215,6 +215,13 @@ struct Inner {
     pub acems: HashMap<ShortId, AcmeEntry>,
     pub accounts: HashMap<String, Account>,
     pub cdn_ranges: Option<CdnRanges>,
+    pub dns_credentials: HashMap<
+        ShortId,
+        (
+            r3v3rs3_api::acme::DnsCredentialInfo,
+            r3v3rs3_api::acme::DnsProvider,
+        ),
+    >,
     /// The error of `ensure_writable`.
     pub write_error: Option<Error>,
     /// The error of every save and delete.
@@ -329,6 +336,61 @@ impl Storage for TestStorage {
 
     async fn load_acmes(&self) -> Vec<AcmeEntry> {
         self.inner.lock().await.acems.values().cloned().collect()
+    }
+
+    async fn load_dns_credentials(
+        &self,
+    ) -> Result<Vec<r3v3rs3_api::acme::DnsCredentialInfo>, Error> {
+        Ok(self
+            .inner
+            .lock()
+            .await
+            .dns_credentials
+            .values()
+            .map(|(info, _)| info.clone())
+            .collect())
+    }
+
+    async fn save_dns_credential(
+        &self,
+        id: ShortId,
+        name: &str,
+        provider: &r3v3rs3_api::acme::DnsProvider,
+    ) -> Result<(), Error> {
+        self.save(|inner| {
+            inner.dns_credentials.insert(
+                id,
+                (
+                    r3v3rs3_api::acme::DnsCredentialInfo {
+                        id,
+                        name: name.to_string(),
+                        provider: provider.name().to_string(),
+                    },
+                    provider.clone(),
+                ),
+            );
+        })
+        .await
+    }
+
+    async fn delete_dns_credential(&self, id: ShortId) -> Result<(), Error> {
+        self.save(|inner| {
+            inner.dns_credentials.remove(&id);
+        })
+        .await
+    }
+
+    async fn dns_provider_of(
+        &self,
+        id: ShortId,
+    ) -> Result<Option<r3v3rs3_api::acme::DnsProvider>, Error> {
+        Ok(self
+            .inner
+            .lock()
+            .await
+            .dns_credentials
+            .get(&id)
+            .map(|(_, provider)| provider.clone()))
     }
 
     async fn load_certs(&self) -> Vec<Arc<Cert>> {

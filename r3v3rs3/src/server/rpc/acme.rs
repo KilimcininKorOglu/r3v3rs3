@@ -57,6 +57,15 @@ impl RpcMethod for AddAcme {
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         self.request.acme.validate()?;
+        if let Some(id) = self.request.acme.dns_credential {
+            // The reference has to name a credential, so a typo fails at once.
+            let credentials = state.storage.load_dns_credentials().await?;
+            if !credentials.iter().any(|known| known.id == id) {
+                return Err(Error::DnsCredentialNotFound {
+                    name: id.to_string(),
+                });
+            }
+        }
         dns::check_exec_provider(
             self.request.acme.dns_provider.as_ref(),
             &state.config().acme_exec,

@@ -731,6 +731,7 @@ mod tests {
                 identifiers: vec!["example.com".parse().unwrap()],
                 challenge_type: challenge_type.into(),
                 dns_provider: None,
+                dns_credential: None,
             },
             account: Arc::new(account),
         }

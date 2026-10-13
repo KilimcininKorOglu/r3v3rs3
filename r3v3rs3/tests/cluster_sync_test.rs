@@ -497,6 +497,7 @@ fn acme_entry(directory: &str) -> anyhow::Result<AcmeEntry> {
             identifiers: vec!["example.com".parse()?],
             challenge_type: HTTP_01.to_string(),
             dns_provider: None,
+            dns_credential: None,
         },
         account: Arc::new(credentials),
     })

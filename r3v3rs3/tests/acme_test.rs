@@ -32,6 +32,7 @@ fn request(
             identifiers,
             challenge_type: challenge_type.to_string(),
             dns_provider,
+            dns_credential: None,
         },
     }
 }

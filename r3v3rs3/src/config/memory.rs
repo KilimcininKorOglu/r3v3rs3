@@ -133,6 +133,33 @@ impl crate::config::storage::Storage for MemoryStorage {
         Vec::new()
     }
 
+    async fn load_dns_credentials(
+        &self,
+    ) -> Result<Vec<r3v3rs3_api::acme::DnsCredentialInfo>, Error> {
+        // The master owns the credentials, and a worker orders no certificates.
+        Ok(Vec::new())
+    }
+
+    async fn save_dns_credential(
+        &self,
+        _id: ShortId,
+        _name: &str,
+        _provider: &r3v3rs3_api::acme::DnsProvider,
+    ) -> Result<(), Error> {
+        Err(Error::FailedToSaveConfig)
+    }
+
+    async fn delete_dns_credential(&self, _id: ShortId) -> Result<(), Error> {
+        Err(Error::FailedToSaveConfig)
+    }
+
+    async fn dns_provider_of(
+        &self,
+        _id: ShortId,
+    ) -> Result<Option<r3v3rs3_api::acme::DnsProvider>, Error> {
+        Ok(None)
+    }
+
     async fn add_account(
         &self,
         _name: &str,

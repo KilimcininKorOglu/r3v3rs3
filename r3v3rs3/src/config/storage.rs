@@ -6,6 +6,7 @@ use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::{LocalSessions, SessionBackend};
 use r3v3rs3_api::{
     access_list::AccessListEntry,
+    acme::{DnsCredentialInfo, DnsProvider},
     app::AppConfig,
     auth::{Account, LoginRequest, LoginResponse, Role},
     error::Error,
@@ -40,6 +41,23 @@ pub trait Storage: Send + Sync + 'static {
     async fn delete_cert(&self, id: ShortId) -> Result<(), Error>;
     async fn load_acmes(&self) -> Vec<AcmeEntry>;
     async fn load_certs(&self) -> Vec<Arc<Cert>>;
+
+    /// The named DNS credentials without their secrets.
+    async fn load_dns_credentials(&self) -> Result<Vec<DnsCredentialInfo>, Error>;
+
+    /// Seals and stores the credentials of one name. The name of a stored credential must
+    /// stay unique.
+    async fn save_dns_credential(
+        &self,
+        id: ShortId,
+        name: &str,
+        provider: &DnsProvider,
+    ) -> Result<(), Error>;
+
+    async fn delete_dns_credential(&self, id: ShortId) -> Result<(), Error>;
+
+    /// The credentials behind a reference, or `None` when the id names no credential.
+    async fn dns_provider_of(&self, id: ShortId) -> Result<Option<DnsProvider>, Error>;
     async fn add_account(
         &self,
         name: &str,

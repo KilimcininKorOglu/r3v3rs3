@@ -982,5 +982,13 @@
   "settings.upgrade_stage_downloading": "Release indiriliyor",
   "settings.upgrade_stage_installing": "Release kuruluyor",
   "settings.upgrade_stage_handing_over": "Yeni sürüm başlatılıyor",
-  "settings.upgrade_stage_done": "Güncelleme tamamlandı. Sayfa yeniden yükleniyor."
+  "settings.upgrade_stage_done": "Güncelleme tamamlandı. Sayfa yeniden yükleniyor.",
+  "error.acme_credential_conflict": "Bir ACME kaydı aynı anda dns provider ve dns kimlik bilgisi taşıyamaz.",
+  "error.dns_credential_not_found": "{name} adlı dns kimlik bilgisi yok.",
+  "error.dns_credential_in_use": "{name} adlı dns kimlik bilgisi bir ACME kaydı tarafından kullanılıyor.",
+  "error.dns_credential_name_taken": "{name} adında bir dns kimlik bilgisi zaten var.",
+  "audit.action_add_dns_credential": "DNS kimlik bilgisi ekleme",
+  "audit.action_update_dns_credential": "DNS kimlik bilgisi güncelleme",
+  "audit.action_delete_dns_credential": "DNS kimlik bilgisi silme",
+  "error.failed_to_load_dns_credentials": "DNS kimlik bilgileri okunamadı."
 }

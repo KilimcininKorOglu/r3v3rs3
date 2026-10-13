@@ -58,6 +58,7 @@ mod certs;
 mod cluster;
 mod config;
 mod discovery;
+mod dns_credentials;
 mod git;
 mod hooks;
 mod logs;
@@ -423,11 +424,23 @@ fn access_list_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(access_lists::put, access_lists::delete))
 }
 
-/// The certificates and the ACME accounts.
+/// The certificates, the ACME accounts and the named DNS credentials.
 fn cert_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .nest("/certs", cert_file_routes())
         .nest("/acme", acme_routes())
+        .nest("/dns_credentials", dns_credential_routes())
+}
+
+/// The named DNS credentials that the ACME entries reference.
+fn dns_credential_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(dns_credentials::list, dns_credentials::add))
+        .routes(routes!(
+            dns_credentials::get,
+            dns_credentials::put,
+            dns_credentials::delete
+        ))
 }
 
 fn cert_file_routes() -> OpenApiRouter<AppState> {

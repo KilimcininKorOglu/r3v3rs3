@@ -112,6 +112,15 @@ impl Layout {
         format!("{}{id}", self.acmes())
     }
 
+    /// The named DNS credentials. They hold sealed secrets.
+    pub fn dns_credentials(&self) -> String {
+        format!("{}dns-credentials/", self.state())
+    }
+
+    pub fn dns_credential(&self, id: ShortId) -> String {
+        format!("{}{id}", self.dns_credentials())
+    }
+
     pub fn accounts(&self) -> String {
         format!("{}accounts/", self.state())
     }

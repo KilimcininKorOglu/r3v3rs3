@@ -41,6 +41,7 @@ const SESSION_COOKIE: &str = "token";
         (name = "access_lists", description = "IP filters and authentication policies that proxies and routes share."),
         (name = "certs", description = "Server and root certificates."),
         (name = "acme", description = "ACME certificate requests."),
+        (name = "dns_credentials", description = "Named DNS credentials that ACME requests reference."),
         (name = "logs", description = "Logs of ports, proxies and certificates."),
         (name = "app_info", description = "Build and path information of the server."),
         (name = "cdn", description = "CDN IP ranges for the client IP resolution."),

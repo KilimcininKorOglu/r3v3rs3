@@ -13,6 +13,7 @@ pub mod certs;
 pub mod cluster;
 pub mod config;
 pub mod discovery;
+pub mod dns_credential;
 pub mod ports;
 pub mod proxies;
 pub mod workers;

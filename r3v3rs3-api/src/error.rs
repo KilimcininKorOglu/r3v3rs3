@@ -194,6 +194,21 @@ pub enum Error {
     #[error("dns-01 challenge needs a dns provider with credentials")]
     AcmeDnsProviderRequired,
 
+    #[error("an ACME entry names a dns provider and a dns credential, not both")]
+    AcmeCredentialConflict,
+
+    #[error("the dns credential {name} does not exist")]
+    DnsCredentialNotFound { name: String },
+
+    #[error("the dns credential {name} is in use by an ACME entry")]
+    DnsCredentialInUse { name: String },
+
+    #[error("a dns credential with the name {name} exists already")]
+    DnsCredentialNameTaken { name: String },
+
+    #[error("the dns credentials could not be read")]
+    FailedToLoadDnsCredentials,
+
     #[error("the webhook url must use https, or http on a loopback address: {url}")]
     AcmeWebhookUrlInvalid { url: String },
 

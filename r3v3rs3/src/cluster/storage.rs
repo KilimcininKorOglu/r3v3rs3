@@ -12,12 +12,14 @@ use crate::certs::acme::{AcmeAccount, AcmeEntry};
 use crate::certs::alpn::TlsAlpnChallenge;
 use crate::certs::challenges::ServedChallenges;
 use crate::config::{account, storage::Storage};
+use crate::dns_credential::StoredDnsCredential;
 use crate::kv::{Condition, KvItem, KvStore, Txn, TxnOutcome, Write};
 use crate::proxy::http::cache_share::SharedCacheStore;
 use crate::proxy::http::rate_share::RateCountExchange;
 use crate::sessions::SessionBackend;
 use anyhow::Context as _;
 use r3v3rs3_api::access_list::{AccessList, AccessListEntry};
+use r3v3rs3_api::acme::{DnsCredentialInfo, DnsProvider};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::auth::{Account, LoginRequest, LoginResponse, Role};
 use r3v3rs3_api::cert::CertKind;
@@ -731,6 +733,55 @@ impl Storage for KvStorage {
                 Some(AcmeEntry::from((id, account)))
             })
             .collect()
+    }
+
+    async fn load_dns_credentials(&self) -> Result<Vec<DnsCredentialInfo>, Error> {
+        let stored = self
+            .load_values::<StoredDnsCredential>(&self.layout.dns_credentials())
+            .await;
+        Ok(stored
+            .into_iter()
+            .filter_map(|(key, entry)| {
+                let id = last_segment(&key).parse::<ShortId>().ok()?;
+                Some(entry.info(id))
+            })
+            .collect())
+    }
+
+    async fn save_dns_credential(
+        &self,
+        id: ShortId,
+        name: &str,
+        provider: &DnsProvider,
+    ) -> Result<(), Error> {
+        let stored = StoredDnsCredential::seal(id, name, provider, &self.keys).map_err(|err| {
+            error!(%err, "failed to seal the dns credential");
+            Error::FailedToSaveConfig
+        })?;
+        self.apply(vec![json_change(self.layout.dns_credential(id), &stored)?])
+            .await
+    }
+
+    async fn delete_dns_credential(&self, id: ShortId) -> Result<(), Error> {
+        self.apply(vec![Change::Delete(self.layout.dns_credential(id))])
+            .await
+    }
+
+    async fn dns_provider_of(&self, id: ShortId) -> Result<Option<DnsProvider>, Error> {
+        let key = self.layout.dns_credential(id);
+        let stored = self
+            .load_values::<StoredDnsCredential>(&key)
+            .await
+            .into_iter()
+            .next()
+            .map(|(_, entry)| entry);
+        let Some(stored) = stored else {
+            return Ok(None);
+        };
+        stored.open(id, &self.keys).map(Some).map_err(|err| {
+            error!(%err, "failed to open the dns credential");
+            Error::FailedToLoadDnsCredentials
+        })
     }
 
     async fn load_certs(&self) -> Vec<Arc<Cert>> {

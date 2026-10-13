@@ -202,6 +202,7 @@ impl AcmeEntry {
                 .dns_provider
                 .as_ref()
                 .map(|provider| provider.name().to_string()),
+            dns_credential: self.acme.dns_credential,
             next_renewal: self
                 .next_renewal(certs)
                 .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
@@ -556,6 +557,7 @@ mod tests {
                 secret_access_key: "secret".to_string(),
                 api_url: None,
             })),
+            dns_credential: None,
         };
         let text = toml_edit::ser::to_document(&acme).unwrap().to_string();
         assert_eq!(toml::from_str::<Acme>(&text).unwrap(), acme);

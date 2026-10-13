@@ -4,6 +4,8 @@ use crate::certs::{
     Cert,
     acme::{AcmeAccount, AcmeEntry},
 };
+use crate::cluster::crypto::ClusterKeys;
+use crate::cluster::key_file::{load_keys, write_new_key_file};
 use anyhow::Context as _;
 use indexmap::map::IndexMap;
 
@@ -11,6 +13,7 @@ use indexmap::map::IndexMap;
 const DEFAULT_CONFIG: &str = include_str!("../../data/default-config.toml");
 use r3v3rs3_api::{
     access_list::{AccessList, AccessListEntry},
+    acme::{DnsCredentialInfo, DnsProvider},
     app::AppConfig,
     auth::{Account, LoginRequest, LoginResponse, Role},
     cert::CertKind,
@@ -227,13 +230,78 @@ mod secret_files_test {
 
 pub struct FileStorage {
     dir: PathBuf,
+    /// The keys that seal the DNS credentials. They load once, from the key file of the
+    /// config directory.
+    secrets: tokio::sync::OnceCell<ClusterKeys>,
 }
 
 impl FileStorage {
     pub fn new(dir: &Path) -> Self {
         Self {
             dir: dir.to_owned(),
+            secrets: tokio::sync::OnceCell::new(),
         }
+    }
+
+    /// The keys that seal the DNS credentials. The key file is created at the first save,
+    /// so a server without the deployment platform carries one too.
+    async fn secret_keys(&self) -> anyhow::Result<&ClusterKeys> {
+        self.secrets
+            .get_or_try_init(|| async {
+                let path = self.dir.join(crate::platform::KEY_FILE);
+                if !fs::try_exists(&path).await? {
+                    fs::create_dir_all(&self.dir).await?;
+                    write_new_key_file(&path).await?;
+                }
+                load_keys(std::slice::from_ref(&path)).await
+            })
+            .await
+    }
+
+    /// Reads the stored DNS credentials by their ids, in the order of the file.
+    async fn read_dns_credentials(
+        &self,
+        path: &Path,
+    ) -> anyhow::Result<Vec<(ShortId, StoredDnsCredential)>> {
+        info!(?path, "load config");
+        let content = fs::read_to_string(path).await?;
+        let table: Versioned<IndexMap<ShortId, StoredDnsCredential>> = toml::from_str(&content)?;
+        Ok(table.data.into_iter().collect())
+    }
+
+    /// Opens the sealed provider of one stored credential.
+    async fn open_stored(
+        &self,
+        id: ShortId,
+        stored: &StoredDnsCredential,
+    ) -> anyhow::Result<DnsProvider> {
+        let keys = self.secret_keys().await?;
+        stored.open(id, keys)
+    }
+
+    /// Seals the provider and stores the credential beside the stored ones.
+    async fn save_dns_credential_impl(
+        &self,
+        path: &Path,
+        id: ShortId,
+        name: &str,
+        provider: &DnsProvider,
+    ) -> anyhow::Result<()> {
+        let keys = self.secret_keys().await?;
+        let stored = StoredDnsCredential::seal(id, name, provider, keys)?;
+        let mut doc = self.load_document_or_new(path).await;
+        doc[&id.to_string()].clone_from(toml_edit::ser::to_document(&stored)?.as_item());
+        doc["version"] = toml_edit::value(build_info::PKG_VERSION);
+        write_private(path, doc.to_string()).await?;
+        Ok(())
+    }
+
+    async fn delete_dns_credential_impl(&self, path: &Path, id: ShortId) -> anyhow::Result<()> {
+        let mut doc = self.load_document_or_new(path).await;
+        doc.remove(&id.to_string());
+        doc["version"] = toml_edit::value(build_info::PKG_VERSION);
+        write_private(path, doc.to_string()).await?;
+        Ok(())
     }
 
     /// Reads `config.toml`. Unlike [`Storage::load_app_config`], a missing or invalid file is an
@@ -545,6 +613,8 @@ pub struct FileState {
     pub cdn_ranges: Option<CdnRanges>,
 }
 
+use crate::dns_credential::StoredDnsCredential;
+
 /// Reads a file when it exists. A missing file gives the default value.
 async fn if_exists<T: Default>(
     path: &Path,
@@ -668,6 +738,57 @@ impl Storage for FileStorage {
                 Default::default()
             }
         }
+    }
+
+    async fn load_dns_credentials(&self) -> Result<Vec<DnsCredentialInfo>, Error> {
+        let path = self.dir.join("dns-credentials.toml");
+        self.read_dns_credentials(&path)
+            .await
+            .map(|stored| {
+                stored
+                    .into_iter()
+                    .map(|(id, entry)| entry.info(id))
+                    .collect()
+            })
+            .map_err(|err| {
+                error!(?path, "failed to load: {err:#}");
+                Error::FailedToLoadDnsCredentials
+            })
+    }
+
+    async fn save_dns_credential(
+        &self,
+        id: ShortId,
+        name: &str,
+        provider: &DnsProvider,
+    ) -> Result<(), Error> {
+        let path = self.dir.join("dns-credentials.toml");
+        let result = self
+            .save_dns_credential_impl(&path, id, name, provider)
+            .await;
+        saved(&path, result)
+    }
+
+    async fn delete_dns_credential(&self, id: ShortId) -> Result<(), Error> {
+        let path = self.dir.join("dns-credentials.toml");
+        let result = self.delete_dns_credential_impl(&path, id).await;
+        saved(&path, result)
+    }
+
+    async fn dns_provider_of(&self, id: ShortId) -> Result<Option<DnsProvider>, Error> {
+        let path = self.dir.join("dns-credentials.toml");
+        let fail = |err: anyhow::Error| {
+            error!(?path, "failed to load: {err:#}");
+            Error::FailedToLoadDnsCredentials
+        };
+        let stored = self
+            .read_dns_credentials(&path)
+            .await
+            .map_err(|err| fail(err.context("the dns credentials are not readable")))?;
+        let Some((_, stored)) = stored.into_iter().find(|(known, _)| *known == id) else {
+            return Ok(None);
+        };
+        self.open_stored(id, &stored).await.map(Some).map_err(fail)
     }
 
     async fn load_certs(&self) -> Vec<Arc<Cert>> {

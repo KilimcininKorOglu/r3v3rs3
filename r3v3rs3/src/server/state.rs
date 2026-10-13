@@ -159,6 +159,22 @@ async fn load_account_directory(storage: &dyn Storage) -> Option<AccountDirector
     }
 }
 
+/// Replaces the credential reference of the entry with the stored provider. An entry that
+/// carries its provider inline stays as it is.
+async fn resolve_dns_credential(
+    storage: &dyn Storage,
+    mut entry: AcmeEntry,
+) -> Result<AcmeEntry, Error> {
+    if let Some(id) = entry.acme.dns_credential {
+        entry.acme.dns_provider = Some(storage.dns_provider_of(id).await?.ok_or_else(|| {
+            Error::DnsCredentialNotFound {
+                name: id.to_string(),
+            }
+        })?);
+    }
+    Ok(entry)
+}
+
 /// The TLS config that answers the TLS-ALPN-01 challenges. `None` without a challenge.
 fn tls_alpn_config(challenges: &[TlsAlpnChallenge]) -> Option<Arc<ServerConfig>> {
     if challenges.is_empty() {
@@ -1436,10 +1452,24 @@ impl ServerState {
         let dns_resolver = self.config.dns_challenge_resolver;
         let acme_exec = self.config.acme_exec.clone();
         let command = self.command_sender.clone();
+        let storage = self.storage.clone();
         tokio::task::spawn(async move {
             let mut orders = Vec::new();
             for (entry, target) in targets {
                 let span = span!(Level::INFO, "acme", resource_id = entry.id.to_string());
+                let entry = match resolve_dns_credential(storage.as_ref(), entry).await {
+                    Ok(entry) => entry,
+                    Err(err) => {
+                        span.in_scope(|| error!("failed to resolve dns credential: {err:#}"));
+                        let _ = command
+                            .send(ServerCommand::AcmeOrderFinished {
+                                target,
+                                error: Some(format!("{err:#}")),
+                            })
+                            .await;
+                        continue;
+                    }
+                };
                 span.in_scope(|| {
                     info!(
                         provider = entry.acme.config.provider,

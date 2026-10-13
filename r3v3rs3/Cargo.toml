@@ -159,6 +159,7 @@ yamux = "0.14.1"
 built = "0.8.1"
 
 [dev-dependencies]
+base64 = "0.23.1"
 libc = "0.2.189"
 mockito = "1.6.1"
 rmcp = { version = "3.5.1", features = [

@@ -982,5 +982,13 @@
   "settings.upgrade_stage_downloading": "Downloading the release",
   "settings.upgrade_stage_installing": "Installing the release",
   "settings.upgrade_stage_handing_over": "Starting the new version",
-  "settings.upgrade_stage_done": "The upgrade finished. Reloading."
+  "settings.upgrade_stage_done": "The upgrade finished. Reloading.",
+  "error.acme_credential_conflict": "An ACME entry names a dns provider and a dns credential, not both.",
+  "error.dns_credential_not_found": "The dns credential {name} does not exist.",
+  "error.dns_credential_in_use": "The dns credential {name} is in use by an ACME entry.",
+  "error.dns_credential_name_taken": "A dns credential with the name {name} exists already.",
+  "audit.action_add_dns_credential": "Add DNS credential",
+  "audit.action_update_dns_credential": "Update DNS credential",
+  "audit.action_delete_dns_credential": "Delete DNS credential",
+  "error.failed_to_load_dns_credentials": "The dns credentials could not be read."
 }
