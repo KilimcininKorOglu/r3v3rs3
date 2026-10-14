@@ -9,6 +9,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git_connection::RepoName;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, AppSpec};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
 /// The connection and the repository that the webhook of an app belongs to.
@@ -104,6 +105,31 @@ impl Platform {
     ) -> anyhow::Result<()> {
         let target = HookTarget::of(hook)?;
         self.replace_hook(app, Some(hook), &target, now).await
+    }
+
+    /// Brings the stored webhooks in line with a new public address: after the address appeared,
+    /// only the hooks whose install failed before, and after the address changed, every hook,
+    /// because the old address is where the providers send the push events. A failed install
+    /// keeps the app in line for the next try, so only a warning leaves this method.
+    pub async fn refresh_hooks(&self, pending_only: bool) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let Ok(apps) = self.apps().await else {
+            return;
+        };
+        for app in apps {
+            let Ok(Some(hook)) = self.store.app_hook(app.id).await else {
+                continue;
+            };
+            if pending_only && hook.remote_id.is_some() {
+                continue;
+            }
+            if let Err(err) = self.reinstall_stored_hook(app.id, &hook, now).await {
+                warn!(app = %app.id, "failed to reinstall the webhook of the app: {err:#}");
+            }
+        }
     }
 
     /// Removes the webhook of a deleted app at its provider.
@@ -413,6 +439,84 @@ mod tests {
         create.assert_async().await;
         delete.assert_async().await;
         assert_eq!((app.webhook_secret_set, app.hook), (false, None));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_new_public_address_installs_the_waiting_webhooks() -> anyhow::Result<()> {
+        let mut mocked = Mocked::new().await?;
+        // No public address yet: the install of the webhook fails and stays pending.
+        mocked
+            .platform
+            .set_platform_settings(&PlatformSettings { public_url: None })
+            .await?;
+        mocked.sync(Some(mocked.target()), 1).await?;
+        let hook = mocked.hook().await?.context("hook")?;
+        assert!(!hook.installed);
+
+        let create = mocked
+            .server
+            .mock("POST", "/api/v1/repos/team/site/hooks")
+            .match_header("authorization", "Bearer access-1")
+            .with_status(201)
+            .with_body(r#"{"id":7}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        mocked
+            .platform
+            .set_platform_settings(&PlatformSettings {
+                public_url: Some("https://deploy.example.com".parse()?),
+            })
+            .await?;
+        mocked.platform.refresh_hooks(true).await;
+        create.assert_async().await;
+        let hook = mocked.hook().await?.context("hook")?;
+        assert!(hook.installed);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_changed_public_address_reinstalls_the_webhooks() -> anyhow::Result<()> {
+        let mut mocked = Mocked::new().await?;
+        let first = mocked
+            .server
+            .mock("POST", "/api/v1/repos/team/site/hooks")
+            .with_status(201)
+            .with_body(r#"{"id":7}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        mocked.sync(Some(mocked.target()), 1).await?;
+        first.assert_async().await;
+        // A changed address reinstalls even the installed webhook, because the providers send
+        // the push events to the old one.
+        let create = mocked
+            .server
+            .mock("POST", "/api/v1/repos/team/site/hooks")
+            .with_status(201)
+            .with_body(r#"{"id":8}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let delete = mocked
+            .server
+            .mock("DELETE", "/api/v1/repos/team/site/hooks/7")
+            .with_status(204)
+            .expect(1)
+            .create_async()
+            .await;
+        mocked
+            .platform
+            .set_platform_settings(&PlatformSettings {
+                public_url: Some("https://deploy2.example.com".parse()?),
+            })
+            .await?;
+        mocked.platform.refresh_hooks(false).await;
+        create.assert_async().await;
+        delete.assert_async().await;
+        let hook = mocked.hook().await?.context("hook")?;
+        assert!(hook.installed);
         Ok(())
     }
 

@@ -317,10 +317,18 @@ pub async fn put_settings(
     Json(settings): Json<PlatformSettings>,
 ) -> Result<Json<PlatformSettings>, AppError> {
     let platform = state.platform(&caller, Permission::Admin).await?;
+    let previous = platform.platform_settings().await.map_err(platform_error)?;
     platform
         .set_platform_settings(&settings)
         .await
         .map_err(platform_error)?;
+    // A new public address installs the webhooks that waited for it, and a changed one
+    // reinstalls every webhook, because the providers send the push events to the old one.
+    if previous.public_url != settings.public_url && settings.public_url.is_some() {
+        let platform = platform.clone();
+        let pending_only = previous.public_url.is_none();
+        tokio::spawn(async move { platform.refresh_hooks(pending_only).await });
+    }
     let summary = settings
         .public_url
         .as_ref()
