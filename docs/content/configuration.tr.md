@@ -1094,6 +1094,8 @@ Client, PKCE'li OAuth 2.1 authorization code akışıyla giriş yapar: client `/
 
 Token'lar yalnız bellekte tutulur, bu yüzden sunucunun yeniden başlaması her MCP client'ının oturumunu düşürür ve client'ın refresh token'ları geçersiz olur.
 
+Bağlanma yolu client'a göre değişir. MCP authorization akışını konuşan bir AI host, örneğin Claude Code veya Cursor, ekstra bir programa ihtiyaç duymaz: bu sunucuyu bir HTTP MCP sunucusu olarak ekler, örneğin `claude mcp add --transport http --scope user r3v3rs3 https://panel.example.com/api/mcp` komutuyla, ve `/mcp` komutunun `Authenticate` adımı aynı authorization akışını tarayıcıda çalıştırır. Aşağıdaki komut satırı client'ı diğer durumlar içindir: script'ler, cron job'ları ve tarayıcı oturumu olmayan sunucular; tek komut bir kez giriş yapar ve token'larını sonraki her çağrı için saklar.
+
 Depo, `r3v3rs3-mcp` içinde bir komut satırı client'ı ile gelir. Kurulum script'i en yeni release'in derlenmiş binary'sini GitHub'dan indirir, sha256 özetini doğrular ve kurar:
 
 ```sh

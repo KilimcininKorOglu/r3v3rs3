@@ -1094,6 +1094,8 @@ A client signs in through the OAuth 2.1 authorization code flow with PKCE: the c
 
 The tokens live in memory only, so a restart of the server signs every MCP client out, and the refresh tokens of a client stop working.
 
+How a client connects depends on the client. An AI host that speaks the MCP authorization flow, such as Claude Code or Cursor, needs no extra program: it adds this server as an HTTP MCP server, for example with `claude mcp add --transport http --scope user r3v3rs3 https://panel.example.com/api/mcp`, and its own `Authenticate` action of the `/mcp` command runs the same authorization flow in the browser. The command line client below serves the other cases: scripts, cron jobs and servers without a browser session, where one command signs in once and stores its tokens for every later call.
+
 The repository ships a command line client in `r3v3rs3-mcp`. The installer script downloads the prebuilt binary of the newest release from GitHub, verifies its sha256 digest, and installs it:
 
 ```sh

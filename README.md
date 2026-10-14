@@ -52,7 +52,7 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 - A single binary with a built-in WebUI in English and Turkish, with light, dark and system themes. Configuration changes apply without a restart
 - An admin API with an OpenAPI document and a Swagger UI
 - A Prometheus metrics endpoint at `GET /api/metrics` with request, cache and connection counters
-- An MCP server at `/api/mcp` over OAuth 2.1 with PKCE and `read` and `edit` scopes, and the `r3v3rs3-mcp` command line client
+- An MCP server at `/api/mcp` over OAuth 2.1 with PKCE and `read` and `edit` scopes, for AI hosts such as Claude Code that connect to the address directly, plus the `r3v3rs3-mcp` command line client for scripts and terminals
 - Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists, TOTP and an audit log with retention
 - Access and server logs with hourly file rotation, a text or JSON format, and the `log.db` database behind the log and audit pages
 - An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down

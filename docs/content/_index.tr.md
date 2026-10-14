@@ -50,7 +50,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - WebUI'ı içinde taşıyan tek bir binary. WebUI İngilizce ve Türkçedir ve açık, koyu ve sistem temaları vardır. Ayar değişiklikleri yeniden başlatmadan uygulanır.
 - OpenAPI dokümanı ve Swagger UI sunan yönetim API'si ([Yönetim API'si](@/configuration.tr.md#yonetim-api-si)).
 - İstek, cache ve bağlantı sayaçlarıyla Prometheus metrics endpoint'i: `GET /api/metrics` ([Metrics](@/configuration.tr.md#metrics)).
-- OAuth 2.1 ve PKCE ile `read` ve `edit` scope'lu `/api/mcp` üzerindeki MCP sunucusu ve `r3v3rs3-mcp` komut satırı istemcisi ([MCP sunucusu](@/configuration.tr.md#mcp-sunucusu)).
+- OAuth 2.1 ve PKCE ile `read` ve `edit` scope'lu `/api/mcp` üzerindeki MCP sunucusu; adresi doğrudan bağlanan Claude Code gibi AI host'ları için, ayrıca script'ler ve terminal için `r3v3rs3-mcp` komut satırı istemcisi ([MCP sunucusu](@/configuration.tr.md#mcp-sunucusu)).
 - `admin`, `editor` ve `viewer` rolleri olan hesaplar, hesap başına proxy listesi, TOTP ve saklama süreli denetim kaydı ([Hesaplar](@/accounts.tr.md)).
 - Saatlik dosya döndürmesi, text veya JSON biçimi olan erişim ve sunucu log'ları. Log ve denetim sayfalarının arkasındaki `log.db` veritabanı ([Loglama](@/configuration.tr.md#log)).
 - Portları sunan, master admin API'sini tutan isteğe bağlı worker süreci. Worker çökmesi paneli düşürmez ([Worker süreçleri](@/configuration.tr.md#worker-surecleri)).
