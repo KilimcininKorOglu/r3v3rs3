@@ -43,7 +43,7 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 - Rol, proxy listesi veya parola değişince değişiklikten önce açılan oturumlar sona erer. Bu kural yönetim paneli oturumlarına ve proxy'lerin Panel Oturumu girişlerine uygulanır.
 - Silinen hesabın oturumları sona erer.
 
-Config dizinindeki `accounts.toml` dosyası hesapları parola hash'leriyle tutar. r3v3rs3 bu dosyayı `0600` moduyla yazar. Cluster, hesapları veri deposunda şifreli tutar.
+Yapılandırma dizinindeki `accounts.toml` dosyası hesapları parola hash'leriyle tutar. r3v3rs3 bu dosyayı `0600` moduyla yazar. Cluster, hesapları veri deposunda şifreli tutar.
 
 ## Hesap oluşturma
 

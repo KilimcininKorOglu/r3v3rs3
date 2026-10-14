@@ -50,7 +50,7 @@ x-cache: HIT
 age: 0
 ```
 
-`X-Cache: MISS` yanıtın upstream sunucudan geldiği, `HIT` ise bellekten geldiği anlamına gelir. `Age`, upstream sunucunun yanıtı gönderdiği andan beri geçen saniyeyi sayar.
+`X-Cache: MISS` yanıtın upstream sunucudan geldiği, `HIT` ise bellekten geldiği anlamına gelir. `Age`, upstream sunucunun yanıtı gönderdiği andan beri geçen saniye sayısını taşır.
 
 ## Adım 3: TTL'i anlayın
 
@@ -64,7 +64,7 @@ Cache-Control: public, max-age=300
 
 **Varsayılan TTL (Saniye)** alanı `0` ise, r3v3rs3 böyle bir yanıtı yalnız `ETag` veya `Last-Modified` header'ı varsa saklar ve her istekte yeniden doğrular. Bu her istemci isteği için bir koşullu istek demektir, ama hiçbir zaman bayat içerik sunmaz.
 
-Saklanan bir yanıt bayatladıysa ve validator'ı varsa, r3v3rs3 `If-None-Match` veya `If-Modified-Since` ile koşullu istek gönderir. `304 Not Modified` cevabı saklanan header'ları tazeler, istemci de saklanan gövdeyi yeniden indirmeden alır.
+Saklanan bir yanıt bayatladıysa ve validator'ı varsa, r3v3rs3 `If-None-Match` veya `If-Modified-Since` ile koşullu istek gönderir. `304 Not Modified` yanıtı saklanan header'ları tazeler, istemci de saklanan gövdeyi yeniden indirmeden alır.
 
 ## Adım 4: Nelerin saklanmadığını bilin
 

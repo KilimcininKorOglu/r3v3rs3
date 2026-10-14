@@ -1,5 +1,5 @@
 ---
-title: "Release Doğrulama"
+title: "Release doğrulama"
 weight: 160
 ---
 

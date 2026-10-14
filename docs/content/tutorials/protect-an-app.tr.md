@@ -31,7 +31,7 @@ Erişim listesi bir IP filtresini ve bir kimlik doğrulamayı tek bir adın alt�
 6. **Kullanıcı Ekle** butonuna tıklayın, bir kullanıcı adı ve parola yazın.
 7. Kaydedin.
 
-r3v3rs3 her parolayı argon2 hash olarak saklar. `access_lists.toml` dosyası listeyi `0600` izinleriyle tutar, yönetim API'si hash yerine `password_set: true` döndürür.
+r3v3rs3 her parolayı argon2 hash olarak saklar. `access_lists.toml` dosyası listeyi `0600` izinleriyle tutar, yönetim API'si hash'i döndürmez, yerine `password_set: true` döndürür.
 
 Proxy'ye ulaşmaması gereken tek bir adres için **Engellenen IP Adresleri** alanını kullanın. Engellenen bir adres, izin verilen adresin önüne geçer.
 
@@ -117,7 +117,7 @@ CDN veya yük dengeleyici arkasında TCP bağlantısının karşı ucu edge sunu
 - Kendi yük dengeleyiciniz için adresini proxy'nin **Güvenilen Proxy'ler** alanına yazın.
 - Güvenilmeyen bir karşı uç için r3v3rs3 `X-Forwarded-For`, `X-Real-IP` ve diğer istemci IP header'larını siler, çünkü istemci onları uydurabilir.
 
-Çözümlenen adresi uygulamanızın erişim log'unda görün. r3v3rs3 adresi `X-Forwarded-For` header'ında, karşı uç güvenilen bir proxy veya CDN ise `X-Real-IP` header'ında da gönderir. Header sırasını [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümü anlatır.
+Çözümlenen adresi uygulamanızın erişim log'unda kontrol edin. r3v3rs3 adresi `X-Forwarded-For` header'ında, karşı uç güvenilen bir proxy veya CDN ise `X-Real-IP` header'ında da gönderir. Header sırasını [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümü anlatır.
 
 ## Adım 7: Denetim kaydını okuyun
 
@@ -137,7 +137,7 @@ Her kayıt zamanı, hesabı, istemci IP adresini, işlemi, kaynağın id'sini ve
 
 - Parola kontrolü proxy'yi korur, uygulamayı değil. Uygulamaya başka bir porttan ulaşan bir istemci r3v3rs3'ü atlar. Uygulamayı `127.0.0.1` adresine veya bir iç ağa bağlayın.
 - r3v3rs3 `Authorization` header'ını upstream sunucuya göndermeden önce siler, yani uygulama proxy'nin kimlik bilgilerini görmez.
-- Rate limit istek sayar, byte saymaz. Yükleme limiti için **İstek Gövdesi Limiti** alanını kullanın. Limiti aşan bir istek, kimlik doğrulamadan önce `413 Payload Too Large` alır.
+- Rate limit isteği sayar, byte'ı saymaz. Yükleme limiti için **İstek Gövdesi Limiti** alanını kullanın. Limiti aşan bir istek, kimlik doğrulamadan önce `413 Payload Too Large` alır.
 
 ## Sonraki adımlar
 

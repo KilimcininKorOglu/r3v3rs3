@@ -97,7 +97,7 @@ Bir proxy'nin kullandığı istemci sertifikası silinemez. Sertifika geçersiz 
 Birkaç upstream sunucusu olan bir TCP proxy bağlantıları dağıtır. UDP proxy bir oturumun paketlerini tek bir sunucuya gönderir.
 
 - **Yük Dengeleme** algoritmayı seçer, örneğin round robin veya istemci IP hash'i.
-- Sağlık kontrolü cevap vermeyen sunucuyu çıkarır, tekrar cevap verince geri alır. **Maksimum Hata Sayısı** ve **Kontrol Aralığı (Saniye)** alanları onu ayarlar.
+- Sağlık kontrolü yanıt vermeyen sunucuyu çıkarır, tekrar yanıt verince geri alır. **Maksimum Hata Sayısı** ve **Kontrol Aralığı (Saniye)** alanları onu ayarlar.
 - **Circuit Breaker** sürekli hata veren bir sunucuya yeni bağlantı göndermeyi durdurur. Bütün sunucuların circuit'i açıksa istemcinin bağlantısı kapanır.
 
 Alanları [Yük dengeleme ve sağlık kontrolü](@/configuration.tr.md#yuk-dengeleme-ve-saglik-kontrolu) bölümü anlatır.

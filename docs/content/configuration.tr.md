@@ -4,9 +4,9 @@ description = "Yapılandırma"
 weight = 0
 +++
 
-# Config Dosyası
+# Yapılandırma dosyası
 
-Config dizinindeki `config.toml` sunucunun ayarlarını taşır. Dosya yoksa sunucu, başlangıçta bütün ayarları varsayılan değerleriyle dosyaya yazar; böylece yeni bir kurulum sunucunun neyi okuduğunu görür. Var olan bir dosyanın üzerine asla yazılmaz.
+Yapılandırma dizinindeki `config.toml` sunucunun ayarlarını taşır. Dosya yoksa sunucu, başlangıçta bütün ayarları varsayılan değerleriyle dosyaya yazar; böylece yeni bir kurulum sunucunun neyi okuduğunu görür. Var olan bir dosyanın üzerine asla yazılmaz.
 
 Panelin ayarlar sayfası bütün bölümleri sunucu çalışırken yönetir ve bir kayıt restart olmadan uygulanır. İstisnalar `[cluster]` bölümü ve `worker_mode`'dur: bunlar process'in kendisini değiştirir, yalnız `config.toml` belirler ve bir değişiklik restart ile uygulanır.
 
@@ -99,7 +99,7 @@ Bir proxy'ye birden fazla port bağlayabilirsiniz. Ancak HTTP / HTTPS proxy'sine
 Bir portu birden fazla HTTP / HTTPS proxy'si kullanıyorsa r3v3rs3, porttaki bütün proxy'lerin bütün route'larını karşılaştırır. İsteği en özel route'a gönderir. Proxy'lerin ve route'ların sırası sonucu değiştirmez.
 
 1. Önce isteğin host'u proxy'leri seçer. Host ile aynı olan virtual host (`app.example.com` veya bir IP adresi), wildcard'dan (`*.example.com`) önce gelir. Wildcard, regex kalıbından önce gelir. Regex kalıbı, virtual host'u olmayan proxy'den önce gelir. Virtual host'u olmayan proxy her host'u kabul eder.
-2. Host eşleşmesi aynı olan route'lar arasında yolu en uzun olan route kazanır. Yol tam bölümlerle eşleşir. Bu yüzden `/api`, `/api` ve `/api/users` ile eşleşir, `/apiv2` ile eşleşmez.
+2. Host eşleşmesi aynı olan route'lar arasında yolu en uzun olan route kazanır. Yol tam bölümlerle eşleşir. Bu yüzden `/api` yolu hem `/api` hem de `/api/users` isteğiyle eşleşir, `/apiv2` ile eşleşmez.
 3. İki route'un host eşleşmesi ve yolu aynıysa önce gelen route kazanır.
 
 Örneğin aşağıdaki route'larda `GET /api/users` isteği `http://api:8080/` sunucusuna, `GET /about` isteği `http://web:3000/` sunucusuna gider. `app.example.com` için gelen istek, yolu `/api` olsa da `my-app` proxy'sine gider.
@@ -169,7 +169,7 @@ HTTP / HTTPS proxy'sinin `redirects` değeri isteğe bir yönlendirme ile yanıt
 - `target` yanıtın `Location` header'ıdır. `${1}` veya `${name}` bir capture group ekler.
 - `status` değeri `301`, `302` (varsayılan), `307` veya `308` olabilir.
 
-Eşleşen ilk kural yanıt verir. r3v3rs3; istemci IP filtresini, rate limit'i ve `upgrade_insecure` HTTPS yönlendirmesini kurallardan önce, kimlik doğrulamayı kurallardan sonra uygular. Geçerli bir header değeri oluşturmayan hedef eşleşme sayılmaz ve r3v3rs3 bir uyarı log'u yazar. r3v3rs3 başka bir durum kodunu reddeder. Boş olan veya kontrol karakteri içeren hedef değerini de reddeder.
+Eşleşen ilk kural yanıt verir. r3v3rs3 istemci IP filtresini, rate limit'i ve `upgrade_insecure` HTTPS yönlendirmesini kurallardan önce uygular. Kimlik doğrulamayı ise kurallardan sonra uygular. Geçerli bir header değeri oluşturmayan hedef eşleşme sayılmaz ve r3v3rs3 bir uyarı log'u yazar. r3v3rs3 başka bir durum kodunu reddeder. Boş olan veya kontrol karakteri içeren hedef değerini de reddeder.
 
 WebUI'da her satıra bir kuralı `status regex target` biçiminde yazın. Orada regex ve hedef boşluk içeremez. Regex içinde `\s`, hedef içinde `%20` kullanın.
 
@@ -243,7 +243,7 @@ connect_timeout = "3s"
 
 HTTP / HTTPS proxy'sinde `max_body_size` değeri istek gövdesini byte cinsinden sınırlar. Varsayılan değer `0`'dır. `0` limiti kapatır. Bir route, proxy değeri yerine kendi `max_body_size` değerini kullanabilir. Route'taki `0` değeri o route için limiti kapatır.
 
-r3v3rs3 `Content-Length` header'ını kimlik doğrulamadan önce kontrol eder. Bu yüzden limitten büyük bir istek 413 Payload Too Large alır ve upstream sunucuya ulaşmaz. `Content-Length` taşımayan gövde, örneğin chunked gövde, r3v3rs3 onu upstream sunucuya gönderirken sayılır. Gövde, upstream sunucu yanıt vermeden limiti geçerse r3v3rs3 upstream isteğini durdurur ve istemci 413 alır. Upstream sunucu böyle bir gövdenin başını alabilir. Limit HTTP/1.1, HTTP/2 ve HTTP/3 isteklerine uygulanır.
+r3v3rs3 `Content-Length` header'ını kimlik doğrulamadan önce kontrol eder. Bu yüzden limitten büyük bir istek 413 Payload Too Large alır ve upstream sunucuya ulaşmaz. r3v3rs3, `Content-Length` taşımayan bir gövdeyi (örneğin chunked gövde) upstream sunucuya gönderirken sayar. Gövde, upstream sunucu yanıt vermeden limiti geçerse r3v3rs3 upstream isteğini durdurur ve istemci 413 alır. Upstream sunucu böyle bir gövdenin başını alabilir. Limit HTTP/1.1, HTTP/2 ve HTTP/3 isteklerine uygulanır.
 
 ```toml
 [uploads]
@@ -282,7 +282,7 @@ Birden fazla upstream sunucusu olan proxy veya HTTP route, istekleri ve bağlant
 - `round_robin` (varsayılan) sunucuları sırayla kullanır.
 - `random` rastgele bir sunucu seçer.
 - `first` ilk sağlıklı sunucuyu kullanır. Diğer sunucular yedektir.
-- `client_ip_hash` her istemci IP adresini, o sunucu sağlıklı kaldıkça aynı sunucuya gönderir. HTTP proxy, belirlenen istemci IP adresini kullanır (bkz. [İstemci IP adresi](#istemci-ip-adresi)). Bir sunucu sağlıksız olursa, servis dışına alınırsa veya silinirse yalnız o sunucunun istemcileri diğer sunuculara geçer.
+- `client_ip_hash` istemciyi IP adresine göre seçer: o sunucu sağlıklı kaldıkça aynı istemci aynı sunucuya gider. HTTP proxy, belirlenen istemci IP adresini kullanır (bkz. [İstemci IP adresi](#istemci-ip-adresi)). Bir sunucu sağlıksız olursa, servis dışına alınırsa veya silinirse yalnız o sunucunun istemcileri diğer sunuculara geçer.
 
 Her sunucunun `0` ile `65535` arasında bir `weight` değeri vardır (varsayılan `1`). `round_robin` her sunucuyu ağırlığı kadar kullanır. nginx'in smooth weighted round robin yöntemindeki gibi, bir sunucunun sıraları döngüye yayılır. Örneğin `3` ve `1` ağırlıklarında her dört isteğin üçü ilk sunucuya gider. `random` sunucuyu ağırlığıyla orantılı bir olasılıkla seçer. `client_ip_hash` her sunucuya, ağırlığıyla orantılı sayıda istemci adresi verir. `first` ağırlığı dikkate almaz. `weight = 0` olan sunucu, diğer bütün sunucular sağlıksız olsa da yeni istek veya bağlantı almaz. Bu yüzden bir sunucuyu silmeden servis dışına alabilirsiniz. Sunucunun açık TCP bağlantıları ve UDP oturumları devam eder. Her proxy'nin veya HTTP route'unun en az bir sunucusunun ağırlığı `0`'dan büyük olmalıdır.
 
@@ -515,7 +515,7 @@ r3v3rs3 her istemci isteğinde doğrulama URL'ine bir `GET` isteği gönderir. B
 | `X-Forwarded-Uri` | İstemci isteğinin yol ve sorgu kısmı. |
 | `X-Forwarded-For` | "İstemci IP adresi" bölümünde belirlenen istemci IP adresi. |
 
-- **2xx yanıt**: r3v3rs3 isteği upstream sunucuya gönderir. "Kopyalanacak Yanıt Header'ları" alanında listelenen header'ları doğrulama yanıtından upstream isteğine kopyalar. İstemci bu header'ları kendisi gönderemesin diye önce istemci isteğindeki aynı adlı header'ları siler.
+- **2xx yanıt**: r3v3rs3 isteği upstream sunucuya gönderir. "Kopyalanacak Yanıt Header'ları" alanında listelenen header'ları doğrulama yanıtından upstream isteğine kopyalar. r3v3rs3 önce istemci isteğindeki aynı adlı header'ları siler, böylece istemci bu header'ları kendisi gönderemez.
 - **Diğer yanıtlar**: r3v3rs3 doğrulama yanıtını (durum kodu, header'lar ve en fazla 64 KiB gövde) istemciye gönderir. Bu sayede giriş sayfasına yapılan yönlendirmeler de çalışır.
 - **`timeout` süresinde (varsayılan `10s`) yanıt gelmezse veya bağlantı hatası olursa**: İstemci `502 Bad Gateway` alır.
 
@@ -606,7 +606,7 @@ routes = [
 |---|---|
 | `GET /api/access_lists` | Erişim listelerini listeler. |
 | `POST /api/access_lists` | Bir erişim listesi ekler. |
-| `PUT /api/access_lists/{id}` | Bir erişim listesini değiştirir. Yeni secret'ı olmayan kullanıcı veya token hash'ini korur. |
+| `PUT /api/access_lists/{id}` | Bir erişim listesini değiştirir. Güncelleme yeni parola veya token taşımıyorsa mevcut hash'ler korunur. |
 | `DELETE /api/access_lists/{id}` | Bir erişim listesini siler. |
 
 Her hesap listeleri okur. Listeleri yalnız admin veya proxy listesi olmayan editör değiştirir. Ayrıntılar için [Hesaplar](@/accounts.tr.md) sayfasına bakın.
@@ -910,7 +910,7 @@ TLS-ALPN-01 challenge'ı sürerken her TLS portu ve her HTTPS portu, yalnız `ac
 r3v3rs3 her alan adı için şu adımları uygular:
 
 1. Sağlayıcının API'si ile alan adının zone'unu bulur. Adı içeren en uzun zone kullanılır.
-2. `_acme-challenge.<domain>` TXT kaydını 60 saniyelik TTL ile oluşturur. Linode'da TTL, Linode'un kabul ettiği en düşük değer olan 300 saniyedir. Porkbun'a TTL gönderilmez, bu yüzden kayıt hesabın en düşük TTL değerini alır. Gandi'de TTL, Gandi'nin kabul ettiği en düşük değer olan 300 saniyedir. deSEC'te TTL 3600 saniyedir, çünkü deSEC alan adının minimum TTL değerinden düşük bir TTL'i reddeder. Gandi, deSEC, Azure DNS ve Google Cloud DNS bir adın bütün kayıt kümesini yazar. Bu yüzden r3v3rs3 kendi değerlerini mevcut TXT değerlerine ekler ve yalnız kendi değerlerini siler. `*.example.com` için kayıt adı `example.com` ile aynıdır: `_acme-challenge.example.com`. Bu yüzden kayıt iki değer taşır.
+2. `_acme-challenge.<domain>` TXT kaydını 60 saniyelik TTL ile oluşturur. Sağlayıcıya göre TTL farklıdır: Linode ve Gandi kaydı kendi en düşük değerleri olan 300 saniyeyle, deSEC ise alan adının minimum TTL'i olan 3600 saniyeyle yazar. Porkbun'a TTL gönderilmez, bu yüzden kayıt hesabın en düşük TTL değerini alır. Gandi, deSEC, Azure DNS ve Google Cloud DNS bir adın bütün kayıt kümesini yazar. Bu yüzden r3v3rs3 kendi değerlerini mevcut TXT değerlerine ekler ve yalnız kendi değerlerini siler. `*.example.com` için kayıt adı `example.com` ile aynıdır: `_acme-challenge.example.com`. Bu yüzden kayıt iki değer taşır.
 3. TXT değerleri görünene kadar DNS'i 5 saniyede bir sorgular, en fazla 5 dakika bekler. Sorgulanan DNS sunucusunu "DNS Challenge Çözümleyicisi" ayarı belirler. Ayar boşsa r3v3rs3 sistemin çözümleyicisini kullanır.
 4. Sertifika otoritesine challenge'ların hazır olduğunu bildirir ve doğrulama için en fazla 3 dakika bekler.
 5. TXT kayıtlarını siler. Order başarısız olsa da kayıtları siler.
@@ -1012,7 +1012,7 @@ Her challenge adı için bir `grant` kuralı ekleyin. `*.example.com` sertifikas
 
 ## Worker Süreçleri
 
-Varsayılan olarak admin API'yi çalıştıran aynı süreç her portu da servis eder. `config.toml` içinde `worker_mode = "workers"` ayarıyla r3v3rs3 portları servise eden bir worker süreci başlatır; master süreç storage'ı, admin API'yi, WebUI'yi, cluster'ı ve deployment platformunu tutar. Worker'ın çökmesi admin API'yi düşürmez ve master worker'ı bir backoff ile yeniden başlatır.
+Varsayılan olarak admin API'yi çalıştıran aynı süreç her portu da servis eder. `config.toml` içinde `worker_mode = "workers"` ayarıyla r3v3rs3 portları sunan bir worker süreci başlatır. Master süreç durumu, admin API'yi, WebUI'yi, cluster'ı ve deployment platformunu tutar. Worker'ın çökmesi admin API'yi düşürmez ve master worker'ı bir backoff ile yeniden başlatır.
 
 ```toml
 worker_mode = "workers"
@@ -1068,11 +1068,11 @@ Varsayılanlarda yapılan bir değişiklik her portu yeniden kurar, yani restart
 `GET /api/metrics` çalışan sürecin sayaçlarını Prometheus text formatında (`text/plain; version=0.0.4`) döndürür:
 
 - `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: proxy'lenen istekler.
-- `r3v3rs3_upstream_errors_total`: başarılı bir upstream yanıtı olmadan cevaplanan istekler.
+- `r3v3rs3_upstream_errors_total`: başarılı bir upstream yanıtı olmadan yanıtlanan istekler.
 - `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`: cache'i açık proxy'lerin cache kararları.
-- `r3v3rs3_open_connections`: hâlâ çalışan istemci bağlantı task'leri.
+- `r3v3rs3_open_connections`: açık istemci bağlantıları.
 
-İsteği bir admin session cookie'si veya geçerli bir MCP Bearer token'ı yetkilendirir, yani bir Prometheus job'ı `bearer_token` ile scrape ederken WebUI cookie'sini kullanmaya devam eder. Sayaçlar tek süreci sayar: worker modunda portları worker sunar ve kendi sayaçlarını tutar, worker durumu ayrıca `GET /api/workers` üzerinden raporlanır.
+İsteği bir admin session cookie'si veya geçerli bir MCP Bearer token'ı yetkilendirir. Bir Prometheus job'ı `bearer_token` ile scrape ederken WebUI cookie'sini kullanmaya devam edebilir. Sayaçlar tek süreci sayar: worker modunda portları worker sunar ve kendi sayaçlarını tutar, worker durumu ayrıca `GET /api/workers` üzerinden raporlanır.
 
 ## MCP Sunucusu
 

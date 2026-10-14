@@ -181,7 +181,7 @@ HTTPS portunda istemciler HTTP/2'yi ALPN ile alır. Upstream tarafında:
 
 h2c seçeneğini yalnız proxy'nin bütün düz HTTP sunucuları prior knowledge ile HTTP/2 kabul ediyorsa açın. Kabul etmeyen sunucu ilk istekte hata döner.
 
-Bir portun aynı istemci sertifikasını ve aynı bağlantı timeout'unu kullanan proxy'leri upstream bağlantılarını paylaşır, yani tek bir HTTP/2 bağlantısı çok sayıda istemcinin stream'ini taşır.
+Bir portta, aynı istemci sertifikasını ve aynı bağlantı timeout'unu kullanan proxy'ler upstream bağlantılarını paylaşır, yani tek bir HTTP/2 bağlantısı çok sayıda istemcinin stream'ini taşır.
 
 ## Referans
 

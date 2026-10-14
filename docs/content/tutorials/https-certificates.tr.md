@@ -69,7 +69,7 @@ Kaydı bu dosyada değil, panelde oluşturun. r3v3rs3 ACME hesabını kaydı ekl
 
 ## Adım 4: Sertifikayı kontrol edin
 
-Siparişten sonra **Sunucu Sertifikaları** sekmesi sertifikayı gösterir. Sekme sertifikayı vereni, subject adlarını ve **Bitiş Tarihi** değerini yazar. **ACME** sekmesi kaydın **Yenileme Tarihi** değerini gösterir.
+Siparişten sonra **Sunucu Sertifikaları** sekmesi sertifikayı gösterir. Sekme sertifikayı vereni, subject adlarını ve **Bitiş Tarihi** değerini gösterir. **ACME** sekmesi kaydın **Yenileme Tarihi** değerini gösterir.
 
 Başarısız bir sipariş nedenini sunucu log'una yazar, r3v3rs3 bir saat sonra yeniden sipariş verir. İki neden sık görülür:
 
@@ -151,7 +151,7 @@ Bu header'ı r3v3rs3 kendisi yazar; değerini proxy'nin HTTPS portundan ve QUIC 
 
 Kontrol edilecek üç şey:
 
-- UDP 443'ü güvenlik duvarında ve security group'ta açın. UDP'si kapalı olan istemci HTTP/2 kullanmaya devam eder ve hiçbir hata görmezsiniz.
+- UDP 443'ü güvenlik duvarında ve security group'ta açın. UDP'si kapalı olan istemci HTTP/2 kullanmaya devam eder ve hiçbir hata görmez.
 - Docker UDP'yi ayrı yayınlar: `-p 443:443` yanında `-p 443:443/udp`.
 - HTTPS portu olmayan bir proxy yalnız QUIC üzerinden yanıt verir ve `alt-svc` header'ı yalnız `h3` ve `h3-25` taşır. İki portu da proxy'de tutun.
 

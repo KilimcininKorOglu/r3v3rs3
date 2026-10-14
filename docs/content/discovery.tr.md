@@ -187,7 +187,7 @@ Ayar değişikliği yalnız sağlayıcıyı yeniden başlatır, sunucu yeniden b
 
 - Container'ın upstream adresi, seçilen ağdaki IP adresidir. `host` ağ modundaki container `127.0.0.1` kullanır.
 - Sağlık kontrolü başarısız olan container atlanır ve sorun olarak gösterilir. Sağlık kontrolünü henüz geçmemiş container atlanır.
-- Bir Compose servisinin replikaları proxy'lerini paylaşır. Her replika kendi sunucularını proxy'nin route'larına ekler, böylece proxy yükü replikalara dağıtır. Replikalar aynı sayıda route tanımlamalıdır.
+- Bir Compose servisinin replikaları proxy'lerini paylaşır. Her replika kendi sunucularını proxy'nin route'larına ekler, böylece proxy yükünü replikalar paylaşır. Replikalar aynı sayıda route tanımlamalıdır.
 - Proxy'nin key'i Compose projesi, Compose servisi ve proxy adından oluşur. Compose dışındaki container kendi adını kullanır.
 - r3v3rs3, olay gelmezse container listesini beş dakikada bir yeniden okur.
 
@@ -447,15 +447,15 @@ exposed_by_default = false
 
 Sağlayıcı `catalog` veya `kv` ayarını gerektirir. `kv` açıkken `prefix` boş olamaz.
 
-Yönetim API'si token'ı döndürmez. Kayıtlı bir token varsa `GET /api/config` yanıtında `token_set: true` döner. `token` alanı olmayan bir `PUT /api/config` isteği kayıtlı token'ı korur. `"token": ""` token'ı siler. `config.toml` token'ı düz metin olarak saklar. Bu yüzden config dizinini yalnız r3v3rs3 kullanıcısı okuyabilmelidir.
+Yönetim API'si token'ı döndürmez. Kayıtlı bir token varsa `GET /api/config` yanıtında `token_set: true` döner. `token` alanı olmayan bir `PUT /api/config` isteği kayıtlı token'ı korur. `"token": ""` token'ı siler. `config.toml` token'ı düz metin olarak saklar. Bu yüzden yapılandırma dizinini yalnız r3v3rs3 kullanıcısı okuyabilmelidir.
 
 ## Catalog servisleri
 
 - Etiket `<key>=<value>` biçimindedir, örneğin `r3v3rs3.http.app.ports=https`. `=` içermeyen bir `r3v3rs3.` etiketi sorun sayılır.
-- r3v3rs3 yalnız sağlık kontrollerini geçen servis örneklerini okur. Sağlık kontrolünü geçen örneği olmayan seçili bir servis sorun sayılır ve proxy'leri kaldırılır.
+- r3v3rs3 yalnız sağlık kontrollerini geçen servis örneklerini okur. Sağlık kontrolünü geçen örneği olmayan seçili bir servis sorun sayılır ve onun proxy'leri kaldırılır.
 - Servis örneğinin upstream adresi servis adresidir. Servis adresi olmayan örnek düğüm adresini kullanır.
 - `port`, `routes` ve `upstream_servers` alanları olmayan bir proxy servisin portunu kullanır. `port`, `servers` ve `response` alanları olmayan bir route da servisin portunu kullanır.
-- Bir servisin örnekleri proxy'lerini paylaşır. Her örnek kendi sunucularını proxy'nin route'larına ekler, böylece proxy yükü örneklere dağıtır.
+- Bir servisin örnekleri proxy'lerini paylaşır. Her örnek kendi sunucularını proxy'nin route'larına ekler, böylece proxy yükünü örnekler paylaşır.
 - r3v3rs3 her örneği kendi etiketleriyle seçer. `exposed_by_default = false` iken `r3v3rs3.enable=true` etiketi olmayan örnek sunucu eklemez.
 
 Servisi Consul agent'ına kaydedin, örneğin `consul services register whoami.json` komutuyla:
@@ -516,7 +516,7 @@ prefix = "r3v3rs3"
 
 `endpoints` en az bir adres içermelidir ve `prefix` boş olamaz.
 
-Yönetim API'si parolayı döndürmez. Kayıtlı bir parola varsa `GET /api/config` yanıtında `password_set: true` döner. `password` alanı olmayan bir `PUT /api/config` isteği kayıtlı parolayı korur. `"password": ""` parolayı siler. `config.toml` parolayı düz metin olarak saklar. Bu yüzden config dizinini yalnız r3v3rs3 kullanıcısı okuyabilmelidir.
+Yönetim API'si parolayı döndürmez. Kayıtlı bir parola varsa `GET /api/config` yanıtında `password_set: true` döner. `password` alanı olmayan bir `PUT /api/config` isteği kayıtlı parolayı korur. `"password": ""` parolayı siler. `config.toml` parolayı düz metin olarak saklar. Bu yüzden yapılandırma dizinini yalnız r3v3rs3 kullanıcısı okuyabilmelidir.
 
 Kimlik doğrulama açıksa r3v3rs3 kullanıcı adı ve parola ile bir token alır. etcd süresi dolmuş bir token'ı reddedince r3v3rs3 yeni bir token alır ve isteği yeniden gönderir. Kullanıcının önek üzerinde okuma izni olan bir rolü olmalıdır:
 

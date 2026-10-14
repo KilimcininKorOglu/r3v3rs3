@@ -16,7 +16,7 @@ Bu sayfa referanstır. Sıfırdan kuruyorsanız [Yüksek erişilebilirlik](@/tut
 - Durum bilgisinin geri kalanı veri deposunda durur: ayarlar, portlar, proxy'ler, erişim listeleri, sertifikalar, ACME kayıtları, admin hesapları ve CDN IP aralıkları. Denetim kaydı ve gönderilen sertifika bildirimleri de veri deposunda durur. Cluster açık olan düğüm `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `accounts.toml`, `notifications.json`, `cdn-ranges.json` ve sertifika dosyalarını okumaz.
 - Her düğüm veri deposunu izler ve her değişikliği uygular. Bir düğümün yönetim API'sinden gelen değişiklik önce veri deposuna yazılır. Daha yeni bir değer bulan yazma `409 cluster_write_conflict` ile başarısız olur ve düğüm yeni değeri veri deposundan alır.
 - Düğümler admin oturumlarını, proxy oturumlarını, rate limit sayılarını ve `share_cache` açıksa cache'lenen yanıtları paylaşır.
-- Düğümlerden biri liderdir. ACME sertifikalarını yalnız lider sipariş eder. Sertifika bildirimlerini yalnız lider gönderir. Eski denetim kayıtlarını, süresi dolan sertifikaları, süresi dolan oturumları ve paylaşılan yanıtları yalnız lider siler. İndirilen CDN IP aralıklarını veri deposuna yalnız lider yazar. Lider CDN kaydı dışındaki bu işleri lider olduğu anda ve sonra her `background_task_interval` sürede çalıştırır. CDN IP aralıklarını her indirmeden sonra yazar.
+- Düğümlerden biri liderdir. ACME sertifikalarını yalnız lider sipariş eder. Sertifika bildirimlerini yalnız lider gönderir. Eski denetim kayıtlarını, süresi dolan sertifikaları, süresi dolan oturumları ve paylaşılan yanıtları yalnız lider siler. İndirilen CDN IP aralıklarını veri deposuna yalnız lider yazar. Lider, CDN kaydı dışındaki bu işleri lider olduğu anda ve sonra her `background_task_interval` sürede çalıştırır. CDN IP aralıklarını ise her indirmeden sonra yazar.
 - Her düğüm açık servis keşfi sağlayıcılarını kendisi çalıştırır. Bu yüzden her düğüm, açık her sağlayıcının Docker socket'ine, Kubernetes API'sine, Consul'una veya etcd'sine erişebilmelidir.
 - Deploy platformu cluster açık olan düğümde çalışmaz. Platform API'si `503 platform_in_cluster` döner.
 - Düğümlerin önündeki bir yük dengeleyici her isteği herhangi bir düğüme gönderebilir.
@@ -32,7 +32,14 @@ WebUI'daki **Ayarlar** sayfası düğümün durumunu, rolünü ve uyguladığı 
 
 ## Cluster kurulumu
 
-Bir cluster'ı dört komut kurar: `r3v3rs3 cluster keygen` şifreleme key'ini yazar, `config.toml` dosyasındaki `[cluster]` bölümü her düğümde veri deposunu tanımlar, `r3v3rs3 cluster import` bir düğümün dosyalarını boş bir öneke kopyalar ve `r3v3rs3 start` her düğümü çalıştırır. Cluster açıkken `r3v3rs3 add-user` hesabı veri deposuna yazar ve aynı adlı hesabın üzerine yazar.
+Bir cluster'ı dört adım kurar:
+
+1. `r3v3rs3 cluster keygen` şifreleme key'ini yazar.
+2. `config.toml` dosyasındaki `[cluster]` bölümü her düğümde veri deposunu tanımlar.
+3. `r3v3rs3 cluster import` bir düğümün dosyalarını boş bir öneke kopyalar.
+4. `r3v3rs3 start` her düğümü çalıştırır.
+
+Cluster açıkken `r3v3rs3 add-user` hesabı veri deposuna yazar ve aynı adlı hesabın üzerine yazar.
 
 [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md) sayfası her adımı komutlarıyla, veri deposu kurulumuyla, kimlik bilgileriyle ve yük dengeleyici ile birlikte anlatır.
 

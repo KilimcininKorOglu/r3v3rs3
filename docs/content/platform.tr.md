@@ -8,7 +8,7 @@ weight = 0
 
 Deploy platformu, uygulamaları r3v3rs3 sunucusunun veya r3v3rs3 agent'ı çalıştıran uzak bir sunucunun Docker Engine'inde container olarak çalıştırır ve alan adlarını r3v3rs3 proxy'leri üzerinden yönlendirir. Yeni bir deployment, çalışan container'ın yanında başlar. Proxy yeni container'a ancak container sağlık kontrolünden geçince geçer.
 
-Platform geliştirme aşamasındadır. Bu sürüm, WebUI veya yönetim API'si üzerinden yerel Docker Engine'e ya da bir [agent hedefine](#agent-hedefleri) registry'deki hazır bir image'ı deploy eder, bir Git reposundaki Dockerfile ile image build eder veya bir Git reposundaki Docker Compose dosyasını başlatır.
+Platform geliştirme aşamasındadır. Bu sürüm, WebUI veya yönetim API'si üzerinden yerel Docker Engine'e ya da bir [agent hedefine](#agent-hedefleri) registry'deki hazır bir image'ı deploy eder, bir Git reposundaki Dockerfile ile image'ı build eder veya bir Git reposundaki Docker Compose dosyasını başlatır.
 
 ## Platformu açma
 
@@ -37,12 +37,12 @@ agent_host = "master.example.com"
 
 Ayar kartı `enabled`, `docker` ve `proxy_ports` değerlerini değiştirir; değişiklik sunucu yeniden başlatılmadan geçerli olur. `acme`, `agent_port` ve `agent_host` değerleri kartta korunur, ama kart onları düzenlemez.
 
-Platform ilk başlangıçta config dizininde iki dosya oluşturur:
+Platform ilk başlangıçta yapılandırma dizininde iki dosya oluşturur:
 
 - `platform.db`: uygulamalar, ortam değişkenleri, deployment'lar, hedefler, Git sağlayıcı bağlantıları ve genel adres.
 - `platform.key`: ortam değişkenlerinin değerlerini, uygulamaların Git token'larını ve webhook secret'larını, Git sağlayıcı bağlantılarının client secret'larını, private key'lerini ve token'larını şifreleyen key. Dosya modu `0600` olur. Bu dosyanın yedeğini `platform.db` yedeğinin yanında saklayın, çünkü değerler bu key olmadan açılmaz.
 
-Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın. r3v3rs3 bir container içinde çalışıyorsa [Docker ile kurulum](@/tutorials/install-docker.tr.md#deploy-platformu) rehberindeki gibi `-platform` tag son ekli image'ı, host ağ modunu, Docker socket'ini ve host'takiyle aynı yolda bağlanmış config dizinini kullanın.
+Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın. r3v3rs3 bir container içinde çalışıyorsa [Docker ile kurulum](@/tutorials/install-docker.tr.md#deploy-platformu) rehberindeki gibi `-platform` tag son ekli image'ı, host ağ modunu, Docker socket'ini ve host'takiyle aynı yolda bağlanmış yapılandırma dizinini kullanın.
 
 ## Uygulamalar
 
@@ -94,7 +94,7 @@ Uygulamanın, alan adlarının veya ortam değişkenlerinin değişikliği sonra
 | `dockerfile` | `Dockerfile` | `context` dizinine göre Dockerfile yolu. |
 | `connection` | yok | Bir [Git sağlayıcı](#git-saglayicilari) bağlantısının id'si. Bağlantı repoyu clone eder ve webhook'unu kurar. |
 
-Private bir repo, bir [Git sağlayıcı](#git-saglayicilari) bağlantısı veya uygulamanın erişim token'ını gerektirir. Erişim token'ı örnekleri: reponun içeriğini okuma izni olan bir GitHub fine-grained token'ı, `read_repository` kapsamı olan bir GitLab token'ı veya `read:repository` kapsamı olan bir Gitea token'ı. `PUT /api/apps/{id}/git_token`, `{"token": "..."}` gövdesiyle token'ı ayarlar. `DELETE /api/apps/{id}/git_token` token'ı siler. r3v3rs3 token'ı `platform.key` ile şifreler. Yönetim API'si token'ı hiçbir zaman döndürmez, uygulamada yalnız `"git_token_set": true` görünür. git token'ı `x-access-token` kullanıcı adıyla HTTP Basic kimlik doğrulaması olarak alır. Token URL'de veya komut satırında yer almaz, git'e bir ortam değişkeniyle ulaşır.
+Private bir repo, bir [Git sağlayıcı](#git-saglayicilari) bağlantısı veya uygulamanın erişim token'ını gerektirir. Erişim token'ı örnekleri: reponun içeriğini okuma izni olan bir GitHub fine-grained token'ı, `read_repository` kapsamı olan bir GitLab token'ı veya `read:repository` kapsamı olan bir Gitea token'ı. `PUT /api/apps/{id}/git_token`, `{"token": "..."}` gövdesiyle token'ı ayarlar. `DELETE /api/apps/{id}/git_token` token'ı siler. r3v3rs3 token'ı `platform.key` ile şifreler. Yönetim API'si token'ı hiçbir zaman döndürmez, uygulamada yalnız `"git_token_set": true` görünür. r3v3rs3 token'ı, clone sırasında `x-access-token` kullanıcı adıyla HTTP Basic kimlik doğrulaması olarak kullanır. Token URL'de veya komut satırında yer almaz, git'e bir ortam değişkeniyle ulaşır.
 
 r3v3rs3'ü çalıştıran sunucuda `git` binary'si bulunmalıdır. r3v3rs3, `git`'i host'un yapılandırması ve hook'lar olmadan, yalnız HTTPS üzerinden çalıştırır. Build context'inde `.git` dizini yer almaz. Context'teki bir sembolik link link olarak kalır. Bu yüzden bir build, repo dışındaki bir dosyayı okuyamaz. Context en fazla 512 MiB olabilir.
 
@@ -132,7 +132,7 @@ Compose dosyasındaki başka bir servis port dışarı açamaz, çünkü dışar
 
 Compose uygulaması `volumes`, `restart` ve `limits` ayarlarını Compose dosyasında yapar. Bu yüzden uygulama tanımı bu alanları kabul etmez. `service` servisi tek bir container olarak çalışır, çünkü bir container adı vardır.
 
-Compose deployment'ı `service` servisini yeniden oluşturur: Docker yeni container başlamadan önce eskisini durdurur. Bu yüzden uygulama, yeni container sağlık kontrolünden geçene kadar yanıt vermez. Sağlık kontrolünden geçemeyen bir deployment yeni container'ı log'u için saklar. Uygulamanın sonraki deployment'a veya geri almaya kadar sağlıklı bir container'ı olmaz. Çalışan deployment'ın checkout'u config dizinindeki `compose/<app id>/` altında kalır, çünkü Compose dosyasındaki bir bind mount onu okuyabilir.
+Compose deployment'ı `service` servisini yeniden oluşturur: Docker yeni container başlamadan önce eskisini durdurur. Bu yüzden uygulama, yeni container sağlık kontrolünden geçene kadar yanıt vermez. Sağlık kontrolünden geçemeyen bir deployment yeni container'ı log'u için saklar. Uygulamanın sonraki deployment'a veya geri almaya kadar sağlıklı bir container'ı olmaz. Çalışan deployment'ın checkout'u yapılandırma dizinindeki `compose/<app id>/` altında kalır, çünkü Compose dosyasındaki bir bind mount onu okuyabilir.
 
 r3v3rs3, Compose dosyasının diğer ayarlarını denetlemez. Bir Compose dosyası host üzerindeki bir yolu bağlayabilir, privileged container çalıştırabilir veya host'un ağını kullanabilir. Bu yüzden uygulama düzenleyebilen her hesap, bu yolla host'u ele geçirebilir. Edit iznini yalnız buna yetkisi olan hesaplara verin.
 
@@ -284,7 +284,7 @@ Agent hedefi, uygulamaları uzak bir sunucuda çalıştırır. Bu sunucu `r3v3rs
 
 ### Agent portunu açma
 
-`[platform]` bölümünde `agent_port` değerini ayarlayın ve sunucuyu yeniden başlatın. Master, `agent_port` ile ilk başlangıçta config dizinindeki `certs/agent/` altında agent CA'sını ve kendi agent sunucu sertifikasını oluşturur. Agent portu sertifika listesindeki bir sertifikayı değil, bu CA'yı kullanır. `certs/agent/` dizininin yedeğini saklayın, çünkü yeni bir agent CA'sı bütün agent'ların yeniden kaydolmasını gerektirir. Firewall'da portu agent'ların adreslerine açın.
+`[platform]` bölümünde `agent_port` değerini ayarlayın ve sunucuyu yeniden başlatın. Master, `agent_port` ile ilk başlangıçta yapılandırma dizinindeki `certs/agent/` altında agent CA'sını ve kendi agent sunucu sertifikasını oluşturur. Agent portu sertifika listesindeki bir sertifikayı değil, bu CA'yı kullanır. `certs/agent/` dizininin yedeğini saklayın, çünkü yeni bir agent CA'sı bütün agent'ların yeniden kaydolmasını gerektirir. Firewall'da portu agent'ların adreslerine açın.
 
 ### Hedef ekleme
 

@@ -50,7 +50,7 @@ Aşağıdaki tablolardaki her maddenin r3v3rs3 karşılığı vardır. Tabloda o
 
 Zaman kaybettiren iki fark:
 
-- **Location'ların sırası sonucu değiştirmez.** nginx, kendi öncelik kurallarına ve dosyadaki sıraya göre seçer. r3v3rs3 isteği her zaman, portun bütün proxy'leri içinde yolu en uzun eşleşen route'a gönderir. `/api`, `/api` ve `/api/users` ile eşleşir, `/apiv2` ile eşleşmez.
+- **Location'ların sırası sonucu değiştirmez.** nginx, kendi öncelik kurallarına ve dosyadaki sıraya göre seçer. r3v3rs3 isteği her zaman, portun bütün proxy'leri içinde yolu en uzun eşleşen route'a gönderir. `/api` yolu hem `/api` hem de `/api/users` isteğiyle eşleşir, `/apiv2` ile eşleşmez.
 - **Sondaki eğik çizgi kuralı aynı değildir.** nginx'te `proxy_pass http://api:8080/` location önekini kaldırır, `proxy_pass http://api:8080` ise korur. r3v3rs3'te route yolu varsayılan olarak kaldırılır (**Route Yolunu Kaldır**) ve kalan kısım sunucu URL'inin yoluna eklenir:
 
 ```

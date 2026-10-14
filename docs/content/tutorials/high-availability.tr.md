@@ -353,7 +353,7 @@ Bu, yükü VIP olmadan üç düğüme dağıtır. Tek sınırı vardır: DNS dur
 ## Cluster'ı doğrulayın
 
 1. Bir düğümde proxy ekleyin. Bir saniye içinde diğer düğümlerde görünür.
-2. Lideri durdurun: `sudo systemctl stop r3v3rs3`. Lider kilidi bırakır ve başka bir düğüm `lock_ttl / 3` içinde, varsayılan olarak 5 saniyede `"leader":true` der.
+2. Lideri durdurun: `sudo systemctl stop r3v3rs3`. Lider kilidi bırakır ve başka bir düğüm `lock_ttl / 3` içinde, varsayılan ayarla 5 saniye içinde `"leader":true` der.
 3. VIP'i kontrol edin: diğer düğümlerde `ip addr show eth0`. Biri artık `10.0.0.10` adresini tutar.
 4. Durdurduğunuz düğümü yeniden başlatın. Bütün durum bilgisini veri deposundan okur ve `synced` der.
 5. VIP üzerinden giriş yapın, örneğin `http://10.0.0.10:46492/`. VIP'i tutan düğümü durdurun ve sayfayı yenileyin. Oturum yeni düğümde de geçerlidir. Tarayıcı oturum cookie'sini yalnız onu yazan adrese gönderir. Bu yüzden kendi adresiyle açtığınız bir düğüm yeniden giriş ister.

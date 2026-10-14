@@ -6,7 +6,7 @@ weight = 12
 
 # r3v3rs3'ü script ile yönetme
 
-WebUI'da, WebUI'ın kendisinin kullanmadığı hiçbir düğme yoktur. Yaptığı her şey `/api` altındaki yönetim API'si üzerinden gider, yani bir script de aynısını yapabilir. Bu rehber giriş yapar, port ve proxy oluşturur, durum bilgisini okur, deploy işinden cache temizler ve o işe başka hiçbir şey yapamayan bir hesap verir.
+WebUI'da, WebUI'ın kendisinin kullanmadığı hiçbir düğme yoktur. Yaptığı her şey `/api` altındaki yönetim API'si üzerinden gider, yani bir script de aynısını yapabilir. Bu rehber giriş yapar, port ve proxy oluşturur, durum bilgisini okur, deploy işinden sonra cache temizler ve o işten başka hiçbir şey yapamayan bir hesap verir.
 
 Örnekler `curl` ile `http://localhost:46492` adresine gider. Bu, yönetim panelinin varsayılan adresidir.
 
@@ -120,7 +120,7 @@ $ curl -s -b cookies.txt -X POST http://localhost:46492/api/proxies \
 null
 ```
 
-Proxy yeniden başlatma olmadan, hemen cevap verir:
+Proxy yeniden başlatma olmadan, hemen yanıt verir:
 
 ```bash
 $ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: demo.example.com' http://127.0.0.1:8475/

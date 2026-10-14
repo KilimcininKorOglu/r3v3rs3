@@ -58,7 +58,7 @@ volumes:
   r3v3rs3-data:
 ```
 
-Etiketler şunu söyler: bu container'ın `whoami` adında bir HTTP proxy'si vardır, r3v3rs3'ün `http` adlı portunu kullanır, `whoami.example.com` host'una cevap verir ve upstream sunucusu container'ın `80` portunda dinler.
+Etiketler şunu söyler: bu container'ın `whoami` adında bir HTTP proxy'si vardır, r3v3rs3'ün `http` adlı portunu kullanır, `whoami.example.com` host'una yanıt verir ve upstream sunucusu container'ın `80` portunda dinler.
 
 Ağ tanımının altındaki `name: proxy` satırı ağ adını `proxy` olarak bırakır. Onsuz Compose başa proje adını ekler.
 
@@ -138,7 +138,7 @@ Bir saniye içinde proxy'nin her replikaya bir tane olmak üzere üç sunucusu o
 $ curl -H 'Host: whoami.example.com' http://127.0.0.1/ | grep Hostname
 ```
 
-İsteği tekrarlayın. Cevaplar üç container arasında dönüşümlü gelir, çünkü bir Compose servisinin replikaları proxy'lerini paylaşır ve her replika kendi sunucusunu ekler.
+İsteği tekrarlayın. Yanıtlar üç container arasında dönüşümlü gelir, çünkü bir Compose servisinin replikaları proxy'lerini paylaşır ve her replika kendi sunucusunu ekler.
 
 Bir replikayı durdurun, proxy o sunucuyu bırakır. Bütün replikalar durunca proxy kaybolur.
 

@@ -24,7 +24,7 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
 
 Script bir soru sorar:
 
-1. **Admin WebUI adresi.** Varsayılan `127.0.0.1:46492` değeridir, yani panel yalnız sunucunun kendisinde cevap verir. `0.0.0.0:46492` değerini yalnız o portu bir firewall veya bir VPN koruyorsa yazın.
+1. **Admin WebUI adresi.** Varsayılan `127.0.0.1:46492` değeridir, yani panel yalnız sunucunun kendisinde yanıt verir. `0.0.0.0:46492` değerini yalnız o portu bir firewall veya bir VPN koruyorsa yazın.
 
 Kurulumun son adımı `admin` hesabını oluşturur. `--password` verilmezse script güçlü rastgele bir parola üretir ve bir kez basar:
 
@@ -51,7 +51,7 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
     | sudo bash -s -- --password s3cret-PASSWORD
 ```
 
-Yükseltme mevcut hesapları korur ve parola basmaz. Script, adres loopback dışına bağlanıyorsa WebUI portunu local firewall'da açar: çalışan bir firewalld'a veya aktif bir ufw'ya kural ekler, başka araç yoksa catch-all REJECT veya DROP kuralı portu engelliyorsa bir `iptables` accept kuralı ekler ve kuralı `netfilter-persistent` varken kaydeder.
+Yükseltme mevcut hesapları korur ve parola basmaz. Script, adres loopback dışına bağlanıyorsa WebUI portunu local firewall'da açar: önce çalışan bir firewalld'a veya aktif bir ufw'ya kural ekler. Başka araç yoksa ve catch-all REJECT veya DROP kuralı portu engelliyorsa bir `iptables` accept kuralı ekler. `netfilter-persistent` varsa kuralı kaydeder.
 
 Tüm seçenekler soru sormadan kurmak için de çalışır:
 
@@ -92,7 +92,7 @@ Servis root olarak çalışır, bu yüzden r3v3rs3 1024 altındaki bir portu ek 
 
 ## Adım 3: Paneli açın
 
-Varsayılan adres yalnız sunucuda cevap verir. Portu dışarı açmak yerine SSH ile ulaşın:
+Varsayılan adres yalnız sunucuda yanıt verir. Portu dışarı açmak yerine SSH ile ulaşın:
 
 ```bash
 $ ssh -L 46492:127.0.0.1:46492 kullanici@sunucunuz
@@ -121,7 +121,7 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
 - Script binary'yi yeniden adlandırarak değiştirir, çünkü çalışan servis eski dosyayı açık tutar.
 - Yapılandırmayı ve hesapları korur. İkinci bir hesap oluşturmaz.
 - WebUI sorusunda varsayılan olarak kurulu servisin adresini sunar, yani Enter adresi korur.
-- Servisi yeniden başlatır ve WebUI cevap verene kadar bekler. WebUI 30 saniye sessiz kalırsa `systemctl status` çıktısını ve son 50 journal satırını yazar, sonra durur.
+- Servisi yeniden başlatır ve WebUI yanıt verene kadar bekler. WebUI 30 saniye sessiz kalırsa `systemctl status` çıktısını ve son 50 journal satırını yazar, sonra durur.
 
 Bir filoyu adım adım yükseltirken sürümü `--version 1.7.8` ile sabitleyin.
 
@@ -179,5 +179,5 @@ $ sudo systemctl daemon-reload
 ## Sonraki adımlar
 
 - [Başlangıç](@/tutorials/getting-started.tr.md): ilk port ve ilk proxy.
-- [Yapılandırma dosyaları](@/configuration.tr.md#yapilandirma-dosyalari): config dizinindeki her dosyanın içeriği.
+- [Yapılandırma dosyaları](@/configuration.tr.md#yapilandirma-dosyalari): yapılandırma dizinindeki her dosyanın içeriği.
 - [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek bir durum bilgisini paylaşan birkaç sunucu.

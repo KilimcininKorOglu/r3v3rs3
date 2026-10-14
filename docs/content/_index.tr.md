@@ -22,7 +22,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - Yol yeniden yazma (prefix silme, regex değiştirme, prefix ekleme), yönlendirme kuralları ve sabit yanıtlar: yönlendirme host'u, durum kodu host'u ve 404 host'u şablonları.
 - Bir route, proxy'sinin ayarlarının yerine kendi ayarını koyabilir: timeout'lar, yeniden deneme, rate limit, IP filtresi, kimlik doğrulama, header kuralları ve gövde boyutu.
 - Round robin (smooth weighted), rastgele, ilk sağlıklı sunucu ve istemci IP hash'i ile yük dengeleme. Sunucuyu devre dışı bırakmak için 0 ile 65535 arası ağırlık.
-- Aktif ve pasif sağlık kontrolü, half-open denemesiyle circuit breaker, HMAC imzalı cookie ile sticky session, idempotent method kuralları ve gövde replay limitiyle yeniden deneme ve yüzde ile istek yansıtma.
+- Yeniden deneme: aktif ve pasif sağlık kontrolü, half-open denemesiyle circuit breaker, idempotent method kuralları ve gövde replay limiti. HMAC imzalı cookie ile sticky session ve yüzde ile istek yansıtma.
 - Proxy ve route başına upstream connect ve request timeout'ları. TTL bitince yenilenen DNS SRV kayıtlarından gelen upstream sunucuları (`http+srv://` URL'leri).
 - İstemci başına UDP oturumları: boşta kalma timeout'u ve port başına en çok 10.000 oturum.
 - Düz HTTP sunuculara gRPC için h2c ile HTTP/2. Bir HTTP/2 upstream bağlantısını çok sayıda istemciye taşıyan paylaşılan upstream bağlantı havuzları.
@@ -33,8 +33,8 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 
 - Proxy ve route başına IP izin ve engelleme listeleri. Tek bir adın altında IP filtresi ve kimlik doğrulamayı taşıyan, paylaşılan erişim listeleri.
 - Saniye, dakika veya saat periyotlu, burst'ü ve `Retry-After` header'ı olan istemci başına rate limit. `413` ile istek gövdesi boyut limiti.
-- Argon2 hash'iyle Basic auth, SHA-256 özeti olarak saklanan ve sabit sürede karşılaştırılan Bearer token'ları, forward auth (oauth2-proxy, Authelia) ve TOTP'li yönetim paneli oturumu ile kimlik doğrulama. Ayrıca giriş denemesi limitleri.
-- Sekiz bilinen CDN (Cloudflare, Fastly, Amazon CloudFront, Bunny, Gcore, KeyCDN, Imperva, Google Cloud Load Balancing) ve güvenilen proxy'lerin arkasında gerçek istemci IP'si bulunur. CDN aralıkları her gün yenilenir, güvenilmeyen karşı uçlardan sahte istemci IP header'ları silinir.
+- Kimlik doğrulama: Argon2 hash'iyle Basic auth, Bearer token'ları, forward auth (oauth2-proxy, Authelia) ve TOTP'li yönetim paneli oturumu. Bearer token'lar SHA-256 özeti olarak saklanır ve sabit sürede karşılaştırılır. Giriş denemesi limitleri de vardır.
+- Sekiz bilinen CDN'in (Cloudflare, Fastly, Amazon CloudFront, Bunny, Gcore, KeyCDN, Imperva, Google Cloud Load Balancing) ve güvenilen proxy'lerin arkasındaki gerçek istemci IP'si bulunur. CDN aralıkları her gün yenilenir. Güvenilmeyen karşı uçlardan sahte istemci IP header'ları silinir.
 - Değişken kullanan istek ve yanıt header kuralları: `{client_ip}`, `{host}`, `{request_id}`, `{route}`, `{client_cert_subject}` ve `{client_cert_fingerprint}`.
 - Yanıt sıkıştırma (brotli, zstd ve gzip) ve ETag ve Last-Modified yenilemesi, `304` yanıtları, `X-Cache` ve `Age` header'ları ve purge API'si olan bellekte tutulan HTTP cache.
 - Mutual TLS: TLS portlarında istemci sertifikası doğrulaması (kapalı, isteğe bağlı veya zorunlu) ve upstream sunuculara istemci sertifikası.
@@ -42,8 +42,8 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 ## Sertifikalar
 
 - Yüklenen veya kendinden imzalı sunucu, istemci ve kök sertifikaları.
-- HTTP-01, TLS-ALPN-01 ve DNS-01 challenge'larıyla ACME v2 (örneğin Let's Encrypt). DNS-01, wildcard sertifikaları 12 DNS sağlayıcısının API'si, webhook, program allowlist'li exec komutu veya TSIG ile RFC 2136 ile alır.
-- Sertifika süresi uyarları ve bearer token'lı, yeniden denemeli, sertifika, deployment ve agent olaylarını bildiren webhook bildirimleri.
+- HTTP-01, TLS-ALPN-01 ve DNS-01 challenge'larıyla ACME v2 (örneğin Let's Encrypt). DNS-01 wildcard sertifikaları da alır. DNS-01 üç yolla çalışır: 12 DNS sağlayıcısının API'si, program allowlist'i olan bir exec komutu veya TSIG'li RFC 2136.
+- Sertifika süresi uyarıları ve webhook bildirimleri. Webhook'lar bearer token taşır, yeniden dener ve sertifika, deployment ile agent olaylarını bildirir.
 
 ## Yönetim
 
@@ -64,7 +64,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - Proxy'yi ancak yeni container sağlık kontrolünden geçince değiştiren blue-green deployment'lar ve önceki bir deployment'a geri alma.
 - r3v3rs3 uygulamaların alan adlarını kendisi yönlendirir ve sertifikalarını ACME ile alır.
 - Şifreli ortam değişkenleri. Her uygulamanın deployment'ları ve container log'u WebUI'da ve yönetim API'sinde görünür.
-- Git sağlayıcı bağlantıları: r3v3rs3'ün bir manifest'ten oluşturduğu GitHub App (GitHub Enterprise Server'da da) ve GitLab ile Gitea için OAuth uygulamaları. Bağlantı repository'leri ve branch'leri listeler, private repository'leri clone eder ve push webhook'unu kurar.
+- Git sağlayıcı bağlantıları: r3v3rs3'ün bir manifest'ten oluşturduğu GitHub App (GitHub Enterprise Server'da da) ve GitLab ile Gitea için OAuth uygulamaları. Bağlantı repository'leri ve branch'leri listeler. Private repository'leri clone eder ve push webhook'unu kurar.
 - GitHub, GitLab, Gitea, Forgejo veya genel bir HMAC göndericisinden gelen push webhook'ları deployment başlatır.
 - Agent hedefleri uygulamaları başka sunucularda çalıştırır. Agent, tek seferlik kayıttan sonra master'a mTLS ile bağlanır ([Deploy platformu](@/platform.tr.md)).
 

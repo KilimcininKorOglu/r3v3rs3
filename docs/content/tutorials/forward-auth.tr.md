@@ -6,7 +6,7 @@ weight = 15
 
 # Forward auth ile single sign-on
 
-Forward auth, her istek için harici bir servise "bu istek geçsin mi?" diye sorar. Kimlik sağlayıcısındaki oturumu o servis tutar; r3v3rs3 yalnız sorar ve cevabı taşır. nginx'teki `auth_request`, Traefik'teki ForwardAuth middleware'i budur.
+Forward auth, her istek için harici bir servise "bu istek geçsin mi?" diye sorar. Kimlik sağlayıcısındaki oturumu o servis tutar; r3v3rs3 yalnız sorar ve yanıtı taşır. nginx'teki `auth_request`, Traefik'teki ForwardAuth middleware'i budur.
 
 Zaten oauth2-proxy, Authelia veya kendi yazdığınız bir servisi çalıştırıyorsanız bunu kullanın. r3v3rs3'ün kendi tuttuğu hesaplar için [Ekip için hesaplar](@/tutorials/team-accounts.tr.md) daha basittir.
 
@@ -91,13 +91,13 @@ x-forwarded-for: 203.0.113.7
 
 Doğrulama isteği, upstream isteklerle aynı kök sertifikalara güvenir ve proxy'nin istemci sertifikasını gönderir. Mutual TLS ile HTTPS üzerinden çalışan bir doğrulama servisi için ikinci bir sertifika ayarı gerekmez.
 
-## Adım 5: r3v3rs3 cevabı ne yapar
+## Adım 5: r3v3rs3 yanıtı ne yapar
 
 | Doğrulama yanıtı | Sonuç |
 |---|---|
 | 2xx | İstek, kopyalanan header'larla upstream sunucuya gider. |
 | Diğer durum kodları | İstemci doğrulama yanıtını alır: durum kodu, header'lar ve en çok 64 KiB gövde. |
-| Timeout içinde cevap yok veya bağlantı hatası | İstemci 502 Bad Gateway alır. |
+| Timeout içinde yanıt yok veya bağlantı hatası | İstemci 502 Bad Gateway alır. |
 
 Tarayıcı girişini mümkün kılan satır ikincisidir. `Location` ile `302 Found` dönen bir doğrulama servisi tarayıcıyı giriş sayfasına gönderir ve r3v3rs3 bu yönlendirmeyi aynen aktarır:
 
@@ -164,7 +164,7 @@ Route, proxy'nin kimlik doğrulamasının yerine geçer. Bu kural tersine de ça
 
 | Belirti | Sebebi |
 |---|---|
-| Her istek 502 dönüyor | Doğrulama servisi cevap vermiyor veya URL yanlış. |
+| Her istek 502 dönüyor | Doğrulama servisi yanıt vermiyor veya URL yanlış. |
 | Tarayıcı uygulama ile giriş sayfası arasında dönüp duruyor | `/oauth2` route'u yok veya kimlik doğrulaması **Yok** değil. |
 | Upstream sunucu kullanıcı header'ını almıyor | Header, **Kopyalanacak Yanıt Header'ları** listesinde yok veya oauth2-proxy `--set-xauthrequest` olmadan çalışıyor. |
 | Doğrulama servisi istemci olarak `127.0.0.1` görüyor | [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) ayarlarında CDN'iniz veya güvenilen proxy'niz tanımlı değil. |

@@ -6,7 +6,7 @@ weight = 3
 
 # Başlangıç
 
-Bu rehber kurulu bir r3v3rs3 ile çalışan bir proxy kurar. Birkaç dakika sürer.
+Bu rehber, kurulu bir r3v3rs3 ile çalışan ilk proxy'nizi kurar. Birkaç dakika sürer.
 
 Önce r3v3rs3'ü kurun. [Ana sayfa](@/_index.tr.md#kurulum) bütün yolları listeler: Linux kurulum script'i, Docker, Docker Compose, Cargo ve release arşivleri.
 
@@ -72,13 +72,13 @@ Bir proxy'nin, istemcileri dinleyen bir porta ihtiyacı vardır.
 8. **Oluştur** butonuna tıklayın.
 9. Proxy'nin listede göründüğünü kontrol edin. Proxy hemen çalışır.
 
-Adım 3'teki porta bir istek gönderin. Cevap uygulamanızdan gelir:
+Adım 3'teki porta bir istek gönderin. Yanıt uygulamanızdan gelir:
 
 ```bash
 $ curl -i http://127.0.0.1/
 ```
 
-`502 Bad Gateway` cevabı, r3v3rs3'ün hiçbir upstream sunucuya ulaşamadığı anlamına gelir. **Hedef** adresini ve uygulamanızı kontrol edin.
+`502 Bad Gateway` yanıtı, r3v3rs3'ün hiçbir upstream sunucuya ulaşamadığı anlamına gelir. **Hedef** adresini ve uygulamanızı kontrol edin.
 
 ## Adım 5: Sertifika ekleyin
 

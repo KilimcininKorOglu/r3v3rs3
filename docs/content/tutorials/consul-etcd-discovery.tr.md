@@ -105,7 +105,7 @@ $ curl -s -b cookies.txt http://localhost:46492/api/proxies/cfr-kpm/status
   {"addr":"http://10.0.0.6:8080/","weight":1,"healthy":true,"failures":0}]}
 ```
 
-Round robin bundan sonra `10.0.0.5, 10.0.0.6, 10.0.0.5, 10.0.0.6` sırasıyla cevap verir. Bir örneğin kaydını silin, sunucusu yaklaşık bir saniye içinde listeden çıkar. Sizin hiçbir ayar değiştirmeniz gerekmez.
+Round robin bundan sonra istekleri `10.0.0.5, 10.0.0.6, 10.0.0.5, 10.0.0.6` sırasıyla gönderir. Bir örneğin kaydını silin, sunucusu yaklaşık bir saniye içinde listeden çıkar. Sizin hiçbir ayar değiştirmeniz gerekmez.
 
 Catalog'un amacı budur: servisi ölçeklersiniz, proxy takip eder.
 
@@ -153,7 +153,7 @@ $ etcdctl put r3v3rs3/http/etcdapp/vhosts etcd.example.com
 $ etcdctl put r3v3rs3/http/etcdapp/routes/0/servers/0/url http://10.0.0.9:8080/
 ```
 
-Proxy yaklaşık bir saniye içinde cevap verir:
+Proxy yaklaşık bir saniye içinde çalışır:
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/discovery
@@ -161,7 +161,7 @@ $ curl -s -b cookies.txt http://localhost:46492/api/discovery
  {"provider":"etcd","state":"running","proxies":1,"updated_at":1789647767}]
 ```
 
-Ne Consul token'ı ne de etcd parolası yönetim API'sinden geri döner. `GET /api/config` yanıtı `token_set: true` ve `password_set: true` içerir. Alanı yazmayan bir `PUT /api/config` kayıtlı değeri korur, boş string ise değeri siler. `config.toml` ikisini de düz metin tutar, bu yüzden config dizinini yalnız r3v3rs3 kullanıcısı okuyabilsin.
+Ne Consul token'ı ne de etcd parolası yönetim API'sinden geri döner. `GET /api/config` yanıtı `token_set: true` ve `password_set: true` içerir. Alanı yazmayan bir `PUT /api/config` kayıtlı değeri korur, boş string ise değeri siler. `config.toml` ikisini de düz metin tutar, bu yüzden yapılandırma dizinini yalnız r3v3rs3 kullanıcısı okuyabilsin.
 
 ## Adım 6: Sorunları okuyun
 

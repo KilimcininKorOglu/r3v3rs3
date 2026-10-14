@@ -38,7 +38,7 @@ $ kubectl -n r3v3rs3 rollout status deployment/r3v3rs3
 
 Manifest `/root/.config/r3v3rs3` için 1 Gi'lik bir PersistentVolumeClaim, tek replikalı ve `Recreate` stratejili bir Deployment ve 80 ile 443 portları için bir `LoadBalancer` Service oluşturur.
 
-Deployment `serviceAccountName: r3v3rs3` kullanır, bu yüzden sağlayıcının pod içinde kubeconfig'e ihtiyacı yoktur. Container image `--webui 0.0.0.0:46492` ile başlar.
+Deployment `serviceAccountName: r3v3rs3` kullanır, bu yüzden sağlayıcının pod içinde kubeconfig'e ihtiyacı yoktur. Container, image'ın varsayılan `--webui 0.0.0.0:46492` bayrağıyla başlar.
 
 Panele, onu dışarı açmadan ulaşın:
 
