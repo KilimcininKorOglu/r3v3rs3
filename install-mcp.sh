@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs the newest r3v3rs3-mcp binary from the GitHub releases of r3v3rs3.
-# Runs on Linux and macOS. Pass a release tag with --version v1.7.7, or set
+# Runs on Linux and macOS. Pass a release tag with --version v1.7.8, or set
 # INSTALL_DIR (the default is /usr/local/bin).
 set -eu
 
@@ -11,7 +11,7 @@ VERSION=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --version)
-            [ $# -ge 2 ] || { echo "--version needs a value like v1.7.7" >&2; exit 1; }
+            [ $# -ge 2 ] || { echo "--version needs a value like v1.7.8" >&2; exit 1; }
             VERSION="$2"
             shift 2
             ;;
