@@ -26,7 +26,6 @@ use r3v3rs3_api::{
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 use std::{collections::HashMap, net::SocketAddr};
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
@@ -1522,10 +1521,10 @@ fn format_unix_time(locale: Locale, unix_time: i64) -> String {
     if unix_time <= 0 {
         return locale.t("settings.never").to_string();
     }
-    OffsetDateTime::from_unix_timestamp(unix_time)
-        .ok()
-        .and_then(|time| time.format(&Rfc3339).ok())
-        .unwrap_or_else(|| unix_time.to_string())
+    match u64::try_from(unix_time) {
+        Ok(time) => crate::format::format_time(time * 1000),
+        Err(_) => unix_time.to_string(),
+    }
 }
 
 async fn get_cdn_status() -> Result<CdnStatus, gloo_net::Error> {

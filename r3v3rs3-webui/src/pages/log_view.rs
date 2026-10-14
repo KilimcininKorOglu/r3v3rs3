@@ -1,8 +1,8 @@
-use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale};
+use crate::{API_ENDPOINT, auth::use_ensure_auth, format::format_instant, i18n::use_locale};
 use gloo_net::http::Request;
 use gloo_timers::callback::Timeout;
 use r3v3rs3_api::log::{LogLevel, SystemLogRow};
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use time::OffsetDateTime;
 use web_sys::Element;
 use yew::prelude::*;
 use yew_router::prelude::use_navigator;
@@ -46,7 +46,7 @@ pub fn log_view(props: &Props) -> Html {
             </div>
             <ul ref={ul_ref.clone()} class="overflow-auto max-h-[70vh] bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 rounded-md">
             { log.iter().map(|entry| {
-                let timestamp = entry.timestamp.format(&Rfc3339).unwrap_or_default();
+                let timestamp = format_instant(&entry.timestamp);
                 let fields = entry.fields.iter().map(|(k, v)| {
                     format!("{}={}", k, v)
                 }).collect::<Vec<String>>().join(" ");

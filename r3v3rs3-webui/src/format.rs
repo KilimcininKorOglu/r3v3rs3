@@ -48,6 +48,16 @@ pub fn format_time(ms: u64) -> String {
     }
 }
 
+/// An instant in the same form as `format_time`, in the display time zone when it is set and
+/// in UTC otherwise. The server sends log timestamps as instants, not as Unix times.
+pub fn format_instant(time: &OffsetDateTime) -> String {
+    let ms = time.unix_timestamp_nanos() / 1_000_000;
+    match u64::try_from(ms) {
+        Ok(ms) => format_time(ms),
+        Err(_) => time.format(&Rfc3339).unwrap_or_default(),
+    }
+}
+
 /// The current Unix time in seconds.
 pub fn unix_now() -> i64 {
     SystemTime::now()
