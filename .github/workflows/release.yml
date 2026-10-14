@@ -14,10 +14,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # The WebUI is WebAssembly, so one build serves every target. This job also creates the draft
-  # release once, before the binary jobs upload to it.
+  # The draft release exists before any job uploads to it. Keeping this out of the WebUI job
+  # lets the macOS and Windows MCP builds start without waiting for the Wasm build, which
+  # r3v3rs3-mcp does not embed.
+  release:
+    name: Create release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
+          test -s relnotes.md
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
+
+  # The WebUI is WebAssembly, so one build serves every target.
   webui:
-    name: Build WebUI and create release
+    name: Build WebUI
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
@@ -46,20 +64,11 @@ jobs:
           path: r3v3rs3/dist/webui
           if-no-files-found: error
           retention-days: 1
-      - name: Create release
-        if: github.event_name == 'push'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          v="${GITHUB_REF_NAME#v}"
-          awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
-          test -s relnotes.md
-          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
 
   # Each target builds on a native runner. Ubuntu 22.04 keeps the required glibc at 2.35.
   binary:
     name: Upload Release Assets (${{ matrix.target }})
-    needs: webui
+    needs: [release, webui]
     strategy:
       matrix:
         include:
@@ -102,7 +111,7 @@ jobs:
   # aws-lc-rs compiles its C code through it, with the cmake and perl of the runner.
   binary-musl:
     name: Upload Release Assets (${{ matrix.target }})
-    needs: webui
+    needs: [release, webui]
     strategy:
       fail-fast: false
       matrix:
@@ -240,7 +249,8 @@ jobs:
   # own archives. The server itself stays Linux only.
   binary-mcp:
     name: Upload Release Assets (r3v3rs3-mcp, ${{ matrix.target }})
-    needs: webui
+    # The MCP client embeds no WebUI, so it only waits for the draft release.
+    needs: release
     strategy:
       fail-fast: false
       matrix:

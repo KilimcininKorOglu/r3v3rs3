@@ -15,12 +15,14 @@ jobs:
   # Each platform builds on a native runner, because building the server under QEMU takes hours.
   # The `runtime` target is the default distroless image, and the `platform` target adds git and
   # the docker CLI for the deployment platform under the `-platform` tag suffix.
-  build:
-    name: Build ${{ matrix.target }} ${{ matrix.platform }}
+  #
+  # The runtime builds first, so the platform build of the same platform reads its cache: the
+  # two targets share the expensive builder stage, and parallel starts would race a cold cache.
+  build-runtime:
+    name: Build runtime ${{ matrix.platform }}
     strategy:
       matrix:
         platform: [linux/amd64, linux/arm64]
-        target: [runtime, platform]
         include:
           - platform: linux/amd64
             runner: ubuntu-24.04
@@ -53,14 +55,14 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          target: ${{ matrix.target }}
+          target: runtime
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ github.event_name == 'push' }}
-          # The two targets share the builder stages, so they read one cache per platform. Only
-          # the runtime target writes it, so the two jobs do not overwrite each other.
+          # The platform target of the same platform reads this cache, so only the runtime
+          # target writes it.
           cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
-          cache-to: ${{ matrix.target == 'runtime' && format('type=gha,mode=max,scope={0}', env.PLATFORM_PAIR) || '' }}
+          cache-to: type=gha,mode=max,scope=${{ env.PLATFORM_PAIR }}
       - name: Export digest
         if: github.event_name == 'push'
         run: |
@@ -71,7 +73,67 @@ jobs:
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
-          name: digests-${{ matrix.target }}-${{ env.PLATFORM_PAIR }}
+          name: digests-runtime-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-platform:
+    name: Build platform ${{ matrix.platform }}
+    needs: build-runtime
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Prepare
+        run: |
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          platform="${{ matrix.platform }}"
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: platform
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ github.event_name == 'push' }}
+          # The runtime target of the same platform wrote this cache, so the shared builder
+          # stage of this build comes from the cache.
+          cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
+      - name: Export digest
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+      - name: Upload digest
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-platform-${{ env.PLATFORM_PAIR }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -87,7 +149,7 @@ jobs:
           - target: platform
             suffix: -platform
     runs-on: ubuntu-24.04
-    needs: build
+    needs: [build-runtime, build-platform]
     steps:
       - name: Prepare
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"

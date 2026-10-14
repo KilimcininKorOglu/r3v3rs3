@@ -23,13 +23,14 @@ jobs:
         # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
         run: rustup toolchain install
       - name: Cache
+        # Only main writes the cache, so the pull requests read it without evicting it.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
           tool: nextest
-      - name: Build
-        run: cargo build --all-features
       - name: Run tests
         run: cargo nextest run --all-features --no-fail-fast
       # The runner has a Docker Engine, so the Docker runtime runs against a real one.
@@ -44,7 +45,10 @@ jobs:
         # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
         run: rustup toolchain install
       - name: Cache
+        # Only main writes the cache, so the pull requests read it without evicting it.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check the formatting
         run: cargo fmt --all --check
       - name: Run clippy
