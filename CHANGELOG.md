@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-10-14
+
+### Added
+- An app selects the ports that serve it in the app form: a checkbox list of the ports plus a free text field for extra ones. An app without a selection takes the ports of the platform setting, or every HTTP and HTTPS port when that setting is also empty, so a deployment no longer answers 502 because of an empty setting.
+
+### Changed
+- The webhooks that could not install because the platform had no public address install themselves when the address is set, and a changed address reinstalls every webhook, because the providers send the push events to the old one.
+
 ## [1.8.0] - 2026-10-14
 
 ### Added
