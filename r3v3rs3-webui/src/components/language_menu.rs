@@ -17,7 +17,7 @@ pub fn language_menu(props: &Props) -> Html {
     let current = preferences.locale;
 
     html! {
-        <Dropdown class={props.class.clone()} label={native_name(current)} button={flag(current)}>
+        <Dropdown class={props.class.clone()} label={native_name(current)} button={flag(current)} menu_class={classes!("w-40")}>
             { for Locale::ALL.into_iter().map(|locale| language_option(locale, current, &dispatch)) }
         </Dropdown>
     }
@@ -29,8 +29,9 @@ fn language_option(locale: Locale, current: Locale, dispatch: &Dispatch<Preferen
     let active = locale == current;
     html! {
         <li role="none">
-            <button type="button" role="menuitemradio" aria-checked={active.to_string()} aria-label={native_name(locale)} title={native_name(locale)} lang={locale.code()} {onclick} class={classes!("flex", "w-full", "items-center", "justify-center", "px-4", "py-2", "hover:bg-neutral-100", "dark:hover:bg-neutral-700", active.then_some("bg-neutral-100 dark:bg-neutral-700"))}>
+            <button type="button" role="menuitemradio" aria-checked={active.to_string()} title={native_name(locale)} lang={locale.code()} {onclick} class={classes!("flex", "w-full", "items-center", "gap-3", "px-4", "py-2", "text-left", "hover:bg-neutral-100", "dark:hover:bg-neutral-700", active.then_some("bg-neutral-100 dark:bg-neutral-700"))}>
                 { flag(locale) }
+                <span>{ native_name(locale) }</span>
             </button>
         </li>
     }
@@ -49,9 +50,9 @@ fn flag(locale: Locale) -> Html {
         Locale::En => "/assets/flags/gb.svg",
         Locale::Tr => "/assets/flags/tr.svg",
     };
-    // The width and the height attributes keep the box fixed. Firefox sizes an SVG in an
-    // img from the attributes of the SVG file, and an object-fit alone can squash it.
+    // The width and the height attributes keep the box fixed in every browser, and the
+    // SVG fits itself into that box, so no flag is cropped.
     html! {
-        <img {src} alt="" width="24" height="16" class="w-6 h-4 shrink-0 rounded-sm object-cover shadow-sm" />
+        <img {src} alt="" width="24" height="16" class="w-6 h-4 shrink-0 rounded-sm object-contain shadow-sm" />
     }
 }
