@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.9] - 2026-10-14
+
+### Fixed
+- The panel bounced to its own sign-in page in the middle of the Create GitHub App flow: the session checks of the single page application treated a request that died without an answer as a sign-out, and the browser aborts the in-flight requests of a page that starts navigating to GitHub. Only a real 401 answer now ends the session, a failed check leaves the state alone, and the per-page check runs once per mount instead of once per render, which also removes the bursts of session requests that the access log showed while a page was open.
+
 ## [1.7.8] - 2026-10-14
 
 ### Changed
