@@ -10,8 +10,9 @@ use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, AppRequest, AppSource, AppSpec, LOCAL_TARGET, TargetEntry};
+use r3v3rs3_api::port::PortEntry;
 use std::str::FromStr;
-use web_sys::{HtmlSelectElement, HtmlTextAreaElement};
+use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
 const BYTES_PER_MB: u64 = 1024 * 1024;
@@ -67,6 +68,10 @@ pub struct AppForm {
     pub port: String,
     /// One domain on each line.
     pub domains: String,
+    /// The ids of the ports that serve the app, as the checkboxes select them.
+    pub ports: Vec<String>,
+    /// One extra port name or id on each line, beyond the port list.
+    pub custom_ports: String,
     pub health_check_path: String,
     /// One mount on each line: `volume:/path` or `volume:/path:ro`.
     pub volumes: String,
@@ -91,6 +96,8 @@ impl Default for AppForm {
             service: String::new(),
             port: String::new(),
             domains: String::new(),
+            ports: Vec::new(),
+            custom_ports: String::new(),
             health_check_path: String::new(),
             volumes: String::new(),
             restart: RestartPolicy::default(),
@@ -108,6 +115,8 @@ impl AppForm {
             target: app.target.to_string(),
             port: spec.port.to_string(),
             domains: lines(spec.domains.iter()),
+            ports: spec.ports.clone(),
+            custom_ports: String::new(),
             health_check_path: spec.health_check_path.clone().unwrap_or_default(),
             volumes: lines(spec.volumes.iter().map(mount_line)),
             restart: spec.restart,
@@ -174,6 +183,7 @@ impl AppForm {
             source: self.source(locale)?,
             port: self.port(locale)?,
             domains: parse_lines(locale, &self.domains, parse)?,
+            ports: self.spec_ports(locale)?,
             health_check_path: non_empty(&self.health_check_path).map(str::to_string),
             volumes,
             restart,
@@ -226,6 +236,18 @@ impl AppForm {
             Ok(port) if port > 0 => Ok(port),
             _ => Err(locale.t("apps.invalid_port").to_string()),
         }
+    }
+
+    /// The checked ports plus the lines of the free text field, without repeats. An empty list
+    /// means the automatic choice of the platform.
+    fn spec_ports(&self, locale: Locale) -> Result<Vec<String>, String> {
+        let mut ports = self.ports.clone();
+        for line in parse_lines(locale, &self.custom_ports, |_, value| Ok(value.to_string()))? {
+            if !ports.contains(&line) {
+                ports.push(line);
+            }
+        }
+        Ok(ports)
     }
 
     /// The volumes, the restart policy and the limits. A Compose file sets them itself, so a
@@ -345,6 +367,7 @@ pub fn fields_view(
     form: &UseStateHandle<AppForm>,
     targets: &[TargetEntry],
     connections: &[GitConnectionEntry],
+    ports: &[PortEntry],
     editing: bool,
 ) -> Html {
     html! {
@@ -357,11 +380,72 @@ pub fn fields_view(
             { source_view(locale, form, connections) }
             { text_field(locale, form, "apps.port", Some("apps.port_hint"), |f| &mut f.port) }
             { text_area(locale, form, "apps.domains", "apps.domains_hint", |f| &mut f.domains) }
+            { ports_view(locale, form, ports) }
             { text_field(locale, form, "apps.health_check_path", Some("apps.health_check_path_hint"), |f| &mut f.health_check_path) }
             if form.kind != SourceKind::Compose {
                 { container_view(locale, form) }
             }
         </>
+    }
+}
+
+/// The checkbox list of the ports and the free text field for the ones beyond the list. An
+/// unchecked list means the automatic choice of the platform.
+fn ports_view(locale: Locale, form: &UseStateHandle<AppForm>, ports: &[PortEntry]) -> Html {
+    let checkboxes = ports
+        .iter()
+        .map(|entry| {
+            let id = entry.id.to_string();
+            let checked = form.ports.contains(&id) || form.ports.contains(&entry.port.name);
+            let state = form.clone();
+            let id_value = id.clone();
+            let onchange = Callback::from(move |event: Event| {
+                let input: HtmlInputElement = event.target_unchecked_into();
+                let mut updated = (*state).clone();
+                if input.checked() {
+                    if !updated.ports.contains(&id_value) {
+                        updated.ports.push(id_value.clone());
+                    }
+                } else {
+                    updated.ports.retain(|port| port != &id_value);
+                }
+                state.set(updated);
+            });
+            html! {
+                <label class="flex items-center gap-2">
+                    <input type="checkbox" value={id} checked={checked} {onchange} />
+                    <span>{port_label(entry)}</span>
+                </label>
+            }
+        })
+        .collect::<Html>();
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{locale.t("apps.ports")}</label>
+            if ports.is_empty() {
+                <p class={HINT_CLASS}>{locale.t("apps.ports_empty")}</p>
+            } else {
+                <div class="flex flex-col gap-1">{checkboxes}</div>
+            }
+            <p class={HINT_CLASS}>{locale.t("apps.ports_hint")}</p>
+            { text_area(locale, form, "apps.custom_ports", "apps.custom_ports_hint", |f| &mut f.custom_ports) }
+        </>
+    }
+}
+
+fn port_label(entry: &PortEntry) -> String {
+    let protocol = entry
+        .port
+        .listen
+        .to_string()
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    if entry.port.name.is_empty() {
+        protocol
+    } else {
+        format!("{} ({protocol})", entry.port.name)
     }
 }
 
@@ -574,6 +658,22 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn the_port_selection_joins_the_extra_port_lines_without_repeats() {
+        let form = AppForm {
+            ports: vec!["p1".into(), "p2".into()],
+            custom_ports: "https\np2\n\n p1 ".into(),
+            ..image_form()
+        };
+        let request = form.parse(Locale::En).unwrap();
+        assert_eq!(request.spec.ports, ["p1", "p2", "https"]);
+        let empty = AppForm {
+            ports: Vec::new(),
+            ..image_form()
+        };
+        assert!(empty.parse(Locale::En).unwrap().spec.ports.is_empty());
     }
 
     #[test]

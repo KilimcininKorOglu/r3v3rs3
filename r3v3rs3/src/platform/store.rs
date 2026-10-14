@@ -830,6 +830,7 @@ mod tests {
                 },
                 port: 80,
                 domains: vec!["shop.example.com".parse().unwrap()],
+                ports: Vec::new(),
                 health_check_path: None,
                 volumes: Vec::new(),
                 restart: Default::default(),

@@ -196,6 +196,13 @@ pub struct AppSpec {
     #[schema(value_type = Vec<String>, example = json!(["app.example.com"]))]
     pub domains: Vec<SubjectName>,
 
+    /// The names or the ids of the ports that serve this app. Empty means the ports of
+    /// `proxy_ports` in the `[platform]` section, or every HTTP and HTTPS port when that
+    /// list is also empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>, example = json!(["http", "https"]))]
+    pub ports: Vec<String>,
+
     /// An HTTP path that answers 2xx or 3xx when the app is ready. Without it a deployment waits
     /// until the port accepts a connection.
     #[serde(default, skip_serializing_if = "Option::is_none")]

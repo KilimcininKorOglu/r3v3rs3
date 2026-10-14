@@ -526,10 +526,21 @@ fn build_proxy(
     validate: &impl Fn(&Proxy) -> Result<(), Error>,
 ) -> Result<Proxy, String> {
     let definition = &proxy.definition;
+    let port_ids =
+        if definition.ports.is_empty() && proxy.source.provider == DiscoveryProvider::Platform {
+            // An app without ports takes every port that accepts its protocol.
+            ports
+                .iter()
+                .filter(|entry| accepts(&definition.kind, &entry.port.listen))
+                .map(|entry| entry.id)
+                .collect()
+        } else {
+            resolve_ports(&definition.ports, &definition.kind, ports)?
+        };
     let value = Proxy {
         active: definition.active,
         name: definition.name.clone(),
-        ports: resolve_ports(&definition.ports, &definition.kind, ports)?,
+        ports: port_ids,
         kind: definition.kind.clone(),
     };
     validate(&value).map_err(|err| err.to_string())?;
@@ -660,6 +671,53 @@ mod tests {
         );
         let tcp = ProxyKind::Tcp(TcpProxy::default());
         assert!(resolve_ports(&names(&["tcp"]), &tcp, &ports).is_ok());
+    }
+
+    fn discovered_from(provider: DiscoveryProvider, key: &str, ports: &[&str]) -> DiscoveredProxy {
+        DiscoveredProxy {
+            key: key.into(),
+            source: DiscoverySource {
+                provider,
+                resource: "app".into(),
+            },
+            definition: ProxyDefinition {
+                key: format!("http.{key}"),
+                name: "app".into(),
+                ports: ports.iter().map(|port| port.to_string()).collect(),
+                active: true,
+                acme: None,
+                kind: http(),
+            },
+        }
+    }
+
+    #[test]
+    fn an_app_of_the_platform_without_ports_takes_every_matching_port() {
+        let ports = [
+            port("p1", "http", "/ip4/0.0.0.0/tcp/80/http"),
+            port("p2", "tcp", "/ip4/0.0.0.0/tcp/5432"),
+            port("p3", "https", "/ip4/0.0.0.0/tcp/443/https"),
+        ];
+        let built = build(
+            DiscoveryProvider::Platform,
+            &[discovered_from(DiscoveryProvider::Platform, "a", &[])],
+            &ports,
+            HashSet::new(),
+            |_| Ok(()),
+        );
+        assert_eq!(
+            built.entries[0].proxy.ports,
+            ["p1".parse().unwrap(), "p3".parse().unwrap()]
+        );
+        // Another provider still needs the ports of its definition.
+        let built = build(
+            DiscoveryProvider::Docker,
+            &[discovered_from(DiscoveryProvider::Docker, "b", &[])],
+            &ports,
+            HashSet::new(),
+            |_| Ok(()),
+        );
+        assert_eq!(built.entries[0].proxy.ports, Vec::<ShortId>::new());
     }
 
     #[test]

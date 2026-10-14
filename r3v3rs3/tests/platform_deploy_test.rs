@@ -131,7 +131,9 @@ where
     let mut config = AppConfig::default();
     config.platform.enabled = true;
     config.platform.docker = docker_host();
-    config.platform.proxy_ports = vec!["apps".into()];
+    // proxy_ports stays empty: an app without its own ports takes the ports of the config, or
+    // every HTTP and HTTPS port when that list is also empty.
+    config.platform.proxy_ports = Vec::new();
     let storage = TestStorage::builder()
         .config(config)
         .ports(vec![port_entry("apps", proxy.multiaddr_http())])

@@ -18,6 +18,7 @@ use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, AppRequest, TargetEntry};
+use r3v3rs3_api::port::PortEntry;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -31,6 +32,7 @@ struct Loaded {
     form: UseStateHandle<AppForm>,
     targets: UseStateHandle<Vec<TargetEntry>>,
     connections: UseStateHandle<Vec<GitConnectionEntry>>,
+    ports: UseStateHandle<Vec<PortEntry>>,
     notice: AppNotice,
 }
 
@@ -53,6 +55,7 @@ pub fn app_view(props: &Props) -> Html {
     let form = use_state(AppForm::default);
     let targets = use_state(Vec::<TargetEntry>::new);
     let connections = use_state(Vec::<GitConnectionEntry>::new);
+    let ports = use_state(Vec::<PortEntry>::new);
     let notice = use_state(|| Option::<Notice<()>>::None);
 
     // The admin API answers 401 until the session loads, so the page waits for it.
@@ -62,6 +65,7 @@ pub fn app_view(props: &Props) -> Html {
         form: form.clone(),
         targets: targets.clone(),
         connections: connections.clone(),
+        ports: ports.clone(),
         notice: notice.clone(),
     };
     // Only an account that changes the apps reads the connections.
@@ -79,6 +83,7 @@ pub fn app_view(props: &Props) -> Html {
     let lists = Lists {
         targets: &targets,
         connections: &connections,
+        ports: &ports,
     };
     html! {
         <>
@@ -90,10 +95,11 @@ pub fn app_view(props: &Props) -> Html {
     }
 }
 
-/// The targets and the connections that the form offers.
+/// The targets, the connections and the ports that the form offers.
 struct Lists<'a> {
     targets: &'a [TargetEntry],
     connections: &'a [GitConnectionEntry],
+    ports: &'a [PortEntry],
 }
 
 fn form_view(
@@ -116,7 +122,7 @@ fn form_view(
         notice: notice_view(notice, |_: &()| html! { {locale.t("apps.saved")} }),
         fields: html! {
             <fieldset disabled={!can_edit}>
-                { fields_view(locale, form, lists.targets, lists.connections, app.is_some()) }
+                { fields_view(locale, form, lists.targets, lists.connections, lists.ports, app.is_some()) }
             </fieldset>
         },
         error: parsed
@@ -226,13 +232,14 @@ async fn save(
         .map_err(|err| err.to_string())
 }
 
-/// Reads the targets, the connections and the app. A failed read shows its message.
+/// Reads the targets, the connections, the ports and the app. A failed read shows its message.
 fn load(locale: Locale, id: Option<ShortId>, can_edit: bool, loaded: Loaded) {
     let Loaded {
         app,
         form,
         targets,
         connections,
+        ports,
         notice,
     } = loaded;
     spawn_local(async move {
@@ -244,6 +251,11 @@ fn load(locale: Locale, id: Option<ShortId>, can_edit: bool, loaded: Loaded) {
             let path = format!("{API_ENDPOINT}/git/connections");
             match fetch_json(locale, Request::get(&path)).await {
                 Ok(list) => connections.set(list),
+                Err(message) => notice.set(Some(Notice::Failed(message))),
+            }
+            let path = format!("{API_ENDPOINT}/ports");
+            match fetch_json(locale, Request::get(&path)).await {
+                Ok(list) => ports.set(list),
                 Err(message) => notice.set(Some(Notice::Failed(message))),
             }
         }

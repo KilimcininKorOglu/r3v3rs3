@@ -693,6 +693,7 @@ mod tests {
                 },
                 port: 80,
                 domains: Vec::new(),
+                ports: Vec::new(),
                 health_check_path: None,
                 volumes: Vec::new(),
                 restart: Default::default(),

@@ -57,7 +57,11 @@ pub fn app_proxy(
         definition: ProxyDefinition {
             key,
             name: app.name.to_string(),
-            ports: config.proxy_ports.clone(),
+            ports: if app.spec.ports.is_empty() {
+                config.proxy_ports.clone()
+            } else {
+                app.spec.ports.clone()
+            },
             active: true,
             acme: config.acme,
             kind: ProxyKind::Http(Box::new(http)),
@@ -103,6 +107,7 @@ mod tests {
             },
             port: 80,
             domains: domains.iter().map(|d| d.parse().unwrap()).collect(),
+            ports: Vec::new(),
             health_check_path: None,
             volumes: Vec::new(),
             restart: Default::default(),
@@ -112,11 +117,11 @@ mod tests {
 
     #[test]
     fn an_app_proxy_routes_its_domains_to_the_published_port() -> anyhow::Result<()> {
-        let spec = spec(&["shop.example.com", "www.shop.example.com"]);
+        let shop_spec = spec(&["shop.example.com", "www.shop.example.com"]);
         let app = LiveApp {
             id: "abc-def".parse()?,
             name: "shop",
-            spec: &spec,
+            spec: &shop_spec,
             host_port: 49153,
         };
         let config = PlatformConfig {
@@ -142,6 +147,25 @@ mod tests {
             crate::discovery::first_route_servers(&proxy),
             ["http://127.0.0.1:49153/"]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn the_ports_of_the_app_win_over_the_proxy_ports_of_the_config() -> anyhow::Result<()> {
+        let mut app_spec = spec(&["shop.example.com"]);
+        app_spec.ports = vec!["https".into()];
+        let app = LiveApp {
+            id: "abc-def".parse()?,
+            name: "shop",
+            spec: &app_spec,
+            host_port: 49153,
+        };
+        let config = PlatformConfig {
+            proxy_ports: vec!["http".into()],
+            ..Default::default()
+        };
+        let proxy = app_proxy(&app, &config)?.expect("a proxy");
+        assert_eq!(proxy.definition.ports, ["https"]);
         Ok(())
     }
 
