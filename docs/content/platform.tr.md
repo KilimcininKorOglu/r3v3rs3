@@ -30,7 +30,7 @@ agent_host = "master.example.com"
 |---|---|---|
 | `enabled` | `false` | Platformu başlatır. Cluster düğümü platformu çalıştırmaz. |
 | `docker` | `unix:///var/run/docker.sock` | Docker Engine API'si: bir Unix socket'i veya düz TCP. TLS desteklenmez. |
-| `proxy_ports` | boş | Uygulamaları sunan portların adları veya id'leri, örneğin HTTP portu ve HTTPS portu. |
+| `proxy_ports` | boş | Kendi portlarını seçmeyen bir uygulamayı sunan portların adları veya id'leri, örneğin HTTP portu ve HTTPS portu. Bu liste de boşsa böyle bir uygulama tüm HTTP ve HTTPS portlarını alır. |
 | `acme` | yok | Uygulamaların alan adlarına sertifika sipariş eden ACME kaydının id'si. Bu değer yoksa uygulamalar sertifika almaz. Ayarlar kartı bu değeri korur; kayıtları ACME sayfası yönetir. |
 | `agent_port` | yok | Uzak sunuculardaki agent'ların bağlandığı TCP portu. Sunucu bu portu bütün IPv4 adreslerinde dinler. Bu değer yoksa sunucu hiçbir agent'ı kabul etmez. [Agent hedefleri](#agent-hedefleri) bölümüne bakın. Ayarlar kartı bu değeri korur. |
 | `agent_host` | yok | **Hedefler** sayfasındaki agent komutlarında bu sunucunun host adı veya adresi. Bu değer yoksa sayfa kendi adresindeki host adını kullanır. Ayarlar kartı bu değeri korur. |
@@ -66,6 +66,7 @@ Bir uygulama bir image'ı, container'ın dinlediği portu ve uygulamaya yönlene
 
 - `target` değeri, r3v3rs3 sunucusunun Docker Engine'i olan `local` veya bir [agent hedefinin](#agent-hedefleri) id'sidir. Bir uygulamanın hedefi ilk deployment'tan sonra değişmez: bir değişiklik `409 app_target_fixed` yanıtını alır.
 - `domains` DNS adlarıdır. Wildcard veya IP adresi kabul edilmez, çünkü her alan adı ACME'den bir sertifika alır.
+- `ports`, uygulamayı sunan portların adları veya id'leridir. Uygulama formundaki **Portlar** ve **Ek Portlar** alanları bunları seçer. `ports` değeri boşsa uygulama `proxy_ports` portlarını alır; o ayar da boşsa tüm HTTP ve HTTPS portlarını alır.
 - `health_check_path`, uygulama hazır olduğunda `2xx` veya `3xx` döndüren bir HTTP yoludur. Bu değer yoksa deployment, port bir bağlantıyı kabul edip açık tutana kadar bekler.
 - `volumes` adlandırılmış Docker volume'larını bağlar. `"read_only": true` volume'u salt okunur bağlar. Host üzerindeki bir yol bağlanamaz.
 - `restart` değeri `no`, `on-failure`, `unless-stopped` (varsayılan) veya `always` olur.
@@ -267,7 +268,7 @@ Bir uygulamanın kullandığı bağlantı silinemez ve `409 git_connection_in_us
 
 Platform, en az bir alan adı olan her çalışan uygulama için bir proxy ekler. Bu proxy'ler `Platform` sağlayıcısından gelir. Bu yüzden [servis keşfi](@/discovery.tr.md) proxy'leri gibi salt okunurdur ve proxy listesi sağlayıcının durumunu gösterir. Her proxy:
 
-- `proxy_ports` portlarında dinler,
+- uygulamanın **Portlar** alanlarında seçtiği portlarda dinler; seçim yoksa `proxy_ports` portlarını, o ayar da boşsa tüm HTTP ve HTTPS portlarını kullanır,
 - uygulamanın alan adlarına yanıt verir,
 - istekleri container'ın `127.0.0.1` üzerindeki dışarı açılmış portuna gönderir,
 - sertifikasını `acme` ACME kaydından, kaydın hesabı, challenge'ı ve DNS sağlayıcısı ile alır. [ACME sertifikaları](@/discovery.tr.md#acme-sertifikalari) kuralları geçerlidir.

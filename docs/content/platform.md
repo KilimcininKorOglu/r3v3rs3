@@ -30,7 +30,7 @@ agent_host = "master.example.com"
 |---|---|---|
 | `enabled` | `false` | Starts the platform. A cluster node does not run the platform. |
 | `docker` | `unix:///var/run/docker.sock` | The Docker Engine API: a Unix socket or plain TCP. TLS is not supported. |
-| `proxy_ports` | empty | The names or the ids of the ports that serve the apps, for example the HTTP port and the HTTPS port. |
+| `proxy_ports` | empty | The names or the ids of the ports that serve an app that selects no ports of its own, for example the HTTP port and the HTTPS port. When this list is also empty, such an app takes every HTTP and HTTPS port. |
 | `acme` | none | The id of the ACME entry that orders the certificates of the app domains. Without it the apps get no certificate. The settings card keeps this value; the ACME page manages the entries. |
 | `agent_port` | none | The TCP port on every IPv4 address that the agents of remote servers connect to. Without it the server accepts no agent. See [Agent targets](#agent-targets). The settings card keeps this value. |
 | `agent_host` | none | The host name or the address of this server in the agent commands of the **Targets** page. Without it the page uses the host name of its own address. The settings card keeps this value. |
@@ -66,6 +66,7 @@ An app names an image, the port that the container listens on and the domains th
 
 - `target` is `local`, the Docker Engine of the r3v3rs3 server, or the id of an [agent target](#agent-targets). The target of an app cannot change after its first deployment: a change answers `409 app_target_fixed`.
 - `domains` are DNS names. A wildcard or an IP address is not accepted, because each domain gets a certificate from ACME.
+- `ports` are the names or the ids of the ports that serve the app, as the **Ports** and **Extra Ports** fields of the app form select them. An app without `ports` takes the ports of `proxy_ports`, or every HTTP and HTTPS port when that setting is also empty.
 - `health_check_path` is an HTTP path that answers `2xx` or `3xx` when the app is ready. Without it a deployment waits until the port accepts a connection and keeps it open.
 - `volumes` mounts named Docker volumes, and `"read_only": true` mounts one read-only. A host path cannot be mounted.
 - `restart` is `no`, `on-failure`, `unless-stopped` (the default) or `always`.
@@ -267,7 +268,7 @@ The notification webhook of the "Settings" page also gets the events of the plat
 
 The platform adds one proxy for each running app that has at least one domain. The proxies come from the `Platform` provider, so they are read-only like the proxies of [service discovery](@/discovery.md), and the proxy list shows the provider status. Each proxy:
 
-- listens on the ports of `proxy_ports`,
+- listens on the ports that the app selects in its **Ports** fields, or the ports of `proxy_ports` when it selects none, or every HTTP and HTTPS port when that setting is also empty,
 - answers the domains of the app,
 - sends the requests to the published port of the container on `127.0.0.1`,
 - gets its certificate from the ACME entry of `acme`, with the account, the challenge and the DNS provider of the entry. The rules of [ACME Certificates](@/discovery.md#acme-certificates) apply.

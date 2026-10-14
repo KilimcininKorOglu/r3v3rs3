@@ -232,7 +232,7 @@ Each running app with at least one domain gets one r3v3rs3 HTTP proxy. The platf
 
 - `vhosts`: the app domains.
 - `routes[0].servers`: `http://127.0.0.1:<port>/`, the port that Docker publishes for the container port on `127.0.0.1`. On an agent target it is the port of a loopback forwarder of the master, which section 10.4 connects to the agent tunnel.
-- `ports`: the ports of `proxy_ports` in the `[platform]` section of `config.toml`.
+- `ports`: the ports of the app spec, or the ports of `proxy_ports` in the `[platform]` section when the spec selects none, or every HTTP and HTTPS port when that setting is also empty.
 - `acme`: the existing ACME entry of `acme` in the `[platform]` section. The certificate follows the rules of discovered proxies.
 
 `publish.rs` reads the running deployments and inspects their containers every 15 seconds, and sends a snapshot only when the result changed. A missing or stopped container becomes an issue of the provider status. `DiscoveryProvider::ALL` does not list `Platform`, so a change of the discovery settings never clears the app proxies. An app without a domain gets no proxy, because a proxy without virtual hosts would answer every host name of its ports.
@@ -382,7 +382,7 @@ Each phase ends with integration tests and docs, and is usable on its own.
 2. **Docker image.** A second image with the `-platform` tag suffix carries `git` and `docker`. The default image stays distroless and small. The `platform` target of the `Dockerfile` is `debian:trixie-slim` with `git` from apt and the static `docker` CLI, Compose and buildx plugins of the pinned `docker:<version>-cli` image. buildx is included, because without it Compose builds with the classic builder, which rejects `RUN --mount`. `latest` becomes `latest-platform`. In a container the platform needs host networking and the config directory on the same path as on the host, because the bind mounts of a Compose file resolve on the host. An installation through `install.sh` uses the `git` and `docker` binaries of the host.
 3. **Agent port.** A dedicated `agent_port` setting in `config.toml`, outside the port list (section 10.2).
 4. **Traffic to agent apps.** Through a tunnel inside the agent link, reached through a loopback forwarder on the master (section 10.4). The agent host opens no port to the network.
-5. **App proxy ports.** The operator lists them in `proxy_ports` of the `[platform]` section. The platform opens no port of its own.
+5. **App proxy ports.** The app form selects them per app; `proxy_ports` of the `[platform]` section is the fallback for an app without a selection, and every HTTP and HTTPS port is the fallback when that setting is also empty. The platform opens no port of its own.
 6. **App certificates.** From an existing ACME entry named by `acme` in the `[platform]` section. The platform creates no ACME entry.
 7. **Container address.** Docker publishes the app port on a free port of `127.0.0.1`. r3v3rs3 reaches the container there, and other hosts do not. This works the same whether r3v3rs3 runs on the host or in a container with host networking.
 8. **Proxy delivery.** The app proxies travel as the snapshot of the `Platform` discovery provider (section 9), not as stored proxies.
