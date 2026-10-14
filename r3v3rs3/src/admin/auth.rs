@@ -120,7 +120,7 @@ async fn record_login_failure(state: &AppState, key: LoginAttemptKey) {
     let record = AuditRecord::new(AuditAction::LoginFailed);
     state.record_audit(&key.1, Some(key.0), record).await;
     let mut data = state.data.lock().await;
-    let admin = data.config.admin;
+    let admin = data.config.admin.clone();
     data.login_attempts.record_failure(
         key,
         admin.max_login_attempts,
@@ -212,6 +212,14 @@ pub async fn session(
         role: caller.role,
         proxies: caller.proxies,
         cert_expiry_warning,
+        display_timezone: state
+            .data
+            .lock()
+            .await
+            .config
+            .admin
+            .display_timezone
+            .clone(),
     })
 }
 

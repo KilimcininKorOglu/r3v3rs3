@@ -1173,6 +1173,7 @@ The "Settings" section of the WebUI edits the server-wide options stored in `con
 | Setting | Default | Description |
 |---|---|---|
 | Session Expiry | `1h` | Lifetime of an admin session. The minimum is 5 minutes. |
+| Display Time Zone | `UTC` | The IANA time zone that the panel renders the stored times in, for example Europe/Istanbul. The times stay stored as UTC. |
 | Max Login Attempts | `10` | Failed logins allowed per client IP and username. |
 | Login Attempts Reset | `15m` | Wait time after the limit is reached. |
 | Background Task Interval | `1h` | Interval of certificate renewal and log cleanup tasks. |

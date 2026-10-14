@@ -16,6 +16,8 @@ session_expiry = "1h"
 max_login_attempts = 10
 # How long a blocked client address and username waits before the next sign-in attempt.
 login_attempts_reset = "15m"
+# The IANA time zone that the panel renders the stored times in. The times stay UTC.
+# display_timezone = "UTC"
 
 [log]
 # How long the log database keeps an entry.

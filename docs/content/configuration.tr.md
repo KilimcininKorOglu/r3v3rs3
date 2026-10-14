@@ -1173,6 +1173,7 @@ WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütü
 | Ayar | Varsayılan | Açıklama |
 |---|---|---|
 | Oturum Süresi | `1h` | Yönetim paneli oturumunun geçerlilik süresi. En az 5 dakika olabilir. |
+| Görüntüleme Saat Dilimi | `UTC` | Panelin saklanan zamanları gösterdiği IANA saat dilimi, örneğin Europe/Istanbul. Zamanlar UTC olarak saklanmaya devam eder. |
 | Maksimum Giriş Denemesi | `10` | Her istemci IP adresi ve kullanıcı adı için izin verilen başarısız giriş sayısı. |
 | Giriş Denemesi Sıfırlama Süresi | `15m` | Limite ulaşıldıktan sonraki bekleme süresi. |
 | Arka Plan Görevi Aralığı | `1h` | Sertifika yenileme ve log temizleme görevlerinin çalışma aralığı. |

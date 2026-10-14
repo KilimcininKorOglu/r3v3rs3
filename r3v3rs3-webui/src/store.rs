@@ -59,6 +59,8 @@ pub struct SessionStore {
     /// The tag of the newest release, when the update check found a newer one. The banner on
     /// every page shows it.
     pub update_available: Option<String>,
+    /// The IANA time zone that the panel renders the stored times in. Empty is UTC.
+    pub display_timezone: String,
 }
 
 impl SessionStore {
@@ -107,9 +109,11 @@ mod tests {
                 role,
                 proxies,
                 cert_expiry_warning: Default::default(),
+                display_timezone: "UTC".into(),
             }),
             platform_enabled: true,
             update_available: None,
+            display_timezone: "UTC".into(),
         };
         let restricted = Some(BTreeSet::from(["web".parse().unwrap()]));
         let cases = [

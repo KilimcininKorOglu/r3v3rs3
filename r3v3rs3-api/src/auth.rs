@@ -124,6 +124,11 @@ pub struct SessionInfo {
     #[serde(with = "humantime_serde")]
     #[schema(value_type = String, example = "14days")]
     pub cert_expiry_warning: std::time::Duration,
+    /// The IANA time zone that the panel renders the stored times in. An older server answers
+    /// without this field, which the panel reads as UTC.
+    #[serde(default)]
+    #[schema(value_type = String, example = "UTC")]
+    pub display_timezone: String,
 }
 
 #[derive(Deserialize, Serialize, ToSchema)]

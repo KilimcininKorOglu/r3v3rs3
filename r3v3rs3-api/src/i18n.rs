@@ -314,6 +314,7 @@ mod tests {
                 min: 1,
                 max: 10,
             },
+            Error::InvalidDisplayTimezone { timezone: text() },
             Error::InvalidStickyCookieName { name: text() },
             Error::InvalidPathRegex { pattern: text() },
             Error::InvalidPathPrefix { prefix: text() },

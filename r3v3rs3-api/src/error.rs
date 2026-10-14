@@ -331,6 +331,9 @@ pub enum Error {
     #[error("the {name} limit must be from {min} to {max}")]
     InvalidHttpLimits { name: String, min: u64, max: u64 },
 
+    #[error("unknown display time zone: {timezone}")]
+    InvalidDisplayTimezone { timezone: String },
+
     #[error("sticky cookie name must be a cookie token: {name}")]
     InvalidStickyCookieName { name: String },
 

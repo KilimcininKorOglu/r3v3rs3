@@ -8,9 +8,9 @@ use gloo_net::http::{Request, RequestBuilder, Response};
 use r3v3rs3_api::{
     acme::webhook_url_allowed,
     app::{
-        AcmeExecConfig, AdminConfig, AppConfig, Http2Limits, Http3Limits, LogConfig,
-        McpClientConfig, McpConfig, NotificationConfig, UpgradeConfig, UpgradeQuery, UpgradeStage,
-        UpgradeStageResponse, UpgradeStarted, WebhookConfig,
+        AcmeExecConfig, AdminConfig, AppConfig, DISPLAY_TIMEZONES, Http2Limits, Http3Limits,
+        LogConfig, McpClientConfig, McpConfig, NotificationConfig, UpgradeConfig, UpgradeQuery,
+        UpgradeStage, UpgradeStageResponse, UpgradeStarted, WebhookConfig,
     },
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
@@ -44,6 +44,7 @@ struct Fields {
     session_expiry: String,
     max_login_attempts: String,
     login_attempts_reset: String,
+    display_timezone: String,
     database_log_retention: String,
     audit_log_retention: String,
     cert_expiry_warning: String,
@@ -176,6 +177,7 @@ impl Fields {
             session_expiry: text("/admin/session_expiry"),
             max_login_attempts: text("/admin/max_login_attempts"),
             login_attempts_reset: text("/admin/login_attempts_reset"),
+            display_timezone: text("/admin/display_timezone"),
             database_log_retention: text("/log/database_log_retention"),
             audit_log_retention: text("/log/audit_log_retention"),
             cert_expiry_warning: text("/notifications/cert_expiry_warning"),
@@ -319,6 +321,8 @@ pub fn settings() -> Html {
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.max_login_attempts_hint")}</p>
             { text_field(&fields, &errors, locale.t("settings.login_attempts_reset"), "login_attempts_reset", "15m", |f| &mut f.login_attempts_reset) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.login_attempts_reset_hint")}</p>
+            { select_field(&fields, &errors, locale.t("settings.display_timezone"), "display_timezone", &DISPLAY_TIMEZONES, |f| &mut f.display_timezone) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.display_timezone_hint")}</p>
 
             <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.server")}</h2>
             { text_field(&fields, &errors, locale.t("settings.background_task_interval"), "background_task_interval", "1h", |f| &mut f.background_task_interval) }
@@ -442,6 +446,51 @@ fn textarea_field(
         <>
             <label class={LABEL_CLASS}>{label}</label>
             <textarea rows="4" autocapitalize="off" value={value} onchange={onchange} class={INPUT_CLASS} placeholder={placeholder} />
+            if let Some(err) = errors.get(key) {
+                <p class="mt-2 text-sm text-red-600 dark:text-red-500">{err}</p>
+            }
+        </>
+    }
+}
+
+/// A select field whose options are the given values. The stored value stays selected when it
+/// is not in the list, so a config.toml value survives an open page.
+fn select_field(
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+    label: &'static str,
+    key: &'static str,
+    options: &[&str],
+    select: fn(&mut Fields) -> &mut String,
+) -> Html {
+    let mut current = (**fields).clone().unwrap_or_default();
+    let value = select(&mut current).clone();
+    let fields = fields.clone();
+    let onchange = Callback::from(move |event: Event| {
+        let target: HtmlSelectElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+        let mut updated = (*fields).clone().unwrap_or_default();
+        *select(&mut updated) = target.value();
+        fields.set(Some(updated));
+    });
+    let extra = (!options.contains(&value.as_str())).then(|| {
+        let value = value.clone();
+        html! { <option value={value.clone()} selected={true}>{value}</option> }
+    });
+    let list: Vec<Html> = options
+        .iter()
+        .map(|option| {
+            let option = (*option).to_owned();
+            let selected = option == value;
+            html! { <option value={option.clone()} selected={selected}>{option}</option> }
+        })
+        .collect();
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{label}</label>
+            <select {onchange} class={INPUT_CLASS}>
+                { extra }
+                { for list }
+            </select>
             if let Some(err) = errors.get(key) {
                 <p class="mt-2 text-sm text-red-600 dark:text-red-500">{err}</p>
             }
@@ -1033,6 +1082,13 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             ("login_attempts_reset", &fields.login_attempts_reset),
         ],
     );
+    let display_timezone = fields.display_timezone.trim().to_owned();
+    if !DISPLAY_TIMEZONES.contains(&display_timezone.as_str()) {
+        errors.insert(
+            "display_timezone".into(),
+            locale.t("settings.invalid_display_timezone").into(),
+        );
+    }
     let log = parse_durations::<LogConfig>(
         &mut errors,
         invalid_duration,
@@ -1115,6 +1171,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 session_expiry: admin[0].session_expiry,
                 max_login_attempts,
                 login_attempts_reset: admin[1].login_attempts_reset,
+                display_timezone,
             },
             log: LogConfig {
                 database_log_retention: log[0].database_log_retention,

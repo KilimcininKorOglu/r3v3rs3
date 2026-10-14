@@ -157,7 +157,7 @@ impl SessionService {
 
     fn record_failure(&self, key: LoginAttemptKey) {
         let mut state = self.state();
-        let config = state.config;
+        let config = state.config.clone();
         state.attempts.record_failure(
             key,
             config.max_login_attempts,

@@ -401,7 +401,30 @@ pub struct UpgradeQuery {
     pub section: String,
 }
 
-#[derive(Debug, DefaultFromSerde, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+/// The IANA time zones that the panel can render the stored times in. The list is fixed, so a
+/// typo in `config.toml` or in the settings page cannot select a zone that the browser cannot
+/// resolve.
+pub const DISPLAY_TIMEZONES: [&str; 17] = [
+    "UTC",
+    "Europe/Istanbul",
+    "Europe/London",
+    "Europe/Berlin",
+    "Europe/Paris",
+    "Europe/Amsterdam",
+    "Europe/Moscow",
+    "America/New_York",
+    "America/Chicago",
+    "America/Los_Angeles",
+    "America/Sao_Paulo",
+    "Asia/Dubai",
+    "Asia/Kolkata",
+    "Asia/Singapore",
+    "Asia/Hong_Kong",
+    "Asia/Tokyo",
+    "Australia/Sydney",
+];
+
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AdminConfig {
     #[serde(with = "humantime_serde", default = "default_admin_session_expiry")]
     #[schema(value_type = String, example = "1d")]
@@ -413,6 +436,26 @@ pub struct AdminConfig {
     #[serde(with = "humantime_serde", default = "default_login_attempts_reset")]
     #[schema(value_type = String, example = "15m")]
     pub login_attempts_reset: Duration,
+
+    /// The IANA time zone that the panel renders the stored times in. The stored times stay
+    /// UTC; this only changes how the panel shows them.
+    #[serde(default = "default_display_timezone")]
+    pub display_timezone: String,
+}
+
+impl AdminConfig {
+    pub fn validate(&self) -> Result<(), Error> {
+        if !DISPLAY_TIMEZONES.contains(&self.display_timezone.as_str()) {
+            return Err(Error::InvalidDisplayTimezone {
+                timezone: self.display_timezone.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn default_display_timezone() -> String {
+    "UTC".to_owned()
 }
 
 fn default_admin_session_expiry() -> Duration {

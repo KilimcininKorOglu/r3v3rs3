@@ -61,7 +61,9 @@ fn shell() -> Html {
                         // the banner names the newest release, so the app information travels
                         // with the session.
                         let (platform_enabled, update_available) = auth::get_session_flags().await;
+                        crate::format::set_display_timezone(&info.display_timezone);
                         set_session.set(SessionStore {
+                            display_timezone: info.display_timezone.clone(),
                             info: Some(info),
                             platform_enabled,
                             update_available,
@@ -131,7 +133,9 @@ fn use_signed_out_redirect(
                 match auth::check_session().await {
                     auth::SessionState::Active(info) => {
                         let (platform_enabled, update_available) = auth::get_session_flags().await;
+                        crate::format::set_display_timezone(&info.display_timezone);
                         set_session.set(SessionStore {
+                            display_timezone: info.display_timezone.clone(),
                             info: Some(info),
                             platform_enabled,
                             update_available,

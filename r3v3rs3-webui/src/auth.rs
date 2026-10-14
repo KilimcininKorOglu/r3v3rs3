@@ -82,7 +82,9 @@ pub fn use_ensure_auth() {
                 SessionState::Active(info) => {
                     if session.get().info.as_ref() != Some(&info) {
                         let (platform_enabled, update_available) = get_session_flags().await;
+                        crate::format::set_display_timezone(&info.display_timezone);
                         session.set(SessionStore {
+                            display_timezone: info.display_timezone.clone(),
                             info: Some(info),
                             platform_enabled,
                             update_available,

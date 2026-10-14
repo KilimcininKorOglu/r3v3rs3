@@ -106,15 +106,17 @@ async fn read_events(dispatchers: &Dispatchers) {
     }
 }
 
-/// Replaces one flag of the session store: the platform flag that the sidebar reads, or the
-/// newest release that the banner shows. A settings change or an update check reaches the
-/// event stream before the page that shows the flag reloads.
+/// Replaces one flag of the session store: the platform flag that the sidebar reads, the time
+/// zone that the pages render with, or the newest release that the banner shows. A settings
+/// change or an update check reaches the event stream before the page that shows the flag
+/// reloads.
 fn set_session_flag(stores: &Dispatchers, change: impl FnOnce(&mut SessionStore)) {
     stores.session.reduce(|state| {
         let mut next = SessionStore {
             info: state.info.clone(),
             platform_enabled: state.platform_enabled,
             update_available: state.update_available.clone(),
+            display_timezone: state.display_timezone.clone(),
         };
         change(&mut next);
         next.into()
@@ -125,7 +127,9 @@ fn set_session_flag(stores: &Dispatchers, change: impl FnOnce(&mut SessionStore)
 fn apply_session_event(stores: &Dispatchers, event: ServerEvent) {
     match event {
         ServerEvent::AppConfigUpdated { config } => set_session_flag(stores, |session| {
-            session.platform_enabled = config.platform.enabled
+            session.platform_enabled = config.platform.enabled;
+            crate::format::set_display_timezone(&config.admin.display_timezone);
+            session.display_timezone = config.admin.display_timezone.clone();
         }),
         ServerEvent::UpdateAvailable { tag } => {
             set_session_flag(stores, |session| session.update_available = tag)

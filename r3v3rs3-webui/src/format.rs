@@ -1,17 +1,37 @@
 use r3v3rs3_api::i18n::Locale;
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use std::cell::RefCell;
+use time::{OffsetDateTime, UtcOffset, format_description::well_known::Rfc3339};
+use wasm_bindgen::JsCast;
 use wasm_bindgen::UnwrapThrowExt;
 use web_time::{SystemTime, UNIX_EPOCH};
 
 const HOUR: u64 = 3600;
 const DAY: u64 = 24 * HOUR;
 
+thread_local! {
+    /// The IANA time zone of the `[admin]` display_timezone setting, which the panel renders
+    /// the stored times in. Empty is UTC, which is how the server stores every time.
+    static TIMEZONE: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Sets the time zone that the panel renders the stored times in. Empty and UTC keep the
+/// stored UTC times.
+pub fn set_display_timezone(timezone: &str) {
+    TIMEZONE.with(|cell| *cell.borrow_mut() = timezone.to_owned());
+}
+
+fn display_timezone() -> Option<String> {
+    TIMEZONE.with(|cell| {
+        let zone = cell.borrow().clone();
+        (!zone.is_empty() && zone != "UTC").then_some(zone)
+    })
+}
+
 /// Formats a Unix time as its date and the exact days left until it,
 /// e.g. `2026-12-01 (59 days)`. A time less than a day away names its hours.
 pub fn format_duration(locale: Locale, unix_time: i64) -> String {
-    let time = OffsetDateTime::from_unix_timestamp(unix_time).unwrap_throw();
-    let timestamp = time.format(&Rfc3339).unwrap_throw();
-    let date = timestamp.split('T').next().unwrap_throw();
+    let timestamp = format_time(u64::try_from(unix_time).unwrap_throw() * 1000);
+    let date = timestamp.split('T').next().unwrap_throw().to_owned();
     let remaining = u64::try_from(unix_time)
         .ok()
         .zip(u64::try_from(unix_now()).ok())
@@ -19,12 +39,13 @@ pub fn format_duration(locale: Locale, unix_time: i64) -> String {
     format!("{date} ({})", time_left(locale, remaining))
 }
 
-/// A Unix time in milliseconds in the RFC 3339 form, in UTC.
+/// A Unix time in milliseconds in the RFC 3339 form, in the display time zone when it is set
+/// and in UTC otherwise.
 pub fn format_time(ms: u64) -> String {
-    OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
-        .ok()
-        .and_then(|time| time.format(&Rfc3339).ok())
-        .unwrap_or_else(|| ms.to_string())
+    match display_timezone().and_then(|zone| timezone_offset_seconds(&zone, ms)) {
+        Some(offset) => rfc3339_in_offset(ms, offset).unwrap_or_else(|| utc_rfc3339(ms)),
+        None => utc_rfc3339(ms),
+    }
 }
 
 /// The current Unix time in seconds.
@@ -33,6 +54,78 @@ pub fn unix_now() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
         .unwrap_or_default()
+}
+
+/// A Unix time in milliseconds in the RFC 3339 form, in UTC.
+fn utc_rfc3339(ms: u64) -> String {
+    OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
+        .ok()
+        .and_then(|time| time.format(&Rfc3339).ok())
+        .unwrap_or_else(|| ms.to_string())
+}
+
+/// A Unix time in milliseconds in the RFC 3339 form with the given offset in seconds east of
+/// UTC. The instant stays the same; only the rendered wall clock moves.
+fn rfc3339_in_offset(ms: u64, offset_seconds: i32) -> Option<String> {
+    let time = OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000).ok()?;
+    let sign = offset_seconds.signum();
+    let rest = offset_seconds.abs();
+    let offset = UtcOffset::from_hms(
+        (sign * (rest / 3600)) as i8,
+        (sign * ((rest % 3600) / 60)) as i8,
+        (sign * (rest % 60)) as i8,
+    )
+    .ok()?;
+    time.to_offset(offset).format(&Rfc3339).ok()
+}
+
+/// The offset of the IANA `zone` at the instant `ms`, in seconds east of UTC, as the browser
+/// resolves it: the browser owns the zone database, so a daylight saving change at the instant
+/// moves the offset with it. The formatter names the offset, for example `GMT+03:00`. Returns
+/// nothing without a JavaScript runtime, which keeps the native tests on the UTC path.
+fn timezone_offset_seconds(zone: &str, ms: u64) -> Option<i32> {
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &"timeZone".into(), &js_sys::JsString::from(zone)).ok()?;
+    js_sys::Reflect::set(&options, &"hourCycle".into(), &"h23".into()).ok()?;
+    js_sys::Reflect::set(&options, &"timeZoneName".into(), &"longOffset".into()).ok()?;
+    let locales = js_sys::Array::of1(&"en-US".into());
+    let formatter = js_sys::Intl::DateTimeFormat::new(&locales, &options);
+    let parts = formatter.format_to_parts(&js_sys::Date::new(&js_sys::Number::from(ms as f64)));
+    let name = parts.iter().find_map(|part| {
+        let part = part.dyn_into::<js_sys::Object>().ok()?;
+        let kind = js_sys::Reflect::get(&part, &"type".into())
+            .ok()?
+            .as_string()?;
+        (kind == "timeZoneName").then_some(()).and_then(|()| {
+            js_sys::Reflect::get(&part, &"value".into())
+                .ok()?
+                .as_string()
+        })
+    })?;
+    Some(parse_gmt_offset(&name))
+}
+
+/// Reads the seconds east of UTC out of the `GMT+03:00` form that `longOffset` names. A bare
+/// `GMT` is zero, and a zone without minutes keeps the `GMT+3` form.
+fn parse_gmt_offset(name: &str) -> i32 {
+    let Some(body) = name.strip_prefix("GMT") else {
+        return 0;
+    };
+    if body.is_empty() {
+        return 0;
+    }
+    let (sign, body) = if let Some(rest) = body.strip_prefix('-') {
+        (-1, rest)
+    } else {
+        (1, body.strip_prefix('+').unwrap_or(body))
+    };
+    let (hours, minutes) = match body.split_once(':') {
+        Some((hours, minutes)) => (hours, minutes),
+        None => (body, "0"),
+    };
+    let hours: i32 = hours.parse().unwrap_or(0);
+    let minutes: i32 = minutes.parse().unwrap_or(0);
+    sign * (hours * 3600 + minutes * 60)
 }
 
 /// Names the remaining time in exact days, or in hours when less than a day is left.
@@ -62,5 +155,18 @@ mod tests {
         assert_eq!(time_left(Locale::Tr, Some(60)), "bir saatten az");
         assert_eq!(time_left(Locale::En, Some(0)), "Expired");
         assert_eq!(time_left(Locale::Tr, None), "Süresi doldu");
+    }
+
+    #[test]
+    fn a_display_offset_shifts_the_rendered_wall_clock() {
+        assert_eq!(utc_rfc3339(1_500), "1970-01-01T00:00:01.5Z");
+        assert_eq!(
+            rfc3339_in_offset(1_500, 3 * 3600),
+            Some("1970-01-01T03:00:01.5+03:00".to_owned())
+        );
+        assert_eq!(
+            rfc3339_in_offset(1_500, -5 * 3600),
+            Some("1969-12-31T19:00:01.5-05:00".to_owned())
+        );
     }
 }

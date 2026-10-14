@@ -315,7 +315,7 @@ impl ServerState {
             storage.clone(),
             session_backend.clone(),
             accounts.subscribe(),
-            config.admin,
+            config.admin.clone(),
         ));
         let leader = !config.cluster.enabled && role == ServerRole::Master;
         let check_interval = config.upgrade.check_interval;
@@ -1601,6 +1601,7 @@ impl ServerState {
         config.http3.validate()?;
         discovery::validate_config(&config.discovery, &self.certs)?;
         config.notifications.validate()?;
+        config.admin.validate()?;
         self.storage.save_app_config(&config).await?;
         self.apply_config(config).await;
         Ok(())
@@ -1635,7 +1636,7 @@ impl ServerState {
         if platform_changed {
             self.restart_platform().await;
         }
-        self.sessions.set_config(config.admin);
+        self.sessions.set_config(config.admin.clone());
         let _ = self.br_sender.send(ServerEvent::AppConfigUpdated {
             config: Box::new(config.masked()),
         });
