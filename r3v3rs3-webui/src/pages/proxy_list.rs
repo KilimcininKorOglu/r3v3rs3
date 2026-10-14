@@ -34,7 +34,7 @@ const COLUMNS: [Column; 5] = [
         class: "whitespace-nowrap",
     },
     Column {
-        label: "common.ports",
+        label: "common.domains",
         class: "",
     },
     Column {
@@ -127,7 +127,7 @@ fn proxy_row(
     let cache_enabled = matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.cache.enabled);
     let purge_onclick = purge_onclick(locale, id);
     let onchange = toggle_onchange(id);
-    let port_names = port_names(entry, ports);
+    let addresses = addresses(entry, ports);
 
     let title = match entry.proxy.name.is_empty() {
         true => id.to_string(),
@@ -146,7 +146,7 @@ fn proxy_row(
         cells: vec![
             html! { <>{title}</> },
             source_cell(locale, entry),
-            html! { <>{port_names}</> },
+            html! { <>{addresses}</> },
             status_cell(locale, &status),
             active_toggle(entry.proxy.active, read_only, onchange),
         ],
@@ -208,8 +208,17 @@ fn toggle_onchange(id: ShortId) -> Callback<Event> {
     })
 }
 
-/// The protocol and the address of every port of the proxy.
-fn port_names(entry: &ProxyEntry, ports: &PortStore) -> String {
+/// The host names of an HTTP proxy, or the protocol and the address of every port of the other
+/// kinds, which have no host names.
+fn addresses(entry: &ProxyEntry, ports: &PortStore) -> String {
+    if let ProxyKind::Http(http) = &entry.proxy.kind {
+        return http
+            .vhosts
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+    }
     entry
         .proxy
         .ports

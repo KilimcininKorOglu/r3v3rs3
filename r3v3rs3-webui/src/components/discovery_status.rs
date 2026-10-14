@@ -4,20 +4,29 @@ use crate::{
 use gloo_net::http::Request;
 use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::i18n::Locale;
+use r3v3rs3_api::proxy::ProxyEntry;
 use yew::prelude::*;
 use yewdux::prelude::*;
 
-/// The state, the proxy count and the issues of each discovery provider. The card is empty when
-/// no provider runs.
+/// The state, the proxy count and the issues of each discovery provider, and the count of the
+/// manual proxies next to them. The card is empty when no provider runs.
 #[function_component(DiscoveryStatusCard)]
 pub fn discovery_status_card() -> Html {
     let locale = use_locale();
     let (store, dispatch) = use_store::<DiscoveryStore>();
+    let manual = use_state(|| Option::<usize>::None);
 
+    let handle = manual.clone();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
             if let Ok(entries) = get_statuses().await {
                 dispatch.set(DiscoveryStore { entries });
+            }
+        });
+        wasm_bindgen_futures::spawn_local(async move {
+            match get_proxies().await {
+                Ok(entries) => handle.set(Some(entries.len())),
+                Err(_) => handle.set(None),
             }
         });
     });
@@ -29,6 +38,11 @@ pub fn discovery_status_card() -> Html {
         <div class="mb-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("discovery.title")}</h2>
             { for store.entries.iter().map(|status| provider_view(locale, status)) }
+            if let Some(count) = (*manual).filter(|count| *count > 0) {
+                <p class="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
+                    {locale.tf("discovery.manual_proxies", &[("count", &count.to_string())])}
+                </p>
+            }
         </div>
     }
 }
@@ -73,6 +87,14 @@ fn issue_text(issue: &DiscoveryIssue) -> String {
 
 async fn get_statuses() -> Result<Vec<DiscoveryStatus>, gloo_net::Error> {
     Request::get(&format!("{API_ENDPOINT}/discovery"))
+        .send()
+        .await?
+        .json()
+        .await
+}
+
+async fn get_proxies() -> Result<Vec<ProxyEntry>, gloo_net::Error> {
+    Request::get(&format!("{API_ENDPOINT}/proxies"))
         .send()
         .await?
         .json()
