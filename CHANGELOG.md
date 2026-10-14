@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-10-14
+
+### Added
+- The times that the WebUI shows follow a configurable display time zone. The zone is stored in the server config under `admin.display_timezone` (the default stays UTC), the settings page offers a fixed list of IANA zones, and the session carries the zone so every rendered time follows it without a reload.
+
+### Changed
+- The CI workflows spend fewer runner minutes: the `Rust` workflow no longer runs a redundant full build step and only saves its caches from `main`, the release workflow creates the draft release in its own job so the binary jobs start without waiting for the WebUI build, and the Docker workflow builds the platform image after the runtime image so it can reuse its cache.
+
+### Fixed
+- The session endpoint answer of the accounts API test now expects the `display_timezone` field that the session carries since 1.8.0.
+
 ## [1.7.9] - 2026-10-14
 
 ### Fixed
