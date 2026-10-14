@@ -31,8 +31,39 @@ impl LoginQuery {
     }
 }
 
+/// The outcome of a session check. A request that died without an answer is `Unreachable`: the
+/// browser aborts the in-flight requests of a page that navigates away, and a failed check must
+/// never end a session that the server may still hold.
+pub enum SessionState {
+    Active(SessionInfo),
+    SignedOut,
+    Unreachable,
+}
+
+/// Asks the server for the session. Only a 401 answer signs the client out; a transport error or
+/// another status leaves the question open.
+pub async fn check_session() -> SessionState {
+    let res = match Request::get(&format!("{API_ENDPOINT}/session"))
+        .send()
+        .await
+    {
+        Ok(res) => res,
+        Err(_) => return SessionState::Unreachable,
+    };
+    if res.status() == 401 {
+        return SessionState::SignedOut;
+    }
+    if res.status() != 200 {
+        return SessionState::Unreachable;
+    }
+    match res.json::<SessionInfo>().await {
+        Ok(info) => SessionState::Active(info),
+        Err(_) => SessionState::Unreachable,
+    }
+}
+
 /// Sends a client without a session to the sign-in page, and keeps the account of the session in
-/// the session store.
+/// the session store. The check runs once per mount, and an unreachable server changes nothing.
 #[hook]
 pub fn use_ensure_auth() {
     let Some(navigator) = use_navigator() else {
@@ -42,25 +73,32 @@ pub fn use_ensure_auth() {
 
     let query = LoginQuery::new(use_route::<Route>().filter(|route| route != &Route::Login));
 
-    wasm_bindgen_futures::spawn_local(async move {
-        match get_session().await {
-            Some(info) => {
-                if session.get().info.as_ref() != Some(&info) {
-                    let (platform_enabled, update_available) = get_session_flags().await;
-                    session.set(SessionStore {
-                        info: Some(info),
-                        platform_enabled,
-                        update_available,
-                    });
+    use_effect_with((), move |_| {
+        let navigator = navigator.clone();
+        let session = session.clone();
+        let query = query.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            match check_session().await {
+                SessionState::Active(info) => {
+                    if session.get().info.as_ref() != Some(&info) {
+                        let (platform_enabled, update_available) = get_session_flags().await;
+                        session.set(SessionStore {
+                            info: Some(info),
+                            platform_enabled,
+                            update_available,
+                        });
+                    }
                 }
-            }
-            None => {
-                if let Err(err) = navigator.replace_with_query(&Route::Login, &query) {
-                    let message = format!("the sign-in redirect failed: {err}");
-                    web_sys::console::error_1(&message.into());
+                SessionState::SignedOut => {
+                    if let Err(err) = navigator.replace_with_query(&Route::Login, &query) {
+                        let message = format!("the sign-in redirect failed: {err}");
+                        web_sys::console::error_1(&message.into());
+                    }
                 }
+                SessionState::Unreachable => {}
             }
-        }
+        });
+        || {}
     });
 }
 
@@ -104,18 +142,6 @@ pub async fn test_token() -> bool {
     } else {
         false
     }
-}
-
-/// The account of the session. `None` without a valid session.
-pub async fn get_session() -> Option<SessionInfo> {
-    let res = Request::get(&format!("{API_ENDPOINT}/session"))
-        .send()
-        .await
-        .ok()?;
-    if res.status() != 200 {
-        return None;
-    }
-    res.json().await.ok()
 }
 
 #[cfg(test)]

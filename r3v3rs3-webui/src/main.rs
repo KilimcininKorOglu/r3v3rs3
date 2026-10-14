@@ -55,8 +55,8 @@ fn shell() -> Html {
         let set_session = set_session.clone();
         use_effect_with((), move |_| {
             wasm_bindgen_futures::spawn_local(async move {
-                match auth::get_session().await {
-                    Some(info) => {
+                match auth::check_session().await {
+                    auth::SessionState::Active(info) => {
                         // The sidebar hides the platform group while the platform is off and
                         // the banner names the newest release, so the app information travels
                         // with the session.
@@ -68,7 +68,9 @@ fn shell() -> Html {
                         });
                         auth.set(Auth::SignedIn);
                     }
-                    None => auth.set(Auth::SignedOut),
+                    auth::SessionState::SignedOut | auth::SessionState::Unreachable => {
+                        auth.set(Auth::SignedOut)
+                    }
                 }
             });
             || {}
@@ -126,8 +128,8 @@ fn use_signed_out_redirect(
             let auth = auth.clone();
             let set_session = set_session.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                match auth::get_session().await {
-                    Some(info) => {
+                match auth::check_session().await {
+                    auth::SessionState::Active(info) => {
                         let (platform_enabled, update_available) = auth::get_session_flags().await;
                         set_session.set(SessionStore {
                             info: Some(info),
@@ -136,11 +138,15 @@ fn use_signed_out_redirect(
                         });
                         auth.set(Auth::SignedIn);
                     }
-                    None => {
+                    // An unreachable server holds the page instead of ending the session: the
+                    // browser aborts the in-flight requests of a page that navigates away, and
+                    // such a killed check is not a sign-out.
+                    auth::SessionState::SignedOut => {
                         navigator
                             .replace_with_query(&pages::Route::Login, &LoginQuery::new(route))
                             .ok();
                     }
+                    auth::SessionState::Unreachable => {}
                 }
             });
         }
