@@ -135,16 +135,13 @@ detect_target() {
 	aarch64 | arm64) arch=aarch64 ;;
 	*) die "no release binary exists for $(uname -m); use x86_64 or aarch64" ;;
 	esac
-	# The static build runs everywhere. The glibc build needs glibc 2.35 or newer, so an
-	# older system, for example Rocky 8 or Debian 11, must take the static build too.
+	# The release targets glibc 2.17, so it runs on every glibc distribution, for example
+	# Rocky 8 or Debian 10. A musl distribution such as Alpine has no glibc loader, so the
+	# binary cannot run there; the Docker image is the way to run r3v3rs3 on Alpine.
 	if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then
-		echo "$arch-unknown-linux-musl"
-	elif ldd --version 2>/dev/null | head -1 | grep -Eq ' 2\.([0-9]+)' &&
-		[ "$(ldd --version 2>/dev/null | head -1 | grep -oE '2\.[0-9]+' | head -1 | cut -d. -f2)" -lt 35 ]; then
-		echo "$arch-unknown-linux-musl"
-	else
-		echo "$arch-unknown-linux-gnu"
+		die "this system uses musl libc; run r3v3rs3 as the Docker image instead"
 	fi
+	echo "$arch-unknown-linux-gnu"
 }
 
 fetch_release_json() {
@@ -170,12 +167,6 @@ install_binary() {
 	[ -n "$tag" ] || die "the release information has no tag"
 	file="r3v3rs3-$target.tar.xz"
 	digest=$(asset_digest "$json" "$file")
-	if [ -z "$digest" ] && [ "$target" != "${target%-musl}" ]; then
-		# The release of an older version has no musl archive; the glibc build still runs there.
-		warn "release $tag has no $file; falling back to the glibc build"
-		install_binary "${target%-musl}-gnu"
-		return
-	fi
 	[ -n "$digest" ] || die "release $tag has no sha256 digest for $file"
 
 	tmp=$(mktemp -d)

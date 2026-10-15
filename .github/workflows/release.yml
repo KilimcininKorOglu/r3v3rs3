@@ -65,59 +65,22 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Each target builds on a native runner. Ubuntu 22.04 keeps the required glibc at 2.35.
+  # One build per architecture serves every Linux: cargo zigbuild targets glibc 2.17, so the
+  # glibc binary also runs on the older distributions, for example Rocky 8 or Debian 10, that
+  # the glibc 2.35 build of the native runners could not serve. Zig also supplies the C
+  # compiler, through which aws-lc-rs compiles its C code. The MCP client additionally builds
+  # against musl, because install-mcp.sh offers the static build on the musl systems.
   binary:
-    name: Upload Release Assets (${{ matrix.target }})
-    needs: [release, webui]
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-22.04
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-22.04-arm
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Install Rust
-        # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
-        run: rustup toolchain install
-      - name: Check host target
-        run: test "$(rustc -vV | awk '/^host:/{print $2}')" = "${{ matrix.target }}"
-      - name: Cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: ${{ matrix.target }}
-      - name: Download webui
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: webui
-          path: r3v3rs3/dist/webui
-      - name: Build project
-        run: cargo build --release --locked -p r3v3rs3 -p r3v3rs3-mcp
-      - name: Make archive
-        run: tar -C target/release -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
-      - name: Make the archive of the MCP client
-        run: tar -C target/release -zcvf r3v3rs3-mcp-${{ matrix.target }}.tar.gz r3v3rs3-mcp
-      - name: Upload archive
-        if: github.event_name == 'push'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-mcp-${{ matrix.target }}.tar.gz
-
-  # Each musl target cross-compiles on one amd64 runner with cargo zigbuild, so no Alpine
-  # container and no arm runner is needed. zig supplies the musl libc and the C compiler;
-  # aws-lc-rs compiles its C code through it, with the cmake and perl of the runner.
-  binary-musl:
     name: Upload Release Assets (${{ matrix.target }})
     needs: [release, webui]
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-unknown-linux-musl
-          - aarch64-unknown-linux-musl
+        include:
+          - target: x86_64-unknown-linux-gnu
+            musl: x86_64-unknown-linux-musl
+          - target: aarch64-unknown-linux-gnu
+            musl: aarch64-unknown-linux-musl
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
@@ -126,7 +89,7 @@ jobs:
         # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
         run: |
           rustup toolchain install
-          rustup target add "${{ matrix.target }}"
+          rustup target add "${{ matrix.target }}" "${{ matrix.musl }}"
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
       - name: Install zig and cargo-zigbuild
@@ -136,26 +99,27 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: ${{ matrix.target }}-musl
+          key: ${{ matrix.target }}-2.17
       - name: Download webui
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: webui
           path: r3v3rs3/dist/webui
-      - name: Build project
-        run: cargo zigbuild --release --locked -p r3v3rs3 -p r3v3rs3-mcp --target ${{ matrix.target }}
-      - name: Check the static binary
-        # A static PIE binary reports "static-pie linked" instead of "statically linked".
-        run: file "target/${{ matrix.target }}/release/r3v3rs3" | grep -qE "statically|static-pie"
+      - name: Build the server and the MCP client for glibc 2.17
+        run: cargo zigbuild --release --locked -p r3v3rs3 -p r3v3rs3-mcp --target ${{ matrix.target }}.2.17
+      - name: Build the MCP client for musl
+        run: cargo zigbuild --release --locked -p r3v3rs3-mcp --target ${{ matrix.musl }}
       - name: Make archive
         run: tar -C "target/${{ matrix.target }}/release" -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
-      - name: Make the archive of the MCP client
-        run: tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-mcp-${{ matrix.target }}.tar.gz r3v3rs3-mcp
+      - name: Make the archives of the MCP client
+        run: |
+          tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-mcp-${{ matrix.target }}.tar.gz r3v3rs3-mcp
+          tar -C "target/${{ matrix.musl }}/release" -zcvf r3v3rs3-mcp-${{ matrix.musl }}.tar.gz r3v3rs3-mcp
       - name: Upload archive
         if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-mcp-${{ matrix.target }}.tar.gz
+        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-mcp-${{ matrix.target }}.tar.gz r3v3rs3-mcp-${{ matrix.musl }}.tar.gz
 
   test:
     name: Test
@@ -165,7 +129,7 @@ jobs:
   # that the repository carries in dist/minisign.pub.
   sign:
     name: Sign the checksums
-    needs: [binary, binary-musl, binary-mcp]
+    needs: [binary, binary-mcp]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
