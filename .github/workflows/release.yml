@@ -129,7 +129,7 @@ jobs:
   # that the repository carries in dist/minisign.pub.
   sign:
     name: Sign the checksums
-    needs: [binary, binary-mcp]
+    needs: [binary, binary-cli]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
@@ -219,7 +219,7 @@ jobs:
 
   # The command line client also runs on the laptop of the admin, so macOS and Windows get
   # their own archives. The server itself stays Linux only.
-  binary-mcp:
+  binary-cli:
     name: Upload Release Assets (r3v3rs3-cli, ${{ matrix.target }})
     # The command line client embeds no WebUI, so it only waits for the draft release.
     needs: release
@@ -248,7 +248,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: ${{ matrix.target }}-mcp
+          key: ${{ matrix.target }}-cli
       - name: Build the command line client
         run: cargo build --release --locked -p r3v3rs3-cli --target ${{ matrix.target }}
       - name: Make archive
@@ -274,7 +274,7 @@ jobs:
   publish:
     name: Publish release
     if: github.event_name == 'push'
-    needs: [binary, binary-mcp, crates, sign]
+    needs: [binary, binary-cli, crates, sign]
     runs-on: ubuntu-24.04
     steps:
       - name: Publish the draft release
