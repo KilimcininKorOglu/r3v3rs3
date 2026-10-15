@@ -3,15 +3,16 @@
 # Both Rust stages use the compiler of `channel` in rust-toolchain.toml. Raise the tags with it.
 FROM --platform=$BUILDPLATFORM rust:1.98.1-trixie AS chef
 ARG BUILDARCH
-ARG CARGO_CHEF_VERSION=0.1.71
+ARG CARGO_CHEF_VERSION=0.1.78
+# cargo-chef 0.1.71 shipped no aarch64 Linux asset; 0.1.78 ships both arches as tar.xz.
 RUN set -eu; \
     case "$BUILDARCH" in \
       amd64) triple=x86_64-unknown-linux-gnu ;; \
       arm64) triple=aarch64-unknown-linux-gnu ;; \
       *) echo "unsupported build platform: $BUILDARCH" >&2; exit 1 ;; \
     esac; \
-    url="https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}/cargo-chef-${triple}.tar.gz"; \
-    curl -fsSL "$url" | tar -xz -C /usr/local/bin cargo-chef
+    url="https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}/cargo-chef-${triple}.tar.xz"; \
+    curl -fsSL "$url" | tar -xJ -C /usr/local/bin --strip-components=1 --wildcards "*/cargo-chef"
 WORKDIR /usr/src/app
 
 FROM --platform=$BUILDPLATFORM chef AS planner
@@ -50,7 +51,7 @@ RUN trunk build --cargo-profile web-release --release
 
 FROM rust:1.98.1-trixie AS builder
 ARG TARGETARCH
-ARG CARGO_CHEF_VERSION=0.1.71
+ARG CARGO_CHEF_VERSION=0.1.78
 # aws-lc-sys builds its C sources with cmake and perl, and bindgen needs libclang.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends cmake perl libclang-dev \
@@ -61,8 +62,8 @@ RUN set -eu; \
       arm64) triple=aarch64-unknown-linux-gnu ;; \
       *) echo "unsupported target platform: $TARGETARCH" >&2; exit 1 ;; \
     esac; \
-    url="https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}/cargo-chef-${triple}.tar.gz"; \
-    curl -fsSL "$url" | tar -xz -C /usr/local/bin cargo-chef
+    url="https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}/cargo-chef-${triple}.tar.xz"; \
+    curl -fsSL "$url" | tar -xJ -C /usr/local/bin --strip-components=1 --wildcards "*/cargo-chef"
 WORKDIR /usr/src/app
 COPY --from=planner /usr/src/app/recipe.json recipe.json
 RUN cargo chef cook --release --package r3v3rs3 --recipe-path recipe.json
