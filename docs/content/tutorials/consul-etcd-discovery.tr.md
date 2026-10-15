@@ -35,7 +35,7 @@ exposed_by_default = false
 
 Token üç izne ihtiyaç duyar:
 
-```hcl
+```
 service_prefix "" { policy = "read" }
 node_prefix "" { policy = "read" }
 key_prefix "r3v3rs3/" { policy = "read" }

@@ -158,7 +158,7 @@ $ etcdctl --user r3v3rs3:<password> del r3v3rs3/probe
 
 Write the policy to `r3v3rs3.hcl`:
 
-```hcl
+```
 key_prefix "r3v3rs3/" {
   policy = "write"
 }

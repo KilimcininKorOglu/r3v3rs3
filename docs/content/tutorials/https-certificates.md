@@ -108,7 +108,7 @@ HSTS tells a browser to use HTTPS for the next request without a redirect. Add i
 1. Open the proxy and find the **Header Rules** section.
 2. Write this line in **Response Headers**:
 
-```text
+```
 set Strict-Transport-Security: max-age=31536000; includeSubDomains
 ```
 
@@ -135,7 +135,7 @@ HTTP/3 runs over QUIC, which is UDP. It needs a second port next to the HTTPS po
 
 The listen address of the port then reads:
 
-```text
+```
 /ip4/0.0.0.0/udp/443/quic/http
 ```
 

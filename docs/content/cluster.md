@@ -116,7 +116,7 @@ With another `prefix`, grant the permission on `<prefix>/`. The nodes renew the 
 
 The token of the nodes needs write access to the keys below the prefix and the permission to create sessions:
 
-```hcl
+```
 key_prefix "r3v3rs3/" {
   policy = "write"
 }

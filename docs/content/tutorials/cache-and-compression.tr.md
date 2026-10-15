@@ -58,7 +58,7 @@ Saklanan bir yanıtın ömrü şunlardan var olan ilkinden gelir: `s-maxage`, `m
 
 Yani kararı upstream sunucu verir, **Varsayılan TTL (Saniye)** de hiçbir şey söylemeyen yanıtları kapsar. Yapabildiğiniz yerde header'ları uygulamanızda ayarlayın:
 
-```text
+```
 Cache-Control: public, max-age=300
 ```
 

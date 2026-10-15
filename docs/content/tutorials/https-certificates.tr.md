@@ -108,7 +108,7 @@ HSTS, tarayıcıya bir sonraki istekte yönlendirme beklemeden HTTPS kullanması
 1. Proxy'yi açın ve **Header Kuralları** bölümünü bulun.
 2. **Yanıt Header'ları** alanına şu satırı yazın:
 
-```text
+```
 set Strict-Transport-Security: max-age=31536000; includeSubDomains
 ```
 
@@ -135,7 +135,7 @@ HTTP/3, QUIC üzerinde çalışır ve QUIC UDP'dir. HTTPS portunun yanına ikinc
 
 Portun dinleme adresi şöyle olur:
 
-```text
+```
 /ip4/0.0.0.0/udp/443/quic/http
 ```
 

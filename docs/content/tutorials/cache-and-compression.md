@@ -58,7 +58,7 @@ The lifetime of a stored response comes from the first of these that exists: `s-
 
 So the upstream server decides, and **Default TTL (Seconds)** covers the responses that say nothing. Set the headers in your application when you can:
 
-```text
+```
 Cache-Control: public, max-age=300
 ```
 

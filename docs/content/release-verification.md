@@ -14,13 +14,13 @@ Install `minisign` (for example `apt install minisign` or
 `SHA256SUMS` and `SHA256SUMS.minisig` from the release page, and save the
 public key next to them:
 
-```console
+```sh
 $ curl -LO https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/dist/minisign.pub
 ```
 
 Then verify the checksums:
 
-```console
+```sh
 $ minisign -Vm SHA256SUMS -p minisign.pub
 Signature and comment signature verified
 ```
@@ -28,7 +28,7 @@ Signature and comment signature verified
 `minisign` exits with a non-zero status when the signature does not match.
 When the signature is good, check the archive against the checksums:
 
-```console
+```sh
 $ sha256sum --check --ignore-missing SHA256SUMS
 r3v3rs3-x86_64-unknown-linux-gnu.tar.xz: OK
 ```

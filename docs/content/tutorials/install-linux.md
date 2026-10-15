@@ -28,7 +28,7 @@ The script asks one question:
 
 The last step of an install creates the admin account `admin`. Without a `--password` option the script generates a strong random password and prints it once:
 
-```text
+```
 r3v3rs3 v1.8.3 is running.
 
   WebUI:    http://127.0.0.1:46492/

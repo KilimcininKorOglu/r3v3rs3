@@ -158,7 +158,7 @@ $ etcdctl --user r3v3rs3:<parola> del r3v3rs3/probe
 
 Politikayı `r3v3rs3.hcl` dosyasına yazın:
 
-```hcl
+```
 key_prefix "r3v3rs3/" {
   policy = "write"
 }

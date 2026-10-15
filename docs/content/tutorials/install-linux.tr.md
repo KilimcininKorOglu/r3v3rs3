@@ -28,7 +28,7 @@ Script bir soru sorar:
 
 Kurulumun son adımı `admin` hesabını oluşturur. `--password` verilmezse script güçlü rastgele bir parola üretir ve bir kez basar:
 
-```text
+```
 r3v3rs3 v1.8.3 is running.
 
   WebUI:    http://127.0.0.1:46492/

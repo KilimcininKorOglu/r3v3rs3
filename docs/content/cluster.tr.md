@@ -123,7 +123,7 @@ Başka bir `prefix` kullanıyorsanız izni `<prefix>/` için verin. etcd kimlik 
 
 Düğümlerin token'ı önekin altındaki key'lere yazabilmeli ve oturum oluşturabilmelidir:
 
-```hcl
+```
 key_prefix "r3v3rs3/" {
   policy = "write"
 }

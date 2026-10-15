@@ -37,7 +37,7 @@ An issue names the resource and the reason, for example `web-1: http.app: port n
 
 Docker labels, Consul tags and key-value entries use the same keys. Each key has this form:
 
-```text
+```
 r3v3rs3.<protocol>.<name>.<field>=<value>
 ```
 
@@ -71,7 +71,7 @@ r3v3rs3.<protocol>.<name>.<field>=<value>
 
 `port` and `scheme` define one route to `/` with one server. They cannot be used together with `routes`.
 
-```text
+```
 r3v3rs3.http.app.ports=https
 r3v3rs3.http.app.vhosts=app.example.com
 r3v3rs3.http.app.port=8080
@@ -79,7 +79,7 @@ r3v3rs3.http.app.port=8080
 
 A route can also use `port` and `scheme`. They cannot be used together with `servers` or `response` of the same route.
 
-```text
+```
 r3v3rs3.http.app.ports=http,https
 r3v3rs3.http.app.vhosts=app.example.com
 r3v3rs3.http.app.routes.0.path=/
@@ -91,7 +91,7 @@ r3v3rs3.http.app.routes.1.scheme=https
 
 A server can have an explicit URL and a weight:
 
-```text
+```
 r3v3rs3.http.app.routes.0.servers.0.url=http://10.0.0.5:8080
 r3v3rs3.http.app.routes.0.servers.1.url=http://10.0.0.6:8080
 r3v3rs3.http.app.routes.0.servers.1.weight=3
@@ -100,7 +100,7 @@ r3v3rs3.http.app.load_balancing=round_robin
 
 The other fields use the names of the admin API:
 
-```text
+```
 r3v3rs3.http.app.upgrade_insecure=true
 r3v3rs3.http.app.ip_filter.allow=10.0.0.0/8,192.168.0.0/16
 r3v3rs3.http.app.rate_limit.requests=100
@@ -128,7 +128,7 @@ r3v3rs3 replaces plain text passwords and tokens with hashes before it uses the 
 
 `port` defines one upstream server on the address of the resource. It cannot be used together with `upstream_servers`.
 
-```text
+```
 r3v3rs3.tcp.db.ports=postgres
 r3v3rs3.tcp.db.port=5432
 
@@ -141,7 +141,7 @@ r3v3rs3.udp.dns.session_idle_timeout=30s
 
 `acme` names an existing ACME entry of the certificate list. r3v3rs3 orders a certificate for the virtual hosts of the proxy with the account, the challenge and the DNS provider of the entry.
 
-```text
+```
 r3v3rs3.http.app.ports=https
 r3v3rs3.http.app.vhosts=app.example.com,www.example.com
 r3v3rs3.http.app.port=8080

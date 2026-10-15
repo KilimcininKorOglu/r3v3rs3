@@ -37,7 +37,7 @@ Her sorun, kaynağı ve sebebi gösterir, örneğin `web-1: http.app: port not f
 
 Docker etiketleri, Consul etiketleri ve key-value kayıtları aynı key'leri kullanır. Her key şu biçimdedir:
 
-```text
+```
 r3v3rs3.<protocol>.<name>.<field>=<value>
 ```
 
@@ -71,7 +71,7 @@ r3v3rs3.<protocol>.<name>.<field>=<value>
 
 `port` ve `scheme`, `/` yoluna tek sunuculu bir route tanımlar. `routes` ile birlikte kullanılamaz.
 
-```text
+```
 r3v3rs3.http.app.ports=https
 r3v3rs3.http.app.vhosts=app.example.com
 r3v3rs3.http.app.port=8080
@@ -79,7 +79,7 @@ r3v3rs3.http.app.port=8080
 
 Bir route da `port` ve `scheme` kullanabilir. Aynı route'un `servers` veya `response` alanıyla birlikte kullanılamaz.
 
-```text
+```
 r3v3rs3.http.app.ports=http,https
 r3v3rs3.http.app.vhosts=app.example.com
 r3v3rs3.http.app.routes.0.path=/
@@ -91,7 +91,7 @@ r3v3rs3.http.app.routes.1.scheme=https
 
 Sunucuya açık bir URL ve ağırlık verilebilir:
 
-```text
+```
 r3v3rs3.http.app.routes.0.servers.0.url=http://10.0.0.5:8080
 r3v3rs3.http.app.routes.0.servers.1.url=http://10.0.0.6:8080
 r3v3rs3.http.app.routes.0.servers.1.weight=3
@@ -100,7 +100,7 @@ r3v3rs3.http.app.load_balancing=round_robin
 
 Diğer alanlar yönetim API'sinin adlarını kullanır:
 
-```text
+```
 r3v3rs3.http.app.upgrade_insecure=true
 r3v3rs3.http.app.ip_filter.allow=10.0.0.0/8,192.168.0.0/16
 r3v3rs3.http.app.rate_limit.requests=100
@@ -128,7 +128,7 @@ r3v3rs3, proxy'yi kullanmadan önce düz metin password ve token değerlerini ha
 
 `port`, kaynağın adresinde tek bir upstream sunucu tanımlar. `upstream_servers` ile birlikte kullanılamaz.
 
-```text
+```
 r3v3rs3.tcp.db.ports=postgres
 r3v3rs3.tcp.db.port=5432
 
@@ -141,7 +141,7 @@ r3v3rs3.udp.dns.session_idle_timeout=30s
 
 `acme`, sertifika listesindeki mevcut bir ACME kaydını verir. r3v3rs3, kaydın hesabı, challenge'ı ve DNS sağlayıcısı ile proxy'nin virtual host'ları için sertifika alır.
 
-```text
+```
 r3v3rs3.http.app.ports=https
 r3v3rs3.http.app.vhosts=app.example.com,www.example.com
 r3v3rs3.http.app.port=8080
