@@ -51,9 +51,3 @@ target/release/r3v3rs3 start
 ```
 
 `make release` builds the WebUI into `r3v3rs3/dist/webui` and then the server. The server embeds that directory at compile time, so the WebUI is built first.
-
-# Gitpod
-
-You can instantly start developing r3v3rs3 in your browser using Gitpod.
-
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/KilimcininKorOglu/r3v3rs3)

@@ -51,9 +51,3 @@ target/release/r3v3rs3 start
 ```
 
 `make release` önce WebUI'ı `r3v3rs3/dist/webui` dizinine, sonra sunucuyu build eder. Sunucu bu dizini derleme sırasında içine gömer. Bu yüzden WebUI önce build edilir.
-
-# Gitpod
-
-Gitpod ile r3v3rs3'ü doğrudan tarayıcıda geliştirebilirsiniz.
-
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/KilimcininKorOglu/r3v3rs3)
