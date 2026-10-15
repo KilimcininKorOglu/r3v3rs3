@@ -113,8 +113,29 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-cli-${{ matrix.target }}.tar.gz
 
+  # The main push already ran the Rust workflow for this commit. The release runs the test
+  # suite again only when that proof is missing, for example on a moved or older tag.
+  test-gate:
+    name: Test gate
+    runs-on: ubuntu-24.04
+    outputs:
+      tested: ${{ steps.check.outputs.tested }}
+    steps:
+      - name: Check for a green Rust run of this commit
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh run list --repo "$GITHUB_REPOSITORY" --workflow Rust --commit "$GITHUB_SHA" --status success --json databaseId --jq 'length > 0' | grep -q true; then
+            echo "tested=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tested=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Test
+    needs: test-gate
+    if: needs.test-gate.outputs.tested == 'false'
     uses: ./.github/workflows/rust.yml
 
   # Signs the checksums of the release assets, so a download verifies against the public key
@@ -164,8 +185,8 @@ jobs:
   # so the repository stores no crates.io secret.
   crates:
     name: Publish crates
-    if: github.event_name == 'push'
-    needs: [webui, test]
+    if: always() && github.event_name == 'push' && needs.webui.result == 'success' && needs.test-gate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    needs: [webui, test-gate, test]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
