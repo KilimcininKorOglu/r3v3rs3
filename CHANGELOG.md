@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.4] - 2026-10-15
+
+### Changed
+- The release ships one glibc binary per architecture again: cargo zigbuild now targets glibc 2.17, so the same archive runs on the older distributions, for example Rocky 8 or Debian 10, that the glibc 2.35 build could not serve. The separate musl archives of the server are gone.
+- The command line client is `r3v3rs3-cli` now, with the `install-cli.sh` and `install-cli.ps1` installers. An installed `r3v3rs3-mcp` keeps running; install the new name over it.
+- `install.sh` installs `git`, `nano`, Docker and the compose plugin when they are missing, because the deployment platform needs them.
+- `install.sh` picks the static build on a system whose glibc is older than 2.35.
+
+### Fixed
+- The docs code fences use the languages that Zola knows, so the site build shows no highlight warnings.
+
 ## [1.8.3] - 2026-10-15
 
 ### Changed
