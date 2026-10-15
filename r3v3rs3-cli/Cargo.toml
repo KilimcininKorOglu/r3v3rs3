@@ -1,12 +1,12 @@
 [package]
-name = "r3v3rs3-mcp"
+name = "r3v3rs3-cli"
 version = "1.8.3"
 edition = "2024"
 publish = false
 license = "MIT"
 repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
-description = "A command line MCP client for the r3v3rs3 admin API"
-authors = ["picoHz <picoHz@outlook.com>", "KilimcininKorOglu <k@keremgok.tr>"]
+description = "A command line client for the r3v3rs3 admin API"
+authors = ["KilimcininKorOglu <k@keremgok.tr>"]
 
 [dependencies]
 anyhow = "1.0.71"

@@ -1085,7 +1085,7 @@ MCP sunucusu varsayılan olarak kapalıdır. Panelin ayarlar sayfası onu sunucu
 enabled = true
 
 [[mcp.clients]]
-id = "r3v3rs3-mcp"
+id = "r3v3rs3-cli"
 name = "r3v3rs3 MCP client"
 redirect_uris = ["http://127.0.0.1:8765/callback"]
 ```
@@ -1096,26 +1096,26 @@ Token'lar yalnız bellekte tutulur, bu yüzden sunucunun yeniden başlaması her
 
 Bağlanma yolu client'a göre değişir. MCP authorization akışını konuşan bir AI host, örneğin Claude Code veya Cursor, ekstra bir programa ihtiyaç duymaz: bu sunucuyu bir HTTP MCP sunucusu olarak ekler, örneğin `claude mcp add --transport http --scope user r3v3rs3 https://panel.example.com/api/mcp` komutuyla, ve `/mcp` komutunun `Authenticate` adımı aynı authorization akışını tarayıcıda çalıştırır. Aşağıdaki komut satırı client'ı diğer durumlar içindir: script'ler, cron job'ları ve tarayıcı oturumu olmayan sunucular; tek komut bir kez giriş yapar ve token'larını sonraki her çağrı için saklar.
 
-Depo, `r3v3rs3-mcp` içinde bir komut satırı client'ı ile gelir. Kurulum script'i en yeni release'in derlenmiş binary'sini GitHub'dan indirir, sha256 özetini doğrular ve kurar:
+Depo, `r3v3rs3-cli` içinde bir komut satırı client'ı ile gelir. Kurulum script'i en yeni release'in derlenmiş binary'sini GitHub'dan indirir, sha256 özetini doğrular ve kurar:
 
 ```sh
 # Linux ve macOS:
-curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-mcp.sh | sh
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-cli.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell):
-irm https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-mcp.ps1 | iex
+irm https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-cli.ps1 | iex
 ```
 
-Windows'ta binary `%LOCALAPPDATA%\Programs\r3v3rs3-mcp` içine düşer; onu `PATH`'e eklersiniz. Script Linux ve macOS'ta `/usr/local/bin`'e kurar, `INSTALL_DIR` bu dizini değiştirir. Belirli bir release `--version vX.Y.Z` ile kurulur; her platformun arşivi ayrıca [releases sayfasında](https://github.com/KilimcininKorOglu/r3v3rs3/releases) durur.
+Windows'ta binary `%LOCALAPPDATA%\Programs\r3v3rs3-cli` içine düşer; onu `PATH`'e eklersiniz. Script Linux ve macOS'ta `/usr/local/bin`'e kurar, `INSTALL_DIR` bu dizini değiştirir. Belirli bir release `--version vX.Y.Z` ile kurulur; her platformun arşivi ayrıca [releases sayfasında](https://github.com/KilimcininKorOglu/r3v3rs3/releases) durur.
 
 Sonra:
 
 ```sh
-r3v3rs3-mcp http://127.0.0.1:46492 login
-r3v3rs3-mcp http://127.0.0.1:46492 tools
-r3v3rs3-mcp http://127.0.0.1:46492 call server_status
+r3v3rs3-cli http://127.0.0.1:46492 login
+r3v3rs3-cli http://127.0.0.1:46492 tools
+r3v3rs3-cli http://127.0.0.1:46492 call server_status
 ```
 
 `login`, onay sayfasını tarayıcıda açar ve token'ları yapılandırma dizinine kaydeder. Bir script, access token'ı doğrudan `--token` ile verebilir. `update` komutu, çalışan binary'nin yerine daha yeni bir release kurar ve sha256 özetini release'in checksum'larıyla doğrular.

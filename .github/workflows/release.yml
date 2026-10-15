@@ -16,7 +16,7 @@ env:
 jobs:
   # The draft release exists before any job uploads to it. Keeping this out of the WebUI job
   # lets the macOS and Windows MCP builds start without waiting for the Wasm build, which
-  # r3v3rs3-mcp does not embed.
+  # r3v3rs3-cli does not embed.
   release:
     name: Create release
     if: github.event_name == 'push'
@@ -68,8 +68,8 @@ jobs:
   # One build per architecture serves every Linux: cargo zigbuild targets glibc 2.17, so the
   # glibc binary also runs on the older distributions, for example Rocky 8 or Debian 10, that
   # the glibc 2.35 build of the native runners could not serve. Zig also supplies the C
-  # compiler, through which aws-lc-rs compiles its C code. The MCP client additionally builds
-  # against musl, because install-mcp.sh offers the static build on the musl systems.
+  # compiler, through which aws-lc-rs compiles its C code. The command line client additionally
+  # builds against musl, because install-cli.sh offers the static build on the musl systems.
   binary:
     name: Upload Release Assets (${{ matrix.target }})
     needs: [release, webui]
@@ -105,21 +105,21 @@ jobs:
         with:
           name: webui
           path: r3v3rs3/dist/webui
-      - name: Build the server and the MCP client for glibc 2.17
-        run: cargo zigbuild --release --locked -p r3v3rs3 -p r3v3rs3-mcp --target ${{ matrix.target }}.2.17
-      - name: Build the MCP client for musl
-        run: cargo zigbuild --release --locked -p r3v3rs3-mcp --target ${{ matrix.musl }}
+      - name: Build the server and the command line client for glibc 2.17
+        run: cargo zigbuild --release --locked -p r3v3rs3 -p r3v3rs3-cli --target ${{ matrix.target }}.2.17
+      - name: Build the command line client for musl
+        run: cargo zigbuild --release --locked -p r3v3rs3-cli --target ${{ matrix.musl }}
       - name: Make archive
         run: tar -C "target/${{ matrix.target }}/release" -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
-      - name: Make the archives of the MCP client
+      - name: Make the archives of the command line client
         run: |
-          tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-mcp-${{ matrix.target }}.tar.gz r3v3rs3-mcp
-          tar -C "target/${{ matrix.musl }}/release" -zcvf r3v3rs3-mcp-${{ matrix.musl }}.tar.gz r3v3rs3-mcp
+          tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-cli-${{ matrix.target }}.tar.gz r3v3rs3-cli
+          tar -C "target/${{ matrix.musl }}/release" -zcvf r3v3rs3-cli-${{ matrix.musl }}.tar.gz r3v3rs3-cli
       - name: Upload archive
         if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-mcp-${{ matrix.target }}.tar.gz r3v3rs3-mcp-${{ matrix.musl }}.tar.gz
+        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-cli-${{ matrix.target }}.tar.gz r3v3rs3-cli-${{ matrix.musl }}.tar.gz
 
   test:
     name: Test
@@ -209,11 +209,11 @@ jobs:
         # dist/webui is gitignored but the package ships it.
         run: cargo publish -p r3v3rs3 --locked --allow-dirty
 
-  # The MCP client also runs on the laptop of the admin, so macOS and Windows get their
-  # own archives. The server itself stays Linux only.
+  # The command line client also runs on the laptop of the admin, so macOS and Windows get
+  # their own archives. The server itself stays Linux only.
   binary-mcp:
-    name: Upload Release Assets (r3v3rs3-mcp, ${{ matrix.target }})
-    # The MCP client embeds no WebUI, so it only waits for the draft release.
+    name: Upload Release Assets (r3v3rs3-cli, ${{ matrix.target }})
+    # The command line client embeds no WebUI, so it only waits for the draft release.
     needs: release
     strategy:
       fail-fast: false
@@ -241,27 +241,27 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: ${{ matrix.target }}-mcp
-      - name: Build the MCP client
-        run: cargo build --release --locked -p r3v3rs3-mcp --target ${{ matrix.target }}
+      - name: Build the command line client
+        run: cargo build --release --locked -p r3v3rs3-cli --target ${{ matrix.target }}
       - name: Make archive
         if: matrix.archive == 'tar.gz'
-        run: tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-mcp-${{ matrix.target }}.tar.gz r3v3rs3-mcp
+        run: tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-cli-${{ matrix.target }}.tar.gz r3v3rs3-cli
       - name: Make archive
         if: matrix.archive == 'zip'
         shell: pwsh
-        run: Compress-Archive -Path "target/${{ matrix.target }}/release/r3v3rs3-mcp.exe" -DestinationPath "r3v3rs3-mcp-${{ matrix.target }}.zip"
+        run: Compress-Archive -Path "target/${{ matrix.target }}/release/r3v3rs3-cli.exe" -DestinationPath "r3v3rs3-cli-${{ matrix.target }}.zip"
       - name: Upload the archive
         if: github.event_name == 'push' && matrix.archive == 'tar.gz'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" "r3v3rs3-mcp-${{ matrix.target }}.tar.gz"
+        run: gh release upload "$GITHUB_REF_NAME" "r3v3rs3-cli-${{ matrix.target }}.tar.gz"
       - name: Upload the archive
         if: github.event_name == 'push' && matrix.archive == 'zip'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # The default shell here is pwsh, where $GITHUB_REF_NAME is not a PowerShell
         # variable, so the tag comes from the context.
-        run: gh release upload "${{ github.ref_name }}" "r3v3rs3-mcp-${{ matrix.target }}.zip"
+        run: gh release upload "${{ github.ref_name }}" "r3v3rs3-cli-${{ matrix.target }}.zip"
 
   publish:
     name: Publish release

@@ -1,4 +1,4 @@
-//! A command line MCP client for the r3v3rs3 admin API.
+//! A command line client for the r3v3rs3 admin API.
 //!
 //! `login` runs the OAuth 2.1 authorization code flow in the browser and stores the tokens.
 //! `tools` and `call` connect to `/api/mcp` with the stored access token.
@@ -17,8 +17,8 @@ use std::time::Duration;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "r3v3rs3-mcp",
-    about = "An MCP client for the r3v3rs3 admin API"
+    name = "r3v3rs3-cli",
+    about = "A command line client for the r3v3rs3 admin API"
 )]
 struct Args {
     /// The origin of the admin API, for example http://127.0.0.1:46492. Every command
@@ -50,7 +50,7 @@ enum Command {
     Update,
 }
 
-/// A silent MCP client: this program prints the results itself.
+/// A silent client: this program prints the results itself.
 #[derive(Clone, Default)]
 struct QuietClient;
 
@@ -199,11 +199,11 @@ const RELEASES_API: &str = "https://api.github.com/repos/KilimcininKorOglu/r3v3r
 /// so they run on every distribution regardless of the installed libc.
 fn asset_name() -> anyhow::Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("linux", "x86_64") => Ok("r3v3rs3-mcp-x86_64-unknown-linux-musl.tar.gz"),
-        ("linux", "aarch64") => Ok("r3v3rs3-mcp-aarch64-unknown-linux-musl.tar.gz"),
-        ("macos", "x86_64") => Ok("r3v3rs3-mcp-x86_64-apple-darwin.tar.gz"),
-        ("macos", "aarch64") => Ok("r3v3rs3-mcp-aarch64-apple-darwin.tar.gz"),
-        ("windows", "x86_64") => Ok("r3v3rs3-mcp-x86_64-pc-windows-msvc.zip"),
+        ("linux", "x86_64") => Ok("r3v3rs3-cli-x86_64-unknown-linux-musl.tar.gz"),
+        ("linux", "aarch64") => Ok("r3v3rs3-cli-aarch64-unknown-linux-musl.tar.gz"),
+        ("macos", "x86_64") => Ok("r3v3rs3-cli-x86_64-apple-darwin.tar.gz"),
+        ("macos", "aarch64") => Ok("r3v3rs3-cli-aarch64-apple-darwin.tar.gz"),
+        ("windows", "x86_64") => Ok("r3v3rs3-cli-x86_64-pc-windows-msvc.zip"),
         (os, arch) => bail!("no release archive exists for {os}/{arch}"),
     }
 }
@@ -211,9 +211,9 @@ fn asset_name() -> anyhow::Result<&'static str> {
 /// The name of the executable inside the archive of this platform.
 fn binary_name() -> &'static str {
     if std::env::consts::OS == "windows" {
-        "r3v3rs3-mcp.exe"
+        "r3v3rs3-cli.exe"
     } else {
-        "r3v3rs3-mcp"
+        "r3v3rs3-cli"
     }
 }
 
@@ -232,7 +232,7 @@ fn newer_than(latest: &str, current: &str) -> Option<bool> {
 async fn latest_version(client: &reqwest::Client) -> anyhow::Result<String> {
     let release: serde_json::Value = client
         .get(RELEASES_API)
-        .header(reqwest::header::USER_AGENT, "r3v3rs3-mcp")
+        .header(reqwest::header::USER_AGENT, "r3v3rs3-cli")
         .send()
         .await
         .context("the release API did not answer")?
@@ -252,7 +252,7 @@ fn digest_of(sums: &str, asset: &str) -> anyhow::Result<String> {
     for line in sums.lines() {
         let mut parts = line.split_whitespace();
         if let (Some(digest), Some(name)) = (parts.next(), parts.next()) {
-            // The sum file lists the names as `./r3v3rs3-mcp-...`.
+            // The sum file lists the names as `./r3v3rs3-cli-...`.
             if name.trim_start_matches("./") == asset {
                 return Ok(digest.to_string());
             }
@@ -268,13 +268,13 @@ async fn update(client: &reqwest::Client) -> anyhow::Result<()> {
     let current = env!("CARGO_PKG_VERSION");
     match newer_than(&latest, current) {
         Some(false) => {
-            println!("r3v3rs3-mcp {current} is the newest release.");
+            println!("r3v3rs3-cli {current} is the newest release.");
             return Ok(());
         }
         None => bail!("the release version {latest} is not three numbers"),
         Some(true) => {}
     }
-    println!("Downloading r3v3rs3-mcp {latest}...");
+    println!("Downloading r3v3rs3-cli {latest}...");
     let base = format!("https://github.com/KilimcininKorOglu/r3v3rs3/releases/download/v{latest}");
     let sums = download(client, &format!("{base}/SHA256SUMS")).await?;
     let archive = download(client, &format!("{base}/{asset}")).await?;
@@ -285,7 +285,7 @@ async fn update(client: &reqwest::Client) -> anyhow::Result<()> {
         bail!("the sha256 digest of {asset} does not match the checksums of the release");
     }
     install(&archive)?;
-    println!("r3v3rs3-mcp {latest} is installed. The next run uses it.");
+    println!("r3v3rs3-cli {latest} is installed. The next run uses it.");
     Ok(())
 }
 
@@ -293,7 +293,7 @@ async fn update(client: &reqwest::Client) -> anyhow::Result<()> {
 async fn download(client: &reqwest::Client, url: &str) -> anyhow::Result<Vec<u8>> {
     client
         .get(url)
-        .header(reqwest::header::USER_AGENT, "r3v3rs3-mcp")
+        .header(reqwest::header::USER_AGENT, "r3v3rs3-cli")
         .send()
         .await
         .with_context(|| format!("{url} did not answer"))?

@@ -5,7 +5,7 @@ edition = "2024"
 include = ["/src", "/templates", "/data", "/build.rs", "/LICENSE", "/dist/webui"]
 build = "build.rs"
 description = "A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, and a deployment platform that runs your apps behind it."
-authors = ["picoHz <picoHz@outlook.com>", "KilimcininKorOglu <k@keremgok.tr>"]
+authors = ["KilimcininKorOglu <k@keremgok.tr>", "picoHz <picoHz@outlook.com>"]
 keywords = ["tcp", "http", "tls", "proxy", "reverse-proxy"]
 categories = [
     "network-programming",

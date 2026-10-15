@@ -1085,7 +1085,7 @@ The MCP server is off by default. The settings page of the panel turns it on whi
 enabled = true
 
 [[mcp.clients]]
-id = "r3v3rs3-mcp"
+id = "r3v3rs3-cli"
 name = "r3v3rs3 MCP client"
 redirect_uris = ["http://127.0.0.1:8765/callback"]
 ```
@@ -1096,26 +1096,26 @@ The tokens live in memory only, so a restart of the server signs every MCP clien
 
 How a client connects depends on the client. An AI host that speaks the MCP authorization flow, such as Claude Code or Cursor, needs no extra program: it adds this server as an HTTP MCP server, for example with `claude mcp add --transport http --scope user r3v3rs3 https://panel.example.com/api/mcp`, and its own `Authenticate` action of the `/mcp` command runs the same authorization flow in the browser. The command line client below serves the other cases: scripts, cron jobs and servers without a browser session, where one command signs in once and stores its tokens for every later call.
 
-The repository ships a command line client in `r3v3rs3-mcp`. The installer script downloads the prebuilt binary of the newest release from GitHub, verifies its sha256 digest, and installs it:
+The repository ships a command line client in `r3v3rs3-cli`. The installer script downloads the prebuilt binary of the newest release from GitHub, verifies its sha256 digest, and installs it:
 
 ```sh
 # Linux and macOS:
-curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-mcp.sh | sh
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-cli.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell):
-irm https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-mcp.ps1 | iex
+irm https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-cli.ps1 | iex
 ```
 
-On Windows the binary lands in `%LOCALAPPDATA%\Programs\r3v3rs3-mcp`, which you add to your `PATH`. The script installs into `/usr/local/bin` on Linux and macOS, and `INSTALL_DIR` overrides that directory. A specific release installs with `--version vX.Y.Z`, and the archives of every platform are on the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases) as well.
+On Windows the binary lands in `%LOCALAPPDATA%\Programs\r3v3rs3-cli`, which you add to your `PATH`. The script installs into `/usr/local/bin` on Linux and macOS, and `INSTALL_DIR` overrides that directory. A specific release installs with `--version vX.Y.Z`, and the archives of every platform are on the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases) as well.
 
 Then:
 
 ```sh
-r3v3rs3-mcp http://127.0.0.1:46492 login
-r3v3rs3-mcp http://127.0.0.1:46492 tools
-r3v3rs3-mcp http://127.0.0.1:46492 call server_status
+r3v3rs3-cli http://127.0.0.1:46492 login
+r3v3rs3-cli http://127.0.0.1:46492 tools
+r3v3rs3-cli http://127.0.0.1:46492 call server_status
 ```
 
 `login` opens the consent page in the browser and stores the tokens in the config directory. A script can pass an access token directly with `--token`. The `update` command installs a newer release over the running binary and verifies its sha256 digest against the checksums of the release.
