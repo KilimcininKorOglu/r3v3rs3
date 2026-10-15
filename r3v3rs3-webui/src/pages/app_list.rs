@@ -149,14 +149,24 @@ fn app_row(
     deploy: &Callback<AppRow>,
     navigator: &Navigator,
 ) -> Row {
-    let domains = row
-        .app
-        .spec
-        .domains
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ");
+    let domains_cell = html! {
+        <span class="break-all">
+            { for row.app.spec.domains.iter().map(|domain| {
+                let domain = domain.to_string();
+                let link = !domain.contains('*');
+                html! {
+                    <>
+                        if link {
+                            <a class={LINK_CLASS} href={format!("https://{domain}")} target="_blank" rel="noopener noreferrer">{domain}</a>
+                        } else {
+                            <span>{domain}</span>
+                        }
+                        { " " }
+                    </>
+                }
+            }) }
+        </span>
+    };
     let busy = row.is_busy();
     let deploy_onclick = {
         let deploy = deploy.clone();
@@ -179,7 +189,7 @@ fn app_row(
         cells: vec![
             html! { <>{row.app.name.as_str()}</> },
             source_cell(locale, &row.app.spec.source),
-            html! { <span class="break-all">{domains}</span> },
+            html! { <>{domains_cell}</> },
             deployment_cell(locale, row.latest.as_ref()),
         ],
         actions: html! {
