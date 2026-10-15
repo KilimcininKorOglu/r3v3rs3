@@ -312,6 +312,7 @@ pub fn settings() -> Html {
 
     html! {
         <>
+        <PublicUrl {locale} />
         <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
             { notice_view(&notice) }
 
@@ -604,7 +605,6 @@ fn platform_section(
     html! {
         <>
             { section_title(locale.t("settings.platform_title")) }
-            <PublicUrl {locale} />
             { checkbox_field(fields, locale.t("settings.platform_enabled"), |f| &mut f.platform_enabled) }
             <p class={HINT_CLASS}>{locale.t("settings.platform_enabled_hint")}</p>
             { text_field(fields, errors, locale.t("settings.platform_docker"), "platform_docker", "unix:///var/run/docker.sock", |f| &mut f.platform_docker) }
