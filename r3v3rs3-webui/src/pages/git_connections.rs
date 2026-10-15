@@ -9,7 +9,7 @@ use super::resource_page::{
     FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback, save_result,
     set_on_click, submit_callback, text_input,
 };
-use super::settings::{failure_box, fetch_json, send_json, success_box};
+use super::settings::{failure_box, send_json, success_box};
 use super::targets::copy_box;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
@@ -22,7 +22,7 @@ use crate::store::SessionStore;
 use gloo_net::http::Request;
 use r3v3rs3_api::git_connection::{
     AuthorizeRequest, AuthorizeResponse, ConnectionStatus, GITHUB_URL, GitConnectionEntry,
-    GitConnectionRequest, GitProvider, GithubAppRequest, OAUTH_CALLBACK_PATH, PlatformSettings,
+    GitConnectionRequest, GitProvider, GithubAppRequest, OAUTH_CALLBACK_PATH,
 };
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
@@ -32,8 +32,6 @@ use yew_router::prelude::*;
 use yewdux::prelude::*;
 
 const PATH: &str = "/git/connections";
-
-const SETTINGS_PATH: &str = "/platform/settings";
 
 /// The callback errors that the server sends back in the `error` parameter.
 const CALLBACK_ERRORS: [&str; 5] = [
@@ -242,7 +240,6 @@ pub fn git_connections() -> Html {
             { list_card(locale, connections.is_some(), "git_connections.empty", &COLUMNS, &rows) }
             if admin {
                 { form_view(locale, &form, &notice, &connections) }
-                <PublicUrl {locale} />
             }
         </>
     }
@@ -591,102 +588,6 @@ async fn save(locale: Locale, change: Change) -> Result<(), String> {
         None => Request::post(&format!("{API_ENDPOINT}{PATH}")),
     };
     send_json(locale, builder, &request).await
-}
-
-#[derive(Properties, PartialEq)]
-struct PublicUrlProps {
-    locale: Locale,
-}
-
-/// The public address that the Git providers send the webhook requests to.
-#[function_component(PublicUrl)]
-fn public_url(props: &PublicUrlProps) -> Html {
-    let locale = props.locale;
-    let value = use_state(String::new);
-    let notice = use_state(|| Option::<Notice<()>>::None);
-
-    let loaded = value.clone();
-    let failed = notice.clone();
-    use_effect_with((), move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            let path = format!("{API_ENDPOINT}{SETTINGS_PATH}");
-            match fetch_json::<PlatformSettings>(locale, Request::get(&path)).await {
-                Ok(settings) => loaded.set(
-                    settings
-                        .public_url
-                        .map(|url| url.to_string())
-                        .unwrap_or_default(),
-                ),
-                Err(message) => failed.set(Some(Notice::Failed(message))),
-            }
-        });
-    });
-
-    let parsed = parse_public_url(locale, &value);
-    let fields = html! {
-        <>
-            <label class={LABEL_CLASS}>{locale.t("git_connections.public_url")}</label>
-            <input type="url" autocapitalize="off" autocomplete="off" placeholder={origin()} value={(*value).clone()} oninput={string_input(&value)} class={INPUT_CLASS} />
-            <p class={HINT_CLASS}>{locale.t("git_connections.public_url_hint")}</p>
-        </>
-    };
-    let card = FormCard {
-        title: locale.t("git_connections.public_url_title").to_string(),
-        notice: notice_view(
-            &notice,
-            |()| html! { <p>{locale.t("git_connections.public_url_saved")}</p> },
-        ),
-        fields,
-        error: parsed.as_ref().err().cloned(),
-        cancel: None,
-        save_label: "git_connections.save",
-        can_save: parsed.is_ok(),
-    };
-    form_card(locale, card, save_public_url(locale, parsed.ok(), &notice))
-}
-
-fn origin() -> String {
-    web_sys::window()
-        .and_then(|window| window.location().origin().ok())
-        .unwrap_or_default()
-}
-
-fn parse_public_url(locale: Locale, value: &str) -> Result<PlatformSettings, String> {
-    let public_url = non_empty(value)
-        .map(|url| url.parse())
-        .transpose()
-        .map_err(|err| locale.error_message(&err))?;
-    Ok(PlatformSettings { public_url })
-}
-
-fn string_input(state: &UseStateHandle<String>) -> Callback<InputEvent> {
-    let state = state.clone();
-    Callback::from(move |event: InputEvent| {
-        let input: web_sys::HtmlInputElement = event.target_unchecked_into();
-        state.set(input.value());
-    })
-}
-
-fn save_public_url(
-    locale: Locale,
-    settings: Option<PlatformSettings>,
-    notice: &UseStateHandle<Option<Notice<()>>>,
-) -> Callback<SubmitEvent> {
-    let notice = notice.clone();
-    Callback::from(move |event: SubmitEvent| {
-        event.prevent_default();
-        let (Some(settings), notice) = (settings.clone(), notice.clone()) else {
-            return;
-        };
-        wasm_bindgen_futures::spawn_local(async move {
-            let request = Request::put(&format!("{API_ENDPOINT}{SETTINGS_PATH}"));
-            let result = send_json(locale, request, &settings).await;
-            notice.set(Some(match result {
-                Ok(()) => Notice::Saved(()),
-                Err(message) => Notice::Failed(message),
-            }));
-        });
-    })
 }
 
 #[cfg(test)]

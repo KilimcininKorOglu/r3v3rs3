@@ -19,6 +19,7 @@ use r3v3rs3_api::{
         EtcdDiscoveryConfig, KubernetesDiscoveryConfig,
     },
     error::ErrorMessage,
+    git_connection::PlatformSettings,
     i18n::Locale,
     id::ShortId,
     platform::PlatformConfig,
@@ -603,6 +604,7 @@ fn platform_section(
     html! {
         <>
             { section_title(locale.t("settings.platform_title")) }
+            <PublicUrl {locale} />
             { checkbox_field(fields, locale.t("settings.platform_enabled"), |f| &mut f.platform_enabled) }
             <p class={HINT_CLASS}>{locale.t("settings.platform_enabled_hint")}</p>
             { text_field(fields, errors, locale.t("settings.platform_docker"), "platform_docker", "unix:///var/run/docker.sock", |f| &mut f.platform_docker) }
@@ -1901,4 +1903,100 @@ mod tests {
             Some(Locale::En.t("settings.invalid_endpoint"))
         );
     }
+}
+
+#[derive(Clone, PartialEq, Properties)]
+struct PublicUrlProps {
+    locale: Locale,
+}
+
+/// The public address of this server: the Git providers send the webhook requests of the apps
+/// to it, and the OAuth clients of the MCP endpoint see it as the issuer.
+#[function_component(PublicUrl)]
+fn public_url(props: &PublicUrlProps) -> Html {
+    let locale = props.locale;
+    let value = use_state(String::new);
+    let notice = use_state(|| Option::<Notice>::None);
+
+    let loaded = value.clone();
+    let failed = notice.clone();
+    use_effect_with((), move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            let path = format!("{API_ENDPOINT}/platform/settings");
+            match fetch_json::<PlatformSettings>(locale, Request::get(&path)).await {
+                Ok(settings) => loaded.set(
+                    settings
+                        .public_url
+                        .map(|url| url.to_string())
+                        .unwrap_or_default(),
+                ),
+                Err(message) => failed.set(Some(Notice::Failed(message))),
+            }
+        });
+    });
+
+    let parsed = public_url_parse(locale, &value);
+    let onsubmit = public_url_save(locale, parsed.clone().ok(), &notice);
+    html! {
+        <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md mt-6">
+            { notice_view(&notice) }
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.public_url_title")}</h2>
+            <label class={LABEL_CLASS}>{locale.t("settings.public_url")}</label>
+            <input type="url" autocapitalize="off" autocomplete="off" placeholder={webui_origin()} value={(*value).clone()} oninput={public_url_input(&value)} class={INPUT_CLASS} />
+            <p class={HINT_CLASS}>{locale.t("settings.public_url_hint")}</p>
+            if let Some(err) = parsed.as_ref().err() {
+                <p class="mt-2 text-sm text-red-600 dark:text-red-500">{err}</p>
+            }
+            <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
+                <button type="submit" disabled={parsed.is_err()} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                    {locale.t("settings.public_url_save")}
+                </button>
+            </div>
+        </form>
+    }
+}
+
+fn webui_origin() -> String {
+    web_sys::window()
+        .and_then(|window| window.location().origin().ok())
+        .unwrap_or_default()
+}
+
+fn public_url_parse(locale: Locale, value: &str) -> Result<PlatformSettings, String> {
+    let trimmed = value.trim();
+    let public_url = (!trimmed.is_empty())
+        .then(|| trimmed.parse())
+        .transpose()
+        .map_err(|err| locale.error_message(&err))?;
+    Ok(PlatformSettings { public_url })
+}
+
+fn public_url_input(state: &UseStateHandle<String>) -> Callback<InputEvent> {
+    let state = state.clone();
+    Callback::from(move |event: InputEvent| {
+        let input: web_sys::HtmlInputElement = event.target_unchecked_into();
+        state.set(input.value());
+    })
+}
+
+fn public_url_save(
+    locale: Locale,
+    settings: Option<PlatformSettings>,
+    notice: &UseStateHandle<Option<Notice>>,
+) -> Callback<SubmitEvent> {
+    let notice = notice.clone();
+    Callback::from(move |event: SubmitEvent| {
+        event.prevent_default();
+        let (Some(settings), notice) = (settings.clone(), notice.clone()) else {
+            return;
+        };
+        wasm_bindgen_futures::spawn_local(async move {
+            let request = Request::put(&format!("{API_ENDPOINT}/platform/settings"));
+            let result = send_json(locale, request, &settings).await;
+            notice.set(Some(match result {
+                Ok(()) => Notice::Success(locale.t("settings.public_url_saved").to_string()),
+                Err(message) => Notice::Failed(message),
+            }));
+        });
+    })
 }
