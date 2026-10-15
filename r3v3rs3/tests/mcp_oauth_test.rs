@@ -330,6 +330,100 @@ async fn a_denied_consent_sends_an_access_denied_error() -> anyhow::Result<()> {
     .await
 }
 
+#[tokio::test]
+async fn a_dynamically_registered_client_runs_the_flow() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-dcr")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        // The registration needs no session and returns a fresh client id.
+        let registered: Value = client
+            .post(format!("http://{addr}/oauth/register"))
+            .json(&json!({
+                "client_name": "Claude Code",
+                "redirect_uris": ["http://127.0.0.1:49153/callback"],
+            }))
+            .send()
+            .await?
+            .json()
+            .await?;
+        let client_id = registered["client_id"]
+            .as_str()
+            .context("the registration returned no client_id")?
+            .to_string();
+        assert!(client_id.starts_with("mcp-"), "{client_id}");
+        assert_eq!(registered["client_name"], json!("Claude Code"));
+
+        // The registered client runs the same consent flow as a configured one.
+        let cookie = session(&client, &addr).await?;
+        let (verifier, challenge) = pkce();
+        let redirect_uri = "http://127.0.0.1:49153/callback";
+        let consent = no_redirect()
+            .post(format!("http://{addr}/oauth/authorize"))
+            .header("cookie", &cookie)
+            .form(&[
+                ("client_id", client_id.as_str()),
+                ("redirect_uri", redirect_uri),
+                ("state", "dcr"),
+                ("code_challenge", challenge.as_str()),
+                ("scope", "read"),
+                ("decision", "approve"),
+            ])
+            .send()
+            .await?;
+        assert_eq!(
+            consent.status(),
+            StatusCode::SEE_OTHER,
+            "{}",
+            consent.text().await.unwrap_or_default()
+        );
+        let location = consent.headers().get("location").unwrap().to_str()?;
+        assert!(location.starts_with(redirect_uri), "{location}");
+        let code = location
+            .split("code=")
+            .nth(1)
+            .and_then(|rest| rest.split('&').next())
+            .unwrap()
+            .to_string();
+
+        // The code trades for tokens under the dynamic client id.
+        let tokens: Value = client
+            .post(format!("http://{addr}/oauth/token"))
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("code", code.as_str()),
+                ("redirect_uri", redirect_uri),
+                ("client_id", client_id.as_str()),
+                ("code_verifier", verifier.as_str()),
+            ])
+            .send()
+            .await?
+            .json()
+            .await?;
+        assert_eq!(tokens["token_type"], json!("Bearer"));
+        assert_eq!(tokens["scope"], json!("read"));
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_registration_without_a_redirect_uri_is_refused() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-dcr-invalid")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let response = client
+            .post(format!("http://{addr}/oauth/register"))
+            .json(&json!({ "client_name": "broken", "redirect_uris": [] }))
+            .send()
+            .await?;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let error: Value = response.json().await?;
+        assert_eq!(error["error"], json!("invalid_redirect_uri"));
+        Ok(())
+    })
+    .await
+}
+
 /// Completes the authorization flow and returns an access token with the edit scope.
 async fn access_token(addr: &SocketAddr) -> anyhow::Result<String> {
     let client = Client::new();

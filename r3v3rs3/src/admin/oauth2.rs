@@ -3,12 +3,14 @@
 //! A pre-registered client starts the authorization code flow with PKCE. The account signs in
 //! through the WebUI session, approves the client on a plain form, and the client trades the
 //! code for an opaque access token with a refresh token at the token endpoint. The tokens live
-//! in memory only, so a restart signs every MCP client out.
+//! in memory only, so a restart signs every MCP client out. A client that is not in the
+//! configured list registers itself through RFC 7591; the registration lives in memory too.
 
 use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
 use crate::accounts::Caller;
 use crate::audit::AuditRecord;
+use crate::server::rpc::auth::GetPlatform;
 use axum::{
     Json,
     extract::{Form, Query, State},
@@ -75,9 +77,31 @@ pub struct McpAuthorizations {
     codes: HashMap<String, AuthorizationCode>,
     tokens: HashMap<String, AccessToken>,
     refresh: HashMap<String, String>,
+    /// The clients that registered themselves through RFC 7591, in memory only. A restart
+    /// removes them, and the clients register again on their next sign-in.
+    clients: HashMap<String, McpClientConfig>,
 }
 
+/// The limit of the dynamically registered clients, like `MAX_GRANTS` for the tokens.
+const MAX_CLIENTS: usize = 256;
+
 impl McpAuthorizations {
+    /// Registers a client of the dynamic registration and returns its `client_id`.
+    fn register_client(&mut self, mut client: McpClientConfig) -> Option<String> {
+        if self.clients.len() >= MAX_CLIENTS {
+            return None;
+        }
+        let id = format!("mcp-{}", new_token().to_lowercase());
+        client.id = id.clone();
+        self.clients.insert(id.clone(), client);
+        Some(id)
+    }
+
+    /// The dynamically registered client with this id, if one exists.
+    fn dynamic_client(&self, id: &str) -> Option<McpClientConfig> {
+        self.clients.get(id).cloned()
+    }
+
     /// Stores an approved authorization code.
     fn issue_code(&mut self, grant: AuthorizationCode) -> String {
         self.cleanup();
@@ -238,6 +262,21 @@ fn challenge_of(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
+/// The public origin that OAuth clients see: the public URL of the deployment platform, or
+/// the forwarded headers when it is not set. The headers are a weak fallback, because the
+/// proxy of the server rewrites the `Host` header of the upstream request to the upstream
+/// address.
+async fn origin_of(state: &AppState, headers: &HeaderMap) -> String {
+    if let Ok(platform) = state.call_system(GetPlatform).await
+        && let Ok(platform) = platform.get()
+        && let Ok(settings) = platform.platform_settings().await
+        && let Some(url) = settings.public_url
+    {
+        return url.to_string().trim_end_matches('/').to_string();
+    }
+    base_origin(headers)
+}
+
 /// The origin of the admin API, from the forwarded headers or from the host of the request.
 fn base_origin(headers: &HeaderMap) -> String {
     let scheme = headers
@@ -251,14 +290,24 @@ fn base_origin(headers: &HeaderMap) -> String {
     format!("{scheme}://{host}")
 }
 
-/// Validates the authorization request and returns the registered client.
-fn validate_authorize<'a>(
-    config: &'a McpConfig,
+/// Validates the authorization request and returns the registered client. A client lives in
+/// the `config` list or registered itself dynamically.
+fn validate_authorize(
+    config: &McpConfig,
+    dynamic: Option<&McpClientConfig>,
     query: &AuthorizeQuery,
-) -> Result<&'a McpClientConfig, Error> {
-    if !config.enabled {
-        return Err(Error::McpDisabled);
+) -> Result<McpClientConfig, Error> {
+    validate_authorize_shape(query)?;
+    let client = find_client(config, dynamic, &query.client_id)?;
+    if !client.allows_redirect(&query.redirect_uri) {
+        return Err(Error::McpRedirectInvalid);
     }
+    Ok(client)
+}
+
+/// The shape of the authorization request: the response type, the PKCE parameters and the
+/// scopes must be the ones that the server supports.
+fn validate_authorize_shape(query: &AuthorizeQuery) -> Result<(), Error> {
     if query.response_type != "code"
         || query.code_challenge_method.as_deref() != Some("S256")
         || !(43..=128).contains(&query.code_challenge.len())
@@ -270,15 +319,25 @@ fn validate_authorize<'a>(
     if scopes.iter().any(|scope| !SCOPES.contains(&scope.as_str())) {
         return Err(Error::McpGrantInvalid);
     }
-    let client = McpClientConfig::find(&config.clients, &query.client_id).ok_or_else(|| {
-        Error::McpClientUnknown {
-            id: query.client_id.clone(),
-        }
-    })?;
-    if !client.allows_redirect(&query.redirect_uri) {
-        return Err(Error::McpRedirectInvalid);
+    Ok(())
+}
+
+/// The client with this id from the configured list or from the dynamic registrations.
+fn find_client(
+    config: &McpConfig,
+    dynamic: Option<&McpClientConfig>,
+    id: &str,
+) -> Result<McpClientConfig, Error> {
+    if !config.enabled {
+        return Err(Error::McpDisabled);
     }
-    Ok(client)
+    match McpClientConfig::find(&config.clients, id) {
+        Some(client) => Ok(client.clone()),
+        None => dynamic
+            .filter(|client| client.id == id)
+            .cloned()
+            .ok_or_else(|| Error::McpClientUnknown { id: id.to_string() }),
+    }
 }
 
 /// The normalized scope list of a request.
@@ -305,12 +364,16 @@ fn scopes_of(scope: &Option<String>) -> Vec<String> {
     security(()),
     responses((status = 200, description = "The authorization server metadata."))
 )]
-pub async fn authorization_server_metadata(headers: HeaderMap) -> Response {
-    let origin = base_origin(&headers);
+pub async fn authorization_server_metadata(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    let origin = origin_of(&state, &headers).await;
     Json(json!({
         "issuer": origin,
         "authorization_endpoint": format!("{origin}/oauth/authorize"),
         "token_endpoint": format!("{origin}/oauth/token"),
+        "registration_endpoint": format!("{origin}/oauth/register"),
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
@@ -328,8 +391,11 @@ pub async fn authorization_server_metadata(headers: HeaderMap) -> Response {
     security(()),
     responses((status = 200, description = "The protected resource metadata."))
 )]
-pub async fn protected_resource_metadata(headers: HeaderMap) -> Response {
-    let origin = base_origin(&headers);
+pub async fn protected_resource_metadata(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    let origin = origin_of(&state, &headers).await;
     Json(json!({
         "resource": format!("{origin}/api/mcp"),
         "authorization_servers": [origin],
@@ -353,8 +419,11 @@ pub async fn authorize(
     axum::Extension(caller): axum::Extension<crate::accounts::Caller>,
     Query(query): Query<AuthorizeQuery>,
 ) -> Result<Response, AppError> {
-    let config = state.data.lock().await.config.mcp.clone();
-    let client = validate_authorize(&config, &query)?;
+    let data = state.data.lock().await;
+    let config = data.config.mcp.clone();
+    let dynamic = data.mcp.dynamic_client(&query.client_id);
+    let client = validate_authorize(&config, dynamic.as_ref(), &query)?;
+    drop(data);
     let scopes = scopes_of(&query.scope);
     let scope = scopes.join(" ");
     let body = format!(
@@ -413,9 +482,12 @@ pub async fn consent(
     axum::Extension(caller): axum::Extension<Caller>,
     Form(form): Form<ConsentForm>,
 ) -> Result<Response, AppError> {
-    let config = state.data.lock().await.config.mcp.clone();
+    let data = state.data.lock().await;
+    let config = data.config.mcp.clone();
+    let dynamic = data.mcp.dynamic_client(&form.client_id);
     let client = validate_authorize(
         &config,
+        dynamic.as_ref(),
         &AuthorizeQuery {
             client_id: form.client_id.clone(),
             redirect_uri: form.redirect_uri.clone(),
@@ -426,6 +498,7 @@ pub async fn consent(
             scope: Some(form.scope.clone()),
         },
     )?;
+    drop(data);
     if form.decision != "approve" {
         let separator = if form.redirect_uri.contains('?') {
             '&'
@@ -494,6 +567,144 @@ fn oauth_error(code: &'static str, description: &str) -> Response {
         .into_response()
 }
 
+/// The RFC 7591 registration request.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct RegistrationBody {
+    /// The name that the consent form shows.
+    pub client_name: Option<String>,
+    /// The redirect URIs of the client. `http` stays allowed on the loopback addresses only,
+    /// enforced at the authorization request like for the configured clients.
+    pub redirect_uris: Vec<String>,
+    pub grant_types: Option<Vec<String>>,
+    pub response_types: Option<Vec<String>>,
+    pub token_endpoint_auth_method: Option<String>,
+}
+
+/// Validates a registration request and returns the client to store. Per RFC 7591 the
+/// response errors carry `invalid_redirect_uri` and `invalid_client_metadata`.
+fn validate_registration(
+    body: &RegistrationBody,
+) -> Result<McpClientConfig, (&'static str, String)> {
+    let redirect_uris = validate_redirect_uris(&body.redirect_uris)?;
+    validate_client_metadata(body)?;
+    Ok(McpClientConfig {
+        id: String::new(),
+        name: body
+            .client_name
+            .clone()
+            .unwrap_or_else(|| "MCP client".into()),
+        redirect_uris,
+    })
+}
+
+/// Every redirect URI of a registration is an absolute http or https URI.
+fn validate_redirect_uris(uris: &[String]) -> Result<Vec<String>, (&'static str, String)> {
+    if uris.is_empty() {
+        return Err((
+            "invalid_redirect_uri",
+            "the request lists no redirect URI".into(),
+        ));
+    }
+    for uri in uris {
+        let parsed = url::Url::parse(uri)
+            .ok()
+            .filter(|url| matches!(url.scheme(), "https" | "http"));
+        if parsed.is_none() {
+            return Err((
+                "invalid_redirect_uri",
+                format!("{uri} is not an absolute http or https URI"),
+            ));
+        }
+    }
+    Ok(uris.to_vec())
+}
+
+/// The grant types, the response types and the auth method of a registration stay inside
+/// what the server supports.
+fn validate_client_metadata(body: &RegistrationBody) -> Result<(), (&'static str, String)> {
+    let grants = body.grant_types.clone().unwrap_or_else(|| {
+        vec![
+            "authorization_code".to_string(),
+            "refresh_token".to_string(),
+        ]
+    });
+    if grants
+        .iter()
+        .any(|grant| grant != "authorization_code" && grant != "refresh_token")
+    {
+        return Err((
+            "invalid_client_metadata",
+            "only authorization_code and refresh_token are supported".into(),
+        ));
+    }
+    if let Some(types) = &body.response_types
+        && types.iter().any(|kind| kind != "code")
+    {
+        return Err((
+            "invalid_client_metadata",
+            "only the code response type is supported".into(),
+        ));
+    }
+    if let Some(method) = &body.token_endpoint_auth_method
+        && method != "none"
+    {
+        return Err((
+            "invalid_client_metadata",
+            "only the none auth method is supported".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Registers an MCP client dynamically, per RFC 7591. The registration lives in memory, so a
+/// restart removes it and the client signs in again through a fresh registration.
+#[utoipa::path(
+    post,
+    path = "/register",
+    tag = "mcp",
+    operation_id = "oauth_register",
+    security(()),
+    request_body = RegistrationBody,
+    responses((status = 201, description = "The registered client."), ErrorResponses)
+)]
+pub async fn register(
+    State(state): State<AppState>,
+    Json(body): Json<RegistrationBody>,
+) -> Response {
+    let config = state.data.lock().await.config.mcp.clone();
+    if !config.enabled {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "access_denied" })),
+        )
+            .into_response();
+    }
+    let client = match validate_registration(&body) {
+        Ok(client) => client,
+        Err((code, description)) => return oauth_error(code, &description),
+    };
+    let issued_at = unix_now();
+    let mut data = state.data.lock().await;
+    let Some(id) = data.mcp.register_client(client.clone()) else {
+        return oauth_error("invalid_client_metadata", "the registration list is full");
+    };
+    drop(data);
+    info!(client = %id, "an MCP client registered itself");
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "client_id": id,
+            "client_id_issued_at": issued_at,
+            "client_name": client.name,
+            "redirect_uris": client.redirect_uris,
+            "token_endpoint_auth_method": "none",
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "response_types_supported": ["code"],
+        })),
+    )
+        .into_response()
+}
+
 /// Trades an authorization code or a refresh token for tokens.
 #[utoipa::path(
     post,
@@ -523,10 +734,12 @@ pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -
             ) else {
                 return oauth_error("invalid_request", "the code request misses a parameter");
             };
-            if McpClientConfig::find(&config.clients, client_id).is_none() {
+            let mut data = state.data.lock().await;
+            let known = McpClientConfig::find(&config.clients, client_id).is_some()
+                || data.mcp.dynamic_client(client_id).is_some();
+            if !known {
                 return oauth_error("invalid_client", "unknown client");
             }
-            let mut data = state.data.lock().await;
             match data
                 .mcp
                 .exchange_code(code, client_id, redirect_uri, verifier)
@@ -553,8 +766,7 @@ pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -
 }
 
 /// The 401 response that points the client at the resource metadata, per RFC 9728.
-fn unauthorized(headers: &HeaderMap) -> Response {
-    let origin = base_origin(headers);
+fn unauthorized(origin: &str) -> Response {
     let mut response = (
         StatusCode::UNAUTHORIZED,
         Json(json!({ "error": "unauthorized" })),
@@ -587,26 +799,88 @@ pub async fn verify_bearer(
         )
             .into_response();
     }
+    let origin = origin_of(&state, &headers).await;
     let Some(token) = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
     else {
-        return unauthorized(&headers);
+        return unauthorized(&origin);
     };
     let (username, scope) = {
         let data = state.data.lock().await;
         match data.mcp.verify(token) {
             Some(grant) => (grant.username.clone(), grant.scope.clone()),
-            None => return unauthorized(&headers),
+            None => return unauthorized(&origin),
         }
     };
     let record = crate::sessions::SessionRecord::new(&username);
     let Some(mut caller) = state.accounts.borrow().caller(&record) else {
-        return unauthorized(&headers);
+        return unauthorized(&origin);
     };
     caller.client = Some(addr.ip());
     request.extensions_mut().insert(caller);
     request.extensions_mut().insert(super::McpScope(scope));
     next.run(request).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+        headers.insert(header::HOST, HeaderValue::from_static("127.0.0.1:46492"));
+        headers
+    }
+
+    #[test]
+    fn the_origin_falls_back_to_the_forwarded_headers() {
+        assert_eq!(base_origin(&headers()), "https://127.0.0.1:46492");
+    }
+
+    #[test]
+    fn a_registration_needs_a_redirect_uri() {
+        let body = RegistrationBody {
+            client_name: None,
+            redirect_uris: Vec::new(),
+            grant_types: None,
+            response_types: None,
+            token_endpoint_auth_method: None,
+        };
+        assert_eq!(
+            validate_registration(&body).unwrap_err().0,
+            "invalid_redirect_uri"
+        );
+    }
+
+    #[test]
+    fn a_registration_rejects_an_unknown_grant_type() {
+        let body = RegistrationBody {
+            client_name: None,
+            redirect_uris: vec!["http://127.0.0.1:8765/callback".to_string()],
+            grant_types: Some(vec!["client_credentials".to_string()]),
+            response_types: None,
+            token_endpoint_auth_method: None,
+        };
+        assert_eq!(
+            validate_registration(&body).unwrap_err().0,
+            "invalid_client_metadata"
+        );
+    }
+
+    #[test]
+    fn a_registration_accepts_a_public_client() {
+        let body = RegistrationBody {
+            client_name: Some("Claude Code".to_string()),
+            redirect_uris: vec!["http://127.0.0.1:8765/callback".to_string()],
+            grant_types: None,
+            response_types: Some(vec!["code".to_string()]),
+            token_endpoint_auth_method: Some("none".to_string()),
+        };
+        let client = validate_registration(&body).unwrap();
+        assert_eq!(client.name, "Claude Code");
+        assert_eq!(client.redirect_uris.len(), 1);
+    }
 }

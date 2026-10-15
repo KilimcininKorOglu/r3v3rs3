@@ -209,7 +209,8 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
     let mcp_oauth = OpenApiRouter::new()
         .routes(routes!(oauth2::authorize).layer(verify.clone()))
         .routes(routes!(oauth2::consent).layer(verify.clone()))
-        .routes(routes!(oauth2::token));
+        .routes(routes!(oauth2::token))
+        .routes(routes!(oauth2::register));
     let (api, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api", auth_routes()?)
         .nest("/api", resource_routes().route_layer(verify.clone()))

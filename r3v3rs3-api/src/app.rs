@@ -249,7 +249,7 @@ pub struct McpConfig {
     #[serde(default)]
     pub enabled: bool,
     /// The clients that may run the authorization code flow. A client that is not in this
-    /// list cannot sign in.
+    /// list cannot sign in, unless it registers itself dynamically.
     #[serde(default)]
     pub clients: Vec<McpClientConfig>,
 }
