@@ -1,5 +1,5 @@
-//! The Git provider connections and the settings of the deployment platform. An account with the
-//! Edit permission lists the connections for the app form, and only an admin changes them.
+//! The Git provider connections. An account with the Edit permission lists the connections for
+//! the app form, and only an admin changes them.
 
 use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::platform::platform_error;
@@ -15,7 +15,7 @@ use r3v3rs3_api::{
     audit::AuditAction,
     git_connection::{
         AuthorizeRequest, AuthorizeResponse, BranchQuery, GitConnectionEntry, GitConnectionRequest,
-        GitRepository, GithubAppForm, GithubAppRequest, PlatformSettings, RepositoryQuery,
+        GitRepository, GithubAppForm, GithubAppRequest, RepositoryQuery,
     },
     id::ShortId,
 };
@@ -282,61 +282,4 @@ async fn record(
     state
         .record_audit(&caller.username, caller.client, record)
         .await;
-}
-
-/// Returns the settings of the deployment platform.
-#[utoipa::path(
-    get,
-    path = "/",
-    tag = "platform",
-    operation_id = "get_platform_settings",
-    responses((status = 200, description = "The settings.", body = PlatformSettings), ErrorResponses)
-)]
-pub async fn get_settings(
-    State(state): State<AppState>,
-    Extension(caller): Extension<Caller>,
-) -> Result<Json<PlatformSettings>, AppError> {
-    let platform = state.platform(&caller, Permission::Edit).await?;
-    Ok(Json(
-        platform.platform_settings().await.map_err(platform_error)?,
-    ))
-}
-
-/// Replaces the settings of the deployment platform.
-#[utoipa::path(
-    put,
-    path = "/",
-    tag = "platform",
-    operation_id = "update_platform_settings",
-    request_body = PlatformSettings,
-    responses((status = 200, description = "The settings.", body = PlatformSettings), ErrorResponses)
-)]
-pub async fn put_settings(
-    State(state): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Json(settings): Json<PlatformSettings>,
-) -> Result<Json<PlatformSettings>, AppError> {
-    let platform = state.platform(&caller, Permission::Admin).await?;
-    let previous = platform.platform_settings().await.map_err(platform_error)?;
-    platform
-        .set_platform_settings(&settings)
-        .await
-        .map_err(platform_error)?;
-    // A new public address installs the webhooks that waited for it, and a changed one
-    // reinstalls every webhook, because the providers send the push events to the old one.
-    if previous.public_url != settings.public_url && settings.public_url.is_some() {
-        let platform = platform.clone();
-        let pending_only = previous.public_url.is_none();
-        tokio::spawn(async move { platform.refresh_hooks(pending_only).await });
-    }
-    let summary = settings
-        .public_url
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_default();
-    let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(summary);
-    state
-        .record_audit(&caller.username, caller.client, record)
-        .await;
-    Ok(Json(settings))
 }

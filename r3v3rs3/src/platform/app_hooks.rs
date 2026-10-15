@@ -88,7 +88,7 @@ impl Platform {
                 .ok_or_else(|| Error::InvalidGitConnection {
                     reason: "the app has no Git provider connection".to_string(),
                 })?;
-        if self.platform_settings().await?.public_url.is_none() {
+        if self.public_url().is_none() {
             return Err(Error::PublicUrlMissing.into());
         }
         let old = self.store.app_hook(id).await?;
@@ -183,11 +183,7 @@ impl Platform {
     }
 
     async fn create_app_hook(&self, app: ShortId, target: &HookTarget) -> anyhow::Result<String> {
-        let public_url = self
-            .platform_settings()
-            .await?
-            .public_url
-            .ok_or(Error::PublicUrlMissing)?;
+        let public_url = self.public_url().ok_or(Error::PublicUrlMissing)?;
         let secret = self.ensure_webhook_secret(app).await?;
         let url = format!("{public_url}/hooks/apps/{app}");
         self.create_git_hook(target.connection, &target.repository, &url, &secret)
@@ -225,7 +221,7 @@ mod tests {
     use super::*;
     use anyhow::Context as _;
     use mockito::{Matcher, ServerGuard};
-    use r3v3rs3_api::git_connection::{GitConnectionRequest, GitProvider, PlatformSettings};
+    use r3v3rs3_api::git_connection::{GitConnectionRequest, GitProvider};
     use r3v3rs3_api::platform::AppHook;
     use r3v3rs3_api::platform::{AppRequest, AppSource};
     use std::sync::Arc;
@@ -287,10 +283,7 @@ mod tests {
             let server = mockito::Server::new_async().await;
             let connection = add_connection(&platform, &server.url()).await?;
             connect(&platform, connection, "access-1").await?;
-            let settings = PlatformSettings {
-                public_url: Some("https://deploy.example.com".parse()?),
-            };
-            platform.set_platform_settings(&settings).await?;
+            platform.set_public_url(Some("https://deploy.example.com".parse()?));
             let app = platform.add_app(request("site"), 1).await?.id;
             Ok(Self {
                 platform,
@@ -446,10 +439,7 @@ mod tests {
     async fn a_new_public_address_installs_the_waiting_webhooks() -> anyhow::Result<()> {
         let mut mocked = Mocked::new().await?;
         // No public address yet: the install of the webhook fails and stays pending.
-        mocked
-            .platform
-            .set_platform_settings(&PlatformSettings { public_url: None })
-            .await?;
+        mocked.platform.set_public_url(None);
         mocked.sync(Some(mocked.target()), 1).await?;
         let hook = mocked.hook().await?.context("hook")?;
         assert!(!hook.installed);
@@ -465,10 +455,7 @@ mod tests {
             .await;
         mocked
             .platform
-            .set_platform_settings(&PlatformSettings {
-                public_url: Some("https://deploy.example.com".parse()?),
-            })
-            .await?;
+            .set_public_url(Some("https://deploy.example.com".parse()?));
         mocked.platform.refresh_hooks(true).await;
         create.assert_async().await;
         let hook = mocked.hook().await?.context("hook")?;
@@ -508,10 +495,7 @@ mod tests {
             .await;
         mocked
             .platform
-            .set_platform_settings(&PlatformSettings {
-                public_url: Some("https://deploy2.example.com".parse()?),
-            })
-            .await?;
+            .set_public_url(Some("https://deploy2.example.com".parse()?));
         mocked.platform.refresh_hooks(false).await;
         create.assert_async().await;
         delete.assert_async().await;

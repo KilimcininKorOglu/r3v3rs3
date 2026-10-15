@@ -1618,6 +1618,8 @@ impl ServerState {
         // change rebuilds every port context.
         let limits_changed = self.config.http2 != config.http2 || self.config.http3 != config.http3;
         let platform_changed = self.config.platform != config.platform;
+        let previous_public_url = self.config.public_url.clone();
+        let public_url_changed = previous_public_url != config.public_url;
         let upgrade_changed = self.config.upgrade != config.upgrade;
         self.config.clone_from(&config);
         if upgrade_changed {
@@ -1635,6 +1637,14 @@ impl ServerState {
         }
         if platform_changed {
             self.restart_platform().await;
+        }
+        // A new public address installs the webhooks that waited for it, and a changed one
+        // reinstalls every webhook, because the providers send the push events to the old one.
+        if public_url_changed && let PlatformHandle::Ready(platform) = &self.platform {
+            platform.set_public_url(config.public_url.clone());
+            let platform = platform.clone();
+            let pending_only = previous_public_url.is_none();
+            tokio::spawn(async move { platform.refresh_hooks(pending_only).await });
         }
         self.sessions.set_config(config.admin.clone());
         let _ = self.br_sender.send(ServerEvent::AppConfigUpdated {

@@ -42,6 +42,7 @@ use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::discovery::Endpoint;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
+use r3v3rs3_api::git_connection::PublicUrl;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, LOCAL_TARGET, PlatformConfig,
@@ -179,6 +180,25 @@ pub struct Platform {
     pending: oauth::PendingAuthorizations,
     /// Lets one token renewal run at a time.
     renewing: Mutex<()>,
+    /// The public address that the Git providers send the webhook requests of the apps to.
+    public_url: std::sync::RwLock<Option<PublicUrl>>,
+}
+
+/// The public address of the config, or the address that an earlier release stored in the
+/// platform database when the config does not set one.
+async fn resolve_public_url(
+    config: &AppConfig,
+    store: &PlatformStore,
+) -> anyhow::Result<Option<PublicUrl>> {
+    match &config.public_url {
+        Some(url) => Ok(Some(url.clone())),
+        None => store
+            .setting(store::PUBLIC_URL)
+            .await?
+            .map(|url| url.parse())
+            .transpose()
+            .map_err(Into::into),
+    }
 }
 
 impl Platform {
@@ -199,6 +219,7 @@ impl Platform {
         build::remove_dir(&build_dir).await?;
         let pki = agent_pki(&config.platform, config_dir).await?;
         let agents = Arc::new(AgentRegistry::default());
+        let public_url = resolve_public_url(config, &store).await?;
         Ok(Self {
             pki,
             forwarders: Arc::new(Forwarders::new(agents.clone())),
@@ -221,6 +242,7 @@ impl Platform {
             http: tokio::sync::OnceCell::new(),
             pending: oauth::PendingAuthorizations::default(),
             renewing: Mutex::new(()),
+            public_url: std::sync::RwLock::new(public_url),
         })
     }
 

@@ -39,7 +39,7 @@ Ayar kartı `enabled`, `docker` ve `proxy_ports` değerlerini değiştirir; değ
 
 Platform ilk başlangıçta yapılandırma dizininde iki dosya oluşturur:
 
-- `platform.db`: uygulamalar, ortam değişkenleri, deployment'lar, hedefler, Git sağlayıcı bağlantıları ve genel adres.
+- `platform.db`: uygulamalar, ortam değişkenleri, deployment'lar, hedefler ve Git sağlayıcı bağlantıları.
 - `platform.key`: ortam değişkenlerinin değerlerini, uygulamaların Git token'larını ve webhook secret'larını, Git sağlayıcı bağlantılarının client secret'larını, private key'lerini ve token'larını şifreleyen key. Dosya modu `0600` olur. Bu dosyanın yedeğini `platform.db` yedeğinin yanında saklayın, çünkü değerler bu key olmadan açılmaz.
 
 Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın. r3v3rs3 bir container içinde çalışıyorsa [Docker ile kurulum](@/tutorials/install-docker.tr.md#deploy-platformu) rehberindeki gibi `-platform` tag son ekli image'ı, host ağ modunu, Docker socket'ini ve host'takiyle aynı yolda bağlanmış yapılandırma dizinini kullanın.
@@ -252,7 +252,7 @@ Deployment ve geri alma, repoyu bağlantının güncel token'ıyla clone eder. G
 
 ### Bağlantının webhook'ları
 
-**Git Sağlayıcıları** sayfasında **Genel adres** alanını ayarlayın, örneğin `https://deploy.example.com`. Git sağlayıcısı webhook isteklerini `<genel adres>/hooks/apps/{id}` adresine gönderir. Bu yüzden sağlayıcı o adrese ulaşabilmelidir. `/hooks/` önekinin proxy'si için [Webhook'lar](#webhook-lar) bölümüne bakın.
+**Ayarlar** sayfasında **Genel adres** alanını ayarlayın (`config.toml` içinde `public_url`), örneğin `https://deploy.example.com`. Git sağlayıcısı webhook isteklerini `<genel adres>/hooks/apps/{id}` adresine gönderir. Bu yüzden sağlayıcı o adrese ulaşabilmelidir. `/hooks/` önekinin proxy'si için [Webhook'lar](#webhook-lar) bölümüne bakın.
 
 Bağlantısı olan bir uygulama kaydedilince r3v3rs3, uygulamanın webhook secret'ı yoksa onu oluşturur ve repoya bir push webhook'u kurar. Uygulamanın reposu değişince, bağlantısı kaldırılınca veya uygulama silinince r3v3rs3 sağlayıcıdaki eski webhook'u siler. Yeni bir webhook secret'ı webhook'u yeniden kurar. **Webhook'u kapat** webhook'u sağlayıcıda siler.
 
@@ -356,7 +356,7 @@ Agent, 1 saniyeden 60 saniyeye kadar uzayan bir beklemeden sonra yeniden bağlan
 
 ## WebUI
 
-Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **Hedefler** ve **Git Sağlayıcıları** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** sayfası Edit izni olan hesaba görünür. Orada bağlantı ekleme, değiştirme, bağlama, silme ve genel adresi değiştirme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
+Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **Hedefler** ve **Git Sağlayıcıları** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** sayfası Edit izni olan hesaba görünür. Orada bağlantı ekleme, değiştirme, bağlama ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
 
 ### Uygulamalar
 
@@ -441,7 +441,5 @@ Admin hesabı ayrıca şunları görür:
 | `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Bağlı hesabın veya kurulumun en fazla 50 repository'si. |
 | `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit | Bir reponun en fazla 50 branch'i. |
 | `GET /oauth/git/callback` | State | Sağlayıcının ve yeni bir GitHub App'in callback'i. Bkz. [Bağlanma](#baglanma) ve [GitHub App oluşturma](#github-app-olusturma). |
-| `GET /api/platform/settings` | Edit | Platformun genel adresi. |
-| `PUT /api/platform/settings` | Admin | `{"public_url": "https://..."}` gövdesiyle genel adresi ayarlar. |
 
-Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). `[platform] enabled` kapalıyken her platform route'u `503 platform_disabled`, cluster düğümünde `503 platform_in_cluster`, platform veritabanını veya key'ini açamadığında `503 platform_failed` yanıtını verir. Başka bir uygulamanın, hedefin veya bağlantının kullandığı ad `409 app_name_exists`, `409 target_name_exists` veya `409 git_connection_name_exists` alır. Bağlı olmayan bağlantı `409 git_connection_not_connected` alır. GitHub App kurulmadan `POST /api/git/connections/{id}/installation` isteği `409 github_app_not_installed`, sağlayıcıya giden başarısız istek `502 git_provider_failed` alır. Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, deploy eden her webhook isteğini, hedefin her değişikliğini, her agent kaydını, Git sağlayıcı bağlantısının her değişikliğini ve yetkilendirmesini, genel adresin her değişikliğini ve bir hesabın başlattığı her webhook kurulumunu kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token veya secret değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Webhook isteğinin özeti uygulamayı, sağlayıcıyı ve deployment'ı adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır. Bağlantının özeti bağlantıyı ve sağlayıcısını adlandırır, client secret'ı veya bir token'ı hiçbir zaman içermez. Yetkilendirmenin özeti hesabı da adlandırır. Webhook kurulumunun özeti uygulamayı adlandırır.
+Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). `[platform] enabled` kapalıyken her platform route'u `503 platform_disabled`, cluster düğümünde `503 platform_in_cluster`, platform veritabanını veya key'ini açamadığında `503 platform_failed` yanıtını verir. Başka bir uygulamanın, hedefin veya bağlantının kullandığı ad `409 app_name_exists`, `409 target_name_exists` veya `409 git_connection_name_exists` alır. Bağlı olmayan bağlantı `409 git_connection_not_connected` alır. GitHub App kurulmadan `POST /api/git/connections/{id}/installation` isteği `409 github_app_not_installed`, sağlayıcıya giden başarısız istek `502 git_provider_failed` alır. Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, deploy eden her webhook isteğini, hedefin her değişikliğini, her agent kaydını, Git sağlayıcı bağlantısının her değişikliğini ve yetkilendirmesini ve bir hesabın başlattığı her webhook kurulumunu kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token veya secret değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Webhook isteğinin özeti uygulamayı, sağlayıcıyı ve deployment'ı adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır. Bağlantının özeti bağlantıyı ve sağlayıcısını adlandırır, client secret'ı veya bir token'ı hiçbir zaman içermez. Yetkilendirmenin özeti hesabı da adlandırır. Webhook kurulumunun özeti uygulamayı adlandırır.

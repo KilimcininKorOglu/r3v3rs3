@@ -372,10 +372,6 @@ fn platform_routes() -> OpenApiRouter<AppState> {
             "/git/github_apps",
             OpenApiRouter::new().routes(routes!(git::create_github_app)),
         )
-        .nest(
-            "/platform/settings",
-            OpenApiRouter::new().routes(routes!(git::get_settings, git::put_settings)),
-        )
 }
 
 /// The event stream, the session and the accounts of the caller.

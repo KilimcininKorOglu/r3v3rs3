@@ -50,6 +50,13 @@ pub struct AppConfig {
     #[schema(value_type = Option<String>, example = "127.0.0.1:8600")]
     pub upstream_dns_resolver: Option<SocketAddr>,
 
+    /// The public address of the server that the Git providers send the webhook requests of
+    /// the platform apps to, and that the OAuth clients of the MCP endpoint see as the
+    /// issuer. Without it a Git connection installs no webhook.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "https://deploy.example.com")]
+    pub public_url: Option<crate::git_connection::PublicUrl>,
+
     #[serde(default)]
     pub discovery: crate::discovery::DiscoveryConfig,
 

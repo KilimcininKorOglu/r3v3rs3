@@ -19,7 +19,7 @@ use r3v3rs3_api::{
         EtcdDiscoveryConfig, KubernetesDiscoveryConfig,
     },
     error::ErrorMessage,
-    git_connection::PlatformSettings,
+    git_connection::PublicUrl,
     i18n::Locale,
     id::ShortId,
     platform::PlatformConfig,
@@ -38,6 +38,8 @@ const LABEL_CLASS: &str =
 
 #[derive(Clone, PartialEq, Default)]
 struct Fields {
+    /// Empty means that no public address is set.
+    public_url: String,
     background_task_interval: String,
     shutdown_graceful_timeout: String,
     upgrade_check_interval: String,
@@ -135,6 +137,11 @@ impl Fields {
         let webhook = config.notifications.webhook.as_ref();
         let platform = &config.platform;
         Self {
+            public_url: config
+                .public_url
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
             webhook_url: webhook.map(|w| w.url.clone()).unwrap_or_default(),
             webhook_token: String::new(),
             webhook_token_set: webhook.is_some_and(|w| w.token_set),
@@ -312,9 +319,15 @@ pub fn settings() -> Html {
 
     html! {
         <>
-        <PublicUrl {locale} />
         <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
             { notice_view(&notice) }
+
+            // The public address is a server-wide setting: the Git providers send the webhook
+            // requests of the apps to it, and the OAuth clients of the MCP endpoint see it as
+            // the issuer.
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.public_url_title")}</h2>
+            { text_field(&fields, &errors, locale.t("settings.public_url"), "public_url", "", |f| &mut f.public_url) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.public_url_hint")}</p>
 
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.admin")}</h2>
             { text_field(&fields, &errors, locale.t("settings.session_expiry"), "session_expiry", "1h", |f| &mut f.session_expiry) }
@@ -1148,6 +1161,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
     );
     let http2 = parse_http2_limits(locale, fields, &mut errors);
     let http3 = parse_http3_limits(locale, fields, &mut errors);
+    let public_url = parse_public_url(locale, &mut errors, &fields.public_url);
     match (
         admin,
         (log, notifications),
@@ -1156,6 +1170,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
         (addr, tls_alpn_addr),
         (resolver, upstream_resolver),
         (http2, http3),
+        public_url,
     ) {
         (
             Some(admin),
@@ -1165,7 +1180,9 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             (Some(addr), Some(tls_alpn_addr)),
             (Ok(resolver), Ok(upstream_resolver)),
             (Some(http2), Some(http3)),
+            public_url,
         ) if errors.is_empty() => Ok(AppConfig {
+            public_url: public_url.flatten(),
             background_task_interval: interval.background_task_interval,
             shutdown_graceful_timeout: interval.shutdown_graceful_timeout,
             admin: AdminConfig {
@@ -1382,6 +1399,25 @@ fn parse_optional_addr(value: &str) -> Result<Option<SocketAddr>, std::net::Addr
         return Ok(None);
     }
     value.parse().map(Some)
+}
+
+/// The public address of the server. An empty value means that no address is set.
+fn parse_public_url(
+    locale: Locale,
+    errors: &mut HashMap<String, String>,
+    value: &str,
+) -> Option<Option<PublicUrl>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Some(None);
+    }
+    match value.parse::<PublicUrl>() {
+        Ok(url) => Some(Some(url)),
+        Err(err) => {
+            errors.insert("public_url".into(), locale.error_message(&err));
+            None
+        }
+    }
 }
 
 async fn get_config() -> Result<AppConfig, gloo_net::Error> {
@@ -1903,100 +1939,4 @@ mod tests {
             Some(Locale::En.t("settings.invalid_endpoint"))
         );
     }
-}
-
-#[derive(Clone, PartialEq, Properties)]
-struct PublicUrlProps {
-    locale: Locale,
-}
-
-/// The public address of this server: the Git providers send the webhook requests of the apps
-/// to it, and the OAuth clients of the MCP endpoint see it as the issuer.
-#[function_component(PublicUrl)]
-fn public_url(props: &PublicUrlProps) -> Html {
-    let locale = props.locale;
-    let value = use_state(String::new);
-    let notice = use_state(|| Option::<Notice>::None);
-
-    let loaded = value.clone();
-    let failed = notice.clone();
-    use_effect_with((), move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            let path = format!("{API_ENDPOINT}/platform/settings");
-            match fetch_json::<PlatformSettings>(locale, Request::get(&path)).await {
-                Ok(settings) => loaded.set(
-                    settings
-                        .public_url
-                        .map(|url| url.to_string())
-                        .unwrap_or_default(),
-                ),
-                Err(message) => failed.set(Some(Notice::Failed(message))),
-            }
-        });
-    });
-
-    let parsed = public_url_parse(locale, &value);
-    let onsubmit = public_url_save(locale, parsed.clone().ok(), &notice);
-    html! {
-        <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md mt-6">
-            { notice_view(&notice) }
-            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.public_url_title")}</h2>
-            <label class={LABEL_CLASS}>{locale.t("settings.public_url")}</label>
-            <input type="url" autocapitalize="off" autocomplete="off" placeholder={webui_origin()} value={(*value).clone()} oninput={public_url_input(&value)} class={INPUT_CLASS} />
-            <p class={HINT_CLASS}>{locale.t("settings.public_url_hint")}</p>
-            if let Some(err) = parsed.as_ref().err() {
-                <p class="mt-2 text-sm text-red-600 dark:text-red-500">{err}</p>
-            }
-            <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
-                <button type="submit" disabled={parsed.is_err()} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                    {locale.t("settings.public_url_save")}
-                </button>
-            </div>
-        </form>
-    }
-}
-
-fn webui_origin() -> String {
-    web_sys::window()
-        .and_then(|window| window.location().origin().ok())
-        .unwrap_or_default()
-}
-
-fn public_url_parse(locale: Locale, value: &str) -> Result<PlatformSettings, String> {
-    let trimmed = value.trim();
-    let public_url = (!trimmed.is_empty())
-        .then(|| trimmed.parse())
-        .transpose()
-        .map_err(|err| locale.error_message(&err))?;
-    Ok(PlatformSettings { public_url })
-}
-
-fn public_url_input(state: &UseStateHandle<String>) -> Callback<InputEvent> {
-    let state = state.clone();
-    Callback::from(move |event: InputEvent| {
-        let input: web_sys::HtmlInputElement = event.target_unchecked_into();
-        state.set(input.value());
-    })
-}
-
-fn public_url_save(
-    locale: Locale,
-    settings: Option<PlatformSettings>,
-    notice: &UseStateHandle<Option<Notice>>,
-) -> Callback<SubmitEvent> {
-    let notice = notice.clone();
-    Callback::from(move |event: SubmitEvent| {
-        event.prevent_default();
-        let (Some(settings), notice) = (settings.clone(), notice.clone()) else {
-            return;
-        };
-        wasm_bindgen_futures::spawn_local(async move {
-            let request = Request::put(&format!("{API_ENDPOINT}/platform/settings"));
-            let result = send_json(locale, request, &settings).await;
-            notice.set(Some(match result {
-                Ok(()) => Notice::Success(locale.t("settings.public_url_saved").to_string()),
-                Err(message) => Notice::Failed(message),
-            }));
-        });
-    })
 }

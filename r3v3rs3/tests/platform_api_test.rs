@@ -777,23 +777,28 @@ async fn check_connection_update(
     Ok(())
 }
 
-/// An editor reads the public address, and only an admin changes it.
+/// The public address is a config value: only an admin saves it, and a trailing slash is
+/// invalid.
 async fn check_platform_settings(
     addr: SocketAddr,
     admin: &str,
     editor: &str,
 ) -> anyhow::Result<()> {
-    let path = "/api/platform/settings";
-    assert_eq!(get(addr, path, editor).await?, json!({}));
-    let body = json!({"public_url": "https://deploy.example.com"});
-    let (status, _) = send(addr, Method::PUT, path, editor, Some(body.clone())).await?;
+    let path = "/api/config";
+    let mut config = get(addr, path, admin).await?;
+    config["public_url"] = json!("https://deploy.example.com");
+    let (status, _) = send(addr, Method::PUT, path, editor, Some(config.clone())).await?;
     assert_eq!(status, 403);
-    let invalid = Some(json!({"public_url": "https://deploy.example.com/"}));
-    let (status, text) = send(addr, Method::PUT, path, admin, invalid).await?;
+    config["public_url"] = json!("https://deploy.example.com/");
+    let (status, text) = send(addr, Method::PUT, path, admin, Some(config.clone())).await?;
     assert_eq!(status, 422, "{text}");
-    let (status, text) = send(addr, Method::PUT, path, admin, Some(body.clone())).await?;
+    config["public_url"] = json!("https://deploy.example.com");
+    let (status, text) = send(addr, Method::PUT, path, admin, Some(config.clone())).await?;
     assert_eq!(status, 200, "{text}");
-    assert_eq!(get(addr, path, editor).await?, body);
+    assert_eq!(
+        get(addr, path, admin).await?["public_url"],
+        "https://deploy.example.com"
+    );
     Ok(())
 }
 

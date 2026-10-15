@@ -1,13 +1,12 @@
 //! The Git provider connections and the settings of the platform. A connection keeps its client
 //! secret and its tokens sealed with `platform.key`, and the admin API never returns them.
 
-use super::store::{PUBLIC_URL, Write};
+use super::store::Write;
 use super::{Platform, new_id, not_found};
 use anyhow::anyhow;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git_connection::{
-    ConnectionStatus, GitConnectionEntry, GitConnectionRequest, GitProvider, PlatformSettings,
-    ProviderUrl,
+    ConnectionStatus, GitConnectionEntry, GitConnectionRequest, GitProvider, ProviderUrl, PublicUrl,
 };
 use r3v3rs3_api::id::ShortId;
 
@@ -117,16 +116,23 @@ impl Platform {
         Ok(entry)
     }
 
-    pub async fn platform_settings(&self) -> anyhow::Result<PlatformSettings> {
-        let public_url = self.store.setting(PUBLIC_URL).await?;
-        Ok(PlatformSettings {
-            public_url: public_url.map(|url| url.parse()).transpose()?,
-        })
+    /// The public address that the Git providers send the webhook requests of the apps to,
+    /// from `config.toml`, or from the platform database when an earlier release stored it
+    /// there and `config.toml` does not set it.
+    pub fn public_url(&self) -> Option<PublicUrl> {
+        match self.public_url.read() {
+            Ok(url) => url.clone(),
+            // The value stays valid when a holder panics.
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
     }
 
-    pub async fn set_platform_settings(&self, settings: &PlatformSettings) -> anyhow::Result<()> {
-        let public_url = settings.public_url.as_ref().map(|url| url.as_str());
-        self.store.set_setting(PUBLIC_URL, public_url).await
+    /// Replaces the public address while the server runs.
+    pub fn set_public_url(&self, url: Option<PublicUrl>) {
+        match self.public_url.write() {
+            Ok(mut guard) => *guard = url,
+            Err(poisoned) => *poisoned.into_inner() = url,
+        }
     }
 
     /// A new id that no connection uses.
@@ -167,10 +173,12 @@ fn connection_name_taken(entry: &GitConnectionEntry) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::super::store::StoredTokens;
+    use super::super::resolve_public_url;
+    use super::super::store::{PUBLIC_URL, StoredTokens};
     use super::super::tests::platform;
     use super::*;
     use anyhow::Context as _;
+    use r3v3rs3_api::app::AppConfig;
 
     fn request(name: &str, secret: Option<&str>) -> GitConnectionRequest {
         GitConnectionRequest {
@@ -286,21 +294,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_public_address_is_a_setting() -> anyhow::Result<()> {
+    async fn the_public_address_is_a_live_value_of_the_platform() -> anyhow::Result<()> {
         let (platform, _dir) = platform().await?;
+        assert_eq!(platform.public_url(), None);
+        platform.set_public_url(Some("https://deploy.example.com".parse().unwrap()));
         assert_eq!(
-            platform.platform_settings().await?,
-            PlatformSettings::default()
+            platform.public_url(),
+            Some("https://deploy.example.com".parse().unwrap())
         );
-        let settings = PlatformSettings {
-            public_url: Some("https://deploy.example.com".parse()?),
-        };
-        platform.set_platform_settings(&settings).await?;
-        assert_eq!(platform.platform_settings().await?, settings);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_stored_public_address_falls_back_when_the_config_has_none() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
         platform
-            .set_platform_settings(&PlatformSettings::default())
+            .store
+            .set_setting(PUBLIC_URL, Some("https://deploy.example.com"))
             .await?;
-        assert_eq!(platform.platform_settings().await?.public_url, None);
+        let resolved = resolve_public_url(&AppConfig::default(), &platform.store).await?;
+        assert_eq!(
+            resolved,
+            Some("https://deploy.example.com".parse().unwrap())
+        );
+        let config = AppConfig {
+            public_url: Some("https://other.example.com".parse().unwrap()),
+            ..Default::default()
+        };
+        let resolved = resolve_public_url(&config, &platform.store).await?;
+        assert_eq!(resolved, Some("https://other.example.com".parse().unwrap()));
         Ok(())
     }
 }

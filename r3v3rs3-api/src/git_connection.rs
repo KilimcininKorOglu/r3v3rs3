@@ -212,16 +212,6 @@ pub struct GitConnectionEntry {
     pub updated_at: u64,
 }
 
-/// The settings of the deployment platform that the WebUI changes.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub struct PlatformSettings {
-    /// The address that the Git providers send the webhook requests of the apps to. Without it
-    /// a connection installs no webhook.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schema(value_type = Option<String>, example = "https://deploy.example.com")]
-    pub public_url: Option<PublicUrl>,
-}
-
 /// The path of the OAuth callback on the address of the WebUI.
 pub const OAUTH_CALLBACK_PATH: &str = "/oauth/git/callback";
 

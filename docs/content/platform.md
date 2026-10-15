@@ -39,7 +39,7 @@ The settings card applies `enabled`, `docker` and `proxy_ports` while the server
 
 At its first start the platform creates two files in the config directory:
 
-- `platform.db`: the apps, their environment variables, their deployments, the targets, the Git provider connections and the public address.
+- `platform.db`: the apps, their environment variables, their deployments, the targets and the Git provider connections.
 - `platform.key`: the key that encrypts the environment values, the Git tokens and webhook secrets of the apps, and the client secrets, private keys and tokens of the Git provider connections. Its mode is `0600`. Keep a backup of it next to the backup of `platform.db`, because the values do not open without it.
 
 Access to the Docker socket is equal to root access on the host. Enable the platform only on a server where r3v3rs3 may control every container. When r3v3rs3 runs in a container, use the image with the `-platform` tag suffix, host networking, the Docker socket and the config directory on the same path as on the host, as [Installing with Docker](@/tutorials/install-docker.md#deployment-platform) shows.
@@ -252,7 +252,7 @@ A deployment and a rollback clone the repository with the current token of the c
 
 ### Webhooks of a Connection
 
-Set the **Public address** on the **Git Providers** page, for example `https://deploy.example.com`. The Git provider sends the webhook requests to `<public address>/hooks/apps/{id}`, so the provider must reach that address. See [Webhooks](#webhooks) for the proxy of the `/hooks/` prefix.
+Set the **Public address** on the **Settings** page (`public_url` in `config.toml`), for example `https://deploy.example.com`. The Git provider sends the webhook requests to `<public address>/hooks/apps/{id}`, so the provider must reach that address. See [Webhooks](#webhooks) for the proxy of the `/hooks/` prefix.
 
 When an app with a connection is saved, r3v3rs3 creates the webhook secret of the app if it has none, and installs a push webhook at the repository. When the repository of the app changes, when its connection is removed, or when the app is deleted, r3v3rs3 deletes the old webhook at the provider. A new webhook secret installs the webhook again, and **Turn off webhook** deletes it at the provider.
 
@@ -356,7 +356,7 @@ The agent connects again after a pause that grows from 1 to 60 seconds. When it 
 
 ## WebUI
 
-The **Platform** group of the sidebar holds the **Apps**, **Targets** and **Git Providers** pages, and appears only while the platform is on. The **Git Providers** page appears for an account with the Edit permission, and only an admin adds, changes, connects or deletes a connection there or changes the public address. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+The **Platform** group of the sidebar holds the **Apps**, **Targets** and **Git Providers** pages, and appears only while the platform is on. The **Git Providers** page appears for an account with the Edit permission, and only an admin adds, changes, connects or deletes a connection there. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
 
 ### Apps
 
@@ -441,7 +441,5 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 | `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Up to 50 repositories of the connected account or of the installation. |
 | `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit | Up to 50 branches of a repository. |
 | `GET /oauth/git/callback` | The state | The callback of the provider and of a new GitHub App. See [Connect](#connect) and [Create a GitHub App](#create-a-github-app). |
-| `GET /api/platform/settings` | Edit | The public address of the platform. |
-| `PUT /api/platform/settings` | Admin | Sets the public address with `{"public_url": "https://..."}`. |
 
-An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). Every platform route answers `503 platform_disabled` when `[platform] enabled` is off, `503 platform_in_cluster` on a cluster node, and `503 platform_failed` when the platform failed to open its database or its key. A name that another app, target or connection uses answers `409 app_name_exists`, `409 target_name_exists` or `409 git_connection_name_exists`. A connection that is not connected answers `409 git_connection_not_connected`. `POST /api/git/connections/{id}/installation` before the GitHub App is installed answers `409 github_app_not_installed`, and a failed request to the provider answers `502 git_provider_failed`. The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target, every agent enrollment, every change and authorization of a Git provider connection, every change of the public address and every webhook installation that an account starts. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, an enrollment names the target and the version of the agent, a connection names itself and its provider, never its client secret or a token, an authorization also names the account, and a webhook installation names the app.
+An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). Every platform route answers `503 platform_disabled` when `[platform] enabled` is off, `503 platform_in_cluster` on a cluster node, and `503 platform_failed` when the platform failed to open its database or its key. A name that another app, target or connection uses answers `409 app_name_exists`, `409 target_name_exists` or `409 git_connection_name_exists`. A connection that is not connected answers `409 git_connection_not_connected`. `POST /api/git/connections/{id}/installation` before the GitHub App is installed answers `409 github_app_not_installed`, and a failed request to the provider answers `502 git_provider_failed`. The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target, every agent enrollment, every change and authorization of a Git provider connection, and every webhook installation that an account starts. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, an enrollment names the target and the version of the agent, a connection names itself and its provider, never its client secret or a token, an authorization also names the account, and a webhook installation names the app.

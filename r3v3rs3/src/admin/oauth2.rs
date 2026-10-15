@@ -262,15 +262,13 @@ fn challenge_of(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
-/// The public origin that OAuth clients see: the public URL of the deployment platform, or
-/// the forwarded headers when it is not set. The headers are a weak fallback, because the
-/// proxy of the server rewrites the `Host` header of the upstream request to the upstream
-/// address.
+/// The public origin that OAuth clients see: the public URL of the server, or the forwarded
+/// headers when it is not set. The headers are a weak fallback, because the proxy of the
+/// server rewrites the `Host` header of the upstream request to the upstream address.
 async fn origin_of(state: &AppState, headers: &HeaderMap) -> String {
     if let Ok(platform) = state.call_system(GetPlatform).await
         && let Ok(platform) = platform.get()
-        && let Ok(settings) = platform.platform_settings().await
-        && let Some(url) = settings.public_url
+        && let Some(url) = platform.public_url()
     {
         return url.to_string().trim_end_matches('/').to_string();
     }
