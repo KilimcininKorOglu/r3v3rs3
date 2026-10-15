@@ -12,7 +12,7 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use url::Url;
 
 /// The client id that `config.toml` registers for this program.
-pub const CLIENT_ID: &str = "r3v3rs3-mcp";
+pub const CLIENT_ID: &str = "r3v3rs3-cli";
 
 /// The scopes that the client asks for. The consent form can grant fewer.
 pub const SCOPES: &str = "read edit";
@@ -41,7 +41,7 @@ pub fn token_path(server: &str) -> anyhow::Result<PathBuf> {
         .map_or_else(String::new, |port| format!("_{port}"));
     Ok(dirs::config_dir()
         .context("the config directory is unknown on this platform")?
-        .join("r3v3rs3-mcp")
+        .join("r3v3rs3-cli")
         .join(format!("{host}{port}.json")))
 }
 
@@ -287,7 +287,7 @@ pub async fn refresh(
 pub async fn valid_tokens(client: &reqwest::Client, server: &str) -> anyhow::Result<StoredTokens> {
     let Some(stored) = load_tokens(server)? else {
         bail!(
-            "no sign-in for {server}. Run `r3v3rs3-mcp login {server}` first. The client id is {CLIENT_ID} and must be in the [mcp] section of config.toml."
+            "no sign-in for {server}. Run `r3v3rs3-cli login {server}` first. The client id is {CLIENT_ID} and must be in the [mcp] section of config.toml."
         );
     };
     // One minute of margin, so the token outlives the following request.

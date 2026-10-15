@@ -622,7 +622,7 @@ fn mcp_section(
             { section_title(locale.t("settings.mcp_title")) }
             { checkbox_field(fields, locale.t("settings.mcp_enabled"), |f| &mut f.mcp_enabled) }
             <p class={HINT_CLASS}>{locale.t("settings.mcp_enabled_hint")}</p>
-            { textarea_field(fields, errors, locale.t("settings.mcp_clients"), "mcp_clients", "r3v3rs3-mcp, r3v3rs3 MCP client, http://127.0.0.1:8765/callback", |f| &mut f.mcp_clients) }
+            { textarea_field(fields, errors, locale.t("settings.mcp_clients"), "mcp_clients", "r3v3rs3-cli, r3v3rs3 CLI client, http://127.0.0.1:8765/callback", |f| &mut f.mcp_clients) }
             <p class={HINT_CLASS}>{locale.t("settings.mcp_clients_hint")}</p>
         </>
     }

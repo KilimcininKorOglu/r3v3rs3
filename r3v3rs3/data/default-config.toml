@@ -113,8 +113,8 @@ proxy_ports = []
 enabled = false
 # The clients that may run the authorization code flow, for example:
 # [[mcp.clients]]
-# id = "r3v3rs3-mcp"
-# name = "r3v3rs3 MCP client"
+# id = "r3v3rs3-cli"
+# name = "r3v3rs3 CLI client"
 # redirect_uris = ["http://127.0.0.1:8765/callback"]
 
 [acme_exec]

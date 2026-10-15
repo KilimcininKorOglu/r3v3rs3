@@ -312,7 +312,7 @@ fn install(archive: &[u8]) -> anyhow::Result<()> {
         .parent()
         .context("the running binary has no directory")?
         .to_path_buf();
-    let temporary = dir.join(format!(".r3v3rs3-mcp.new.{}", std::process::id()));
+    let temporary = dir.join(format!(".r3v3rs3-cli.new.{}", std::process::id()));
     let bytes = unpack(archive)?;
     std::fs::write(&temporary, &bytes)
         .context("the binary could not be written next to the running one")?;
@@ -326,7 +326,7 @@ fn install(archive: &[u8]) -> anyhow::Result<()> {
     // this process until it exits. Windows locks the running file, so the old binary
     // moves aside first and the next update removes it.
     if std::fs::rename(&temporary, &exe).is_err() {
-        let aside = dir.join("r3v3rs3-mcp.old");
+        let aside = dir.join("r3v3rs3-cli.old");
         let _ = std::fs::remove_file(&aside);
         std::fs::rename(&exe, &aside).context("the old binary could not be moved aside")?;
         std::fs::rename(&temporary, &exe).context("the running binary could not be replaced")?;
@@ -342,7 +342,7 @@ fn unpack(archive: &[u8]) -> anyhow::Result<Vec<u8>> {
         let mut zip = zip::ZipArchive::new(reader).context("the archive is not readable")?;
         let mut file = zip
             .by_name(name)
-            .context("the archive holds no r3v3rs3-mcp binary")?;
+            .context("the archive holds no r3v3rs3-cli binary")?;
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(&mut file, &mut bytes)
             .context("the archive could not be unpacked")?;
@@ -364,7 +364,7 @@ fn unpack(archive: &[u8]) -> anyhow::Result<Vec<u8>> {
             return Ok(bytes);
         }
     }
-    bail!("the archive holds no r3v3rs3-mcp binary")
+    bail!("the archive holds no r3v3rs3-cli binary")
 }
 
 #[cfg(test)]
@@ -382,11 +382,11 @@ mod tests {
 
     #[test]
     fn the_digest_is_read_from_the_sum_file_with_or_without_a_dot_prefix() {
-        let sums = "abc123  ./r3v3rs3-mcp-x86_64-unknown-linux-musl.tar.gz\ndef456  SHA256SUMS\n";
+        let sums = "abc123  ./r3v3rs3-cli-x86_64-unknown-linux-musl.tar.gz\ndef456  SHA256SUMS\n";
         assert_eq!(
-            digest_of(sums, "r3v3rs3-mcp-x86_64-unknown-linux-musl.tar.gz").unwrap(),
+            digest_of(sums, "r3v3rs3-cli-x86_64-unknown-linux-musl.tar.gz").unwrap(),
             "abc123"
         );
-        assert!(digest_of(sums, "r3v3rs3-mcp-aarch64-unknown-linux-musl.tar.gz").is_err());
+        assert!(digest_of(sums, "r3v3rs3-cli-aarch64-unknown-linux-musl.tar.gz").is_err());
     }
 }
