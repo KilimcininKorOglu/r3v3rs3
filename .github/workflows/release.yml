@@ -30,7 +30,7 @@ jobs:
           v="${GITHUB_REF_NAME#v}"
           awk -v v="$v" '$0 ~ "^## \\["v"\\]"{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > relnotes.md
           test -s relnotes.md
-          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
 
   # The WebUI is WebAssembly, so one build serves every target.
   webui:
