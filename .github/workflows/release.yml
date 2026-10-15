@@ -206,8 +206,16 @@ jobs:
       - name: Publish r3v3rs3
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        # dist/webui is gitignored but the package ships it.
-        run: cargo publish -p r3v3rs3 --locked --allow-dirty
+        # The same already-published check as r3v3rs3-api, so a rerun of a release whose
+        # crates went out in an earlier attempt closes the release instead of failing here.
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "r3v3rs3") | .version')
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -A "r3v3rs3-release (github.com/KilimcininKorOglu/r3v3rs3)" "https://crates.io/api/v1/crates/r3v3rs3/$version")
+          case "$code" in
+            200) echo "r3v3rs3 $version is already published" ;;
+            404) cargo publish -p r3v3rs3 --locked --allow-dirty ;;
+            *) echo "crates.io returned $code for r3v3rs3 $version" >&2; exit 1 ;;
+          esac
 
   # The command line client also runs on the laptop of the admin, so macOS and Windows get
   # their own archives. The server itself stays Linux only.
