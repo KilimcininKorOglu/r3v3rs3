@@ -28,9 +28,16 @@ jobs:
         # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
         run: rustup toolchain install
       - name: Cache
+        # The -v2 suffix drops the cache entries that were saved before the test profile
+        # env vars changed, whose artifacts never match the current fingerprints again.
+        # The env-vars list rotates the key automatically when a profile env changes.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: tests
+          shared-key: tests-v2
+          env-vars: |
+            RUSTC_.*
+            CARGO_INCREMENTAL
+            CARGO_PROFILE_.*
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -49,7 +56,11 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: tests
+          shared-key: tests-v2
+          env-vars: |
+            RUSTC_.*
+            CARGO_INCREMENTAL
+            CARGO_PROFILE_.*
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -67,7 +78,11 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: clippy
+          shared-key: clippy-v2
+          env-vars: |
+            RUSTC_.*
+            CARGO_INCREMENTAL
+            CARGO_PROFILE_.*
       - name: Check the formatting
         run: cargo fmt --all --check
       - name: Run clippy
