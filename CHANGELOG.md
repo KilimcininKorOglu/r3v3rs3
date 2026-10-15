@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.7] - 2026-10-15
+
+### Changed
+- The Docker image build uses cargo-chef, so a code-only change rebuilds the workspace crates without recompiling the dependencies.
+- The Docker workflow builds the `runtime` and `platform` targets of a platform sequentially on the same runner, so the second build reads the local BuildKit cache instead of the Actions cache.
+- The musl archives of the command line client build in the same matrix as the macOS and Windows archives, with cargo zigbuild, instead of serializing the Linux release build.
+- The crates publishing skips the local verification build, because the tests already ran in the same release.
+- The `web-release` profile drops full LTO and `codegen-units = 1`, which shortens the WebUI build at a small bundle size cost.
+- Every branch writes the cargo caches, and clippy keeps its own cache entry, so the lint job starts warm.
+
 ## [1.8.6] - 2026-10-15
 
 ### Changed
