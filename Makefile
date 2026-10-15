@@ -1,4 +1,4 @@
-.PHONY: all build release webui webui-release test test-api test-server test-acme-pebble test-discovery-e2e test-cluster-e2e test-runtime-docker lint fmt fmt-check check run clean cdn-snapshot
+.PHONY: all build release webui webui-release test test-api test-server test-acme-pebble test-discovery-e2e test-cluster-e2e test-runtime-docker lint fmt fmt-check check check-fast run clean cdn-snapshot
 
 CARGO ?= cargo
 TRUNK ?= trunk
@@ -78,6 +78,11 @@ fmt-check:
 	$(CARGO) fmt --all -- --check
 
 check: fmt-check lint test webui
+
+# The fast local loop: type-checks every target without codegen and runs no tests. Use it
+# between edits; run the full `make check` before a push.
+check-fast:
+	$(CARGO) check --workspace --all-targets --all-features
 
 run:
 	$(CARGO) run --bin r3v3rs3 -- start
