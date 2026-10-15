@@ -487,12 +487,28 @@ fn server_row(
     warning: Duration,
     select: Html,
 ) -> Row {
-    let subject_names = entry
-        .san
-        .iter()
-        .map(|name| name.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let subject_names = html! {
+        <span class="break-all">
+            { for entry.san.iter().map(|name| {
+                let name = name.to_string();
+                // A wildcard, an IP address or a port-like name is not a browsable site.
+                let link = !name.contains('*')
+                    && !name.contains(':')
+                    && name.rsplit('.').all(|part| !part.is_empty())
+                    && name.split('.').all(|part| part.chars().next().is_some_and(|c| !c.is_ascii_digit()));
+                html! {
+                    <>
+                        if link {
+                            <a class={LINK_CLASS} href={format!("https://{name}")} target="_blank" rel="noopener noreferrer">{name}</a>
+                        } else {
+                            <span>{name}</span>
+                        }
+                        { " " }
+                    </>
+                }
+            }) }
+        </span>
+    };
     Row {
         key: entry.id.to_string(),
         cells: vec![
