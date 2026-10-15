@@ -13,6 +13,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Incremental compilation helps local iteration but slows CI builds and bloats the cache.
+  CARGO_INCREMENTAL: 0
+  # Test binaries carry no debug info, so the target directory stays small and the cache
+  # restores faster.
+  CARGO_PROFILE_TEST_DEBUG: 0
 
 jobs:
   test:
@@ -32,10 +37,26 @@ jobs:
         with:
           tool: nextest
       - name: Run tests
-        run: cargo nextest run --all-features --no-fail-fast
-      # The runner has a Docker Engine, so the Docker runtime runs against a real one.
+        run: cargo nextest run --all-features --locked --no-fail-fast
+
+  # The runner has a Docker Engine, so the ignored Docker runtime tests run against a real
+  # one. They stay in their own job, so the two test sets run in parallel.
+  test-docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Rust
+        run: rustup toolchain install
+      - name: Cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       - name: Run the Docker runtime tests
-        run: cargo nextest run --all-features --no-fail-fast --run-ignored only -E 'binary(runtime_docker_test) | binary(platform_deploy_test) | test(on_the_docker_engine)'
+        run: cargo nextest run --all-features --locked --no-fail-fast --run-ignored only -E 'binary(runtime_docker_test) | binary(platform_deploy_test) | test(on_the_docker_engine)'
 
   lint:
     runs-on: ubuntu-24.04
