@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.6] - 2026-10-15
+
+### Changed
+- The app list opens the app domains in a new tab, and the certificate list opens the server certificate domains in the same way. A wildcard, an IPv4 address or a name that carries a port stays plain text.
+- The CI runs the normal tests and the Docker runtime tests in two parallel jobs, and the three build jobs share one cargo cache entry, so every run rebuilds less.
+
 ## [1.8.5] - 2026-10-15
 
 ### Changed
