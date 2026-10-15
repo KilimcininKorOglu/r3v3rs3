@@ -34,20 +34,20 @@ pub fn discovery_status_card() -> Html {
     if store.entries.is_empty() {
         return html! {};
     }
+    let manual = (*manual).filter(|count| *count > 0);
     html! {
         <div class="mb-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("discovery.title")}</h2>
-            { for store.entries.iter().map(|status| provider_view(locale, status)) }
-            if let Some(count) = (*manual).filter(|count| *count > 0) {
-                <p class="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
-                    {locale.tf("discovery.manual_proxies", &[("count", &count.to_string())])}
-                </p>
-            }
+            { for store.entries.iter().enumerate().map(|(index, status)| {
+                // The manual count shares the first provider line.
+                let manual = if index == 0 { manual } else { None };
+                provider_view(locale, status, manual)
+            }) }
         </div>
     }
 }
 
-fn provider_view(locale: Locale, status: &DiscoveryStatus) -> Html {
+fn provider_view(locale: Locale, status: &DiscoveryStatus, manual: Option<usize>) -> Html {
     let (state_key, color) = state_badge(status.state);
     let proxies = locale.tf(
         "discovery.proxies",
@@ -59,6 +59,11 @@ fn provider_view(locale: Locale, status: &DiscoveryStatus) -> Html {
                 <span class="font-medium">{status.provider.name()}</span>
                 { status_badge(locale.t(state_key), color) }
                 <span class="text-neutral-500 dark:text-neutral-400">{proxies}</span>
+                if let Some(count) = manual {
+                    <span class="text-neutral-500 dark:text-neutral-400">
+                        {locale.tf("discovery.manual_proxies", &[("count", &count.to_string())])}
+                    </span>
+                }
             </div>
             if let Some(error) = &status.error {
                 <p class="mt-1 text-sm text-red-600 dark:text-red-500">{error}</p>
