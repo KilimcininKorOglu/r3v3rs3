@@ -198,7 +198,7 @@ cd r3v3rs3-webui
 trunk serve
 ```
 
-`make check` runs the format check, clippy, the tests and the WebUI build. `make test-runtime-docker` runs the Docker runtime and deployment platform tests against the local Docker Engine. `make release` builds the release WebUI and the release binary. The repository also has a Gitpod configuration and a dev container.
+`make check` runs the format check, clippy, the tests and the WebUI build, and `make check-fast` type-checks the whole workspace without codegen for the loop between edits. `make test-runtime-docker` runs the Docker runtime and deployment platform tests against the local Docker Engine. `make release` builds the release WebUI and the release binary. The repository also has a Gitpod configuration and a dev container.
 
 [![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/KilimcininKorOglu/r3v3rs3)
 
