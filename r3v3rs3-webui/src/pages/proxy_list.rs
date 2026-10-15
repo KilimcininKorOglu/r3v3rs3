@@ -127,7 +127,6 @@ fn proxy_row(
     let cache_enabled = matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.cache.enabled);
     let purge_onclick = purge_onclick(locale, id);
     let onchange = toggle_onchange(id);
-    let addresses = addresses(entry, ports);
 
     let title = match entry.proxy.name.is_empty() {
         true => id.to_string(),
@@ -146,7 +145,7 @@ fn proxy_row(
         cells: vec![
             html! { <>{title}</> },
             source_cell(locale, entry),
-            html! { <>{addresses}</> },
+            addresses_cell(entry, ports),
             status_cell(locale, &status),
             active_toggle(entry.proxy.active, read_only, onchange),
         ],
@@ -209,17 +208,31 @@ fn toggle_onchange(id: ShortId) -> Callback<Event> {
 }
 
 /// The host names of an HTTP proxy, or the protocol and the address of every port of the other
-/// kinds, which have no host names.
-fn addresses(entry: &ProxyEntry, ports: &PortStore) -> String {
+/// kinds, which have no host names. A host name that looks like a public domain opens the site in
+/// a new tab; a wildcard or an internal name stays plain text.
+fn addresses_cell(entry: &ProxyEntry, ports: &PortStore) -> Html {
     if let ProxyKind::Http(http) = &entry.proxy.kind {
-        return http
-            .vhosts
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
+        return html! {
+            <>
+                { for http.vhosts.iter().map(|vhost| {
+                    let vhost = vhost.to_string();
+                    let url = format!("https://{vhost}");
+                    let link = !vhost.contains('*');
+                    html! {
+                        <>
+                            if link {
+                                <a class={LINK_CLASS} href={url} target="_blank" rel="noopener noreferrer">{vhost}</a>
+                            } else {
+                                <span>{vhost}</span>
+                            }
+                            { " " }
+                        </>
+                    }
+                }) }
+            </>
+        };
     }
-    entry
+    let text = entry
         .proxy
         .ports
         .iter()
@@ -234,7 +247,8 @@ fn addresses(entry: &ProxyEntry, ports: &PortStore) -> String {
             format!("{}/{}", entry.port.listen.protocol_name(), addr)
         })
         .collect::<Vec<_>>()
-        .join(", ")
+        .join(", ");
+    html! { <span>{text}</span> }
 }
 
 /// The source of the proxy. The title names the resource of a discovered proxy.
