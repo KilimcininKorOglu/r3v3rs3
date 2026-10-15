@@ -491,11 +491,11 @@ fn server_row(
         <span class="break-all">
             { for entry.san.iter().map(|name| {
                 let name = name.to_string();
-                // A wildcard, an IP address or a port-like name is not a browsable site.
-                let link = !name.contains('*')
-                    && !name.contains(':')
-                    && name.rsplit('.').all(|part| !part.is_empty())
-                    && name.split('.').all(|part| part.chars().next().is_some_and(|c| !c.is_ascii_digit()));
+                // A wildcard, an IPv4 address or a port-like name is not a browsable site.
+                let parts = name.split('.').collect::<Vec<_>>();
+                let is_ipv4 = parts.len() == 4
+                    && parts.iter().all(|part| !part.is_empty() && part.parse::<u8>().is_ok());
+                let link = !name.contains('*') && !name.contains(':') && !is_ipv4;
                 html! {
                     <>
                         if link {
