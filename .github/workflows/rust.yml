@@ -29,8 +29,10 @@ jobs:
         run: rustup toolchain install
       - name: Cache
         # Only main writes the cache, so the pull requests read it without evicting it.
+        # Both test jobs compile the same test binaries, so they share one cache entry.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          shared-key: tests
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
@@ -50,6 +52,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          shared-key: tests
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
