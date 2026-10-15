@@ -21,7 +21,7 @@ WORKDIR /usr/src/app
 COPY Cargo.toml Cargo.lock ./
 COPY r3v3rs3 r3v3rs3
 COPY r3v3rs3-api r3v3rs3-api
-COPY r3v3rs3-mcp r3v3rs3-mcp
+COPY r3v3rs3-cli r3v3rs3-cli
 COPY r3v3rs3-webui r3v3rs3-webui
 WORKDIR /usr/src/app/r3v3rs3-webui
 RUN trunk build --cargo-profile web-release --release
@@ -35,7 +35,7 @@ WORKDIR /usr/src/app
 COPY Cargo.toml Cargo.lock ./
 COPY r3v3rs3 r3v3rs3
 COPY r3v3rs3-api r3v3rs3-api
-COPY r3v3rs3-mcp r3v3rs3-mcp
+COPY r3v3rs3-cli r3v3rs3-cli
 COPY r3v3rs3-webui r3v3rs3-webui
 COPY --from=webui /usr/src/app/r3v3rs3/dist/webui r3v3rs3/dist/webui
 RUN cargo build --release --locked -p r3v3rs3

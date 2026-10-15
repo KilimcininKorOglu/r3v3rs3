@@ -19,7 +19,7 @@ use tracing_subscriber::filter::LevelFilter;
 mod common;
 use common::{TestStorage, alloc_tcp_port, login_when_allowed, session_cookie, wait_for_listener};
 
-const CLIENT_ID: &str = "r3v3rs3-mcp";
+const CLIENT_ID: &str = "r3v3rs3-cli";
 const REDIRECT_URI: &str = "http://127.0.0.1:49152/callback";
 
 struct TempDir(PathBuf);
@@ -467,9 +467,9 @@ async fn the_client_binary_lists_the_tools() -> anyhow::Result<()> {
 
         // The client binary of the workspace, built up to date before the test runs it.
         let binary =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/debug/r3v3rs3-mcp");
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/debug/r3v3rs3-cli");
         let status = std::process::Command::new("cargo")
-            .args(["build", "-p", "r3v3rs3-mcp"])
+            .args(["build", "-p", "r3v3rs3-cli"])
             .status()
             .context("failed to run cargo")?;
         assert!(status.success());
