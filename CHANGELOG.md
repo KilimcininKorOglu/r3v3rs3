@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.5] - 2026-10-15
+
+### Changed
+- The proxy list opens the domains of an HTTP proxy in a new tab. A wildcard name stays plain text.
+- The Service Discovery card shows the manual proxy count on the same line as the provider state.
+- The release workflow closes the release even when the crates of the version went out in an earlier publish attempt.
+
 ## [1.8.4] - 2026-10-15
 
 ### Changed
