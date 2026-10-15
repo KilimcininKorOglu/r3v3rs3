@@ -28,12 +28,9 @@ jobs:
         # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
         run: rustup toolchain install
       - name: Cache
-        # Only main writes the cache, so the pull requests read it without evicting it.
-        # The three build jobs share one cache entry.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: tests
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -53,7 +50,6 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: tests
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -69,11 +65,9 @@ jobs:
         # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
         run: rustup toolchain install
       - name: Cache
-        # Only main writes the cache, so the pull requests read it without evicting it.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: tests
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: clippy
       - name: Check the formatting
         run: cargo fmt --all --check
       - name: Run clippy

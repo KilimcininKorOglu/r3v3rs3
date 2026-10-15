@@ -23,5 +23,3 @@ inherits = "release"
 opt-level = 'z'
 panic = 'abort'
 strip = true
-lto = true
-codegen-units = 1

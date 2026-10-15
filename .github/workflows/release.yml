@@ -15,8 +15,7 @@ env:
 
 jobs:
   # The draft release exists before any job uploads to it. Keeping this out of the WebUI job
-  # lets the macOS and Windows MCP builds start without waiting for the Wasm build, which
-  # r3v3rs3-cli does not embed.
+  # lets the CLI builds start without waiting for the Wasm build, which r3v3rs3-cli does not embed.
   release:
     name: Create release
     if: github.event_name == 'push'
@@ -68,8 +67,7 @@ jobs:
   # One build per architecture serves every Linux: cargo zigbuild targets glibc 2.17, so the
   # glibc binary also runs on the older distributions, for example Rocky 8 or Debian 10, that
   # the glibc 2.35 build of the native runners could not serve. Zig also supplies the C
-  # compiler, through which aws-lc-rs compiles its C code. The command line client additionally
-  # builds against musl, because install-cli.sh offers the static build on the musl systems.
+  # compiler, through which aws-lc-rs compiles its C code.
   binary:
     name: Upload Release Assets (${{ matrix.target }})
     needs: [release, webui]
@@ -78,9 +76,7 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            musl: x86_64-unknown-linux-musl
           - target: aarch64-unknown-linux-gnu
-            musl: aarch64-unknown-linux-musl
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
@@ -89,7 +85,7 @@ jobs:
         # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
         run: |
           rustup toolchain install
-          rustup target add "${{ matrix.target }}" "${{ matrix.musl }}"
+          rustup target add "${{ matrix.target }}"
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
       - name: Install zig and cargo-zigbuild
@@ -107,19 +103,15 @@ jobs:
           path: r3v3rs3/dist/webui
       - name: Build the server and the command line client for glibc 2.17
         run: cargo zigbuild --release --locked -p r3v3rs3 -p r3v3rs3-cli --target ${{ matrix.target }}.2.17
-      - name: Build the command line client for musl
-        run: cargo zigbuild --release --locked -p r3v3rs3-cli --target ${{ matrix.musl }}
-      - name: Make archive
-        run: tar -C "target/${{ matrix.target }}/release" -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
-      - name: Make the archives of the command line client
+      - name: Make archives
         run: |
+          tar -C "target/${{ matrix.target }}/release" -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
           tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-cli-${{ matrix.target }}.tar.gz r3v3rs3-cli
-          tar -C "target/${{ matrix.musl }}/release" -zcvf r3v3rs3-cli-${{ matrix.musl }}.tar.gz r3v3rs3-cli
-      - name: Upload archive
+      - name: Upload archives
         if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-cli-${{ matrix.target }}.tar.gz r3v3rs3-cli-${{ matrix.musl }}.tar.gz
+        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-cli-${{ matrix.target }}.tar.gz
 
   test:
     name: Test
@@ -200,7 +192,7 @@ jobs:
           code=$(curl -sS -o /dev/null -w '%{http_code}' -A "r3v3rs3-release (github.com/KilimcininKorOglu/r3v3rs3)" "https://crates.io/api/v1/crates/r3v3rs3-api/$version")
           case "$code" in
             200) echo "r3v3rs3-api $version is already published" ;;
-            404) cargo publish -p r3v3rs3-api --locked ;;
+            404) cargo publish -p r3v3rs3-api --locked --no-verify ;;
             *) echo "crates.io returned $code for r3v3rs3-api $version" >&2; exit 1 ;;
           esac
       - name: Publish r3v3rs3
@@ -213,29 +205,39 @@ jobs:
           code=$(curl -sS -o /dev/null -w '%{http_code}' -A "r3v3rs3-release (github.com/KilimcininKorOglu/r3v3rs3)" "https://crates.io/api/v1/crates/r3v3rs3/$version")
           case "$code" in
             200) echo "r3v3rs3 $version is already published" ;;
-            404) cargo publish -p r3v3rs3 --locked --allow-dirty ;;
+            404) cargo publish -p r3v3rs3 --locked --allow-dirty --no-verify ;;
             *) echo "crates.io returned $code for r3v3rs3 $version" >&2; exit 1 ;;
           esac
 
-  # The command line client also runs on the laptop of the admin, so macOS and Windows get
-  # their own archives. The server itself stays Linux only.
+  # The command line client also runs on macOS, Windows, and static musl Linux systems.
+  # Because it embeds no WebUI, all of these builds run in parallel immediately without waiting for webui.
   binary-cli:
     name: Upload Release Assets (r3v3rs3-cli, ${{ matrix.target }})
-    # The command line client embeds no WebUI, so it only waits for the draft release.
     needs: release
     strategy:
       fail-fast: false
       matrix:
         include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+            archive: tar.gz
+            zigbuild: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04
+            archive: tar.gz
+            zigbuild: true
           - target: x86_64-apple-darwin
             os: macos-15-intel
             archive: tar.gz
+            zigbuild: false
           - target: aarch64-apple-darwin
             os: macos-15
             archive: tar.gz
+            zigbuild: false
           - target: x86_64-pc-windows-msvc
             os: windows-2022
             archive: zip
+            zigbuild: false
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
@@ -245,12 +247,22 @@ jobs:
         run: rustup toolchain install
       - name: Add the target
         run: rustup target add "${{ matrix.target }}"
+      - name: Install zig and cargo-zigbuild
+        if: matrix.zigbuild
+        run: |
+          python3 -m pip install ziglang==0.17.0
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall cargo-zigbuild@0.23.4 --force -y
       - name: Cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: ${{ matrix.target }}-cli
-      - name: Build the command line client
+          key: ${{ matrix.target }}-mcp
+      - name: Build the command line client (native)
+        if: ${{ !matrix.zigbuild }}
         run: cargo build --release --locked -p r3v3rs3-cli --target ${{ matrix.target }}
+      - name: Build the command line client (zigbuild)
+        if: matrix.zigbuild
+        run: cargo zigbuild --release --locked -p r3v3rs3-cli --target ${{ matrix.target }}
       - name: Make archive
         if: matrix.archive == 'tar.gz'
         run: tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-cli-${{ matrix.target }}.tar.gz r3v3rs3-cli

@@ -1,8 +1,29 @@
 # syntax=docker/dockerfile:1
 
 # Both Rust stages use the compiler of `channel` in rust-toolchain.toml. Raise the tags with it.
+FROM --platform=$BUILDPLATFORM rust:1.98.1-trixie AS chef
+ARG BUILDARCH
+ARG CARGO_CHEF_VERSION=0.1.71
+RUN set -eu; \
+    case "$BUILDARCH" in \
+      amd64) triple=x86_64-unknown-linux-gnu ;; \
+      arm64) triple=aarch64-unknown-linux-gnu ;; \
+      *) echo "unsupported build platform: $BUILDARCH" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}/cargo-chef-${triple}.tar.gz"; \
+    curl -fsSL "$url" | tar -xz -C /usr/local/bin cargo-chef
+WORKDIR /usr/src/app
+
+FROM --platform=$BUILDPLATFORM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY r3v3rs3 r3v3rs3
+COPY r3v3rs3-api r3v3rs3-api
+COPY r3v3rs3-cli r3v3rs3-cli
+COPY r3v3rs3-webui r3v3rs3-webui
+RUN cargo chef prepare --recipe-path recipe.json
+
 # The WebUI is WebAssembly, so it is built once on the build platform for every target platform.
-FROM --platform=$BUILDPLATFORM rust:1.98.1-trixie AS webui
+FROM --platform=$BUILDPLATFORM chef AS webui
 ARG BUILDARCH
 ARG TRUNK_VERSION=0.21.14
 RUN set -eu; \
@@ -17,7 +38,8 @@ RUN set -eu; \
     tar -xzf /tmp/trunk.tar.gz -C /usr/local/bin trunk; \
     rm /tmp/trunk.tar.gz
 RUN rustup target add wasm32-unknown-unknown
-WORKDIR /usr/src/app
+COPY --from=planner /usr/src/app/recipe.json recipe.json
+RUN cargo chef cook --profile web-release --target wasm32-unknown-unknown --package r3v3rs3-webui --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY r3v3rs3 r3v3rs3
 COPY r3v3rs3-api r3v3rs3-api
@@ -27,11 +49,23 @@ WORKDIR /usr/src/app/r3v3rs3-webui
 RUN trunk build --cargo-profile web-release --release
 
 FROM rust:1.98.1-trixie AS builder
+ARG TARGETARCH
+ARG CARGO_CHEF_VERSION=0.1.71
 # aws-lc-sys builds its C sources with cmake and perl, and bindgen needs libclang.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends cmake perl libclang-dev \
     && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) triple=x86_64-unknown-linux-gnu ;; \
+      arm64) triple=aarch64-unknown-linux-gnu ;; \
+      *) echo "unsupported target platform: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}/cargo-chef-${triple}.tar.gz"; \
+    curl -fsSL "$url" | tar -xz -C /usr/local/bin cargo-chef
 WORKDIR /usr/src/app
+COPY --from=planner /usr/src/app/recipe.json recipe.json
+RUN cargo chef cook --release --package r3v3rs3 --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY r3v3rs3 r3v3rs3
 COPY r3v3rs3-api r3v3rs3-api
