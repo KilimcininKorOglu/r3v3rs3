@@ -135,8 +135,12 @@ detect_target() {
 	aarch64 | arm64) arch=aarch64 ;;
 	*) die "no release binary exists for $(uname -m); use x86_64 or aarch64" ;;
 	esac
-	# A musl system cannot run the glibc binary, so the static build is preferred there.
+	# The static build runs everywhere. The glibc build needs glibc 2.35 or newer, so an
+	# older system, for example Rocky 8 or Debian 11, must take the static build too.
 	if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then
+		echo "$arch-unknown-linux-musl"
+	elif ldd --version 2>/dev/null | head -1 | grep -Eq ' 2\.([0-9]+)' &&
+		[ "$(ldd --version 2>/dev/null | head -1 | grep -oE '2\.[0-9]+' | head -1 | cut -d. -f2)" -lt 35 ]; then
 		echo "$arch-unknown-linux-musl"
 	else
 		echo "$arch-unknown-linux-gnu"
@@ -334,6 +338,42 @@ check_docker() {
 	fi
 }
 
+# Installs the packages that the server and its deployment platform need: git builds a Git
+# app, Docker runs the apps, the compose plugin starts Compose apps, and nano edits the
+# config files. Docker comes from get.docker.com, because the default repositories of the
+# older distributions ship no Docker at all. Already-installed packages stay untouched.
+install_packages() {
+	local pkgs=()
+	local pkg
+	for pkg in git nano; do
+		command -v "$pkg" >/dev/null 2>&1 || pkgs+=("$pkg")
+	done
+	if ! command -v docker >/dev/null 2>&1; then
+		info "Installing Docker from get.docker.com"
+		curl -fsSL https://get.docker.com | sh || warn "get.docker.com failed; install Docker by hand"
+	fi
+	if command -v docker >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
+		if command -v apt-get >/dev/null 2>&1; then
+			pkgs+=(docker-compose-plugin)
+		elif command -v dnf >/dev/null 2>&1; then
+			pkgs+=(docker-compose-plugin)
+		fi
+	fi
+	if [ "${#pkgs[@]}" -gt 0 ]; then
+		info "Installing packages: ${pkgs[*]}"
+		if command -v apt-get >/dev/null 2>&1; then
+			apt-get update >/dev/null
+			DEBIAN_FRONTEND=noninteractive apt-get install -y "${pkgs[@]}" || warn "apt-get could not install: ${pkgs[*]}"
+		elif command -v dnf >/dev/null 2>&1; then
+			dnf install -y "${pkgs[@]}" || warn "dnf could not install: ${pkgs[*]}"
+		elif command -v yum >/dev/null 2>&1; then
+			yum install -y "${pkgs[@]}" || warn "yum could not install: ${pkgs[*]}"
+		else
+			warn "no known package manager; install ${pkgs[*]} by hand"
+		fi
+	fi
+}
+
 choose_master() {
 	local current=""
 	if [ -f "$AGENT_UNIT" ]; then
@@ -505,6 +545,7 @@ main() {
 	target=$(detect_target)
 	choose_webui
 	install_binary "$target"
+	install_packages
 
 	install -d -m 0700 "$CONFIG_DIR"
 	install -d -m 0750 "$LOG_DIR"
