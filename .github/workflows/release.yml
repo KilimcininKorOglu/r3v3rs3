@@ -256,7 +256,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: ${{ matrix.target }}-mcp
+          key: ${{ matrix.target }}-cli
       - name: Build the command line client (native)
         if: ${{ !matrix.zigbuild }}
         run: cargo build --release --locked -p r3v3rs3-cli --target ${{ matrix.target }}
