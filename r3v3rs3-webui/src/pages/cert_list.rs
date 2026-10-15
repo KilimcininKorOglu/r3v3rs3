@@ -487,8 +487,10 @@ fn is_browsable_host(name: &str) -> bool {
         return false;
     }
     let parts = name.split('.').collect::<Vec<_>>();
-    let is_ipv4 =
-        parts.len() == 4 && parts.iter().all(|part| !part.is_empty() && part.parse::<u8>().is_ok());
+    let is_ipv4 = parts.len() == 4
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.parse::<u8>().is_ok());
     !is_ipv4
 }
 
