@@ -480,6 +480,18 @@ fn expiry_cell(locale: Locale, not_after: i64, warning: Duration) -> Html {
     }
 }
 
+/// A name that opens as a site in a new tab: it has at least two labels, is not a wildcard,
+/// is not an IPv4 address and carries no port.
+fn is_browsable_host(name: &str) -> bool {
+    if name.contains('*') || name.contains(':') || !name.contains('.') {
+        return false;
+    }
+    let parts = name.split('.').collect::<Vec<_>>();
+    let is_ipv4 =
+        parts.len() == 4 && parts.iter().all(|part| !part.is_empty() && part.parse::<u8>().is_ok());
+    !is_ipv4
+}
+
 fn server_row(
     locale: Locale,
     entry: &CertInfo,
@@ -491,11 +503,7 @@ fn server_row(
         <span class="break-all">
             { for entry.san.iter().map(|name| {
                 let name = name.to_string();
-                // A wildcard, an IPv4 address or a port-like name is not a browsable site.
-                let parts = name.split('.').collect::<Vec<_>>();
-                let is_ipv4 = parts.len() == 4
-                    && parts.iter().all(|part| !part.is_empty() && part.parse::<u8>().is_ok());
-                let link = !name.contains('*') && !name.contains(':') && !is_ipv4;
+                let link = is_browsable_host(&name);
                 html! {
                     <>
                         if link {
@@ -703,6 +711,21 @@ mod location {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_host_whose_part_starts_with_a_digit_is_still_a_link() {
+        assert!(is_browsable_host("3.example.com"));
+        assert!(is_browsable_host("panel.example.com"));
+    }
+
+    #[test]
+    fn wildcards_addresses_and_port_like_names_are_not_links() {
+        assert!(!is_browsable_host("*.example.com"));
+        assert!(!is_browsable_host("192.168.1.10"));
+        assert!(!is_browsable_host("255.255.255.255"));
+        assert!(!is_browsable_host("example.com:8443"));
+        assert!(!is_browsable_host("localhost"));
+    }
 
     #[test]
     fn the_title_of_a_discovered_certificate_names_its_resource() {
