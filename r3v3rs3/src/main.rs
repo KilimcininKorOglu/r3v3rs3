@@ -156,6 +156,7 @@ async fn new_server(
 async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()> {
     let (app_info, local, server, channels, webui_listener) = prepare(&mut args).await?;
     r3v3rs3::cdn::fetch::spawn_refresh_task(channels.command.clone());
+    r3v3rs3::appstore::fetch::spawn_refresh_task(channels.command.clone());
     r3v3rs3::server::self_upgrade::spawn_check_task(
         channels.command.clone(),
         server.update_check_interval(),

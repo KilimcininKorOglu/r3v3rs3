@@ -10,6 +10,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::ProxyEntry;
+use r3v3rs3_api::store::StoreCatalog;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -22,6 +23,7 @@ struct MemoryData {
     access_lists: Vec<AccessListEntry>,
     certs: Vec<Arc<Cert>>,
     cdn: Option<CdnRanges>,
+    app_store: Option<StoreCatalog>,
 }
 
 /// The storage of a worker process. A write keeps the value in memory only.
@@ -194,6 +196,15 @@ impl crate::config::storage::Storage for MemoryStorage {
 
     async fn load_cdn_ranges(&self) -> Option<CdnRanges> {
         self.data.lock().await.cdn.clone()
+    }
+
+    async fn save_app_store(&self, catalog: &StoreCatalog) -> Result<(), Error> {
+        self.data.lock().await.app_store = Some(catalog.clone());
+        Ok(())
+    }
+
+    async fn load_app_store(&self) -> Option<StoreCatalog> {
+        self.data.lock().await.app_store.clone()
     }
 }
 

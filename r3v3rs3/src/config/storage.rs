@@ -13,6 +13,7 @@ use r3v3rs3_api::{
     id::ShortId,
     port::PortEntry,
     proxy::ProxyEntry,
+    store::StoreCatalog,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -75,6 +76,10 @@ pub trait Storage: Send + Sync + 'static {
     async fn save_accounts(&self, accounts: &HashMap<String, Account>) -> Result<(), Error>;
     async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error>;
     async fn load_cdn_ranges(&self) -> Option<CdnRanges>;
+
+    /// The downloaded app store catalog. `None` when no download replaced the embedded one.
+    async fn save_app_store(&self, catalog: &StoreCatalog) -> Result<(), Error>;
+    async fn load_app_store(&self) -> Option<StoreCatalog>;
 
     /// The keys of the certificate events that the webhook got. A storage without them sends the
     /// notifications again after a restart.

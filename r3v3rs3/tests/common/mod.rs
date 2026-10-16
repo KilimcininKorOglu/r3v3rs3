@@ -28,6 +28,7 @@ use r3v3rs3_api::{
     policy::IpFilter,
     port::{Port, PortEntry},
     proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route, Server as UpstreamUrl},
+    store::StoreCatalog,
 };
 use socket2::{Domain, Socket, Type};
 use std::{
@@ -213,6 +214,7 @@ struct Inner {
     pub acems: HashMap<ShortId, AcmeEntry>,
     pub accounts: HashMap<String, Account>,
     pub cdn_ranges: Option<CdnRanges>,
+    pub app_store: Option<StoreCatalog>,
     pub dns_credentials: HashMap<
         ShortId,
         (
@@ -440,6 +442,15 @@ impl Storage for TestStorage {
 
     async fn load_cdn_ranges(&self) -> Option<CdnRanges> {
         self.inner.lock().await.cdn_ranges.clone()
+    }
+
+    async fn save_app_store(&self, catalog: &StoreCatalog) -> Result<(), Error> {
+        self.save(|inner| inner.app_store = Some(catalog.clone()))
+            .await
+    }
+
+    async fn load_app_store(&self) -> Option<StoreCatalog> {
+        self.inner.lock().await.app_store.clone()
     }
 }
 

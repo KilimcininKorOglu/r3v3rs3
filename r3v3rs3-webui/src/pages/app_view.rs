@@ -19,6 +19,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, AppRequest, TargetEntry};
 use r3v3rs3_api::port::PortEntry;
+use r3v3rs3_api::store::StoreResponse;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -41,6 +42,9 @@ pub struct Props {
     /// The app to show. `None` adds an app.
     #[prop_or_default]
     pub id: Option<ShortId>,
+    /// The id of the app store entry that fills the new app form.
+    #[prop_or_default]
+    pub store: Option<String>,
 }
 
 #[function_component(AppView)]
@@ -70,9 +74,10 @@ pub fn app_view(props: &Props) -> Html {
     };
     // Only an account that changes the apps reads the connections.
     let can_edit = session.can_edit();
+    let store = props.store.clone();
     use_effect_with((props.id, signed_in), move |&(id, signed_in)| {
         if signed_in {
-            load(locale, id, can_edit, state);
+            load(locale, id, store, can_edit, state);
         }
     });
 
@@ -80,14 +85,16 @@ pub fn app_view(props: &Props) -> Html {
         return html! { { notice_view(&notice, |_: &()| html! {}) } };
     }
     let saved = saved_callback(&app, &form, &notice, &navigator);
-    let lists = Lists {
+    let inputs = FormInputs {
         targets: &targets,
         connections: &connections,
         ports: &ports,
+        can_edit,
+        auto_deploy: props.store.is_some(),
     };
     html! {
         <>
-            { form_view(locale, &form, lists, &notice, (*app).as_ref(), can_edit, saved) }
+            { form_view(locale, &form, inputs, &notice, (*app).as_ref(), saved) }
             if let Some(entry) = (*app).clone().filter(|_| can_edit) {
                 { edit_extras(locale, entry, &app, &navigator) }
             }
@@ -95,22 +102,25 @@ pub fn app_view(props: &Props) -> Html {
     }
 }
 
-/// The targets, the connections and the ports that the form offers.
-struct Lists<'a> {
+/// The lists that the form offers and the rights of the account on it.
+struct FormInputs<'a> {
     targets: &'a [TargetEntry],
     connections: &'a [GitConnectionEntry],
     ports: &'a [PortEntry],
+    can_edit: bool,
+    /// A new app from the app store starts its first deployment at once.
+    auto_deploy: bool,
 }
 
 fn form_view(
     locale: Locale,
     form: &UseStateHandle<AppForm>,
-    lists: Lists<'_>,
+    inputs: FormInputs<'_>,
     notice: &AppNotice,
     app: Option<&AppEntry>,
-    can_edit: bool,
     saved: Callback<AppEntry>,
 ) -> Html {
+    let can_edit = inputs.can_edit;
     let parsed = form.parse(locale);
     let title = match app {
         Some(app) => locale.tf("apps.edit_title", &[("name", app.name.as_str())]),
@@ -122,7 +132,7 @@ fn form_view(
         notice: notice_view(notice, |_: &()| html! { {locale.t("apps.saved")} }),
         fields: html! {
             <fieldset disabled={!can_edit}>
-                { fields_view(locale, form, lists.targets, lists.connections, lists.ports, app.is_some()) }
+                { fields_view(locale, form, inputs.targets, inputs.connections, inputs.ports, app.is_some()) }
             </fieldset>
         },
         error: parsed
@@ -138,7 +148,14 @@ fn form_view(
         },
         can_save: can_edit && parsed.is_ok(),
     };
-    let onsubmit = submit(locale, form, notice, app.map(|app| app.id), saved);
+    let onsubmit = submit(
+        locale,
+        form,
+        notice,
+        app.map(|app| app.id),
+        inputs.auto_deploy,
+        saved,
+    );
     form_card(locale, card, onsubmit)
 }
 
@@ -197,6 +214,7 @@ fn submit(
     form: &UseStateHandle<AppForm>,
     notice: &AppNotice,
     id: Option<ShortId>,
+    auto_deploy: bool,
     saved: Callback<AppEntry>,
 ) -> Callback<SubmitEvent> {
     let (form, notice) = (form.clone(), notice.clone());
@@ -208,7 +226,23 @@ fn submit(
         let (notice, saved) = (notice.clone(), saved.clone());
         spawn_local(async move {
             match save(locale, id, &request).await {
-                Ok(entry) => saved.emit(entry),
+                Ok(entry) => {
+                    // An app that came from the app store starts its first deployment at once.
+                    if id.is_none() && auto_deploy {
+                        let path = format!("{API_ENDPOINT}/apps/{}/deploy", entry.id);
+                        if let Err(message) =
+                            fetch_json::<serde_json::Value>(locale, Request::post(&path)).await
+                        {
+                            notice.set(Some(Notice::Failed(format!(
+                                "{}: {}",
+                                locale.t("apps.store_deploy_failed"),
+                                message
+                            ))));
+                            return;
+                        }
+                    }
+                    saved.emit(entry)
+                }
                 Err(message) => notice.set(Some(Notice::Failed(message))),
             }
         });
@@ -233,7 +267,14 @@ async fn save(
 }
 
 /// Reads the targets, the connections, the ports and the app. A failed read shows its message.
-fn load(locale: Locale, id: Option<ShortId>, can_edit: bool, loaded: Loaded) {
+/// Without an app id, the app store entry of `store` fills the new form.
+fn load(
+    locale: Locale,
+    id: Option<ShortId>,
+    store: Option<String>,
+    can_edit: bool,
+    loaded: Loaded,
+) {
     let Loaded {
         app,
         form,
@@ -260,6 +301,9 @@ fn load(locale: Locale, id: Option<ShortId>, can_edit: bool, loaded: Loaded) {
             }
         }
         let Some(id) = id else {
+            if let Some(store) = store {
+                fill_from_store(locale, &store, &form, &notice).await;
+            }
             return;
         };
         let path = format!("{API_ENDPOINT}/apps/{id}");
@@ -271,4 +315,23 @@ fn load(locale: Locale, id: Option<ShortId>, can_edit: bool, loaded: Loaded) {
             Err(message) => notice.set(Some(Notice::Failed(message))),
         }
     });
+}
+
+/// Fills the new form from an app store entry.
+async fn fill_from_store(
+    locale: Locale,
+    store: &str,
+    form: &UseStateHandle<AppForm>,
+    notice: &AppNotice,
+) {
+    let path = format!("{API_ENDPOINT}/store");
+    match fetch_json::<StoreResponse>(locale, Request::get(&path)).await {
+        Ok(response) => match response.catalog.apps.iter().find(|app| app.id == store) {
+            Some(entry) => form.set(AppForm::from_store(entry)),
+            None => notice.set(Some(Notice::Failed(
+                locale.t("apps.store_missing").to_string(),
+            ))),
+        },
+        Err(message) => notice.set(Some(Notice::Failed(message))),
+    }
 }

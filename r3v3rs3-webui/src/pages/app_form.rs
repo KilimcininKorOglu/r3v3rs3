@@ -11,6 +11,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, AppRequest, AppSource, AppSpec, LOCAL_TARGET, TargetEntry};
 use r3v3rs3_api::port::PortEntry;
+use r3v3rs3_api::store::StoreApp;
 use std::str::FromStr;
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
@@ -108,6 +109,19 @@ impl Default for AppForm {
 }
 
 impl AppForm {
+    /// A form filled from an app store entry. The name starts as the entry id; the user
+    /// changes it before the first save.
+    pub fn from_store(app: &StoreApp) -> Self {
+        Self {
+            name: app.id.clone(),
+            kind: SourceKind::Image,
+            image: app.image.clone(),
+            port: app.port.to_string(),
+            health_check_path: app.health_check_path.clone().unwrap_or_default(),
+            ..Self::default()
+        }
+    }
+
     pub fn edit(app: &AppEntry) -> Self {
         let spec = &app.spec;
         let form = Self {
@@ -712,6 +726,31 @@ mod tests {
         assert_eq!(form.parse(Locale::En).unwrap(), request);
         assert_eq!(form.cpus, "1.5");
         assert!(!form.uses_git());
+    }
+
+    #[test]
+    fn a_store_entry_fills_the_image_form() {
+        let entry = StoreApp {
+            id: "uptime-kuma".into(),
+            name: "Uptime Kuma".into(),
+            description: "test".into(),
+            description_tr: String::new(),
+            image: "louislam/uptime-kuma:1".into(),
+            port: 3001,
+            health_check_path: Some("/".into()),
+            website: None,
+        };
+        let form = AppForm::from_store(&entry);
+        let request = form.parse(Locale::En).unwrap();
+        assert_eq!(request.name.as_str(), "uptime-kuma");
+        assert_eq!(request.target.to_string(), "local");
+        assert_eq!(
+            to_value(&request.spec.source).unwrap(),
+            json!({"type": "image", "image": "louislam/uptime-kuma:1"})
+        );
+        assert_eq!(request.spec.port, 3001);
+        assert_eq!(request.spec.health_check_path.as_deref(), Some("/"));
+        assert!(request.spec.domains.is_empty());
     }
 
     #[test]

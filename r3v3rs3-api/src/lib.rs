@@ -29,6 +29,7 @@ pub mod proxy;
 pub mod proxy_protocol;
 pub mod redirect;
 pub mod rewrite;
+pub mod store;
 pub mod subject_name;
 pub mod tls;
 pub mod upstream;

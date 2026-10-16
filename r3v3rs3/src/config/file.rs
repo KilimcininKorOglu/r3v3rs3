@@ -23,6 +23,7 @@ use r3v3rs3_api::{
     error::Error,
     port::{Port, PortEntry},
     proxy::{Proxy, ProxyEntry},
+    store::StoreCatalog,
 };
 use serde_derive::{Deserialize, Serialize};
 use std::{
@@ -345,6 +346,13 @@ impl FileStorage {
         fs::create_dir_all(&self.dir).await?;
         info!(?path, "save CDN IP ranges");
         fs::write(path, serde_json::to_vec(ranges)?).await?;
+        Ok(())
+    }
+
+    async fn save_app_store_impl(&self, path: &Path, catalog: &StoreCatalog) -> anyhow::Result<()> {
+        fs::create_dir_all(&self.dir).await?;
+        info!(?path, "save app store catalog");
+        fs::write(path, serde_json::to_vec(catalog)?).await?;
         Ok(())
     }
 
@@ -860,6 +868,26 @@ impl Storage for FileStorage {
                 warn!(?path, "failed to load: {err}");
                 None
             }
+        }
+    }
+
+    async fn save_app_store(&self, catalog: &StoreCatalog) -> Result<(), Error> {
+        let path = self.dir.join("app-store.json");
+        let result = self.save_app_store_impl(&path, catalog).await;
+        saved(&path, result)
+    }
+
+    async fn load_app_store(&self) -> Option<StoreCatalog> {
+        let path = self.dir.join("app-store.json");
+        match fs::read(&path).await {
+            Ok(bytes) => match serde_json::from_slice(&bytes) {
+                Ok(catalog) => Some(catalog),
+                Err(err) => {
+                    warn!(?path, %err, "failed to parse the app store catalog");
+                    None
+                }
+            },
+            Err(_) => None,
         }
     }
 

@@ -1,0 +1,476 @@
+{
+  "version": 1,
+  "updated_at": 1792167994,
+  "apps": [
+    {
+      "id": "uptime-kuma",
+      "name": "Uptime Kuma",
+      "description": "Self-hosted uptime monitoring with status pages and many notification channels.",
+      "description_tr": "Durum sayfaları ve çok sayıda bildirim kanalıyla self-hosted erişilebilirlik izleme.",
+      "image": "louislam/uptime-kuma:1",
+      "port": 3001,
+      "health_check_path": "/",
+      "website": "https://uptime.kuma.pet"
+    },
+    {
+      "id": "memos",
+      "name": "Memos",
+      "description": "A lightweight, self-hosted note-taking service, like a private Twitter.",
+      "description_tr": "Özel bir Twitter gibi, hafif bir self-hosted not alma servisi.",
+      "image": "neosmemo/memos:stable",
+      "port": 5230,
+      "health_check_path": "/",
+      "website": "https://www.usememos.com"
+    },
+    {
+      "id": "vaultwarden",
+      "name": "Vaultwarden",
+      "description": "A lightweight Bitwarden-compatible password vault server.",
+      "description_tr": "Hafif, Bitwarden uyumlu bir parola kasa sunucusu.",
+      "image": "vaultwarden/server:latest",
+      "port": 80,
+      "health_check_path": "/alive",
+      "website": "https://github.com/dani-garcia/vaultwarden"
+    },
+    {
+      "id": "gitea",
+      "name": "Gitea",
+      "description": "A painless self-hosted Git service.",
+      "description_tr": "Zahmetsiz bir self-hosted Git servisi.",
+      "image": "gitea/gitea:1",
+      "port": 3000,
+      "health_check_path": "/api/healthz",
+      "website": "https://gitea.io"
+    },
+    {
+      "id": "forgejo",
+      "name": "Forgejo",
+      "description": "A community-driven, self-hosted Git forge beyond Gitea.",
+      "description_tr": "Gitea'nın ötesinde, topluluk güdümlü bir self-hosted Git forge'u.",
+      "image": "codeberg.org/forgejo/forgejo:7",
+      "port": 3000,
+      "health_check_path": "/api/healthz",
+      "website": "https://forgejo.org"
+    },
+    {
+      "id": "woodpecker",
+      "name": "Woodpecker CI",
+      "description": "A simple, container-native continuous integration server with a SQLite store.",
+      "description_tr": "SQLite deposuyla basit, container tabanlı bir sürekli entegrasyon sunucusu.",
+      "image": "woodpeckerci/woodpecker-server:latest",
+      "port": 8000,
+      "health_check_path": "/healthz",
+      "website": "https://woodpecker-ci.org"
+    },
+    {
+      "id": "n8n",
+      "name": "n8n",
+      "description": "A workflow automation tool with a visual editor and hundreds of integrations.",
+      "description_tr": "Görsel editörlü, yüzlerce entegrasyonlu bir iş akışı otomasyon aracı.",
+      "image": "docker.n8n.io/n8nio/n8n",
+      "port": 5678,
+      "health_check_path": "/healthz",
+      "website": "https://n8n.io"
+    },
+    {
+      "id": "it-tools",
+      "name": "IT Tools",
+      "description": "A collection of handy online tools for developers.",
+      "description_tr": "Geliştiriciler için kullanışlı çevrimiçi araçlar koleksiyonu.",
+      "image": "corentinth/it-tools:latest",
+      "port": 80,
+      "health_check_path": "/",
+      "website": "https://it-tools.tech"
+    },
+    {
+      "id": "cyberchef",
+      "name": "CyberChef",
+      "description": "The Cyber Swiss Army Knife: encoding, compression and analysis recipes in the browser.",
+      "description_tr": "Siber İsviçre çakısı: tarayıcıda encoding, sıkıştırma ve analiz reçeteleri.",
+      "image": "ghcr.io/gchq/cyberchef:latest",
+      "port": 80,
+      "health_check_path": "/",
+      "website": "https://gchq.github.io/CyberChef/"
+    },
+    {
+      "id": "stirling-pdf",
+      "name": "Stirling PDF",
+      "description": "A locally hosted web application for split, merge and conversion of PDF files.",
+      "description_tr": "PDF dosyalarını bölme, birleştirme ve dönüştürme için lokal barındırılan bir web uygulaması.",
+      "image": "stirlingtools/stirling-pdf:latest",
+      "port": 8080,
+      "health_check_path": "/",
+      "website": "https://stirlingpdf.com"
+    },
+    {
+      "id": "drawio",
+      "name": "draw.io",
+      "description": "A diagramming and whiteboarding tool that runs in the browser.",
+      "description_tr": "Tarayıcıda çalışan bir diyagram ve beyaz tahta aracı.",
+      "image": "jgraph/drawio:latest",
+      "port": 8080,
+      "health_check_path": "/",
+      "website": "https://www.drawio.com"
+    },
+    {
+      "id": "etherpad",
+      "name": "Etherpad",
+      "description": "A real-time collaborative document editor with a built-in pad store.",
+      "description_tr": "Dahili pad deposuyla gerçek zamanlı ortak belge editörü.",
+      "image": "etherpad/etherpad:latest",
+      "port": 9001,
+      "health_check_path": "/",
+      "website": "https://etherpad.org"
+    },
+    {
+      "id": "trilium",
+      "name": "Trilium Notes",
+      "description": "A hierarchical note-taking application with a rich editor and a SQLite store.",
+      "description_tr": "Zengin editörlü, SQLite depolu hiyerarşik bir not alma uygulaması.",
+      "image": "zadam/trilium:latest",
+      "port": 8080,
+      "health_check_path": "/",
+      "website": "https://github.com/zadam/trilium"
+    },
+    {
+      "id": "linkding",
+      "name": "Linkding",
+      "description": "A minimal bookmark manager designed to be fast and simple.",
+      "description_tr": "Hızlı ve sade tasarlanmış, minimal bir bookmark yöneticisi.",
+      "image": "sissbruecker/linkding:latest",
+      "port": 9090,
+      "health_check_path": "/",
+      "website": "https://github.com/sissbruecker/linkding"
+    },
+    {
+      "id": "readeck",
+      "name": "Readeck",
+      "description": "A read-it-later service that saves articles for offline reading.",
+      "description_tr": "Makaleleri çevrimdışı okumak için kaydeden bir read-it-later servisi.",
+      "image": "codeberg.org/readeck/readeck:latest",
+      "port": 8000,
+      "health_check_path": "/",
+      "website": "https://readeck.org"
+    },
+    {
+      "id": "vikunja",
+      "name": "Vikunja",
+      "description": "A to-do app to organize tasks, projects and teams with a SQLite default store.",
+      "description_tr": "Görevleri, projeleri ve ekipleri düzenleyen, varsayılan SQLite depolu bir to-do uygulaması.",
+      "image": "vikunja/vikunja:latest",
+      "port": 3456,
+      "health_check_path": "/api/v1/info",
+      "website": "https://vikunja.io"
+    },
+    {
+      "id": "mealie",
+      "name": "Mealie",
+      "description": "A self-hosted recipe manager and meal planner with a SQLite default store.",
+      "description_tr": "Varsayılan SQLite depolu, self-hosted bir yemek tarifi yöneticisi ve öğe planlayıcı.",
+      "image": "ghcr.io/mealie-recipes/mealie:latest",
+      "port": 9000,
+      "health_check_path": "/",
+      "website": "https://mealie.io"
+    },
+    {
+      "id": "grocy",
+      "name": "Grocy",
+      "description": "An ERP for your fridge: groceries, household chores and inventory management.",
+      "description_tr": "Buzdolabınız için bir ERP: erzak, ev işleri ve envanter yönetimi.",
+      "image": "lscr.io/linuxserver/grocy:latest",
+      "port": 80,
+      "health_check_path": "/",
+      "website": "https://grocy.info"
+    },
+    {
+      "id": "actual-budget",
+      "name": "Actual Budget",
+      "description": "A local-first personal finance app with envelope budgeting.",
+      "description_tr": "Zarf bütçelemeli, local-first kişisel finans uygulaması.",
+      "image": "actualbudget/actual-server:latest",
+      "port": 5006,
+      "health_check_path": "/",
+      "website": "https://actualbudget.org"
+    },
+    {
+      "id": "nocodb",
+      "name": "NocoDB",
+      "description": "An open-source Airtable alternative that turns databases into a smart spreadsheet.",
+      "description_tr": "Veritabanlarını akıllı tabloya çeviren, açık kaynak bir Airtable alternatifi.",
+      "image": "nocodb/nocodb:latest",
+      "port": 8080,
+      "health_check_path": "/api/v2/meta/health",
+      "website": "https://nocodb.com"
+    },
+    {
+      "id": "grist",
+      "name": "Grist",
+      "description": "A relational spreadsheet with formulas and Python, backed by SQLite.",
+      "description_tr": "SQLite destekli, formüllü ve Python'lu ilişkisel tablo uygulaması.",
+      "image": "gristlabs/grist-core:latest",
+      "port": 8484,
+      "health_check_path": "/status",
+      "website": "https://www.getgrist.com"
+    },
+    {
+      "id": "ghost",
+      "name": "Ghost",
+      "description": "A publishing platform for blogs and newsletters with a SQLite default store.",
+      "description_tr": "Varsayılan SQLite depolu, blog ve bülten yayınlama platformu.",
+      "image": "ghost:5",
+      "port": 2368,
+      "health_check_path": "/",
+      "website": "https://ghost.org"
+    },
+    {
+      "id": "nextcloud",
+      "name": "Nextcloud",
+      "description": "A self-hosted file sync and collaboration platform with a SQLite default store.",
+      "description_tr": "Varsayılan SQLite depolu, self-hosted dosya senkronizasyon ve işbirliği platformu.",
+      "image": "nextcloud:29-apache",
+      "port": 80,
+      "health_check_path": "/status.php",
+      "website": "https://nextcloud.com"
+    },
+    {
+      "id": "filebrowser",
+      "name": "File Browser",
+      "description": "A web file manager for browsing, uploading and editing files in a directory.",
+      "description_tr": "Bir dizindeki dosyalara göz atma, yükleme ve düzenleme için web dosya yöneticisi.",
+      "image": "filebrowser/filebrowser:latest",
+      "port": 80,
+      "health_check_path": "/health",
+      "website": "https://filebrowser.org"
+    },
+    {
+      "id": "alist",
+      "name": "Alist",
+      "description": "A file list program that supports many storage backends behind one web interface.",
+      "description_tr": "Tek web arayüzünde çok sayıda storage backend'i destekleyen dosya listeleme programı.",
+      "image": "xhofe/alist:latest",
+      "port": 5244,
+      "health_check_path": "/",
+      "website": "https://alist.nn.ci"
+    },
+    {
+      "id": "jellyfin",
+      "name": "Jellyfin",
+      "description": "A media server that streams movies, series and music to your devices.",
+      "description_tr": "Film, dizi ve müziği cihazlarınıza aktaran bir medya sunucusu.",
+      "image": "jellyfin/jellyfin:latest",
+      "port": 8096,
+      "health_check_path": "/health",
+      "website": "https://jellyfin.org"
+    },
+    {
+      "id": "jellyseerr",
+      "name": "Jellyseerr",
+      "description": "A request management and media discovery tool for Jellyfin.",
+      "description_tr": "Jellyfin için istek yönetimi ve medya keşif aracı.",
+      "image": "fallenbagel/jellyseerr:latest",
+      "port": 5055,
+      "health_check_path": "/api/v1/status",
+      "website": "https://github.com/Fallenbagel/jellyseerr"
+    },
+    {
+      "id": "navidrome",
+      "name": "Navidrome",
+      "description": "A lightweight music streaming server with a Subsonic-compatible API.",
+      "description_tr": "Subsonic uyumlu API'li, hafif bir müzik akış sunucusu.",
+      "image": "deluan/navidrome:latest",
+      "port": 4533,
+      "health_check_path": "/ping",
+      "website": "https://www.navidrome.org"
+    },
+    {
+      "id": "syncthing",
+      "name": "Syncthing",
+      "description": "A continuous file synchronization program with a web interface.",
+      "description_tr": "Web arayüzlü, sürekli dosya senkronizasyon programı.",
+      "image": "syncthing/syncthing:latest",
+      "port": 8384,
+      "health_check_path": "/rest/noauth/health",
+      "website": "https://syncthing.net"
+    },
+    {
+      "id": "portainer",
+      "name": "Portainer CE",
+      "description": "A container management panel for Docker environments.",
+      "description_tr": "Docker ortamları için container yönetim paneli.",
+      "image": "portainer/portainer-ce:latest",
+      "port": 9000,
+      "health_check_path": "/api/status",
+      "website": "https://www.portainer.io"
+    },
+    {
+      "id": "dozzle",
+      "name": "Dozzle",
+      "description": "A real-time log viewer for Docker containers.",
+      "description_tr": "Docker container'ları için gerçek zamanlı log görüntüleyici.",
+      "image": "amir20/dozzle:latest",
+      "port": 8080,
+      "health_check_path": "/health",
+      "website": "https://dozzle.dev"
+    },
+    {
+      "id": "netdata",
+      "name": "Netdata",
+      "description": "Real-time infrastructure monitoring with thousands of metrics per second.",
+      "description_tr": "Saniyede binlerce metric'le gerçek zamanlı altyapı izleme.",
+      "image": "netdata/netdata:latest",
+      "port": 19999,
+      "health_check_path": "/v1/info",
+      "website": "https://www.netdata.cloud"
+    },
+    {
+      "id": "grafana",
+      "name": "Grafana",
+      "description": "Dashboards and visualization for metrics, logs and traces with a SQLite default store.",
+      "description_tr": "Varsayılan SQLite depolu, metric, log ve trace için pano ve görselleştirme.",
+      "image": "grafana/grafana:latest",
+      "port": 3000,
+      "health_check_path": "/api/health",
+      "website": "https://grafana.com"
+    },
+    {
+      "id": "changedetection",
+      "name": "Changedetection.io",
+      "description": "A website change monitoring service with notifications.",
+      "description_tr": "Bildirim destekli web sitesi değişiklik izleme servisi.",
+      "image": "dgtlmoon/changedetection.io:latest",
+      "port": 5000,
+      "health_check_path": "/",
+      "website": "https://changedetection.io"
+    },
+    {
+      "id": "rss-bridge",
+      "name": "RSS-Bridge",
+      "description": "Generates RSS and Atom feeds for websites that do not provide one.",
+      "description_tr": "RSS ve Atom beslemesi sunmayan web siteleri için besleme üretir.",
+      "image": "rssbridge/rss-bridge:latest",
+      "port": 80,
+      "health_check_path": "/",
+      "website": "https://rss-bridge.github.io/rss-bridge/"
+    },
+    {
+      "id": "searxng",
+      "name": "SearXNG",
+      "description": "A privacy-respecting metasearch engine that aggregates many search engines.",
+      "description_tr": "Birçok arama motorunu birleştiren, gizliliğe saygılı bir metasearch motoru.",
+      "image": "searxng/searxng:latest",
+      "port": 8080,
+      "health_check_path": "/healthz",
+      "website": "https://docs.searxng.org"
+    },
+    {
+      "id": "redlib",
+      "name": "Redlib",
+      "description": "A private front-end for Reddit without JavaScript.",
+      "description_tr": "JavaScript'siz, Reddit için gizlilik odaklı bir ön yüz.",
+      "image": "quay.io/redlib/redlib:latest",
+      "port": 8080,
+      "health_check_path": "/",
+      "website": "https://github.com/redlib-org/redlib"
+    },
+    {
+      "id": "rimgo",
+      "name": "rimgo",
+      "description": "A privacy-focused front-end for Imgur.",
+      "description_tr": "Imgur için gizlilik odaklı bir ön yüz.",
+      "image": "codeberg.org/rimgo/rimgo:latest",
+      "port": 3000,
+      "health_check_path": "/",
+      "website": "https://codeberg.org/rimgo/rimgo"
+    },
+    {
+      "id": "gotosocial",
+      "name": "GoToSocial",
+      "description": "A lightweight ActivityPub social network server with a SQLite default store.",
+      "description_tr": "Varsayılan SQLite depolu, hafif bir ActivityPub sosyal ağ sunucusu.",
+      "image": "superseriousbusiness/gotosocial:latest",
+      "port": 8080,
+      "health_check_path": "/livez",
+      "website": "https://gotosocial.org"
+    },
+    {
+      "id": "pingvin-share",
+      "name": "Pingvin Share",
+      "description": "A self-hosted file sharing platform with a SQLite default store.",
+      "description_tr": "Varsayılan SQLite depolu, self-hosted dosya paylaşım platformu.",
+      "image": "stonith404/pingvin-share:latest",
+      "port": 3000,
+      "health_check_path": "/api/health",
+      "website": "https://github.com/stonith404/pingvin-share"
+    },
+    {
+      "id": "pairdrop",
+      "name": "PairDrop",
+      "description": "Local file sharing in your browser, inspired by Apple AirDrop.",
+      "description_tr": "Apple AirDrop'tan ilham alan, tarayıcıda lokal dosya paylaşımı.",
+      "image": "lscr.io/linuxserver/pairdrop:latest",
+      "port": 3000,
+      "health_check_path": "/",
+      "website": "https://pairdrop.net"
+    },
+    {
+      "id": "librespeed",
+      "name": "LibreSpeed",
+      "description": "A self-hosted internet speed test without external dependencies.",
+      "description_tr": "Dış bağımlılığı olmayan, self-hosted internet hız testi.",
+      "image": "lscr.io/linuxserver/librespeed:latest",
+      "port": 80,
+      "health_check_path": "/",
+      "website": "https://librespeed.org"
+    },
+    {
+      "id": "homepage",
+      "name": "Homepage",
+      "description": "A modern, fully static dashboard for your services with API integrations.",
+      "description_tr": "API entegrasyonlu, hizmetleriniz için modern ve tamamen statik pano.",
+      "image": "ghcr.io/gethomepage/homepage:latest",
+      "port": 3000,
+      "health_check_path": "/",
+      "website": "https://gethomepage.dev"
+    },
+    {
+      "id": "heimdall",
+      "name": "Heimdall",
+      "description": "An application dashboard that organizes links to your self-hosted services.",
+      "description_tr": "Self-hosted hizmetlerinizin linklerini düzenleyen uygulama panosu.",
+      "image": "lscr.io/linuxserver/heimdall:latest",
+      "port": 80,
+      "health_check_path": "/",
+      "website": "https://heimdall.site"
+    },
+    {
+      "id": "apprise-api",
+      "name": "Apprise API",
+      "description": "A REST interface for sending notifications to over 100 services.",
+      "description_tr": "100'den fazla servise bildirim göndermek için REST arayüzü.",
+      "image": "lscr.io/linuxserver/apprise-api:latest",
+      "port": 8000,
+      "health_check_path": "/status",
+      "website": "https://github.com/caronc/apprise-api"
+    },
+    {
+      "id": "httpbin",
+      "name": "httpbin",
+      "description": "An HTTP request and response testing service.",
+      "description_tr": "HTTP isteği ve yanıtı test servisi.",
+      "image": "mccutchen/go-httpbin:latest",
+      "port": 8080,
+      "health_check_path": "/status/200",
+      "website": "https://httpbin.org"
+    },
+    {
+      "id": "whoami",
+      "name": "whoami",
+      "description": "A tiny container that echoes the request headers, a simple connectivity test.",
+      "description_tr": "İstek header'larını yankılayan minik container, basit bir bağlantı testi.",
+      "image": "traefik/whoami:v1.10.3",
+      "port": 80,
+      "health_check_path": "/",
+      "website": "https://github.com/traefik/whoami"
+    }
+  ]
+}

@@ -41,6 +41,9 @@ pub enum Error {
     #[error("failed to refresh CDN IP ranges")]
     FailedToRefreshCdnRanges,
 
+    #[error("failed to refresh the app store catalog")]
+    FailedToRefreshAppStore,
+
     #[error("no release newer than the running version is available")]
     NoNewRelease,
 
@@ -418,7 +421,9 @@ impl Error {
             | Self::TargetInUse { .. }
             | Self::AppTargetFixed { .. } => 409,
             Self::AgentOffline { .. } | Self::PlatformDisabled | Self::PlatformFailed => 503,
-            Self::NotificationFailed { .. } | Self::GitProviderFailed { .. } => 502,
+            Self::NotificationFailed { .. }
+            | Self::GitProviderFailed { .. }
+            | Self::FailedToRefreshAppStore => 502,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig
             | Self::FailedToInvokeRpc

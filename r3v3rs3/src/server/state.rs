@@ -285,6 +285,9 @@ impl ServerState {
         if let Some(ranges) = storage.load_cdn_ranges().await {
             crate::cdn::install(ranges);
         }
+        if let Some(catalog) = storage.load_app_store().await {
+            crate::appstore::install(catalog);
+        }
 
         let certs = storage.load_certs().await;
         let acmes = storage.load_acmes().await;
@@ -421,6 +424,12 @@ impl ServerState {
                 // Only the master installs the new ranges and stores them.
                 if self.leader && crate::cdn::install(ranges.clone()) {
                     log_save_error(self.storage.save_cdn_ranges(&ranges).await);
+                }
+            }
+            ServerCommand::SetAppStore { catalog } => {
+                // Only the master installs the new catalog and stores it.
+                if self.leader && crate::appstore::install(catalog.clone()) {
+                    log_save_error(self.storage.save_app_store(&catalog).await);
                 }
             }
             ServerCommand::SetUpdateAvailable { tag } => {

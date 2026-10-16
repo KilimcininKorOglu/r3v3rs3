@@ -34,6 +34,10 @@ pub enum ServerCommand {
     SetCdnRanges {
         ranges: CdnRanges,
     },
+    /// The app store refresh downloaded a newer catalog.
+    SetAppStore {
+        catalog: r3v3rs3_api::store::StoreCatalog,
+    },
     /// The update check learned the newest release, or that this build is current again.
     SetUpdateAvailable {
         tag: Option<String>,
@@ -92,6 +96,11 @@ impl std::fmt::Debug for ServerCommand {
             Self::SetCdnRanges { ranges } => f
                 .debug_struct("SetCdnRanges")
                 .field("updated_at", &ranges.updated_at)
+                .finish(),
+            Self::SetAppStore { catalog } => f
+                .debug_struct("SetAppStore")
+                .field("updated_at", &catalog.updated_at)
+                .field("apps", &catalog.apps.len())
                 .finish(),
             Self::SetUpdateAvailable { tag } => f
                 .debug_struct("SetUpdateAvailable")

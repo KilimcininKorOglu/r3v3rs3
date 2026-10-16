@@ -70,6 +70,7 @@ mod platform;
 mod ports;
 mod proxies;
 mod static_file;
+mod store;
 mod upgrade;
 mod workers;
 
@@ -483,6 +484,12 @@ fn state_routes() -> OpenApiRouter<AppState> {
             OpenApiRouter::new()
                 .routes(routes!(cdn::get))
                 .routes(routes!(cdn::refresh)),
+        )
+        .nest(
+            "/store",
+            OpenApiRouter::new()
+                .routes(routes!(store::get))
+                .routes(routes!(store::refresh)),
         )
         .nest(
             "/discovery",

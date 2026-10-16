@@ -12,6 +12,7 @@ mod app_git_token;
 mod app_list;
 mod app_log;
 mod app_repository;
+mod app_store;
 mod app_view;
 mod app_webhook;
 mod audit;
@@ -84,6 +85,10 @@ pub enum Route {
     Apps,
     #[at("/apps/new")]
     NewApp,
+    #[at("/apps/store")]
+    AppStore,
+    #[at("/apps/store/:store")]
+    NewStoreApp { store: String },
     #[at("/apps/:id")]
     AppView { id: ShortId },
     #[at("/apps/:id/deployments")]
@@ -127,6 +132,8 @@ impl Route {
             | Route::ProxyLogView { .. } => Some(Route::Proxies),
             Route::Apps
             | Route::NewApp
+            | Route::AppStore
+            | Route::NewStoreApp { .. }
             | Route::AppView { .. }
             | Route::AppDeployments { .. }
             | Route::AppLog { .. } => Some(Route::Apps),
@@ -156,6 +163,10 @@ pub fn switch(routes: Route) -> Html {
         Route::NewProxy => html! { <new_proxy::NewProxy /> },
         Route::AccessLists => html! { <access_lists::AccessLists /> },
         Route::Apps => html! { <app_list::AppList /> },
+        Route::AppStore => html! { <app_store::AppStore /> },
+        Route::NewStoreApp { store } => {
+            html! { <app_view::AppView store={Some(store)} /> }
+        }
         Route::NewApp => html! { <app_view::AppView /> },
         Route::AppView { id } => html! { <app_view::AppView id={Some(id)} /> },
         Route::AppDeployments { id } => html! { <app_deployments::AppDeployments {id} /> },

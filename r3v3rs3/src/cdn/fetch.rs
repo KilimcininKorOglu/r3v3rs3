@@ -26,7 +26,7 @@ use tracing::{error, info, warn};
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
 const RETRY_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const STARTUP_DELAY: Duration = Duration::from_secs(10);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY_SIZE: usize = 4 * 1024 * 1024;
 
 /// Google Cloud Load Balancing proxy and health check ranges. Google publishes them only in its

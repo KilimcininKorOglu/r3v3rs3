@@ -112,6 +112,13 @@ const GROUPS: &[MenuGroup] = &[
                 subs: NO_SUBS,
             },
             MenuItem {
+                name: "nav.app_store",
+                icon: "/assets/icons/create.svg",
+                route: Route::AppStore,
+                access: Access::PlatformEdit,
+                subs: NO_SUBS,
+            },
+            MenuItem {
                 name: "nav.targets",
                 icon: "/assets/icons/server.svg",
                 route: Route::Targets,

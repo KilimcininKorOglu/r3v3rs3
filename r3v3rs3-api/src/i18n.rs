@@ -192,6 +192,7 @@ mod tests {
             Error::InvalidServerUrl { url: text() },
             Error::InvalidCidr { cidr: text() },
             Error::FailedToRefreshCdnRanges,
+            Error::FailedToRefreshAppStore,
             Error::NoNewRelease,
             Error::UpgradeFailed,
             Error::FailedToBuildDnsResolver { reason: text() },
