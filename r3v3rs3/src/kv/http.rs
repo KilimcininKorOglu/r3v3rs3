@@ -15,8 +15,8 @@ use serde::de::DeserializeOwned;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 use std::task::{Context, Poll};
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
@@ -134,7 +134,10 @@ impl ApiClient {
     /// Sends a request that switches the connection to a raw duplex stream, like the Docker
     /// exec hijack. The request goes over its own connection without hyper, the `101` response
     /// headers are read by hand, and the rest of the stream is returned.
-    pub async fn send_upgrade(&self, request: Request<Full<Bytes>>) -> anyhow::Result<UpgradedStream> {
+    pub async fn send_upgrade(
+        &self,
+        request: Request<Full<Bytes>>,
+    ) -> anyhow::Result<UpgradedStream> {
         let (mut io, endpoint) = self.connect().await?;
         let method = request.method().clone();
         let path = request.uri().path().to_string();
@@ -167,8 +170,7 @@ impl ApiClient {
                 bail!("the response headers are too large");
             }
         }
-        let split = window(&buffered)
-            .len();
+        let split = window(&buffered).len();
         let head = String::from_utf8_lossy(&buffered[..split]);
         let status = head.lines().next().unwrap_or_default();
         if !status.contains(" 101 ") {

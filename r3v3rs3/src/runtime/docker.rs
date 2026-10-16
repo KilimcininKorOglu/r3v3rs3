@@ -154,7 +154,9 @@ impl DockerRuntime {
         let builder = self.client.builder(Method::POST, &path);
         let request = builder
             .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from_static(b"{\"Detach\":false,\"Tty\":true}")))?;
+            .body(Full::new(Bytes::from_static(
+                b"{\"Detach\":false,\"Tty\":true}",
+            )))?;
         let stream = self.client.send_upgrade(request).await?;
         let handle = ExecHandle {
             stream,
@@ -170,24 +172,33 @@ impl DockerRuntime {
 pub struct ExecHandle {
     /// The duplex stream of the session: stdin and the raw TTY output.
     pub stream: crate::kv::http::UpgradedStream,
-    client: ApiClient,
-    id: String,
+    pub(crate) client: ApiClient,
+    pub(crate) id: String,
 }
 
 impl ExecHandle {
     /// Resizes the TTY of the open session.
     pub async fn resize(&self, cols: u16, rows: u16) -> anyhow::Result<()> {
-        let path = format!("/exec/{}/resize?h={rows}&w={cols}", self.id);
-        let request = self
-            .client
-            .builder(Method::POST, &path)
-            .body(Full::new(Bytes::new()))?;
-        // A resize of a session that just ended answers 404, which is fine.
-        self.client
-            .send_with(request, RESPONSE_TIMEOUT, &[StatusCode::NOT_FOUND])
-            .await?;
-        Ok(())
+        resize_exec(&self.client, &self.id, cols, rows).await
     }
+}
+
+/// Resizes the TTY of an open exec session. A resize of a session that just ended answers
+/// `404`, which is fine.
+pub(crate) async fn resize_exec(
+    client: &ApiClient,
+    id: &str,
+    cols: u16,
+    rows: u16,
+) -> anyhow::Result<()> {
+    let path = format!("/exec/{id}/resize?h={rows}&w={cols}");
+    let request = client
+        .builder(Method::POST, &path)
+        .body(Full::new(Bytes::new()))?;
+    client
+        .send_with(request, RESPONSE_TIMEOUT, &[StatusCode::NOT_FOUND])
+        .await?;
+    Ok(())
 }
 
 #[async_trait::async_trait]

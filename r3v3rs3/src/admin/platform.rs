@@ -10,9 +10,9 @@ use crate::platform::{DEFAULT_LOG_TAIL, Platform};
 use crate::runtime::docker::ExecHandle;
 use axum::{
     Extension, Json,
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::{Path, Query, State},
     response::Response,
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
 };
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
@@ -26,10 +26,10 @@ use r3v3rs3_api::{
     },
 };
 use serde_derive::Deserialize;
-use utoipa::IntoParams;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::error;
+use utoipa::IntoParams;
 
 impl AppState {
     /// The platform, after the permission check of the caller.
