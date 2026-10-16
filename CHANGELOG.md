@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.8] - 2026-10-16
+
+### Added
+- MCP clients can register themselves through the RFC 7591 dynamic client registration endpoint.
+
+### Changed
+- The public URL is one top-level setting that the settings page manages for every module.
+- The public address is its own section at the top of the settings page.
+- The project ships a binary and the `install.sh` installer only. It builds and publishes no Docker images anymore.
+
+### Removed
+- Cluster mode: the multi-node state sharing, the leader election, the `KvStorage`, the `[cluster]` configuration section and the cluster end-to-end tests. The service discovery from etcd stays.
+- The Kubernetes discovery provider, its configuration and its k3s tests.
+- The Consul discovery provider, its configuration and its tests. r3v3rs3 discovers services from Docker labels and etcd.
+
 ## [1.8.7] - 2026-10-15
 
 ### Changed
