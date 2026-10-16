@@ -270,7 +270,12 @@ pub async fn read_json<T: DeserializeOwned>(response: Response<Incoming>) -> any
 }
 
 pub async fn read_body(response: Response<Incoming>) -> anyhow::Result<Bytes> {
-    let body = Limited::new(response.into_body(), MAX_BODY_SIZE).collect();
+    read_body_limited(response, MAX_BODY_SIZE).await
+}
+
+/// Reads the body up to `max` bytes. A larger body is an error.
+pub async fn read_body_limited(response: Response<Incoming>, max: usize) -> anyhow::Result<Bytes> {
+    let body = Limited::new(response.into_body(), max).collect();
     let body = tokio::time::timeout(RESPONSE_TIMEOUT, body)
         .await
         .map_err(|_| anyhow!("the response body timed out"))?

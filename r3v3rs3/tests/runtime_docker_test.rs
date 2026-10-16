@@ -377,6 +377,67 @@ async fn an_exec_session_runs_a_command() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Redis stays up and carries `/data`, so the archive calls run against a real directory.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_file_round_trips_through_the_archive() -> anyhow::Result<()> {
+    use r3v3rs3_api::platform::FileEntry;
+    let runtime = runtime()?;
+    let names = Names::new()?;
+    let image: ImageRef = "redis:8-alpine".parse()?;
+    runtime.ensure_network(&names.network, &names.app).await?;
+    let spec = ContainerSpec {
+        name: names.container.clone(),
+        image: image.clone(),
+        env: Vec::new(),
+        labels: BTreeMap::from([(APP_LABEL.to_string(), names.app.to_string())]),
+        network: Some(names.network.clone()),
+        volumes: Vec::new(),
+        restart: RestartPolicy::No,
+        limits: ResourceLimits {
+            memory_bytes: Some(64 << 20),
+            nano_cpus: Some(500_000_000),
+        },
+        publish: None,
+    };
+    runtime.pull_image(&image).await?;
+    runtime.create_container(&spec).await?;
+    runtime.start_container(&names.container).await?;
+
+    let path = "/data/r3v3rs3-test.txt";
+    let content = b"r3v3rs3 files ok".to_vec();
+    let result = async {
+        runtime
+            .upload_file(&names.container, path, content.clone())
+            .await?;
+        let entries = runtime.list_dir(&names.container, "/data").await?;
+        let found = entries
+            .iter()
+            .find(|FileEntry { name, .. }| name == "r3v3rs3-test.txt")
+            .context("the uploaded file is not listed")?;
+        ensure_eq!(found.dir, false);
+        ensure_eq!(found.size, content.len() as u64);
+        let downloaded = runtime.download_file(&names.container, path).await?;
+        ensure_eq!(downloaded, content);
+        runtime.remove_path(&names.container, path).await?;
+        let entries = runtime.list_dir(&names.container, "/data").await?;
+        ensure!(
+            entries
+                .iter()
+                .all(|FileEntry { name, .. }| name != "r3v3rs3-test.txt"),
+            "the removed file is still listed"
+        );
+        anyhow::Ok(())
+    }
+    .await;
+    let container = runtime.remove_container(&names.container).await;
+    let network = runtime.remove_network(&names.network).await;
+    result?;
+    container?;
+    network?;
+    Ok(())
+}
+
 /// Opens a terminal in the container, runs `echo` through it and reads the answer back.
 async fn exec_echo(runtime: &DockerRuntime, names: &Names) -> anyhow::Result<()> {
     use tokio::io::{AsyncRead, AsyncWrite};

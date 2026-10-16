@@ -413,6 +413,26 @@ pub struct AppLogQuery {
     pub tail: Option<u32>,
 }
 
+/// One entry of a directory inside a volume of an app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct FileEntry {
+    /// The name of the entry, without its directory.
+    #[schema(value_type = String, example = "app.db")]
+    pub name: String,
+    /// The size of a file in bytes, and `0` for a directory.
+    pub size: u64,
+    /// Whether the entry is a directory.
+    pub dir: bool,
+}
+
+/// The query of an app file request.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct FilePathQuery {
+    /// The absolute path of the file or directory inside the container, for example `/data/app.db`.
+    pub path: String,
+}
+
 /// One environment variable of an app. The admin API does not return the value of a secret
 /// variable. An update without a value keeps the current value of a secret variable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

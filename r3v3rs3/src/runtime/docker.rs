@@ -6,7 +6,9 @@
 //! matches, and then uses the returned id.
 
 use super::ContainerRuntime;
-use crate::kv::http::{ApiClient, Lines, RESPONSE_TIMEOUT, read_body, read_json};
+use crate::kv::http::{
+    ApiClient, Lines, RESPONSE_TIMEOUT, read_body, read_body_limited, read_json,
+};
 use anyhow::{anyhow, bail};
 use bytes::Bytes;
 use http_body_util::Full;
@@ -18,11 +20,14 @@ use r3v3rs3_api::container::{
     ContainerSpec, ContainerSummary, ImageInfo, ImageRef, NetworkName, ProjectName,
 };
 use r3v3rs3_api::git::RelPath;
+use r3v3rs3_api::platform::FileEntry;
 use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
+use std::io::Read as _;
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
 
 /// The time a pull may go without a progress line.
 const PULL_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -41,6 +46,38 @@ const PUBLISH_HOST: &str = "127.0.0.1";
 
 /// The content type of a log body that carries the raw output of a TTY container.
 const RAW_STREAM: &str = "application/vnd.docker.raw-stream";
+
+/// The largest directory listing that the archive endpoint may answer.
+const MAX_ARCHIVE_SIZE: usize = 128 * 1024 * 1024;
+/// The largest file that a download may return.
+const MAX_DOWNLOAD_SIZE: usize = 64 * 1024 * 1024;
+/// The largest file that an upload accepts.
+const MAX_UPLOAD_SIZE: usize = 16 * 1024 * 1024;
+
+/// Percent-encodes a query value.
+fn encode_path(value: &str) -> String {
+    percent_encoding::percent_encode(value.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
+        .to_string()
+}
+
+/// The last segment of a path.
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
+/// Splits a path into its parent directory and its last segment.
+fn split_parent(path: &str) -> anyhow::Result<(String, String)> {
+    let trimmed = path.trim_end_matches('/');
+    let (parent, file) = trimmed
+        .rsplit_once('/')
+        .ok_or_else(|| anyhow!("the path {path} has no parent"))?;
+    if file.is_empty() {
+        bail!("the path {path} names no file");
+    }
+    Ok((parent.to_string(), file.to_string()))
+}
 
 #[derive(Clone)]
 pub struct DockerRuntime {
@@ -199,6 +236,184 @@ pub(crate) async fn resize_exec(
         .send_with(request, RESPONSE_TIMEOUT, &[StatusCode::NOT_FOUND])
         .await?;
     Ok(())
+}
+
+impl DockerRuntime {
+    /// The entries of a directory inside a container.
+    pub async fn list_dir(
+        &self,
+        name: &ContainerName,
+        path: &str,
+    ) -> anyhow::Result<Vec<FileEntry>> {
+        let container = self.container_id(name).await?;
+        let response = self
+            .send(
+                Method::GET,
+                &format!(
+                    "/containers/{}/archive?path={}",
+                    container.id,
+                    encode_path(path)
+                ),
+                None,
+                &[],
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let body = read_body_limited(response, MAX_ARCHIVE_SIZE).await?;
+        read_dir_archive(body.to_vec()).await
+    }
+
+    /// The content of a file inside a container, up to `MAX_DOWNLOAD_SIZE`.
+    pub async fn download_file(&self, name: &ContainerName, path: &str) -> anyhow::Result<Vec<u8>> {
+        let container = self.container_id(name).await?;
+        let response = self
+            .send(
+                Method::GET,
+                &format!(
+                    "/containers/{}/archive?path={}",
+                    container.id,
+                    encode_path(path)
+                ),
+                None,
+                &[],
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let body = read_body_limited(response, MAX_DOWNLOAD_SIZE).await?;
+        extract_first_file(body.to_vec()).await
+    }
+
+    /// Writes `bytes` into the file at `path` inside a container.
+    pub async fn upload_file(
+        &self,
+        name: &ContainerName,
+        path: &str,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        if bytes.len() > MAX_UPLOAD_SIZE {
+            bail!("the file is larger than {MAX_UPLOAD_SIZE} bytes");
+        }
+        let container = self.container_id(name).await?;
+        let (parent, file) = split_parent(path)?;
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive.append_data(&mut header, file, bytes.as_slice())?;
+        let body = archive.into_inner()?;
+        let path = format!(
+            "/containers/{}/archive?path={}",
+            container.id,
+            encode_path(&parent)
+        );
+        let request = self
+            .client
+            .builder(Method::PUT, &path)
+            .header(CONTENT_TYPE, "application/x-tar")
+            .body(Full::new(Bytes::from(body)))?;
+        let response = self
+            .client
+            .send_with(request, RESPONSE_TIMEOUT, &[])
+            .await?;
+        read_body(response).await?;
+        Ok(())
+    }
+
+    /// Removes a file or a directory inside a container with `rm -rf`.
+    pub async fn remove_path(&self, name: &ContainerName, path: &str) -> anyhow::Result<()> {
+        let container = self.container_id(name).await?;
+        let code = self
+            .exec_run(&container.id, &["rm", "-rf", "--", path])
+            .await?;
+        if code != 0 {
+            bail!("the container failed to remove {path} with exit code {code}");
+        }
+        Ok(())
+    }
+
+    /// The inspect document of the container with exactly this name, or an error.
+    async fn container_id(&self, name: &ContainerName) -> anyhow::Result<InspectContainer> {
+        self.find_container(name)
+            .await?
+            .ok_or_else(|| anyhow!("the container {name} is not running"))
+    }
+
+    /// Runs a command in the container and returns its exit code.
+    async fn exec_run(&self, id: &str, command: &[&str]) -> anyhow::Result<i64> {
+        let response = self
+            .send(
+                Method::POST,
+                &format!("/containers/{id}/exec"),
+                Some(&json!({
+                    "AttachStdout": true,
+                    "AttachStderr": true,
+                    "Cmd": command,
+                })),
+                &[],
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let exec: ExecCreateResponse = read_json(response).await?;
+        let stream = self.start_exec(&exec.id).await?;
+        // The output is not shown, but the session has to run to its end.
+        let mut leftover = stream;
+        let mut chunk = [0u8; 1024];
+        while tokio::time::timeout(RESPONSE_TIMEOUT, leftover.read(&mut chunk))
+            .await
+            .unwrap_or(Ok(0))?
+            > 0
+        {}
+        let state: ExecInspectResponse = self.get(&format!("/exec/{}/json", exec.id)).await?;
+        Ok(state.exit_code)
+    }
+
+    /// Starts a created exec and returns its duplex stream.
+    async fn start_exec(&self, id: &str) -> anyhow::Result<crate::kv::http::UpgradedStream> {
+        let path = format!("/exec/{id}/start");
+        let request = self
+            .client
+            .builder(Method::POST, &path)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::new(Bytes::from_static(b"{\"Detach\":false}")))?;
+        self.client.send_upgrade(request).await
+    }
+}
+
+/// The entries of the top level of a directory archive.
+async fn read_dir_archive(body: Vec<u8>) -> anyhow::Result<Vec<FileEntry>> {
+    tokio::task::spawn_blocking(move || {
+        let mut entries = Vec::new();
+        let mut archive = tar::Archive::new(&body[..]);
+        for entry in archive.entries()? {
+            let entry = entry?;
+            let path = entry.path()?.to_path_buf();
+            entries.push(FileEntry {
+                name: file_name(&path),
+                size: entry.header().entry_size().unwrap_or(0),
+                dir: entry.header().entry_type().is_dir(),
+            });
+        }
+        Ok(entries)
+    })
+    .await?
+}
+
+/// The content of the first file entry of an archive.
+async fn extract_first_file(body: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+    tokio::task::spawn_blocking(move || {
+        let mut archive = tar::Archive::new(&body[..]);
+        for entry in archive.entries()? {
+            let mut entry = entry?;
+            if entry.header().entry_type().is_file() {
+                let mut content = Vec::new();
+                entry.read_to_end(&mut content)?;
+                return Ok(content);
+            }
+        }
+        anyhow::bail!("the archive holds no file")
+    })
+    .await?
 }
 
 #[async_trait::async_trait]
@@ -628,6 +843,12 @@ struct InspectContainer {
 #[serde(rename_all = "PascalCase")]
 struct ExecCreateResponse {
     id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ExecInspectResponse {
+    exit_code: i64,
 }
 
 #[derive(Deserialize)]
