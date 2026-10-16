@@ -1,4 +1,4 @@
-//! Service discovery against real services: Consul and etcd from
+//! Service discovery against real services: etcd from
 //! `tests/discovery/docker-compose.yml`, and the local Docker engine.
 //!
 //! `make test-discovery-e2e` starts the containers, runs the tests and removes them. The Docker
@@ -14,13 +14,13 @@ use r3v3rs3_api::{
     discovery::{DiscoveryProvider, DiscoveryState},
     port::PortEntry,
 };
-use serde_json::{Value, json};
+use serde_json::json;
 use std::net::Ipv4Addr;
 use std::process::Command;
 use std::time::Duration;
 
 mod common;
-use common::e2e::{CONSUL, CONSUL_TOKEN, ETCD, ETCD_PASSWORD, consul_put, etcd_post, etcd_token};
+use common::e2e::{ETCD, ETCD_PASSWORD, etcd_post, etcd_token};
 use common::{
     TestStorage, alloc_tcp_port, call, http_port_entry, wait_for_host_body, wait_for_host_status,
     with_server,
@@ -68,53 +68,6 @@ async fn wait_for_proxies(
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     anyhow::bail!("{provider} did not add {proxies} proxies: {statuses:?}")
-}
-
-#[tokio::test]
-#[ignore = "needs the discovery containers, run it with make test-discovery-e2e"]
-async fn consul_services_and_keys_define_proxies() -> anyhow::Result<()> {
-    let catalog_port = serve_ipv4(Ipv4Addr::LOCALHOST, "catalog").await?;
-    let kv_port = serve_ipv4(Ipv4Addr::LOCALHOST, "kv").await?;
-    let service = json!({
-        "ID": "e2e-web-1", "Name": "e2e-web", "Address": "127.0.0.1", "Port": catalog_port,
-        "Tags": [
-            "r3v3rs3.enable=true",
-            "r3v3rs3.http.web.ports=web",
-            "r3v3rs3.http.web.vhosts=catalog.e2e.test",
-        ],
-    });
-    consul_put("/v1/agent/service/register", service.to_string()).await?;
-    let keys = [
-        ("ports", "web".to_string()),
-        ("vhosts", "kv.e2e.test".to_string()),
-        (
-            "routes/0/servers/0/url",
-            format!("http://127.0.0.1:{kv_port}/"),
-        ),
-    ];
-    for (key, value) in keys {
-        consul_put(&format!("/v1/kv/r3v3rs3/http/kv/{key}"), value).await?;
-    }
-
-    let (port, url) = web_port().await?;
-    let mut config = AppConfig::default();
-    config.discovery.consul.enabled = true;
-    config.discovery.consul.address = CONSUL.into();
-    config.discovery.consul.token = Some(CONSUL_TOKEN.into());
-    let storage = TestStorage::builder().ports(vec![port]).build();
-    with_server(storage, |mut channels| async move {
-        call(&mut channels, SetConfig { config }).await??;
-        wait_for_proxies(&mut channels, DiscoveryProvider::Consul, 2).await?;
-        wait_for_host_body(&url, "catalog.e2e.test", "catalog").await?;
-        wait_for_host_body(&url, "kv.e2e.test", "kv").await?;
-
-        // A deregistered service removes its proxy.
-        consul_put("/v1/agent/service/deregister/e2e-web-1", String::new()).await?;
-        wait_for_proxies(&mut channels, DiscoveryProvider::Consul, 1).await?;
-        wait_for_host_status(&url, Some("catalog.e2e.test"), 502).await?;
-        Ok(())
-    })
-    .await
 }
 
 async fn etcd_put(token: &str, key: &str, value: &str) -> anyhow::Result<()> {

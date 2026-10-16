@@ -236,14 +236,12 @@ mod tests {
     }
 
     const DOCKER: Option<DiscoveryProvider> = Some(DiscoveryProvider::Docker);
-    const CONSUL: Option<DiscoveryProvider> = Some(DiscoveryProvider::Consul);
+    const ETCD: Option<DiscoveryProvider> = Some(DiscoveryProvider::Etcd);
 
     #[test]
     fn replace_discovered_changes_only_the_proxies_of_the_provider() {
-        let mut list = ProxyList::from_iter([
-            entry("manual", http(), None),
-            entry("consul", http(), CONSUL),
-        ]);
+        let mut list =
+            ProxyList::from_iter([entry("manual", http(), None), entry("etcd", http(), ETCD)]);
 
         let update = list.replace_discovered(
             DiscoveryProvider::Docker,
@@ -257,7 +255,7 @@ mod tests {
             }
         );
         let ids = |list: &ProxyList| list.entries().map(|e| e.id.to_string()).collect::<Vec<_>>();
-        assert_eq!(ids(&list), ["manual", "consul", "web"]);
+        assert_eq!(ids(&list), ["manual", "etcd", "web"]);
 
         let update = list.replace_discovered(
             DiscoveryProvider::Docker,
@@ -278,7 +276,7 @@ mod tests {
             vec![
                 entry("manual", http(), DOCKER),
                 entry("stream", tcp(), DOCKER),
-                entry("other", http(), CONSUL),
+                entry("other", http(), ETCD),
                 entry("web", http(), DOCKER),
             ],
         );

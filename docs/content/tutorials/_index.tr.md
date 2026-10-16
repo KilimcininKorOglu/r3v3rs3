@@ -19,7 +19,7 @@ Buradaki her sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bi
 - [TCP ve UDP proxy'ler](@/tutorials/tcp-and-udp.tr.md): bir veritabanı, bir DNS sunucusu ve mutual TLS.
 - [Yük dengeleme ve sağlık kontrolü](@/tutorials/load-balancing.tr.md): ağırlık, sağlık kontrolü, yeniden deneme, sticky session, WebSocket ve gRPC.
 - [r3v3rs3'ü script ile yönetme](@/tutorials/admin-api.tr.md): yönetim API'si, deploy işi ve ona özel hesap.
-- [Consul ve etcd'den proxy'ler](@/tutorials/consul-etcd-discovery.tr.md): catalog, key-value store ve etcd key'leri.
+- [etcd'den proxy'ler](@/tutorials/etcd-discovery.tr.md): bir etcd cluster'ının key'lerinden kurulan proxy'ler.
 - [Ekip için hesaplar](@/tutorials/team-accounts.tr.md): roller, proxy listeleri, TOTP ve denetim kaydı.
 - [Forward auth ile single sign-on](@/tutorials/forward-auth.tr.md): önde oauth2-proxy, upstream isteğinde kullanıcı.
 - [nginx veya Traefik'ten geçiş](@/tutorials/migrate.tr.md): her direktifin karşılığı ve devir sırası.

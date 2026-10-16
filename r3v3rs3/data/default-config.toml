@@ -52,21 +52,6 @@ network = ""
 # Reads every container. Otherwise only the containers with r3v3rs3.enable=true.
 exposed_by_default = false
 
-[discovery.consul]
-# Reads proxies from the Consul catalog and key-value store.
-enabled = false
-address = "http://127.0.0.1:8500"
-# The ACL token of the API.
-# token = "secret"
-datacenter = ""
-# Reads the r3v3rs3.* tags of the catalog services.
-catalog = true
-# Reads the keys under the prefix of the key-value store.
-kv = true
-prefix = "r3v3rs3"
-# Reads every service. Otherwise only the services with r3v3rs3.enable=true.
-exposed_by_default = false
-
 [discovery.etcd]
 # Reads proxies from the etcd keys.
 enabled = false

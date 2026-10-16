@@ -9,7 +9,6 @@ use utoipa::ToSchema;
 #[serde(rename_all = "snake_case")]
 pub enum DiscoveryProvider {
     Docker,
-    Consul,
     Etcd,
     /// The apps of the deployment platform.
     Platform,
@@ -18,17 +17,12 @@ pub enum DiscoveryProvider {
 impl DiscoveryProvider {
     /// The providers that the discovery settings configure. The deployment platform is not one of
     /// them, because it publishes its proxies itself.
-    pub const ALL: [DiscoveryProvider; 3] = [
-        DiscoveryProvider::Docker,
-        DiscoveryProvider::Consul,
-        DiscoveryProvider::Etcd,
-    ];
+    pub const ALL: [DiscoveryProvider; 2] = [DiscoveryProvider::Docker, DiscoveryProvider::Etcd];
 
     /// The product name, which is the same in every language.
     pub fn name(self) -> &'static str {
         match self {
             Self::Docker => "Docker",
-            Self::Consul => "Consul",
             Self::Etcd => "etcd",
             Self::Platform => "Platform",
         }
@@ -95,17 +89,14 @@ pub struct DiscoveryConfig {
     #[serde(default)]
     pub docker: DockerDiscoveryConfig,
     #[serde(default)]
-    pub consul: ConsulDiscoveryConfig,
-    #[serde(default)]
     pub etcd: EtcdDiscoveryConfig,
 }
 
 impl DiscoveryConfig {
-    /// A copy without secrets, which the admin API returns. `token_set` and `password_set` tell
-    /// whether a secret is set.
+    /// A copy without secrets, which the admin API returns. `password_set` tells whether a
+    /// secret is set.
     pub fn masked(&self) -> Self {
         let mut masked = self.clone();
-        masked.consul.token_set = masked.consul.token.take().is_some();
         masked.etcd.password_set = masked.etcd.password.take().is_some();
         masked
     }
@@ -113,8 +104,6 @@ impl DiscoveryConfig {
     /// Takes the secrets that an update does not set from the current settings. An empty secret
     /// removes the secret.
     pub fn keep_secrets(&mut self, current: &Self) {
-        self.consul.token_set = false;
-        keep_secret(&mut self.consul.token, &current.consul.token);
         self.etcd.password_set = false;
         keep_secret(&mut self.etcd.password, &current.etcd.password);
     }
@@ -159,73 +148,6 @@ fn default_docker_endpoint() -> String {
 #[derive(
     serde_default::DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema,
 )]
-pub struct ConsulDiscoveryConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    /// The HTTP API of a Consul agent: `http://<host>:<port>`, `https://<host>:<port>` or
-    /// `unix://<path>`.
-    #[serde(default = "default_consul_address")]
-    #[schema(example = "http://127.0.0.1:8500")]
-    pub address: String,
-    /// The client certificate for an `https` address.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schema(value_type = Option<String>, example = "abc-def")]
-    pub client_cert: Option<crate::id::ShortId>,
-    /// The ACL token. The admin API does not return it. An update without a token keeps the
-    /// current token, and an empty token removes it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schema(write_only)]
-    pub token: Option<String>,
-    /// Whether a token is set.
-    #[serde(default, skip_serializing_if = "is_false")]
-    #[schema(read_only)]
-    pub token_set: bool,
-    /// The datacenter to read. Empty reads the datacenter of the agent.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    #[schema(example = "dc1")]
-    pub datacenter: String,
-    /// Reads the `r3v3rs3.*` tags of the services in the catalog.
-    #[serde(default = "default_true")]
-    pub catalog: bool,
-    /// Reads the keys under `prefix` in the key-value store.
-    #[serde(default = "default_true")]
-    pub kv: bool,
-    #[serde(default = "default_consul_prefix")]
-    #[schema(example = "r3v3rs3")]
-    pub prefix: String,
-    /// Reads every service. Otherwise only the services with the `r3v3rs3.enable=true` tag are
-    /// read.
-    #[serde(default)]
-    pub exposed_by_default: bool,
-}
-
-impl fmt::Debug for ConsulDiscoveryConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ConsulDiscoveryConfig")
-            .field("enabled", &self.enabled)
-            .field("address", &self.address)
-            .field("client_cert", &self.client_cert)
-            .field("token", &self.token.as_ref().map(|_| "***"))
-            .field("datacenter", &self.datacenter)
-            .field("catalog", &self.catalog)
-            .field("kv", &self.kv)
-            .field("prefix", &self.prefix)
-            .field("exposed_by_default", &self.exposed_by_default)
-            .finish()
-    }
-}
-
-fn default_consul_address() -> String {
-    "http://127.0.0.1:8500".to_string()
-}
-
-fn default_consul_prefix() -> String {
-    "r3v3rs3".to_string()
-}
-
-#[derive(
-    serde_default::DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema,
-)]
 pub struct EtcdDiscoveryConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -250,7 +172,7 @@ pub struct EtcdDiscoveryConfig {
     #[serde(default, skip_serializing_if = "is_false")]
     #[schema(read_only)]
     pub password_set: bool,
-    #[serde(default = "default_consul_prefix")]
+    #[serde(default = "default_etcd_prefix")]
     #[schema(example = "r3v3rs3")]
     pub prefix: String,
 }
@@ -272,8 +194,8 @@ fn default_etcd_endpoints() -> Vec<String> {
     vec!["http://127.0.0.1:2379".to_string()]
 }
 
-fn default_true() -> bool {
-    true
+fn default_etcd_prefix() -> String {
+    "r3v3rs3".to_string()
 }
 
 fn is_false(value: &bool) -> bool {
@@ -369,38 +291,6 @@ mod endpoint_tests {
         let config = DiscoveryConfig::default();
         assert!(!config.docker.enabled);
         assert_eq!(config.docker.endpoint, "unix:///var/run/docker.sock");
-        assert!(!config.consul.enabled);
-        assert!(config.consul.catalog && config.consul.kv);
-        assert_eq!(config.consul.prefix, "r3v3rs3");
-    }
-
-    fn with_token(token: Option<&str>) -> DiscoveryConfig {
-        let mut config = DiscoveryConfig::default();
-        config.consul.token = token.map(str::to_string);
-        config
-    }
-
-    #[test]
-    fn the_token_is_masked_and_kept_until_an_update_sets_it() {
-        let current = with_token(Some("secret"));
-        let masked = current.masked();
-        assert_eq!(masked.consul.token, None);
-        assert!(masked.consul.token_set);
-        assert!(!serde_json::to_string(&masked).unwrap().contains("secret"));
-        assert!(!format!("{:?}", current).contains("secret"));
-        assert!(!with_token(None).masked().consul.token_set);
-
-        let mut update = masked;
-        update.keep_secrets(&current);
-        assert_eq!(update, current);
-
-        let mut update = with_token(Some("new"));
-        update.keep_secrets(&current);
-        assert_eq!(update.consul.token.as_deref(), Some("new"));
-
-        let mut update = with_token(Some(""));
-        update.keep_secrets(&current);
-        assert_eq!(update.consul.token, None);
     }
 
     #[test]

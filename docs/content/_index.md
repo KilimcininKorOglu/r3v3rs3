@@ -10,7 +10,7 @@ sort_by = "weight"
 
 r3v3rs3 is a reverse proxy server written in Rust. It proxies TCP, UDP, TLS, HTTP and WebSocket traffic, and it accepts incoming HTTP/3 connections. It also deploys apps as containers and routes their domains through its own proxies. It is a fork of [Taxy](https://github.com/picoHz/taxy).
 
-You configure it in a browser. One binary carries the proxy and a WebUI in English and Turkish, and every port, proxy, certificate and account is a form in that WebUI. A change applies without a restart. The same operations are available over an admin API, and r3v3rs3 can also build its proxies from Docker labels, a Kubernetes Ingress, the Consul catalog or etcd keys.
+You configure it in a browser. One binary carries the proxy and a WebUI in English and Turkish, and every port, proxy, certificate and account is a form in that WebUI. A change applies without a restart. The same operations are available over an admin API, and r3v3rs3 can also build its proxies from Docker labels or etcd keys.
 
 # Key Features
 
@@ -55,7 +55,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 - Access and server logs with hourly file rotation, a text or JSON format, and the `log.db` database behind the log and audit pages ([Logging](@/configuration.md#logging))
 - An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down ([Worker Processes](@/configuration.md#worker-processes))
 - A zero-downtime upgrade over SIGUSR2 (`systemctl reload r3v3rs3`), an in-panel upgrade button that verifies the sha256 digest, and an hourly check for a newer release with a banner on every page of the panel ([Zero-Downtime Upgrade](@/configuration.md#zero-downtime-upgrade), [In-Panel Upgrade](@/configuration.md#in-panel-upgrade))
-- Service discovery from Docker labels, Consul and etcd. Discovered proxies are read-only, and a definition that fails to become a proxy is reported as an issue in the proxy list ([Service Discovery](@/discovery.md))
+- Service discovery from Docker labels and etcd. Discovered proxies are read-only, and a definition that fails to become a proxy is reported as an issue in the proxy list ([Service Discovery](@/discovery.md))
 - High availability with cluster mode: several nodes share one encrypted state in etcd or Consul ([Setup guide](@/tutorials/high-availability.md), [Cluster](@/cluster.md))
 
 ## Deployment platform

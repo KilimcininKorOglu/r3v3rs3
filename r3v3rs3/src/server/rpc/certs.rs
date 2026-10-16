@@ -155,11 +155,7 @@ fn delete_status(id: ShortId, result: Result<(), Error>) -> DeleteCertStatus {
 /// Rejects the deletion of a certificate that a port, a proxy or a discovery provider uses.
 fn ensure_unused(state: &ServerState, id: ShortId) -> Result<(), Error> {
     let discovery = &state.config().discovery;
-    let provider_certs = [
-        discovery.docker.client_cert,
-        discovery.consul.client_cert,
-        discovery.etcd.client_cert,
-    ];
+    let provider_certs = [discovery.docker.client_cert, discovery.etcd.client_cert];
     if provider_certs.contains(&Some(id)) {
         return Err(Error::CertificateInUse { id });
     }

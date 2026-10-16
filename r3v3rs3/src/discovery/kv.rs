@@ -89,7 +89,7 @@ mod tests {
             entry("r3v3rs3x/http/other/ports", Some("http")),
         ];
         let mut built = Built::default();
-        let mut groups = ProxyGroups::new(DiscoveryProvider::Consul);
+        let mut groups = ProxyGroups::new(DiscoveryProvider::Etcd);
         add_kv(&mut built, &mut groups, &entries, "r3v3rs3");
         let proxies = groups.into_proxies();
         assert_eq!(proxies.len(), 1);

@@ -44,7 +44,7 @@ mod tests {
         assert_eq!(id.to_string().len(), 7);
         assert_ne!(
             id,
-            discovered_id(DiscoveryProvider::Consul, "compose/app/http.app", &taken)
+            discovered_id(DiscoveryProvider::Etcd, "compose/app/http.app", &taken)
         );
 
         let taken = HashSet::from([id]);

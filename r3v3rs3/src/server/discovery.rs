@@ -8,10 +8,7 @@ use super::proxy_list::accepts;
 use crate::certs::{Cert, acme::AcmeTarget};
 use crate::discovery::{DiscoveredProxy, DiscoverySnapshot, ids};
 use crate::proxy::tls::upstream_client_config;
-use hyper::header::HeaderValue;
-use r3v3rs3_api::discovery::{
-    ConsulDiscoveryConfig, DiscoveryConfig, Endpoint, EtcdDiscoveryConfig,
-};
+use r3v3rs3_api::discovery::{DiscoveryConfig, Endpoint, EtcdDiscoveryConfig};
 use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryProvider, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
@@ -250,14 +247,12 @@ pub fn validate_config(config: &DiscoveryConfig, certs: &CertList) -> Result<(),
             upstream_client_config(certs, client_cert)?;
         }
     }
-    validate_consul(&config.consul)?;
     validate_etcd(&config.etcd)
 }
 
 pub fn is_enabled(config: &DiscoveryConfig, provider: DiscoveryProvider) -> bool {
     match provider {
         DiscoveryProvider::Docker => config.docker.enabled,
-        DiscoveryProvider::Consul => config.consul.enabled,
         DiscoveryProvider::Etcd => config.etcd.enabled,
         // The deployment platform sends its snapshots without a provider task.
         DiscoveryProvider::Platform => false,
@@ -273,10 +268,6 @@ pub fn api_settings(
         DiscoveryProvider::Docker if config.docker.enabled => Some((
             vec![config.docker.endpoint.as_str()],
             config.docker.client_cert,
-        )),
-        DiscoveryProvider::Consul if config.consul.enabled => Some((
-            vec![config.consul.address.as_str()],
-            config.consul.client_cert,
         )),
         DiscoveryProvider::Etcd if config.etcd.enabled => Some((
             config.etcd.endpoints.iter().map(String::as_str).collect(),
@@ -317,30 +308,6 @@ fn validate_etcd(etcd: &EtcdDiscoveryConfig) -> Result<(), Error> {
     ])
 }
 
-fn validate_consul(consul: &ConsulDiscoveryConfig) -> Result<(), Error> {
-    if !consul.enabled {
-        return Ok(());
-    }
-    let invalid_token = consul
-        .token
-        .as_deref()
-        .is_some_and(|token| HeaderValue::from_str(token).is_err());
-    check_rules(&[
-        (
-            !consul.catalog && !consul.kv,
-            "Consul needs the catalog or the key-value store",
-        ),
-        (
-            consul.kv && consul.prefix.trim_matches('/').is_empty(),
-            "the Consul key prefix is empty",
-        ),
-        (
-            invalid_token,
-            "the Consul token contains characters that a header cannot hold",
-        ),
-    ])
-}
-
 pub fn parse_endpoint(endpoint: &str) -> Result<Endpoint, Error> {
     endpoint.parse::<Endpoint>()
 }
@@ -350,9 +317,6 @@ pub fn changed_providers(old: &DiscoveryConfig, new: &DiscoveryConfig) -> Vec<Di
     let mut changed = Vec::new();
     if old.docker != new.docker {
         changed.push(DiscoveryProvider::Docker);
-    }
-    if old.consul != new.consul {
-        changed.push(DiscoveryProvider::Consul);
     }
     if old.etcd != new.etcd {
         changed.push(DiscoveryProvider::Etcd);

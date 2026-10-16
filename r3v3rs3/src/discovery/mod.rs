@@ -1,7 +1,6 @@
 //! Service discovery. A provider reads proxy definitions from an external system and sends a
 //! snapshot to the server. The server turns the definitions into read-only proxies.
 
-pub mod consul;
 pub mod docker;
 pub mod etcd;
 pub mod ids;
@@ -279,9 +278,6 @@ pub fn spawn(
     match (provider, client) {
         (DiscoveryProvider::Docker, Some(client)) => {
             tokio::spawn(run(docker::Provider::new(&config.docker, client, reporter)))
-        }
-        (DiscoveryProvider::Consul, Some(client)) => {
-            tokio::spawn(run(consul::Provider::new(&config.consul, client, reporter)))
         }
         (DiscoveryProvider::Etcd, Some(client)) => {
             tokio::spawn(run(etcd::Provider::new(&config.etcd, client, reporter)))

@@ -10,7 +10,7 @@ sort_by = "weight"
 
 r3v3rs3, Rust ile yazılmış bir reverse proxy sunucusudur. TCP, UDP, TLS, HTTP ve WebSocket bağlantılarını proxy'ler, gelen HTTP/3 bağlantılarını da kabul eder. Uygulamaları container olarak deploy eder ve alan adlarını kendi proxy'leri üzerinden yönlendirir. [Taxy](https://github.com/picoHz/taxy) projesinin bir fork'udur.
 
-Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngilizce ve Türkçe WebUI'yi taşır; her port, proxy, sertifika ve hesap bu WebUI'de bir formdur. Değişiklik yeniden başlatmadan uygulanır. Aynı işlemler yönetim API'si üzerinden de yapılır. r3v3rs3 proxy'lerini Docker etiketlerinden, Kubernetes Ingress'ten, Consul catalog'undan veya etcd key'lerinden de oluşturabilir.
+Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngilizce ve Türkçe WebUI'yi taşır; her port, proxy, sertifika ve hesap bu WebUI'de bir formdur. Değişiklik yeniden başlatmadan uygulanır. Aynı işlemler yönetim API'si üzerinden de yapılır. r3v3rs3 proxy'lerini Docker etiketlerinden veya etcd key'lerinden de oluşturabilir.
 
 # Temel özellikler
 
@@ -55,7 +55,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - Saatlik dosya döndürmesi, text veya JSON biçimi olan erişim ve sunucu log'ları. Log ve denetim sayfalarının arkasındaki `log.db` veritabanı ([Loglama](@/configuration.tr.md#log)).
 - Portları sunan, master admin API'sini tutan isteğe bağlı worker süreci. Worker çökmesi paneli düşürmez ([Worker süreçleri](@/configuration.tr.md#worker-surecleri)).
 - SIGUSR2 ile kesintisiz yükseltme (`systemctl reload r3v3rs3`), sha256 özetini doğrulayan panel içi yükseltme butonu ve panelin her sayfasında banner'la saat başı daha yeni bir release kontrolü ([Kesintisiz yükseltme](@/configuration.tr.md#kesintisiz-yukseltme), [Panelden yükseltme](@/configuration.tr.md#panelden-yukseltme)).
-- Docker etiketleri, Consul ve etcd ile servis keşfi. Keşfedilen proxy'ler salt okunurdur ve proxy olamayan bir tanım, proxy listesinde sorun olarak raporlanır ([Servis keşfi](@/discovery.tr.md)).
+- Docker etiketleri ve etcd ile servis keşfi. Keşfedilen proxy'ler salt okunurdur ve proxy olamayan bir tanım, proxy listesinde sorun olarak raporlanır ([Servis keşfi](@/discovery.tr.md)).
 - Cluster modu ile yüksek erişilebilirlik: birden fazla düğüm, etcd veya Consul'da şifreli tek bir durum bilgisini paylaşır ([Kurulum rehberi](@/tutorials/high-availability.tr.md), [Cluster](@/cluster.tr.md)).
 
 ## Deploy platformu
