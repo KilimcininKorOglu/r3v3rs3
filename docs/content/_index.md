@@ -56,7 +56,6 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 - An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down ([Worker Processes](@/configuration.md#worker-processes))
 - A zero-downtime upgrade over SIGUSR2 (`systemctl reload r3v3rs3`), an in-panel upgrade button that verifies the sha256 digest, and an hourly check for a newer release with a banner on every page of the panel ([Zero-Downtime Upgrade](@/configuration.md#zero-downtime-upgrade), [In-Panel Upgrade](@/configuration.md#in-panel-upgrade))
 - Service discovery from Docker labels and etcd. Discovered proxies are read-only, and a definition that fails to become a proxy is reported as an issue in the proxy list ([Service Discovery](@/discovery.md))
-- High availability with cluster mode: several nodes share one encrypted state in etcd or Consul ([Setup guide](@/tutorials/high-availability.md), [Cluster](@/cluster.md))
 
 ## Deployment platform
 

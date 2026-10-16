@@ -58,7 +58,6 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 - An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down
 - A zero-downtime upgrade over SIGUSR2 (`systemctl reload r3v3rs3`), an in-panel upgrade button that verifies the sha256 digest, and an hourly check for a newer release with a banner on every page of the panel
 - Service discovery from Docker labels and etcd. Discovered proxies are read-only, and a definition that fails to become a proxy is reported as an issue in the proxy list
-- High availability with cluster mode: several nodes share one encrypted state in etcd or Consul
 
 ### Deployment platform
 
@@ -78,8 +77,7 @@ The documentation is available in [English](https://r3v3rs3.keremgok.tr/) and [T
 - [Accounts](https://r3v3rs3.keremgok.tr/accounts/): roles and permissions
 - [Service Discovery](https://r3v3rs3.keremgok.tr/discovery/): Docker and etcd
 - [Deployment Platform](https://r3v3rs3.keremgok.tr/platform/): apps, deployments, webhooks, Git providers and agent targets
-- [Tutorials](https://r3v3rs3.keremgok.tr/tutorials/): step by step guides, starting with [High Availability](https://r3v3rs3.keremgok.tr/tutorials/high-availability/)
-- [Cluster](https://r3v3rs3.keremgok.tr/cluster/): the cluster reference, from the settings to the failure modes
+- [Tutorials](https://r3v3rs3.keremgok.tr/tutorials/): step by step guides, starting with [Getting Started](https://r3v3rs3.keremgok.tr/tutorials/getting-started/)
 - [Development](https://r3v3rs3.keremgok.tr/development/)
 
 ## Screenshot

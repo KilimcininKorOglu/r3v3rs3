@@ -1,7 +1,6 @@
 #![recursion_limit = "1024"]
 
 use auth::LoginQuery;
-use components::cluster_status::ClusterBanner;
 use components::footer::Footer;
 use components::navbar::Navbar;
 use components::sidebar::Sidebar;
@@ -91,7 +90,6 @@ fn shell() -> Html {
             <div class="w-full max-w-7xl mx-auto px-4 sm:px-6 py-4 flex-1 flex gap-6">
                 <Sidebar />
                 <main class="flex-1 min-w-0">
-                    <ClusterBanner />
                     <UpdateBanner />
                     <Switch<pages::Route> render={pages::switch} />
                 </main>

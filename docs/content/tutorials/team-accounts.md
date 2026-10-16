@@ -183,7 +183,7 @@ The changes that r3v3rs3 makes by itself, for example a certificate renewal or a
 
 ## Where the Accounts Live
 
-`accounts.toml` in the configuration directory holds the accounts with their password hashes, written with mode `0600`. A cluster keeps the accounts encrypted in the store, so every node shares them.
+`accounts.toml` in the configuration directory holds the accounts with their password hashes, written with mode `0600`.
 
 ## Reference
 

@@ -183,7 +183,7 @@ r3v3rs3'ün kendi yaptığı değişiklikler, örneğin sertifika yenileme veya 
 
 ## Hesaplar nerede durur
 
-Yapılandırma dizinindeki `accounts.toml` hesapları parola hash'leriyle tutar ve `0600` izinleriyle yazılır. Cluster hesapları veri deposunda şifreli tutar, böylece her düğüm aynı hesapları paylaşır.
+Yapılandırma dizinindeki `accounts.toml` hesapları parola hash'leriyle tutar ve `0600` izinleriyle yazılır.
 
 ## Referans
 

@@ -1,6 +1,6 @@
 # The settings of r3v3rs3 with their default values. The server writes this file on its first
-# start. The settings page of the panel manages every section except [cluster] and the
-# worker_mode, which need a restart, and shows the same values.
+# start. The settings page of the panel manages every section except worker_mode, which needs a
+# restart, and shows the same values.
 
 # How often the background tasks run: the log cleanup, the certificate expiry check and the
 # certificate cleanup.
@@ -64,7 +64,7 @@ prefix = "r3v3rs3"
 
 [platform]
 # The server builds and runs apps and routes their domains itself. The settings page turns
-# the platform on and off while the server runs. A cluster does not run the platform.
+# the platform on and off while the server runs.
 enabled = false
 # The Docker Engine API of the local target.
 docker = "unix:///var/run/docker.sock"
@@ -113,15 +113,7 @@ max_concurrent_uni_streams = 10
 # the panel shows a banner on every page. The shortest interval is one minute.
 check_interval = "1h"
 
-# The worker processes serve the ports instead of this process. This setting and the cluster
-# below are file-only: a change applies after a restart. Everything else is managed live from
-# the settings page of the panel.
+# The worker processes serve the ports instead of this process. This setting is file-only: a
+# change applies after a restart. Everything else is managed live from the settings page of the
+# panel.
 # worker_mode = "workers"
-
-# The settings of a cluster whose nodes share their state in etcd or Consul. File-only: a
-# change applies after a restart. See https://r3v3rs3.keremgok.tr/configuration/ for every key.
-# [cluster]
-# enabled = true
-# backend = "etcd"
-# endpoints = ["https://10.0.0.1:2379"]
-# node_name = "node-1"

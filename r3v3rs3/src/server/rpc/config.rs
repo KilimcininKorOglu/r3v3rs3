@@ -43,12 +43,11 @@ pub struct GetNotificationWebhook;
 
 #[async_trait::async_trait]
 impl RpcMethod for GetNotificationWebhook {
-    type Output = (Option<WebhookConfig>, String);
+    type Output = Option<WebhookConfig>;
     const PERMISSION: Permission = Permission::Admin;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         let config = state.config();
-        let webhook = config.notifications.webhook.clone();
-        Ok((webhook, config.cluster.node_name.clone()))
+        Ok(config.notifications.webhook.clone())
     }
 }

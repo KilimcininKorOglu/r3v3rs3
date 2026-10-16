@@ -227,4 +227,3 @@ Use it for a dashboard or an alert instead of asking the status endpoints in a l
 
 - [Load Balancing and Health Checks](@/tutorials/load-balancing.md): the status endpoint in practice.
 - [Caching and Compression](@/tutorials/cache-and-compression.md): what the purge removes.
-- [High Availability](@/tutorials/high-availability.md): the same API on every node of a cluster.

@@ -119,4 +119,3 @@ WebUI, proxy'yi kaynağıyla ve düzenleme eylemleri olmadan gösterir. Değişt
 ## Sonraki adımlar
 
 - [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md): aynı key'ler container etiketi olarak.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek bir durum bilgisini paylaşan birkaç düğüm.

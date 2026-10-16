@@ -73,7 +73,7 @@ retry-after: 14
 
 - r3v3rs3 counts each client IP address on its own.
 - A limit protects the password check too: argon2 takes CPU time on purpose, so a limit slows down password guessing.
-- The counters live in memory. A restart resets them. In a cluster the nodes share the counts, see [Rate Limit Accuracy](@/cluster.md#rate-limit-accuracy).
+- The counters live in memory. A restart resets them.
 
 A route can hold its own limit. Give the sign-in path of your application a tighter one:
 

@@ -5,12 +5,10 @@ use crate::{
         Cert,
         acme::{AcmeOrder, AcmeTarget},
     },
-    cluster::layout::StateKind,
     discovery::DiscoverySnapshot,
     notify::Notification,
     server::rpc::ErasedRpcMethod,
 };
-use r3v3rs3_api::cluster::ClusterStatus;
 use std::sync::Arc;
 
 pub enum ServerCommand {
@@ -43,17 +41,6 @@ pub enum ServerCommand {
     /// Replaces the state and the proxies of a discovery provider.
     SetDiscovery {
         snapshot: DiscoverySnapshot,
-    },
-    /// The cluster store changed these parts of the state.
-    ClusterChanged {
-        kinds: Vec<StateKind>,
-    },
-    SetClusterStatus {
-        status: ClusterStatus,
-    },
-    /// This node gained or lost the leader lock.
-    SetLeader {
-        leader: bool,
     },
     /// The targets of a DNS SRV name changed, so the proxies must be reloaded.
     SrvUpdated {
@@ -117,17 +104,6 @@ impl std::fmt::Debug for ServerCommand {
                 .field("state", &snapshot.state)
                 .field("proxies", &snapshot.proxies.as_ref().map(Vec::len))
                 .finish(),
-            Self::ClusterChanged { kinds } => f
-                .debug_struct("ClusterChanged")
-                .field("kinds", kinds)
-                .finish(),
-            Self::SetClusterStatus { status } => f
-                .debug_struct("SetClusterStatus")
-                .field("status", status)
-                .finish(),
-            Self::SetLeader { leader } => {
-                f.debug_struct("SetLeader").field("leader", leader).finish()
-            }
             Self::SrvUpdated { name } => f.debug_struct("SrvUpdated").field("name", name).finish(),
             Self::Notify { notification } => f
                 .debug_struct("Notify")

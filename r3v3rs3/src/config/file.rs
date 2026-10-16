@@ -4,8 +4,8 @@ use crate::certs::{
     Cert,
     acme::{AcmeAccount, AcmeEntry},
 };
-use crate::cluster::crypto::ClusterKeys;
-use crate::cluster::key_file::{load_keys, write_new_key_file};
+use crate::keys::crypto::ClusterKeys;
+use crate::keys::key_file::{load_keys, write_new_key_file};
 use anyhow::Context as _;
 use indexmap::map::IndexMap;
 

@@ -193,4 +193,3 @@ Bir portta, aynı istemci sertifikasını ve aynı bağlantı timeout'unu kullan
 
 - [Bir uygulamayı korumaya alma](@/tutorials/protect-an-app.tr.md): erişim listesi, kimlik doğrulama ve rate limit.
 - [Cache ve sıkıştırma](@/tutorials/cache-and-compression.tr.md): sunuculara daha az istek.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek durum bilgisini paylaşan birkaç r3v3rs3 düğümü.

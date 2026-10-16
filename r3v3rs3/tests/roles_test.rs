@@ -1,7 +1,6 @@
 use r3v3rs3::{
     accounts::Caller,
     admin::start_admin,
-    cluster::layout::StateKind,
     command::ServerCommand,
     config::{new_appinfo, storage::Storage},
     log::DatabaseLayer,
@@ -18,7 +17,7 @@ use r3v3rs3_api::{
     id::ShortId,
     proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind},
 };
-use reqwest::{Client, Method, Response, header::COOKIE};
+use reqwest::{Client, Method, Response, StatusCode, header::COOKIE};
 use std::{collections::BTreeSet, net::SocketAddr, time::Duration};
 use tokio::sync::mpsc;
 use tracing_subscriber::filter::LevelFilter;
@@ -60,13 +59,14 @@ fn proxy_entry(id: &str, upstream: &str) -> ProxyEntry {
     }
 }
 
-/// Storage with the proxies `web` and `other`, and an editor that sees only `web`.
+/// Storage with the proxies `web` and `other`, an admin, and an editor that sees only `web`.
 fn restricted_storage() -> TestStorage {
     TestStorage::builder()
         .proxies(vec![
             proxy_entry("web", "http://127.0.0.1:1/"),
             proxy_entry("other", "http://127.0.0.1:1/"),
         ])
+        .account("admin", "admin-secret", Role::Admin, None)
         .account("editor", "editor-secret", Role::Editor, web_only())
         .build()
 }
@@ -297,13 +297,16 @@ async fn the_event_stream_holds_only_the_proxies_of_the_account_and_ends_when_th
         assert!(text.contains("\"web\""), "{text}");
         assert!(!text.contains("\"other\""), "{text}");
 
-        let mut accounts = storage.load_accounts().await?;
-        accounts.remove("editor");
-        storage.save_accounts(&accounts).await?;
-        let kinds = vec![StateKind::Accounts];
-        command
-            .send(ServerCommand::ClusterChanged { kinds })
-            .await?;
+        // The session of the editor ends when an admin removes its proxy list.
+        let admin_cookie = session_cookie(addr, "admin", "admin-secret").await?;
+        let resp = client
+            .put(format!("http://{addr}/api/accounts/editor"))
+            .header(COOKIE, &admin_cookie)
+            .json(&serde_json::json!({"role": "editor", "proxies": null}))
+            .send()
+            .await?
+            .error_for_status()?;
+        assert_eq!(resp.status(), StatusCode::OK);
         let rest = tokio::time::timeout(Duration::from_secs(5), async {
             while events.chunk().await?.is_some() {}
             anyhow::Ok(())

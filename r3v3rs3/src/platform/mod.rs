@@ -31,9 +31,9 @@ use crate::agent::remote::RemoteRuntime;
 use crate::audit::AuditLog;
 use crate::build::compose::{ComposeRunner, DockerCompose};
 use crate::build::{GitCredential, GitFetcher, SourceFetcher};
-use crate::cluster::crypto::ClusterKeys;
-use crate::cluster::key_file::{load_keys, write_new_key_file};
 use crate::command::ServerCommand;
+use crate::keys::crypto::ClusterKeys;
+use crate::keys::key_file::{load_keys, write_new_key_file};
 use crate::kv::http::ApiClient;
 use crate::runtime::ContainerRuntime;
 use crate::runtime::docker::DockerRuntime;
@@ -82,7 +82,6 @@ const MAX_GIT_TOKEN_LENGTH: usize = 4096;
 pub enum PlatformHandle {
     #[default]
     Disabled,
-    InCluster,
     /// The platform failed to open its database or its key. The server log has the reason.
     Failed,
     Ready(Arc<Platform>),
@@ -100,10 +99,6 @@ impl PlatformHandle {
     ) -> Self {
         if !config.platform.enabled {
             return Self::Disabled;
-        }
-        if config.cluster.enabled {
-            error!("the deployment platform does not run in a cluster, so it stays off");
-            return Self::InCluster;
         }
         match Platform::open(config, config_dir, command, Some(audit)).await {
             Ok(platform) => {
@@ -132,7 +127,6 @@ impl PlatformHandle {
     pub fn get(&self) -> Result<&Arc<Platform>, Error> {
         match self {
             Self::Disabled => Err(Error::PlatformDisabled),
-            Self::InCluster => Err(Error::PlatformInCluster),
             Self::Failed => Err(Error::PlatformFailed),
             Self::Ready(platform) => Ok(platform),
         }
@@ -850,12 +844,6 @@ mod tests {
         assert!(matches!(handle.get(), Err(Error::PlatformDisabled)));
 
         config.platform.enabled = true;
-        config.cluster.enabled = true;
-        let handle =
-            PlatformHandle::start(&config, &dir, command.clone(), &events, audit.clone()).await;
-        assert!(matches!(handle.get(), Err(Error::PlatformInCluster)));
-
-        config.cluster.enabled = false;
         config.platform.docker = "https://docker.example:2376".into();
         let handle = PlatformHandle::start(&config, &dir, command, &events, audit).await;
         assert!(matches!(handle.get(), Err(Error::PlatformFailed)));

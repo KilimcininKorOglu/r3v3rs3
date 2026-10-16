@@ -73,7 +73,7 @@ retry-after: 14
 
 - r3v3rs3 her istemci IP adresini ayrı sayar.
 - Limit parola kontrolünü de korur: argon2 bilerek CPU zamanı harcar, limit parola denemesini yavaşlatır.
-- Sayaçlar bellekte durur. Yeniden başlatma onları sıfırlar. Cluster'da düğümler sayıları paylaşır, bkz. [Rate limit doğruluğu](@/cluster.tr.md#rate-limit-dogrulugu).
+- Sayaçlar bellekte durur. Yeniden başlatma onları sıfırlar.
 
 Bir route kendi limitini tutabilir. Uygulamanızın giriş yoluna daha dar bir limit verin:
 

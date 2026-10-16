@@ -11,7 +11,6 @@ Buradaki her sayfa bir kurulum rehberidir. Baştan sona izlerseniz çalışan bi
 
 - [Linux sunucuya kurulum](@/tutorials/install-linux.tr.md): `install.sh` ve systemd servisi.
 - [Başlangıç](@/tutorials/getting-started.tr.md): ilk admin hesabı, ilk port ve ilk proxy.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): etcd veya Consul'da tek bir durum bilgisini paylaşan, yük dengeleyici arkasındaki üç düğüm.
 - [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md): container'ların etiketlerinden kurulan proxy'ler.
 - [Wildcard sertifika ile HTTPS](@/tutorials/https-certificates.tr.md): DNS-01 ile wildcard sertifika, HTTPS yönlendirmesi ve HSTS.
 - [Bir uygulamayı korumaya alma](@/tutorials/protect-an-app.tr.md): erişim listesi, kimlik doğrulama, rate limit ve denetim kaydı.

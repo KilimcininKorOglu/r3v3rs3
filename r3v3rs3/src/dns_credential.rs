@@ -2,7 +2,7 @@
 //! provider. The stored credential holds the provider sealed with the key file of the config
 //! directory, so the store holds no secret in plain text.
 
-use crate::cluster::crypto::ClusterKeys;
+use crate::keys::crypto::ClusterKeys;
 use base64::{Engine as _, engine::general_purpose};
 use r3v3rs3_api::acme::{DnsCredentialInfo, DnsProvider};
 use r3v3rs3_api::id::ShortId;
@@ -64,7 +64,7 @@ use anyhow::Context as _;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cluster::crypto::ClusterKey;
+    use crate::keys::crypto::ClusterKey;
     use r3v3rs3_api::acme::{TokenApi, TokenProvider};
 
     fn keys() -> ClusterKeys {

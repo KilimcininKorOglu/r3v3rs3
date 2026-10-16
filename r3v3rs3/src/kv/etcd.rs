@@ -81,23 +81,10 @@ pub(super) struct WatchResult {
     pub(super) events: Vec<Event>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-pub(super) enum EventType {
-    #[default]
-    #[serde(rename = "PUT")]
-    Put,
-    #[serde(rename = "DELETE")]
-    Delete,
-}
-
+/// One event of a watch stream. The watcher only counts the events, so the type and the
+/// value stay unparsed.
 #[derive(Debug, Default, Deserialize)]
-pub(super) struct Event {
-    /// The JSON gateway omits the default type, `PUT`.
-    #[serde(default, rename = "type")]
-    pub(super) kind: EventType,
-    #[serde(default)]
-    pub(super) kv: KeyValue,
-}
+pub(super) struct Event {}
 
 /// An int64 field, which the JSON gateway writes as a string.
 pub(super) fn int64<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
@@ -160,10 +147,6 @@ impl KeyRange {
     }
 
     /// Every key that starts with `prefix`.
-    pub(super) fn with_prefix(prefix: &str) -> Self {
-        Self::starting_with(prefix, prefix.to_string())
-    }
-
     fn starting_with(start: &str, prefix: String) -> Self {
         Self {
             key: BASE64_STANDARD.encode(start),
@@ -337,12 +320,9 @@ mod tests {
     }
 
     #[test]
-    fn watch_events_have_a_type_and_a_key() {
+    fn watch_events_are_counted() {
         let line = br#"{"result":{"events":[{"kv":{"key":"YQ==","mod_revision":"4"}},{"type":"DELETE","kv":{"key":"Yg==","mod_revision":"5"}}]}}"#;
-        let events = watch_result(line).unwrap().events;
-        let kinds = events.iter().map(|event| event.kind).collect::<Vec<_>>();
-        assert_eq!(kinds, [EventType::Put, EventType::Delete]);
-        assert_eq!(events[1].kv.mod_revision, 5);
+        assert_eq!(watch_result(line).unwrap().events.len(), 2);
     }
 
     #[test]
@@ -352,8 +332,10 @@ mod tests {
         assert_eq!(range.key, BASE64_STANDARD.encode("apps/r3v3rs3/"));
         assert_eq!(range.range_end, BASE64_STANDARD.encode("apps/r3v3rs30"));
 
-        let range = KeyRange::with_prefix("a\u{7f}");
-        assert_eq!(range.range_end, BASE64_STANDARD.encode([b'a', 0x80]));
+        assert_eq!(
+            BASE64_STANDARD.encode(prefix_end("a\u{7f}".as_bytes())),
+            BASE64_STANDARD.encode([b'a', 0x80])
+        );
         assert_eq!(prefix_end(&[b'a', 0xff, 0xff]), b"b");
         assert_eq!(prefix_end(&[0xff]), [0]);
 

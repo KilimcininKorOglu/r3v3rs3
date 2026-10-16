@@ -1,4 +1,3 @@
-use crate::components::cluster_status::ClusterStatusCard;
 use crate::components::http_proxy_config::{
     client_cert_label, parse_optional_id, use_client_certs,
 };
@@ -334,7 +333,6 @@ pub fn settings() -> Html {
                 </button>
             </div>
         </form>
-        <ClusterStatusCard />
         <CdnStatusCard />
         <WorkerStatusCard />
         <div ref={upgrade_card_ref}>
@@ -1049,10 +1047,8 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             dns_challenge_resolver: resolver,
             upstream_dns_resolver: upstream_resolver,
             discovery: DiscoveryConfig { docker, etcd },
-            // The server keeps the cluster and the worker mode of config.toml; a restart
-            // applies them.
+            // The server keeps the worker mode of config.toml; a restart applies it.
             acme_exec: parse_acme_exec(locale, fields, &mut errors),
-            cluster: Default::default(),
             platform: PlatformConfig {
                 enabled: fields.platform_enabled,
                 docker: fields.platform_docker.trim().to_string(),

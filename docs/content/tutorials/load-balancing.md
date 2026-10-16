@@ -193,4 +193,3 @@ The proxies of a port that use the same client certificate and the same connect 
 
 - [Protecting an Application](@/tutorials/protect-an-app.md): access list, authentication and rate limit.
 - [Caching and Compression](@/tutorials/cache-and-compression.md): fewer requests to the servers.
-- [High Availability](@/tutorials/high-availability.md): several r3v3rs3 nodes with one shared state.

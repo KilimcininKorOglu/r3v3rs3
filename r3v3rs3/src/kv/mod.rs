@@ -1,18 +1,11 @@
-//! Clients of the HTTP APIs of etcd and Consul. Service discovery reads its keys through them, and
-//! [`KvStore`] reads and writes shared state with transactions, leases, locks and watches.
+//! Clients of the HTTP APIs that the service discovery providers read their sources through.
 
-pub mod consul;
-mod consul_store;
 pub mod etcd;
-mod etcd_store;
 pub mod http;
-
-pub use consul_store::ConsulStore;
 
 use std::time::Duration;
 
-/// A key, its value and the version of its last change: the etcd mod revision or the Consul
-/// modify index.
+/// A key, its value and the version of its last change: the etcd mod revision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KvItem {
     pub key: String,
@@ -27,8 +20,8 @@ pub struct KvList {
     pub revision: u64,
 }
 
-/// A grant with a TTL: an etcd lease or a Consul session. The store deletes the keys of the lease
-/// when the lease ends.
+/// A grant with a TTL: an etcd lease. The store deletes the keys of the lease when the lease
+/// ends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lease {
     pub id: String,
@@ -94,8 +87,8 @@ impl KvEvent {
 pub enum WatchBatch {
     /// The changes after the previous batch. `revision` is the revision of the last change.
     Events { events: Vec<KvEvent>, revision: u64 },
-    /// The store lost the change history, for example after an etcd compaction or a Consul index
-    /// that went back. The list is the current state.
+    /// The store lost the change history, for example after an etcd compaction. The list is the
+    /// current state.
     Resync(KvList),
 }
 

@@ -227,7 +227,6 @@ mod tests {
             Error::InvalidDiscoveryConfig { reason: text() },
             Error::InvalidContainerSpec { reason: text() },
             Error::PlatformDisabled,
-            Error::PlatformInCluster,
             Error::PlatformFailed,
             Error::AppNameExists { name: text() },
             Error::AppBusy { name: text() },
@@ -333,8 +332,6 @@ mod tests {
             Error::AccessListInUse {
                 id: "abc".parse().unwrap(),
             },
-            Error::ClusterUnavailable,
-            Error::ClusterWriteConflict,
             Error::FailedToHashPassword,
             Error::FailedToFetchLog,
             Error::FailedToSaveConfig,

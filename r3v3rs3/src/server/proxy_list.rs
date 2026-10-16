@@ -265,7 +265,7 @@ mod tests {
 
         let update = list.replace_discovered(DiscoveryProvider::Docker, vec![]);
         assert!(update.changed);
-        assert_eq!(ids(&list), ["manual", "consul"]);
+        assert_eq!(ids(&list), ["manual", "etcd"]);
     }
 
     #[test]

@@ -8,7 +8,7 @@ weight = 0
 
 Yapılandırma dizinindeki `config.toml` sunucunun ayarlarını taşır. Dosya yoksa sunucu, başlangıçta bütün ayarları varsayılan değerleriyle dosyaya yazar; böylece yeni bir kurulum sunucunun neyi okuduğunu görür. Var olan bir dosyanın üzerine asla yazılmaz.
 
-Panelin ayarlar sayfası bütün bölümleri sunucu çalışırken yönetir ve bir kayıt restart olmadan uygulanır. İstisnalar `[cluster]` bölümü ve `worker_mode`'dur: bunlar process'in kendisini değiştirir, yalnız `config.toml` belirler ve bir değişiklik restart ile uygulanır.
+Panelin ayarlar sayfası bütün bölümleri sunucu çalışırken yönetir ve bir kayıt restart olmadan uygulanır. İstisna `worker_mode`'dur: process'in kendisini değiştirir, yalnız `config.toml` belirler ve bir değişiklik restart ile uygulanır.
 
 # Portlar
 
@@ -577,7 +577,7 @@ WebUI'daki "Erişim Listeleri" sayfası listeleri ekler, değiştirir ve siler. 
 - Route'un listesi, route'un IP filtresinin ve kimlik doğrulamasının yerini alır.
 - Kendi listesi veya kendi ayarı olmayan route, proxy'nin ayarlarını kullanır. Proxy'nin listesi de bu ayarlara dahildir.
 - Listesi olan proxy veya route kendi IP filtresini veya kimlik doğrulamasını ayarlayamaz. Yönetim API'si `400 access_list_conflict` döndürür.
-- Bilinmeyen bir listeyi kullanan proxy `400 access_list_not_found` alır. Liste çalışma sırasında yoksa, örneğin henüz eşitlenmemiş bir cluster'da, proxy veya route her istemciye `403 Forbidden` döndürür.
+- Bilinmeyen bir listeyi kullanan proxy `400 access_list_not_found` alır. Liste çalışma sırasında yoksa proxy veya route her istemciye `403 Forbidden` döndürür.
 - Bir proxy'nin veya route'un kullandığı liste silinemez. Yönetim API'si `400 access_list_in_use` döndürür.
 
 Yapılandırma dizinindeki `access_lists.toml` dosyası listeleri tutar. Dosya parola hash'lerini ve token özetlerini taşır. Bu yüzden r3v3rs3 dosyayı `0600` moduyla yazar. Yönetim API'si, proxy kimlik doğrulamasında olduğu gibi hash'leri döndürmez.
@@ -851,11 +851,11 @@ r3v3rs3 şu olaylar için bildirim webhook'una bir JSON `POST` isteği gönderir
 {"event": "agent_offline", "time": 1757894400, "target": {"id": "fzn-txd", "name": "edge"}}
 ```
 
-- `time` saniye cinsinden Unix zamanıdır. `node` cluster düğümünün adıdır. Cluster yoksa bu alan bulunmaz. `certificate` alanı sertifika olayının sertifikasını gösterir. `acme` alanı ACME kaydının `id` ve `identifiers` değerlerini taşır. `error` alanı `acme_order_failed` olayının hatasını açıklar.
+- `time` saniye cinsinden Unix zamanıdır. `certificate` alanı sertifika olayının sertifikasını gösterir. `acme` alanı ACME kaydının `id` ve `identifiers` değerlerini taşır. `error` alanı `acme_order_failed` olayının hatasını açıklar.
 - `deployment` alanı deployment'ı, uygulamasını ve tetikleyicisini (`manual`, `webhook`, `rollback` veya `api`) gösterir. `error` alanı `deployment_failed` olayının mesajını taşır. `target` alanı agent olayının agent hedefini gösterir.
 - Token varsa istek `Authorization: Bearer <token>` header'ını taşır. Admin API token'ı döndürmez.
 - 2xx durum kodu başarı sayılır. r3v3rs3 başarısız isteği en fazla üç kez gönderir: 1 saniye sonra bir kez daha, 2 saniye sonra bir kez daha. "Webhook Timeout" (varsayılan `10s`) her denemeyi sınırlar.
-- Lider düğüm sertifikaları her "Arka Plan Görevi Aralığı" süresinde kontrol eder. Bir sertifikanın her olayı bir kez gönderilir. Yenilenen sertifikanın fingerprint'i değişir. Bu yüzden onun olayları yeniden gönderilir. r3v3rs3 gönderilen olayları yapılandırma dizinindeki `notifications.json` dosyasında veya cluster veri deposunda tutar.
+- r3v3rs3 sertifikaları her "Arka Plan Görevi Aralığı" süresinde kontrol eder. Bir sertifikanın her olayı bir kez gönderilir. Yenilenen sertifikanın fingerprint'i değişir. Bu yüzden onun olayları yeniden gönderilir. r3v3rs3 gönderilen olayları yapılandırma dizinindeki `notifications.json` dosyasında tutar.
 - r3v3rs3 bildirimleri arka planda gönderir. Kuyruk en fazla 64 bildirim tutar. Kuyruk doluysa r3v3rs3 bildirimi göndermez ve bir hata log'u yazar.
 - Webhook URL'i HTTPS kullanmalıdır. HTTP yalnız loopback adresinde kullanılabilir.
 
@@ -1012,7 +1012,7 @@ Her challenge adı için bir `grant` kuralı ekleyin. `*.example.com` sertifikas
 
 ## Worker Süreçleri
 
-Varsayılan olarak admin API'yi çalıştıran aynı süreç her portu da servis eder. `config.toml` içinde `worker_mode = "workers"` ayarıyla r3v3rs3 portları sunan bir worker süreci başlatır. Master süreç durumu, admin API'yi, WebUI'yi, cluster'ı ve deployment platformunu tutar. Worker'ın çökmesi admin API'yi düşürmez ve master worker'ı bir backoff ile yeniden başlatır.
+Varsayılan olarak admin API'yi çalıştıran aynı süreç her portu da servis eder. `config.toml` içinde `worker_mode = "workers"` ayarıyla r3v3rs3 portları sunan bir worker süreci başlatır. Master süreç durumu, admin API'yi, WebUI'yi ve deployment platformunu tutar. Worker'ın çökmesi admin API'yi düşürmez ve master worker'ı bir backoff ile yeniden başlatır.
 
 ```toml
 worker_mode = "workers"
@@ -1200,8 +1200,6 @@ Varsayılan konumu `R3V3RS3_CONFIG_DIR` ortam değişkeni veya `--config-dir` ko
 
 Bu dosyaları elle de düzenleyebilirsiniz. Ancak r3v3rs3 yapılandırma dosyalarındaki değişiklikleri kendiliğinden algılamaz. Değişikliklerin geçerli olması için dosyayı düzenledikten sonra sunucuyu yeniden başlatın.
 
-Cluster'daki bir düğüm yalnız `config.toml` dosyasını okur. Düğümün diğer verileri etcd veya Consul'dadır. Ayrıntılar için [Cluster](@/cluster.tr.md) sayfasına bakın.
-
 # WebUI
 
 r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak `127.0.0.1:46492` adresinde çalışır. Başka bir dinleme adresini, örneğin `0.0.0.0:46492`, `R3V3RS3_WEBUI` ortam değişkeni veya `--webui` komut satırı seçeneğiyle ayarlayın. `R3V3RS3_NO_WEBUI=1` ortam değişkeni veya `--no-webui` komut satırı seçeneği WebUI'ı ve yönetim API'sini kapatır.
@@ -1252,9 +1250,9 @@ r3v3rs3, bir hesabın WebUI veya yönetim API'si ile yaptığı değişiklikleri
 
 Her kayıtta zaman, hesap, istemci IP adresi, işlem, değişen kaynağın id'si ve kısa bir özet bulunur. Özet isimleri, adresleri ve rolleri içerir. Parola, token veya key içermez.
 
-Tek sunucu denetim kaydını log dizinindeki `log.db` dosyasının `audit_log` tablosunda tutar. Cluster denetim kaydını cluster veri deposunda şifreli tutar. Böylece her düğüm bütün düğümlerin kayıtlarını okur. Cluster'daki bir kayıt, onu yazan düğümün adını da içerir.
+Tek sunucu denetim kaydını log dizinindeki `log.db` dosyasının `audit_log` tablosunda tutar.
 
-Bir kaydın ne kadar tutulacağını "Denetim Kaydı Saklama Süresi" ayarı belirler. Varsayılan değer `1year` olur. Cluster bir günün kayıtlarını birlikte siler. Silme, o gün saklama süresini geçtikten sonra yapılır.
+Bir kaydın ne kadar tutulacağını "Denetim Kaydı Saklama Süresi" ayarı belirler. Varsayılan değer `1year` olur.
 
 Denetim kaydına yazma başarısız olursa değişiklik geri alınmaz. r3v3rs3 hatayı log'a yazar.
 
@@ -1269,8 +1267,6 @@ WebUI'daki Denetim Kaydı sayfası kayıtları en yeni kayıttan başlayarak lis
 | `username` | Kayıtların ait olduğu hesap. |
 | `resource_id` | Değişen kaynağın id'si veya değişen kullanıcı adı. |
 | `limit` | Yanıttaki en fazla kayıt sayısı. Varsayılan değer `100`, en yüksek değer `500` olur. |
-
-Cluster, `until` değerinden en fazla 31 gün geriye okur. Bu yüzden daha uzun bir dönem daha eski kayıtları döndürmez.
 
 # Log
 

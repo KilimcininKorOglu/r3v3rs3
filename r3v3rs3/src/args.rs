@@ -15,8 +15,6 @@ pub enum Command {
     Start(StartArgs),
     /// Add user
     AddUser(AddUserArgs),
-    /// Manage the cluster store
-    Cluster(ClusterArgs),
     /// Run the containers of a deployment platform target for a master
     Agent(AgentArgs),
     /// Serve the listeners that a master hands over over IPC
@@ -81,34 +79,6 @@ pub struct WorkerArgs {
         env = "R3V3RS3_LOG_LEVEL"
     )]
     pub log_level: LevelFilter,
-}
-
-#[derive(Args)]
-pub struct ClusterArgs {
-    #[command(subcommand)]
-    pub command: ClusterCommand,
-}
-
-#[derive(Subcommand)]
-pub enum ClusterCommand {
-    /// Write a new value encryption key to a file
-    Keygen(KeygenArgs),
-    /// Encrypt every value of the cluster store with the first key of `cluster.encryption_key_files`
-    Rekey(ClusterConfigArgs),
-    /// Copy the configuration files into an empty cluster store
-    Import(ClusterConfigArgs),
-}
-
-#[derive(Args)]
-pub struct KeygenArgs {
-    /// The key file. It must not exist.
-    pub file: PathBuf,
-}
-
-#[derive(Args)]
-pub struct ClusterConfigArgs {
-    #[clap(long, short, value_name = "DIR", env = "R3V3RS3_CONFIG_DIR")]
-    pub config_dir: Option<PathBuf>,
 }
 
 #[derive(Args)]

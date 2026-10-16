@@ -8,7 +8,7 @@ weight = 0
 
 `config.toml` in the config directory holds the settings of the server. When the file is missing, the server writes it on its start with every setting and its default value, so a fresh install shows what the server reads. A file that exists is never overwritten.
 
-The settings page of the panel manages every section while the server runs, and a save applies it without a restart. The exceptions are the `[cluster]` section and the `worker_mode`, which change the process itself: only `config.toml` sets them, and a restart applies a change.
+The settings page of the panel manages every section while the server runs, and a save applies it without a restart. The exception is the `worker_mode`, which changes the process itself: only `config.toml` sets it, and a restart applies a change.
 
 # Ports
 
@@ -577,7 +577,7 @@ The "Access Lists" page of the WebUI adds, changes and deletes the lists. The "A
 - The list of a route replaces the IP filter and the authentication of the route.
 - A route without its own list or override uses the settings of the proxy, including the list of the proxy.
 - A proxy or a route with a list cannot also set its own IP filter or authentication. The admin API answers `400 access_list_conflict`.
-- A proxy that names an unknown list gets `400 access_list_not_found`. When the list is missing at runtime, for example in a cluster that has not synced yet, the proxy or the route answers every client with `403 Forbidden`.
+- A proxy that names an unknown list gets `400 access_list_not_found`. When the list is missing at runtime, the proxy or the route answers every client with `403 Forbidden`.
 - A list that a proxy or a route uses cannot be deleted. The admin API answers `400 access_list_in_use`.
 
 `access_lists.toml` in the configuration directory holds the lists. r3v3rs3 writes the file with mode `0600`, because it holds the password hashes and the token digests. The admin API does not return the hashes, like the proxy authentication.
@@ -851,11 +851,11 @@ r3v3rs3 sends a JSON `POST` request to the notification webhook for these events
 {"event": "agent_offline", "time": 1757894400, "target": {"id": "fzn-txd", "name": "edge"}}
 ```
 
-- `time` is the Unix time in seconds. `node` is the name of the cluster node, and it is absent without a cluster. `certificate` names the certificate of a certificate event. `acme` holds the `id` and the `identifiers` of the ACME entry, and `error` describes the failure of an `acme_order_failed` event.
+- `time` is the Unix time in seconds. `certificate` names the certificate of a certificate event. `acme` holds the `id` and the `identifiers` of the ACME entry, and `error` describes the failure of an `acme_order_failed` event.
 - `deployment` names the deployment, its app and its trigger (`manual`, `webhook`, `rollback` or `api`). `error` holds the message of a `deployment_failed` event. `target` names the agent target of an agent event.
 - With a token, the request has the header `Authorization: Bearer <token>`. The admin API does not return the token.
 - A 2xx status is a success. r3v3rs3 sends a failed request at most three times: again after 1 second, and again 2 seconds later. "Webhook Timeout" (default `10s`) limits each try.
-- The leader checks the certificates at each "Background Task Interval". Each event of a certificate is sent once. A renewed certificate has a new fingerprint, so its events are sent again. r3v3rs3 keeps the sent events in `notifications.json` in the configuration directory, or in the cluster store.
+- r3v3rs3 checks the certificates at each "Background Task Interval". Each event of a certificate is sent once. A renewed certificate has a new fingerprint, so its events are sent again. r3v3rs3 keeps the sent events in `notifications.json` in the configuration directory.
 - r3v3rs3 sends the notifications in the background. The queue holds at most 64 notifications. When the queue is full, r3v3rs3 drops the notification and logs an error.
 - The webhook URL must use HTTPS. HTTP is allowed only for a loopback address.
 
@@ -1012,7 +1012,7 @@ Add a `grant` rule for each challenge name. A certificate for `*.example.com` us
 
 ## Worker Processes
 
-By default the same process that runs the admin API also serves every port. With `worker_mode = "workers"` in `config.toml`, r3v3rs3 starts one worker process that serves the ports while the master process keeps the storage, the admin API, the WebUI, the cluster and the deployment platform. A crash of the worker does not take the admin API down, and the master restarts the worker with a backoff.
+By default the same process that runs the admin API also serves every port. With `worker_mode = "workers"` in `config.toml`, r3v3rs3 starts one worker process that serves the ports while the master process keeps the storage, the admin API, the WebUI and the deployment platform. A crash of the worker does not take the admin API down, and the master restarts the worker with a backoff.
 
 ```toml
 worker_mode = "workers"
@@ -1200,8 +1200,6 @@ You can override the default location by setting the `R3V3RS3_CONFIG_DIR` enviro
 
 These files can be edited manually, but r3v3rs3 does not detect the change. Restart the server after editing a configuration file.
 
-A node of a cluster reads only `config.toml`. The rest of its state is in etcd or Consul. See [Cluster](@/cluster.md).
-
 # WebUI
 
 r3v3rs3 includes a built-in WebUI. By default, it is served on `127.0.0.1:46492`. Set another listening address, for example `0.0.0.0:46492`, with the `R3V3RS3_WEBUI` environment variable or the `--webui` command-line option. The `R3V3RS3_NO_WEBUI=1` environment variable or the `--no-webui` command-line option turns off the WebUI and the admin API.
@@ -1252,9 +1250,9 @@ r3v3rs3 records the changes that an account makes through the WebUI or the admin
 
 Each entry holds the time, the account, the client IP address, the action, the id of the changed resource and a short summary. The summary holds names, addresses and roles. It never holds a password, a token or a key.
 
-A single server keeps the audit log in the `audit_log` table of `log.db` in the log directory. A cluster keeps the audit log encrypted in the cluster store, so each node reads the entries of every node. An entry of a cluster also names the node that recorded it.
+A single server keeps the audit log in the `audit_log` table of `log.db` in the log directory.
 
-The "Audit Log Retention" setting sets how long an entry stays. The default is `1year`. A cluster deletes the entries of a day together, after that day passes the retention.
+The "Audit Log Retention" setting sets how long an entry stays. The default is `1year`.
 
 A failed write to the audit log does not undo the change. r3v3rs3 logs the error.
 
@@ -1269,8 +1267,6 @@ The Audit Log page of the WebUI lists the entries, starting with the newest. Onl
 | `username` | The account of the entries. |
 | `resource_id` | The id of the changed resource, or the changed username. |
 | `limit` | The most entries in the response. The default is `100` and the maximum is `500`. |
-
-A cluster reads at most 31 days before `until`, so a longer period does not return older entries.
 
 # Logging
 

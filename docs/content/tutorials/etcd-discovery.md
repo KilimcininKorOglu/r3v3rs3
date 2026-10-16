@@ -119,4 +119,3 @@ The WebUI shows the proxy with its source and without the edit actions. To chang
 ## Next Steps
 
 - [Proxies from Docker](@/tutorials/docker-discovery.md): the same keys as container labels.
-- [High Availability](@/tutorials/high-availability.md): several nodes with one shared state.

@@ -2,9 +2,6 @@
 
 use serde_json::{Value, json};
 
-pub const CONSUL: &str = "http://127.0.0.1:8480";
-/// The management token of the Consul agent.
-pub const CONSUL_TOKEN: &str = "e2e-consul-token";
 pub const ETCD: &str = "http://127.0.0.1:8481";
 /// The password of the etcd `root` user.
 pub const ETCD_PASSWORD: &str = "e2e-etcd-password";
@@ -23,7 +20,7 @@ pub async fn etcd_post(path: &str, body: Value, token: Option<&str>) -> anyhow::
     Ok(body)
 }
 
-/// Adds the `root` user, enables authentication and returns a token. A cluster whose
+/// Adds the `root` user, enables authentication and returns a token. An etcd whose
 /// authentication is already on only returns the token.
 pub async fn etcd_token() -> anyhow::Result<String> {
     let credentials = json!({"name": "root", "password": ETCD_PASSWORD});
@@ -39,17 +36,4 @@ pub async fn etcd_token() -> anyhow::Result<String> {
         .as_str()
         .map(String::from)
         .ok_or_else(|| anyhow::anyhow!("etcd returned no token: {body}"))
-}
-
-/// Sends a request with the management token to the Consul HTTP API.
-pub async fn consul_put(path: &str, body: String) -> anyhow::Result<Value> {
-    let response = reqwest::Client::new()
-        .put(format!("{CONSUL}{path}"))
-        .header("X-Consul-Token", CONSUL_TOKEN)
-        .body(body)
-        .send()
-        .await?
-        .error_for_status()?;
-    let text = response.text().await?;
-    Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
 }

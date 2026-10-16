@@ -97,5 +97,4 @@ Herkese açık bir site HTTPS ister. r3v3rs3 sertifikaları bir ACME sunucusunda
 
 - [Yapılandırma](@/configuration.tr.md): route seçimi, yük dengeleme, cache, kimlik doğrulama, rate limit ve diğer bütün proxy ayarları.
 - [Hesaplar](@/accounts.tr.md): roller, proxy listeleri ve denetim kaydı.
-- [Servis keşfi](@/discovery.tr.md): Docker etiketleri, Consul ve etcd'den gelen proxy'ler.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek bir durum bilgisini paylaşan birkaç düğüm.
+- [Servis keşfi](@/discovery.tr.md): Docker etiketleri ve etcd'den gelen proxy'ler.

@@ -8,7 +8,6 @@
 use super::{AppState, McpScope};
 use crate::accounts::Caller;
 use crate::server::rpc::certs::GetCertList;
-use crate::server::rpc::cluster::GetClusterStatus;
 use crate::server::rpc::config::GetConfig;
 use crate::server::rpc::ports::{GetPort, GetPortList};
 use crate::server::rpc::proxies::{AddProxy, DeleteProxy, GetProxy, GetProxyList, UpdateProxy};
@@ -113,7 +112,7 @@ impl McpServer {
 
     /// The version, the target and the state of the server.
     #[tool(
-        description = "Show the version, the profile and the runtime state of this r3v3rs3 server: the workers that serve the ports and the cluster status."
+        description = "Show the version, the profile and the runtime state of this r3v3rs3 server: the workers that serve the ports."
     )]
     async fn server_status(
         &self,
@@ -131,15 +130,9 @@ impl McpServer {
             .call(&caller, GetWorkers)
             .await
             .map_err(tool_error)?;
-        let cluster: r3v3rs3_api::cluster::ClusterStatus = *self
-            .state
-            .call(&caller, GetClusterStatus)
-            .await
-            .map_err(tool_error)?;
         json_result(json!({
             "app": app_info,
             "workers": workers,
-            "cluster": cluster,
         }))
     }
 

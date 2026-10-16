@@ -8,7 +8,6 @@ pub mod cdn;
 pub mod cert;
 pub mod cidr;
 pub mod client_ip;
-pub mod cluster;
 pub mod compression;
 pub mod container;
 pub mod discovery;

@@ -227,4 +227,3 @@ Durum endpoint'lerini döngüde sormak yerine bir izleme paneli veya alarm için
 
 - [Yük dengeleme ve sağlık kontrolü](@/tutorials/load-balancing.tr.md): durum endpoint'inin kullanımı.
 - [Cache ve sıkıştırma](@/tutorials/cache-and-compression.tr.md): cache temizlemenin neyi sildiği.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): cluster'daki her düğümde aynı API.

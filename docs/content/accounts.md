@@ -43,7 +43,7 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 - A change of the role, the proxy list or the password ends the sessions that started before the change. This applies to the admin panel sessions and to the Admin Session sign-ins of the proxies.
 - A deleted account loses its sessions.
 
-`accounts.toml` in the configuration directory holds the accounts with their password hashes. r3v3rs3 writes the file with mode `0600`. A cluster keeps the accounts encrypted in the store.
+`accounts.toml` in the configuration directory holds the accounts with their password hashes. r3v3rs3 writes the file with mode `0600`.
 
 ## Create an Account
 

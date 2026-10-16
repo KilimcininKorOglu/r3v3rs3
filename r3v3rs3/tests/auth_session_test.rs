@@ -1,4 +1,3 @@
-use r3v3rs3::{cluster::layout::StateKind, command::ServerCommand, config::storage::Storage};
 use r3v3rs3_api::{
     app::AppConfig, auth::Role, i18n::Locale, id::ShortId, policy::AuthPolicy, proxy::HttpProxy,
 };
@@ -14,7 +13,7 @@ use std::{
 
 mod common;
 use common::{
-    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
+    TestStorage, alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route, with_server,
 };
 
 #[tokio::test]
@@ -198,6 +197,7 @@ async fn only_the_accounts_that_see_the_proxy_keep_a_session() -> anyhow::Result
         Ok(Some(BTreeSet::from([id.parse()?])))
     };
     let storage = TestStorage::builder()
+        .account("admin", "admin-secret", Role::Admin, None)
         .account("outsider", "outsider-secret", Role::Viewer, proxy("other")?)
         .account("member", "member-secret", Role::Viewer, proxy("proxy1")?)
         .ports(vec![http_port_entry("session", &port)])
@@ -213,7 +213,7 @@ async fn only_the_accounts_that_see_the_proxy_keep_a_session() -> anyhow::Result
         )])
         .build();
 
-    with_server(storage.clone(), |channels| async move {
+    with_server(storage.clone(), |mut channels| async move {
         let client = reqwest::Client::builder()
             .redirect(Policy::none())
             .build()?;
@@ -243,16 +243,21 @@ async fn only_the_accounts_that_see_the_proxy_keep_a_session() -> anyhow::Result
         assert_eq!(private().await?.status(), StatusCode::OK);
 
         // The session ends when the proxy leaves the proxy list of the account.
-        let mut accounts = storage.load_accounts().await?;
-        if let Some(member) = accounts.get_mut("member") {
-            member.proxies = proxy("other")?;
-        }
-        storage.save_accounts(&accounts).await?;
-        let kinds = vec![StateKind::Accounts];
-        channels
-            .command
-            .send(ServerCommand::ClusterChanged { kinds })
-            .await?;
+        use r3v3rs3::server::rpc::accounts::UpdateAccount;
+        use r3v3rs3_api::auth::AccountUpdate;
+        call(
+            &mut channels,
+            UpdateAccount {
+                actor: "system".to_string(),
+                username: "member".to_string(),
+                update: AccountUpdate {
+                    role: Role::Viewer,
+                    proxies: proxy("other")?,
+                    password: None,
+                },
+            },
+        )
+        .await??;
         tokio::time::timeout(Duration::from_secs(5), async {
             while private().await?.status() != StatusCode::FOUND {
                 tokio::time::sleep(Duration::from_millis(50)).await;

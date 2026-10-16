@@ -1,7 +1,6 @@
 use crate::acme::AcmeInfo;
 use crate::app::AppConfig;
 use crate::cert::CertInfo;
-use crate::cluster::ClusterStatus;
 use crate::discovery::DiscoveryStatus;
 use crate::id::ShortId;
 use crate::port::PortStatus;
@@ -43,9 +42,6 @@ pub enum ServerEvent {
     },
     DiscoveryStatusUpdated {
         entries: Vec<DiscoveryStatus>,
-    },
-    ClusterStatusUpdated {
-        status: ClusterStatus,
     },
     Shutdown,
 }

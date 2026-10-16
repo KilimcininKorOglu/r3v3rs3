@@ -14,7 +14,6 @@ use crate::certs::acme::{AcmeEntry, AcmeOrder, AcmeTarget};
 use crate::certs::alpn::{ChallengeCerts, TlsAlpnChallenge, challenge_config};
 use crate::certs::challenges::ServedChallenges;
 use crate::clock::unix_ms;
-use crate::cluster::layout::StateKind;
 use crate::config::storage::Storage;
 use crate::discovery::DiscoverySnapshot;
 use crate::kv::http::ApiClient;
@@ -31,7 +30,6 @@ use crate::{
 use quinn::Incoming;
 use r3v3rs3_api::access_list::{AccessListEntry, apply_access_lists};
 use r3v3rs3_api::app::{AppConfig, AppInfo, WorkerEntry, WorkerStatusEntry, WorkerStatusReport};
-use r3v3rs3_api::cluster::ClusterStatus;
 use r3v3rs3_api::discovery::{DiscoveryProvider, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
@@ -80,8 +78,7 @@ pub struct ServerState {
     broadcast_events: bool,
     discovery: DiscoveryRegistry,
     discovery_tasks: DiscoveryTasks,
-    cluster: ClusterStatus,
-    /// Whether this node runs the leader tasks. A server without a cluster always does.
+    /// Whether this process runs the periodic tasks. The worker process does not.
     leader: bool,
     session_backend: Arc<dyn SessionBackend>,
     /// The accounts without their secrets, for the admin API and the proxy authentication.
@@ -268,7 +265,7 @@ impl ServerState {
         listeners: Vec<super::fdmanifest::ListenerFd>,
     ) -> Self {
         let config = storage.load_app_config().await;
-        let audit = Arc::new(AuditLog::new(audit_store, config.cluster.node_name.clone()));
+        let audit = Arc::new(AuditLog::new(audit_store, String::new()));
         let platform = if role == ServerRole::Worker {
             PlatformHandle::Disabled
         } else {
@@ -317,7 +314,7 @@ impl ServerState {
             accounts.subscribe(),
             config.admin.clone(),
         ));
-        let leader = !config.cluster.enabled && role == ServerRole::Master;
+        let leader = role == ServerRole::Master;
         let check_interval = config.upgrade.check_interval;
         let mut this = Self {
             proxies: proxies.into_iter().collect(),
@@ -342,7 +339,6 @@ impl ServerState {
             broadcast_events: false,
             discovery: DiscoveryRegistry::default(),
             discovery_tasks: DiscoveryTasks::default(),
-            cluster: ClusterStatus::default(),
             leader,
             session_backend,
             accounts,
@@ -369,8 +365,9 @@ impl ServerState {
         listeners: Vec<super::fdmanifest::ListenerFd>,
     ) {
         if let Some(exchange) = self.storage.clone().rate_count_exchange() {
-            let interval = self.config.cluster.rate_limit_sync_interval;
-            self.registries.limiters.start_sharing(exchange, interval);
+            self.registries
+                .limiters
+                .start_sharing(exchange, std::time::Duration::from_secs(1));
         }
         if let Some(store) = self.storage.clone().shared_cache_store() {
             self.registries.caches.start_sharing(store);
@@ -392,6 +389,9 @@ impl ServerState {
             for provider in DiscoveryProvider::ALL {
                 self.restart_discovery(provider).await;
             }
+            // The master runs the periodic tasks of the leader, so its first background run
+            // does not wait.
+            self.run_leader_tasks().await;
         }
     }
 
@@ -418,7 +418,7 @@ impl ServerState {
                 let _ = self.callback_sender.send(RpcCallback { id, result }).await;
             }
             ServerCommand::SetCdnRanges { ranges } => {
-                // In a cluster the other nodes read the ranges of the leader from the store.
+                // Only the master installs the new ranges and stores them.
                 if self.leader && crate::cdn::install(ranges.clone()) {
                     log_save_error(self.storage.save_cdn_ranges(&ranges).await);
                 }
@@ -455,24 +455,11 @@ impl ServerState {
         }
     }
 
-    /// Handles the commands that change where the proxies and the cluster get their state from.
+    /// Handles the commands that change where the proxies get their state from.
     async fn handle_topology_command(&mut self, cmd: ServerCommand) {
         match cmd {
             ServerCommand::SetDiscovery { snapshot } => {
                 self.set_discovery(snapshot).await;
-            }
-            ServerCommand::ClusterChanged { kinds } => {
-                self.apply_cluster_changes(kinds).await;
-            }
-            ServerCommand::SetClusterStatus { status } => {
-                self.cluster = ClusterStatus {
-                    leader: self.leader,
-                    ..status
-                };
-                self.publish_cluster_status();
-            }
-            ServerCommand::SetLeader { leader } => {
-                self.set_leader(leader).await;
             }
             ServerCommand::SrvUpdated { name } => {
                 info!(name, "reloading the proxies for the new SRV targets");
@@ -484,27 +471,7 @@ impl ServerState {
         }
     }
 
-    fn publish_cluster_status(&self) {
-        let status = self.cluster.clone();
-        let _ = self
-            .br_sender
-            .send(ServerEvent::ClusterStatusUpdated { status });
-    }
-
-    /// A new leader runs the leader tasks at once, so it does not wait for the next background
-    /// run.
-    async fn set_leader(&mut self, leader: bool) {
-        self.leader = leader;
-        self.cluster.leader = leader;
-        self.publish_cluster_status();
-        if leader {
-            // The previous leader can have sent notifications that this node did not send.
-            self.sent_notifications = self.storage.load_sent_notifications().await;
-            self.run_leader_tasks().await;
-        }
-    }
-
-    /// The tasks that only one node of a cluster runs.
+    /// The tasks that the master runs at its start and at every background run.
     async fn run_leader_tasks(&mut self) {
         self.start_http_challenges().await;
         self.cleanup_audit_log().await;
@@ -515,10 +482,6 @@ impl ServerState {
             error!(%err, "failed to remove the expired sessions");
         }
         self.storage.remove_expired_shared_responses().await;
-    }
-
-    pub fn cluster_status(&self) -> ClusterStatus {
-        self.cluster.clone()
     }
 
     /// Reports the workers that serve the ports. A worker without a live status stays listed
@@ -578,7 +541,7 @@ impl ServerState {
             &self.sent_notifications,
             now,
             self.config.notifications.cert_expiry_warning,
-            &self.config.cluster.node_name,
+            "",
         );
         for notification in notifications {
             self.notifier.send(&webhook, notification);
@@ -609,8 +572,7 @@ impl ServerState {
             .as_ref()
             .filter(|_| self.leader);
         if let (Some(webhook), Some(error)) = (webhook, error) {
-            let node = &self.config.cluster.node_name;
-            let notification = Notification::acme_order_failed(node, &target, error);
+            let notification = Notification::acme_order_failed("", &target, error);
             self.notifier.send(webhook, notification);
         }
         if self.acme_schedule.is_idle() {
@@ -623,24 +585,13 @@ impl ServerState {
         self.accounts.subscribe()
     }
 
-    /// Reads the parts of the state that the cluster store changed again, and applies them.
-    async fn apply_cluster_changes(&mut self, kinds: Vec<StateKind>) {
-        for kind in kinds {
-            self.reload_kind(kind).await;
-        }
-    }
-
     /// Reloads the parts of the state that the configuration of the master replaces. Only the
     /// worker process receives this command, because only its storage is a memory storage.
     async fn apply_worker_state(&mut self) {
-        for kind in [
-            StateKind::Ports,
-            StateKind::Proxies,
-            StateKind::AccessLists,
-            StateKind::Certs,
-        ] {
-            self.reload_kind(kind).await;
-        }
+        self.reload_ports().await;
+        self.reload_manual_proxies().await;
+        self.reload_access_lists().await;
+        self.reload_certs().await;
     }
 
     /// The listeners that the worker processes take over.
@@ -667,21 +618,6 @@ impl ServerState {
                 })
                 .collect(),
             app: self.config.clone(),
-        }
-    }
-
-    async fn reload_kind(&mut self, kind: StateKind) {
-        match kind {
-            StateKind::Config => self.reload_config().await,
-            StateKind::Certs => self.reload_certs().await,
-            StateKind::Acmes => self.reload_acmes().await,
-            StateKind::Ports => self.reload_ports().await,
-            StateKind::Proxies => self.reload_manual_proxies().await,
-            StateKind::AccessLists => self.reload_access_lists().await,
-            StateKind::Cdn => self.reload_cdn_ranges().await,
-            StateKind::Challenges => self.reload_challenges().await,
-            StateKind::CachePurges => self.reload_cache_purges().await,
-            StateKind::Accounts => self.reload_accounts().await,
         }
     }
 
@@ -748,24 +684,12 @@ impl ServerState {
         });
     }
 
-    async fn reload_config(&mut self) {
-        let config = self.storage.load_app_config().await;
-        if config != self.config {
-            self.apply_config(config).await;
-        }
-    }
-
     async fn reload_certs(&mut self) {
         let certs = self.storage.load_certs().await;
         if self.certs.replace_stored(certs) {
             self.update_certs().await;
             self.reload_proxies().await;
         }
-    }
-
-    async fn reload_acmes(&mut self) {
-        self.acmes = self.storage.load_acmes().await.into_iter().collect();
-        self.update_acmes().await;
     }
 
     async fn reload_ports(&mut self) {
@@ -799,27 +723,6 @@ impl ServerState {
             self.publish_proxies();
             self.reload_proxies().await;
         }
-    }
-
-    async fn reload_cdn_ranges(&mut self) {
-        if let Some(ranges) = self.storage.load_cdn_ranges().await {
-            crate::cdn::install(ranges);
-        }
-    }
-
-    /// Serves the challenges of the store, and tells the leader that this node serves them.
-    async fn reload_challenges(&mut self) {
-        let Some(challenges) = self.storage.load_challenges().await else {
-            return;
-        };
-        self.set_challenges(challenges.clone()).await;
-        log_save_error(self.storage.ack_challenges(&challenges).await);
-    }
-
-    /// Purges the caches that another node purged.
-    async fn reload_cache_purges(&mut self) {
-        let purges = self.storage.load_cache_purges().await;
-        self.registries.caches.apply_purges(purges);
     }
 
     /// Adds a certificate that an ACME order issued. The server uses the certificate even when the
@@ -1346,7 +1249,6 @@ impl ServerState {
             if let Err(err) = self.certs.delete(*id) {
                 error!(%err, "failed to delete cert");
             }
-            // The other nodes of a cluster remove the certificate after the store change.
             log_save_error(self.storage.delete_cert(*id).await);
         }
         if !removing_items.is_empty() {
@@ -1392,8 +1294,7 @@ impl ServerState {
         renewals
     }
 
-    /// Orders the due certificates. In a cluster only the leader orders, and a node that takes the
-    /// lead orders the due certificates at once.
+    /// Orders the due certificates. Only the master process orders.
     async fn start_http_challenges(&mut self) {
         if !self.leader {
             return;
@@ -1510,7 +1411,7 @@ impl ServerState {
         let command = self.command_sender.clone();
         let storage = self.storage.clone();
         tokio::task::spawn(async move {
-            // The ACME server can validate a challenge on any node of a cluster.
+            // The ACME server validates the challenges before the order continues.
             storage.wait_for_challenges(&challenges).await;
             for mut order in orders {
                 let span = span!(
@@ -1656,7 +1557,7 @@ impl ServerState {
     /// settings page turns the deployment platform on and off while the server runs.
     async fn restart_platform(&mut self) {
         self.platform = PlatformHandle::Disabled;
-        if !self.config.platform.enabled || self.config.cluster.enabled {
+        if !self.config.platform.enabled {
             return;
         }
         self.platform = PlatformHandle::start(

@@ -57,7 +57,6 @@ The two decisions that matter most:
 | SQLite through `sqlx` with an idempotent schema | `r3v3rs3/src/audit.rs`, `r3v3rs3/src/log.rs` |
 | Audit log | `r3v3rs3/src/audit.rs` |
 | Notifications | `r3v3rs3/src/notify.rs` |
-| Cluster mode | `r3v3rs3/src/cluster/` |
 | WebUI with i18n | `r3v3rs3-webui/` |
 
 The new work is the container lifecycle: the domain model, the runtime, the build step, the deploy pipeline and the agent link.

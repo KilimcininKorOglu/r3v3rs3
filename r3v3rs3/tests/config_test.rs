@@ -55,8 +55,7 @@ async fn set_config_persists_to_storage() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn set_config_carries_the_exec_programs_and_keeps_the_cluster_of_the_file()
--> anyhow::Result<()> {
+async fn set_config_carries_the_exec_programs_of_the_file() -> anyhow::Result<()> {
     let file_config = AppConfig {
         acme_exec: AcmeExecConfig {
             programs: vec!["/usr/local/bin/r3v3rs3-dns-hook".into()],
@@ -66,8 +65,7 @@ async fn set_config_carries_the_exec_programs_and_keeps_the_cluster_of_the_file(
     };
     let storage = TestStorage::builder().config(file_config.clone()).build();
 
-    // The exec allowlist travels with the settings; the cluster needs a restart and the
-    // update cannot change it.
+    // The exec allowlist travels with the settings.
     let mut config = AppConfig::default();
     config.acme_exec.programs = vec!["/bin/sh".into()];
     config.acme_exec.timeout = Duration::from_secs(9);

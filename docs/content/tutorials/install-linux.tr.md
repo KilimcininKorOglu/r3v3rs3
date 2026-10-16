@@ -179,4 +179,3 @@ $ sudo systemctl daemon-reload
 
 - [Başlangıç](@/tutorials/getting-started.tr.md): ilk port ve ilk proxy.
 - [Yapılandırma dosyaları](@/configuration.tr.md#yapilandirma-dosyalari): yapılandırma dizinindeki her dosyanın içeriği.
-- [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek bir durum bilgisini paylaşan birkaç sunucu.

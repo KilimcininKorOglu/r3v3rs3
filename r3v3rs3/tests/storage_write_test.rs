@@ -17,7 +17,7 @@ async fn a_change_is_rejected_and_not_applied_when_the_storage_cannot_write() ->
 {
     let storage = TestStorage::builder().build();
     storage
-        .set_write_error(Some(Error::ClusterUnavailable))
+        .set_write_error(Some(Error::FailedToSaveConfig))
         .await;
 
     let config = AppConfig {
@@ -35,7 +35,7 @@ async fn a_change_is_rejected_and_not_applied_when_the_storage_cannot_write() ->
         )
         .await?;
         assert!(
-            matches!(rejected, Err(Error::ClusterUnavailable)),
+            matches!(rejected, Err(Error::FailedToSaveConfig)),
             "{rejected:?}"
         );
         // A read still works, and the rejected change is not applied.
@@ -46,7 +46,7 @@ async fn a_change_is_rejected_and_not_applied_when_the_storage_cannot_write() ->
         let id = "abcdef".parse()?;
         let deleted = call(&mut channels, DeleteProxy { id }).await?;
         assert!(
-            matches!(deleted, Err(Error::ClusterUnavailable)),
+            matches!(deleted, Err(Error::FailedToSaveConfig)),
             "{deleted:?}"
         );
 
@@ -129,7 +129,5 @@ async fn a_change_is_not_applied_when_the_storage_cannot_save() -> anyhow::Resul
 
 #[test]
 fn storage_errors_have_their_http_status() {
-    assert_eq!(Error::ClusterUnavailable.status_code(), 503);
-    assert_eq!(Error::ClusterWriteConflict.status_code(), 409);
     assert_eq!(Error::FailedToSaveConfig.status_code(), 500);
 }

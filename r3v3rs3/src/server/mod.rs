@@ -57,7 +57,7 @@ impl Server {
         let (command_send, command_recv) = mpsc::channel(1);
         let (callback_send, callback_recv) = mpsc::channel(16);
         let (event_send, _) = broadcast::channel(16);
-        // A cluster keeps the audit log in its store, and a single server in its log database.
+        // A storage with its own audit store, and a single server in its log database.
         let audit_store = storage.clone().audit_store().unwrap_or_else(|| {
             Arc::new(SqliteAuditStore::new(app_info.log_path.join("log.db"))) as Arc<dyn AuditStore>
         });
@@ -115,7 +115,7 @@ impl Server {
         let (command_send, command_recv) = mpsc::channel(1);
         let (callback_send, callback_recv) = mpsc::channel(16);
         let (event_send, _) = broadcast::channel(16);
-        // A cluster keeps the audit log in its store, and a single server in its log database.
+        // A storage with its own audit store, and a single server in its log database.
         let audit_store = storage.clone().audit_store().unwrap_or_else(|| {
             Arc::new(crate::audit::SqliteAuditStore::new(
                 app_info.log_path.join("log.db"),

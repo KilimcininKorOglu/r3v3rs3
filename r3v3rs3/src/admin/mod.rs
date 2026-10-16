@@ -55,7 +55,6 @@ mod audit;
 pub(crate) mod auth;
 mod cdn;
 mod certs;
-mod cluster;
 mod config;
 mod discovery;
 mod dns_credentials;
@@ -488,10 +487,6 @@ fn state_routes() -> OpenApiRouter<AppState> {
         .nest(
             "/discovery",
             OpenApiRouter::new().routes(routes!(discovery::list)),
-        )
-        .nest(
-            "/cluster",
-            OpenApiRouter::new().routes(routes!(cluster::status)),
         )
         .nest(
             "/workers",

@@ -105,16 +105,6 @@ r3v3rs3 trusts the IP ranges of eight known CDNs by default: Cloudflare, Fastly,
 - Add your own load balancer to **Trusted Proxies** of the proxy.
 - Akamai publishes no edge ranges. Add your Site Shield ranges to **Trusted Proxies**.
 
-## In a Cluster
-
-Each node has its own cache. With `share_cache = true` the nodes also store the responses in the cluster store, so a response that one node fetched serves the others.
-
-- A node stores a response in the cluster store when it stays fresh for at least 60 seconds.
-- A purge removes the shared responses too, and every node purges its local cache.
-- Each stored response is a write to the store, so a busy cache grows the store between compactions.
-
-[Shared Cache](@/cluster.md#shared-cache) describes the limits.
-
 ## Next Steps
 
 - [Cache](@/configuration.md#cache) and [Compression](@/configuration.md#compression): every field and every condition.

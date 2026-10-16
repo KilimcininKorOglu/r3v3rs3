@@ -56,7 +56,6 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - Portları sunan, master admin API'sini tutan isteğe bağlı worker süreci. Worker çökmesi paneli düşürmez ([Worker süreçleri](@/configuration.tr.md#worker-surecleri)).
 - SIGUSR2 ile kesintisiz yükseltme (`systemctl reload r3v3rs3`), sha256 özetini doğrulayan panel içi yükseltme butonu ve panelin her sayfasında banner'la saat başı daha yeni bir release kontrolü ([Kesintisiz yükseltme](@/configuration.tr.md#kesintisiz-yukseltme), [Panelden yükseltme](@/configuration.tr.md#panelden-yukseltme)).
 - Docker etiketleri ve etcd ile servis keşfi. Keşfedilen proxy'ler salt okunurdur ve proxy olamayan bir tanım, proxy listesinde sorun olarak raporlanır ([Servis keşfi](@/discovery.tr.md)).
-- Cluster modu ile yüksek erişilebilirlik: birden fazla düğüm, etcd veya Consul'da şifreli tek bir durum bilgisini paylaşır ([Kurulum rehberi](@/tutorials/high-availability.tr.md), [Cluster](@/cluster.tr.md)).
 
 ## Deploy platformu
 

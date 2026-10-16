@@ -159,7 +159,7 @@ HTTP/3 yalnız gelen bağlantılar için vardır. Upstream bağlantısı HTTP/2 
 
 ## Yenileme
 
-r3v3rs3 son siparişten `renewal_days` sonra yeni bir sertifika ister, hazır sağlayıcılarda 60 gün. Let's Encrypt sertifikası 90 gün geçerlidir, yani yenilemenin 30 gün payı olur. Sipariş DNS-01 challenge'ını tekrarlar, bu yüzden kimlik bilgisi geçerli kalmalıdır. Cluster'da sertifikayı yalnız lider ister.
+r3v3rs3 son siparişten `renewal_days` sonra yeni bir sertifika ister, hazır sağlayıcılarda 60 gün. Let's Encrypt sertifikası 90 gün geçerlidir, yani yenilemenin 30 gün payı olur. Sipariş DNS-01 challenge'ını tekrarlar, bu yüzden kimlik bilgisi geçerli kalmalıdır.
 
 **Ayarlar** sayfasında bir bildirim webhook'u vardır. Bitişten önce `certificate_expiring`, başarısız bir siparişten sonra `acme_order_failed` olayını gönderir, böylece bozulan bir kimlik bilgisi fark edilmeden kalmaz. Olayları [Bildirimler](@/configuration.tr.md#bildirimler) bölümü anlatır.
 

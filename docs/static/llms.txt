@@ -15,7 +15,6 @@ The documentation is published in English at the root and in Turkish under `/tr/
 - [Configuration](https://r3v3rs3.keremgok.tr/configuration/): every port and proxy field, with its default
 - [Accounts](https://r3v3rs3.keremgok.tr/accounts/): the roles, the permissions and the proxy list of a panel account
 - [Service Discovery](https://r3v3rs3.keremgok.tr/discovery/): Docker and etcd sources
-- [Cluster](https://r3v3rs3.keremgok.tr/cluster/): the cluster settings, the store keys, the encryption and the failure modes
 - [Deployment Platform](https://r3v3rs3.keremgok.tr/platform/): image, Git and Compose apps, deployments and rollback, webhooks, Git providers and agent targets
 - [Development](https://r3v3rs3.keremgok.tr/development/): build the server and the WebUI from source
 
@@ -23,9 +22,7 @@ The documentation is published in English at the root and in Turkish under `/tr/
 
 - [Installing on a Linux Server](https://r3v3rs3.keremgok.tr/tutorials/install-linux/): install as a systemd service with install.sh
 - [Getting Started](https://r3v3rs3.keremgok.tr/tutorials/getting-started/): from the first account to the first working proxy
-- [High Availability](https://r3v3rs3.keremgok.tr/tutorials/high-availability/): three nodes behind a load balancer
 - [Proxies from Docker](https://r3v3rs3.keremgok.tr/tutorials/docker-discovery/): let containers define their own proxies with labels
-- [HTTPS with a Wildcard Certificate](https://r3v3rs3.keremgok.tr/tutorials/https-certificates/): DNS-01, renewal and HTTP/3
 - [HTTPS with a Wildcard Certificate](https://r3v3rs3.keremgok.tr/tutorials/https-certificates/): DNS-01, renewal and HTTP/3
 - [Protecting an Application](https://r3v3rs3.keremgok.tr/tutorials/protect-an-app/): IP filter, authentication, rate limit and audit log
 - [Caching and Compression](https://r3v3rs3.keremgok.tr/tutorials/cache-and-compression/): answer repeated requests from memory and send smaller responses

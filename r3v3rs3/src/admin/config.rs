@@ -51,9 +51,9 @@ pub async fn test_notification(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<()>, AppError> {
-    let (webhook, node) = *state.call(&caller, GetNotificationWebhook).await?;
+    let webhook = *state.call(&caller, GetNotificationWebhook).await?;
     let webhook = webhook.ok_or(Error::NotificationWebhookMissing)?;
-    let notification = Notification::new(NotificationEvent::Test, &node);
+    let notification = Notification::new(NotificationEvent::Test, "");
     notify::deliver(&webhook, &notification)
         .await
         .map_err(|err| Error::NotificationFailed {

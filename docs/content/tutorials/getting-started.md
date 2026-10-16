@@ -97,5 +97,4 @@ A public site needs HTTPS. r3v3rs3 orders certificates from an ACME server, for 
 
 - [Configuration](@/configuration.md): routing, load balancing, caching, authentication, rate limits and every other proxy setting.
 - [Accounts](@/accounts.md): roles, proxy lists and the audit log.
-- [Service Discovery](@/discovery.md): proxies from Docker labels, Consul and etcd.
-- [High Availability](@/tutorials/high-availability.md): several nodes with one shared state.
+- [Service Discovery](@/discovery.md): proxies from Docker labels and etcd.

@@ -2,7 +2,6 @@ use r3v3rs3_api::{
     acme::AcmeInfo,
     auth::{Role, SessionInfo},
     cert::CertInfo,
-    cluster::ClusterStatus,
     discovery::DiscoveryStatus,
     id::ShortId,
     port::{PortEntry, PortStatus},
@@ -40,11 +39,6 @@ pub struct AcmeStore {
 #[derive(Default, Clone, PartialEq, Store)]
 pub struct DiscoveryStore {
     pub entries: Vec<DiscoveryStatus>,
-}
-
-#[derive(Default, Clone, PartialEq, Store)]
-pub struct ClusterStore {
-    pub status: ClusterStatus,
 }
 
 /// The account of the admin session. The WebUI hides the actions that the role of the account

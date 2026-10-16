@@ -179,4 +179,3 @@ $ sudo systemctl daemon-reload
 
 - [Getting Started](@/tutorials/getting-started.md): the first port and the first proxy.
 - [Configuration Files](@/configuration.md#configuration-files): what each file in the config directory holds.
-- [High Availability](@/tutorials/high-availability.md): several servers with one shared state.

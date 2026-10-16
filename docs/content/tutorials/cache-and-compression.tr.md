@@ -105,16 +105,6 @@ r3v3rs3 sekiz bilinen CDN'in IP aralıklarına varsayılan olarak güvenir: Clou
 - Kendi yük dengeleyicinizi proxy'nin **Güvenilen Proxy'ler** alanına ekleyin.
 - Akamai edge aralıklarını yayınlamaz. Site Shield aralıklarınızı **Güvenilen Proxy'ler** alanına yazın.
 
-## Cluster'da
-
-Her düğümün kendi cache'i vardır. `share_cache = true` ile düğümler yanıtları cluster veri deposuna da yazar, böylece bir düğümün aldığı yanıt diğerlerine de hizmet eder.
-
-- Bir düğüm, en az 60 saniye taze kalacak bir yanıtı cluster veri deposuna yazar.
-- Temizleme paylaşılan yanıtları da siler ve her düğüm kendi yerel cache'ini temizler.
-- Saklanan her yanıt veri deposuna bir yazma demektir, yani yoğun bir cache veri deposunu compaction'lar arasında büyütür.
-
-Sınırları [Paylaşılan cache](@/cluster.tr.md#paylasilan-cache) bölümü anlatır.
-
 ## Sonraki adımlar
 
 - [Cache](@/configuration.tr.md#cache) ve [Sıkıştırma](@/configuration.tr.md#sikistirma): bütün alanlar ve bütün koşullar.

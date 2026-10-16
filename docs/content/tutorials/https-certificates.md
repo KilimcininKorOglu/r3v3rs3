@@ -159,7 +159,7 @@ HTTP/3 is available for incoming connections only. The upstream connection uses 
 
 ## Renewal
 
-r3v3rs3 orders a new certificate `renewal_days` after the last order, 60 days with a preset provider. A Let's Encrypt certificate is valid for 90 days, so the renewal has 30 days of margin. The order repeats the DNS-01 challenge, so the credential must stay valid. In a cluster only the leader orders certificates.
+r3v3rs3 orders a new certificate `renewal_days` after the last order, 60 days with a preset provider. A Let's Encrypt certificate is valid for 90 days, so the renewal has 30 days of margin. The order repeats the DNS-01 challenge, so the credential must stay valid.
 
 The **Settings** page has a notification webhook. It sends a `certificate_expiring` event before an expiry and an `acme_order_failed` event after a failed order, so a broken credential does not stay silent. [Notifications](@/configuration.md#notifications) describes the events.
 

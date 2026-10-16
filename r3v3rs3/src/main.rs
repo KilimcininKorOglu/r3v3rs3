@@ -8,9 +8,8 @@ use r3v3rs3::agent::compose::AgentCompose;
 use r3v3rs3::agent::executor::Executor;
 use r3v3rs3::agent::token::EnrollmentToken;
 use r3v3rs3::args::StartArgs;
-use r3v3rs3::args::{AgentArgs, ClusterArgs, ClusterCommand, Command};
+use r3v3rs3::args::{AgentArgs, Command};
 use r3v3rs3::build::compose::DockerCompose;
-use r3v3rs3::cluster::storage::KvStorage;
 use r3v3rs3::config::file::FileStorage;
 use r3v3rs3::config::new_appinfo;
 use r3v3rs3::config::storage::Storage;
@@ -41,7 +40,6 @@ async fn main() -> anyhow::Result<()> {
     match args.command {
         Command::Start(args) => start(args, exe_args).await?,
         Command::AddUser(args) => add_user(args).await?,
-        Command::Cluster(args) => cluster(args).await?,
         Command::Agent(args) => agent(args).await?,
         Command::Worker(args) => worker(args).await?,
     }
@@ -101,47 +99,7 @@ async fn worker(args: r3v3rs3::args::WorkerArgs) -> anyhow::Result<()> {
     r3v3rs3::server::worker::run(args.ipc, &config_dir, &log_dir).await
 }
 
-async fn cluster(args: ClusterArgs) -> anyhow::Result<()> {
-    match args.command {
-        ClusterCommand::Keygen(args) => {
-            let id = r3v3rs3::cluster::key_file::write_new_key_file(&args.file).await?;
-            println!(
-                "Wrote the encryption key {} to {}.",
-                hex::encode(id),
-                args.file.display()
-            );
-            eprintln!(
-                "Keep a copy of the key file. The cluster data cannot be decrypted when every key file is lost."
-            );
-        }
-        ClusterCommand::Rekey(args) => {
-            let config_dir = get_config_dir(args.config_dir)?;
-            let config = FileStorage::new(&config_dir).read_app_config().await?;
-            let report = r3v3rs3::cluster::rekey::run(&config.cluster).await?;
-            println!(
-                "Encrypted {} values with the first key. {} values already used it, {} values are not encrypted and {} values were deleted during the run.",
-                report.resealed, report.current, report.plain, report.deleted
-            );
-        }
-        ClusterCommand::Import(args) => {
-            let config_dir = get_config_dir(args.config_dir)?;
-            let report = r3v3rs3::cluster::import::run(&config_dir).await?;
-            println!(
-                "Imported the config, {} ports, {} proxies, {} access lists, {} certificates, {} ACME entries and {} accounts.",
-                report.ports,
-                report.proxies,
-                report.access_lists,
-                report.certs,
-                report.acmes,
-                report.accounts
-            );
-        }
-    }
-    Ok(())
-}
-
-/// Reads `config.toml`. A missing file gives the default config. An invalid file is an error, so
-/// a node of a cluster does not start with its local files.
+/// Reads `config.toml`. A missing file gives the default config.
 async fn read_local_config(config_dir: &Path) -> anyhow::Result<AppConfig> {
     if !config_dir.join("config.toml").try_exists()? {
         return Ok(AppConfig::default());
@@ -182,30 +140,17 @@ async fn init_logging(
     Ok((log_guard, access_guard))
 }
 
-/// Builds the server. A node of a cluster reads its state from the store and starts the cluster
-/// tasks, and every other server reads its state from the config directory.
+/// Builds the server that reads its state from the config directory.
 async fn new_server(
     app_info: AppInfo,
-    local: AppConfig,
+    _local: AppConfig,
     config_dir: &Path,
     listeners: Vec<r3v3rs3::server::fdmanifest::ListenerFd>,
 ) -> anyhow::Result<(Server, ServerChannels)> {
-    if !local.cluster.enabled {
-        return Ok(Server::new_shared_inheriting(
-            app_info,
-            Arc::new(FileStorage::new(config_dir)),
-            listeners,
-        )
-        .await);
-    }
-    let storage = Arc::new(KvStorage::open(local).await?);
-    let (server, channels) = if listeners.is_empty() {
-        Server::new_shared(app_info, storage.clone()).await
-    } else {
-        Server::new_shared_inheriting(app_info, storage.clone(), listeners).await
-    };
-    r3v3rs3::cluster::spawn_tasks(storage, channels.command.clone());
-    Ok((server, channels))
+    Ok(
+        Server::new_shared_inheriting(app_info, Arc::new(FileStorage::new(config_dir)), listeners)
+            .await,
+    )
 }
 
 async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()> {
@@ -445,20 +390,13 @@ async fn try_hand_over(
     }
 }
 
-/// Writes the account to the store of a cluster node, or to the config directory of every other
-/// server.
+/// Writes the account to the config directory.
 async fn create_account(
     args: &r3v3rs3::args::AddUserArgs,
     password: &str,
-    local: AppConfig,
+    _local: AppConfig,
     config_dir: &Path,
 ) -> anyhow::Result<r3v3rs3_api::auth::Account> {
-    if local.cluster.enabled {
-        let storage = KvStorage::open(local).await?;
-        return Ok(storage
-            .add_account(&args.name, password, args.totp, args.role)
-            .await?);
-    }
     let files = FileStorage::new(config_dir);
     Ok(files
         .add_account(&args.name, password, args.totp, args.role)

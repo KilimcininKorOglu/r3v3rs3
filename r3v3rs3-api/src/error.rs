@@ -110,9 +110,6 @@ pub enum Error {
     #[error("the deployment platform is not enabled")]
     PlatformDisabled,
 
-    #[error("the deployment platform does not run in a cluster")]
-    PlatformInCluster,
-
     #[error("the deployment platform failed to start")]
     PlatformFailed,
 
@@ -380,12 +377,6 @@ pub enum Error {
     #[error("a proxy uses the access list: {id}")]
     AccessListInUse { id: ShortId },
 
-    #[error("the cluster store cannot save changes now")]
-    ClusterUnavailable,
-
-    #[error("another node changed the same data, load it again and retry")]
-    ClusterWriteConflict,
-
     #[error("failed to hash password")]
     FailedToHashPassword,
 
@@ -415,8 +406,7 @@ impl Error {
             | Self::CertificateReadOnly { .. }
             | Self::TargetReadOnly { .. } => 403,
             Self::TooManyLoginAttempts => 429,
-            Self::ClusterWriteConflict
-            | Self::AccountExists { .. }
+            Self::AccountExists { .. }
             | Self::AppNameExists { .. }
             | Self::AppBusy { .. }
             | Self::TargetNameExists { .. }
@@ -427,11 +417,7 @@ impl Error {
             | Self::PublicUrlMissing
             | Self::TargetInUse { .. }
             | Self::AppTargetFixed { .. } => 409,
-            Self::ClusterUnavailable
-            | Self::AgentOffline { .. }
-            | Self::PlatformDisabled
-            | Self::PlatformInCluster
-            | Self::PlatformFailed => 503,
+            Self::AgentOffline { .. } | Self::PlatformDisabled | Self::PlatformFailed => 503,
             Self::NotificationFailed { .. } | Self::GitProviderFailed { .. } => 502,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig

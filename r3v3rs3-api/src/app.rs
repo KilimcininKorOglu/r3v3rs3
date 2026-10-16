@@ -70,10 +70,6 @@ pub struct AppConfig {
 
     /// Only `config.toml` sets this section. An update through the admin API keeps it.
     #[serde(default)]
-    pub cluster: crate::cluster::ClusterConfig,
-
-    /// Only `config.toml` sets this section. An update through the admin API keeps it.
-    #[serde(default)]
     pub platform: crate::platform::PlatformConfig,
 
     /// Only `config.toml` sets this section. An update through the admin API keeps it.
@@ -222,7 +218,6 @@ impl AppConfig {
         Self {
             notifications: self.notifications.masked(),
             discovery: self.discovery.masked(),
-            cluster: self.cluster.masked(),
             ..self.clone()
         }
     }
@@ -233,10 +228,9 @@ impl AppConfig {
         self.discovery.keep_secrets(&current.discovery);
     }
 
-    /// Takes the settings that only `config.toml` sets from the current settings. The cluster
-    /// and the worker mode change the process itself, so a restart applies them.
+    /// Takes the settings that only `config.toml` sets from the current settings. The worker
+    /// mode changes the process itself, so a restart applies it.
     pub fn keep_file_only(&mut self, current: &Self) {
-        self.cluster.clone_from(&current.cluster);
         self.worker_mode.clone_from(&current.worker_mode);
     }
 }

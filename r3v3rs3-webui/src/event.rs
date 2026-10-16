@@ -1,8 +1,6 @@
 use crate::{
     API_ENDPOINT,
-    store::{
-        AcmeStore, CertStore, ClusterStore, DiscoveryStore, PortStore, ProxyStore, SessionStore,
-    },
+    store::{AcmeStore, CertStore, DiscoveryStore, PortStore, ProxyStore, SessionStore},
 };
 use futures::StreamExt;
 use futures::channel::oneshot;
@@ -27,7 +25,6 @@ struct Dispatchers {
     acme: Dispatch<AcmeStore>,
     proxies: Dispatch<ProxyStore>,
     discovery: Dispatch<DiscoveryStore>,
-    cluster: Dispatch<ClusterStore>,
 }
 
 /// Reads the server events while the client has a session. The stream opens when the session
@@ -42,7 +39,6 @@ pub fn use_event_subscriber() {
         acme: use_store::<AcmeStore>().1,
         proxies: use_store::<ProxyStore>().1,
         discovery: use_store::<DiscoveryStore>().1,
-        cluster: use_store::<ClusterStore>().1,
     };
     let attempt = use_state(|| 0_u32);
     let signed_in = session.info.is_some();
@@ -190,9 +186,6 @@ fn apply_event(stores: &Dispatchers, event: ServerEvent) {
         }
         ServerEvent::DiscoveryStatusUpdated { entries } => {
             stores.discovery.set(DiscoveryStore { entries });
-        }
-        ServerEvent::ClusterStatusUpdated { status } => {
-            stores.cluster.set(ClusterStore { status });
         }
         _ => (),
     }
