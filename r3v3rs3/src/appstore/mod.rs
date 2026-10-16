@@ -84,19 +84,26 @@ mod tests {
     use super::*;
     use r3v3rs3_api::store::StoreApp;
 
-    fn app(id: &str, _updated: i64) -> StoreApp {
+    fn app(id: &str) -> StoreApp {
         StoreApp {
             id: id.to_string(),
             name: id.to_string(),
             description: "test".to_string(),
             description_tr: String::new(),
-            image: format!("{id}:1"),
+            image: Some(format!("{id}:1")),
             port: 80,
             health_check_path: None,
             website: None,
+            repository: None,
+            branch: None,
+            file: None,
+            service: None,
+            env: Vec::new(),
         }
     }
 
+    /// Every entry is one kind: an image entry names only an image, a Compose entry names a
+    /// repository, a file and a service, and its variables carry valid key names.
     #[test]
     fn embedded_catalog_parses() {
         let catalog: StoreCatalog = serde_json::from_str(EMBEDDED_CATALOG).unwrap();
@@ -104,12 +111,20 @@ mod tests {
             catalog.apps.len() >= 30,
             "the embedded catalog is too small"
         );
+        assert!(
+            catalog
+                .apps
+                .iter()
+                .any(|app| app.is_compose() && !app.env.is_empty()),
+            "the embedded catalog holds no Compose entry with variables"
+        );
         let mut ids: Vec<_> = catalog.apps.iter().map(|app| app.id.as_str()).collect();
         ids.sort_unstable();
         let total = ids.len();
         ids.dedup();
         assert_eq!(ids.len(), total, "a catalog id appears twice");
-        for id in &ids {
+        for entry in &catalog.apps {
+            let id = &entry.id;
             assert!(
                 !id.is_empty()
                     && id
@@ -117,11 +132,66 @@ mod tests {
                         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
                 "invalid catalog id: {id}"
             );
+            assert_ne!(entry.port, 0, "an app has no port: {id}");
+            if entry.is_compose() {
+                assert_compose_entry(entry);
+            } else {
+                assert_image_entry(entry);
+            }
+            for var in &entry.env {
+                assert!(
+                    !var.key.is_empty()
+                        && var
+                            .key
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                        && var
+                            .key
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                    "an entry has an invalid variable key: {id}/{}",
+                    var.key
+                );
+            }
         }
-        for entry in &catalog.apps {
-            assert!(!entry.image.is_empty(), "an app has no image: {}", entry.id);
-            assert_ne!(entry.port, 0, "an app has no port: {}", entry.id);
-        }
+    }
+
+    fn assert_image_entry(entry: &StoreApp) {
+        assert!(
+            !entry.image.as_deref().unwrap_or_default().is_empty(),
+            "an app has no image: {}",
+            entry.id
+        );
+        assert!(
+            entry.repository.is_none(),
+            "an image entry names a repo: {}",
+            entry.id
+        );
+    }
+
+    fn assert_compose_entry(entry: &StoreApp) {
+        assert!(
+            entry.image.is_none(),
+            "a Compose entry names an image: {}",
+            entry.id
+        );
+        assert!(
+            entry
+                .repository
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with("https://")
+                && entry.branch.as_deref().unwrap_or_default() == "main"
+                && entry
+                    .file
+                    .as_deref()
+                    .unwrap_or_default()
+                    .ends_with("compose.yaml")
+                && entry.service.as_deref().unwrap_or_default() == entry.id,
+            "the Compose entry is incomplete: {}",
+            entry.id
+        );
     }
 
     #[test]
@@ -129,7 +199,7 @@ mod tests {
         let newer = StoreCatalog {
             version: 1,
             updated_at: i64::MAX,
-            apps: vec![app("new", i64::MAX)],
+            apps: vec![app("new")],
         };
         assert!(install(newer.clone()));
         assert_eq!(state().catalog.apps[0].id, "new");
@@ -139,7 +209,7 @@ mod tests {
 
     #[test]
     fn description_falls_back_to_english() {
-        let mut entry = app("a", 1);
+        let mut entry = app("a");
         assert_eq!(entry.description_in(true), "test");
         entry.description_tr = "deneme".to_string();
         assert_eq!(entry.description_in(true), "deneme");

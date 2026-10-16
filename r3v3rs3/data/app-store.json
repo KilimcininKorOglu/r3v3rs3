@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "updated_at": 1792167994,
+  "version": 2,
+  "updated_at": 1792172616,
   "apps": [
     {
       "id": "uptime-kuma",
@@ -471,6 +471,109 @@
       "port": 80,
       "health_check_path": "/",
       "website": "https://github.com/traefik/whoami"
+    },
+    {
+      "id": "umami",
+      "name": "Umami",
+      "description": "A privacy-focused web analytics alternative to Google Analytics, with its own PostgreSQL database.",
+      "description_tr": "Kendi PostgreSQL veritabanıyla çalışan, gizlilik odaklı bir web analitiği.",
+      "repository": "https://github.com/KilimcininKorOglu/r3v3rs3.git",
+      "branch": "main",
+      "file": "app-store-compose/umami/compose.yaml",
+      "service": "umami",
+      "port": 3000,
+      "website": "https://umami.is",
+      "env": [
+        {"key": "UMAMI_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
+        {"key": "APP_SECRET", "description": "Random secret that signs the sessions.", "description_tr": "Oturumları imzalayan rastgele secret.", "secret": true}
+      ]
+    },
+    {
+      "id": "listmonk",
+      "name": "Listmonk",
+      "description": "A newsletter and mailing list manager, with its own PostgreSQL database.",
+      "description_tr": "Kendi PostgreSQL veritabanıyla bülten ve e-posta listesi yöneticisi.",
+      "repository": "https://github.com/KilimcininKorOglu/r3v3rs3.git",
+      "branch": "main",
+      "file": "app-store-compose/listmonk/compose.yaml",
+      "service": "listmonk",
+      "port": 9000,
+      "website": "https://listmonk.app",
+      "env": [
+        {"key": "LISTMONK_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
+        {"key": "LISTMONK_ADMIN_USER", "description": "User name of the first admin.", "description_tr": "İlk admin'in kullanıcı adı.", "secret": false},
+        {"key": "LISTMONK_ADMIN_PASSWORD", "description": "Password of the first admin.", "description_tr": "İlk admin'in parolası.", "secret": true}
+      ]
+    },
+    {
+      "id": "keycloak",
+      "name": "Keycloak",
+      "description": "An identity and access management server with single sign-on, with its own PostgreSQL database.",
+      "description_tr": "Kendi PostgreSQL veritabanıyla tek oturum açma sunan kimlik ve erişim yönetimi sunucusu.",
+      "repository": "https://github.com/KilimcininKorOglu/r3v3rs3.git",
+      "branch": "main",
+      "file": "app-store-compose/keycloak/compose.yaml",
+      "service": "keycloak",
+      "port": 8080,
+      "website": "https://www.keycloak.org",
+      "env": [
+        {"key": "KC_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
+        {"key": "KEYCLOAK_ADMIN", "description": "User name of the first admin.", "description_tr": "İlk admin'in kullanıcı adı.", "secret": false},
+        {"key": "KEYCLOAK_ADMIN_PASSWORD", "description": "Password of the first admin.", "description_tr": "İlk admin'in parolası.", "secret": true}
+      ]
+    },
+    {
+      "id": "mattermost",
+      "name": "Mattermost",
+      "description": "A team chat platform, with its own PostgreSQL database.",
+      "description_tr": "Kendi PostgreSQL veritabanıyla ekip sohbet platformu.",
+      "repository": "https://github.com/KilimcininKorOglu/r3v3rs3.git",
+      "branch": "main",
+      "file": "app-store-compose/mattermost/compose.yaml",
+      "service": "mattermost",
+      "port": 8065,
+      "website": "https://mattermost.com",
+      "env": [
+        {"key": "MM_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
+        {"key": "MM_SITEURL", "description": "The public https address of the app, for example https://chat.example.com.", "description_tr": "Uygulamanın genel https adresi, örneğin https://chat.example.com.", "secret": false}
+      ]
+    },
+    {
+      "id": "plausible",
+      "name": "Plausible",
+      "description": "A lightweight, cookie-free web analytics server, with its own PostgreSQL and ClickHouse databases.",
+      "description_tr": "Kendi PostgreSQL ve ClickHouse veritabanlarıyla hafif, cookie kullanmayan web analitiği.",
+      "repository": "https://github.com/KilimcininKorOglu/r3v3rs3.git",
+      "branch": "main",
+      "file": "app-store-compose/plausible/compose.yaml",
+      "service": "plausible",
+      "port": 8000,
+      "website": "https://plausible.io",
+      "env": [
+        {"key": "PLAUSIBLE_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
+        {"key": "CLICKHOUSE_PASSWORD", "description": "Password of the ClickHouse database.", "description_tr": "ClickHouse veritabanı parolası.", "secret": true},
+        {"key": "SECRET_KEY_BASE", "description": "Random secret that signs the sessions.", "description_tr": "Oturumları imzalayan rastgele secret.", "secret": true},
+        {"key": "PLAUSIBLE_BASE_URL", "description": "The public https address of the app, for example https://stats.example.com.", "description_tr": "Uygulamanın genel https adresi, örneğin https://stats.example.com.", "secret": false}
+      ]
+    },
+    {
+      "id": "directus",
+      "name": "Directus",
+      "description": "A headless CMS and data platform over a SQL database, with its own PostgreSQL database.",
+      "description_tr": "SQL veritabanı üzerinde headless CMS ve veri platformu; kendi PostgreSQL veritabanıyla.",
+      "repository": "https://github.com/KilimcininKorOglu/r3v3rs3.git",
+      "branch": "main",
+      "file": "app-store-compose/directus/compose.yaml",
+      "service": "directus",
+      "port": 8055,
+      "website": "https://directus.io",
+      "env": [
+        {"key": "DIRECTUS_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
+        {"key": "DIRECTUS_KEY", "description": "Random key that identifies the installation.", "description_tr": "Kurulumu tanımlayan rastgele key.", "secret": true},
+        {"key": "DIRECTUS_SECRET", "description": "Random secret that signs the sessions.", "description_tr": "Oturumları imzalayan rastgele secret.", "secret": true},
+        {"key": "DIRECTUS_ADMIN_EMAIL", "description": "E-mail address of the first admin.", "description_tr": "İlk admin'in e-posta adresi.", "secret": false},
+        {"key": "DIRECTUS_ADMIN_PASSWORD", "description": "Password of the first admin.", "description_tr": "İlk admin'in parolası.", "secret": true}
+      ]
     }
   ]
 }

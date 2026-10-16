@@ -1,0 +1,31 @@
+services:
+  mattermost:
+    image: mattermost/mattermost-enterprise-edition:release-10.3
+    restart: unless-stopped
+    environment:
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: postgres://mattermost:${MM_DB_PASSWORD}@db:5432/mattermost?sslmode=disable
+      MM_FILESETTINGS_DRIVERNAME: local
+      MM_SERVICESETTINGS_SITEURL: ${MM_SITEURL}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - mattermost-data:/mattermost/data
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mattermost
+      POSTGRES_USER: mattermost
+      POSTGRES_PASSWORD: ${MM_DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mattermost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  db-data:
+  mattermost-data:

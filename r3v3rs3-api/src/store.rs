@@ -15,7 +15,8 @@ pub struct StoreCatalog {
     pub apps: Vec<StoreApp>,
 }
 
-/// An installable image app of the catalog.
+/// An installable app of the catalog: a single image, or a Compose file of the r3v3rs3
+/// repository.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct StoreApp {
     /// The short id of the app, lowercase letters, digits and dashes.
@@ -27,8 +28,9 @@ pub struct StoreApp {
     /// The Turkish description. Empty means the English description.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description_tr: String,
-    /// The container image, for example `nginx:1.27`.
-    pub image: String,
+    /// The container image, for example `nginx:1.27`. Set on an image entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
     /// The HTTP port inside the container.
     pub port: u16,
     /// The path of the health check, starting with `/`.
@@ -37,16 +39,63 @@ pub struct StoreApp {
     /// The home page of the project.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub website: Option<String>,
+    /// The clone URL of the repository that holds the Compose file. Set on a Compose entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    /// The branch of the Compose repository. The default is `main`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// The Compose file in the repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// The service of the Compose file that serves the traffic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    /// The environment variables that the user fills before the first deployment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<StoreEnv>,
+}
+
+/// An environment variable of a Compose entry that the user fills in the panel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct StoreEnv {
+    /// The name of the variable, for example `DB_PASSWORD`.
+    pub key: String,
+    /// The English description of what the variable holds.
+    pub description: String,
+    /// The Turkish description. Empty means the English description.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description_tr: String,
+    /// The panel hides the value of a secret variable.
+    #[serde(default)]
+    pub secret: bool,
+}
+
+/// The text in the given language; the English one when no Turkish one exists.
+fn description_in<'a>(tr: bool, text: &'a str, turkish: &'a str) -> &'a str {
+    if tr && !turkish.is_empty() {
+        turkish
+    } else {
+        text
+    }
 }
 
 impl StoreApp {
+    /// Whether the entry installs through a Compose file instead of a single image.
+    pub fn is_compose(&self) -> bool {
+        self.image.is_none()
+    }
+
     /// The description in the given language; the English one when no Turkish one exists.
     pub fn description_in(&self, tr: bool) -> &str {
-        if tr && !self.description_tr.is_empty() {
-            &self.description_tr
-        } else {
-            &self.description
-        }
+        description_in(tr, &self.description, &self.description_tr)
+    }
+}
+
+impl StoreEnv {
+    /// The description in the given language; the English one when no Turkish one exists.
+    pub fn description_in(&self, tr: bool) -> &str {
+        description_in(tr, &self.description, &self.description_tr)
     }
 }
 

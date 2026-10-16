@@ -33,6 +33,7 @@ mod proxy_view;
 mod resource_page;
 mod self_sign;
 mod settings;
+mod store_env;
 mod targets;
 mod upload;
 

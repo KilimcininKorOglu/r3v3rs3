@@ -8,6 +8,7 @@ use super::app_git_token::AppGitToken;
 use super::app_webhook::AppWebhook;
 use super::resource_page::{FormCard, Notice, delete_on_click, form_card, notice_view};
 use super::settings::{fetch_json, send_request};
+use super::store_env::{StoreEnvValue, fields_view as store_env_fields, parse as parse_store_env};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::data_list::DANGER_LINK_CLASS;
@@ -17,7 +18,7 @@ use gloo_net::http::Request;
 use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{AppEntry, AppRequest, TargetEntry};
+use r3v3rs3_api::platform::{AppEntry, AppRequest, EnvEntry, TargetEntry};
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::store::StoreResponse;
 use wasm_bindgen_futures::spawn_local;
@@ -34,6 +35,7 @@ struct Loaded {
     targets: UseStateHandle<Vec<TargetEntry>>,
     connections: UseStateHandle<Vec<GitConnectionEntry>>,
     ports: UseStateHandle<Vec<PortEntry>>,
+    store_env: UseStateHandle<Vec<StoreEnvValue>>,
     notice: AppNotice,
 }
 
@@ -60,6 +62,7 @@ pub fn app_view(props: &Props) -> Html {
     let targets = use_state(Vec::<TargetEntry>::new);
     let connections = use_state(Vec::<GitConnectionEntry>::new);
     let ports = use_state(Vec::<PortEntry>::new);
+    let store_env = use_state(Vec::<StoreEnvValue>::new);
     let notice = use_state(|| Option::<Notice<()>>::None);
 
     // The admin API answers 401 until the session loads, so the page waits for it.
@@ -70,6 +73,7 @@ pub fn app_view(props: &Props) -> Html {
         targets: targets.clone(),
         connections: connections.clone(),
         ports: ports.clone(),
+        store_env: store_env.clone(),
         notice: notice.clone(),
     };
     // Only an account that changes the apps reads the connections.
@@ -89,6 +93,7 @@ pub fn app_view(props: &Props) -> Html {
         targets: &targets,
         connections: &connections,
         ports: &ports,
+        store_env: &store_env,
         can_edit,
         auto_deploy: props.store.is_some(),
     };
@@ -102,11 +107,14 @@ pub fn app_view(props: &Props) -> Html {
     }
 }
 
-/// The lists that the form offers and the rights of the account on it.
+/// The lists that the form offers, the variables of the catalog entry and the rights of the
+/// account on the form.
 struct FormInputs<'a> {
     targets: &'a [TargetEntry],
     connections: &'a [GitConnectionEntry],
     ports: &'a [PortEntry],
+    /// The variables of an app store entry that the user fills before the first save.
+    store_env: &'a UseStateHandle<Vec<StoreEnvValue>>,
     can_edit: bool,
     /// A new app from the app store starts its first deployment at once.
     auto_deploy: bool,
@@ -122,6 +130,7 @@ fn form_view(
 ) -> Html {
     let can_edit = inputs.can_edit;
     let parsed = form.parse(locale);
+    let env_values = parse_store_env(locale, inputs.store_env);
     let title = match app {
         Some(app) => locale.tf("apps.edit_title", &[("name", app.name.as_str())]),
         None => locale.t("apps.add_title").to_string(),
@@ -133,11 +142,15 @@ fn form_view(
         fields: html! {
             <fieldset disabled={!can_edit}>
                 { fields_view(locale, form, inputs.targets, inputs.connections, inputs.ports, app.is_some()) }
+                if !inputs.store_env.is_empty() {
+                    { store_env_fields(locale, inputs.store_env) }
+                }
             </fieldset>
         },
         error: parsed
             .as_ref()
             .err()
+            .or(env_values.as_ref().err())
             .filter(|_| touched && can_edit)
             .cloned(),
         cancel: None,
@@ -146,13 +159,14 @@ fn form_view(
         } else {
             "common.create"
         },
-        can_save: can_edit && parsed.is_ok(),
+        can_save: can_edit && parsed.is_ok() && env_values.is_ok(),
     };
     let onsubmit = submit(
         locale,
         form,
         notice,
         app.map(|app| app.id),
+        inputs.store_env,
         inputs.auto_deploy,
         saved,
     );
@@ -214,39 +228,79 @@ fn submit(
     form: &UseStateHandle<AppForm>,
     notice: &AppNotice,
     id: Option<ShortId>,
+    store_env: &UseStateHandle<Vec<StoreEnvValue>>,
     auto_deploy: bool,
     saved: Callback<AppEntry>,
 ) -> Callback<SubmitEvent> {
-    let (form, notice) = (form.clone(), notice.clone());
+    let (form, notice, store_env) = (form.clone(), notice.clone(), store_env.clone());
     Callback::from(move |event: SubmitEvent| {
         event.prevent_default();
         let Ok(request) = form.parse(locale) else {
             return;
         };
+        // A catalog entry with variables saves them before the first deployment reads them.
+        let env = if id.is_none() && !store_env.is_empty() {
+            match parse_store_env(locale, &store_env) {
+                Ok(entries) => Some(entries),
+                Err(message) => {
+                    notice.set(Some(Notice::Failed(message)));
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let (notice, saved) = (notice.clone(), saved.clone());
         spawn_local(async move {
             match save(locale, id, &request).await {
                 Ok(entry) => {
-                    // An app that came from the app store starts its first deployment at once.
-                    if id.is_none() && auto_deploy {
-                        let path = format!("{API_ENDPOINT}/apps/{}/deploy", entry.id);
-                        if let Err(message) =
-                            fetch_json::<serde_json::Value>(locale, Request::post(&path)).await
-                        {
-                            notice.set(Some(Notice::Failed(format!(
-                                "{}: {}",
-                                locale.t("apps.store_deploy_failed"),
-                                message
-                            ))));
-                            return;
-                        }
+                    if store_entry_saved(locale, &entry, env, auto_deploy, &notice).await {
+                        saved.emit(entry)
                     }
-                    saved.emit(entry)
                 }
                 Err(message) => notice.set(Some(Notice::Failed(message))),
             }
         });
     })
+}
+
+/// Saves the variables of a catalog entry and starts the first deployment. Returns `false`
+/// when one of the two failed and the notice explains why.
+async fn store_entry_saved(
+    locale: Locale,
+    entry: &AppEntry,
+    env: Option<Vec<EnvEntry>>,
+    auto_deploy: bool,
+    notice: &AppNotice,
+) -> bool {
+    if let Some(env) = env {
+        let path = format!("{API_ENDPOINT}/apps/{}/env", entry.id);
+        let saved_env = match Request::put(&path).json(&env) {
+            Ok(request) => send_request(locale, request).await,
+            Err(err) => Err(err.to_string()),
+        };
+        if let Err(message) = saved_env {
+            notice.set(Some(Notice::Failed(format!(
+                "{}: {}",
+                locale.t("apps.store_env_failed"),
+                message
+            ))));
+            return false;
+        }
+    }
+    // An app that came from the app store starts its first deployment at once.
+    if auto_deploy {
+        let path = format!("{API_ENDPOINT}/apps/{}/deploy", entry.id);
+        if let Err(message) = fetch_json::<serde_json::Value>(locale, Request::post(&path)).await {
+            notice.set(Some(Notice::Failed(format!(
+                "{}: {}",
+                locale.t("apps.store_deploy_failed"),
+                message
+            ))));
+            return false;
+        }
+    }
+    true
 }
 
 async fn save(
@@ -281,6 +335,7 @@ fn load(
         targets,
         connections,
         ports,
+        store_env,
         notice,
     } = loaded;
     spawn_local(async move {
@@ -302,7 +357,7 @@ fn load(
         }
         let Some(id) = id else {
             if let Some(store) = store {
-                fill_from_store(locale, &store, &form, &notice).await;
+                fill_from_store(locale, &store, &form, &store_env, &notice).await;
             }
             return;
         };
@@ -317,17 +372,31 @@ fn load(
     });
 }
 
-/// Fills the new form from an app store entry.
+/// Fills the new form from an app store entry and lists its variables.
 async fn fill_from_store(
     locale: Locale,
     store: &str,
     form: &UseStateHandle<AppForm>,
+    store_env: &UseStateHandle<Vec<StoreEnvValue>>,
     notice: &AppNotice,
 ) {
     let path = format!("{API_ENDPOINT}/store");
     match fetch_json::<StoreResponse>(locale, Request::get(&path)).await {
         Ok(response) => match response.catalog.apps.iter().find(|app| app.id == store) {
-            Some(entry) => form.set(AppForm::from_store(entry)),
+            Some(entry) => {
+                form.set(AppForm::from_store(entry));
+                store_env.set(
+                    entry
+                        .env
+                        .iter()
+                        .cloned()
+                        .map(|env| StoreEnvValue {
+                            env,
+                            value: String::new(),
+                        })
+                        .collect(),
+                );
+            }
             None => notice.set(Some(Notice::Failed(
                 locale.t("apps.store_missing").to_string(),
             ))),

@@ -112,10 +112,25 @@ impl AppForm {
     /// A form filled from an app store entry. The name starts as the entry id; the user
     /// changes it before the first save.
     pub fn from_store(app: &StoreApp) -> Self {
+        if app.is_compose() {
+            return Self {
+                name: app.id.clone(),
+                kind: SourceKind::Compose,
+                repository: app.repository.clone().unwrap_or_default(),
+                branch: app
+                    .branch
+                    .clone()
+                    .unwrap_or_else(|| GitRef::main().to_string()),
+                compose_file: app.file.clone().unwrap_or_default(),
+                service: app.service.clone().unwrap_or_default(),
+                port: app.port.to_string(),
+                ..Self::default()
+            };
+        }
         Self {
             name: app.id.clone(),
             kind: SourceKind::Image,
-            image: app.image.clone(),
+            image: app.image.clone().unwrap_or_default(),
             port: app.port.to_string(),
             health_check_path: app.health_check_path.clone().unwrap_or_default(),
             ..Self::default()
@@ -735,10 +750,15 @@ mod tests {
             name: "Uptime Kuma".into(),
             description: "test".into(),
             description_tr: String::new(),
-            image: "louislam/uptime-kuma:1".into(),
+            image: Some("louislam/uptime-kuma:1".into()),
             port: 3001,
             health_check_path: Some("/".into()),
             website: None,
+            repository: None,
+            branch: None,
+            file: None,
+            service: None,
+            env: Vec::new(),
         };
         let form = AppForm::from_store(&entry);
         let request = form.parse(Locale::En).unwrap();
@@ -751,6 +771,39 @@ mod tests {
         assert_eq!(request.spec.port, 3001);
         assert_eq!(request.spec.health_check_path.as_deref(), Some("/"));
         assert!(request.spec.domains.is_empty());
+    }
+
+    #[test]
+    fn a_compose_store_entry_fills_the_compose_form() {
+        let entry = StoreApp {
+            id: "umami".into(),
+            name: "Umami".into(),
+            description: "test".into(),
+            description_tr: String::new(),
+            image: None,
+            port: 3000,
+            health_check_path: None,
+            website: None,
+            repository: Some("https://github.com/owner/shop.git".into()),
+            branch: None,
+            file: Some("app-store-compose/umami/compose.yaml".into()),
+            service: Some("umami".into()),
+            env: Vec::new(),
+        };
+        let form = AppForm::from_store(&entry);
+        let request = form.parse(Locale::En).unwrap();
+        assert_eq!(request.name.as_str(), "umami");
+        assert_eq!(
+            to_value(&request.spec.source).unwrap(),
+            json!({
+                "type": "compose",
+                "repository": "https://github.com/owner/shop.git",
+                "branch": "main",
+                "file": "app-store-compose/umami/compose.yaml",
+                "service": "umami"
+            })
+        );
+        assert_eq!(request.spec.port, 3000);
     }
 
     #[test]
