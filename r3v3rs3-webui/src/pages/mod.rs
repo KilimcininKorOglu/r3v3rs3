@@ -13,6 +13,7 @@ mod app_list;
 mod app_log;
 mod app_repository;
 mod app_store;
+mod app_terminal;
 mod app_view;
 mod app_webhook;
 mod audit;
@@ -96,6 +97,8 @@ pub enum Route {
     AppDeployments { id: ShortId },
     #[at("/apps/:id/log")]
     AppLog { id: ShortId },
+    #[at("/apps/:id/terminal")]
+    AppTerminal { id: ShortId },
     #[at("/targets")]
     Targets,
     #[at("/git_connections")]
@@ -137,7 +140,8 @@ impl Route {
             | Route::NewStoreApp { .. }
             | Route::AppView { .. }
             | Route::AppDeployments { .. }
-            | Route::AppLog { .. } => Some(Route::Apps),
+            | Route::AppLog { .. }
+            | Route::AppTerminal { .. } => Some(Route::Apps),
             Route::AccessLists
             | Route::Targets
             | Route::GitConnections
@@ -172,6 +176,7 @@ pub fn switch(routes: Route) -> Html {
         Route::AppView { id } => html! { <app_view::AppView id={Some(id)} /> },
         Route::AppDeployments { id } => html! { <app_deployments::AppDeployments {id} /> },
         Route::AppLog { id } => html! { <app_log::AppLogView {id} /> },
+        Route::AppTerminal { id } => html! { <app_terminal::AppTerminal {id} /> },
         Route::Targets => html! { <targets::Targets /> },
         Route::GitConnections => html! { <git_connections::GitConnections /> },
         Route::Certs => {

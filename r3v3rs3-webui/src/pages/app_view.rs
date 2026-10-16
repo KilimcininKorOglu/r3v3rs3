@@ -195,7 +195,10 @@ fn edit_extras(
             }
             <AppWebhook app={entry.clone()} {locale} {onchanged} />
             <AppEnv id={entry.id} {locale} />
-            <div class="flex justify-end mt-4">
+            <div class="flex justify-end mt-4 gap-4 items-center">
+                <Link<Route> to={Route::AppTerminal { id: entry.id }} classes="text-sm text-neutral-400 hover:text-neutral-200">
+                    {locale.t("apps.terminal")}
+                </Link<Route>>
                 <a class={DANGER_LINK_CLASS} onclick={delete}>{locale.t("apps.delete")}</a>
             </div>
         </>
