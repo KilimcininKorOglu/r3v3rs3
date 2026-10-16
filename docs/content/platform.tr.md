@@ -73,6 +73,14 @@ Bir uygulama bir image'ı, container'ın dinlediği portu ve uygulamaya yönlene
 
 Uygulamanın, alan adlarının veya ortam değişkenlerinin değişikliği sonraki deployment'ta geçerli olur.
 
+## App Store
+
+App Store, r3v3rs3'ün tek tıkla kurabileceği image app'leri listeler. Katalog, r3v3rs3 deposunda `data/app-store.json` yolunda yaşar; taze kurulumun listeyle başlaması için binary'nin içine gömülür ve günde bir kez depodan yenilenir. Sayfadaki **Kataloğu yenile** butonu güncel kataloğu hemen indirir. API kataloğu `GET /api/store` ile okur, `POST /api/store/refresh` ile yeniler.
+
+Her girdi uygulamanın image'ını ve portunu taşır. **Kur** butonu o alanlar doldurulmuş app formunu açar; hedefi, alan adlarını ve portları seçip uygulamayı oluşturun. İlk deployment, uygulama oluşturulur oluşturulmaz başlar.
+
+Katalog yalnız tek container'lı uygulamaları listeler: kendi veritabanına ya da ikinci bir container'a ihtiyaç duyan uygulama bir Compose app'idir ve App Store onları listelemez.
+
 ### Git kaynağı
 
 `git` kaynağı olan bir uygulama, image'ını bir reponun bir branch'inden, reponun Dockerfile'ı ile build eder:
@@ -343,7 +351,7 @@ Agent, 1 saniyeden 60 saniyeye kadar uzayan bir beklemeden sonra yeniden bağlan
 
 ## WebUI
 
-Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **Hedefler** ve **Git Sağlayıcıları** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** sayfası Edit izni olan hesaba görünür. Orada bağlantı ekleme, değiştirme, bağlama ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
+Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **App Store**, **Hedefler** ve **Git Sağlayıcıları** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** sayfası Edit izni olan hesaba görünür. Orada bağlantı ekleme, değiştirme, bağlama ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
 
 ### Uygulamalar
 
@@ -355,6 +363,10 @@ Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **Hedefler** ve **Git Sa
 - **Deploy et** onaydan sonra bir deployment başlatır.
 
 Sayfa, bitmemiş bir deployment varken uygulamaları 2 saniyede bir, yoksa 10 saniyede bir yeniden okur.
+
+### App Store
+
+**App Store** sayfası tek tıkla kurulan image app'lerin kataloğunu listeler; ayrıntı için [App Store](#app-store) bölümüne bakın. **Kur**, girdinin image'ını ve portunu doldurulmuş app formunu açar; uygulamayı oluşturmak ilk deployment'ı başlatır. **Kataloğu yenile** güncel kataloğu depodan hemen indirir.
 
 ### Uygulama ekleme ve değiştirme
 

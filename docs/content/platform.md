@@ -73,6 +73,14 @@ An app names an image, the port that the container listens on and the domains th
 
 A change of an app, of its domains or of its environment variables takes effect at the next deployment.
 
+## App Store
+
+The App Store lists the image apps that r3v3rs3 can install in one click. The catalog lives in the r3v3rs3 repository at `data/app-store.json`, ships embedded in the binary so that a fresh install starts with a full list, and refreshes from the repository once a day. The **Refresh catalog** button of the page downloads the current catalog at once. The API reads it at `GET /api/store` and refreshes it with `POST /api/store/refresh`.
+
+Every entry carries the image and the port of the app. **Install** opens the app form with those fields filled in; choose the target, the domains and the ports, then create the app. The first deployment starts as soon as the app is created.
+
+The catalog lists single-container apps only: an app that needs its own database or a second container is a Compose app, and the App Store does not list those.
+
 ### Git Source
 
 An app with a `git` source builds its image from a branch of a repository with the Dockerfile of the repository:
@@ -343,7 +351,7 @@ The agent connects again after a pause that grows from 1 to 60 seconds. When it 
 
 ## WebUI
 
-The **Platform** group of the sidebar holds the **Apps**, **Targets** and **Git Providers** pages, and appears only while the platform is on. The **Git Providers** page appears for an account with the Edit permission, and only an admin adds, changes, connects or deletes a connection there. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+The **Platform** group of the sidebar holds the **Apps**, **App Store**, **Targets** and **Git Providers** pages, and appears only while the platform is on. The **Git Providers** page appears for an account with the Edit permission, and only an admin adds, changes, connects or deletes a connection there. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
 
 ### Apps
 
@@ -355,6 +363,10 @@ The **Apps** page lists every app with its **Source**, its **Domains** and the s
 - **Deploy** starts a deployment after a confirmation.
 
 The page reads the apps again every 2 seconds while a deployment is unfinished, and every 10 seconds otherwise.
+
+### App Store
+
+The **App Store** page lists the catalog of the image apps that install in one click, see [App Store](#app-store). **Install** opens the app form with the image and the port of the entry filled in, and creating the app starts its first deployment. **Refresh catalog** downloads the current catalog from the repository at once.
 
 ### Add and Change an App
 
@@ -395,6 +407,8 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 
 | Route | Permission | Description |
 |---|---|---|
+| `GET /api/store` | Read | The app store catalog with its state. |
+| `POST /api/store/refresh` | Edit | Downloads the catalog from the repository and applies it. |
 | `GET /api/targets` | Read | The Docker hosts that run apps, with the state of their agents. |
 | `POST /api/targets` | Admin | Adds an agent target and returns its enrollment token once. |
 | `POST /api/targets/{id}/token` | Admin | Returns a new enrollment token of an agent target. |
