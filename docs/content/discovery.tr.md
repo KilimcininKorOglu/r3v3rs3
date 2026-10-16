@@ -193,18 +193,10 @@ Ayar değişikliği yalnız sağlayıcıyı yeniden başlatır, sunucu yeniden b
 
 ## Compose örneği
 
+r3v3rs3 host'ta çalışır ve `/var/run/docker.sock` dosyasını okur. Compose dosyası etiketli container'ları taşır:
+
 ```yaml
 services:
-  r3v3rs3:
-    image: ghcr.io/kilimcininkoroglu/r3v3rs3:latest
-    volumes:
-      - r3v3rs3-config:/root/.config/r3v3rs3
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks: [proxy]
-    ports:
-      - 80:80
-      - 127.0.0.1:46492:46492
-
   whoami:
     image: traefik/whoami
     networks: [proxy]
@@ -217,12 +209,9 @@ services:
 networks:
   proxy:
     name: proxy
-
-volumes:
-  r3v3rs3-config:
 ```
 
-"Portlar" sayfasında `http` adında bir port ekleyin, sağlayıcıyı `proxy` ağı ile açın ve stack'i başlatın. Ağ `name` alanını vermezse Compose ağ adının başına proje adını ekler.
+"Portlar" sayfasında `http` adında bir port ekleyin, sağlayıcıyı `proxy` ağı ile açın ve servisi başlatın. Ağ `name` alanını vermezse Compose ağ adının başına proje adını ekler.
 
 > Docker socket erişimi Docker host'unun tam kontrolünü verir. Bu yetki root erişimine eşittir. `:ro` seçeneği yalnız socket dosyasına uygulanır ve API'yi salt okunur yapmaz. Yönetim paneline veya host'a güvenilmeyen ağlardan erişilebiliyorsa r3v3rs3'ü yalnız `GET /containers/json` ve `GET /events` isteklerine izin veren bir Docker socket proxy'sine bağlayın.
 

@@ -36,13 +36,6 @@ const REFRESH_MS: u32 = 10_000;
 const INSTALL_SCRIPT: &str =
     "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh";
 
-/// The image with the docker CLI, which the Compose apps need.
-const AGENT_IMAGE: &str = "ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform";
-
-/// The data directory of an agent in a container. It has the same path on the host, because
-/// Compose resolves the bind mounts of a service on the host.
-const AGENT_DATA_DIR: &str = "/var/lib/r3v3rs3-agent";
-
 const COLUMNS: [Column; 5] = [
     Column {
         label: "common.name",
@@ -269,7 +262,6 @@ fn token_view(locale: Locale, token: &TargetToken) -> Html {
             <p class="mt-1">{locale.t("targets.token_once")}</p>
             { copy_box(locale.t("targets.token"), &token.token, 1) }
             { copy_box(locale.t("targets.install_command"), &install_command(&master, &token.token), 3) }
-            { copy_box(locale.t("targets.docker_command"), &docker_command(&master, &token.token), 5) }
         </>
     }
 }
@@ -301,17 +293,6 @@ fn master_address(token: &TargetToken) -> String {
 fn install_command(master: &str, token: &str) -> String {
     format!(
         "curl -fsSL {INSTALL_SCRIPT} | sudo bash -s -- --agent --master {} --token {}",
-        shell_word(master),
-        shell_word(token)
-    )
-}
-
-fn docker_command(master: &str, token: &str) -> String {
-    format!(
-        "docker run -d --name r3v3rs3-agent --restart unless-stopped --network host \
-         --stop-signal SIGINT -v /var/run/docker.sock:/var/run/docker.sock \
-         -v {AGENT_DATA_DIR}:{AGENT_DATA_DIR} --entrypoint /usr/bin/r3v3rs3 {AGENT_IMAGE} \
-         agent --master {} --data-dir {AGENT_DATA_DIR} --token {}",
         shell_word(master),
         shell_word(token)
     )
@@ -367,14 +348,6 @@ mod tests {
         assert!(
             install.ends_with("--agent --master master.example.com:9443 --token abc.def"),
             "{install}"
-        );
-        let docker = docker_command("[2001:db8::1]:9443", "abc.def");
-        assert!(docker.contains(AGENT_IMAGE), "{docker}");
-        assert!(
-            docker.ends_with(
-                "--master [2001:db8::1]:9443 --data-dir /var/lib/r3v3rs3-agent --token abc.def"
-            ),
-            "{docker}"
         );
         assert_eq!(shell_word("a b;c'd"), r"'a b;c'\''d'");
         assert_eq!(shell_word(""), "''");

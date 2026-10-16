@@ -172,7 +172,6 @@ $ sudo systemctl daemon-reload
 
 ## Other Install Methods
 
-- [Docker](@/tutorials/install-docker.md): one container with two volumes.
 - `cargo binstall r3v3rs3` or `cargo install r3v3rs3`: the crates.io package ships the WebUI, so it needs no trunk.
 - The [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases): the archive for a manual install. Put the binary in your `PATH` and write your own unit file.
 

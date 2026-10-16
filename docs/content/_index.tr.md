@@ -74,7 +74,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-[Linux sunucuya kurulum](@/tutorials/install-linux.tr.md) rehberi seçenekleri, yolları, yükseltmeyi, kaldırmayı ve diğer kurulum yollarını anlatır: cargo-binstall, `cargo install` ve release arşivleri. [Docker ile kurulum](@/tutorials/install-docker.tr.md) rehberi container'ı, Docker Compose'u ve deploy platformunun image'ını anlatır.
+[Linux sunucuya kurulum](@/tutorials/install-linux.tr.md) rehberi seçenekleri, yolları, yükseltmeyi, kaldırmayı ve diğer kurulum yollarını anlatır: cargo-binstall, `cargo install` ve release arşivleri.
 
 # Geliştirme
 

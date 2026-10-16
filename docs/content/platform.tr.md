@@ -42,7 +42,7 @@ Platform ilk başlangıçta yapılandırma dizininde iki dosya oluşturur:
 - `platform.db`: uygulamalar, ortam değişkenleri, deployment'lar, hedefler ve Git sağlayıcı bağlantıları.
 - `platform.key`: ortam değişkenlerinin değerlerini, uygulamaların Git token'larını ve webhook secret'larını, Git sağlayıcı bağlantılarının client secret'larını, private key'lerini ve token'larını şifreleyen key. Dosya modu `0600` olur. Bu dosyanın yedeğini `platform.db` yedeğinin yanında saklayın, çünkü değerler bu key olmadan açılmaz.
 
-Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın. r3v3rs3 bir container içinde çalışıyorsa [Docker ile kurulum](@/tutorials/install-docker.tr.md#deploy-platformu) rehberindeki gibi `-platform` tag son ekli image'ı, host ağ modunu, Docker socket'ini ve host'takiyle aynı yolda bağlanmış yapılandırma dizinini kullanın.
+Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın.
 
 ## Uygulamalar
 
@@ -302,19 +302,6 @@ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/inst
 ```
 
 Script binary'yi kurar, `/var/lib/r3v3rs3-agent` veri dizinini kullanan `r3v3rs3-agent` systemd servisini oluşturur, agent kaydolana kadar bekler ve sonra token'ı siler. Token unit dosyasına hiç yazılmaz. Güncellemek için script'i `--agent` ile yeniden çalıştırın. Kayıtlı bir agent token istemez. Yeni bir token ile script agent'ı yeniden kaydeder. Bu kayıt başarısız olursa önceki kimliği geri yükler.
-
-Docker ile kurulumda `-platform` tag son ekli image'ı kullanın, çünkü bu image Compose eklentili `docker` binary'sini içerir:
-
-```sh
-docker run -d --name r3v3rs3-agent --restart unless-stopped --network host --stop-signal SIGINT \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /var/lib/r3v3rs3-agent:/var/lib/r3v3rs3-agent \
-  --entrypoint /usr/bin/r3v3rs3 \
-  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform \
-  agent --master master.example.com:9443 --data-dir /var/lib/r3v3rs3-agent --token <token>
-```
-
-Container host ağ modunda çalışmalıdır, çünkü agent uygulamalara host'un `127.0.0.1` adresinden ulaşır. Veri dizininin yolu container'da ve host'ta aynı olmalıdır, çünkü `docker compose`, Compose dosyasındaki bind mount yollarını host'un Docker Engine'ine gönderir.
 
 | Seçenek | Ortam değişkeni | Varsayılan | Açıklama |
 |---|---|---|---|

@@ -811,7 +811,6 @@
   "targets.token_once": "Token'ı şimdi kopyalayın. Token yalnız bir kez gösterilir ve tek bir agent'ı kaydeder.",
   "targets.token": "Token",
   "targets.install_command": "Agent'ı systemd servisi olarak kurun",
-  "targets.docker_command": "Agent'ı Docker ile çalıştırın",
   "git_connections.empty": "Henüz bağlı Git sağlayıcısı yok.",
   "git_connections.provider": "Sağlayıcı",
   "git_connections.address": "Adres",

@@ -13,33 +13,23 @@ Bu rehber o kurulumu Docker Compose ile yapar ve her adımı doğrular. Birkaç 
 ## Ne kuruyorsunuz
 
 ```
-   istemci ---> :80 r3v3rs3 ---> whoami container(ları)
+   istemci ---> :80 r3v3rs3 (host'ta) ---> whoami container(ları)
                      |
                      +-- etiketler ve olaylar için Docker socket'ini okur
 ```
 
-r3v3rs3 ile container'lar aynı Docker ağını paylaşır. r3v3rs3 her container'ın etiketini okur ve istekleri container'ın o ağdaki adresine gönderir.
+r3v3rs3 host'ta çalışır ve Docker socket'ini okur. Her container'ın etiketini okur ve istekleri container'ın o ağdaki adresine gönderir.
 
-> Docker socket'ine erişim, host üzerinde root erişimine eşittir. `:ro` seçeneği yalnız socket dosyası içindir, API'yi salt okunur yapmaz. Host güvenilmeyen bir ağdan erişilebiliyorsa önüne yalnız `GET /containers/json` ve `GET /events` isteklerine izin veren bir Docker socket proxy'si koyun.
+> Docker socket'ine erişim, host üzerinde root erişimine eşittir. r3v3rs3 socket'i çalıştığı kullanıcı olarak okur; install.sh servisi root olarak çalıştırır.
 
-## Adım 1: Compose dosyasını yazın
+## Adım 1: r3v3rs3'ü host'a kurun
+
+[Linux sunucuya kurulum](@/tutorials/install-linux.tr.md) rehberi binary'yi kurar ve admin hesabını oluşturur. [http://localhost:46492/](http://localhost:46492/) adresini açın ve giriş yapın.
+
+## Adım 2: Compose dosyasını yazın
 
 ```yaml
 services:
-  r3v3rs3:
-    image: ghcr.io/kilimcininkoroglu/r3v3rs3:latest
-    environment:
-      R3V3RS3_WEBUI: 0.0.0.0:46492
-    volumes:
-      - r3v3rs3-config:/root/.config/r3v3rs3
-      - r3v3rs3-data:/root/.local/share/r3v3rs3
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks: [proxy]
-    ports:
-      - "80:80"
-      - "127.0.0.1:46492:46492"
-    stop_signal: SIGINT
-
   whoami:
     image: traefik/whoami
     networks: [proxy]
@@ -52,29 +42,17 @@ services:
 networks:
   proxy:
     name: proxy
-
-volumes:
-  r3v3rs3-config:
-  r3v3rs3-data:
 ```
 
 Etiketler şunu söyler: bu container'ın `whoami` adında bir HTTP proxy'si vardır, r3v3rs3'ün `http` adlı portunu kullanır, `whoami.example.com` host'una yanıt verir ve upstream sunucusu container'ın `80` portunda dinler.
 
 Ağ tanımının altındaki `name: proxy` satırı ağ adını `proxy` olarak bırakır. Onsuz Compose başa proje adını ekler.
 
-Stack'i başlatın:
+Servisi başlatın:
 
 ```bash
 $ docker compose up -d
 ```
-
-## Adım 2: Admin hesabını oluşturun
-
-```bash
-$ docker compose exec r3v3rs3 r3v3rs3 add-user admin
-```
-
-[http://localhost:46492/](http://localhost:46492/) adresini açın ve giriş yapın.
 
 ## Adım 3: Portu bağlayın
 
@@ -90,7 +68,7 @@ Bir servis keşfi sağlayıcısı port açmaz. `ports: http` etiketi, önceden v
 1. Menüde **Ayarlar** linkine tıklayın.
 2. **Docker Servis Keşfi** bölümünü bulun ve açın.
 3. **Endpoint** alanına `unix:///var/run/docker.sock` yazın.
-4. **Ağ** alanına `proxy` yazın. Bu, Adım 1'deki Docker ağının adıdır.
+4. **Ağ** alanına `proxy` yazın. Bu, Adım 2'deki Docker ağının adıdır.
 5. **Her container'ı oku** seçeneğini kapalı bırakın. Böylece r3v3rs3 yalnız `r3v3rs3.enable=true` etiketi olan container'ları okur.
 6. Kaydedin.
 

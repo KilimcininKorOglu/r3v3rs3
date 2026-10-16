@@ -193,18 +193,10 @@ A change of the settings restarts the provider without a server restart. The pro
 
 ## Compose Example
 
+r3v3rs3 runs on the host and reads `/var/run/docker.sock`. The Compose file holds the labeled containers:
+
 ```yaml
 services:
-  r3v3rs3:
-    image: ghcr.io/kilimcininkoroglu/r3v3rs3:latest
-    volumes:
-      - r3v3rs3-config:/root/.config/r3v3rs3
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks: [proxy]
-    ports:
-      - 80:80
-      - 127.0.0.1:46492:46492
-
   whoami:
     image: traefik/whoami
     networks: [proxy]
@@ -217,14 +209,9 @@ services:
 networks:
   proxy:
     name: proxy
-
-volumes:
-  r3v3rs3-config:
 ```
 
 Add a port with the name `http` in "Ports", enable the provider with the network `proxy`, and start the stack. Compose adds the project name to a network name unless the network sets `name`.
-
-> Access to the Docker socket gives full control of the Docker host, which equals root access. The `:ro` option applies only to the socket file and does not make the API read-only. When the admin panel or the host is reachable from untrusted networks, connect r3v3rs3 to a Docker socket proxy that allows only `GET /containers/json` and `GET /events`.
 
 # Kubernetes
 

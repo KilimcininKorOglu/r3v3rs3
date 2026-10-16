@@ -106,44 +106,6 @@ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/inst
 
 The config is in `/etc/r3v3rs3` and the logs are in `/var/log/r3v3rs3`. Run the script again to upgrade.
 
-### Docker
-
-```bash
-docker run -d \
-  -v r3v3rs3-config:/root/.config/r3v3rs3 \
-  -v r3v3rs3-data:/root/.local/share/r3v3rs3 \
-  -p 80:80 \
-  -p 443:443 \
-  -p 127.0.0.1:46492:46492 \
-  --restart unless-stopped \
-  --stop-signal SIGINT \
-  --name r3v3rs3 \
-  ghcr.io/kilimcininkoroglu/r3v3rs3:latest
-```
-
-Publish each additional port that you add in the WebUI with another `-p` option. Create the admin account:
-
-```bash
-docker exec -it r3v3rs3 r3v3rs3 add-user admin
-```
-
-The deployment platform needs the image with the `-platform` tag suffix (for example `latest-platform`), which adds `git` and the `docker` CLI with its Compose and buildx plugins. Run it with host networking, the Docker socket and the config directory on the same path as on the host, as [Installing with Docker](https://r3v3rs3.keremgok.tr/tutorials/install-docker/#deployment-platform) shows.
-
-### Docker Compose
-
-Download [`docker-compose.yml`](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/docker-compose.yml) and start r3v3rs3:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/docker-compose.yml
-docker compose up -d
-docker compose exec r3v3rs3 r3v3rs3 add-user admin
-```
-
-The file uses host networking, so every port that you add in the WebUI listens without a change to the file. Host networking works only on a Linux Docker host. Set these variables in a `.env` file next to it:
-
-- `R3V3RS3_WEBUI`: the admin WebUI address. The default is `127.0.0.1:46492`.
-- `R3V3RS3_VERSION`: the image tag. The default is `latest`.
-
 ### Cargo
 
 The crates.io package contains the built WebUI, so you do not need trunk or the wasm toolchain.

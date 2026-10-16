@@ -13,33 +13,23 @@ This guide builds that setup with Docker Compose and checks each step. It takes 
 ## What You Build
 
 ```
-   client ---> :80 r3v3rs3 ---> whoami container(s)
+   client ---> :80 r3v3rs3 (on the host) ---> whoami container(s)
                     |
                     +-- reads the Docker socket for labels and events
 ```
 
-r3v3rs3 and the containers share one Docker network. r3v3rs3 reads the label of each container and sends the traffic to the address of the container on that network.
+r3v3rs3 runs on the host and reads the Docker socket. It reads the label of each container and sends the traffic to the address of the container on the network.
 
-> Access to the Docker socket equals root access on the host. The `:ro` option applies to the socket file only and does not make the API read-only. Put a Docker socket proxy that allows `GET /containers/json` and `GET /events` in front of it when the host is reachable from untrusted networks.
+> Access to the Docker socket equals root access on the host. r3v3rs3 reads the socket as the user that runs it, and the install script runs the service as root.
 
-## Step 1: Write the Compose File
+## Step 1: Install r3v3rs3 on the Host
+
+[Installing on a Linux Server](@/tutorials/install-linux.md) installs the binary and creates the admin account. Open [http://localhost:46492/](http://localhost:46492/) and sign in.
+
+## Step 2: Write the Compose File
 
 ```yaml
 services:
-  r3v3rs3:
-    image: ghcr.io/kilimcininkoroglu/r3v3rs3:latest
-    environment:
-      R3V3RS3_WEBUI: 0.0.0.0:46492
-    volumes:
-      - r3v3rs3-config:/root/.config/r3v3rs3
-      - r3v3rs3-data:/root/.local/share/r3v3rs3
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks: [proxy]
-    ports:
-      - "80:80"
-      - "127.0.0.1:46492:46492"
-    stop_signal: SIGINT
-
   whoami:
     image: traefik/whoami
     networks: [proxy]
@@ -52,29 +42,17 @@ services:
 networks:
   proxy:
     name: proxy
-
-volumes:
-  r3v3rs3-config:
-  r3v3rs3-data:
 ```
 
 The labels say: this container has one HTTP proxy named `whoami`, it uses the r3v3rs3 port named `http`, it answers for the host `whoami.example.com`, and its upstream server listens on port `80` of the container.
 
 `name: proxy` under the network keeps the network name as `proxy`. Without it Compose adds the project name.
 
-Start the stack:
+Start the service:
 
 ```bash
 $ docker compose up -d
 ```
-
-## Step 2: Create the Admin Account
-
-```bash
-$ docker compose exec r3v3rs3 r3v3rs3 add-user admin
-```
-
-Open [http://localhost:46492/](http://localhost:46492/) and sign in.
 
 ## Step 3: Bind the Port
 
@@ -90,7 +68,7 @@ A discovery provider opens no port. The label `ports: http` names a port that mu
 1. Click **Settings** in the menu.
 2. Find **Docker Service Discovery** and turn it on.
 3. Write `unix:///var/run/docker.sock` in the endpoint field.
-4. Write `proxy` in the network field. This is the name of the Docker network of Step 1.
+4. Write `proxy` in the network field. This is the name of the Docker network of Step 2.
 5. Leave **Read every container** off, so r3v3rs3 reads only the containers with `r3v3rs3.enable=true`.
 6. Save.
 

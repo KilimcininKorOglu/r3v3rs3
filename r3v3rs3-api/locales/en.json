@@ -811,7 +811,6 @@
   "targets.token_once": "Copy it now. The token is shown only once and enrolls one agent.",
   "targets.token": "Token",
   "targets.install_command": "Install the agent as a systemd service",
-  "targets.docker_command": "Run the agent with Docker",
   "git_connections.empty": "No Git provider is connected yet.",
   "git_connections.provider": "Provider",
   "git_connections.address": "Address",

@@ -137,9 +137,9 @@ detect_target() {
 	esac
 	# The release targets glibc 2.17, so it runs on every glibc distribution, for example
 	# Rocky 8 or Debian 10. A musl distribution such as Alpine has no glibc loader, so the
-	# binary cannot run there; the Docker image is the way to run r3v3rs3 on Alpine.
+	# binary cannot run there; build r3v3rs3 from source with cargo instead.
 	if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then
-		die "this system uses musl libc; run r3v3rs3 as the Docker image instead"
+		die "this system uses musl libc; build r3v3rs3 from source with cargo instead"
 	fi
 	echo "$arch-unknown-linux-gnu"
 }

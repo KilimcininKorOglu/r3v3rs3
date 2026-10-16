@@ -32,6 +32,3 @@ When the signature is good, check the archive against the checksums:
 $ sha256sum --check --ignore-missing SHA256SUMS
 r3v3rs3-x86_64-unknown-linux-gnu.tar.xz: OK
 ```
-
-Docker images carry no separate signature. Their digest, which
-`docker pull` prints, identifies the image bytes that the registry serves.

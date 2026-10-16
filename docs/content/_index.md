@@ -74,7 +74,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-[Installing on a Linux Server](@/tutorials/install-linux.md) covers the options, the paths, the upgrade, the removal and the other install methods: cargo-binstall, `cargo install` and the release archives. [Installing with Docker](@/tutorials/install-docker.md) covers the container, Docker Compose and the image of the deployment platform.
+[Installing on a Linux Server](@/tutorials/install-linux.md) covers the options, the paths, the upgrade, the removal and the other install methods: cargo-binstall, `cargo install` and the release archives.
 
 # Development
 

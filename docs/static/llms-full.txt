@@ -2,7 +2,7 @@
 
 > A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, and a deployment platform that runs your apps behind it, written in Rust. It is a fork of Taxy.
 
-r3v3rs3 runs as a single binary or a single container. You configure it in a browser, not in a configuration file: every port, proxy, certificate and account is a form in the WebUI, and the same operations are available over an admin API. It can also build its proxies from Docker labels, a Kubernetes Ingress, the Consul catalog, the Consul key-value store or etcd keys.
+r3v3rs3 runs as a single binary. You configure it in a browser, not in a configuration file: every port, proxy, certificate and account is a form in the WebUI, and the same operations are available over an admin API. It can also build its proxies from Docker labels, a Kubernetes Ingress, the Consul catalog, the Consul key-value store or etcd keys.
 
 The deployment platform runs apps as containers on the Docker Engine of the server or of a remote server with the r3v3rs3 agent. An app comes from a registry image, from a Git repository with its Dockerfile, or from the Docker Compose file of a Git repository. A deployment is blue-green, and r3v3rs3 routes the domains of the apps itself. Git provider connections (a GitHub App, or an OAuth app for GitLab and Gitea) list the repositories, clone private ones and install the push webhook that starts a deployment.
 
@@ -16,13 +16,12 @@ The documentation is published in English at the root and in Turkish under `/tr/
 - [Service Discovery](https://r3v3rs3.keremgok.tr/discovery/): the Docker label keys, the Kubernetes Ingress and `R3v3rs3Proxy` resource fields, the Consul catalog and key-value store settings, the etcd settings, the label grammar (types, numbered lists, defaults), the ACME integration of discovered proxies and the issue reporting.
 - [Cluster](https://r3v3rs3.keremgok.tr/cluster/): every `[cluster]` setting with its default, the keys in the etcd or Consul store, the AES-256-GCM encryption and key rotation, the leader election and ACME coordination, the failure modes, the shared sessions, the rate limit accuracy and the shared cache.
 - [Deployment Platform](https://r3v3rs3.keremgok.tr/platform/): image, Git and Compose apps, blue-green deployments with health checks and rollback, encrypted environment variables, the Git provider connections (a private GitHub App, OAuth apps for GitLab and Gitea), the verified push webhooks, the agent targets with their mTLS enrollment and the notification events.
-- [Release Verification](https://r3v3rs3.keremgok.tr/release-verification/): how to verify a downloaded release binary or image against its sha256 digest and signature.
+- [Release Verification](https://r3v3rs3.keremgok.tr/release-verification/): how to verify a downloaded release binary against its sha256 digest and signature.
 - [Development](https://r3v3rs3.keremgok.tr/development/): the toolchain requirements and the commands that build, test, lint and release the workspace.
 
 ## Tutorials
 
 - [Installing on a Linux Server](https://r3v3rs3.keremgok.tr/tutorials/install-linux/): run install.sh, what it asks and what it writes, the systemd unit, the file locations, the upgrade, the removal and the agent enrollment.
-- [Installing with Docker](https://r3v3rs3.keremgok.tr/tutorials/install-docker/): the single-container command with its two volumes, every option explained, Docker Compose with host networking, the `-platform` image of the deployment platform and what a restart keeps and loses.
 - [Getting Started](https://r3v3rs3.keremgok.tr/tutorials/getting-started/): from the first admin account to the first working proxy in five steps, with the HTTPS and ACME follow-up.
 - [High Availability](https://r3v3rs3.keremgok.tr/tutorials/high-availability/): build a three-node cluster step by step, from the etcd or Consul install over the encryption key and the cluster import to keepalived or DNS round robin, with the failover checks.
 - [Proxies from Docker](https://r3v3rs3.keremgok.tr/tutorials/docker-discovery/): a working Compose stack where containers define their own proxies with `r3v3rs3.` labels, scale to replicas, and get certificates from an ACME entry by label.
@@ -44,5 +43,4 @@ The documentation is published in English at the root and in Turkish under `/tr/
 - [crates.io: r3v3rs3](https://crates.io/crates/r3v3rs3): the server binary package; it ships the built WebUI.
 - [crates.io: r3v3rs3-api](https://crates.io/crates/r3v3rs3-api): the shared API types and validation.
 - [docs.rs: r3v3rs3-api](https://docs.rs/r3v3rs3-api): the rustdoc reference of the API types.
-- [Container image](https://github.com/KilimcininKorOglu/r3v3rs3/pkgs/container/r3v3rs3): `ghcr.io/kilimcininkoroglu/r3v3rs3`; the `-platform` tag suffix adds `git` and the `docker` CLI for the deployment platform.
 - [Changelog](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/CHANGELOG.md): the notable changes of every release in Keep a Changelog format.

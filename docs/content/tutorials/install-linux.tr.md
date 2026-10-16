@@ -172,7 +172,6 @@ $ sudo systemctl daemon-reload
 
 ## Diğer kurulum yolları
 
-- [Docker](@/tutorials/install-docker.tr.md): iki volume ile tek container.
 - `cargo binstall r3v3rs3` veya `cargo install r3v3rs3`: crates.io paketi WebUI'yi içinde taşır, bu yüzden trunk istemez.
 - [Releases sayfası](https://github.com/KilimcininKorOglu/r3v3rs3/releases): elle kurulum için arşiv. Binary'yi `PATH` içine koyun ve kendi unit dosyanızı yazın.
 

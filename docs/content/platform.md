@@ -42,7 +42,7 @@ At its first start the platform creates two files in the config directory:
 - `platform.db`: the apps, their environment variables, their deployments, the targets and the Git provider connections.
 - `platform.key`: the key that encrypts the environment values, the Git tokens and webhook secrets of the apps, and the client secrets, private keys and tokens of the Git provider connections. Its mode is `0600`. Keep a backup of it next to the backup of `platform.db`, because the values do not open without it.
 
-Access to the Docker socket is equal to root access on the host. Enable the platform only on a server where r3v3rs3 may control every container. When r3v3rs3 runs in a container, use the image with the `-platform` tag suffix, host networking, the Docker socket and the config directory on the same path as on the host, as [Installing with Docker](@/tutorials/install-docker.md#deployment-platform) shows.
+Access to the Docker socket is equal to root access on the host. Enable the platform only on a server where r3v3rs3 may control every container.
 
 ## Apps
 
@@ -302,19 +302,6 @@ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/inst
 ```
 
 The script installs the binary, creates the systemd service `r3v3rs3-agent` with the data directory `/var/lib/r3v3rs3-agent`, waits until the agent enrolls and then deletes the token. The token never enters the unit file. Run the script again with `--agent` to upgrade; an enrolled agent needs no token. With a new token the script enrolls the agent again, and when that enrollment fails it restores the earlier identity.
-
-With Docker, use the image with the `-platform` tag suffix, because it holds the `docker` binary with the Compose plugin:
-
-```sh
-docker run -d --name r3v3rs3-agent --restart unless-stopped --network host --stop-signal SIGINT \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /var/lib/r3v3rs3-agent:/var/lib/r3v3rs3-agent \
-  --entrypoint /usr/bin/r3v3rs3 \
-  ghcr.io/kilimcininkoroglu/r3v3rs3:latest-platform \
-  agent --master master.example.com:9443 --data-dir /var/lib/r3v3rs3-agent --token <token>
-```
-
-The container needs host networking, because the agent reaches the apps on `127.0.0.1` of the host. The data directory needs the same path in the container and on the host, because `docker compose` sends the bind mount paths of a Compose file to the Docker Engine of the host.
 
 | Option | Environment variable | Default | Description |
 |---|---|---|---|
