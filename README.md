@@ -62,7 +62,7 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 ### Deployment platform
 
 - Apps from a registry image, from a Git repository with its Dockerfile, or from the Docker Compose file of a Git repository
-- An App Store that installs a catalog image app in one click, refreshed daily from the repository
+- An App Store that installs a catalog app, image or Compose, in one click, refreshed daily from the repository
 - Blue-green deployments that switch the proxy only after the new container passes its health check, and rollback to an earlier deployment
 - r3v3rs3 routes the domains of the apps itself and orders their certificates through ACME
 - Encrypted environment variables, the deployments and the container log of every app in the WebUI and the admin API

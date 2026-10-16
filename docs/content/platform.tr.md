@@ -75,11 +75,13 @@ Uygulamanın, alan adlarının veya ortam değişkenlerinin değişikliği sonra
 
 ## App Store
 
-App Store, r3v3rs3'ün tek tıkla kurabileceği image app'leri listeler. Katalog, r3v3rs3 deposunda `data/app-store.json` yolunda yaşar; taze kurulumun listeyle başlaması için binary'nin içine gömülür ve günde bir kez depodan yenilenir. Sayfadaki **Kataloğu yenile** butonu güncel kataloğu hemen indirir. API kataloğu `GET /api/store` ile okur, `POST /api/store/refresh` ile yeniler.
+App Store, r3v3rs3'ün tek tıkla kurabileceği uygulamaları listeler. Katalog, r3v3rs3 deposunda `data/app-store.json` yolunda yaşar; taze kurulumun listeyle başlaması için binary'nin içine gömülür ve günde bir kez depodan yenilenir. Sayfadaki **Kataloğu yenile** butonu güncel kataloğu hemen indirir. API kataloğu `GET /api/store` ile okur, `POST /api/store/refresh` ile yeniler.
 
-Her girdi uygulamanın image'ını ve portunu taşır. **Kur** butonu o alanlar doldurulmuş app formunu açar; hedefi, alan adlarını ve portları seçip uygulamayı oluşturun. İlk deployment, uygulama oluşturulur oluşturulmaz başlar.
+Bir **image girdisi** uygulamanın image'ını ve portunu taşır. **Kur** butonu o alanlar doldurulmuş app formunu açar; hedefi, alan adlarını ve portları seçip uygulamayı oluşturun. İlk deployment, uygulama oluşturulur oluşturulmaz başlar.
 
-Katalog yalnız tek container'lı uygulamaları listeler: kendi veritabanına ya da ikinci bir container'a ihtiyaç duyan uygulama bir Compose app'idir ve App Store onları listelemez.
+Bir **Compose girdisi**, r3v3rs3 deposunun kendisinin tuttuğu bir Compose dosyasına işaret eder; böylece kendi veritabanına ihtiyaç duyan bir uygulama da tek tıkla kurulur. Form Compose modunda açılır ve girdi, uygulamanın ihtiyaç duyduğu **Değişkenleri** listeler, örneğin bir veritabanı parolası: formda doldurun, değerler ilk deployment'tan önce uygulamanın ortam değişkenlerine yazılır. Compose app'i düz bir `docker compose` çalıştırmasıyla deploy olur; blue-green geçişi yoktur ve geri alma, eski bir commit'i yeniden deploy etmekle olur.
+
+Katalog başka Compose kaynağı tutmaz: kendi Compose dosyanızı kuran girdi App Store'a değil, [Uygulamalar](#uygulamalar) sayfasına aittir.
 
 ### Git kaynağı
 
@@ -366,7 +368,7 @@ Sayfa, bitmemiş bir deployment varken uygulamaları 2 saniyede bir, yoksa 10 sa
 
 ### App Store
 
-**App Store** sayfası tek tıkla kurulan image app'lerin kataloğunu listeler; ayrıntı için [App Store](#app-store) bölümüne bakın. **Kur**, girdinin image'ını ve portunu doldurulmuş app formunu açar; uygulamayı oluşturmak ilk deployment'ı başlatır. **Kataloğu yenile** güncel kataloğu depodan hemen indirir.
+**App Store** sayfası tek tıkla kurulan uygulamaların kataloğunu listeler; ayrıntı için [App Store](#app-store) bölümüne bakın. **Kur**, girdinin alanları doldurulmuş app formunu açar; Compose girdisi ayrıca **Değişkenlerini** listeler, uygulamayı oluşturmak onları kaydeder ve ilk deployment'ı başlatır. **Kataloğu yenile** güncel kataloğu depodan hemen indirir.
 
 ### Uygulama ekleme ve değiştirme
 

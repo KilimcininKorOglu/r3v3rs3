@@ -75,11 +75,13 @@ A change of an app, of its domains or of its environment variables takes effect 
 
 ## App Store
 
-The App Store lists the image apps that r3v3rs3 can install in one click. The catalog lives in the r3v3rs3 repository at `data/app-store.json`, ships embedded in the binary so that a fresh install starts with a full list, and refreshes from the repository once a day. The **Refresh catalog** button of the page downloads the current catalog at once. The API reads it at `GET /api/store` and refreshes it with `POST /api/store/refresh`.
+The App Store lists the apps that r3v3rs3 can install in one click. The catalog lives in the r3v3rs3 repository at `data/app-store.json`, ships embedded in the binary so that a fresh install starts with a full list, and refreshes from the repository once a day. The **Refresh catalog** button of the page downloads the current catalog at once. The API reads it at `GET /api/store` and refreshes it with `POST /api/store/refresh`.
 
-Every entry carries the image and the port of the app. **Install** opens the app form with those fields filled in; choose the target, the domains and the ports, then create the app. The first deployment starts as soon as the app is created.
+An **image entry** carries the image and the port of the app. **Install** opens the app form with those fields filled in; choose the target, the domains and the ports, then create the app. The first deployment starts as soon as the app is created.
 
-The catalog lists single-container apps only: an app that needs its own database or a second container is a Compose app, and the App Store does not list those.
+A **Compose entry** points at a Compose file that the r3v3rs3 repository itself holds, so an app that needs its own database installs in one click too. The form opens in the Compose mode, and the entry lists the **Variables** that the app needs, such as a database password: fill them in the form, and they go into the environment of the app before its first deployment. A Compose app deploys with a plain `docker compose` run, so it has no blue-green switch and rolls back by deploying an earlier commit.
+
+The catalog holds no other Compose source: an entry that installs your own Compose file belongs on the [Apps](#apps) page, not in the catalog.
 
 ### Git Source
 
@@ -366,7 +368,7 @@ The page reads the apps again every 2 seconds while a deployment is unfinished, 
 
 ### App Store
 
-The **App Store** page lists the catalog of the image apps that install in one click, see [App Store](#app-store). **Install** opens the app form with the image and the port of the entry filled in, and creating the app starts its first deployment. **Refresh catalog** downloads the current catalog from the repository at once.
+The **App Store** page lists the catalog of the apps that install in one click, see [App Store](#app-store). **Install** opens the app form with the fields of the entry filled in; a Compose entry also lists its **Variables**, and creating the app saves them and starts the first deployment. **Refresh catalog** downloads the current catalog from the repository at once.
 
 ### Add and Change an App
 
