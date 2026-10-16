@@ -29,7 +29,7 @@ Script bir soru sorar:
 Kurulumun son adımı `admin` hesabını oluşturur. `--password` verilmezse script güçlü rastgele bir parola üretir ve bir kez basar:
 
 ```
-r3v3rs3 v1.8.7 is running.
+r3v3rs3 v1.8.8 is running.
 
   WebUI:    http://127.0.0.1:46492/
   Binary:   /usr/local/bin/r3v3rs3
@@ -57,7 +57,7 @@ Tüm seçenekler soru sormadan kurmak için de çalışır:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
-    | sudo bash -s -- --version 1.8.7 --webui 0.0.0.0:46492
+    | sudo bash -s -- --version 1.8.8 --webui 0.0.0.0:46492
 ```
 
 ## Adım 2: Servisi kontrol edin
@@ -123,7 +123,7 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
 - WebUI sorusunda varsayılan olarak kurulu servisin adresini sunar, yani Enter adresi korur.
 - Servisi yeniden başlatır ve WebUI yanıt verene kadar bekler. WebUI 30 saniye sessiz kalırsa `systemctl status` çıktısını ve son 50 journal satırını yazar, sonra durur.
 
-Bir filoyu adım adım yükseltirken sürümü `--version 1.8.7` ile sabitleyin.
+Bir filoyu adım adım yükseltirken sürümü `--version 1.8.8` ile sabitleyin.
 
 ## Kaldırma
 
