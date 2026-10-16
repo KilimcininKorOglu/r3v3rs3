@@ -393,6 +393,10 @@ Deployment geçmişi son 100 deployment'ı durumu, **Tetikleyen** (**Elle**, **W
 
 Log sayfası çalışan container'ın stdout ve stderr çıktısının son 200 satırını gösterir ve 10 saniyede bir yeniden okur. **Yenile** satırları hemen okur. Çalışan container'ı olmayan uygulamada "Uygulamanın çalışan container'ı yok." mesajı görünür.
 
+### Terminal
+
+Admin hesap, uygulama sayfasında bir **Terminal** linki görür. Link, çalışan container içinde bir shell açar; komutlar container içinde çalışır ve pencerenin boyut değişikliği container terminalinin boyutunu da değiştirir. Terminal yalnız uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir; agent hedefindeki bir uygulamanın henüz terminali yoktur. Bir hesabın açtığı her terminal audit log'una `exec_app` olarak geçer.
+
 ### Hedefler
 
 **Hedefler** sayfası yerel hedefi ve agent hedeflerini **Tür**, **Durum** (**Bağlı**, **Bağlı değil** veya **Kayıt bekliyor**), **Son görülme** ve agent'ın **Sürüm** bilgisiyle listeler. Sayfa listeyi 10 saniyede bir yeniden okur. Uygulama formundaki **Hedef** seçimi her hedefin adının yanında durumunu gösterir.
@@ -429,6 +433,7 @@ Admin hesabı ayrıca şunları görür:
 | `GET /api/apps/{id}/deployments` | Read | Bir uygulamanın son 100 deployment'ı. |
 | `GET /api/apps/{id}/logs?tail=200` | Read | Çalışan deployment'ın container log'unun son satırları, 1 ile 1000 satır arası. Uygulamanın çalışan deployment'ı yoksa `running` değeri `false` olur. |
 | `POST /api/apps/{id}/deploy` | Edit | Bir deployment başlatır. |
+| `GET /api/apps/{id}/terminal` | Admin | Bağlantıyı çalışan container'ın WebSocket terminaline çevirir. |
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
 | `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |
 | `GET /api/git/connections` | Edit | Secret'lar ve token'lar olmadan Git sağlayıcı bağlantıları. |
