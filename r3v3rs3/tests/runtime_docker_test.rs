@@ -341,3 +341,74 @@ async fn a_missing_image_fails_the_pull() -> anyhow::Result<()> {
     assert!(runtime.inspect_image(&image).await?.is_none());
     Ok(())
 }
+
+/// Redis stays up and carries a shell, so the exec session can run a command in it.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn an_exec_session_runs_a_command() -> anyhow::Result<()> {
+    let runtime = runtime()?;
+    let names = Names::new()?;
+    let image: ImageRef = "redis:8-alpine".parse()?;
+    runtime.ensure_network(&names.network, &names.app).await?;
+    let spec = ContainerSpec {
+        name: names.container.clone(),
+        image: image.clone(),
+        env: Vec::new(),
+        labels: BTreeMap::from([(APP_LABEL.to_string(), names.app.to_string())]),
+        network: Some(names.network.clone()),
+        volumes: Vec::new(),
+        restart: RestartPolicy::No,
+        limits: ResourceLimits {
+            memory_bytes: Some(64 << 20),
+            nano_cpus: Some(500_000_000),
+        },
+        publish: None,
+    };
+    runtime.pull_image(&image).await?;
+    runtime.create_container(&spec).await?;
+    runtime.start_container(&names.container).await?;
+
+    let result = exec_echo(&runtime, &names).await;
+    let container = runtime.remove_container(&names.container).await;
+    let network = runtime.remove_network(&names.network).await;
+    result?;
+    container?;
+    network?;
+    Ok(())
+}
+
+/// Opens a terminal in the container, runs `echo` through it and reads the answer back.
+async fn exec_echo(runtime: &DockerRuntime, names: &Names) -> anyhow::Result<()> {
+    use tokio::io::{AsyncRead, AsyncWrite};
+    let mut handle = runtime.exec(&names.container, 80, 24).await?;
+    handle.stream.write_all(b"echo r3v3rs3-exec-ok\n").await?;
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 512];
+    let read = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let size = handle.stream.read(&mut chunk).await?;
+            buffer.extend_from_slice(&chunk[..size]);
+            if window_contains(&buffer, b"r3v3rs3-exec-ok") {
+                return Ok::<_, std::io::Error>(());
+            }
+        }
+    })
+    .await;
+    let resized = handle.resize(120, 40).await;
+    read??;
+    resized?;
+    // The stream types satisfy the bounds that the terminal bridge needs.
+    fn bounds<T: AsyncRead + AsyncWrite + Unpin + Send>(_: &T) {}
+    bounds(&handle.stream);
+    ensure!(
+        window_contains(&buffer, b"r3v3rs3-exec-ok"),
+        "the exec output has no answer: {:?}",
+        String::from_utf8_lossy(&buffer)
+    );
+    Ok(())
+}
+
+/// A search that tolerates the prompt and the echo of the typed line around the answer.
+fn window_contains(data: &[u8], needle: &[u8]) -> bool {
+    data.windows(needle.len()).any(|window| window == needle)
+}

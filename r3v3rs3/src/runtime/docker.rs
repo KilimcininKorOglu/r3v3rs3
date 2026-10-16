@@ -121,6 +121,73 @@ impl DockerRuntime {
             .await?;
         Ok(found.filter(|network| network.name == name.as_str()))
     }
+
+    /// Opens an interactive shell in the container with exactly this name. The stream carries
+    /// the raw output of a TTY session, so it needs no frame demux.
+    pub async fn exec(
+        &self,
+        name: &ContainerName,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<ExecHandle> {
+        let Some(container) = self.find_container(name).await? else {
+            bail!("the container {name} is not running");
+        };
+        let response = self
+            .send(
+                Method::POST,
+                &format!("/containers/{}/exec", container.id),
+                Some(&json!({
+                    "AttachStdin": true,
+                    "AttachStdout": true,
+                    "AttachStderr": true,
+                    "Tty": true,
+                    "Cmd": ["/bin/sh"],
+                    "Env": ["TERM=xterm-256color"],
+                })),
+                &[],
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let exec: ExecCreateResponse = read_json(response).await?;
+        let path = format!("/exec/{}/start", exec.id);
+        let builder = self.client.builder(Method::POST, &path);
+        let request = builder
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::new(Bytes::from_static(b"{\"Detach\":false,\"Tty\":true}")))?;
+        let stream = self.client.send_upgrade(request).await?;
+        let handle = ExecHandle {
+            stream,
+            id: exec.id,
+            client: self.client.clone(),
+        };
+        handle.resize(cols, rows).await?;
+        Ok(handle)
+    }
+}
+
+/// An open exec session of a container.
+pub struct ExecHandle {
+    /// The duplex stream of the session: stdin and the raw TTY output.
+    pub stream: crate::kv::http::UpgradedStream,
+    client: ApiClient,
+    id: String,
+}
+
+impl ExecHandle {
+    /// Resizes the TTY of the open session.
+    pub async fn resize(&self, cols: u16, rows: u16) -> anyhow::Result<()> {
+        let path = format!("/exec/{}/resize?h={rows}&w={cols}", self.id);
+        let request = self
+            .client
+            .builder(Method::POST, &path)
+            .body(Full::new(Bytes::new()))?;
+        // A resize of a session that just ended answers 404, which is fine.
+        self.client
+            .send_with(request, RESPONSE_TIMEOUT, &[StatusCode::NOT_FOUND])
+            .await?;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -544,6 +611,12 @@ struct InspectContainer {
     config: Option<InspectConfig>,
     #[serde(default)]
     network_settings: Option<InspectNetworkSettings>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ExecCreateResponse {
+    id: String,
 }
 
 #[derive(Deserialize)]

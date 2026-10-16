@@ -12,10 +12,12 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use r3v3rs3_api::discovery::Endpoint;
 use serde::de::DeserializeOwned;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite};
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::ClientConfig;
@@ -27,6 +29,63 @@ pub const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY_SIZE: usize = 32 * 1024 * 1024;
 const MAX_LINE_SIZE: usize = 1024 * 1024;
 const MAX_ERROR_TEXT: usize = 200;
+/// The largest head of an upgraded response.
+const MAX_HEADER_SIZE: usize = 8 * 1024;
+
+/// The end of the response headers of an upgraded connection.
+fn window(data: &[u8]) -> &[u8] {
+    data.windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map_or(&[], |index| &data[..index + 4])
+}
+
+fn window_ends(data: &[u8]) -> bool {
+    !window(data).is_empty()
+}
+
+/// The duplex stream of an upgraded connection.
+pub(crate) type UpgradedStream = PrefixedIo;
+
+/// A stream that replays the bytes that the header read already consumed before the rest.
+pub struct PrefixedIo {
+    prefix: Bytes,
+    io: Box<dyn Io>,
+}
+
+impl AsyncRead for PrefixedIo {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        if self.prefix.is_empty() {
+            Pin::new(&mut self.io).poll_read(cx, buf)
+        } else {
+            let size = self.prefix.len().min(buf.remaining());
+            let data = self.prefix.split_to(size);
+            buf.put_slice(&data);
+            Poll::Ready(Ok(()))
+        }
+    }
+}
+
+impl AsyncWrite for PrefixedIo {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.io).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.io).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.io).poll_shutdown(cx)
+    }
+}
 
 trait Io: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
 
@@ -70,6 +129,55 @@ impl ApiClient {
     /// success. The body is not read, so a stream can stay open.
     pub async fn send(&self, request: Request<Full<Bytes>>) -> anyhow::Result<Response<Incoming>> {
         self.send_with(request, RESPONSE_TIMEOUT, &[]).await
+    }
+
+    /// Sends a request that switches the connection to a raw duplex stream, like the Docker
+    /// exec hijack. The request goes over its own connection without hyper, the `101` response
+    /// headers are read by hand, and the rest of the stream is returned.
+    pub async fn send_upgrade(&self, request: Request<Full<Bytes>>) -> anyhow::Result<UpgradedStream> {
+        let (mut io, endpoint) = self.connect().await?;
+        let method = request.method().clone();
+        let path = request.uri().path().to_string();
+        let body = request.into_body().into_inner().unwrap_or_default();
+        let head = format!(
+            "{} {} HTTP/1.1\r\nhost: {}\r\nuser-agent: {}\r\nconnection: Upgrade\r\nupgrade: tcp\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n",
+            method,
+            path,
+            host_header(endpoint),
+            concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")),
+            body.len(),
+        );
+        let mut wire = head.into_bytes();
+        wire.extend_from_slice(&body);
+        io.write_all(&wire).await?;
+        io.flush().await?;
+
+        let mut buffered = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            if window_ends(&buffered) {
+                break;
+            }
+            let size = tokio::time::timeout(RESPONSE_TIMEOUT, io.read(&mut chunk)).await??;
+            if size == 0 {
+                bail!("the connection closed before the upgrade");
+            }
+            buffered.extend_from_slice(&chunk[..size]);
+            if buffered.len() > MAX_HEADER_SIZE {
+                bail!("the response headers are too large");
+            }
+        }
+        let split = window(&buffered)
+            .len();
+        let head = String::from_utf8_lossy(&buffered[..split]);
+        let status = head.lines().next().unwrap_or_default();
+        if !status.contains(" 101 ") {
+            bail!("the connection was not upgraded: {}", status.trim());
+        }
+        Ok(PrefixedIo {
+            prefix: Bytes::copy_from_slice(&buffered[split..]),
+            io,
+        })
     }
 
     /// Sends the request and waits for the response headers up to `timeout`. A status in
