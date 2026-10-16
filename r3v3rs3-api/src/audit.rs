@@ -56,6 +56,8 @@ pub enum AuditAction {
     RollbackApp,
     /// An account opened a terminal into the container of an app.
     ExecApp,
+    /// An account uploaded or deleted a file of an app.
+    AppFile,
     SetAppGitToken,
     DeleteAppGitToken,
     AddTarget,
@@ -80,7 +82,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 48] = [
+    pub const ALL: [AuditAction; 49] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -113,6 +115,7 @@ impl AuditAction {
         Self::DeployApp,
         Self::RollbackApp,
         Self::ExecApp,
+        Self::AppFile,
         Self::SetAppGitToken,
         Self::DeleteAppGitToken,
         Self::AddTarget,

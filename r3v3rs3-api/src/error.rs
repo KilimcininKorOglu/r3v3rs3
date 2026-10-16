@@ -131,6 +131,12 @@ pub enum Error {
     #[error("the app has no running deployment: {name}")]
     AppNotRunning { name: String },
 
+    #[error("the path is not inside a volume of the app: {path}")]
+    InvalidFilePath { path: String },
+
+    #[error("the volume is read-only: {path}")]
+    VolumeReadOnly { path: String },
+
     #[error("the enrollment token is invalid or was used already")]
     InvalidEnrollmentToken,
 

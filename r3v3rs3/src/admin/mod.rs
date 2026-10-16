@@ -49,6 +49,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 mod access_lists;
 mod accounts;
+mod app_files;
 mod acme;
 mod app_info;
 mod audit;
@@ -347,7 +348,10 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(platform::list_deployments))
                 .routes(routes!(platform::get_logs))
                 .routes(routes!(platform::deploy_app))
-                .routes(routes!(platform::terminal)),
+                .routes(routes!(platform::terminal))
+                .routes(routes!(app_files::list))
+                .routes(routes!(app_files::download))
+                .routes(routes!(app_files::upload, app_files::delete)),
         )
         .nest(
             "/deployments",

@@ -81,4 +81,38 @@ pub trait ContainerRuntime: Send + Sync {
         let _ = (name, cols, rows);
         anyhow::bail!("the runtime does not support a terminal");
     }
+
+    /// The entries of a directory inside the container. Like `exec`, only the local runtime
+    /// carries the files of a container.
+    async fn list_dir(
+        &self,
+        name: &ContainerName,
+        path: &str,
+    ) -> anyhow::Result<Vec<r3v3rs3_api::platform::FileEntry>> {
+        let _ = (name, path);
+        anyhow::bail!("the runtime does not carry the files of a container");
+    }
+
+    /// The content of a file inside the container.
+    async fn download_file(&self, name: &ContainerName, path: &str) -> anyhow::Result<Vec<u8>> {
+        let _ = (name, path);
+        anyhow::bail!("the runtime does not carry the files of a container");
+    }
+
+    /// Writes a file inside the container.
+    async fn upload_file(
+        &self,
+        name: &ContainerName,
+        path: &str,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        let _ = (name, path, bytes);
+        anyhow::bail!("the runtime does not carry the files of a container");
+    }
+
+    /// Removes a file or a directory inside the container.
+    async fn remove_path(&self, name: &ContainerName, path: &str) -> anyhow::Result<()> {
+        let _ = (name, path);
+        anyhow::bail!("the runtime does not carry the files of a container");
+    }
 }

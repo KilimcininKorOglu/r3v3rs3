@@ -195,6 +195,8 @@ mod tests {
             Error::FailedToRefreshAppStore,
             Error::TerminalUnsupported,
             Error::AppNotRunning { name: text() },
+            Error::InvalidFilePath { path: text() },
+            Error::VolumeReadOnly { path: text() },
             Error::NoNewRelease,
             Error::UpgradeFailed,
             Error::FailedToBuildDnsResolver { reason: text() },

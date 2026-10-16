@@ -37,6 +37,7 @@ use crate::keys::key_file::{load_keys, write_new_key_file};
 use crate::kv::http::ApiClient;
 use crate::runtime::ContainerRuntime;
 use crate::runtime::docker::{DockerRuntime, ExecHandle};
+use r3v3rs3_api::container::ContainerName;
 use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::discovery::Endpoint;
@@ -45,7 +46,8 @@ use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::git_connection::PublicUrl;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, LOCAL_TARGET, PlatformConfig,
+    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, FileEntry, LOCAL_TARGET,
+    PlatformConfig,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashSet};
@@ -499,6 +501,56 @@ impl Platform {
         let name = proxy::container_name(id, deployment)?;
         let exec = self.local.exec(&name, cols, rows).await?;
         Ok((name.to_string(), exec))
+    }
+
+    /// The files of the running deployment of an app, over the archive API. Only the local
+    /// target carries them; an agent target answers `terminal_unsupported`.
+    async fn file_runtime(
+        &self,
+        id: ShortId,
+    ) -> anyhow::Result<(AppEntry, ContainerName, Arc<dyn ContainerRuntime>)> {
+        let app = self.app(id).await?;
+        if !is_local(app.target) {
+            return Err(Error::TerminalUnsupported.into());
+        }
+        let Some(deployment) = self.store.running_deployment(id).await? else {
+            return Err(Error::AppNotRunning {
+                name: app.name.to_string(),
+            }
+            .into());
+        };
+        let name = proxy::container_name(id, deployment)?;
+        let runtime = self.runtime(app.target);
+        Ok((app, name, runtime))
+    }
+
+    /// The entries of a directory inside the container of the running deployment.
+    pub async fn list_files(&self, id: ShortId, path: &str) -> anyhow::Result<Vec<FileEntry>> {
+        let (_, name, runtime) = self.file_runtime(id).await?;
+        runtime.list_dir(&name, path).await
+    }
+
+    /// The content of a file inside the container of the running deployment.
+    pub async fn download_file(&self, id: ShortId, path: &str) -> anyhow::Result<Vec<u8>> {
+        let (_, name, runtime) = self.file_runtime(id).await?;
+        runtime.download_file(&name, path).await
+    }
+
+    /// Writes a file inside the container of the running deployment.
+    pub async fn upload_file(
+        &self,
+        id: ShortId,
+        path: &str,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        let (_, name, runtime) = self.file_runtime(id).await?;
+        runtime.upload_file(&name, path, bytes).await
+    }
+
+    /// Removes a file or a directory inside the container of the running deployment.
+    pub async fn delete_path(&self, id: ShortId, path: &str) -> anyhow::Result<()> {
+        let (_, name, runtime) = self.file_runtime(id).await?;
+        runtime.remove_path(&name, path).await
     }
 
     pub async fn deployment(&self, id: ShortId) -> anyhow::Result<DeploymentEntry> {
