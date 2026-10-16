@@ -86,7 +86,7 @@ The documentation is available in [English](https://r3v3rs3.keremgok.tr/) and [T
 
 ## Installation
 
-r3v3rs3 runs on Linux. Release binaries and Docker images are available for x86_64 (amd64) and aarch64 (arm64).
+r3v3rs3 runs on Linux. Release binaries are available for x86_64 (amd64) and aarch64 (arm64).
 
 ### Linux server
 
