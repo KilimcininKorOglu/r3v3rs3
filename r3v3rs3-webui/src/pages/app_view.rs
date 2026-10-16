@@ -199,6 +199,9 @@ fn edit_extras(
                 <Link<Route> to={Route::AppTerminal { id: entry.id }} classes="text-sm text-neutral-400 hover:text-neutral-200">
                     {locale.t("apps.terminal")}
                 </Link<Route>>
+                <Link<Route> to={Route::AppFiles { id: entry.id }} classes="text-sm text-neutral-400 hover:text-neutral-200">
+                    {locale.t("apps.files")}
+                </Link<Route>>
                 <a class={DANGER_LINK_CLASS} onclick={delete}>{locale.t("apps.delete")}</a>
             </div>
         </>

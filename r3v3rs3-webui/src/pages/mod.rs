@@ -7,6 +7,7 @@ mod access_lists;
 mod accounts;
 mod app_deployments;
 mod app_env;
+mod app_files;
 mod app_form;
 mod app_git_token;
 mod app_list;
@@ -99,6 +100,8 @@ pub enum Route {
     AppLog { id: ShortId },
     #[at("/apps/:id/terminal")]
     AppTerminal { id: ShortId },
+    #[at("/apps/:id/files")]
+    AppFiles { id: ShortId },
     #[at("/targets")]
     Targets,
     #[at("/git_connections")]
@@ -141,7 +144,8 @@ impl Route {
             | Route::AppView { .. }
             | Route::AppDeployments { .. }
             | Route::AppLog { .. }
-            | Route::AppTerminal { .. } => Some(Route::Apps),
+            | Route::AppTerminal { .. }
+            | Route::AppFiles { .. } => Some(Route::Apps),
             Route::AccessLists
             | Route::Targets
             | Route::GitConnections
@@ -177,6 +181,7 @@ pub fn switch(routes: Route) -> Html {
         Route::AppDeployments { id } => html! { <app_deployments::AppDeployments {id} /> },
         Route::AppLog { id } => html! { <app_log::AppLogView {id} /> },
         Route::AppTerminal { id } => html! { <app_terminal::AppTerminal {id} /> },
+        Route::AppFiles { id } => html! { <app_files::AppFiles {id} /> },
         Route::Targets => html! { <targets::Targets /> },
         Route::GitConnections => html! { <git_connections::GitConnections /> },
         Route::Certs => {
