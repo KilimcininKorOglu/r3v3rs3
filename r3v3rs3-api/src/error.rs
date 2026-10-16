@@ -125,6 +125,12 @@ pub enum Error {
     #[error("the deployment has no image to roll back to: {id}")]
     RollbackUnavailable { id: ShortId },
 
+    #[error("the target of the app does not support a terminal")]
+    TerminalUnsupported,
+
+    #[error("the app has no running deployment: {name}")]
+    AppNotRunning { name: String },
+
     #[error("the enrollment token is invalid or was used already")]
     InvalidEnrollmentToken,
 
@@ -402,7 +408,9 @@ pub enum Error {
 impl Error {
     pub fn status_code(&self) -> u16 {
         match self {
-            Self::IdNotFound { .. } | Self::AccountNotFound { .. } => 404,
+            Self::IdNotFound { .. } | Self::AccountNotFound { .. } | Self::AppNotRunning { .. } => {
+                404
+            }
             Self::Unauthorized => 401,
             Self::Forbidden
             | Self::ProxyReadOnly { .. }

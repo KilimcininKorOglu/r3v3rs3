@@ -7,10 +7,15 @@ use crate::accounts::{Caller, Permission};
 use crate::audit::AuditRecord;
 use crate::clock::unix_ms;
 use crate::platform::{DEFAULT_LOG_TAIL, Platform};
+use crate::runtime::docker::ExecHandle;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
+    response::Response,
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
 };
+use bytes::Bytes;
+use futures::{SinkExt, StreamExt};
 use r3v3rs3_api::{
     audit::AuditAction,
     error::Error,
@@ -20,7 +25,10 @@ use r3v3rs3_api::{
         GitTokenRequest, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
     },
 };
+use serde_derive::Deserialize;
+use utoipa::IntoParams;
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::error;
 
 impl AppState {
@@ -543,6 +551,121 @@ pub async fn deploy_app(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(deployment))
+}
+
+/// Opens a WebSocket terminal into the running container of an app. Binary frames carry the
+/// terminal data both ways, and a text frame with `{"cols":N,"rows":N}` resizes the terminal.
+#[utoipa::path(
+    get,
+    path = "/{id}/terminal",
+    tag = "platform",
+    operation_id = "open_app_terminal",
+    params(
+        ("id" = ShortId, Path, description = "App id."),
+        TerminalQuery
+    ),
+    responses((status = 101, description = "The terminal stream of the container."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn terminal(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Query(query): Query<TerminalQuery>,
+    ws: WebSocketUpgrade,
+) -> Result<Response, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let (container, exec) = platform
+        .app_terminal(id, query.cols(), query.rows())
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::ExecApp)
+        .id(id)
+        .summary(container);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(ws.on_upgrade(move |socket| terminal_bridge(socket, exec)))
+}
+
+/// The size of the terminal that the page opens.
+#[derive(Debug, Clone, Copy, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct TerminalQuery {
+    /// The columns of the terminal. The default is 80.
+    pub cols: Option<u16>,
+    /// The rows of the terminal. The default is 24.
+    pub rows: Option<u16>,
+}
+
+impl TerminalQuery {
+    fn cols(&self) -> u16 {
+        self.cols.unwrap_or(80).clamp(2, 500)
+    }
+
+    fn rows(&self) -> u16 {
+        self.rows.unwrap_or(24).clamp(2, 200)
+    }
+}
+
+/// Bridges a WebSocket and the exec stream of a terminal until either side closes.
+async fn terminal_bridge(socket: WebSocket, exec: ExecHandle) {
+    let ExecHandle { stream, client, id } = exec;
+    let (mut sink, mut ws_stream) = socket.split();
+    let (mut reader, mut writer) = tokio::io::split(stream);
+    let read = async {
+        let mut chunk = [0u8; 8192];
+        loop {
+            let size = reader.read(&mut chunk).await?;
+            if size == 0 {
+                break;
+            }
+            if sink
+                .send(Message::Binary(Bytes::copy_from_slice(&chunk[..size])))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+        anyhow::Ok(())
+    };
+    let write = async {
+        while let Some(message) = ws_stream.next().await {
+            match message? {
+                Message::Binary(data) => writer.write_all(&data).await?,
+                Message::Text(text) => {
+                    if let Ok(size) = serde_json::from_str::<TerminalSize>(&text) {
+                        crate::runtime::docker::resize_exec(&client, &id, size.cols(), size.rows())
+                            .await?;
+                    }
+                }
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+        anyhow::Ok::<()>(())
+    };
+    tokio::select! {
+        _ = read => {}
+        _ = write => {}
+    }
+}
+
+/// The resize message of the terminal page.
+#[derive(Deserialize)]
+struct TerminalSize {
+    cols: u16,
+    rows: u16,
+}
+
+impl TerminalSize {
+    fn cols(&self) -> u16 {
+        self.cols.clamp(2, 500)
+    }
+
+    fn rows(&self) -> u16 {
+        self.rows.clamp(2, 200)
+    }
 }
 
 /// Returns a deployment.

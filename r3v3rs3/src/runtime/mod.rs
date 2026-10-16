@@ -69,4 +69,16 @@ pub trait ContainerRuntime: Send + Sync {
 
     /// The last `tail` lines of the standard output and the standard error of a container.
     async fn logs(&self, name: &ContainerName, tail: u32) -> anyhow::Result<String>;
+
+    /// Opens an interactive shell in the container. Only the local runtime carries one; an
+    /// agent target answers an error until the terminal travels its own link.
+    async fn exec(
+        &self,
+        name: &ContainerName,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<docker::ExecHandle> {
+        let _ = (name, cols, rows);
+        anyhow::bail!("the runtime does not support a terminal");
+    }
 }

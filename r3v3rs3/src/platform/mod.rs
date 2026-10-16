@@ -36,7 +36,7 @@ use crate::keys::crypto::ClusterKeys;
 use crate::keys::key_file::{load_keys, write_new_key_file};
 use crate::kv::http::ApiClient;
 use crate::runtime::ContainerRuntime;
-use crate::runtime::docker::DockerRuntime;
+use crate::runtime::docker::{DockerRuntime, ExecHandle};
 use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::discovery::Endpoint;
@@ -476,6 +476,29 @@ impl Platform {
         let runtime = self.runtime(app.target);
         let log = runtime.logs(&name, tail.clamp(1, MAX_LOG_TAIL)).await?;
         Ok(AppLog { log, running: true })
+    }
+
+    /// Opens a terminal into the container of the running deployment of an app. Only the local
+    /// target carries a terminal; an agent target answers `terminal_unsupported`.
+    pub async fn app_terminal(
+        &self,
+        id: ShortId,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<(String, ExecHandle)> {
+        let app = self.app(id).await?;
+        if !is_local(app.target) {
+            return Err(Error::TerminalUnsupported.into());
+        }
+        let Some(deployment) = self.store.running_deployment(id).await? else {
+            return Err(Error::AppNotRunning {
+                name: app.name.to_string(),
+            }
+            .into());
+        };
+        let name = proxy::container_name(id, deployment)?;
+        let exec = self.local.exec(&name, cols, rows).await?;
+        Ok((name.to_string(), exec))
     }
 
     pub async fn deployment(&self, id: ShortId) -> anyhow::Result<DeploymentEntry> {
