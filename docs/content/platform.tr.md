@@ -397,6 +397,10 @@ Log sayfası çalışan container'ın stdout ve stderr çıktısının son 200 s
 
 Admin hesap, uygulama sayfasında bir **Terminal** linki görür. Link, çalışan container içinde bir shell açar; komutlar container içinde çalışır ve pencerenin boyut değişikliği container terminalinin boyutunu da değiştirir. Terminal yalnız uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir; agent hedefindeki bir uygulamanın henüz terminali yoktur. Bir hesabın açtığı her terminal audit log'una `exec_app` olarak geçer.
 
+### Dosyalar
+
+Admin hesap, uygulama sayfasında bir **Dosyalar** linki de görür. Link, çalışan container'ın volume'lerindeki dosyaları açar. Sayfa bir volume seçer, dizinlerini listeler ve **Görüntüle** ile bir dizini açar. Bir dosya satırı **İndir**, **Düzenle** ve **Sil** sunar; **Düzenle** 1 MB'a kadar bir dosyayı metin olarak açar ve **Kaydet** geri yazar. Sayfanın üst barı geçerli dizine bir dosya yükler ve bir üst dizine çıkar. Yazma işlemleri read-only olmayan bir volume içinde kalır; sayfa read-only bir volume için yükleme, düzenleme ve silme butonlarını göstermez. Terminal gibi dosyalar da yalnız uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir. Her yazma ve silme işlemi audit log'una `app_file` olarak geçer.
+
 ### Hedefler
 
 **Hedefler** sayfası yerel hedefi ve agent hedeflerini **Tür**, **Durum** (**Bağlı**, **Bağlı değil** veya **Kayıt bekliyor**), **Son görülme** ve agent'ın **Sürüm** bilgisiyle listeler. Sayfa listeyi 10 saniyede bir yeniden okur. Uygulama formundaki **Hedef** seçimi her hedefin adının yanında durumunu gösterir.
@@ -434,6 +438,10 @@ Admin hesabı ayrıca şunları görür:
 | `GET /api/apps/{id}/logs?tail=200` | Read | Çalışan deployment'ın container log'unun son satırları, 1 ile 1000 satır arası. Uygulamanın çalışan deployment'ı yoksa `running` değeri `false` olur. |
 | `POST /api/apps/{id}/deploy` | Edit | Bir deployment başlatır. |
 | `GET /api/apps/{id}/terminal` | Admin | Bağlantıyı çalışan container'ın WebSocket terminaline çevirir. |
+| `GET /api/apps/{id}/files?path=` | Admin | Çalışan container'ın bir volume'ündeki dizinin girdilerini döndürür. |
+| `GET /api/apps/{id}/files/download?path=` | Admin | Bir volume içindeki dosyanın içeriğini döndürür. |
+| `PUT /api/apps/{id}/files?path=` | Admin | İstek gövdesini yazılabilir bir volume içindeki dosyaya yazar. |
+| `DELETE /api/apps/{id}/files?path=` | Admin | Yazılabilir bir volume içindeki dosyayı veya dizini siler. |
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
 | `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |
 | `GET /api/git/connections` | Edit | Secret'lar ve token'lar olmadan Git sağlayıcı bağlantıları. |

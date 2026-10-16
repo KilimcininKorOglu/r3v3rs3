@@ -63,6 +63,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 - An App Store that installs a catalog app, image or Compose, in one click, refreshed daily from the repository
 - Blue-green deployments that switch the proxy only after the new container passes its health check, and rollback to an earlier deployment
 - A web terminal into the running container of an app, for admins, over a WebSocket from the panel
+- A file manager for the volumes of an app in the panel, for admins: list, download, upload, edit and delete
 - r3v3rs3 routes the domains of the apps itself and orders their certificates through ACME
 - Encrypted environment variables, the deployments and the container log of every app in the WebUI and the admin API
 - Git provider connections: a GitHub App that r3v3rs3 creates from a manifest, also on GitHub Enterprise Server, and OAuth apps for GitLab and Gitea. A connection lists the repositories and branches, clones private repositories and installs the push webhook

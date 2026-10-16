@@ -397,6 +397,10 @@ The log page shows the last 200 lines of stdout and stderr of the running contai
 
 An admin account sees a **Terminal** link on the page of an app. It opens a shell in the running container, so commands run inside it, and a resize of the window resizes the terminal of the container. The terminal works only while the app runs on the local Docker Engine of the r3v3rs3 server; an app on an agent target has no terminal yet. Every terminal that an account opens goes into the audit log as `exec_app`.
 
+### Files
+
+An admin account also sees a **Files** link on the page of an app. It opens the files of the volumes of the running container. The page selects a volume, lists its directories, and opens a directory on **View**. A file row offers **Download**, **Edit** and **Delete**; **Edit** opens a file up to 1 MB as text, and **Save** writes it back. The toolbar of the page uploads a file into the current directory and steps one directory up. A write stays inside a volume that is not read-only, and the page hides the upload, the edit and the delete of a read-only volume. Like the terminal, the files work only while the app runs on the local Docker Engine of the r3v3rs3 server. Every write and delete goes into the audit log as `app_file`.
+
 ### Targets
 
 The **Targets** page lists the local target and the agent targets with their **Kind**, their **Status** (**Online**, **Offline** or **Waiting for enrollment**), **Last seen** and the **Version** of the agent. It reads the list again every 10 seconds. The **Target** select of the app form shows the status of each target next to its name.
@@ -436,6 +440,10 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 | `GET /api/apps/{id}/logs?tail=200` | Read | The last lines of the container log of the running deployment, from 1 to 1000 lines. `running` is `false` when the app has no running deployment. |
 | `POST /api/apps/{id}/deploy` | Edit | Starts a deployment. |
 | `GET /api/apps/{id}/terminal` | Admin | Switches the connection to a WebSocket terminal of the running container. |
+| `GET /api/apps/{id}/files?path=` | Admin | The entries of a directory inside a volume of the running container. |
+| `GET /api/apps/{id}/files/download?path=` | Admin | The content of a file inside a volume. |
+| `PUT /api/apps/{id}/files?path=` | Admin | Writes the request body into a file inside a writable volume. |
+| `DELETE /api/apps/{id}/files?path=` | Admin | Deletes a file or a directory inside a writable volume. |
 | `GET /api/deployments/{id}` | Read | Returns a deployment. |
 | `POST /api/deployments/{id}/rollback` | Edit | Repeats an earlier deployment. |
 | `GET /api/git/connections` | Edit | The Git provider connections, without secrets or tokens. |

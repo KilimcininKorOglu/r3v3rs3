@@ -63,6 +63,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - Katalogdaki bir uygulamayı, image veya Compose, tek tıkla kuran ve günde bir kez depodan yenilenen App Store.
 - Proxy'yi ancak yeni container sağlık kontrolünden geçince değiştiren blue-green deployment'lar ve önceki bir deployment'a geri alma.
 - Admin için, paneldeki WebSocket üzerinden uygulamanın çalışan container'ına web terminali.
+- Admin için, panelde uygulamanın volume'lerine dosya yöneticisi: listeleme, indirme, yükleme, düzenleme ve silme.
 - r3v3rs3 uygulamaların alan adlarını kendisi yönlendirir ve sertifikalarını ACME ile alır.
 - Şifreli ortam değişkenleri. Her uygulamanın deployment'ları ve container log'u WebUI'da ve yönetim API'sinde görünür.
 - Git sağlayıcı bağlantıları: r3v3rs3'ün bir manifest'ten oluşturduğu GitHub App (GitHub Enterprise Server'da da) ve GitLab ile Gitea için OAuth uygulamaları. Bağlantı repository'leri ve branch'leri listeler. Private repository'leri clone eder ve push webhook'unu kurar.
