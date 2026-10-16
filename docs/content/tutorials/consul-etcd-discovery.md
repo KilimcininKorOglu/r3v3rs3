@@ -210,5 +210,4 @@ The WebUI shows the proxy with its source and without the edit actions. To chang
 ## Next Steps
 
 - [Proxies from Docker](@/tutorials/docker-discovery.md): the same keys as container labels.
-- [r3v3rs3 on Kubernetes](@/tutorials/kubernetes.md): Ingress resources and the R3v3rs3Proxy resource.
 - [High Availability](@/tutorials/high-availability.md): the same Consul or etcd as the cluster store.

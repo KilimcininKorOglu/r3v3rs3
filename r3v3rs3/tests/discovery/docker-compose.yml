@@ -1,4 +1,4 @@
-# Consul, etcd and k3s for the ignored service discovery end-to-end tests.
+# Consul and etcd for the ignored service discovery end-to-end tests.
 # Run the tests with `make test-discovery-e2e`.
 name: r3v3rs3-discovery
 
@@ -32,19 +32,3 @@ services:
       test: ["CMD", "/usr/local/bin/etcdctl", "endpoint", "health"]
       interval: 2s
       retries: 30
-
-  k3s:
-    image: rancher/k3s:v1.32.8-k3s1
-    command: ["server", "--disable=traefik", "--disable=metrics-server", "--tls-san=127.0.0.1"]
-    privileged: true
-    tmpfs:
-      - /run
-      - /var/run
-    ports:
-      - "127.0.0.1:8482:6443"
-    volumes:
-      - ../../../deploy/kubernetes:/manifests:ro
-    healthcheck:
-      test: ["CMD", "kubectl", "get", "--raw=/readyz"]
-      interval: 2s
-      retries: 60

@@ -38,7 +38,7 @@ trunk serve
 - `make test` runs the tests of the server and the API types. CI runs `cargo nextest run --all-features --no-fail-fast`.
 - `make lint` runs clippy with `-D warnings`, and `make fmt-check` checks the formatting.
 - CI also checks that every function stays at or below a cyclomatic complexity of 10 with `lizard -l rust -C 10 -w r3v3rs3/src r3v3rs3-api/src r3v3rs3-webui/src`.
-- `make test-runtime-docker`, `make test-acme-pebble`, `make test-discovery-e2e` and `make test-cluster-e2e` run the ignored tests against a Docker Engine, Pebble, Consul, etcd and k3s.
+- `make test-runtime-docker`, `make test-acme-pebble` and `make test-discovery-e2e` run the ignored tests against a Docker Engine, Pebble, Consul and etcd.
 - `make check` runs the format check, clippy, the tests and the WebUI build.
 
 # Building for Release

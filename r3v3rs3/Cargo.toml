@@ -151,8 +151,6 @@ utoipa = "5.2.0"
 utoipa-axum = "0.2.0"
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "vendored"] }
 x509-parser = "0.18.1"
-kube = { version = "4.2.0", default-features = false, features = ["client", "rustls-tls", "aws-lc-rs", "runtime"] }
-k8s-openapi = { version = "0.28.0", features = ["v1_32"] }
 yamux = "0.14.1"
 
 [build-dependencies]
@@ -166,7 +164,6 @@ rmcp = { version = "3.5.1", features = [
     "client",
     "transport-streamable-http-client-reqwest",
 ] }
-serde-saphyr = "1.2.0"
 reqwest = { version = "0.13.5", default-features = false, features = [
     "rustls-no-provider",
     "form",

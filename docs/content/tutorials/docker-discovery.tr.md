@@ -151,6 +151,6 @@ r3v3rs3 proxy'nin `vhosts` değeri için sertifika ister. Kuralları [ACME serti
 
 ## Sonraki adımlar
 
-- [Servis keşfi](@/discovery.tr.md): bütün sağlayıcılar, bütün etiket key'leri ve Kubernetes, Consul, etcd kaynakları.
+- [Servis keşfi](@/discovery.tr.md): bütün sağlayıcılar, bütün etiket key'leri ve Consul, etcd kaynakları.
 - [Yapılandırma](@/configuration.tr.md): her proxy alanının ne yaptığı.
 - [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): tek bir durum bilgisini paylaşan birkaç düğüm.

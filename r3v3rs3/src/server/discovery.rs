@@ -11,7 +11,6 @@ use crate::proxy::tls::upstream_client_config;
 use hyper::header::HeaderValue;
 use r3v3rs3_api::discovery::{
     ConsulDiscoveryConfig, DiscoveryConfig, Endpoint, EtcdDiscoveryConfig,
-    KubernetesDiscoveryConfig,
 };
 use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryProvider, DiscoveryState, DiscoveryStatus};
 use r3v3rs3_api::error::Error;
@@ -251,7 +250,6 @@ pub fn validate_config(config: &DiscoveryConfig, certs: &CertList) -> Result<(),
             upstream_client_config(certs, client_cert)?;
         }
     }
-    validate_kubernetes(&config.kubernetes)?;
     validate_consul(&config.consul)?;
     validate_etcd(&config.etcd)
 }
@@ -259,7 +257,6 @@ pub fn validate_config(config: &DiscoveryConfig, certs: &CertList) -> Result<(),
 pub fn is_enabled(config: &DiscoveryConfig, provider: DiscoveryProvider) -> bool {
     match provider {
         DiscoveryProvider::Docker => config.docker.enabled,
-        DiscoveryProvider::Kubernetes => config.kubernetes.enabled,
         DiscoveryProvider::Consul => config.consul.enabled,
         DiscoveryProvider::Etcd => config.etcd.enabled,
         // The deployment platform sends its snapshots without a provider task.
@@ -297,20 +294,6 @@ fn check_rules(rules: &[(bool, &str)]) -> Result<(), Error> {
         }),
         None => Ok(()),
     }
-}
-
-fn validate_kubernetes(kubernetes: &KubernetesDiscoveryConfig) -> Result<(), Error> {
-    if !kubernetes.enabled {
-        return Ok(());
-    }
-    let empty_namespace = kubernetes.namespaces.iter().any(|ns| ns.trim().is_empty());
-    check_rules(&[
-        (
-            !kubernetes.ingress && !kubernetes.crd,
-            "Kubernetes needs the Ingress or the R3v3rs3Proxy resources",
-        ),
-        (empty_namespace, "a Kubernetes namespace is empty"),
-    ])
 }
 
 fn validate_etcd(etcd: &EtcdDiscoveryConfig) -> Result<(), Error> {
@@ -367,9 +350,6 @@ pub fn changed_providers(old: &DiscoveryConfig, new: &DiscoveryConfig) -> Vec<Di
     let mut changed = Vec::new();
     if old.docker != new.docker {
         changed.push(DiscoveryProvider::Docker);
-    }
-    if old.kubernetes != new.kubernetes {
-        changed.push(DiscoveryProvider::Kubernetes);
     }
     if old.consul != new.consul {
         changed.push(DiscoveryProvider::Consul);

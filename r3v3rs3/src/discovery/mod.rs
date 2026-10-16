@@ -5,7 +5,6 @@ pub mod consul;
 pub mod docker;
 pub mod etcd;
 pub mod ids;
-pub mod kubernetes;
 pub mod kv;
 pub mod labels;
 mod tree;
@@ -268,8 +267,7 @@ pub async fn run(provider: impl Watch) {
     }
 }
 
-/// Starts the task of a provider. A provider that reads an HTTP API needs `client`. The
-/// Kubernetes provider builds its own client.
+/// Starts the task of a provider. A provider that reads an HTTP API needs `client`.
 pub fn spawn(
     provider: DiscoveryProvider,
     config: &DiscoveryConfig,
@@ -279,9 +277,6 @@ pub fn spawn(
 ) -> JoinHandle<()> {
     let reporter = Reporter::new(provider, generation, command);
     match (provider, client) {
-        (DiscoveryProvider::Kubernetes, _) => {
-            tokio::spawn(run(kubernetes::Provider::new(&config.kubernetes, reporter)))
-        }
         (DiscoveryProvider::Docker, Some(client)) => {
             tokio::spawn(run(docker::Provider::new(&config.docker, client, reporter)))
         }

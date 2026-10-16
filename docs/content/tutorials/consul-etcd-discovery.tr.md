@@ -210,5 +210,4 @@ WebUI proxy'yi kaynağıyla birlikte ve düzenleme işlemleri olmadan gösterir.
 ## Sonraki adımlar
 
 - [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md): aynı key'ler container etiketi olarak.
-- [Kubernetes'te r3v3rs3](@/tutorials/kubernetes.tr.md): Ingress kaynakları ve R3v3rs3Proxy kaynağı.
 - [Yüksek erişilebilirlik](@/tutorials/high-availability.tr.md): cluster veri deposu olarak aynı Consul veya etcd.

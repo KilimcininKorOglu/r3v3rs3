@@ -9,7 +9,6 @@ use utoipa::ToSchema;
 #[serde(rename_all = "snake_case")]
 pub enum DiscoveryProvider {
     Docker,
-    Kubernetes,
     Consul,
     Etcd,
     /// The apps of the deployment platform.
@@ -19,9 +18,8 @@ pub enum DiscoveryProvider {
 impl DiscoveryProvider {
     /// The providers that the discovery settings configure. The deployment platform is not one of
     /// them, because it publishes its proxies itself.
-    pub const ALL: [DiscoveryProvider; 4] = [
+    pub const ALL: [DiscoveryProvider; 3] = [
         DiscoveryProvider::Docker,
-        DiscoveryProvider::Kubernetes,
         DiscoveryProvider::Consul,
         DiscoveryProvider::Etcd,
     ];
@@ -30,7 +28,6 @@ impl DiscoveryProvider {
     pub fn name(self) -> &'static str {
         match self {
             Self::Docker => "Docker",
-            Self::Kubernetes => "Kubernetes",
             Self::Consul => "Consul",
             Self::Etcd => "etcd",
             Self::Platform => "Platform",
@@ -98,8 +95,6 @@ pub struct DiscoveryConfig {
     #[serde(default)]
     pub docker: DockerDiscoveryConfig,
     #[serde(default)]
-    pub kubernetes: KubernetesDiscoveryConfig,
-    #[serde(default)]
     pub consul: ConsulDiscoveryConfig,
     #[serde(default)]
     pub etcd: EtcdDiscoveryConfig,
@@ -159,37 +154,6 @@ pub struct DockerDiscoveryConfig {
 
 fn default_docker_endpoint() -> String {
     "unix:///var/run/docker.sock".to_string()
-}
-
-#[derive(
-    Debug, serde_default::DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema,
-)]
-pub struct KubernetesDiscoveryConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    /// The kubeconfig file. Empty uses `KUBECONFIG` or `~/.kube/config`, then the service account
-    /// of the pod.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    #[schema(example = "/etc/r3v3rs3/kubeconfig")]
-    pub kubeconfig: String,
-    /// The namespaces to read. Empty reads every namespace.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub namespaces: Vec<String>,
-    /// Reads the Ingress resources.
-    #[serde(default = "default_true")]
-    pub ingress: bool,
-    /// Reads the `R3v3rs3Proxy` custom resources. The cluster needs the custom resource
-    /// definition.
-    #[serde(default)]
-    pub crd: bool,
-    /// The class of the Ingress resources to read, from `spec.ingressClassName` or the
-    /// `kubernetes.io/ingress.class` annotation. Empty reads every Ingress.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    #[schema(example = "r3v3rs3")]
-    pub ingress_class: String,
-    /// The port names or ids of an Ingress without the `r3v3rs3.io/ports` annotation.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ports: Vec<String>,
 }
 
 #[derive(
@@ -405,9 +369,6 @@ mod endpoint_tests {
         let config = DiscoveryConfig::default();
         assert!(!config.docker.enabled);
         assert_eq!(config.docker.endpoint, "unix:///var/run/docker.sock");
-        assert!(!config.kubernetes.enabled);
-        assert!(config.kubernetes.ingress);
-        assert!(config.kubernetes.namespaces.is_empty());
         assert!(!config.consul.enabled);
         assert!(config.consul.catalog && config.consul.kv);
         assert_eq!(config.consul.prefix, "r3v3rs3");

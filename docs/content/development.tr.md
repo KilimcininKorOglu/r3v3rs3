@@ -38,7 +38,7 @@ trunk serve
 - `make test` sunucunun ve API tiplerinin testlerini çalıştırır. CI `cargo nextest run --all-features --no-fail-fast` komutunu çalıştırır.
 - `make lint` clippy'yi `-D warnings` ile çalıştırır. `make fmt-check` biçimlendirmeyi kontrol eder.
 - CI ayrıca her fonksiyonun cyclomatic complexity değerinin 10 veya altında kaldığını `lizard -l rust -C 10 -w r3v3rs3/src r3v3rs3-api/src r3v3rs3-webui/src` ile kontrol eder.
-- `make test-runtime-docker`, `make test-acme-pebble`, `make test-discovery-e2e` ve `make test-cluster-e2e` yok sayılan testleri Docker Engine, Pebble, Consul, etcd ve k3s üzerinde çalıştırır.
+- `make test-runtime-docker`, `make test-acme-pebble` ve `make test-discovery-e2e` yok sayılan testleri Docker Engine, Pebble, Consul ve etcd üzerinde çalıştırır.
 - `make check` biçim kontrolünü, clippy'yi, testleri ve WebUI build'ini çalıştırır.
 
 # Release build

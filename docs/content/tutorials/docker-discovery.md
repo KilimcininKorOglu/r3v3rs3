@@ -151,6 +151,6 @@ r3v3rs3 orders a certificate for the `vhosts` of the proxy. [ACME Certificates](
 
 ## Next Steps
 
-- [Service Discovery](@/discovery.md): every provider, every label key, and the Kubernetes, Consul and etcd sources.
+- [Service Discovery](@/discovery.md): every provider, every label key, and the Consul and etcd sources.
 - [Configuration](@/configuration.md): what each proxy field does.
 - [High Availability](@/tutorials/high-availability.md): several nodes with one shared state.

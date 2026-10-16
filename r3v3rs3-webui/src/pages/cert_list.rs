@@ -732,7 +732,7 @@ mod tests {
     #[test]
     fn the_title_of_a_discovered_certificate_names_its_resource() {
         let source = DiscoverySource {
-            provider: r3v3rs3_api::discovery::DiscoveryProvider::Kubernetes,
+            provider: r3v3rs3_api::discovery::DiscoveryProvider::Consul,
             resource: "secret default/app-tls".into(),
         };
         assert_eq!(

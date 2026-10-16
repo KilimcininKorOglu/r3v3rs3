@@ -52,22 +52,6 @@ network = ""
 # Reads every container. Otherwise only the containers with r3v3rs3.enable=true.
 exposed_by_default = false
 
-[discovery.kubernetes]
-# Reads proxies from Kubernetes.
-enabled = false
-# The kubeconfig file. Empty uses KUBECONFIG or ~/.kube/config.
-kubeconfig = ""
-# The namespaces to read. Empty reads every namespace.
-namespaces = []
-# Reads the Ingress resources.
-ingress = true
-# Reads the R3v3rs3Proxy custom resources.
-crd = false
-# The class of the Ingress resources to read. Empty reads every Ingress.
-ingress_class = ""
-# The port names or ids of an Ingress without the r3v3rs3.io/ports annotation.
-ports = []
-
 [discovery.consul]
 # Reads proxies from the Consul catalog and key-value store.
 enabled = false
