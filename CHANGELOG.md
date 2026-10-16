@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.9] - 2026-10-16
+
+### Added
+- An app store that lists the image apps of a catalog and installs one in a click. The catalog lives in the repository, ships embedded in the binary, refreshes from the repository once a day, and a panel button refreshes it at once. Creating an app from the store picks the deployment target and starts the first deployment.
+
+### Changed
+- The platform documentation describes the app store and its `GET /api/store` and `POST /api/store/refresh` endpoints.
+
 ## [1.8.8] - 2026-10-16
 
 ### Added
