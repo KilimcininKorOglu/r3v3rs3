@@ -37,9 +37,9 @@ use crate::keys::key_file::{load_keys, write_new_key_file};
 use crate::kv::http::ApiClient;
 use crate::runtime::ContainerRuntime;
 use crate::runtime::docker::{DockerRuntime, ExecHandle};
-use r3v3rs3_api::container::ContainerName;
 use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::app::AppConfig;
+use r3v3rs3_api::container::ContainerName;
 use r3v3rs3_api::discovery::Endpoint;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
@@ -537,12 +537,7 @@ impl Platform {
     }
 
     /// Writes a file inside the container of the running deployment.
-    pub async fn upload_file(
-        &self,
-        id: ShortId,
-        path: &str,
-        bytes: Vec<u8>,
-    ) -> anyhow::Result<()> {
+    pub async fn upload_file(&self, id: ShortId, path: &str, bytes: Vec<u8>) -> anyhow::Result<()> {
         let (_, name, runtime) = self.file_runtime(id).await?;
         runtime.upload_file(&name, path, bytes).await
     }

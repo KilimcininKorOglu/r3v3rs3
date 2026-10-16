@@ -147,11 +147,7 @@ struct FileContext {
     app: AppEntry,
 }
 
-async fn context(
-    state: &AppState,
-    caller: &Caller,
-    id: ShortId,
-) -> Result<FileContext, AppError> {
+async fn context(state: &AppState, caller: &Caller, id: ShortId) -> Result<FileContext, AppError> {
     let platform = state.platform(caller, Permission::Admin).await?;
     let app = platform.app(id).await.map_err(platform_error)?;
     Ok(FileContext { platform, app })
@@ -160,9 +156,11 @@ async fn context(
 /// The volume that holds `path`, rejecting a path outside every mount. A write also needs a
 /// mount that is not read-only.
 fn check_path(app: &AppEntry, path: &str, write: bool) -> Result<VolumeMount, AppError> {
-    let invalid = || AppError::R3v3rs3(Error::InvalidFilePath {
-        path: path.to_string(),
-    });
+    let invalid = || {
+        AppError::R3v3rs3(Error::InvalidFilePath {
+            path: path.to_string(),
+        })
+    };
     let normalized = path.strip_prefix('/').ok_or_else(invalid)?;
     if normalized.split('/').any(|segment| segment == "..") {
         return Err(invalid());
@@ -186,6 +184,10 @@ fn check_path(app: &AppEntry, path: &str, write: bool) -> Result<VolumeMount, Ap
 }
 
 async fn audit(state: &AppState, caller: &Caller, id: ShortId, summary: String) {
-    let record = AuditRecord::new(AuditAction::AppFile).id(id).summary(summary);
-    state.record_audit(&caller.username, caller.client, record).await;
+    let record = AuditRecord::new(AuditAction::AppFile)
+        .id(id)
+        .summary(summary);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
 }

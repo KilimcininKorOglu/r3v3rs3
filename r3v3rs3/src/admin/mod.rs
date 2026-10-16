@@ -49,8 +49,8 @@ use utoipa_swagger_ui::SwaggerUi;
 
 mod access_lists;
 mod accounts;
-mod app_files;
 mod acme;
+mod app_files;
 mod app_info;
 mod audit;
 pub(crate) mod auth;
