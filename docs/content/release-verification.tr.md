@@ -31,6 +31,3 @@ iyiyse arşivi checksum'larla karşılaştırın:
 $ sha256sum --check --ignore-missing SHA256SUMS
 r3v3rs3-x86_64-unknown-linux-gnu.tar.xz: OK
 ```
-
-Docker image'larının ayrı bir imzası yoktur. `docker pull` çıktısındaki
-digest, registry'nin servis ettiği image baytlarını tanımlar.
