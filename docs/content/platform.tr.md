@@ -75,11 +75,11 @@ Uygulamanın, alan adlarının veya ortam değişkenlerinin değişikliği sonra
 
 ## App Store
 
-App Store, r3v3rs3'ün tek tıkla kurabileceği uygulamaları listeler. Katalog, r3v3rs3 deposunda `data/app-store.json` yolunda yaşar; taze kurulumun listeyle başlaması için binary'nin içine gömülür ve günde bir kez depodan yenilenir. Sayfadaki **Kataloğu yenile** butonu güncel kataloğu hemen indirir. API kataloğu `GET /api/store` ile okur, `POST /api/store/refresh` ile yeniler.
+App Store, r3v3rs3'ün tek tıkla kurabileceği uygulamaları listeler. Katalog, [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) deposunun `app-store.json` dosyasıdır; binary ayrıca gömülü bir kopya taşır, böylece taze kurulum listeyle başlar, ve günde bir kez depodan yenilenir. Sayfadaki **Kataloğu yenile** butonu güncel kataloğu hemen indirir. API kataloğu `GET /api/store` ile okur, `POST /api/store/refresh` ile yeniler.
 
 Bir **image girdisi** uygulamanın image'ını ve portunu taşır. **Kur** butonu o alanlar doldurulmuş app formunu açar; hedefi, alan adlarını ve portları seçip uygulamayı oluşturun. İlk deployment, uygulama oluşturulur oluşturulmaz başlar.
 
-Bir **Compose girdisi**, r3v3rs3 deposunun kendisinin tuttuğu bir Compose dosyasına işaret eder; böylece kendi veritabanına ihtiyaç duyan bir uygulama da tek tıkla kurulur. Form Compose modunda açılır ve girdi, uygulamanın ihtiyaç duyduğu **Değişkenleri** listeler, örneğin bir veritabanı parolası: formda doldurun, değerler ilk deployment'tan önce uygulamanın ortam değişkenlerine yazılır. Compose app'i düz bir `docker compose` çalıştırmasıyla deploy olur; blue-green geçişi yoktur ve geri alma, eski bir commit'i yeniden deploy etmekle olur.
+Bir **Compose girdisi**, r3v3rs3-apps deposunun `app-store-compose/` altındaki bir Compose dosyasına işaret eder; böylece kendi veritabanına ihtiyaç duyan bir uygulama da tek tıkla kurulur. Form Compose modunda açılır ve girdi, uygulamanın ihtiyaç duyduğu **Değişkenleri** listeler, örneğin bir veritabanı parolası: formda doldurun, değerler ilk deployment'tan önce uygulamanın ortam değişkenlerine yazılır. Compose app'i düz bir `docker compose` çalıştırmasıyla deploy olur; blue-green geçişi yoktur ve geri alma, eski bir commit'i yeniden deploy etmekle olur.
 
 Katalog başka Compose kaynağı tutmaz: kendi Compose dosyanızı kuran girdi App Store'a değil, [Uygulamalar](#uygulamalar) sayfasına aittir.
 
@@ -153,7 +153,7 @@ r3v3rs3, Compose dosyasının diğer ayarlarını denetlemez. Bir Compose dosyas
 
 ## Veritabanları
 
-**Veritabanları** sayfası bir motorun veritabanını tek tıkla kurar. Motorlar PostgreSQL 17 ve 18, MariaDB 11 ve 12, MySQL 9, MongoDB 8 ve Redis 8'dir; her birinin image tag'i bir sürüme sabitlenmiştir.
+**Veritabanları** sayfası bir motorun veritabanını tek tıkla kurar. Motorlar PostgreSQL 17 ve 18, MariaDB 11 ve 12, MySQL 9, MongoDB 8 ve Redis 8'dir; her birinin image tag'i bir sürüme sabitlenmiştir. Engine kataloğu, [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) deposunun `engines.json` dosyasıdır; binary ayrıca gömülü bir kopya taşır ve günde bir kez depodan yenilenir. Sayfadaki **Kataloğu yenile** butonu güncel kataloğu hemen indirir; API ise `POST /api/databases/engines/refresh` ile yeniler.
 
 **Veritabanı ekle** bir motor, bir sürüm, bir ad ve isteğe bağlı olarak bir `127.0.0.1` portu alır. Port boş bırakılırsa sunucu oluşturma anında boş bir port alır ve veritabanı o portu sonradan da korur: bir veritabanının her deployment'ı portunu aynı adrese yayınlar; bir uygulamadan farklı olarak adres değişmez. Oluşturma, local target'ta sürümün image'ıyla, motorun verileri için bir named volume ile ve 32 hex karakterli üretilmiş bir parolayı secret ortam değişkeni olarak taşıyan bir app yaratır. İlk deployment hemen başlar.
 
@@ -474,6 +474,7 @@ Admin hesabı ayrıca şunları görür:
 | `DELETE /api/apps/{id}/files?path=` | Admin | Yazılabilir bir volume içindeki dosyayı veya dizini siler. |
 | `GET /api/databases` | Read | Veritabanı uygulamaları; motor, port ve bağlantılarıyla. |
 | `GET /api/databases/engines` | Read | Panelin sunduğu motorlar ve sürümler. |
+| `POST /api/databases/engines/refresh` | Edit | Engine kataloğunu r3v3rs3-apps deposundan indirir. |
 | `POST /api/databases` | Edit | Bir veritabanı oluşturur, deployment'ını başlatır ve parolasını bir kez döndürür. |
 | `DELETE /api/databases/{id}` | Edit | Veritabanı app'ini siler. Volume'ü kalır. |
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |

@@ -75,11 +75,11 @@ A change of an app, of its domains or of its environment variables takes effect 
 
 ## App Store
 
-The App Store lists the apps that r3v3rs3 can install in one click. The catalog lives in the r3v3rs3 repository at `data/app-store.json`, ships embedded in the binary so that a fresh install starts with a full list, and refreshes from the repository once a day. The **Refresh catalog** button of the page downloads the current catalog at once. The API reads it at `GET /api/store` and refreshes it with `POST /api/store/refresh`.
+The App Store lists the apps that r3v3rs3 can install in one click. The catalog is the `app-store.json` file of the [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) repository; the binary also ships an embedded copy, so that a fresh install starts with a full list, and refreshes from the repository once a day. The **Refresh catalog** button of the page downloads the current catalog at once. The API reads it at `GET /api/store` and refreshes it with `POST /api/store/refresh`.
 
 An **image entry** carries the image and the port of the app. **Install** opens the app form with those fields filled in; choose the target, the domains and the ports, then create the app. The first deployment starts as soon as the app is created.
 
-A **Compose entry** points at a Compose file that the r3v3rs3 repository itself holds, so an app that needs its own database installs in one click too. The form opens in the Compose mode, and the entry lists the **Variables** that the app needs, such as a database password: fill them in the form, and they go into the environment of the app before its first deployment. A Compose app deploys with a plain `docker compose` run, so it has no blue-green switch and rolls back by deploying an earlier commit.
+A **Compose entry** points at a Compose file under `app-store-compose/` of the r3v3rs3-apps repository, so an app that needs its own database installs in one click too. The form opens in the Compose mode, and the entry lists the **Variables** that the app needs, such as a database password: fill them in the form, and they go into the environment of the app before its first deployment. A Compose app deploys with a plain `docker compose` run, so it has no blue-green switch and rolls back by deploying an earlier commit.
 
 The catalog holds no other Compose source: an entry that installs your own Compose file belongs on the [Apps](#apps) page, not in the catalog.
 
@@ -153,7 +153,7 @@ r3v3rs3 does not check the other settings of a Compose file. A Compose file can 
 
 ## Databases
 
-The **Databases** page installs a database of one engine in one click. The engines are PostgreSQL 17 and 18, MariaDB 11 and 12, MySQL 9, MongoDB 8 and Redis 8, each with its image tag pinned to a version.
+The **Databases** page installs a database of one engine in one click. The engines are PostgreSQL 17 and 18, MariaDB 11 and 12, MySQL 9, MongoDB 8 and Redis 8, each with its image tag pinned to a version. The engine catalog is the `engines.json` file of the [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) repository; the binary also ships an embedded copy and refreshes from the repository once a day. The **Refresh catalog** button of the page downloads the current catalog at once; the API refreshes it with `POST /api/databases/engines/refresh`.
 
 **Add a database** takes an engine, a version, a name and, optionally, a port of `127.0.0.1`. Without a port the server takes a free one at the creation, and the database keeps that port afterwards: every deployment of a database publishes its port on the same address, unlike an app, whose deployment takes a new port. The creation builds an app on the local target with the image of the version, one named volume for the data of the engine, and a generated password of 32 hex characters as a secret environment variable. The first deployment starts at once.
 
@@ -476,6 +476,7 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 | `DELETE /api/apps/{id}/files?path=` | Admin | Deletes a file or a directory inside a writable volume. |
 | `GET /api/databases` | Read | The database apps, with their engine, their port and their connection. |
 | `GET /api/databases/engines` | Read | The engines and the versions that the panel offers. |
+| `POST /api/databases/engines/refresh` | Edit | Downloads the engine catalog from the r3v3rs3-apps repository. |
 | `POST /api/databases` | Edit | Creates a database, deploys it and returns its password once. |
 | `DELETE /api/databases/{id}` | Edit | Deletes the database app. Its volume stays. |
 | `GET /api/deployments/{id}` | Read | Returns a deployment. |
