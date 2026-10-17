@@ -151,6 +151,16 @@ r3v3rs3 does not check the other settings of a Compose file. A Compose file can 
 
 `PUT /api/apps/{id}/env` replaces the environment variables of an app. A variable with `"secret": true` never leaves the server again: the admin API returns it without its value, and an update without a value keeps the current value. r3v3rs3 encrypts every value with `platform.key` and decrypts it only when a container starts.
 
+## Databases
+
+The **Databases** page installs a database of one engine in one click. The engines are PostgreSQL 17 and 18, MariaDB 11 and 12, MySQL 9, MongoDB 8 and Redis 8, each with its image tag pinned to a version.
+
+**Add a database** takes an engine, a version, a name and, optionally, a port of `127.0.0.1`. Without a port the server takes a free one at the creation, and the database keeps that port afterwards: every deployment of a database publishes its port on the same address, unlike an app, whose deployment takes a new port. The creation builds an app on the local target with the image of the version, one named volume for the data of the engine, and a generated password of 32 hex characters as a secret environment variable. The first deployment starts at once.
+
+The response shows the password and the connection string once, like a webhook secret. The panel lists every database with its engine, its port and its connection without the password. The database answers on `127.0.0.1` of the r3v3rs3 server, so only the apps of this server and the programs on the server itself reach it: a database gets no domain and no proxy, and **Delete** on its row removes the app while the volume with the data stays. Redis takes no password, so its port answers to every local client.
+
+A database needs the local target, and only an account with the Edit permission sees the page. Every creation and deletion goes into the audit log.
+
 ## Deployments
 
 `POST /api/apps/{id}/deploy` starts a deployment and returns it with the status `queued`. `GET /api/deployments/{id}` shows its progress.
@@ -444,6 +454,10 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 | `GET /api/apps/{id}/files/download?path=` | Admin | The content of a file inside a volume. |
 | `PUT /api/apps/{id}/files?path=` | Admin | Writes the request body into a file inside a writable volume. |
 | `DELETE /api/apps/{id}/files?path=` | Admin | Deletes a file or a directory inside a writable volume. |
+| `GET /api/databases` | Read | The database apps, with their engine, their port and their connection. |
+| `GET /api/databases/engines` | Read | The engines and the versions that the panel offers. |
+| `POST /api/databases` | Edit | Creates a database, deploys it and returns its password once. |
+| `DELETE /api/databases/{id}` | Edit | Deletes the database app. Its volume stays. |
 | `GET /api/deployments/{id}` | Read | Returns a deployment. |
 | `POST /api/deployments/{id}/rollback` | Edit | Repeats an earlier deployment. |
 | `GET /api/git/connections` | Edit | The Git provider connections, without secrets or tokens. |

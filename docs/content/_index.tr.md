@@ -61,6 +61,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 
 - Registry image'ından, Dockerfile'ı olan bir Git repository'sinden veya bir Git repository'sindeki Docker Compose dosyasından uygulamalar.
 - Katalogdaki bir uygulamayı, image veya Compose, tek tıkla kuran ve günde bir kez depodan yenilenen App Store.
+- PostgreSQL, MariaDB, MySQL, MongoDB veya Redis'i tek tıkla kuran; `127.0.0.1` üzerinde sabit port ve üretilmiş paroyla bir Veritabanları bölümü.
 - Proxy'yi ancak yeni container sağlık kontrolünden geçince değiştiren blue-green deployment'lar ve önceki bir deployment'a geri alma.
 - Admin için, paneldeki WebSocket üzerinden uygulamanın çalışan container'ına web terminali.
 - Admin için, panelde uygulamanın volume'lerine dosya yöneticisi: listeleme, indirme, yükleme, düzenleme ve silme.

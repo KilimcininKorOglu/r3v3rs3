@@ -151,6 +151,16 @@ r3v3rs3, Compose dosyasının diğer ayarlarını denetlemez. Bir Compose dosyas
 
 `PUT /api/apps/{id}/env` bir uygulamanın ortam değişkenlerini değiştirir. `"secret": true` olan bir değişkenin değeri yönetim API'sinden bir daha çıkmaz: API değişkeni değeri olmadan döndürür, değersiz bir güncelleme de mevcut değeri korur. r3v3rs3 her değeri `platform.key` ile şifreler ve yalnız bir container başlarken açar.
 
+## Veritabanları
+
+**Veritabanları** sayfası bir motorun veritabanını tek tıkla kurar. Motorlar PostgreSQL 17 ve 18, MariaDB 11 ve 12, MySQL 9, MongoDB 8 ve Redis 8'dir; her birinin image tag'i bir sürüme sabitlenmiştir.
+
+**Veritabanı ekle** bir motor, bir sürüm, bir ad ve isteğe bağlı olarak bir `127.0.0.1` portu alır. Port boş bırakılırsa sunucu oluşturma anında boş bir port alır ve veritabanı o portu sonradan da korur: bir veritabanının her deployment'ı portunu aynı adrese yayınlar; bir uygulamadan farklı olarak adres değişmez. Oluşturma, local target'ta sürümün image'ıyla, motorun verileri için bir named volume ile ve 32 hex karakterli üretilmiş bir parolayı secret ortam değişkeni olarak taşıyan bir app yaratır. İlk deployment hemen başlar.
+
+Yanıt, parolayı ve bağlantı dizesini webhook secret gibi bir kez gösterir. Panel her veritabanını motoru, portu ve parolasız bağlantısıyla listeler. Veritabanı r3v3rs3 sunucusunun `127.0.0.1` adresini dinler; yalnız bu sunucudaki uygulamalar ve sunucunun kendi programları ulaşır: bir veritabanının alan adı ve proxy'si yoktur ve satırındaki **Sil** app'i kaldırırken verilerin olduğu volume kalır. Redis parola almaz, bu yüzden portu yerel her istemciye yanıt verir.
+
+Veritabanı local target ister ve sayfayı yalnız Edit izni olan bir hesap görür. Her oluşturma ve silme audit log'una geçer.
+
 ## Deployment'lar
 
 `POST /api/apps/{id}/deploy` bir deployment başlatır ve onu `queued` durumuyla döndürür. `GET /api/deployments/{id}` ilerlemeyi gösterir.
@@ -442,6 +452,10 @@ Admin hesabı ayrıca şunları görür:
 | `GET /api/apps/{id}/files/download?path=` | Admin | Bir volume içindeki dosyanın içeriğini döndürür. |
 | `PUT /api/apps/{id}/files?path=` | Admin | İstek gövdesini yazılabilir bir volume içindeki dosyaya yazar. |
 | `DELETE /api/apps/{id}/files?path=` | Admin | Yazılabilir bir volume içindeki dosyayı veya dizini siler. |
+| `GET /api/databases` | Read | Veritabanı uygulamaları; motor, port ve bağlantılarıyla. |
+| `GET /api/databases/engines` | Read | Panelin sunduğu motorlar ve sürümler. |
+| `POST /api/databases` | Edit | Bir veritabanı oluşturur, deployment'ını başlatır ve parolasını bir kez döndürür. |
+| `DELETE /api/databases/{id}` | Edit | Veritabanı app'ini siler. Volume'ü kalır. |
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
 | `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |
 | `GET /api/git/connections` | Edit | Secret'lar ve token'lar olmadan Git sağlayıcı bağlantıları. |
