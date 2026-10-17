@@ -1,0 +1,456 @@
+//! The backups of the managed databases. A backup is the dump of the engine, gzipped, in the
+//! `backups` directory of the config directory, with one JSON manifest per file. A restore
+//! uploads the dump back into the running container and runs the restore command of the engine.
+
+use super::{Platform, is_local, proxy};
+use crate::clock::unix_ms;
+use crate::runtime::ContainerRuntime;
+use anyhow::{Context, bail};
+use async_compression::tokio::bufread::GzipEncoder;
+use r3v3rs3_api::container::ContainerName;
+use r3v3rs3_api::error::Error;
+use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::platform::{BackupConfig, BackupEntry, DatabaseEngine, EngineInfo};
+use sha2::{Digest, Sha256};
+use std::sync::Arc;
+use tokio::io::AsyncReadExt;
+
+/// The settings row of the backup configuration in the platform database.
+pub const BACKUP_CONFIG: &str = "backup_config";
+
+/// The directory under the config directory that holds the backups.
+pub const BACKUP_DIR: &str = "backups";
+
+/// The directory inside the container that a restore uploads its dump to.
+const RESTORE_DIR: &str = "/tmp/r3v3rs3-restore";
+
+/// How the engine takes its backup: one command over `exec`, or one file to download.
+struct DumpPlan {
+    command: Vec<String>,
+    env: Vec<String>,
+    /// The file that carries the dump, for an engine that cannot write it to stdout.
+    file: Option<String>,
+}
+
+/// How the engine takes its dump back: the file that the restore uploads, and the command that
+/// reads it.
+struct RestorePlan {
+    /// The target path of the upload. `None` for an engine that takes the file in place.
+    upload: Option<String>,
+    command: Vec<String>,
+    env: Vec<String>,
+}
+
+impl Platform {
+    /// The backup settings stored in the platform database, or the defaults.
+    pub async fn backup_config(&self) -> anyhow::Result<BackupConfig> {
+        match self.store.setting(BACKUP_CONFIG).await? {
+            Some(json) => Ok(serde_json::from_str(&json)?),
+            None => Ok(BackupConfig::default()),
+        }
+    }
+
+    /// Replaces the backup settings.
+    pub async fn set_backup_config(&self, config: &BackupConfig) -> anyhow::Result<()> {
+        let json = serde_json::to_string(config)?;
+        self.store.set_setting(BACKUP_CONFIG, Some(&json)).await
+    }
+
+    /// The backups of one database, newest first.
+    pub async fn list_backups(&self, db_id: ShortId) -> anyhow::Result<Vec<BackupEntry>> {
+        let dir = self.backup_dir(db_id).await?;
+        let mut entries = Vec::new();
+        let mut reader = match tokio::fs::read_dir(&dir).await {
+            Ok(reader) => reader,
+            // A database without a backup has no directory yet.
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(entries),
+            Err(err) => return Err(err.into()),
+        };
+        while let Some(file) = reader.next_entry().await? {
+            let path = file.path();
+            if path.extension().is_some_and(|ext| ext == "json")
+                && let Ok(json) = tokio::fs::read(&path).await
+                && let Ok(entry) = serde_json::from_slice::<BackupEntry>(&json)
+            {
+                entries.push(entry);
+            }
+        }
+        entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(entries)
+    }
+
+    /// Dumps the database of the local target into the backup directory, and applies the
+    /// retention of the settings.
+    pub async fn run_backup(&self, db_id: ShortId) -> anyhow::Result<BackupEntry> {
+        let (app, container, runtime) = self.database_container(db_id).await?;
+        let engine = app
+            .spec
+            .database
+            .context("the app is not a managed database")?;
+        let info = engine.info();
+        let password = self.database_password(db_id, info).await?;
+        let plan = dump_plan(engine, info, &password);
+        let dump = match &plan.file {
+            // Redis writes its dump itself; the backup downloads the file after a SAVE.
+            Some(path) => {
+                runtime
+                    .exec_capture(&container, plan.command.clone(), plan.env.clone())
+                    .await?;
+                runtime.download_file(&container, path).await?
+            }
+            None => {
+                runtime
+                    .exec_capture(&container, plan.command, plan.env)
+                    .await?
+            }
+        };
+        let compressed = gzip(&dump).await?;
+        let entry = BackupEntry {
+            id: backup_id(),
+            app: db_id,
+            name: app.name.to_string(),
+            engine,
+            size: compressed.len() as u64,
+            sha256: hex::encode(Sha256::digest(&compressed)),
+            created_at: unix_ms() as i64,
+        };
+        let dir = self.backup_dir(db_id).await?;
+        tokio::fs::create_dir_all(&dir).await?;
+        let file = dir.join(format!("{}.dump.gz", entry.id));
+        tokio::fs::write(&file, &compressed).await?;
+        let manifest = serde_json::to_vec(&entry)?;
+        tokio::fs::write(dir.join(format!("{}.json", entry.id)), manifest).await?;
+        self.apply_retention(db_id).await?;
+        Ok(entry)
+    }
+
+    /// Removes one backup and its manifest.
+    pub async fn delete_backup(&self, db_id: ShortId, backup_id: &str) -> anyhow::Result<()> {
+        let entry = self.backup_entry(db_id, backup_id).await?;
+        let dir = self.backup_dir(db_id).await?;
+        tokio::fs::remove_file(dir.join(format!("{}.dump.gz", entry.id))).await?;
+        tokio::fs::remove_file(dir.join(format!("{}.json", entry.id))).await?;
+        Ok(())
+    }
+
+    /// The content of one backup.
+    pub async fn download_backup(
+        &self,
+        db_id: ShortId,
+        backup_id: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        let entry = self.backup_entry(db_id, backup_id).await?;
+        let dir = self.backup_dir(db_id).await?;
+        Ok(tokio::fs::read(dir.join(format!("{}.dump.gz", entry.id))).await?)
+    }
+
+    /// Uploads a stored backup into the running container of the database and runs the restore
+    /// command of the engine. Redis replaces its dump file and restarts.
+    pub async fn restore_backup(&self, db_id: ShortId, backup_id: &str) -> anyhow::Result<()> {
+        let (app, container, runtime) = self.database_container(db_id).await?;
+        let engine = app
+            .spec
+            .database
+            .context("the app is not a managed database")?;
+        let info = engine.info();
+        let password = self.database_password(db_id, info).await?;
+        let plan = restore_plan(engine, info, &password);
+        let bytes = ungzip(&self.download_backup(db_id, backup_id).await?).await?;
+        let outcome = match &plan.upload {
+            Some(path) => {
+                runtime
+                    .exec_capture(
+                        &container,
+                        vec!["mkdir".into(), "-p".into(), RESTORE_DIR.into()],
+                        Vec::new(),
+                    )
+                    .await?;
+                runtime.upload_file(&container, path, bytes).await?;
+                Some(
+                    runtime
+                        .exec_capture(&container, plan.command, plan.env)
+                        .await,
+                )
+            }
+            // Redis takes the uploaded dump at its next start, so the shutdown of the server
+            // must not save the old dataset over it.
+            None => {
+                let path = format!("{}/dump.rdb", info.data_path);
+                let uploaded = runtime.upload_file(&container, &path, bytes).await;
+                match uploaded {
+                    Ok(()) => Some(
+                        runtime
+                            .exec_capture(
+                                &container,
+                                vec!["redis-cli".into(), "SHUTDOWN".into(), "NOSAVE".into()],
+                                Vec::new(),
+                            )
+                            .await,
+                    ),
+                    Err(err) => Some(Err(err)),
+                }
+            }
+        };
+        if let Some(path) = &plan.upload {
+            runtime.remove_path(&container, path).await.ok();
+        }
+        if let Some(result) = outcome {
+            result.map_err(|err| Error::RestoreFailed {
+                reason: format!("{err:#}"),
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Deletes the oldest backups beyond the `keep` count of the settings.
+    async fn apply_retention(&self, db_id: ShortId) -> anyhow::Result<()> {
+        let keep = self.backup_config().await?.keep.max(1);
+        let backups = self.list_backups(db_id).await?;
+        for entry in backups.into_iter().skip(keep as usize) {
+            self.delete_backup(db_id, &entry.id).await?;
+        }
+        Ok(())
+    }
+
+    async fn backup_entry(&self, db_id: ShortId, backup_id: &str) -> anyhow::Result<BackupEntry> {
+        self.list_backups(db_id)
+            .await?
+            .into_iter()
+            .find(|entry| entry.id == backup_id)
+            .ok_or_else(|| {
+                Error::BackupNotFound {
+                    id: backup_id.to_string(),
+                }
+                .into()
+            })
+    }
+
+    /// The backup directory of one database, named after the app.
+    async fn backup_dir(&self, db_id: ShortId) -> anyhow::Result<std::path::PathBuf> {
+        let app = self.app(db_id).await?;
+        Ok(self.backup_dir.join(app.name.as_str()))
+    }
+
+    /// The running container of a managed database on the local target.
+    async fn database_container(
+        &self,
+        db_id: ShortId,
+    ) -> anyhow::Result<(
+        r3v3rs3_api::platform::AppEntry,
+        ContainerName,
+        Arc<dyn ContainerRuntime>,
+    )> {
+        let app = self.app(db_id).await?;
+        if app.spec.database.is_none() {
+            bail!("the app {} is not a managed database", app.name);
+        }
+        if !is_local(app.target) {
+            return Err(Error::TerminalUnsupported.into());
+        }
+        let Some(deployment) = self.store.running_deployment(db_id).await? else {
+            return Err(Error::AppNotRunning {
+                name: app.name.to_string(),
+            }
+            .into());
+        };
+        let name = proxy::container_name(db_id, deployment)?;
+        let runtime = self.runtime(app.target);
+        Ok((app, name, runtime))
+    }
+
+    /// Opens the generated password of the database from its secret environment variable.
+    async fn database_password(&self, db_id: ShortId, info: &EngineInfo) -> anyhow::Result<String> {
+        if info.password_env.is_empty() {
+            return Ok(String::new());
+        }
+        for var in self.store.env(db_id).await? {
+            if var.key.as_str() == info.password_env {
+                let value = self
+                    .keys
+                    .open(&super::env_aad(db_id, var.key.as_str()), &var.sealed)?;
+                return Ok(String::from_utf8(value).context("a password is not UTF-8")?);
+            }
+        }
+        Ok(String::new())
+    }
+}
+
+/// The dump command of one engine over the local connection of the container itself.
+fn dump_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> DumpPlan {
+    match engine {
+        DatabaseEngine::Postgres => DumpPlan {
+            command: vec![
+                "pg_dump".into(),
+                "-U".into(),
+                info.user.clone(),
+                info.default_db.clone(),
+            ],
+            env: vec![format!("PGPASSWORD={password}")],
+            file: None,
+        },
+        DatabaseEngine::MariaDb => DumpPlan {
+            command: vec![
+                "mariadb-dump".into(),
+                "-u".into(),
+                "root".into(),
+                "--all-databases".into(),
+            ],
+            env: vec![format!("MYSQL_PWD={password}")],
+            file: None,
+        },
+        DatabaseEngine::MySql => DumpPlan {
+            command: vec![
+                "mysqldump".into(),
+                "-u".into(),
+                "root".into(),
+                "--all-databases".into(),
+            ],
+            env: vec![format!("MYSQL_PWD={password}")],
+            file: None,
+        },
+        DatabaseEngine::MongoDb => DumpPlan {
+            command: vec![
+                "mongodump".into(),
+                "--archive".into(),
+                "-u".into(),
+                info.user.clone(),
+                "-p".into(),
+                password.into(),
+            ],
+            env: Vec::new(),
+            file: None,
+        },
+        DatabaseEngine::Redis => DumpPlan {
+            // SAVE blocks until the dump file is complete, unlike BGSAVE.
+            command: vec!["redis-cli".into(), "SAVE".into()],
+            env: Vec::new(),
+            file: Some(format!("{}/dump.rdb", info.data_path)),
+        },
+    }
+}
+
+/// The restore command of one engine, reading the dump that the restore uploads.
+fn restore_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> RestorePlan {
+    match engine {
+        DatabaseEngine::Postgres => RestorePlan {
+            upload: Some(format!("{RESTORE_DIR}/dump.sql")),
+            command: vec![
+                "psql".into(),
+                "-U".into(),
+                info.user.clone(),
+                "-d".into(),
+                info.default_db.clone(),
+                "-f".into(),
+                format!("{RESTORE_DIR}/dump.sql"),
+            ],
+            env: vec![format!("PGPASSWORD={password}")],
+        },
+        DatabaseEngine::MariaDb => RestorePlan {
+            upload: Some(format!("{RESTORE_DIR}/dump.sql")),
+            command: vec![
+                "sh".into(),
+                "-c".into(),
+                "mariadb -u root < /tmp/r3v3rs3-restore/dump.sql".into(),
+            ],
+            env: vec![format!("MYSQL_PWD={password}")],
+        },
+        DatabaseEngine::MySql => RestorePlan {
+            upload: Some(format!("{RESTORE_DIR}/dump.sql")),
+            command: vec![
+                "sh".into(),
+                "-c".into(),
+                "mysql -u root < /tmp/r3v3rs3-restore/dump.sql".into(),
+            ],
+            env: vec![format!("MYSQL_PWD={password}")],
+        },
+        DatabaseEngine::MongoDb => RestorePlan {
+            upload: Some(format!("{RESTORE_DIR}/dump.archive")),
+            command: vec![
+                "mongorestore".into(),
+                format!("--archive={RESTORE_DIR}/dump.archive"),
+                "-u".into(),
+                info.user.clone(),
+                "-p".into(),
+                password.into(),
+                "--drop".into(),
+            ],
+            env: Vec::new(),
+        },
+        // Redis takes no upload: the restore writes the dump into the data volume and
+        // restarts the server, which loads it.
+        DatabaseEngine::Redis => RestorePlan {
+            upload: None,
+            command: vec!["redis-cli".into(), "SHUTDOWN".into(), "NOSAVE".into()],
+            env: Vec::new(),
+        },
+    }
+}
+
+/// The id of a new backup: the time and four random bytes, both in hex.
+fn backup_id() -> String {
+    format!("{:x}-{:08x}", unix_ms(), rand::random::<u32>())
+}
+
+/// The gzipped content.
+async fn gzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let mut encoder = GzipEncoder::new(content);
+    let mut compressed = Vec::new();
+    encoder.read_to_end(&mut compressed).await?;
+    Ok(compressed)
+}
+
+/// The content behind the gzip.
+async fn ungzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let mut decoder = async_compression::tokio::bufread::GzipDecoder::new(content);
+    let mut plain = Vec::new();
+    decoder.read_to_end(&mut plain).await?;
+    Ok(plain)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use r3v3rs3_api::platform::DatabaseEngine;
+
+    #[tokio::test]
+    async fn gzip_round_trips() {
+        let content = b"the dump content".to_vec();
+        let restored = ungzip(&gzip(&content).await.unwrap()).await.unwrap();
+        assert_eq!(restored, content);
+    }
+
+    #[test]
+    fn postgres_dumps_its_default_database() {
+        let info = DatabaseEngine::Postgres.info();
+        let plan = dump_plan(DatabaseEngine::Postgres, info, "pass");
+        assert_eq!(plan.command, ["pg_dump", "-U", "postgres", "postgres"]);
+        assert_eq!(plan.env, ["PGPASSWORD=pass"]);
+        assert!(plan.file.is_none());
+    }
+
+    #[test]
+    fn redis_downloads_its_dump_file_instead() {
+        let info = DatabaseEngine::Redis.info();
+        let plan = dump_plan(DatabaseEngine::Redis, info, "");
+        assert_eq!(plan.command, ["redis-cli", "SAVE"]);
+        assert_eq!(plan.file.as_deref(), Some("/data/dump.rdb"));
+
+        let plan = restore_plan(DatabaseEngine::Redis, info, "");
+        assert!(plan.upload.is_none());
+    }
+
+    #[test]
+    fn every_dump_engine_has_a_restore_that_undoes_it() {
+        for engine in [
+            DatabaseEngine::Postgres,
+            DatabaseEngine::MariaDb,
+            DatabaseEngine::MySql,
+            DatabaseEngine::MongoDb,
+        ] {
+            let info = engine.info();
+            let restore = restore_plan(engine, info, "pass");
+            assert!(restore.upload.is_some(), "{engine} has no upload");
+            assert!(!restore.command.is_empty());
+        }
+    }
+}

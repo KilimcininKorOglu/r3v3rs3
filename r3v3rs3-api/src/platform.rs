@@ -67,6 +67,59 @@ pub struct EngineInfo {
     pub data_path: String,
 }
 
+/// The backup settings of the managed databases, stored in the platform database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(default)]
+pub struct BackupConfig {
+    /// The time of day that the scheduler takes the backups at, as `HH:MM`. Empty turns the
+    /// scheduler off.
+    pub schedule: String,
+    /// The backups of one database that survive; the oldest go first.
+    pub keep: u32,
+    /// The S3 bucket that receives a copy of every backup.
+    pub s3: Option<S3Config>,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self {
+            schedule: String::new(),
+            keep: 7,
+            s3: None,
+        }
+    }
+}
+
+/// An S3 compatible bucket that the backups upload to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct S3Config {
+    /// The base URL of the bucket, for example `https://s3.example.com/bucket`.
+    pub endpoint: String,
+    pub region: String,
+    /// The key prefix of the uploaded backups, for example `databases`.
+    pub prefix: String,
+    pub access_key: String,
+    /// Written only: the API answers an empty value, and an empty value in a request keeps the
+    /// stored one.
+    #[serde(default)]
+    pub secret_key: String,
+}
+
+/// One stored backup of a managed database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BackupEntry {
+    pub id: String,
+    pub app: ShortId,
+    /// The name of the database app.
+    pub name: String,
+    pub engine: DatabaseEngine,
+    /// The compressed size in bytes.
+    pub size: u64,
+    /// The SHA-256 of the compressed file.
+    pub sha256: String,
+    pub created_at: i64,
+}
+
 impl DatabaseEngine {
     /// The engines that the Databases page installs, in the order of the panel.
     pub fn catalog() -> &'static [EngineInfo] {

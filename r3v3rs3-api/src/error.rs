@@ -143,6 +143,15 @@ pub enum Error {
     #[error("an app uses the database: {name}")]
     DatabaseInUse { name: String },
 
+    #[error("the backup failed: {reason}")]
+    BackupFailed { reason: String },
+
+    #[error("the restore failed: {reason}")]
+    RestoreFailed { reason: String },
+
+    #[error("the backup does not exist: {id}")]
+    BackupNotFound { id: String },
+
     #[error("the enrollment token is invalid or was used already")]
     InvalidEnrollmentToken,
 
@@ -420,9 +429,10 @@ pub enum Error {
 impl Error {
     pub fn status_code(&self) -> u16 {
         match self {
-            Self::IdNotFound { .. } | Self::AccountNotFound { .. } | Self::AppNotRunning { .. } => {
-                404
-            }
+            Self::IdNotFound { .. }
+            | Self::AccountNotFound { .. }
+            | Self::AppNotRunning { .. }
+            | Self::BackupNotFound { .. } => 404,
             Self::Unauthorized => 401,
             Self::Forbidden
             | Self::ProxyReadOnly { .. }
@@ -451,7 +461,9 @@ impl Error {
             | Self::FailedToInvokeRpc
             | Self::FailedToHashPassword
             | Self::FailedToLoadAccounts
-            | Self::FailedToCreateCertificateArchive => 500,
+            | Self::FailedToCreateCertificateArchive
+            | Self::BackupFailed { .. }
+            | Self::RestoreFailed { .. } => 500,
             _ => 400,
         }
     }

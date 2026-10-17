@@ -82,6 +82,19 @@ pub trait ContainerRuntime: Send + Sync {
         anyhow::bail!("the runtime does not support a terminal");
     }
 
+    /// Runs a command in the container, captures its standard output and fails on a non-zero
+    /// exit code. `env` carries `KEY=value` entries. Like the files of a container, only the
+    /// local runtime carries it.
+    async fn exec_capture(
+        &self,
+        name: &ContainerName,
+        command: Vec<String>,
+        env: Vec<String>,
+    ) -> anyhow::Result<Vec<u8>> {
+        let _ = (name, command, env);
+        anyhow::bail!("the runtime does not support a captured command");
+    }
+
     /// The entries of a directory inside the container. Like `exec`, only the local runtime
     /// carries the files of a container.
     async fn list_dir(

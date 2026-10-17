@@ -244,11 +244,12 @@ impl DockerRuntime {
     pub async fn exec_capture(
         &self,
         name: &ContainerName,
-        command: &[String],
-        env: &[String],
+        command: Vec<String>,
+        env: Vec<String>,
     ) -> anyhow::Result<Vec<u8>> {
         let container = self.container_id(name).await?;
         let env: Vec<Value> = env.iter().map(|entry| json!(entry)).collect();
+        let command: Vec<Value> = command.into_iter().map(|word| json!(word)).collect();
         let response = self
             .send(
                 Method::POST,
@@ -675,6 +676,15 @@ impl ContainerRuntime for DockerRuntime {
             return Ok(String::from_utf8_lossy(&body).into_owned());
         }
         demux_logs(&body)
+    }
+
+    async fn exec_capture(
+        &self,
+        name: &ContainerName,
+        command: Vec<String>,
+        env: Vec<String>,
+    ) -> anyhow::Result<Vec<u8>> {
+        DockerRuntime::exec_capture(self, name, command, env).await
     }
 }
 

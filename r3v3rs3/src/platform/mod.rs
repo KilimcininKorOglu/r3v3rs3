@@ -5,6 +5,7 @@
 
 mod agents;
 mod app_hooks;
+mod backup;
 mod build;
 mod compose;
 mod connections;
@@ -162,6 +163,8 @@ pub struct Platform {
     compose: Arc<dyn ComposeRunner>,
     /// The directory of the Compose checkouts.
     compose_dir: PathBuf,
+    /// The directory of the database backups.
+    backup_dir: PathBuf,
     /// The CA of the agent link. Only a server with an agent port has it.
     pki: Option<AgentPki>,
     /// The connected agents.
@@ -235,6 +238,7 @@ impl Platform {
             build_dir,
             compose: Arc::new(DockerCompose::new(config.platform.docker.clone())),
             compose_dir: config_dir.join(compose::COMPOSE_DIR),
+            backup_dir: config_dir.join(backup::BACKUP_DIR),
             http: tokio::sync::OnceCell::new(),
             pending: oauth::PendingAuthorizations::default(),
             renewing: Mutex::new(()),
