@@ -96,12 +96,27 @@ const SCHEMA: &[&str] = &[
         failure       TEXT,
         updated_at    INTEGER NOT NULL
     )",
+    "CREATE TABLE IF NOT EXISTS app_metrics (
+        app_id  TEXT NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+        ts      INTEGER NOT NULL,
+        running INTEGER NOT NULL,
+        health  TEXT    NOT NULL,
+        cpu     REAL    NOT NULL,
+        memory  INTEGER NOT NULL,
+        rx_bytes INTEGER NOT NULL,
+        tx_bytes INTEGER NOT NULL,
+        requests INTEGER NOT NULL,
+        PRIMARY KEY (app_id, ts)
+    )",
+    "CREATE INDEX IF NOT EXISTS app_metrics_app ON app_metrics (app_id, ts)",
 ];
 
 mod connections;
 mod hooks;
+mod metrics;
 pub use connections::{PUBLIC_URL, StoredConnection, StoredGithubApp, StoredTokens};
 pub use hooks::StoredHook;
+pub use metrics::AppMetricRow;
 
 /// The secret of an app that holds its Git token.
 pub const GIT_TOKEN: &str = "git_token";

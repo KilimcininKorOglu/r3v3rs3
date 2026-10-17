@@ -14,6 +14,7 @@ pub mod deploy;
 pub(crate) mod fake;
 mod github_app;
 pub mod hooks;
+mod metrics;
 mod notices;
 pub mod oauth;
 mod provider;
@@ -109,6 +110,7 @@ impl PlatformHandle {
                 let platform = Arc::new(platform);
                 tokio::spawn(publish::refresh(Arc::downgrade(&platform)));
                 backup::spawn_scheduler(platform.clone());
+                metrics::spawn_collector(&platform);
                 if let Some(port) = config.platform.agent_port
                     && let Err(err) = platform
                         .start_agent_listener(port, events.subscribe())
