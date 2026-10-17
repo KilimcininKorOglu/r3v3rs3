@@ -92,7 +92,7 @@ async fn collect_round(platform: &Arc<Platform>, previous: &Previous) -> anyhow:
     let now = crate::clock::unix_ms();
     let requests = crate::proxy::stats::snapshot_resources();
     for app in platform.apps().await? {
-        if let Err(err) = collect_app(platform, &previous, &app, &requests).await {
+        if let Err(err) = collect_app(platform, previous, &app, &requests).await {
             tracing::error!(
                 err = format!("{err:#}"),
                 app = %app.name,

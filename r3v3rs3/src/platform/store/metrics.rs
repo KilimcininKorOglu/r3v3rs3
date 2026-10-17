@@ -2,7 +2,6 @@
 
 use super::PlatformStore;
 use r3v3rs3_api::id::ShortId;
-use sqlx::Row;
 
 /// One recorded sample of one app.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +18,20 @@ pub struct AppMetricRow {
     pub tx_bytes: u64,
     /// The served requests since the previous sample.
     pub requests: u64,
+}
+
+/// The columns of one app_metrics row, as SQLite holds them.
+#[derive(sqlx::FromRow)]
+struct MetricRow {
+    app_id: String,
+    ts: i64,
+    running: bool,
+    health: String,
+    cpu: f64,
+    memory: i64,
+    rx_bytes: i64,
+    tx_bytes: i64,
+    requests: i64,
 }
 
 impl PlatformStore {
@@ -44,7 +57,7 @@ impl PlatformStore {
 
     /// The samples of one app from `since`, oldest first.
     pub async fn app_metrics(&self, app: ShortId, since: u64) -> anyhow::Result<Vec<AppMetricRow>> {
-        let rows = sqlx::query(
+        let rows = sqlx::query_as::<_, MetricRow>(
             "SELECT app_id, ts, running, health, cpu, memory, rx_bytes, tx_bytes, requests
             FROM app_metrics WHERE app_id = ? AND ts >= ? ORDER BY ts",
         )
@@ -52,7 +65,7 @@ impl PlatformStore {
         .bind(sql_int(since))
         .fetch_all(&self.pool)
         .await?;
-        rows.iter().map(metric_of).collect()
+        rows.into_iter().map(metric_of).collect()
     }
 
     /// Deletes the samples older than `before`.
@@ -65,18 +78,18 @@ impl PlatformStore {
     }
 }
 
-/// One row of the app_metrics table.
-fn metric_of(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<AppMetricRow> {
+/// The recorded sample of one row.
+fn metric_of(row: MetricRow) -> anyhow::Result<AppMetricRow> {
     Ok(AppMetricRow {
-        app: row.try_get::<String, _>("app_id")?.parse()?,
-        ts: row.try_get::<i64, _>("ts")? as u64,
-        running: row.try_get::<bool, _>("running")?,
-        health: row.try_get::<String, _>("health")?,
-        cpu: row.try_get::<f64, _>("cpu")?,
-        memory: row.try_get::<i64, _>("memory")? as u64,
-        rx_bytes: row.try_get::<i64, _>("rx_bytes")? as u64,
-        tx_bytes: row.try_get::<i64, _>("tx_bytes")? as u64,
-        requests: row.try_get::<i64, _>("requests")? as u64,
+        app: row.app_id.parse()?,
+        ts: row.ts as u64,
+        running: row.running,
+        health: row.health,
+        cpu: row.cpu,
+        memory: row.memory as u64,
+        rx_bytes: row.rx_bytes as u64,
+        tx_bytes: row.tx_bytes as u64,
+        requests: row.requests as u64,
     })
 }
 
