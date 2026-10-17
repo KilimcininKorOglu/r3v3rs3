@@ -57,6 +57,7 @@ pub(crate) mod auth;
 mod cdn;
 mod certs;
 mod config;
+mod databases;
 mod discovery;
 mod dns_credentials;
 mod git;
@@ -358,6 +359,13 @@ fn platform_routes() -> OpenApiRouter<AppState> {
             OpenApiRouter::new()
                 .routes(routes!(platform::get_deployment))
                 .routes(routes!(platform::rollback_deployment)),
+        )
+        .nest(
+            "/databases",
+            OpenApiRouter::new()
+                .routes(routes!(databases::engines))
+                .routes(routes!(databases::list, databases::create))
+                .routes(routes!(databases::delete)),
         )
         .nest(
             "/git/connections",
