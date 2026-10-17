@@ -105,6 +105,29 @@ pub struct S3Config {
     pub secret_key: String,
 }
 
+/// One recorded sample of the metrics of an app. The network and the request counters are the
+/// deltas against the previous sample.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct AppMetricsPoint {
+    pub ts: i64,
+    pub running: bool,
+    /// The container health, empty when the image declares no health check.
+    pub health: String,
+    /// The CPU use as a percent of one core.
+    pub cpu: f64,
+    pub memory: u64,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    pub requests: u64,
+}
+
+/// The query of the metrics of one app.
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct MetricsQuery {
+    /// How far back the history goes, from 1 to 24 hours. The default is 6.
+    pub hours: Option<u32>,
+}
+
 /// One stored backup of a managed database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct BackupEntry {

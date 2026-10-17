@@ -21,8 +21,9 @@ use r3v3rs3_api::{
     error::Error,
     id::ShortId,
     platform::{
-        AppEntry, AppLog, AppLogQuery, AppRequest, DeploymentEntry, DeploymentTrigger, EnvEntry,
-        GitTokenRequest, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
+        AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, DeploymentEntry,
+        DeploymentTrigger, EnvEntry, GitTokenRequest, MetricsQuery, TargetEntry, TargetRequest,
+        TargetToken, WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -521,6 +522,31 @@ pub async fn get_logs(
     let tail = query.tail.unwrap_or(DEFAULT_LOG_TAIL);
     Ok(Json(
         platform.app_log(id, tail).await.map_err(platform_error)?,
+    ))
+}
+
+/// The recorded metrics of an app: the samples of the last hours, oldest first.
+#[utoipa::path(
+    get,
+    path = "/{id}/metrics",
+    tag = "platform",
+    operation_id = "get_app_metrics",
+    params(("id" = ShortId, Path, description = "App id."), MetricsQuery),
+    responses((status = 200, description = "The metrics samples.", body = Vec<AppMetricsPoint>), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_app_metrics(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Query(query): Query<MetricsQuery>,
+) -> Result<Json<Vec<AppMetricsPoint>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let hours = query.hours.unwrap_or(6).clamp(1, 24);
+    Ok(Json(
+        platform
+            .app_metrics(id, hours)
+            .await
+            .map_err(platform_error)?,
     ))
 }
 

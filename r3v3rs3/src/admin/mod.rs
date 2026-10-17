@@ -348,6 +348,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 ))
                 .routes(routes!(platform::install_hook))
                 .routes(routes!(platform::list_deployments))
+                .routes(routes!(platform::get_app_metrics))
                 .routes(routes!(platform::get_logs))
                 .routes(routes!(platform::deploy_app))
                 .routes(routes!(platform::terminal))

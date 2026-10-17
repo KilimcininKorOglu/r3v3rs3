@@ -58,6 +58,34 @@ pub(super) fn spawn_collector(platform: &Arc<Platform>) {
     });
 }
 
+impl Platform {
+    /// The recorded samples of an app, oldest first, over the last hours.
+    pub async fn app_metrics(
+        &self,
+        id: ShortId,
+        hours: u32,
+    ) -> anyhow::Result<Vec<r3v3rs3_api::platform::AppMetricsPoint>> {
+        self.app(id).await?;
+        let since = crate::clock::unix_ms().saturating_sub(hours.min(24) as u64 * 3_600_000);
+        Ok(self
+            .store
+            .app_metrics(id, since)
+            .await?
+            .into_iter()
+            .map(|row| r3v3rs3_api::platform::AppMetricsPoint {
+                ts: row.ts as i64,
+                running: row.running,
+                health: row.health,
+                cpu: row.cpu,
+                memory: row.memory,
+                rx_bytes: row.rx_bytes,
+                tx_bytes: row.tx_bytes,
+                requests: row.requests,
+            })
+            .collect())
+    }
+}
+
 /// Records one sample for every running local app, then trims the old samples.
 async fn collect_round(platform: &Arc<Platform>) -> anyhow::Result<()> {
     let previous = Previous::default();
