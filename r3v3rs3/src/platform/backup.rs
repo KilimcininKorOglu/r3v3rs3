@@ -107,7 +107,7 @@ impl Platform {
                 entries.push(entry);
             }
         }
-        entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.created_at));
         Ok(entries)
     }
 
@@ -121,21 +121,7 @@ impl Platform {
             .context("the app is not a managed database")?;
         let info = engine.info();
         let password = self.database_password(db_id, info).await?;
-        let plan = dump_plan(engine, info, &password);
-        let dump = match &plan.file {
-            // Redis writes its dump itself; the backup downloads the file after a SAVE.
-            Some(path) => {
-                runtime
-                    .exec_capture(&container, plan.command.clone(), plan.env.clone())
-                    .await?;
-                runtime.download_file(&container, path).await?
-            }
-            None => {
-                runtime
-                    .exec_capture(&container, plan.command, plan.env)
-                    .await?
-            }
-        };
+        let dump = take_dump(&runtime, &container, dump_plan(engine, info, &password)).await?;
         let compressed = gzip(&dump).await?;
         let entry = BackupEntry {
             id: backup_id(),
@@ -146,21 +132,31 @@ impl Platform {
             sha256: hex::encode(Sha256::digest(&compressed)),
             created_at: unix_ms() as i64,
         };
+        self.store_backup(db_id, &entry, compressed).await?;
+        self.apply_retention(db_id).await?;
+        Ok(entry)
+    }
+
+    /// Writes one backup file with its manifest and uploads it to the configured S3 bucket.
+    async fn store_backup(
+        &self,
+        db_id: ShortId,
+        entry: &BackupEntry,
+        compressed: Vec<u8>,
+    ) -> anyhow::Result<()> {
         let dir = self.backup_dir(db_id).await?;
         tokio::fs::create_dir_all(&dir).await?;
-        let file = dir.join(format!("{}.dump.gz", entry.id));
-        tokio::fs::write(&file, &compressed).await?;
-        let manifest = serde_json::to_vec(&entry)?;
+        tokio::fs::write(dir.join(format!("{}.dump.gz", entry.id)), &compressed).await?;
+        let manifest = serde_json::to_vec(entry)?;
         tokio::fs::write(dir.join(format!("{}.json", entry.id)), manifest).await?;
-        if let Err(err) = self.upload_to_s3(&entry, compressed).await {
+        if let Err(err) = self.upload_to_s3(entry, compressed).await {
             // The local backup stays; only the log shows the failed upload.
             tracing::error!(
                 err = format!("{err:#}"),
                 "failed to upload the backup to S3"
             );
         }
-        self.apply_retention(db_id).await?;
-        Ok(entry)
+        Ok(())
     }
 
     /// Removes one backup and its manifest.
@@ -195,49 +191,11 @@ impl Platform {
         let password = self.database_password(db_id, info).await?;
         let plan = restore_plan(engine, info, &password);
         let bytes = ungzip(&self.download_backup(db_id, backup_id).await?).await?;
-        let outcome = match &plan.upload {
-            Some(path) => {
-                runtime
-                    .exec_capture(
-                        &container,
-                        vec!["mkdir".into(), "-p".into(), RESTORE_DIR.into()],
-                        Vec::new(),
-                    )
-                    .await?;
-                runtime.upload_file(&container, path, bytes).await?;
-                Some(
-                    runtime
-                        .exec_capture(&container, plan.command, plan.env)
-                        .await,
-                )
-            }
-            // Redis takes the uploaded dump at its next start, so the shutdown of the server
-            // must not save the old dataset over it.
-            None => {
-                let path = format!("{}/dump.rdb", info.data_path);
-                let uploaded = runtime.upload_file(&container, &path, bytes).await;
-                match uploaded {
-                    Ok(()) => Some(
-                        runtime
-                            .exec_capture(
-                                &container,
-                                vec!["redis-cli".into(), "SHUTDOWN".into(), "NOSAVE".into()],
-                                Vec::new(),
-                            )
-                            .await,
-                    ),
-                    Err(err) => Some(Err(err)),
-                }
-            }
-        };
-        if let Some(path) = &plan.upload {
-            runtime.remove_path(&container, path).await.ok();
-        }
-        if let Some(result) = outcome {
-            result.map_err(|err| Error::RestoreFailed {
+        run_restore(&runtime, &container, &plan, bytes, &info.data_path)
+            .await
+            .map_err(|err| Error::RestoreFailed {
                 reason: format!("{err:#}"),
             })?;
-        }
         Ok(())
     }
 
@@ -323,11 +281,86 @@ impl Platform {
                 let value = self
                     .keys
                     .open(&super::env_aad(db_id, var.key.as_str()), &var.sealed)?;
-                return Ok(String::from_utf8(value).context("a password is not UTF-8")?);
+                let value = String::from_utf8(value).context("a password is not UTF-8")?;
+                return Ok(value);
             }
         }
         Ok(String::new())
     }
+}
+
+/// Runs the dump of the plan and returns the dump bytes. An engine that writes no dump to
+/// stdout, such as Redis, gets its file downloaded after the command.
+async fn take_dump(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    plan: DumpPlan,
+) -> anyhow::Result<Vec<u8>> {
+    match &plan.file {
+        Some(path) => {
+            runtime
+                .exec_capture(container, plan.command, plan.env)
+                .await?;
+            runtime.download_file(container, path).await
+        }
+        None => {
+            runtime
+                .exec_capture(container, plan.command, plan.env)
+                .await
+        }
+    }
+}
+
+/// Uploads the dump into the container and runs the restore command of the engine. Redis takes
+/// no upload: the restore writes the dump into the data volume and shuts the server down, and
+/// the container restart loads it. A shutdown must not save the old dataset over the file.
+async fn run_restore(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    plan: &RestorePlan,
+    bytes: Vec<u8>,
+    data_path: &str,
+) -> anyhow::Result<()> {
+    let outcome = match &plan.upload {
+        Some(path) => {
+            runtime
+                .exec_capture(
+                    container,
+                    vec!["mkdir".into(), "-p".into(), RESTORE_DIR.into()],
+                    Vec::new(),
+                )
+                .await?;
+            runtime.upload_file(container, path, bytes).await?;
+            Some(
+                runtime
+                    .exec_capture(container, plan.command.clone(), plan.env.clone())
+                    .await,
+            )
+        }
+        None => {
+            let path = format!("{data_path}/dump.rdb");
+            let uploaded = runtime.upload_file(container, &path, bytes).await;
+            match uploaded {
+                Ok(()) => Some(
+                    runtime
+                        .exec_capture(
+                            container,
+                            vec!["redis-cli".into(), "SHUTDOWN".into(), "NOSAVE".into()],
+                            Vec::new(),
+                        )
+                        .await,
+                ),
+                Err(err) => Some(Err(err)),
+            }
+        }
+    };
+    if let Some(path) = &plan.upload {
+        runtime.remove_path(container, path).await.ok();
+    }
+    if let Some(result) = outcome {
+        result?;
+    }
+    Ok(())
 }
 
 /// The dump command of one engine over the local connection of the container itself.
@@ -479,14 +512,15 @@ impl Platform {
                 .await?
                 .first()
                 .map(|entry| entry.created_at);
-            if last.is_none_or(|created_at| created_at < slot) && now >= slot {
-                if let Err(err) = self.run_backup(app.id).await {
-                    tracing::error!(
-                        err = format!("{err:#}"),
-                        database = %app.name,
-                        "the scheduled backup failed"
-                    );
-                }
+            if now >= slot
+                && last.is_none_or(|created_at| created_at < slot)
+                && let Err(err) = self.run_backup(app.id).await
+            {
+                tracing::error!(
+                    err = format!("{err:#}"),
+                    database = %app.name,
+                    "the scheduled backup failed"
+                );
             }
         }
         Ok(())
