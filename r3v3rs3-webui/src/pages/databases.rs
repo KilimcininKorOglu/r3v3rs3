@@ -126,9 +126,33 @@ pub fn databases() -> Html {
             reload_lists(&databases, &apps, &notice);
         })
     };
+    let refresh_engines = {
+        let (engines, notice) = (engines.clone(), notice.clone());
+        Callback::from(move |_: MouseEvent| {
+            let (engines, notice) = (engines.clone(), notice.clone());
+            spawn_local(async move {
+                match fetch_json::<Vec<EngineInfo>>(
+                    Locale::En,
+                    Request::post(&format!("{API_ENDPOINT}/databases/engines/refresh")),
+                )
+                .await
+                {
+                    Ok(list) => engines.set(list),
+                    Err(message) => notice.set(Some(Notice::Failed(message))),
+                }
+            });
+        })
+    };
     html! {
         <>
-            <h1 class="text-xl font-semibold mb-3">{locale.t("nav.databases")}</h1>
+            <div class="flex items-center justify-between mb-3">
+                <h1 class="text-xl font-semibold">{locale.t("nav.databases")}</h1>
+                if can_edit {
+                    <button type="button" class="text-sm text-neutral-400 hover:text-neutral-200" onclick={refresh_engines}>
+                        {locale.t("databases.refresh")}
+                    </button>
+                }
+            </div>
             { notice_view(&notice, |_| html!()) }
             { (*created)
                 .clone()

@@ -9,9 +9,7 @@ use r3v3rs3_api::git::{GitRef, RelPath};
 use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{
-    AppEntry, AppRequest, AppSource, AppSpec, LOCAL_TARGET, TargetEntry,
-};
+use r3v3rs3_api::platform::{AppEntry, AppRequest, AppSource, AppSpec, LOCAL_TARGET, TargetEntry};
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::store::StoreApp;
 use std::str::FromStr;
