@@ -118,8 +118,23 @@ const SCHEMA: &[&str] = &[
         latest_digest    TEXT,
         checked_at       INTEGER NOT NULL
     )",
+    "CREATE TABLE IF NOT EXISTS app_scheduled_commands (
+        id          TEXT PRIMARY KEY,
+        app_id      TEXT NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+        name        TEXT NOT NULL,
+        schedule    TEXT NOT NULL,
+        command     TEXT NOT NULL,
+        enabled     INTEGER NOT NULL,
+        last_run_at INTEGER,
+        last_status TEXT,
+        last_output TEXT,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+    )",
+    "CREATE INDEX IF NOT EXISTS app_scheduled_commands_app ON app_scheduled_commands (app_id)",
 ];
 
+mod commands;
 mod connections;
 mod hooks;
 mod metrics;

@@ -447,6 +447,18 @@ An admin account sees a **Terminal** link on the page of an app. It opens a shel
 
 An admin account also sees a **Files** link on the page of an app. It opens the files of the volumes of the running container. The page selects a volume, lists its directories, and opens a directory on **View**. A file row offers **Download**, **Edit** and **Delete**; **Edit** opens a file up to 1 MB as text, and **Save** writes it back. The toolbar of the page uploads a file into the current directory and steps one directory up. A write stays inside a volume that is not read-only, and the page hides the upload, the edit and the delete of a read-only volume. Like the terminal, the files work only while the app runs on the local Docker Engine of the r3v3rs3 server. Every write and delete goes into the audit log as `app_file`.
 
+### Scheduled Commands
+
+The page of an app includes a **Scheduled Commands** section to run scheduled or periodic one-off commands inside the container of the running deployment (e.g. database maintenance, cache clear, warmup tasks).
+
+Each command configuration specifies:
+- **Name**: A descriptive name for the task.
+- **Schedule**: A timing expression. Supports daily time `HH:MM` (UTC), standard 5-field cron syntax (e.g. `*/15 * * * *`, `0 2 * * *`), shorthand macros (`@hourly`, `@daily`), or interval expressions (`@every 15m`, `@every 1h`, `@every 30s`).
+- **Command**: The command to execute inside the container, passed to `sh -c`.
+- **Enabled**: Whether the background scheduler runs the task when due.
+
+The server checks and triggers due commands in a background loop every 30 seconds. A command can also be run immediately on demand with **Run now**. The last execution status, exit code, and run time are recorded on each row, and **Output** opens a modal displaying stdout and stderr of the latest run.
+
 ### Targets
 
 The **Targets** page lists the local target and the agent targets with their **Kind**, their **Status** (**Online**, **Offline** or **Waiting for enrollment**), **Last seen** and the **Version** of the agent. It reads the list again every 10 seconds. The **Target** select of the app form shows the status of each target next to its name.
@@ -491,6 +503,11 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 | `GET /api/apps/{id}/files/download?path=` | Admin | The content of a file inside a volume. |
 | `PUT /api/apps/{id}/files?path=` | Admin | Writes the request body into a file inside a writable volume. |
 | `DELETE /api/apps/{id}/files?path=` | Admin | Deletes a file or a directory inside a writable volume. |
+| `GET /api/apps/{id}/commands` | Read | The scheduled commands configured for an app. |
+| `POST /api/apps/{id}/commands` | Edit | Adds a scheduled command to an app. |
+| `PUT /api/apps/{id}/commands/{cmd_id}` | Edit | Replaces a scheduled command. |
+| `DELETE /api/apps/{id}/commands/{cmd_id}` | Edit | Deletes a scheduled command. |
+| `POST /api/apps/{id}/commands/{cmd_id}/run` | Edit | Runs a scheduled command inside the container immediately and returns the output. |
 | `GET /api/databases` | Read | The database apps, with their engine, their port and their connection. |
 | `GET /api/databases/engines` | Read | The engines and the versions that the panel offers. |
 | `POST /api/databases/engines/refresh` | Edit | Downloads the engine catalog from the r3v3rs3-apps repository. |

@@ -427,6 +427,12 @@ pub enum Error {
 
     #[error("failed to create the certificate archive")]
     FailedToCreateCertificateArchive,
+
+    #[error("scheduled command not found: {id}")]
+    ScheduledCommandNotFound {
+        #[schema(value_type = String)]
+        id: ShortId,
+    },
 }
 
 impl Error {
@@ -435,7 +441,8 @@ impl Error {
             Self::IdNotFound { .. }
             | Self::AccountNotFound { .. }
             | Self::AppNotRunning { .. }
-            | Self::BackupNotFound { .. } => 404,
+            | Self::BackupNotFound { .. }
+            | Self::ScheduledCommandNotFound { .. } => 404,
             Self::Unauthorized => 401,
             Self::Forbidden
             | Self::ProxyReadOnly { .. }

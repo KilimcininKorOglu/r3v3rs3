@@ -93,10 +93,18 @@ pub enum AuditAction {
     AuthorizeMcpClient,
     /// An account checked for image updates of an app.
     CheckAppUpdate,
+    /// An account added a scheduled command to an app.
+    AddScheduledCommand,
+    /// An account updated a scheduled command of an app.
+    UpdateScheduledCommand,
+    /// An account deleted a scheduled command of an app.
+    DeleteScheduledCommand,
+    /// An account executed a scheduled command of an app.
+    RunScheduledCommand,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 56] = [
+    pub const ALL: [AuditAction; 60] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -153,6 +161,10 @@ impl AuditAction {
         Self::InstallAppHook,
         Self::AuthorizeMcpClient,
         Self::CheckAppUpdate,
+        Self::AddScheduledCommand,
+        Self::UpdateScheduledCommand,
+        Self::DeleteScheduledCommand,
+        Self::RunScheduledCommand,
     ];
 }
 

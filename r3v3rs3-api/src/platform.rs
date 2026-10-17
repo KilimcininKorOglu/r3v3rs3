@@ -808,6 +808,51 @@ pub struct DeploymentEntry {
     pub message: Option<String>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// A scheduled command configured for an app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AppScheduledCommand {
+    #[schema(value_type = String)]
+    pub id: ShortId,
+    #[schema(value_type = String)]
+    pub app_id: ShortId,
+    pub name: String,
+    pub schedule: String,
+    pub command: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_output: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Request to create or update a scheduled command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ScheduledCommandRequest {
+    pub name: String,
+    pub schedule: String,
+    pub command: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// The result of running a scheduled command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ScheduledCommandRunResult {
+    pub success: bool,
+    pub status: String,
+    pub output: String,
+    pub duration_ms: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

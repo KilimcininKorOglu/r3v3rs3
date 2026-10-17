@@ -25,6 +25,7 @@ mod publish;
 mod remote_tests;
 mod repositories;
 mod s3;
+pub mod scheduler;
 pub mod store;
 
 use crate::agent::compose::RemoteCompose;
@@ -113,6 +114,7 @@ impl PlatformHandle {
                 backup::spawn_scheduler(platform.clone());
                 metrics::spawn_collector(&platform);
                 image_check::spawn_checker(&platform);
+                scheduler::spawn_command_scheduler(&platform);
                 if let Some(port) = config.platform.agent_port
                     && let Err(err) = platform
                         .start_agent_listener(port, events.subscribe())

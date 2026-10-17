@@ -447,6 +447,18 @@ Admin hesap, uygulama sayfasında bir **Terminal** linki görür. Link, çalış
 
 Admin hesap, uygulama sayfasında bir **Dosyalar** linki de görür. Link, çalışan container'ın volume'lerindeki dosyaları açar. Sayfa bir volume seçer, dizinlerini listeler ve **Görüntüle** ile bir dizini açar. Bir dosya satırı **İndir**, **Düzenle** ve **Sil** sunar; **Düzenle** 1 MB'a kadar bir dosyayı metin olarak açar ve **Kaydet** geri yazar. Sayfanın üst barı geçerli dizine bir dosya yükler ve bir üst dizine çıkar. Yazma işlemleri read-only olmayan bir volume içinde kalır; sayfa read-only bir volume için yükleme, düzenleme ve silme butonlarını göstermez. Terminal gibi dosyalar da yalnız uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir. Her yazma ve silme işlemi audit log'una `app_file` olarak geçer.
 
+### Zamanlanmış Komutlar
+
+Uygulama sayfasında çalışan deployment container'ı içinde düzenli aralıklarla tek seferlik veya periyodik komutlar çalıştırmak için bir **Zamanlanmış Komutlar** bölümü yer alır (veritabanı bakımı, cache temizleme, ısınma görevleri vb.).
+
+Her komut tanımı şunları içerir:
+- **İsim**: Görevi tanımlayan açıklayıcı bir isim.
+- **Zamanlama**: Zaman ifadesi. Günlük UTC saati `HH:MM` (ör. `03:00`), standart 5 alanlı cron sözdizimi (ör. `*/15 * * * *`, `0 2 * * *`), kısaltma makroları (`@hourly`, `@daily`) veya aralık ifadeleri (`@every 15m`, `@every 1h`, `@every 30s`) desteklenir.
+- **Komut**: Container içinde `sh -c` ile çalıştırılacak komut.
+- **Etkin**: Arka plan zamanlayıcısının süresi gelen görevi otomatik olarak çalıştırıp çalıştırmayacağı.
+
+Sunucu, süresi gelen komutları kontrol edip çalıştırmak için her 30 saniyede bir arka plan döngüsü yürütür. Bir komut ayrıca **Şimdi çalıştır** butonu ile anında elle de çalıştırılabilir. Her satırda son çalıştırma durumu, çıkış kodu ve süresi kaydedilir; **Çıktı** butonu ise en son çalıştırmanın stdout ve stderr çıktısını gösteren bir modal açar.
+
 ### Hedefler
 
 **Hedefler** sayfası yerel hedefi ve agent hedeflerini **Tür**, **Durum** (**Bağlı**, **Bağlı değil** veya **Kayıt bekliyor**), **Son görülme** ve agent'ın **Sürüm** bilgisiyle listeler. Sayfa listeyi 10 saniyede bir yeniden okur. Uygulama formundaki **Hedef** seçimi her hedefin adının yanında durumunu gösterir.
@@ -489,6 +501,11 @@ Admin hesabı ayrıca şunları görür:
 | `GET /api/apps/{id}/files/download?path=` | Admin | Bir volume içindeki dosyanın içeriğini döndürür. |
 | `PUT /api/apps/{id}/files?path=` | Admin | İstek gövdesini yazılabilir bir volume içindeki dosyaya yazar. |
 | `DELETE /api/apps/{id}/files?path=` | Admin | Yazılabilir bir volume içindeki dosyayı veya dizini siler. |
+| `GET /api/apps/{id}/commands` | Read | Bir uygulamanın zamanlanmış komutlarını listeler. |
+| `POST /api/apps/{id}/commands` | Edit | Uygulamaya yeni bir zamanlanmış komut ekler. |
+| `PUT /api/apps/{id}/commands/{cmd_id}` | Edit | Mevcut bir zamanlanmış komutu günceller. |
+| `DELETE /api/apps/{id}/commands/{cmd_id}` | Edit | Bir zamanlanmış komutu siler. |
+| `POST /api/apps/{id}/commands/{cmd_id}/run` | Edit | Zamanlanmış bir komutu container içinde derhal çalıştırır ve çıktısını döner. |
 | `GET /api/databases` | Read | Veritabanı uygulamaları; motor, port ve bağlantılarıyla. |
 | `GET /api/databases/engines` | Read | Panelin sunduğu motorlar ve sürümler. |
 | `POST /api/databases/engines/refresh` | Edit | Engine kataloğunu r3v3rs3-apps deposundan indirir. |

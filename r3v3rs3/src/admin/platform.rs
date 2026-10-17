@@ -22,8 +22,9 @@ use r3v3rs3_api::{
     error::Error,
     id::ShortId,
     platform::{
-        AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, DeploymentEntry,
-        DeploymentTrigger, EnvEntry, GitTokenRequest, ImageUpdateStatus, MetricsQuery, TargetEntry,
+        AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
+        DeploymentEntry, DeploymentTrigger, EnvEntry, GitTokenRequest, ImageUpdateStatus,
+        MetricsQuery, ScheduledCommandRequest, ScheduledCommandRunResult, TargetEntry,
         TargetRequest, TargetToken, WebhookSecret,
     },
 };
@@ -926,4 +927,151 @@ pub async fn rollback_deployment(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(deployment))
+}
+
+/// Lists the scheduled commands configured for an app.
+#[utoipa::path(
+    get,
+    path = "/{id}/commands",
+    tag = "platform",
+    operation_id = "get_app_scheduled_commands",
+    params(("id" = ShortId, Path, description = "The app id.")),
+    responses((status = 200, description = "The scheduled commands.", body = Vec<AppScheduledCommand>), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_app_scheduled_commands(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Vec<AppScheduledCommand>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let list = platform
+        .scheduled_commands(id)
+        .await
+        .map_err(platform_error)?;
+    Ok(Json(list))
+}
+
+/// Adds a new scheduled command to an app.
+#[utoipa::path(
+    post,
+    path = "/{id}/commands",
+    tag = "platform",
+    operation_id = "create_app_scheduled_command",
+    params(("id" = ShortId, Path, description = "The app id.")),
+    request_body = ScheduledCommandRequest,
+    responses((status = 200, description = "The created scheduled command.", body = AppScheduledCommand), NotFoundResponse, ErrorResponses)
+)]
+pub async fn create_app_scheduled_command(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<ScheduledCommandRequest>,
+) -> Result<Json<AppScheduledCommand>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let cmd = platform
+        .add_scheduled_command(id, request)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::AddScheduledCommand)
+        .id(id)
+        .summary(&cmd.name);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(cmd))
+}
+
+/// Updates a scheduled command.
+#[utoipa::path(
+    put,
+    path = "/{id}/commands/{cmd_id}",
+    tag = "platform",
+    operation_id = "update_app_scheduled_command",
+    params(
+        ("id" = ShortId, Path, description = "The app id."),
+        ("cmd_id" = ShortId, Path, description = "The command id.")
+    ),
+    request_body = ScheduledCommandRequest,
+    responses((status = 200, description = "The updated scheduled command.", body = AppScheduledCommand), NotFoundResponse, ErrorResponses)
+)]
+pub async fn update_app_scheduled_command(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((id, cmd_id)): Path<(ShortId, ShortId)>,
+    Json(request): Json<ScheduledCommandRequest>,
+) -> Result<Json<AppScheduledCommand>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let cmd = platform
+        .update_scheduled_command(cmd_id, request)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UpdateScheduledCommand)
+        .id(id)
+        .summary(&cmd.name);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(cmd))
+}
+
+/// Deletes a scheduled command.
+#[utoipa::path(
+    delete,
+    path = "/{id}/commands/{cmd_id}",
+    tag = "platform",
+    operation_id = "delete_app_scheduled_command",
+    params(
+        ("id" = ShortId, Path, description = "The app id."),
+        ("cmd_id" = ShortId, Path, description = "The command id.")
+    ),
+    responses((status = 200, description = "Command deleted."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn delete_app_scheduled_command(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((id, cmd_id)): Path<(ShortId, ShortId)>,
+) -> Result<(), AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    platform
+        .delete_scheduled_command(cmd_id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeleteScheduledCommand)
+        .id(id)
+        .summary(cmd_id.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(())
+}
+
+/// Runs a scheduled command immediately inside the running container.
+#[utoipa::path(
+    post,
+    path = "/{id}/commands/{cmd_id}/run",
+    tag = "platform",
+    operation_id = "run_app_scheduled_command",
+    params(
+        ("id" = ShortId, Path, description = "The app id."),
+        ("cmd_id" = ShortId, Path, description = "The command id.")
+    ),
+    responses((status = 200, description = "Execution result.", body = ScheduledCommandRunResult), NotFoundResponse, ErrorResponses)
+)]
+pub async fn run_app_scheduled_command(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((id, cmd_id)): Path<(ShortId, ShortId)>,
+) -> Result<Json<ScheduledCommandRunResult>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let result = platform
+        .execute_scheduled_command(cmd_id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::RunScheduledCommand)
+        .id(id)
+        .summary(cmd_id.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(result))
 }

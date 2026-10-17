@@ -5,6 +5,7 @@ use yew_router::prelude::*;
 
 mod access_lists;
 mod accounts;
+mod app_commands;
 mod app_deployments;
 mod app_env;
 mod app_files;

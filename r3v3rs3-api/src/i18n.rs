@@ -203,6 +203,9 @@ mod tests {
             Error::BackupFailed { reason: text() },
             Error::RestoreFailed { reason: text() },
             Error::BackupNotFound { id: text() },
+            Error::ScheduledCommandNotFound {
+                id: "abc".parse().unwrap(),
+            },
             Error::NoNewRelease,
             Error::UpgradeFailed,
             Error::FailedToBuildDnsResolver { reason: text() },

@@ -2,6 +2,7 @@
 //! environment variables.
 
 use super::Route;
+use super::app_commands::AppCommands;
 use super::app_env::AppEnv;
 use super::app_form::{AppForm, fields_view};
 use super::app_git_token::AppGitToken;
@@ -205,6 +206,7 @@ fn edit_extras(
                 <AppGitToken app={entry.clone()} {locale} onchanged={onchanged.clone()} />
             }
             <AppWebhook app={entry.clone()} {locale} {onchanged} />
+            <AppCommands id={entry.id} {locale} />
             <AppMetrics id={entry.id} />
             <AppEnv id={entry.id} {locale} />
             <div class="flex justify-end mt-4 gap-4 items-center">
