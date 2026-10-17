@@ -54,6 +54,7 @@ mod app_files;
 mod app_info;
 mod audit;
 pub(crate) mod auth;
+mod backups;
 mod cdn;
 mod certs;
 mod config;
@@ -365,7 +366,14 @@ fn platform_routes() -> OpenApiRouter<AppState> {
             OpenApiRouter::new()
                 .routes(routes!(databases::engines))
                 .routes(routes!(databases::list, databases::create))
-                .routes(routes!(databases::delete)),
+                .routes(routes!(databases::delete))
+                .routes(routes!(backups::list, backups::create))
+                .routes(routes!(backups::download))
+                .routes(routes!(backups::delete, backups::restore)),
+        )
+        .nest(
+            "/backup-config",
+            OpenApiRouter::new().routes(routes!(backups::get_config, backups::put_config)),
         )
         .nest(
             "/git/connections",

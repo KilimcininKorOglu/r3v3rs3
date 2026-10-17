@@ -21,6 +21,12 @@ pub const BACKUP_CONFIG: &str = "backup_config";
 /// The directory under the config directory that holds the backups.
 pub const BACKUP_DIR: &str = "backups";
 
+/// The settings row of the sealed S3 secret key.
+const S3_SECRET: &str = "backup_s3_secret";
+
+/// The associated data that binds the sealed S3 secret key.
+const S3_SECRET_AAD: &str = "backup/s3/secret_key";
+
 /// The directory inside the container that a restore uploads its dump to.
 const RESTORE_DIR: &str = "/tmp/r3v3rs3-restore";
 
@@ -50,10 +56,36 @@ impl Platform {
         }
     }
 
-    /// Replaces the backup settings.
-    pub async fn set_backup_config(&self, config: &BackupConfig) -> anyhow::Result<()> {
-        let json = serde_json::to_string(config)?;
+    /// Replaces the backup settings. A secret key in the request replaces the stored one, an
+    /// empty one keeps it, and no S3 target clears it. The settings are stored without the
+    /// secret; it lives sealed in its own row.
+    pub async fn set_backup_config(&self, mut config: BackupConfig) -> anyhow::Result<()> {
+        let secret = config
+            .s3
+            .as_mut()
+            .map(|s3| std::mem::take(&mut s3.secret_key))
+            .unwrap_or_default();
+        match (&config.s3, secret.is_empty()) {
+            (Some(_), false) => {
+                let sealed = hex::encode(self.keys.seal(S3_SECRET_AAD, secret.as_bytes())?);
+                self.store.set_setting(S3_SECRET, Some(&sealed)).await?;
+            }
+            // An S3 target without a new secret keeps the stored one.
+            (Some(_), true) => {}
+            (None, _) => self.store.set_setting(S3_SECRET, None).await?,
+        }
+        let json = serde_json::to_string(&config)?;
         self.store.set_setting(BACKUP_CONFIG, Some(&json)).await
+    }
+
+    /// The S3 secret key, unsealed. `None` when no secret is stored.
+    pub async fn s3_secret(&self) -> anyhow::Result<Option<String>> {
+        let Some(sealed) = self.store.setting(S3_SECRET).await? else {
+            return Ok(None);
+        };
+        let sealed_bytes = hex::decode(sealed)?;
+        let bytes = self.keys.open(S3_SECRET_AAD, &sealed_bytes)?;
+        Ok(Some(String::from_utf8(bytes)?))
     }
 
     /// The backups of one database, newest first.

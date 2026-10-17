@@ -62,6 +62,12 @@ pub enum AuditAction {
     CreateDatabase,
     /// An account deleted a database app.
     DeleteDatabase,
+    /// An account took the backup of a database.
+    BackupDatabase,
+    /// An account restored the backup of a database.
+    RestoreDatabase,
+    /// An account changed the backup settings.
+    UpdateBackupConfig,
     SetAppGitToken,
     DeleteAppGitToken,
     AddTarget,
@@ -86,7 +92,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 51] = [
+    pub const ALL: [AuditAction; 54] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -122,6 +128,9 @@ impl AuditAction {
         Self::AppFile,
         Self::CreateDatabase,
         Self::DeleteDatabase,
+        Self::BackupDatabase,
+        Self::RestoreDatabase,
+        Self::UpdateBackupConfig,
         Self::SetAppGitToken,
         Self::DeleteAppGitToken,
         Self::AddTarget,
