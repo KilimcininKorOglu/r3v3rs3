@@ -39,6 +39,8 @@ pub struct FakeState {
     pub builds: Vec<Build>,
     /// The Compose projects whose images were pruned, and whether every unused image went.
     pub pruned: Vec<(String, bool)>,
+    /// The spec of every created container.
+    pub specs: Vec<ContainerSpec>,
 }
 
 /// One build of the fake runtime.
@@ -376,6 +378,7 @@ impl ContainerRuntime for FakeRuntime {
         if !state.images.contains_key(spec.image.as_str()) {
             bail!("no such image: {}", spec.image);
         }
+        state.specs.push(spec.clone());
         let published = spec
             .publish
             .map(|port| vec![(port, state.host_port)])

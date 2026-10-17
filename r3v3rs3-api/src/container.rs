@@ -358,6 +358,9 @@ pub struct ContainerSpec {
     /// port, so the address survives a new deployment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_port: Option<u16>,
+    /// Extra entries of `/etc/hosts` of the container, as `host` and `ip` pairs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_hosts: Vec<(String, String)>,
 }
 
 impl ContainerSpec {
@@ -529,6 +532,7 @@ mod tests {
             limits: ResourceLimits::default(),
             publish: None,
             host_port: None,
+            extra_hosts: Vec::new(),
         };
         assert!(spec.validate().is_ok());
         spec.env[0].value = "a\0b".into();

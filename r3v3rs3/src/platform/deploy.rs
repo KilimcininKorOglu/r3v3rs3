@@ -461,10 +461,20 @@ impl Platform {
         let app_label = app_label(job.app)?;
         let network = app_network(job.app)?;
         runtime.ensure_network(&network, &app_label).await?;
+        let mut env = self.open_env(job.app, &job.env)?;
+        let extra_hosts = if job.spec.uses_database.is_some() {
+            env.extend(self.database_env(job, runtime).await?);
+            vec![(
+                "host.docker.internal".to_string(),
+                "host-gateway".to_string(),
+            )]
+        } else {
+            Vec::new()
+        };
         let spec = ContainerSpec {
             name: name.clone(),
             image: digest.parse()?,
-            env: self.open_env(job.app, &job.env)?,
+            env,
             labels: BTreeMap::from([
                 (APP_LABEL.to_string(), app_label.to_string()),
                 (DEPLOYMENT_LABEL.to_string(), job.deployment.to_string()),
@@ -475,6 +485,7 @@ impl Platform {
             limits: job.spec.limits,
             publish: Some(job.spec.port),
             host_port: job.spec.host_port,
+            extra_hosts,
         };
         runtime.create_container(&spec).await?;
         runtime.start_container(name).await?;
@@ -487,6 +498,76 @@ impl Platform {
                 Ok(EnvVar {
                     key: var.key.parse()?,
                     value: self.open_value(app, var)?,
+                })
+            })
+            .collect()
+    }
+
+    /// The connection of the database that the app uses, as the environment of the container.
+    /// The container reaches the published port of the database over the host gateway.
+    async fn database_env(
+        &self,
+        job: &Job,
+        runtime: &dyn ContainerRuntime,
+    ) -> anyhow::Result<Vec<EnvVar>> {
+        let Some(db_id) = job.spec.uses_database else {
+            return Ok(Vec::new());
+        };
+        let db = self.app(db_id).await?;
+        let Some(engine) = db.spec.database else {
+            bail!("the app {} is not a database", db.name);
+        };
+        let info = engine.info();
+        let Some(host_port) = db.spec.host_port else {
+            bail!("the database {} has no host port", db.name);
+        };
+        let running = runtime
+            .list_containers(&app_label(db_id)?)
+            .await?
+            .iter()
+            .any(|container| container.state == "running");
+        if !running {
+            bail!("the database {} is not running", db.name);
+        }
+        let stored = self.store.env(db_id).await?;
+        let password = match stored
+            .iter()
+            .find(|var| var.key.as_str() == info.password_env)
+        {
+            Some(var) => self.open_value(db_id, var)?,
+            None => String::new(),
+        };
+        let host = "host.docker.internal";
+        let mut values = vec![
+            (format!("{}_HOST", info.env_prefix), host.to_string()),
+            (format!("{}_PORT", info.env_prefix), host_port.to_string()),
+            (format!("{}_USER", info.env_prefix), info.user.clone()),
+            (format!("{}_PASSWORD", info.env_prefix), password.clone()),
+        ];
+        if !info.default_db.is_empty() {
+            values.push((
+                format!("{}_DATABASE", info.env_prefix),
+                info.default_db.clone(),
+            ));
+        }
+        let url = match (info.user.is_empty(), info.url_database) {
+            (true, _) => format!("{}://{host}:{host_port}", info.url_scheme),
+            (false, true) => format!(
+                "{}://{}:{password}@{host}:{host_port}/{}",
+                info.url_scheme, info.user, info.default_db
+            ),
+            (false, false) => format!(
+                "{}://{}:{password}@{host}:{host_port}",
+                info.url_scheme, info.user
+            ),
+        };
+        values.push(("DATABASE_URL".to_string(), url));
+        values
+            .into_iter()
+            .map(|(key, value)| {
+                Ok(EnvVar {
+                    key: key.parse()?,
+                    value,
                 })
             })
             .collect()
@@ -704,7 +785,7 @@ mod tests {
     use super::super::tests::{TempDir, platform_with, request};
     use super::*;
     use crate::build::compose::{ComposePort, DockerCompose};
-    use r3v3rs3_api::platform::{AppRequest, EnvEntry, PlatformConfig};
+    use r3v3rs3_api::platform::{AppRequest, DatabaseEngine, EnvEntry, PlatformConfig};
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
 
@@ -1237,6 +1318,149 @@ mod tests {
 
     fn container_of(setup: &Setup, deployment: &DeploymentEntry) -> String {
         format!("r3v3rs3-{}-{}", setup.app.id, deployment.id)
+    }
+
+    /// Waits until no app of `apps` runs a pipeline, and returns the deployment.
+    async fn settled(
+        platform: &Arc<Platform>,
+        apps: &[ShortId],
+        id: ShortId,
+    ) -> anyhow::Result<DeploymentEntry> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+        while tokio::time::Instant::now() < deadline {
+            let busy = apps.iter().any(|app| platform.busy_apps().contains(app));
+            let entry = platform.store.deployment(id).await?.context("entry")?;
+            if !busy {
+                return Ok(entry);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        bail!("the deployment {id} did not end")
+    }
+
+    /// A platform whose database app `main-db` runs with a secret password, and the app
+    /// `app-db` that uses it.
+    async fn setup_with_database()
+    -> anyhow::Result<(Arc<Platform>, Arc<FakeRuntime>, AppEntry, TempDir, u16)> {
+        let (command, _) = mpsc::channel(1);
+        let (mut platform, runtime, dir) =
+            platform_with(&PlatformConfig::default(), command).await?;
+        platform.fetcher = Arc::new(FakeFetcher::default());
+        platform.compose = Arc::new(FakeCompose::new(runtime.clone()));
+        let platform = Arc::new(platform);
+        runtime.state().host_port = app_server(200).await?;
+
+        let mut db = request("main-db");
+        db.spec.port = 5432;
+        db.spec.database = Some(DatabaseEngine::Postgres);
+        let host_port = std::net::TcpListener::bind(("127.0.0.1", 0))?
+            .local_addr()?
+            .port();
+        db.spec.host_port = Some(host_port);
+        db.spec.health_check_path = Some("/healthz".into());
+        let db_app = platform.add_app(db, 1).await?;
+        platform
+            .set_env(
+                db_app.id,
+                vec![EnvEntry {
+                    key: "POSTGRES_PASSWORD".parse()?,
+                    value: Some("s3cret".into()),
+                    secret: true,
+                }],
+            )
+            .await?;
+        let db_entry = platform
+            .deploy(db_app.id, "alice", DeploymentTrigger::Manual)
+            .await?;
+        settled(&platform, &[db_app.id], db_entry.id).await?;
+
+        let mut app = request("app-db");
+        app.spec.uses_database = Some(db_app.id);
+        app.spec.health_check_path = Some("/healthz".into());
+        let linked = platform.add_app(app, 2).await?;
+        Ok((platform, runtime, linked, dir, host_port))
+    }
+
+    #[tokio::test]
+    async fn a_deployment_injects_the_connection_of_its_database() -> anyhow::Result<()> {
+        let (platform, runtime, linked, _dir, host_port) = setup_with_database().await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        let entry = platform
+            .deploy(linked.id, "alice", DeploymentTrigger::Manual)
+            .await?;
+        let entry = settled(&platform, &[db_id, linked.id], entry.id).await?;
+        assert_eq!(entry.status, DeploymentStatus::Running);
+
+        let created = runtime
+            .state()
+            .specs
+            .last()
+            .cloned()
+            .context("the created container")?;
+        assert_eq!(
+            created.extra_hosts,
+            vec![(
+                "host.docker.internal".to_string(),
+                "host-gateway".to_string()
+            )]
+        );
+        let env = |key: &str| {
+            created
+                .env
+                .iter()
+                .find(|var| var.key.as_str() == key)
+                .map(|var| var.value.clone())
+        };
+        assert_eq!(
+            env("DATABASE_URL").as_deref(),
+            Some(&*format!(
+                "postgres://postgres:s3cret@host.docker.internal:{host_port}/postgres"
+            ))
+        );
+        assert_eq!(
+            env("POSTGRES_HOST").as_deref(),
+            Some("host.docker.internal")
+        );
+        assert_eq!(
+            env("POSTGRES_PORT").as_deref(),
+            Some(&*host_port.to_string())
+        );
+        assert_eq!(env("POSTGRES_USER").as_deref(), Some("postgres"));
+        assert_eq!(env("POSTGRES_PASSWORD").as_deref(), Some("s3cret"));
+        assert_eq!(env("POSTGRES_DATABASE").as_deref(), Some("postgres"));
+
+        // A database that an app uses cannot be deleted.
+        let err = platform.delete_app(db_id).await.unwrap_err();
+        let err = err.downcast::<Error>().context("an api error")?;
+        assert!(matches!(err, Error::DatabaseInUse { .. }), "{err}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_deployment_of_a_connected_app_fails_while_the_database_is_down() -> anyhow::Result<()>
+    {
+        let (platform, runtime, linked, _dir, _host_port) = setup_with_database().await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        let db_entry = platform
+            .store
+            .deployments(db_id, 1)
+            .await?
+            .into_iter()
+            .next()
+            .context("the database deployment")?;
+        let db_container: ContainerName = format!("r3v3rs3-{db_id}-{}", db_entry.id).parse()?;
+        runtime
+            .stop_container(&db_container, Duration::from_secs(1))
+            .await?;
+
+        let entry = platform
+            .deploy(linked.id, "alice", DeploymentTrigger::Manual)
+            .await?;
+        let entry = settled(&platform, &[db_id, linked.id], entry.id).await?;
+        assert_eq!(entry.status, DeploymentStatus::Failed);
+        let message = entry.message.as_deref().unwrap_or_default();
+        assert!(message.contains("is not running"), "{entry:?}");
+        Ok(())
     }
 
     #[tokio::test]

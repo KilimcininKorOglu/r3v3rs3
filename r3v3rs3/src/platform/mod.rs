@@ -355,8 +355,23 @@ impl Platform {
     }
 
     /// Deletes an app with its containers, its network, its environment and its deployments.
+    /// A database that another app uses cannot be deleted.
     pub async fn delete_app(self: &Arc<Self>, id: ShortId) -> anyhow::Result<AppEntry> {
         let app = self.app(id).await?;
+        if app.spec.database.is_some() {
+            let uses = self
+                .store
+                .apps()
+                .await?
+                .into_iter()
+                .any(|other| other.spec.uses_database == Some(id));
+            if uses {
+                return Err(Error::DatabaseInUse {
+                    name: app.name.to_string(),
+                }
+                .into());
+            }
+        }
         let _lock = self.lock_app(&app)?;
         // Only a pipeline creates containers, so an app without deployments needs no Docker call.
         if !self.store.deployments(id, 1).await?.is_empty() {

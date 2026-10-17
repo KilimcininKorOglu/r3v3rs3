@@ -246,6 +246,7 @@ mod tests {
             limits: Default::default(),
             publish: Some(80),
             host_port: None,
+            extra_hosts: Vec::new(),
         }
     }
 

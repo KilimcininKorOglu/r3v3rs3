@@ -729,6 +729,14 @@ fn create_body(spec: &ContainerSpec) -> Value {
         body["HostConfig"]["NetworkMode"] = json!(network.as_str());
         body["NetworkingConfig"] = json!({ "EndpointsConfig": { network.as_str(): {} } });
     }
+    if !spec.extra_hosts.is_empty() {
+        let hosts = spec
+            .extra_hosts
+            .iter()
+            .map(|(host, ip)| format!("{host}:{ip}"))
+            .collect::<Vec<_>>();
+        body["HostConfig"]["ExtraHosts"] = json!(hosts);
+    }
     if let Some(port) = spec.publish {
         let key = format!("{port}/tcp");
         body["ExposedPorts"] = json!({ key.as_str(): {} });
@@ -1072,6 +1080,10 @@ mod tests {
             },
             publish: Some(8080),
             host_port: Some(18080),
+            extra_hosts: vec![(
+                "host.docker.internal".to_string(),
+                "host-gateway".to_string(),
+            )],
         };
         let expected = json!({
             "Image": "nginx@sha256:abc",
@@ -1087,6 +1099,7 @@ mod tests {
                 }],
                 "Memory": 268435456,
                 "NetworkMode": "r3v3rs3-shop",
+                "ExtraHosts": ["host.docker.internal:host-gateway"],
                 "PortBindings": { "8080/tcp": [{ "HostIp": "127.0.0.1", "HostPort": "18080" }] },
             },
             "NetworkingConfig": { "EndpointsConfig": { "r3v3rs3-shop": {} } },
