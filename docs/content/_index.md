@@ -61,7 +61,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 
 - Apps from a registry image, from a Git repository with its Dockerfile, or from the Docker Compose file of a Git repository
 - An App Store that installs a catalog app, image or Compose, in one click, refreshed daily from the repository
-- A Databases section that installs PostgreSQL, MariaDB, MySQL, MongoDB or Redis in one click, on a fixed port of `127.0.0.1` with a generated password, and injects the connection into the apps that use it
+- A Databases section that installs PostgreSQL, MariaDB, MySQL, MongoDB or Redis in one click, on a fixed port of `127.0.0.1` with a generated password, injects the connection into the apps that use it, and takes scheduled backups with an optional S3 target
 - Blue-green deployments that switch the proxy only after the new container passes its health check, and rollback to an earlier deployment
 - A web terminal into the running container of an app, for admins, over a WebSocket from the panel
 - A file manager for the volumes of an app in the panel, for admins: list, download, upload, edit and delete

@@ -411,6 +411,10 @@ Sayfa, bitmemiş bir deployment varken uygulamaları 2 saniyede bir, yoksa 10 sa
 - **Ortam değişkenleri**. **Değişken ekle**, **Key**, **Değer** ve **Secret** kutusu olan bir satır ekler. Kaydedilmiş secret bir değişkenin değeri **Değişmedi** olarak görünür. Değeri korumak için alanı boş bırakın. **Değişkenleri kaydet** bütün değişkenleri değiştirir ve sonraki deployment bunları kullanır.
 - **Uygulamayı sil** onaydan sonra uygulamayı container'larıyla birlikte siler.
 
+### Metrikler
+
+Uygulamanın sayfasında bir **Metrikler** kartı vardır. Uygulama çalıştığı sürece sunucu 30 saniyede bir bir örnek kaydeder: container'ın CPU'su, belleği, ağ arayüzlerinin baytları ve uygulamanın proxy'sinin karşıladığı istekler; her biri önceki örneğe göre değişim olarak. Kart en son değerleri, son saatlerin CPU ve istek grafiklerini ve son örneğin zamanını gösterir. Örnekleri 10 saniyede bir yeniden okur. Geçmiş bir gün boyunca platform veritabanında kalır; çalışmayan bir uygulama örnek kaydetmez. Agent target üzerindeki bir uygulamanın container istatistikleri alınmaz, yalnız istekleri kaydedilir.
+
 ### Deployment geçmişi
 
 Deployment geçmişi son 100 deployment'ı durumu, **Tetikleyen** (**Elle**, **Webhook** veya **Geri alma**), **Commit**, **Hesap**, **Başlangıç**, **Süre** ve **Mesaj** ile gösterir. **Geri al** onaydan sonra önceki bir deployment'ı yeniden başlatır. Link yalnız bitmiş, artık çalışmayan ve image özeti kaydedilmiş bir deployment'ta görünür. Compose uygulamasında kaydedilmiş commit gerekir. Uygulamanın bitmemiş bir deployment'ı varken link gizlenir. Sayfa **Uygulamalar** sayfasıyla aynı aralıklarla yenilenir.

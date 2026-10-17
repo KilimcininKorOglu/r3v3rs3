@@ -411,6 +411,10 @@ The **App Store** page lists the catalog of the apps that install in one click, 
 - **Environment Variables**. **Add variable** adds a row with a **Key**, a **Value** and a **Secret** checkbox. The value of a saved secret variable shows as **Unchanged**. Leave it empty to keep the value. **Save Variables** replaces all variables, and the next deployment uses them.
 - **Delete app** deletes the app with its containers after a confirmation.
 
+### Metrics
+
+The page of an app carries a **Metrics** card. While an app runs, the server records a sample every 30 seconds: the CPU of the container, its memory, the bytes of its network interfaces, and the requests that the proxy of the app served, each as the change against the previous sample. The card shows the latest values, two small charts of the CPU and the requests of the last hours, and the time of the last sample. It reads the samples again every 10 seconds. The history stays in the platform database for a day, and an app keeps no samples while it does not run. An app on an agent target carries no container stats, so only its requests are recorded.
+
 ### Deployments
 
 The deployment history shows the latest 100 deployments with their status, **Trigger** (**Manual**, **Webhook** or **Rollback**), **Commit**, **Account**, **Started**, **Duration** and **Message**. **Roll back** starts an earlier deployment again after a confirmation. The link appears only for a finished deployment that no longer runs and has a recorded image digest, or a recorded commit for a Compose app. It hides while a deployment of the app is unfinished. The page follows the same refresh intervals as the **Apps** page.
