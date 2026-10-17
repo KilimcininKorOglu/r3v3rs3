@@ -65,7 +65,7 @@ pub fn app_store() -> Html {
                     {locale.t("apps.store_refresh")}
                 </button>
             </div>
-            { notice_view(&notice, |_: &()| html! {}) }
+            { notice_view(&notice, |_: &()| html! { {locale.t("apps.store_refreshed")} }) }
             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 { for catalog.catalog.apps.iter().map(|app| store_card(locale, app)) }
             </div>
