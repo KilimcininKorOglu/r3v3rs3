@@ -686,6 +686,23 @@ impl ContainerRuntime for DockerRuntime {
     ) -> anyhow::Result<Vec<u8>> {
         DockerRuntime::exec_capture(self, name, command, env).await
     }
+
+    async fn download_file(&self, name: &ContainerName, path: &str) -> anyhow::Result<Vec<u8>> {
+        DockerRuntime::download_file(self, name, path).await
+    }
+
+    async fn upload_file(
+        &self,
+        name: &ContainerName,
+        path: &str,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        DockerRuntime::upload_file(self, name, path, bytes).await
+    }
+
+    async fn remove_path(&self, name: &ContainerName, path: &str) -> anyhow::Result<()> {
+        DockerRuntime::remove_path(self, name, path).await
+    }
 }
 
 fn container_id(found: Option<InspectContainer>, name: &ContainerName) -> anyhow::Result<String> {
