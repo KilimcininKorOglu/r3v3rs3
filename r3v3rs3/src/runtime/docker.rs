@@ -239,6 +239,56 @@ pub(crate) async fn resize_exec(
 }
 
 impl DockerRuntime {
+    /// Runs a command in the container and returns its demultiplexed standard output. The
+    /// non-TTY exec stream carries stdout and stderr in length-prefixed frames.
+    pub async fn exec_capture(
+        &self,
+        name: &ContainerName,
+        command: &[String],
+        env: &[String],
+    ) -> anyhow::Result<Vec<u8>> {
+        let container = self.container_id(name).await?;
+        let env: Vec<Value> = env.iter().map(|entry| json!(entry)).collect();
+        let response = self
+            .send(
+                Method::POST,
+                &format!("/containers/{}/exec", container.id),
+                Some(&json!({
+                    "AttachStdout": true,
+                    "AttachStderr": true,
+                    "Cmd": command,
+                    "Env": env,
+                })),
+                &[],
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let exec: ExecCreateResponse = read_json(response).await?;
+        let mut stream = self.start_exec(&exec.id).await?;
+        let mut frames = Vec::new();
+        let mut chunk = [0u8; 16 * 1024];
+        loop {
+            let read = tokio::time::timeout(RESPONSE_TIMEOUT, stream.read(&mut chunk))
+                .await
+                .unwrap_or(Ok(0))?;
+            if read == 0 {
+                break;
+            }
+            frames.extend_from_slice(&chunk[..read]);
+        }
+        let state: ExecInspectResponse = self.get(&format!("/exec/{}/json", exec.id)).await?;
+        let output = demux_stream(&frames)?;
+        if state.exit_code != 0 {
+            bail!(
+                "the command {:?} failed with exit code {}: {}",
+                command,
+                state.exit_code,
+                String::from_utf8_lossy(&output)
+            );
+        }
+        Ok(output)
+    }
+
     /// The entries of a directory inside a container.
     pub async fn list_dir(
         &self,
@@ -774,7 +824,13 @@ fn published_ports(
 
 /// Joins the frames of a multiplexed log stream. Each frame has an 8-byte header: the stream type,
 /// three zero bytes and the payload size as a big-endian `u32`.
-fn demux_logs(mut data: &[u8]) -> anyhow::Result<String> {
+fn demux_logs(data: &[u8]) -> anyhow::Result<String> {
+    Ok(String::from_utf8_lossy(&demux_stream(data)?).into_owned())
+}
+
+/// Joins the payloads of a multiplexed exec or log stream: an 8-byte header per frame (the stream
+/// type, three zero bytes and the payload size as a big-endian `u32`), payload after it.
+fn demux_stream(mut data: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut output = Vec::with_capacity(data.len());
     while !data.is_empty() {
         let header = data
@@ -787,7 +843,7 @@ fn demux_logs(mut data: &[u8]) -> anyhow::Result<String> {
         output.extend_from_slice(payload);
         data = &data[8 + size..];
     }
-    Ok(String::from_utf8_lossy(&output).into_owned())
+    Ok(output)
 }
 
 #[derive(Deserialize)]
@@ -1020,6 +1076,18 @@ mod tests {
         let data = frame(1, "hello");
         assert!(demux_logs(&data[..6]).is_err());
         assert!(demux_logs(&data[..10]).is_err());
+    }
+
+    #[test]
+    fn captured_frames_carry_the_payload_bytes() {
+        let mut data = frame(1, "head ");
+        data.extend(frame(2, "ignored err "));
+        data.extend(frame(1, "tail"));
+        assert_eq!(
+            demux_stream(&data).unwrap(),
+            b"head ignored err tail".to_vec()
+        );
+        assert_eq!(demux_stream(&[]).unwrap(), Vec::<u8>::new());
     }
 
     #[test]
