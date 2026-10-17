@@ -161,6 +161,12 @@ The response shows the password and the connection string once, like a webhook s
 
 A deployment of a database is not blue-green, because the fixed port frees only when the old container stops: r3v3rs3 stops the old container, starts the new one and waits for its health check, so the database answers a few seconds later.
 
+### Connect an App
+
+The **Database** field of the app form connects an app to a database of this server. The next deployment of the app injects the connection into the environment of its container: `DATABASE_URL` with the user, the generated password and the port, plus the variables of the engine, for example `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DATABASE` for PostgreSQL, and `MYSQL_*` for MariaDB and MySQL, `MONGO_*` for MongoDB and `REDIS_URL` for Redis. The container resolves `host.docker.internal` to the host of r3v3rs3, so the address works from every app network.
+
+The injected user is the root user of the database, because r3v3rs3 creates no per-app users. While the database does not run, the deployment of a connected app fails with the reason, and the old container keeps serving. A database that an app uses cannot be deleted: the deletion answers `409 database_in_use` until the apps disconnect from it, and the databases page shows the apps that use each database.
+
 A database needs the local target, and only an account with the Edit permission sees the page. Every creation and deletion goes into the audit log.
 
 ## Deployments

@@ -161,6 +161,12 @@ Yanıt, parolayı ve bağlantı dizesini webhook secret gibi bir kez gösterir. 
 
 Bir veritabanının deployment'ı blue-green değildir, çünkü sabit port eski container durmadan boşalmaz: r3v3rs3 eski container'ı durdurur, yenisini başlatır ve sağlık kontrolünü bekler; veritabanı birkaç saniye sonra yanıtlamaya devam eder.
 
+### Bir uygulamayı bağlamak
+
+App formundaki **Veritabanı** alanı, bir uygulamayı bu sunucudaki bir veritabanına bağlar. Uygulamanın sonraki deployment'ı bağlantıyı container'ının ortamına ekler: kullanıcıyı, üretilmiş parolayı ve portu taşıyan `DATABASE_URL`, artı motorun değişkenleri; örneğin PostgreSQL için `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` ve `POSTGRES_DATABASE`, MariaDB ve MySQL için `MYSQL_*`, MongoDB için `MONGO_*`, Redis için `REDIS_URL`. Container, `host.docker.internal` adresini r3v3rs3'ün hostuna çözer; adres her app ağında çalışır.
+
+Enjekte edilen kullanıcı veritabanının root kullanıcısıdır; r3v3rs3 app başına kullanıcı yaratmaz. Veritabanı çalışmadığı sürece bağlı bir uygulamanın deployment'ı nedeniyle başarısız olur ve eski container karşılamaya devam eder. Bir uygulamanın kullandığı veritabanı silinemez: silme, uygulamalar bağlantılarını kesene kadar `409 database_in_use` yanıtını alır ve veritabanları sayfası her veritabanını kullanan uygulamaları gösterir.
+
 Veritabanı local target ister ve sayfayı yalnız Edit izni olan bir hesap görür. Her oluşturma ve silme audit log'una geçer.
 
 ## Deployment'lar
