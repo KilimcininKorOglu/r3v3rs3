@@ -114,7 +114,9 @@ jobs:
         run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-cli-${{ matrix.target }}.tar.gz
 
   # The main push already ran the Rust workflow for this commit. The release runs the test
-  # suite again only when that proof is missing, for example on a moved or older tag.
+  # suite again only when that proof is missing, for example on a moved or older tag. A Rust
+  # run that is still queued or in progress is worth waiting for, so the gate polls for it
+  # before it decides to test again.
   test-gate:
     name: Test gate
     runs-on: ubuntu-24.04
@@ -126,11 +128,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh run list --repo "$GITHUB_REPOSITORY" --workflow Rust --commit "$GITHUB_SHA" --status success --json databaseId --jq 'length > 0' | grep -q true; then
-            echo "tested=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "tested=false" >> "$GITHUB_OUTPUT"
-          fi
+          for i in $(seq 1 40); do
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow Rust --commit "$GITHUB_SHA" --json conclusion,status)
+            if [ "$(echo "$runs" | jq 'length')" -eq 0 ]; then
+              echo "this commit has no Rust run, the tests run here"
+              echo "tested=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            conclusion=$(echo "$runs" | jq -r '[.[] | select(.status == "completed")] | map(.conclusion) | sort | last // "running"')
+            case "$conclusion" in
+              success)
+                echo "the Rust run of $GITHUB_SHA is green, the tests are skipped"
+                echo "tested=false" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              failure | cancelled | startup_failure | timed_out)
+                echo "the Rust run of $GITHUB_SHA is $conclusion" >&2
+                echo "tested=true" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+            echo "the Rust run of $GITHUB_SHA is not finished yet ($i/40)"
+            sleep 30
+          done
+          echo "no finished Rust run of $GITHUB_SHA within 20 minutes" >&2
+          echo "tested=true" >> "$GITHUB_OUTPUT"
 
   test:
     name: Test
