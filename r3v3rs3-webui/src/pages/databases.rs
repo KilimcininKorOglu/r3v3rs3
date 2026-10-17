@@ -21,6 +21,7 @@ const INPUT_CLASS: &str =
 
 /// Reads the databases, the engines and the apps, and the first failure goes to the notice.
 fn load_all(
+    locale: Locale,
     databases: &UseStateHandle<Vec<AppEntry>>,
     engines: &UseStateHandle<Vec<EngineInfo>>,
     apps: &UseStateHandle<Vec<AppEntry>>,
@@ -34,7 +35,7 @@ fn load_all(
     );
     spawn_local(async move {
         match fetch_json::<Vec<AppEntry>>(
-            Locale::En,
+            locale,
             Request::get(&format!("{API_ENDPOINT}/databases")),
         )
         .await
@@ -43,7 +44,7 @@ fn load_all(
             Err(message) => notice.set(Some(Notice::Failed(message))),
         }
         if let Ok(list) = fetch_json::<Vec<EngineInfo>>(
-            Locale::En,
+            locale,
             Request::get(&format!("{API_ENDPOINT}/databases/engines")),
         )
         .await
@@ -51,8 +52,7 @@ fn load_all(
             engines.set(list);
         }
         if let Ok(list) =
-            fetch_json::<Vec<AppEntry>>(Locale::En, Request::get(&format!("{API_ENDPOINT}/apps")))
-                .await
+            fetch_json::<Vec<AppEntry>>(locale, Request::get(&format!("{API_ENDPOINT}/apps"))).await
         {
             apps.set(list);
         }
@@ -61,6 +61,7 @@ fn load_all(
 
 /// Reads the databases and the apps again after a change.
 fn reload_lists(
+    locale: Locale,
     databases: &UseStateHandle<Vec<AppEntry>>,
     apps: &UseStateHandle<Vec<AppEntry>>,
     notice: &UseStateHandle<Option<Notice<()>>>,
@@ -68,7 +69,7 @@ fn reload_lists(
     let (databases, apps, notice) = (databases.clone(), apps.clone(), notice.clone());
     spawn_local(async move {
         match fetch_json::<Vec<AppEntry>>(
-            Locale::En,
+            locale,
             Request::get(&format!("{API_ENDPOINT}/databases")),
         )
         .await
@@ -77,8 +78,7 @@ fn reload_lists(
             Err(message) => notice.set(Some(Notice::Failed(message))),
         }
         if let Ok(list) =
-            fetch_json::<Vec<AppEntry>>(Locale::En, Request::get(&format!("{API_ENDPOINT}/apps")))
-                .await
+            fetch_json::<Vec<AppEntry>>(locale, Request::get(&format!("{API_ENDPOINT}/apps"))).await
         {
             apps.set(list);
         }
@@ -88,6 +88,37 @@ fn reload_lists(
 /// The engine info of a database app, from the catalog.
 fn engine_of(engines: &[EngineInfo], key: &str) -> Option<EngineInfo> {
     engines.iter().find(|info| info.engine == key).cloned()
+}
+
+fn refresh_callback(
+    locale: Locale,
+    engines: &UseStateHandle<Vec<EngineInfo>>,
+    notice: &UseStateHandle<Option<Notice<()>>>,
+    refreshing: &UseStateHandle<bool>,
+) -> Callback<MouseEvent> {
+    let (engines, notice, refreshing) = (engines.clone(), notice.clone(), refreshing.clone());
+    Callback::from(move |_| {
+        if *refreshing {
+            return;
+        }
+        refreshing.set(true);
+        let (engines, notice, refreshing) = (engines.clone(), notice.clone(), refreshing.clone());
+        spawn_local(async move {
+            refreshing.set(false);
+            match fetch_json::<Vec<EngineInfo>>(
+                locale,
+                Request::post(&format!("{API_ENDPOINT}/databases/engines/refresh")),
+            )
+            .await
+            {
+                Ok(list) => {
+                    engines.set(list);
+                    notice.set(Some(Notice::Saved(())));
+                }
+                Err(message) => notice.set(Some(Notice::Failed(message))),
+            }
+        });
+    })
 }
 
 #[function_component(Databases)]
@@ -100,6 +131,7 @@ pub fn databases() -> Html {
     let notice = use_state(|| Option::<Notice<()>>::None);
     let created = use_state(|| Option::<DatabaseCreated>::None);
     let apps = use_state(Vec::<AppEntry>::new);
+    let refreshing = use_state(|| false);
 
     let signed_in = session.info.is_some();
     let can_edit = session.can_edit();
@@ -112,7 +144,7 @@ pub fn databases() -> Html {
         );
         use_effect_with(signed_in, move |&signed_in| {
             if signed_in {
-                load_all(&databases, &engines, &apps, &notice);
+                load_all(locale, &databases, &engines, &apps, &notice);
             }
         });
     }
@@ -123,37 +155,21 @@ pub fn databases() -> Html {
     let reload = {
         let (databases, notice, apps) = (databases.clone(), notice.clone(), apps.clone());
         Callback::from(move |_: ()| {
-            reload_lists(&databases, &apps, &notice);
+            reload_lists(locale, &databases, &apps, &notice);
         })
     };
-    let refresh_engines = {
-        let (engines, notice) = (engines.clone(), notice.clone());
-        Callback::from(move |_: MouseEvent| {
-            let (engines, notice) = (engines.clone(), notice.clone());
-            spawn_local(async move {
-                match fetch_json::<Vec<EngineInfo>>(
-                    Locale::En,
-                    Request::post(&format!("{API_ENDPOINT}/databases/engines/refresh")),
-                )
-                .await
-                {
-                    Ok(list) => engines.set(list),
-                    Err(message) => notice.set(Some(Notice::Failed(message))),
-                }
-            });
-        })
-    };
+    let refresh_engines = refresh_callback(locale, &engines, &notice, &refreshing);
     html! {
         <>
             <div class="flex items-center justify-between mb-3">
                 <h1 class="text-xl font-semibold">{locale.t("nav.databases")}</h1>
                 if can_edit {
-                    <button type="button" class="text-sm text-neutral-400 hover:text-neutral-200" onclick={refresh_engines}>
+                    <button type="button" class="text-sm text-neutral-400 hover:text-neutral-200 disabled:opacity-50" disabled={*refreshing} onclick={refresh_engines}>
                         {locale.t("databases.refresh")}
                     </button>
                 }
             </div>
-            { notice_view(&notice, |_| html!()) }
+            { notice_view(&notice, |_| html! { {locale.t("databases.refreshed")} }) }
             { (*created)
                 .clone()
                 .map(|value| created_view(locale, value, &engines, &created))

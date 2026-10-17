@@ -73,7 +73,7 @@ pub fn database_backups(props: &Props) -> Html {
     let (session, _) = use_store::<SessionStore>();
     let backups = use_state(Vec::<BackupEntry>::new);
     let config = use_state(|| Option::<BackupConfig>::None);
-    let notice = use_state(|| Option::<Notice<()>>::None);
+    let notice = use_state(|| Option::<Notice<&'static str>>::None);
     let form = use_state(FormState::default);
     let busy = use_state(|| false);
     let id = props.id;
@@ -110,7 +110,7 @@ pub fn database_backups(props: &Props) -> Html {
     html! {
         <>
             { back_header(locale, &navigator, locale.t("backups.title").to_string()) }
-            { notice_view(&notice, |_| html!()) }
+            { notice_view(&notice, |key| html! { {locale.t(key)} }) }
             if can_edit {
                 <div class="mb-4">
                     <button type="button" class={BUTTON_CLASS} disabled={*busy}
@@ -145,7 +145,7 @@ fn reload(
     backups: &UseStateHandle<Vec<BackupEntry>>,
     config: &UseStateHandle<Option<BackupConfig>>,
     form: &UseStateHandle<FormState>,
-    notice: &UseStateHandle<Option<Notice<()>>>,
+    notice: &UseStateHandle<Option<Notice<&'static str>>>,
     id: ShortId,
 ) {
     let (backups, notice) = (backups.clone(), notice.clone());
@@ -188,7 +188,7 @@ async fn take_backup(
     locale: Locale,
     id: ShortId,
     busy: UseStateHandle<bool>,
-    notice: UseStateHandle<Option<Notice<()>>>,
+    notice: UseStateHandle<Option<Notice<&'static str>>>,
     reload: Callback<()>,
 ) {
     busy.set(true);
@@ -197,7 +197,7 @@ async fn take_backup(
         .map(|request| send_request(locale, request));
     match sent {
         Ok(sent) => match sent.await {
-            Ok(_) => notice.set(Some(Notice::Saved(()))),
+            Ok(_) => notice.set(Some(Notice::Saved("backups.taken"))),
             Err(message) => notice.set(Some(Notice::Failed(message))),
         },
         Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
@@ -307,7 +307,7 @@ fn settings_view(
     locale: Locale,
     config: &UseStateHandle<Option<BackupConfig>>,
     form: &UseStateHandle<FormState>,
-    notice: &UseStateHandle<Option<Notice<()>>>,
+    notice: &UseStateHandle<Option<Notice<&'static str>>>,
 ) -> Html {
     let submit = {
         let (form, notice, config) = (form.clone(), notice.clone(), config.clone());
@@ -323,7 +323,7 @@ fn settings_view(
                     Ok(sent) => match sent.await {
                         Ok(response) if response.ok() => {
                             config.set(Some(value));
-                            notice.set(Some(Notice::Saved(())));
+                            notice.set(Some(Notice::Saved("backups.saved")));
                         }
                         Ok(response) => notice.set(Some(Notice::Failed(response.status_text()))),
                         Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
