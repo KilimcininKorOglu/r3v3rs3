@@ -46,12 +46,13 @@ pub(super) fn spawn_collector(platform: &Arc<Platform>) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(COLLECT_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let previous = Previous::default();
         loop {
             interval.tick().await;
             let Some(platform) = platform.upgrade() else {
                 return;
             };
-            if let Err(err) = collect_round(&platform).await {
+            if let Err(err) = collect_round(&platform, &previous).await {
                 tracing::error!(err = format!("{err:#}"), "the metrics collector failed");
             }
         }
@@ -87,8 +88,7 @@ impl Platform {
 }
 
 /// Records one sample for every running local app, then trims the old samples.
-async fn collect_round(platform: &Arc<Platform>) -> anyhow::Result<()> {
-    let previous = Previous::default();
+async fn collect_round(platform: &Arc<Platform>, previous: &Previous) -> anyhow::Result<()> {
     let now = crate::clock::unix_ms();
     let requests = crate::proxy::stats::snapshot_resources();
     for app in platform.apps().await? {
@@ -126,9 +126,11 @@ async fn collect_app(
         return Ok(());
     }
     let stats = runtime.stats(&container).await.unwrap_or_default();
+    // The requests count under the resource name of the proxy, which a platform proxy
+    // names after its app.
     let requests = requests
         .iter()
-        .find(|(id, _)| *id == app.id.to_string())
+        .find(|(id, _)| *id == app.name.as_str())
         .map(|(_, count)| *count)
         .unwrap_or(0);
     let (rx, tx, served) =

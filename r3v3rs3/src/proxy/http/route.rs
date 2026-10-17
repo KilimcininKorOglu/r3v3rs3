@@ -40,12 +40,13 @@ impl Router {
         registries: &ProxyRegistries,
     ) -> Self {
         let mut routes = vec![];
-        for (id, http) in proxies
-            .into_iter()
-            .filter_map(|entry| match entry.proxy.kind {
-                ProxyKind::Http(http) => Some((entry.id, *http)),
-                _ => None,
-            })
+        for (id, http, entry_source) in
+            proxies
+                .into_iter()
+                .filter_map(|entry| match entry.proxy.kind {
+                    ProxyKind::Http(http) => Some((entry.id, *http, entry.source)),
+                    _ => None,
+                })
         {
             let (tls_client_config, _) = upstream.get(http.client_cert, http.timeouts.connect);
             let proxy_upstream = ProxyUpstream::new(&http);
@@ -91,6 +92,7 @@ impl Router {
                 );
                 routes.push(FilteredRoute {
                     resource_id: id,
+                    metric_key: entry_source.as_ref().map(|source| source.resource.clone()),
                     filter,
                     base_path,
                     https_port,
@@ -250,6 +252,9 @@ fn url_target(url: &Url) -> Option<(String, u16)> {
 #[derive(Debug)]
 pub struct FilteredRoute {
     pub resource_id: ShortId,
+    /// The resource name of a discovered proxy, for example the app that a platform proxy
+    /// serves. The request counters of the collector count under it.
+    pub metric_key: Option<String>,
     pub filter: RequestFilter,
     /// Path of the route without a trailing slash, e.g. `/admin`. Empty for `/`.
     pub base_path: String,
