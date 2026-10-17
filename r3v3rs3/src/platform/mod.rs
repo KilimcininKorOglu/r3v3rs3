@@ -561,6 +561,11 @@ impl Platform {
         request: &AppRequest,
     ) -> anyhow::Result<Option<app_hooks::HookTarget>> {
         request.spec.validate()?;
+        if let Some(port) = request.spec.host_port
+            && !host_port_free(port)
+        {
+            return Err(Error::HostPortUnavailable { port }.into());
+        }
         if !self.store.has_target(request.target).await? {
             return Err(not_found(request.target));
         }
@@ -601,6 +606,19 @@ impl Platform {
 /// another row does not open.
 fn env_aad(app: ShortId, key: &str) -> String {
     format!("app/{app}/env/{key}")
+}
+
+/// Whether nothing listens on the fixed host port of `127.0.0.1` right now. The check is
+/// best effort: between it and the deployment another process can take the port, and the
+/// deployment fails with the reason of Docker.
+fn host_port_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+/// A free port of `127.0.0.1` for a fixed host port, chosen by the kernel.
+pub fn allocate_host_port() -> anyhow::Result<u16> {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+    Ok(listener.local_addr()?.port())
 }
 
 fn git_token_aad(app: ShortId) -> String {
@@ -784,6 +802,8 @@ mod tests {
                 volumes: Vec::new(),
                 restart: Default::default(),
                 limits: Default::default(),
+                host_port: None,
+                database: None,
             },
         }
     }

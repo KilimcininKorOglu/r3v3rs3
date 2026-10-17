@@ -428,6 +428,7 @@ impl Platform {
             restart: job.spec.restart,
             limits: job.spec.limits,
             publish: Some(job.spec.port),
+            host_port: job.spec.host_port,
         };
         runtime.create_container(&spec).await?;
         runtime.start_container(name).await?;

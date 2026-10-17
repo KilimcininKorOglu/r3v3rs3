@@ -197,6 +197,7 @@ mod tests {
             Error::AppNotRunning { name: text() },
             Error::InvalidFilePath { path: text() },
             Error::VolumeReadOnly { path: text() },
+            Error::HostPortUnavailable { port: 5432 },
             Error::NoNewRelease,
             Error::UpgradeFailed,
             Error::FailedToBuildDnsResolver { reason: text() },

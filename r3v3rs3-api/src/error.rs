@@ -137,6 +137,9 @@ pub enum Error {
     #[error("the volume is read-only: {path}")]
     VolumeReadOnly { path: String },
 
+    #[error("the port is in use already: {port}")]
+    HostPortUnavailable { port: u16 },
+
     #[error("the enrollment token is invalid or was used already")]
     InvalidEnrollmentToken,
 
@@ -433,7 +436,8 @@ impl Error {
             | Self::GitConnectionInUse { .. }
             | Self::PublicUrlMissing
             | Self::TargetInUse { .. }
-            | Self::AppTargetFixed { .. } => 409,
+            | Self::AppTargetFixed { .. }
+            | Self::HostPortUnavailable { .. } => 409,
             Self::AgentOffline { .. } | Self::PlatformDisabled | Self::PlatformFailed => 503,
             Self::NotificationFailed { .. }
             | Self::GitProviderFailed { .. }

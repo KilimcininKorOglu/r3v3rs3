@@ -354,6 +354,10 @@ pub struct ContainerSpec {
     /// r3v3rs3 on the host reaches the container and other hosts do not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publish: Option<u16>,
+    /// Publishes the port of `publish` on this fixed port of `127.0.0.1` instead of a free
+    /// port, so the address survives a new deployment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_port: Option<u16>,
 }
 
 impl ContainerSpec {
@@ -524,6 +528,7 @@ mod tests {
             restart: RestartPolicy::default(),
             limits: ResourceLimits::default(),
             publish: None,
+            host_port: None,
         };
         assert!(spec.validate().is_ok());
         spec.env[0].value = "a\0b".into();

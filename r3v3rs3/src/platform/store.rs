@@ -835,6 +835,8 @@ mod tests {
                 volumes: Vec::new(),
                 restart: Default::default(),
                 limits: Default::default(),
+                host_port: None,
+                database: None,
             },
             git_token_set: false,
             webhook_secret_set: false,

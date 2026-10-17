@@ -732,9 +732,14 @@ fn create_body(spec: &ContainerSpec) -> Value {
     if let Some(port) = spec.publish {
         let key = format!("{port}/tcp");
         body["ExposedPorts"] = json!({ key.as_str(): {} });
-        // An empty host port lets Docker pick a free port.
+        // A fixed host port keeps the address across deployments; an empty one lets
+        // Docker pick a free port.
+        let host_port = spec
+            .host_port
+            .map(|port| port.to_string())
+            .unwrap_or_default();
         body["HostConfig"]["PortBindings"] =
-            json!({ key.as_str(): [{ "HostIp": PUBLISH_HOST, "HostPort": "" }] });
+            json!({ key.as_str(): [{ "HostIp": PUBLISH_HOST, "HostPort": host_port }] });
     }
     body
 }
@@ -1066,6 +1071,7 @@ mod tests {
                 nano_cpus: None,
             },
             publish: Some(8080),
+            host_port: Some(18080),
         };
         let expected = json!({
             "Image": "nginx@sha256:abc",
@@ -1081,12 +1087,19 @@ mod tests {
                 }],
                 "Memory": 268435456,
                 "NetworkMode": "r3v3rs3-shop",
-                "PortBindings": { "8080/tcp": [{ "HostIp": "127.0.0.1", "HostPort": "" }] },
+                "PortBindings": { "8080/tcp": [{ "HostIp": "127.0.0.1", "HostPort": "18080" }] },
             },
             "NetworkingConfig": { "EndpointsConfig": { "r3v3rs3-shop": {} } },
             "ExposedPorts": { "8080/tcp": {} },
         });
         assert_eq!(create_body(&spec), expected);
+        // Without a fixed host port Docker picks a free one.
+        let mut floating = spec;
+        floating.host_port = None;
+        assert_eq!(
+            create_body(&floating)["HostConfig"]["PortBindings"]["8080/tcp"][0]["HostPort"],
+            json!("")
+        );
     }
 
     #[test]

@@ -245,6 +245,7 @@ mod tests {
             restart: Default::default(),
             limits: Default::default(),
             publish: Some(80),
+            host_port: None,
         }
     }
 

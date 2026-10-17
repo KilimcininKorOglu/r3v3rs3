@@ -126,6 +126,7 @@ fn spec(names: &Names, image: ImageRef) -> anyhow::Result<ContainerSpec> {
             nano_cpus: Some(500_000_000),
         },
         publish: Some(80),
+        host_port: None,
     })
 }
 
@@ -363,6 +364,7 @@ async fn an_exec_session_runs_a_command() -> anyhow::Result<()> {
             nano_cpus: Some(500_000_000),
         },
         publish: None,
+        host_port: None,
     };
     runtime.pull_image(&image).await?;
     runtime.create_container(&spec).await?;
@@ -399,6 +401,7 @@ async fn a_file_round_trips_through_the_archive() -> anyhow::Result<()> {
             nano_cpus: Some(500_000_000),
         },
         publish: None,
+        host_port: None,
     };
     runtime.pull_image(&image).await?;
     runtime.create_container(&spec).await?;
@@ -472,4 +475,47 @@ async fn exec_echo(runtime: &DockerRuntime, names: &Names) -> anyhow::Result<()>
 /// A search that tolerates the prompt and the echo of the typed line around the answer.
 fn window_contains(data: &[u8], needle: &[u8]) -> bool {
     data.windows(needle.len()).any(|window| window == needle)
+}
+
+/// A fixed host port publishes the container on the same port of `127.0.0.1` on every run.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_fixed_host_port_publishes_the_same_port() -> anyhow::Result<()> {
+    use std::net::TcpListener;
+
+    let runtime = runtime()?;
+    let names = Names::new()?;
+    let host_port = TcpListener::bind(("127.0.0.1", 0))?.local_addr()?.port();
+    let result = async {
+        let image: ImageRef = IMAGE.parse()?;
+        runtime.pull_image(&image).await?;
+        runtime.ensure_network(&names.network, &names.app).await?;
+        let mut one = spec(&names, image.clone())?;
+        one.host_port = Some(host_port);
+        runtime.create_container(&one).await?;
+        runtime.start_container(&names.container).await?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let info = runtime
+                .inspect_container(&names.container)
+                .await?
+                .context("created container")?;
+            if let Some(published) = info.published.get(&80) {
+                ensure_eq!(*published, host_port);
+                break;
+            }
+            ensure!(
+                tokio::time::Instant::now() < deadline,
+                "the container published no port in time"
+            );
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        Ok(())
+    }
+    .await;
+    let container = runtime.remove_container(&names.container).await;
+    let network = runtime.remove_network(&names.network).await;
+    result?;
+    container?;
+    network
 }

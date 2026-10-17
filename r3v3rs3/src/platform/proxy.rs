@@ -112,6 +112,8 @@ mod tests {
             volumes: Vec::new(),
             restart: Default::default(),
             limits: Default::default(),
+            host_port: None,
+            database: None,
         }
     }
 

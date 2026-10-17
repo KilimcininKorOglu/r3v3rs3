@@ -15,6 +15,138 @@ use utoipa::{IntoParams, ToSchema};
 /// The id of the target that runs the containers on the server of r3v3rs3 itself.
 pub const LOCAL_TARGET: &str = "local";
 
+/// The database engines that the Databases page installs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DatabaseEngine {
+    Postgres,
+    MariaDb,
+    MySql,
+    MongoDb,
+    Redis,
+}
+
+impl std::fmt::Display for DatabaseEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            DatabaseEngine::Postgres => "postgres",
+            DatabaseEngine::MariaDb => "mariadb",
+            DatabaseEngine::MySql => "mysql",
+            DatabaseEngine::MongoDb => "mongodb",
+            DatabaseEngine::Redis => "redis",
+        };
+        f.write_str(name)
+    }
+}
+
+/// One engine of the database catalog: the image tags that the panel offers and the values
+/// that the connection information shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct EngineInfo {
+    pub engine: DatabaseEngine,
+    /// The name of the engine in the panel.
+    pub label: String,
+    /// The image tags that the panel offers, pinned to a major version.
+    pub versions: Vec<String>,
+    /// The port that the container listens on.
+    pub container_port: u16,
+    /// The environment variable that holds the generated password. Empty for an engine that
+    /// takes no password, such as Redis.
+    pub password_env: String,
+    /// The user that the connection information names.
+    pub user: String,
+    /// The database that the connection information names.
+    pub default_db: String,
+    /// The scheme of the connection string, for example `postgres`.
+    pub url_scheme: String,
+    /// The directory inside the container that the data volume mounts.
+    pub data_path: String,
+}
+
+impl DatabaseEngine {
+    /// The engines that the Databases page installs, in the order of the panel.
+    pub fn catalog() -> &'static [EngineInfo] {
+        static CATALOG: std::sync::OnceLock<Vec<EngineInfo>> = std::sync::OnceLock::new();
+        CATALOG.get_or_init(|| {
+            vec![
+                EngineInfo {
+                    engine: DatabaseEngine::Postgres,
+                    label: "PostgreSQL".to_string(),
+                    versions: vec![
+                        "postgres:17-alpine".to_string(),
+                        "postgres:18-alpine".to_string(),
+                    ],
+                    container_port: 5432,
+                    password_env: "POSTGRES_PASSWORD".to_string(),
+                    user: "postgres".to_string(),
+                    default_db: "postgres".to_string(),
+                    url_scheme: "postgres".to_string(),
+                    data_path: "/var/lib/postgresql/data".to_string(),
+                },
+                EngineInfo {
+                    engine: DatabaseEngine::MariaDb,
+                    label: "MariaDB".to_string(),
+                    versions: vec![
+                        "mariadb:11.8-noble".to_string(),
+                        "mariadb:12-noble".to_string(),
+                    ],
+                    container_port: 3306,
+                    password_env: "MARIADB_ROOT_PASSWORD".to_string(),
+                    user: "root".to_string(),
+                    default_db: String::new(),
+                    url_scheme: "mariadb".to_string(),
+                    data_path: "/var/lib/mysql".to_string(),
+                },
+                EngineInfo {
+                    engine: DatabaseEngine::MySql,
+                    label: "MySQL".to_string(),
+                    versions: vec!["mysql:9".to_string()],
+                    container_port: 3306,
+                    password_env: "MYSQL_ROOT_PASSWORD".to_string(),
+                    user: "root".to_string(),
+                    default_db: String::new(),
+                    url_scheme: "mysql".to_string(),
+                    data_path: "/var/lib/mysql".to_string(),
+                },
+                EngineInfo {
+                    engine: DatabaseEngine::MongoDb,
+                    label: "MongoDB".to_string(),
+                    versions: vec!["mongo:8".to_string()],
+                    container_port: 27017,
+                    password_env: "MONGO_INITDB_ROOT_PASSWORD".to_string(),
+                    user: "root".to_string(),
+                    default_db: "admin".to_string(),
+                    url_scheme: "mongodb".to_string(),
+                    data_path: "/data/db".to_string(),
+                },
+                EngineInfo {
+                    engine: DatabaseEngine::Redis,
+                    label: "Redis".to_string(),
+                    versions: vec!["redis:8-alpine".to_string()],
+                    container_port: 6379,
+                    password_env: String::new(),
+                    user: String::new(),
+                    default_db: String::new(),
+                    url_scheme: "redis".to_string(),
+                    data_path: "/data".to_string(),
+                },
+            ]
+        })
+    }
+
+    /// The catalog entry of this engine.
+    pub fn info(self) -> &'static EngineInfo {
+        let index = match self {
+            DatabaseEngine::Postgres => 0,
+            DatabaseEngine::MariaDb => 1,
+            DatabaseEngine::MySql => 2,
+            DatabaseEngine::MongoDb => 3,
+            DatabaseEngine::Redis => 4,
+        };
+        &Self::catalog()[index]
+    }
+}
+
 /// The longest health check path.
 const MAX_HEALTH_PATH_LENGTH: usize = 1024;
 
@@ -217,6 +349,17 @@ pub struct AppSpec {
 
     #[serde(default)]
     pub limits: ResourceLimits,
+
+    /// The fixed host port on `127.0.0.1` that every deployment publishes the container port
+    /// on. Without it a deployment takes a free port, so the address changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 5432)]
+    pub host_port: Option<u16>,
+
+    /// Marks the app as a database of an engine. A database app has no domains, so it gets no
+    /// proxy: clients reach it on the host port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database: Option<DatabaseEngine>,
 }
 
 impl AppSpec {
@@ -238,6 +381,27 @@ impl AppSpec {
             return Err(invalid(&format!(
                 "the path {} is mounted twice",
                 mount.target.as_str()
+            )));
+        }
+        self.validate_database()
+    }
+
+    /// A database app is an image app without domains: its clients reach it on the host port,
+    /// so a route and a certificate would only expose it.
+    fn validate_database(&self) -> Result<(), Error> {
+        let Some(engine) = self.database else {
+            return Ok(());
+        };
+        if !matches!(self.source, AppSource::Image { .. }) {
+            return Err(invalid(&format!(
+                "a database app runs an image, not a {} source",
+                engine
+            )));
+        }
+        if let Some(domain) = self.domains.first() {
+            return Err(invalid(&format!(
+                "a database app has no domains, but {} is listed",
+                domain
             )));
         }
         Ok(())
@@ -288,6 +452,37 @@ fn invalid(reason: &str) -> Error {
     Error::InvalidContainerSpec {
         reason: reason.to_string(),
     }
+}
+
+/// The body that creates a database. The version is one image tag of the catalog entry of
+/// the engine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DatabaseRequest {
+    #[schema(value_type = String, example = "main-postgres")]
+    pub name: AppName,
+    pub engine: DatabaseEngine,
+    #[schema(value_type = String, example = "postgres:17-alpine")]
+    pub version: String,
+    /// A fixed port of `127.0.0.1`. Empty takes a free port, which stays the port of the
+    /// database afterwards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 5432)]
+    pub host_port: Option<u16>,
+}
+
+/// The new database. The password is shown once, like a webhook secret.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct DatabaseCreated {
+    pub app: AppEntry,
+    /// The generated password. `None` for an engine that takes no password, such as Redis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// The fixed port of `127.0.0.1` that every deployment publishes the port on.
+    pub host_port: u16,
+    /// The user that the connection string names.
+    pub user: String,
+    /// The database that the connection string names.
+    pub database: String,
 }
 
 /// The body that creates or replaces an app.
@@ -568,6 +763,40 @@ mod tests {
         let mut unsafe_image = base();
         unsafe_image["source"]["image"] = json!("nginx --privileged");
         assert!(spec(unsafe_image).is_err());
+    }
+
+    #[test]
+    fn a_database_spec_takes_a_host_port_and_no_domains() {
+        let parsed = spec(json!({
+            "source": {"type": "image", "image": "postgres:17-alpine"},
+            "port": 5432,
+            "host_port": 15432,
+            "database": "postgres",
+            "volumes": [{"volume": "db-data", "target": "/var/lib/postgresql/data"}],
+        }))
+        .unwrap();
+        assert_eq!(parsed.host_port, Some(15432));
+        assert_eq!(parsed.database, Some(DatabaseEngine::Postgres));
+    }
+
+    #[test]
+    fn a_database_spec_rejects_what_a_database_cannot_be() {
+        let base = || {
+            json!({
+                "source": {"type": "image", "image": "postgres:17-alpine"},
+                "port": 5432,
+                "database": "postgres",
+            })
+        };
+        let mut with_domain = base();
+        with_domain["domains"] = json!(["db.example.com"]);
+        assert!(spec(with_domain).is_err());
+        let with_git = json!({
+            "source": {"type": "git", "repository": "https://example.com/a.git"},
+            "port": 5432,
+            "database": "postgres",
+        });
+        assert!(spec(with_git).is_err());
     }
 
     #[test]
