@@ -9,7 +9,9 @@ use r3v3rs3_api::git::{GitRef, RelPath};
 use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{AppEntry, AppRequest, AppSource, AppSpec, LOCAL_TARGET, TargetEntry};
+use r3v3rs3_api::platform::{
+    AppEntry, AppRequest, AppSource, AppSpec, DatabaseEngine, LOCAL_TARGET, TargetEntry,
+};
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::store::StoreApp;
 use std::str::FromStr;
@@ -79,6 +81,10 @@ pub struct AppForm {
     pub restart: RestartPolicy,
     pub memory_mb: String,
     pub cpus: String,
+    /// The fixed host port and the engine of a database app, kept from the saved app. The
+    /// app form shows neither, because the Databases page manages them.
+    pub host_port: Option<u16>,
+    pub database: Option<DatabaseEngine>,
 }
 
 impl Default for AppForm {
@@ -104,6 +110,8 @@ impl Default for AppForm {
             restart: RestartPolicy::default(),
             memory_mb: String::new(),
             cpus: String::new(),
+            host_port: None,
+            database: None,
         }
     }
 }
@@ -155,6 +163,8 @@ impl AppForm {
                     .nano_cpus
                     .map(|nano| nano as f64 / NANO_CPUS_PER_CPU),
             ),
+            host_port: spec.host_port,
+            database: spec.database,
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -217,6 +227,8 @@ impl AppForm {
             volumes,
             restart,
             limits,
+            host_port: self.host_port,
+            database: self.database,
         };
         spec.validate().map_err(|err| locale.error_message(&err))?;
         Ok(AppRequest {
