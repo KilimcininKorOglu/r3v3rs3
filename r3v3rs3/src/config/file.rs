@@ -891,6 +891,35 @@ impl Storage for FileStorage {
         }
     }
 
+    async fn save_engines(
+        &self,
+        catalog: &r3v3rs3_api::platform::EnginesCatalog,
+    ) -> Result<(), Error> {
+        let path = self.dir.join("engines.json");
+        let result = async {
+            fs::create_dir_all(&self.dir).await?;
+            info!(?path, "save engine catalog");
+            fs::write(&path, serde_json::to_vec(catalog)?).await?;
+            Ok(())
+        }
+        .await;
+        saved(&path, result)
+    }
+
+    async fn load_engines(&self) -> Option<r3v3rs3_api::platform::EnginesCatalog> {
+        let path = self.dir.join("engines.json");
+        match fs::read(&path).await {
+            Ok(bytes) => match serde_json::from_slice(&bytes) {
+                Ok(catalog) => Some(catalog),
+                Err(err) => {
+                    warn!(?path, %err, "failed to parse the engine catalog");
+                    None
+                }
+            },
+            Err(_) => None,
+        }
+    }
+
     async fn load_sent_notifications(&self) -> std::collections::HashSet<String> {
         let path = self.dir.join("notifications.json");
         let result: anyhow::Result<_> = async {

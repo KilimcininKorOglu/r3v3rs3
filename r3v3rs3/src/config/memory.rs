@@ -24,6 +24,7 @@ struct MemoryData {
     certs: Vec<Arc<Cert>>,
     cdn: Option<CdnRanges>,
     app_store: Option<StoreCatalog>,
+    engines: Option<r3v3rs3_api::platform::EnginesCatalog>,
 }
 
 /// The storage of a worker process. A write keeps the value in memory only.
@@ -205,6 +206,18 @@ impl crate::config::storage::Storage for MemoryStorage {
 
     async fn load_app_store(&self) -> Option<StoreCatalog> {
         self.data.lock().await.app_store.clone()
+    }
+
+    async fn save_engines(
+        &self,
+        catalog: &r3v3rs3_api::platform::EnginesCatalog,
+    ) -> Result<(), Error> {
+        self.data.lock().await.engines = Some(catalog.clone());
+        Ok(())
+    }
+
+    async fn load_engines(&self) -> Option<r3v3rs3_api::platform::EnginesCatalog> {
+        self.data.lock().await.engines.clone()
     }
 }
 

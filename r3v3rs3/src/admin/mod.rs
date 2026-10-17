@@ -365,7 +365,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
         .nest(
             "/databases",
             OpenApiRouter::new()
-                .routes(routes!(databases::engines))
+                .routes(routes!(databases::engines, databases::refresh_engines))
                 .routes(routes!(databases::list, databases::create))
                 .routes(routes!(databases::delete))
                 .routes(routes!(backups::list, backups::create))

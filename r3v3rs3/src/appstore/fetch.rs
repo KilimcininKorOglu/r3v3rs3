@@ -18,7 +18,7 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const STARTUP_DELAY: Duration = Duration::from_secs(10);
 /// The catalog of the repository, refreshed on every change of `main`.
 const CATALOG_URL: &str =
-    "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/data/app-store.json";
+    "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/app-store.json";
 /// The catalog stays far below the CDN list limit, but shares its bound.
 const MAX_BODY_SIZE: usize = 4 * 1024 * 1024;
 

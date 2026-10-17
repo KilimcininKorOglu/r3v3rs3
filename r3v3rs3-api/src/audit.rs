@@ -27,6 +27,8 @@ pub enum AuditAction {
     RefreshCdnRanges,
     /// An account refreshed the app store catalog.
     RefreshAppStore,
+    /// An account refreshed the engine catalog.
+    RefreshEngines,
     AddPort,
     UpdatePort,
     DeletePort,
@@ -92,7 +94,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 54] = [
+    pub const ALL: [AuditAction; 55] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -102,6 +104,7 @@ impl AuditAction {
         Self::UpdateConfig,
         Self::RefreshCdnRanges,
         Self::RefreshAppStore,
+        Self::RefreshEngines,
         Self::AddPort,
         Self::UpdatePort,
         Self::DeletePort,

@@ -288,6 +288,9 @@ impl ServerState {
         if let Some(catalog) = storage.load_app_store().await {
             crate::appstore::install(catalog);
         }
+        if let Some(catalog) = storage.load_engines().await {
+            crate::engines::install(catalog);
+        }
 
         let certs = storage.load_certs().await;
         let acmes = storage.load_acmes().await;
@@ -430,6 +433,12 @@ impl ServerState {
                 // Only the master installs the new catalog and stores it.
                 if self.leader && crate::appstore::install(catalog.clone()) {
                     log_save_error(self.storage.save_app_store(&catalog).await);
+                }
+            }
+            ServerCommand::SetEngines { catalog } => {
+                // Only the master installs the new catalog and stores it.
+                if self.leader && crate::engines::install(catalog.clone()) {
+                    log_save_error(self.storage.save_engines(&catalog).await);
                 }
             }
             ServerCommand::SetUpdateAvailable { tag } => {

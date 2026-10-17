@@ -38,6 +38,10 @@ pub enum ServerCommand {
     SetAppStore {
         catalog: r3v3rs3_api::store::StoreCatalog,
     },
+    /// The engine catalog refresh downloaded a newer catalog.
+    SetEngines {
+        catalog: r3v3rs3_api::platform::EnginesCatalog,
+    },
     /// The update check learned the newest release, or that this build is current again.
     SetUpdateAvailable {
         tag: Option<String>,
@@ -101,6 +105,11 @@ impl std::fmt::Debug for ServerCommand {
                 .debug_struct("SetAppStore")
                 .field("updated_at", &catalog.updated_at)
                 .field("apps", &catalog.apps.len())
+                .finish(),
+            Self::SetEngines { catalog } => f
+                .debug_struct("SetEngines")
+                .field("updated_at", &catalog.updated_at)
+                .field("engines", &catalog.engines.len())
                 .finish(),
             Self::SetUpdateAvailable { tag } => f
                 .debug_struct("SetUpdateAvailable")

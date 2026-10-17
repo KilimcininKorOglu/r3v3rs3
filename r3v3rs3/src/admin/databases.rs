@@ -41,6 +41,37 @@ pub async fn engines(
     Ok(Json(r3v3rs3_api::platform::engines()))
 }
 
+/// Downloads the engine catalog from the repository and applies it.
+#[utoipa::path(
+    post,
+    path = "/engines/refresh",
+    tag = "platform",
+    operation_id = "refresh_database_engines",
+    responses((status = 200, description = "The engines.", body = Vec<EngineInfo>), ErrorResponses)
+)]
+pub async fn refresh_engines(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Vec<EngineInfo>>, AppError> {
+    caller.authorize(Permission::Edit)?;
+    let catalog = crate::engines::fetch::fetch_catalog()
+        .await
+        .map_err(|err| {
+            tracing::error!(%err, "failed to refresh the engine catalog");
+            Error::FailedToRefreshEngines
+        })?;
+    state
+        .sender
+        .send(crate::command::ServerCommand::SetEngines { catalog })
+        .await
+        .map_err(|_| Error::FailedToInvokeRpc)?;
+    let record = AuditRecord::new(AuditAction::RefreshEngines);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(r3v3rs3_api::platform::engines()))
+}
+
 /// Lists the database apps.
 #[utoipa::path(
     get,

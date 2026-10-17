@@ -193,6 +193,7 @@ mod tests {
             Error::InvalidCidr { cidr: text() },
             Error::FailedToRefreshCdnRanges,
             Error::FailedToRefreshAppStore,
+            Error::FailedToRefreshEngines,
             Error::TerminalUnsupported,
             Error::AppNotRunning { name: text() },
             Error::InvalidFilePath { path: text() },

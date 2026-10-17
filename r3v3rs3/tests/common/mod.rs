@@ -215,6 +215,7 @@ struct Inner {
     pub accounts: HashMap<String, Account>,
     pub cdn_ranges: Option<CdnRanges>,
     pub app_store: Option<StoreCatalog>,
+    pub engines: Option<r3v3rs3_api::platform::EnginesCatalog>,
     pub dns_credentials: HashMap<
         ShortId,
         (
@@ -451,6 +452,18 @@ impl Storage for TestStorage {
 
     async fn load_app_store(&self) -> Option<StoreCatalog> {
         self.inner.lock().await.app_store.clone()
+    }
+
+    async fn save_engines(
+        &self,
+        catalog: &r3v3rs3_api::platform::EnginesCatalog,
+    ) -> Result<(), Error> {
+        self.save(|inner| inner.engines = Some(catalog.clone()))
+            .await
+    }
+
+    async fn load_engines(&self) -> Option<r3v3rs3_api::platform::EnginesCatalog> {
+        self.inner.lock().await.engines.clone()
     }
 }
 

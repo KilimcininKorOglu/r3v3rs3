@@ -81,6 +81,13 @@ pub trait Storage: Send + Sync + 'static {
     async fn save_app_store(&self, catalog: &StoreCatalog) -> Result<(), Error>;
     async fn load_app_store(&self) -> Option<StoreCatalog>;
 
+    /// The downloaded engine catalog. `None` when no download replaced the embedded one.
+    async fn save_engines(
+        &self,
+        catalog: &r3v3rs3_api::platform::EnginesCatalog,
+    ) -> Result<(), Error>;
+    async fn load_engines(&self) -> Option<r3v3rs3_api::platform::EnginesCatalog>;
+
     /// The keys of the certificate events that the webhook got. A storage without them sends the
     /// notifications again after a restart.
     async fn load_sent_notifications(&self) -> HashSet<String> {

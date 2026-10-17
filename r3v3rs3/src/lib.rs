@@ -12,6 +12,7 @@ pub mod command;
 pub mod config;
 pub mod discovery;
 pub mod dns_credential;
+pub mod engines;
 pub mod jwt;
 pub mod keys;
 pub mod kv;

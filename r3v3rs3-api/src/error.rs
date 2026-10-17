@@ -44,6 +44,9 @@ pub enum Error {
     #[error("failed to refresh the app store catalog")]
     FailedToRefreshAppStore,
 
+    #[error("failed to refresh the engine catalog")]
+    FailedToRefreshEngines,
+
     #[error("no release newer than the running version is available")]
     NoNewRelease,
 
@@ -455,7 +458,8 @@ impl Error {
             Self::AgentOffline { .. } | Self::PlatformDisabled | Self::PlatformFailed => 503,
             Self::NotificationFailed { .. }
             | Self::GitProviderFailed { .. }
-            | Self::FailedToRefreshAppStore => 502,
+            | Self::FailedToRefreshAppStore
+            | Self::FailedToRefreshEngines => 502,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig
             | Self::FailedToInvokeRpc

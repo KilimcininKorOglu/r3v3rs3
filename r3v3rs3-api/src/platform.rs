@@ -95,6 +95,11 @@ pub fn engines() -> Vec<EngineInfo> {
     read_engines().engines.clone()
 }
 
+/// The `updated_at` of the installed catalog, `0` when no catalog is installed.
+pub fn engines_updated_at() -> i64 {
+    read_engines().updated_at
+}
+
 /// The catalog entry of one engine key.
 pub fn engine_info(key: &str) -> Option<EngineInfo> {
     read_engines()
