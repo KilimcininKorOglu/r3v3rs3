@@ -114,6 +114,7 @@ mod tests {
             limits: Default::default(),
             host_port: None,
             database: None,
+            uses_database: None,
         }
     }
 

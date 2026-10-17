@@ -299,6 +299,7 @@
   "error.invalid_file_path": "The path is not inside a volume of the app.",
   "error.volume_read_only": "The volume is read-only.",
   "error.host_port_unavailable": "The port {port} is in use already.",
+  "error.database_in_use": "An app uses the database {name}. Disconnect its apps first.",
   "error.no_new_release": "No release newer than the running version is available.",
   "error.upgrade_failed": "Failed to install the server upgrade. The running server is not changed.",
   "error.failed_to_save_config": "Failed to save the configuration. The change is not applied.",

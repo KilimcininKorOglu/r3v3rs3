@@ -85,6 +85,8 @@ pub struct AppForm {
     /// app form shows neither, because the Databases page manages them.
     pub host_port: Option<u16>,
     pub database: Option<DatabaseEngine>,
+    /// The database that the app uses. The select of the form lists the databases.
+    pub uses_database: Option<ShortId>,
 }
 
 impl Default for AppForm {
@@ -112,6 +114,7 @@ impl Default for AppForm {
             cpus: String::new(),
             host_port: None,
             database: None,
+            uses_database: None,
         }
     }
 }
@@ -165,6 +168,7 @@ impl AppForm {
             ),
             host_port: spec.host_port,
             database: spec.database,
+            uses_database: spec.uses_database,
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -229,6 +233,7 @@ impl AppForm {
             limits,
             host_port: self.host_port,
             database: self.database,
+            uses_database: self.uses_database,
         };
         spec.validate().map_err(|err| locale.error_message(&err))?;
         Ok(AppRequest {

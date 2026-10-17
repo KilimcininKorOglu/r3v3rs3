@@ -140,6 +140,9 @@ pub enum Error {
     #[error("the port is in use already: {port}")]
     HostPortUnavailable { port: u16 },
 
+    #[error("an app uses the database: {name}")]
+    DatabaseInUse { name: String },
+
     #[error("the enrollment token is invalid or was used already")]
     InvalidEnrollmentToken,
 
@@ -437,7 +440,8 @@ impl Error {
             | Self::PublicUrlMissing
             | Self::TargetInUse { .. }
             | Self::AppTargetFixed { .. }
-            | Self::HostPortUnavailable { .. } => 409,
+            | Self::HostPortUnavailable { .. }
+            | Self::DatabaseInUse { .. } => 409,
             Self::AgentOffline { .. } | Self::PlatformDisabled | Self::PlatformFailed => 503,
             Self::NotificationFailed { .. }
             | Self::GitProviderFailed { .. }

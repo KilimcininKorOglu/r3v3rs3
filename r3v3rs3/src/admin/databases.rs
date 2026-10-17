@@ -175,6 +175,7 @@ fn app_request(
             limits: Default::default(),
             host_port: Some(host_port),
             database: Some(request.engine),
+            uses_database: None,
         },
     })
 }

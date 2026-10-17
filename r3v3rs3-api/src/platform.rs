@@ -59,6 +59,10 @@ pub struct EngineInfo {
     pub default_db: String,
     /// The scheme of the connection string, for example `postgres`.
     pub url_scheme: String,
+    /// The prefix of the environment variables of a connected app, for example `POSTGRES`.
+    pub env_prefix: String,
+    /// Whether the connection string ends in the database name.
+    pub url_database: bool,
     /// The directory inside the container that the data volume mounts.
     pub data_path: String,
 }
@@ -81,6 +85,8 @@ impl DatabaseEngine {
                     user: "postgres".to_string(),
                     default_db: "postgres".to_string(),
                     url_scheme: "postgres".to_string(),
+                    env_prefix: "POSTGRES".to_string(),
+                    url_database: true,
                     data_path: "/var/lib/postgresql/data".to_string(),
                 },
                 EngineInfo {
@@ -95,6 +101,8 @@ impl DatabaseEngine {
                     user: "root".to_string(),
                     default_db: String::new(),
                     url_scheme: "mariadb".to_string(),
+                    env_prefix: "MYSQL".to_string(),
+                    url_database: false,
                     data_path: "/var/lib/mysql".to_string(),
                 },
                 EngineInfo {
@@ -106,6 +114,8 @@ impl DatabaseEngine {
                     user: "root".to_string(),
                     default_db: String::new(),
                     url_scheme: "mysql".to_string(),
+                    env_prefix: "MYSQL".to_string(),
+                    url_database: false,
                     data_path: "/var/lib/mysql".to_string(),
                 },
                 EngineInfo {
@@ -117,6 +127,8 @@ impl DatabaseEngine {
                     user: "root".to_string(),
                     default_db: "admin".to_string(),
                     url_scheme: "mongodb".to_string(),
+                    env_prefix: "MONGO".to_string(),
+                    url_database: true,
                     data_path: "/data/db".to_string(),
                 },
                 EngineInfo {
@@ -128,6 +140,8 @@ impl DatabaseEngine {
                     user: String::new(),
                     default_db: String::new(),
                     url_scheme: "redis".to_string(),
+                    env_prefix: "REDIS".to_string(),
+                    url_database: false,
                     data_path: "/data".to_string(),
                 },
             ]
@@ -360,6 +374,12 @@ pub struct AppSpec {
     /// proxy: clients reach it on the host port.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database: Option<DatabaseEngine>,
+
+    /// The id of the database app that this app uses. A deployment injects its connection
+    /// into the environment of the container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub uses_database: Option<ShortId>,
 }
 
 impl AppSpec {
@@ -387,22 +407,25 @@ impl AppSpec {
     }
 
     /// A database app is an image app without domains: its clients reach it on the host port,
-    /// so a route and a certificate would only expose it.
+    /// so a route and a certificate would only expose it. A database server cannot use another
+    /// database, and only a database server carries the engine.
     fn validate_database(&self) -> Result<(), Error> {
-        let Some(engine) = self.database else {
-            return Ok(());
-        };
-        if !matches!(self.source, AppSource::Image { .. }) {
-            return Err(invalid(&format!(
-                "a database app runs an image, not a {} source",
-                engine
-            )));
-        }
-        if let Some(domain) = self.domains.first() {
-            return Err(invalid(&format!(
-                "a database app has no domains, but {} is listed",
-                domain
-            )));
+        if let Some(engine) = self.database {
+            if !matches!(self.source, AppSource::Image { .. }) {
+                return Err(invalid(&format!(
+                    "a database app runs an image, not a {} source",
+                    engine
+                )));
+            }
+            if let Some(domain) = self.domains.first() {
+                return Err(invalid(&format!(
+                    "a database app has no domains, but {} is listed",
+                    domain
+                )));
+            }
+            if self.uses_database.is_some() {
+                return Err(invalid("a database app cannot use another database"));
+            }
         }
         Ok(())
     }

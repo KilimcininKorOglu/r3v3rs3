@@ -299,6 +299,7 @@
   "error.invalid_file_path": "Yol, uygulamanın bir volume'unun içinde değil.",
   "error.volume_read_only": "Volume salt okunur.",
   "error.host_port_unavailable": "{port} portu zaten kullanımda.",
+  "error.database_in_use": "{name} veritabanını bir uygulama kullanıyor. Önce uygulamalarının bağlantısını kesin.",
   "error.no_new_release": "Çalışan sürümden daha yeni bir release yok.",
   "error.upgrade_failed": "Sunucu yükseltmesi kurulamadı. Çalışan sunucu değişmedi.",
   "error.failed_to_save_config": "Yapılandırma kaydedilemedi. Değişiklik uygulanmadı.",
