@@ -215,6 +215,7 @@ fn app_request(
             host_port: Some(host_port),
             database: Some(request.engine.clone()),
             uses_database: None,
+            auto_deploy: false,
         },
     })
 }

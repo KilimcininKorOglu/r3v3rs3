@@ -11,7 +11,9 @@ use crate::store::SessionStore;
 use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
 use r3v3rs3_api::i18n::Locale;
-use r3v3rs3_api::platform::{AppEntry, AppSource, DeploymentEntry, DeploymentStatus};
+use r3v3rs3_api::platform::{
+    AppEntry, AppSource, DeploymentEntry, DeploymentStatus, ImageUpdateStatus,
+};
 use std::collections::HashSet;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -356,7 +358,7 @@ fn app_row(
         key: row.app.id.to_string(),
         cells: vec![
             html! { <>{row.app.name.as_str()}</> },
-            source_cell(locale, &row.app.spec.source),
+            source_cell(locale, &row.app),
             html! { <>{domains_cell}</> },
             deployment_cell(locale, row.latest.as_ref()),
         ],
@@ -383,8 +385,8 @@ fn link(navigator: &Navigator, route: Route) -> Callback<MouseEvent> {
 }
 
 /// The kind of the source, and the image or the repository with its branch.
-fn source_cell(locale: Locale, source: &AppSource) -> Html {
-    let (kind, detail) = match source {
+fn source_cell(locale: Locale, app: &AppEntry) -> Html {
+    let (kind, detail) = match &app.spec.source {
         AppSource::Image { image } => ("apps.source_image", image.as_str().to_string()),
         AppSource::Git {
             repository, branch, ..
@@ -401,9 +403,26 @@ fn source_cell(locale: Locale, source: &AppSource) -> Html {
     };
     html! {
         <div>
-            <span class="block">{locale.t(kind)}</span>
+            <div class="flex items-center">
+                <span>{locale.t(kind)}</span>
+                { update_badge(locale, app.update.as_ref()) }
+            </div>
             <span class="block text-xs text-neutral-500 dark:text-neutral-400 break-all">{detail}</span>
         </div>
+    }
+}
+
+fn update_badge(locale: Locale, update: Option<&ImageUpdateStatus>) -> Html {
+    let Some(update) = update else {
+        return html! {};
+    };
+    if !update.update_available {
+        return html! {};
+    }
+    html! {
+        <span class="inline-flex items-center px-1.5 py-0.5 ml-2 rounded text-[10px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+            {locale.t("apps.update_available")}
+        </span>
     }
 }
 

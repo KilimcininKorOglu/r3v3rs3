@@ -115,6 +115,7 @@ mod tests {
             host_port: None,
             database: None,
             uses_database: None,
+            auto_deploy: false,
         }
     }
 

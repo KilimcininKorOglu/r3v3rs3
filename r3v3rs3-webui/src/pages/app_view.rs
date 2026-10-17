@@ -5,6 +5,7 @@ use super::Route;
 use super::app_env::AppEnv;
 use super::app_form::{AppForm, fields_view};
 use super::app_git_token::AppGitToken;
+use super::app_image_update::AppImageUpdate;
 use super::app_metrics::AppMetrics;
 use super::app_webhook::AppWebhook;
 use super::resource_page::{FormCard, Notice, delete_on_click, form_card, notice_view};
@@ -19,7 +20,7 @@ use gloo_net::http::Request;
 use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{AppEntry, AppRequest, EnvEntry, TargetEntry};
+use r3v3rs3_api::platform::{AppEntry, AppRequest, AppSource, EnvEntry, TargetEntry};
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::store::StoreResponse;
 use wasm_bindgen_futures::spawn_local;
@@ -188,6 +189,7 @@ fn edit_extras(
 ) -> Html {
     // The saved source decides the token section, not the unsaved input of the form.
     let uses_git = AppForm::edit(&entry).uses_git();
+    let is_image = matches!(entry.spec.source, AppSource::Image { .. });
     let app = app.clone();
     let onchanged = Callback::from(move |updated: AppEntry| app.set(Some(updated)));
     let navigator = navigator.clone();
@@ -196,6 +198,9 @@ fn edit_extras(
     let delete = delete_on_click(locale, question, format!("/apps/{}", entry.id), deleted);
     html! {
         <>
+            if is_image {
+                <AppImageUpdate app={entry.clone()} {locale} onchanged={onchanged.clone()} />
+            }
             if uses_git {
                 <AppGitToken app={entry.clone()} {locale} onchanged={onchanged.clone()} />
             }

@@ -351,6 +351,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(platform::get_app_metrics))
                 .routes(routes!(platform::get_logs))
                 .routes(routes!(platform::deploy_app))
+                .routes(routes!(platform::check_app_update))
                 .routes(routes!(platform::terminal))
                 .routes(routes!(app_files::list))
                 .routes(routes!(app_files::download))

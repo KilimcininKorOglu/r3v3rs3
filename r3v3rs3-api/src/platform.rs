@@ -418,6 +418,10 @@ pub struct AppSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub uses_database: Option<ShortId>,
+
+    /// Whether updates to the app image (newer tag or digest) should be deployed automatically.
+    #[serde(default)]
+    pub auto_deploy: bool,
 }
 
 impl AppSpec {
@@ -581,10 +585,34 @@ pub struct AppEntry {
     /// The webhook that the Git provider connection of the app installed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hook: Option<AppHook>,
+    /// The image update status of the app, when checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<ImageUpdateStatus>,
     /// The Unix time in milliseconds.
     pub created_at: u64,
     /// The Unix time in milliseconds.
     pub updated_at: u64,
+}
+
+/// The image update status of an app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ImageUpdateStatus {
+    /// Whether an update is available (either a newer tag or a newer digest for current tag).
+    pub update_available: bool,
+    /// The current image tag of the app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_tag: Option<String>,
+    /// The newer tag found in registry, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_tag: Option<String>,
+    /// The digest of the running deployment, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_digest: Option<String>,
+    /// The remote digest of the latest tag or current tag in the registry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_digest: Option<String>,
+    /// The Unix time in milliseconds when the check was performed.
+    pub checked_at: u64,
 }
 
 /// The webhook of an app at the Git provider of its connection. It sends the push events of the
@@ -740,6 +768,7 @@ pub enum DeploymentTrigger {
     Webhook,
     Rollback,
     Api,
+    Auto,
 }
 
 impl DeploymentTrigger {
@@ -749,6 +778,7 @@ impl DeploymentTrigger {
             Self::Webhook => "webhook",
             Self::Rollback => "rollback",
             Self::Api => "api",
+            Self::Auto => "auto",
         }
     }
 }

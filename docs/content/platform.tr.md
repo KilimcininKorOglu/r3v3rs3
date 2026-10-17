@@ -70,8 +70,24 @@ Bir uygulama bir image'ı, container'ın dinlediği portu ve uygulamaya yönlene
 - `health_check_path`, uygulama hazır olduğunda `2xx` veya `3xx` döndüren bir HTTP yoludur. Bu değer yoksa deployment, port bir bağlantıyı kabul edip açık tutana kadar bekler.
 - `volumes` adlandırılmış Docker volume'larını bağlar. `"read_only": true` volume'u salt okunur bağlar. Host üzerindeki bir yol bağlanamaz.
 - `restart` değeri `no`, `on-failure`, `unless-stopped` (varsayılan) veya `always` olur.
+- `auto_deploy` (isteğe bağlı, varsayılan `false`), container registry'de yeni bir image tag'i veya güncellenmiş digest tespit edildiğinde otomatik deployment'ı etkinleştirir.
 
 Uygulamanın, alan adlarının veya ortam değişkenlerinin değişikliği sonraki deployment'ta geçerli olur.
+
+### Image Güncellemeleri
+
+Image kaynağı kullanan uygulamalar için r3v3rs3, arka planda container registry'sini (Docker Hub, GitHub Container Registry vb.) periyodik olarak kontrol eder:
+- **Registry Tag ve Digest Denetimi**: Mevcut tag için yeni manifest digest'larını veya semver olarak daha yeni sürüm tag'lerini kontrol eder.
+- **Güncelleme Bildirimleri**: Bir güncelleme bulunduğunda, uygulama listesinde **Güncelleme mevcut** etiketi gösterilir. Uygulama detay sayfasında ise mevcut ve en son sürümleri içeren bir uyarı paneli ve **Güncellemeyi deploy et** butonu yer alır.
+- **Otomatik Deploy**: **Güncellemede otomatik deploy** seçeneği açık olduğunda, r3v3rs3 yeni tag çıktığında uygulama tanımını günceller ve deployment'ı otomatik olarak başlatır.
+- **Manuel Denetim**: WebUI üzerindeki **Güncellemeleri denetle** butonu veya `POST /api/apps/{id}/check_update` API çağrısı ile anında kontrol yapılabilir.
+
+### Toplu İşlemler
+
+Uygulama, port ve proxy listeleri çoklu seçim kontrollerini destekler:
+- Satır onay kutularını kullanarak birden fazla öğeyi seçebilir veya başlık kutusuyla tüm görünür öğeleri işaretleyebilirsiniz.
+- Seçilen öğeleri onay alarak toplu silebilirsiniz.
+- Birden fazla seçili uygulamayı tek seferde deploy edebilirsiniz.
 
 ## App Store
 

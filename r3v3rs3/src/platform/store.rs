@@ -6,8 +6,8 @@ use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppHook, AppSpec, DeploymentEntry, DeploymentStatus, DeploymentTrigger, LOCAL_TARGET,
-    TargetEntry, TargetKind,
+    AppEntry, AppHook, AppSpec, DeploymentEntry, DeploymentStatus, DeploymentTrigger,
+    ImageUpdateStatus, LOCAL_TARGET, TargetEntry, TargetKind,
 };
 use serde_derive::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteRow};
@@ -109,6 +109,15 @@ const SCHEMA: &[&str] = &[
         PRIMARY KEY (app_id, ts)
     )",
     "CREATE INDEX IF NOT EXISTS app_metrics_app ON app_metrics (app_id, ts)",
+    "CREATE TABLE IF NOT EXISTS app_updates (
+        app_id           TEXT PRIMARY KEY REFERENCES apps (id) ON DELETE CASCADE,
+        update_available INTEGER NOT NULL,
+        current_tag      TEXT,
+        latest_tag       TEXT,
+        current_digest   TEXT,
+        latest_digest    TEXT,
+        checked_at       INTEGER NOT NULL
+    )",
 ];
 
 mod connections;
@@ -136,8 +145,12 @@ macro_rules! select_apps {
                     AND s.name = 'webhook_secret') AS webhook_secret_set,
                 h.connection_id AS hook_connection, h.repository AS hook_repository,
                 h.remote_id AS hook_remote_id, h.error AS hook_error, h.failure AS hook_failure,
-                h.updated_at AS hook_updated_at
-            FROM apps LEFT JOIN app_hooks h ON h.app_id = apps.id ",
+                h.updated_at AS hook_updated_at,
+                u.update_available AS update_available, u.current_tag AS update_current_tag,
+                u.latest_tag AS update_latest_tag, u.current_digest AS update_current_digest,
+                u.latest_digest AS update_latest_digest, u.checked_at AS update_checked_at
+            FROM apps LEFT JOIN app_hooks h ON h.app_id = apps.id
+            LEFT JOIN app_updates u ON u.app_id = apps.id ",
             $rest
         )
     };
@@ -673,6 +686,42 @@ impl PlatformStore {
             })
             .collect()
     }
+
+    pub async fn set_image_update(
+        &self,
+        app_id: ShortId,
+        status: &ImageUpdateStatus,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO app_updates (app_id, update_available, current_tag, latest_tag, current_digest, latest_digest, checked_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(app_id) DO UPDATE SET
+                update_available = excluded.update_available,
+                current_tag = excluded.current_tag,
+                latest_tag = excluded.latest_tag,
+                current_digest = excluded.current_digest,
+                latest_digest = excluded.latest_digest,
+                checked_at = excluded.checked_at",
+        )
+        .bind(app_id.to_string())
+        .bind(status.update_available)
+        .bind(&status.current_tag)
+        .bind(&status.latest_tag)
+        .bind(&status.current_digest)
+        .bind(&status.latest_digest)
+        .bind(sql_int(status.checked_at))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn clear_image_update(&self, app_id: ShortId) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM app_updates WHERE app_id = ?")
+            .bind(app_id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
 }
 
 /// Maps a unique constraint failure on the app name to `NameTaken`.
@@ -738,20 +787,52 @@ fn unfinished_of(row: &SqliteRow) -> anyhow::Result<UnfinishedDeployment> {
     })
 }
 
+fn app_identity(row: &SqliteRow) -> anyhow::Result<(ShortId, AppName, ShortId)> {
+    Ok((
+        id_of(row, "id")?,
+        row.try_get::<&str, _>("name")?.parse::<AppName>()?,
+        id_of(row, "target_id")?,
+    ))
+}
+
 fn app_of(row: &SqliteRow) -> anyhow::Result<AppEntry> {
+    let (id, name, target) = app_identity(row)?;
     let spec: AppSpec = serde_json::from_str(row.try_get("spec")?)?;
     let (git_token_set, webhook_secret_set, hook) = app_extras(row)?;
+    let update = app_update_of(row)?;
     Ok(AppEntry {
-        id: id_of(row, "id")?,
-        name: row.try_get::<&str, _>("name")?.parse::<AppName>()?,
-        target: id_of(row, "target_id")?,
+        id,
+        name,
+        target,
         spec,
         git_token_set,
         webhook_secret_set,
         hook,
+        update,
         created_at: time_of(row, "created_at")?,
         updated_at: time_of(row, "updated_at")?,
     })
+}
+
+fn app_update_of(row: &SqliteRow) -> anyhow::Result<Option<ImageUpdateStatus>> {
+    let checked_at: Option<i64> = row.try_get("update_checked_at")?;
+    let Some(checked_at) = checked_at else {
+        return Ok(None);
+    };
+    let update_available: bool = row.try_get("update_available")?;
+    let current_tag: Option<String> = row.try_get("update_current_tag")?;
+    let latest_tag: Option<String> = row.try_get("update_latest_tag")?;
+    let current_digest: Option<String> = row.try_get("update_current_digest")?;
+    let latest_digest: Option<String> = row.try_get("update_latest_digest")?;
+    let checked_at = u64::try_from(checked_at).unwrap_or(0);
+    Ok(Some(ImageUpdateStatus {
+        update_available,
+        current_tag,
+        latest_tag,
+        current_digest,
+        latest_digest,
+        checked_at,
+    }))
 }
 
 /// Whether the app has a Git token, whether it has a webhook secret, and its webhook at its Git
@@ -853,13 +934,39 @@ mod tests {
                 host_port: None,
                 database: None,
                 uses_database: None,
+                auto_deploy: false,
             },
             git_token_set: false,
             webhook_secret_set: false,
             hook: None,
+            update: None,
             created_at: 10,
             updated_at: 10,
         }
+    }
+
+    #[tokio::test]
+    async fn image_update_can_be_saved_read_and_cleared() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let shop = app("abc-def", "shop");
+        store.insert_app(&shop).await?;
+
+        let status = ImageUpdateStatus {
+            update_available: true,
+            current_tag: Some("1.27".into()),
+            latest_tag: Some("1.28".into()),
+            current_digest: Some("sha256:1111".into()),
+            latest_digest: Some("sha256:2222".into()),
+            checked_at: 500,
+        };
+        store.set_image_update(shop.id, &status).await?;
+        let loaded = store.app(shop.id).await?.unwrap();
+        assert_eq!(loaded.update, Some(status));
+
+        store.clear_image_update(shop.id).await?;
+        let cleared = store.app(shop.id).await?.unwrap();
+        assert!(cleared.update.is_none());
+        Ok(())
     }
 
     #[tokio::test]

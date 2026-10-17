@@ -70,8 +70,24 @@ An app names an image, the port that the container listens on and the domains th
 - `health_check_path` is an HTTP path that answers `2xx` or `3xx` when the app is ready. Without it a deployment waits until the port accepts a connection and keeps it open.
 - `volumes` mounts named Docker volumes, and `"read_only": true` mounts one read-only. A host path cannot be mounted.
 - `restart` is `no`, `on-failure`, `unless-stopped` (the default) or `always`.
+- `auto_deploy` (optional, default `false`) enables automatic deployment when a newer image tag or updated digest is detected in the container registry.
 
 A change of an app, of its domains or of its environment variables takes effect at the next deployment.
+
+### Image Updates
+
+For apps with an image source, r3v3rs3 periodically inspects the container registry (Docker Hub, GHCR, etc.) in the background:
+- **Registry Tag & Digest Checking**: Checks for newer semver tags matching the image suffix or new manifest digests for the current tag.
+- **Update Notifications**: If an update is found, an **Update available** badge appears on the app in the apps list. The app view page displays an update alert banner with current and latest versions and a **Deploy update** button.
+- **Auto-Deploy**: When **Auto-deploy on update** is enabled, r3v3rs3 updates the app specification to the newer tag and triggers a deployment automatically.
+- **Manual Checks**: An immediate update check can be triggered via the **Check for updates** button in the WebUI or `POST /api/apps/{id}/check_update`.
+
+### Bulk Operations
+
+The app, port, and proxy list views provide multi-selection controls:
+- Select multiple items using row checkboxes, or select all visible items using the header checkbox.
+- Perform batch deletions with confirmation.
+- Deploy multiple selected apps at once.
 
 ## App Store
 

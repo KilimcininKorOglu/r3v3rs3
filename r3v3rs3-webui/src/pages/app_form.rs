@@ -85,6 +85,7 @@ pub struct AppForm {
     pub database: Option<String>,
     /// The database that the app uses. The select of the form lists the databases.
     pub uses_database: Option<ShortId>,
+    pub auto_deploy: bool,
 }
 
 impl Default for AppForm {
@@ -113,6 +114,7 @@ impl Default for AppForm {
             host_port: None,
             database: None,
             uses_database: None,
+            auto_deploy: false,
         }
     }
 }
@@ -167,6 +169,7 @@ impl AppForm {
             host_port: spec.host_port,
             database: spec.database.clone(),
             uses_database: spec.uses_database,
+            auto_deploy: spec.auto_deploy,
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -232,6 +235,7 @@ impl AppForm {
             host_port: self.host_port,
             database: self.database.clone(),
             uses_database: self.uses_database,
+            auto_deploy: self.auto_deploy,
         };
         spec.validate().map_err(|err| locale.error_message(&err))?;
         Ok(AppRequest {
@@ -541,9 +545,14 @@ fn source_view(
     connections: &[GitConnectionEntry],
 ) -> Html {
     match form.kind {
-        SourceKind::Image => text_field(locale, form, "apps.image", Some("apps.image_hint"), |f| {
-            &mut f.image
-        }),
+        SourceKind::Image => html! {
+            <>
+                { text_field(locale, form, "apps.image", Some("apps.image_hint"), |f| {
+                    &mut f.image
+                }) }
+                { auto_deploy_toggle(locale, form) }
+            </>
+        },
         SourceKind::Git => html! {
             <>
                 { repository_view(locale, form, connections) }
@@ -558,6 +567,27 @@ fn source_view(
                 { text_field(locale, form, "apps.service", Some("apps.service_hint"), |f| &mut f.service) }
             </>
         },
+    }
+}
+
+fn auto_deploy_toggle(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let form_handle = form.clone();
+    let checked = form.auto_deploy;
+    let onchange = Callback::from(move |e: Event| {
+        if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+            let mut updated = (*form_handle).clone();
+            updated.auto_deploy = target.checked();
+            form_handle.set(updated);
+        }
+    });
+    html! {
+        <div class="mt-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={checked} {onchange} class="w-4 h-4 text-blue-600 bg-neutral-100 border-neutral-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-neutral-800 focus:ring-2 dark:bg-neutral-700 dark:border-neutral-600" />
+                <span class={LABEL_CLASS}>{locale.t("apps.auto_deploy")}</span>
+            </label>
+            <p class={HINT_CLASS}>{locale.t("apps.auto_deploy_hint")}</p>
+        </div>
     }
 }
 
@@ -740,7 +770,8 @@ mod tests {
                         {"volume": "shop-cache", "target": "/cache", "read_only": true}
                     ],
                     "restart": "always",
-                    "limits": {"memory_bytes": 536_870_912_u64, "nano_cpus": 1_500_000_000_u64}
+                    "limits": {"memory_bytes": 536_870_912_u64, "nano_cpus": 1_500_000_000_u64},
+                    "auto_deploy": false
                 }
             })
         );
@@ -791,6 +822,7 @@ mod tests {
             git_token_set: false,
             webhook_secret_set: false,
             hook: None,
+            update: None,
             created_at: 0,
             updated_at: 0,
         };

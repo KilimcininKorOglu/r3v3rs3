@@ -91,10 +91,12 @@ pub enum AuditAction {
     InstallAppHook,
     /// An account approved an MCP client in the OAuth authorization flow.
     AuthorizeMcpClient,
+    /// An account checked for image updates of an app.
+    CheckAppUpdate,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 55] = [
+    pub const ALL: [AuditAction; 56] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -150,6 +152,7 @@ impl AuditAction {
         Self::ConnectGitConnection,
         Self::InstallAppHook,
         Self::AuthorizeMcpClient,
+        Self::CheckAppUpdate,
     ];
 }
 

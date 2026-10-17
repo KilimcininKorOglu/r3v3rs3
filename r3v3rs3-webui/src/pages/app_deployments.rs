@@ -235,6 +235,7 @@ fn trigger_key(trigger: DeploymentTrigger) -> &'static str {
         DeploymentTrigger::Webhook => "deployments.trigger_webhook",
         DeploymentTrigger::Rollback => "deployments.trigger_rollback",
         DeploymentTrigger::Api => "deployments.trigger_api",
+        DeploymentTrigger::Auto => "deployments.trigger_auto",
     }
 }
 
@@ -362,6 +363,7 @@ mod tests {
             DeploymentTrigger::Webhook,
             DeploymentTrigger::Rollback,
             DeploymentTrigger::Api,
+            DeploymentTrigger::Auto,
         ] {
             assert_ne!(Locale::Tr.t(trigger_key(trigger)), trigger_key(trigger));
         }

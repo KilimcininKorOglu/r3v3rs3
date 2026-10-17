@@ -22,8 +22,8 @@ use r3v3rs3_api::{
     id::ShortId,
     platform::{
         AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, DeploymentEntry,
-        DeploymentTrigger, EnvEntry, GitTokenRequest, MetricsQuery, TargetEntry, TargetRequest,
-        TargetToken, WebhookSecret,
+        DeploymentTrigger, EnvEntry, GitTokenRequest, ImageUpdateStatus, MetricsQuery, TargetEntry,
+        TargetRequest, TargetToken, WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -577,6 +577,34 @@ pub async fn deploy_app(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(deployment))
+}
+
+/// Checks Docker/OCI registry for updates to the image of an app. If auto-deploy is enabled and an update is found, triggers deployment.
+#[utoipa::path(
+    post,
+    path = "/{id}/check_update",
+    tag = "platform",
+    operation_id = "check_app_update",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The image update status.", body = ImageUpdateStatus), NotFoundResponse, ErrorResponses)
+)]
+pub async fn check_app_update(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<ImageUpdateStatus>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let status = platform
+        .check_app_update(id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::CheckAppUpdate)
+        .id(id)
+        .summary(format!("update_available: {}", status.update_available));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(status))
 }
 
 /// Opens a WebSocket terminal into the running container of an app. Binary frames carry the

@@ -10,6 +10,7 @@ mod app_env;
 mod app_files;
 mod app_form;
 mod app_git_token;
+mod app_image_update;
 mod app_list;
 mod app_log;
 mod app_metrics;

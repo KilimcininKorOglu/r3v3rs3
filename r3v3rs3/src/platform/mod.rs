@@ -14,6 +14,7 @@ pub mod deploy;
 pub(crate) mod fake;
 mod github_app;
 pub mod hooks;
+pub mod image_check;
 mod metrics;
 mod notices;
 pub mod oauth;
@@ -49,8 +50,8 @@ use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::git_connection::PublicUrl;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, FileEntry, LOCAL_TARGET,
-    PlatformConfig,
+    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, FileEntry, ImageUpdateStatus,
+    LOCAL_TARGET, PlatformConfig,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashSet};
@@ -111,6 +112,7 @@ impl PlatformHandle {
                 tokio::spawn(publish::refresh(Arc::downgrade(&platform)));
                 backup::spawn_scheduler(platform.clone());
                 metrics::spawn_collector(&platform);
+                image_check::spawn_checker(&platform);
                 if let Some(port) = config.platform.agent_port
                     && let Err(err) = platform
                         .start_agent_listener(port, events.subscribe())
@@ -312,6 +314,7 @@ impl Platform {
             git_token_set: false,
             webhook_secret_set: false,
             hook: None,
+            update: None,
             created_at: now,
             updated_at: now,
         };
@@ -354,6 +357,7 @@ impl Platform {
             git_token_set: current.git_token_set,
             webhook_secret_set: current.webhook_secret_set,
             hook: None,
+            update: current.update,
             created_at: current.created_at,
             updated_at: now,
         };
@@ -380,6 +384,17 @@ impl Platform {
         self.forget_queued_hook(id);
         self.publish().await;
         Ok(app)
+    }
+
+    /// Checks for image updates of an app.
+    pub async fn check_app_update(
+        self: &Arc<Self>,
+        id: ShortId,
+    ) -> anyhow::Result<ImageUpdateStatus> {
+        let status = image_check::check_app(self, id).await?;
+        let app = self.app(id).await?;
+        image_check::auto_deploy_if_needed(self, &app, &status).await?;
+        Ok(status)
     }
 
     /// Refuses the deletion of a database that another app uses.
@@ -836,6 +851,7 @@ mod tests {
                 host_port: None,
                 database: None,
                 uses_database: None,
+                auto_deploy: false,
             },
         }
     }
