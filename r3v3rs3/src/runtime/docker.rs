@@ -17,7 +17,7 @@ use hyper::header::CONTENT_TYPE;
 use hyper::{Method, Response, StatusCode};
 use r3v3rs3_api::container::{
     APP_LABEL, AppName, COMPOSE_PROJECT_LABEL, ContainerHealth, ContainerInfo, ContainerName,
-    ContainerSpec, ContainerSummary, ImageInfo, ImageRef, NetworkName, ProjectName,
+    ContainerSpec, ContainerStats, ContainerSummary, ImageInfo, ImageRef, NetworkName, ProjectName,
 };
 use r3v3rs3_api::git::RelPath;
 use r3v3rs3_api::platform::FileEntry;
@@ -288,6 +288,25 @@ impl DockerRuntime {
             );
         }
         Ok(output)
+    }
+
+    /// The resource usage of a container, from one stats document.
+    pub async fn stats(&self, name: &ContainerName) -> anyhow::Result<ContainerStats> {
+        let container = self.container_id(name).await?;
+        let response = self
+            .send(
+                Method::GET,
+                &format!(
+                    "/containers/{}/stats?stream=false&one-shot=true",
+                    container.id
+                ),
+                None,
+                &[],
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let document: StatsDocument = read_json(response).await?;
+        Ok(document.into_stats())
     }
 
     /// The entries of a directory inside a container.
@@ -678,6 +697,10 @@ impl ContainerRuntime for DockerRuntime {
         demux_logs(&body)
     }
 
+    async fn stats(&self, name: &ContainerName) -> anyhow::Result<ContainerStats> {
+        DockerRuntime::stats(self, name).await
+    }
+
     async fn exec_capture(
         &self,
         name: &ContainerName,
@@ -947,6 +970,90 @@ struct ExecInspectResponse {
     exit_code: i64,
 }
 
+/// One stats document of the Docker Engine API, with `stream=false`.
+#[derive(Deserialize)]
+struct StatsDocument {
+    cpu_stats: StatsCpu,
+    precpu_stats: StatsCpu,
+    #[serde(default)]
+    memory_stats: Option<StatsMemory>,
+    #[serde(default)]
+    networks: Option<BTreeMap<String, StatsNetwork>>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct StatsCpu {
+    #[serde(default)]
+    cpu_usage: Option<StatsCpuUsage>,
+    #[serde(default)]
+    system_cpu_usage: Option<u64>,
+    #[serde(default)]
+    online_cpus: Option<f64>,
+}
+
+#[derive(Default, Deserialize)]
+struct StatsCpuUsage {
+    #[serde(default)]
+    total_usage: u64,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct StatsMemory {
+    #[serde(default)]
+    usage: u64,
+    #[serde(default)]
+    limit: u64,
+}
+
+#[derive(Default, Deserialize)]
+struct StatsNetwork {
+    #[serde(default)]
+    rx_bytes: u64,
+    #[serde(default)]
+    tx_bytes: u64,
+}
+
+impl StatsDocument {
+    /// The CPU percent of the interval between the two samples, the memory, and the summed
+    /// network counters of every interface.
+    fn into_stats(self) -> ContainerStats {
+        let online = self.cpu_stats.online_cpus.unwrap_or(1.0).max(1.0);
+        let total = self
+            .cpu_stats
+            .cpu_usage
+            .as_ref()
+            .map(|usage| usage.total_usage)
+            .unwrap_or(0);
+        let previous = self
+            .precpu_stats
+            .cpu_usage
+            .as_ref()
+            .map(|usage| usage.total_usage)
+            .unwrap_or(0);
+        let system = self.cpu_stats.system_cpu_usage.unwrap_or(0);
+        let previous_system = self.precpu_stats.system_cpu_usage.unwrap_or(0);
+        let cpu_percent = if system > previous_system {
+            (total - previous) as f64 / (system - previous_system) as f64 * online * 100.0
+        } else {
+            0.0
+        };
+        let memory = self.memory_stats.unwrap_or_default();
+        let networks = self.networks.unwrap_or_default();
+        let (rx, tx) = networks.into_values().fold((0, 0), |(rx, tx), net| {
+            (rx + net.rx_bytes, tx + net.tx_bytes)
+        });
+        ContainerStats {
+            cpu_percent,
+            memory_bytes: memory.usage,
+            memory_limit: memory.limit,
+            net_rx_bytes: rx,
+            net_tx_bytes: tx,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct InspectState {
@@ -1103,6 +1210,49 @@ mod tests {
         let data = frame(1, "hello");
         assert!(demux_logs(&data[..6]).is_err());
         assert!(demux_logs(&data[..10]).is_err());
+    }
+
+    #[test]
+    fn a_stats_document_becomes_container_stats() {
+        let document = json!({
+            "cpu_stats": {
+                "cpu_usage": { "total_usage": 2_000_000u64 },
+                "system_cpu_usage": 10_000_000_000u64,
+                "online_cpus": 2u64,
+            },
+            "precpu_stats": {
+                "cpu_usage": { "total_usage": 1_000_000u64 },
+                "system_cpu_usage": 9_000_000_000u64,
+            },
+            "memory_stats": { "usage": 5_000_000u64, "limit": 1_000_000_000u64 },
+            "networks": {
+                "eth0": { "rx_bytes": 100u64, "tx_bytes": 50u64 },
+                "lo": { "rx_bytes": 10u64, "tx_bytes": 10u64 },
+            },
+        });
+        let stats = serde_json::from_value::<StatsDocument>(document)
+            .unwrap()
+            .into_stats();
+        // 1 ms of one core over 1 s of two cores is 0.2 %.
+        assert!(
+            (stats.cpu_percent - 0.2).abs() < 1e-9,
+            "{:?}",
+            stats.cpu_percent
+        );
+        assert_eq!(stats.memory_bytes, 5_000_000);
+        assert_eq!(stats.memory_limit, 1_000_000_000);
+        assert_eq!(stats.net_rx_bytes, 110);
+        assert_eq!(stats.net_tx_bytes, 60);
+    }
+
+    #[test]
+    fn a_stats_document_without_samples_is_zeroed() {
+        let stats = serde_json::from_value::<StatsDocument>(json!({
+            "cpu_stats": {}, "precpu_stats": {},
+        }))
+        .unwrap()
+        .into_stats();
+        assert_eq!(stats, ContainerStats::default());
     }
 
     #[test]

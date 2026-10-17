@@ -5,8 +5,8 @@
 pub mod docker;
 
 use r3v3rs3_api::container::{
-    AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerSummary, ImageInfo, ImageRef,
-    NetworkName, ProjectName,
+    AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerStats, ContainerSummary,
+    ImageInfo, ImageRef, NetworkName, ProjectName,
 };
 use r3v3rs3_api::git::RelPath;
 use std::time::Duration;
@@ -93,6 +93,13 @@ pub trait ContainerRuntime: Send + Sync {
     ) -> anyhow::Result<Vec<u8>> {
         let _ = (name, command, env);
         anyhow::bail!("the runtime does not support a captured command");
+    }
+
+    /// The resource usage of the container. Like the files of a container, only the local
+    /// runtime carries it.
+    async fn stats(&self, name: &ContainerName) -> anyhow::Result<ContainerStats> {
+        let _ = name;
+        anyhow::bail!("the runtime does not carry the stats of a container");
     }
 
     /// The entries of a directory inside the container. Like `exec`, only the local runtime

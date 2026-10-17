@@ -434,6 +434,19 @@ pub struct ImageInfo {
     pub repo_digests: Vec<String>,
 }
 
+/// The resource usage of one container at one moment. The network counters are cumulative
+/// since the container started; the caller keeps the previous sample for a delta.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct ContainerStats {
+    /// The CPU use of the last stats interval, as a percent of one core.
+    pub cpu_percent: f64,
+    pub memory_bytes: u64,
+    pub memory_limit: u64,
+    /// The bytes that every interface of the container received and sent, cumulative.
+    pub net_rx_bytes: u64,
+    pub net_tx_bytes: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
