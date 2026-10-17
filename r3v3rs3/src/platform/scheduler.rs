@@ -28,11 +28,41 @@ pub fn spawn_command_scheduler(platform: &Arc<Platform>) {
                 break;
             };
             platform.run_due_commands().await;
+            platform.check_window_deployments().await;
         }
     });
 }
 
 impl Platform {
+    /// Checks pending deployments whose maintenance window has opened and approves them.
+    pub async fn check_window_deployments(self: &Arc<Self>) {
+        let Ok(pending) = self.store.pending_deployments().await else {
+            return;
+        };
+        let now = OffsetDateTime::now_utc();
+        let hour = now.hour() as u32;
+        let minute = now.minute() as u32;
+        for dep in pending {
+            let Ok(app) = self.app(dep.app).await else {
+                continue;
+            };
+            if app.spec.require_approval {
+                continue;
+            }
+            let Some(window) = app.spec.deploy_window.as_deref() else {
+                continue;
+            };
+            if r3v3rs3_api::platform::is_within_deploy_window(window, hour, minute) {
+                let this = self.clone();
+                let dep_id = dep.id;
+                tokio::spawn(async move {
+                    if let Err(err) = this.approve_deployment(dep_id, "scheduler").await {
+                        tracing::warn!(err = format!("{err:#}"), %dep_id, "window deployment auto-approval failed");
+                    }
+                });
+            }
+        }
+    }
     /// Checks all enabled scheduled commands and triggers those that are due.
     pub async fn run_due_commands(self: &Arc<Self>) {
         let Ok(commands) = self.store.list_all_enabled_scheduled_commands().await else {

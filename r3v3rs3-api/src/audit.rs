@@ -101,10 +101,14 @@ pub enum AuditAction {
     DeleteScheduledCommand,
     /// An account executed a scheduled command of an app.
     RunScheduledCommand,
+    /// An account approved a pending deployment of an app.
+    ApproveDeployment,
+    /// An account rejected a pending deployment of an app.
+    RejectDeployment,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 60] = [
+    pub const ALL: [AuditAction; 62] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -165,6 +169,8 @@ impl AuditAction {
         Self::UpdateScheduledCommand,
         Self::DeleteScheduledCommand,
         Self::RunScheduledCommand,
+        Self::ApproveDeployment,
+        Self::RejectDeployment,
     ];
 }
 

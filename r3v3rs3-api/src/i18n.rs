@@ -206,6 +206,9 @@ mod tests {
             Error::ScheduledCommandNotFound {
                 id: "abc".parse().unwrap(),
             },
+            Error::DeploymentNotPendingApproval {
+                id: "abc".parse().unwrap(),
+            },
             Error::NoNewRelease,
             Error::UpgradeFailed,
             Error::FailedToBuildDnsResolver { reason: text() },

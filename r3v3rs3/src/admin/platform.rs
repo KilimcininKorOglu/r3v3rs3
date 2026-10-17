@@ -929,6 +929,62 @@ pub async fn rollback_deployment(
     Ok(Json(deployment))
 }
 
+/// Approves a pending deployment and starts its pipeline.
+#[utoipa::path(
+    post,
+    path = "/{id}/approve",
+    tag = "platform",
+    operation_id = "approve_deployment",
+    params(("id" = ShortId, Path, description = "The id of the pending deployment.")),
+    responses((status = 200, description = "The approved deployment.", body = DeploymentEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn approve_deployment(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<DeploymentEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let deployment = platform
+        .approve_deployment(id, &caller.username)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::ApproveDeployment)
+        .id(deployment.app)
+        .summary(id.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(deployment))
+}
+
+/// Rejects a pending deployment.
+#[utoipa::path(
+    post,
+    path = "/{id}/reject",
+    tag = "platform",
+    operation_id = "reject_deployment",
+    params(("id" = ShortId, Path, description = "The id of the pending deployment.")),
+    responses((status = 200, description = "The rejected deployment.", body = DeploymentEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn reject_deployment(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<DeploymentEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let deployment = platform
+        .reject_deployment(id, &caller.username)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::RejectDeployment)
+        .id(deployment.app)
+        .summary(id.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(deployment))
+}
+
 /// Lists the scheduled commands configured for an app.
 #[utoipa::path(
     get,

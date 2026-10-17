@@ -207,12 +207,14 @@ Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment süre
 
 | Durum | Anlamı |
 |---|---|
+| `pending_approval` | Dağıtım manuel onay veya bakım penceresi bekliyor. |
 | `queued` | Deployment başlamayı bekliyor. |
 | `building` | r3v3rs3 branch'i clone ediyor ve image'ı build ediyor veya Compose dosyasını okuyor. |
 | `deploying` | Image çekiliyor, `docker compose up` çalışıyor veya yeni container sağlık kontrolünü bekliyor. |
 | `running` | Deployment'ın container'ı uygulamayı sunuyor. |
 | `superseded` | Daha yeni bir deployment bunun yerini aldı. |
 | `failed` | Deployment durdu. Nedeni `message` alanındadır. |
+| `cancelled` | Dağıtım reddedildi veya iptal edildi. Nedeni `message` alanındadır. |
 
 ### Geri alma
 
@@ -221,6 +223,15 @@ Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment süre
 Bir Git uygulamasını geri alma build yapmaz, build edilmiş image'ı yeniden başlatır. r3v3rs3, bir uygulamanın en yeni 5 deployment'ının ve çalışan deployment'ının image'larını saklar, daha eskilerini siler. Image'ı silinmiş bir deployment'a geri alma `the image ... is no longer present` mesajıyla başarısız olur.
 
 Bir Compose uygulamasını geri alma, önceki deployment'ın kaydedilmiş commit'ini clone eder ve `docker compose up --build` komutunu o deployment'ın uygulama ayarları ve ortam değişkenleriyle yeniden çalıştırır. Commit'ini kaydetmeden önce başarısız olan bir Compose deployment'ı için geri alma isteği `400 rollback_unavailable` alır.
+
+### Dağıtım onayı ve dağıtım pencereleri
+
+Bir uygulama manuel onay gerektirebilir veya dağıtımları planlı bir bakım penceresiyle sınırlandırabilir:
+- `require_approval` (`bool`): `true` olduğunda, her yeni dağıtım (manuel, webhook, otomatik dağıtım veya geri alma) `pending_approval` durumuyla başlar ve `Edit` yetkisine sahip bir kullanıcı onaylayana kadar bekler.
+- `deploy_window` (`Option<String>`): `HH:MM-HH:MM` formatında izin verilen UTC saat aralığı (ör. `02:00-05:00`). Tanımlandığında, bu aralık dışında tetiklenen dağıtımlar `pending_approval` durumuna geçer. `require_approval` `false` ise, UTC saati pencereye girdiğinde arka plan zamanlayıcısı dağıtımı otomatik olarak onaylar ve başlatır.
+
+`POST /api/deployments/{id}/approve` bekleyen bir dağıtımı onaylar ve sürecini başlatır.
+`POST /api/deployments/{id}/reject` bekleyen dağıtımı reddederek durumunu `cancelled` yapar.
 
 ## Webhook'lar
 
@@ -513,6 +524,8 @@ Admin hesabı ayrıca şunları görür:
 | `DELETE /api/databases/{id}` | Edit | Veritabanı app'ini siler. Volume'ü kalır. |
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
 | `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |
+| `POST /api/deployments/{id}/approve` | Edit | Bekleyen bir dağıtımı onaylar ve başlatır. |
+| `POST /api/deployments/{id}/reject` | Edit | Bekleyen bir dağıtımı reddeder. |
 | `GET /api/git/connections` | Edit | Secret'lar ve token'lar olmadan Git sağlayıcı bağlantıları. |
 | `POST /api/git/connections` | Admin | GitLab veya Gitea bağlantısı ekler. |
 | `GET /api/git/connections/{id}` | Edit | Bir bağlantıyı döndürür. |

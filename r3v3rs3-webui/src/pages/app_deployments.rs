@@ -101,9 +101,8 @@ pub fn app_deployments(props: &Props) -> Html {
         *reload,
     );
 
-    let rollback =
-        (session.can_edit() && !busy).then(|| rollback_callback(locale, &failure, &reload));
-    let (title, rows, error) = page_parts(locale, &history, rollback.as_ref());
+    let callbacks = build_callbacks(session.can_edit(), busy, locale, &failure, &reload);
+    let (title, rows, error) = page_parts(locale, &history, &callbacks);
     html! {
         <>
             { back_header(locale, &navigator, title) }
@@ -112,6 +111,33 @@ pub fn app_deployments(props: &Props) -> Html {
             }
             { list_card(locale, rows.is_some(), "deployments.empty", &COLUMNS, &rows.unwrap_or_default()) }
         </>
+    }
+}
+
+struct DeploymentCallbacks {
+    rollback: Option<Callback<DeploymentEntry>>,
+    approve: Option<Callback<DeploymentEntry>>,
+    reject: Option<Callback<DeploymentEntry>>,
+}
+
+fn build_callbacks(
+    can_edit: bool,
+    busy: bool,
+    locale: Locale,
+    failure: &UseStateHandle<Option<String>>,
+    reload: &UseStateHandle<u32>,
+) -> DeploymentCallbacks {
+    if !can_edit || busy {
+        return DeploymentCallbacks {
+            rollback: None,
+            approve: None,
+            reject: None,
+        };
+    }
+    DeploymentCallbacks {
+        rollback: Some(rollback_callback(locale, failure, reload)),
+        approve: Some(approve_callback(locale, failure, reload)),
+        reject: Some(reject_callback(locale, failure, reload)),
     }
 }
 
@@ -145,7 +171,7 @@ fn use_polling(
 fn page_parts(
     locale: Locale,
     history: &Loaded,
-    rollback: Option<&Callback<DeploymentEntry>>,
+    callbacks: &DeploymentCallbacks,
 ) -> (String, Option<Vec<Row>>, Option<String>) {
     match history {
         None => (String::new(), None, None),
@@ -154,7 +180,7 @@ fn page_parts(
             let rows = history
                 .deployments
                 .iter()
-                .map(|deployment| deployment_row(locale, &history.app, deployment, rollback))
+                .map(|deployment| deployment_row(locale, &history.app, deployment, callbacks))
                 .collect();
             let title = locale.tf("deployments.title", &[("name", history.app.name.as_str())]);
             (title, Some(rows), None)
@@ -181,7 +207,7 @@ fn deployment_row(
     locale: Locale,
     app: &AppEntry,
     deployment: &DeploymentEntry,
-    rollback: Option<&Callback<DeploymentEntry>>,
+    callbacks: &DeploymentCallbacks,
 ) -> Row {
     let (status_key, color) = status_style(deployment.status);
     let commit = deployment
@@ -189,15 +215,19 @@ fn deployment_row(
         .as_deref()
         .map(|sha| sha.chars().take(SHORT_COMMIT).collect::<String>())
         .unwrap_or_default();
-    let action = rollback
+    let rollback = callbacks
+        .rollback
+        .as_ref()
         .filter(|_| can_roll_back(app, deployment))
-        .map(|rollback| {
-            let (rollback, deployment) = (rollback.clone(), deployment.clone());
-            Callback::from(move |event: MouseEvent| {
-                event.prevent_default();
-                rollback.emit(deployment.clone());
-            })
-        });
+        .map(|cb| make_action(cb, deployment));
+    let approve = (deployment.status == DeploymentStatus::PendingApproval)
+        .then_some(callbacks.approve.as_ref())
+        .flatten()
+        .map(|cb| make_action(cb, deployment));
+    let reject = (deployment.status == DeploymentStatus::PendingApproval)
+        .then_some(callbacks.reject.as_ref())
+        .flatten()
+        .map(|cb| make_action(cb, deployment));
     Row {
         key: deployment.id.to_string(),
         cells: vec![
@@ -210,11 +240,36 @@ fn deployment_row(
             html! { <>{deployment.message.clone().unwrap_or_default()}</> },
         ],
         actions: html! {
-            if let Some(onclick) = action {
+            if deployment.status == DeploymentStatus::PendingApproval {
+                <div class="flex items-center gap-2">
+                    if let Some(onclick) = approve {
+                        <a class="font-medium text-green-600 dark:text-green-500 hover:underline cursor-pointer" {onclick}>
+                            {locale.t("deployments.approve")}
+                        </a>
+                    }
+                    if let Some(onclick) = reject {
+                        <a class="font-medium text-red-600 dark:text-red-500 hover:underline cursor-pointer" {onclick}>
+                            {locale.t("deployments.reject")}
+                        </a>
+                    }
+                </div>
+            } else if let Some(onclick) = rollback {
                 <a class={LINK_CLASS} {onclick}>{locale.t("deployments.rollback")}</a>
             }
         },
     }
+}
+
+fn make_action(
+    cb: &Callback<DeploymentEntry>,
+    deployment: &DeploymentEntry,
+) -> Callback<MouseEvent> {
+    let cb = cb.clone();
+    let dep = deployment.clone();
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        cb.emit(dep.clone());
+    })
 }
 
 /// Whether a rollback can start the deployment again: a Compose app needs its commit, every
@@ -265,6 +320,50 @@ fn rollback_callback(
         let (failure, reload) = (failure.clone(), reload.clone());
         dialog::confirm_then(locale, question, async move {
             let path = format!("{API_ENDPOINT}/deployments/{id}/rollback");
+            match fetch_json::<DeploymentEntry>(locale, Request::post(&path)).await {
+                Ok(_) => failure.set(None),
+                Err(err) => failure.set(Some(err)),
+            }
+            reload.set(*reload + 1);
+        });
+    })
+}
+
+/// Asks for a confirmation, approves the pending deployment and reloads the page.
+fn approve_callback(
+    locale: Locale,
+    failure: &UseStateHandle<Option<String>>,
+    reload: &UseStateHandle<u32>,
+) -> Callback<DeploymentEntry> {
+    let (failure, reload) = (failure.clone(), reload.clone());
+    Callback::from(move |deployment: DeploymentEntry| {
+        let id = deployment.id;
+        let question = locale.tf("deployments.confirm_approve", &[("id", &id.to_string())]);
+        let (failure, reload) = (failure.clone(), reload.clone());
+        dialog::confirm_then(locale, question, async move {
+            let path = format!("{API_ENDPOINT}/deployments/{id}/approve");
+            match fetch_json::<DeploymentEntry>(locale, Request::post(&path)).await {
+                Ok(_) => failure.set(None),
+                Err(err) => failure.set(Some(err)),
+            }
+            reload.set(*reload + 1);
+        });
+    })
+}
+
+/// Asks for a confirmation, rejects the pending deployment and reloads the page.
+fn reject_callback(
+    locale: Locale,
+    failure: &UseStateHandle<Option<String>>,
+    reload: &UseStateHandle<u32>,
+) -> Callback<DeploymentEntry> {
+    let (failure, reload) = (failure.clone(), reload.clone());
+    Callback::from(move |deployment: DeploymentEntry| {
+        let id = deployment.id;
+        let question = locale.tf("deployments.confirm_reject", &[("id", &id.to_string())]);
+        let (failure, reload) = (failure.clone(), reload.clone());
+        dialog::confirm_then(locale, question, async move {
+            let path = format!("{API_ENDPOINT}/deployments/{id}/reject");
             match fetch_json::<DeploymentEntry>(locale, Request::post(&path)).await {
                 Ok(_) => failure.set(None),
                 Err(err) => failure.set(Some(err)),

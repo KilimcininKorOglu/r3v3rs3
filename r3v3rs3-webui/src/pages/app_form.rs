@@ -86,6 +86,8 @@ pub struct AppForm {
     /// The database that the app uses. The select of the form lists the databases.
     pub uses_database: Option<ShortId>,
     pub auto_deploy: bool,
+    pub require_approval: bool,
+    pub deploy_window: String,
 }
 
 impl Default for AppForm {
@@ -115,6 +117,8 @@ impl Default for AppForm {
             database: None,
             uses_database: None,
             auto_deploy: false,
+            require_approval: false,
+            deploy_window: String::new(),
         }
     }
 }
@@ -170,6 +174,8 @@ impl AppForm {
             database: spec.database.clone(),
             uses_database: spec.uses_database,
             auto_deploy: spec.auto_deploy,
+            require_approval: spec.require_approval,
+            deploy_window: spec.deploy_window.clone().unwrap_or_default(),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -236,6 +242,8 @@ impl AppForm {
             database: self.database.clone(),
             uses_database: self.uses_database,
             auto_deploy: self.auto_deploy,
+            require_approval: self.require_approval,
+            deploy_window: non_empty(&self.deploy_window).map(str::to_string),
         };
         spec.validate().map_err(|err| locale.error_message(&err))?;
         Ok(AppRequest {
@@ -435,7 +443,30 @@ pub fn fields_view(
             if form.kind != SourceKind::Compose {
                 { container_view(locale, form) }
             }
+            { approval_view(locale, form) }
         </>
+    }
+}
+
+fn approval_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let form_handle = form.clone();
+    let checked = form.require_approval;
+    let onchange = Callback::from(move |e: Event| {
+        if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+            let mut updated = (*form_handle).clone();
+            updated.require_approval = target.checked();
+            form_handle.set(updated);
+        }
+    });
+    html! {
+        <div class="mt-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={checked} {onchange} class="w-4 h-4 text-blue-600 bg-neutral-100 border-neutral-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-neutral-800 focus:ring-2 dark:bg-neutral-700 dark:border-neutral-600" />
+                <span class={LABEL_CLASS}>{locale.t("apps.require_approval")}</span>
+            </label>
+            <p class={HINT_CLASS}>{locale.t("apps.require_approval_hint")}</p>
+            { text_field(locale, form, "apps.deploy_window", Some("apps.deploy_window_hint"), |f| &mut f.deploy_window) }
+        </div>
     }
 }
 
@@ -771,7 +802,8 @@ mod tests {
                     ],
                     "restart": "always",
                     "limits": {"memory_bytes": 536_870_912_u64, "nano_cpus": 1_500_000_000_u64},
-                    "auto_deploy": false
+                    "auto_deploy": false,
+                    "require_approval": false
                 }
             })
         );

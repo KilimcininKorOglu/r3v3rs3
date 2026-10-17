@@ -184,12 +184,51 @@ pub struct StoredEnv {
 pub struct NewDeployment<'a> {
     pub id: ShortId,
     pub app: ShortId,
+    pub status: DeploymentStatus,
     pub trigger: DeploymentTrigger,
     pub username: &'a str,
     pub spec: &'a AppSpec,
     pub env: &'a [StoredEnv],
     pub image_digest: Option<&'a str>,
+    pub commit_sha: Option<&'a str>,
+    pub message: Option<&'a str>,
     pub started_at: u64,
+}
+
+impl<'a> NewDeployment<'a> {
+    pub fn new(
+        app: &AppEntry,
+        trigger: DeploymentTrigger,
+        username: &'a str,
+        spec: &'a AppSpec,
+        env: &'a [StoredEnv],
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            id: super::new_id()?,
+            app: app.id,
+            status: DeploymentStatus::Queued,
+            trigger,
+            username,
+            spec,
+            env,
+            image_digest: None,
+            commit_sha: None,
+            message: None,
+            started_at: crate::clock::unix_ms(),
+        })
+    }
+
+    pub fn with_source_info(mut self, digest: Option<&'a str>, commit: Option<&'a str>) -> Self {
+        self.image_digest = digest;
+        self.commit_sha = commit;
+        self
+    }
+
+    pub fn pending(mut self, reason: &'a str) -> Self {
+        self.status = DeploymentStatus::PendingApproval;
+        self.message = Some(reason);
+        self
+    }
 }
 
 /// The failure message of a deployment that a stopped server left unfinished.
@@ -527,21 +566,48 @@ impl PlatformStore {
 impl PlatformStore {
     pub async fn insert_deployment(&self, deployment: &NewDeployment<'_>) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO deployments (id, app_id, status, trigger, image_digest, spec, env,
-                username, started_at)
-            VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO deployments (id, app_id, status, trigger, image_digest, commit_sha, spec, env,
+                username, message, started_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(deployment.id.to_string())
         .bind(deployment.app.to_string())
+        .bind(deployment.status.as_str())
         .bind(deployment.trigger.as_str())
         .bind(deployment.image_digest)
+        .bind(deployment.commit_sha)
         .bind(serde_json::to_string(deployment.spec)?)
         .bind(serde_json::to_vec(deployment.env)?)
         .bind(deployment.username)
+        .bind(deployment.message)
         .bind(sql_int(deployment.started_at))
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Moves a pending deployment to queued and clears its message.
+    pub async fn approve_deployment(&self, id: ShortId, now: u64) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE deployments SET status = 'queued', message = NULL, started_at = ? WHERE id = ?",
+        )
+        .bind(sql_int(now))
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The deployments waiting for manual approval or for their deploy window.
+    pub async fn pending_deployments(&self) -> anyhow::Result<Vec<DeploymentEntry>> {
+        let rows = sqlx::query(
+            "SELECT id, app_id, status, trigger, commit_sha, image_digest, username, message,
+                started_at, finished_at
+            FROM deployments WHERE status = 'pending_approval' ORDER BY started_at, id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(deployment_of).collect()
     }
 
     /// Sets the status of a deployment that has not finished.
@@ -950,6 +1016,8 @@ mod tests {
                 database: None,
                 uses_database: None,
                 auto_deploy: false,
+                require_approval: false,
+                deploy_window: None,
             },
             git_token_set: false,
             webhook_secret_set: false,
@@ -1199,11 +1267,14 @@ mod tests {
         NewDeployment {
             id: id.parse().unwrap(),
             app: app.id,
+            status: DeploymentStatus::Queued,
             trigger: DeploymentTrigger::Manual,
             username: "alice",
             spec: &app.spec,
             env,
             image_digest: None,
+            commit_sha: None,
+            message: None,
             started_at: 5,
         }
     }

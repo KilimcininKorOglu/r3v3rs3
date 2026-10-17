@@ -447,6 +447,9 @@ pub fn status_style(status: DeploymentStatus) -> (&'static str, &'static str) {
         DeploymentStatus::Superseded => ("deployments.status_superseded", "bg-neutral-500"),
         DeploymentStatus::Failed => ("deployments.status_failed", "bg-red-500"),
         DeploymentStatus::Cancelled => ("deployments.status_cancelled", "bg-neutral-500"),
+        DeploymentStatus::PendingApproval => {
+            ("deployments.status_pending_approval", "bg-amber-500")
+        }
     }
 }
 
@@ -454,7 +457,10 @@ pub fn status_style(status: DeploymentStatus) -> (&'static str, &'static str) {
 pub fn is_unfinished(status: DeploymentStatus) -> bool {
     matches!(
         status,
-        DeploymentStatus::Queued | DeploymentStatus::Building | DeploymentStatus::Deploying
+        DeploymentStatus::Queued
+            | DeploymentStatus::Building
+            | DeploymentStatus::Deploying
+            | DeploymentStatus::PendingApproval
     )
 }
 

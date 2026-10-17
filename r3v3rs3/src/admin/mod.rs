@@ -371,7 +371,9 @@ fn platform_routes() -> OpenApiRouter<AppState> {
             "/deployments",
             OpenApiRouter::new()
                 .routes(routes!(platform::get_deployment))
-                .routes(routes!(platform::rollback_deployment)),
+                .routes(routes!(platform::rollback_deployment))
+                .routes(routes!(platform::approve_deployment))
+                .routes(routes!(platform::reject_deployment)),
         )
         .nest(
             "/databases",

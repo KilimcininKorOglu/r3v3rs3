@@ -422,6 +422,15 @@ pub struct AppSpec {
     /// Whether updates to the app image (newer tag or digest) should be deployed automatically.
     #[serde(default)]
     pub auto_deploy: bool,
+
+    /// Whether deployments of this app require manual approval before proceeding.
+    #[serde(default)]
+    pub require_approval: bool,
+
+    /// An optional daily UTC time window (e.g. `22:00-04:00`) when deployments are allowed to
+    /// run automatically. Deployments outside this window require approval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deploy_window: Option<String>,
 }
 
 impl AppSpec {
@@ -433,6 +442,9 @@ impl AppSpec {
         self.validate_compose()?;
         if let Some(path) = &self.health_check_path {
             validate_health_path(path)?;
+        }
+        if let Some(window) = &self.deploy_window {
+            validate_deploy_window(window)?;
         }
         let mut targets = HashSet::new();
         if let Some(mount) = self
@@ -516,6 +528,56 @@ fn validate_health_path(path: &str) -> Result<(), Error> {
     } else {
         Err(invalid(&format!("invalid health check path: {path}")))
     }
+}
+
+/// Validates that a deployment window has the form `HH:MM-HH:MM`.
+pub fn validate_deploy_window(window: &str) -> Result<(), Error> {
+    let Some((start, end)) = window.split_once('-') else {
+        return Err(invalid("deploy window must be in format HH:MM-HH:MM"));
+    };
+    validate_window_time(start)?;
+    validate_window_time(end)
+}
+
+fn validate_window_time(s: &str) -> Result<(), Error> {
+    let Some((h_str, m_str)) = s.split_once(':') else {
+        return Err(invalid("deploy window time must be in format HH:MM"));
+    };
+    let Ok(h) = h_str.parse::<u32>() else {
+        return Err(invalid("invalid hour in deploy window"));
+    };
+    let Ok(m) = m_str.parse::<u32>() else {
+        return Err(invalid("invalid minute in deploy window"));
+    };
+    if h > 23 || m > 59 {
+        return Err(invalid("hour must be 0-23 and minute 0-59"));
+    }
+    Ok(())
+}
+
+/// Checks whether the given hour and minute (UTC) fall within `HH:MM-HH:MM`.
+pub fn is_within_deploy_window(window: &str, hour: u32, minute: u32) -> bool {
+    let Some((start_str, end_str)) = window.split_once('-') else {
+        return true;
+    };
+    let (Some(start), Some(end)) = (
+        parse_window_minutes(start_str),
+        parse_window_minutes(end_str),
+    ) else {
+        return true;
+    };
+    let cur = hour * 60 + minute;
+    if start <= end {
+        cur >= start && cur < end
+    } else {
+        cur >= start || cur < end
+    }
+}
+
+fn parse_window_minutes(s: &str) -> Option<u32> {
+    let (h_str, m_str) = s.split_once(':')?;
+    let (h, m) = (h_str.parse::<u32>().ok()?, m_str.parse::<u32>().ok()?);
+    Some(h * 60 + m)
 }
 
 fn invalid(reason: &str) -> Error {
@@ -738,6 +800,7 @@ pub struct EnvEntry {
 #[serde(rename_all = "snake_case")]
 pub enum DeploymentStatus {
     Queued,
+    PendingApproval,
     Building,
     Deploying,
     Running,
@@ -751,6 +814,7 @@ impl DeploymentStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Queued => "queued",
+            Self::PendingApproval => "pending_approval",
             Self::Building => "building",
             Self::Deploying => "deploying",
             Self::Running => "running",
@@ -1070,5 +1134,27 @@ mod tests {
             serde_json::to_value(&entry).unwrap(),
             json!({"key": "TOKEN", "secret": true})
         );
+    }
+
+    #[test]
+    fn deploy_window_validation_and_check() {
+        assert!(validate_deploy_window("22:00-04:00").is_ok());
+        assert!(validate_deploy_window("09:00-17:00").is_ok());
+        assert!(validate_deploy_window("invalid").is_err());
+        assert!(validate_deploy_window("25:00-04:00").is_err());
+        assert!(validate_deploy_window("22:00-04:65").is_err());
+
+        // Overnight window: 22:00 to 04:00
+        assert!(is_within_deploy_window("22:00-04:00", 23, 0));
+        assert!(is_within_deploy_window("22:00-04:00", 2, 30));
+        assert!(is_within_deploy_window("22:00-04:00", 22, 0));
+        assert!(!is_within_deploy_window("22:00-04:00", 4, 0));
+        assert!(!is_within_deploy_window("22:00-04:00", 12, 0));
+
+        // Daytime window: 09:00 to 17:00
+        assert!(is_within_deploy_window("09:00-17:00", 9, 0));
+        assert!(is_within_deploy_window("09:00-17:00", 12, 0));
+        assert!(!is_within_deploy_window("09:00-17:00", 8, 59));
+        assert!(!is_within_deploy_window("09:00-17:00", 17, 0));
     }
 }

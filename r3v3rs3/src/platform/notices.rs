@@ -218,17 +218,15 @@ mod tests {
         let (platform, app) = (&setup.platform, setup.app);
         // A deployment that no pipeline runs stays queued, like after a stop of the server.
         let entry = platform.app(app).await?;
-        let id = super::super::new_id()?;
-        let queued = crate::platform::store::NewDeployment {
-            id,
-            app,
-            trigger: DeploymentTrigger::Webhook,
-            username: "webhook",
-            spec: &entry.spec,
-            env: &[],
-            image_digest: None,
-            started_at: 2,
-        };
+        let mut queued = crate::platform::store::NewDeployment::new(
+            &entry,
+            DeploymentTrigger::Webhook,
+            "webhook",
+            &entry.spec,
+            &[],
+        )?;
+        let id = queued.id;
+        queued.started_at = 2;
         platform.store.insert_deployment(&queued).await?;
         let failed = platform.store.fail_unfinished(9).await?;
         assert_eq!(failed.len(), 1);

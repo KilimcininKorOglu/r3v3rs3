@@ -207,12 +207,14 @@ An app runs one deployment at a time. A second deploy, a rollback or a deletion 
 
 | Status | Meaning |
 |---|---|
+| `pending_approval` | The deployment waits for manual approval or for the maintenance deploy window. |
 | `queued` | The deployment waits to start. |
 | `building` | r3v3rs3 clones the branch and builds the image, or reads the Compose file. |
 | `deploying` | The image is pulled, `docker compose up` runs, or the new container waits for its health check. |
 | `running` | The container of the deployment serves the app. |
 | `superseded` | A newer deployment replaced this one. |
 | `failed` | The deployment stopped. `message` holds the reason. |
+| `cancelled` | The deployment was rejected or cancelled. `message` holds the reason. |
 
 ### Rollback
 
@@ -221,6 +223,15 @@ An app runs one deployment at a time. A second deploy, a rollback or a deletion 
 A rollback of a Git app starts the built image again and does not build. r3v3rs3 keeps the images of the 5 newest deployments of an app and of its running deployment, and removes older ones. A rollback to a deployment whose image is removed fails with the message `the image ... is no longer present`.
 
 A rollback of a Compose app clones the recorded commit of the earlier deployment and runs `docker compose up --build` again, with the app settings and the environment variables of that deployment. A Compose deployment that failed before it recorded its commit answers `400 rollback_unavailable`.
+
+### Deployment Approval and Deploy Windows
+
+An app can require manual approval or restrict deployments to a scheduled maintenance window via its spec:
+- `require_approval` (`bool`): when `true`, every new deployment (manual, webhook, auto-deploy, or rollback) starts with status `pending_approval` and waits until an account with `Edit` permission approves it.
+- `deploy_window` (`Option<String>`): an allowed UTC time window in `HH:MM-HH:MM` format (e.g. `02:00-05:00`). When set, any deployment triggered outside the window pauses with status `pending_approval`. If `require_approval` is `false`, the platform's background scheduler automatically approves and starts the deployment once the UTC time enters the window.
+
+`POST /api/deployments/{id}/approve` approves a `pending_approval` deployment and starts its pipeline.
+`POST /api/deployments/{id}/reject` rejects the deployment, setting its status to `cancelled`.
 
 ## Webhooks
 
@@ -515,6 +526,8 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 | `DELETE /api/databases/{id}` | Edit | Deletes the database app. Its volume stays. |
 | `GET /api/deployments/{id}` | Read | Returns a deployment. |
 | `POST /api/deployments/{id}/rollback` | Edit | Repeats an earlier deployment. |
+| `POST /api/deployments/{id}/approve` | Edit | Approves a pending deployment and starts it. |
+| `POST /api/deployments/{id}/reject` | Edit | Rejects a pending deployment. |
 | `GET /api/git/connections` | Edit | The Git provider connections, without secrets or tokens. |
 | `POST /api/git/connections` | Admin | Adds a GitLab or Gitea connection. |
 | `GET /api/git/connections/{id}` | Edit | Returns a connection. |

@@ -216,6 +216,8 @@ fn app_request(
             database: Some(request.engine.clone()),
             uses_database: None,
             auto_deploy: false,
+            require_approval: false,
+            deploy_window: None,
         },
     })
 }

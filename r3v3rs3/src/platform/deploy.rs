@@ -7,7 +7,7 @@ use super::build::GitBuild;
 use super::compose::{ComposeBuild, ComposeJob, SourceRevision};
 use super::notices::DeploymentRef;
 use super::store::{NewDeployment, StoredEnv};
-use super::{Backend, Platform, new_id, not_found, proxy};
+use super::{Backend, Platform, not_found, proxy};
 use crate::agent::executor::RESOURCE_PREFIX;
 use crate::clock::unix_ms;
 use crate::notify::NotificationEvent;
@@ -24,6 +24,7 @@ use r3v3rs3_api::platform::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
+use time::OffsetDateTime;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::{error, info};
@@ -153,6 +154,13 @@ impl JobImage {
     }
 }
 
+fn job_image_for_entry(entry: &DeploymentEntry, spec: &AppSpec) -> Result<JobImage, Error> {
+    match entry.trigger {
+        DeploymentTrigger::Rollback => JobImage::rollback(spec, entry),
+        _ => Ok(JobImage::from(spec.source.clone())),
+    }
+}
+
 /// Holds the app of a running pipeline, so that the app gets one pipeline at a time.
 pub struct AppLock {
     platform: Arc<Platform>,
@@ -179,6 +187,23 @@ impl Platform {
         })
     }
 
+    async fn insert_pending(&self, new: NewDeployment<'_>) -> anyhow::Result<DeploymentEntry> {
+        self.store.insert_deployment(&new).await?;
+        self.store
+            .deployment(new.id)
+            .await?
+            .context("the new deployment was not stored")
+    }
+
+    fn spawn_job(self: &Arc<Self>, lock: AppLock, job: Job) {
+        let platform = self.clone();
+        tokio::spawn(async move {
+            platform.run_job(&job).await;
+            drop(lock);
+            platform.run_queued_hook(job.app).await;
+        });
+    }
+
     /// Starts a deployment of the current spec and environment of an app, and returns it while
     /// it is queued.
     pub async fn deploy(
@@ -188,11 +213,27 @@ impl Platform {
         trigger: DeploymentTrigger,
     ) -> anyhow::Result<DeploymentEntry> {
         let app = self.app(id).await?;
-        let image = JobImage::from(app.spec.source.clone());
         let env = self.store.env(id).await?;
+        let new = NewDeployment::new(&app, trigger, username, &app.spec, &env)?;
+        if let Some(reason) = needs_approval(&app.spec) {
+            return self.insert_pending(new.pending(reason)).await;
+        }
+        let image = JobImage::from(app.spec.source.clone());
         let lock = self.lock_app(&app)?;
-        let new = new_deployment(&app, trigger, username, &app.spec, &env, None)?;
         self.start_job(lock, &app, new, image).await
+    }
+
+    async fn rollback_source(
+        &self,
+        id: ShortId,
+    ) -> anyhow::Result<(DeploymentEntry, AppSpec, Vec<StoredEnv>)> {
+        let source = self.deployment(id).await?;
+        let (spec, env) = self
+            .store
+            .deployment_snapshot(id)
+            .await?
+            .ok_or_else(|| not_found(id))?;
+        Ok((source, spec, env))
     }
 
     /// Starts a deployment that repeats the image digest, or for a Compose app the commit, the
@@ -202,19 +243,68 @@ impl Platform {
         id: ShortId,
         username: &str,
     ) -> anyhow::Result<DeploymentEntry> {
-        let source = self.deployment(id).await?;
+        let (source, spec, env) = self.rollback_source(id).await?;
+        let app = self.app(source.app).await?;
+        let digest = source.image_digest.as_deref();
+        let commit = source.commit_sha.as_deref();
+        let new = NewDeployment::new(&app, DeploymentTrigger::Rollback, username, &spec, &env)?
+            .with_source_info(digest, commit);
+        if let Some(reason) = needs_approval(&app.spec) {
+            return self.insert_pending(new.pending(reason)).await;
+        }
+        let image = JobImage::rollback(&spec, &source)?;
+        let lock = self.lock_app(&app)?;
+        self.start_job(lock, &app, new, image).await
+    }
+
+    /// Approves a pending deployment and starts its pipeline.
+    pub async fn approve_deployment(
+        self: &Arc<Self>,
+        id: ShortId,
+        _username: &str,
+    ) -> anyhow::Result<DeploymentEntry> {
+        let entry = self.deployment(id).await?;
+        if entry.status != DeploymentStatus::PendingApproval {
+            return Err(Error::DeploymentNotPendingApproval { id }.into());
+        }
+        let app = self.app(entry.app).await?;
+        let lock = self.lock_app(&app)?;
         let (spec, env) = self
             .store
             .deployment_snapshot(id)
             .await?
             .ok_or_else(|| not_found(id))?;
-        let image = JobImage::rollback(&spec, &source)?;
-        let app = self.app(source.app).await?;
-        let lock = self.lock_app(&app)?;
-        let trigger = DeploymentTrigger::Rollback;
-        let digest = source.image_digest.as_deref();
-        let new = new_deployment(&app, trigger, username, &spec, &env, digest)?;
-        self.start_job(lock, &app, new, image).await
+        let image = job_image_for_entry(&entry, &spec)?;
+        self.store.approve_deployment(id, unix_ms()).await?;
+        let job = Job {
+            app: entry.app,
+            app_name: app.name.clone(),
+            trigger: entry.trigger,
+            deployment: entry.id,
+            backend: self.backend(app.target),
+            spec,
+            env,
+            image,
+        };
+        self.spawn_job(lock, job);
+        self.deployment(id).await
+    }
+
+    /// Rejects a pending deployment with cancelled status.
+    pub async fn reject_deployment(
+        self: &Arc<Self>,
+        id: ShortId,
+        username: &str,
+    ) -> anyhow::Result<DeploymentEntry> {
+        let entry = self.deployment(id).await?;
+        if entry.status != DeploymentStatus::PendingApproval {
+            return Err(Error::DeploymentNotPendingApproval { id }.into());
+        }
+        let message = format!("Rejected by {username}");
+        self.store
+            .fail_deployment(id, DeploymentStatus::Cancelled, &message, unix_ms())
+            .await?;
+        self.deployment(id).await
     }
 
     async fn start_job(
@@ -240,12 +330,7 @@ impl Platform {
             env: new.env.to_vec(),
             image,
         };
-        let platform = self.clone();
-        tokio::spawn(async move {
-            platform.run_job(&job).await;
-            drop(lock);
-            platform.run_queued_hook(job.app).await;
-        });
+        self.spawn_job(lock, job);
         Ok(entry)
     }
 
@@ -661,24 +746,19 @@ impl Platform {
     }
 }
 
-fn new_deployment<'a>(
-    app: &AppEntry,
-    trigger: DeploymentTrigger,
-    username: &'a str,
-    spec: &'a AppSpec,
-    env: &'a [StoredEnv],
-    image_digest: Option<&'a str>,
-) -> anyhow::Result<NewDeployment<'a>> {
-    Ok(NewDeployment {
-        id: new_id()?,
-        app: app.id,
-        trigger,
-        username,
-        spec,
-        env,
-        image_digest,
-        started_at: unix_ms(),
-    })
+fn needs_approval(spec: &AppSpec) -> Option<&'static str> {
+    if spec.require_approval {
+        return Some("Waiting for manual approval");
+    }
+    if let Some(window) = spec.deploy_window.as_deref() {
+        let now = OffsetDateTime::now_utc();
+        let hour = now.hour() as u32;
+        let minute = now.minute() as u32;
+        if !r3v3rs3_api::platform::is_within_deploy_window(window, hour, minute) {
+            return Some("Outside deploy window");
+        }
+    }
+    None
 }
 
 /// The last lines of the container log, for a failure message.
@@ -1695,6 +1775,51 @@ mod tests {
         });
         assert!(!probe(closing_port, None, &timing).await);
         assert!(probe(port, Some("/"), &timing).await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_app_with_require_approval_waits_and_can_be_approved() -> anyhow::Result<()> {
+        let mut req = request("shop");
+        req.spec.require_approval = true;
+        let setup = setup_with(req).await?;
+        let entry = setup
+            .platform
+            .deploy(setup.app.id, "alice", DeploymentTrigger::Manual)
+            .await?;
+        assert_eq!(entry.status, DeploymentStatus::PendingApproval);
+        assert_eq!(
+            entry.message.as_deref(),
+            Some("Waiting for manual approval")
+        );
+        assert!(setup.runtime.names().is_empty());
+
+        let approved = setup.platform.approve_deployment(entry.id, "bob").await?;
+        assert_eq!(approved.status, DeploymentStatus::Queued);
+        let final_dep = finished(&setup, entry.id).await?;
+        assert_eq!(final_dep.status, DeploymentStatus::Running);
+        assert_eq!(setup.runtime.names(), [container_of(&setup, &final_dep)]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_pending_deployment_can_be_rejected() -> anyhow::Result<()> {
+        let mut req = request("shop");
+        req.spec.require_approval = true;
+        let setup = setup_with(req).await?;
+        let entry = setup
+            .platform
+            .deploy(setup.app.id, "alice", DeploymentTrigger::Manual)
+            .await?;
+        assert_eq!(entry.status, DeploymentStatus::PendingApproval);
+
+        let rejected = setup.platform.reject_deployment(entry.id, "lead").await?;
+        assert_eq!(rejected.status, DeploymentStatus::Cancelled);
+        assert_eq!(rejected.message.as_deref(), Some("Rejected by lead"));
+        assert!(setup.runtime.names().is_empty());
+
+        let err = setup.platform.approve_deployment(entry.id, "bob").await;
+        assert!(err.is_err());
         Ok(())
     }
 }

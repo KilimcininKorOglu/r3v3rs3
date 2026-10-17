@@ -158,17 +158,10 @@ mod tests {
         let mut app = request(name);
         app.spec.domains = vec![format!("{name}.example.com").parse()?];
         let app = platform.add_app(app, 1).await?;
-        let id = super::super::new_id()?;
-        let deployment = NewDeployment {
-            id,
-            app: app.id,
-            trigger: DeploymentTrigger::Manual,
-            username: "alice",
-            spec: &app.spec,
-            env: &[],
-            image_digest: None,
-            started_at: 2,
-        };
+        let mut deployment =
+            NewDeployment::new(&app, DeploymentTrigger::Manual, "alice", &app.spec, &[])?;
+        let id = deployment.id;
+        deployment.started_at = 2;
         platform.store.insert_deployment(&deployment).await?;
         platform.store.finish_deployment(app.id, id, 3).await?;
         proxy::container_name(app.id, id)

@@ -433,6 +433,12 @@ pub enum Error {
         #[schema(value_type = String)]
         id: ShortId,
     },
+
+    #[error("deployment not pending approval: {id}")]
+    DeploymentNotPendingApproval {
+        #[schema(value_type = String)]
+        id: ShortId,
+    },
 }
 
 impl Error {
