@@ -169,6 +169,14 @@ The injected user is the root user of the database, because r3v3rs3 creates no p
 
 A database needs the local target, and only an account with the Edit permission sees the page. Every creation and deletion goes into the audit log.
 
+### Backups
+
+The **Backups** link on a database row opens its backups. **Back up now** runs the dump of the engine inside the container (`pg_dump`, `mariadb-dump`, `mysqldump` or `mongodump`; Redis runs `SAVE` and takes its dump file), gzips it and stores it in the `backups` directory of the config directory, one folder per database, with a JSON manifest that carries the SHA-256 of the file. A backup holds no password. A database on an agent target takes no backup, because the dump runs in the container itself.
+
+The backup settings on the same page name the daily time in UTC that every database is backed up at, the number of backups per database that survive (the oldest go first), and an optional S3 target: an `http` or `https` endpoint with the bucket in its path, a region, a key prefix and an access key and secret key. Every new backup uploads to the bucket, path style; a failed upload only goes into the server log, because the local copy exists. The secret key is stored sealed in the platform database and the panel never shows it; an empty field keeps the stored one.
+
+**Restore** writes the stored dump back into the running container and runs the restore command of the engine (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis takes the dump file into its data volume and restarts, so the restore answers after the server is back. A restore replaces the data of the database.
+
 ## Deployments
 
 `POST /api/apps/{id}/deploy` starts a deployment and returns it with the status `queued`. `GET /api/deployments/{id}` shows its progress.
