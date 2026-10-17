@@ -79,9 +79,11 @@ pub fn app_view(props: &Props) -> Html {
     // Only an account that changes the apps reads the connections.
     let can_edit = session.can_edit();
     let store = props.store.clone();
+    let databases = use_state(Vec::<(ShortId, String)>::new);
+    let databases_for_load = databases.clone();
     use_effect_with((props.id, signed_in), move |&(id, signed_in)| {
         if signed_in {
-            load(locale, id, store, can_edit, state);
+            load(locale, id, store, can_edit, state, &databases_for_load);
         }
     });
 
@@ -93,6 +95,7 @@ pub fn app_view(props: &Props) -> Html {
         targets: &targets,
         connections: &connections,
         ports: &ports,
+        databases: &databases,
         store_env: &store_env,
         can_edit,
         auto_deploy: props.store.is_some(),
@@ -113,6 +116,8 @@ struct FormInputs<'a> {
     targets: &'a [TargetEntry],
     connections: &'a [GitConnectionEntry],
     ports: &'a [PortEntry],
+    /// The databases that the app can use, as id and name.
+    databases: &'a [(ShortId, String)],
     /// The variables of an app store entry that the user fills before the first save.
     store_env: &'a UseStateHandle<Vec<StoreEnvValue>>,
     can_edit: bool,
@@ -141,7 +146,7 @@ fn form_view(
         notice: notice_view(notice, |_: &()| html! { {locale.t("apps.saved")} }),
         fields: html! {
             <fieldset disabled={!can_edit}>
-                { fields_view(locale, form, inputs.targets, inputs.connections, inputs.ports, app.is_some()) }
+                { fields_view(locale, form, inputs.targets, inputs.connections, inputs.ports, inputs.databases, app.is_some()) }
                 if !inputs.store_env.is_empty() {
                     { store_env_fields(locale, inputs.store_env) }
                 }
@@ -326,15 +331,17 @@ async fn save(
         .map_err(|err| err.to_string())
 }
 
-/// Reads the targets, the connections, the ports and the app. A failed read shows its message.
-/// Without an app id, the app store entry of `store` fills the new form.
+/// Reads the targets, the connections, the ports, the databases and the app. A failed read
+/// shows its message. Without an app id, the app store entry of `store` fills the new form.
 fn load(
     locale: Locale,
     id: Option<ShortId>,
     store: Option<String>,
     can_edit: bool,
     loaded: Loaded,
+    databases: &UseStateHandle<Vec<(ShortId, String)>>,
 ) {
+    let databases = databases.clone();
     let Loaded {
         app,
         form,
@@ -348,6 +355,16 @@ fn load(
         match fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/targets"))).await {
             Ok(list) => targets.set(list),
             Err(message) => notice.set(Some(Notice::Failed(message))),
+        }
+        if let Ok(list) =
+            fetch_json::<Vec<AppEntry>>(locale, Request::get(&format!("{API_ENDPOINT}/databases")))
+                .await
+        {
+            databases.set(
+                list.into_iter()
+                    .map(|app| (app.id, app.name.to_string()))
+                    .collect(),
+            );
         }
         if can_edit {
             let path = format!("{API_ENDPOINT}/git/connections");

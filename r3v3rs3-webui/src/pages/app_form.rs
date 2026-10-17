@@ -414,6 +414,7 @@ pub fn fields_view(
     targets: &[TargetEntry],
     connections: &[GitConnectionEntry],
     ports: &[PortEntry],
+    databases: &[(ShortId, String)],
     editing: bool,
 ) -> Html {
     html! {
@@ -428,9 +429,50 @@ pub fn fields_view(
             { text_area(locale, form, "apps.domains", "apps.domains_hint", |f| &mut f.domains) }
             { ports_view(locale, form, ports) }
             { text_field(locale, form, "apps.health_check_path", Some("apps.health_check_path_hint"), |f| &mut f.health_check_path) }
+            { database_select(locale, form, databases) }
             if form.kind != SourceKind::Compose {
                 { container_view(locale, form) }
             }
+        </>
+    }
+}
+
+/// The select of the database that the app uses. The deployment injects its connection.
+fn database_select(
+    locale: Locale,
+    form: &UseStateHandle<AppForm>,
+    databases: &[(ShortId, String)],
+) -> Html {
+    let options = databases
+        .iter()
+        .map(|(id, name)| {
+            let value = id.to_string();
+            let selected = form.uses_database == Some(*id);
+            html! { <option {value} {selected}>{name.clone()}</option> }
+        })
+        .collect::<Html>();
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{locale.t("apps.database")}</label>
+            <select
+                class={INPUT_CLASS}
+                value={form.uses_database.map(|id| id.to_string()).unwrap_or_default()}
+                onchange={{
+                    let form = form.clone();
+                    Callback::from(move |event: Event| {
+                        let select: HtmlSelectElement = event.target_unchecked_into();
+                        let mut updated = (*form).clone();
+                        updated.uses_database = select.value().parse().ok();
+                        form.set(updated);
+                    })
+                }}
+            >
+                <option value="" selected={form.uses_database.is_none()}>
+                    {locale.t("apps.database_none")}
+                </option>
+                { options }
+            </select>
+            <p class={HINT_CLASS}>{locale.t("apps.database_hint")}</p>
         </>
     }
 }

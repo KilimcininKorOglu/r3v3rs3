@@ -9,6 +9,7 @@ use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
+use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, DatabaseCreated, DatabaseEngine, DatabaseRequest, EngineInfo,
 };
@@ -51,15 +52,25 @@ pub fn databases() -> Html {
     let engines = use_state(Vec::<EngineInfo>::new);
     let notice = use_state(|| Option::<Notice<()>>::None);
     let created = use_state(|| Option::<DatabaseCreated>::None);
+    let apps = use_state(Vec::<AppEntry>::new);
 
     let signed_in = session.info.is_some();
     let can_edit = session.can_edit();
     {
-        let (databases, engines, notice) = (databases.clone(), engines.clone(), notice.clone());
+        let (databases, engines, notice, apps) = (
+            databases.clone(),
+            engines.clone(),
+            notice.clone(),
+            apps.clone(),
+        );
         use_effect_with(signed_in, move |&signed_in| {
             if signed_in {
-                let (databases, engines, notice) =
-                    (databases.clone(), engines.clone(), notice.clone());
+                let (databases, engines, notice, apps) = (
+                    databases.clone(),
+                    engines.clone(),
+                    notice.clone(),
+                    apps.clone(),
+                );
                 spawn_local(async move {
                     match fetch_json::<Vec<AppEntry>>(
                         Locale::En,
@@ -78,6 +89,14 @@ pub fn databases() -> Html {
                     {
                         engines.set(list);
                     }
+                    if let Ok(list) = fetch_json::<Vec<AppEntry>>(
+                        Locale::En,
+                        Request::get(&format!("{API_ENDPOINT}/apps")),
+                    )
+                    .await
+                    {
+                        apps.set(list);
+                    }
                 });
             }
         });
@@ -87,9 +106,9 @@ pub fn databases() -> Html {
         return html!();
     }
     let reload = {
-        let (databases, notice) = (databases.clone(), notice.clone());
+        let (databases, notice, apps) = (databases.clone(), notice.clone(), apps.clone());
         Callback::from(move |_: ()| {
-            let (databases, notice) = (databases.clone(), notice.clone());
+            let (databases, notice, apps) = (databases.clone(), notice.clone(), apps.clone());
             spawn_local(async move {
                 match fetch_json::<Vec<AppEntry>>(
                     Locale::En,
@@ -99,6 +118,14 @@ pub fn databases() -> Html {
                 {
                     Ok(list) => databases.set(list),
                     Err(message) => notice.set(Some(Notice::Failed(message))),
+                }
+                if let Ok(list) = fetch_json::<Vec<AppEntry>>(
+                    Locale::En,
+                    Request::get(&format!("{API_ENDPOINT}/apps")),
+                )
+                .await
+                {
+                    apps.set(list);
                 }
             });
         })
@@ -119,7 +146,7 @@ pub fn databases() -> Html {
                     created={created}
                 />
             }
-            { list_view(locale, &databases, can_edit, reload.clone()) }
+            { list_view(locale, &databases, &apps, can_edit, reload.clone()) }
         </>
     }
 }
@@ -147,11 +174,24 @@ fn connection(app: &AppEntry) -> String {
     }
 }
 
-/// The table of the databases.
-fn list_view(locale: Locale, databases: &[AppEntry], can_edit: bool, reload: Callback<()>) -> Html {
+/// The table of the databases, with the number of the apps that use each one.
+fn list_view(
+    locale: Locale,
+    databases: &[AppEntry],
+    apps: &[AppEntry],
+    can_edit: bool,
+    reload: Callback<()>,
+) -> Html {
     if databases.is_empty() {
         return html! { <p class="text-neutral-400 mt-2">{locale.t("databases.empty")}</p> };
     }
+    let users_of = |id: ShortId| {
+        apps.iter()
+            .filter(|app| app.spec.uses_database == Some(id))
+            .map(|app| app.name.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     let rows = databases
         .iter()
         .map(|app| {
@@ -160,6 +200,7 @@ fn list_view(locale: Locale, databases: &[AppEntry], can_edit: bool, reload: Cal
                 .database
                 .map(|engine| engine.info().label.clone())
                 .unwrap_or_default();
+            let users = users_of(app.id);
             let delete = can_edit.then(|| {
                 let question =
                     locale.tf("databases.confirm_delete", &[("name", app.name.as_str())]);
@@ -176,6 +217,7 @@ fn list_view(locale: Locale, databases: &[AppEntry], can_edit: bool, reload: Cal
                     <td class="py-1.5 text-neutral-400">{engine}</td>
                     <td class="py-1.5 font-mono text-neutral-400">{port_of(app).to_string()}</td>
                     <td class="py-1.5 font-mono text-neutral-400">{connection(app)}</td>
+                    <td class="py-1.5 text-neutral-400">{users}</td>
                     <td class="py-1.5 text-right">
                         <Link<Route> to={Route::AppView { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
                             {locale.t("common.view")}
@@ -198,6 +240,7 @@ fn list_view(locale: Locale, databases: &[AppEntry], can_edit: bool, reload: Cal
                     <th class="py-1.5 font-medium">{locale.t("databases.engine")}</th>
                     <th class="py-1.5 font-medium">{locale.t("common.port")}</th>
                     <th class="py-1.5 font-medium">{locale.t("databases.connection")}</th>
+                    <th class="py-1.5 font-medium">{locale.t("databases.apps")}</th>
                     <th />
                 </tr>
             </thead>
