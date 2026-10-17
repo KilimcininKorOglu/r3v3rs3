@@ -697,6 +697,23 @@ impl ContainerRuntime for DockerRuntime {
         demux_logs(&body)
     }
 
+    async fn logs_stream(
+        &self,
+        name: &ContainerName,
+        tail: u32,
+    ) -> anyhow::Result<(bool, Response<Incoming>)> {
+        let id = container_id(self.find_container(name).await?, name)?;
+        let path = format!("/containers/{id}/logs?stdout=true&stderr=true&follow=true&tail={tail}");
+        let response = self
+            .send(Method::GET, &path, None, &[], RESPONSE_TIMEOUT)
+            .await?;
+        let raw = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .is_some_and(|value| value == RAW_STREAM);
+        Ok((raw, response))
+    }
+
     async fn stats(&self, name: &ContainerName) -> anyhow::Result<ContainerStats> {
         DockerRuntime::stats(self, name).await
     }

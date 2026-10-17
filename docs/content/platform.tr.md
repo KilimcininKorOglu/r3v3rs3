@@ -437,7 +437,7 @@ Deployment geçmişi son 100 deployment'ı durumu, **Tetikleyen** (**Elle**, **W
 
 ### Log
 
-Log sayfası çalışan container'ın stdout ve stderr çıktısının son 200 satırını gösterir ve 10 saniyede bir yeniden okur. **Yenile** satırları hemen okur. Çalışan container'ı olmayan uygulamada "Uygulamanın çalışan container'ı yok." mesajı görünür.
+Log sayfası çalışan container'ın stdout ve stderr çıktısının son 200 satırını gösterir ve yeni satırları WebSocket bağlantısı üzerinden canlı aktarır. Üst araç çubuğu canlı akış geçişi (canlı veya duraklatıldı), otomatik kaydırma anahtarı, eşleşen satır sayısını gösteren gerçek zamanlı arama/filtreleme kutusu ve log çıktısını `.txt` dosyası olarak dışa aktaran **İndir** butonu sunar. Çalışan container'ı olmayan uygulamada "Uygulamanın çalışan container'ı yok." mesajı görünür.
 
 ### Terminal
 
@@ -482,6 +482,7 @@ Admin hesabı ayrıca şunları görür:
 | `POST /hooks/apps/{id}` | İmza | İmzalı bir push ile uygulamayı deploy eder. Bkz. [Webhook'lar](#webhook-lar). |
 | `GET /api/apps/{id}/deployments` | Read | Bir uygulamanın son 100 deployment'ı. |
 | `GET /api/apps/{id}/logs?tail=200` | Read | Çalışan deployment'ın container log'unun son satırları, 1 ile 1000 satır arası. Uygulamanın çalışan deployment'ı yoksa `running` değeri `false` olur. |
+| `GET /api/apps/{id}/logs/live?tail=200` | Read | Bağlantıyı çalışan container'ın log'unun canlı WebSocket akışına çevirir. |
 | `POST /api/apps/{id}/deploy` | Edit | Bir deployment başlatır. |
 | `GET /api/apps/{id}/terminal` | Admin | Bağlantıyı çalışan container'ın WebSocket terminaline çevirir. |
 | `GET /api/apps/{id}/files?path=` | Admin | Çalışan container'ın bir volume'ündeki dizinin girdilerini döndürür. |

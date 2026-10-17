@@ -70,6 +70,16 @@ pub trait ContainerRuntime: Send + Sync {
     /// The last `tail` lines of the standard output and the standard error of a container.
     async fn logs(&self, name: &ContainerName, tail: u32) -> anyhow::Result<String>;
 
+    /// Returns a streaming HTTP response of the container logs with `follow=true`.
+    async fn logs_stream(
+        &self,
+        name: &ContainerName,
+        tail: u32,
+    ) -> anyhow::Result<(bool, hyper::Response<hyper::body::Incoming>)> {
+        let _ = (name, tail);
+        anyhow::bail!("the runtime does not support log streaming");
+    }
+
     /// Opens an interactive shell in the container. Only the local runtime carries one; an
     /// agent target answers an error until the terminal travels its own link.
     async fn exec(

@@ -437,7 +437,7 @@ The deployment history shows the latest 100 deployments with their status, **Tri
 
 ### Log
 
-The log page shows the last 200 lines of stdout and stderr of the running container and reads them again every 10 seconds. **Refresh** reads them at once. An app without a running container shows "The app has no running container."
+The log page shows the last 200 lines of stdout and stderr of the running container and streams new lines in real time over a WebSocket connection. The toolbar offers a live tail toggle (streaming or paused), an auto-scroll switch, real-time search filtering with match counts, and a **Download** button to export the log buffer as a `.txt` file. An app without a running container shows "The app has no running container."
 
 ### Terminal
 
@@ -484,6 +484,7 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 | `POST /hooks/apps/{id}` | The signature | Deploys the app for a signed push. See [Webhooks](#webhooks). |
 | `GET /api/apps/{id}/deployments` | Read | The latest 100 deployments of an app. |
 | `GET /api/apps/{id}/logs?tail=200` | Read | The last lines of the container log of the running deployment, from 1 to 1000 lines. `running` is `false` when the app has no running deployment. |
+| `GET /api/apps/{id}/logs/live?tail=200` | Read | Upgrades the connection to a WebSocket live stream of the running container log. |
 | `POST /api/apps/{id}/deploy` | Edit | Starts a deployment. |
 | `GET /api/apps/{id}/terminal` | Admin | Switches the connection to a WebSocket terminal of the running container. |
 | `GET /api/apps/{id}/files?path=` | Admin | The entries of a directory inside a volume of the running container. |

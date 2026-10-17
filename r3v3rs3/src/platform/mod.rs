@@ -526,6 +526,26 @@ impl Platform {
         Ok(AppLog { log, running: true })
     }
 
+    /// Streams the container logs of the running deployment of an app.
+    pub async fn app_log_stream(
+        &self,
+        id: ShortId,
+        tail: u32,
+    ) -> anyhow::Result<(bool, hyper::Response<hyper::body::Incoming>)> {
+        let app = self.app(id).await?;
+        let Some(deployment) = self.store.running_deployment(id).await? else {
+            return Err(Error::AppNotRunning {
+                name: app.name.to_string(),
+            }
+            .into());
+        };
+        let name = proxy::container_name(id, deployment)?;
+        let runtime = self.runtime(app.target);
+        runtime
+            .logs_stream(&name, tail.clamp(1, MAX_LOG_TAIL))
+            .await
+    }
+
     /// Opens a terminal into the container of the running deployment of an app. Only the local
     /// target carries a terminal; an agent target answers `terminal_unsupported`.
     pub async fn app_terminal(

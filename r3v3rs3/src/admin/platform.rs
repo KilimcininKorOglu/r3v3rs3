@@ -6,7 +6,7 @@ use super::{AppError, AppState};
 use crate::accounts::{Caller, Permission};
 use crate::audit::AuditRecord;
 use crate::clock::unix_ms;
-use crate::platform::{DEFAULT_LOG_TAIL, Platform};
+use crate::platform::{DEFAULT_LOG_TAIL, MAX_LOG_TAIL, Platform};
 use crate::runtime::docker::ExecHandle;
 use axum::{
     Extension, Json,
@@ -16,6 +16,7 @@ use axum::{
 };
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
+use http_body_util::BodyExt;
 use r3v3rs3_api::{
     audit::AuditAction,
     error::Error,
@@ -523,6 +524,164 @@ pub async fn get_logs(
     Ok(Json(
         platform.app_log(id, tail).await.map_err(platform_error)?,
     ))
+}
+
+/// Query for live container log streaming.
+#[derive(Debug, Clone, Copy, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct AppLogLiveQuery {
+    /// Number of initial lines to stream.
+    pub tail: Option<u32>,
+}
+
+/// Opens a WebSocket stream for live logs of the running container of an app.
+#[utoipa::path(
+    get,
+    path = "/{id}/logs/live",
+    tag = "platform",
+    operation_id = "app_logs_live",
+    params(
+        ("id" = ShortId, Path, description = "App id."),
+        AppLogLiveQuery
+    ),
+    responses((status = 101, description = "The live container log stream."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn logs_live(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Query(query): Query<AppLogLiveQuery>,
+    ws: WebSocketUpgrade,
+) -> Result<Response, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let tail = query
+        .tail
+        .unwrap_or(DEFAULT_LOG_TAIL)
+        .clamp(1, MAX_LOG_TAIL);
+    platform.app(id).await.map_err(platform_error)?;
+    Ok(ws.on_upgrade(move |socket| logs_live_bridge(socket, platform, id, tail)))
+}
+
+async fn logs_live_bridge(socket: WebSocket, platform: Arc<Platform>, id: ShortId, tail: u32) {
+    let (sink, ws_stream) = socket.split();
+    match platform.app_log_stream(id, tail).await {
+        Ok((raw, response)) => {
+            logs_stream_bridge(sink, ws_stream, raw, response).await;
+        }
+        Err(_) => {
+            logs_poll_bridge(sink, ws_stream, platform, id, tail).await;
+        }
+    }
+}
+
+async fn logs_stream_bridge(
+    mut sink: futures::stream::SplitSink<WebSocket, Message>,
+    mut ws_stream: futures::stream::SplitStream<WebSocket>,
+    raw: bool,
+    response: hyper::Response<hyper::body::Incoming>,
+) {
+    let mut body = response.into_body();
+    let mut buffer = Vec::new();
+
+    let stream_to_client = async {
+        while let Some(frame_result) = body.frame().await {
+            let Ok(frame) = frame_result else { break };
+            let Some(data) = frame.data_ref() else {
+                continue;
+            };
+            if raw {
+                let text = String::from_utf8_lossy(data);
+                if sink
+                    .send(Message::Text(text.into_owned().into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            } else {
+                buffer.extend_from_slice(data);
+                if send_demuxed_chunks(&mut sink, &mut buffer).await.is_err() {
+                    break;
+                }
+            }
+        }
+    };
+
+    let client_listener = async {
+        while let Some(msg) = ws_stream.next().await {
+            if matches!(msg, Ok(Message::Close(_)) | Err(_)) {
+                break;
+            }
+        }
+    };
+
+    tokio::select! {
+        _ = stream_to_client => {}
+        _ = client_listener => {}
+    }
+}
+
+async fn send_demuxed_chunks(
+    sink: &mut futures::stream::SplitSink<WebSocket, Message>,
+    buffer: &mut Vec<u8>,
+) -> Result<(), ()> {
+    while buffer.len() >= 8 {
+        let size = u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]) as usize;
+        if buffer.len() < 8 + size {
+            break;
+        }
+        let text = String::from_utf8_lossy(&buffer[8..8 + size]).into_owned();
+        buffer.drain(..8 + size);
+        if sink.send(Message::Text(text.into())).await.is_err() {
+            return Err(());
+        }
+    }
+    Ok(())
+}
+
+async fn logs_poll_bridge(
+    mut sink: futures::stream::SplitSink<WebSocket, Message>,
+    mut ws_stream: futures::stream::SplitStream<WebSocket>,
+    platform: Arc<Platform>,
+    id: ShortId,
+    tail: u32,
+) {
+    let poller = async {
+        if let Ok(app_log) = platform.app_log(id, tail).await
+            && !app_log.log.is_empty()
+        {
+            let _ = sink.send(Message::Text(app_log.log.into())).await;
+        }
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(1500));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            let Ok(app_log) = platform.app_log(id, 20).await else {
+                break;
+            };
+            if !app_log.running {
+                break;
+            }
+            if !app_log.log.is_empty()
+                && sink.send(Message::Text(app_log.log.into())).await.is_err()
+            {
+                break;
+            }
+        }
+    };
+
+    let client_listener = async {
+        while let Some(msg) = ws_stream.next().await {
+            if matches!(msg, Ok(Message::Close(_)) | Err(_)) {
+                break;
+            }
+        }
+    };
+
+    tokio::select! {
+        _ = poller => {}
+        _ = client_listener => {}
+    }
 }
 
 /// The recorded metrics of an app: the samples of the last hours, oldest first.
