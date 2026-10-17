@@ -19,6 +19,7 @@ mod app_view;
 mod app_webhook;
 mod audit;
 pub mod cert_list;
+mod database_backups;
 mod databases;
 mod dns_credentials;
 mod git_connections;
@@ -105,6 +106,8 @@ pub enum Route {
     AppFiles { id: ShortId },
     #[at("/databases")]
     Databases,
+    #[at("/databases/:id/backups")]
+    DatabaseBackups { id: ShortId },
     #[at("/targets")]
     Targets,
     #[at("/git_connections")]
@@ -150,6 +153,7 @@ impl Route {
             | Route::AppTerminal { .. }
             | Route::AppFiles { .. } => Some(Route::Apps),
             Route::Databases
+            | Route::DatabaseBackups { .. }
             | Route::AccessLists
             | Route::Targets
             | Route::GitConnections
@@ -177,6 +181,9 @@ pub fn switch(routes: Route) -> Html {
         Route::AccessLists => html! { <access_lists::AccessLists /> },
         Route::Apps => html! { <app_list::AppList /> },
         Route::Databases => html! { <databases::Databases /> },
+        Route::DatabaseBackups { id } => {
+            html! { <database_backups::DatabaseBackups {id} /> }
+        }
         Route::AppStore => html! { <app_store::AppStore /> },
         Route::NewStoreApp { store } => {
             html! { <app_view::AppView store={Some(store)} /> }

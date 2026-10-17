@@ -234,6 +234,9 @@ fn list_view(
                     <td class="py-1.5 font-mono text-neutral-400">{connection(app)}</td>
                     <td class="py-1.5 text-neutral-400">{users}</td>
                     <td class="py-1.5 text-right">
+                        <Link<Route> to={Route::DatabaseBackups { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
+                            {locale.t("backups.nav")}
+                        </Link<Route>>
                         <Link<Route> to={Route::AppView { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
                             {locale.t("common.view")}
                         </Link<Route>>

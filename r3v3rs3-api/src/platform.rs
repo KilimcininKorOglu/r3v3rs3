@@ -91,7 +91,7 @@ impl Default for BackupConfig {
 }
 
 /// An S3 compatible bucket that the backups upload to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct S3Config {
     /// The base URL of the bucket, for example `https://s3.example.com/bucket`.
     pub endpoint: String,
