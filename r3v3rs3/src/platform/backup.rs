@@ -446,6 +446,65 @@ fn backup_id() -> String {
     format!("{:x}-{:08x}", unix_ms(), rand::random::<u32>())
 }
 
+/// How often the scheduler checks whether a backup is due.
+const SCHEDULER_ROUND: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Runs the backup scheduler until the server stops: every round it reads the settings and
+/// takes the backups that their daily time has passed since the last backup.
+pub fn spawn_scheduler(platform: Arc<Platform>) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(SCHEDULER_ROUND).await;
+            if let Err(err) = platform.run_scheduled_backups().await {
+                tracing::error!(err = format!("{err:#}"), "the backup scheduler failed");
+            }
+        }
+    });
+}
+
+impl Platform {
+    /// Takes the backup of every managed database that the schedule is due for.
+    async fn run_scheduled_backups(&self) -> anyhow::Result<()> {
+        let config = self.backup_config().await?;
+        let now = unix_ms() as i64;
+        let Some(slot) = scheduled_slot_ms(&config.schedule, now) else {
+            return Ok(());
+        };
+        for app in self.apps().await? {
+            if app.spec.database.is_none() {
+                continue;
+            }
+            let last = self
+                .list_backups(app.id)
+                .await?
+                .first()
+                .map(|entry| entry.created_at);
+            if last.is_none_or(|created_at| created_at < slot) && now >= slot {
+                if let Err(err) = self.run_backup(app.id).await {
+                    tracing::error!(
+                        err = format!("{err:#}"),
+                        database = %app.name,
+                        "the scheduled backup failed"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The UTC milliseconds of today's scheduled time, when `schedule` is a valid `HH:MM`.
+fn scheduled_slot_ms(schedule: &str, now_ms: i64) -> Option<i64> {
+    let (hour, minute) = schedule.split_once(':')?;
+    let hour: i64 = hour.parse().ok()?;
+    let minute: i64 = minute.parse().ok()?;
+    if !(0..24).contains(&hour) || !(0..60).contains(&minute) {
+        return None;
+    }
+    let day = now_ms.div_euclid(86_400_000);
+    Some(day * 86_400_000 + hour * 3_600_000 + minute * 60_000)
+}
+
 /// The gzipped content.
 async fn gzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut encoder = GzipEncoder::new(content);
@@ -466,6 +525,22 @@ async fn ungzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
 mod tests {
     use super::*;
     use r3v3rs3_api::platform::DatabaseEngine;
+
+    #[test]
+    fn a_schedule_names_one_moment_of_the_utc_day() {
+        // 2026-10-17T00:00:00Z is 1792195200000 ms.
+        let day = 1_792_195_200_000;
+        assert_eq!(
+            scheduled_slot_ms("03:30", day + 60_000),
+            Some(day + 3 * 3_600_000 + 30 * 60_000)
+        );
+        // Exactly at the scheduled time the moment is still today's.
+        assert_eq!(scheduled_slot_ms("03:30", day), Some(day + 12_600_000));
+        assert_eq!(scheduled_slot_ms("", day), None);
+        assert_eq!(scheduled_slot_ms("24:00", day), None);
+        assert_eq!(scheduled_slot_ms("07:60", day), None);
+        assert_eq!(scheduled_slot_ms("7:00", day), Some(day + 7 * 3_600_000));
+    }
 
     #[tokio::test]
     async fn gzip_round_trips() {

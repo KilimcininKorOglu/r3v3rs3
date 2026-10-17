@@ -108,6 +108,7 @@ impl PlatformHandle {
             Ok(platform) => {
                 let platform = Arc::new(platform);
                 tokio::spawn(publish::refresh(Arc::downgrade(&platform)));
+                backup::spawn_scheduler(platform.clone());
                 if let Some(port) = config.platform.agent_port
                     && let Err(err) = platform
                         .start_agent_listener(port, events.subscribe())
