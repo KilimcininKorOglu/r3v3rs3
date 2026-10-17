@@ -5,6 +5,7 @@ use super::Route;
 use super::app_env::AppEnv;
 use super::app_form::{AppForm, fields_view};
 use super::app_git_token::AppGitToken;
+use super::app_metrics::AppMetrics;
 use super::app_webhook::AppWebhook;
 use super::resource_page::{FormCard, Notice, delete_on_click, form_card, notice_view};
 use super::settings::{fetch_json, send_request};
@@ -199,6 +200,7 @@ fn edit_extras(
                 <AppGitToken app={entry.clone()} {locale} onchanged={onchanged.clone()} />
             }
             <AppWebhook app={entry.clone()} {locale} {onchanged} />
+            <AppMetrics id={entry.id} />
             <AppEnv id={entry.id} {locale} />
             <div class="flex justify-end mt-4 gap-4 items-center">
                 <Link<Route> to={Route::AppTerminal { id: entry.id }} classes="text-sm text-neutral-400 hover:text-neutral-200">

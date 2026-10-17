@@ -12,6 +12,7 @@ mod app_form;
 mod app_git_token;
 mod app_list;
 mod app_log;
+mod app_metrics;
 mod app_repository;
 mod app_store;
 mod app_terminal;
