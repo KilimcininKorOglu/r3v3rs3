@@ -22,6 +22,7 @@ mod publish;
 #[cfg(test)]
 mod remote_tests;
 mod repositories;
+mod s3;
 pub mod store;
 
 use crate::agent::compose::RemoteCompose;

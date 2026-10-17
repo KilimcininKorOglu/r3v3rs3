@@ -152,6 +152,13 @@ impl Platform {
         tokio::fs::write(&file, &compressed).await?;
         let manifest = serde_json::to_vec(&entry)?;
         tokio::fs::write(dir.join(format!("{}.json", entry.id)), manifest).await?;
+        if let Err(err) = self.upload_to_s3(&entry, compressed).await {
+            // The local backup stays; only the log shows the failed upload.
+            tracing::error!(
+                err = format!("{err:#}"),
+                "failed to upload the backup to S3"
+            );
+        }
         self.apply_retention(db_id).await?;
         Ok(entry)
     }
@@ -232,6 +239,22 @@ impl Platform {
             })?;
         }
         Ok(())
+    }
+
+    /// Uploads one backup to the configured S3 bucket. Does nothing without a target.
+    async fn upload_to_s3(&self, entry: &BackupEntry, content: Vec<u8>) -> anyhow::Result<()> {
+        let config = self.backup_config().await?;
+        let Some(s3) = config.s3 else {
+            return Ok(());
+        };
+        let Some(secret) = self.s3_secret().await? else {
+            bail!("the S3 target has no secret key stored");
+        };
+        let s3 = r3v3rs3_api::platform::S3Config {
+            secret_key: secret,
+            ..s3
+        };
+        super::s3::upload(self.http().await?, &s3, entry, content).await
     }
 
     /// Deletes the oldest backups beyond the `keep` count of the settings.

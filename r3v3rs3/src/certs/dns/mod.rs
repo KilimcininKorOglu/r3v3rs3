@@ -15,7 +15,7 @@ mod porkbun;
 mod rfc2136;
 mod route53;
 mod rrset;
-mod sigv4;
+pub(crate) mod sigv4;
 mod vultr;
 mod webhook;
 
