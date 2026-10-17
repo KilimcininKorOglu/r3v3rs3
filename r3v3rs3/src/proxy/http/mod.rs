@@ -743,6 +743,7 @@ where
         );
 
     let resource_id = route.resource_id;
+    crate::proxy::stats::count_resource_request(&resource_id.to_string());
     let client = route
         .client_ip
         .resolve(info.remote.ip(), req.headers(), &crate::cdn::table());

@@ -1,7 +1,13 @@
 //! The process-wide proxy counters that the admin metrics endpoint exports. The counters count
 //! one process: with worker mode, the worker serves the ports and keeps its own counters.
 
+use std::collections::BTreeMap;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// The served requests of one resource, keyed by the resource id of the proxy. A platform app
+/// names its proxy after its id, so the collector reads the requests of an app here.
+static RESOURCE_REQUESTS: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
 
 /// The proxy counters of this process.
 #[derive(Default)]
@@ -30,6 +36,22 @@ impl Counters {
 /// Counts one served HTTP request on a TCP or TLS port.
 pub(crate) fn count_http_request() {
     COUNTERS.http_requests.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Counts one served request of the resource with this id, for example the app behind a
+/// platform proxy.
+pub(crate) fn count_resource_request(resource_id: &str) {
+    if let Ok(mut map) = RESOURCE_REQUESTS.lock() {
+        *map.entry(resource_id.to_string()).or_insert(0) += 1;
+    }
+}
+
+/// The served requests per resource id, sorted by the id.
+pub(crate) fn snapshot_resources() -> Vec<(String, u64)> {
+    RESOURCE_REQUESTS
+        .lock()
+        .map(|map| map.iter().map(|(id, count)| (id.clone(), *count)).collect())
+        .unwrap_or_default()
 }
 
 /// Counts one served HTTP/3 request on a QUIC port.
@@ -67,4 +89,22 @@ pub(crate) fn snapshot() -> Vec<(&'static str, u64)> {
         ("r3v3rs3_cache_misses_total", load(&COUNTERS.cache_misses)),
         ("r3v3rs3_open_connections", super::open_connections() as u64),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resource_requests_accumulate_per_id() {
+        let id = format!("test-{:x}", std::process::id());
+        count_resource_request(&id);
+        count_resource_request(&id);
+        count_resource_request("");
+        let count = snapshot_resources()
+            .into_iter()
+            .find(|(key, _)| *key == id)
+            .map(|(_, count)| count);
+        assert_eq!(count, Some(2));
+    }
 }
