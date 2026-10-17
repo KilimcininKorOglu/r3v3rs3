@@ -521,56 +521,32 @@ impl Platform {
         let Some(host_port) = db.spec.host_port else {
             bail!("the database {} has no host port", db.name);
         };
-        let running = runtime
-            .list_containers(&app_label(db_id)?)
-            .await?
-            .iter()
-            .any(|container| container.state == "running");
-        if !running {
-            bail!("the database {} is not running", db.name);
+        ensure_database_running(runtime, db_id, &db.name).await?;
+        let password = self.open_password(db_id, info).await?;
+        let mut env = Vec::new();
+        for (key, value) in connection_values(info, host_port, password) {
+            env.push(EnvVar {
+                key: key.parse()?,
+                value,
+            });
         }
+        Ok(env)
+    }
+
+    /// Opens the password of the database, which its creation stored as a secret variable.
+    async fn open_password(
+        &self,
+        db_id: ShortId,
+        info: &r3v3rs3_api::platform::EngineInfo,
+    ) -> anyhow::Result<String> {
         let stored = self.store.env(db_id).await?;
-        let password = match stored
+        match stored
             .iter()
             .find(|var| var.key.as_str() == info.password_env)
         {
-            Some(var) => self.open_value(db_id, var)?,
-            None => String::new(),
-        };
-        let host = "host.docker.internal";
-        let mut values = vec![
-            (format!("{}_HOST", info.env_prefix), host.to_string()),
-            (format!("{}_PORT", info.env_prefix), host_port.to_string()),
-            (format!("{}_USER", info.env_prefix), info.user.clone()),
-            (format!("{}_PASSWORD", info.env_prefix), password.clone()),
-        ];
-        if !info.default_db.is_empty() {
-            values.push((
-                format!("{}_DATABASE", info.env_prefix),
-                info.default_db.clone(),
-            ));
+            Some(var) => self.open_value(db_id, var),
+            None => Ok(String::new()),
         }
-        let url = match (info.user.is_empty(), info.url_database) {
-            (true, _) => format!("{}://{host}:{host_port}", info.url_scheme),
-            (false, true) => format!(
-                "{}://{}:{password}@{host}:{host_port}/{}",
-                info.url_scheme, info.user, info.default_db
-            ),
-            (false, false) => format!(
-                "{}://{}:{password}@{host}:{host_port}",
-                info.url_scheme, info.user
-            ),
-        };
-        values.push(("DATABASE_URL".to_string(), url));
-        values
-            .into_iter()
-            .map(|(key, value)| {
-                Ok(EnvVar {
-                    key: key.parse()?,
-                    value,
-                })
-            })
-            .collect()
     }
 
     /// Waits until the container passes its health check. A stopped container fails at once.
@@ -775,6 +751,59 @@ async fn stays_open(stream: &mut TcpStream) -> std::io::Result<bool> {
         Ok(Ok(read)) => Ok(read > 0),
         Ok(Err(err)) => Err(err),
     }
+}
+
+/// Fails while no container of the database runs.
+async fn ensure_database_running(
+    runtime: &dyn ContainerRuntime,
+    db_id: ShortId,
+    name: &AppName,
+) -> anyhow::Result<()> {
+    let running = runtime
+        .list_containers(&app_label(db_id)?)
+        .await?
+        .iter()
+        .any(|container| container.state == "running");
+    if running {
+        Ok(())
+    } else {
+        bail!("the database {name} is not running")
+    }
+}
+
+/// The environment entries of a database connection: the variables of the engine and
+/// DATABASE_URL, for `host.docker.internal` on the host.
+fn connection_values(
+    info: &r3v3rs3_api::platform::EngineInfo,
+    host_port: u16,
+    password: String,
+) -> Vec<(String, String)> {
+    let host = "host.docker.internal";
+    let mut values = vec![
+        (format!("{}_HOST", info.env_prefix), host.to_string()),
+        (format!("{}_PORT", info.env_prefix), host_port.to_string()),
+        (format!("{}_USER", info.env_prefix), info.user.clone()),
+        (format!("{}_PASSWORD", info.env_prefix), password.clone()),
+    ];
+    if !info.default_db.is_empty() {
+        values.push((
+            format!("{}_DATABASE", info.env_prefix),
+            info.default_db.clone(),
+        ));
+    }
+    let url = match (info.user.is_empty(), info.url_database) {
+        (true, _) => format!("{}://{host}:{host_port}", info.url_scheme),
+        (false, true) => format!(
+            "{}://{}:{password}@{host}:{host_port}/{}",
+            info.url_scheme, info.user, info.default_db
+        ),
+        (false, false) => format!(
+            "{}://{}:{password}@{host}:{host_port}",
+            info.url_scheme, info.user
+        ),
+    };
+    values.push(("DATABASE_URL".to_string(), url));
+    values
 }
 
 #[cfg(test)]
@@ -1338,10 +1367,8 @@ mod tests {
         bail!("the deployment {id} did not end")
     }
 
-    /// A platform whose database app `main-db` runs with a secret password, and the app
-    /// `app-db` that uses it.
-    async fn setup_with_database()
-    -> anyhow::Result<(Arc<Platform>, Arc<FakeRuntime>, AppEntry, TempDir, u16)> {
+    /// A platform with the fake fetcher, the fake Compose and a healthy health check port.
+    async fn setup_platform() -> anyhow::Result<(Arc<Platform>, Arc<FakeRuntime>, TempDir)> {
         let (command, _) = mpsc::channel(1);
         let (mut platform, runtime, dir) =
             platform_with(&PlatformConfig::default(), command).await?;
@@ -1349,6 +1376,14 @@ mod tests {
         platform.compose = Arc::new(FakeCompose::new(runtime.clone()));
         let platform = Arc::new(platform);
         runtime.state().host_port = app_server(200).await?;
+        Ok((platform, runtime, dir))
+    }
+
+    /// A platform whose database app `main-db` runs with a secret password, and the app
+    /// `app-db` that uses it.
+    async fn setup_with_database()
+    -> anyhow::Result<(Arc<Platform>, Arc<FakeRuntime>, AppEntry, TempDir, u16)> {
+        let (platform, runtime, dir) = setup_platform().await?;
 
         let mut db = request("main-db");
         db.spec.port = 5432;

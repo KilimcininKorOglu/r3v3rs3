@@ -21,6 +21,72 @@ use yewdux::prelude::*;
 const INPUT_CLASS: &str =
     "w-full rounded bg-neutral-800 text-neutral-100 border border-neutral-700 px-2 py-1.5 text-sm";
 
+/// Reads the databases, the engines and the apps, and the first failure goes to the notice.
+fn load_all(
+    databases: &UseStateHandle<Vec<AppEntry>>,
+    engines: &UseStateHandle<Vec<EngineInfo>>,
+    apps: &UseStateHandle<Vec<AppEntry>>,
+    notice: &UseStateHandle<Option<Notice<()>>>,
+) {
+    let (databases, engines, apps, notice) = (
+        databases.clone(),
+        engines.clone(),
+        apps.clone(),
+        notice.clone(),
+    );
+    spawn_local(async move {
+        match fetch_json::<Vec<AppEntry>>(
+            Locale::En,
+            Request::get(&format!("{API_ENDPOINT}/databases")),
+        )
+        .await
+        {
+            Ok(list) => databases.set(list),
+            Err(message) => notice.set(Some(Notice::Failed(message))),
+        }
+        if let Ok(list) = fetch_json::<Vec<EngineInfo>>(
+            Locale::En,
+            Request::get(&format!("{API_ENDPOINT}/databases/engines")),
+        )
+        .await
+        {
+            engines.set(list);
+        }
+        if let Ok(list) =
+            fetch_json::<Vec<AppEntry>>(Locale::En, Request::get(&format!("{API_ENDPOINT}/apps")))
+                .await
+        {
+            apps.set(list);
+        }
+    });
+}
+
+/// Reads the databases and the apps again after a change.
+fn reload_lists(
+    databases: &UseStateHandle<Vec<AppEntry>>,
+    apps: &UseStateHandle<Vec<AppEntry>>,
+    notice: &UseStateHandle<Option<Notice<()>>>,
+) {
+    let (databases, apps, notice) = (databases.clone(), apps.clone(), notice.clone());
+    spawn_local(async move {
+        match fetch_json::<Vec<AppEntry>>(
+            Locale::En,
+            Request::get(&format!("{API_ENDPOINT}/databases")),
+        )
+        .await
+        {
+            Ok(list) => databases.set(list),
+            Err(message) => notice.set(Some(Notice::Failed(message))),
+        }
+        if let Ok(list) =
+            fetch_json::<Vec<AppEntry>>(Locale::En, Request::get(&format!("{API_ENDPOINT}/apps")))
+                .await
+        {
+            apps.set(list);
+        }
+    });
+}
+
 /// The value of an engine in a select, and back.
 fn engine_value(engine: DatabaseEngine) -> &'static str {
     match engine {
@@ -65,39 +131,7 @@ pub fn databases() -> Html {
         );
         use_effect_with(signed_in, move |&signed_in| {
             if signed_in {
-                let (databases, engines, notice, apps) = (
-                    databases.clone(),
-                    engines.clone(),
-                    notice.clone(),
-                    apps.clone(),
-                );
-                spawn_local(async move {
-                    match fetch_json::<Vec<AppEntry>>(
-                        Locale::En,
-                        Request::get(&format!("{API_ENDPOINT}/databases")),
-                    )
-                    .await
-                    {
-                        Ok(list) => databases.set(list),
-                        Err(message) => notice.set(Some(Notice::Failed(message))),
-                    }
-                    if let Ok(list) = fetch_json::<Vec<EngineInfo>>(
-                        Locale::En,
-                        Request::get(&format!("{API_ENDPOINT}/databases/engines")),
-                    )
-                    .await
-                    {
-                        engines.set(list);
-                    }
-                    if let Ok(list) = fetch_json::<Vec<AppEntry>>(
-                        Locale::En,
-                        Request::get(&format!("{API_ENDPOINT}/apps")),
-                    )
-                    .await
-                    {
-                        apps.set(list);
-                    }
-                });
+                load_all(&databases, &engines, &apps, &notice);
             }
         });
     }
@@ -108,26 +142,7 @@ pub fn databases() -> Html {
     let reload = {
         let (databases, notice, apps) = (databases.clone(), notice.clone(), apps.clone());
         Callback::from(move |_: ()| {
-            let (databases, notice, apps) = (databases.clone(), notice.clone(), apps.clone());
-            spawn_local(async move {
-                match fetch_json::<Vec<AppEntry>>(
-                    Locale::En,
-                    Request::get(&format!("{API_ENDPOINT}/databases")),
-                )
-                .await
-                {
-                    Ok(list) => databases.set(list),
-                    Err(message) => notice.set(Some(Notice::Failed(message))),
-                }
-                if let Ok(list) = fetch_json::<Vec<AppEntry>>(
-                    Locale::En,
-                    Request::get(&format!("{API_ENDPOINT}/apps")),
-                )
-                .await
-                {
-                    apps.set(list);
-                }
-            });
+            reload_lists(&databases, &apps, &notice);
         })
     };
     html! {
