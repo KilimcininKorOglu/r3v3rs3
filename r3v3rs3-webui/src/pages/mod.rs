@@ -146,16 +146,14 @@ impl Route {
             | Route::ProxyLogView { .. } => Some(Route::Proxies),
             Route::Apps
             | Route::NewApp
-            | Route::AppStore
-            | Route::NewStoreApp { .. }
             | Route::AppView { .. }
             | Route::AppDeployments { .. }
             | Route::AppLog { .. }
             | Route::AppTerminal { .. }
             | Route::AppFiles { .. } => Some(Route::Apps),
-            Route::Databases
-            | Route::DatabaseBackups { .. }
-            | Route::AccessLists
+            Route::AppStore | Route::NewStoreApp { .. } => Some(Route::AppStore),
+            Route::Databases | Route::DatabaseBackups { .. } => Some(Route::Databases),
+            Route::AccessLists
             | Route::Targets
             | Route::GitConnections
             | Route::Settings
