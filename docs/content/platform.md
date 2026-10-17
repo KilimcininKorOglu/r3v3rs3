@@ -159,6 +159,8 @@ The **Databases** page installs a database of one engine in one click. The engin
 
 The response shows the password and the connection string once, like a webhook secret. The panel lists every database with its engine, its port and its connection without the password. The database answers on `127.0.0.1` of the r3v3rs3 server, so only the apps of this server and the programs on the server itself reach it: a database gets no domain and no proxy, and **Delete** on its row removes the app while the volume with the data stays. Redis takes no password, so its port answers to every local client.
 
+A deployment of a database is not blue-green, because the fixed port frees only when the old container stops: r3v3rs3 stops the old container, starts the new one and waits for its health check, so the database answers a few seconds later.
+
 A database needs the local target, and only an account with the Edit permission sees the page. Every creation and deletion goes into the audit log.
 
 ## Deployments

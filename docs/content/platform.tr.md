@@ -159,6 +159,8 @@ r3v3rs3, Compose dosyasının diğer ayarlarını denetlemez. Bir Compose dosyas
 
 Yanıt, parolayı ve bağlantı dizesini webhook secret gibi bir kez gösterir. Panel her veritabanını motoru, portu ve parolasız bağlantısıyla listeler. Veritabanı r3v3rs3 sunucusunun `127.0.0.1` adresini dinler; yalnız bu sunucudaki uygulamalar ve sunucunun kendi programları ulaşır: bir veritabanının alan adı ve proxy'si yoktur ve satırındaki **Sil** app'i kaldırırken verilerin olduğu volume kalır. Redis parola almaz, bu yüzden portu yerel her istemciye yanıt verir.
 
+Bir veritabanının deployment'ı blue-green değildir, çünkü sabit port eski container durmadan boşalmaz: r3v3rs3 eski container'ı durdurur, yenisini başlatır ve sağlık kontrolünü bekler; veritabanı birkaç saniye sonra yanıtlamaya devam eder.
+
 Veritabanı local target ister ve sayfayı yalnız Edit izni olan bir hesap görür. Her oluşturma ve silme audit log'una geçer.
 
 ## Deployment'lar
