@@ -141,6 +141,7 @@ jobs:
             async function refIsLive(ref) {
               const pull = ref.match(/^refs\/pull\/(\d+)\//);
               if (pull) return pullIsOpen(Number(pull[1]));
+              if (ref.includes('/tags/')) return true;
               if (ref.startsWith('refs/heads/')) return branchRefs.has(ref);
               // A tag ref or a shape this step does not know: never guess, keep it.
               return true;

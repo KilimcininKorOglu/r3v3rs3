@@ -4,7 +4,13 @@ on:
   push:
     tags:
       - "v*"
-  # A manual run builds the WebUI and both binaries and publishes nothing.
+    branches:
+      - main
+    paths:
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/release.yml"
+  # A manual run builds the WebUI and all binaries and publishes nothing.
   workflow_dispatch:
 
 permissions:
@@ -18,7 +24,7 @@ jobs:
   # lets the CLI builds start without waiting for the Wasm build, which r3v3rs3-cli does not embed.
   release:
     name: Create release
-    if: github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
@@ -53,7 +59,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: r3v3rs3-webui
-          key: wasm
+          shared-key: wasm-webui
       - name: Build webui
         run: cd r3v3rs3-webui && trunk build --cargo-profile web-release --release
       - name: Upload webui
@@ -70,6 +76,7 @@ jobs:
   # compiler, through which aws-lc-rs compiles its C code.
   binary:
     name: Upload Release Assets (${{ matrix.target }})
+    if: always() && needs.webui.result == 'success' && (needs.release.result == 'success' || needs.release.result == 'skipped')
     needs: [release, webui]
     strategy:
       fail-fast: false
@@ -95,7 +102,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: ${{ matrix.target }}-2.17
+          shared-key: release-${{ matrix.target }}-2.17
       - name: Download webui
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -108,7 +115,7 @@ jobs:
           tar -C "target/${{ matrix.target }}/release" -Jcvf r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3
           tar -C "target/${{ matrix.target }}/release" -zcvf r3v3rs3-cli-${{ matrix.target }}.tar.gz r3v3rs3-cli
       - name: Upload archives
-        if: github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-cli-${{ matrix.target }}.tar.gz
@@ -165,7 +172,7 @@ jobs:
   sign:
     name: Sign the checksums
     needs: [binary, binary-cli]
-    if: github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
@@ -207,7 +214,7 @@ jobs:
   # so the repository stores no crates.io secret.
   crates:
     name: Publish crates
-    if: always() && github.event_name == 'push' && needs.webui.result == 'success' && needs.test-gate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.webui.result == 'success' && needs.test-gate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
     needs: [webui, test-gate, test]
     runs-on: ubuntu-24.04
     permissions:
@@ -256,6 +263,7 @@ jobs:
   # Because it embeds no WebUI, all of these builds run in parallel immediately without waiting for webui.
   binary-cli:
     name: Upload Release Assets (r3v3rs3-cli, ${{ matrix.target }})
+    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
     needs: release
     strategy:
       fail-fast: false
@@ -299,7 +307,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: ${{ matrix.target }}-cli
+          shared-key: release-${{ matrix.target }}-cli
       - name: Build the command line client (native)
         if: ${{ !matrix.zigbuild }}
         run: cargo build --release --locked -p r3v3rs3-cli --target ${{ matrix.target }}
@@ -314,12 +322,12 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path "target/${{ matrix.target }}/release/r3v3rs3-cli.exe" -DestinationPath "r3v3rs3-cli-${{ matrix.target }}.zip"
       - name: Upload the archive
-        if: github.event_name == 'push' && matrix.archive == 'tar.gz'
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.archive == 'tar.gz'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" "r3v3rs3-cli-${{ matrix.target }}.tar.gz"
       - name: Upload the archive
-        if: github.event_name == 'push' && matrix.archive == 'zip'
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.archive == 'zip'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # The default shell here is pwsh, where $GITHUB_REF_NAME is not a PowerShell
@@ -328,7 +336,7 @@ jobs:
 
   publish:
     name: Publish release
-    if: github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [binary, binary-cli, crates, sign]
     runs-on: ubuntu-24.04
     steps:
