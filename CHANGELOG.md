@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-10-17
+
+### Added
+- Managed databases: the Databases page creates PostgreSQL, MariaDB, MySQL, MongoDB or Redis on the local target with one data volume, a generated password and a fixed `127.0.0.1` port, and deletes the app while the data volume stays.
+- App to database connections: the app form picks a database, and the deployment injects `DATABASE_URL` plus the engine variables into the container environment. A database that an app uses cannot be deleted.
+- Database backups: one-off or daily scheduled dumps per database, gzip with a SHA-256 manifest, a per-database retention count, and an optional S3 upload with a sealed secret key. A backup restores back into the running container.
+- App metrics: the panel shows the CPU, memory, network and request history of an app of the last 24 hours, served by `GET /api/apps/{id}/metrics`.
+- Web terminal: the app page opens a shell into the running container over a WebSocket bridge to the Docker exec API.
+- App files: `GET`, `PUT` and `DELETE /api/apps/{id}/files` read, write and delete files inside a writable volume, and the panel edits them.
+- App Store Compose entries: catalog entries that install a multi-container app from a Compose file, with an environment variable template that the panel asks for before the first deployment.
+- The app store catalog and the database engine catalog now live in the [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) repository. The binary ships embedded copies, refreshes both once a day, and the Databases page has a refresh button plus `POST /api/databases/engines/refresh`.
+
+### Changed
+- The engine catalog is data driven: the engine of a database is a catalog key instead of a compiled-in enum, so a new engine in `engines.json` needs no release.
+- An app can publish a port on a fixed host port, and a database keeps its port across deployments; the old container stops before the new one binds it, so such apps deploy without a blue-green switch.
+
+### Fixed
+- The request counter of a discovered proxy now counts under the resource of the proxy instead of the port id.
+- A container file operation no longer fails with `the runtime does not carry the files of a container` on the local Docker runtime.
+
 ## [1.8.9] - 2026-10-16
 
 ### Added
