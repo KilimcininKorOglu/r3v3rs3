@@ -322,18 +322,64 @@ impl Platform {
     }
 
     /// Starts the new container and waits for its health check. A failure removes the new
-    /// container, and the old container keeps serving.
+    /// container, and the old container keeps serving. An app with a fixed host port cannot
+    /// run blue-green: the port of the old container frees only when it stops, so the old
+    /// containers stop first and start again when the deployment fails.
     async fn start_container(&self, job: &Job) -> anyhow::Result<ContainerName> {
         let digest = self.prepare_image(job).await?;
         self.store.set_image_digest(job.deployment, &digest).await?;
         let name = proxy::container_name(job.app, job.deployment)?;
+        let stopped = self.stop_old_containers(job).await;
         let result = self.run_container(job, &name, &digest).await;
         if result.is_err()
             && let Err(err) = job.backend.runtime.remove_container(&name).await
         {
             error!(container = %name, "failed to remove a failed container: {err:#}");
         }
+        if result.is_err() {
+            for container in &stopped {
+                if let Err(err) = job.backend.runtime.start_container(container).await {
+                    error!(container = %container, "failed to start the old container again: {err:#}");
+                }
+            }
+        }
         result.map(|()| name)
+    }
+
+    /// Stops the running containers of the app. They hold nothing for a blue-green switch, so
+    /// this matters only when their port must free for the new container.
+    async fn stop_old_containers(&self, job: &Job) -> Vec<ContainerName> {
+        if job.spec.host_port.is_none() {
+            return Vec::new();
+        }
+        let runtime = &*job.backend.runtime;
+        let label = match app_label(job.app) {
+            Ok(label) => label,
+            Err(err) => {
+                error!(app = %job.app, "failed to name the old containers: {err:#}");
+                return Vec::new();
+            }
+        };
+        let running = match runtime.list_containers(&label).await {
+            Ok(containers) => containers
+                .into_iter()
+                .filter(|container| container.state == "running")
+                .filter_map(|container| container.name.parse().ok())
+                .collect::<Vec<_>>(),
+            Err(err) => {
+                error!(app = %job.app, "failed to list the old containers: {err:#}");
+                return Vec::new();
+            }
+        };
+        for container in &running {
+            if let Err(err) = runtime
+                .stop_container(container, Duration::from_secs(10))
+                .await
+            {
+                error!(container = %container, "failed to stop the old container: {err:#}");
+            }
+        }
+        running
     }
 
     /// Pulls or builds the image of the deployment, and returns the reference that pins it.
