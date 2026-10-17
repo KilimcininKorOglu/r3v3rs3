@@ -1,10 +1,11 @@
 use crate::dialog::{self, Icon};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::data_list::{
-    Column, DANGER_LINK_CLASS, LINK_CLASS, Row, active_toggle, list_card, status_badge,
+    Column, DANGER_LINK_CLASS, LINK_CLASS, Row, SelectionProps, active_toggle,
+    selectable_list_card, status_badge,
 };
 use crate::components::discovery_status::DiscoveryStatusCard;
 use crate::i18n::use_locale;
@@ -56,9 +57,11 @@ pub fn proxy_list() -> Html {
     let (proxies, proxies_dispatcher) = use_store::<ProxyStore>();
     let (session, _) = use_store::<SessionStore>();
     let can_edit = session.can_edit_proxies();
+    let selected = use_state(HashSet::<String>::new);
 
+    let proxies_dispatcher_for_effect = proxies_dispatcher.clone();
     use_effect_with((), move |_| {
-        let load = move || load_proxies(proxies_dispatcher.clone());
+        let load = move || load_proxies(proxies_dispatcher_for_effect.clone());
         load();
         let interval = Interval::new(STATUS_REFRESH_INTERVAL_MS, load);
         move || drop(interval)
@@ -89,12 +92,23 @@ pub fn proxy_list() -> Html {
     let rows = proxies
         .entries
         .iter()
-        .map(|entry| proxy_row(locale, entry, &proxies, &ports, &navigator, can_edit))
+        .map(|entry| {
+            proxy_row(
+                locale,
+                entry,
+                &proxies,
+                &ports,
+                &navigator,
+                &proxies_dispatcher,
+                can_edit,
+            )
+        })
         .collect::<Vec<_>>();
+    let selection = build_selection(locale, can_edit, &proxies, &selected, &proxies_dispatcher);
     html! {
         <>
             <DiscoveryStatusCard />
-            { list_card(locale, proxies.loaded, "proxies.empty", &COLUMNS, &rows) }
+            { selectable_list_card(locale, proxies.loaded, "proxies.empty", &COLUMNS, &rows, selection.as_ref()) }
             if can_edit {
                 <div class="flex items-center justify-end my-4">
                     <div>
@@ -109,6 +123,106 @@ pub fn proxy_list() -> Html {
     }
 }
 
+fn bulk_delete_callback(
+    locale: Locale,
+    selected: &UseStateHandle<HashSet<String>>,
+    proxies_dispatcher: &Dispatch<ProxyStore>,
+) -> Callback<MouseEvent> {
+    let (selected, proxies_dispatcher) = (selected.clone(), proxies_dispatcher.clone());
+    Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        let selected_ids = (*selected).clone();
+        let question = locale.tf(
+            "proxies.bulk_confirm_delete",
+            &[("count", &selected_ids.len().to_string())],
+        );
+        let (selected, proxies_dispatcher) = (selected.clone(), proxies_dispatcher.clone());
+        dialog::confirm_then(locale, question, async move {
+            for id_str in selected_ids {
+                if let Ok(id) = id_str.parse::<ShortId>() {
+                    let _ = delete_site(id).await;
+                }
+            }
+            selected.set(HashSet::new());
+            load_proxies(proxies_dispatcher);
+        });
+    })
+}
+
+fn build_selection(
+    locale: Locale,
+    can_edit: bool,
+    proxies: &ProxyStore,
+    selected: &UseStateHandle<HashSet<String>>,
+    proxies_dispatcher: &Dispatch<ProxyStore>,
+) -> Option<SelectionProps> {
+    if !can_edit {
+        return None;
+    }
+    let selectable_keys: HashSet<String> = proxies
+        .entries
+        .iter()
+        .filter(|e| !e.is_discovered())
+        .map(|e| e.id.to_string())
+        .collect();
+    let all_selected =
+        !selectable_keys.is_empty() && selectable_keys.iter().all(|k| selected.contains(k));
+
+    let on_toggle = {
+        let selected = selected.clone();
+        Callback::from(move |key: String| {
+            let mut set = (*selected).clone();
+            if set.contains(&key) {
+                set.remove(&key);
+            } else {
+                set.insert(key);
+            }
+            selected.set(set);
+        })
+    };
+
+    let on_toggle_all = {
+        let selected = selected.clone();
+        let selectable_keys = selectable_keys.clone();
+        Callback::from(move |()| {
+            if all_selected {
+                selected.set(HashSet::new());
+            } else {
+                selected.set(selectable_keys.clone());
+            }
+        })
+    };
+
+    let on_clear = {
+        let selected = selected.clone();
+        Some(Callback::from(move |_: MouseEvent| {
+            selected.set(HashSet::new())
+        }))
+    };
+
+    let bulk_delete = bulk_delete_callback(locale, selected, proxies_dispatcher);
+
+    let bulk_actions = Some(html! {
+        <button
+            type="button"
+            onclick={bulk_delete}
+            class="inline-flex items-center text-red-600 dark:text-red-400 bg-white dark:bg-neutral-800 border border-red-300 dark:border-red-700 focus:outline-none hover:bg-red-50 hover:dark:bg-red-950 focus:ring-4 focus:ring-red-200 dark:focus:ring-red-900 font-medium rounded-lg text-xs px-2.5 py-1.5"
+        >
+            {locale.t("common.bulk_delete")}
+        </button>
+    });
+
+    Some(SelectionProps {
+        selected: (**selected).clone(),
+        on_toggle,
+        on_toggle_all,
+        all_selected,
+        selectable_keys: Some(selectable_keys),
+        bulk_actions,
+        on_clear,
+    })
+}
+
 /// A proxy row. A discovered proxy, or an account that cannot change the proxies, gets only the
 /// read actions.
 fn proxy_row(
@@ -117,13 +231,14 @@ fn proxy_row(
     proxies: &ProxyStore,
     ports: &PortStore,
     navigator: &Navigator,
+    proxies_dispatcher: &Dispatch<ProxyStore>,
     can_edit: bool,
 ) -> Row {
     let id = entry.id;
 
     let log_onclick = route_onclick(navigator, Route::ProxyLogView { id });
     let config_onclick = route_onclick(navigator, Route::ProxyView { id });
-    let delete_onclick = delete_onclick(locale, id);
+    let delete_onclick = delete_onclick(locale, id, proxies_dispatcher.clone());
     let cache_enabled = matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.cache.enabled);
     let purge_onclick = purge_onclick(locale, id);
     let onchange = toggle_onchange(id);
@@ -172,12 +287,18 @@ fn route_onclick(navigator: &Navigator, route: Route) -> Callback<MouseEvent> {
 }
 
 /// Deletes the proxy after the confirmation of the account.
-fn delete_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
+fn delete_onclick(
+    locale: Locale,
+    id: ShortId,
+    proxies_dispatcher: Dispatch<ProxyStore>,
+) -> Callback<MouseEvent> {
     Callback::from(move |e: MouseEvent| {
         e.prevent_default();
         let question = locale.tf("common.confirm_delete", &[("id", &id.to_string())]);
+        let proxies_dispatcher = proxies_dispatcher.clone();
         dialog::confirm_then(locale, question, async move {
             let _ = delete_site(id).await;
+            load_proxies(proxies_dispatcher);
         });
     })
 }

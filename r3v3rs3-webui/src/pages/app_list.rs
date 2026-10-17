@@ -1,15 +1,18 @@
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
-use crate::components::data_list::{Column, LINK_CLASS, Row, list_card, status_badge};
+use crate::components::data_list::{
+    Column, LINK_CLASS, Row, SelectionProps, selectable_list_card, status_badge,
+};
 use crate::dialog;
 use crate::i18n::use_locale;
 use crate::pages::Route;
-use crate::pages::settings::{failure_box, fetch_json};
+use crate::pages::settings::{failure_box, fetch_json, send_request};
 use crate::store::SessionStore;
 use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::platform::{AppEntry, AppSource, DeploymentEntry, DeploymentStatus};
+use std::collections::HashSet;
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
@@ -64,6 +67,7 @@ pub fn app_list() -> Html {
     let rows = use_state(|| Loaded::None);
     let failure = use_state(|| Option::<String>::None);
     let reload = use_state(|| 0_u32);
+    let selected = use_state(HashSet::<String>::new);
 
     let busy = rows
         .as_ref()
@@ -93,20 +97,184 @@ pub fn app_list() -> Html {
         Some(Err(err)) => (true, Vec::new(), Some(err.clone())),
     };
     let table_rows = list
-        .into_iter()
+        .iter()
+        .cloned()
         .map(|row| app_row(locale, row, can_edit, &deploy, &navigator))
         .collect::<Vec<_>>();
+    let selection = build_selection(locale, can_edit, &list, &selected, &failure, &reload);
     html! {
         <>
             if let Some(err) = error.as_ref().or(failure.as_ref()) {
                 { failure_box(err) }
             }
-            { list_card(locale, loaded, "apps.empty", &COLUMNS, &table_rows) }
+            { selectable_list_card(locale, loaded, "apps.empty", &COLUMNS, &table_rows, selection.as_ref()) }
             if can_edit {
                 { add_button(locale, &navigator) }
             }
         </>
     }
+}
+
+fn bulk_deploy_callback(
+    locale: Locale,
+    selected: &UseStateHandle<HashSet<String>>,
+    list: &[AppRow],
+    failure: &UseStateHandle<Option<String>>,
+    reload: &UseStateHandle<u32>,
+) -> Callback<MouseEvent> {
+    let (selected, failure, reload, list) = (
+        selected.clone(),
+        failure.clone(),
+        reload.clone(),
+        list.to_vec(),
+    );
+    Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        let selected_ids = (*selected).clone();
+        let question = locale.tf(
+            "apps.bulk_confirm_deploy",
+            &[("count", &selected_ids.len().to_string())],
+        );
+        let (selected, failure, reload, list) = (
+            selected.clone(),
+            failure.clone(),
+            reload.clone(),
+            list.clone(),
+        );
+        dialog::confirm_then(locale, question, async move {
+            let mut last_err = None;
+            for id_str in selected_ids {
+                let Some(row) = list.iter().find(|r| r.app.id.to_string() == id_str) else {
+                    continue;
+                };
+                if let Err(err) = start_deployment(locale, &row.app).await {
+                    last_err = Some(err);
+                }
+            }
+            if let Some(err) = last_err {
+                failure.set(Some(err));
+            }
+            selected.set(HashSet::new());
+            reload.set(*reload + 1);
+        });
+    })
+}
+
+fn bulk_delete_callback(
+    locale: Locale,
+    selected: &UseStateHandle<HashSet<String>>,
+    failure: &UseStateHandle<Option<String>>,
+    reload: &UseStateHandle<u32>,
+) -> Callback<MouseEvent> {
+    let (selected, failure, reload) = (selected.clone(), failure.clone(), reload.clone());
+    Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        let selected_ids = (*selected).clone();
+        let question = locale.tf(
+            "apps.bulk_confirm_delete",
+            &[("count", &selected_ids.len().to_string())],
+        );
+        let (selected, failure, reload) = (selected.clone(), failure.clone(), reload.clone());
+        dialog::confirm_then(locale, question, async move {
+            let mut last_err = None;
+            for id_str in selected_ids {
+                let path = format!("{API_ENDPOINT}/apps/{id_str}");
+                let request = Request::delete(&path).build().map_err(|e| e.to_string());
+                match request {
+                    Ok(req) => {
+                        if let Err(err) = send_request(locale, req).await {
+                            last_err = Some(err);
+                        }
+                    }
+                    Err(err) => last_err = Some(err),
+                }
+            }
+            if let Some(err) = last_err {
+                failure.set(Some(err));
+            }
+            selected.set(HashSet::new());
+            reload.set(*reload + 1);
+        });
+    })
+}
+
+fn build_selection(
+    locale: Locale,
+    can_edit: bool,
+    list: &[AppRow],
+    selected: &UseStateHandle<HashSet<String>>,
+    failure: &UseStateHandle<Option<String>>,
+    reload: &UseStateHandle<u32>,
+) -> Option<SelectionProps> {
+    if !can_edit {
+        return None;
+    }
+    let all_keys: HashSet<String> = list.iter().map(|r| r.app.id.to_string()).collect();
+    let all_selected = !all_keys.is_empty() && all_keys.iter().all(|k| selected.contains(k));
+
+    let on_toggle = {
+        let selected = selected.clone();
+        Callback::from(move |key: String| {
+            let mut set = (*selected).clone();
+            if set.contains(&key) {
+                set.remove(&key);
+            } else {
+                set.insert(key);
+            }
+            selected.set(set);
+        })
+    };
+
+    let on_toggle_all = {
+        let selected = selected.clone();
+        let all_keys = all_keys.clone();
+        Callback::from(move |()| {
+            if all_selected {
+                selected.set(HashSet::new());
+            } else {
+                selected.set(all_keys.clone());
+            }
+        })
+    };
+
+    let on_clear = {
+        let selected = selected.clone();
+        Some(Callback::from(move |_: MouseEvent| {
+            selected.set(HashSet::new())
+        }))
+    };
+
+    let bulk_deploy = bulk_deploy_callback(locale, selected, list, failure, reload);
+    let bulk_delete = bulk_delete_callback(locale, selected, failure, reload);
+
+    let bulk_actions = Some(html! {
+        <>
+            <button
+                type="button"
+                onclick={bulk_deploy}
+                class="inline-flex items-center text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-xs px-2.5 py-1.5 dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800"
+            >
+                {locale.t("apps.bulk_deploy")}
+            </button>
+            <button
+                type="button"
+                onclick={bulk_delete}
+                class="inline-flex items-center text-red-600 dark:text-red-400 bg-white dark:bg-neutral-800 border border-red-300 dark:border-red-700 focus:outline-none hover:bg-red-50 hover:dark:bg-red-950 focus:ring-4 focus:ring-red-200 dark:focus:ring-red-900 font-medium rounded-lg text-xs px-2.5 py-1.5"
+            >
+                {locale.t("common.bulk_delete")}
+            </button>
+        </>
+    });
+
+    Some(SelectionProps {
+        selected: (**selected).clone(),
+        on_toggle,
+        on_toggle_all,
+        all_selected,
+        selectable_keys: Some(all_keys),
+        bulk_actions,
+        on_clear,
+    })
 }
 
 /// Asks for a confirmation, starts a deployment of the app and reloads the list.
