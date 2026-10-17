@@ -104,6 +104,7 @@
   "audit.action_purge_proxy_cache": "Proxy cache temizleme",
   "audit.action_refresh_cdn_ranges": "CDN IP aralıklarını yenileme",
   "audit.action_refresh_app_store": "App store kataloğunu yenileme",
+  "audit.action_refresh_engines": "Veritabanı engine kataloğunu yenileme",
   "audit.action_exec_app": "Uygulamaya terminal açma",
   "audit.action_app_file": "Uygulama dosyası değiştirme",
   "audit.action_create_database": "Veritabanı oluştur",

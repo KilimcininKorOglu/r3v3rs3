@@ -104,6 +104,7 @@
   "audit.action_purge_proxy_cache": "Purge proxy cache",
   "audit.action_refresh_cdn_ranges": "Refresh CDN IP ranges",
   "audit.action_refresh_app_store": "Refresh app store catalog",
+  "audit.action_refresh_engines": "Refresh database engine catalog",
   "audit.action_exec_app": "Open a terminal into an app",
   "audit.action_app_file": "Change a file of an app",
   "audit.action_create_database": "Create a database",
