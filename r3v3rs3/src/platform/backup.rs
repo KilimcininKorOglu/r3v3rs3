@@ -10,7 +10,7 @@ use async_compression::tokio::bufread::GzipEncoder;
 use r3v3rs3_api::container::ContainerName;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{BackupConfig, BackupEntry, DatabaseEngine, EngineInfo};
+use r3v3rs3_api::platform::{BackupConfig, BackupEntry, EngineInfo};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
@@ -118,10 +118,12 @@ impl Platform {
         let engine = app
             .spec
             .database
+            .clone()
             .context("the app is not a managed database")?;
-        let info = engine.info();
-        let password = self.database_password(db_id, info).await?;
-        let dump = take_dump(&runtime, &container, dump_plan(engine, info, &password)).await?;
+        let info = r3v3rs3_api::platform::engine_info(&engine)
+            .context("the engine is not in the database catalog")?;
+        let password = self.database_password(db_id, &info).await?;
+        let dump = take_dump(&runtime, &container, dump_plan(&engine, &info, &password)?).await?;
         let compressed = gzip(&dump).await?;
         let entry = BackupEntry {
             id: backup_id(),
@@ -186,10 +188,12 @@ impl Platform {
         let engine = app
             .spec
             .database
+            .clone()
             .context("the app is not a managed database")?;
-        let info = engine.info();
-        let password = self.database_password(db_id, info).await?;
-        let plan = restore_plan(engine, info, &password);
+        let info = r3v3rs3_api::platform::engine_info(&engine)
+            .context("the engine is not in the database catalog")?;
+        let password = self.database_password(db_id, &info).await?;
+        let plan = restore_plan(&engine, &info, &password)?;
         let bytes = ungzip(&self.download_backup(db_id, backup_id).await?).await?;
         run_restore(&runtime, &container, &plan, bytes, &info.data_path)
             .await
@@ -363,10 +367,12 @@ async fn run_restore(
     Ok(())
 }
 
-/// The dump command of one engine over the local connection of the container itself.
-fn dump_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> DumpPlan {
-    match engine {
-        DatabaseEngine::Postgres => DumpPlan {
+/// The dump command of one engine over the local connection of the container itself. The
+/// engines with a dump command are the ones that the catalog of the `r3v3rs3-apps`
+/// repository carries; an engine without a command cannot be backed up.
+fn dump_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Result<DumpPlan> {
+    let plan = match engine {
+        "postgres" => DumpPlan {
             command: vec![
                 "pg_dump".into(),
                 "-U".into(),
@@ -376,7 +382,7 @@ fn dump_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> DumpP
             env: vec![format!("PGPASSWORD={password}")],
             file: None,
         },
-        DatabaseEngine::MariaDb => DumpPlan {
+        "mariadb" => DumpPlan {
             command: vec![
                 "mariadb-dump".into(),
                 "-u".into(),
@@ -386,7 +392,7 @@ fn dump_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> DumpP
             env: vec![format!("MYSQL_PWD={password}")],
             file: None,
         },
-        DatabaseEngine::MySql => DumpPlan {
+        "mysql" => DumpPlan {
             command: vec![
                 "mysqldump".into(),
                 "-u".into(),
@@ -396,7 +402,7 @@ fn dump_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> DumpP
             env: vec![format!("MYSQL_PWD={password}")],
             file: None,
         },
-        DatabaseEngine::MongoDb => DumpPlan {
+        "mongodb" => DumpPlan {
             command: vec![
                 "mongodump".into(),
                 "--archive".into(),
@@ -408,19 +414,21 @@ fn dump_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> DumpP
             env: Vec::new(),
             file: None,
         },
-        DatabaseEngine::Redis => DumpPlan {
+        "redis" => DumpPlan {
             // SAVE blocks until the dump file is complete, unlike BGSAVE.
             command: vec!["redis-cli".into(), "SAVE".into()],
             env: Vec::new(),
             file: Some(format!("{}/dump.rdb", info.data_path)),
         },
-    }
+        other => anyhow::bail!("the engine {other} has no backup command"),
+    };
+    Ok(plan)
 }
 
 /// The restore command of one engine, reading the dump that the restore uploads.
-fn restore_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> RestorePlan {
-    match engine {
-        DatabaseEngine::Postgres => RestorePlan {
+fn restore_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Result<RestorePlan> {
+    let plan = match engine {
+        "postgres" => RestorePlan {
             upload: Some(format!("{RESTORE_DIR}/dump.sql")),
             command: vec![
                 "psql".into(),
@@ -433,7 +441,7 @@ fn restore_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> Re
             ],
             env: vec![format!("PGPASSWORD={password}")],
         },
-        DatabaseEngine::MariaDb => RestorePlan {
+        "mariadb" => RestorePlan {
             upload: Some(format!("{RESTORE_DIR}/dump.sql")),
             command: vec![
                 "sh".into(),
@@ -442,7 +450,7 @@ fn restore_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> Re
             ],
             env: vec![format!("MYSQL_PWD={password}")],
         },
-        DatabaseEngine::MySql => RestorePlan {
+        "mysql" => RestorePlan {
             upload: Some(format!("{RESTORE_DIR}/dump.sql")),
             command: vec![
                 "sh".into(),
@@ -451,7 +459,7 @@ fn restore_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> Re
             ],
             env: vec![format!("MYSQL_PWD={password}")],
         },
-        DatabaseEngine::MongoDb => RestorePlan {
+        "mongodb" => RestorePlan {
             upload: Some(format!("{RESTORE_DIR}/dump.archive")),
             command: vec![
                 "mongorestore".into(),
@@ -466,12 +474,14 @@ fn restore_plan(engine: DatabaseEngine, info: &EngineInfo, password: &str) -> Re
         },
         // Redis takes no upload: the restore writes the dump into the data volume and
         // restarts the server, which loads it.
-        DatabaseEngine::Redis => RestorePlan {
+        "redis" => RestorePlan {
             upload: None,
             command: vec!["redis-cli".into(), "SHUTDOWN".into(), "NOSAVE".into()],
             env: Vec::new(),
         },
-    }
+        other => anyhow::bail!("the engine {other} has no restore command"),
+    };
+    Ok(plan)
 }
 
 /// The id of a new backup: the time and four random bytes, both in hex.
@@ -558,7 +568,13 @@ async fn ungzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use r3v3rs3_api::platform::DatabaseEngine;
+
+    /// Installs the engine catalog for the tests that read the dump and restore plans.
+    fn catalog() {
+        let catalog: r3v3rs3_api::platform::EnginesCatalog =
+            serde_json::from_str(include_str!("../../data/engines.json")).unwrap();
+        r3v3rs3_api::platform::install_engines(catalog);
+    }
 
     #[test]
     fn a_schedule_names_one_moment_of_the_utc_day() {
@@ -585,8 +601,9 @@ mod tests {
 
     #[test]
     fn postgres_dumps_its_default_database() {
-        let info = DatabaseEngine::Postgres.info();
-        let plan = dump_plan(DatabaseEngine::Postgres, info, "pass");
+        catalog();
+        let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
+        let plan = dump_plan("postgres", &info, "pass").unwrap();
         assert_eq!(plan.command, ["pg_dump", "-U", "postgres", "postgres"]);
         assert_eq!(plan.env, ["PGPASSWORD=pass"]);
         assert!(plan.file.is_none());
@@ -594,25 +611,22 @@ mod tests {
 
     #[test]
     fn redis_downloads_its_dump_file_instead() {
-        let info = DatabaseEngine::Redis.info();
-        let plan = dump_plan(DatabaseEngine::Redis, info, "");
+        catalog();
+        let info = r3v3rs3_api::platform::engine_info("redis").unwrap();
+        let plan = dump_plan("redis", &info, "").unwrap();
         assert_eq!(plan.command, ["redis-cli", "SAVE"]);
         assert_eq!(plan.file.as_deref(), Some("/data/dump.rdb"));
 
-        let plan = restore_plan(DatabaseEngine::Redis, info, "");
+        let plan = restore_plan("redis", &info, "").unwrap();
         assert!(plan.upload.is_none());
     }
 
     #[test]
     fn every_dump_engine_has_a_restore_that_undoes_it() {
-        for engine in [
-            DatabaseEngine::Postgres,
-            DatabaseEngine::MariaDb,
-            DatabaseEngine::MySql,
-            DatabaseEngine::MongoDb,
-        ] {
-            let info = engine.info();
-            let restore = restore_plan(engine, info, "pass");
+        catalog();
+        for engine in ["postgres", "mariadb", "mysql", "mongodb"] {
+            let info = r3v3rs3_api::platform::engine_info(engine).unwrap();
+            let restore = restore_plan(engine, &info, "pass").unwrap();
             assert!(restore.upload.is_some(), "{engine} has no upload");
             assert!(!restore.command.is_empty());
         }

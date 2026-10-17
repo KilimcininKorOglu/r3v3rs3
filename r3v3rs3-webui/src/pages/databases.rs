@@ -10,9 +10,7 @@ use crate::store::SessionStore;
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{
-    AppEntry, DatabaseCreated, DatabaseEngine, DatabaseRequest, EngineInfo,
-};
+use r3v3rs3_api::platform::{AppEntry, DatabaseCreated, DatabaseRequest, EngineInfo};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -87,26 +85,9 @@ fn reload_lists(
     });
 }
 
-/// The value of an engine in a select, and back.
-fn engine_value(engine: DatabaseEngine) -> &'static str {
-    match engine {
-        DatabaseEngine::Postgres => "postgres",
-        DatabaseEngine::MariaDb => "mariadb",
-        DatabaseEngine::MySql => "mysql",
-        DatabaseEngine::MongoDb => "mongodb",
-        DatabaseEngine::Redis => "redis",
-    }
-}
-
-fn engine_of(value: &str) -> Option<DatabaseEngine> {
-    match value {
-        "postgres" => Some(DatabaseEngine::Postgres),
-        "mariadb" => Some(DatabaseEngine::MariaDb),
-        "mysql" => Some(DatabaseEngine::MySql),
-        "mongodb" => Some(DatabaseEngine::MongoDb),
-        "redis" => Some(DatabaseEngine::Redis),
-        _ => None,
-    }
+/// The engine info of a database app, from the catalog.
+fn engine_of(engines: &[EngineInfo], key: &str) -> Option<EngineInfo> {
+    engines.iter().find(|info| info.engine == key).cloned()
 }
 
 #[function_component(Databases)]
@@ -151,7 +132,7 @@ pub fn databases() -> Html {
             { notice_view(&notice, |_| html!()) }
             { (*created)
                 .clone()
-                .map(|value| created_view(locale, value, &created))
+                .map(|value| created_view(locale, value, &engines, &created))
                 .unwrap_or_default() }
             if can_edit {
                 <AddForm
@@ -161,7 +142,7 @@ pub fn databases() -> Html {
                     created={created}
                 />
             }
-            { list_view(locale, &databases, &apps, can_edit, reload.clone()) }
+            { list_view(locale, &databases, &apps, &engines, can_edit, reload.clone()) }
         </>
     }
 }
@@ -172,11 +153,13 @@ fn port_of(app: &AppEntry) -> u16 {
 }
 
 /// The connection string of a database, without a password.
-fn connection(app: &AppEntry) -> String {
-    let Some(engine) = app.spec.database else {
+fn connection(app: &AppEntry, engines: &[EngineInfo]) -> String {
+    let Some(engine) = app.spec.database.as_deref() else {
         return String::new();
     };
-    let info = engine.info();
+    let Some(info) = engine_of(engines, engine) else {
+        return String::new();
+    };
     let port = port_of(app);
     let host = format!("127.0.0.1:{port}");
     match (info.user.is_empty(), info.default_db.is_empty()) {
@@ -194,6 +177,7 @@ fn list_view(
     locale: Locale,
     databases: &[AppEntry],
     apps: &[AppEntry],
+    engines: &[EngineInfo],
     can_edit: bool,
     reload: Callback<()>,
 ) -> Html {
@@ -213,8 +197,10 @@ fn list_view(
             let engine = app
                 .spec
                 .database
-                .map(|engine| engine.info().label.clone())
-                .unwrap_or_default();
+                .as_deref()
+                .and_then(|key| engine_of(engines, key))
+                .map(|info| info.label.clone())
+                .unwrap_or_else(|| app.spec.database.clone().unwrap_or_default());
             let users = users_of(app.id);
             let delete = can_edit.then(|| {
                 let question =
@@ -231,7 +217,7 @@ fn list_view(
                     <td class="py-1.5">{app.name.to_string()}</td>
                     <td class="py-1.5 text-neutral-400">{engine}</td>
                     <td class="py-1.5 font-mono text-neutral-400">{port_of(app).to_string()}</td>
-                    <td class="py-1.5 font-mono text-neutral-400">{connection(app)}</td>
+                    <td class="py-1.5 font-mono text-neutral-400">{connection(app, engines)}</td>
                     <td class="py-1.5 text-neutral-400">{users}</td>
                     <td class="py-1.5 text-right">
                         <Link<Route> to={Route::DatabaseBackups { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
@@ -271,9 +257,15 @@ fn list_view(
 fn created_view(
     locale: Locale,
     created: DatabaseCreated,
+    engines: &[EngineInfo],
     clear: &UseStateHandle<Option<DatabaseCreated>>,
 ) -> Html {
-    let info = created.app.spec.database.map(|engine| engine.info());
+    let info = created
+        .app
+        .spec
+        .database
+        .as_deref()
+        .and_then(|key| engine_of(engines, key));
     let password = created.password.clone().unwrap_or_default();
     let url = match info {
         Some(info) => {
@@ -331,9 +323,10 @@ struct AddFormProps {
 fn add_form(props: &AddFormProps) -> Html {
     let locale = props.locale;
     let engines = props.engines.clone();
-    let engine = use_state(|| Option::<DatabaseEngine>::None);
-    let selected =
-        (*engine).and_then(|engine| engines.iter().find(|info| info.engine == engine).cloned());
+    let engine = use_state(|| Option::<String>::None);
+    let selected = (*engine)
+        .as_deref()
+        .and_then(|key| engines.iter().find(|info| info.engine == key).cloned());
     let version = use_state(String::new);
     let name = use_state(String::new);
     let host_port = use_state(String::new);
@@ -345,7 +338,7 @@ fn add_form(props: &AddFormProps) -> Html {
         let version = version.clone();
         Callback::from(move |event: Event| {
             let select: web_sys::HtmlSelectElement = event.target_unchecked_into();
-            engine.set(engine_of(&select.value()));
+            engine.set(Some(select.value()));
             version.set(String::new());
         })
     };
@@ -362,7 +355,7 @@ fn add_form(props: &AddFormProps) -> Html {
         let created = props.created.clone();
         Callback::from(move |event: SubmitEvent| {
             event.prevent_default();
-            let Some(engine) = *engine else {
+            let Some(engine) = (*engine).clone() else {
                 notice.set(Some(locale.t("databases.engine_required").to_string()));
                 return;
             };
@@ -397,8 +390,9 @@ fn add_form(props: &AddFormProps) -> Html {
                     <select class={INPUT_CLASS} onchange={pick_engine}>
                         <option value="">{locale.t("databases.pick_engine")}</option>
                         { for engines.iter().map(|info| {
-                            let value = engine_value(info.engine);
-                            let is_selected = selected.as_ref().map(|s| s.engine) == Some(info.engine);
+                            let value = info.engine.clone();
+                            let is_selected =
+                                selected.as_ref().map(|s| s.engine.clone()) == Some(value.clone());
                             html! { <option {value} selected={is_selected}>{info.label.clone()}</option> }
                         }) }
                     </select>

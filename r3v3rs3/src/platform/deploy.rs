@@ -517,14 +517,15 @@ impl Platform {
         let Some(engine) = db.spec.database else {
             bail!("the app {} is not a database", db.name);
         };
-        let info = engine.info();
+        let info = r3v3rs3_api::platform::engine_info(&engine)
+            .ok_or_else(|| anyhow!("the engine {} is not in the database catalog", engine))?;
         let Some(host_port) = db.spec.host_port else {
             bail!("the database {} has no host port", db.name);
         };
         ensure_database_running(runtime, db_id, &db.name).await?;
-        let password = self.open_password(db_id, info).await?;
+        let password = self.open_password(db_id, &info).await?;
         let mut env = Vec::new();
-        for (key, value) in connection_values(info, host_port, password) {
+        for (key, value) in connection_values(&info, host_port, password) {
             env.push(EnvVar {
                 key: key.parse()?,
                 value,
@@ -814,7 +815,14 @@ mod tests {
     use super::super::tests::{TempDir, platform_with, request};
     use super::*;
     use crate::build::compose::{ComposePort, DockerCompose};
-    use r3v3rs3_api::platform::{AppRequest, DatabaseEngine, EnvEntry, PlatformConfig};
+    use r3v3rs3_api::platform::{AppRequest, EnvEntry, PlatformConfig};
+
+    /// Installs the embedded engine catalog for the tests that connect apps to a database.
+    fn catalog() {
+        let catalog: r3v3rs3_api::platform::EnginesCatalog =
+            serde_json::from_str(include_str!("../../data/engines.json")).unwrap();
+        r3v3rs3_api::platform::install_engines(catalog);
+    }
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
 
@@ -1383,11 +1391,12 @@ mod tests {
     /// `app-db` that uses it.
     async fn setup_with_database()
     -> anyhow::Result<(Arc<Platform>, Arc<FakeRuntime>, AppEntry, TempDir, u16)> {
+        catalog();
         let (platform, runtime, dir) = setup_platform().await?;
 
         let mut db = request("main-db");
         db.spec.port = 5432;
-        db.spec.database = Some(DatabaseEngine::Postgres);
+        db.spec.database = Some("postgres".to_string());
         let host_port = std::net::TcpListener::bind(("127.0.0.1", 0))?
             .local_addr()?
             .port();

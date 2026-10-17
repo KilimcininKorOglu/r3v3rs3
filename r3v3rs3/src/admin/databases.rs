@@ -19,7 +19,7 @@ use r3v3rs3_api::{
     error::Error,
     id::ShortId,
     platform::{
-        AppEntry, AppRequest, AppSource, AppSpec, DatabaseCreated, DatabaseEngine, DatabaseRequest,
+        AppEntry, AppRequest, AppSource, AppSpec, DatabaseCreated, DatabaseRequest,
         DeploymentTrigger, EngineInfo, LOCAL_TARGET,
     },
 };
@@ -38,7 +38,7 @@ pub async fn engines(
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<Vec<EngineInfo>>, AppError> {
     caller.authorize(Permission::Read)?;
-    Ok(Json(DatabaseEngine::catalog().to_vec()))
+    Ok(Json(r3v3rs3_api::platform::engines()))
 }
 
 /// Lists the database apps.
@@ -80,7 +80,15 @@ pub async fn create(
     Json(request): Json<DatabaseRequest>,
 ) -> Result<Json<DatabaseCreated>, AppError> {
     let platform = state.platform(&caller, Permission::Edit).await?;
-    let info = request.engine.info();
+    let Some(info) = r3v3rs3_api::platform::engine_info(&request.engine) else {
+        return Err(Error::InvalidContainerSpec {
+            reason: format!(
+                "the engine {} is not in the database catalog",
+                request.engine
+            ),
+        }
+        .into());
+    };
     if !info.versions.iter().any(|tag| tag == &request.version) {
         return Err(Error::InvalidContainerSpec {
             reason: format!(
@@ -95,12 +103,12 @@ pub async fn create(
         Some(port) => port,
         None => allocate_host_port().map_err(platform_error)?,
     };
-    let app_request = app_request(&request, info, host_port).map_err(into_app_error)?;
+    let app_request = app_request(&request, &info, host_port).map_err(into_app_error)?;
     let app = platform
         .add_app(app_request, unix_ms())
         .await
         .map_err(platform_error)?;
-    let password = set_password(&platform, &app, info).await?;
+    let password = set_password(&platform, &app, &info).await?;
     if let Err(err) = platform
         .deploy(app.id, &caller.username, DeploymentTrigger::Manual)
         .await
@@ -110,7 +118,7 @@ pub async fn create(
     }
     let record = AuditRecord::new(AuditAction::CreateDatabase)
         .id(app.id)
-        .summary(format!("{} {}", app.name, request.engine));
+        .summary(format!("{} {}", app.name, request.engine.clone()));
     state
         .record_audit(&caller.username, caller.client, record)
         .await;
@@ -174,7 +182,7 @@ fn app_request(
             restart: Default::default(),
             limits: Default::default(),
             host_port: Some(host_port),
-            database: Some(request.engine),
+            database: Some(request.engine.clone()),
             uses_database: None,
         },
     })

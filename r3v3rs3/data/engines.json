@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "updated_at": 1792249000000,
+  "engines": [
+    {
+      "engine": "postgres",
+      "label": "PostgreSQL",
+      "versions": [
+        "postgres:17-alpine",
+        "postgres:18-alpine"
+      ],
+      "container_port": 5432,
+      "password_env": "POSTGRES_PASSWORD",
+      "user": "postgres",
+      "default_db": "postgres",
+      "url_scheme": "postgres",
+      "env_prefix": "POSTGRES",
+      "url_database": true,
+      "data_path": "/var/lib/postgresql/data"
+    },
+    {
+      "engine": "mariadb",
+      "label": "MariaDB",
+      "versions": [
+        "mariadb:11.8-noble",
+        "mariadb:12-noble"
+      ],
+      "container_port": 3306,
+      "password_env": "MARIADB_ROOT_PASSWORD",
+      "user": "root",
+      "default_db": "",
+      "url_scheme": "mariadb",
+      "env_prefix": "MYSQL",
+      "url_database": false,
+      "data_path": "/var/lib/mysql"
+    },
+    {
+      "engine": "mysql",
+      "label": "MySQL",
+      "versions": [
+        "mysql:9"
+      ],
+      "container_port": 3306,
+      "password_env": "MYSQL_ROOT_PASSWORD",
+      "user": "root",
+      "default_db": "",
+      "url_scheme": "mysql",
+      "env_prefix": "MYSQL",
+      "url_database": false,
+      "data_path": "/var/lib/mysql"
+    },
+    {
+      "engine": "mongodb",
+      "label": "MongoDB",
+      "versions": [
+        "mongo:8"
+      ],
+      "container_port": 27017,
+      "password_env": "MONGO_INITDB_ROOT_PASSWORD",
+      "user": "root",
+      "default_db": "admin",
+      "url_scheme": "mongodb",
+      "env_prefix": "MONGO",
+      "url_database": true,
+      "data_path": "/data/db"
+    },
+    {
+      "engine": "redis",
+      "label": "Redis",
+      "versions": [
+        "redis:8-alpine"
+      ],
+      "container_port": 6379,
+      "password_env": "",
+      "user": "",
+      "default_db": "",
+      "url_scheme": "redis",
+      "env_prefix": "REDIS",
+      "url_database": false,
+      "data_path": "/data"
+    }
+  ]
+}

@@ -15,35 +15,13 @@ use utoipa::{IntoParams, ToSchema};
 /// The id of the target that runs the containers on the server of r3v3rs3 itself.
 pub const LOCAL_TARGET: &str = "local";
 
-/// The database engines that the Databases page installs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum DatabaseEngine {
-    Postgres,
-    MariaDb,
-    MySql,
-    MongoDb,
-    Redis,
-}
-
-impl std::fmt::Display for DatabaseEngine {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            DatabaseEngine::Postgres => "postgres",
-            DatabaseEngine::MariaDb => "mariadb",
-            DatabaseEngine::MySql => "mysql",
-            DatabaseEngine::MongoDb => "mongodb",
-            DatabaseEngine::Redis => "redis",
-        };
-        f.write_str(name)
-    }
-}
-
 /// One engine of the database catalog: the image tags that the panel offers and the values
-/// that the connection information shows.
+/// that the connection information shows. The catalog lives in the `engines.json` of the
+/// `r3v3rs3-apps` repository; the server installs it here at the start and refreshes it daily.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct EngineInfo {
-    pub engine: DatabaseEngine,
+    /// The key of the engine, for example `postgres`. An app names its engine with it.
+    pub engine: String,
     /// The name of the engine in the panel.
     pub label: String,
     /// The image tags that the panel offers, pinned to a major version.
@@ -65,6 +43,77 @@ pub struct EngineInfo {
     pub url_database: bool,
     /// The directory inside the container that the data volume mounts.
     pub data_path: String,
+}
+
+/// The document of the `engines.json` catalog.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnginesCatalog {
+    pub version: u32,
+    pub updated_at: i64,
+    pub engines: Vec<EngineInfo>,
+}
+
+/// The installed engine catalog and the time of the document that it came from.
+#[derive(Debug, Default)]
+struct InstalledEngines {
+    updated_at: i64,
+    engines: Vec<EngineInfo>,
+}
+
+static ENGINES: std::sync::RwLock<InstalledEngines> = std::sync::RwLock::new(InstalledEngines {
+    updated_at: 0,
+    engines: Vec::new(),
+});
+
+/// Installs a catalog when it is newer than the installed one, and reports whether it was
+/// installed. An engine without a key, or two engines with the same key, reject the catalog.
+pub fn install_engines(catalog: EnginesCatalog) -> bool {
+    let mut keys = HashSet::new();
+    let valid = !catalog.engines.is_empty()
+        && catalog.engines.iter().all(|info| {
+            !info.engine.is_empty()
+                && info
+                    .engine
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                && keys.insert(info.engine.clone())
+        });
+    if !valid {
+        return false;
+    }
+    let mut installed = write_engines();
+    if catalog.updated_at < installed.updated_at {
+        return false;
+    }
+    installed.updated_at = catalog.updated_at;
+    installed.engines = catalog.engines;
+    true
+}
+
+/// The installed engine catalog.
+pub fn engines() -> Vec<EngineInfo> {
+    read_engines().engines.clone()
+}
+
+/// The catalog entry of one engine key.
+pub fn engine_info(key: &str) -> Option<EngineInfo> {
+    read_engines()
+        .engines
+        .iter()
+        .find(|info| info.engine == key)
+        .cloned()
+}
+
+fn read_engines() -> std::sync::RwLockReadGuard<'static, InstalledEngines> {
+    ENGINES
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn write_engines() -> std::sync::RwLockWriteGuard<'static, InstalledEngines> {
+    ENGINES
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// The backup settings of the managed databases, stored in the platform database.
@@ -135,106 +184,13 @@ pub struct BackupEntry {
     pub app: ShortId,
     /// The name of the database app.
     pub name: String,
-    pub engine: DatabaseEngine,
+    /// The key of the engine in the catalog.
+    pub engine: String,
     /// The compressed size in bytes.
     pub size: u64,
     /// The SHA-256 of the compressed file.
     pub sha256: String,
     pub created_at: i64,
-}
-
-impl DatabaseEngine {
-    /// The engines that the Databases page installs, in the order of the panel.
-    pub fn catalog() -> &'static [EngineInfo] {
-        static CATALOG: std::sync::OnceLock<Vec<EngineInfo>> = std::sync::OnceLock::new();
-        CATALOG.get_or_init(|| {
-            vec![
-                EngineInfo {
-                    engine: DatabaseEngine::Postgres,
-                    label: "PostgreSQL".to_string(),
-                    versions: vec![
-                        "postgres:17-alpine".to_string(),
-                        "postgres:18-alpine".to_string(),
-                    ],
-                    container_port: 5432,
-                    password_env: "POSTGRES_PASSWORD".to_string(),
-                    user: "postgres".to_string(),
-                    default_db: "postgres".to_string(),
-                    url_scheme: "postgres".to_string(),
-                    env_prefix: "POSTGRES".to_string(),
-                    url_database: true,
-                    data_path: "/var/lib/postgresql/data".to_string(),
-                },
-                EngineInfo {
-                    engine: DatabaseEngine::MariaDb,
-                    label: "MariaDB".to_string(),
-                    versions: vec![
-                        "mariadb:11.8-noble".to_string(),
-                        "mariadb:12-noble".to_string(),
-                    ],
-                    container_port: 3306,
-                    password_env: "MARIADB_ROOT_PASSWORD".to_string(),
-                    user: "root".to_string(),
-                    default_db: String::new(),
-                    url_scheme: "mariadb".to_string(),
-                    env_prefix: "MYSQL".to_string(),
-                    url_database: false,
-                    data_path: "/var/lib/mysql".to_string(),
-                },
-                EngineInfo {
-                    engine: DatabaseEngine::MySql,
-                    label: "MySQL".to_string(),
-                    versions: vec!["mysql:9".to_string()],
-                    container_port: 3306,
-                    password_env: "MYSQL_ROOT_PASSWORD".to_string(),
-                    user: "root".to_string(),
-                    default_db: String::new(),
-                    url_scheme: "mysql".to_string(),
-                    env_prefix: "MYSQL".to_string(),
-                    url_database: false,
-                    data_path: "/var/lib/mysql".to_string(),
-                },
-                EngineInfo {
-                    engine: DatabaseEngine::MongoDb,
-                    label: "MongoDB".to_string(),
-                    versions: vec!["mongo:8".to_string()],
-                    container_port: 27017,
-                    password_env: "MONGO_INITDB_ROOT_PASSWORD".to_string(),
-                    user: "root".to_string(),
-                    default_db: "admin".to_string(),
-                    url_scheme: "mongodb".to_string(),
-                    env_prefix: "MONGO".to_string(),
-                    url_database: true,
-                    data_path: "/data/db".to_string(),
-                },
-                EngineInfo {
-                    engine: DatabaseEngine::Redis,
-                    label: "Redis".to_string(),
-                    versions: vec!["redis:8-alpine".to_string()],
-                    container_port: 6379,
-                    password_env: String::new(),
-                    user: String::new(),
-                    default_db: String::new(),
-                    url_scheme: "redis".to_string(),
-                    env_prefix: "REDIS".to_string(),
-                    url_database: false,
-                    data_path: "/data".to_string(),
-                },
-            ]
-        })
-    }
-
-    /// The catalog entry of this engine.
-    pub fn info(self) -> &'static EngineInfo {
-        let index = match self {
-            DatabaseEngine::Postgres => 0,
-            DatabaseEngine::MariaDb => 1,
-            DatabaseEngine::MySql => 2,
-            DatabaseEngine::MongoDb => 3,
-            DatabaseEngine::Redis => 4,
-        };
-        &Self::catalog()[index]
-    }
 }
 
 /// The longest health check path.
@@ -446,10 +402,11 @@ pub struct AppSpec {
     #[schema(example = 5432)]
     pub host_port: Option<u16>,
 
-    /// Marks the app as a database of an engine. A database app has no domains, so it gets no
+    /// The key of the engine in the catalog that this app serves, for example `postgres`. A
+    /// database app has no domains, so it gets no
     /// proxy: clients reach it on the host port.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub database: Option<DatabaseEngine>,
+    pub database: Option<String>,
 
     /// The id of the database app that this app uses. A deployment injects its connection
     /// into the environment of the container.
@@ -484,9 +441,14 @@ impl AppSpec {
 
     /// A database app is an image app without domains: its clients reach it on the host port,
     /// so a route and a certificate would only expose it. A database server cannot use another
-    /// database, and only a database server carries the engine.
+    /// database, and its engine must be in the installed catalog.
     fn validate_database(&self) -> Result<(), Error> {
-        if let Some(engine) = self.database {
+        if let Some(engine) = &self.database {
+            if engine_info(engine).is_none() {
+                return Err(invalid(&format!(
+                    "the engine {engine} is not in the database catalog"
+                )));
+            }
             if !matches!(self.source, AppSource::Image { .. }) {
                 return Err(invalid(&format!(
                     "a database app runs an image, not a {} source",
@@ -559,7 +521,7 @@ fn invalid(reason: &str) -> Error {
 pub struct DatabaseRequest {
     #[schema(value_type = String, example = "main-postgres")]
     pub name: AppName,
-    pub engine: DatabaseEngine,
+    pub engine: String,
     #[schema(value_type = String, example = "postgres:17-alpine")]
     pub version: String,
     /// A fixed port of `127.0.0.1`. Empty takes a free port, which stays the port of the
@@ -822,6 +784,28 @@ mod tests {
         Ok(spec)
     }
 
+    /// Installs a one-engine catalog for the tests that validate a database spec.
+    fn install_test_engines() {
+        let info = EngineInfo {
+            engine: "postgres".to_string(),
+            label: "PostgreSQL".to_string(),
+            versions: vec!["postgres:17-alpine".to_string()],
+            container_port: 5432,
+            password_env: "POSTGRES_PASSWORD".to_string(),
+            user: "postgres".to_string(),
+            default_db: "postgres".to_string(),
+            url_scheme: "postgres".to_string(),
+            env_prefix: "POSTGRES".to_string(),
+            url_database: true,
+            data_path: "/var/lib/postgresql/data".to_string(),
+        };
+        install_engines(EnginesCatalog {
+            version: 1,
+            updated_at: 1,
+            engines: vec![info],
+        });
+    }
+
     #[test]
     fn a_spec_with_an_image_and_a_port_is_valid() {
         let parsed = spec(json!({
@@ -866,6 +850,7 @@ mod tests {
 
     #[test]
     fn a_database_spec_takes_a_host_port_and_no_domains() {
+        install_test_engines();
         let parsed = spec(json!({
             "source": {"type": "image", "image": "postgres:17-alpine"},
             "port": 5432,
@@ -875,11 +860,12 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(parsed.host_port, Some(15432));
-        assert_eq!(parsed.database, Some(DatabaseEngine::Postgres));
+        assert_eq!(parsed.database, Some("postgres".to_string()));
     }
 
     #[test]
     fn a_database_spec_rejects_what_a_database_cannot_be() {
+        install_test_engines();
         let base = || {
             json!({
                 "source": {"type": "image", "image": "postgres:17-alpine"},
@@ -965,6 +951,32 @@ mod tests {
             input[field] = value;
             assert!(spec(input).is_err(), "{field}");
         }
+    }
+
+    #[test]
+    fn install_rejects_a_catalog_that_cannot_be_served() {
+        let info = |engine: &str| EngineInfo {
+            engine: engine.to_string(),
+            label: "X".to_string(),
+            versions: vec!["x:1".to_string()],
+            container_port: 1,
+            password_env: String::new(),
+            user: String::new(),
+            default_db: String::new(),
+            url_scheme: "x".to_string(),
+            env_prefix: "X".to_string(),
+            url_database: false,
+            data_path: "/data".to_string(),
+        };
+        let catalog = |engines: Vec<EngineInfo>| EnginesCatalog {
+            version: 1,
+            updated_at: 1,
+            engines,
+        };
+        assert!(!install_engines(catalog(Vec::new())));
+        assert!(!install_engines(catalog(vec![info("")])));
+        assert!(!install_engines(catalog(vec![info("Postgres")])));
+        assert!(!install_engines(catalog(vec![info("pg"), info("pg")])));
     }
 
     #[test]

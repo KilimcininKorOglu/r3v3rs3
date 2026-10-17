@@ -114,7 +114,7 @@ mod tests {
             id: "1a2b".to_string(),
             app: "abc".parse().unwrap(),
             name: "shop".to_string(),
-            engine: r3v3rs3_api::platform::DatabaseEngine::Postgres,
+            engine: "postgres".to_string(),
             size: 4,
             sha256: "feed".to_string(),
             created_at: 1,

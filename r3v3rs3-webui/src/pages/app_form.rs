@@ -10,7 +10,7 @@ use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppRequest, AppSource, AppSpec, DatabaseEngine, LOCAL_TARGET, TargetEntry,
+    AppEntry, AppRequest, AppSource, AppSpec, LOCAL_TARGET, TargetEntry,
 };
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::store::StoreApp;
@@ -84,7 +84,7 @@ pub struct AppForm {
     /// The fixed host port and the engine of a database app, kept from the saved app. The
     /// app form shows neither, because the Databases page manages them.
     pub host_port: Option<u16>,
-    pub database: Option<DatabaseEngine>,
+    pub database: Option<String>,
     /// The database that the app uses. The select of the form lists the databases.
     pub uses_database: Option<ShortId>,
 }
@@ -167,7 +167,7 @@ impl AppForm {
                     .map(|nano| nano as f64 / NANO_CPUS_PER_CPU),
             ),
             host_port: spec.host_port,
-            database: spec.database,
+            database: spec.database.clone(),
             uses_database: spec.uses_database,
             ..Self::default()
         };
@@ -232,7 +232,7 @@ impl AppForm {
             restart,
             limits,
             host_port: self.host_port,
-            database: self.database,
+            database: self.database.clone(),
             uses_database: self.uses_database,
         };
         spec.validate().map_err(|err| locale.error_message(&err))?;
