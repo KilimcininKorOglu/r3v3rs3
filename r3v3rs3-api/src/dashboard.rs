@@ -118,8 +118,8 @@ mod tests {
                 used_bytes: 25_000_000_000,
                 used_percent: 25,
             }),
-            version: "2.0.3".into(),
-            update_available: Some("v2.0.4".into()),
+            version: "2.0.4".into(),
+            update_available: Some("v2.0.5".into()),
             recent_deployments: vec![],
         };
 

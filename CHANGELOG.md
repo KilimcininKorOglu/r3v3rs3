@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] - 2026-10-18
+
+### Added
+- Remote agent self-upgrade: master pushes the latest `r3v3rs3` executable binary to target agent hosts upon version difference or on demand, with automatic disk replacement and graceful systemd restart.
+- Multi-target replica deployments: run app replicas across multiple agent targets and local target with unified master reverse proxy load balancing (`round_robin`, `client_ip_hash`, `random`, `first`).
+- System dashboard: single-screen overview page at `/dashboard` summarizing ports, proxies, apps, databases, targets, disk storage space, and available updates.
+- Private container registry credentials: encrypted and sealed (`platform.key`) credentials storage with authenticated pull (`X-Registry-Auth`) support for Docker Hub, GHCR, GitLab, ECR, and private registries.
+
 ## [2.0.3] - 2026-10-18
 
 ### Added
