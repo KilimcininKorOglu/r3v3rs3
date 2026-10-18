@@ -102,10 +102,11 @@ impl IpBanTracker {
     }
 
     fn cleanup(&mut self, now: Instant) {
-        self.entries.retain(|_, attempt| match attempt.banned_until {
-            Some(until) => until > now,
-            None => now.duration_since(attempt.window_start) < Duration::from_secs(3600),
-        });
+        self.entries
+            .retain(|_, attempt| match attempt.banned_until {
+                Some(until) => until > now,
+                None => now.duration_since(attempt.window_start) < Duration::from_secs(3600),
+            });
     }
 }
 

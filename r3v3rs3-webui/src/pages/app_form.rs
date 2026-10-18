@@ -89,6 +89,7 @@ pub struct AppForm {
     pub require_approval: bool,
     pub deploy_window: String,
     pub tag_trigger: String,
+    pub store_app_id: Option<String>,
 }
 
 impl Default for AppForm {
@@ -121,6 +122,7 @@ impl Default for AppForm {
             require_approval: false,
             deploy_window: String::new(),
             tag_trigger: String::new(),
+            store_app_id: None,
         }
     }
 }
@@ -141,6 +143,7 @@ impl AppForm {
                 compose_file: app.file.clone().unwrap_or_default(),
                 service: app.service.clone().unwrap_or_default(),
                 port: app.port.to_string(),
+                store_app_id: Some(app.id.clone()),
                 ..Self::default()
             };
         }
@@ -150,6 +153,7 @@ impl AppForm {
             image: app.image.clone().unwrap_or_default(),
             port: app.port.to_string(),
             health_check_path: app.health_check_path.clone().unwrap_or_default(),
+            store_app_id: Some(app.id.clone()),
             ..Self::default()
         }
     }
@@ -179,6 +183,7 @@ impl AppForm {
             require_approval: spec.require_approval,
             deploy_window: spec.deploy_window.clone().unwrap_or_default(),
             tag_trigger: spec.tag_trigger.clone().unwrap_or_default(),
+            store_app_id: spec.store_app_id.clone(),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -248,6 +253,7 @@ impl AppForm {
             require_approval: self.require_approval,
             deploy_window: non_empty(&self.deploy_window).map(str::to_string),
             tag_trigger: non_empty(&self.tag_trigger).map(str::to_string),
+            store_app_id: self.store_app_id.clone(),
         };
         spec.validate().map_err(|err| locale.error_message(&err))?;
         Ok(AppRequest {
@@ -861,6 +867,7 @@ mod tests {
             webhook_secret_set: false,
             hook: None,
             update: None,
+            catalog_update: None,
             created_at: 0,
             updated_at: 0,
         };

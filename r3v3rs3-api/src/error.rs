@@ -290,7 +290,9 @@ pub enum Error {
     #[error("too many login attempts")]
     TooManyLoginAttempts,
 
-    #[error("the client IP is temporarily banned due to too many failed sign-in attempts: {seconds}s remaining")]
+    #[error(
+        "the client IP is temporarily banned due to too many failed sign-in attempts: {seconds}s remaining"
+    )]
     IpBanned { seconds: u64 },
 
     #[error("invalid username: {username}")]

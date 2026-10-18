@@ -318,6 +318,7 @@ impl Platform {
             webhook_secret_set: false,
             hook: None,
             update: None,
+            catalog_update: None,
             created_at: now,
             updated_at: now,
         };
@@ -361,6 +362,7 @@ impl Platform {
             webhook_secret_set: current.webhook_secret_set,
             hook: None,
             update: current.update,
+            catalog_update: None,
             created_at: current.created_at,
             updated_at: now,
         };

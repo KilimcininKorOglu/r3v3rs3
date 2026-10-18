@@ -890,6 +890,7 @@ fn app_of(row: &SqliteRow) -> anyhow::Result<AppEntry> {
         webhook_secret_set,
         hook,
         update,
+        catalog_update: None,
         created_at: time_of(row, "created_at")?,
         updated_at: time_of(row, "updated_at")?,
     })
@@ -1019,11 +1020,13 @@ mod tests {
                 require_approval: false,
                 deploy_window: None,
                 tag_trigger: None,
+                store_app_id: None,
             },
             git_token_set: false,
             webhook_secret_set: false,
             hook: None,
             update: None,
+            catalog_update: None,
             created_at: 10,
             updated_at: 10,
         }

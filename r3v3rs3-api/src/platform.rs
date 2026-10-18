@@ -435,6 +435,10 @@ pub struct AppSpec {
     /// Optional tag pattern (e.g. `v*`, `release-*`) that triggers an automatic deployment when pushed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag_trigger: Option<String>,
+
+    /// Optional app store catalog entry id that this app was installed from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_app_id: Option<String>,
 }
 
 impl AppSpec {
@@ -731,10 +735,21 @@ pub struct AppEntry {
     /// The image update status of the app, when checked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update: Option<ImageUpdateStatus>,
+    /// A newer version of this app is available in the app store catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_update: Option<CatalogUpdateStatus>,
     /// The Unix time in milliseconds.
     pub created_at: u64,
     /// The Unix time in milliseconds.
     pub updated_at: u64,
+}
+
+/// The app store catalog update status of an app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CatalogUpdateStatus {
+    pub store_app_id: String,
+    pub current_version: String,
+    pub catalog_version: String,
 }
 
 /// The image update status of an app.

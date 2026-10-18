@@ -99,6 +99,10 @@ A **Compose entry** points at a Compose file under `app-store-compose/` of the r
 
 The catalog holds no other Compose source: an entry that installs your own Compose file belongs on the [Apps](#apps) page, not in the catalog.
 
+### Catalog Updates and One-Click Upgrade
+
+When an app installed from the App Store has a newer version available in the catalog (for example, an updated image tag or an updated Compose configuration), r3v3rs3 displays an **Update available in catalog** badge next to the app in the app list and on the app details page. Clicking **Upgrade to Catalog Version** (or calling `POST /api/apps/{id}/upgrade-catalog`) updates the app specification to match the latest catalog entry and immediately triggers a deployment with the new version.
+
 ### Git Source
 
 An app with a `git` source builds its image from a branch of a repository with the Dockerfile of the repository:

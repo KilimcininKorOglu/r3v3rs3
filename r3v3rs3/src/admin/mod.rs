@@ -54,8 +54,8 @@ mod app_files;
 mod app_info;
 mod audit;
 pub(crate) mod auth;
-mod ban;
 mod backups;
+mod ban;
 mod cdn;
 mod certs;
 mod config;
@@ -354,6 +354,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(platform::logs_live))
                 .routes(routes!(platform::deploy_app))
                 .routes(routes!(platform::check_app_update))
+                .routes(routes!(platform::upgrade_app_catalog))
                 .routes(routes!(
                     platform::get_app_scheduled_commands,
                     platform::create_app_scheduled_command

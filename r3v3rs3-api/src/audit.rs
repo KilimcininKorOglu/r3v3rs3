@@ -107,10 +107,12 @@ pub enum AuditAction {
     RejectDeployment,
     /// An account removed a login ban for an IP address.
     UnbanIp,
+    /// An account upgraded an app to the latest version in the app store catalog.
+    UpgradeAppFromCatalog,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 63] = [
+    pub const ALL: [AuditAction; 64] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -174,6 +176,7 @@ impl AuditAction {
         Self::ApproveDeployment,
         Self::RejectDeployment,
         Self::UnbanIp,
+        Self::UpgradeAppFromCatalog,
     ];
 }
 

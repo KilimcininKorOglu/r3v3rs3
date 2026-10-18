@@ -15,6 +15,7 @@ use super::store_env::{StoreEnvValue, fields_view as store_env_fields, parse as 
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::data_list::DANGER_LINK_CLASS;
+use crate::dialog;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -94,6 +95,7 @@ pub fn app_view(props: &Props) -> Html {
         return html! { { notice_view(&notice, |_: &()| html! {}) } };
     }
     let saved = saved_callback(&app, &form, &notice, &navigator);
+    let on_upgrade = upgrade_catalog_callback(locale, &app, &form, &notice);
     let inputs = FormInputs {
         targets: &targets,
         connections: &connections,
@@ -105,6 +107,9 @@ pub fn app_view(props: &Props) -> Html {
     };
     html! {
         <>
+            if let Some(entry) = (*app).as_ref().filter(|_| can_edit) {
+                { catalog_upgrade_banner(locale, entry, &on_upgrade) }
+            }
             { form_view(locale, &form, inputs, &notice, (*app).as_ref(), saved) }
             if let Some(entry) = (*app).clone().filter(|_| can_edit) {
                 { edit_extras(locale, entry, &app, &navigator) }
@@ -240,6 +245,74 @@ fn saved_callback(
         form.set(AppForm::edit(&entry));
         app.set(Some(entry));
         notice.set(Some(Notice::Saved(())));
+    })
+}
+
+fn catalog_upgrade_banner(
+    locale: Locale,
+    app: &AppEntry,
+    on_upgrade: &Callback<MouseEvent>,
+) -> Html {
+    let Some(update) = &app.catalog_update else {
+        return html! {};
+    };
+    let arrow_text = format!(
+        "{} \u{2192} {}",
+        update.current_version, update.catalog_version
+    );
+    html! {
+        <div class="mb-4 p-4 rounded-lg bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 flex items-center justify-between flex-wrap gap-2">
+            <div class="flex items-center gap-3">
+                <span class="text-purple-700 dark:text-purple-300 font-semibold text-sm">
+                    {locale.t("apps.catalog_update_available")}
+                </span>
+                <span class="text-xs text-neutral-600 dark:text-neutral-400 font-mono">
+                    {arrow_text}
+                </span>
+            </div>
+            <button
+                type="button"
+                onclick={on_upgrade}
+                class="inline-flex items-center text-white bg-purple-600 hover:bg-purple-700 focus:ring-4 focus:ring-purple-300 font-medium rounded-lg text-xs px-3 py-1.5 dark:bg-purple-600 dark:hover:bg-purple-700 dark:focus:ring-purple-800"
+            >
+                {locale.t("apps.upgrade_catalog")}
+            </button>
+        </div>
+    }
+}
+
+fn upgrade_catalog_callback(
+    locale: Locale,
+    app: &UseStateHandle<Option<AppEntry>>,
+    form: &UseStateHandle<AppForm>,
+    notice: &AppNotice,
+) -> Callback<MouseEvent> {
+    let (app, form, notice) = (app.clone(), form.clone(), notice.clone());
+    Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        let Some(entry) = (*app).clone() else {
+            return;
+        };
+        let update_info = entry.catalog_update.as_ref();
+        let target_ver = update_info
+            .map(|u| u.catalog_version.as_str())
+            .unwrap_or("");
+        let question = locale.tf(
+            "apps.upgrade_catalog_confirm",
+            &[("name", entry.name.as_str()), ("version", target_ver)],
+        );
+        let (app, form, notice) = (app.clone(), form.clone(), notice.clone());
+        dialog::confirm_then(locale, question, async move {
+            let path = format!("{API_ENDPOINT}/apps/{}/upgrade-catalog", entry.id);
+            match fetch_json::<AppEntry>(locale, Request::post(&path)).await {
+                Ok(updated) => {
+                    form.set(AppForm::edit(&updated));
+                    app.set(Some(updated));
+                    notice.set(Some(Notice::Saved(())));
+                }
+                Err(err) => notice.set(Some(Notice::Failed(err))),
+            }
+        });
     })
 }
 

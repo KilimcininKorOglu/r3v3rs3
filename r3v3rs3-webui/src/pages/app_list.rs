@@ -12,7 +12,7 @@ use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::platform::{
-    AppEntry, AppSource, DeploymentEntry, DeploymentStatus, ImageUpdateStatus,
+    AppEntry, AppSource, CatalogUpdateStatus, DeploymentEntry, DeploymentStatus, ImageUpdateStatus,
 };
 use std::collections::HashSet;
 use yew::prelude::*;
@@ -92,6 +92,7 @@ pub fn app_list() -> Html {
         return html!();
     };
     let deploy = deploy_callback(locale, &failure, &reload);
+    let upgrade = upgrade_callback(locale, &failure, &reload);
 
     let (loaded, list, error) = match &*rows {
         None => (false, Vec::new(), None),
@@ -101,7 +102,7 @@ pub fn app_list() -> Html {
     let table_rows = list
         .iter()
         .cloned()
-        .map(|row| app_row(locale, row, can_edit, &deploy, &navigator))
+        .map(|row| app_row(locale, row, can_edit, &deploy, &upgrade, &navigator))
         .collect::<Vec<_>>();
     let selection = build_selection(locale, can_edit, &list, &selected, &failure, &reload);
     html! {
@@ -299,6 +300,32 @@ fn deploy_callback(
     })
 }
 
+fn upgrade_callback(
+    locale: Locale,
+    failure: &UseStateHandle<Option<String>>,
+    reload: &UseStateHandle<u32>,
+) -> Callback<AppRow> {
+    let (failure, reload) = (failure.clone(), reload.clone());
+    Callback::from(move |row: AppRow| {
+        let update_info = row.app.catalog_update.as_ref();
+        let target_ver = update_info
+            .map(|u| u.catalog_version.as_str())
+            .unwrap_or("");
+        let question = locale.tf(
+            "apps.upgrade_catalog_confirm",
+            &[("name", row.app.name.as_str()), ("version", target_ver)],
+        );
+        let (failure, reload) = (failure.clone(), reload.clone());
+        dialog::confirm_then(locale, question, async move {
+            match start_upgrade(locale, &row.app).await {
+                Ok(_) => failure.set(None),
+                Err(err) => failure.set(Some(err)),
+            }
+            reload.set(*reload + 1);
+        });
+    })
+}
+
 fn add_button(locale: Locale, navigator: &Navigator) -> Html {
     let navigator = navigator.clone();
     let onclick = Callback::from(move |_: MouseEvent| navigator.push(&Route::NewApp));
@@ -317,6 +344,7 @@ fn app_row(
     row: AppRow,
     can_edit: bool,
     deploy: &Callback<AppRow>,
+    upgrade: &Callback<AppRow>,
     navigator: &Navigator,
 ) -> Row {
     let domains_cell = html! {
@@ -346,6 +374,15 @@ fn app_row(
             deploy.emit(row.clone());
         })
     };
+    let upgrade_available = row.app.catalog_update.is_some();
+    let upgrade_onclick = {
+        let upgrade = upgrade.clone();
+        let row = row.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            upgrade.emit(row.clone());
+        })
+    };
     let view_label = if can_edit {
         "common.edit"
     } else {
@@ -367,6 +404,9 @@ fn app_row(
                 <a class={LINK_CLASS} onclick={view_onclick}>{locale.t(view_label)}</a>
                 <a class={LINK_CLASS} onclick={deployments_onclick}>{locale.t("apps.deployments")}</a>
                 <a class={LINK_CLASS} onclick={log_onclick}>{locale.t("common.log")}</a>
+                if can_edit && !busy && upgrade_available {
+                    <a class={LINK_CLASS} onclick={upgrade_onclick}>{locale.t("apps.upgrade_catalog")}</a>
+                }
                 if can_edit && !busy {
                     <a class={LINK_CLASS} onclick={deploy_onclick}>{locale.t("apps.deploy")}</a>
                 }
@@ -403,12 +443,28 @@ fn source_cell(locale: Locale, app: &AppEntry) -> Html {
     };
     html! {
         <div>
-            <div class="flex items-center">
+            <div class="flex items-center gap-1.5 flex-wrap">
                 <span>{locale.t(kind)}</span>
                 { update_badge(locale, app.update.as_ref()) }
+                { catalog_update_badge(locale, app.catalog_update.as_ref()) }
             </div>
             <span class="block text-xs text-neutral-500 dark:text-neutral-400 break-all">{detail}</span>
         </div>
+    }
+}
+
+fn catalog_update_badge(locale: Locale, update: Option<&CatalogUpdateStatus>) -> Html {
+    let Some(update) = update else {
+        return html! {};
+    };
+    let title = format!(
+        "{} \u{2192} {}",
+        update.current_version, update.catalog_version
+    );
+    html! {
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200" {title}>
+            {locale.t("apps.catalog_update_available")}
+        </span>
     }
 }
 
@@ -496,6 +552,11 @@ async fn fetch_rows(locale: Locale) -> Result<Vec<AppRow>, String> {
 
 async fn start_deployment(locale: Locale, app: &AppEntry) -> Result<DeploymentEntry, String> {
     let path = format!("{API_ENDPOINT}/apps/{}/deploy", app.id);
+    fetch_json(locale, Request::post(&path)).await
+}
+
+async fn start_upgrade(locale: Locale, app: &AppEntry) -> Result<AppEntry, String> {
+    let path = format!("{API_ENDPOINT}/apps/{}/upgrade-catalog", app.id);
     fetch_json(locale, Request::post(&path)).await
 }
 

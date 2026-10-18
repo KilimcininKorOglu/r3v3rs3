@@ -177,7 +177,12 @@ pub async fn list_apps(
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<Vec<AppEntry>>, AppError> {
     let platform = state.platform(&caller, Permission::Read).await?;
-    Ok(Json(platform.apps().await.map_err(platform_error)?))
+    let mut apps = platform.apps().await.map_err(platform_error)?;
+    let catalog = crate::appstore::state().catalog.clone();
+    for app in &mut apps {
+        app.catalog_update = check_catalog_update(app, &catalog);
+    }
+    Ok(Json(apps))
 }
 
 /// Adds an app. The app runs after its first deployment.
@@ -223,7 +228,10 @@ pub async fn get_app(
     Path(id): Path<ShortId>,
 ) -> Result<Json<AppEntry>, AppError> {
     let platform = state.platform(&caller, Permission::Read).await?;
-    Ok(Json(platform.app(id).await.map_err(platform_error)?))
+    let mut app = platform.app(id).await.map_err(platform_error)?;
+    let catalog = crate::appstore::state().catalog.clone();
+    app.catalog_update = check_catalog_update(&app, &catalog);
+    Ok(Json(app))
 }
 
 /// Replaces the name, the target and the spec of an app. The running containers change at the
@@ -1130,4 +1138,159 @@ pub async fn run_app_scheduled_command(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(result))
+}
+
+/// Upgrades an app to the newest version in the app store catalog and starts a deployment.
+#[utoipa::path(
+    post,
+    path = "/{id}/upgrade-catalog",
+    tag = "platform",
+    operation_id = "upgrade_app_catalog",
+    params(("id" = ShortId, Path, description = "The app id.")),
+    responses((status = 200, description = "The upgraded app.", body = AppEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn upgrade_app_catalog(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AppEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let mut app = platform.app(id).await.map_err(platform_error)?;
+    let catalog = crate::appstore::state().catalog.clone();
+    let Some(store_app) = find_catalog_app(&app.spec, &catalog) else {
+        return Err(Error::IdNotFound { id: id.to_string() }.into());
+    };
+    apply_catalog_upgrade(&mut app.spec, store_app)?;
+    let req = AppRequest {
+        name: app.name.clone(),
+        target: app.target,
+        spec: app.spec.clone(),
+    };
+    let mut updated = platform
+        .update_app(id, req, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    let _ = platform
+        .deploy(id, &caller.username, DeploymentTrigger::Manual)
+        .await;
+    let record = AuditRecord::new(AuditAction::UpgradeAppFromCatalog)
+        .id(id)
+        .summary(format!("{} -> {}", app.name, store_app.id));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    updated.catalog_update = None;
+    Ok(Json(updated))
+}
+
+fn find_catalog_app<'a>(
+    spec: &r3v3rs3_api::platform::AppSpec,
+    catalog: &'a r3v3rs3_api::store::StoreCatalog,
+) -> Option<&'a r3v3rs3_api::store::StoreApp> {
+    if let Some(ref store_id) = spec.store_app_id {
+        return catalog.apps.iter().find(|a| &a.id == store_id);
+    }
+    match &spec.source {
+        r3v3rs3_api::platform::AppSource::Image { image } => {
+            let current_repo = image.repository();
+            catalog.apps.iter().find(|a| {
+                if let Some(ref cat_img) = a.image {
+                    if let Ok(cat_parsed) = cat_img.parse::<r3v3rs3_api::container::ImageRef>() {
+                        return cat_parsed.repository() == current_repo;
+                    }
+                }
+                false
+            })
+        }
+        r3v3rs3_api::platform::AppSource::Compose { file, .. } => {
+            let file_str = file.as_ref().map(|f| f.as_str()).unwrap_or("");
+            catalog
+                .apps
+                .iter()
+                .find(|a| a.file.as_deref().unwrap_or("") == file_str)
+        }
+        _ => None,
+    }
+}
+
+fn diff_catalog_version(
+    source: &r3v3rs3_api::platform::AppSource,
+    store_app: &r3v3rs3_api::store::StoreApp,
+) -> Option<(String, String)> {
+    match source {
+        r3v3rs3_api::platform::AppSource::Image { image } => {
+            let cat_img = store_app.image.as_ref()?;
+            if image.as_str() != cat_img {
+                Some((image.as_str().to_string(), cat_img.clone()))
+            } else {
+                None
+            }
+        }
+        r3v3rs3_api::platform::AppSource::Compose { branch, file, .. } => {
+            let cat_file = store_app.file.as_deref().unwrap_or_default();
+            let cat_branch = store_app.branch.as_deref().unwrap_or("main");
+            let file_str = file.as_ref().map(|f| f.as_str()).unwrap_or_default();
+            if file_str != cat_file || branch.as_str() != cat_branch {
+                Some((
+                    format!("{}#{}", branch.as_str(), file_str),
+                    format!("{}#{}", cat_branch, cat_file),
+                ))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn check_catalog_update(
+    app: &AppEntry,
+    catalog: &r3v3rs3_api::store::StoreCatalog,
+) -> Option<r3v3rs3_api::platform::CatalogUpdateStatus> {
+    let store_app = find_catalog_app(&app.spec, catalog)?;
+    let (current_version, catalog_version) = diff_catalog_version(&app.spec.source, store_app)?;
+    Some(r3v3rs3_api::platform::CatalogUpdateStatus {
+        store_app_id: store_app.id.clone(),
+        current_version,
+        catalog_version,
+    })
+}
+
+fn apply_catalog_upgrade(
+    spec: &mut r3v3rs3_api::platform::AppSpec,
+    store_app: &r3v3rs3_api::store::StoreApp,
+) -> Result<(), Error> {
+    spec.store_app_id = Some(store_app.id.clone());
+    if let Some(ref image_str) = store_app.image {
+        let image: r3v3rs3_api::container::ImageRef = image_str.parse()?;
+        spec.source = r3v3rs3_api::platform::AppSource::Image { image };
+    } else if let Some(ref repo_str) = store_app.repository {
+        let repo: r3v3rs3_api::git::RepoUrl = repo_str.parse()?;
+        let branch = store_app
+            .branch
+            .as_deref()
+            .map(str::parse::<r3v3rs3_api::git::GitRef>)
+            .transpose()?
+            .unwrap_or_else(r3v3rs3_api::git::GitRef::main);
+        let file = store_app
+            .file
+            .as_deref()
+            .map(str::parse::<r3v3rs3_api::git::RelPath>)
+            .transpose()?;
+        let service: r3v3rs3_api::container::ServiceName =
+            store_app.service.as_deref().unwrap_or("app").parse()?;
+        let connection = match &spec.source {
+            r3v3rs3_api::platform::AppSource::Compose { connection, .. } => *connection,
+            r3v3rs3_api::platform::AppSource::Git { connection, .. } => *connection,
+            _ => None,
+        };
+        spec.source = r3v3rs3_api::platform::AppSource::Compose {
+            repository: repo,
+            branch,
+            file,
+            service,
+            connection,
+        };
+    }
+    Ok(())
 }
