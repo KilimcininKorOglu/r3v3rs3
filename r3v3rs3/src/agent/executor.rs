@@ -67,7 +67,10 @@ impl Executor {
                 .version()
                 .await
                 .map(|version| AgentOutput::Version { version }),
-            AgentRequest::PullImage { image } => runtime.pull_image(&image).await.map(done),
+            AgentRequest::PullImage { image, auth } => runtime
+                .pull_image_with_auth(&image, auth.as_ref())
+                .await
+                .map(done),
             AgentRequest::InspectImage { image } => runtime
                 .inspect_image(&image)
                 .await

@@ -539,7 +539,8 @@ impl Platform {
         let info = match Self::present_image(runtime, image).await? {
             Some(info) => info,
             None => {
-                runtime.pull_image(image).await?;
+                let auth = self.registry_auth_for_image(image.as_str()).await?;
+                runtime.pull_image_with_auth(image, auth.as_ref()).await?;
                 runtime
                     .inspect_image(image)
                     .await?

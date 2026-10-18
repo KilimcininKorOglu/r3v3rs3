@@ -24,8 +24,8 @@ use r3v3rs3_api::{
     platform::{
         AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
         DeploymentEntry, DeploymentTrigger, EnvEntry, GitTokenRequest, ImageUpdateStatus,
-        KeyRotationReport, MetricsQuery, ScheduledCommandRequest, ScheduledCommandRunResult,
-        TargetEntry, TargetRequest, TargetToken, WebhookSecret,
+        KeyRotationReport, MetricsQuery, RegistryEntry, RegistryRequest, ScheduledCommandRequest,
+        ScheduledCommandRunResult, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -1318,4 +1318,102 @@ pub async fn rotate_platform_key(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(report))
+}
+
+/// Lists the configured container registries for image pulls.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "platform",
+    operation_id = "list_registries",
+    responses((status = 200, description = "The container registries.", body = Vec<RegistryEntry>), ErrorResponses)
+)]
+pub async fn list_registries(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Vec<RegistryEntry>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let registries = platform.registries().await.map_err(platform_error)?;
+    Ok(Json(registries))
+}
+
+/// Adds container registry credentials for private image pulls.
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "platform",
+    operation_id = "add_registry",
+    request_body = RegistryRequest,
+    responses((status = 200, description = "The created registry.", body = RegistryEntry), ErrorResponses)
+)]
+pub async fn add_registry(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<RegistryRequest>,
+) -> Result<Json<RegistryEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let entry = platform
+        .add_registry(request)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::AddRegistry)
+        .id(entry.id)
+        .summary(entry.server.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(entry))
+}
+
+/// Updates container registry credentials.
+#[utoipa::path(
+    put,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "update_registry",
+    params(("id" = ShortId, Path, description = "The registry id")),
+    request_body = RegistryRequest,
+    responses((status = 200, description = "The updated registry.", body = RegistryEntry), ErrorResponses, NotFoundResponse)
+)]
+pub async fn update_registry(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<RegistryRequest>,
+) -> Result<Json<RegistryEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let entry = platform
+        .update_registry(id, request)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UpdateRegistry)
+        .id(id)
+        .summary(entry.server.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(entry))
+}
+
+/// Deletes container registry credentials.
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "delete_registry",
+    params(("id" = ShortId, Path, description = "The registry id")),
+    responses((status = 200, description = "The registry was deleted."), ErrorResponses, NotFoundResponse)
+)]
+pub async fn delete_registry(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<(), AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    platform.delete_registry(id).await.map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeleteRegistry).id(id);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(())
 }

@@ -37,6 +37,7 @@ mod port_list;
 mod port_view;
 mod proxy_list;
 mod proxy_view;
+mod registries;
 mod resource_page;
 mod self_sign;
 mod settings;
@@ -115,6 +116,8 @@ pub enum Route {
     Targets,
     #[at("/git_connections")]
     GitConnections,
+    #[at("/registries")]
+    Registries,
     #[at("/settings")]
     Settings,
     #[at("/accounts")]
@@ -197,6 +200,7 @@ pub fn switch(routes: Route) -> Html {
         Route::AppFiles { id } => html! { <app_files::AppFiles {id} /> },
         Route::Targets => html! { <targets::Targets /> },
         Route::GitConnections => html! { <git_connections::GitConnections /> },
+        Route::Registries => html! { <registries::Registries /> },
         Route::Certs => {
             html! { <cert_list::CertList kind={Some(CertKind::Server)} acme={false} /> }
         }

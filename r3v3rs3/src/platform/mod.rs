@@ -21,6 +21,7 @@ pub mod oauth;
 mod provider;
 pub mod proxy;
 mod publish;
+pub mod registries;
 #[cfg(test)]
 mod remote_tests;
 mod repositories;

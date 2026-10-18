@@ -224,6 +224,36 @@ pub struct KeyRotationReport {
     pub resealed_github_apps: u32,
     pub resealed_settings: u32,
     pub resealed_app_secrets: u32,
+    #[serde(default)]
+    pub resealed_registries: u32,
+}
+
+/// A container registry credential entry for private image pulls.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RegistryEntry {
+    pub id: ShortId,
+    pub server: String,
+    pub username: String,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Request to create or update container registry credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RegistryRequest {
+    pub server: String,
+    pub username: String,
+    /// Written only: password or access token for authentication (stored sealed).
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+/// Auth credentials passed to the container runtime for image pulls.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RegistryAuth {
+    pub username: String,
+    pub password: String,
+    pub serveraddress: String,
 }
 
 /// One recorded sample of the metrics of an app. The network and the request counters are the

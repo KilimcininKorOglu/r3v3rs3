@@ -16,6 +16,29 @@ use sqlx::{Row, SqlitePool};
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
+struct ResealedCounts {
+    app_env: u32,
+    git_connections: u32,
+    github_apps: u32,
+    settings: u32,
+    app_secrets: u32,
+    registries: u32,
+}
+
+async fn reseal_all_tables(
+    pool: &SqlitePool,
+    keys: &std::sync::RwLock<ClusterKeys>,
+) -> anyhow::Result<ResealedCounts> {
+    Ok(ResealedCounts {
+        app_env: reseal_app_env(pool, keys).await?,
+        app_secrets: reseal_app_secrets(pool, keys).await?,
+        git_connections: reseal_git_connections(pool, keys).await?,
+        github_apps: reseal_github_apps(pool, keys).await?,
+        settings: reseal_settings(pool, keys).await?,
+        registries: reseal_registries(pool, keys).await?,
+    })
+}
+
 pub(super) async fn run_key_rotation(
     pool: &SqlitePool,
     config_dir: &Path,
@@ -34,22 +57,19 @@ pub(super) async fn run_key_rotation(
         guard.rotate(new_primary);
     }
 
-    let resealed_app_env = reseal_app_env(pool, keys).await?;
-    let resealed_app_secrets = reseal_app_secrets(pool, keys).await?;
-    let resealed_git_connections = reseal_git_connections(pool, keys).await?;
-    let resealed_github_apps = reseal_github_apps(pool, keys).await?;
-    let resealed_settings = reseal_settings(pool, keys).await?;
+    let counts = reseal_all_tables(pool, keys).await?;
 
     // Persist new key to disk, backing up previous key to platform.key.old
     write_key_files(config_dir, &key_text).await?;
 
     Ok(KeyRotationReport {
         new_key_id,
-        resealed_app_env,
-        resealed_git_connections,
-        resealed_github_apps,
-        resealed_settings,
-        resealed_app_secrets,
+        resealed_app_env: counts.app_env,
+        resealed_git_connections: counts.git_connections,
+        resealed_github_apps: counts.github_apps,
+        resealed_settings: counts.settings,
+        resealed_app_secrets: counts.app_secrets,
+        resealed_registries: counts.registries,
     })
 }
 
@@ -231,6 +251,30 @@ async fn reseal_settings(
     Ok(count)
 }
 
+async fn reseal_registries(
+    pool: &SqlitePool,
+    keys: &std::sync::RwLock<ClusterKeys>,
+) -> anyhow::Result<u32> {
+    let rows = sqlx::query("SELECT id, secret FROM registries")
+        .fetch_all(pool)
+        .await?;
+    let mut count = 0;
+    for row in rows {
+        let id_str: String = row.try_get("id")?;
+        let id: ShortId = id_str.parse()?;
+        let secret: Vec<u8> = row.try_get("secret")?;
+        let aad = super::registries::registry_aad(id);
+        let resealed = reseal_value(keys, &aad, &secret)?;
+        sqlx::query("UPDATE registries SET secret = ? WHERE id = ?")
+            .bind(resealed)
+            .bind(id_str)
+            .execute(pool)
+            .await?;
+        count += 1;
+    }
+    Ok(count)
+}
+
 async fn write_key_files(config_dir: &Path, key_text: &str) -> anyhow::Result<()> {
     let key_path = config_dir.join(KEY_FILE);
     let old_key_path = config_dir.join("platform.key.old");
@@ -287,6 +331,25 @@ mod tests {
         })
     }
 
+    async fn populate_test_app_secrets(
+        platform: &Platform,
+        app_id: ShortId,
+    ) -> anyhow::Result<String> {
+        platform
+            .set_env(
+                app_id,
+                vec![EnvEntry {
+                    key: "DB_PASSWORD".parse()?,
+                    value: Some("super_secret_123".into()),
+                    secret: true,
+                }],
+            )
+            .await?;
+
+        platform.set_git_token(app_id, "ghp_test_token_xyz").await?;
+        platform.ensure_webhook_secret(app_id).await
+    }
+
     async fn populate_test_app_and_settings(
         platform: &Platform,
     ) -> anyhow::Result<(ShortId, String)> {
@@ -301,19 +364,7 @@ mod tests {
             )
             .await?;
 
-        platform
-            .set_env(
-                app.id,
-                vec![EnvEntry {
-                    key: "DB_PASSWORD".parse()?,
-                    value: Some("super_secret_123".into()),
-                    secret: true,
-                }],
-            )
-            .await?;
-
-        platform.set_git_token(app.id, "ghp_test_token_xyz").await?;
-        let webhook_sec = platform.ensure_webhook_secret(app.id).await?;
+        let webhook_sec = populate_test_app_secrets(platform, app.id).await?;
 
         let s3 = Some(r3v3rs3_api::platform::S3Config {
             endpoint: "https://s3.example.com/b".into(),
@@ -326,6 +377,14 @@ mod tests {
             .set_backup_config(BackupConfig {
                 s3,
                 ..Default::default()
+            })
+            .await?;
+
+        platform
+            .add_registry(r3v3rs3_api::platform::RegistryRequest {
+                server: "ghcr.io".into(),
+                username: "octocat".into(),
+                password: Some("ghp_secret".into()),
             })
             .await?;
 
@@ -353,6 +412,11 @@ mod tests {
 
         let opened_s3 = platform.s3_secret().await?;
         assert_eq!(opened_s3.as_deref(), Some("secret_s3_key"));
+
+        let auth = platform
+            .registry_auth_for_image("ghcr.io/octocat/app:v1")
+            .await?;
+        assert_eq!(auth.map(|a| a.password), Some("ghp_secret".to_string()));
         Ok(())
     }
 
@@ -373,6 +437,14 @@ mod tests {
         );
         let fresh_s3 = fresh.s3_secret().await?;
         assert_eq!(fresh_s3.as_deref(), Some("secret_s3_key"));
+
+        let fresh_auth = fresh
+            .registry_auth_for_image("ghcr.io/octocat/app:v1")
+            .await?;
+        assert_eq!(
+            fresh_auth.map(|a| a.password),
+            Some("ghp_secret".to_string())
+        );
         Ok(())
     }
 
@@ -385,6 +457,7 @@ mod tests {
         assert_eq!(report.resealed_app_env, 1);
         assert_eq!(report.resealed_app_secrets, 2);
         assert_eq!(report.resealed_settings, 1);
+        assert_eq!(report.resealed_registries, 1);
 
         verify_rotated_secrets(&platform, app_id, &webhook_sec).await?;
 

@@ -341,6 +341,15 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(platform::new_target_token)),
         )
         .nest(
+            "/registries",
+            OpenApiRouter::new()
+                .routes(routes!(platform::list_registries, platform::add_registry))
+                .routes(routes!(
+                    platform::update_registry,
+                    platform::delete_registry
+                )),
+        )
+        .nest(
             "/apps",
             OpenApiRouter::new()
                 .routes(routes!(platform::list_apps, platform::add_app))

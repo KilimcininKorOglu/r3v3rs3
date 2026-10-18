@@ -425,9 +425,25 @@ Agent, 1 saniyeden 60 saniyeye kadar uzayan bir beklemeden sonra yeniden bağlan
 
 `DELETE /api/targets/{id}`, uygulaması olmayan bir hedefi siler ve agent'ının bağlantısını keser. Uygulaması olan hedef `409 target_in_use`, yerel hedef `403 target_read_only` yanıtını alır. Sertifikası hiçbir hedefe ait olmayan agent log'a `the master closed the connection before its first request` yazar ve bağlanmayı denemeye devam eder.
 
+## Konteyner Registry'leri
+
+Özel konteyner imajlarını çekerken (örneğin özel Docker Hub depoları, GitHub Packages `ghcr.io`, GitLab Registry, AWS ECR veya özel bir registry sunucusu), kimlik bilgilerini WebUI'daki **Registry'ler** sayfasından veya admin API üzerinden yapılandırın.
+
+```json
+{
+  "server": "ghcr.io",
+  "username": "octocat",
+  "password": "ghp_xxxxxxxxxxxxxxxxxxxx"
+}
+```
+
+- Registry parolaları ve kişisel erişim token'ları `platform.key` ile mühürlenir ve yalnızca standart Docker `X-Registry-Auth` ile imaj çekme sırasında hedef konteyner motoruna iletilmek üzere açılır.
+- Anahtar döndürme (`POST /api/platform/key/rotate`), depolanan tüm registry sırlarını tek bir atomik işlemde çözüp yeni anahtarla yeniden mühürler.
+- Bir imaj uygulaması deploy edilirken, r3v3rs3 ilgili registry sunucusunu (örn. `ghcr.io` veya `docker.io` / `registry-1.docker.io`) tespit eder, eşleşen kimlik bilgilerini ekler ve çekme isteğini yerel motora veya uzak agent'lara iletir.
+
 ## WebUI
 
-Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **App Store**, **Hedefler** ve **Git Sağlayıcıları** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** sayfası Edit izni olan hesaba görünür. Orada bağlantı ekleme, değiştirme, bağlama ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
+Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **App Store**, **Veritabanları**, **Hedefler**, **Git Sağlayıcıları** ve **Registry'ler** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** ve **Registry'ler** sayfaları Edit/Admin izni olan hesaba görünür. Orada bağlantı veya registry ekleme, değiştirme ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
 
 ### Uygulamalar
 
@@ -511,6 +527,10 @@ Admin hesabı ayrıca şunları görür:
 | `POST /api/targets` | Admin | Bir agent hedefi ekler ve kayıt token'ını bir kez döndürür. |
 | `POST /api/targets/{id}/token` | Admin | Bir agent hedefinin yeni kayıt token'ını döndürür. |
 | `DELETE /api/targets/{id}` | Admin | Uygulaması olmayan bir agent hedefini siler ve agent'ının bağlantısını keser. |
+| `GET /api/registries` | Read | İmaj çekme için yapılandırılmış konteyner registry'leri. |
+| `POST /api/registries` | Admin | Konteyner registry kimlik bilgisi ekler. |
+| `PUT /api/registries/{id}` | Admin | Konteyner registry kimlik bilgilerini günceller. |
+| `DELETE /api/registries/{id}` | Admin | Konteyner registry kimlik bilgilerini siler. |
 | `GET /api/apps` | Read | Uygulamalar. |
 | `POST /api/apps` | Edit | Uygulama ekler. |
 | `GET /api/apps/{id}` | Read | Bir uygulamayı döndürür. |

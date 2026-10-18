@@ -425,9 +425,25 @@ The agent connects again after a pause that grows from 1 to 60 seconds. When it 
 
 `DELETE /api/targets/{id}` deletes a target without apps and disconnects its agent. A target with an app answers `409 target_in_use`, and the local target answers `403 target_read_only`. An agent whose certificate belongs to no target logs `the master closed the connection before its first request` and keeps trying to connect.
 
+## Container Registries
+
+When pulling private container images (such as from private Docker Hub repositories, GitHub Packages `ghcr.io`, GitLab Container Registry, AWS ECR, or a self-hosted private registry), configure credentials in the **Registries** page of the WebUI or via the admin API.
+
+```json
+{
+  "server": "ghcr.io",
+  "username": "octocat",
+  "password": "ghp_xxxxxxxxxxxxxxxxxxxx"
+}
+```
+
+- Registry passwords and personal access tokens are sealed with `platform.key` and unsealed only when authenticating image pulls via standard Docker `X-Registry-Auth`.
+- Key rotation (`POST /api/platform/key/rotate`) automatically unseals and re-encrypts all stored registry secrets in a single transaction.
+- When deploying an image app, r3v3rs3 resolves the registry server (e.g. `ghcr.io` or `docker.io` / `registry-1.docker.io`), attaches authentication credentials, and sends the request to the local engine or remote agents.
+
 ## WebUI
 
-The **Platform** group of the sidebar holds the **Apps**, **App Store**, **Targets** and **Git Providers** pages, and appears only while the platform is on. The **Git Providers** page appears for an account with the Edit permission, and only an admin adds, changes, connects or deletes a connection there. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+The **Platform** group of the sidebar holds the **Apps**, **App Store**, **Databases**, **Targets**, **Git Providers** and **Registries** pages, and appears only while the platform is on. The **Git Providers** and **Registries** pages appear for an account with the Edit/Admin permission. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
 
 ### Apps
 
@@ -513,6 +529,10 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 | `POST /api/targets` | Admin | Adds an agent target and returns its enrollment token once. |
 | `POST /api/targets/{id}/token` | Admin | Returns a new enrollment token of an agent target. |
 | `DELETE /api/targets/{id}` | Admin | Deletes an agent target without apps and disconnects its agent. |
+| `GET /api/registries` | Read | The configured container registries for image pulls. |
+| `POST /api/registries` | Admin | Adds container registry credentials. |
+| `PUT /api/registries/{id}` | Admin | Updates container registry credentials. |
+| `DELETE /api/registries/{id}` | Admin | Deletes container registry credentials. |
 | `GET /api/apps` | Read | The apps. |
 | `POST /api/apps` | Edit | Adds an app. |
 | `GET /api/apps/{id}` | Read | Returns an app. |

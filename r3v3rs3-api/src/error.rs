@@ -447,11 +447,18 @@ pub enum Error {
 
     #[error("invalid passkey")]
     InvalidPasskey,
+
+    #[error("registry already exists: {server}")]
+    RegistryExists { server: String },
+
+    #[error("invalid registry: {reason}")]
+    InvalidRegistry { reason: String },
 }
 
 impl Error {
     pub fn status_code(&self) -> u16 {
         match self {
+            Self::RegistryExists { .. } => 409,
             Self::IdNotFound { .. }
             | Self::AccountNotFound { .. }
             | Self::AppNotRunning { .. }

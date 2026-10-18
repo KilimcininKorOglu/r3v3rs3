@@ -115,10 +115,16 @@ pub enum AuditAction {
     RegisterPasskey,
     /// An account deleted a WebAuthn passkey.
     DeletePasskey,
+    /// An account added container registry credentials.
+    AddRegistry,
+    /// An account updated container registry credentials.
+    UpdateRegistry,
+    /// An account deleted container registry credentials.
+    DeleteRegistry,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 67] = [
+    pub const ALL: [AuditAction; 70] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -186,6 +192,9 @@ impl AuditAction {
         Self::RotatePlatformKey,
         Self::RegisterPasskey,
         Self::DeletePasskey,
+        Self::AddRegistry,
+        Self::UpdateRegistry,
+        Self::DeleteRegistry,
     ];
 }
 

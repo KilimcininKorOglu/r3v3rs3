@@ -139,6 +139,13 @@ const GROUPS: &[MenuGroup] = &[
                 access: Access::PlatformEdit,
                 subs: NO_SUBS,
             },
+            MenuItem {
+                name: "nav.registries",
+                icon: "/assets/icons/cube.svg",
+                route: Route::Registries,
+                access: Access::Platform,
+                subs: NO_SUBS,
+            },
         ],
     },
     MenuGroup {

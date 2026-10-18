@@ -19,6 +19,16 @@ pub trait ContainerRuntime: Send + Sync {
     /// Pulls the image from its registry.
     async fn pull_image(&self, image: &ImageRef) -> anyhow::Result<()>;
 
+    /// Pulls the image from its registry, optionally using authentication credentials.
+    async fn pull_image_with_auth(
+        &self,
+        image: &ImageRef,
+        auth: Option<&r3v3rs3_api::platform::RegistryAuth>,
+    ) -> anyhow::Result<()> {
+        let _ = auth;
+        self.pull_image(image).await
+    }
+
     /// Returns `None` when the image is not present.
     async fn inspect_image(&self, image: &ImageRef) -> anyhow::Result<Option<ImageInfo>>;
 

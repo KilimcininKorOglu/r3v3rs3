@@ -59,6 +59,8 @@ pub enum AgentRequest {
     Version,
     PullImage {
         image: ImageRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auth: Option<r3v3rs3_api::platform::RegistryAuth>,
     },
     InspectImage {
         image: ImageRef,

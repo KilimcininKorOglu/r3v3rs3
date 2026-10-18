@@ -486,6 +486,24 @@ async fn extract_first_file(body: Vec<u8>) -> anyhow::Result<Vec<u8>> {
     .await?
 }
 
+fn registry_auth_header(auth: &r3v3rs3_api::platform::RegistryAuth) -> anyhow::Result<String> {
+    use base64::Engine as _;
+    let json = serde_json::to_vec(auth)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(json))
+}
+
+async fn drain_pull_lines(mut lines: Lines, image: &ImageRef) -> anyhow::Result<()> {
+    loop {
+        let line = tokio::time::timeout(PULL_IDLE_TIMEOUT, lines.next())
+            .await
+            .map_err(|_| anyhow!("the pull of {image} stopped sending progress"))??;
+        let Some(line) = line else {
+            return Ok(());
+        };
+        pull_error(&line).map_err(|err| anyhow!("failed to pull {image}: {err}"))?;
+    }
+}
+
 #[async_trait::async_trait]
 impl ContainerRuntime for DockerRuntime {
     async fn version(&self) -> anyhow::Result<String> {
@@ -494,24 +512,30 @@ impl ContainerRuntime for DockerRuntime {
     }
 
     async fn pull_image(&self, image: &ImageRef) -> anyhow::Result<()> {
+        self.pull_image_with_auth(image, None).await
+    }
+
+    async fn pull_image_with_auth(
+        &self,
+        image: &ImageRef,
+        auth: Option<&r3v3rs3_api::platform::RegistryAuth>,
+    ) -> anyhow::Result<()> {
         let path = format!(
             "/images/create?fromImage={}&tag={}",
             encode(image.repository()),
             encode(image.tag_or_digest())
         );
-        let response = self
-            .send(Method::POST, &path, None, &[], RESPONSE_TIMEOUT)
-            .await?;
-        let mut lines = Lines::new(response);
-        loop {
-            let line = tokio::time::timeout(PULL_IDLE_TIMEOUT, lines.next())
-                .await
-                .map_err(|_| anyhow!("the pull of {image} stopped sending progress"))??;
-            let Some(line) = line else {
-                return Ok(());
-            };
-            pull_error(&line).map_err(|err| anyhow!("failed to pull {image}: {err}"))?;
+        let mut builder = self.client.builder(Method::POST, &path);
+        if let Some(auth) = auth {
+            let encoded = registry_auth_header(auth)?;
+            builder = builder.header("X-Registry-Auth", encoded);
         }
+        let request = builder.body(Full::new(Bytes::new()))?;
+        let response = self
+            .client
+            .send_with(request, RESPONSE_TIMEOUT, &[])
+            .await?;
+        drain_pull_lines(Lines::new(response), image).await
     }
 
     async fn inspect_image(&self, image: &ImageRef) -> anyhow::Result<Option<ImageInfo>> {

@@ -357,6 +357,8 @@ mod tests {
             Error::FailedToListNetworkInterfaces,
             Error::FailedToCreateCertificateArchive,
             Error::InvalidPasskey,
+            Error::RegistryExists { server: text() },
+            Error::InvalidRegistry { reason: text() },
         ]
     }
 

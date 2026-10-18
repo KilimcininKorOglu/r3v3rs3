@@ -132,12 +132,21 @@ const SCHEMA: &[&str] = &[
         updated_at  INTEGER NOT NULL
     )",
     "CREATE INDEX IF NOT EXISTS app_scheduled_commands_app ON app_scheduled_commands (app_id)",
+    "CREATE TABLE IF NOT EXISTS registries (
+        id         TEXT PRIMARY KEY,
+        server     TEXT NOT NULL UNIQUE,
+        username   TEXT NOT NULL,
+        secret     BLOB NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )",
 ];
 
 mod commands;
 mod connections;
 mod hooks;
 mod metrics;
+mod registries;
 pub use connections::{PUBLIC_URL, StoredConnection, StoredGithubApp, StoredTokens};
 pub use hooks::StoredHook;
 pub use metrics::AppMetricRow;

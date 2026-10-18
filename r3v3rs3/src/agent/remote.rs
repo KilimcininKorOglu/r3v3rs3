@@ -97,8 +97,18 @@ impl ContainerRuntime for RemoteRuntime {
     }
 
     async fn pull_image(&self, image: &ImageRef) -> anyhow::Result<()> {
+        self.pull_image_with_auth(image, None).await
+    }
+
+    async fn pull_image_with_auth(
+        &self,
+        image: &ImageRef,
+        auth: Option<&r3v3rs3_api::platform::RegistryAuth>,
+    ) -> anyhow::Result<()> {
         let image = image.clone();
-        self.call_done(AgentRequest::PullImage { image }).await
+        let auth = auth.cloned();
+        self.call_done(AgentRequest::PullImage { image, auth })
+            .await
     }
 
     async fn inspect_image(&self, image: &ImageRef) -> anyhow::Result<Option<ImageInfo>> {
