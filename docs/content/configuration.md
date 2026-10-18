@@ -1136,7 +1136,83 @@ r3v3rs3-cli http://127.0.0.1:46492 tools
 r3v3rs3-cli http://127.0.0.1:46492 call server_status
 ```
 
-`login` opens the consent page in the browser and stores the tokens in the config directory. A script can pass an access token directly with `--token`. The `update` command installs a newer release over the running binary and verifies its sha256 digest against the checksums of the release.
+`login` opens the consent page in the browser and stores the tokens in the config directory. A script can pass an access token directly with `--token` or the `R3V3RS3_MCP_TOKEN` environment variable. The `update` command installs a newer release over the running binary and verifies its sha256 digest against the checksums of the release.
+
+### Full resource management
+
+`r3v3rs3-cli` provides direct commands to manage ports, reverse proxies, deployed applications, and database backups:
+
+```sh
+# Ports
+r3v3rs3-cli <server> port list
+r3v3rs3-cli <server> port get <id>
+r3v3rs3-cli <server> port delete <id>
+r3v3rs3-cli <server> port reset <id>
+
+# Proxies
+r3v3rs3-cli <server> proxy list
+r3v3rs3-cli <server> proxy get <id>
+r3v3rs3-cli <server> proxy status <id>
+r3v3rs3-cli <server> proxy purge-cache <id>
+r3v3rs3-cli <server> proxy delete <id>
+
+# Apps
+r3v3rs3-cli <server> app list
+r3v3rs3-cli <server> app get <id>
+r3v3rs3-cli <server> app deploy <id>
+r3v3rs3-cli <server> app rollback <id>
+r3v3rs3-cli <server> app start <id>
+r3v3rs3-cli <server> app stop <id>
+r3v3rs3-cli <server> app restart <id>
+r3v3rs3-cli <server> app delete <id>
+
+# Backups
+r3v3rs3-cli <server> backup config
+r3v3rs3-cli <server> backup list <database-id>
+r3v3rs3-cli <server> backup create <database-id>
+r3v3rs3-cli <server> backup restore <database-id> <backup-id>
+```
+
+### Declarative manifests (`apply -f`)
+
+For CI/CD pipelines and automated configuration, `r3v3rs3-cli apply -f <file>` applies a declarative YAML or JSON manifest to configure ports, proxies, and applications idempotently:
+
+```sh
+# Apply from a file
+r3v3rs3-cli http://127.0.0.1:46492 apply -f infrastructure.yaml
+
+# Apply from stdin
+cat infrastructure.yaml | r3v3rs3-cli http://127.0.0.1:46492 apply -f -
+```
+
+An example manifest in YAML:
+
+```yaml
+ports:
+  - id: http
+    port:
+      listen: /ip4/0.0.0.0/tcp/80
+      active: true
+
+proxies:
+  - id: web
+    name: "Web frontend"
+    protocol: http
+    ports: ["http"]
+    routes:
+      - host: "example.com"
+        servers:
+          - url: "http://127.0.0.1:3000"
+
+apps:
+  - spec:
+      name: "my-app"
+      domains: ["app.example.com"]
+      target:
+        type: image
+        image: "nginx:alpine"
+        port: 80
+```
 
 ## Stored data
 

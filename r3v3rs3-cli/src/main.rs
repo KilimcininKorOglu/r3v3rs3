@@ -3,6 +3,7 @@
 //! `login` runs the OAuth 2.1 authorization code flow in the browser and stores the tokens.
 //! `tools` and `call` connect to `/api/mcp` with the stored access token.
 
+mod api_client;
 mod oauth;
 
 use anyhow::{Context, bail};
@@ -46,8 +47,94 @@ enum Command {
         #[clap(default_value = "{}")]
         arguments: String,
     },
+    /// Manage listening ports.
+    #[command(subcommand)]
+    Port(PortCommand),
+    /// Manage reverse proxies.
+    #[command(subcommand)]
+    Proxy(ProxyCommand),
+    /// Manage deployed applications.
+    #[command(subcommand)]
+    App(AppCommand),
+    /// Manage database backups.
+    #[command(subcommand)]
+    Backup(BackupCommand),
+    /// Apply a declarative YAML or JSON manifest to configure ports, proxies, and apps.
+    Apply {
+        /// Path to manifest file, or '-' to read from standard input.
+        #[arg(short = 'f', long = "file")]
+        file: String,
+    },
     /// Installs the newest release of this client over the running binary.
     Update,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PortCommand {
+    /// Lists all configured ports.
+    #[command(alias = "ls")]
+    List,
+    /// Shows configuration of a port.
+    Get { id: String },
+    /// Deletes a port.
+    #[command(alias = "rm")]
+    Delete { id: String },
+    /// Resets a port listener.
+    Reset { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProxyCommand {
+    /// Lists all proxies.
+    #[command(alias = "ls")]
+    List,
+    /// Shows configuration of a proxy.
+    Get { id: String },
+    /// Shows live status of a proxy.
+    Status { id: String },
+    /// Deletes a proxy.
+    #[command(alias = "rm")]
+    Delete { id: String },
+    /// Purges cache for a proxy.
+    PurgeCache { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AppCommand {
+    /// Lists deployed applications.
+    #[command(alias = "ls")]
+    List,
+    /// Shows configuration of an application.
+    Get { id: String },
+    /// Triggers a deployment for an application.
+    Deploy { id: String },
+    /// Rolls back an application to the previous deployment.
+    Rollback { id: String },
+    /// Starts an application container.
+    Start { id: String },
+    /// Stops an application container.
+    Stop { id: String },
+    /// Restarts an application container.
+    Restart { id: String },
+    /// Deletes an application.
+    #[command(alias = "rm")]
+    Delete { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BackupCommand {
+    /// Lists backups for a database.
+    #[command(alias = "ls")]
+    List { database_id: String },
+    /// Triggers an immediate backup for a database.
+    Create { database_id: String },
+    /// Restores a database from a backup.
+    Restore {
+        database_id: String,
+        backup_id: String,
+    },
+    /// Shows backup configuration.
+    Config,
 }
 
 /// A silent client: this program prints the results itself.
@@ -105,23 +192,103 @@ async fn main() -> anyhow::Result<()> {
         .expect("failed to install the rustls crypto provider");
     let args = Args::parse();
     let client = http_client()?;
-    match args.command {
-        Command::Update => update(&client).await?,
-        _ => {
-            let server = origin(args.server.as_deref().context(
-                "this command needs the server origin, for example http://127.0.0.1:46492",
-            )?)?;
-            match args.command {
-                Command::Login => login(&client, &server).await?,
-                Command::Tools => tools(&client, &server, args.token).await?,
-                Command::Call { name, arguments } => {
-                    call(&client, &server, args.token, &name, &arguments).await?
-                }
-                Command::Update => unreachable!("handled above"),
-            }
+    if let Command::Update = args.command {
+        return update(&client).await;
+    }
+    let server =
+        origin(args.server.as_deref().context(
+            "this command needs the server origin, for example http://127.0.0.1:46492",
+        )?)?;
+    if let Command::Login = args.command {
+        return login(&client, &server).await;
+    }
+    run_with_token(&client, &server, args.token, args.command).await
+}
+
+async fn run_with_token(
+    client: &reqwest::Client,
+    server: &str,
+    token: Option<String>,
+    cmd: Command,
+) -> anyhow::Result<()> {
+    match cmd {
+        Command::Tools => tools(client, server, token).await,
+        Command::Call { name, arguments } => call(client, server, token, &name, &arguments).await,
+        Command::Login | Command::Update => unreachable!(),
+        other => {
+            let access_token = access_token_of(client, server, token).await?;
+            let api = api_client::ApiClient::new(client.clone(), server.to_string(), access_token);
+            run_api(&api, other).await
         }
     }
-    Ok(())
+}
+
+async fn run_api(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()> {
+    match cmd {
+        Command::Port(c) => run_port(api, c).await,
+        Command::Proxy(c) => run_proxy(api, c).await,
+        Command::App(c) => run_app(api, c).await,
+        Command::Backup(c) => run_backup(api, c).await,
+        Command::Apply { file } => run_apply(api, &file).await,
+        _ => unreachable!(),
+    }
+}
+
+async fn run_port(api: &api_client::ApiClient, cmd: PortCommand) -> anyhow::Result<()> {
+    match cmd {
+        PortCommand::List => api.list_ports().await,
+        PortCommand::Get { id } => api.get_port(&id).await,
+        PortCommand::Delete { id } => api.delete_port(&id).await,
+        PortCommand::Reset { id } => api.reset_port(&id).await,
+    }
+}
+
+async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Result<()> {
+    match cmd {
+        ProxyCommand::List => api.list_proxies().await,
+        ProxyCommand::Get { id } => api.get_proxy(&id).await,
+        ProxyCommand::Status { id } => api.proxy_status(&id).await,
+        ProxyCommand::Delete { id } => api.delete_proxy(&id).await,
+        ProxyCommand::PurgeCache { id } => api.purge_cache(&id).await,
+    }
+}
+
+async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result<()> {
+    match cmd {
+        AppCommand::List => api.list_apps().await,
+        AppCommand::Get { id } => api.get_app(&id).await,
+        AppCommand::Deploy { id } => api.deploy_app(&id).await,
+        AppCommand::Rollback { id } => api.rollback_app(&id).await,
+        AppCommand::Start { id } => api.start_app(&id).await,
+        AppCommand::Stop { id } => api.stop_app(&id).await,
+        AppCommand::Restart { id } => api.restart_app(&id).await,
+        AppCommand::Delete { id } => api.delete_app(&id).await,
+    }
+}
+
+async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::Result<()> {
+    match cmd {
+        BackupCommand::List { database_id } => api.list_backups(&database_id).await,
+        BackupCommand::Create { database_id } => api.create_backup(&database_id).await,
+        BackupCommand::Restore {
+            database_id,
+            backup_id,
+        } => api.restore_backup(&database_id, &backup_id).await,
+        BackupCommand::Config => api.backup_config().await,
+    }
+}
+
+async fn run_apply(api: &api_client::ApiClient, file: &str) -> anyhow::Result<()> {
+    let content = if file == "-" {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            .context("failed to read manifest from stdin")?;
+        buf
+    } else {
+        std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read manifest file: {file}"))?
+    };
+    api.apply_manifest(&content).await
 }
 
 /// Runs the OAuth flow and stores the tokens.
@@ -334,20 +501,19 @@ fn install(archive: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Reads the executable out of the tar.gz or the zip archive of this platform.
-fn unpack(archive: &[u8]) -> anyhow::Result<Vec<u8>> {
-    let name = binary_name();
-    if std::env::consts::OS == "windows" {
-        let reader = std::io::Cursor::new(archive);
-        let mut zip = zip::ZipArchive::new(reader).context("the archive is not readable")?;
-        let mut file = zip
-            .by_name(name)
-            .context("the archive holds no r3v3rs3-cli binary")?;
-        let mut bytes = Vec::new();
-        std::io::Read::read_to_end(&mut file, &mut bytes)
-            .context("the archive could not be unpacked")?;
-        return Ok(bytes);
-    }
+fn unpack_zip(archive: &[u8], name: &str) -> anyhow::Result<Vec<u8>> {
+    let reader = std::io::Cursor::new(archive);
+    let mut zip = zip::ZipArchive::new(reader).context("the archive is not readable")?;
+    let mut file = zip
+        .by_name(name)
+        .context("the archive holds no r3v3rs3-cli binary")?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes)
+        .context("the archive could not be unpacked")?;
+    Ok(bytes)
+}
+
+fn unpack_tar_gz(archive: &[u8], name: &str) -> anyhow::Result<Vec<u8>> {
     let reader = flate2::read::GzDecoder::new(archive);
     let mut tar = tar::Archive::new(reader);
     for entry in tar.entries().context("the archive is not readable")? {
@@ -365,6 +531,16 @@ fn unpack(archive: &[u8]) -> anyhow::Result<Vec<u8>> {
         }
     }
     bail!("the archive holds no r3v3rs3-cli binary")
+}
+
+/// Reads the executable out of the tar.gz or the zip archive of this platform.
+fn unpack(archive: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let name = binary_name();
+    if std::env::consts::OS == "windows" {
+        unpack_zip(archive, name)
+    } else {
+        unpack_tar_gz(archive, name)
+    }
 }
 
 #[cfg(test)]

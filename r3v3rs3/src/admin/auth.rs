@@ -236,17 +236,29 @@ pub async fn session(
     })
 }
 
-/// Accepts a request with an active admin session and adds its `Caller` to the request.
+/// Accepts a request with an active admin session or a valid OAuth Bearer token and adds its `Caller` to the request.
 pub async fn verify(
     State(state): State<AppState>,
     jar: CookieJar,
     mut request: Request,
     next: Next,
 ) -> Response {
-    let Some(token) = jar.get("token") else {
+    let token = jar.get("token").map(|c| c.value().to_string()).or_else(|| {
+        request
+            .headers()
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|val| val.to_str().ok())
+            .and_then(|val| val.strip_prefix("Bearer "))
+            .map(str::to_string)
+    });
+    let Some(token) = token else {
         return AppError::R3v3rs3(Error::Unauthorized).into_response();
     };
-    match session_caller(&state, token.value()).await {
+    let caller_res = match session_caller(&state, &token).await {
+        Ok(caller) => Ok(caller),
+        Err(_) => bearer_caller(&state, &token).await,
+    };
+    match caller_res {
         Ok(mut caller) => {
             caller.client = request
                 .extensions()
@@ -257,6 +269,25 @@ pub async fn verify(
         }
         Err(err) => AppError::R3v3rs3(err).into_response(),
     }
+}
+
+async fn bearer_caller(state: &AppState, token: &str) -> Result<Caller, Error> {
+    let username = {
+        let data = state.data.lock().await;
+        if !data.config.mcp.enabled {
+            return Err(Error::Unauthorized);
+        }
+        match data.mcp.verify(token) {
+            Some(grant) => grant.username().to_string(),
+            None => return Err(Error::Unauthorized),
+        }
+    };
+    let record = crate::sessions::SessionRecord::new(&username);
+    state
+        .accounts
+        .borrow()
+        .caller(&record)
+        .ok_or(Error::Unauthorized)
 }
 
 /// The account of an active admin session. The account must exist, and its last change must not

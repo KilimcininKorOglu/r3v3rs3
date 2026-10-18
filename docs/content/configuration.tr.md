@@ -1136,7 +1136,83 @@ r3v3rs3-cli http://127.0.0.1:46492 tools
 r3v3rs3-cli http://127.0.0.1:46492 call server_status
 ```
 
-`login`, onay sayfasını tarayıcıda açar ve token'ları yapılandırma dizinine kaydeder. Bir script, access token'ı doğrudan `--token` ile verebilir. `update` komutu, çalışan binary'nin yerine daha yeni bir release kurar ve sha256 özetini release'in checksum'larıyla doğrular.
+`login`, onay sayfasını tarayıcıda açar ve token'ları yapılandırma dizinine kaydeder. Bir script, access token'ı doğrudan `--token` ile veya `R3V3RS3_MCP_TOKEN` ortam değişkeniyle verebilir. `update` komutu, çalışan binary'nin yerine daha yeni bir release kurar ve sha256 özetini release'in checksum'larıyla doğrular.
+
+### Tam kaynak yönetimi
+
+`r3v3rs3-cli`, portları, reverse proxy'leri, dağıtılan uygulamaları ve veritabanı yedeklerini yönetmek için doğrudan alt komutlar sunar:
+
+```sh
+# Portlar
+r3v3rs3-cli <server> port list
+r3v3rs3-cli <server> port get <id>
+r3v3rs3-cli <server> port delete <id>
+r3v3rs3-cli <server> port reset <id>
+
+# Proxy'ler
+r3v3rs3-cli <server> proxy list
+r3v3rs3-cli <server> proxy get <id>
+r3v3rs3-cli <server> proxy status <id>
+r3v3rs3-cli <server> proxy purge-cache <id>
+r3v3rs3-cli <server> proxy delete <id>
+
+# Uygulamalar
+r3v3rs3-cli <server> app list
+r3v3rs3-cli <server> app get <id>
+r3v3rs3-cli <server> app deploy <id>
+r3v3rs3-cli <server> app rollback <id>
+r3v3rs3-cli <server> app start <id>
+r3v3rs3-cli <server> app stop <id>
+r3v3rs3-cli <server> app restart <id>
+r3v3rs3-cli <server> app delete <id>
+
+# Yedekler
+r3v3rs3-cli <server> backup config
+r3v3rs3-cli <server> backup list <database-id>
+r3v3rs3-cli <server> backup create <database-id>
+r3v3rs3-cli <server> backup restore <database-id> <backup-id>
+```
+
+### Deklaratif tanımlar (`apply -f`)
+
+CI/CD pipeline'ları ve betikli yönetim için `r3v3rs3-cli apply -f <dosya>`, portları, proxy'leri ve uygulamaları tek hamlede ve idempotent biçimde tanımlamak üzere YAML veya JSON manifest uygular:
+
+```sh
+# Dosyadan uygula
+r3v3rs3-cli http://127.0.0.1:46492 apply -f infrastructure.yaml
+
+# Standart girdiden uygula
+cat infrastructure.yaml | r3v3rs3-cli http://127.0.0.1:46492 apply -f -
+```
+
+Örnek bir YAML manifesti:
+
+```yaml
+ports:
+  - id: http
+    port:
+      listen: /ip4/0.0.0.0/tcp/80
+      active: true
+
+proxies:
+  - id: web
+    name: "Web frontend"
+    protocol: http
+    ports: ["http"]
+    routes:
+      - host: "example.com"
+        servers:
+          - url: "http://127.0.0.1:3000"
+
+apps:
+  - spec:
+      name: "my-app"
+      domains: ["app.example.com"]
+      target:
+        type: image
+        image: "nginx:alpine"
+        port: 80
+```
 
 ## Saklanan veriler
 
