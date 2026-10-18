@@ -214,6 +214,10 @@ pub struct AuditQuery {
     pub username: Option<String>,
     /// The id of the changed resource, or the changed username.
     pub resource_id: Option<String>,
+    /// The action of the entries.
+    pub action: Option<AuditAction>,
+    /// Free-text search matching username, resource_id, or summary.
+    pub search: Option<String>,
     /// The most entries in the response: 100 by default, at most 500.
     pub limit: Option<u32>,
 }

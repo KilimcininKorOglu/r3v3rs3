@@ -880,6 +880,7 @@ mod tests {
                 require_approval: false,
                 deploy_window: None,
                 tag_trigger: None,
+                store_app_id: None,
             },
         }
     }

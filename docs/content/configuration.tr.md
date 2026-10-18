@@ -1256,7 +1256,7 @@ Bir kaydın ne kadar tutulacağını "Denetim Kaydı Saklama Süresi" ayarı bel
 
 Denetim kaydına yazma başarısız olursa değişiklik geri alınmaz. r3v3rs3 hatayı log'a yazar.
 
-WebUI'daki Denetim Kaydı sayfası kayıtları en yeni kayıttan başlayarak listeler. Bu sayfayı yalnız admin hesabı açar. Sayfa kayıtları hesaba, kaynağa ve döneme göre filtreler. Sayfada en fazla 500 kayıt görünür.
+WebUI'daki Denetim Kaydı sayfası kayıtları en yeni kayıttan başlayarak listeler. Bu sayfayı yalnız admin hesabı açar. Sayfa kayıtları metin araması, eylem, hesap, kaynak ve döneme göre filtreler ve en fazla 500 kayıt gösterir. Filtrelenmiş kayıtları indirmek için bir **CSV İndir** butonu ve saklama süresini doğrudan sayfa üzerinden görüp ayarlamak için bir **Saklama Süresi** seçicisi sunar.
 
 `GET /api/audit` aynı kayıtları döner. Bu endpoint'i yalnız admin hesabı çağırabilir. Sorgu parametrelerinin hepsi isteğe bağlıdır:
 
@@ -1266,6 +1266,8 @@ WebUI'daki Denetim Kaydı sayfası kayıtları en yeni kayıttan başlayarak lis
 | `until` | Unix milisaniye cinsinden en geç zaman. Varsayılan değer şu andır. |
 | `username` | Kayıtların ait olduğu hesap. |
 | `resource_id` | Değişen kaynağın id'si veya değişen kullanıcı adı. |
+| `action` | Kayıtların eylemi (örneğin `login`, `deploy_app`). |
+| `search` | Hesap, kaynak id veya özet içinde serbest metin araması. |
 | `limit` | Yanıttaki en fazla kayıt sayısı. Varsayılan değer `100`, en yüksek değer `500` olur. |
 
 # Log

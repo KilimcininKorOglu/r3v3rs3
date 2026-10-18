@@ -32,6 +32,8 @@ pub struct AuditFilter {
     pub until: u64,
     pub username: Option<String>,
     pub resource_id: Option<String>,
+    pub action: Option<AuditAction>,
+    pub search: Option<String>,
     pub limit: usize,
 }
 
@@ -49,20 +51,49 @@ impl AuditFilter {
             until,
             username: query.username.clone(),
             resource_id: query.resource_id.clone(),
+            action: query.action,
+            search: query
+                .search
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
             limit: limit as usize,
         }
     }
 
     pub fn matches(&self, entry: &AuditEntry) -> bool {
         (self.since..=self.until).contains(&entry.time)
-            && self
-                .username
-                .as_ref()
-                .is_none_or(|username| *username == entry.username)
-            && self
+            && self.matches_username(&entry.username)
+            && self.matches_resource(entry.resource_id.as_deref())
+            && self.matches_action(entry.action)
+            && self.matches_search(entry)
+    }
+
+    fn matches_username(&self, username: &str) -> bool {
+        self.username.as_deref().is_none_or(|u| u == username)
+    }
+
+    fn matches_resource(&self, resource_id: Option<&str>) -> bool {
+        self.resource_id
+            .as_deref()
+            .is_none_or(|id| resource_id == Some(id))
+    }
+
+    fn matches_action(&self, action: AuditAction) -> bool {
+        self.action.is_none_or(|a| a == action)
+    }
+
+    fn matches_search(&self, entry: &AuditEntry) -> bool {
+        let Some(ref search) = self.search else {
+            return true;
+        };
+        let needle = search.to_ascii_lowercase();
+        entry.username.to_ascii_lowercase().contains(&needle)
+            || entry.summary.to_ascii_lowercase().contains(&needle)
+            || entry
                 .resource_id
                 .as_ref()
-                .is_none_or(|id| entry.resource_id.as_ref() == Some(id))
+                .is_some_and(|r| r.to_ascii_lowercase().contains(&needle))
     }
 }
 
@@ -96,8 +127,14 @@ impl AuditStore for MemoryAuditStore {
         Ok(())
     }
 
-    async fn query(&self, _filter: &AuditFilter) -> anyhow::Result<Vec<AuditEntry>> {
-        Ok(self.entries.lock().await.clone())
+    async fn query(&self, filter: &AuditFilter) -> anyhow::Result<Vec<AuditEntry>> {
+        let entries = self.entries.lock().await;
+        Ok(entries
+            .iter()
+            .filter(|entry| filter.matches(entry))
+            .take(filter.limit)
+            .cloned()
+            .collect())
     }
 
     async fn remove_before(&self, time: u64) -> anyhow::Result<()> {
@@ -241,10 +278,18 @@ impl AuditStore for SqliteAuditStore {
     }
 
     async fn query(&self, filter: &AuditFilter) -> anyhow::Result<Vec<AuditEntry>> {
+        let action_str = filter.action.and_then(|a| {
+            serde_json::to_value(a)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+        });
+        let search_pattern = filter.search.as_ref().map(|s| format!("%{s}%"));
         let rows = sqlx::query(
             "SELECT entry FROM audit_log
             WHERE time BETWEEN ?1 AND ?2 AND (?3 IS NULL OR username = ?3)
             AND (?5 IS NULL OR json_extract(entry, '$.resource_id') = ?5)
+            AND (?6 IS NULL OR json_extract(entry, '$.action') = ?6)
+            AND (?7 IS NULL OR username LIKE ?7 OR json_extract(entry, '$.resource_id') LIKE ?7 OR json_extract(entry, '$.summary') LIKE ?7)
             ORDER BY time DESC LIMIT ?4",
         )
         .bind(sql_int(filter.since))
@@ -252,6 +297,8 @@ impl AuditStore for SqliteAuditStore {
         .bind(filter.username.as_deref())
         .bind(sql_int(filter.limit as u64))
         .bind(filter.resource_id.as_deref())
+        .bind(action_str.as_deref())
+        .bind(search_pattern.as_deref())
         .fetch_all(self.pool().await?)
         .await?;
         rows.iter()
@@ -334,6 +381,8 @@ mod tests {
             until: u64::MAX,
             username: None,
             resource_id: None,
+            action: None,
+            search: None,
             limit: 10,
         }
     }
@@ -369,6 +418,30 @@ mod tests {
             ..all_entries()
         };
         assert_eq!(times(store.query(&resource).await?), [7_000]);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_log_database_filters_by_action_and_search() -> anyhow::Result<()> {
+        let (store, path) = filled_store().await?;
+        let mut custom = entry(8_000, "operator");
+        custom.action = AuditAction::DeployApp;
+        custom.summary = "special deployment summary".into();
+        store.append(&custom).await?;
+
+        let by_action = AuditFilter {
+            action: Some(AuditAction::DeployApp),
+            ..all_entries()
+        };
+        assert_eq!(times(store.query(&by_action).await?), [8_000]);
+
+        let by_search = AuditFilter {
+            search: Some("special deployment".into()),
+            ..all_entries()
+        };
+        assert_eq!(times(store.query(&by_search).await?), [8_000]);
+
         std::fs::remove_file(path)?;
         Ok(())
     }

@@ -1256,7 +1256,7 @@ The "Audit Log Retention" setting sets how long an entry stays. The default is `
 
 A failed write to the audit log does not undo the change. r3v3rs3 logs the error.
 
-The Audit Log page of the WebUI lists the entries, starting with the newest. Only an admin opens the page. The page filters the entries by account, resource and period, and shows at most 500 entries.
+The Audit Log page of the WebUI lists the entries, starting with the newest. Only an admin opens the page. The page filters the entries by keyword search, action, account, resource and period, and shows at most 500 entries. It provides an **Export CSV** button to download the filtered entries, as well as an in-page **Retention** selector to view and adjust how long entries are kept.
 
 `GET /api/audit` returns the same entries. Only an admin account can call it. Each query parameter is optional:
 
@@ -1266,6 +1266,8 @@ The Audit Log page of the WebUI lists the entries, starting with the newest. Onl
 | `until` | The latest time in Unix milliseconds. The default is the current time. |
 | `username` | The account of the entries. |
 | `resource_id` | The id of the changed resource, or the changed username. |
+| `action` | The action of the entries (for example `login`, `deploy_app`). |
+| `search` | Free-text search matching username, resource id, or summary. |
 | `limit` | The most entries in the response. The default is `100` and the maximum is `500`. |
 
 # Logging
