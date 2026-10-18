@@ -425,6 +425,14 @@ Agent, 1 saniyeden 60 saniyeye kadar uzayan bir beklemeden sonra yeniden bağlan
 
 `DELETE /api/targets/{id}`, uygulaması olmayan bir hedefi siler ve agent'ının bağlantısını keser. Uygulaması olan hedef `409 target_in_use`, yerel hedef `403 target_read_only` yanıtını alır. Sertifikası hiçbir hedefe ait olmayan agent log'a `the master closed the connection before its first request` yazar ve bağlanmayı denemeye devam eder.
 
+### Agent'a Uzaktan Kendi Başına Güncelleme
+
+Master sunucu yeni bir sürüme güncellendiğinde, güncel `r3v3rs3` çalıştırılabilir ikili dosyasını bağlı agent host'larına itebilir:
+
+- **Otomatik Güncelleme**: Sürümü master sürümünden eski olan bir agent bağlandığında, master yeni ikili dosyayı çoklu TLS bağlantısı üzerinden otomatik olarak iter. Agent ikili dosyayı alır, diskteki çalıştırılabilir dosyasını yenisiyle değiştirir ve temiz bir şekilde yeniden başlar (systemd aracılığıyla).
+- **Elle Güncelleme**: **Hedefler** sayfasında bir admin, bağlı bir agent satırındaki **Güncelle** butonuna veya tüm bağlı hedeflere en son ikili dosyayı itmek için **Tüm Agent'ları Güncelle** butonuna tıklayabilir.
+- **Yönetim API'si**: `POST /api/targets/{id}/upgrade` belirli bir agent'a güncellemeyi iter, `POST /api/targets/upgrade` ise tüm eski sürümlü bağlı agent'ları günceller.
+
 ### Çoklu Hedef Replika Dağıtımı
 
 Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde replikalar halinde dağıtılabilir:
@@ -535,6 +543,8 @@ Admin hesabı ayrıca şunları görür:
 - Listenin altındaki **Agent hedefi ekle** formu. **Ekle** hedefi oluşturur ve **Token** değerini, agent'ın `install.sh` komutu ve `docker run` komutuyla birlikte sayfanın üstünde bir kez gösterir. Sayfadan ayrılmadan önce bunları kopyalayın.
 - Bir agent hedefinin satırındaki **Yeni token**. Onaydan sonra yeni bir kayıt token'ı oluşturur.
 - Bir agent hedefinin satırındaki **Sil**. Onaydan sonra hedefi siler.
+- Bir bağlı agent hedefinin satırındaki **Güncelle**. En son sunucu ikili dosyasını agent'a iter ve agent'ı yeniden başlatır.
+- Bağlı agent'lar varken listenin üstündeki **Tüm Agent'ları Güncelle** butonu. Tüm bağlı agent'lara güncellemeyi iter.
 
 `agent_port` ayarlı değilse ekleme ve yeni token işlemleri `400 agent_port_missing` yanıtını alır.
 
@@ -544,7 +554,9 @@ Admin hesabı ayrıca şunları görür:
 |---|---|---|
 | `GET /api/targets` | Read | Uygulamaları çalıştıran Docker host'ları ve agent'larının durumu. |
 | `POST /api/targets` | Admin | Bir agent hedefi ekler ve kayıt token'ını bir kez döndürür. |
+| `POST /api/targets/upgrade` | Admin | Bağlı tüm eski sürümlü agent hedeflerine en güncel ikili dosyayı iter. |
 | `POST /api/targets/{id}/token` | Admin | Bir agent hedefinin yeni kayıt token'ını döndürür. |
+| `POST /api/targets/{id}/upgrade` | Admin | Belirtilen agent hedefine en güncel ikili dosyayı iterek hedefin agent'ını günceller. |
 | `DELETE /api/targets/{id}` | Admin | Uygulaması olmayan bir agent hedefini siler ve agent'ının bağlantısını keser. |
 | `GET /api/registries` | Read | İmaj çekme için yapılandırılmış konteyner registry'leri. |
 | `POST /api/registries` | Admin | Konteyner registry kimlik bilgisi ekler. |

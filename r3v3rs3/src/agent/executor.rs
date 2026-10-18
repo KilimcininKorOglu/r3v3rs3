@@ -29,11 +29,28 @@ const MAX_PAYLOAD: u64 = MAX_CONTEXT_BYTES + (64 << 20);
 pub struct Executor {
     runtime: Arc<dyn ContainerRuntime>,
     compose: AgentCompose,
+    target_exe: Option<std::path::PathBuf>,
+    restart_on_upgrade: bool,
 }
 
 impl Executor {
     pub fn new(runtime: Arc<dyn ContainerRuntime>, compose: AgentCompose) -> Self {
-        Self { runtime, compose }
+        Self {
+            runtime,
+            compose,
+            target_exe: None,
+            restart_on_upgrade: true,
+        }
+    }
+
+    pub fn with_target_exe(mut self, path: std::path::PathBuf) -> Self {
+        self.target_exe = Some(path);
+        self
+    }
+
+    pub fn with_restart(mut self, restart: bool) -> Self {
+        self.restart_on_upgrade = restart;
+        self
     }
 
     /// Reads one request from a stream of the master and answers it. A tunnel keeps the stream
@@ -51,6 +68,10 @@ impl Executor {
             AgentRequest::ComposeConfig(request) => {
                 let checkout = read_payload(&mut stream, MAX_PAYLOAD).await?;
                 self.compose.config(&request, checkout).await
+            }
+            AgentRequest::Upgrade { version } => {
+                let binary = read_payload(&mut stream, MAX_PAYLOAD).await?;
+                self.upgrade_binary(binary, &version).await
             }
             request => self.execute(request).await,
         };
@@ -223,6 +244,46 @@ impl Executor {
             .with_context(|| format!("the container {container} does not serve port {port}"))?;
         Ok(TcpStream::connect(("127.0.0.1", host_port)).await?)
     }
+
+    async fn upgrade_binary(&self, binary: Vec<u8>, version: &str) -> anyhow::Result<AgentOutput> {
+        if binary.len() < 1024 {
+            bail!("upgrade binary is too small ({} bytes)", binary.len());
+        }
+        let current_exe = match &self.target_exe {
+            Some(path) => path.clone(),
+            None => std::env::current_exe().context("failed to determine executable path")?,
+        };
+        let parent = current_exe
+            .parent()
+            .context("current executable has no parent directory")?;
+        let temp_path = parent.join(format!(".r3v3rs3-upgrade-{}", std::process::id()));
+
+        if let Err(err) = write_executable(&temp_path, &current_exe, &binary).await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            bail!("failed to install upgrade binary: {err:#}");
+        }
+
+        tracing::info!(%version, "agent binary updated, will restart");
+        if self.restart_on_upgrade {
+            tokio::spawn(async {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                std::process::exit(0);
+            });
+        }
+        Ok(AgentOutput::Done)
+    }
+}
+
+async fn write_executable(
+    temp_path: &std::path::Path,
+    current_exe: &std::path::Path,
+    binary: &[u8],
+) -> anyhow::Result<()> {
+    tokio::fs::write(temp_path, binary).await?;
+    use std::os::unix::fs::PermissionsExt;
+    tokio::fs::set_permissions(temp_path, std::fs::Permissions::from_mode(0o755)).await?;
+    tokio::fs::rename(temp_path, current_exe).await?;
+    Ok(())
 }
 
 fn done(_: ()) -> AgentOutput {

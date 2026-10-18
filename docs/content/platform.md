@@ -425,6 +425,14 @@ The agent connects again after a pause that grows from 1 to 60 seconds. When it 
 
 `DELETE /api/targets/{id}` deletes a target without apps and disconnects its agent. A target with an app answers `409 target_in_use`, and the local target answers `403 target_read_only`. An agent whose certificate belongs to no target logs `the master closed the connection before its first request` and keeps trying to connect.
 
+### Agent Remote Self-Upgrade
+
+When the master server is updated to a newer version, it can push the updated `r3v3rs3` executable binary to connected agent hosts:
+
+- **Automatic Upgrade**: When an agent connects whose version is older than the master's version, the master automatically pushes the new binary over the multiplexed TLS link. The agent receives the binary, replaces its executable on disk, and cleanly restarts (via systemd).
+- **Manual Upgrade**: On the **Targets** page, an admin can click **Upgrade** on an individual connected agent or **Upgrade All Agents** to push the latest binary to all online targets.
+- **Admin API**: `POST /api/targets/{id}/upgrade` pushes the upgrade to an individual agent, and `POST /api/targets/upgrade` upgrades all outdated online agents.
+
 ### Multi-Target Replica Deployment
 
 An app can deploy replicas across multiple agent targets and the local target simultaneously:
@@ -535,6 +543,8 @@ An admin account also sees:
 - **Add an agent target** below the list. **Add** creates the target and shows its **Token** once at the top of the page, with the `install.sh` command and the `docker run` command of the agent. Copy them before you leave the page.
 - **New token** on the row of an agent target, which creates a new enrollment token after a confirmation.
 - **Delete** on the row of an agent target, which deletes it after a confirmation.
+- **Upgrade** on the row of an online agent target, which pushes the current server binary to the agent and restarts it.
+- **Upgrade All Agents** above the list when online agents exist, which pushes the update to all connected agents.
 
 Without `agent_port` the add and the new token actions answer `400 agent_port_missing`.
 
@@ -546,7 +556,9 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 | `POST /api/store/refresh` | Edit | Downloads the catalog from the repository and applies it. |
 | `GET /api/targets` | Read | The Docker hosts that run apps, with the state of their agents. |
 | `POST /api/targets` | Admin | Adds an agent target and returns its enrollment token once. |
+| `POST /api/targets/upgrade` | Admin | Pushes the latest binary to all connected outdated agent targets. |
 | `POST /api/targets/{id}/token` | Admin | Returns a new enrollment token of an agent target. |
+| `POST /api/targets/{id}/upgrade` | Admin | Pushes the latest server binary to an agent target to upgrade it. |
 | `DELETE /api/targets/{id}` | Admin | Deletes an agent target without apps and disconnects its agent. |
 | `GET /api/registries` | Read | The configured container registries for image pulls. |
 | `POST /api/registries` | Admin | Adds container registry credentials. |

@@ -193,6 +193,8 @@ pub struct Platform {
     renewing: Mutex<()>,
     /// The public address that the Git providers send the webhook requests of the apps to.
     public_url: std::sync::RwLock<Option<PublicUrl>>,
+    /// Records the last auto-upgrade attempt time for each target to avoid repeated attempts.
+    agent_upgrade_attempts: std::sync::Mutex<HashMap<ShortId, std::time::Instant>>,
 }
 
 /// The public address of the config, or the address that an earlier release stored in the
@@ -256,6 +258,7 @@ impl Platform {
             pending: oauth::PendingAuthorizations::default(),
             renewing: Mutex::new(()),
             public_url: std::sync::RwLock::new(public_url),
+            agent_upgrade_attempts: std::sync::Mutex::new(HashMap::new()),
         })
     }
 

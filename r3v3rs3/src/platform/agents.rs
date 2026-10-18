@@ -5,11 +5,11 @@ use super::store::Write;
 use super::{Platform, new_id, not_found};
 use crate::agent::listener::{AgentDirectory, AgentListener, LinkTiming};
 use crate::agent::pki::{AgentPki, fingerprint, pem_certificates};
-use crate::agent::protocol::{EnrollRequest, Enrolled};
+use crate::agent::protocol::{AgentOutput, AgentRequest, EnrollRequest, Enrolled};
 use crate::agent::token::{EnrollmentToken, secret_hash};
 use crate::audit::AuditRecord;
 use crate::notify::NotificationEvent;
-use anyhow::{Context, anyhow};
+use anyhow::{Context, anyhow, bail};
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
@@ -121,6 +121,90 @@ impl Platform {
         Ok(target)
     }
 
+    /// Pushes the current r3v3rs3 binary to an online agent target to upgrade it.
+    pub async fn upgrade_target(&self, id: ShortId) -> anyhow::Result<TargetEntry> {
+        self.agent_target(id).await?;
+        let link = self.agents.link(id).ok_or(Error::AgentOffline { id })?;
+        let current_exe = std::env::current_exe().context("failed to determine executable path")?;
+        let binary = tokio::fs::read(&current_exe)
+            .await
+            .context("failed to read executable binary")?;
+        let version = env!("CARGO_PKG_VERSION").to_string();
+
+        let output = link
+            .request_with_payload(
+                &AgentRequest::Upgrade {
+                    version: version.clone(),
+                },
+                &binary,
+            )
+            .await?;
+        match output {
+            AgentOutput::Done => {}
+            other => bail!("unexpected response from agent: {other:?}"),
+        }
+
+        self.target(id).await
+    }
+
+    /// Pushes the current r3v3rs3 binary to all online agent targets that have a different version.
+    pub async fn upgrade_all_targets(&self) -> anyhow::Result<Vec<TargetEntry>> {
+        let targets = self.targets().await?;
+        let current_version = env!("CARGO_PKG_VERSION");
+        let mut upgraded = Vec::new();
+        for target in targets {
+            if target.kind == TargetKind::Agent
+                && target.online
+                && target.version.as_deref() != Some(current_version)
+                && let Ok(entry) = self.upgrade_target(target.id).await
+            {
+                upgraded.push(entry);
+            }
+        }
+        Ok(upgraded)
+    }
+
+    async fn auto_upgrade(&self, target: ShortId) {
+        let Some(status) = self.agents.status(target) else {
+            return;
+        };
+        let current_version = env!("CARGO_PKG_VERSION");
+        if status.version == current_version {
+            return;
+        }
+        if !self.allow_upgrade_attempt(target) {
+            return;
+        }
+        tracing::info!(%target, agent_version = status.version, current_version, "auto-upgrading outdated agent");
+        match self.upgrade_target(target).await {
+            Ok(entry) => {
+                if let Some(audit) = &self.audit {
+                    let record = AuditRecord::new(AuditAction::UpgradeTarget)
+                        .id(entry.id)
+                        .summary(format!("{} -> {current_version}", entry.name));
+                    audit.record("", None, record);
+                }
+            }
+            Err(err) => {
+                tracing::warn!(%target, %err, "auto-upgrade failed for agent target");
+            }
+        }
+    }
+
+    fn allow_upgrade_attempt(&self, target: ShortId) -> bool {
+        let mut attempts = self
+            .agent_upgrade_attempts
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if let Some(last) = attempts.get(&target)
+            && last.elapsed() < std::time::Duration::from_secs(300)
+        {
+            return false;
+        }
+        attempts.insert(target, std::time::Instant::now());
+        true
+    }
+
     async fn target_token(
         &self,
         id: ShortId,
@@ -219,6 +303,7 @@ impl AgentDirectory for Platform {
     async fn online(&self, target: ShortId) {
         self.notify_agent(NotificationEvent::AgentOnline, target)
             .await;
+        self.auto_upgrade(target).await;
     }
 
     async fn offline(&self, target: ShortId) {

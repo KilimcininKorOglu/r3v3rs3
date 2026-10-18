@@ -338,8 +338,10 @@ fn platform_routes() -> OpenApiRouter<AppState> {
             "/targets",
             OpenApiRouter::new()
                 .routes(routes!(platform::list_targets, platform::add_target))
+                .routes(routes!(platform::upgrade_all_targets))
                 .routes(routes!(platform::delete_target))
-                .routes(routes!(platform::new_target_token)),
+                .routes(routes!(platform::new_target_token))
+                .routes(routes!(platform::upgrade_target)),
         )
         .nest(
             "/registries",

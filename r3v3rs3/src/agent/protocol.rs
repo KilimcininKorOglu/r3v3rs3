@@ -130,6 +130,10 @@ pub enum AgentRequest {
     ComposeRemove {
         app: ShortId,
     },
+    /// Upgrades the agent binary. The new binary follows the frame as a payload.
+    Upgrade {
+        version: String,
+    },
 }
 
 /// One deployment of a Compose app. The files are relative to the deployment directory

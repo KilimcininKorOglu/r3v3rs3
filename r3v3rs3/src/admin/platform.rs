@@ -164,6 +164,51 @@ pub async fn delete_target(
     Ok(Json(()))
 }
 
+/// Upgrades the agent of a target by pushing the latest server binary to it.
+#[utoipa::path(
+    post,
+    path = "/{id}/upgrade",
+    tag = "platform",
+    operation_id = "upgrade_target",
+    params(("id" = ShortId, Path, description = "Target id.")),
+    responses((status = 200, description = "The target with its updated state.", body = TargetEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn upgrade_target(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<TargetEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let updated = platform.upgrade_target(id).await.map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UpgradeTarget)
+        .id(id)
+        .summary(format!("{} -> {}", updated.name, env!("CARGO_PKG_VERSION")));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(updated))
+}
+
+/// Upgrades all connected agents by pushing the latest server binary to them.
+#[utoipa::path(
+    post,
+    path = "/upgrade",
+    tag = "platform",
+    operation_id = "upgrade_all_targets",
+    responses((status = 200, description = "The upgraded targets.", body = Vec<TargetEntry>), ErrorResponses)
+)]
+pub async fn upgrade_all_targets(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Vec<TargetEntry>>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let upgraded = platform
+        .upgrade_all_targets()
+        .await
+        .map_err(platform_error)?;
+    Ok(Json(upgraded))
+}
+
 /// Lists the apps.
 #[utoipa::path(
     get,

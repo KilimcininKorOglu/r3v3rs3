@@ -162,6 +162,8 @@ fn executor(dir: &std::path::Path) -> Executor {
     let runtime = Arc::new(FakeRuntime::default());
     let compose = Arc::new(FakeCompose::new(runtime.clone()));
     Executor::new(runtime, AgentCompose::new(compose, dir.join("compose")))
+        .with_restart(false)
+        .with_target_exe(dir.join("r3v3rs3-bin"))
 }
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -329,5 +331,35 @@ async fn the_heartbeat_keeps_the_contact_time_current() -> anyhow::Result<()> {
     assert!(later.last_seen_at > first.last_seen_at);
     running.abort();
     std::fs::remove_dir_all(dir)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_agent_can_be_upgraded_with_a_new_binary() -> anyhow::Result<()> {
+    let master = Master::start().await?;
+    let (agent, dir) = master.agent("upgrade");
+    let identity = agent.identity(Some(&master.token(target()))).await?;
+    let running = tokio::spawn(async move { agent.run(&identity).await });
+    master.wait_online(target(), true).await?;
+
+    let link = master.registry.link(target()).context("link")?;
+    let mut payload = vec![0x7fu8, b'E', b'L', b'F'];
+    payload.resize(2048, 0x42);
+
+    let output = link
+        .request_with_payload(
+            &super::protocol::AgentRequest::Upgrade {
+                version: "2.0.4".to_string(),
+            },
+            &payload,
+        )
+        .await?;
+    assert_eq!(output, super::protocol::AgentOutput::Done);
+
+    let installed = tokio::fs::read(dir.join("r3v3rs3-bin")).await?;
+    assert_eq!(installed, payload);
+
+    running.abort();
+    let _ = std::fs::remove_dir_all(dir);
     Ok(())
 }

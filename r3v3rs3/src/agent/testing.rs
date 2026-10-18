@@ -33,7 +33,11 @@ impl TestAgent {
             hex::encode(rand::random::<[u8; 8]>())
         ));
         let agent_compose = AgentCompose::new(compose.clone(), dir.clone());
-        let executor = Arc::new(Executor::new(runtime.clone(), agent_compose));
+        let executor = Arc::new(
+            Executor::new(runtime.clone(), agent_compose)
+                .with_restart(false)
+                .with_target_exe(dir.join("r3v3rs3-bin")),
+        );
         let (master_io, agent_io) = tokio::io::duplex(1 << 20);
         let task = tokio::spawn(async move {
             let _ = serve(agent_io.compat(), move |stream| {

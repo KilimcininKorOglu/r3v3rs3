@@ -5,8 +5,8 @@
 use super::Route;
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{
-    FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback, save_result,
-    submit_callback, text_input,
+    BUTTON_CLASS, FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback,
+    save_result, submit_callback, text_input,
 };
 use super::settings::{fetch_json, send_request};
 use crate::API_ENDPOINT;
@@ -102,11 +102,32 @@ pub fn targets() -> Html {
     html! {
         <>
             { token }
+            { upgrade_all_button(locale, &targets, admin) }
             { list_card(locale, targets.is_some(), "targets.empty", &COLUMNS, &rows) }
             if admin {
                 { form_view(locale, &form, &notice, &targets) }
             }
         </>
+    }
+}
+
+fn upgrade_all_button(locale: Locale, targets: &TargetList, admin: bool) -> Html {
+    let has_online_agents = targets
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .any(|t| t.kind == TargetKind::Agent && t.online);
+    if !admin || !has_online_agents {
+        return html! {};
+    }
+    let question = locale.t("targets.confirm_upgrade_all").to_string();
+    let onclick = upgrade_on_click(locale, question, format!("{PATH}/upgrade"), targets);
+    html! {
+        <div class="mb-4 flex justify-end">
+            <button type="button" class={BUTTON_CLASS} {onclick}>
+                {locale.t("targets.upgrade_all")}
+            </button>
+        </div>
     }
 }
 
@@ -170,12 +191,46 @@ fn agent_actions(
     );
     let question = locale.tf("targets.confirm_new_token", &[("name", name)]);
     let renew = new_token_on_click(locale, question, format!("{path}/token"), notice, targets);
+    let upgrade = target.online.then(|| {
+        let question = locale.tf("targets.confirm_upgrade", &[("name", name)]);
+        let onclick = upgrade_on_click(locale, question, format!("{path}/upgrade"), targets);
+        html! {
+            <a class={LINK_CLASS} {onclick}>{locale.t("targets.upgrade")}</a>
+        }
+    });
     html! {
         <>
+            { upgrade }
             <a class={LINK_CLASS} onclick={renew}>{locale.t("targets.new_token")}</a>
             <a class={DANGER_LINK_CLASS} onclick={delete}>{locale.t("common.delete")}</a>
         </>
     }
+}
+
+fn upgrade_on_click(
+    locale: Locale,
+    question: String,
+    path: String,
+    targets: &TargetList,
+) -> Callback<MouseEvent> {
+    let reload = reload_callback(targets, PATH);
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let (path, reload) = (path.clone(), reload.clone());
+        dialog::confirm_then(locale, question.clone(), async move {
+            let request = Request::post(&format!("{API_ENDPOINT}{path}"));
+            match fetch_json::<serde_json::Value>(locale, request).await {
+                Ok(_) => {
+                    dialog::message(locale, locale.t("targets.upgrade_started"), Icon::Success)
+                        .await;
+                    reload.emit(());
+                }
+                Err(err) => {
+                    dialog::message(locale, &err, Icon::Error).await;
+                }
+            }
+        });
+    })
 }
 
 /// Asks `question`, replaces the token of the target at `path` and shows the new token.

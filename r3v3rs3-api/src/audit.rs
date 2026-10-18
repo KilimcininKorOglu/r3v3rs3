@@ -121,10 +121,12 @@ pub enum AuditAction {
     UpdateRegistry,
     /// An account deleted container registry credentials.
     DeleteRegistry,
+    /// An account pushed an upgrade to an agent target.
+    UpgradeTarget,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 70] = [
+    pub const ALL: [AuditAction; 72] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -170,6 +172,7 @@ impl AuditAction {
         Self::DeleteTarget,
         Self::NewTargetToken,
         Self::EnrollAgent,
+        Self::UpgradeServer,
         Self::NewAppWebhookSecret,
         Self::DeleteAppWebhookSecret,
         Self::AppWebhook,
@@ -195,6 +198,7 @@ impl AuditAction {
         Self::AddRegistry,
         Self::UpdateRegistry,
         Self::DeleteRegistry,
+        Self::UpgradeTarget,
     ];
 }
 
