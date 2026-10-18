@@ -526,6 +526,16 @@ impl Platform {
         self.store.deployments(id, DEPLOYMENT_LIST_LIMIT).await
     }
 
+    /// The latest deployments across all apps, the newest first.
+    pub async fn recent_deployments(&self, limit: u32) -> anyhow::Result<Vec<DeploymentEntry>> {
+        self.store.recent_deployments(limit).await
+    }
+
+    /// The running deployment of every app.
+    pub async fn running_deployments(&self) -> anyhow::Result<Vec<store::RunningDeployment>> {
+        self.store.running_deployments().await
+    }
+
     /// The last `tail` lines of the container log of the running deployment of an app. An app
     /// without a running deployment has an empty log.
     pub async fn app_log(&self, id: ShortId, tail: u32) -> anyhow::Result<AppLog> {

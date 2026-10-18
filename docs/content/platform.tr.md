@@ -443,7 +443,16 @@ Agent, 1 saniyeden 60 saniyeye kadar uzayan bir beklemeden sonra yeniden bağlan
 
 ## WebUI
 
-Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **App Store**, **Veritabanları**, **Hedefler**, **Git Sağlayıcıları** ve **Registry'ler** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** ve **Registry'ler** sayfaları Edit/Admin izni olan hesaba görünür. Orada bağlantı veya registry ekleme, değiştirme ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
+**Kontrol Paneli** (`/`), sistem durumunun, portların, proxy'lerin, uygulamaların, veritabanlarının, hedeflerin, disk depolama alanının ve mevcut güncellemelerin tek ekranda özetini sunar. Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **App Store**, **Veritabanları**, **Hedefler**, **Git Sağlayıcıları** ve **Registry'ler** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** ve **Registry'ler** sayfaları Edit/Admin izni olan hesaba görünür. Orada bağlantı veya registry ekleme, değiştirme ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
+
+### Kontrol Paneli
+
+**Kontrol Paneli**, sistem operasyonlarını tek bir birleşik ekranda özetler:
+- **Durum Kartları**: Portlar, proxy'ler, uygulamalar (güncelleme rozetleriyle), veritabanları ve agent hedefleri için canlı sayılar ve aktif oranları; doğrudan ilgili yönetim sayfasına bağlanır.
+- **Disk Alanı**: Kullanılan ve kullanılabilir disk kapasitesini gigabayt ve yüzde olarak gösteren gerçek zamanlı depolama göstergesi.
+- **Son Dağıtımlar**: Tüm uygulamalardaki en son deployment işleri; çalışma durumunu, tetikleyici kaynağını ve başlama zamanını görüntüler.
+- **Hızlı Bağlantılar**: Proxy, port ve uygulama oluşturmak veya App Store kataloğunu keşfetmek için doğrudan kısayollar.
+- **Admin API**: `GET /api/dashboard` uç noktası `DashboardSummary` nesnesini döndürür.
 
 ### Uygulamalar
 

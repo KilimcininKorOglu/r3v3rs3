@@ -59,6 +59,7 @@ mod ban;
 mod cdn;
 mod certs;
 mod config;
+mod dashboard;
 mod databases;
 mod discovery;
 mod dns_credentials;
@@ -547,6 +548,10 @@ fn state_routes() -> OpenApiRouter<AppState> {
         .nest(
             "/app_info",
             OpenApiRouter::new().routes(routes!(app_info::get)),
+        )
+        .nest(
+            "/dashboard",
+            OpenApiRouter::new().routes(routes!(dashboard::get)),
         )
         .nest(
             "/cdn",

@@ -574,6 +574,19 @@ impl PlatformStore {
         .await?;
         rows.iter().map(deployment_of).collect()
     }
+
+    /// The latest deployments across all apps, the newest first.
+    pub async fn recent_deployments(&self, limit: u32) -> anyhow::Result<Vec<DeploymentEntry>> {
+        let rows = sqlx::query(
+            "SELECT id, app_id, status, trigger, commit_sha, image_digest, username, message,
+                started_at, finished_at
+            FROM deployments ORDER BY started_at DESC, id LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(deployment_of).collect()
+    }
 }
 
 impl PlatformStore {

@@ -10,6 +10,7 @@ pub mod cidr;
 pub mod client_ip;
 pub mod compression;
 pub mod container;
+pub mod dashboard;
 pub mod discovery;
 pub mod error;
 pub mod event;

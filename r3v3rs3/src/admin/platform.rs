@@ -1243,7 +1243,7 @@ fn diff_catalog_version(
     }
 }
 
-fn check_catalog_update(
+pub(super) fn check_catalog_update(
     app: &AppEntry,
     catalog: &r3v3rs3_api::store::StoreCatalog,
 ) -> Option<r3v3rs3_api::platform::CatalogUpdateStatus> {

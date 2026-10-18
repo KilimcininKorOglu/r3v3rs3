@@ -72,6 +72,13 @@ const GROUPS: &[MenuGroup] = &[
         name: "nav.group_proxy",
         items: &[
             MenuItem {
+                name: "nav.dashboard",
+                icon: "/assets/icons/server.svg",
+                route: Route::Home,
+                access: Access::All,
+                subs: NO_SUBS,
+            },
+            MenuItem {
                 name: "nav.ports",
                 icon: "/assets/icons/wifi.svg",
                 route: Route::Ports,

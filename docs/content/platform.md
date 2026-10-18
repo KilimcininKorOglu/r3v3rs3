@@ -443,7 +443,16 @@ When pulling private container images (such as from private Docker Hub repositor
 
 ## WebUI
 
-The **Platform** group of the sidebar holds the **Apps**, **App Store**, **Databases**, **Targets**, **Git Providers** and **Registries** pages, and appears only while the platform is on. The **Git Providers** and **Registries** pages appear for an account with the Edit/Admin permission. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+The **Dashboard** (`/`) provides a single-screen overview of the system state, ports, proxies, apps, databases, targets, disk storage space, and available updates. The **Platform** group of the sidebar holds the **Apps**, **App Store**, **Databases**, **Targets**, **Git Providers** and **Registries** pages, and appears only while the platform is on. The **Git Providers** and **Registries** pages appear for an account with the Edit/Admin permission. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+
+### Dashboard
+
+The **Dashboard** summarizes system operations on a single unified screen:
+- **Stat Cards**: Live counts and active ratios for ports, proxies, apps (with update badges), databases, and agent targets, linking directly to each management section.
+- **Disk Space**: Real-time storage consumption gauge showing used and available disk capacity in gigabytes and percentage.
+- **Recent Deployments**: The latest deployment jobs across all apps, displaying execution status, trigger source, and start time.
+- **Quick Links**: Direct shortcuts to create proxies, ports, and apps, or explore the catalog in the App Store.
+- **Admin API**: `GET /api/dashboard` returns the `DashboardSummary` object.
 
 ### Apps
 

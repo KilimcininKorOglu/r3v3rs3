@@ -22,6 +22,7 @@ mod app_view;
 mod app_webhook;
 mod audit;
 pub mod cert_list;
+mod dashboard;
 mod database_backups;
 mod databases;
 mod dns_credentials;
@@ -171,7 +172,7 @@ impl Route {
 
 pub fn switch(routes: Route) -> Html {
     match routes {
-        Route::Home => html! { <Redirect<Route> to={Route::Ports}/> },
+        Route::Home => html! { <dashboard::Dashboard /> },
         Route::Login => html! { <login::Login /> },
         Route::Logout => html! { <logout::Logout /> },
         Route::Ports => html! { <port_list::PortList /> },
