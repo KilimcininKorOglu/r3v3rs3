@@ -59,6 +59,9 @@ enum Command {
     /// Manage database backups.
     #[command(subcommand)]
     Backup(BackupCommand),
+    /// Manage platform operations.
+    #[command(subcommand)]
+    Platform(PlatformCommand),
     /// Apply a declarative YAML or JSON manifest to configure ports, proxies, and apps.
     Apply {
         /// Path to manifest file, or '-' to read from standard input.
@@ -135,6 +138,12 @@ pub enum BackupCommand {
     },
     /// Shows backup configuration.
     Config,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PlatformCommand {
+    /// Rotates the platform encryption key and re-encrypts all stored secrets.
+    RotateKey,
 }
 
 /// A silent client: this program prints the results itself.
@@ -229,8 +238,15 @@ async fn run_api(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()
         Command::Proxy(c) => run_proxy(api, c).await,
         Command::App(c) => run_app(api, c).await,
         Command::Backup(c) => run_backup(api, c).await,
+        Command::Platform(c) => run_platform(api, c).await,
         Command::Apply { file } => run_apply(api, &file).await,
         _ => unreachable!(),
+    }
+}
+
+async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyhow::Result<()> {
+    match cmd {
+        PlatformCommand::RotateKey => api.rotate_platform_key().await,
     }
 }
 

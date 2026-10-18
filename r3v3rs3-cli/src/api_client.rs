@@ -327,6 +327,16 @@ impl ApiClient {
         print_json(&res)
     }
 
+    // --- Platform operations ---
+
+    pub async fn rotate_platform_key(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::POST, "/api/platform/key/rotate", None)
+            .await?;
+        println!("Platform encryption key rotated successfully.");
+        print_json(&res)
+    }
+
     // --- Apply operation ---
 
     pub async fn apply_manifest(&self, content: &str) -> anyhow::Result<()> {

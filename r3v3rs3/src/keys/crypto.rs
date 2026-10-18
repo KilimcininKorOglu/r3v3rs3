@@ -79,6 +79,13 @@ impl ClusterKeys {
         self.primary.id
     }
 
+    /// Sets `new_primary` as the primary key that seals, and moves the previous primary key to
+    /// the front of `older` so that it still opens.
+    pub fn rotate(&mut self, new_primary: ClusterKey) {
+        let old_primary = std::mem::replace(&mut self.primary, new_primary);
+        self.older.insert(0, old_primary);
+    }
+
     pub fn seal(&self, kv_key: &str, plaintext: &[u8]) -> anyhow::Result<Vec<u8>> {
         let mut nonce = [0; NONCE_LEN];
         self.random
@@ -190,6 +197,21 @@ mod tests {
 
         let error = old.open("k", &resealed).unwrap_err().to_string();
         assert!(error.contains("unknown encryption key"), "{error}");
+    }
+
+    #[test]
+    fn rotation_moves_primary_to_older_and_seals_with_new_key() {
+        let mut keyset = keys(&[1]);
+        let sealed = keyset.seal("k", b"secret").unwrap();
+        let new_key = ClusterKey::new(&[2; KEY_LEN]).unwrap();
+        let new_id = new_key.id();
+        keyset.rotate(new_key);
+        assert_eq!(keyset.primary_id(), new_id);
+        // Old sealed value opens with the rotated keyset
+        assert_eq!(keyset.open("k", &sealed).unwrap(), b"secret");
+        // New seal uses new primary key
+        let resealed = keyset.seal("k", b"secret").unwrap();
+        assert_eq!(sealed_key_id(&resealed), Some(new_id));
     }
 
     #[test]

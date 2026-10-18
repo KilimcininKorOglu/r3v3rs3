@@ -116,8 +116,10 @@ mod tests {
             name: "shop".to_string(),
             engine: "postgres".to_string(),
             size: 4,
-            sha256: "feed".to_string(),
+            sha256: "deadbeef".to_string(),
             created_at: 1,
+            verified_at: None,
+            verification_status: None,
         }
     }
 

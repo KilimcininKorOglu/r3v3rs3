@@ -241,7 +241,7 @@ mod tests {
     /// Stores the access token `token` of the connection, as an authorization does.
     async fn connect(platform: &Platform, id: ShortId, token: &str) -> anyhow::Result<()> {
         let sealed = platform
-            .keys
+            .keys()
             .seal(&connection_aad(id, "access_token"), token.as_bytes())?;
         let tokens = StoredTokens {
             access_token: &sealed,

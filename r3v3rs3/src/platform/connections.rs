@@ -53,7 +53,7 @@ impl Platform {
             updated_at: now,
         };
         let aad = connection_aad(entry.id, "client_secret");
-        let sealed = self.keys.seal(&aad, secret.as_bytes())?;
+        let sealed = self.keys().seal(&aad, secret.as_bytes())?;
         match self.store.insert_git_connection(&entry, &sealed).await? {
             Write::Done => Ok(entry),
             Write::NameTaken => Err(connection_name_taken(&entry).into()),
@@ -86,7 +86,7 @@ impl Platform {
         let sealed = request
             .client_secret
             .map(|secret| {
-                self.keys
+                self.keys()
                     .seal(&connection_aad(id, "client_secret"), secret.as_bytes())
             })
             .transpose()?;
@@ -212,7 +212,7 @@ mod tests {
             .await?
             .context("secrets")?;
         assert!(!stored.client_secret.windows(6).any(|w| w == b"s3cr3t"));
-        let opened = platform.keys.open(
+        let opened = platform.keys().open(
             &connection_aad(entry.id, "client_secret"),
             &stored.client_secret,
         )?;
@@ -245,7 +245,10 @@ mod tests {
             .await?
             .context("secrets")?;
         let aad = connection_aad(entry.id, "client_secret");
-        assert_eq!(platform.keys.open(&aad, &stored.client_secret)?, b"s3cr3t");
+        assert_eq!(
+            platform.keys().open(&aad, &stored.client_secret)?,
+            b"s3cr3t"
+        );
 
         let deleted = platform.delete_git_connection(entry.id).await?;
         assert_eq!(deleted.id, entry.id);

@@ -231,7 +231,9 @@ impl Platform {
     /// Stores a new webhook secret of an app and returns it.
     async fn create_webhook_secret(&self, id: ShortId) -> anyhow::Result<String> {
         let secret = hex::encode(rand::random::<[u8; 32]>());
-        let sealed = self.keys.seal(&webhook_secret_aad(id), secret.as_bytes())?;
+        let sealed = self
+            .keys()
+            .seal(&webhook_secret_aad(id), secret.as_bytes())?;
         self.store.set_secret(id, WEBHOOK_SECRET, &sealed).await?;
         Ok(secret)
     }
@@ -259,7 +261,7 @@ impl Platform {
             return Ok(None);
         };
         let secret = self
-            .keys
+            .keys()
             .open(&webhook_secret_aad(id), &sealed)
             .context("failed to open the webhook secret")?;
         Ok(Some(secret))
@@ -345,7 +347,7 @@ impl Platform {
     }
 }
 
-fn webhook_secret_aad(app: ShortId) -> String {
+pub(super) fn webhook_secret_aad(app: ShortId) -> String {
     format!("app/{app}/secret/{WEBHOOK_SECRET}")
 }
 

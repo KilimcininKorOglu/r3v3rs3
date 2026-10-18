@@ -510,6 +510,39 @@ fn platform_section(
     fields: &UseStateHandle<Option<Fields>>,
     errors: &HashMap<String, String>,
 ) -> Html {
+    let rotate_on_click = {
+        Callback::from(move |event: MouseEvent| {
+            event.prevent_default();
+            dialog::confirm_then(
+                locale,
+                locale.t("settings.rotate_key_question").to_string(),
+                async move {
+                    match Request::post(&format!("{API_ENDPOINT}/platform/key/rotate"))
+                        .send()
+                        .await
+                    {
+                        Ok(resp) if resp.ok() => {
+                            let _ = dialog::message(
+                                locale,
+                                locale.t("settings.rotate_key_success"),
+                                dialog::Icon::Success,
+                            )
+                            .await;
+                        }
+                        Ok(resp) => {
+                            let _ =
+                                dialog::message(locale, &resp.status_text(), dialog::Icon::Error)
+                                    .await;
+                        }
+                        Err(err) => {
+                            let _ = dialog::message(locale, &err.to_string(), dialog::Icon::Error)
+                                .await;
+                        }
+                    }
+                },
+            );
+        })
+    };
     html! {
         <>
             { section_title(locale.t("settings.platform_title")) }
@@ -518,6 +551,16 @@ fn platform_section(
             { text_field(fields, errors, locale.t("settings.platform_docker"), "platform_docker", "unix:///var/run/docker.sock", |f| &mut f.platform_docker) }
             { text_field(fields, errors, locale.t("settings.platform_proxy_ports"), "platform_proxy_ports", "http,https", |f| &mut f.platform_proxy_ports) }
             <p class={HINT_CLASS}>{locale.t("settings.platform_proxy_ports_hint")}</p>
+            <div class="mt-4">
+                <button
+                    type="button"
+                    onclick={rotate_on_click}
+                    class="px-3 py-1.5 rounded bg-neutral-200 dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-sm font-medium"
+                >
+                    {locale.t("settings.rotate_key")}
+                </button>
+                <p class={HINT_CLASS}>{locale.t("settings.rotate_key_hint")}</p>
+            </div>
         </>
     }
 }

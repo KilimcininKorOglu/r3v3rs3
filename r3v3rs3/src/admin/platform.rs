@@ -24,8 +24,8 @@ use r3v3rs3_api::{
     platform::{
         AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
         DeploymentEntry, DeploymentTrigger, EnvEntry, GitTokenRequest, ImageUpdateStatus,
-        MetricsQuery, ScheduledCommandRequest, ScheduledCommandRunResult, TargetEntry,
-        TargetRequest, TargetToken, WebhookSecret,
+        KeyRotationReport, MetricsQuery, ScheduledCommandRequest, ScheduledCommandRunResult,
+        TargetEntry, TargetRequest, TargetToken, WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -1293,4 +1293,29 @@ fn apply_catalog_upgrade(
         };
     }
     Ok(())
+}
+
+/// Rotates the platform encryption key and re-encrypts all stored secrets in SQLite tables.
+#[utoipa::path(
+    post,
+    path = "/key/rotate",
+    tag = "platform",
+    operation_id = "rotate_platform_key",
+    responses((status = 200, description = "Key rotation report.", body = KeyRotationReport), ErrorResponses)
+)]
+pub async fn rotate_platform_key(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<KeyRotationReport>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let report = platform
+        .rotate_platform_key()
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::RotatePlatformKey)
+        .summary(format!("new key: {}", report.new_key_id));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(report))
 }

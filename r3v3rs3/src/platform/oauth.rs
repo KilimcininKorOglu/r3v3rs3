@@ -333,11 +333,13 @@ impl Platform {
         let access_aad = connection_aad(id, "access_token");
         let refresh_aad = connection_aad(id, "refresh_token");
         let refresh = match &grant.refresh_token {
-            Some(token) => Some(self.keys.seal(&refresh_aad, token.as_bytes())?),
+            Some(token) => Some(self.keys().seal(&refresh_aad, token.as_bytes())?),
             None => old_refresh,
         };
         Ok(SealedTokens {
-            access: self.keys.seal(&access_aad, grant.access_token.as_bytes())?,
+            access: self
+                .keys()
+                .seal(&access_aad, grant.access_token.as_bytes())?,
             refresh,
             expires_at: grant
                 .expires_in
@@ -366,7 +368,7 @@ impl Platform {
         field: &str,
         sealed: &[u8],
     ) -> anyhow::Result<String> {
-        let value = self.keys.open(&connection_aad(id, field), sealed)?;
+        let value = self.keys().open(&connection_aad(id, field), sealed)?;
         String::from_utf8(value).with_context(|| format!("the {field} is not UTF-8"))
     }
 }

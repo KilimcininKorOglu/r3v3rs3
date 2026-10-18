@@ -24,6 +24,7 @@ mod publish;
 #[cfg(test)]
 mod remote_tests;
 mod repositories;
+pub mod rotate;
 mod s3;
 pub mod scheduler;
 pub mod store;
@@ -153,9 +154,10 @@ pub(super) struct Backend {
 
 pub struct Platform {
     store: PlatformStore,
-    keys: ClusterKeys,
+    keys: std::sync::RwLock<ClusterKeys>,
     local: Arc<dyn ContainerRuntime>,
     config: PlatformConfig,
+    config_dir: PathBuf,
     command: mpsc::Sender<ServerCommand>,
     /// The proxies and the issues of the last snapshot that the server got.
     sent: Mutex<Option<publish::Published>>,
@@ -234,9 +236,10 @@ impl Platform {
             agents,
             audit,
             store,
-            keys,
+            keys: std::sync::RwLock::new(keys),
             local: Arc::new(local),
             config: config.platform.clone(),
+            config_dir: config_dir.to_path_buf(),
             command,
             sent: Mutex::new(None),
             busy: std::sync::Mutex::new(HashSet::new()),
@@ -253,6 +256,13 @@ impl Platform {
             renewing: Mutex::new(()),
             public_url: std::sync::RwLock::new(public_url),
         })
+    }
+
+    pub(crate) fn keys(&self) -> std::sync::RwLockReadGuard<'_, ClusterKeys> {
+        match self.keys.read() {
+            Ok(keys) => keys,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     fn busy_apps(&self) -> std::sync::MutexGuard<'_, HashSet<ShortId>> {
@@ -473,7 +483,7 @@ impl Platform {
     pub async fn set_git_token(&self, id: ShortId, token: &str) -> anyhow::Result<AppEntry> {
         self.app(id).await?;
         check_git_token(token)?;
-        let sealed = self.keys.seal(&git_token_aad(id), token.as_bytes())?;
+        let sealed = self.keys().seal(&git_token_aad(id), token.as_bytes())?;
         self.store.set_secret(id, GIT_TOKEN, &sealed).await?;
         self.app(id).await
     }
@@ -499,11 +509,11 @@ impl Platform {
     }
 
     /// The Git token of an app, opened for one clone.
-    async fn git_token(&self, id: ShortId) -> anyhow::Result<Option<String>> {
+    pub(crate) async fn git_token(&self, id: ShortId) -> anyhow::Result<Option<String>> {
         let Some(sealed) = self.store.secret(id, GIT_TOKEN).await? else {
             return Ok(None);
         };
-        let token = self.keys.open(&git_token_aad(id), &sealed)?;
+        let token = self.keys().open(&git_token_aad(id), &sealed)?;
         Ok(Some(
             String::from_utf8(token).context("the Git token is not UTF-8")?,
         ))
@@ -653,7 +663,7 @@ impl Platform {
         let sealed = match (entry.value, current.get(&key)) {
             (Some(value), _) => {
                 check_env_value(&key, &value)?;
-                self.keys.seal(&env_aad(id, &key), value.as_bytes())?
+                self.keys().seal(&env_aad(id, &key), value.as_bytes())?
             }
             // Only a secret variable keeps its value, so a variable does not turn secret with
             // the value that the API showed before.
@@ -667,15 +677,23 @@ impl Platform {
         })
     }
 
-    fn open_value(&self, id: ShortId, var: &StoredEnv) -> anyhow::Result<String> {
-        let value = self.keys.open(&env_aad(id, &var.key), &var.sealed)?;
+    pub(crate) fn open_value(&self, id: ShortId, var: &StoredEnv) -> anyhow::Result<String> {
+        let value = self.keys().open(&env_aad(id, &var.key), &var.sealed)?;
         String::from_utf8(value).context("an environment value is not UTF-8")
+    }
+
+    /// Rotates the platform encryption key: generates a new primary key, moves the previous
+    /// primary to older keys, re-seals all stored secrets in SQLite, and persists the new key.
+    pub async fn rotate_platform_key(
+        &self,
+    ) -> anyhow::Result<r3v3rs3_api::platform::KeyRotationReport> {
+        rotate::run_key_rotation(self.store.pool(), &self.config_dir, &self.keys).await
     }
 }
 
 /// The associated data of a sealed value binds it to its app and its key, so a value copied to
 /// another row does not open.
-fn env_aad(app: ShortId, key: &str) -> String {
+pub(super) fn env_aad(app: ShortId, key: &str) -> String {
     format!("app/{app}/env/{key}")
 }
 
@@ -692,7 +710,7 @@ pub fn allocate_host_port() -> anyhow::Result<u16> {
     Ok(listener.local_addr()?.port())
 }
 
-fn git_token_aad(app: ShortId) -> String {
+pub(super) fn git_token_aad(app: ShortId) -> String {
     format!("app/{app}/secret/{GIT_TOKEN}")
 }
 
@@ -776,7 +794,12 @@ async fn open_keys(config_dir: &Path) -> anyhow::Result<ClusterKeys> {
     if !tokio::fs::try_exists(&key_path).await? {
         write_new_key_file(&key_path).await?;
     }
-    load_keys(std::slice::from_ref(&key_path)).await
+    let mut paths = vec![key_path];
+    let old_key_path = config_dir.join("platform.key.old");
+    if tokio::fs::try_exists(&old_key_path).await? {
+        paths.push(old_key_path);
+    }
+    load_keys(&paths).await
 }
 
 /// The CA of the agent link. Only a server with an agent port needs it.

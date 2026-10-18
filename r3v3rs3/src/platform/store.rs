@@ -281,6 +281,10 @@ impl PlatformStore {
         Ok(Self { pool })
     }
 
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
     /// Adds the local target unless it exists.
     pub async fn ensure_local_target(&self, now: u64) -> anyhow::Result<()> {
         sqlx::query(

@@ -194,14 +194,14 @@ impl Platform {
             created_at: now,
             updated_at: now,
         };
-        let secret = self.keys.seal(
+        let secret = self.keys().seal(
             &connection_aad(id, "client_secret"),
             app.client_secret.as_bytes(),
         )?;
         let stored = StoredGithubApp {
             html_url: app.html_url,
             private_key: self
-                .keys
+                .keys()
                 .seal(&connection_aad(id, "private_key"), app.pem.as_bytes())?,
             installation_id: None,
         };
@@ -268,7 +268,7 @@ impl Platform {
         {
             Ok(granted) => {
                 let aad = connection_aad(entry.id, "access_token");
-                let sealed = self.keys.seal(&aad, granted.token.as_bytes())?;
+                let sealed = self.keys().seal(&aad, granted.token.as_bytes())?;
                 let tokens = StoredTokens {
                     access_token: &sealed,
                     refresh_token: None,
@@ -305,7 +305,7 @@ impl Platform {
         app: &StoredGithubApp,
     ) -> anyhow::Result<String> {
         let aad = connection_aad(entry.id, "private_key");
-        let pem = String::from_utf8(self.keys.open(&aad, &app.private_key)?)
+        let pem = String::from_utf8(self.keys().open(&aad, &app.private_key)?)
             .context("the private key of the GitHub App is not UTF-8")?;
         app_jwt(&entry.client_id, &pem, unix_ms() / 1000)
     }
