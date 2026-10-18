@@ -431,6 +431,10 @@ pub struct AppSpec {
     /// run automatically. Deployments outside this window require approval.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deploy_window: Option<String>,
+
+    /// Optional tag pattern (e.g. `v*`, `release-*`) that triggers an automatic deployment when pushed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_trigger: Option<String>,
 }
 
 impl AppSpec {
@@ -440,12 +444,32 @@ impl AppSpec {
         }
         self.validate_domains()?;
         self.validate_compose()?;
+        self.validate_optional_fields()?;
+        self.validate_volumes()?;
+        self.validate_database()
+    }
+
+    fn validate_optional_fields(&self) -> Result<(), Error> {
         if let Some(path) = &self.health_check_path {
             validate_health_path(path)?;
         }
         if let Some(window) = &self.deploy_window {
             validate_deploy_window(window)?;
         }
+        self.validate_tag_trigger()
+    }
+
+    fn validate_tag_trigger(&self) -> Result<(), Error> {
+        let Some(pattern) = &self.tag_trigger else {
+            return Ok(());
+        };
+        if matches!(self.source, AppSource::Image { .. }) {
+            return Err(invalid("a tag trigger requires a git or compose source"));
+        }
+        validate_tag_pattern(pattern)
+    }
+
+    fn validate_volumes(&self) -> Result<(), Error> {
         let mut targets = HashSet::new();
         if let Some(mount) = self
             .volumes
@@ -457,7 +481,7 @@ impl AppSpec {
                 mount.target.as_str()
             )));
         }
-        self.validate_database()
+        Ok(())
     }
 
     /// A database app is an image app without domains: its clients reach it on the host port,
@@ -578,6 +602,63 @@ fn parse_window_minutes(s: &str) -> Option<u32> {
     let (h_str, m_str) = s.split_once(':')?;
     let (h, m) = (h_str.parse::<u32>().ok()?, m_str.parse::<u32>().ok()?);
     Some(h * 60 + m)
+}
+
+/// Validates a git tag pattern.
+pub fn validate_tag_pattern(pattern: &str) -> Result<(), Error> {
+    if pattern.is_empty() || pattern.len() > 128 {
+        return Err(invalid("tag pattern must be between 1 and 128 characters"));
+    }
+    if !pattern.chars().all(is_valid_tag_char) {
+        return Err(invalid(
+            "tag pattern contains invalid characters (allowed: alphanumeric, ., -, _, *, ?, /, +, @)",
+        ));
+    }
+    Ok(())
+}
+
+fn is_valid_tag_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '*' | '?' | '/' | '+' | '@')
+}
+
+fn char_matches(p: u8, t: u8) -> bool {
+    p == t || p == b'?'
+}
+
+fn skip_trailing_stars(p: &[u8], mut idx: usize) -> usize {
+    while idx < p.len() && p[idx] == b'*' {
+        idx += 1;
+    }
+    idx
+}
+
+/// Matches a git tag against a pattern supporting `*` (zero or more chars) and `?` (single char).
+pub fn matches_tag_pattern(pattern: &str, tag: &str) -> bool {
+    let p = pattern.as_bytes();
+    let t = tag.as_bytes();
+    let mut p_idx = 0;
+    let mut t_idx = 0;
+    let mut star = None;
+    let mut match_idx = 0;
+
+    while t_idx < t.len() {
+        if p_idx < p.len() && char_matches(p[p_idx], t[t_idx]) {
+            p_idx += 1;
+            t_idx += 1;
+        } else if p_idx < p.len() && p[p_idx] == b'*' {
+            star = Some(p_idx);
+            p_idx += 1;
+            match_idx = t_idx;
+        } else if let Some(s) = star {
+            p_idx = s + 1;
+            match_idx += 1;
+            t_idx = match_idx;
+        } else {
+            return false;
+        }
+    }
+
+    skip_trailing_stars(p, p_idx) == p.len()
 }
 
 fn invalid(reason: &str) -> Error {
@@ -1156,5 +1237,29 @@ mod tests {
         assert!(is_within_deploy_window("09:00-17:00", 12, 0));
         assert!(!is_within_deploy_window("09:00-17:00", 8, 59));
         assert!(!is_within_deploy_window("09:00-17:00", 17, 0));
+    }
+
+    #[test]
+    fn tag_pattern_validation_and_matching() {
+        assert!(validate_tag_pattern("v*").is_ok());
+        assert!(validate_tag_pattern("release-*").is_ok());
+        assert!(validate_tag_pattern("*").is_ok());
+        assert!(validate_tag_pattern("v1.2.3").is_ok());
+        assert!(validate_tag_pattern("").is_err());
+        assert!(validate_tag_pattern("v 1.0").is_err());
+        assert!(validate_tag_pattern("v$1").is_err());
+
+        assert!(matches_tag_pattern("v*", "v1.0.0"));
+        assert!(matches_tag_pattern("v*", "v"));
+        assert!(!matches_tag_pattern("v*", "1.0.0"));
+        assert!(matches_tag_pattern("*", "anything"));
+        assert!(matches_tag_pattern("release-*", "release-2026.1"));
+        assert!(!matches_tag_pattern("release-*", "rel-2026.1"));
+        assert!(matches_tag_pattern("*-prod", "v1.0-prod"));
+        assert!(!matches_tag_pattern("*-prod", "v1.0-dev"));
+        assert!(matches_tag_pattern("v?.*", "v1.2"));
+        assert!(!matches_tag_pattern("v?.*", "v10.2"));
+        assert!(matches_tag_pattern("v1.0", "v1.0"));
+        assert!(!matches_tag_pattern("v1.0", "v1.0.1"));
     }
 }

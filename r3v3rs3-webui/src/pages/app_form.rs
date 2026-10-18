@@ -88,6 +88,7 @@ pub struct AppForm {
     pub auto_deploy: bool,
     pub require_approval: bool,
     pub deploy_window: String,
+    pub tag_trigger: String,
 }
 
 impl Default for AppForm {
@@ -119,6 +120,7 @@ impl Default for AppForm {
             auto_deploy: false,
             require_approval: false,
             deploy_window: String::new(),
+            tag_trigger: String::new(),
         }
     }
 }
@@ -176,6 +178,7 @@ impl AppForm {
             auto_deploy: spec.auto_deploy,
             require_approval: spec.require_approval,
             deploy_window: spec.deploy_window.clone().unwrap_or_default(),
+            tag_trigger: spec.tag_trigger.clone().unwrap_or_default(),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -244,6 +247,7 @@ impl AppForm {
             auto_deploy: self.auto_deploy,
             require_approval: self.require_approval,
             deploy_window: non_empty(&self.deploy_window).map(str::to_string),
+            tag_trigger: non_empty(&self.tag_trigger).map(str::to_string),
         };
         spec.validate().map_err(|err| locale.error_message(&err))?;
         Ok(AppRequest {
@@ -587,6 +591,7 @@ fn source_view(
         SourceKind::Git => html! {
             <>
                 { repository_view(locale, form, connections) }
+                { text_field(locale, form, "apps.tag_trigger", Some("apps.tag_trigger_hint"), |f| &mut f.tag_trigger) }
                 { text_field(locale, form, "apps.context", Some("apps.context_hint"), |f| &mut f.context) }
                 { text_field(locale, form, "apps.dockerfile", Some("apps.dockerfile_hint"), |f| &mut f.dockerfile) }
             </>
@@ -594,6 +599,7 @@ fn source_view(
         SourceKind::Compose => html! {
             <>
                 { repository_view(locale, form, connections) }
+                { text_field(locale, form, "apps.tag_trigger", Some("apps.tag_trigger_hint"), |f| &mut f.tag_trigger) }
                 { text_field(locale, form, "apps.compose_file", Some("apps.compose_file_hint"), |f| &mut f.compose_file) }
                 { text_field(locale, form, "apps.service", Some("apps.service_hint"), |f| &mut f.service) }
             </>
@@ -986,5 +992,25 @@ mod tests {
             assert_eq!(parse_restart(value), restart);
         }
         assert_eq!(parse_kind("other"), SourceKind::Image);
+    }
+
+    #[test]
+    fn tag_trigger_in_form() {
+        let form = AppForm {
+            kind: SourceKind::Git,
+            repository: "https://github.com/owner/shop.git".into(),
+            tag_trigger: "v*".into(),
+            ..image_form()
+        };
+        let request = form.parse(Locale::En).unwrap();
+        assert_eq!(request.spec.tag_trigger.as_deref(), Some("v*"));
+
+        let invalid_pattern = AppForm {
+            kind: SourceKind::Git,
+            repository: "https://github.com/owner/shop.git".into(),
+            tag_trigger: "v* invalid".into(),
+            ..image_form()
+        };
+        assert!(invalid_pattern.parse(Locale::En).is_err());
     }
 }

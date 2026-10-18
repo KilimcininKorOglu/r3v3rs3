@@ -7,12 +7,14 @@ use anyhow::Context as _;
 use hmac::{Hmac, KeyInit, Mac};
 use hyper::header::HeaderMap;
 use r3v3rs3_api::error::Error;
+use r3v3rs3_api::git::GitRef;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, AppSource, DeploymentTrigger, HookOutcome, HookResponse, WebhookSecret,
 };
 use serde_derive::Deserialize;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -135,37 +137,78 @@ struct Push {
     /// GitHub and Gitea mark the push that deletes the branch.
     #[serde(default)]
     deleted: bool,
+    #[serde(default)]
+    after: Option<String>,
 }
 
-/// Whether the push deploys the app. A Git or Compose app deploys for a push to its branch or to
-/// the tag of its branch field. An image app has no branch, so every push deploys it again. A
-/// generic request carries no event, so it always deploys.
-fn deploys(signature: &Signature, app: &AppEntry, body: &[u8]) -> Result<bool, Error> {
+/// What a push request should deploy.
+#[derive(Debug, PartialEq, Eq)]
+enum PushTarget {
+    Deploy(Option<GitRef>),
+    Ignore,
+}
+
+/// Whether the push deploys the app, and with which target ref (if specified).
+fn push_target(signature: &Signature, app: &AppEntry, body: &[u8]) -> Result<PushTarget, Error> {
     if !signature.is_push() {
-        return Ok(false);
+        return Ok(PushTarget::Ignore);
     }
     let (AppSource::Git { branch, .. } | AppSource::Compose { branch, .. }) = &app.spec.source
     else {
-        return Ok(true);
+        return Ok(PushTarget::Deploy(None));
     };
     if signature.provider == Provider::Generic {
-        return Ok(true);
+        return Ok(PushTarget::Deploy(None));
     }
-    let branch = branch.as_str();
     let push: Push = serde_json::from_slice(body).map_err(|err| Error::InvalidWebhookPayload {
         reason: err.to_string(),
     })?;
-    let named = ["refs/heads/", "refs/tags/"]
-        .iter()
-        .any(|prefix| push.git_ref.strip_prefix(prefix) == Some(branch));
-    Ok(named && !push.deleted)
+    if push.deleted || is_empty_commit(push.after.as_deref()) {
+        return Ok(PushTarget::Ignore);
+    }
+    check_push_ref(
+        branch.as_str(),
+        app.spec.tag_trigger.as_deref(),
+        &push.git_ref,
+    )
+}
+
+fn is_empty_commit(after: Option<&str>) -> bool {
+    after == Some("0000000000000000000000000000000000000000")
+}
+
+fn check_push_ref(
+    branch: &str,
+    tag_trigger: Option<&str>,
+    git_ref: &str,
+) -> Result<PushTarget, Error> {
+    if let Some(tag) = git_ref.strip_prefix("refs/tags/") {
+        if let Some(pattern) = tag_trigger
+            && r3v3rs3_api::platform::matches_tag_pattern(pattern, tag)
+        {
+            let target = tag.parse().map_err(|_| Error::InvalidWebhookPayload {
+                reason: format!("invalid tag name: {tag}"),
+            })?;
+            return Ok(PushTarget::Deploy(Some(target)));
+        }
+        if tag == branch {
+            return Ok(PushTarget::Deploy(None));
+        }
+        return Ok(PushTarget::Ignore);
+    }
+    if let Some(head) = git_ref.strip_prefix("refs/heads/")
+        && head == branch
+    {
+        return Ok(PushTarget::Deploy(None));
+    }
+    Ok(PushTarget::Ignore)
 }
 
 impl Platform {
-    fn queued_hooks(&self) -> std::sync::MutexGuard<'_, std::collections::HashSet<ShortId>> {
+    fn queued_hooks(&self) -> std::sync::MutexGuard<'_, HashMap<ShortId, Option<GitRef>>> {
         match self.queued.lock() {
             Ok(queued) => queued,
-            // The set stays valid when a holder panics.
+            // The map stays valid when a holder panics.
             Err(poisoned) => poisoned.into_inner(),
         }
     }
@@ -238,21 +281,29 @@ impl Platform {
         let signature = Signature::of(headers)
             .filter(|signature| signature.verify(&secret, body))
             .ok_or(Error::Unauthorized)?;
-        let response = if deploys(&signature, &app, body)? {
-            self.hook_deploy(id).await?
-        } else {
-            HookResponse {
+        let response = match push_target(&signature, &app, body)? {
+            PushTarget::Deploy(target_ref) => self.hook_deploy(id, target_ref).await?,
+            PushTarget::Ignore => HookResponse {
                 outcome: HookOutcome::Ignored,
                 deployment: None,
-            }
+            },
         };
         Ok((app, signature.provider, response))
     }
 
     /// Deploys the app, or queues one deployment while a deployment of the app runs.
-    async fn hook_deploy(self: &Arc<Self>, id: ShortId) -> anyhow::Result<HookResponse> {
+    async fn hook_deploy(
+        self: &Arc<Self>,
+        id: ShortId,
+        target_ref: Option<GitRef>,
+    ) -> anyhow::Result<HookResponse> {
         match self
-            .deploy(id, HOOK_USERNAME, DeploymentTrigger::Webhook)
+            .deploy_with_ref(
+                id,
+                HOOK_USERNAME,
+                DeploymentTrigger::Webhook,
+                target_ref.clone(),
+            )
             .await
         {
             Ok(deployment) => Ok(HookResponse {
@@ -260,7 +311,7 @@ impl Platform {
                 deployment: Some(deployment),
             }),
             Err(err) if matches!(err.downcast_ref(), Some(Error::AppBusy { .. })) => {
-                self.queued_hooks().insert(id);
+                self.queued_hooks().insert(id, target_ref);
                 Ok(HookResponse {
                     outcome: HookOutcome::Queued,
                     deployment: None,
@@ -278,11 +329,11 @@ impl Platform {
         id: ShortId,
     ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(async move {
-            if !self.queued_hooks().remove(&id) {
+            let Some(target_ref) = self.queued_hooks().remove(&id) else {
                 return;
-            }
-            // The deployment takes the latest commit of the branch, so it covers every queued push.
-            if let Err(err) = self.hook_deploy(id).await {
+            };
+            // The deployment takes the latest commit of the branch or tag, so it covers every queued push.
+            if let Err(err) = self.hook_deploy(id, target_ref).await {
                 error!(app = %id, "failed to start the queued webhook deployment: {err:#}");
             }
         })
@@ -521,6 +572,59 @@ mod tests {
             assert!(tokio::time::Instant::now() < deadline, "{deployments:?}");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn tag_trigger_deploys_matching_tags_on_git_app() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let mut req = git_request("tag-app");
+        req.spec.tag_trigger = Some("v*".to_string());
+        let app = platform.add_app(req, 1).await?;
+        let (_, secret) = platform.new_webhook_secret(app.id).await?;
+        let signed = |event, body: &[u8]| github(&secret.secret, event, body);
+
+        // Non-matching tag is ignored
+        let other_tag = push("refs/tags/beta-1");
+        let result = platform
+            .hook(app.id, &signed("push", &other_tag), &other_tag)
+            .await?;
+        assert_eq!(outcome(&result), (Provider::GitHub, HookOutcome::Ignored));
+
+        // Deleted matching tag is ignored
+        let deleted_tag = br#"{"ref":"refs/tags/v1.0.1","deleted":true}"#;
+        let result = platform
+            .hook(app.id, &signed("push", deleted_tag), deleted_tag)
+            .await?;
+        assert_eq!(outcome(&result), (Provider::GitHub, HookOutcome::Ignored));
+
+        // Matching tag push deploys
+        let tag_body = push("refs/tags/v1.0.0");
+        let result = platform
+            .hook(app.id, &signed("push", &tag_body), &tag_body)
+            .await?;
+        assert_eq!(outcome(&result), (Provider::GitHub, HookOutcome::Deployed));
+        let deployment = result.2.deployment.unwrap();
+        assert_eq!(deployment.trigger, DeploymentTrigger::Webhook);
+
+        // Verify deployment snapshot recorded the tag as the branch
+        let (snap_spec, _) = platform
+            .store
+            .deployment_snapshot(deployment.id)
+            .await?
+            .unwrap();
+        if let AppSource::Git { branch, .. } = snap_spec.source {
+            assert_eq!(branch.as_str(), "v1.0.0");
+        } else {
+            panic!("expected Git source");
+        }
+
+        // Another push while app is busy gets queued
+        let branch_body = push("refs/heads/main");
+        let result = platform
+            .hook(app.id, &signed("push", &branch_body), &branch_body)
+            .await?;
+        assert_eq!(outcome(&result), (Provider::GitHub, HookOutcome::Queued));
         Ok(())
     }
 }

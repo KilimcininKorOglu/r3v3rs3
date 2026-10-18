@@ -1103,6 +1103,8 @@
   "apps.require_approval_hint": "Etkinleştirildiğinde, deployment'lar başlamadan önce manuel onay bekler.",
   "apps.deploy_window": "Deployment Penceresi (UTC)",
   "apps.deploy_window_hint": "Günlük UTC saat aralığı (örn. 22:00-04:00). Bu aralık dışındaki deployment'lar onay bekler.",
+  "apps.tag_trigger": "Etiket Tetikleyici",
+  "apps.tag_trigger_hint": "Eşleşen etiket (tag) push edildiğinde otomatik deploy kuralı (örn. v*, release-*).",
   "deployments.title": "{name} deployment'ları",
   "deployments.empty": "Uygulamanın henüz deployment'ı yok.",
   "deployments.trigger": "Tetikleyen",

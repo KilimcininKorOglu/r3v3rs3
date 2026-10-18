@@ -120,6 +120,7 @@ An app with a `git` source builds its image from a branch of a repository with t
 | `context` | `.` | The directory of the repository that Docker receives as the build context. |
 | `dockerfile` | `Dockerfile` | The Dockerfile, relative to `context`. |
 | `connection` | none | The id of a [Git provider](#git-providers) connection. The connection clones the repository and installs its webhook. |
+| `tag_trigger` | none | An optional tag pattern (e.g. `v*`, `release-*`) that automatically deploys matching tags when pushed. |
 
 A private repository needs a [Git provider](#git-providers) connection or an access token of the app. An access token is, for example, a GitHub fine-grained token with read access to the contents of the repository, a GitLab token with the `read_repository` scope, or a Gitea token with the `read:repository` scope. `PUT /api/apps/{id}/git_token` with `{"token": "..."}` sets the token, and `DELETE /api/apps/{id}/git_token` deletes it. r3v3rs3 encrypts the token with `platform.key`, and the admin API never returns it: an app shows only `"git_token_set": true`. git receives the token as HTTP basic authentication with the user name `x-access-token`, through an environment variable instead of the URL or the command line.
 
@@ -148,6 +149,7 @@ An app with a `compose` source starts the Docker Compose file of a branch of a r
 | `file` | the first of `compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml` | The Compose file, relative to the root of the repository. Its relative paths resolve against its own directory. |
 | `service` | | The service that receives the requests of the domains on `port`. A service name has lowercase letters, digits and `_.-`. |
 | `connection` | none | The id of a [Git provider](#git-providers) connection, as for a Git source. |
+| `tag_trigger` | none | An optional tag pattern (e.g. `v*`, `release-*`) that automatically deploys matching tags when pushed. |
 
 The server needs the `git` binary and the `docker` binary with the Compose plugin. r3v3rs3 runs `docker compose` with the Compose project `r3v3rs3-<app id>` and adds a file that sets for the service of `service`:
 
@@ -249,6 +251,7 @@ The provider sends its events to `POST /hooks/apps/{id}` on the address of the a
 Which request deploys:
 
 - A Git or a Compose app deploys for a push whose `ref` is `refs/heads/<branch>` or `refs/tags/<branch>`, where `<branch>` is the branch field of the app. A push that deletes the branch does not deploy.
+- When `tag_trigger` is configured (for example `v*` or `release-*`), pushing a tag that matches the pattern automatically deploys that tag.
 - An image app has no branch, so every signed push deploys it again, and r3v3rs3 pulls the tag of the image again.
 - A request of another sender always deploys, with any body.
 - A ping, a push to another branch, or another event answers `200` with `{"outcome": "ignored"}`.

@@ -48,6 +48,7 @@ use r3v3rs3_api::container::ContainerName;
 use r3v3rs3_api::discovery::Endpoint;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
+use r3v3rs3_api::git::GitRef;
 use r3v3rs3_api::git_connection::PublicUrl;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
@@ -55,7 +56,7 @@ use r3v3rs3_api::platform::{
     LOCAL_TARGET, PlatformConfig,
 };
 use rand::seq::IndexedRandom;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use store::{GIT_TOKEN, PlatformStore, StoredEnv, Write};
@@ -160,8 +161,8 @@ pub struct Platform {
     sent: Mutex<Option<publish::Published>>,
     /// The apps that a pipeline or a deletion holds.
     busy: std::sync::Mutex<HashSet<ShortId>>,
-    /// The apps that a webhook request deploys again after their running pipeline.
-    queued: std::sync::Mutex<HashSet<ShortId>>,
+    /// The apps that a webhook request deploys again after their running pipeline, with optional git ref.
+    queued: std::sync::Mutex<HashMap<ShortId, Option<GitRef>>>,
     timing: deploy::Timing,
     fetcher: Arc<dyn SourceFetcher>,
     /// Limits the builds that run at the same time.
@@ -239,7 +240,7 @@ impl Platform {
             command,
             sent: Mutex::new(None),
             busy: std::sync::Mutex::new(HashSet::new()),
-            queued: std::sync::Mutex::new(HashSet::new()),
+            queued: std::sync::Mutex::new(HashMap::new()),
             timing: deploy::Timing::default(),
             fetcher: Arc::new(GitFetcher),
             builds: Semaphore::new(build::MAX_BUILDS),
@@ -876,6 +877,7 @@ mod tests {
                 auto_deploy: false,
                 require_approval: false,
                 deploy_window: None,
+                tag_trigger: None,
             },
         }
     }

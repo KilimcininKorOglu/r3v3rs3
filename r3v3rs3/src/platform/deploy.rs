@@ -17,6 +17,7 @@ use r3v3rs3_api::container::{
     APP_LABEL, AppName, ContainerName, ContainerSpec, EnvVar, ImageInfo, ImageRef, NetworkName,
 };
 use r3v3rs3_api::error::Error;
+use r3v3rs3_api::git::GitRef;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, AppSource, AppSpec, DeploymentEntry, DeploymentStatus, DeploymentTrigger,
@@ -212,13 +213,33 @@ impl Platform {
         username: &str,
         trigger: DeploymentTrigger,
     ) -> anyhow::Result<DeploymentEntry> {
+        self.deploy_with_ref(id, username, trigger, None).await
+    }
+
+    /// Starts a deployment of an app, optionally overriding the source branch or tag.
+    pub async fn deploy_with_ref(
+        self: &Arc<Self>,
+        id: ShortId,
+        username: &str,
+        trigger: DeploymentTrigger,
+        git_ref: Option<GitRef>,
+    ) -> anyhow::Result<DeploymentEntry> {
         let app = self.app(id).await?;
+        let mut spec = app.spec.clone();
+        if let Some(ref target_ref) = git_ref {
+            match &mut spec.source {
+                AppSource::Git { branch, .. } | AppSource::Compose { branch, .. } => {
+                    *branch = target_ref.clone();
+                }
+                AppSource::Image { .. } => {}
+            }
+        }
         let env = self.store.env(id).await?;
-        let new = NewDeployment::new(&app, trigger, username, &app.spec, &env)?;
-        if let Some(reason) = needs_approval(&app.spec) {
+        let new = NewDeployment::new(&app, trigger, username, &spec, &env)?;
+        if let Some(reason) = needs_approval(&spec) {
             return self.insert_pending(new.pending(reason)).await;
         }
-        let image = JobImage::from(app.spec.source.clone());
+        let image = JobImage::from(spec.source.clone());
         let lock = self.lock_app(&app)?;
         self.start_job(lock, &app, new, image).await
     }

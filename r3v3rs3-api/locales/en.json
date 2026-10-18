@@ -1103,6 +1103,8 @@
   "apps.require_approval_hint": "When enabled, deployments wait for manual approval before proceeding.",
   "apps.deploy_window": "Deployment Window (UTC)",
   "apps.deploy_window_hint": "Daily UTC hour range (e.g. 22:00-04:00). Deployments outside this window wait for approval.",
+  "apps.tag_trigger": "Tag Trigger",
+  "apps.tag_trigger_hint": "Pattern to automatically deploy on matching tag push (e.g. v*, release-*).",
   "deployments.title": "Deployments of {name}",
   "deployments.empty": "The app has no deployment yet.",
   "deployments.trigger": "Trigger",

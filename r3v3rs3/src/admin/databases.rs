@@ -218,6 +218,7 @@ fn app_request(
             auto_deploy: false,
             require_approval: false,
             deploy_window: None,
+            tag_trigger: None,
         },
     })
 }

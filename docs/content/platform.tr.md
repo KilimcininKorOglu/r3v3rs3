@@ -120,6 +120,7 @@ Katalog başka Compose kaynağı tutmaz: kendi Compose dosyanızı kuran girdi A
 | `context` | `.` | Docker'ın build context olarak aldığı repo dizini. |
 | `dockerfile` | `Dockerfile` | `context` dizinine göre Dockerfile yolu. |
 | `connection` | yok | Bir [Git sağlayıcı](#git-saglayicilari) bağlantısının id'si. Bağlantı repoyu clone eder ve webhook'unu kurar. |
+| `tag_trigger` | yok | Push edildiğinde eşleşen etiketleri (tag) otomatik olarak deploy eden etiket kalıbı (örn. `v*`, `release-*`). |
 
 Private bir repo, bir [Git sağlayıcı](#git-saglayicilari) bağlantısı veya uygulamanın erişim token'ını gerektirir. Erişim token'ı örnekleri: reponun içeriğini okuma izni olan bir GitHub fine-grained token'ı, `read_repository` kapsamı olan bir GitLab token'ı veya `read:repository` kapsamı olan bir Gitea token'ı. `PUT /api/apps/{id}/git_token`, `{"token": "..."}` gövdesiyle token'ı ayarlar. `DELETE /api/apps/{id}/git_token` token'ı siler. r3v3rs3 token'ı `platform.key` ile şifreler. Yönetim API'si token'ı hiçbir zaman döndürmez, uygulamada yalnız `"git_token_set": true` görünür. r3v3rs3 token'ı, clone sırasında `x-access-token` kullanıcı adıyla HTTP Basic kimlik doğrulaması olarak kullanır. Token URL'de veya komut satırında yer almaz, git'e bir ortam değişkeniyle ulaşır.
 
@@ -148,6 +149,7 @@ Docker image'ı klasik builder ile build eder. Aynı anda iki build çalışır,
 | `file` | `compose.yaml`, `compose.yml`, `docker-compose.yaml` ve `docker-compose.yml` dosyalarından ilk bulunan | Reponun köküne göre Compose dosyası. Dosyadaki göreli yollar dosyanın kendi dizinine göre çözülür. |
 | `service` | | Alan adına gelen istekleri `port` üzerinde alan servis. Servis adı küçük harf, rakam ve `_.-` içerir. |
 | `connection` | yok | Git kaynağındaki gibi bir [Git sağlayıcı](#git-saglayicilari) bağlantısının id'si. |
+| `tag_trigger` | yok | Push edildiğinde eşleşen etiketleri (tag) otomatik olarak deploy eden etiket kalıbı (örn. `v*`, `release-*`). |
 
 Sunucuda `git` binary'si ve Compose eklentisi olan `docker` binary'si bulunmalıdır. r3v3rs3, `docker compose` komutunu `r3v3rs3-<app id>` Compose projesiyle çalıştırır ve `service` servisi için şu ayarları yapan bir dosya ekler:
 
@@ -249,6 +251,7 @@ Sağlayıcı olaylarını yönetim API'sinin adresindeki `POST /hooks/apps/{id}`
 Hangi istek deploy eder:
 
 - Git veya Compose uygulaması, `ref` değeri `refs/heads/<branch>` veya `refs/tags/<branch>` olan bir push ile deploy olur. Burada `<branch>` uygulamanın branch alanıdır. Branch'i silen bir push deploy etmez.
+- `tag_trigger` tanımlandığında (örneğin `v*` veya `release-*`), bu kalıba uyan bir etiket (tag) push edildiğinde otomatik olarak o etiket deploy edilir.
 - Image uygulamasının branch'i yoktur. Bu yüzden imzalı her push onu yeniden deploy eder ve r3v3rs3 image'ın tag'ini yeniden çeker.
 - Başka bir göndericinin isteği gövdesi ne olursa olsun her zaman deploy eder.
 - Ping, başka bir branch'e push veya başka bir olay `200` ve `{"outcome": "ignored"}` yanıtını alır.
