@@ -1571,6 +1571,59 @@ impl ServerState {
         });
     }
 
+    /// Exports a complete configuration backup with secrets masked and accounts excluded.
+    pub async fn export_config_backup(
+        &self,
+    ) -> Result<r3v3rs3_api::config_backup::ConfigBackup, Error> {
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        let created_at = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let config = self.config().masked();
+        let ports = self.ports.entries().cloned().collect::<Vec<_>>();
+        let proxies = mask_proxies_for_backup(self);
+        let access_lists = mask_access_lists_for_backup(&self.access_lists);
+        let acme = mask_acme_for_backup(self);
+        let files = generate_backup_files(&version, &config, &ports, &proxies, &access_lists);
+
+        Ok(r3v3rs3_api::config_backup::ConfigBackup {
+            version,
+            created_at,
+            config,
+            ports,
+            proxies,
+            access_lists,
+            acme,
+            files,
+        })
+    }
+
+    /// Restores the configuration from a backup.
+    pub async fn import_config_backup(
+        &mut self,
+        backup: r3v3rs3_api::config_backup::ConfigBackup,
+    ) -> Result<(), Error> {
+        self.storage.save_ports(&backup.ports).await?;
+        self.reload_ports().await;
+
+        self.storage.save_access_lists(&backup.access_lists).await?;
+        self.reload_access_lists().await;
+
+        let mut proxies = backup.proxies;
+        for entry in &mut proxies {
+            if let Some(existing) = self.proxies.get(entry.id) {
+                super::credentials::restore_secrets(&mut entry.proxy, &existing.entry.proxy);
+            }
+        }
+        self.storage.save_proxies(&proxies).await?;
+        self.reload_manual_proxies().await;
+
+        self.set_config(backup.config).await?;
+        self.reload_proxies().await;
+        Ok(())
+    }
+
     /// Opens or closes the platform for the config that `apply_config` keeps, so the
     /// settings page turns the deployment platform on and off while the server runs.
     async fn restart_platform(&mut self) {
@@ -1658,4 +1711,82 @@ impl ServerState {
     pub async fn shutdown(self) {
         std::mem::drop(self.quic_pool);
     }
+}
+
+fn mask_proxies_for_backup(state: &ServerState) -> Vec<ProxyEntry> {
+    let mut proxies: Vec<ProxyEntry> = state
+        .proxies
+        .entries()
+        .filter(|entry| !entry.is_discovered())
+        .cloned()
+        .collect();
+    for entry in &mut proxies {
+        super::credentials::mask_proxy(&mut entry.proxy);
+    }
+    proxies
+}
+
+fn mask_access_lists_for_backup(lists: &[AccessListEntry]) -> Vec<AccessListEntry> {
+    let mut access_lists = lists.to_vec();
+    for entry in &mut access_lists {
+        super::credentials::mask_policy(&mut entry.list.auth);
+    }
+    access_lists
+}
+
+fn mask_acme_for_backup(state: &ServerState) -> Vec<r3v3rs3_api::config_backup::AcmeBackupEntry> {
+    state
+        .acmes
+        .entries()
+        .map(|entry| {
+            let mut acme = entry.acme.clone();
+            acme.mask();
+            r3v3rs3_api::config_backup::AcmeBackupEntry { id: entry.id, acme }
+        })
+        .collect()
+}
+
+fn serialize_table_for_backup<T: serde::Serialize>(
+    version: &str,
+    entries: &[(ShortId, T)],
+) -> Option<String> {
+    let mut doc = toml_edit::DocumentMut::new();
+    doc["version"] = toml_edit::value(version);
+    for (id, item) in entries {
+        if let Ok(serialized) = toml_edit::ser::to_document(item) {
+            doc[&id.to_string()].clone_from(serialized.as_item());
+        }
+    }
+    Some(doc.to_string())
+}
+
+fn generate_backup_files(
+    version: &str,
+    config: &AppConfig,
+    ports: &[PortEntry],
+    proxies: &[ProxyEntry],
+    access_lists: &[AccessListEntry],
+) -> std::collections::BTreeMap<String, String> {
+    let mut files = std::collections::BTreeMap::new();
+    if let Ok(toml_str) = toml::to_string_pretty(config) {
+        files.insert("config.toml".to_string(), toml_str);
+    }
+    let port_tuples: Vec<(ShortId, r3v3rs3_api::port::Port)> =
+        ports.iter().map(|p| (p.id, p.port.clone())).collect();
+    if let Some(s) = serialize_table_for_backup(version, &port_tuples) {
+        files.insert("ports.toml".to_string(), s);
+    }
+    let proxy_tuples: Vec<(ShortId, r3v3rs3_api::proxy::Proxy)> =
+        proxies.iter().map(|p| (p.id, p.proxy.clone())).collect();
+    if let Some(s) = serialize_table_for_backup(version, &proxy_tuples) {
+        files.insert("proxies.toml".to_string(), s);
+    }
+    let list_tuples: Vec<(ShortId, r3v3rs3_api::access_list::AccessList)> = access_lists
+        .iter()
+        .map(|l| (l.id, l.list.clone()))
+        .collect();
+    if let Some(s) = serialize_table_for_backup(version, &list_tuples) {
+        files.insert("access_lists.toml".to_string(), s);
+    }
+    files
 }

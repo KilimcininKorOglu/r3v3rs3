@@ -479,6 +479,43 @@ impl ApiClient {
         }
         Ok(())
     }
+
+    pub async fn get_config(&self) -> anyhow::Result<()> {
+        let res = self.request(Method::GET, "/api/config", None).await?;
+        print_json(&res)
+    }
+
+    pub async fn export_config_backup(&self, output: Option<&str>) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/config/backup", None)
+            .await?;
+        let json_text = serde_json::to_string_pretty(&res)?;
+        if let Some(path) = output {
+            std::fs::write(path, &json_text)
+                .with_context(|| format!("failed to write backup to {path}"))?;
+            println!("Configuration backup saved to {path}");
+        } else {
+            println!("{json_text}");
+        }
+        Ok(())
+    }
+
+    pub async fn restore_config_backup(&self, file: &str) -> anyhow::Result<()> {
+        let content = if file == "-" {
+            let mut buf = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+                .context("failed to read backup from stdin")?;
+            buf
+        } else {
+            std::fs::read_to_string(file)
+                .with_context(|| format!("failed to read backup file: {file}"))?
+        };
+        let body: Value = serde_json::from_str(&content).context("failed to parse backup JSON")?;
+        self.request(Method::POST, "/api/config/restore", Some(&body))
+            .await?;
+        println!("Configuration successfully restored.");
+        Ok(())
+    }
 }
 
 pub fn parse_manifest(content: &str) -> anyhow::Result<Value> {

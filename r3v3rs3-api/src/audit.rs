@@ -123,10 +123,12 @@ pub enum AuditAction {
     DeleteRegistry,
     /// An account pushed an upgrade to an agent target.
     UpgradeTarget,
+    /// An account restored a configuration backup.
+    RestoreConfig,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 72] = [
+    pub const ALL: [AuditAction; 73] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -199,6 +201,7 @@ impl AuditAction {
         Self::UpdateRegistry,
         Self::DeleteRegistry,
         Self::UpgradeTarget,
+        Self::RestoreConfig,
     ];
 }
 

@@ -9,6 +9,7 @@ pub mod cert;
 pub mod cidr;
 pub mod client_ip;
 pub mod compression;
+pub mod config_backup;
 pub mod container;
 pub mod dashboard;
 pub mod discovery;

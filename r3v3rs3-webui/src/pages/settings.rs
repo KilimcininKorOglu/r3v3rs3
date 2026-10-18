@@ -337,6 +337,7 @@ pub fn settings() -> Html {
         <CdnStatusCard />
         <WorkerStatusCard />
         <BannedIpsCard />
+        <BackupRestoreCard />
         <div ref={upgrade_card_ref}>
             <UpgradeCard />
         </div>
@@ -1553,6 +1554,129 @@ fn banned_ips_card() -> Html {
                 </div>
             }
         </div>
+    }
+}
+
+/// The card for configuration backup and restore.
+#[function_component(BackupRestoreCard)]
+fn backup_restore_card() -> Html {
+    let locale = use_locale();
+    let notice = use_state(|| Option::<Notice>::None);
+    let is_exporting = use_state(|| false);
+    let is_restoring = use_state(|| false);
+
+    let on_export = {
+        let is_exporting = is_exporting.clone();
+        let notice = notice.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *is_exporting {
+                return;
+            }
+            is_exporting.set(true);
+            let is_exporting = is_exporting.clone();
+            let notice = notice.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let req = Request::get(&format!("{API_ENDPOINT}/config/backup"));
+                match req.build() {
+                    Ok(built) => match send_request(locale, built).await {
+                        Ok(response) => {
+                            if let Ok(text) = response.text().await {
+                                let now = js_sys::Date::now() as u64 / 1000;
+                                crate::pages::app_log::download_text_file(
+                                    &format!("r3v3rs3-config-backup-{now}.json"),
+                                    &text,
+                                );
+                            }
+                        }
+                        Err(err) => notice.set(Some(Notice::Failed(err))),
+                    },
+                    Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
+                }
+                is_exporting.set(false);
+            });
+        })
+    };
+
+    let on_file_change = {
+        let is_restoring = is_restoring.clone();
+        let notice = notice.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlInputElement = event.target_unchecked_into();
+            let Some(file) = input.files().and_then(|files| files.get(0)) else {
+                return;
+            };
+            let notice = notice.clone();
+            let is_restoring = is_restoring.clone();
+            let question = locale.t("settings.restore_confirm").to_string();
+            dialog::confirm_then(locale, question, async move {
+                is_restoring.set(true);
+                match wasm_bindgen_futures::JsFuture::from(file.text()).await {
+                    Ok(js_val) => {
+                        let text = js_val.as_string().unwrap_or_default();
+                        handle_restore_payload(locale, &text, &notice).await;
+                    }
+                    Err(err) => {
+                        notice.set(Some(Notice::Failed(format!("{err:?}"))));
+                    }
+                }
+                is_restoring.set(false);
+            });
+        })
+    };
+
+    html! {
+        <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
+            { notice_view(&notice) }
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.backup_restore_title")}</h2>
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.backup_restore_hint")}</p>
+            <div class="flex flex-wrap items-center gap-4 mt-4">
+                <button
+                    type="button"
+                    onclick={on_export}
+                    disabled={*is_exporting}
+                    class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2"
+                >
+                    {locale.t("settings.export_backup")}
+                </button>
+                <label class="inline-flex justify-center items-center text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 cursor-pointer">
+                    {locale.t("settings.restore_backup")}
+                    <input
+                        type="file"
+                        accept=".json"
+                        class="hidden"
+                        onchange={on_file_change}
+                        disabled={*is_restoring}
+                    />
+                </label>
+            </div>
+        </div>
+    }
+}
+
+async fn handle_restore_payload(
+    locale: Locale,
+    text: &str,
+    notice: &UseStateHandle<Option<Notice>>,
+) {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(text) else {
+        notice.set(Some(Notice::Failed(
+            locale.t("settings.restore_invalid_file").to_string(),
+        )));
+        return;
+    };
+    let req = Request::post(&format!("{API_ENDPOINT}/config/restore"))
+        .header("content-type", "application/json")
+        .json(&val);
+    match req {
+        Ok(built) => match send_request(locale, built).await {
+            Ok(_) => {
+                notice.set(Some(Notice::Success(
+                    locale.t("settings.restore_success").to_string(),
+                )));
+            }
+            Err(err) => notice.set(Some(Notice::Failed(err))),
+        },
+        Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
     }
 }
 

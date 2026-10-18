@@ -10,6 +10,42 @@ weight = 0
 
 The settings page of the panel manages every section while the server runs, and a save applies it without a restart. The exception is the `worker_mode`, which changes the process itself: only `config.toml` sets it, and a restart applies a change.
 
+## Configuration Backup & Restore
+
+r3v3rs3 can export its entire configuration (settings, ports, proxies, access lists, ACME configs, and storage files) to a single JSON backup file and restore it onto another server:
+
+- **Secrets masked**: Sensitive secrets such as webhook tokens, proxy and access list password hashes, and ACME provider API keys are masked or redacted in the backup file so that backups can be stored or transmitted safely.
+- **Accounts excluded**: User accounts (`accounts.toml`) are strictly excluded from the backup and restore process. When restoring a backup on a server, existing admin credentials remain unchanged.
+
+### WebUI
+
+Open the **Settings** page and scroll to **Configuration Backup & Restore**:
+- Click **Export Backup** to download the `r3v3rs3-config-backup-<timestamp>.json` file.
+- Click **Restore Backup** and select a valid backup JSON file. A confirmation dialog will summarize the action before applying the configuration.
+
+### CLI
+
+The `r3v3rs3-cli` provides dedicated commands:
+
+```bash
+# Export configuration backup to a file
+$ r3v3rs3-cli config backup -o r3v3rs3-backup.json
+
+# Export backup to stdout (e.g. for piping or remote backup scripts)
+$ r3v3rs3-cli config backup
+
+# Restore configuration from a file
+$ r3v3rs3-cli config restore -f r3v3rs3-backup.json
+
+# Restore configuration from standard input
+$ cat r3v3rs3-backup.json | r3v3rs3-cli config restore -f -
+```
+
+### REST API
+
+- `GET /api/config/backup`: Returns the complete `ConfigBackup` object. Requires `admin` permission.
+- `POST /api/config/restore`: Restores the configuration from a `ConfigBackup` JSON payload. Hot-reloads all ports, proxies, access lists, and settings immediately. Requires `admin` permission and records an entry in the audit log.
+
 # Ports
 
 A proxy needs a port. Add one in the "Ports" section.

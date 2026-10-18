@@ -10,6 +10,42 @@ Yapılandırma dizinindeki `config.toml` sunucunun ayarlarını taşır. Dosya y
 
 Panelin ayarlar sayfası bütün bölümleri sunucu çalışırken yönetir ve bir kayıt restart olmadan uygulanır. İstisna `worker_mode`'dur: process'in kendisini değiştirir, yalnız `config.toml` belirler ve bir değişiklik restart ile uygulanır.
 
+## Yapılandırma Yedeği ve Geri Yükleme
+
+r3v3rs3 tüm yapılandırmasını (ayarlar, portlar, proxy'ler, erişim listeleri, ACME yapılandırmaları ve depolama dosyaları) tek bir JSON yedek dosyasına aktarabilir ve başka bir sunucuya geri yükleyebilir:
+
+- **Gizli anahtarlar maskeli**: Webhook belirteçleri, proxy ve erişim listesi parola özetleri ve ACME sağlayıcı API anahtarları gibi hassas bilgiler yedek dosyasında maskelenir; böylece yedekler güvenle saklanabilir ve taşınabilir.
+- **Hesaplar hariç**: Kullanıcı hesapları (`accounts.toml`) yedekleme ve geri yükleme işlemlerine kesinlikle dahil edilmez. Bir sunucuya yedek geri yüklendiğinde mevcut yönetici hesapları ve parolaları değişmeden korunur.
+
+### WebUI
+
+**Ayarlar** sayfasını açın ve **Yapılandırma Yedeği ve Geri Yükleme** kartına gidin:
+- `r3v3rs3-config-backup-<zaman_damgası>.json` dosyasını indirmek için **Yedeği İndir** düğmesine tıklayın.
+- **Yedeği Geri Yükle** seçeneğine tıklayarak geçerli bir JSON yedek dosyası seçin. Yapılandırma uygulanmadan önce bir onay iletişim kutusu gösterilir.
+
+### CLI
+
+`r3v3rs3-cli` yedekleme ve geri yükleme için komutlar sunar:
+
+```bash
+# Yapılandırma yedeğini bir dosyaya aktarma
+$ r3v3rs3-cli config backup -o r3v3rs3-backup.json
+
+# Yedeği standart çıktıya verme (scriptler veya uzak yedekleme için)
+$ r3v3rs3-cli config backup
+
+# Yapılandırmayı bir dosyadan geri yükleme
+$ r3v3rs3-cli config restore -f r3v3rs3-backup.json
+
+# Yapılandırmayı standart girdiden geri yükleme
+$ cat r3v3rs3-backup.json | r3v3rs3-cli config restore -f -
+```
+
+### REST API
+
+- `GET /api/config/backup`: Tam `ConfigBackup` nesnesini döner. `admin` yetkisi gerektirir.
+- `POST /api/config/restore`: `ConfigBackup` JSON yükünden yapılandırmayı geri yükler. Bütün portları, proxy'leri, erişim listelerini ve ayarları kesinti olmadan anında yeniden yükler. `admin` yetkisi gerektirir ve denetim kaydına (`RestoreConfig`) işlenir.
+
 # Portlar
 
 Proxy eklemeden önce dinlenecek bir port bağlamanız gerekir. Bunu "Portlar" bölümünden yapabilirsiniz.

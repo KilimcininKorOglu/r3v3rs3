@@ -51,3 +51,36 @@ impl RpcMethod for GetNotificationWebhook {
         Ok(config.notifications.webhook.clone())
     }
 }
+
+/// Exports a complete configuration backup with secrets masked and accounts excluded.
+pub struct ExportConfigBackup;
+
+#[async_trait::async_trait]
+impl RpcMethod for ExportConfigBackup {
+    type Output = r3v3rs3_api::config_backup::ConfigBackup;
+    const PERMISSION: Permission = Permission::Admin;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        state.export_config_backup().await
+    }
+}
+
+/// Restores the configuration from a backup.
+pub struct ImportConfigBackup {
+    pub backup: Box<r3v3rs3_api::config_backup::ConfigBackup>,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for ImportConfigBackup {
+    type Output = ();
+    const MUTATES: bool = true;
+    const PERMISSION: Permission = Permission::Admin;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        state.import_config_backup(*self.backup).await
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(AuditRecord::new(AuditAction::RestoreConfig).summary(self.backup.summary()))
+    }
+}

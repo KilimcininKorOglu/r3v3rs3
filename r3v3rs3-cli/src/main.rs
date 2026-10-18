@@ -59,6 +59,9 @@ enum Command {
     /// Manage database backups.
     #[command(subcommand)]
     Backup(BackupCommand),
+    /// Manage server settings and configuration backup/restore.
+    #[command(subcommand)]
+    Config(ConfigCommand),
     /// Manage platform operations.
     #[command(subcommand)]
     Platform(PlatformCommand),
@@ -138,6 +141,24 @@ pub enum BackupCommand {
     },
     /// Shows backup configuration.
     Config,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    /// Shows the current application settings.
+    Get,
+    /// Exports all configuration to a backup file (secrets masked, accounts excluded).
+    Backup {
+        /// File path to save the backup to, or standard output if omitted.
+        #[arg(short = 'o', long = "output")]
+        output: Option<String>,
+    },
+    /// Restores configuration from a backup file.
+    Restore {
+        /// File path of the backup to restore, or '-' to read from standard input.
+        #[arg(short = 'f', long = "file")]
+        file: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -238,6 +259,7 @@ async fn run_api(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()
         Command::Proxy(c) => run_proxy(api, c).await,
         Command::App(c) => run_app(api, c).await,
         Command::Backup(c) => run_backup(api, c).await,
+        Command::Config(c) => run_config(api, c).await,
         Command::Platform(c) => run_platform(api, c).await,
         Command::Apply { file } => run_apply(api, &file).await,
         _ => unreachable!(),
@@ -291,6 +313,14 @@ async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::
             backup_id,
         } => api.restore_backup(&database_id, &backup_id).await,
         BackupCommand::Config => api.backup_config().await,
+    }
+}
+
+async fn run_config(api: &api_client::ApiClient, cmd: ConfigCommand) -> anyhow::Result<()> {
+    match cmd {
+        ConfigCommand::Get => api.get_config().await,
+        ConfigCommand::Backup { output } => api.export_config_backup(output.as_deref()).await,
+        ConfigCommand::Restore { file } => api.restore_config_backup(&file).await,
     }
 }
 

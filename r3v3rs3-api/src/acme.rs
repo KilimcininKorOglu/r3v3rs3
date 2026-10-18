@@ -69,6 +69,12 @@ impl Acme {
             }),
         }
     }
+
+    pub fn mask(&mut self) {
+        if let Some(provider) = &mut self.dns_provider {
+            provider.mask();
+        }
+    }
 }
 
 /// A DNS provider API that publishes the TXT records of the `dns-01` challenge.
@@ -93,6 +99,12 @@ pub struct TokenProvider {
     pub api_token: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_url: Option<String>,
+}
+
+impl TokenProvider {
+    pub fn mask(&mut self) {
+        self.api_token.clear();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
@@ -204,6 +216,23 @@ impl KeyedProvider {
             } => filled(&[application_key, application_secret, consumer_key]),
         }
     }
+
+    pub fn mask(&mut self) {
+        match self {
+            Self::Route53 {
+                secret_access_key, ..
+            } => secret_access_key.clear(),
+            Self::Porkbun { secret_api_key, .. } => secret_api_key.clear(),
+            Self::Ovh {
+                application_secret,
+                consumer_key,
+                ..
+            } => {
+                application_secret.clear();
+                consumer_key.clear();
+            }
+        }
+    }
 }
 
 /// A cloud platform API that authenticates with a service account of the platform.
@@ -256,6 +285,16 @@ impl CloudProvider {
                 service_account_key,
                 ..
             } => filled(&[service_account_key]),
+        }
+    }
+
+    pub fn mask(&mut self) {
+        match self {
+            Self::Azure { client_secret, .. } => client_secret.clear(),
+            Self::GoogleCloud {
+                service_account_key,
+                ..
+            } => service_account_key.clear(),
         }
     }
 }
@@ -347,6 +386,14 @@ impl LocalProvider {
             } => filled(&[server, key_name, key_secret]),
         }
     }
+
+    pub fn mask(&mut self) {
+        match self {
+            Self::Webhook { token, .. } => token.clear(),
+            Self::Exec { .. } => {}
+            Self::Rfc2136 { key_secret, .. } => key_secret.clear(),
+        }
+    }
 }
 
 /// Whether a webhook URL uses HTTPS, or HTTP on a loopback address.
@@ -376,6 +423,15 @@ impl DnsProvider {
             Self::Keyed(provider) => provider.name(),
             Self::Cloud(provider) => provider.name(),
             Self::Local(provider) => provider.name(),
+        }
+    }
+
+    pub fn mask(&mut self) {
+        match self {
+            Self::Token(provider) => provider.mask(),
+            Self::Keyed(provider) => provider.mask(),
+            Self::Cloud(provider) => provider.mask(),
+            Self::Local(provider) => provider.mask(),
         }
     }
 

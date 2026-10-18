@@ -542,6 +542,7 @@ fn config_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(config::get, config::put))
         .routes(routes!(config::test_notification))
+        .routes(routes!(config::backup, config::restore))
 }
 
 /// The views of the running server: build info, CDN ranges, discovery and cluster state.
