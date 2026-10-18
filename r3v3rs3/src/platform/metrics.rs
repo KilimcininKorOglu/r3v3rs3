@@ -17,6 +17,7 @@ const RETENTION: u64 = 24 * 60 * 60 * 1000;
 #[derive(Default)]
 struct Previous {
     samples: Mutex<BTreeMap<ShortId, (u64, u64, u64)>>,
+    alerts: Mutex<BTreeMap<(ShortId, &'static str), u64>>,
 }
 
 impl Previous {
@@ -37,6 +38,19 @@ impl Previous {
             ),
             None => (0, 0, 0),
         }
+    }
+
+    /// Checks whether an alert for (app, metric) can be fired or is within cooldown (5 minutes).
+    fn should_alert(&self, app: ShortId, metric: &'static str, now: u64) -> bool {
+        const COOLDOWN_MS: u64 = 5 * 60 * 1000;
+        let mut alerts = self.alerts.lock().expect("the alert map is intact");
+        if let Some(&last) = alerts.get(&(app, metric))
+            && now.saturating_sub(last) < COOLDOWN_MS
+        {
+            return false;
+        }
+        alerts.insert((app, metric), now);
+        true
     }
 }
 
@@ -154,7 +168,122 @@ async fn collect_app(
             tx_bytes: tx,
             requests: served,
         })
-        .await
+        .await?;
+    if let Some(rules) = &app.spec.alert_rules {
+        check_app_alerts(platform, previous, app, rules, &stats).await;
+    }
+    Ok(())
+}
+
+async fn check_app_alerts(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    app: &r3v3rs3_api::platform::AppEntry,
+    rules: &r3v3rs3_api::platform::AlertRules,
+    stats: &r3v3rs3_api::container::ContainerStats,
+) {
+    let now = crate::clock::unix_ms();
+    check_cpu_alert(
+        platform,
+        previous,
+        app,
+        rules.cpu_percent,
+        stats.cpu_percent,
+        now,
+    )
+    .await;
+    check_mem_bytes_alert(
+        platform,
+        previous,
+        app,
+        rules.memory_bytes,
+        stats.memory_bytes,
+        now,
+    )
+    .await;
+    check_mem_pct_alert(
+        platform,
+        previous,
+        app,
+        rules.memory_percent,
+        stats.memory_bytes,
+        stats.memory_limit,
+        now,
+    )
+    .await;
+}
+
+async fn check_cpu_alert(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    app: &r3v3rs3_api::platform::AppEntry,
+    threshold: Option<u32>,
+    cpu_percent: f64,
+    now: u64,
+) {
+    let Some(limit) = threshold else { return };
+    if cpu_percent >= limit as f64 && previous.should_alert(app.id, "cpu", now) {
+        platform
+            .notify_alert(
+                app.id,
+                app.name.to_string(),
+                "cpu",
+                format!("{:.1}%", cpu_percent),
+                format!("{limit}%"),
+            )
+            .await;
+    }
+}
+
+async fn check_mem_bytes_alert(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    app: &r3v3rs3_api::platform::AppEntry,
+    threshold: Option<u64>,
+    memory_bytes: u64,
+    now: u64,
+) {
+    let Some(limit) = threshold else { return };
+    if memory_bytes >= limit && previous.should_alert(app.id, "memory_bytes", now) {
+        let current_mb = memory_bytes / 1024 / 1024;
+        let limit_mb = limit / 1024 / 1024;
+        platform
+            .notify_alert(
+                app.id,
+                app.name.to_string(),
+                "memory_bytes",
+                format!("{current_mb} MB"),
+                format!("{limit_mb} MB"),
+            )
+            .await;
+    }
+}
+
+async fn check_mem_pct_alert(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    app: &r3v3rs3_api::platform::AppEntry,
+    threshold: Option<u32>,
+    memory_bytes: u64,
+    memory_limit: u64,
+    now: u64,
+) {
+    let Some(limit) = threshold else { return };
+    if memory_limit == 0 {
+        return;
+    }
+    let pct = ((memory_bytes as f64 / memory_limit as f64) * 100.0) as u32;
+    if pct >= limit && previous.should_alert(app.id, "memory_percent", now) {
+        platform
+            .notify_alert(
+                app.id,
+                app.name.to_string(),
+                "memory_percent",
+                format!("{pct}%"),
+                format!("{limit}%"),
+            )
+            .await;
+    }
 }
 
 #[cfg(test)]
@@ -215,5 +344,21 @@ mod tests {
         assert_eq!(previous.deltas(app, 150, 260, 13), (50, 60, 3));
         // A counter that went backwards means a restart: the whole value counts.
         assert_eq!(previous.deltas(app, 5, 0, 1), (5, 0, 1));
+    }
+
+    #[test]
+    fn alert_cooldown_prevents_spam() {
+        let previous = Previous::default();
+        let app = "abc".parse().unwrap();
+        let t0 = 1_000_000;
+        // First alert succeeds
+        assert!(previous.should_alert(app, "cpu", t0));
+        // Alert within 5 minutes (300_000 ms) is suppressed
+        assert!(!previous.should_alert(app, "cpu", t0 + 60_000));
+        assert!(!previous.should_alert(app, "cpu", t0 + 299_999));
+        // Different metric for same app succeeds immediately
+        assert!(previous.should_alert(app, "memory_bytes", t0 + 60_000));
+        // After 5 minutes, alert fires again
+        assert!(previous.should_alert(app, "cpu", t0 + 300_001));
     }
 }

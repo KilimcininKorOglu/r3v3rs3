@@ -862,15 +862,17 @@ r3v3rs3 sends a JSON `POST` request to the notification webhook for these events
 | `deployment_failed` | A deployment failed. A restart of r3v3rs3 also fails each unfinished deployment and sends this event. |
 | `agent_online` | An agent connected to the master. A new connection that replaces an open one sends no event. |
 | `agent_offline` | The connection of an agent ended. A deleted or re-enrolled target sends no event. |
+| `app_alert` | An app exceeded its configured CPU or memory alert threshold. |
 
 ```json
 {"event": "certificate_expiring", "time": 1757894400, "node": "proxy-1", "certificate": {"id": "a1b2c3d", "san": ["example.com"], "not_after": 1759104000}}
 {"event": "deployment_failed", "time": 1757894400, "deployment": {"id": "kfd-mzq", "app": "bxv-tpw", "app_name": "shop", "trigger": "webhook"}, "error": "the health check failed"}
 {"event": "agent_offline", "time": 1757894400, "target": {"id": "fzn-txd", "name": "edge"}}
+{"event": "app_alert", "time": 1757894400, "alert": {"app": "bxv-tpw", "app_name": "shop", "metric": "cpu", "current_value": "85.0%", "threshold": "80%"}}
 ```
 
 - `time` is the Unix time in seconds. `certificate` names the certificate of a certificate event. `acme` holds the `id` and the `identifiers` of the ACME entry, and `error` describes the failure of an `acme_order_failed` event.
-- `deployment` names the deployment, its app and its trigger (`manual`, `webhook`, `rollback` or `api`). `error` holds the message of a `deployment_failed` event. `target` names the agent target of an agent event.
+- `deployment` names the deployment, its app and its trigger (`manual`, `webhook`, `rollback` or `api`). `error` holds the message of a `deployment_failed` event. `target` names the agent target of an agent event. `alert` holds the app id, name, triggered metric (`cpu`, `memory_bytes` or `memory_percent`), current value and threshold of an `app_alert` event. Repeated alerts for the same app and metric are rate-limited with a 5-minute cooldown.
 - With a token, the request has the header `Authorization: Bearer <token>`. The admin API does not return the token.
 - A 2xx status is a success. r3v3rs3 sends a failed request at most three times: again after 1 second, and again 2 seconds later. "Webhook Timeout" (default `10s`) limits each try.
 - r3v3rs3 checks the certificates at each "Background Task Interval". Each event of a certificate is sent once. A renewed certificate has a new fingerprint, so its events are sent again. r3v3rs3 keeps the sent events in `notifications.json` in the configuration directory.

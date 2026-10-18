@@ -58,6 +58,19 @@ impl Platform {
         let notification = Notification::agent(event, TargetSummary { id: target, name });
         send(&self.command, notification).await;
     }
+
+    /// Sends an app resource alert to the server webhook.
+    pub(super) async fn notify_alert(
+        &self,
+        app: ShortId,
+        app_name: String,
+        metric: &'static str,
+        current_value: String,
+        threshold: String,
+    ) {
+        let notification = Notification::app_alert(app, app_name, metric, current_value, threshold);
+        send(&self.command, notification).await;
+    }
 }
 
 /// Sends a failure event for each deployment that a restart failed. The platform opens before

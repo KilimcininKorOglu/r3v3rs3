@@ -469,6 +469,38 @@ impl AppSource {
     }
 }
 
+/// Alert thresholds for CPU and memory usage, triggering webhook notifications when exceeded.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AlertRules {
+    /// The CPU percentage threshold (e.g. 80 for 80%). When CPU usage meets or exceeds this, an alert is sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_percent: Option<u32>,
+    /// The memory threshold in bytes (e.g. 524288000 for 500MB). When memory meets or exceeds this, an alert is sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bytes: Option<u64>,
+    /// The memory percentage threshold against the container memory limit (e.g. 90 for 90%).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_percent: Option<u32>,
+}
+
+impl AlertRules {
+    pub fn validate(&self) -> Result<(), Error> {
+        if let Some(mem_pct) = self.memory_percent
+            && (mem_pct == 0 || mem_pct > 100)
+        {
+            return Err(invalid(
+                "the memory alert percentage must be between 1 and 100",
+            ));
+        }
+        if let Some(cpu_pct) = self.cpu_percent
+            && cpu_pct == 0
+        {
+            return Err(invalid("the cpu alert percentage must be greater than 0"));
+        }
+        Ok(())
+    }
+}
+
 /// What a deployment of an app runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AppSpec {
@@ -552,6 +584,10 @@ pub struct AppSpec {
     /// Optional load balancing algorithm across replica targets (default: round_robin).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub load_balancing: Option<LoadBalancing>,
+
+    /// Optional resource alert rules that send notifications when CPU or memory exceeds the threshold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alert_rules: Option<AlertRules>,
 }
 
 impl AppSpec {
@@ -573,6 +609,9 @@ impl AppSpec {
         }
         if let Some(window) = &self.deploy_window {
             validate_deploy_window(window)?;
+        }
+        if let Some(rules) = &self.alert_rules {
+            rules.validate()?;
         }
         self.validate_tag_trigger()
     }
@@ -1461,5 +1500,40 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn alert_rules_validation() {
+        let valid = spec(json!({
+            "source": {"type": "image", "image": "nginx:alpine"},
+            "port": 80,
+            "domains": ["app.example.com"],
+            "alert_rules": {
+                "cpu_percent": 80,
+                "memory_bytes": 524288000,
+                "memory_percent": 90
+            }
+        }));
+        assert!(valid.is_ok());
+
+        let invalid_cpu = spec(json!({
+            "source": {"type": "image", "image": "nginx:alpine"},
+            "port": 80,
+            "domains": ["app.example.com"],
+            "alert_rules": {
+                "cpu_percent": 0
+            }
+        }));
+        assert!(invalid_cpu.is_err());
+
+        let invalid_mem = spec(json!({
+            "source": {"type": "image", "image": "nginx:alpine"},
+            "port": 80,
+            "domains": ["app.example.com"],
+            "alert_rules": {
+                "memory_percent": 150
+            }
+        }));
+        assert!(invalid_mem.is_err());
     }
 }

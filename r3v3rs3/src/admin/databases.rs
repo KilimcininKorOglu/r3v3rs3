@@ -222,6 +222,7 @@ fn app_request(
             store_app_id: None,
             targets: Vec::new(),
             load_balancing: None,
+            alert_rules: None,
         },
     })
 }

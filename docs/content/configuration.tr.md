@@ -862,15 +862,17 @@ r3v3rs3 şu olaylar için bildirim webhook'una bir JSON `POST` isteği gönderir
 | `deployment_failed` | Bir deployment başarısız olmuştur. r3v3rs3 yeniden başlarken bitmemiş her deployment'ı başarısız sayar ve bu olayı da gönderir. |
 | `agent_online` | Bir agent master'a bağlanmıştır. Açık bir bağlantının yerini alan yeni bağlantı olay göndermez. |
 | `agent_offline` | Bir agent'ın bağlantısı kopmuştur. Silinen veya yeniden kaydedilen hedef olay göndermez. |
+| `app_alert` | Bir uygulama yapılandırılan CPU veya bellek uyarı eşiğini aşmıştır. |
 
 ```json
 {"event": "certificate_expiring", "time": 1757894400, "node": "proxy-1", "certificate": {"id": "a1b2c3d", "san": ["example.com"], "not_after": 1759104000}}
 {"event": "deployment_failed", "time": 1757894400, "deployment": {"id": "kfd-mzq", "app": "bxv-tpw", "app_name": "shop", "trigger": "webhook"}, "error": "the health check failed"}
 {"event": "agent_offline", "time": 1757894400, "target": {"id": "fzn-txd", "name": "edge"}}
+{"event": "app_alert", "time": 1757894400, "alert": {"app": "bxv-tpw", "app_name": "shop", "metric": "cpu", "current_value": "85.0%", "threshold": "80%"}}
 ```
 
 - `time` saniye cinsinden Unix zamanıdır. `certificate` alanı sertifika olayının sertifikasını gösterir. `acme` alanı ACME kaydının `id` ve `identifiers` değerlerini taşır. `error` alanı `acme_order_failed` olayının hatasını açıklar.
-- `deployment` alanı deployment'ı, uygulamasını ve tetikleyicisini (`manual`, `webhook`, `rollback` veya `api`) gösterir. `error` alanı `deployment_failed` olayının mesajını taşır. `target` alanı agent olayının agent hedefini gösterir.
+- `deployment` alanı deployment'ı, uygulamasını ve tetikleyicisini (`manual`, `webhook`, `rollback` veya `api`) gösterir. `error` alanı `deployment_failed` olayının mesajını taşır. `target` alanı agent olayının agent hedefini gösterir. `alert` alanı `app_alert` olayının uygulama id'sini, adını, tetiklenen metriği (`cpu`, `memory_bytes` veya `memory_percent`), anlık değeri ve yapılandırılmış eşiği taşır. Aynı uygulama ve metrik için tekrarlanan uyarılar 5 dakikalık bekleme süresiyle sınırlandırılır.
 - Token varsa istek `Authorization: Bearer <token>` header'ını taşır. Admin API token'ı döndürmez.
 - 2xx durum kodu başarı sayılır. r3v3rs3 başarısız isteği en fazla üç kez gönderir: 1 saniye sonra bir kez daha, 2 saniye sonra bir kez daha. "Webhook Timeout" (varsayılan `10s`) her denemeyi sınırlar.
 - r3v3rs3 sertifikaları her "Arka Plan Görevi Aralığı" süresinde kontrol eder. Bir sertifikanın her olayı bir kez gönderilir. Yenilenen sertifikanın fingerprint'i değişir. Bu yüzden onun olayları yeniden gönderilir. r3v3rs3 gönderilen olayları yapılandırma dizinindeki `notifications.json` dosyasında tutar.

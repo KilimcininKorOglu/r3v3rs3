@@ -92,6 +92,8 @@ pub struct AppForm {
     pub store_app_id: Option<String>,
     pub targets: Vec<String>,
     pub load_balancing: String,
+    pub alert_cpu_percent: String,
+    pub alert_memory_mb: String,
 }
 
 impl Default for AppForm {
@@ -127,6 +129,8 @@ impl Default for AppForm {
             store_app_id: None,
             targets: Vec::new(),
             load_balancing: String::new(),
+            alert_cpu_percent: String::new(),
+            alert_memory_mb: String::new(),
         }
     }
 }
@@ -193,6 +197,18 @@ impl AppForm {
                 .load_balancing
                 .map(|lb| lb.as_str().to_string())
                 .unwrap_or_default(),
+            alert_cpu_percent: spec
+                .alert_rules
+                .as_ref()
+                .and_then(|r| r.cpu_percent)
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            alert_memory_mb: spec
+                .alert_rules
+                .as_ref()
+                .and_then(|r| r.memory_bytes)
+                .map(|b| (b / BYTES_PER_MB).to_string())
+                .unwrap_or_default(),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -245,9 +261,20 @@ impl AppForm {
 
     /// Checks the form and returns the request. The error is a message in the selected language.
     pub fn parse(&self, locale: Locale) -> Result<AppRequest, String> {
+        let spec = self.build_spec(locale)?;
+        spec.validate().map_err(|err| locale.error_message(&err))?;
+        Ok(AppRequest {
+            name: parse(locale, self.name.trim())?,
+            target: parse_target(locale, &self.target)?,
+            spec,
+        })
+    }
+
+    fn build_spec(&self, locale: Locale) -> Result<AppSpec, String> {
         let (volumes, restart, limits) = self.container_settings(locale)?;
         let (targets, load_balancing) = self.parse_replica_settings(locale)?;
-        let spec = AppSpec {
+        let alert_rules = self.parse_alert_rules()?;
+        Ok(AppSpec {
             source: self.source(locale)?,
             port: self.port(locale)?,
             domains: parse_lines(locale, &self.domains, parse)?,
@@ -266,13 +293,35 @@ impl AppForm {
             store_app_id: self.store_app_id.clone(),
             targets,
             load_balancing,
-        };
-        spec.validate().map_err(|err| locale.error_message(&err))?;
-        Ok(AppRequest {
-            name: parse(locale, self.name.trim())?,
-            target: parse_target(locale, &self.target)?,
-            spec,
+            alert_rules,
         })
+    }
+
+    fn parse_alert_rules(&self) -> Result<Option<r3v3rs3_api::platform::AlertRules>, String> {
+        let cpu = non_empty(&self.alert_cpu_percent)
+            .map(|s| {
+                s.trim()
+                    .parse::<u32>()
+                    .map_err(|_| "CPU threshold must be a number".to_string())
+            })
+            .transpose()?;
+        let mem = non_empty(&self.alert_memory_mb)
+            .map(|s| {
+                s.trim()
+                    .parse::<u64>()
+                    .map(|mb| mb * BYTES_PER_MB)
+                    .map_err(|_| "Memory threshold must be a number".to_string())
+            })
+            .transpose()?;
+        if cpu.is_some() || mem.is_some() {
+            Ok(Some(r3v3rs3_api::platform::AlertRules {
+                cpu_percent: cpu,
+                memory_bytes: mem,
+                memory_percent: None,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_replica_settings(
@@ -681,6 +730,8 @@ fn container_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
             { restart_select(locale, form) }
             { text_field(locale, form, "apps.memory", Some("apps.memory_hint"), |f| &mut f.memory_mb) }
             { text_field(locale, form, "apps.cpus", Some("apps.cpus_hint"), |f| &mut f.cpus) }
+            { text_field(locale, form, "apps.alert_cpu", Some("apps.alert_cpu_hint"), |f| &mut f.alert_cpu_percent) }
+            { text_field(locale, form, "apps.alert_memory", Some("apps.alert_memory_hint"), |f| &mut f.alert_memory_mb) }
         </>
     }
 }
@@ -1122,5 +1173,24 @@ mod tests {
             ..image_form()
         };
         assert!(invalid_pattern.parse(Locale::En).is_err());
+    }
+
+    #[test]
+    fn alert_rules_in_form() {
+        let form = AppForm {
+            alert_cpu_percent: "80".into(),
+            alert_memory_mb: "256".into(),
+            ..image_form()
+        };
+        let request = form.parse(Locale::En).unwrap();
+        let rules = request.spec.alert_rules.unwrap();
+        assert_eq!(rules.cpu_percent, Some(80));
+        assert_eq!(rules.memory_bytes, Some(256 * BYTES_PER_MB));
+
+        let invalid_cpu = AppForm {
+            alert_cpu_percent: "not-a-number".into(),
+            ..image_form()
+        };
+        assert!(invalid_cpu.parse(Locale::En).is_err());
     }
 }

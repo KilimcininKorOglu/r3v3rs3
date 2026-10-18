@@ -1049,6 +1049,7 @@ mod tests {
                 store_app_id: None,
                 targets: Vec::new(),
                 load_balancing: None,
+                alert_rules: None,
             },
             git_token_set: false,
             webhook_secret_set: false,

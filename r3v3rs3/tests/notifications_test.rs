@@ -113,6 +113,60 @@ async fn the_server_sends_a_deployment_event_of_the_platform() -> anyhow::Result
 }
 
 #[tokio::test]
+async fn the_server_sends_an_app_alert_notification() -> anyhow::Result<()> {
+    use r3v3rs3::command::ServerCommand;
+    use r3v3rs3::notify::Notification;
+    let mut server = mockito::Server::new_async().await;
+    let body = json!({
+        "event": "app_alert",
+        "alert": {
+            "app": "app",
+            "app_name": "shop",
+            "metric": "cpu",
+            "current_value": "85.0%",
+            "threshold": "80%"
+        },
+    });
+    let mock = server
+        .mock("POST", "/")
+        .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+        .match_body(Matcher::PartialJson(body))
+        .expect(1)
+        .create_async()
+        .await;
+    let config = AppConfig {
+        notifications: NotificationConfig {
+            webhook: Some(WebhookConfig {
+                url: server.url(),
+                token: Some(TOKEN.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let storage = TestStorage::builder().config(config).build();
+    with_server(storage, |channels| async move {
+        let notification = Notification::app_alert(
+            "app".parse()?,
+            "shop".into(),
+            "cpu",
+            "85.0%".into(),
+            "80%".into(),
+        );
+        channels
+            .command
+            .send(ServerCommand::Notify { notification })
+            .await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        Ok(())
+    })
+    .await?;
+    mock.assert_async().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_failed_notification_is_sent_three_times() -> anyhow::Result<()> {
     let mut server = mockito::Server::new_async().await;
     let mock = server

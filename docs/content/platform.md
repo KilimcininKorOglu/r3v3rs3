@@ -346,7 +346,11 @@ A connection that an app uses cannot be deleted and answers `409 git_connection_
 
 ## Notifications
 
-The notification webhook of the "Settings" page also gets the events of the platform: `deployment_started`, `deployment_running` and `deployment_failed` for each deployment, and `agent_online` and `agent_offline` for each agent target. See [Notifications](@/configuration.md#notifications) for the JSON body.
+The notification webhook of the "Settings" page also gets the events of the platform: `deployment_started`, `deployment_running` and `deployment_failed` for each deployment, `agent_online` and `agent_offline` for each agent target, and `app_alert` when an app exceeds its configured CPU or memory alert threshold. See [Notifications](@/configuration.md#notifications) for the JSON body.
+
+### Resource Alert Rules
+
+An app can define alert rules in the **CPU Alert Threshold (%)** and **Memory Alert Threshold (MB)** fields of its form (or `alert_rules` in `AppSpec`). During periodic background metrics collection (every 30 seconds), r3v3rs3 compares the container stats with the configured thresholds. When usage reaches or exceeds a threshold, an `app_alert` notification is delivered to the webhook with the current value and threshold. Repeated alerts for the same app and metric are rate-limited with a 5-minute cooldown to avoid notification flood.
 
 ## Routing
 

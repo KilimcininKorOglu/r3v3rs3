@@ -36,6 +36,7 @@ pub enum NotificationEvent {
     DeploymentFailed,
     AgentOnline,
     AgentOffline,
+    AppAlert,
 }
 
 impl NotificationEvent {
@@ -50,6 +51,7 @@ impl NotificationEvent {
             Self::DeploymentFailed => "deployment_failed",
             Self::AgentOnline => "agent_online",
             Self::AgentOffline => "agent_offline",
+            Self::AppAlert => "app_alert",
         }
     }
 }
@@ -72,7 +74,19 @@ pub struct Notification {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<TargetSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub alert: Option<Box<AppAlertSummary>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// An app resource threshold alert.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AppAlertSummary {
+    pub app: ShortId,
+    pub app_name: String,
+    pub metric: String,
+    pub current_value: String,
+    pub threshold: String,
 }
 
 /// A deployment of the platform, with the app that it deploys.
@@ -116,7 +130,28 @@ impl Notification {
             acme: None,
             deployment: None,
             target: None,
+            alert: None,
             error: None,
+        }
+    }
+
+    /// An app resource threshold alert event.
+    pub fn app_alert(
+        app: ShortId,
+        app_name: String,
+        metric: &'static str,
+        current_value: String,
+        threshold: String,
+    ) -> Self {
+        Self {
+            alert: Some(Box::new(AppAlertSummary {
+                app,
+                app_name,
+                metric: metric.to_string(),
+                current_value,
+                threshold,
+            })),
+            ..Self::new(NotificationEvent::AppAlert, "")
         }
     }
 

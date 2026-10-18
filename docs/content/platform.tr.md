@@ -346,7 +346,11 @@ Bir uygulamanın kullandığı bağlantı silinemez ve `409 git_connection_in_us
 
 ## Bildirimler
 
-"Ayarlar" sayfasındaki bildirim webhook'u platformun olaylarını da alır: her deployment için `deployment_started`, `deployment_running` ve `deployment_failed`, her agent hedefi için `agent_online` ve `agent_offline`. JSON gövdesi için [Bildirimler](@/configuration.tr.md#bildirimler) bölümüne bakın.
+"Ayarlar" sayfasındaki bildirim webhook'u platformun olaylarını da alır: her deployment için `deployment_started`, `deployment_running` ve `deployment_failed`, her agent hedefi için `agent_online` ve `agent_offline`, ve bir uygulama yapılandırılan CPU veya bellek uyarı eşiğini aştığında `app_alert`. JSON gövdesi için [Bildirimler](@/configuration.tr.md#bildirimler) bölümüne bakın.
+
+### Kaynak Uyarı Kuralları
+
+Bir uygulama, formundaki **CPU Uyarı Eşiği (%)** ve **Bellek Uyarı Eşiği (MB)** alanlarında (veya `AppSpec` içindeki `alert_rules`) uyarı kuralları tanımlayabilir. Periyodik arka plan metrik toplaması sırasında (her 30 saniyede bir), r3v3rs3 container istatistiklerini yapılandırılan eşiklerle karşılaştırır. Kullanım bir eşiğe ulaştığında veya onu aştığında, webhook'a anlık değer ve eşik bilgisiyle bir `app_alert` bildirimi gönderilir. Bildirim kirliliğini önlemek amacıyla aynı uygulama ve metrik için tekrarlanan uyarılar 5 dakikalık bekleme süresiyle sınırlandırılır.
 
 ## Yönlendirme
 
