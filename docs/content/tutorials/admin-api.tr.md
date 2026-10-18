@@ -55,6 +55,8 @@ Yanlış parola 400 döner:
 {"message":"invalid login credentials","error":{"message":"invalid_login_credentials"}}
 ```
 
+Aynı IP adresinden yapılan ardışık hatalı giriş denemeleri, kullanıcı adından bağımsız olarak geçici brute-force engellemesini (fail2ban benzeri katman) tetikler (429 `ip_banned` döner). Yöneticiler aktif engelleri `GET /api/banned-ips` ve `DELETE /api/banned-ips/{ip}` uç noktalarından veya Ayarlar sayfasındaki "Engellenen IP Adresleri" kartından inceleyip kaldırabilir.
+
 `GET /api/session` kim olduğunuzu söyler, `GET /api/logout` oturumu bitirir. Çıkıştan sonra cookie işe yaramaz:
 
 ```bash

@@ -54,6 +54,7 @@ mod app_files;
 mod app_info;
 mod audit;
 pub(crate) mod auth;
+mod ban;
 mod backups;
 mod cdn;
 mod certs;
@@ -423,6 +424,12 @@ fn session_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(accounts::list, accounts::add))
                 .routes(routes!(accounts::put, accounts::delete)),
         )
+        .nest(
+            "/banned-ips",
+            OpenApiRouter::new()
+                .routes(routes!(ban::list_banned_ips))
+                .routes(routes!(ban::unban_ip)),
+        )
 }
 
 /// The ports, the proxies and the access lists that carry the traffic.
@@ -754,6 +761,7 @@ pub struct Data {
     /// The server replaces these sessions with its own sessions at the start of the admin API.
     pub sessions: Arc<dyn SessionBackend>,
     pub login_attempts: LoginAttempts,
+    pub ban_tracker: ban::IpBanTracker,
     pub log: Arc<LogReader>,
     /// The audit log of the server. The admin API reads it at its start.
     pub audit: Option<Arc<AuditLog>>,
@@ -774,6 +782,7 @@ impl Data {
             config: AppConfig::default(),
             sessions: Arc::new(LocalSessions::default()),
             login_attempts: Default::default(),
+            ban_tracker: Default::default(),
             log: Arc::new(LogReader::new(&log).await?),
             audit: None,
             platform: PlatformHandle::default(),

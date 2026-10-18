@@ -303,6 +303,7 @@ mod tests {
             Error::FailedToLoadAccounts,
             Error::InvalidLoginCredentials,
             Error::TooManyLoginAttempts,
+            Error::IpBanned { seconds: 0 },
             Error::InvalidUsername { username: text() },
             Error::PasswordRequired { username: text() },
             Error::PasswordTooShort { min: 8 },

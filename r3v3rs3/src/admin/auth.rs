@@ -72,7 +72,10 @@ pub async fn login(
 
     let scope = match *result {
         LoginResponse::Success => {
-            state.data.lock().await.login_attempts.clear(&attempt_key);
+            let mut data = state.data.lock().await;
+            data.login_attempts.clear(&attempt_key);
+            data.ban_tracker.clear(&peer.ip());
+            drop(data);
             let record = AuditRecord::new(AuditAction::Login);
             state.record_audit(&username, Some(peer.ip()), record).await;
             SessionScope::Admin
@@ -108,8 +111,10 @@ async fn session_backend(state: &AppState) -> (Arc<dyn SessionBackend>, Duration
 
 async fn ensure_login_allowed(state: &AppState, key: &LoginAttemptKey) -> Result<(), Error> {
     let mut data = state.data.lock().await;
+    let now = Instant::now();
+    data.ban_tracker.check_banned(&key.0, now)?;
     let reset = data.config.admin.login_attempts_reset;
-    if data.login_attempts.is_blocked(key, reset, Instant::now()) {
+    if data.login_attempts.is_blocked(key, reset, now) {
         return Err(Error::TooManyLoginAttempts);
     }
     Ok(())
@@ -121,11 +126,19 @@ async fn record_login_failure(state: &AppState, key: LoginAttemptKey) {
     state.record_audit(&key.1, Some(key.0), record).await;
     let mut data = state.data.lock().await;
     let admin = data.config.admin.clone();
+    let now = Instant::now();
     data.login_attempts.record_failure(
-        key,
+        key.clone(),
         admin.max_login_attempts,
         admin.login_attempts_reset,
-        Instant::now(),
+        now,
+    );
+    data.ban_tracker.record_failure(
+        key.0,
+        admin.max_login_attempts,
+        admin.login_attempts_reset,
+        admin.login_attempts_reset,
+        now,
     );
 }
 

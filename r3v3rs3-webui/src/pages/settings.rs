@@ -2,7 +2,7 @@ use crate::components::http_proxy_config::{
     client_cert_label, parse_optional_id, use_client_certs,
 };
 use crate::components::worker_status::WorkerStatusCard;
-use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale};
+use crate::{API_ENDPOINT, auth::use_ensure_auth, dialog, i18n::use_locale};
 use gloo_net::http::{Request, RequestBuilder, Response};
 use r3v3rs3_api::{
     acme::webhook_url_allowed,
@@ -11,6 +11,7 @@ use r3v3rs3_api::{
         LogConfig, McpClientConfig, McpConfig, NotificationConfig, UpgradeConfig, UpgradeQuery,
         UpgradeStage, UpgradeStageResponse, UpgradeStarted, WebhookConfig,
     },
+    auth::BannedIpEntry,
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
     discovery::{DiscoveryConfig, DockerDiscoveryConfig, Endpoint, EtcdDiscoveryConfig},
@@ -335,6 +336,7 @@ pub fn settings() -> Html {
         </form>
         <CdnStatusCard />
         <WorkerStatusCard />
+        <BannedIpsCard />
         <div ref={upgrade_card_ref}>
             <UpgradeCard />
         </div>
@@ -1410,6 +1412,105 @@ async fn get_cdn_status() -> Result<CdnStatus, gloo_net::Error> {
         .await?
         .json()
         .await
+}
+
+#[function_component(BannedIpsCard)]
+fn banned_ips_card() -> Html {
+    let locale = use_locale();
+    let reload = use_state(|| 0);
+    let list = use_state(Vec::<BannedIpEntry>::new);
+    let notice = use_state(|| Option::<Notice>::None);
+
+    let reload_val = *reload;
+    let list_handle = list.clone();
+    use_effect_with(reload_val, move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Ok(entries) = fetch_json::<Vec<BannedIpEntry>>(
+                locale,
+                Request::get(&format!("{API_ENDPOINT}/banned-ips")),
+            )
+            .await
+            {
+                list_handle.set(entries);
+            }
+        });
+    });
+
+    let unban = {
+        let reload = reload.clone();
+        let notice = notice.clone();
+        Callback::from(move |ip: String| {
+            let reload = reload.clone();
+            let notice = notice.clone();
+            let question = locale.tf("settings.unban_confirm", &[("ip", &ip)]);
+            dialog::confirm_then(locale, question, async move {
+                let req = Request::delete(&format!("{API_ENDPOINT}/banned-ips/{ip}"));
+                if let Ok(built) = req.build() {
+                    match send_request(locale, built).await {
+                        Ok(_) => {
+                            notice.set(Some(Notice::Success(
+                                locale.t("settings.unbanned").to_string(),
+                            )));
+                            reload.set(*reload + 1);
+                        }
+                        Err(err) => notice.set(Some(Notice::Failed(err))),
+                    }
+                }
+            });
+        })
+    };
+
+    html! {
+        <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
+            { notice_view(&notice) }
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.banned_ips")}</h2>
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.banned_ips_hint")}</p>
+            if list.is_empty() {
+                <p class="mt-4 text-sm text-neutral-400 dark:text-neutral-500 italic">{locale.t("settings.banned_ips_empty")}</p>
+            } else {
+                <div class="mt-4 overflow-x-auto">
+                    <table class="w-full text-sm text-left text-neutral-500 dark:text-neutral-400">
+                        <thead class="text-xs uppercase bg-neutral-50 dark:bg-neutral-750 text-neutral-700 dark:text-neutral-300">
+                            <tr>
+                                <th class="px-4 py-2">{"IP"}</th>
+                                <th class="px-4 py-2">{locale.t("settings.failures_count")}</th>
+                                <th class="px-4 py-2">{locale.t("settings.remaining_time")}</th>
+                                <th class="px-4 py-2"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            { for list.iter().map(|entry| {
+                                let ip_str = entry.ip.to_string();
+                                let on_unban = {
+                                    let unban = unban.clone();
+                                    let ip_str = ip_str.clone();
+                                    Callback::from(move |e: MouseEvent| {
+                                        e.prevent_default();
+                                        unban.emit(ip_str.clone());
+                                    })
+                                };
+                                let mins = entry.remaining_seconds / 60;
+                                let secs = entry.remaining_seconds % 60;
+                                let time_str = format!("{mins}m {secs}s");
+                                html! {
+                                    <tr class="border-b dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-750">
+                                        <td class="px-4 py-2 font-mono font-medium text-neutral-900 dark:text-white">{entry.ip.to_string()}</td>
+                                        <td class="px-4 py-2">{entry.failures}</td>
+                                        <td class="px-4 py-2 font-mono text-amber-600 dark:text-amber-400">{time_str}</td>
+                                        <td class="px-4 py-2 text-right">
+                                            <button type="button" onclick={on_unban} class="text-xs text-red-600 hover:text-red-800 dark:text-red-400 font-medium">
+                                                {locale.t("settings.unban")}
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            }) }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
 }
 
 /// The card of the server upgrade: it installs the newest release and restarts the server

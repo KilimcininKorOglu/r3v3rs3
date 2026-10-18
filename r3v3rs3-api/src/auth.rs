@@ -2,6 +2,7 @@ use crate::id::ShortId;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
+use std::net::IpAddr;
 use utoipa::ToSchema;
 
 /// What an account can change through the admin API.
@@ -160,6 +161,15 @@ pub enum LoginMethod {
 pub enum LoginResponse {
     Success,
     TotpRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BannedIpEntry {
+    #[schema(value_type = String, example = "192.0.2.1")]
+    pub ip: IpAddr,
+    pub failures: u32,
+    pub banned_until: u64,
+    pub remaining_seconds: u64,
 }
 
 fn is_zero(value: &u64) -> bool {

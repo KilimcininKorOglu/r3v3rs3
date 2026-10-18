@@ -55,6 +55,8 @@ A wrong password answers 400:
 {"message":"invalid login credentials","error":{"message":"invalid_login_credentials"}}
 ```
 
+Repeated failed sign-in attempts from an IP address trigger a temporary brute-force ban across all usernames (answering 429 with `ip_banned`). Administrators can inspect and lift active bans via `GET /api/banned-ips` and `DELETE /api/banned-ips/{ip}`, or from the Banned IP Addresses card in the Settings panel.
+
 `GET /api/session` tells you who you are, and `GET /api/logout` ends the session. After a logout the cookie is worthless:
 
 ```bash
