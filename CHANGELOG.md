@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-10-18
+
+### Added
+- Bulk operations: multi-select on apps, ports, and proxies with batch delete and batch deploy.
+- Image update checker: periodic check for newer tags of image-based apps with auto-deploy option.
+- Scheduled container commands: cron-scheduled commands inside app containers with execution logs.
+- Live log tailing: WebSocket log streaming with live search, level filtering, and raw log download.
+- Deployment approval and maintenance window: optional manual approval gate before applying deployments and maintenance window time restrictions.
+- Git tag triggers: automatic deployments triggered on Git tag push matching glob patterns.
+- OAuth 2.1 login redirect: unauthenticated authorization requests to `/oauth/authorize` automatically redirect to the sign-in page with return URL preserved.
+- Redesigned OAuth consent screen: modern, responsive authorization consent page with dark and light mode support.
+
+### Fixed
+- Fixed return path routing for app store and database views.
+- Fixed database and backup action feedback toast notifications.
+
 ## [2.0.0] - 2026-10-17
 
 ### Added
