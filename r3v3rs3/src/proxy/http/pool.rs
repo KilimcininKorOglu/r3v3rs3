@@ -510,7 +510,7 @@ fn is_gateway_error(status: StatusCode) -> bool {
 /// The URL of a request to a server: the path of the server URL, then the request path segments
 /// after the route path, then the query of the request. The segments keep their percent-encoding.
 /// A request without segments keeps the server path unchanged.
-fn upstream_url(server: &Url, segments: &[String], query: Option<&str>) -> Url {
+pub(crate) fn upstream_url(server: &Url, segments: &[String], query: Option<&str>) -> Url {
     let mut url = server.clone();
     if !segments.is_empty() {
         let rest = segments

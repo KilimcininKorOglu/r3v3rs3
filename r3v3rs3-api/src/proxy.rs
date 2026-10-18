@@ -21,6 +21,7 @@ use crate::{id::ShortId, port::UpstreamServer};
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt;
+use std::net::IpAddr;
 use std::str::FromStr;
 use std::time::Duration;
 use url::Url;
@@ -514,6 +515,43 @@ impl fmt::Display for ServerUrl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
+}
+
+/// A request to test route matching and rewriting against unsaved proxy rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ProxyDryRunRequest {
+    pub proxy: HttpProxy,
+    #[schema(example = "https://example.com/api/users")]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "GET")]
+    pub method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "192.0.2.10")]
+    pub client_ip: Option<IpAddr>,
+}
+
+/// The result of simulating a request against proxy rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ProxyDryRunResult {
+    pub matched: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_index: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub upstream_servers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirect_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirect_status: Option<u16>,
+    #[serde(default)]
+    pub disallowed_by_ip: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_required: Option<String>,
+    pub explanation: String,
 }
 
 #[cfg(test)]

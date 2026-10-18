@@ -453,6 +453,7 @@ fn port_routes() -> OpenApiRouter<AppState> {
 fn proxy_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(proxies::list, proxies::add))
+        .routes(routes!(proxies::dry_run))
         .routes(routes!(proxies::get, proxies::put, proxies::delete))
         .routes(routes!(proxies::status))
         .routes(routes!(proxies::purge_cache))

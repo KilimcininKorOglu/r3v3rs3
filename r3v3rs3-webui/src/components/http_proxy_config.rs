@@ -1,4 +1,5 @@
 use super::auth_config::{AuthConfig, AuthForm};
+use super::proxy_dry_run::ProxyDryRun;
 use crate::API_ENDPOINT;
 use crate::i18n::use_locale;
 use crate::pages::cert_list::get_cert_list;
@@ -606,10 +607,9 @@ pub fn http_proxy_config(props: &Props) -> Html {
         }
     });
 
-    let errors = use_entry_errors(
-        get_proxy(locale, &form, &routes, &upstream, &circuit_breaker),
-        props.onchanged.clone(),
-    );
+    let parsed_proxy = get_proxy(locale, &form, &routes, &upstream, &circuit_breaker);
+    let current_proxy = parsed_proxy.as_ref().ok().cloned();
+    let errors = use_entry_errors(parsed_proxy, props.onchanged.clone());
 
     html! {
         <>
@@ -738,6 +738,8 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { routes.iter().enumerate().map(|(i, route)| {
                 route_view(locale, &routes, i, route, &access_lists, errors.get(&format!("routes_{i}")))
             }).collect::<Html>() }
+
+            <ProxyDryRun proxy={current_proxy} />
         </>
     }
 }

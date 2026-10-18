@@ -32,15 +32,14 @@ pub struct IpBanTracker {
 impl IpBanTracker {
     pub fn check_banned(&mut self, ip: &IpAddr, now: Instant) -> Result<(), Error> {
         self.cleanup(now);
-        if let Some(attempt) = self.entries.get(ip) {
-            if let Some(until) = attempt.banned_until {
-                if until > now {
-                    let remaining = until.duration_since(now).as_secs();
-                    return Err(Error::IpBanned {
-                        seconds: remaining.max(1),
-                    });
-                }
-            }
+        if let Some(attempt) = self.entries.get(ip)
+            && let Some(until) = attempt.banned_until
+            && until > now
+        {
+            let remaining = until.duration_since(now).as_secs();
+            return Err(Error::IpBanned {
+                seconds: remaining.max(1),
+            });
         }
         Ok(())
     }
@@ -85,16 +84,16 @@ impl IpBanTracker {
         self.cleanup(now);
         let mut list = Vec::new();
         for (ip, attempt) in &self.entries {
-            if let Some(until) = attempt.banned_until {
-                if until > now {
-                    let remaining = until.duration_since(now).as_secs().max(1);
-                    list.push(BannedIpEntry {
-                        ip: *ip,
-                        failures: attempt.failures,
-                        banned_until: attempt.banned_until_unix_ms,
-                        remaining_seconds: remaining,
-                    });
-                }
+            if let Some(until) = attempt.banned_until
+                && until > now
+            {
+                let remaining = until.duration_since(now).as_secs().max(1);
+                list.push(BannedIpEntry {
+                    ip: *ip,
+                    failures: attempt.failures,
+                    banned_until: attempt.banned_until_unix_ms,
+                    remaining_seconds: remaining,
+                });
             }
         }
         list.sort_by_key(|e| e.banned_until);

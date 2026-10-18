@@ -1194,10 +1194,10 @@ fn find_catalog_app<'a>(
         r3v3rs3_api::platform::AppSource::Image { image } => {
             let current_repo = image.repository();
             catalog.apps.iter().find(|a| {
-                if let Some(ref cat_img) = a.image {
-                    if let Ok(cat_parsed) = cat_img.parse::<r3v3rs3_api::container::ImageRef>() {
-                        return cat_parsed.repository() == current_repo;
-                    }
+                if let Some(ref cat_img) = a.image
+                    && let Ok(cat_parsed) = cat_img.parse::<r3v3rs3_api::container::ImageRef>()
+                {
+                    return cat_parsed.repository() == current_repo;
                 }
                 false
             })

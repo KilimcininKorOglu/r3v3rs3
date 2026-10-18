@@ -136,6 +136,24 @@ routes = [{ path = "/", servers = [{ url = "http+srv://_http._tcp.api.service.co
 - SRV adının hedefi olmayan route 502 döner. Route'un başka sunucuları varsa istekleri onlar alır.
 - "Upstream DNS Çözümleyicisi" ayarı ([Ayarlar](#ayarlar) bölümüne bakın) SRV sorgularının DNS sunucusunu seçer, örneğin Consul DNS için `127.0.0.1:8600`. Ayar boşsa r3v3rs3 sistemin çözümleyicisini kullanır. Hedeflerin host adlarını bağlantı sırasında sistemin çözümleyicisi çözer.
 
+### Kural Testi ve Simülasyon (Dry Run)
+
+Proxy ayarlarını kaydetmeden önce gelen isteklerin nasıl yönlendirileceğini yerleşik kural testi aracıyla deneyebilirsiniz. WebUI proxy formundaki **Kural Testi ve Simülasyon** kartı örnek bir URL, HTTP metodu ve isteğe bağlı istemci IP'si girmenize olanak tanır. **İsteği Simüle Et** butonuna tıklandığında kaydedilmemiş kurallar bellekte test edilir:
+
+- İsteğin hangi route veya yönlendirme kuralıyla eşleştiğini belirler (veya eşleşmeme nedenini açıklar).
+- Yol yeniden yazma kurallarından (`strip_prefix`, `add_prefix`, regex değişimi) sonra çözümlenen upstream sunucu URL'sini gösterir.
+- İstemci IP filtrelerini (`allow` / `deny` listeleri) kontrol ederek isteğin engellenip engellenmeyeceğini bildirir.
+- Kimlik doğrulama gereksinimini (Basic Auth, Bearer, Forward Auth veya Panel Oturumu) belirtir.
+
+Yönetim API'si bu aracı `POST /api/proxies/dry-run` uç noktasında sunar:
+
+```bash
+curl -X POST http://localhost:8080/api/proxies/dry-run \
+  -H "Cookie: r3v3rs3_session=..." \
+  -H "Content-Type: application/json" \
+  -d '{"proxy": {"routes": [{"path": "/api", "servers": [{"url": "http://127.0.0.1:8080"}]}]}, "url": "https://example.com/api/users", "method": "GET"}'
+```
+
 ## HTTPS yönlendirmesi
 
 "HTTP'yi Otomatik Olarak HTTPS'e Yönlendir" (`upgrade_insecure`, varsayılan `true`) düz HTTP isteğine `301` ile yanıt verir ve istemciyi aynı host ile yolun proxy'nin HTTPS portundaki adresine yönlendirir. HTTPS portu olmayan proxy yönlendirme yapmaz.

@@ -136,6 +136,24 @@ With the SRV records `_http._tcp.api.service.consul. 30 IN SRV 0 5 8080 api-1.no
 - A route whose SRV name has no target answers with 502. The other servers of the route, if any, still get the requests.
 - The "Upstream DNS Resolver" setting (see [Settings](#settings)) selects the DNS server of the SRV lookups, for example `127.0.0.1:8600` for the Consul DNS interface. Without the setting, r3v3rs3 uses the system resolver. The host names of the targets are resolved by the system resolver when r3v3rs3 connects.
 
+### Rule Matching Dry Run
+
+Before saving proxy changes, you can test how incoming requests will be routed using the built-in dry-run testing tool. In the WebUI proxy form, the **Rule Matching Dry Run** card lets you enter a sample URL, HTTP method and optional client IP. Clicking **Simulate Request** tests the unsaved rules in memory:
+
+- Identifies which route or redirect rule matches the request (or explains why no route matched).
+- Shows the resolved upstream URL after path rewrite rules (`strip_prefix`, `add_prefix`, regex replacement).
+- Checks client IP filtering (`allow` / `deny` lists) to indicate whether the request would be blocked.
+- Notes any authentication requirement (Basic Auth, Bearer, Forward Auth, or Session).
+
+The admin API exposes this tool at `POST /api/proxies/dry-run`:
+
+```bash
+curl -X POST http://localhost:8080/api/proxies/dry-run \
+  -H "Cookie: r3v3rs3_session=..." \
+  -H "Content-Type: application/json" \
+  -d '{"proxy": {"routes": [{"path": "/api", "servers": [{"url": "http://127.0.0.1:8080"}]}]}, "url": "https://example.com/api/users", "method": "GET"}'
+```
+
 ## HTTPS Redirect
 
 "Automatically Redirect HTTP to HTTPS" (`upgrade_insecure`, default `true`) answers a plain HTTP request with `301` to the same host and path on the HTTPS port of the proxy. A proxy without an HTTPS port does not redirect.

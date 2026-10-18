@@ -96,6 +96,8 @@ async fn the_audit_log_records_the_changes_and_the_sign_ins_of_an_account() -> a
         until: u64::MAX,
         username: None,
         resource_id: None,
+        action: None,
+        search: None,
         limit: 100,
     };
     let (store, filter) = (&store, &filter);
