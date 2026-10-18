@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-10-18
+
+### Added
+- Login brute-force protection: fail2ban-style security layer that temporarily or permanently bans IP addresses after repeated failed login attempts, with an admin management API and WebUI security panel.
+- App store catalog update detection: installed apps display a badge when a newer version exists in the catalog, with one-click upgrade.
+- Audit log search and management: text search and action type filtering in the panel, CSV export, and configurable log retention days.
+- Proxy rule dry run: simulation tool in the proxy form that tests sample requests against unsaved rules to preview route matches, upstream URLs, and redirects.
+- Full CLI management: direct subcommands for ports, proxies, apps, and backups in `r3v3rs3-cli`, with OAuth Bearer token authentication on the admin API.
+- Declarative CLI apply: `r3v3rs3-cli apply -f` command supporting YAML and JSON manifests for scripted and idempotent infrastructure management.
+
 ## [2.0.1] - 2026-10-18
 
 ### Added
