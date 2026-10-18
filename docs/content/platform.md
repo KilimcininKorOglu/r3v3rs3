@@ -425,6 +425,16 @@ The agent connects again after a pause that grows from 1 to 60 seconds. When it 
 
 `DELETE /api/targets/{id}` deletes a target without apps and disconnects its agent. A target with an app answers `409 target_in_use`, and the local target answers `403 target_read_only`. An agent whose certificate belongs to no target logs `the master closed the connection before its first request` and keeps trying to connect.
 
+### Multi-Target Replica Deployment
+
+An app can deploy replicas across multiple agent targets and the local target simultaneously:
+
+- In `AppSpec`, set `targets` to a list of target IDs (e.g. `["local", "edge-1", "edge-2"]`).
+- Optionally specify `load_balancing` (`round_robin`, `random`, `first`, or `client_ip_hash`).
+- When a deployment runs, the master prepares the image, runs the container, and waits for health checks across all specified targets.
+- Remote agent ports forward over loopback to the master, and the master's reverse proxy automatically balances traffic across all active replicas using the chosen load balancing algorithm.
+- If an individual agent becomes temporarily offline, the master continues routing traffic among the remaining healthy replicas.
+
 ## Container Registries
 
 When pulling private container images (such as from private Docker Hub repositories, GitHub Packages `ghcr.io`, GitLab Container Registry, AWS ECR, or a self-hosted private registry), configure credentials in the **Registries** page of the WebUI or via the admin API.

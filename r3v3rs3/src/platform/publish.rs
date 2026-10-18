@@ -7,6 +7,7 @@ use crate::agent::forward::ForwardKey;
 use crate::command::ServerCommand;
 use crate::discovery::DiscoveredProxy;
 use r3v3rs3_api::discovery::DiscoveryIssue;
+use r3v3rs3_api::id::ShortId;
 use std::sync::Weak;
 use std::time::Duration;
 
@@ -47,23 +48,37 @@ impl Platform {
         let mut proxies = Vec::new();
         let mut issues = Vec::new();
         for deployment in self.store.running_deployments().await? {
-            match self.published_port(&deployment).await? {
-                Ok(host_port) => {
-                    let app = LiveApp {
-                        id: deployment.app,
-                        name: deployment.app_name.as_str(),
-                        spec: &deployment.spec,
-                        host_port,
-                    };
-                    proxies.extend(proxy::app_proxy(&app, &self.config)?);
-                }
+            let (host_ports, app_issues) = self.deployment_ports(&deployment).await?;
+            issues.extend(app_issues);
+            if !host_ports.is_empty() {
+                let app = LiveApp {
+                    id: deployment.app,
+                    name: deployment.app_name.as_str(),
+                    spec: &deployment.spec,
+                    host_ports,
+                };
+                proxies.extend(proxy::app_proxy(&app, &self.config)?);
+            }
+        }
+        Ok((proxies, issues))
+    }
+
+    async fn deployment_ports(
+        &self,
+        deployment: &RunningDeployment,
+    ) -> anyhow::Result<(Vec<u16>, Vec<DiscoveryIssue>)> {
+        let mut host_ports = Vec::new();
+        let mut issues = Vec::new();
+        for target in deployment.spec.targets_or_default(deployment.target) {
+            match self.published_port(deployment, target).await? {
+                Ok(host_port) => host_ports.push(host_port),
                 Err(message) => issues.push(DiscoveryIssue {
                     resource: deployment.app_name.to_string(),
                     message,
                 }),
             }
         }
-        Ok((proxies, issues))
+        Ok((host_ports, issues))
     }
 
     /// The port of 127.0.0.1 that reaches the app port of a running deployment, or the reason why
@@ -71,20 +86,17 @@ impl Platform {
     async fn published_port(
         &self,
         deployment: &RunningDeployment,
+        target: ShortId,
     ) -> anyhow::Result<Result<u16, String>> {
         let name = proxy::container_name(deployment.app, deployment.id)?;
         let port = deployment.spec.port;
-        let info = match self
-            .runtime(deployment.target)
-            .inspect_container(&name)
-            .await
-        {
+        let info = match self.runtime(target).inspect_container(&name).await {
             Ok(info) => info,
             // The app of an unreachable agent keeps its route, and its forwarder closes every
             // connection until the agent is back, so the proxy answers 502.
-            Err(err) if !is_local(deployment.target) => {
+            Err(err) if !is_local(target) => {
                 let key = ForwardKey {
-                    target: deployment.target,
+                    target,
                     container: name,
                     port,
                 };

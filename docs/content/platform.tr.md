@@ -425,6 +425,16 @@ Agent, 1 saniyeden 60 saniyeye kadar uzayan bir beklemeden sonra yeniden bağlan
 
 `DELETE /api/targets/{id}`, uygulaması olmayan bir hedefi siler ve agent'ının bağlantısını keser. Uygulaması olan hedef `409 target_in_use`, yerel hedef `403 target_read_only` yanıtını alır. Sertifikası hiçbir hedefe ait olmayan agent log'a `the master closed the connection before its first request` yazar ve bağlanmayı denemeye devam eder.
 
+### Çoklu Hedef Replika Dağıtımı
+
+Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde replikalar halinde dağıtılabilir:
+
+- `AppSpec` içinde `targets` alanına hedef ID'leri listesi verilir (örn. `["local", "edge-1", "edge-2"]`).
+- İsteğe bağlı olarak `load_balancing` (`round_robin`, `random`, `first` veya `client_ip_hash`) seçilebilir.
+- Bir deployment çalıştığında, master tüm belirtilen hedeflerde imajı hazırlar, konteyneri başlatır ve sağlık kontrollerini bekler.
+- Uzak agent portları master üzerinde loopback forwarder ile eşlenir ve master'ın ters proxysi seçilen yük dengeleme algoritmasıyla trafiği tüm etkin replikalar arasında otomatik dengeler.
+- Herhangi bir agent geçici olarak çevrimdışı kalırsa, master trafiği diğer sağlıklı replikalar arasında yönlendirmeye devam eder.
+
 ## Konteyner Registry'leri
 
 Özel konteyner imajlarını çekerken (örneğin özel Docker Hub depoları, GitHub Packages `ghcr.io`, GitLab Registry, AWS ECR veya özel bir registry sunucusu), kimlik bilgilerini WebUI'daki **Registry'ler** sayfasından veya admin API üzerinden yapılandırın.

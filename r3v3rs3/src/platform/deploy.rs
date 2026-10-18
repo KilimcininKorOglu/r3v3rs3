@@ -72,6 +72,7 @@ struct Job {
     app: ShortId,
     /// The name and the trigger name the deployment in its notifications.
     app_name: AppName,
+    app_target: ShortId,
     trigger: DeploymentTrigger,
     deployment: ShortId,
     /// The runtime and the Compose runner of the target of the app at the start of the
@@ -300,6 +301,7 @@ impl Platform {
         let job = Job {
             app: entry.app,
             app_name: app.name.clone(),
+            app_target: app.target,
             trigger: entry.trigger,
             deployment: entry.id,
             backend: self.backend(app.target),
@@ -344,6 +346,7 @@ impl Platform {
         let job = Job {
             app: new.app,
             app_name: app.name.clone(),
+            app_target: app.target,
             trigger: new.trigger,
             deployment: new.id,
             backend: self.backend(app.target),
@@ -358,14 +361,16 @@ impl Platform {
     async fn run_job(&self, job: &Job) {
         self.run_pipeline(job).await;
         // A failed deployment can leave a built image too, so the cleanup follows every build.
-        let runtime = &*job.backend.runtime;
-        let pruned = match job.spec.source {
-            AppSource::Git { .. } => self.prune_builds(runtime, job.app).await,
-            AppSource::Compose { .. } => self.prune_compose_images(runtime, job.app).await,
-            AppSource::Image { .. } => Ok(()),
-        };
-        if let Err(err) = pruned {
-            error!(app = %job.app, "failed to remove the old built images: {err:#}");
+        for target in job.spec.targets_or_default(job.app_target) {
+            let runtime = &*self.backend(target).runtime;
+            let pruned = match job.spec.source {
+                AppSource::Git { .. } => self.prune_builds(runtime, job.app).await,
+                AppSource::Compose { .. } => self.prune_compose_images(runtime, job.app).await,
+                AppSource::Image { .. } => Ok(()),
+            };
+            if let Err(err) = pruned {
+                error!(app = %job.app, target = %target, "failed to remove the old built images: {err:#}");
+            }
         }
     }
 
@@ -411,58 +416,100 @@ impl Platform {
         };
         let name = proxy::container_name(job.app, job.deployment)?;
         let env = self.open_env(job.app, &job.env)?;
-        let compose = ComposeJob {
-            runner: &*job.backend.compose,
-            app: job.app,
-            deployment: job.deployment,
-            port: job.spec.port,
-            source,
-            env: &env,
-            container: &name,
-        };
-        self.compose_up(&compose).await?;
-        // Compose replaced the old container already, so a failed container stays for its log.
-        self.wait_healthy(&*job.backend.runtime, &name, &job.spec)
-            .await?;
+        for target in job.spec.targets_or_default(job.app_target) {
+            let backend = self.backend(target);
+            let compose = ComposeJob {
+                runner: &*backend.compose,
+                app: job.app,
+                deployment: job.deployment,
+                port: job.spec.port,
+                source,
+                env: &env,
+                container: &name,
+            };
+            self.compose_up(&compose).await?;
+            self.wait_healthy(&*backend.runtime, &name, &job.spec)
+                .await?;
+        }
         Ok(name)
     }
 
-    /// Starts the new container and waits for its health check. A failure removes the new
-    /// container, and the old container keeps serving. An app with a fixed host port cannot
-    /// run blue-green: the port of the old container frees only when it stops, so the old
-    /// containers stop first and start again when the deployment fails.
+    /// Starts the new container on all target nodes and waits for health checks.
     async fn start_container(&self, job: &Job) -> anyhow::Result<ContainerName> {
         let digest = self.prepare_image(job).await?;
         self.store.set_image_digest(job.deployment, &digest).await?;
         let name = proxy::container_name(job.app, job.deployment)?;
-        let stopped = self.stop_old_containers(job).await;
-        let result = self.run_container(job, &name, &digest).await;
-        if result.is_err()
-            && let Err(err) = job.backend.runtime.remove_container(&name).await
-        {
-            error!(container = %name, "failed to remove a failed container: {err:#}");
-        }
+        let targets = job.spec.targets_or_default(job.app_target);
+        let stopped = self.stop_old_on_targets(job, &targets).await;
+        let result = self.deploy_targets(job, &name, &digest, &targets).await;
         if result.is_err() {
-            for container in &stopped {
-                if let Err(err) = job.backend.runtime.start_container(container).await {
-                    error!(container = %container, "failed to start the old container again: {err:#}");
-                }
-            }
+            self.restart_stopped(&stopped).await;
         }
         result.map(|()| name)
     }
 
-    /// Stops the running containers of the app. They hold nothing for a blue-green switch, so
-    /// this matters only when their port must free for the new container.
-    async fn stop_old_containers(&self, job: &Job) -> Vec<ContainerName> {
+    async fn deploy_targets(
+        &self,
+        job: &Job,
+        name: &ContainerName,
+        digest: &str,
+        targets: &[ShortId],
+    ) -> anyhow::Result<()> {
+        let mut started = Vec::new();
+        for &target in targets {
+            let backend = self.backend(target);
+            self.ensure_target_image(&*backend.runtime, job).await?;
+            if let Err(err) = self.run_container(&backend, job, name, digest).await {
+                self.cleanup_failed_targets(name, &started).await;
+                return Err(err);
+            }
+            started.push(target);
+        }
+        Ok(())
+    }
+
+    async fn ensure_target_image(
+        &self,
+        runtime: &dyn ContainerRuntime,
+        job: &Job,
+    ) -> anyhow::Result<()> {
+        if let JobImage::Pull(image) = &job.image {
+            self.resolve_image(runtime, image).await?;
+        }
+        Ok(())
+    }
+
+    async fn cleanup_failed_targets(&self, name: &ContainerName, targets: &[ShortId]) {
+        for &target in targets {
+            let runtime = self.runtime(target);
+            if let Err(err) = runtime.remove_container(name).await {
+                error!(container = %name, target = %target, "failed to remove a failed container: {err:#}");
+            }
+        }
+    }
+
+    async fn stop_old_on_targets(
+        &self,
+        job: &Job,
+        targets: &[ShortId],
+    ) -> Vec<(ShortId, Vec<ContainerName>)> {
         if job.spec.host_port.is_none() {
             return Vec::new();
         }
-        let runtime = &*job.backend.runtime;
-        let label = match app_label(job.app) {
+        let mut stopped = Vec::new();
+        for &target in targets {
+            let containers = self.stop_old_containers(target, job.app).await;
+            stopped.push((target, containers));
+        }
+        stopped
+    }
+
+    async fn stop_old_containers(&self, target: ShortId, app: ShortId) -> Vec<ContainerName> {
+        let runtime = self.runtime(target);
+        let label = match app_label(app) {
             Ok(label) => label,
             Err(err) => {
-                error!(app = %job.app, "failed to name the old containers: {err:#}");
+                error!(app = %app, "failed to name the old containers: {err:#}");
                 return Vec::new();
             }
         };
@@ -473,7 +520,7 @@ impl Platform {
                 .filter_map(|container| container.name.parse().ok())
                 .collect::<Vec<_>>(),
             Err(err) => {
-                error!(app = %job.app, "failed to list the old containers: {err:#}");
+                error!(app = %app, "failed to list the old containers: {err:#}");
                 return Vec::new();
             }
         };
@@ -482,10 +529,21 @@ impl Platform {
                 .stop_container(container, Duration::from_secs(10))
                 .await
             {
-                error!(container = %container, "failed to stop the old container: {err:#}");
+                error!(container = %container, target = %target, "failed to stop the old container: {err:#}");
             }
         }
         running
+    }
+
+    async fn restart_stopped(&self, stopped: &[(ShortId, Vec<ContainerName>)]) {
+        for (target, containers) in stopped {
+            let runtime = self.runtime(*target);
+            for container in containers {
+                if let Err(err) = runtime.start_container(container).await {
+                    error!(container = %container, target = %target, "failed to start the old container again: {err:#}");
+                }
+            }
+        }
     }
 
     /// Pulls or builds the image of the deployment, and returns the reference that pins it.
@@ -560,14 +618,36 @@ impl Platform {
 
     async fn run_container(
         &self,
+        backend: &Backend,
         job: &Job,
         name: &ContainerName,
         digest: &str,
     ) -> anyhow::Result<()> {
-        let runtime = &*job.backend.runtime;
+        let runtime = &*backend.runtime;
         let app_label = app_label(job.app)?;
         let network = app_network(job.app)?;
         runtime.ensure_network(&network, &app_label).await?;
+        let spec = self
+            .build_container_spec(job, name, digest, runtime, &app_label, &network)
+            .await?;
+        runtime.create_container(&spec).await?;
+        runtime.start_container(name).await?;
+        let healthy = self.wait_healthy(runtime, name, &job.spec).await;
+        if healthy.is_err() {
+            let _ = runtime.remove_container(name).await;
+        }
+        healthy
+    }
+
+    async fn build_container_spec(
+        &self,
+        job: &Job,
+        name: &ContainerName,
+        digest: &str,
+        runtime: &dyn ContainerRuntime,
+        app_label: &AppName,
+        network: &NetworkName,
+    ) -> anyhow::Result<ContainerSpec> {
         let mut env = self.open_env(job.app, &job.env)?;
         let extra_hosts = if job.spec.uses_database.is_some() {
             env.extend(self.database_env(job, runtime).await?);
@@ -578,7 +658,7 @@ impl Platform {
         } else {
             Vec::new()
         };
-        let spec = ContainerSpec {
+        Ok(ContainerSpec {
             name: name.clone(),
             image: digest.parse()?,
             env,
@@ -586,17 +666,14 @@ impl Platform {
                 (APP_LABEL.to_string(), app_label.to_string()),
                 (DEPLOYMENT_LABEL.to_string(), job.deployment.to_string()),
             ]),
-            network: Some(network),
+            network: Some(network.clone()),
             volumes: job.spec.volumes.clone(),
             restart: job.spec.restart,
             limits: job.spec.limits,
             publish: Some(job.spec.port),
             host_port: job.spec.host_port,
             extra_hosts,
-        };
-        runtime.create_container(&spec).await?;
-        runtime.start_container(name).await?;
-        self.wait_healthy(runtime, name, &job.spec).await
+        })
     }
 
     fn open_env(&self, app: ShortId, env: &[StoredEnv]) -> anyhow::Result<Vec<EnvVar>> {
@@ -706,9 +783,12 @@ impl Platform {
         if !compose {
             tokio::time::sleep(self.timing.drain).await;
         }
-        if let Err(err) = self.remove_old(&job.backend, job.app, name, compose).await {
-            // The deployment serves already, so only the log shows the failed cleanup.
-            error!(app = %job.app, "failed to remove the old containers: {err:#}");
+        for target in job.spec.targets_or_default(job.app_target) {
+            let backend = self.backend(target);
+            if let Err(err) = self.remove_old(&backend, job.app, name, compose).await {
+                // The deployment serves already, so only the log shows the failed cleanup.
+                error!(app = %job.app, target = %target, "failed to remove the old containers: {err:#}");
+            }
         }
         Ok(())
     }

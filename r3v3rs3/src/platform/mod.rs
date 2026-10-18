@@ -388,11 +388,7 @@ impl Platform {
         let app = self.app(id).await?;
         self.ensure_database_free(&app).await?;
         let _lock = self.lock_app(&app)?;
-        // Only a pipeline creates containers, so an app without deployments needs no Docker call.
-        if !self.store.deployments(id, 1).await?.is_empty() {
-            self.remove_app_resources(&self.backend(app.target), id)
-                .await?;
-        }
+        self.cleanup_app_targets(&app, id).await?;
         self.drop_app_hook(id).await?;
         if !self.store.delete_app(id).await? {
             return Err(not_found(id));
@@ -400,6 +396,15 @@ impl Platform {
         self.forget_queued_hook(id);
         self.publish().await;
         Ok(app)
+    }
+
+    async fn cleanup_app_targets(&self, app: &AppEntry, id: ShortId) -> anyhow::Result<()> {
+        if !self.store.deployments(id, 1).await?.is_empty() {
+            for target in app.spec.targets_or_default(app.target) {
+                self.remove_app_resources(&self.backend(target), id).await?;
+            }
+        }
+        Ok(())
     }
 
     /// Checks for image updates of an app.
@@ -915,6 +920,8 @@ mod tests {
                 deploy_window: None,
                 tag_trigger: None,
                 store_app_id: None,
+                targets: Vec::new(),
+                load_balancing: None,
             },
         }
     }

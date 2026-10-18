@@ -1047,6 +1047,8 @@ mod tests {
                 deploy_window: None,
                 tag_trigger: None,
                 store_app_id: None,
+                targets: Vec::new(),
+                load_balancing: None,
             },
             git_token_set: false,
             webhook_secret_set: false,

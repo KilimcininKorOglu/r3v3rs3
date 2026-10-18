@@ -90,6 +90,8 @@ pub struct AppForm {
     pub deploy_window: String,
     pub tag_trigger: String,
     pub store_app_id: Option<String>,
+    pub targets: Vec<String>,
+    pub load_balancing: String,
 }
 
 impl Default for AppForm {
@@ -123,6 +125,8 @@ impl Default for AppForm {
             deploy_window: String::new(),
             tag_trigger: String::new(),
             store_app_id: None,
+            targets: Vec::new(),
+            load_balancing: String::new(),
         }
     }
 }
@@ -184,6 +188,11 @@ impl AppForm {
             deploy_window: spec.deploy_window.clone().unwrap_or_default(),
             tag_trigger: spec.tag_trigger.clone().unwrap_or_default(),
             store_app_id: spec.store_app_id.clone(),
+            targets: spec.targets.iter().map(ToString::to_string).collect(),
+            load_balancing: spec
+                .load_balancing
+                .map(|lb| lb.as_str().to_string())
+                .unwrap_or_default(),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -237,6 +246,7 @@ impl AppForm {
     /// Checks the form and returns the request. The error is a message in the selected language.
     pub fn parse(&self, locale: Locale) -> Result<AppRequest, String> {
         let (volumes, restart, limits) = self.container_settings(locale)?;
+        let (targets, load_balancing) = self.parse_replica_settings(locale)?;
         let spec = AppSpec {
             source: self.source(locale)?,
             port: self.port(locale)?,
@@ -254,6 +264,8 @@ impl AppForm {
             deploy_window: non_empty(&self.deploy_window).map(str::to_string),
             tag_trigger: non_empty(&self.tag_trigger).map(str::to_string),
             store_app_id: self.store_app_id.clone(),
+            targets,
+            load_balancing,
         };
         spec.validate().map_err(|err| locale.error_message(&err))?;
         Ok(AppRequest {
@@ -261,6 +273,25 @@ impl AppForm {
             target: parse_target(locale, &self.target)?,
             spec,
         })
+    }
+
+    fn parse_replica_settings(
+        &self,
+        locale: Locale,
+    ) -> Result<(Vec<ShortId>, Option<r3v3rs3_api::upstream::LoadBalancing>), String> {
+        let targets = self
+            .targets
+            .iter()
+            .map(|t| parse_target(locale, t))
+            .collect::<Result<Vec<_>, _>>()?;
+        let load_balancing = match self.load_balancing.as_str() {
+            "round_robin" => Some(r3v3rs3_api::upstream::LoadBalancing::RoundRobin),
+            "random" => Some(r3v3rs3_api::upstream::LoadBalancing::Random),
+            "first" => Some(r3v3rs3_api::upstream::LoadBalancing::First),
+            "client_ip_hash" => Some(r3v3rs3_api::upstream::LoadBalancing::ClientIpHash),
+            _ => None,
+        };
+        Ok((targets, load_balancing))
     }
 
     fn source(&self, locale: Locale) -> Result<AppSource, String> {
@@ -759,7 +790,79 @@ fn target_select(locale: Locale, form: &UseStateHandle<AppForm>, targets: &[Targ
         <>
             <label class={LABEL_CLASS}>{locale.t("apps.target")}</label>
             { select_view(form, options, |f, value| f.target = value.to_string()) }
+            { replica_targets_view(locale, form, targets) }
         </>
+    }
+}
+
+fn replica_targets_view(
+    locale: Locale,
+    form: &UseStateHandle<AppForm>,
+    targets: &[TargetEntry],
+) -> Html {
+    if targets.len() <= 1 {
+        return html! {};
+    }
+    let checkboxes = targets
+        .iter()
+        .map(|target| {
+            let id = target.id.to_string();
+            let checked = form.targets.contains(&id);
+            let state = form.clone();
+            let id_value = id.clone();
+            let (status, _) = super::targets::target_status(target);
+            let label = format!("{} ({})", target.name, locale.t(status));
+            let onchange = Callback::from(move |event: Event| {
+                let input: HtmlInputElement = event.target_unchecked_into();
+                let mut updated = (*state).clone();
+                if input.checked() {
+                    if !updated.targets.contains(&id_value) {
+                        updated.targets.push(id_value.clone());
+                    }
+                } else {
+                    updated.targets.retain(|t| t != &id_value);
+                }
+                state.set(updated);
+            });
+            html! {
+                <label class="flex items-center gap-2">
+                    <input type="checkbox" value={id} checked={checked} {onchange} />
+                    <span>{label}</span>
+                </label>
+            }
+        })
+        .collect::<Html>();
+    html! {
+        <div class="mt-4">
+            <label class={LABEL_CLASS}>{locale.t("apps.replica_targets")}</label>
+            <div class="flex flex-col gap-1">{checkboxes}</div>
+            <p class={HINT_CLASS}>{locale.t("apps.replica_targets_hint")}</p>
+            if form.targets.len() > 1 {
+                { load_balancing_select(locale, form) }
+            }
+        </div>
+    }
+}
+
+fn load_balancing_select(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let options = r3v3rs3_api::upstream::LoadBalancing::ALL
+        .iter()
+        .map(|lb| {
+            let val = lb.as_str();
+            let key = format!("load_balancing.{val}");
+            let label = locale.t(&key);
+            let selected = form.load_balancing == val
+                || (form.load_balancing.is_empty()
+                    && *lb == r3v3rs3_api::upstream::LoadBalancing::RoundRobin);
+            html! { <option value={val} {selected}>{label}</option> }
+        })
+        .collect::<Html>();
+    html! {
+        <div class="mt-2">
+            <label class={LABEL_CLASS}>{locale.t("apps.load_balancing")}</label>
+            { select_view(form, options, |f, value| f.load_balancing = value.to_string()) }
+            <p class={HINT_CLASS}>{locale.t("apps.load_balancing_hint")}</p>
+        </div>
     }
 }
 

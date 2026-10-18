@@ -7,6 +7,7 @@ use crate::error::Error;
 use crate::git::{GitRef, RelPath, RepoUrl};
 use crate::id::ShortId;
 use crate::subject_name::SubjectName;
+use crate::upstream::LoadBalancing;
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -542,6 +543,15 @@ pub struct AppSpec {
     /// Optional app store catalog entry id that this app was installed from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub store_app_id: Option<String>,
+
+    /// Optional target nodes to deploy replicas of this app on. When set, deployments run across
+    /// all specified targets, and the master proxies traffic across all active replicas with unified load balancing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<ShortId>,
+
+    /// Optional load balancing algorithm across replica targets (default: round_robin).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_balancing: Option<LoadBalancing>,
 }
 
 impl AppSpec {
@@ -553,7 +563,8 @@ impl AppSpec {
         self.validate_compose()?;
         self.validate_optional_fields()?;
         self.validate_volumes()?;
-        self.validate_database()
+        self.validate_database()?;
+        self.validate_targets()
     }
 
     fn validate_optional_fields(&self) -> Result<(), Error> {
@@ -618,6 +629,28 @@ impl AppSpec {
             }
         }
         Ok(())
+    }
+
+    fn validate_targets(&self) -> Result<(), Error> {
+        if self.database.is_some() && !self.targets.is_empty() {
+            return Err(invalid("a database app cannot run across multiple targets"));
+        }
+        let mut seen = HashSet::new();
+        for target in &self.targets {
+            if !seen.insert(*target) {
+                return Err(invalid("replica targets must be distinct"));
+            }
+        }
+        Ok(())
+    }
+
+    /// The target nodes that run replicas of this app. Returns `[primary]` when `self.targets` is empty.
+    pub fn targets_or_default(&self, primary: ShortId) -> Vec<ShortId> {
+        if self.targets.is_empty() {
+            vec![primary]
+        } else {
+            self.targets.clone()
+        }
     }
 
     /// A domain gets a certificate from ACME, so it is one DNS name, not a wildcard or an IP
@@ -1379,5 +1412,54 @@ mod tests {
         assert!(!matches_tag_pattern("v?.*", "v10.2"));
         assert!(matches_tag_pattern("v1.0", "v1.0"));
         assert!(!matches_tag_pattern("v1.0", "v1.0.1"));
+    }
+
+    #[test]
+    fn replica_targets_validation_and_resolution() {
+        let primary: ShortId = "fzn-txd".parse().unwrap();
+        let target2: ShortId = "abc-123".parse().unwrap();
+
+        // Default targets resolution
+        let s = spec(json!({
+            "source": {"type": "image", "image": "nginx:alpine"},
+            "port": 80,
+            "domains": ["app.example.com"]
+        }))
+        .unwrap();
+        assert_eq!(s.targets_or_default(primary), vec![primary]);
+
+        // Explicit multiple targets
+        let s2 = spec(json!({
+            "source": {"type": "image", "image": "nginx:alpine"},
+            "port": 80,
+            "domains": ["app.example.com"],
+            "targets": ["fzn-txd", "abc-123"],
+            "load_balancing": "round_robin"
+        }))
+        .unwrap();
+        assert_eq!(s2.targets_or_default(primary), vec![primary, target2]);
+        assert_eq!(s2.load_balancing, Some(LoadBalancing::RoundRobin));
+
+        // Rejects duplicates
+        assert!(
+            spec(json!({
+                "source": {"type": "image", "image": "nginx:alpine"},
+                "port": 80,
+                "domains": ["app.example.com"],
+                "targets": ["fzn-txd", "fzn-txd"]
+            }))
+            .is_err()
+        );
+
+        // Rejects replica targets on databases
+        assert!(
+            spec(json!({
+                "source": {"type": "image", "image": "postgres:16"},
+                "port": 5432,
+                "database": "postgres",
+                "targets": ["fzn-txd", "abc-123"]
+            }))
+            .is_err()
+        );
     }
 }

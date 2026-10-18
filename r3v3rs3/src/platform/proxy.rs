@@ -15,12 +15,12 @@ pub fn container_name(app: ShortId, deployment: ShortId) -> anyhow::Result<Conta
     Ok(format!("r3v3rs3-{app}-{deployment}").parse()?)
 }
 
-/// An app whose running container listens on `host_port` of 127.0.0.1.
+/// An app whose running containers listen on `host_ports` of 127.0.0.1.
 pub struct LiveApp<'a> {
     pub id: ShortId,
     pub name: &'a str,
     pub spec: &'a AppSpec,
-    pub host_port: u16,
+    pub host_ports: Vec<u16>,
 }
 
 /// The proxy of an app. An app without domains gets no proxy, because a proxy without virtual
@@ -29,10 +29,17 @@ pub fn app_proxy(
     app: &LiveApp<'_>,
     config: &PlatformConfig,
 ) -> anyhow::Result<Option<DiscoveredProxy>> {
-    if app.spec.domains.is_empty() {
+    if app.spec.domains.is_empty() || app.host_ports.is_empty() {
         return Ok(None);
     }
-    let url = format!("http://127.0.0.1:{}/", app.host_port).parse::<ServerUrl>()?;
+    let servers = app
+        .host_ports
+        .iter()
+        .map(|port| {
+            let url = format!("http://127.0.0.1:{port}/").parse::<ServerUrl>()?;
+            Ok(Server::new(url))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let http = HttpProxy {
         vhosts: app
             .spec
@@ -42,9 +49,10 @@ pub fn app_proxy(
             .map(VirtualHost::SubjectName)
             .collect(),
         routes: vec![Route {
-            servers: vec![Server::new(url)],
+            servers,
             ..Default::default()
         }],
+        load_balancing: app.spec.load_balancing.unwrap_or_default(),
         ..Default::default()
     };
     let key = app.id.to_string();
@@ -120,6 +128,8 @@ mod tests {
             deploy_window: None,
             tag_trigger: None,
             store_app_id: None,
+            targets: Vec::new(),
+            load_balancing: None,
         }
     }
 
@@ -130,7 +140,7 @@ mod tests {
             id: "abc-def".parse()?,
             name: "shop",
             spec: &shop_spec,
-            host_port: 49153,
+            host_ports: vec![49153],
         };
         let config = PlatformConfig {
             proxy_ports: vec!["http".into(), "https".into()],
@@ -159,6 +169,35 @@ mod tests {
     }
 
     #[test]
+    fn an_app_proxy_with_multiple_targets_sets_load_balancing() -> anyhow::Result<()> {
+        let mut shop_spec = spec(&["shop.example.com"]);
+        shop_spec.load_balancing = Some(r3v3rs3_api::upstream::LoadBalancing::ClientIpHash);
+        let app = LiveApp {
+            id: "abc-def".parse()?,
+            name: "shop",
+            spec: &shop_spec,
+            host_ports: vec![49153, 49154],
+        };
+        let config = PlatformConfig {
+            proxy_ports: vec!["http".into()],
+            ..Default::default()
+        };
+        let proxy = app_proxy(&app, &config)?.expect("a proxy");
+        assert_eq!(
+            crate::discovery::first_route_servers(&proxy),
+            ["http://127.0.0.1:49153/", "http://127.0.0.1:49154/"]
+        );
+        let ProxyKind::Http(http) = &proxy.definition.kind else {
+            panic!("an HTTP proxy");
+        };
+        assert_eq!(
+            http.load_balancing,
+            r3v3rs3_api::upstream::LoadBalancing::ClientIpHash
+        );
+        Ok(())
+    }
+
+    #[test]
     fn the_ports_of_the_app_win_over_the_proxy_ports_of_the_config() -> anyhow::Result<()> {
         let mut app_spec = spec(&["shop.example.com"]);
         app_spec.ports = vec!["https".into()];
@@ -166,7 +205,7 @@ mod tests {
             id: "abc-def".parse()?,
             name: "shop",
             spec: &app_spec,
-            host_port: 49153,
+            host_ports: vec![49153],
         };
         let config = PlatformConfig {
             proxy_ports: vec!["http".into()],
@@ -184,7 +223,7 @@ mod tests {
             id: "abc-def".parse()?,
             name: "shop",
             spec: &spec,
-            host_port: 49153,
+            host_ports: vec![49153],
         };
         assert!(app_proxy(&app, &PlatformConfig::default())?.is_none());
         Ok(())
