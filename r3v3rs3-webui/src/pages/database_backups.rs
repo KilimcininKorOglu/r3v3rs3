@@ -13,7 +13,7 @@ use crate::store::SessionStore;
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{BackupConfig, BackupEntry, S3Config};
+use r3v3rs3_api::platform::{BackupConfig, BackupEntry, RsyncConfig, S3Config, SftpConfig};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -24,8 +24,8 @@ const INPUT_CLASS: &str =
 const BUTTON_CLASS: &str =
     "px-3 py-1.5 rounded bg-neutral-100 text-neutral-900 font-medium disabled:opacity-50";
 
-/// The S3 and the schedule fields of the settings form, as the inputs hold them.
-#[derive(Clone, Default, PartialEq)]
+/// The backup settings form state holding S3, SFTP, rsync and restore test fields.
+#[derive(Clone, PartialEq)]
 struct FormState {
     schedule: String,
     keep: String,
@@ -34,11 +34,47 @@ struct FormState {
     prefix: String,
     access_key: String,
     secret_key: String,
+    sftp_host: String,
+    sftp_port: String,
+    sftp_user: String,
+    sftp_path: String,
+    sftp_password: String,
+    sftp_key: String,
+    rsync_dest: String,
+    rsync_ssh_options: String,
+    rsync_password: String,
+    restore_test_enabled: bool,
+}
+
+impl Default for FormState {
+    fn default() -> Self {
+        Self {
+            schedule: String::new(),
+            keep: "7".into(),
+            endpoint: String::new(),
+            region: String::new(),
+            prefix: String::new(),
+            access_key: String::new(),
+            secret_key: String::new(),
+            sftp_host: String::new(),
+            sftp_port: "22".into(),
+            sftp_user: String::new(),
+            sftp_path: String::new(),
+            sftp_password: String::new(),
+            sftp_key: String::new(),
+            rsync_dest: String::new(),
+            rsync_ssh_options: String::new(),
+            rsync_password: String::new(),
+            restore_test_enabled: true,
+        }
+    }
 }
 
 impl FormState {
     fn from_config(config: &BackupConfig) -> Self {
         let s3 = config.s3.clone().unwrap_or_default();
+        let sftp = config.sftp.clone().unwrap_or_default();
+        let rsync = config.rsync.clone().unwrap_or_default();
         Self {
             schedule: config.schedule.clone(),
             keep: config.keep.to_string(),
@@ -47,6 +83,20 @@ impl FormState {
             prefix: s3.prefix,
             access_key: s3.access_key,
             secret_key: String::new(),
+            sftp_host: sftp.host,
+            sftp_port: if sftp.port > 0 {
+                sftp.port.to_string()
+            } else {
+                "22".to_string()
+            },
+            sftp_user: sftp.user,
+            sftp_path: sftp.path,
+            sftp_password: String::new(),
+            sftp_key: String::new(),
+            rsync_dest: rsync.destination,
+            rsync_ssh_options: rsync.ssh_options,
+            rsync_password: String::new(),
+            restore_test_enabled: config.restore_test_enabled,
         }
     }
 
@@ -58,10 +108,26 @@ impl FormState {
             access_key: self.access_key.trim().to_string(),
             secret_key: self.secret_key.clone(),
         });
+        let sftp = (!self.sftp_host.trim().is_empty()).then(|| SftpConfig {
+            host: self.sftp_host.trim().to_string(),
+            port: self.sftp_port.trim().parse().unwrap_or(22),
+            user: self.sftp_user.trim().to_string(),
+            path: self.sftp_path.trim().to_string(),
+            password: self.sftp_password.clone(),
+            key: self.sftp_key.clone(),
+        });
+        let rsync = (!self.rsync_dest.trim().is_empty()).then(|| RsyncConfig {
+            destination: self.rsync_dest.trim().to_string(),
+            ssh_options: self.rsync_ssh_options.trim().to_string(),
+            password: self.rsync_password.clone(),
+        });
         BackupConfig {
             schedule: self.schedule.trim().to_string(),
             keep: self.keep.trim().parse().unwrap_or(7),
             s3,
+            sftp,
+            rsync,
+            restore_test_enabled: self.restore_test_enabled,
         }
     }
 }
@@ -254,12 +320,46 @@ fn list_view(
                     reload.clone(),
                 )
             });
+            let test = can_edit.then(|| {
+                let (reload, backup_id) = (reload.clone(), entry.id.clone());
+                Callback::from(move |_| {
+                    let (reload, backup_id) = (reload.clone(), backup_id.clone());
+                    spawn_local(async move {
+                        let _ = Request::post(&format!("{API_ENDPOINT}/databases/{id}/backups/{backup_id}/test")).send().await;
+                        reload.emit(());
+                    });
+                })
+            });
+            let status_badge = match entry.verification_status.as_deref() {
+                Some("valid") => html! {
+                    <span class="text-xs text-green-400 mr-3" title="Dump verified">
+                        {"✓ "}{locale.t("backups.verified")}
+                    </span>
+                },
+                Some(err) => html! {
+                    <span class="text-xs text-red-400 mr-3" title={err.to_string()}>
+                        {"✗ "}{locale.t("backups.verify_failed")}
+                    </span>
+                },
+                None => {
+                    if let Some(test_click) = test {
+                        html! {
+                            <a class="text-xs text-neutral-400 hover:text-neutral-200 mr-3 cursor-pointer" onclick={test_click}>
+                                {locale.t("backups.test")}
+                            </a>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+            };
             html! {
                 <tr class="border-b border-neutral-700">
                     <td class="py-1.5">{format_time(entry.created_at.max(0) as u64)}</td>
                     <td class="py-1.5 font-mono text-neutral-400">{format_size(entry.size)}</td>
                     <td class="py-1.5 font-mono text-neutral-400">{entry.sha256.chars().take(12).collect::<String>()}</td>
                     <td class="py-1.5 text-right">
+                        {status_badge}
                         <a class="text-sm text-neutral-400 hover:text-neutral-200 mr-3" href={download} download={format!("{}.dump.gz", entry.id)}>
                             {locale.t("backups.download")}
                         </a>
@@ -352,6 +452,12 @@ fn settings_view(
                         onchange={text_input(form, |state| &mut state.keep)}
                     />
                 </label>
+                <label class="flex items-center space-x-2 md:col-span-2">
+                    <input type="checkbox" checked={form.restore_test_enabled}
+                        onchange={checkbox_input(form, |state| &mut state.restore_test_enabled)}
+                    />
+                    <span class="text-sm text-neutral-300">{locale.t("backups.restore_test_enabled")}</span>
+                </label>
             </div>
             <p class="font-medium mt-4 mb-2">{locale.t("backups.s3")}</p>
             <div class="grid gap-3 md:grid-cols-2">
@@ -391,6 +497,75 @@ fn settings_view(
                     <span class="text-xs text-neutral-500">{locale.t("backups.secret_key_hint")}</span>
                 </label>
             </div>
+            <p class="font-medium mt-4 mb-2">{locale.t("backups.sftp")}</p>
+            <div class="grid gap-3 md:grid-cols-2">
+                <label class="block">
+                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_host")}</span>
+                    <input type="text" class={INPUT_CLASS} placeholder="sftp.example.com"
+                        value={form.sftp_host.clone()}
+                        onchange={text_input(form, |state| &mut state.sftp_host)}
+                    />
+                </label>
+                <label class="block">
+                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_port")}</span>
+                    <input type="text" class={INPUT_CLASS} placeholder="22"
+                        value={form.sftp_port.clone()}
+                        onchange={text_input(form, |state| &mut state.sftp_port)}
+                    />
+                </label>
+                <label class="block">
+                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_user")}</span>
+                    <input type="text" class={INPUT_CLASS}
+                        value={form.sftp_user.clone()}
+                        onchange={text_input(form, |state| &mut state.sftp_user)}
+                    />
+                </label>
+                <label class="block">
+                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_path")}</span>
+                    <input type="text" class={INPUT_CLASS} placeholder="/backups"
+                        value={form.sftp_path.clone()}
+                        onchange={text_input(form, |state| &mut state.sftp_path)}
+                    />
+                </label>
+                <label class="block">
+                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_password")}</span>
+                    <input type="password" class={INPUT_CLASS}
+                        value={form.sftp_password.clone()}
+                        onchange={text_input(form, |state| &mut state.sftp_password)}
+                    />
+                </label>
+                <label class="block">
+                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_key")}</span>
+                    <textarea rows="2" class={INPUT_CLASS}
+                        value={form.sftp_key.clone()}
+                        onchange={textarea_input(form, |state| &mut state.sftp_key)}
+                    />
+                </label>
+            </div>
+            <p class="font-medium mt-4 mb-2">{locale.t("backups.rsync")}</p>
+            <div class="grid gap-3 md:grid-cols-2">
+                <label class="block md:col-span-2">
+                    <span class="text-sm text-neutral-400">{locale.t("backups.rsync_destination")}</span>
+                    <input type="text" class={INPUT_CLASS} placeholder="user@remote.example.com:/backups"
+                        value={form.rsync_dest.clone()}
+                        onchange={text_input(form, |state| &mut state.rsync_dest)}
+                    />
+                </label>
+                <label class="block">
+                    <span class="text-sm text-neutral-400">{locale.t("backups.rsync_ssh_options")}</span>
+                    <input type="text" class={INPUT_CLASS} placeholder="-p 22 -i /path/key"
+                        value={form.rsync_ssh_options.clone()}
+                        onchange={text_input(form, |state| &mut state.rsync_ssh_options)}
+                    />
+                </label>
+                <label class="block">
+                    <span class="text-sm text-neutral-400">{locale.t("backups.rsync_password")}</span>
+                    <input type="password" class={INPUT_CLASS}
+                        value={form.rsync_password.clone()}
+                        onchange={text_input(form, |state| &mut state.rsync_password)}
+                    />
+                </label>
+            </div>
             <div class="flex justify-end mt-3">
                 <button type="submit" class={BUTTON_CLASS}>
                     {locale.t("common.update")}
@@ -408,6 +583,34 @@ fn text_input(
     let form = form.clone();
     Callback::from(move |event: Event| {
         let input: web_sys::HtmlInputElement = event.target_unchecked_into();
+        let mut updated = (*form).clone();
+        *select(&mut updated) = input.value();
+        form.set(updated);
+    })
+}
+
+/// Returns a callback that writes the checked state of a checkbox to a field of the form.
+fn checkbox_input(
+    form: &UseStateHandle<FormState>,
+    select: fn(&mut FormState) -> &mut bool,
+) -> Callback<Event> {
+    let form = form.clone();
+    Callback::from(move |event: Event| {
+        let input: web_sys::HtmlInputElement = event.target_unchecked_into();
+        let mut updated = (*form).clone();
+        *select(&mut updated) = input.checked();
+        form.set(updated);
+    })
+}
+
+/// Returns a callback that writes the value of a textarea to a field of the form.
+fn textarea_input(
+    form: &UseStateHandle<FormState>,
+    select: fn(&mut FormState) -> &mut String,
+) -> Callback<Event> {
+    let form = form.clone();
+    Callback::from(move |event: Event| {
+        let input: web_sys::HtmlTextAreaElement = event.target_unchecked_into();
         let mut updated = (*form).clone();
         *select(&mut updated) = input.value();
         form.set(updated);

@@ -42,6 +42,10 @@ At its first start the platform creates two files in the config directory:
 - `platform.db`: the apps, their environment variables, their deployments, the targets and the Git provider connections.
 - `platform.key`: the key that encrypts the environment values, the Git tokens and webhook secrets of the apps, and the client secrets, private keys and tokens of the Git provider connections. Its mode is `0600`. Keep a backup of it next to the backup of `platform.db`, because the values do not open without it.
 
+#### Key Rotation
+
+To rotate the encryption key, click **Rotate Key** in the **Settings** page under **Deployment Platform**, run `r3v3rs3-cli platform rotate-key` in the CLI, or send `POST /api/platform/key/rotate`. This generates a fresh 256-bit AES key, decrypts every stored secret in `platform.db` using the existing key, re-encrypts them with the new key in a single atomic transaction, writes the new `platform.key`, and safely archives the previous key to `platform.key.old` (with mode `0600`).
+
 Access to the Docker socket is equal to root access on the host. Enable the platform only on a server where r3v3rs3 may control every container.
 
 ## Apps
@@ -195,9 +199,19 @@ A database needs the local target, and only an account with the Edit permission 
 
 The **Backups** link on a database row opens its backups. **Back up now** runs the dump of the engine inside the container (`pg_dump`, `mariadb-dump`, `mysqldump` or `mongodump`; Redis runs `SAVE` and takes its dump file), gzips it and stores it in the `backups` directory of the config directory, one folder per database, with a JSON manifest that carries the SHA-256 of the file. A backup holds no password. A database on an agent target takes no backup, because the dump runs in the container itself.
 
-The backup settings on the same page name the daily time in UTC that every database is backed up at, the number of backups per database that survive (the oldest go first), and an optional S3 target: an `http` or `https` endpoint with the bucket in its path, a region, a key prefix and an access key and secret key. Every new backup uploads to the bucket, path style; a failed upload only goes into the server log, because the local copy exists. The secret key is stored sealed in the platform database and the panel never shows it; an empty field keeps the stored one.
+The backup settings on the same page configure the daily time in UTC that every database is backed up at, the number of backups per database that survive (the oldest go first), and remote upload destinations:
+
+- **S3**: An S3-compatible bucket endpoint with region, path prefix, access key, and secret key.
+- **SFTP**: Uploads dumps via SSH/SFTP specifying `host`, `port` (default 22), `user`, target `path`, and an optional private key or password.
+- **rsync**: Transfers dumps using `rsync` over SSH to a remote target directory.
+
+Every new backup uploads to the configured remote targets; a failed upload only goes into the server log, because the local copy exists. Remote credentials are encrypted with `platform.key`.
+
+#### Restore & Periodic Verification Test
 
 **Restore** writes the stored dump back into the running container and runs the restore command of the engine (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis takes the dump file into its data volume and restarts, so the restore answers after the server is back. A restore replaces the data of the database.
+
+To ensure that backups remain uncorrupted and recoverable, r3v3rs3 includes an automated periodic restore testing mechanism. The system verifies that gzipped dumps decompress cleanly and match the expected database engine format magic bytes or SQL header signatures (Redis RDB, SQLite 3, PostgreSQL, MySQL/MariaDB). Verified backups display a verification timestamp (`verified_at`), and an immediate test can be triggered in the WebUI or via `POST /api/databases/{id}/backups/{name}/verify`.
 
 ## Deployments
 

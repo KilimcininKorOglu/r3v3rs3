@@ -22,10 +22,22 @@ pub const BACKUP_CONFIG: &str = "backup_config";
 pub const BACKUP_DIR: &str = "backups";
 
 /// The settings row of the sealed S3 secret key.
-const S3_SECRET: &str = "backup_s3_secret";
+pub(super) const S3_SECRET: &str = "backup_s3_secret";
 
 /// The associated data that binds the sealed S3 secret key.
-const S3_SECRET_AAD: &str = "backup/s3/secret_key";
+pub(super) const S3_SECRET_AAD: &str = "backup/s3/secret_key";
+
+/// The settings row of the sealed SFTP secret key/password.
+pub(super) const SFTP_SECRET: &str = "backup_sftp_secret";
+
+/// The associated data that binds the sealed SFTP secret.
+pub(super) const SFTP_SECRET_AAD: &str = "backup/sftp/secret";
+
+/// The settings row of the sealed rsync secret password.
+pub(super) const RSYNC_SECRET: &str = "backup_rsync_secret";
+
+/// The associated data that binds the sealed rsync secret.
+pub(super) const RSYNC_SECRET_AAD: &str = "backup/rsync/secret";
 
 /// The directory inside the container that a restore uploads its dump to.
 const RESTORE_DIR: &str = "/tmp/r3v3rs3-restore";
@@ -56,26 +68,75 @@ impl Platform {
         }
     }
 
-    /// Replaces the backup settings. A secret key in the request replaces the stored one, an
-    /// empty one keeps it, and no S3 target clears it. The settings are stored without the
-    /// secret; it lives sealed in its own row.
+    /// Replaces the backup settings. Secret keys/passwords in the request replace the stored ones,
+    /// empty ones keep them, and removing a target clears its secret. The settings are stored
+    /// without secrets; they live sealed in their own rows.
     pub async fn set_backup_config(&self, mut config: BackupConfig) -> anyhow::Result<()> {
-        let secret = config
-            .s3
-            .as_mut()
-            .map(|s3| std::mem::take(&mut s3.secret_key))
-            .unwrap_or_default();
-        match (&config.s3, secret.is_empty()) {
-            (Some(_), false) => {
-                let sealed = hex::encode(self.keys.seal(S3_SECRET_AAD, secret.as_bytes())?);
-                self.store.set_setting(S3_SECRET, Some(&sealed)).await?;
-            }
-            // An S3 target without a new secret keeps the stored one.
-            (Some(_), true) => {}
-            (None, _) => self.store.set_setting(S3_SECRET, None).await?,
-        }
+        self.save_s3_secret(&mut config.s3).await?;
+        self.save_sftp_secret(&mut config.sftp).await?;
+        self.save_rsync_secret(&mut config.rsync).await?;
         let json = serde_json::to_string(&config)?;
         self.store.set_setting(BACKUP_CONFIG, Some(&json)).await
+    }
+
+    async fn save_s3_secret(
+        &self,
+        s3: &mut Option<r3v3rs3_api::platform::S3Config>,
+    ) -> anyhow::Result<()> {
+        let secret = s3
+            .as_mut()
+            .map(|s| std::mem::take(&mut s.secret_key))
+            .unwrap_or_default();
+        match (s3.is_some(), secret.is_empty()) {
+            (true, false) => {
+                let sealed = hex::encode(self.keys().seal(S3_SECRET_AAD, secret.as_bytes())?);
+                self.store.set_setting(S3_SECRET, Some(&sealed)).await
+            }
+            (true, true) => Ok(()),
+            (false, _) => self.store.set_setting(S3_SECRET, None).await,
+        }
+    }
+
+    async fn save_sftp_secret(
+        &self,
+        sftp: &mut Option<r3v3rs3_api::platform::SftpConfig>,
+    ) -> anyhow::Result<()> {
+        let secret = sftp
+            .as_mut()
+            .map(|s| {
+                if !s.key.is_empty() {
+                    std::mem::take(&mut s.key)
+                } else {
+                    std::mem::take(&mut s.password)
+                }
+            })
+            .unwrap_or_default();
+        match (sftp.is_some(), secret.is_empty()) {
+            (true, false) => {
+                let sealed = hex::encode(self.keys().seal(SFTP_SECRET_AAD, secret.as_bytes())?);
+                self.store.set_setting(SFTP_SECRET, Some(&sealed)).await
+            }
+            (true, true) => Ok(()),
+            (false, _) => self.store.set_setting(SFTP_SECRET, None).await,
+        }
+    }
+
+    async fn save_rsync_secret(
+        &self,
+        rsync: &mut Option<r3v3rs3_api::platform::RsyncConfig>,
+    ) -> anyhow::Result<()> {
+        let secret = rsync
+            .as_mut()
+            .map(|r| std::mem::take(&mut r.password))
+            .unwrap_or_default();
+        match (rsync.is_some(), secret.is_empty()) {
+            (true, false) => {
+                let sealed = hex::encode(self.keys().seal(RSYNC_SECRET_AAD, secret.as_bytes())?);
+                self.store.set_setting(RSYNC_SECRET, Some(&sealed)).await
+            }
+            (true, true) => Ok(()),
+            (false, _) => self.store.set_setting(RSYNC_SECRET, None).await,
+        }
     }
 
     /// The S3 secret key, unsealed. `None` when no secret is stored.
@@ -84,7 +145,27 @@ impl Platform {
             return Ok(None);
         };
         let sealed_bytes = hex::decode(sealed)?;
-        let bytes = self.keys.open(S3_SECRET_AAD, &sealed_bytes)?;
+        let bytes = self.keys().open(S3_SECRET_AAD, &sealed_bytes)?;
+        Ok(Some(String::from_utf8(bytes)?))
+    }
+
+    /// The SFTP password or private key, unsealed. `None` when no secret is stored.
+    pub async fn sftp_secret(&self) -> anyhow::Result<Option<String>> {
+        let Some(sealed) = self.store.setting(SFTP_SECRET).await? else {
+            return Ok(None);
+        };
+        let sealed_bytes = hex::decode(sealed)?;
+        let bytes = self.keys().open(SFTP_SECRET_AAD, &sealed_bytes)?;
+        Ok(Some(String::from_utf8(bytes)?))
+    }
+
+    /// The rsync password, unsealed. `None` when no secret is stored.
+    pub async fn rsync_secret(&self) -> anyhow::Result<Option<String>> {
+        let Some(sealed) = self.store.setting(RSYNC_SECRET).await? else {
+            return Ok(None);
+        };
+        let sealed_bytes = hex::decode(sealed)?;
+        let bytes = self.keys().open(RSYNC_SECRET_AAD, &sealed_bytes)?;
         Ok(Some(String::from_utf8(bytes)?))
     }
 
@@ -133,13 +214,16 @@ impl Platform {
             size: compressed.len() as u64,
             sha256: hex::encode(Sha256::digest(&compressed)),
             created_at: unix_ms() as i64,
+            verified_at: None,
+            verification_status: None,
         };
         self.store_backup(db_id, &entry, compressed).await?;
         self.apply_retention(db_id).await?;
         Ok(entry)
     }
 
-    /// Writes one backup file with its manifest and uploads it to the configured S3 bucket.
+    /// Writes one backup file with its manifest, uploads it to remote targets, and runs initial
+    /// restore testing when enabled.
     async fn store_backup(
         &self,
         db_id: ShortId,
@@ -148,17 +232,47 @@ impl Platform {
     ) -> anyhow::Result<()> {
         let dir = self.backup_dir(db_id).await?;
         tokio::fs::create_dir_all(&dir).await?;
-        tokio::fs::write(dir.join(format!("{}.dump.gz", entry.id)), &compressed).await?;
+        let dump_path = dir.join(format!("{}.dump.gz", entry.id));
+        let manifest_path = dir.join(format!("{}.json", entry.id));
+        tokio::fs::write(&dump_path, &compressed).await?;
         let manifest = serde_json::to_vec(entry)?;
-        tokio::fs::write(dir.join(format!("{}.json", entry.id)), manifest).await?;
-        if let Err(err) = self.upload_to_s3(entry, compressed).await {
-            // The local backup stays; only the log shows the failed upload.
+        tokio::fs::write(&manifest_path, manifest).await?;
+
+        self.dispatch_remote_backups(entry, &compressed, &dump_path, &manifest_path)
+            .await;
+
+        let config = self.backup_config().await.unwrap_or_default();
+        if config.restore_test_enabled {
+            let _ = self.verify_backup(db_id, &entry.id).await;
+        }
+        Ok(())
+    }
+
+    async fn dispatch_remote_backups(
+        &self,
+        entry: &BackupEntry,
+        compressed: &[u8],
+        dump_path: &std::path::Path,
+        manifest_path: &std::path::Path,
+    ) {
+        if let Err(err) = self.upload_to_s3(entry, compressed.to_vec()).await {
             tracing::error!(
                 err = format!("{err:#}"),
                 "failed to upload the backup to S3"
             );
         }
-        Ok(())
+        if let Err(err) = self.upload_to_sftp(entry, dump_path, manifest_path).await {
+            tracing::error!(
+                err = format!("{err:#}"),
+                "failed to upload the backup to SFTP"
+            );
+        }
+        if let Err(err) = self.upload_to_rsync(entry, dump_path, manifest_path).await {
+            tracing::error!(
+                err = format!("{err:#}"),
+                "failed to sync the backup with rsync"
+            );
+        }
     }
 
     /// Removes one backup and its manifest.
@@ -217,6 +331,203 @@ impl Platform {
             ..s3
         };
         super::s3::upload(self.http().await?, &s3, entry, content).await
+    }
+
+    fn sftp_remote_spec(sftp: &r3v3rs3_api::platform::SftpConfig) -> String {
+        if !sftp.user.is_empty() {
+            format!("{}@{}", sftp.user, sftp.host)
+        } else {
+            sftp.host.clone()
+        }
+    }
+
+    async fn prepare_sftp_key(secret: &str) -> anyhow::Result<Option<std::path::PathBuf>> {
+        let is_key =
+            !secret.is_empty() && (secret.contains("BEGIN ") || secret.contains("PRIVATE KEY"));
+        if !is_key {
+            return Ok(None);
+        }
+        let key_path = std::env::temp_dir().join(format!("sftp-key-{}", backup_id()));
+        tokio::fs::write(&key_path, secret).await?;
+        Ok(Some(key_path))
+    }
+
+    fn build_sftp_cmd(
+        sftp: &r3v3rs3_api::platform::SftpConfig,
+        key_path: Option<&std::path::Path>,
+    ) -> tokio::process::Command {
+        let mut cmd = tokio::process::Command::new("sftp");
+        cmd.arg("-P").arg(sftp.port.to_string());
+        cmd.arg("-o").arg("StrictHostKeyChecking=no");
+        cmd.arg("-o").arg("UserKnownHostsFile=/dev/null");
+        cmd.arg("-o").arg("BatchMode=yes");
+        if let Some(key) = key_path {
+            cmd.arg("-i").arg(key);
+        }
+        cmd.arg("-b").arg("-");
+        cmd.arg(Self::sftp_remote_spec(sftp));
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        cmd
+    }
+
+    /// Uploads one backup to the configured SFTP server. Does nothing without a target.
+    async fn upload_to_sftp(
+        &self,
+        entry: &BackupEntry,
+        dump_path: &std::path::Path,
+        manifest_path: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        let config = self.backup_config().await?;
+        let Some(sftp) = config.sftp else {
+            return Ok(());
+        };
+        let secret = self.sftp_secret().await?.unwrap_or_default();
+        let target_dir = format!("{}/{}", sftp.path.trim_end_matches('/'), entry.name);
+        let batch = format!(
+            "-mkdir \"{target_dir}\"\nput \"{}\" \"{target_dir}/\"\nput \"{}\" \"{target_dir}/\"\nquit\n",
+            dump_path.display(),
+            manifest_path.display()
+        );
+
+        let temp_key = Self::prepare_sftp_key(&secret).await?;
+        let mut cmd = Self::build_sftp_cmd(&sftp, temp_key.as_deref());
+
+        let mut child = cmd.spawn()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            use tokio::io::AsyncWriteExt;
+            let _ = stdin.write_all(batch.as_bytes()).await;
+        }
+
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(300),
+            child.wait_with_output(),
+        )
+        .await??;
+        if let Some(key_path) = temp_key {
+            let _ = tokio::fs::remove_file(key_path).await;
+        }
+
+        if !output.status.success() {
+            let msg = String::from_utf8_lossy(&output.stderr);
+            bail!("sftp upload failed: {msg}");
+        }
+        Ok(())
+    }
+
+    /// Syncs one backup to the configured rsync destination. Does nothing without a target.
+    async fn upload_to_rsync(
+        &self,
+        entry: &BackupEntry,
+        dump_path: &std::path::Path,
+        manifest_path: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        let config = self.backup_config().await?;
+        let Some(rsync) = config.rsync else {
+            return Ok(());
+        };
+        let secret = self.rsync_secret().await?.unwrap_or_default();
+        let dest = format!("{}/{}", rsync.destination.trim_end_matches('/'), entry.name);
+
+        let mut cmd = tokio::process::Command::new("rsync");
+        cmd.arg("-avz");
+        if !rsync.ssh_options.is_empty() {
+            cmd.arg("-e").arg(&rsync.ssh_options);
+        }
+        if !secret.is_empty() {
+            cmd.env("RSYNC_PASSWORD", &secret);
+        }
+        cmd.arg(dump_path);
+        cmd.arg(manifest_path);
+        cmd.arg(dest);
+
+        let output =
+            tokio::time::timeout(std::time::Duration::from_secs(300), cmd.output()).await??;
+        if !output.status.success() {
+            let msg = String::from_utf8_lossy(&output.stderr);
+            bail!("rsync failed: {msg}");
+        }
+        Ok(())
+    }
+
+    /// Tests decompression and format integrity of a backup dump.
+    pub async fn verify_backup(
+        &self,
+        db_id: ShortId,
+        backup_id: &str,
+    ) -> anyhow::Result<r3v3rs3_api::platform::BackupVerifyReport> {
+        let mut entry = self.backup_entry(db_id, backup_id).await?;
+        let dir = self.backup_dir(db_id).await?;
+        let dump_path = dir.join(format!("{}.dump.gz", entry.id));
+        let compressed = tokio::fs::read(&dump_path).await?;
+
+        let digest = hex::encode(Sha256::digest(&compressed));
+        if digest != entry.sha256 {
+            let msg = format!(
+                "checksum mismatch: expected {}, got {}",
+                entry.sha256, digest
+            );
+            self.save_verification_result(&dir, &mut entry, false, &msg)
+                .await?;
+            return Ok(r3v3rs3_api::platform::BackupVerifyReport {
+                backup_id: entry.id,
+                verified: false,
+                uncompressed_size: 0,
+                format_detected: "unknown".into(),
+                message: msg,
+            });
+        }
+
+        let plain = match ungzip(&compressed).await {
+            Ok(p) => p,
+            Err(err) => {
+                let msg = format!("decompression failed: {err:#}");
+                self.save_verification_result(&dir, &mut entry, false, &msg)
+                    .await?;
+                return Ok(r3v3rs3_api::platform::BackupVerifyReport {
+                    backup_id: entry.id,
+                    verified: false,
+                    uncompressed_size: 0,
+                    format_detected: "corrupt_gzip".into(),
+                    message: msg,
+                });
+            }
+        };
+
+        let format = detect_dump_format(&entry.engine, &plain);
+        let msg = format!(
+            "verified {} uncompressed bytes, format: {format}",
+            plain.len()
+        );
+        self.save_verification_result(&dir, &mut entry, true, "valid")
+            .await?;
+
+        Ok(r3v3rs3_api::platform::BackupVerifyReport {
+            backup_id: entry.id,
+            verified: true,
+            uncompressed_size: plain.len() as u64,
+            format_detected: format,
+            message: msg,
+        })
+    }
+
+    async fn save_verification_result(
+        &self,
+        dir: &std::path::Path,
+        entry: &mut BackupEntry,
+        valid: bool,
+        status: &str,
+    ) -> anyhow::Result<()> {
+        entry.verified_at = Some(unix_ms() as i64);
+        entry.verification_status = Some(if valid {
+            "valid".to_string()
+        } else {
+            format!("failed: {status}")
+        });
+        let manifest = serde_json::to_vec(entry)?;
+        tokio::fs::write(dir.join(format!("{}.json", entry.id)), manifest).await?;
+        Ok(())
     }
 
     /// Deletes the oldest backups beyond the `keep` count of the settings.
@@ -283,7 +594,7 @@ impl Platform {
         for var in self.store.env(db_id).await? {
             if var.key.as_str() == info.password_env {
                 let value = self
-                    .keys
+                    .keys()
                     .open(&super::env_aad(db_id, var.key.as_str()), &var.sealed)?;
                 let value = String::from_utf8(value).context("a password is not UTF-8")?;
                 return Ok(value);
@@ -522,19 +833,48 @@ impl Platform {
                 .await?
                 .first()
                 .map(|entry| entry.created_at);
-            if now >= slot
-                && last.is_none_or(|created_at| created_at < slot)
-                && let Err(err) = self.run_backup(app.id).await
-            {
-                tracing::error!(
-                    err = format!("{err:#}"),
-                    database = %app.name,
-                    "the scheduled backup failed"
-                );
+            if now >= slot && last.is_none_or(|created_at| created_at < slot) {
+                if let Err(err) = self.run_backup(app.id).await {
+                    tracing::error!(
+                        err = format!("{err:#}"),
+                        database = %app.name,
+                        "the scheduled backup failed"
+                    );
+                }
+            } else if config.restore_test_enabled {
+                self.verify_untested_backup(app.id).await;
             }
         }
         Ok(())
     }
+
+    async fn verify_untested_backup(&self, db_id: ShortId) {
+        if let Ok(backups) = self.list_backups(db_id).await
+            && let Some(entry) = backups.into_iter().find(|b| b.verified_at.is_none())
+        {
+            let _ = self.verify_backup(db_id, &entry.id).await;
+        }
+    }
+}
+
+/// Identifies the format and engine signature of uncompressed dump bytes.
+fn detect_dump_format(engine: &str, plain: &[u8]) -> String {
+    if plain.is_empty() {
+        return "empty".to_string();
+    }
+    if plain.starts_with(b"REDIS") {
+        return "redis_rdb".to_string();
+    }
+    if plain.starts_with(b"SQLite format 3\0") {
+        return "sqlite3".to_string();
+    }
+    if plain.windows(10).any(|w| w == b"PostgreSQL") || plain.windows(7).any(|w| w == b"pg_dump") {
+        return "postgres_dump".to_string();
+    }
+    if plain.windows(5).any(|w| w == b"MySQL") || plain.windows(7).any(|w| w == b"mariadb") {
+        return "mysql_dump".to_string();
+    }
+    format!("{engine}_dump")
 }
 
 /// The UTC milliseconds of today's scheduled time, when `schedule` is a valid `HH:MM`.
@@ -630,5 +970,23 @@ mod tests {
             assert!(restore.upload.is_some(), "{engine} has no upload");
             assert!(!restore.command.is_empty());
         }
+    }
+
+    #[test]
+    fn dump_formats_are_detected_from_content_magic() {
+        assert_eq!(detect_dump_format("redis", b"REDIS0009\xff"), "redis_rdb");
+        assert_eq!(
+            detect_dump_format("postgres", b"-- PostgreSQL database dump"),
+            "postgres_dump"
+        );
+        assert_eq!(
+            detect_dump_format("mysql", b"-- MySQL dump 10.13"),
+            "mysql_dump"
+        );
+        assert_eq!(
+            detect_dump_format("sqlite", b"SQLite format 3\0\x10"),
+            "sqlite3"
+        );
+        assert_eq!(detect_dump_format("generic", b""), "empty");
     }
 }

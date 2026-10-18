@@ -15,7 +15,7 @@ use axum::{
 use r3v3rs3_api::{
     audit::AuditAction,
     id::ShortId,
-    platform::{BackupConfig, BackupEntry},
+    platform::{BackupConfig, BackupEntry, BackupVerifyReport},
 };
 
 /// Lists the backups of a database, newest first.
@@ -144,7 +144,36 @@ pub async fn restore(
     Ok(Json(()))
 }
 
-/// The backup settings. The answer carries no S3 secret key.
+/// Tests decompression and format integrity of a database backup.
+#[utoipa::path(
+    post,
+    path = "/{id}/backups/{backup_id}/test",
+    tag = "platform",
+    operation_id = "test_database_backup",
+    params(("id" = ShortId, Path, description = "Database app id."), ("backup_id" = String, Path, description = "Backup id.")),
+    responses((status = 200, description = "The verification report.", body = BackupVerifyReport), NotFoundResponse, ErrorResponses)
+)]
+pub async fn test_backup(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((id, backup_id)): Path<(ShortId, String)>,
+) -> Result<Json<BackupVerifyReport>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let report = platform
+        .verify_backup(id, &backup_id)
+        .await
+        .map_err(platform_error)?;
+    let app = platform.app(id).await.map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::BackupDatabase)
+        .id(id)
+        .summary(format!("{}: test backup {backup_id}", app.name));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(report))
+}
+
+/// The backup settings. The answer carries no secret keys or passwords.
 #[utoipa::path(
     get,
     path = "/",
@@ -161,10 +190,17 @@ pub async fn get_config(
     if let Some(s3) = config.s3.as_mut() {
         s3.secret_key = String::new();
     }
+    if let Some(sftp) = config.sftp.as_mut() {
+        sftp.password = String::new();
+        sftp.key = String::new();
+    }
+    if let Some(rsync) = config.rsync.as_mut() {
+        rsync.password = String::new();
+    }
     Ok(Json(config))
 }
 
-/// Replaces the backup settings. An empty S3 secret key keeps the stored one.
+/// Replaces the backup settings. An empty secret key or password keeps the stored one.
 #[utoipa::path(
     put,
     path = "/",

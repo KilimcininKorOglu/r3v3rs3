@@ -132,6 +132,12 @@ pub struct BackupConfig {
     pub keep: u32,
     /// The S3 bucket that receives a copy of every backup.
     pub s3: Option<S3Config>,
+    /// The SFTP server target that receives a copy of every backup.
+    pub sftp: Option<SftpConfig>,
+    /// The rsync remote destination that receives a copy of every backup.
+    pub rsync: Option<RsyncConfig>,
+    /// Whether periodic restore testing (decompression and integrity validation) is performed.
+    pub restore_test_enabled: bool,
 }
 
 impl Default for BackupConfig {
@@ -140,6 +146,9 @@ impl Default for BackupConfig {
             schedule: String::new(),
             keep: 7,
             s3: None,
+            sftp: None,
+            rsync: None,
+            restore_test_enabled: true,
         }
     }
 }
@@ -157,6 +166,64 @@ pub struct S3Config {
     /// stored one.
     #[serde(default)]
     pub secret_key: String,
+}
+
+/// An SFTP server target that the backups upload to.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SftpConfig {
+    /// Hostname or IP address of the SFTP server.
+    pub host: String,
+    /// Port of the SFTP server (default 22).
+    #[serde(default = "default_ssh_port")]
+    pub port: u16,
+    /// Username for authentication.
+    pub user: String,
+    /// Remote directory path where backups will be stored.
+    pub path: String,
+    /// Written only: password for authentication (stored sealed).
+    #[serde(default)]
+    pub password: String,
+    /// Written only: SSH private key for authentication (stored sealed).
+    #[serde(default)]
+    pub key: String,
+}
+
+fn default_ssh_port() -> u16 {
+    22
+}
+
+/// An rsync remote destination that the backups sync to.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RsyncConfig {
+    /// Destination path (e.g. `user@host:/path` or `rsync://host/module`).
+    pub destination: String,
+    /// Custom SSH or rsync options (e.g. `-e 'ssh -p 2222'`).
+    #[serde(default)]
+    pub ssh_options: String,
+    /// Written only: password for authentication (stored sealed).
+    #[serde(default)]
+    pub password: String,
+}
+
+/// Report of a backup dump decompression and integrity verification test.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BackupVerifyReport {
+    pub backup_id: String,
+    pub verified: bool,
+    pub uncompressed_size: u64,
+    pub format_detected: String,
+    pub message: String,
+}
+
+/// Report of platform.key rotation and secret re-encryption across SQLite tables.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct KeyRotationReport {
+    pub new_key_id: String,
+    pub resealed_app_env: u32,
+    pub resealed_git_connections: u32,
+    pub resealed_github_apps: u32,
+    pub resealed_settings: u32,
+    pub resealed_app_secrets: u32,
 }
 
 /// One recorded sample of the metrics of an app. The network and the request counters are the
@@ -196,6 +263,12 @@ pub struct BackupEntry {
     /// The SHA-256 of the compressed file.
     pub sha256: String,
     pub created_at: i64,
+    /// Unix timestamp in milliseconds when the backup was verified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_at: Option<i64>,
+    /// Verification result message or status ("valid", "error: ...").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_status: Option<String>,
 }
 
 /// The longest health check path.

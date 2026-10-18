@@ -42,6 +42,10 @@ Platform ilk başlangıçta yapılandırma dizininde iki dosya oluşturur:
 - `platform.db`: uygulamalar, ortam değişkenleri, deployment'lar, hedefler ve Git sağlayıcı bağlantıları.
 - `platform.key`: ortam değişkenlerinin değerlerini, uygulamaların Git token'larını ve webhook secret'larını, Git sağlayıcı bağlantılarının client secret'larını, private key'lerini ve token'larını şifreleyen key. Dosya modu `0600` olur. Bu dosyanın yedeğini `platform.db` yedeğinin yanında saklayın, çünkü değerler bu key olmadan açılmaz.
 
+#### Anahtar Rotasyonu (Key Rotation)
+
+Platform anahtarını yenilemek için **Ayarlar** sayfasındaki **Deployment Platform** kartında **Anahtarı Yenile** butonuna tıklayın, CLI'da `r3v3rs3-cli platform rotate-key` çalıştırın veya `POST /api/platform/key/rotate` çağrısı yapın. Bu işlem yeni bir 256-bit AES anahtarı üretir, `platform.db` içindeki tüm gizli verileri eski anahtarla çözüp tek bir veritabanı işleminde yeni anahtarla yeniden mühürler, yeni `platform.key` dosyasını yazar ve önceki anahtarı güvenli biçimde `platform.key.old` (`0600` moduyla) dosyasına arşivler.
+
 Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın.
 
 ## Uygulamalar
@@ -195,9 +199,19 @@ Veritabanı local target ister ve sayfayı yalnız Edit izni olan bir hesap gör
 
 Veritabanı satırındaki **Yedekler** bağlantısı o veritabanının yedeklerini açar. **Şimdi yedekle**, engine'in dump'ını container'ın içinde çalıştırır (`pg_dump`, `mariadb-dump`, `mysqldump` veya `mongodump`; Redis `SAVE` çalıştırır ve dump dosyasını alır), gzip'ler ve config dizinindeki `backups` dizinine kaydeder; veritabanı başına bir klasör, dosyanın SHA-256'sını taşıyan bir JSON manifest ile birlikte. Bir yedek parola içermez. Agent target üzerindeki bir veritabanı yedek alamaz; çünkü dump container'ın içinde çalışır.
 
-Aynı sayfadaki yedekleme ayarları, her veritabanının yedeklendiği UTC'deki günlük saati, veritabanı başına kalacak yedek sayısını (en eskiler önce gider) ve isteğe bağlı bir S3 hedefi verir: bucket'ı yolunda taşıyan bir `http` veya `https` endpoint, bir region, bir key prefix, bir access key ve secret key. Her yeni yedek bucket'a path style ile yüklenir; başarısız bir yükleme yalnız sunucu log'una geçer, çünkü local kopya vardır. Secret key, platform veritabanında seal'lı saklanır ve panel onu hiç göstermez; boş alan kayıtlı olanı korur.
+Aynı sayfadaki yedekleme ayarları, her veritabanının yedeklendiği UTC'deki günlük saati, veritabanı başına kalacak yedek sayısını (en eskiler önce gider) ve uzak depolama hedeflerini yapılandırır:
+
+- **S3**: Bucket'ı yolunda taşıyan bir `http` veya `https` endpoint, bir region, bir key prefix, bir access key ve secret key.
+- **SFTP**: `host`, `port` (varsayılan 22), `user`, hedef `path` ve isteğe bağlı SSH private key (veya parola) ile aktarım.
+- **rsync**: SSH üzerinden uzak hedef dizine `rsync` ile yedek aktarımı.
+
+Her yeni yedek yapılandırılan uzak hedeflere aktarılır; başarısız bir yükleme yalnız sunucu log'una geçer, çünkü yerel kopya vardır. Uzak kimlik bilgileri `platform.key` ile şifrelenir.
+
+#### Geri Yükleme & Periyodik Doğrulama Testi
 
 **Geri yükle**, kayıtlı dump'ı çalışan container'a yazar ve engine'in restore komutunu çalıştırır (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis dump dosyasını data volume'üne alır ve yeniden başlar; bu yüzden restore, sunucu geri geldikten sonra tamamlanır. Geri yükleme veritabanının verisinin yerine geçer.
+
+Yedeklerin bozulmadan saklandığını ve geri yüklenebilir olduğunu garanti etmek için r3v3rs3 otomatik periyodik geri yükleme doğrulama testi içerir. Sistem gzipped dump'ların hatasız açıldığını ve ilgili veritabanı motorunun sihirli baytlarıyla veya SQL başlıklarıyla (Redis RDB, SQLite 3, PostgreSQL, MySQL/MariaDB) eşleştiğini doğrular. Doğrulanan yedeklerde onay zaman damgası (`verified_at`) yer alır; ayrıca WebUI üzerinden veya `POST /api/databases/{id}/backups/{name}/verify` ile anında test başlatılabilir.
 
 ## Deployment'lar
 
