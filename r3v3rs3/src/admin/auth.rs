@@ -133,11 +133,12 @@ async fn record_login_failure(state: &AppState, key: LoginAttemptKey) {
         admin.login_attempts_reset,
         now,
     );
+    let ban_threshold = admin.max_login_attempts.saturating_mul(2).max(5);
     data.ban_tracker.record_failure(
         key.0,
-        admin.max_login_attempts,
+        ban_threshold,
         admin.login_attempts_reset,
-        admin.login_attempts_reset,
+        admin.login_attempts_reset.max(Duration::from_secs(300)),
         now,
     );
 }
