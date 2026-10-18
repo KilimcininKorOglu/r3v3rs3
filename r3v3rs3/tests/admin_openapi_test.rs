@@ -10,13 +10,16 @@ mod common;
 use common::{TestStorage, admin_session_cookie, alloc_tcp_port, wait_for_listener, with_server};
 
 /// Every route of the admin API. The OpenAPI document must list exactly these operations.
-const OPERATIONS: [(&str, &str); 130] = [
+const OPERATIONS: [(&str, &str); 135] = [
     ("get", "/.well-known/oauth-authorization-server"),
     ("get", "/.well-known/oauth-protected-resource"),
     ("post", "/api/login"),
     ("get", "/api/logout"),
     ("get", "/api/events"),
     ("get", "/api/session"),
+    ("get", "/api/auth/passkey/challenge"),
+    ("post", "/api/auth/passkey/register"),
+    ("delete", "/api/auth/passkey/{id}"),
     ("get", "/api/accounts"),
     ("post", "/api/accounts"),
     ("put", "/api/accounts/{username}"),
@@ -84,6 +87,7 @@ const OPERATIONS: [(&str, &str); 130] = [
     ("post", "/api/targets"),
     ("post", "/api/targets/{id}/token"),
     ("delete", "/api/targets/{id}"),
+    ("post", "/api/platform/key/rotate"),
     ("get", "/api/apps"),
     ("post", "/api/apps"),
     ("get", "/api/apps/{id}"),
@@ -124,6 +128,7 @@ const OPERATIONS: [(&str, &str); 130] = [
     ("get", "/api/databases/{id}/backups/{backup_id}/download"),
     ("delete", "/api/databases/{id}/backups/{backup_id}"),
     ("post", "/api/databases/{id}/backups/{backup_id}/restore"),
+    ("post", "/api/databases/{id}/backups/{backup_id}/test"),
     ("get", "/api/backup-config"),
     ("put", "/api/backup-config"),
     ("get", "/api/deployments/{id}"),

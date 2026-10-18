@@ -90,4 +90,28 @@ $ curl -b cookies.txt -X PUT -H 'Content-Type: application/json' \
 
 `GET /api/session`, giriş yapmış hesabın kullanıcı adını, rolünü ve proxy listesini döndürür.
 
+## WebAuthn ve Passkey
+
+r3v3rs3, parola ve TOTP kimlik doğrulamasının yanında donanım güvenlik anahtarları, Touch ID, Face ID ve biyometrik cihaz anahtarlarını (FIDO2 / WebAuthn, ES256 P-256) destekler.
+
+### Passkey Ekleme
+
+1. WebUI'da oturum açın ve **Hesaplar** sayfasına gidin.
+2. Hesabınızı düzenleyin veya passkey yönetim bölümündeki **Passkey Ekle** butonuna tıklayın.
+3. Açıklayıcı bir etiket girin (örneğin "MacBook Touch ID" veya "YubiKey 5C") ve tarayıcının biyometrik/güvenlik anahtarı onayını verin.
+4. r3v3rs3, genel anahtarı kaydeder ve replay saldırılarına karşı monotonik sayaç takibi başlatır.
+
+### Passkey ile Giriş Yapma
+
+Giriş ekranında **Passkey ile giriş yap** butonuna tıklayın. Destekleyen tarayıcılar kullanıcı adı veya parola yazmaya gerek kalmadan yerleşik anahtar (resident key) ile doğrulamayı tamamlar. İsteğe bağlı olarak kullanıcı adınızı yazarak da passkey onayınızı verebilirsiniz.
+
+### API Endpoint'leri
+
+| Endpoint | Yöntem | İşlem |
+|---|---|---|
+| `/api/auth/passkey/challenge` | `GET` | Kimlik doğrulama veya kayıt için tek kullanımlık rastgele challenge üretir. |
+| `/api/auth/passkey/register` | `POST` | Giriş yapmış kullanıcı için yeni üretilen passkey kaydını tamamlar. |
+| `/api/auth/passkey/{id}` | `DELETE` | Credential ID ile kayıtlı bir passkey'i siler. |
+| `/api/auth/login` | `POST` | İmzalanmış WebAuthn kanıtı ve istemci verisi ile `LoginMethod::Passkey` üzerinden oturum açar. |
+
 [Denetim kaydı](@/configuration.tr.md#denetim-kaydi) her hesap değişikliğini ve her girişi kaydeder.

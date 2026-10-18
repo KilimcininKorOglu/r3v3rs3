@@ -84,6 +84,35 @@ pub async fn message(locale: Locale, text: &str, icon: Icon) {
     }
 }
 
+/// Asks the account for a text input.
+pub async fn prompt(locale: Locale, text: &str, placeholder: &str) -> Option<String> {
+    let entries = [
+        ("title", JsValue::from_str(text)),
+        ("input", JsValue::from_str("text")),
+        ("inputPlaceholder", JsValue::from_str(placeholder)),
+        ("showCancelButton", JsValue::TRUE),
+        (
+            "confirmButtonText",
+            JsValue::from_str(locale.t("common.ok")),
+        ),
+        (
+            "cancelButtonText",
+            JsValue::from_str(locale.t("common.cancel")),
+        ),
+    ];
+    let result = show(&entries).await.ok()?;
+    let confirmed = Reflect::get(&result, &JsValue::from_str("isConfirmed"))
+        .ok()?
+        .as_bool()?;
+    if confirmed {
+        Reflect::get(&result, &JsValue::from_str("value"))
+            .ok()?
+            .as_string()
+    } else {
+        None
+    }
+}
+
 async fn show(entries: &[(&str, JsValue)]) -> Result<JsValue, JsValue> {
     let options = Object::new();
     for (key, value) in entries {

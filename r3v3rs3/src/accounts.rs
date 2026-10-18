@@ -109,6 +109,7 @@ pub struct AccountEntry {
     /// The proxies that the account sees. `None` means every proxy.
     pub proxies: Option<BTreeSet<ShortId>>,
     pub credentials_changed_at: u64,
+    pub passkey_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -125,6 +126,7 @@ impl AccountDirectory {
                     role: account.role,
                     proxies: account.proxies.clone(),
                     credentials_changed_at: account.credentials_changed_at,
+                    passkey_ids: account.passkeys.iter().map(|pk| pk.id.clone()).collect(),
                 };
                 (name.clone(), entry)
             })
@@ -134,6 +136,16 @@ impl AccountDirectory {
 
     pub fn get(&self, username: &str) -> Option<&AccountEntry> {
         self.accounts.get(username)
+    }
+
+    pub fn find_by_passkey(&self, credential_id: &str) -> Option<String> {
+        self.accounts.iter().find_map(|(name, entry)| {
+            if entry.passkey_ids.iter().any(|id| id == credential_id) {
+                Some(name.clone())
+            } else {
+                None
+            }
+        })
     }
 
     /// The caller of an admin session. A session of a removed account, or a session that started
@@ -181,6 +193,7 @@ mod tests {
             role: Role::Editor,
             proxies,
             credentials_changed_at: 7,
+            passkey_ids: Vec::new(),
         };
         assert_eq!(directory.get("editor"), Some(&expected));
         assert_eq!(directory.get("admin"), None);

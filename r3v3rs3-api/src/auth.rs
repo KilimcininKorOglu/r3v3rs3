@@ -49,6 +49,30 @@ pub struct Account {
     /// session that started earlier is not valid.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub credentials_changed_at: u64,
+
+    /// Registered passkeys for WebAuthn authentication.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub passkeys: Vec<PasskeyCredential>,
+}
+
+/// A stored WebAuthn passkey credential.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PasskeyCredential {
+    pub id: String,
+    pub name: String,
+    pub public_key: String,
+    #[serde(default)]
+    pub counter: u32,
+    #[serde(default)]
+    pub created_at: u64,
+}
+
+/// Public information about a registered passkey.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PasskeyInfo {
+    pub id: String,
+    pub name: String,
+    pub created_at: u64,
 }
 
 impl fmt::Debug for Account {
@@ -60,6 +84,7 @@ impl fmt::Debug for Account {
             .field("role", &self.role)
             .field("proxies", &self.proxies)
             .field("credentials_changed_at", &self.credentials_changed_at)
+            .field("passkeys", &self.passkeys)
             .finish()
     }
 }
@@ -76,6 +101,9 @@ pub struct AccountInfo {
     pub proxies: Option<BTreeSet<ShortId>>,
     /// Whether the account signs in with a TOTP token too.
     pub totp: bool,
+    /// Registered passkeys for WebAuthn authentication.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub passkeys: Vec<PasskeyInfo>,
 }
 
 #[derive(Deserialize, Serialize, ToSchema)]
@@ -154,6 +182,30 @@ pub enum LoginMethod {
         #[schema(example = "234567")]
         token: String,
     },
+    Passkey {
+        #[schema(example = "credential-id")]
+        credential_id: String,
+        authenticator_data: String,
+        client_data_json: String,
+        signature: String,
+    },
+}
+
+/// A WebAuthn challenge issued to a client.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PasskeyChallenge {
+    pub challenge: String,
+    pub rp_id: String,
+}
+
+/// Registration of a new passkey credential.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PasskeyRegisterRequest {
+    pub name: String,
+    pub credential_id: String,
+    pub public_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_data_json: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]

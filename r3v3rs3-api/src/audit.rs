@@ -109,10 +109,16 @@ pub enum AuditAction {
     UnbanIp,
     /// An account upgraded an app to the latest version in the app store catalog.
     UpgradeAppFromCatalog,
+    /// An account rotated the platform encryption key and re-sealed stored secrets.
+    RotatePlatformKey,
+    /// An account registered a WebAuthn passkey.
+    RegisterPasskey,
+    /// An account deleted a WebAuthn passkey.
+    DeletePasskey,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 64] = [
+    pub const ALL: [AuditAction; 67] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -177,6 +183,9 @@ impl AuditAction {
         Self::RejectDeployment,
         Self::UnbanIp,
         Self::UpgradeAppFromCatalog,
+        Self::RotatePlatformKey,
+        Self::RegisterPasskey,
+        Self::DeletePasskey,
     ];
 }
 

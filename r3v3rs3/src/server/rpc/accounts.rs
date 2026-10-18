@@ -8,7 +8,8 @@ use crate::config::account::new_account;
 use crate::server::state::ServerState;
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::auth::{
-    Account, AccountCreated, AccountInfo, AccountUpdate, MIN_PASSWORD_LENGTH, NewAccount, Role,
+    Account, AccountCreated, AccountInfo, AccountUpdate, MIN_PASSWORD_LENGTH, NewAccount,
+    PasskeyCredential, PasskeyInfo, Role,
 };
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
@@ -33,6 +34,15 @@ impl RpcMethod for GetAccountList {
                 role: account.role,
                 proxies: account.proxies,
                 totp: account.totp.is_some(),
+                passkeys: account
+                    .passkeys
+                    .into_iter()
+                    .map(|pk| PasskeyInfo {
+                        id: pk.id,
+                        name: pk.name,
+                        created_at: pk.created_at,
+                    })
+                    .collect(),
             })
             .collect::<Vec<_>>();
         list.sort_by(|a, b| a.username.cmp(&b.username));
@@ -177,6 +187,87 @@ impl RpcMethod for DeleteAccount {
 
     fn audit(&self) -> Option<AuditRecord> {
         Some(AuditRecord::new(AuditAction::DeleteAccount).id(&self.username))
+    }
+}
+
+pub struct RegisterPasskey {
+    pub username: String,
+    pub credential: PasskeyCredential,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for RegisterPasskey {
+    type Output = ();
+    const MUTATES: bool = true;
+    const PERMISSION: Permission = Permission::Read;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        let username = self.username;
+        let credential = self.credential;
+        state
+            .edit_accounts(move |accounts| {
+                let account =
+                    accounts
+                        .get_mut(&username)
+                        .ok_or_else(|| Error::AccountNotFound {
+                            username: username.clone(),
+                        })?;
+                account.passkeys.retain(|p| p.id != credential.id);
+                account.passkeys.push(credential);
+                Ok(true)
+            })
+            .await?;
+        Ok(())
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(account_record(
+            AuditAction::RegisterPasskey,
+            &self.username,
+            self.credential.name.clone(),
+        ))
+    }
+}
+
+pub struct DeletePasskey {
+    pub username: String,
+    pub credential_id: String,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for DeletePasskey {
+    type Output = ();
+    const MUTATES: bool = true;
+    const PERMISSION: Permission = Permission::Read;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        let username = self.username;
+        let credential_id = self.credential_id;
+        state
+            .edit_accounts(move |accounts| {
+                let account =
+                    accounts
+                        .get_mut(&username)
+                        .ok_or_else(|| Error::AccountNotFound {
+                            username: username.clone(),
+                        })?;
+                let prev_len = account.passkeys.len();
+                account.passkeys.retain(|p| p.id != credential_id);
+                if account.passkeys.len() == prev_len {
+                    return Err(Error::IdNotFound { id: credential_id });
+                }
+                Ok(true)
+            })
+            .await?;
+        Ok(())
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(account_record(
+            AuditAction::DeletePasskey,
+            &self.username,
+            self.credential_id.clone(),
+        ))
     }
 }
 

@@ -6,7 +6,7 @@ use crate::server::rpc::auth::VerifyAccount;
 use crate::sessions::{self, SessionBackend, SessionRecord, SessionScope};
 use axum::{
     Extension, Json,
-    extract::{ConnectInfo, Request, State},
+    extract::{ConnectInfo, Path, Request, State},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -14,9 +14,13 @@ use axum_extra::extract::{
     CookieJar,
     cookie::{Cookie, SameSite},
 };
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use r3v3rs3_api::{
     audit::AuditAction,
-    auth::{LoginMethod, LoginRequest, LoginResponse, SessionInfo},
+    auth::{
+        LoginMethod, LoginRequest, LoginResponse, PasskeyChallenge, PasskeyCredential,
+        PasskeyRegisterRequest, SessionInfo,
+    },
     error::{Error, ErrorMessage},
 };
 use std::{
@@ -26,6 +30,54 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::warn;
+
+fn resolve_login_username(state: &AppState, request: &mut LoginRequest) {
+    if request.username.is_empty()
+        && let LoginMethod::Passkey {
+            ref credential_id, ..
+        } = request.method
+        && let Some(user) = state.accounts.borrow().find_by_passkey(credential_id)
+    {
+        request.username = user;
+    }
+}
+
+async fn verify_pre_login_conditions(
+    state: &AppState,
+    jar: &CookieJar,
+    request: &LoginRequest,
+    attempt_key: &LoginAttemptKey,
+) -> Result<(), Error> {
+    let token = jar.get("token").map(|c| c.value().to_string());
+    if let LoginMethod::Totp { .. } = &request.method
+        && !verify_login_session(state, &token.unwrap_or_default(), &attempt_key.1).await
+    {
+        return Err(Error::InvalidLoginCredentials);
+    }
+    if let LoginMethod::Passkey {
+        ref client_data_json,
+        ..
+    } = request.method
+        && !verify_and_consume_challenge(state, client_data_json, "webauthn.get").await
+    {
+        return Err(Error::InvalidLoginCredentials);
+    }
+    Ok(())
+}
+
+async fn record_successful_login(
+    state: &AppState,
+    username: &str,
+    peer_ip: &IpAddr,
+    attempt_key: &LoginAttemptKey,
+) {
+    let mut data = state.data.lock().await;
+    data.login_attempts.clear(attempt_key);
+    data.ban_tracker.clear(peer_ip);
+    drop(data);
+    let record = AuditRecord::new(AuditAction::Login);
+    state.record_audit(username, Some(*peer_ip), record).await;
+}
 
 /// Signs in and sets the `token` session cookie. An account with TOTP returns `totp_required`
 /// first, and a second request with the TOTP code completes the sign-in.
@@ -47,18 +99,16 @@ pub async fn login(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     jar: CookieJar,
-    Json(request): Json<LoginRequest>,
+    Json(mut request): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    resolve_login_username(&state, &mut request);
     let username = request.username.clone();
     let attempt_key = (peer.ip(), username.clone());
     ensure_login_allowed(&state, &attempt_key).await?;
 
-    let token = jar.get("token").map(|c| c.value().to_string());
-    if let LoginMethod::Totp { .. } = &request.method
-        && !verify_login_session(&state, &token.unwrap_or_default(), &username).await
-    {
+    if let Err(err) = verify_pre_login_conditions(&state, &jar, &request, &attempt_key).await {
         record_login_failure(&state, attempt_key).await;
-        return Err(Error::InvalidLoginCredentials.into());
+        return Err(err.into());
     }
 
     let insecure = request.insecure;
@@ -72,12 +122,7 @@ pub async fn login(
 
     let scope = match *result {
         LoginResponse::Success => {
-            let mut data = state.data.lock().await;
-            data.login_attempts.clear(&attempt_key);
-            data.ban_tracker.clear(&peer.ip());
-            drop(data);
-            let record = AuditRecord::new(AuditAction::Login);
-            state.record_audit(&username, Some(peer.ip()), record).await;
+            record_successful_login(&state, &username, &peer.ip(), &attempt_key).await;
             SessionScope::Admin
         }
         _ => SessionScope::Login,
@@ -237,6 +282,154 @@ pub async fn session(
     })
 }
 
+/// Returns a new WebAuthn challenge for passkey sign-in or registration.
+#[utoipa::path(
+    get,
+    path = "/passkey/challenge",
+    tag = "auth",
+    operation_id = "get_passkey_challenge",
+    security(()),
+    responses(
+        (status = 200, description = "A new WebAuthn challenge.", body = PasskeyChallenge),
+        (status = 500, description = "Failed to generate challenge.", body = ErrorMessage)
+    )
+)]
+pub async fn get_passkey_challenge(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<PasskeyChallenge>, AppError> {
+    let mut challenge_bytes = [0u8; 32];
+    use aws_lc_rs::rand::{SecureRandom, SystemRandom};
+    SystemRandom::new()
+        .fill(&mut challenge_bytes)
+        .map_err(|_| Error::InvalidPasskey)?;
+    let challenge = URL_SAFE_NO_PAD.encode(challenge_bytes);
+    let rp_id = extract_rp_id(&state, &headers).await;
+
+    let mut data = state.data.lock().await;
+    data.passkey_challenges
+        .insert(challenge.clone(), Instant::now());
+
+    Ok(Json(PasskeyChallenge { challenge, rp_id }))
+}
+
+/// Registers a new WebAuthn passkey for the current account.
+#[utoipa::path(
+    post,
+    path = "/passkey/register",
+    tag = "auth",
+    operation_id = "register_passkey",
+    request_body = PasskeyRegisterRequest,
+    responses(
+        (status = 200, description = "The passkey is registered."),
+        (status = 400, description = "The passkey details are invalid.", body = ErrorMessage),
+        (status = 401, description = "Unauthorized.", body = ErrorMessage)
+    )
+)]
+pub async fn register_passkey(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<PasskeyRegisterRequest>,
+) -> Result<Json<()>, AppError> {
+    if request.name.trim().is_empty() || request.credential_id.trim().is_empty() {
+        return Err(Error::InvalidPasskey.into());
+    }
+    if crate::config::account::decode_p256_public_key(&request.public_key).is_none() {
+        return Err(Error::InvalidPasskey.into());
+    }
+    if let Some(client_data) = &request.client_data_json
+        && !verify_and_consume_challenge(&state, client_data, "webauthn.create").await
+    {
+        return Err(Error::InvalidPasskey.into());
+    }
+
+    let credential = PasskeyCredential {
+        id: request.credential_id.trim().to_string(),
+        name: request.name.trim().to_string(),
+        public_key: request.public_key.trim().to_string(),
+        counter: 0,
+        created_at: crate::clock::unix_secs(),
+    };
+
+    state
+        .call(
+            &caller,
+            crate::server::rpc::accounts::RegisterPasskey {
+                username: caller.username.clone(),
+                credential,
+            },
+        )
+        .await?;
+
+    Ok(Json(()))
+}
+
+/// Deletes a registered WebAuthn passkey of the current account.
+#[utoipa::path(
+    delete,
+    path = "/passkey/{id}",
+    tag = "auth",
+    operation_id = "delete_passkey",
+    params(("id" = String, Path, description = "Credential ID.")),
+    responses(
+        (status = 200, description = "The passkey is deleted."),
+        (status = 401, description = "Unauthorized.", body = ErrorMessage),
+        (status = 404, description = "Passkey not found.", body = ErrorMessage)
+    )
+)]
+pub async fn delete_passkey(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Json<()>, AppError> {
+    state
+        .call(
+            &caller,
+            crate::server::rpc::accounts::DeletePasskey {
+                username: caller.username.clone(),
+                credential_id: id,
+            },
+        )
+        .await?;
+    Ok(Json(()))
+}
+
+async fn extract_rp_id(state: &AppState, headers: &axum::http::HeaderMap) -> String {
+    if let Some(host) = headers.get("host").and_then(|h| h.to_str().ok()) {
+        let domain = host.split(':').next().unwrap_or("localhost");
+        return domain.to_string();
+    }
+    let data = state.data.lock().await;
+    if let Some(url) = &data.config.public_url
+        && let Ok(parsed) = url::Url::parse(url.as_str())
+        && let Some(host) = parsed.host_str()
+    {
+        return host.to_string();
+    }
+    "localhost".to_string()
+}
+
+pub async fn verify_and_consume_challenge(
+    state: &AppState,
+    client_data_b64: &str,
+    expected_type: &str,
+) -> bool {
+    let Some(bytes) = crate::config::account::decode_base64_or_hex(client_data_b64) else {
+        return false;
+    };
+    let Ok(client_data) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    if client_data.get("type").and_then(|v| v.as_str()) != Some(expected_type) {
+        return false;
+    }
+    let Some(challenge) = client_data.get("challenge").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    let mut data = state.data.lock().await;
+    data.passkey_challenges.consume(challenge, Instant::now())
+}
+
 /// Accepts a request with an active admin session or a valid OAuth Bearer token and adds its `Caller` to the request.
 pub async fn verify(
     State(state): State<AppState>,
@@ -359,6 +552,26 @@ impl LoginAttempt {
             Some(until) => until > now,
             None => now.duration_since(self.window_start) < reset,
         }
+    }
+}
+
+/// Active WebAuthn challenges with 2-minute expiration.
+#[derive(Default)]
+pub struct PasskeyChallenges {
+    entries: HashMap<String, Instant>,
+}
+
+impl PasskeyChallenges {
+    pub fn insert(&mut self, challenge: String, now: Instant) {
+        self.entries
+            .retain(|_, time| now.duration_since(*time) < Duration::from_secs(120));
+        self.entries.insert(challenge, now);
+    }
+
+    pub fn consume(&mut self, challenge: &str, now: Instant) -> bool {
+        self.entries
+            .retain(|_, time| now.duration_since(*time) < Duration::from_secs(120));
+        self.entries.remove(challenge).is_some()
     }
 }
 

@@ -356,6 +356,7 @@ mod tests {
             Error::FailedToInvokeRpc,
             Error::FailedToListNetworkInterfaces,
             Error::FailedToCreateCertificateArchive,
+            Error::InvalidPasskey,
         ]
     }
 

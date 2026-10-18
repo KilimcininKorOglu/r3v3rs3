@@ -90,4 +90,28 @@ An update without `proxies` removes the proxy list, and an update without `passw
 
 `GET /api/session` returns the username, the role and the proxy list of the signed-in account.
 
+## WebAuthn and Passkeys
+
+r3v3rs3 supports hardware security keys, Touch ID, Face ID, and biometric device passkeys (FIDO2 / WebAuthn, ES256 P-256) for admin authentication alongside passwords and TOTP.
+
+### Adding a Passkey
+
+1. Log in to the WebUI and navigate to the **Accounts** page.
+2. Edit your account or click **Add Passkey** on the passkey management section.
+3. Enter a descriptive label (e.g., "MacBook Touch ID" or "YubiKey 5C") and confirm the browser's biometric/security key prompt.
+4. r3v3rs3 registers the public key and assigns a monotonic counter for replay protection.
+
+### Signing in with a Passkey
+
+On the login screen, click **Sign in with Passkey**. Supported browsers will prompt for resident key authentication without needing to type the username or password. You can also sign in directly by specifying your username and confirming your passkey.
+
+### API Endpoints
+
+| Endpoint | Method | Action |
+|---|---|---|
+| `/api/auth/passkey/challenge` | `GET` | Obtains a single-use random challenge for WebAuthn authentication or registration. |
+| `/api/auth/passkey/register` | `POST` | Registers a newly created passkey credential for the signed-in caller. |
+| `/api/auth/passkey/{id}` | `DELETE` | Deletes a registered passkey by its credential ID. |
+| `/api/auth/login` | `POST` | Authenticates using `LoginMethod::Passkey` with signed WebAuthn assertion and client data. |
+
 The [audit log](@/configuration.md#audit-log) records each change of an account and each sign-in.

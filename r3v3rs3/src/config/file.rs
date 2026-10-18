@@ -254,7 +254,12 @@ impl FileStorage {
                     fs::create_dir_all(&self.dir).await?;
                     write_new_key_file(&path).await?;
                 }
-                load_keys(std::slice::from_ref(&path)).await
+                let mut paths = vec![path];
+                let old_key_path = self.dir.join("platform.key.old");
+                if fs::try_exists(&old_key_path).await? {
+                    paths.push(old_key_path);
+                }
+                load_keys(&paths).await
             })
             .await
     }
@@ -846,12 +851,15 @@ impl Storage for FileStorage {
     }
 
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error> {
-        let accounts = self.read_accounts().await.map_err(|err| {
+        let mut accounts = self.read_accounts().await.map_err(|err| {
             error!(%err, "failed to load accounts: {err}");
             Error::InvalidLoginCredentials
         })?;
-        let account = accounts.get(&request.username).cloned();
-        account::verify(account.as_ref(), request)
+        let (response, updated) = account::verify_and_update(&mut accounts, request)?;
+        if updated {
+            let _ = self.save_accounts_impl(&accounts).await;
+        }
+        Ok(response)
     }
 
     async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error> {

@@ -444,6 +444,9 @@ pub enum Error {
         #[schema(value_type = String)]
         id: ShortId,
     },
+
+    #[error("invalid passkey")]
+    InvalidPasskey,
 }
 
 impl Error {

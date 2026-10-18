@@ -11,7 +11,10 @@ use crate::i18n::use_locale;
 use crate::store::{ProxyStore, SessionStore};
 use gloo_net::http::Request;
 use r3v3rs3_api::{
-    auth::{AccountCreated, AccountInfo, AccountUpdate, MIN_PASSWORD_LENGTH, NewAccount, Role},
+    auth::{
+        AccountCreated, AccountInfo, AccountUpdate, MIN_PASSWORD_LENGTH, NewAccount, PasskeyInfo,
+        PasskeyRegisterRequest, Role,
+    },
     error::Error,
     i18n::Locale,
     id::ShortId,
@@ -24,6 +27,27 @@ use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(module = "/js/webauthn.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = isWebAuthnSupported)]
+    fn is_web_authn_supported() -> bool;
+    #[wasm_bindgen(js_name = createPasskey)]
+    fn create_passkey(
+        challenge_b64: &str,
+        rp_id: &str,
+        rp_name: &str,
+        user_id_str: &str,
+        user_name: &str,
+        user_display_name: &str,
+    ) -> js_sys::Promise;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_web_authn_supported() -> bool {
+    false
+}
+
 pub(super) const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-60";
 pub(super) const LABEL_CLASS: &str =
     "block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200";
@@ -33,7 +57,7 @@ const CHECKBOX_CLASS: &str =
 
 const PATH: &str = "/accounts";
 
-const COLUMNS: [Column; 4] = [
+const COLUMNS: [Column; 5] = [
     Column {
         label: "accounts.username",
         class: "whitespace-nowrap",
@@ -48,6 +72,10 @@ const COLUMNS: [Column; 4] = [
     },
     Column {
         label: "accounts.totp",
+        class: "w-0 whitespace-nowrap text-center",
+    },
+    Column {
+        label: "accounts.passkeys",
         class: "w-0 whitespace-nowrap text-center",
     },
 ];
@@ -76,6 +104,7 @@ struct Form {
     restrict: bool,
     proxies: BTreeSet<ShortId>,
     totp: bool,
+    passkeys: Vec<PasskeyInfo>,
 }
 
 impl Form {
@@ -83,11 +112,12 @@ impl Form {
         Self {
             editing: Some(info.username.clone()),
             username: info.username.clone(),
+            password: String::new(),
             role: info.role,
             restrict: info.proxies.is_some(),
             proxies: info.proxies.clone().unwrap_or_default(),
             totp: info.totp,
-            ..Default::default()
+            passkeys: info.passkeys.clone(),
         }
     }
 }
@@ -128,6 +158,21 @@ pub fn accounts() -> Html {
         });
     });
 
+    use_effect_with(accounts.clone(), {
+        let form = form.clone();
+        move |accounts| {
+            if let Some(editing) = &form.editing
+                && let Some(list) = accounts.as_ref()
+                && let Some(info) = list.iter().find(|acc| &acc.username == editing)
+                && form.passkeys != info.passkeys
+            {
+                let mut updated = (*form).clone();
+                updated.passkeys = info.passkeys.clone();
+                form.set(updated);
+            }
+        }
+    });
+
     if session.info.is_some() && !session.is_admin() {
         return html! { <Redirect<Route> to={Route::Home} /> };
     }
@@ -147,7 +192,7 @@ pub fn accounts() -> Html {
     html! {
         <>
             { list_card(locale, accounts.is_some(), "accounts.empty", &COLUMNS, &rows) }
-            { form_view(locale, &form, &notice, &proxies.entries, &own, onsubmit) }
+            { form_view(locale, &form, &notice, &proxies.entries, &own, onsubmit, &accounts) }
         </>
     }
 }
@@ -182,6 +227,11 @@ fn account_row(
         delete_on_click(locale, question, path, reload_callback(accounts, PATH))
     });
     let totp = if info.totp { "common.yes" } else { "common.no" };
+    let passkeys_text = if info.passkeys.is_empty() {
+        "-".to_string()
+    } else {
+        info.passkeys.len().to_string()
+    };
     Row {
         key: info.username.clone(),
         cells: vec![
@@ -189,8 +239,47 @@ fn account_row(
             html! { <>{locale.t(role_key(info.role))}</> },
             html! { <>{proxies_label(locale, info.proxies.as_ref(), proxies)}</> },
             html! { <>{locale.t(totp)}</> },
+            html! { <>{passkeys_text}</> },
         ],
         actions: row_actions(locale, set_on_click(form, Form::edit(info)), delete),
+    }
+}
+
+fn account_fields(
+    locale: Locale,
+    form: &UseStateHandle<Form>,
+    own_account: bool,
+    proxies: &[ProxyEntry],
+    accounts: &AccountList,
+) -> Html {
+    let editing = form.editing.is_some();
+    let password_label = if editing {
+        "accounts.new_password"
+    } else {
+        "accounts.password"
+    };
+    html! {
+        <>
+            <label class={LABEL_CLASS}>{locale.t("accounts.username")}</label>
+            <input type="text" autocapitalize="off" autocomplete="off" value={form.username.clone()} oninput={text_input(form, |f| &mut f.username)} disabled={editing} class={INPUT_CLASS} />
+            <label class={LABEL_CLASS}>{locale.t(password_label)}</label>
+            <input type="password" autocomplete="new-password" value={form.password.clone()} oninput={text_input(form, |f| &mut f.password)} class={INPUT_CLASS} />
+            if editing {
+                <p class={HINT_CLASS}>{locale.t("accounts.new_password_hint")}</p>
+            }
+            <label class={LABEL_CLASS}>{locale.t("accounts.role")}</label>
+            { role_select(locale, form, own_account) }
+            <p class={HINT_CLASS}>{locale.t("accounts.role_hint")}</p>
+            if !form.role.is_admin() {
+                { proxy_scope(locale, form, proxies) }
+            }
+            if !editing {
+                { checkbox(form, locale.t("accounts.totp_enable"), |f| &mut f.totp) }
+            }
+            if editing {
+                { passkey_list_view(locale, form, own_account, accounts) }
+            }
+        </>
     }
 }
 
@@ -201,6 +290,7 @@ fn form_view(
     proxies: &[ProxyEntry],
     own: &str,
     onsubmit: Callback<SubmitEvent>,
+    accounts: &AccountList,
 ) -> Html {
     let parsed = parse_form(locale, form);
     let editing = form.editing.clone();
@@ -209,33 +299,8 @@ fn form_view(
         None => locale.t("accounts.add_title").to_string(),
     };
     let touched = editing.is_some() || !form.username.is_empty() || !form.password.is_empty();
-    let password_label = if editing.is_some() {
-        "accounts.new_password"
-    } else {
-        "accounts.password"
-    };
-    // An admin cannot lower its own role.
     let own_account = editing.as_deref() == Some(own);
-    let fields = html! {
-        <>
-            <label class={LABEL_CLASS}>{locale.t("accounts.username")}</label>
-            <input type="text" autocapitalize="off" autocomplete="off" value={form.username.clone()} oninput={text_input(form, |f| &mut f.username)} disabled={editing.is_some()} class={INPUT_CLASS} />
-            <label class={LABEL_CLASS}>{locale.t(password_label)}</label>
-            <input type="password" autocomplete="new-password" value={form.password.clone()} oninput={text_input(form, |f| &mut f.password)} class={INPUT_CLASS} />
-            if editing.is_some() {
-                <p class={HINT_CLASS}>{locale.t("accounts.new_password_hint")}</p>
-            }
-            <label class={LABEL_CLASS}>{locale.t("accounts.role")}</label>
-            { role_select(locale, form, own_account) }
-            <p class={HINT_CLASS}>{locale.t("accounts.role_hint")}</p>
-            if !form.role.is_admin() {
-                { proxy_scope(locale, form, proxies) }
-            }
-            if editing.is_none() {
-                { checkbox(form, locale.t("accounts.totp_enable"), |f| &mut f.totp) }
-            }
-        </>
-    };
+    let fields = account_fields(locale, form, own_account, proxies, accounts);
     let notice = notice_view(notice, |secret: &Option<String>| {
         html! {
             <>
@@ -450,6 +515,203 @@ async fn save(locale: Locale, change: Change) -> Result<Option<String>, String> 
     }
 }
 
+fn passkey_list_view(
+    locale: Locale,
+    form: &UseStateHandle<Form>,
+    own_account: bool,
+    accounts: &AccountList,
+) -> Html {
+    let form_for_add = form.clone();
+    let accounts_for_add = accounts.clone();
+    let on_add_passkey = Callback::from(move |_| {
+        let form = form_for_add.clone();
+        let accounts = accounts_for_add.clone();
+        spawn_local(async move {
+            add_passkey_flow(locale, form, accounts).await;
+        });
+    });
+
+    html! {
+        <div class="mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-700">
+            <div class="flex justify-between items-center mb-2">
+                <label class="text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("accounts.passkeys")}</label>
+                if own_account && is_web_authn_supported() {
+                    <button type="button" class="text-xs font-semibold px-2.5 py-1 rounded bg-neutral-800 text-white dark:bg-neutral-700 hover:bg-neutral-600 transition flex items-center gap-1 cursor-pointer" onclick={on_add_passkey}>
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        {locale.t("accounts.add_passkey")}
+                    </button>
+                }
+            </div>
+            if form.passkeys.is_empty() {
+                <p class={HINT_CLASS}>{locale.t("accounts.no_passkeys")}</p>
+            } else {
+                <div class="space-y-2 mt-2">
+                    { for form.passkeys.iter().map(|pk| passkey_item(locale, pk, own_account, accounts)) }
+                </div>
+            }
+        </div>
+    }
+}
+
+fn passkey_item(
+    locale: Locale,
+    pk: &PasskeyInfo,
+    own_account: bool,
+    accounts: &AccountList,
+) -> Html {
+    let id = pk.id.clone();
+    let accounts = accounts.clone();
+    let on_delete = Callback::from(move |_| {
+        let id = id.clone();
+        let accounts = accounts.clone();
+        spawn_local(async move {
+            delete_passkey_action(locale, id, accounts).await;
+        });
+    });
+
+    html! {
+        <div class="flex justify-between items-center p-2 rounded border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800">
+            <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                <span class="text-sm font-medium text-neutral-800 dark:text-neutral-200">{&pk.name}</span>
+            </div>
+            if own_account {
+                <button type="button" class="text-red-600 hover:text-red-800 dark:hover:text-red-400 p-1 cursor-pointer" onclick={on_delete}>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                </button>
+            }
+        </div>
+    }
+}
+
+async fn fetch_challenge() -> Result<r3v3rs3_api::auth::PasskeyChallenge, String> {
+    let response = Request::get(&format!("{API_ENDPOINT}/auth/passkey/challenge"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !response.ok() {
+        return Err("failed to get passkey challenge".into());
+    }
+    response
+        .json::<r3v3rs3_api::auth::PasskeyChallenge>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn js_error_message(err: wasm_bindgen::JsValue) -> String {
+    if let Some(s) = err.as_string() {
+        return s;
+    }
+    if let Ok(msg) = js_sys::Reflect::get(&err, &wasm_bindgen::JsValue::from_str("message"))
+        && let Some(s) = msg.as_string()
+    {
+        return s;
+    }
+    "Passkey operation failed".to_string()
+}
+
+async fn register_passkey_request(
+    locale: Locale,
+    req: &PasskeyRegisterRequest,
+) -> Result<(), String> {
+    let post_res = Request::post(&format!("{API_ENDPOINT}/auth/passkey/register"))
+        .json(req)
+        .map_err(|err| err.to_string())?
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if post_res.ok() {
+        Ok(())
+    } else {
+        let msg = post_res
+            .text()
+            .await
+            .unwrap_or_else(|_| locale.t("error.invalid_passkey").to_string());
+        Err(msg)
+    }
+}
+
+async fn add_passkey_flow(locale: Locale, form: UseStateHandle<Form>, accounts: AccountList) {
+    let prompt_msg = locale.t("accounts.passkey_name_prompt");
+    let Some(name) = crate::dialog::prompt(locale, prompt_msg, "MacBook Touch ID").await else {
+        return;
+    };
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return;
+    }
+
+    let challenge = match fetch_challenge().await {
+        Ok(c) => c,
+        Err(e) => {
+            crate::dialog::message(locale, &e, crate::dialog::Icon::Error).await;
+            return;
+        }
+    };
+
+    let username = form.username.clone();
+    #[cfg(target_arch = "wasm32")]
+    let reg_result = {
+        let promise = create_passkey(
+            &challenge.challenge,
+            &challenge.rp_id,
+            "r3v3rs3",
+            &username,
+            &username,
+            &username,
+        );
+        match wasm_bindgen_futures::JsFuture::from(promise).await {
+            Ok(js_val) => {
+                let s = js_val.as_string().unwrap_or_default();
+                serde_json::from_str::<serde_json::Value>(&s).ok()
+            }
+            Err(err) => {
+                let msg = js_error_message(err);
+                crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await;
+                return;
+            }
+        }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let reg_result: Option<serde_json::Value> = {
+        let _ = (&challenge, &username);
+        None
+    };
+
+    let Some(val) = reg_result else {
+        return;
+    };
+    let req = PasskeyRegisterRequest {
+        name,
+        credential_id: val["credential_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        public_key: val["public_key"].as_str().unwrap_or_default().to_string(),
+        client_data_json: val["client_data_json"].as_str().map(str::to_string),
+    };
+
+    match register_passkey_request(locale, &req).await {
+        Ok(()) => load(accounts, PATH),
+        Err(msg) => crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await,
+    }
+}
+
+async fn delete_passkey_action(locale: Locale, id: String, accounts: AccountList) {
+    if !crate::dialog::confirm(locale, locale.t("accounts.delete_passkey_confirm")).await {
+        return;
+    }
+    let res = Request::delete(&format!("{API_ENDPOINT}/auth/passkey/{id}"))
+        .send()
+        .await;
+    if let Ok(res) = res
+        && res.ok()
+    {
+        load(accounts, PATH);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,6 +768,7 @@ mod tests {
             role: Role::Admin,
             proxies: None,
             totp: false,
+            passkeys: Vec::new(),
         };
         let form = Form {
             restrict: true,

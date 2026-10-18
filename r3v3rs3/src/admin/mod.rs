@@ -274,7 +274,11 @@ fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
         });
     Ok(OpenApiRouter::new()
         .routes(routes!(auth::login).layer(login_limit))
-        .routes(routes!(auth::logout)))
+        .routes(routes!(auth::logout))
+        .nest(
+            "/auth",
+            OpenApiRouter::new().routes(routes!(auth::get_passkey_challenge)),
+        ))
 }
 
 /// The largest webhook event. A push of many commits stays far below it.
@@ -325,6 +329,10 @@ fn resource_routes() -> OpenApiRouter<AppState> {
 /// The targets and the apps of the deployment platform.
 fn platform_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        .nest(
+            "/platform",
+            OpenApiRouter::new().routes(routes!(platform::rotate_platform_key)),
+        )
         .nest(
             "/targets",
             OpenApiRouter::new()
@@ -385,7 +393,9 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(databases::delete))
                 .routes(routes!(backups::list, backups::create))
                 .routes(routes!(backups::download))
-                .routes(routes!(backups::delete, backups::restore)),
+                .routes(routes!(backups::delete))
+                .routes(routes!(backups::restore))
+                .routes(routes!(backups::test_backup)),
         )
         .nest(
             "/backup-config",
@@ -418,6 +428,12 @@ fn session_routes() -> OpenApiRouter<AppState> {
         .nest(
             "/session",
             OpenApiRouter::new().routes(routes!(auth::session)),
+        )
+        .nest(
+            "/auth",
+            OpenApiRouter::new()
+                .routes(routes!(auth::register_passkey))
+                .routes(routes!(auth::delete_passkey)),
         )
         .nest(
             "/accounts",
@@ -763,6 +779,7 @@ pub struct Data {
     /// The server replaces these sessions with its own sessions at the start of the admin API.
     pub sessions: Arc<dyn SessionBackend>,
     pub login_attempts: LoginAttempts,
+    pub passkey_challenges: auth::PasskeyChallenges,
     pub ban_tracker: ban::IpBanTracker,
     pub log: Arc<LogReader>,
     /// The audit log of the server. The admin API reads it at its start.
@@ -784,6 +801,7 @@ impl Data {
             config: AppConfig::default(),
             sessions: Arc::new(LocalSessions::default()),
             login_attempts: Default::default(),
+            passkey_challenges: Default::default(),
             ban_tracker: Default::default(),
             log: Arc::new(LogReader::new(&log).await?),
             audit: None,

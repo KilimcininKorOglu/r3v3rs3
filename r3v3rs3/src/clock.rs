@@ -9,3 +9,7 @@ pub fn unix_ms() -> u64 {
         .map(|elapsed| elapsed.as_millis() as u64)
         .unwrap_or_default()
 }
+
+pub fn unix_secs() -> u64 {
+    unix_ms() / 1000
+}
