@@ -336,7 +336,7 @@ jobs:
 
   publish:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.binary.result == 'success' && needs.binary-cli.result == 'success' && needs.crates.result == 'success' && needs.sign.result == 'success'
     needs: [binary, binary-cli, crates, sign]
     runs-on: ubuntu-24.04
     steps:
