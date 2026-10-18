@@ -15,10 +15,12 @@ pub struct ProxyContext {
 
 impl ProxyContext {
     fn new(entry: ProxyEntry) -> Self {
-        let state = if entry.proxy.active && !entry.proxy.ports.is_empty() {
-            ProxyState::Active
-        } else {
+        let state = if !entry.proxy.active || entry.proxy.ports.is_empty() {
             ProxyState::Inactive
+        } else if matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.maintenance.enabled) {
+            ProxyState::Maintenance
+        } else {
+            ProxyState::Active
         };
         Self {
             entry,

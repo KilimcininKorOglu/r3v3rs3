@@ -260,6 +260,27 @@ protocol = "http"
 routes = [{ path = "/", response = { type = "status", status = 404, body = "Not found" } }]
 ```
 
+## Maintenance Mode
+
+An HTTP / HTTPS proxy can be placed into maintenance mode at any time without altering or losing its existing route and upstream server definitions. When maintenance mode is active, r3v3rs3 immediately responds to all incoming requests with a designated status code (default `503 Service Unavailable`) and an optional `Retry-After` header, bypassing all upstream targets.
+
+- `enabled` (boolean, default `false`): Toggles maintenance mode on or off.
+- `status` (integer, default `503`): HTTP status code returned to clients (100–599).
+- `retry_after` (optional integer): Number of seconds in the `Retry-After` header to inform clients and search crawlers when to check back.
+- `body` (optional string): Custom HTML or plain text response body. When left blank, r3v3rs3 serves a built-in responsive dark-themed maintenance page (`text/html; charset=utf-8`).
+
+In the WebUI:
+- The **Proxies** list table includes a quick one-click action link (**Enter maintenance** / **Exit maintenance**) on every HTTP proxy, switching status immediately while updating the badge to amber **Maintenance**.
+- The proxy editing page provides a dedicated **Maintenance Mode** card to customize the status code, retry interval, and custom response body.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+maintenance = { enabled = true, status = 503, retry_after = 300, body = "System upgrade in progress. Back shortly." }
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
+```
+
 ## UDP Sessions
 
 A UDP proxy opens one session for each client address. The session has its own socket to the upstream server, so the upstream server sees a different source port for each client. r3v3rs3 sends the replies of the upstream server back to the client from the listening port.

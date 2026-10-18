@@ -107,6 +107,7 @@ fn validate_http_upstream(http: &HttpProxy) -> Result<(), Error> {
     http.circuit_breaker.validate()?;
     http.sticky.validate()?;
     http.redirects.iter().try_for_each(RedirectRule::validate)?;
+    http.maintenance.validate()?;
     http.routes.iter().try_for_each(validate_route)?;
     validate_route_overrides(http)
 }
@@ -266,6 +267,62 @@ pub struct HttpProxy {
     /// Redirects that answer the matching requests before authentication.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redirects: Vec<RedirectRule>,
+    /// Maintenance mode returns an immediate maintenance response (default 503) without
+    /// forwarding to upstreams, preserving all upstream configuration.
+    #[serde(default, skip_serializing_if = "MaintenanceConfig::is_disabled")]
+    pub maintenance: MaintenanceConfig,
+}
+
+/// The default status code of a maintenance response (503 Service Unavailable).
+pub const DEFAULT_MAINTENANCE_STATUS: u16 = 503;
+
+pub fn default_maintenance_status() -> u16 {
+    DEFAULT_MAINTENANCE_STATUS
+}
+
+pub fn is_default_maintenance_status(status: &u16) -> bool {
+    *status == DEFAULT_MAINTENANCE_STATUS
+}
+
+/// Maintenance mode configuration for an HTTP proxy.
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct MaintenanceConfig {
+    /// When true, the proxy returns an immediate maintenance response instead of routing to upstreams.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub enabled: bool,
+    /// HTTP status code returned in maintenance mode (default 503).
+    #[serde(
+        default = "default_maintenance_status",
+        skip_serializing_if = "is_default_maintenance_status"
+    )]
+    pub status: u16,
+    /// Custom body text or HTML. If empty, the default maintenance page is returned.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub body: String,
+    /// Optional Retry-After header in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after: Option<u32>,
+}
+
+impl MaintenanceConfig {
+    pub fn is_disabled(&self) -> bool {
+        !self.enabled
+            && self.status == DEFAULT_MAINTENANCE_STATUS
+            && self.body.is_empty()
+            && self.retry_after.is_none()
+    }
+
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.status < 100 || self.status > 599 {
+            return Err(Error::InvalidFixedStatus {
+                status: self.status,
+            });
+        }
+        if self.body.len() > 65536 {
+            return Err(Error::FixedBodyTooLarge { max: 65536 });
+        }
+        Ok(())
+    }
 }
 
 impl HttpProxy {
@@ -303,6 +360,7 @@ fn is_false(b: &bool) -> bool {
 pub enum ProxyState {
     Active,
     Inactive,
+    Maintenance,
     #[default]
     Unknown,
 }

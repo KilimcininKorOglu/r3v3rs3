@@ -58,6 +58,7 @@ impl Router {
             let compression = (!http.compression.is_disabled()).then(|| Arc::new(http.compression));
             let proxy_cache = registries.caches.cache_for(id, &http.cache);
             let redirects: Arc<[RedirectRule]> = http.redirects.clone().into();
+            let maintenance = Arc::new(http.maintenance);
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 let base_path: String = filter
@@ -109,6 +110,7 @@ impl Router {
                     h2c: http.h2c,
                     upstream,
                     response: route.response.map(Arc::new),
+                    maintenance: maintenance.clone(),
                 });
             }
         }
@@ -280,4 +282,6 @@ pub struct FilteredRoute {
     pub upstream: Option<Upstream>,
     /// The redirect or the status that answers the route instead of an upstream server.
     pub response: Option<Arc<FixedResponse>>,
+    /// Maintenance mode settings of the proxy.
+    pub maintenance: Arc<r3v3rs3_api::proxy::MaintenanceConfig>,
 }

@@ -19,7 +19,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::mirror::{DEFAULT_MIRROR_BODY_SIZE, Mirror};
 use r3v3rs3_api::policy::{AuthPolicy, IpFilter, RateLimit, RatePeriod};
-use r3v3rs3_api::proxy::{HttpProxy, Route, Server, ServerUrl};
+use r3v3rs3_api::proxy::{HttpProxy, MaintenanceConfig, Route, Server, ServerUrl};
 use r3v3rs3_api::redirect::{RedirectRule, RedirectStatus};
 use r3v3rs3_api::rewrite::{PathRegex, PathRewrite};
 use r3v3rs3_api::upstream::{
@@ -73,6 +73,29 @@ struct ProxyForm {
     max_body_size: String,
     /// One redirect rule on each line.
     redirects: String,
+    maintenance: MaintenanceForm,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct MaintenanceForm {
+    pub enabled: bool,
+    pub status: String,
+    pub body: String,
+    pub retry_after: String,
+}
+
+impl MaintenanceForm {
+    pub fn new(config: &MaintenanceConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            status: config.status.to_string(),
+            body: config.body.clone(),
+            retry_after: config
+                .retry_after
+                .map(|secs| secs.to_string())
+                .unwrap_or_default(),
+        }
+    }
 }
 
 impl ProxyForm {
@@ -108,6 +131,7 @@ impl ProxyForm {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join("\n"),
+            maintenance: MaintenanceForm::new(&proxy.maintenance),
         }
     }
 }
@@ -690,6 +714,8 @@ pub fn http_proxy_config(props: &Props) -> Html {
             { cache_view(locale, &form) }
             { error_view(errors.get("cache")) }
             <p class={HINT_CLASS}>{locale.t("http_form.cache_hint")}</p>
+
+            { maintenance_view(locale, &form, &errors) }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.upstream_protocol")}</label>
             <div>
@@ -1433,6 +1459,38 @@ fn cache_view(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
     }
 }
 
+fn maintenance_view(
+    locale: Locale,
+    form: &UseStateHandle<ProxyForm>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    let maintenance = &form.maintenance;
+    html! {
+        <div class="mt-6 p-4 rounded-lg bg-neutral-100 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700">
+            <label class="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">{locale.t("http_form.maintenance")}</label>
+            <p class={HINT_CLASS}>{locale.t("http_form.maintenance_hint")}</p>
+            { toggle(state_input(form, checked, |form, value| form.maintenance.enabled = value), maintenance.enabled, locale.t("http_form.maintenance_enabled"), "mt-3") }
+            if maintenance.enabled {
+                <div class="grid gap-4 sm:grid-cols-2 mt-4">
+                    <div>
+                        <label class={LABEL_CLASS}>{locale.t("http_form.maintenance_status")}</label>
+                        <input type="number" min="100" max="599" value={maintenance.status.clone()} onchange={state_input(form, text, |form, value| form.maintenance.status = value)} class={INPUT_CLASS} placeholder="503" />
+                        { error_view(errors.get("maintenance_status")) }
+                    </div>
+                    <div>
+                        <label class={LABEL_CLASS}>{locale.t("http_form.maintenance_retry_after")}</label>
+                        <input type="number" min="0" value={maintenance.retry_after.clone()} onchange={state_input(form, text, |form, value| form.maintenance.retry_after = value)} class={INPUT_CLASS} placeholder="3600" />
+                        { error_view(errors.get("maintenance_retry_after")) }
+                    </div>
+                </div>
+                <label class={classes!(LABEL_CLASS, "mt-3")}>{locale.t("http_form.maintenance_body")}</label>
+                <textarea rows="3" autocapitalize="off" spellcheck="false" placeholder={locale.t("http_form.maintenance_body_placeholder")} value={maintenance.body.clone()} onchange={state_input(form, text_area, |form, value| form.maintenance.body = value)} class={INPUT_CLASS} />
+                <p class={HINT_CLASS}>{locale.t("http_form.maintenance_body_hint")}</p>
+            }
+        </div>
+    }
+}
+
 fn sticky_view(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
     html! {
         <>
@@ -1868,6 +1926,7 @@ fn get_proxy(
         "redirects",
         &mut errors,
     );
+    let maintenance = parse_maintenance(locale, &form.maintenance, &mut errors);
 
     if !errors.is_empty() {
         return Err(errors);
@@ -1897,7 +1956,45 @@ fn get_proxy(
         sticky,
         max_body_size,
         redirects,
+        maintenance,
     })
+}
+
+fn parse_maintenance(
+    locale: Locale,
+    form: &MaintenanceForm,
+    errors: &mut HashMap<String, String>,
+) -> MaintenanceConfig {
+    let status = form.status.trim().parse::<u16>().unwrap_or(503);
+    if !(100..=599).contains(&status) {
+        errors.insert(
+            "maintenance_status".into(),
+            locale.error_message(&Error::InvalidFixedStatus { status }),
+        );
+    }
+    let retry_after = if form.retry_after.trim().is_empty() {
+        None
+    } else {
+        match form.retry_after.trim().parse::<u32>() {
+            Ok(val) => Some(val),
+            Err(_) => {
+                errors.insert(
+                    "maintenance_retry_after".into(),
+                    locale.tf(
+                        "http_form.whole_number",
+                        &[("name", locale.t("http_form.maintenance_retry_after"))],
+                    ),
+                );
+                None
+            }
+        }
+    };
+    MaintenanceConfig {
+        enabled: form.enabled,
+        status,
+        body: form.body.clone(),
+        retry_after,
+    }
 }
 
 /// The IP filter and the authentication of the proxy. The access list of the proxy replaces both.

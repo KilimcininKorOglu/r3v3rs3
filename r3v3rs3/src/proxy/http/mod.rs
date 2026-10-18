@@ -732,15 +732,7 @@ where
             response_rewriter,
         );
     };
-    let response_rewriter = response_rewriter
-        .https_port(route.https_port)
-        .quic_port(route.quic_port)
-        .compression(
-            route
-                .compression
-                .clone()
-                .map(|config| ResponseCompression::new(config, req.method(), req.headers())),
-        );
+    let response_rewriter = configure_response_rewriter(response_rewriter, route, &req);
 
     let resource_id = route.resource_id;
     if let Some(key) = &route.metric_key {
@@ -750,6 +742,12 @@ where
         .client_ip
         .resolve(info.remote.ip(), req.headers(), &crate::cdn::table());
     let action = format!("{} {}", req.method().as_str(), req.uri());
+
+    if route.maintenance.enabled {
+        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, status = route.maintenance.status);
+        let response = maintenance_response(&route.maintenance);
+        return (ProxiedRequest::Respond(response), response_rewriter);
+    }
 
     let upstream = match check_policies(route, client.ip) {
         Ok(upstream) => upstream,
@@ -1181,4 +1179,53 @@ impl<T: BidiStream<Bytes>> Stream for StreamWrapper<T> {
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
     }
+}
+
+fn configure_response_rewriter<B>(
+    builder: ResponseRewriterBuilder,
+    route: &FilteredRoute,
+    req: &Request<B>,
+) -> ResponseRewriterBuilder {
+    builder
+        .https_port(route.https_port)
+        .quic_port(route.quic_port)
+        .compression(
+            route
+                .compression
+                .clone()
+                .map(|config| ResponseCompression::new(config, req.method(), req.headers())),
+        )
+}
+
+const DEFAULT_MAINTENANCE_BODY: &str = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>Under Maintenance</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 1rem; box-sizing: border-box; }\n    .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 2.5rem; max-width: 32rem; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }\n    h1 { font-size: 1.5rem; margin-top: 0; margin-bottom: 0.75rem; color: #f1f5f9; }\n    p { font-size: 0.95rem; line-height: 1.5; color: #94a3b8; margin: 0; }\n  </style>\n</head>\n<body>\n  <div class=\"card\">\n    <h1>Under Maintenance</h1>\n    <p>This service is temporarily undergoing scheduled maintenance. Please check back shortly.</p>\n  </div>\n</body>\n</html>\n";
+
+fn is_html_body(body: &[u8], body_str: &str) -> bool {
+    body.starts_with(b"<!DOCTYPE") || body.starts_with(b"<html") || body_str.contains("</html>")
+}
+
+fn maintenance_response(
+    maintenance: &r3v3rs3_api::proxy::MaintenanceConfig,
+) -> Response<Full<Bytes>> {
+    let status =
+        StatusCode::from_u16(maintenance.status).unwrap_or(StatusCode::SERVICE_UNAVAILABLE);
+    let body = if maintenance.body.is_empty() {
+        DEFAULT_MAINTENANCE_BODY.as_bytes().to_vec()
+    } else {
+        maintenance.body.as_bytes().to_vec()
+    };
+    let content_type = if is_html_body(&body, &maintenance.body) {
+        HeaderValue::from_static("text/html; charset=utf-8")
+    } else {
+        HeaderValue::from_static("text/plain; charset=utf-8")
+    };
+    let mut res = Response::new(Full::new(Bytes::from(body)));
+    *res.status_mut() = status;
+    res.headers_mut()
+        .insert(hyper::header::CONTENT_TYPE, content_type);
+    if let Some(retry_after) = maintenance.retry_after
+        && let Ok(val) = HeaderValue::from_str(&retry_after.to_string())
+    {
+        res.headers_mut().insert(hyper::header::RETRY_AFTER, val);
+    }
+    res
 }

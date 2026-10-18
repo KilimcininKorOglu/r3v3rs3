@@ -102,9 +102,7 @@ impl StoreApp {
 
     /// The category in the given language; the English one when no Turkish one exists.
     pub fn category_in(&self, tr: bool) -> Option<&str> {
-        if tr
-            && let Some(cat_tr) = self.category_tr.as_deref().filter(|s| !s.is_empty())
-        {
+        if tr && let Some(cat_tr) = self.category_tr.as_deref().filter(|s| !s.is_empty()) {
             return Some(cat_tr);
         }
         self.category.as_deref()

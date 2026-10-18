@@ -223,6 +223,35 @@ fn build_selection(
     })
 }
 
+struct ProxyRowActions {
+    config_onclick: Callback<MouseEvent>,
+    config_label: &'static str,
+    log_onclick: Callback<MouseEvent>,
+    maintenance: Option<(bool, Callback<MouseEvent>)>,
+    purge: Option<Callback<MouseEvent>>,
+    delete: Option<Callback<MouseEvent>>,
+}
+
+fn render_proxy_actions(locale: Locale, actions: ProxyRowActions) -> Html {
+    html! {
+        <>
+            <a class={LINK_CLASS} onclick={actions.config_onclick}>{locale.t(actions.config_label)}</a>
+            <a class={LINK_CLASS} onclick={actions.log_onclick}>{locale.t("common.log")}</a>
+            if let Some((enabled, cb)) = actions.maintenance {
+                <a class={LINK_CLASS} onclick={cb}>
+                    {if enabled { locale.t("proxies.exit_maintenance") } else { locale.t("proxies.enter_maintenance") }}
+                </a>
+            }
+            if let Some(purge_onclick) = actions.purge {
+                <a class={LINK_CLASS} onclick={purge_onclick}>{locale.t("proxies.purge")}</a>
+            }
+            if let Some(delete_onclick) = actions.delete {
+                <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
+            }
+        </>
+    }
+}
+
 /// A proxy row. A discovered proxy, or an account that cannot change the proxies, gets only the
 /// read actions.
 fn proxy_row(
@@ -235,12 +264,10 @@ fn proxy_row(
     can_edit: bool,
 ) -> Row {
     let id = entry.id;
-
+    let read_only = entry.is_discovered() || !can_edit;
     let log_onclick = route_onclick(navigator, Route::ProxyLogView { id });
     let config_onclick = route_onclick(navigator, Route::ProxyView { id });
-    let delete_onclick = delete_onclick(locale, id, proxies_dispatcher.clone());
     let cache_enabled = matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.cache.enabled);
-    let purge_onclick = purge_onclick(locale, id);
     let onchange = toggle_onchange(id);
 
     let title = match entry.proxy.name.is_empty() {
@@ -249,11 +276,32 @@ fn proxy_row(
     };
 
     let status = proxies.statuses.get(&id).cloned().unwrap_or_default();
-    let read_only = entry.is_discovered() || !can_edit;
     let config_label = match read_only {
         true => "common.view",
         false => "common.edit",
     };
+    let maintenance = if !read_only && let ProxyKind::Http(http) = &entry.proxy.kind {
+        Some((
+            http.maintenance.enabled,
+            maintenance_onclick(id, !http.maintenance.enabled, proxies_dispatcher.clone()),
+        ))
+    } else {
+        None
+    };
+    let purge = (cache_enabled && can_edit).then(|| purge_onclick(locale, id));
+    let delete = (!read_only).then(|| delete_onclick(locale, id, proxies_dispatcher.clone()));
+
+    let actions = render_proxy_actions(
+        locale,
+        ProxyRowActions {
+            config_onclick,
+            config_label,
+            log_onclick,
+            maintenance,
+            purge,
+            delete,
+        },
+    );
 
     Row {
         key: id.to_string(),
@@ -264,18 +312,7 @@ fn proxy_row(
             status_cell(locale, &status),
             active_toggle(entry.proxy.active, read_only, onchange),
         ],
-        actions: html! {
-            <>
-                <a class={LINK_CLASS} onclick={config_onclick}>{locale.t(config_label)}</a>
-                <a class={LINK_CLASS} onclick={log_onclick}>{locale.t("common.log")}</a>
-                if cache_enabled && can_edit {
-                    <a class={LINK_CLASS} onclick={purge_onclick}>{locale.t("proxies.purge")}</a>
-                }
-                if !read_only {
-                    <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
-                }
-            </>
-        },
+        actions,
     }
 }
 
@@ -396,6 +433,7 @@ fn status_cell(locale: Locale, status: &ProxyStatus) -> Html {
     let (status_key, color) = match status.state {
         ProxyState::Active => ("state.active", "bg-green-500"),
         ProxyState::Inactive => ("state.inactive", "bg-neutral-500"),
+        ProxyState::Maintenance => ("state.maintenance", "bg-amber-500"),
         ProxyState::Unknown => ("state.unknown", "bg-neutral-500"),
     };
     let badge = status_badge(locale.t(status_key), color);
@@ -543,6 +581,37 @@ async fn toggle_proxy(id: ShortId) -> Result<(), gloo_net::Error> {
         .json()
         .await?;
     entry.proxy.active = !entry.proxy.active;
+    Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
+        .json(&entry)?
+        .send()
+        .await?;
+    Ok(())
+}
+
+fn maintenance_onclick(
+    id: ShortId,
+    enabled: bool,
+    proxies_dispatcher: Dispatch<ProxyStore>,
+) -> Callback<MouseEvent> {
+    Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        let proxies_dispatcher = proxies_dispatcher.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = toggle_maintenance(id, enabled).await;
+            load_proxies(proxies_dispatcher);
+        });
+    })
+}
+
+async fn toggle_maintenance(id: ShortId, enabled: bool) -> Result<(), gloo_net::Error> {
+    let mut entry: ProxyEntry = Request::get(&format!("{API_ENDPOINT}/proxies/{id}"))
+        .send()
+        .await?
+        .json()
+        .await?;
+    if let ProxyKind::Http(ref mut http) = entry.proxy.kind {
+        http.maintenance.enabled = enabled;
+    }
     Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
         .json(&entry)?
         .send()

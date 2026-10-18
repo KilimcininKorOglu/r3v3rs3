@@ -260,6 +260,27 @@ protocol = "http"
 routes = [{ path = "/", response = { type = "status", status = 404, body = "Not found" } }]
 ```
 
+## Bakım modu
+
+HTTP / HTTPS proxy'si, mevcut route ve upstream sunucu yapılandırmasını kaybetmeden veya değiştirmeden dilediğiniz an bakım moduna alınabilir. Bakım modu etkinken r3v3rs3, gelen tüm istekleri upstream sunuculara yönlendirmeden doğrudan belirlenen durum koduyla (varsayılan `503 Service Unavailable`) ve isteğe bağlı `Retry-After` header'ı ile yanıtlar.
+
+- `enabled` (boolean, varsayılan `false`): Bakım modunu açar veya kapatır.
+- `status` (tamsayı, varsayılan `503`): İstemcilere dönülen HTTP durum kodu (100–599).
+- `retry_after` (isteğe bağlı tamsayı): İstemcilere ve arama motoru botlarına ne zaman tekrar kontrol edeceklerini bildiren `Retry-After` header'ındaki saniye değeri.
+- `body` (isteğe bağlı metin): Özel HTML veya düz metin yanıt gövdesi. Boş bırakıldığında r3v3rs3 dahili, modern ve responsive koyu temalı bir bakım sayfası sunar (`text/html; charset=utf-8`).
+
+WebUI'da:
+- **Proxies** listesinde her HTTP proxy satırında tek tıkla durumu değiştiren **Bakıma al** / **Bakımdan çıkar** aksiyon bağlantısı bulunur; durum rozeti anında sarı **Bakımda** olarak güncellenir.
+- Proxy düzenleme formunda durum kodunu, yeniden deneme süresini ve özel yanıt metnini ayarlayabileceğiniz bir **Bakım Modu** kartı yer alır.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+maintenance = { enabled = true, status = 503, retry_after = 300, body = "Sistem bakımı devam etmektedir. Lütfen kısa süre sonra tekrar deneyin." }
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
+```
+
 ## UDP oturumları
 
 UDP proxy her istemci adresi için ayrı bir oturum açar. Her oturumun upstream sunucuya giden kendi socket'i vardır. Bu yüzden upstream sunucu her istemciyi farklı bir kaynak porttan görür. r3v3rs3 upstream sunucunun yanıtlarını dinlediği porttan istemciye geri gönderir.

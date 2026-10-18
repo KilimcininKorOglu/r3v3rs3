@@ -142,6 +142,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                     max_body_size: 0,
                     redirects: Vec::new(),
                     client_cert: None,
+                    maintenance: Default::default(),
                 })),
                 ..Default::default()
             },
@@ -311,6 +312,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                         RedirectRule::parse_line("302 .* https://other.test/").unwrap(),
                     ],
                     client_cert: None,
+                    maintenance: Default::default(),
                 })),
                 ..Default::default()
             },
@@ -399,6 +401,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     max_body_size: 0,
                     redirects: Vec::new(),
                     client_cert: None,
+                    maintenance: Default::default(),
                 })),
                 ..Default::default()
             },
