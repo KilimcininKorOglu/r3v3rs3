@@ -17,7 +17,7 @@ pub struct StoreCatalog {
 
 /// An installable app of the catalog: a single image, or a Compose file of the r3v3rs3
 /// repository.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct StoreApp {
     /// The short id of the app, lowercase letters, digits and dashes.
     pub id: String,
@@ -28,6 +28,15 @@ pub struct StoreApp {
     /// The Turkish description. Empty means the English description.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description_tr: String,
+    /// The category of the app (e.g. "Monitoring", "Development", "Productivity").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// The Turkish category name. Empty or None means the English category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_tr: Option<String>,
+    /// Optional screenshot URL or image path demonstrating the application.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screenshot: Option<String>,
     /// The container image, for example `nginx:1.27`. Set on an image entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
@@ -90,6 +99,16 @@ impl StoreApp {
     pub fn description_in(&self, tr: bool) -> &str {
         description_in(tr, &self.description, &self.description_tr)
     }
+
+    /// The category in the given language; the English one when no Turkish one exists.
+    pub fn category_in(&self, tr: bool) -> Option<&str> {
+        if tr
+            && let Some(cat_tr) = self.category_tr.as_deref().filter(|s| !s.is_empty())
+        {
+            return Some(cat_tr);
+        }
+        self.category.as_deref()
+    }
 }
 
 impl StoreEnv {
@@ -128,4 +147,39 @@ pub struct StoreStatus {
 pub struct StoreResponse {
     pub status: StoreStatus,
     pub catalog: StoreCatalog,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn category_in_respects_language_preference_and_fallback() {
+        let app = StoreApp {
+            category: Some("Monitoring".to_string()),
+            category_tr: Some("İzleme".to_string()),
+            ..StoreApp::default()
+        };
+        assert_eq!(app.category_in(false), Some("Monitoring"));
+        assert_eq!(app.category_in(true), Some("İzleme"));
+
+        let fallback_app = StoreApp {
+            category: Some("Security".to_string()),
+            category_tr: None,
+            ..StoreApp::default()
+        };
+        assert_eq!(fallback_app.category_in(false), Some("Security"));
+        assert_eq!(fallback_app.category_in(true), Some("Security"));
+
+        let empty_tr_app = StoreApp {
+            category: Some("Development".to_string()),
+            category_tr: Some(String::new()),
+            ..StoreApp::default()
+        };
+        assert_eq!(empty_tr_app.category_in(true), Some("Development"));
+
+        let no_cat = StoreApp::default();
+        assert_eq!(no_cat.category_in(false), None);
+        assert_eq!(no_cat.category_in(true), None);
+    }
 }

@@ -103,6 +103,13 @@ A **Compose entry** points at a Compose file under `app-store-compose/` of the r
 
 The catalog holds no other Compose source: an entry that installs your own Compose file belongs on the [Apps](#apps) page, not in the catalog.
 
+### Categories, Search, and Screenshots
+
+The App Store provides instant search and category filtering:
+- **Search**: Filters catalog applications dynamically in real time by name, description, container image, or category.
+- **Categories**: Applications are organized into categories such as *Monitoring*, *Security*, *Development*, *Productivity*, *Automation*, *Database*, *Files*, *Media*, *Analytics*, *Social*, and *Management*. Click any category pill to filter the catalog, or click **All** to display all applications.
+- **Screenshots & Preview**: Catalog entries can feature visual screenshot previews and category badges, providing an immediate preview of the application's interface before installation.
+
 ### Catalog Updates and One-Click Upgrade
 
 When an app installed from the App Store has a newer version available in the catalog (for example, an updated image tag or an updated Compose configuration), r3v3rs3 displays an **Update available in catalog** badge next to the app in the app list and on the app details page. Clicking **Upgrade to Catalog Version** (or calling `POST /api/apps/{id}/upgrade-catalog`) updates the app specification to match the latest catalog entry and immediately triggers a deployment with the new version.

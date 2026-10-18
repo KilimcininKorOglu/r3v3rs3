@@ -103,6 +103,13 @@ Bir **Compose girdisi**, r3v3rs3-apps deposunun `app-store-compose/` altındaki 
 
 Katalog başka Compose kaynağı tutmaz: kendi Compose dosyanızı kuran girdi App Store'a değil, [Uygulamalar](#uygulamalar) sayfasına aittir.
 
+### Kategoriler, Arama ve Ekran Görüntüleri
+
+App Store, anlık arama ve kategori filtreleme özellikleri sunar:
+- **Arama**: Katalog uygulamalarını ada, açıklamaya, konteyner imajına veya kategoriye göre anında filtreler.
+- **Kategoriler**: Uygulamalar *İzleme*, *Güvenlik*, *Geliştirme*, *Üretkenlik*, *Otomasyon*, *Veritabanı*, *Dosyalar*, *Medya*, *Analitik*, *Sosyal* ve *Yönetim* gibi kategorilere ayrılmıştır. Kataloğu filtrelemek için herhangi bir kategori etiketine tıklayabilir veya tüm uygulamaları görmek için **Tümü** seçeneğini seçebilirsiniz.
+- **Ekran Görüntüleri & Önizleme**: Katalog girdileri ekran görüntüsü önizlemeleri ve kategori rozetleri içerebilir; bu sayede kurulumdan önce uygulamanın arayüzü doğrudan incelenebilir.
+
 ### Katalog Güncellemeleri ve Tek Tıkla Yükseltme
 
 App Store'dan kurulan bir uygulamanın katalogda daha yeni bir sürümü bulunduğunda (örneğin güncellenmiş bir imaj etiketi veya yeni bir Compose yapılandırması), r3v3rs3 uygulamalar listesinde ve uygulama detay sayfasında **Katalogda yeni sürüm var** rozeti gösterir. **Katalog Sürümüne Yükselt** butonuna tıklamak (veya `POST /api/apps/{id}/upgrade-catalog` çağırmak) uygulama yapılandırmasını en son katalog sürümüyle günceller ve hemen yeni sürümle deployment başlatır.

@@ -90,6 +90,9 @@ mod tests {
             name: id.to_string(),
             description: "test".to_string(),
             description_tr: String::new(),
+            category: None,
+            category_tr: None,
+            screenshot: None,
             image: Some(format!("{id}:1")),
             port: 80,
             health_check_path: None,
@@ -214,5 +217,20 @@ mod tests {
         entry.description_tr = "deneme".to_string();
         assert_eq!(entry.description_in(true), "deneme");
         assert_eq!(entry.description_in(false), "test");
+    }
+
+    #[test]
+    fn embedded_catalog_has_categories_and_screenshots() {
+        let catalog: StoreCatalog = serde_json::from_str(EMBEDDED_CATALOG).unwrap();
+        for entry in &catalog.apps {
+            let cat = entry.category.as_deref().unwrap_or_default();
+            assert!(!cat.is_empty(), "entry {} has no category", entry.id);
+            let cat_tr = entry.category_tr.as_deref().unwrap_or_default();
+            assert!(!cat_tr.is_empty(), "entry {} has no category_tr", entry.id);
+        }
+        assert!(
+            catalog.apps.iter().any(|app| app.screenshot.is_some()),
+            "catalog has no screenshots"
+        );
     }
 }

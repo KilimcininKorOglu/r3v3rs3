@@ -10,7 +10,10 @@
       "image": "louislam/uptime-kuma:1",
       "port": 3001,
       "health_check_path": "/",
-      "website": "https://uptime.kuma.pet"
+      "website": "https://uptime.kuma.pet",
+      "category": "Monitoring",
+      "category_tr": "İzleme",
+      "screenshot": "https://raw.githubusercontent.com/louislam/uptime-kuma/master/extra/screenshot.png"
     },
     {
       "id": "memos",
@@ -20,7 +23,10 @@
       "image": "neosmemo/memos:stable",
       "port": 5230,
       "health_check_path": "/",
-      "website": "https://www.usememos.com"
+      "website": "https://www.usememos.com",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik",
+      "screenshot": "https://www.usememos.com/screenshot.png"
     },
     {
       "id": "vaultwarden",
@@ -30,7 +36,10 @@
       "image": "vaultwarden/server:latest",
       "port": 80,
       "health_check_path": "/alive",
-      "website": "https://github.com/dani-garcia/vaultwarden"
+      "website": "https://github.com/dani-garcia/vaultwarden",
+      "category": "Security",
+      "category_tr": "Güvenlik",
+      "screenshot": "https://raw.githubusercontent.com/dani-garcia/vaultwarden/main/resources/vaultwarden-logo.png"
     },
     {
       "id": "gitea",
@@ -40,7 +49,10 @@
       "image": "gitea/gitea:1",
       "port": 3000,
       "health_check_path": "/api/healthz",
-      "website": "https://gitea.io"
+      "website": "https://gitea.io",
+      "category": "Development",
+      "category_tr": "Geliştirme",
+      "screenshot": "https://gitea.io/images/gitea.png"
     },
     {
       "id": "forgejo",
@@ -50,7 +62,9 @@
       "image": "codeberg.org/forgejo/forgejo:7",
       "port": 3000,
       "health_check_path": "/api/healthz",
-      "website": "https://forgejo.org"
+      "website": "https://forgejo.org",
+      "category": "Development",
+      "category_tr": "Geliştirme"
     },
     {
       "id": "woodpecker",
@@ -60,7 +74,9 @@
       "image": "woodpeckerci/woodpecker-server:latest",
       "port": 8000,
       "health_check_path": "/healthz",
-      "website": "https://woodpecker-ci.org"
+      "website": "https://woodpecker-ci.org",
+      "category": "Development",
+      "category_tr": "Geliştirme"
     },
     {
       "id": "n8n",
@@ -70,7 +86,10 @@
       "image": "docker.n8n.io/n8nio/n8n",
       "port": 5678,
       "health_check_path": "/healthz",
-      "website": "https://n8n.io"
+      "website": "https://n8n.io",
+      "category": "Automation",
+      "category_tr": "Otomasyon",
+      "screenshot": "https://n8n.io/images/og-image.png"
     },
     {
       "id": "it-tools",
@@ -80,7 +99,10 @@
       "image": "corentinth/it-tools:latest",
       "port": 80,
       "health_check_path": "/",
-      "website": "https://it-tools.tech"
+      "website": "https://it-tools.tech",
+      "category": "Development",
+      "category_tr": "Geliştirme",
+      "screenshot": "https://it-tools.tech/og-image.png"
     },
     {
       "id": "cyberchef",
@@ -90,7 +112,9 @@
       "image": "ghcr.io/gchq/cyberchef:latest",
       "port": 80,
       "health_check_path": "/",
-      "website": "https://gchq.github.io/CyberChef/"
+      "website": "https://gchq.github.io/CyberChef/",
+      "category": "Development",
+      "category_tr": "Geliştirme"
     },
     {
       "id": "stirling-pdf",
@@ -100,7 +124,10 @@
       "image": "stirlingtools/stirling-pdf:latest",
       "port": 8080,
       "health_check_path": "/",
-      "website": "https://stirlingpdf.com"
+      "website": "https://stirlingpdf.com",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik",
+      "screenshot": "https://raw.githubusercontent.com/Stirling-Tools/Stirling-PDF/main/docs/homepage.png"
     },
     {
       "id": "drawio",
@@ -110,7 +137,10 @@
       "image": "jgraph/drawio:latest",
       "port": 8080,
       "health_check_path": "/",
-      "website": "https://www.drawio.com"
+      "website": "https://www.drawio.com",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik",
+      "screenshot": "https://raw.githubusercontent.com/jgraph/drawio/master/src/main/webapp/images/drawlogo256.png"
     },
     {
       "id": "etherpad",
@@ -120,7 +150,9 @@
       "image": "etherpad/etherpad:latest",
       "port": 9001,
       "health_check_path": "/",
-      "website": "https://etherpad.org"
+      "website": "https://etherpad.org",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik"
     },
     {
       "id": "trilium",
@@ -130,7 +162,9 @@
       "image": "zadam/trilium:latest",
       "port": 8080,
       "health_check_path": "/",
-      "website": "https://github.com/zadam/trilium"
+      "website": "https://github.com/zadam/trilium",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik"
     },
     {
       "id": "linkding",
@@ -140,7 +174,9 @@
       "image": "sissbruecker/linkding:latest",
       "port": 9090,
       "health_check_path": "/",
-      "website": "https://github.com/sissbruecker/linkding"
+      "website": "https://github.com/sissbruecker/linkding",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik"
     },
     {
       "id": "readeck",
@@ -150,7 +186,9 @@
       "image": "codeberg.org/readeck/readeck:latest",
       "port": 8000,
       "health_check_path": "/",
-      "website": "https://readeck.org"
+      "website": "https://readeck.org",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik"
     },
     {
       "id": "vikunja",
@@ -160,7 +198,10 @@
       "image": "vikunja/vikunja:latest",
       "port": 3456,
       "health_check_path": "/api/v1/info",
-      "website": "https://vikunja.io"
+      "website": "https://vikunja.io",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik",
+      "screenshot": "https://vikunja.io/img/screenshots/vikunja-list-view.png"
     },
     {
       "id": "mealie",
@@ -170,7 +211,9 @@
       "image": "ghcr.io/mealie-recipes/mealie:latest",
       "port": 9000,
       "health_check_path": "/",
-      "website": "https://mealie.io"
+      "website": "https://mealie.io",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik"
     },
     {
       "id": "grocy",
@@ -180,7 +223,9 @@
       "image": "lscr.io/linuxserver/grocy:latest",
       "port": 80,
       "health_check_path": "/",
-      "website": "https://grocy.info"
+      "website": "https://grocy.info",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik"
     },
     {
       "id": "actual-budget",
@@ -190,7 +235,10 @@
       "image": "actualbudget/actual-server:latest",
       "port": 5006,
       "health_check_path": "/",
-      "website": "https://actualbudget.org"
+      "website": "https://actualbudget.org",
+      "category": "Productivity",
+      "category_tr": "Üretkenlik",
+      "screenshot": "https://actualbudget.org/assets/images/budget-f8bbfa8804a1df0f2cb2a01ceb6932a5.png"
     },
     {
       "id": "nocodb",
@@ -200,7 +248,10 @@
       "image": "nocodb/nocodb:latest",
       "port": 8080,
       "health_check_path": "/api/v2/meta/health",
-      "website": "https://nocodb.com"
+      "website": "https://nocodb.com",
+      "category": "Database",
+      "category_tr": "Veritabanı",
+      "screenshot": "https://raw.githubusercontent.com/nocodb/nocodb/develop/packages/nocodb/src/public/img/cover.png"
     },
     {
       "id": "grist",
@@ -210,7 +261,9 @@
       "image": "gristlabs/grist-core:latest",
       "port": 8484,
       "health_check_path": "/status",
-      "website": "https://www.getgrist.com"
+      "website": "https://www.getgrist.com",
+      "category": "Database",
+      "category_tr": "Veritabanı"
     },
     {
       "id": "ghost",
@@ -220,7 +273,9 @@
       "image": "ghost:5",
       "port": 2368,
       "health_check_path": "/",
-      "website": "https://ghost.org"
+      "website": "https://ghost.org",
+      "category": "Publishing",
+      "category_tr": "Yayıncılık"
     },
     {
       "id": "nextcloud",
@@ -230,7 +285,9 @@
       "image": "nextcloud:29-apache",
       "port": 80,
       "health_check_path": "/status.php",
-      "website": "https://nextcloud.com"
+      "website": "https://nextcloud.com",
+      "category": "Files",
+      "category_tr": "Dosyalar"
     },
     {
       "id": "filebrowser",
@@ -240,7 +297,9 @@
       "image": "filebrowser/filebrowser:latest",
       "port": 80,
       "health_check_path": "/health",
-      "website": "https://filebrowser.org"
+      "website": "https://filebrowser.org",
+      "category": "Files",
+      "category_tr": "Dosyalar"
     },
     {
       "id": "alist",
@@ -250,7 +309,9 @@
       "image": "xhofe/alist:latest",
       "port": 5244,
       "health_check_path": "/",
-      "website": "https://alist.nn.ci"
+      "website": "https://alist.nn.ci",
+      "category": "Files",
+      "category_tr": "Dosyalar"
     },
     {
       "id": "jellyfin",
@@ -260,7 +321,10 @@
       "image": "jellyfin/jellyfin:latest",
       "port": 8096,
       "health_check_path": "/health",
-      "website": "https://jellyfin.org"
+      "website": "https://jellyfin.org",
+      "category": "Media",
+      "category_tr": "Medya",
+      "screenshot": "https://raw.githubusercontent.com/jellyfin/jellyfin-ux/master/branding/SVG/banner-dark.svg"
     },
     {
       "id": "jellyseerr",
@@ -270,7 +334,9 @@
       "image": "fallenbagel/jellyseerr:latest",
       "port": 5055,
       "health_check_path": "/api/v1/status",
-      "website": "https://github.com/Fallenbagel/jellyseerr"
+      "website": "https://github.com/Fallenbagel/jellyseerr",
+      "category": "Media",
+      "category_tr": "Medya"
     },
     {
       "id": "navidrome",
@@ -280,7 +346,9 @@
       "image": "deluan/navidrome:latest",
       "port": 4533,
       "health_check_path": "/ping",
-      "website": "https://www.navidrome.org"
+      "website": "https://www.navidrome.org",
+      "category": "Media",
+      "category_tr": "Medya"
     },
     {
       "id": "syncthing",
@@ -290,7 +358,9 @@
       "image": "syncthing/syncthing:latest",
       "port": 8384,
       "health_check_path": "/rest/noauth/health",
-      "website": "https://syncthing.net"
+      "website": "https://syncthing.net",
+      "category": "Files",
+      "category_tr": "Dosyalar"
     },
     {
       "id": "portainer",
@@ -300,7 +370,10 @@
       "image": "portainer/portainer-ce:latest",
       "port": 9000,
       "health_check_path": "/api/status",
-      "website": "https://www.portainer.io"
+      "website": "https://www.portainer.io",
+      "category": "Management",
+      "category_tr": "Yönetim",
+      "screenshot": "https://www.portainer.io/hubfs/Portainer-CE-Dashboard.png"
     },
     {
       "id": "dozzle",
@@ -310,7 +383,9 @@
       "image": "amir20/dozzle:latest",
       "port": 8080,
       "health_check_path": "/health",
-      "website": "https://dozzle.dev"
+      "website": "https://dozzle.dev",
+      "category": "Monitoring",
+      "category_tr": "İzleme"
     },
     {
       "id": "netdata",
@@ -320,7 +395,10 @@
       "image": "netdata/netdata:latest",
       "port": 19999,
       "health_check_path": "/v1/info",
-      "website": "https://www.netdata.cloud"
+      "website": "https://www.netdata.cloud",
+      "category": "Monitoring",
+      "category_tr": "İzleme",
+      "screenshot": "https://raw.githubusercontent.com/netdata/netdata/master/src/web/gui/v2/src/assets/netdata-overview.png"
     },
     {
       "id": "grafana",
@@ -330,7 +408,10 @@
       "image": "grafana/grafana:latest",
       "port": 3000,
       "health_check_path": "/api/health",
-      "website": "https://grafana.com"
+      "website": "https://grafana.com",
+      "category": "Monitoring",
+      "category_tr": "İzleme",
+      "screenshot": "https://grafana.com/static/assets/img/blog/grafana-10-dashboards.png"
     },
     {
       "id": "changedetection",
@@ -340,7 +421,9 @@
       "image": "dgtlmoon/changedetection.io:latest",
       "port": 5000,
       "health_check_path": "/",
-      "website": "https://changedetection.io"
+      "website": "https://changedetection.io",
+      "category": "Monitoring",
+      "category_tr": "İzleme"
     },
     {
       "id": "rss-bridge",
@@ -350,7 +433,9 @@
       "image": "rssbridge/rss-bridge:latest",
       "port": 80,
       "health_check_path": "/",
-      "website": "https://rss-bridge.github.io/rss-bridge/"
+      "website": "https://rss-bridge.github.io/rss-bridge/",
+      "category": "Automation",
+      "category_tr": "Otomasyon"
     },
     {
       "id": "searxng",
@@ -360,7 +445,9 @@
       "image": "searxng/searxng:latest",
       "port": 8080,
       "health_check_path": "/healthz",
-      "website": "https://docs.searxng.org"
+      "website": "https://docs.searxng.org",
+      "category": "Utilities",
+      "category_tr": "Araçlar"
     },
     {
       "id": "redlib",
@@ -370,7 +457,9 @@
       "image": "quay.io/redlib/redlib:latest",
       "port": 8080,
       "health_check_path": "/",
-      "website": "https://github.com/redlib-org/redlib"
+      "website": "https://github.com/redlib-org/redlib",
+      "category": "Utilities",
+      "category_tr": "Araçlar"
     },
     {
       "id": "rimgo",
@@ -380,7 +469,9 @@
       "image": "codeberg.org/rimgo/rimgo:latest",
       "port": 3000,
       "health_check_path": "/",
-      "website": "https://codeberg.org/rimgo/rimgo"
+      "website": "https://codeberg.org/rimgo/rimgo",
+      "category": "Utilities",
+      "category_tr": "Araçlar"
     },
     {
       "id": "gotosocial",
@@ -390,7 +481,9 @@
       "image": "superseriousbusiness/gotosocial:latest",
       "port": 8080,
       "health_check_path": "/livez",
-      "website": "https://gotosocial.org"
+      "website": "https://gotosocial.org",
+      "category": "Social",
+      "category_tr": "Sosyal"
     },
     {
       "id": "pingvin-share",
@@ -400,7 +493,9 @@
       "image": "stonith404/pingvin-share:latest",
       "port": 3000,
       "health_check_path": "/api/health",
-      "website": "https://github.com/stonith404/pingvin-share"
+      "website": "https://github.com/stonith404/pingvin-share",
+      "category": "Files",
+      "category_tr": "Dosyalar"
     },
     {
       "id": "pairdrop",
@@ -410,7 +505,9 @@
       "image": "lscr.io/linuxserver/pairdrop:latest",
       "port": 3000,
       "health_check_path": "/",
-      "website": "https://pairdrop.net"
+      "website": "https://pairdrop.net",
+      "category": "Files",
+      "category_tr": "Dosyalar"
     },
     {
       "id": "librespeed",
@@ -420,7 +517,9 @@
       "image": "lscr.io/linuxserver/librespeed:latest",
       "port": 80,
       "health_check_path": "/",
-      "website": "https://librespeed.org"
+      "website": "https://librespeed.org",
+      "category": "Utilities",
+      "category_tr": "Araçlar"
     },
     {
       "id": "homepage",
@@ -430,7 +529,10 @@
       "image": "ghcr.io/gethomepage/homepage:latest",
       "port": 3000,
       "health_check_path": "/",
-      "website": "https://gethomepage.dev"
+      "website": "https://gethomepage.dev",
+      "category": "Management",
+      "category_tr": "Yönetim",
+      "screenshot": "https://raw.githubusercontent.com/gethomepage/homepage/main/public/images/dashboard.png"
     },
     {
       "id": "heimdall",
@@ -440,7 +542,9 @@
       "image": "lscr.io/linuxserver/heimdall:latest",
       "port": 80,
       "health_check_path": "/",
-      "website": "https://heimdall.site"
+      "website": "https://heimdall.site",
+      "category": "Management",
+      "category_tr": "Yönetim"
     },
     {
       "id": "apprise-api",
@@ -450,7 +554,9 @@
       "image": "lscr.io/linuxserver/apprise-api:latest",
       "port": 8000,
       "health_check_path": "/status",
-      "website": "https://github.com/caronc/apprise-api"
+      "website": "https://github.com/caronc/apprise-api",
+      "category": "Automation",
+      "category_tr": "Otomasyon"
     },
     {
       "id": "httpbin",
@@ -460,7 +566,9 @@
       "image": "mccutchen/go-httpbin:latest",
       "port": 8080,
       "health_check_path": "/status/200",
-      "website": "https://httpbin.org"
+      "website": "https://httpbin.org",
+      "category": "Development",
+      "category_tr": "Geliştirme"
     },
     {
       "id": "whoami",
@@ -470,7 +578,9 @@
       "image": "traefik/whoami:v1.10.3",
       "port": 80,
       "health_check_path": "/",
-      "website": "https://github.com/traefik/whoami"
+      "website": "https://github.com/traefik/whoami",
+      "category": "Development",
+      "category_tr": "Geliştirme"
     },
     {
       "id": "umami",
@@ -484,9 +594,22 @@
       "port": 3000,
       "website": "https://umami.is",
       "env": [
-        {"key": "UMAMI_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
-        {"key": "APP_SECRET", "description": "Random secret that signs the sessions.", "description_tr": "Oturumları imzalayan rastgele secret.", "secret": true}
-      ]
+        {
+          "key": "UMAMI_DB_PASSWORD",
+          "description": "Password of the PostgreSQL database.",
+          "description_tr": "PostgreSQL veritabanı parolası.",
+          "secret": true
+        },
+        {
+          "key": "APP_SECRET",
+          "description": "Random secret that signs the sessions.",
+          "description_tr": "Oturumları imzalayan rastgele secret.",
+          "secret": true
+        }
+      ],
+      "category": "Analytics",
+      "category_tr": "Analitik",
+      "screenshot": "https://umami.is/images/screenshots/overview-desktop.png"
     },
     {
       "id": "listmonk",
@@ -500,10 +623,27 @@
       "port": 9000,
       "website": "https://listmonk.app",
       "env": [
-        {"key": "LISTMONK_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
-        {"key": "LISTMONK_ADMIN_USER", "description": "User name of the first admin.", "description_tr": "İlk admin'in kullanıcı adı.", "secret": false},
-        {"key": "LISTMONK_ADMIN_PASSWORD", "description": "Password of the first admin.", "description_tr": "İlk admin'in parolası.", "secret": true}
-      ]
+        {
+          "key": "LISTMONK_DB_PASSWORD",
+          "description": "Password of the PostgreSQL database.",
+          "description_tr": "PostgreSQL veritabanı parolası.",
+          "secret": true
+        },
+        {
+          "key": "LISTMONK_ADMIN_USER",
+          "description": "User name of the first admin.",
+          "description_tr": "İlk admin'in kullanıcı adı.",
+          "secret": false
+        },
+        {
+          "key": "LISTMONK_ADMIN_PASSWORD",
+          "description": "Password of the first admin.",
+          "description_tr": "İlk admin'in parolası.",
+          "secret": true
+        }
+      ],
+      "category": "Publishing",
+      "category_tr": "Yayıncılık"
     },
     {
       "id": "keycloak",
@@ -517,10 +657,27 @@
       "port": 8080,
       "website": "https://www.keycloak.org",
       "env": [
-        {"key": "KC_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
-        {"key": "KEYCLOAK_ADMIN", "description": "User name of the first admin.", "description_tr": "İlk admin'in kullanıcı adı.", "secret": false},
-        {"key": "KEYCLOAK_ADMIN_PASSWORD", "description": "Password of the first admin.", "description_tr": "İlk admin'in parolası.", "secret": true}
-      ]
+        {
+          "key": "KC_DB_PASSWORD",
+          "description": "Password of the PostgreSQL database.",
+          "description_tr": "PostgreSQL veritabanı parolası.",
+          "secret": true
+        },
+        {
+          "key": "KEYCLOAK_ADMIN",
+          "description": "User name of the first admin.",
+          "description_tr": "İlk admin'in kullanıcı adı.",
+          "secret": false
+        },
+        {
+          "key": "KEYCLOAK_ADMIN_PASSWORD",
+          "description": "Password of the first admin.",
+          "description_tr": "İlk admin'in parolası.",
+          "secret": true
+        }
+      ],
+      "category": "Security",
+      "category_tr": "Güvenlik"
     },
     {
       "id": "mattermost",
@@ -534,9 +691,21 @@
       "port": 8065,
       "website": "https://mattermost.com",
       "env": [
-        {"key": "MM_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
-        {"key": "MM_SITEURL", "description": "The public https address of the app, for example https://chat.example.com.", "description_tr": "Uygulamanın genel https adresi, örneğin https://chat.example.com.", "secret": false}
-      ]
+        {
+          "key": "MM_DB_PASSWORD",
+          "description": "Password of the PostgreSQL database.",
+          "description_tr": "PostgreSQL veritabanı parolası.",
+          "secret": true
+        },
+        {
+          "key": "MM_SITEURL",
+          "description": "The public https address of the app, for example https://chat.example.com.",
+          "description_tr": "Uygulamanın genel https adresi, örneğin https://chat.example.com.",
+          "secret": false
+        }
+      ],
+      "category": "Social",
+      "category_tr": "Sosyal"
     },
     {
       "id": "plausible",
@@ -550,11 +719,33 @@
       "port": 8000,
       "website": "https://plausible.io",
       "env": [
-        {"key": "PLAUSIBLE_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
-        {"key": "CLICKHOUSE_PASSWORD", "description": "Password of the ClickHouse database.", "description_tr": "ClickHouse veritabanı parolası.", "secret": true},
-        {"key": "SECRET_KEY_BASE", "description": "Random secret that signs the sessions.", "description_tr": "Oturumları imzalayan rastgele secret.", "secret": true},
-        {"key": "PLAUSIBLE_BASE_URL", "description": "The public https address of the app, for example https://stats.example.com.", "description_tr": "Uygulamanın genel https adresi, örneğin https://stats.example.com.", "secret": false}
-      ]
+        {
+          "key": "PLAUSIBLE_DB_PASSWORD",
+          "description": "Password of the PostgreSQL database.",
+          "description_tr": "PostgreSQL veritabanı parolası.",
+          "secret": true
+        },
+        {
+          "key": "CLICKHOUSE_PASSWORD",
+          "description": "Password of the ClickHouse database.",
+          "description_tr": "ClickHouse veritabanı parolası.",
+          "secret": true
+        },
+        {
+          "key": "SECRET_KEY_BASE",
+          "description": "Random secret that signs the sessions.",
+          "description_tr": "Oturumları imzalayan rastgele secret.",
+          "secret": true
+        },
+        {
+          "key": "PLAUSIBLE_BASE_URL",
+          "description": "The public https address of the app, for example https://stats.example.com.",
+          "description_tr": "Uygulamanın genel https adresi, örneğin https://stats.example.com.",
+          "secret": false
+        }
+      ],
+      "category": "Analytics",
+      "category_tr": "Analitik"
     },
     {
       "id": "directus",
@@ -568,12 +759,39 @@
       "port": 8055,
       "website": "https://directus.io",
       "env": [
-        {"key": "DIRECTUS_DB_PASSWORD", "description": "Password of the PostgreSQL database.", "description_tr": "PostgreSQL veritabanı parolası.", "secret": true},
-        {"key": "DIRECTUS_KEY", "description": "Random key that identifies the installation.", "description_tr": "Kurulumu tanımlayan rastgele key.", "secret": true},
-        {"key": "DIRECTUS_SECRET", "description": "Random secret that signs the sessions.", "description_tr": "Oturumları imzalayan rastgele secret.", "secret": true},
-        {"key": "DIRECTUS_ADMIN_EMAIL", "description": "E-mail address of the first admin.", "description_tr": "İlk admin'in e-posta adresi.", "secret": false},
-        {"key": "DIRECTUS_ADMIN_PASSWORD", "description": "Password of the first admin.", "description_tr": "İlk admin'in parolası.", "secret": true}
-      ]
+        {
+          "key": "DIRECTUS_DB_PASSWORD",
+          "description": "Password of the PostgreSQL database.",
+          "description_tr": "PostgreSQL veritabanı parolası.",
+          "secret": true
+        },
+        {
+          "key": "DIRECTUS_KEY",
+          "description": "Random key that identifies the installation.",
+          "description_tr": "Kurulumu tanımlayan rastgele key.",
+          "secret": true
+        },
+        {
+          "key": "DIRECTUS_SECRET",
+          "description": "Random secret that signs the sessions.",
+          "description_tr": "Oturumları imzalayan rastgele secret.",
+          "secret": true
+        },
+        {
+          "key": "DIRECTUS_ADMIN_EMAIL",
+          "description": "E-mail address of the first admin.",
+          "description_tr": "İlk admin'in e-posta adresi.",
+          "secret": false
+        },
+        {
+          "key": "DIRECTUS_ADMIN_PASSWORD",
+          "description": "Password of the first admin.",
+          "description_tr": "İlk admin'in parolası.",
+          "secret": true
+        }
+      ],
+      "category": "Database",
+      "category_tr": "Veritabanı"
     }
   ]
 }
