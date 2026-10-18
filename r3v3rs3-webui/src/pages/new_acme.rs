@@ -18,6 +18,7 @@ pub enum Provider {
     LetsEncrypt,
     GoogleTrustServices,
     ZeroSSL,
+    BuyPass,
     Custom,
 }
 
@@ -32,6 +33,9 @@ impl Provider {
             }
             Provider::ZeroSSL => {
                 html! { <AcmeProvider name={self.to_string()} eab={true} url={"https://acme.zerossl.com/v2/DV90"} {show_errors} {onchanged} /> }
+            }
+            Provider::BuyPass => {
+                html! { <AcmeProvider name={self.to_string()} eab_optional={true} url={"https://api.buypass.com/acme/directory"} {show_errors} {onchanged} /> }
             }
             Provider::Custom => html! { <CustomAcme {show_errors} {onchanged} /> },
         }
@@ -52,6 +56,7 @@ impl Display for Provider {
             Provider::LetsEncrypt => write!(f, "Let's Encrypt"),
             Provider::GoogleTrustServices => write!(f, "Google Trust Services"),
             Provider::ZeroSSL => write!(f, "ZeroSSL"),
+            Provider::BuyPass => write!(f, "BuyPass"),
             Provider::Custom => write!(f, "Custom"),
         }
     }
@@ -61,6 +66,7 @@ const PROVIDERS: &[Provider] = &[
     Provider::LetsEncrypt,
     Provider::GoogleTrustServices,
     Provider::ZeroSSL,
+    Provider::BuyPass,
     Provider::Custom,
 ];
 
@@ -199,4 +205,17 @@ fn provider_options(locale: Locale, selected: &Provider) -> Html {
 
 async fn add_acme(locale: Locale, req: &AcmeRequest) -> Result<(), String> {
     send_json(locale, Request::post(&format!("{API_ENDPOINT}/acme")), req).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn providers_include_zerossl_and_buypass() {
+        assert!(PROVIDERS.contains(&Provider::ZeroSSL));
+        assert!(PROVIDERS.contains(&Provider::BuyPass));
+        assert_eq!(Provider::BuyPass.to_string(), "BuyPass");
+        assert_eq!(Provider::ZeroSSL.to_string(), "ZeroSSL");
+    }
 }

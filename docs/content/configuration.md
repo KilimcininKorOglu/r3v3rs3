@@ -903,11 +903,11 @@ An id that the request repeats gets one result.
 
 # ACME
 
-r3v3rs3 supports automatic certificate provisioning using [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment). ACME is supported by many certificate authorities, such as Let's Encrypt, ZeroSSL, and Google Trust Services.
+r3v3rs3 supports automatic certificate provisioning using [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment). ACME is supported by many certificate authorities, such as Let's Encrypt, ZeroSSL, BuyPass, and Google Trust Services.
 
 An ACME entry holds one or more domain names. Enter them separated by commas in the "Domain Names" field, for example `example.com, *.example.com`. The certificate contains every domain name as a Subject Alternative Name. r3v3rs3 renews the certificate automatically before it expires. If an order fails, r3v3rs3 orders again after one hour. The "Order again" action of an entry in the ACME tab, and `POST /api/acme/{id}/order`, order the certificates of the entry at once, without waiting for the renewal time or for the retry.
 
-Select the certificate authority (Let's Encrypt, Google Trust Services, ZeroSSL, or "Custom" with its "Server URL") and enter an "Email Address". Google Trust Services and ZeroSSL need the "EAB Key ID" and the "EAB HMAC Key" of your account at the certificate authority. r3v3rs3 orders a new certificate "Renewal Interval (days)" (`renewal_days`, default `60`) days after the last one.
+Select the certificate authority (Let's Encrypt, Google Trust Services, ZeroSSL, BuyPass, BuyPass Test, or "Custom" with its "Server URL") and enter an "Email Address". Certificate authorities that use External Account Binding (EAB), such as Google Trust Services or ZeroSSL, require the "EAB Key ID" and "EAB HMAC Key" of your account at the certificate authority. r3v3rs3 orders a new certificate "Renewal Interval (days)" (`renewal_days`, default `60`) days after the last one.
 
 ## Challenges
 

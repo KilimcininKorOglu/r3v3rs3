@@ -14,6 +14,8 @@ pub struct Props {
     #[prop_or_default]
     pub eab: bool,
     #[prop_or_default]
+    pub eab_optional: bool,
+    #[prop_or_default]
     pub show_errors: bool,
     pub onchanged: Callback<AcmeResult>,
 }
@@ -32,15 +34,19 @@ pub fn acme_provider(props: &Props) -> Html {
     let entry = build_request(
         locale,
         &fields,
-        props.eab,
+        props.eab || props.eab_optional,
         &props.url,
         config,
         HashMap::new(),
     );
     let errors = use_entry_errors(entry, props.onchanged.clone());
-    let eab = props
-        .eab
-        .then_some(("acme.eab_key_id", "acme.eab_hmac_key"));
+    let eab = if props.eab {
+        Some(("acme.eab_key_id", "acme.eab_hmac_key"))
+    } else if props.eab_optional {
+        Some(("acme.eab_key_id_optional", "acme.eab_hmac_key_optional"))
+    } else {
+        None
+    };
     fields_view(
         locale,
         &fields,

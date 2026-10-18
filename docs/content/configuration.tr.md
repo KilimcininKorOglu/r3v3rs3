@@ -903,11 +903,11 @@ Listedeki onay kutularıyla sertifikaları seçin ve "Seçilenleri Sil" butonuna
 
 # ACME
 
-r3v3rs3, sertifikaları [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment) ile otomatik alabilir. Let's Encrypt, ZeroSSL ve Google Trust Services gibi birçok sertifika otoritesi ACME'yi destekler.
+r3v3rs3, sertifikaları [ACME](https://letsencrypt.org/docs/client-options/) (Automatic Certificate Management Environment) ile otomatik alabilir. Let's Encrypt, ZeroSSL, BuyPass ve Google Trust Services gibi birçok sertifika otoritesi ACME'yi destekler.
 
 Bir ACME kaydı bir veya daha fazla alan adı içerir. Alan adlarını "Alan Adları" alanına virgülle ayırarak yazın, örneğin `example.com, *.example.com`. Sertifika her alan adını Subject Alternative Name olarak içerir. r3v3rs3 sertifikayı süresi dolmadan otomatik yeniler. Bir order başarısız olursa r3v3rs3 bir saat sonra yeniden order oluşturur. ACME sekmesindeki kaydın **Yeniden iste** işlemi ve `POST /api/acme/{id}/order`, kaydın sertifikalarını yenileme zamanını ve yeniden denemeyi beklemeden hemen ister.
 
-Sertifika otoritesini seçin (Let's Encrypt, Google Trust Services, ZeroSSL veya "Sunucu URL'i" ile "Özel") ve "E-posta Adresi" girin. Google Trust Services ve ZeroSSL, sertifika otoritesindeki hesabınızın "EAB Key ID" ve "EAB HMAC Key" değerlerini ister. r3v3rs3 yeni sertifikayı son sertifikadan "Yenileme Aralığı (Gün)" (`renewal_days`, varsayılan `60`) gün sonra ister.
+Sertifika otoritesini seçin (Let's Encrypt, Google Trust Services, ZeroSSL, BuyPass, BuyPass Test veya "Sunucu URL'i" ile "Özel") ve "E-posta Adresi" girin. External Account Binding (EAB) kullanan sertifika otoriteleri (örneğin Google Trust Services veya ZeroSSL), hesabınızın "EAB Key ID" ve "EAB HMAC Key" değerlerini ister. r3v3rs3 yeni sertifikayı son sertifikadan "Yenileme Aralığı (Gün)" (`renewal_days`, varsayılan `60`) gün sonra ister.
 
 ## Challenge'lar
 

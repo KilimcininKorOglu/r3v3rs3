@@ -42,7 +42,7 @@ Linux'ta 1024 altındaki bir port root veya `CAP_NET_BIND_SERVICE` capability'si
 ## Adım 3: ACME kaydını oluşturun
 
 1. Menüde **Sertifikalar** linkine, sonra **ACME** sekmesine, sonra **Ekle** butonuna tıklayın.
-2. Sağlayıcı olarak **Let's Encrypt** seçin. Sayfa onun directory URL'ini kullanır. **Sağlayıcı** listesinde Google Trust Services, ZeroSSL ve özel bir sunucu da vardır.
+2. Sağlayıcı olarak **Let's Encrypt** seçin. Sayfa onun directory URL'ini kullanır. **Sağlayıcı** listesinde Google Trust Services, ZeroSSL, BuyPass, BuyPass Test ve özel bir sunucu da vardır. External Account Binding (EAB) gerektiren sertifika otoriteleri için **EAB Anahtar Kimliği (Key ID)** ve **EAB HMAC Anahtarı** alanları bulunur.
 3. **E-posta Adresi** alanına adresinizi yazın. Sertifika otoritesi bitiş uyarılarını oraya gönderir.
 4. **Alan Adları** alanına `example.com, *.example.com` yazın. Sertifika her adı bir Subject Alternative Name olarak taşır.
 5. **Challenge** alanında **DNS-01** seçin.

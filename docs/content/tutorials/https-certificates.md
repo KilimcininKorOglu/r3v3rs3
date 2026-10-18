@@ -42,7 +42,7 @@ On Linux a port below 1024 needs root or the `CAP_NET_BIND_SERVICE` capability.
 ## Step 3: Create the ACME Entry
 
 1. Click **Certificates** in the menu, then the **ACME** tab, then **Add**.
-2. Select the provider **Let's Encrypt**. The page uses its directory URL. **Provider** offers Google Trust Services, ZeroSSL and a custom server too.
+2. Select the provider **Let's Encrypt**. The page uses its directory URL. **Provider** offers Google Trust Services, ZeroSSL, BuyPass, BuyPass Test, and a custom server too. Certificate authorities requiring External Account Binding (EAB) have **EAB Key ID** and **EAB HMAC Key** fields.
 3. Write your address in **Email Address**. The certificate authority sends the expiry warnings there.
 4. Write `example.com, *.example.com` in **Domain Names**. The certificate holds every name as a Subject Alternative Name.
 5. Select **DNS-01** in **Challenge**.
