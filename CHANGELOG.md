@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2026-10-18
+
+### Added
+- WebAuthn and passkey admin login: hardware security keys, Touch ID, Face ID, and biometric device passkey authentication (FIDO2 / ES256 P-256) alongside passwords and TOTP, with resident key support, replay protection counters, and management in the WebUI.
+- platform.key rotation workflow: POST /api/platform/key/rotate, CLI r3v3rs3-cli platform rotate-key, and panel settings button to generate a new 256-bit AES encryption key, re-encrypt all stored SQLite secrets, and archive the previous key to platform.key.old.
+- Backup SFTP and rsync targets: upload database backup dumps directly to remote SFTP servers with private key or password auth, or sync via rsync over SSH.
+- Backup restore verification testing: automated periodic decompression and engine magic byte signature verification (Redis RDB, SQLite 3, PostgreSQL, MySQL/MariaDB) to ensure backups remain uncorrupted and restorable, with on-demand verification API.
+- ACME multi-CA and EAB support: ZeroSSL, BuyPass, and custom ACME directory providers with optional External Account Binding (EAB Key ID and HMAC Key) credentials.
+
+### Fixed
+- Calibrated fail2ban brute-force protection threshold beyond single-username max attempts to prevent lockouts on targeted username sprays.
+
 ## [2.0.2] - 2026-10-18
 
 ### Added
