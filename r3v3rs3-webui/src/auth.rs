@@ -29,6 +29,13 @@ impl LoginQuery {
             .filter(|route| !matches!(route, Route::Login | Route::NotFound))
             .unwrap_or(Route::Home)
     }
+
+    /// An OAuth target on the server, like `/oauth/authorize?...`.
+    pub fn is_oauth_redirect(&self) -> bool {
+        self.redirect
+            .as_deref()
+            .is_some_and(|target| target.starts_with("/oauth/"))
+    }
 }
 
 /// The outcome of a session check. A request that died without an answer is `Unreachable`: the
@@ -171,5 +178,18 @@ mod tests {
             };
             assert_eq!(query.route(), Route::Home, "{redirect:?}");
         }
+    }
+
+    #[test]
+    fn an_oauth_redirect_is_recognized() {
+        let query = LoginQuery {
+            redirect: Some("/oauth/authorize?client_id=mcp-cli".to_string()),
+        };
+        assert!(query.is_oauth_redirect());
+
+        let internal = LoginQuery {
+            redirect: Some("/apps".to_string()),
+        };
+        assert!(!internal.is_oauth_redirect());
     }
 }

@@ -207,10 +207,10 @@ async fn load_server_state(app_state: &AppState) -> anyhow::Result<()> {
 /// other endpoints under `/api` except sign-in and sign-out.
 fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
     let verify = middleware::from_fn_with_state(app_state.clone(), auth::verify);
-    // The consent form needs the signed-in account; the token endpoint and the metadata
-    // documents do not.
+    // The authorization endpoint redirects to the sign-in page when signed out; the consent
+    // submission requires an active session. The token and metadata endpoints are public.
     let mcp_oauth = OpenApiRouter::new()
-        .routes(routes!(oauth2::authorize).layer(verify.clone()))
+        .routes(routes!(oauth2::authorize))
         .routes(routes!(oauth2::consent).layer(verify.clone()))
         .routes(routes!(oauth2::token))
         .routes(routes!(oauth2::register));

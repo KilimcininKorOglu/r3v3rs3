@@ -13,12 +13,14 @@ use crate::audit::AuditRecord;
 use crate::server::rpc::auth::GetPlatform;
 use axum::{
     Json,
-    extract::{Form, Query, State},
+    extract::{Form, Query, RawQuery, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Redirect, Response},
 };
+use axum_extra::extract::CookieJar;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use r3v3rs3_api::app::{McpClientConfig, McpConfig};
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
@@ -414,47 +416,343 @@ pub async fn protected_resource_metadata(
 )]
 pub async fn authorize(
     State(state): State<AppState>,
-    axum::Extension(caller): axum::Extension<crate::accounts::Caller>,
+    jar: CookieJar,
+    RawQuery(raw_query): RawQuery,
     Query(query): Query<AuthorizeQuery>,
 ) -> Result<Response, AppError> {
+    let caller = match jar.get("token") {
+        Some(cookie) => super::auth::session_caller(&state, cookie.value())
+            .await
+            .ok(),
+        None => None,
+    };
+    let Some(caller) = caller else {
+        return Ok(login_redirect(raw_query.as_deref()));
+    };
     let data = state.data.lock().await;
     let config = data.config.mcp.clone();
     let dynamic = data.mcp.dynamic_client(&query.client_id);
     let client = validate_authorize(&config, dynamic.as_ref(), &query)?;
     drop(data);
     let scopes = scopes_of(&query.scope);
-    let scope = scopes.join(" ");
-    let body = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\">\
-         <title>r3v3rs3</title></head>\
-         <body><h1>Authorize {name}</h1>\
-         <p>The MCP client <strong>{name}</strong> (client <code>{id}</code>) requests access \
-         to this r3v3rs3 server as the account <strong>{username}</strong>.</p>\
-         <p>Requested scopes: <code>{scope}</code> (read: view the state, edit: change proxies).</p>\
-         <form method=\"post\" action=\"/oauth/authorize\">\
-         <input type=\"hidden\" name=\"client_id\" value=\"{client_id}\">\
-         <input type=\"hidden\" name=\"redirect_uri\" value=\"{redirect_uri}\">\
-         <input type=\"hidden\" name=\"state\" value=\"{state_value}\">\
-         <input type=\"hidden\" name=\"code_challenge\" value=\"{challenge}\">\
-         <input type=\"hidden\" name=\"scope\" value=\"{scope}\">\
-         <button type=\"submit\" name=\"decision\" value=\"approve\">Approve</button>\
-         <button type=\"submit\" name=\"decision\" value=\"deny\">Deny</button>\
-         </form></body></html>",
-        name = html_escape(&client.name),
-        id = html_escape(&client.id),
-        username = html_escape(&caller.username),
-        scope = html_escape(&scope),
-        client_id = html_escape(&query.client_id),
-        redirect_uri = html_escape(&query.redirect_uri),
-        state_value = html_escape(&query.state),
-        challenge = html_escape(&query.code_challenge),
-    );
+    let body = render_consent_page(&client, &caller, &query, &scopes);
     let mut response = Html(body).into_response();
     response.headers_mut().insert(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
     Ok(response)
+}
+
+fn login_redirect(raw_query: Option<&str>) -> Response {
+    let target = match raw_query {
+        Some(q) => format!("/oauth/authorize?{q}"),
+        None => "/oauth/authorize".to_string(),
+    };
+    let redirect = format!(
+        "/login?redirect={}",
+        utf8_percent_encode(&target, NON_ALPHANUMERIC)
+    );
+    Redirect::to(&redirect).into_response()
+}
+
+fn render_scopes_list(scopes: &[String]) -> String {
+    let mut html = String::new();
+    for scope in scopes {
+        let (desc, label) = match scope.as_str() {
+            "read" => (
+                "View proxies, ports, certificates, system metrics, and logs.",
+                "read (read-only)",
+            ),
+            "edit" => (
+                "Create, update, or remove proxies, ports, certificates, and settings.",
+                "edit (full control)",
+            ),
+            other => (
+                "Access specific resources associated with this scope.",
+                other,
+            ),
+        };
+        html.push_str(&format!(
+            "<div class=\"scope-item\">\
+             <svg class=\"scope-icon\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z\"/></svg>\
+             <div>\
+             <span class=\"scope-badge\">{label}</span>\
+             <div class=\"scope-desc\">{desc}</div>\
+             </div>\
+             </div>",
+            label = html_escape(label),
+            desc = html_escape(desc),
+        ));
+    }
+    html
+}
+
+fn render_consent_css() -> &'static str {
+    "<style>\
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }\
+    body {\
+        font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;\
+        background-color: #f8fafc;\
+        color: #0f172a;\
+        line-height: 1.5;\
+        min-height: 100vh;\
+        display: flex;\
+        flex-direction: column;\
+        align-items: center;\
+        justify-content: center;\
+        padding: 1.5rem;\
+    }\
+    .consent-container { max-width: 480px; width: 100%; }\
+    .brand-header {\
+        display: flex;\
+        align-items: center;\
+        justify-content: center;\
+        gap: 0.75rem;\
+        margin-bottom: 1.5rem;\
+    }\
+    .brand-logo { width: 36px; height: 36px; flex-shrink: 0; }\
+    .brand-name {\
+        font-size: 1.35rem;\
+        font-weight: 700;\
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;\
+        letter-spacing: -0.025em;\
+        color: #0f172a;\
+    }\
+    .oauth-badge {\
+        font-size: 0.7rem;\
+        font-weight: 600;\
+        padding: 0.15rem 0.5rem;\
+        border-radius: 9999px;\
+        background: #e2e8f0;\
+        color: #475569;\
+        text-transform: uppercase;\
+        letter-spacing: 0.05em;\
+    }\
+    .card {\
+        background: #ffffff;\
+        border: 1px solid #e2e8f0;\
+        border-radius: 16px;\
+        padding: 2rem;\
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.06), 0 8px 10px -6px rgba(0, 0, 0, 0.04);\
+    }\
+    .card-header { text-align: center; margin-bottom: 1.5rem; }\
+    .card-title { font-size: 1.25rem; font-weight: 700; color: #0f172a; margin-bottom: 0.35rem; }\
+    .card-subtitle { font-size: 0.875rem; color: #64748b; }\
+    .client-info-box {\
+        display: flex;\
+        align-items: flex-start;\
+        gap: 0.85rem;\
+        padding: 1rem;\
+        background: #f8fafc;\
+        border: 1px solid #e2e8f0;\
+        border-radius: 10px;\
+        margin-bottom: 1rem;\
+    }\
+    .client-icon {\
+        width: 38px;\
+        height: 38px;\
+        border-radius: 8px;\
+        background: #2563eb;\
+        color: #ffffff;\
+        display: flex;\
+        align-items: center;\
+        justify-content: center;\
+        flex-shrink: 0;\
+    }\
+    .client-details { min-width: 0; flex: 1; }\
+    .client-name { font-size: 1rem; font-weight: 600; color: #0f172a; word-break: break-word; }\
+    .client-meta {\
+        font-size: 0.775rem;\
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;\
+        color: #64748b;\
+        word-break: break-all;\
+        margin-top: 0.2rem;\
+    }\
+    .user-info-row {\
+        display: flex;\
+        align-items: center;\
+        gap: 0.5rem;\
+        font-size: 0.85rem;\
+        color: #475569;\
+        padding: 0.6rem 0.85rem;\
+        background: #f1f5f9;\
+        border-radius: 8px;\
+        margin-bottom: 1.25rem;\
+    }\
+    .user-icon { width: 16px; height: 16px; color: #64748b; flex-shrink: 0; }\
+    .scopes-section { margin-bottom: 1.25rem; }\
+    .scopes-title {\
+        font-size: 0.8rem;\
+        font-weight: 600;\
+        text-transform: uppercase;\
+        letter-spacing: 0.05em;\
+        color: #64748b;\
+        margin-bottom: 0.6rem;\
+    }\
+    .scope-item {\
+        display: flex;\
+        align-items: flex-start;\
+        gap: 0.65rem;\
+        padding: 0.65rem 0.85rem;\
+        border: 1px solid #e2e8f0;\
+        border-radius: 8px;\
+        margin-bottom: 0.5rem;\
+        background: #ffffff;\
+    }\
+    .scope-icon { color: #2563eb; flex-shrink: 0; margin-top: 2px; }\
+    .scope-badge {\
+        font-size: 0.725rem;\
+        font-family: ui-monospace, SFMono-Regular, monospace;\
+        font-weight: 600;\
+        padding: 0.1rem 0.4rem;\
+        border-radius: 4px;\
+        background: #dbeafe;\
+        color: #1e40af;\
+        display: inline-block;\
+        margin-bottom: 0.2rem;\
+    }\
+    .scope-desc { font-size: 0.825rem; color: #475569; line-height: 1.35; }\
+    .security-notice {\
+        font-size: 0.775rem;\
+        color: #64748b;\
+        text-align: center;\
+        margin-bottom: 1.5rem;\
+        line-height: 1.4;\
+        padding: 0 0.5rem;\
+    }\
+    .form-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }\
+    .btn {\
+        display: inline-flex;\
+        align-items: center;\
+        justify-content: center;\
+        font-size: 0.925rem;\
+        font-weight: 600;\
+        padding: 0.7rem 1rem;\
+        border-radius: 8px;\
+        cursor: pointer;\
+        transition: all 0.15s ease-in-out;\
+        border: none;\
+        text-decoration: none;\
+    }\
+    .btn-secondary {\
+        background: #ffffff;\
+        color: #475569;\
+        border: 1px solid #cbd5e1;\
+    }\
+    .btn-secondary:hover {\
+        background: #f1f5f9;\
+        color: #0f172a;\
+        border-color: #94a3b8;\
+    }\
+    .btn-primary {\
+        background: #2563eb;\
+        color: #ffffff;\
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);\
+    }\
+    .btn-primary:hover { background: #1d4ed8; }\
+    .btn:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }\
+    @media (prefers-color-scheme: dark) {\
+        body { background-color: #09090b; color: #f4f4f5; }\
+        .brand-name { color: #f4f4f5; }\
+        .oauth-badge { background: #27272a; color: #a1a1aa; }\
+        .card {\
+            background: #18181b;\
+            border-color: #27272a;\
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);\
+        }\
+        .card-title { color: #f4f4f5; }\
+        .card-subtitle { color: #a1a1aa; }\
+        .client-info-box { background: #27272a; border-color: #3f3f46; }\
+        .client-name { color: #f4f4f5; }\
+        .client-meta { color: #a1a1aa; }\
+        .user-info-row { background: #27272a; color: #d4d4d8; }\
+        .user-icon { color: #a1a1aa; }\
+        .scopes-title { color: #a1a1aa; }\
+        .scope-item { background: #1f1f23; border-color: #27272a; }\
+        .scope-badge { background: #1e3a8a; color: #bfdbfe; }\
+        .scope-desc { color: #d4d4d8; }\
+        .scope-icon { color: #60a5fa; }\
+        .security-notice { color: #a1a1aa; }\
+        .btn-secondary {\
+            background: #27272a;\
+            color: #e4e4e7;\
+            border-color: #3f3f46;\
+        }\
+        .btn-secondary:hover { background: #3f3f46; color: #ffffff; }\
+        .btn-primary { background: #3b82f6; color: #ffffff; }\
+        .btn-primary:hover { background: #2563eb; }\
+    }\
+    </style>"
+}
+
+fn render_consent_page(
+    client: &McpClientConfig,
+    caller: &Caller,
+    query: &AuthorizeQuery,
+    scopes: &[String],
+) -> String {
+    let scope_value = scopes.join(" ");
+    let scopes_html = render_scopes_list(scopes);
+    let css = render_consent_css();
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+         <title>r3v3rs3 &middot; Authorize {name}</title>\
+         {css}</head>\
+         <body><div class=\"consent-container\">\
+         <div class=\"brand-header\">\
+         <svg class=\"brand-logo\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 46 46\" fill=\"none\">\
+         <rect width=\"32.527\" height=\"32.527\" x=\"23\" fill=\"#FFE134\" rx=\"6\" transform=\"rotate(45 23 0)\"/>\
+         <g stroke=\"#202020\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"3\">\
+         <path d=\"M13 18h18M27 14l4 4-4 4\"/><path d=\"M33 28H15M19 24l-4 4 4 4\"/>\
+         </g></svg>\
+         <span class=\"brand-name\">r3v3rs3</span>\
+         <span class=\"oauth-badge\">OAuth 2.1</span>\
+         </div>\
+         <div class=\"card\">\
+         <div class=\"card-header\">\
+         <h1 class=\"card-title\">Authorize {name}</h1>\
+         <p class=\"card-subtitle\">An external application requests access to this server.</p>\
+         </div>\
+         <div class=\"client-info-box\">\
+         <div class=\"client-icon\">\
+         <svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"3\"/><path d=\"m8 10 3 2.5-3 2.5\"/><path d=\"M13 15h3\"/></svg>\
+         </div>\
+         <div class=\"client-details\">\
+         <div class=\"client-name\">{name}</div>\
+         <div class=\"client-meta\">Client ID: <code>{id}</code></div>\
+         <div class=\"client-meta\">Redirect: <code>{redirect_uri}</code></div>\
+         </div></div>\
+         <div class=\"user-info-row\">\
+         <svg class=\"user-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2\"/><circle cx=\"12\" cy=\"7\" r=\"4\"/></svg>\
+         <span>Signed in as <strong>{username}</strong></span>\
+         </div>\
+         <div class=\"scopes-section\">\
+         <div class=\"scopes-title\">Permissions Requested</div>\
+         {scopes_html}\
+         </div>\
+         <p class=\"security-notice\">Ensure you trust <strong>{name}</strong> before approving. It will act on behalf of your account.</p>\
+         <form method=\"post\" action=\"/oauth/authorize\">\
+         <input type=\"hidden\" name=\"client_id\" value=\"{client_id}\">\
+         <input type=\"hidden\" name=\"redirect_uri\" value=\"{redirect_uri}\">\
+         <input type=\"hidden\" name=\"state\" value=\"{state_value}\">\
+         <input type=\"hidden\" name=\"code_challenge\" value=\"{challenge}\">\
+         <input type=\"hidden\" name=\"scope\" value=\"{scope}\">\
+         <div class=\"form-actions\">\
+         <button type=\"submit\" name=\"decision\" value=\"deny\" class=\"btn btn-secondary\">Cancel</button>\
+         <button type=\"submit\" name=\"decision\" value=\"approve\" class=\"btn btn-primary\">Approve</button>\
+         </div>\
+         </form></div></div></body></html>",
+        name = html_escape(&client.name),
+        id = html_escape(&client.id),
+        username = html_escape(&caller.username),
+        scope = html_escape(&scope_value),
+        client_id = html_escape(&query.client_id),
+        redirect_uri = html_escape(&query.redirect_uri),
+        state_value = html_escape(&query.state),
+        challenge = html_escape(&query.code_challenge),
+    )
 }
 
 /// The smallest HTML escaping that the consent form needs.
@@ -464,6 +762,7 @@ fn html_escape(value: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 /// Issues the authorization code and sends the browser to the redirect URI.

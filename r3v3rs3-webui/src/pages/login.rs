@@ -176,7 +176,18 @@ impl LoginForm {
 
     fn apply(self, login: ApiResult<LoginResponse>) {
         match login {
-            ApiResult::Ok(LoginResponse::Success) => self.navigator.replace(&self.query.route()),
+            ApiResult::Ok(LoginResponse::Success) => {
+                if self.query.is_oauth_redirect() {
+                    #[cfg(target_arch = "wasm32")]
+                    if let Some(target) = &self.query.redirect
+                        && let Some(window) = web_sys::window()
+                    {
+                        let _ = window.location().assign(target);
+                        return;
+                    }
+                }
+                self.navigator.replace(&self.query.route());
+            }
             ApiResult::Ok(LoginResponse::TotpRequired) => self.totp.set(Some(String::new())),
             ApiResult::Err(err) => self.error.set(Some(err)),
         }

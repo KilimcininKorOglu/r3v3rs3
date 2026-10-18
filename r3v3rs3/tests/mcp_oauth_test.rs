@@ -188,6 +188,52 @@ async fn an_unknown_client_is_refused() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn an_authorization_request_without_session_redirects_to_login() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-unauth")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = no_redirect();
+        let (_, challenge) = pkce();
+        let url = format!(
+            "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
+             &redirect_uri={REDIRECT_URI}&state=s1&code_challenge={challenge}\
+             &code_challenge_method=S256"
+        );
+        let response = client.get(&url).send().await?;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let location = response.headers().get("location").unwrap().to_str()?;
+        assert!(location.starts_with("/login?redirect="), "{location}");
+        assert!(location.contains("oauth%2Fauthorize"), "{location}");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn an_authenticated_authorization_request_renders_the_consent_page() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-consent-page")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let cookie = session(&client, &addr).await?;
+        let (_, challenge) = pkce();
+        let url = format!(
+            "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
+             &redirect_uri={REDIRECT_URI}&state=s1&code_challenge={challenge}\
+             &code_challenge_method=S256&scope=read%20edit"
+        );
+        let response = client.get(&url).header("cookie", &cookie).send().await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let text = response.text().await?;
+        assert!(text.contains("r3v3rs3 MCP client"), "{text}");
+        assert!(text.contains("admin"), "{text}");
+        assert!(text.contains("Permissions Requested"), "{text}");
+        assert!(text.contains("value=\"approve\""), "{text}");
+        assert!(text.contains("value=\"deny\""), "{text}");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
 async fn the_authorization_code_flow_issues_tokens() -> anyhow::Result<()> {
     let dir = TempDir::new("mcp-flow")?;
     with_admin(&dir.0, |addr| async move {
