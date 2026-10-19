@@ -24,6 +24,7 @@ fn basic_auth(realm: &str, username: &str, password: &str) -> AuthPolicy {
             password_hash,
             password_set: false,
         }],
+        user_file: None,
     })
 }
 
@@ -107,5 +108,71 @@ async fn basic_auth_protects_routes() -> anyhow::Result<()> {
 
     mock_private.assert_async().await;
     mock_public.assert_async().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn basic_auth_with_user_file_protects_proxy() -> anyhow::Result<()> {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("GET", "/secret")
+        .with_status(200)
+        .with_body("secret content")
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let dir = std::env::temp_dir().join(format!("r3v3rs3-basic-file-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let user_file = dir.join("users.txt");
+    std::fs::write(&user_file, "developer:supersecret\n")?;
+
+    let port = alloc_tcp_port().await?;
+    let proxy = HttpProxy {
+        routes: vec![http_route("/", &server.url(), None)],
+        auth: AuthPolicy::Basic(BasicAuth {
+            realm: "Protected".into(),
+            users: vec![],
+            user_file: Some(user_file.to_str().unwrap().to_string()),
+        }),
+        ..Default::default()
+    };
+
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &port)])
+        .proxies(vec![http_proxy_entry("bfiles", "http", proxy)])
+        .build();
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::new();
+        let url = port.http_url("/secret");
+
+        // 1. Unauthenticated request -> 401
+        let resp = client.get(url.clone()).send().await?;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // 2. Wrong password -> 401
+        let resp = client
+            .get(url.clone())
+            .basic_auth("developer", Some("wrongpass"))
+            .send()
+            .await?;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // 3. Valid user from file -> 200
+        let resp = client
+            .get(url.clone())
+            .basic_auth("developer", Some("supersecret"))
+            .send()
+            .await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.text().await?, "secret content");
+
+        Ok(())
+    })
+    .await?;
+
+    mock.assert_async().await;
+    let _ = std::fs::remove_dir_all(&dir);
     Ok(())
 }

@@ -59,6 +59,7 @@ fn stored_entry() -> ProxyEntry {
                 password_hash,
                 ..Default::default()
             }],
+            user_file: None,
         }),
         ..Default::default()
     };

@@ -573,19 +573,20 @@ r3v3rs3 kimlik doğrulamayı IP filtresinden, rate limit'ten ve HTTPS yönlendir
 Geçerli kullanıcı adı ve parola göndermeyen istemciler `WWW-Authenticate: Basic realm="..."` header'ıyla birlikte `401 Unauthorized` alır. Tarayıcı bunun üzerine giriş penceresini açar.
 
 - **Realm**: Tarayıcının giriş penceresinde gösterdiği ad. Boş bırakılırsa `r3v3rs3` kullanılır.
-- **Kullanıcılar**: Kullanıcı adları ve parolalar. Kullanıcı adında iki nokta üst üste bulunamaz.
+- **Kullanıcılar**: Doğrudan proxy üzerinde tanımlanan kullanıcı adları ve parolalar. Kullanıcı adında iki nokta üst üste bulunamaz.
+- **Kullanıcı Listesi Dosyası (`user_file`)**: Disk üzerindeki bir kullanıcı listesi dosyasının mutlak yolu (`username:password` veya `username:$argon2id$...`, her satırda bir kullanıcı; boş satırlar ve `#` ile başlayan satırlar yoksayılır). Statik siteler veya harici kullanıcı listeleri için idealdir. Düz metin parolalar sabit sürede (constant-time) karşılaştırılır; ayrıca Argon2 hash'leri de desteklenir. Dosya diskte güncellendiğinde r3v3rs3 proxy'yi yeniden başlatmaya gerek kalmadan dosyayı otomatik olarak yeniden yükler.
 
-r3v3rs3 parolaları argon2 hash olarak saklar; düz metin parolayı hiçbir zaman kaydetmez. Admin API hash'i döndürmez. Parolası olan kullanıcı için `password_set: true` döndürür. Parolayı değiştirmek istemiyorsanız parola alanını boş bırakın. r3v3rs3, isteği upstream sunucuya göndermeden önce `Authorization` header'ını siler.
+r3v3rs3 `users` içinde tanımlanan parolaları argon2 hash olarak saklar; düz metin parolayı hiçbir zaman kaydetmez. Admin API hash'i döndürmez. Parolası olan kullanıcı için `password_set: true` döndürür. Parolayı değiştirmek istemiyorsanız parola alanını boş bırakın. r3v3rs3, isteği upstream sunucuya göndermeden önce `Authorization` header'ını siler.
 
 Argon2 kasıtlı olarak CPU harcar. r3v3rs3 her kimlik bilgisini bir kez doğrular ve sonucu ayarlar değişene kadar bellekte tutar. Parola denemelerini sınırlamak için rate limit kullanın.
 
-`proxies.toml` dosyasında `password_hash` yerine `password` yazabilirsiniz. r3v3rs3 başlarken bu değeri hash'e çevirir.
+`proxies.toml` dosyasında `password_hash` yerine `password` yazabilirsiniz. r3v3rs3 başlarken bu değeri hash'e çevirir. Ayrıca `user_file` da belirtebilirsiniz:
 
 ```toml
 [my-proxy]
 protocol = "http"
 vhosts = ["example.com"]
-auth = { type = "basic", realm = "Staff", users = [{ username = "alice", password_hash = "$argon2id$v=19$m=19456,t=2,p=1$..." }] }
+auth = { type = "basic", realm = "Staff", user_file = "/etc/r3v3rs3/users.txt" }
 routes = [
   { path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] },
   { path = "/health", servers = [{ url = "http://127.0.0.1:8080/health" }], auth = { type = "none" } },

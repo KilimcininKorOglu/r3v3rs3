@@ -23,7 +23,7 @@ pub use session::SessionService;
 /// Authenticates the requests of a route.
 #[derive(Debug)]
 pub enum Authenticator {
-    Basic(BasicAuthenticator),
+    Basic(Box<BasicAuthenticator>),
     Bearer(BearerAuthenticator),
     Forward(Box<ForwardAuthenticator>),
     Session(SessionAuthenticator),
@@ -78,7 +78,7 @@ impl Authenticator {
     ) -> Option<Arc<Self>> {
         let authenticator = match policy {
             AuthPolicy::None => return None,
-            AuthPolicy::Basic(basic) => Self::Basic(BasicAuthenticator::new(basic)),
+            AuthPolicy::Basic(basic) => Self::Basic(Box::new(BasicAuthenticator::new(basic))),
             AuthPolicy::Bearer(bearer) => Self::Bearer(BearerAuthenticator::new(bearer)),
             AuthPolicy::Forward(forward) => Self::Forward(Box::new(ForwardAuthenticator::new(
                 *forward,

@@ -8,8 +8,10 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    path::{Path, PathBuf},
     sync::{Mutex, PoisonError},
 };
+use subtle::ConstantTimeEq;
 use tracing::error;
 
 const DEFAULT_REALM: &str = "r3v3rs3";
@@ -28,13 +30,26 @@ static UNKNOWN_USER_HASH: Lazy<Option<String>> =
         }
     });
 
-/// HTTP Basic authentication (RFC 7617) with argon2 password hashes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum StoredPassword {
+    Argon2(String),
+    Plain(String),
+}
+
+#[derive(Default)]
+struct FileUsers {
+    last_modified: Option<std::time::SystemTime>,
+    users: HashMap<String, StoredPassword>,
+}
+
+/// HTTP Basic authentication (RFC 7617) with argon2 password hashes or user file.
 pub struct BasicAuthenticator {
-    /// Password hash of each username.
-    users: HashMap<String, String>,
+    /// Password hash of each username defined in configuration.
+    users: HashMap<String, StoredPassword>,
+    user_file: Option<PathBuf>,
+    file_users: Mutex<FileUsers>,
     challenge: HeaderValue,
-    /// SHA-256 digests of credentials that passed argon2 verification. Argon2 is slow on purpose,
-    /// so each client credential is verified only once.
+    /// SHA-256 digests of credentials that passed verification.
     verified: Mutex<HashSet<[u8; 32]>>,
 }
 
@@ -42,9 +57,33 @@ impl fmt::Debug for BasicAuthenticator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BasicAuthenticator")
             .field("users", &self.users.keys())
+            .field("user_file", &self.user_file)
             .field("challenge", &self.challenge)
             .finish_non_exhaustive()
     }
+}
+
+fn parse_user_line(line: &str) -> Option<(String, StoredPassword)> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let (username, secret) = line.split_once(':')?;
+    let username = username.trim();
+    let secret = secret.trim();
+    if username.is_empty() || secret.is_empty() {
+        return None;
+    }
+    let password = if secret.starts_with("$argon2") {
+        StoredPassword::Argon2(secret.to_string())
+    } else {
+        StoredPassword::Plain(secret.strip_prefix("{PLAIN}").unwrap_or(secret).to_string())
+    };
+    Some((username.to_string(), password))
+}
+
+fn parse_user_file(content: &str) -> HashMap<String, StoredPassword> {
+    content.lines().filter_map(parse_user_line).collect()
 }
 
 impl BasicAuthenticator {
@@ -59,10 +98,26 @@ impl BasicAuthenticator {
                     false
                 }
             })
-            .map(|user| (user.username, user.password_hash))
+            .map(|user| (user.username, StoredPassword::Argon2(user.password_hash)))
             .collect();
+        let (user_file, file_users) = match config.user_file {
+            Some(path) => {
+                let path = PathBuf::from(path);
+                let mut users = FileUsers::default();
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    users.last_modified = meta.modified().ok();
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        users.users = parse_user_file(&content);
+                    }
+                }
+                (Some(path), Mutex::new(users))
+            }
+            None => (None, Mutex::new(FileUsers::default())),
+        };
         Self {
             users,
+            user_file,
+            file_users,
             challenge: challenge(&config.realm),
             verified: Mutex::new(HashSet::new()),
         }
@@ -86,18 +141,55 @@ impl BasicAuthenticator {
         }
     }
 
+    fn get_user(&self, username: &str) -> Option<StoredPassword> {
+        if let Some(user) = self.users.get(username) {
+            return Some(user.clone());
+        }
+        if let Some(path) = &self.user_file {
+            self.reload_file_if_modified(path);
+            let state = self
+                .file_users
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            return state.users.get(username).cloned();
+        }
+        None
+    }
+
+    fn reload_file_if_modified(&self, path: &Path) {
+        let Ok(meta) = std::fs::metadata(path) else {
+            return;
+        };
+        let modified = meta.modified().ok();
+        let mut state = self
+            .file_users
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if state.last_modified == modified && !state.users.is_empty() {
+            return;
+        }
+        state.last_modified = modified;
+        if let Ok(content) = std::fs::read_to_string(path) {
+            state.users = parse_user_file(&content);
+            self.lock_verified().clear();
+        }
+    }
+
     async fn verify(&self, username: &str, password: String) -> bool {
-        let Some(hash) = self.users.get(username) else {
+        let Some(stored) = self.get_user(username) else {
             if let Some(hash) = UNKNOWN_USER_HASH.as_ref() {
                 verify_password(hash.clone(), password).await;
             }
             return false;
         };
-        let digest = credential_digest(hash, &password);
+        let digest = credential_digest(&stored, &password);
         if self.lock_verified().contains(&digest) {
             return true;
         }
-        let valid = verify_password(hash.clone(), password).await;
+        let valid = match stored {
+            StoredPassword::Argon2(hash) => verify_password(hash, password).await,
+            StoredPassword::Plain(plain) => bool::from(plain.as_bytes().ct_eq(password.as_bytes())),
+        };
         if valid {
             let mut verified = self.lock_verified();
             if verified.len() >= MAX_VERIFIED_CREDENTIALS {
@@ -149,9 +241,18 @@ fn parse_credentials(value: &HeaderValue) -> Option<(String, String)> {
     Some((username.to_owned(), password.to_owned()))
 }
 
-fn credential_digest(hash: &str, password: &str) -> [u8; 32] {
+fn credential_digest(secret: &StoredPassword, password: &str) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    hasher.update(hash.as_bytes());
+    match secret {
+        StoredPassword::Argon2(hash) => {
+            hasher.update(b"argon2:");
+            hasher.update(hash.as_bytes());
+        }
+        StoredPassword::Plain(plain) => {
+            hasher.update(b"plain:");
+            hasher.update(plain.as_bytes());
+        }
+    }
     hasher.update([0]);
     hasher.update(password.as_bytes());
     hasher.finalize().into()
@@ -197,6 +298,7 @@ mod tests {
                     password_set: false,
                 },
             ],
+            user_file: None,
         })
     }
 
@@ -257,5 +359,38 @@ mod tests {
         };
         assert_eq!(challenge, "Basic realm=\"Staff\", charset=\"UTF-8\"");
         assert_eq!(auth.lock_verified().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn authorize_with_user_file() {
+        let dir = std::env::temp_dir().join(format!("r3v3rs3-userfile-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file_path = dir.join("users.txt");
+        let hash = Argon2::default()
+            .hash_password(b"argonpass")
+            .unwrap()
+            .to_string();
+        std::fs::write(
+            &file_path,
+            format!("# Comments\nplainuser:plainpass\nhashuser:{hash}\n"),
+        )
+        .unwrap();
+
+        let auth = BasicAuthenticator::new(BasicAuth {
+            realm: "FileRealm".into(),
+            users: vec![],
+            user_file: Some(file_path.to_str().unwrap().to_string()),
+        });
+
+        let mut headers = basic("plainuser:plainpass");
+        assert!(auth.authorize(&mut headers).await.is_ok());
+
+        let mut headers = basic("hashuser:argonpass");
+        assert!(auth.authorize(&mut headers).await.is_ok());
+
+        let mut headers = basic("plainuser:wrong");
+        assert!(auth.authorize(&mut headers).await.is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

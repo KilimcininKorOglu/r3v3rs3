@@ -73,6 +73,7 @@ impl AuthKind {
 pub struct AuthForm {
     kind: AuthKind,
     realm: String,
+    user_file: String,
     users: Vec<UserForm>,
     tokens: Vec<TokenForm>,
     forward_url: String,
@@ -110,6 +111,7 @@ impl AuthForm {
         let mut form = Self {
             kind: AuthKind::of(policy),
             realm: String::new(),
+            user_file: String::new(),
             users: vec![UserForm::default()],
             tokens: vec![TokenForm::default()],
             forward_url: String::new(),
@@ -129,7 +131,10 @@ impl AuthForm {
             AuthPolicy::None | AuthPolicy::Session => {}
             AuthPolicy::Basic(basic) => {
                 form.realm = basic.realm.clone();
-                form.users = basic.users.iter().map(UserForm::new).collect();
+                form.user_file = basic.user_file.clone().unwrap_or_default();
+                if !basic.users.is_empty() {
+                    form.users = basic.users.iter().map(UserForm::new).collect();
+                }
             }
             AuthPolicy::Bearer(bearer) => {
                 form.tokens = bearer.tokens.iter().map(TokenForm::new).collect();
@@ -258,13 +263,16 @@ impl AuthForm {
     }
 
     fn parse_basic(&self, locale: Locale) -> Result<BasicAuth, String> {
+        let user_file = self.user_file.trim();
+        let user_file = (!user_file.is_empty()).then(|| user_file.to_string());
         let users = self
             .users
             .iter()
+            .filter(|u| !(user_file.is_some() && u.username.trim().is_empty()))
             .map(|user| user.parse(locale))
             .collect::<Result<Vec<_>, _>>()?;
-        if users.is_empty() {
-            return Err(locale.t("auth.at_least_one_user").into());
+        if users.is_empty() && user_file.is_none() {
+            return Err(locale.t("auth.at_least_one_user_or_file").into());
         }
         if let Some(username) = duplicate(users.iter().map(|user| &user.username)) {
             return Err(locale.tf("auth.duplicate_username", &[("username", username)]));
@@ -272,6 +280,7 @@ impl AuthForm {
         Ok(BasicAuth {
             realm: self.realm.trim().into(),
             users,
+            user_file,
         })
     }
 }
@@ -372,6 +381,10 @@ pub fn auth_config(props: &Props) -> Html {
             if form.kind == AuthKind::Basic {
                 <label class={LABEL_CLASS}>{locale.t("auth.realm")}</label>
                 <input type="text" placeholder="r3v3rs3" value={form.realm.clone()} onchange={form_input(props, |form, value| form.realm = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{locale.t("auth.user_file")}</label>
+                <input type="text" autocapitalize="off" spellcheck="false" placeholder="/etc/r3v3rs3/users.txt" value={form.user_file.clone()} onchange={form_input(props, |form, value| form.user_file = value)} class={classes!(INPUT_CLASS, "font-mono")} />
+                <p class={HINT_CLASS}>{locale.t("auth.user_file_hint")}</p>
 
                 <label class={LABEL_CLASS}>{locale.t("auth.users")}</label>
                 { for form.users.iter().enumerate().map(|(index, user)| user_view(locale, props, index, user)) }
@@ -662,6 +675,17 @@ mod tests {
             panic!("expected basic auth");
         };
         assert_eq!(basic.users, vec![sealed]);
+    }
+
+    #[test]
+    fn basic_form_accepts_user_file_without_in_form_users() {
+        let mut form = basic_form(vec![]);
+        form.user_file = "/etc/r3v3rs3/users.txt".into();
+        let AuthPolicy::Basic(basic) = form.parse(Locale::En).unwrap() else {
+            panic!("expected basic auth");
+        };
+        assert_eq!(basic.user_file, Some("/etc/r3v3rs3/users.txt".into()));
+        assert!(basic.users.is_empty());
     }
 
     #[test]

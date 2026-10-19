@@ -573,19 +573,20 @@ r3v3rs3 checks authentication after the IP filter, the rate limit and the HTTPS 
 Clients without a valid username and password receive `401 Unauthorized` with a `WWW-Authenticate: Basic realm="..."` header. The browser then shows a login dialog.
 
 - **Realm**: The name that the browser shows in the login dialog. Empty uses `r3v3rs3`.
-- **Users**: Usernames and passwords. A username must not contain a colon.
+- **Users**: Usernames and passwords configured directly on the proxy. A username must not contain a colon.
+- **User List File (`user_file`)**: An optional absolute path to a text file on disk containing credentials (`username:password` or `username:$argon2id$...`), one entry per line (empty lines and lines starting with `#` are skipped). This is convenient for static sites or external user lists. Plaintext passwords are verified using constant-time comparison, and Argon2 hashes are supported. When the file's modification time changes, r3v3rs3 automatically hot-reloads it without restarting the proxy.
 
 r3v3rs3 stores each password as an argon2 hash and never saves the plain text password. The admin API does not return the hash. It returns `password_set: true` for a user with a password. Leave the password field empty to keep the current password. r3v3rs3 removes the `Authorization` header before it sends the request to the upstream server.
 
 Argon2 takes CPU time on purpose. r3v3rs3 verifies each credential once and keeps the result in memory until the configuration changes. Use a rate limit to limit password guessing.
 
-In `proxies.toml`, you can write a `password` instead of a `password_hash`. r3v3rs3 replaces it with a hash at startup.
+In `proxies.toml`, you can write a `password` instead of a `password_hash`. r3v3rs3 replaces it with a hash at startup. You can also specify `user_file`:
 
 ```toml
 [my-proxy]
 protocol = "http"
 vhosts = ["example.com"]
-auth = { type = "basic", realm = "Staff", users = [{ username = "alice", password_hash = "$argon2id$v=19$m=19456,t=2,p=1$..." }] }
+auth = { type = "basic", realm = "Staff", user_file = "/etc/r3v3rs3/users.txt" }
 routes = [
   { path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] },
   { path = "/health", servers = [{ url = "http://127.0.0.1:8080/health" }], auth = { type = "none" } },

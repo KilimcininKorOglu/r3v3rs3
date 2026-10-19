@@ -128,8 +128,12 @@ pub struct BasicAuth {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub realm: String,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub users: Vec<BasicAuthUser>,
+
+    /// Path to a file on disk containing username:password or username:hash pairs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_file: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

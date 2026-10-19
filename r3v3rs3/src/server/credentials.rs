@@ -288,6 +288,7 @@ mod tests {
             auth: AuthPolicy::Basic(BasicAuth {
                 realm: String::new(),
                 users,
+                user_file: None,
             }),
             ..Default::default()
         })
