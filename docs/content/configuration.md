@@ -281,6 +281,26 @@ maintenance = { enabled = true, status = 503, retry_after = 300, body = "System 
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
 ```
 
+## Custom Error Pages
+
+An HTTP / HTTPS proxy can define custom HTML error pages for standard HTTP error statuses (400 to 599), such as `404 Not Found` or `502 Bad Gateway`. When an upstream server responds with that status or r3v3rs3 generates a gateway error (such as when an upstream server is unreachable or no route matches), r3v3rs3 intercepts the error and returns the custom HTML page with `Content-Type: text/html; charset=utf-8` and `Cache-Control: no-store`.
+
+- `status` (integer, 400–599): The HTTP error status code.
+- `body` (string, max 64 KB): The custom HTML content for the error page.
+
+In the WebUI, scroll down to the **Custom Error Pages** section on the HTTP proxy page to add or remove error pages.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+error_pages = [
+  { status = 404, body = "<h1>Page Not Found</h1><p>Sorry, the requested page does not exist.</p>" },
+  { status = 502, body = "<h1>Service Unavailable</h1><p>Our backend service is currently down.</p>" },
+]
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
+```
+
 ## UDP Sessions
 
 A UDP proxy opens one session for each client address. The session has its own socket to the upstream server, so the upstream server sees a different source port for each client. r3v3rs3 sends the replies of the upstream server back to the client from the listening port.

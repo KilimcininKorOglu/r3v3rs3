@@ -90,6 +90,7 @@ async fn wss_proxy() -> anyhow::Result<()> {
                     redirects: Vec::new(),
                     client_cert: None,
                     maintenance: Default::default(),
+                    error_pages: Vec::new(),
                 })),
                 ..Default::default()
             },

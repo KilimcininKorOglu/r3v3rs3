@@ -6,7 +6,8 @@ use hyper::{
     header::{FORWARDED, VIA},
     http::{HeaderValue, header::Entry},
 };
-use hyper::{Response, body::Body};
+use hyper::{Response, StatusCode, body::Body};
+use r3v3rs3_api::proxy::CustomErrorPage;
 use sailfish::TemplateOnce;
 use std::{iter, net::IpAddr, sync::Arc, sync::PoisonError};
 
@@ -188,6 +189,7 @@ pub struct ResponseRewriter {
     /// The sticky cookie that the upstream request sets. It is added outside the cache, because
     /// the cache does not store a response with `Set-Cookie`.
     sticky_cookie: Option<CookieSlot>,
+    error_pages: Arc<[CustomErrorPage]>,
 }
 
 impl ResponseRewriter {
@@ -203,26 +205,39 @@ impl ResponseRewriter {
         B: Body<Data = Bytes, Error = anyhow::Error> + Send + Sync + 'static,
     {
         match res {
-            Ok(mut res) => {
+            Ok(res) => {
+                if let Some(custom) = self
+                    .error_pages
+                    .iter()
+                    .find(|p| p.status == res.status().as_u16())
+                {
+                    let mut res = custom_response_body(custom, res);
+                    self.apply_post_headers(res.headers_mut());
+                    return Ok(res);
+                }
+                let mut res = res;
                 res.headers_mut().remove(ALT_SVC);
                 if let Some(alt_svc) = self.alt_svc() {
                     res.headers_mut()
                         .insert(ALT_SVC, HeaderValue::from_str(&alt_svc)?);
                 }
-                if let Some((rules, variables)) = &self.header_rules {
-                    rules.apply_response(res.headers_mut(), variables);
-                }
-                if let Some(cookie) = self.sticky_cookie_value() {
-                    res.headers_mut().append(SET_COOKIE, cookie);
-                }
-                // Compression runs after the header rules, so a rule can add `no-transform`.
+                self.apply_post_headers(res.headers_mut());
                 let res = res.map(|body| BoxBody::new(body));
                 Ok(match &self.compression {
                     Some(compression) => compression.apply(res),
                     None => res,
                 })
             }
-            Err(err) => error_response(err, self.preferences),
+            Err(err) => error_response(err, self.preferences, &self.error_pages),
+        }
+    }
+
+    fn apply_post_headers(&self, headers: &mut HeaderMap) {
+        if let Some((rules, variables)) = &self.header_rules {
+            rules.apply_response(headers, variables);
+        }
+        if let Some(cookie) = self.sticky_cookie_value() {
+            headers.append(SET_COOKIE, cookie);
         }
     }
 
@@ -247,29 +262,73 @@ impl ResponseRewriter {
     }
 }
 
+fn is_html_body(body: &[u8], body_str: &str) -> bool {
+    body.starts_with(b"<!DOCTYPE")
+        || body.starts_with(b"<html")
+        || body_str.contains("</html>")
+        || body_str.contains("</div>")
+        || body_str.contains("</p>")
+        || body_str.contains("</h1>")
+}
+
+fn custom_response_body<B>(
+    custom: &CustomErrorPage,
+    mut res: Response<B>,
+) -> Response<BoxBody<Bytes, anyhow::Error>> {
+    let body = custom.body.as_bytes().to_vec();
+    let content_type = if is_html_body(&body, &custom.body) {
+        HeaderValue::from_static("text/html; charset=utf-8")
+    } else {
+        HeaderValue::from_static("text/plain; charset=utf-8")
+    };
+    res.headers_mut().insert(CONTENT_TYPE, content_type);
+    res.headers_mut()
+        .insert(hyper::header::CONTENT_LENGTH, HeaderValue::from(body.len()));
+    res.headers_mut().remove(hyper::header::CONTENT_ENCODING);
+    res.map(|_| BoxBody::new(Full::new(Bytes::from(body)).map_err(Into::into)))
+}
+
+fn render_error_body(
+    code: StatusCode,
+    preferences: PagePreferences,
+    error_pages: &[CustomErrorPage],
+) -> Result<(Vec<u8>, HeaderValue), anyhow::Error> {
+    if let Some(custom) = error_pages.iter().find(|p| p.status == code.as_u16()) {
+        let body = custom.body.as_bytes().to_vec();
+        let content_type = if is_html_body(&body, &custom.body) {
+            HeaderValue::from_static("text/html; charset=utf-8")
+        } else {
+            HeaderValue::from_static("text/plain; charset=utf-8")
+        };
+        Ok((body, content_type))
+    } else {
+        let body = ErrorTemplate {
+            code: code.as_u16(),
+            text: status_text(code, preferences.locale),
+            preferences,
+        }
+        .render_once()?;
+        Ok((
+            body.into_bytes(),
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        ))
+    }
+}
+
 fn error_response(
     err: anyhow::Error,
     preferences: PagePreferences,
+    error_pages: &[CustomErrorPage],
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let headers = error_headers(&err);
     let code = map_error(err);
-    let body = ErrorTemplate {
-        code: code.as_u16(),
-        text: status_text(code, preferences.locale),
-        preferences,
-    }
-    .render_once()?;
+    let (body, content_type) = render_error_body(code, preferences, error_pages)?;
     let mut res = Response::new(BoxBody::new(
         Full::new(Bytes::from(body)).map_err(Into::into),
     ));
     *res.status_mut() = code;
     res.headers_mut().extend(headers);
-    res.headers_mut().insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/html; charset=utf-8"),
-    );
-    // The page follows the language and theme cookies, and an error must not outlive its cause,
-    // so no cache in front of r3v3rs3 may keep it.
+    res.headers_mut().insert(CONTENT_TYPE, content_type);
     res.headers_mut()
         .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(res)
@@ -315,6 +374,11 @@ impl ResponseRewriterBuilder {
         self
     }
 
+    pub fn error_pages(mut self, pages: Arc<[CustomErrorPage]>) -> Self {
+        self.inner.error_pages = pages;
+        self
+    }
+
     pub fn build(self) -> ResponseRewriter {
         self.inner
     }
@@ -336,7 +400,20 @@ mod test {
     #[test]
     fn the_error_page_is_never_stored() {
         let err = anyhow::Error::new(super::super::error::ProxyError::NoUpstreamServers);
-        let res = error_response(err, PagePreferences::default()).unwrap();
+        let res = error_response(err, PagePreferences::default(), &[]).unwrap();
+        assert_eq!(res.status(), 502);
+        assert_eq!(res.headers()[CACHE_CONTROL], "no-store");
+        assert_eq!(res.headers()[CONTENT_TYPE], "text/html; charset=utf-8");
+    }
+
+    #[test]
+    fn custom_error_page_replaces_response_body() {
+        let err = anyhow::Error::new(super::super::error::ProxyError::NoUpstreamServers);
+        let pages = [r3v3rs3_api::proxy::CustomErrorPage {
+            status: 502,
+            body: "<h1>Custom 502 Bad Gateway</h1>".to_string(),
+        }];
+        let res = error_response(err, PagePreferences::default(), &pages).unwrap();
         assert_eq!(res.status(), 502);
         assert_eq!(res.headers()[CACHE_CONTROL], "no-store");
         assert_eq!(res.headers()[CONTENT_TYPE], "text/html; charset=utf-8");

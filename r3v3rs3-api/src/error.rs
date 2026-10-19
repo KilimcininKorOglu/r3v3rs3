@@ -404,6 +404,12 @@ pub enum Error {
     #[error("fixed response body cannot be longer than {max} bytes")]
     FixedBodyTooLarge { max: usize },
 
+    #[error("custom error page status must be an HTTP error code from 400 to 599: {status}")]
+    InvalidErrorPageStatus { status: u16 },
+
+    #[error("custom error page body cannot be longer than {max} bytes")]
+    ErrorPageBodyTooLarge { max: usize },
+
     #[error("an access list needs a name")]
     AccessListNameRequired,
 

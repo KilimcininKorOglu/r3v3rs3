@@ -17,7 +17,7 @@ use r3v3rs3_api::{
     fixed_response::FixedResponse,
     id::ShortId,
     policy::IpFilter,
-    proxy::{HttpProxy, ProxyEntry, ProxyKind, Route, Server},
+    proxy::{CustomErrorPage, HttpProxy, ProxyEntry, ProxyKind, Route, Server},
     upstream::{
         CircuitBreaker, HealthCheck, LoadBalancing, RetryPolicy, StickyCookie, UpstreamTimeouts,
     },
@@ -59,6 +59,7 @@ impl Router {
             let proxy_cache = registries.caches.cache_for(id, &http.cache);
             let redirects: Arc<[RedirectRule]> = http.redirects.clone().into();
             let maintenance = Arc::new(http.maintenance);
+            let error_pages: Arc<[CustomErrorPage]> = http.error_pages.into();
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 let base_path: String = filter
@@ -111,10 +112,21 @@ impl Router {
                     upstream,
                     response: route.response.map(Arc::new),
                     maintenance: maintenance.clone(),
+                    error_pages: error_pages.clone(),
                 });
             }
         }
         Self { routes }
+    }
+
+    /// Returns the custom error pages of the first route matching the host, or empty if none.
+    pub fn find_error_pages(&self, host: Option<&str>) -> Arc<[CustomErrorPage]> {
+        for route in &self.routes {
+            if route.filter.matches_host(host) && !route.error_pages.is_empty() {
+                return route.error_pages.clone();
+            }
+        }
+        Arc::from([])
     }
 
     /// Returns the most specific route for the request: the most specific host match, then the
@@ -293,4 +305,6 @@ pub struct FilteredRoute {
     pub response: Option<Arc<FixedResponse>>,
     /// Maintenance mode settings of the proxy.
     pub maintenance: Arc<r3v3rs3_api::proxy::MaintenanceConfig>,
+    /// Custom error pages of the proxy.
+    pub error_pages: Arc<[CustomErrorPage]>,
 }

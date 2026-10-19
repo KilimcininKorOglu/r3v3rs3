@@ -65,6 +65,10 @@ impl RequestFilter {
         }
     }
 
+    pub fn matches_host(&self, host: Option<&str>) -> bool {
+        self.host_match(host).is_some()
+    }
+
     fn host_match(&self, host: Option<&str>) -> Option<HostMatch> {
         if self.vhosts.is_empty() {
             return Some(HostMatch::Any);

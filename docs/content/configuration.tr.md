@@ -281,6 +281,26 @@ maintenance = { enabled = true, status = 503, retry_after = 300, body = "Sistem 
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
 ```
 
+## Özel Hata Sayfaları
+
+Bir HTTP / HTTPS proxy'si, standart HTTP hata durumları (400 ile 599 arası, örn. `404 Not Found` veya `502 Bad Gateway`) için özel HTML hata sayfaları tanımlayabilir. Upstream sunucu bu durum kodunu döndürdüğünde veya r3v3rs3 bir ağ geçidi hatası ürettiğinde (örneğin upstream sunucuya ulaşılamadığında ya da hiçbir route eşleşmediğinde), r3v3rs3 hatayı yakalayarak `Content-Type: text/html; charset=utf-8` ve `Cache-Control: no-store` başlıklarıyla özel HTML sayfanızı döndürür.
+
+- `status` (tamsayı, 400–599): HTTP hata durum kodu.
+- `body` (metin, en fazla 64 KB): Hata sayfası için özel HTML içeriği.
+
+WebUI'da, HTTP proxy düzenleme sayfasındaki **Özel Hata Sayfaları** kartından hata sayfaları ekleyebilir veya silebilirsiniz.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+error_pages = [
+  { status = 404, body = "<h1>Sayfa Bulunamadı</h1><p>Aradığınız sayfa mevcut değil.</p>" },
+  { status = 502, body = "<h1>Hizmet Kullanılamıyor</h1><p>Sunucularımız şu anda yanıt vermiyor.</p>" },
+]
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
+```
+
 ## UDP oturumları
 
 UDP proxy her istemci adresi için ayrı bir oturum açar. Her oturumun upstream sunucuya giden kendi socket'i vardır. Bu yüzden upstream sunucu her istemciyi farklı bir kaynak porttan görür. r3v3rs3 upstream sunucunun yanıtlarını dinlediği porttan istemciye geri gönderir.

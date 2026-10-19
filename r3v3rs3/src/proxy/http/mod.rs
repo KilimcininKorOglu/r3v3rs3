@@ -727,9 +727,10 @@ where
     let header_host = header_host(&req).map(str::to_string);
     let request_host = request_host(&req, header_host.clone(), info.sni);
     let Some((res, route)) = shared.router.get_route(&req, request_host.as_deref()) else {
+        let error_pages = shared.router.find_error_pages(request_host.as_deref());
         return (
             ProxiedRequest::Err(ProxyError::NoRouteFound),
-            response_rewriter,
+            response_rewriter.error_pages(error_pages),
         );
     };
     let response_rewriter = configure_response_rewriter(response_rewriter, route, &req);
@@ -1188,6 +1189,7 @@ fn configure_response_rewriter<B>(
     builder
         .https_port(route.https_port)
         .quic_port(route.quic_port)
+        .error_pages(route.error_pages.clone())
         .compression(
             route
                 .compression

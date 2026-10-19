@@ -143,6 +143,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                     redirects: Vec::new(),
                     client_cert: None,
                     maintenance: Default::default(),
+                    error_pages: Vec::new(),
                 })),
                 ..Default::default()
             },
@@ -313,6 +314,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     ],
                     client_cert: None,
                     maintenance: Default::default(),
+                    error_pages: Vec::new(),
                 })),
                 ..Default::default()
             },
@@ -402,6 +404,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     redirects: Vec::new(),
                     client_cert: None,
                     maintenance: Default::default(),
+                    error_pages: Vec::new(),
                 })),
                 ..Default::default()
             },

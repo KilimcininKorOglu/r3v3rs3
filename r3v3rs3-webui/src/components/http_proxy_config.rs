@@ -19,7 +19,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::mirror::{DEFAULT_MIRROR_BODY_SIZE, Mirror};
 use r3v3rs3_api::policy::{AuthPolicy, IpFilter, RateLimit, RatePeriod};
-use r3v3rs3_api::proxy::{HttpProxy, MaintenanceConfig, Route, Server, ServerUrl};
+use r3v3rs3_api::proxy::{CustomErrorPage, HttpProxy, MaintenanceConfig, Route, Server, ServerUrl};
 use r3v3rs3_api::redirect::{RedirectRule, RedirectStatus};
 use r3v3rs3_api::rewrite::{PathRegex, PathRewrite};
 use r3v3rs3_api::upstream::{
@@ -74,6 +74,13 @@ struct ProxyForm {
     /// One redirect rule on each line.
     redirects: String,
     maintenance: MaintenanceForm,
+    error_pages: Vec<ErrorPageForm>,
+}
+
+#[derive(Clone, PartialEq, Default)]
+pub struct ErrorPageForm {
+    pub status: String,
+    pub body: String,
 }
 
 #[derive(Clone, PartialEq)]
@@ -132,6 +139,14 @@ impl ProxyForm {
                 .collect::<Vec<_>>()
                 .join("\n"),
             maintenance: MaintenanceForm::new(&proxy.maintenance),
+            error_pages: proxy
+                .error_pages
+                .iter()
+                .map(|p| ErrorPageForm {
+                    status: p.status.to_string(),
+                    body: p.body.clone(),
+                })
+                .collect(),
         }
     }
 }
@@ -718,6 +733,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
             <p class={HINT_CLASS}>{locale.t("http_form.cache_hint")}</p>
 
             { maintenance_view(locale, &form, &errors) }
+            { error_pages_view(locale, &form, &errors) }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.upstream_protocol")}</label>
             <div>
@@ -1497,6 +1513,68 @@ fn maintenance_view(
     }
 }
 
+fn error_pages_view(
+    locale: Locale,
+    form: &UseStateHandle<ProxyForm>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    let pages = &form.error_pages;
+    let add_page = {
+        let form = form.clone();
+        Callback::from(move |_| {
+            let mut updated = (*form).clone();
+            updated.error_pages.push(ErrorPageForm::default());
+            form.set(updated);
+        })
+    };
+    html! {
+        <div class="mt-6 p-4 rounded-lg bg-neutral-100 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700">
+            <div class="flex items-center justify-between">
+                <div>
+                    <label class="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">{locale.t("http_form.error_pages")}</label>
+                    <p class={HINT_CLASS}>{locale.t("http_form.error_pages_hint")}</p>
+                </div>
+                <button type="button" onclick={add_page} class={classes!(BUTTON_CLASS, "rounded-lg")}>
+                    {locale.t("http_form.add_error_page")}
+                </button>
+            </div>
+            if !pages.is_empty() {
+                <div class="mt-4 space-y-4">
+                    { for pages.iter().enumerate().map(|(index, page)| {
+                        let remove = {
+                            let form = form.clone();
+                            Callback::from(move |_| {
+                                let mut updated = (*form).clone();
+                                updated.error_pages.remove(index);
+                                form.set(updated);
+                            })
+                        };
+                        let status_err = errors.get(&format!("error_pages_{index}_status"));
+                        let body_err = errors.get(&format!("error_pages_{index}_body"));
+                        html! {
+                            <div class="p-3 border rounded-md border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-900">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="w-32">
+                                        <label class={LABEL_CLASS}>{locale.t("http_form.error_page_status")}</label>
+                                        <input type="number" min="400" max="599" value={page.status.clone()} onchange={error_page_input(form, index, text, |page, value| page.status = value)} class={INPUT_CLASS} placeholder="404" />
+                                        { error_view(status_err) }
+                                    </div>
+                                    <button type="button" onclick={remove} class="text-sm font-medium text-red-600 hover:text-red-700 dark:text-red-400">
+                                        {locale.t("http_form.remove_error_page")}
+                                    </button>
+                                </div>
+                                <label class={LABEL_CLASS}>{locale.t("http_form.error_page_body")}</label>
+                                <textarea rows="3" autocapitalize="off" spellcheck="false" placeholder={locale.t("http_form.error_page_body_placeholder")} value={page.body.clone()} onchange={error_page_input(form, index, text_area, |page, value| page.body = value)} class={classes!(INPUT_CLASS, "font-mono")} />
+                                { error_view(body_err) }
+                            </div>
+                        }
+                    }) }
+                </div>
+            }
+        </div>
+    }
+}
+
 fn sticky_view(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
     html! {
         <>
@@ -1886,6 +1964,23 @@ fn route_input<V: 'static>(
     item_update(routes, index, update).reform(move |event: Event| read(&event))
 }
 
+fn error_page_input<V: 'static>(
+    form: &UseStateHandle<ProxyForm>,
+    index: usize,
+    read: fn(&Event) -> V,
+    update: fn(&mut ErrorPageForm, V),
+) -> Callback<Event> {
+    let form = form.clone();
+    Callback::from(move |event: Event| {
+        let value = read(&event);
+        let mut updated = (*form).clone();
+        if let Some(item) = updated.error_pages.get_mut(index) {
+            update(item, value);
+            form.set(updated);
+        }
+    })
+}
+
 fn get_proxy(
     locale: Locale,
     form: &ProxyForm,
@@ -1933,6 +2028,7 @@ fn get_proxy(
         &mut errors,
     );
     let maintenance = parse_maintenance(locale, &form.maintenance, &mut errors);
+    let error_pages = parse_error_pages(locale, &form.error_pages, &mut errors);
 
     if !errors.is_empty() {
         return Err(errors);
@@ -1963,6 +2059,7 @@ fn get_proxy(
         max_body_size,
         redirects,
         maintenance,
+        error_pages,
     })
 }
 
@@ -2001,6 +2098,39 @@ fn parse_maintenance(
         body: form.body.clone(),
         retry_after,
     }
+}
+
+fn parse_error_pages(
+    locale: Locale,
+    pages: &[ErrorPageForm],
+    errors: &mut HashMap<String, String>,
+) -> Vec<CustomErrorPage> {
+    let mut result = Vec::new();
+    for (index, page) in pages.iter().enumerate() {
+        let key = format!("error_pages_{index}_status");
+        let status = match page.status.trim().parse::<u16>() {
+            Ok(code) if (400..=599).contains(&code) => code,
+            _ => {
+                errors.insert(
+                    key,
+                    locale.error_message(&Error::InvalidErrorPageStatus {
+                        status: page.status.trim().parse::<u16>().unwrap_or(0),
+                    }),
+                );
+                400
+            }
+        };
+        let body = page.body.clone();
+        if body.len() > 65536 {
+            let body_key = format!("error_pages_{index}_body");
+            errors.insert(
+                body_key,
+                locale.error_message(&Error::ErrorPageBodyTooLarge { max: 65536 }),
+            );
+        }
+        result.push(CustomErrorPage { status, body });
+    }
+    result
 }
 
 /// The IP filter and the authentication of the proxy. The access list of the proxy replaces both.
@@ -2968,5 +3098,33 @@ mod tests {
             invalid.parse(Locale::En, true, &mut errors);
             assert!(errors.contains_key(UPSTREAM_KEY));
         }
+    }
+
+    #[test]
+    fn error_pages_round_trip_and_report_invalid_values() {
+        let pages = [
+            ErrorPageForm {
+                status: "404".into(),
+                body: "<h1>Not Found</h1>".into(),
+            },
+            ErrorPageForm {
+                status: "502".into(),
+                body: "<h1>Bad Gateway</h1>".into(),
+            },
+        ];
+        let mut errors = HashMap::new();
+        let parsed = parse_error_pages(Locale::En, &pages, &mut errors);
+        assert!(errors.is_empty());
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].status, 404);
+        assert_eq!(parsed[1].status, 502);
+
+        let invalid = [ErrorPageForm {
+            status: "200".into(),
+            body: "ok".into(),
+        }];
+        let mut errors = HashMap::new();
+        parse_error_pages(Locale::En, &invalid, &mut errors);
+        assert!(errors.contains_key("error_pages_0_status"));
     }
 }

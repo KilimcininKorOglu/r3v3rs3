@@ -108,6 +108,9 @@ fn validate_http_upstream(http: &HttpProxy) -> Result<(), Error> {
     http.sticky.validate()?;
     http.redirects.iter().try_for_each(RedirectRule::validate)?;
     http.maintenance.validate()?;
+    http.error_pages
+        .iter()
+        .try_for_each(CustomErrorPage::validate)?;
     http.routes.iter().try_for_each(validate_route)?;
     validate_route_overrides(http)
 }
@@ -276,6 +279,9 @@ pub struct HttpProxy {
     /// forwarding to upstreams, preserving all upstream configuration.
     #[serde(default, skip_serializing_if = "MaintenanceConfig::is_disabled")]
     pub maintenance: MaintenanceConfig,
+    /// Custom error pages for HTTP status codes (e.g. 404, 502) replacing default error responses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub error_pages: Vec<CustomErrorPage>,
 }
 
 /// The default status code of a maintenance response (503 Service Unavailable).
@@ -325,6 +331,29 @@ impl MaintenanceConfig {
         }
         if self.body.len() > 65536 {
             return Err(Error::FixedBodyTooLarge { max: 65536 });
+        }
+        Ok(())
+    }
+}
+
+/// Custom error page configuration for an HTTP proxy.
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CustomErrorPage {
+    /// HTTP status code (400 to 599).
+    pub status: u16,
+    /// Custom HTML or plain text body for this status code.
+    pub body: String,
+}
+
+impl CustomErrorPage {
+    pub fn validate(&self) -> Result<(), Error> {
+        if !(400..=599).contains(&self.status) {
+            return Err(Error::InvalidErrorPageStatus {
+                status: self.status,
+            });
+        }
+        if self.body.len() > 65536 {
+            return Err(Error::ErrorPageBodyTooLarge { max: 65536 });
         }
         Ok(())
     }
@@ -688,5 +717,26 @@ mod tests {
             http.srv_names(),
             ["_a._tcp.example.com", "_b._tcp.example.com"]
         );
+    }
+
+    #[test]
+    fn custom_error_page_validation() {
+        let valid = CustomErrorPage {
+            status: 404,
+            body: "<h1>Not Found</h1>".into(),
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid_status = CustomErrorPage {
+            status: 200,
+            body: "ok".into(),
+        };
+        assert!(invalid_status.validate().is_err());
+
+        let too_large = CustomErrorPage {
+            status: 502,
+            body: "a".repeat(70000),
+        };
+        assert!(too_large.validate().is_err());
     }
 }
