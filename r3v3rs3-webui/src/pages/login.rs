@@ -126,7 +126,7 @@ pub fn login() -> Html {
             let form = form.clone_state();
             let user = form.username.to_string();
             wasm_bindgen_futures::spawn_local(async move {
-                match passkey_login(user).await {
+                match passkey_login(locale, user).await {
                     Ok(resp) => form.apply(resp),
                     Err(err) => form.error.set(Some(ErrorMessage {
                         message: err,
@@ -330,6 +330,21 @@ fn js_error_message(err: wasm_bindgen::JsValue) -> String {
     "Passkey authentication failed".to_string()
 }
 
+#[cfg(target_arch = "wasm32")]
+fn format_passkey_error(locale: Locale, err: &str) -> String {
+    if err.contains("PASSKEY_ORIGIN_IP")
+        || err.contains("127.0.0.1")
+        || err.contains("cannot be used with the current origin")
+        || err.contains("relying party ID")
+    {
+        locale.t("accounts.passkey_origin_error").to_string()
+    } else if err.contains("PASSKEY_ORIGIN_IP_OTHER") {
+        locale.t("accounts.passkey_ip_error").to_string()
+    } else {
+        err.to_string()
+    }
+}
+
 async fn fetch_passkey_challenge() -> Result<r3v3rs3_api::auth::PasskeyChallenge, String> {
     let response = Request::get(&format!("{API_ENDPOINT}/auth/passkey/challenge"))
         .send()
@@ -344,14 +359,17 @@ async fn fetch_passkey_challenge() -> Result<r3v3rs3_api::auth::PasskeyChallenge
         .map_err(|e| e.to_string())
 }
 
-async fn passkey_login(username: String) -> Result<ApiResult<LoginResponse>, String> {
+async fn passkey_login(
+    locale: Locale,
+    username: String,
+) -> Result<ApiResult<LoginResponse>, String> {
     let challenge = fetch_passkey_challenge().await?;
     #[cfg(target_arch = "wasm32")]
     let assertion = {
         let promise = get_passkey(&challenge.challenge, &challenge.rp_id);
         let js_val = wasm_bindgen_futures::JsFuture::from(promise)
             .await
-            .map_err(js_error_message)?;
+            .map_err(|err| format_passkey_error(locale, &js_error_message(err)))?;
         let json_str = js_val
             .as_string()
             .ok_or_else(|| "Invalid passkey response".to_string())?;
@@ -359,7 +377,7 @@ async fn passkey_login(username: String) -> Result<ApiResult<LoginResponse>, Str
     };
     #[cfg(not(target_arch = "wasm32"))]
     let assertion = {
-        let _ = &challenge;
+        let _ = (&challenge, &locale);
         PasskeyAssertion {
             credential_id: String::new(),
             authenticator_data: String::new(),

@@ -38,6 +38,8 @@
   "accounts.passkey_name_prompt": "Enter a name for this passkey (e.g. MacBook Touch ID):",
   "accounts.delete_passkey_confirm": "Delete this passkey?",
   "accounts.no_passkeys": "No passkeys",
+  "accounts.passkey_origin_error": "Passkeys cannot be created on IP addresses (such as 127.0.0.1). Please open the panel using 'localhost' (e.g. http://localhost:8080) or a configured domain name.",
+  "accounts.passkey_ip_error": "Passkeys require a domain name or 'localhost' (web browsers do not support passkeys on IP addresses). Please access the panel via a domain name.",
   "acme.access_key_id": "Access Key ID",
   "acme.api_endpoint": "API Endpoint",
   "acme.api_key": "API Key",

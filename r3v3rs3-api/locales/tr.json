@@ -38,6 +38,8 @@
   "accounts.passkey_name_prompt": "Bu passkey için bir isim girin (ör. MacBook Touch ID):",
   "accounts.delete_passkey_confirm": "Bu passkey silinsin mi?",
   "accounts.no_passkeys": "Passkey yok",
+  "accounts.passkey_origin_error": "Passkey'ler IP adresi (127.0.0.1 gibi) üzerinde oluşturulamaz. Lütfen panele 'localhost' (örn. http://localhost:8080) veya tanımlı bir alan adı üzerinden erişin.",
+  "accounts.passkey_ip_error": "Passkey'ler bir alan adı veya 'localhost' gerektirir (tarayıcılar IP adreslerinde passkey desteklemez). Lütfen panele bir alan adı üzerinden erişin.",
   "acme.access_key_id": "Access Key ID",
   "acme.api_endpoint": "API Endpoint",
   "acme.api_key": "API Key",

@@ -394,10 +394,32 @@ pub async fn delete_passkey(
     Ok(Json(()))
 }
 
+fn sanitize_rp_domain(raw: &str) -> String {
+    let domain = raw.split(':').next().unwrap_or("localhost");
+    if domain == "127.0.0.1" || domain == "::1" {
+        "localhost".to_string()
+    } else {
+        domain.to_string()
+    }
+}
+
+fn domain_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
+    if let Some(fwd) = headers
+        .get("x-forwarded-host")
+        .and_then(|h| h.to_str().ok())
+    {
+        let host = fwd.split(',').next().unwrap_or("").trim();
+        if !host.is_empty() {
+            return Some(sanitize_rp_domain(host));
+        }
+    }
+    let host = headers.get("host").and_then(|h| h.to_str().ok())?;
+    Some(sanitize_rp_domain(host))
+}
+
 async fn extract_rp_id(state: &AppState, headers: &axum::http::HeaderMap) -> String {
-    if let Some(host) = headers.get("host").and_then(|h| h.to_str().ok()) {
-        let domain = host.split(':').next().unwrap_or("localhost");
-        return domain.to_string();
+    if let Some(domain) = domain_from_headers(headers) {
+        return domain;
     }
     let data = state.data.lock().await;
     if let Some(url) = &data.config.public_url

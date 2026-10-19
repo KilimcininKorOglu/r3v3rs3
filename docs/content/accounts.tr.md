@@ -101,6 +101,9 @@ r3v3rs3, parola ve TOTP kimlik doğrulamasının yanında donanım güvenlik ana
 3. Açıklayıcı bir etiket girin (örneğin "MacBook Touch ID" veya "YubiKey 5C") ve tarayıcının biyometrik/güvenlik anahtarı onayını verin.
 4. r3v3rs3, genel anahtarı kaydeder ve replay saldırılarına karşı monotonik sayaç takibi başlatır.
 
+> [!NOTE]
+> WebAuthn güvenli bir kaynak (HTTPS) veya `http://localhost` gerektirir. Panele bir ters proxy alan adı veya loopback portu üzerinden erişildiğinde, Relying Party ID (`rp.id`) otomatik olarak tarayıcının mevcut alan adına veya `localhost`'a eşlenir. Web tarayıcıları doğrudan IP adresleri (örn. `127.0.0.1`) üzerinde passkey oluşturulmasına izin vermez.
+
 ### Passkey ile Giriş Yapma
 
 Giriş ekranında **Passkey ile giriş yap** butonuna tıklayın. Destekleyen tarayıcılar kullanıcı adı veya parola yazmaya gerek kalmadan yerleşik anahtar (resident key) ile doğrulamayı tamamlar. İsteğe bağlı olarak kullanıcı adınızı yazarak da passkey onayınızı verebilirsiniz.

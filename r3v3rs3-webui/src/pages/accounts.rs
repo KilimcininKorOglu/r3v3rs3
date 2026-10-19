@@ -632,6 +632,21 @@ async fn register_passkey_request(
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn format_passkey_error(locale: Locale, err: &str) -> String {
+    if err.contains("PASSKEY_ORIGIN_IP")
+        || err.contains("127.0.0.1")
+        || err.contains("cannot be used with the current origin")
+        || err.contains("relying party ID")
+    {
+        locale.t("accounts.passkey_origin_error").to_string()
+    } else if err.contains("PASSKEY_ORIGIN_IP_OTHER") {
+        locale.t("accounts.passkey_ip_error").to_string()
+    } else {
+        err.to_string()
+    }
+}
+
 async fn add_passkey_flow(locale: Locale, form: UseStateHandle<Form>, accounts: AccountList) {
     let prompt_msg = locale.t("accounts.passkey_name_prompt");
     let Some(name) = crate::dialog::prompt(locale, prompt_msg, "MacBook Touch ID").await else {
@@ -667,7 +682,8 @@ async fn add_passkey_flow(locale: Locale, form: UseStateHandle<Form>, accounts: 
                 serde_json::from_str::<serde_json::Value>(&s).ok()
             }
             Err(err) => {
-                let msg = js_error_message(err);
+                let raw_msg = js_error_message(err);
+                let msg = format_passkey_error(locale, &raw_msg);
                 crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await;
                 return;
             }

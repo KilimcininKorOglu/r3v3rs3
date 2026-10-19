@@ -164,7 +164,7 @@ pub fn databases() -> Html {
             <div class="flex items-center justify-between mb-3">
                 <h1 class="text-xl font-semibold">{locale.t("nav.databases")}</h1>
                 if can_edit {
-                    <button type="button" class="text-sm text-neutral-400 hover:text-neutral-200 disabled:opacity-50" disabled={*refreshing} onclick={refresh_engines}>
+                    <button type="button" class="px-3 py-1.5 rounded bg-neutral-700 text-neutral-100 hover:bg-neutral-600 disabled:opacity-50 text-sm shrink-0" disabled={*refreshing} onclick={refresh_engines}>
                         {locale.t("databases.refresh")}
                     </button>
                 }

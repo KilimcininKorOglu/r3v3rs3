@@ -101,6 +101,9 @@ r3v3rs3 supports hardware security keys, Touch ID, Face ID, and biometric device
 3. Enter a descriptive label (e.g., "MacBook Touch ID" or "YubiKey 5C") and confirm the browser's biometric/security key prompt.
 4. r3v3rs3 registers the public key and assigns a monotonic counter for replay protection.
 
+> [!NOTE]
+> WebAuthn requires a secure origin (HTTPS) or `http://localhost`. When accessing the panel through a reverse proxy domain or loopback port, the Relying Party ID (`rp.id`) is automatically matched to the browser's current domain name or `localhost`. Web browsers do not permit passkeys on raw IP addresses (such as `127.0.0.1`).
+
 ### Signing in with a Passkey
 
 On the login screen, click **Sign in with Passkey**. Supported browsers will prompt for resident key authentication without needing to type the username or password. You can also sign in directly by specifying your username and confirming your passkey.

@@ -26,10 +26,47 @@ export function isWebAuthnSupported() {
         typeof window.PublicKeyCredential === 'function';
 }
 
+function isIpAddress(host) {
+    if (!host) return false;
+    return /^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(':');
+}
+
+function resolveRpId(serverRpId) {
+    if (typeof window === 'undefined' || !window.location) {
+        return serverRpId || undefined;
+    }
+    const host = window.location.hostname;
+    if (!host) {
+        return serverRpId || undefined;
+    }
+    if (host === 'localhost' || host.endsWith('.localhost')) {
+        return 'localhost';
+    }
+    if (serverRpId && (host === serverRpId || host.endsWith('.' + serverRpId))) {
+        return serverRpId;
+    }
+    if (!isIpAddress(host)) {
+        return host;
+    }
+    return undefined;
+}
+
 export async function createPasskey(challengeB64, rpId, rpName, userIdStr, userName, userDisplayName) {
     if (!isWebAuthnSupported()) {
         throw new Error("WebAuthn is not supported in this browser");
     }
+
+    const host = (typeof window !== 'undefined' && window.location) ? window.location.hostname : '';
+    if (isIpAddress(host)) {
+        if (host === '127.0.0.1' || host === '::1') {
+            const port = (window.location && window.location.port) ? (':' + window.location.port) : '';
+            throw new Error("PASSKEY_ORIGIN_IP: WebAuthn passkeys cannot be created on IP address 127.0.0.1. Please open the panel using http://localhost" + port + " instead.");
+        } else {
+            throw new Error("PASSKEY_ORIGIN_IP_OTHER: WebAuthn passkeys require a domain name or 'localhost' (browsers do not support passkeys on IP addresses such as " + host + "). Please access via a domain name.");
+        }
+    }
+
+    const effectiveRpId = resolveRpId(rpId);
 
     const challenge = base64ToBuffer(challengeB64);
     const enc = new TextEncoder();
@@ -39,7 +76,7 @@ export async function createPasskey(challengeB64, rpId, rpName, userIdStr, userN
         challenge,
         rp: {
             name: rpName || "r3v3rs3",
-            id: rpId || undefined
+            id: effectiveRpId
         },
         user: {
             id: userId,
@@ -59,9 +96,17 @@ export async function createPasskey(challengeB64, rpId, rpName, userIdStr, userN
         attestation: "none"
     };
 
-    const credential = await navigator.credentials.create({
-        publicKey: publicKeyCredentialCreationOptions
-    });
+    let credential;
+    try {
+        credential = await navigator.credentials.create({
+            publicKey: publicKeyCredentialCreationOptions
+        });
+    } catch (err) {
+        if (err && err.message && (err.message.includes("cannot be used with the current origin") || err.message.includes("relying party ID"))) {
+            throw new Error("PASSKEY_ORIGIN_MISMATCH: " + err.message);
+        }
+        throw err;
+    }
 
     if (!credential) {
         throw new Error("Passkey creation was cancelled");
@@ -90,18 +135,28 @@ export async function getPasskey(challengeB64, rpId) {
         throw new Error("WebAuthn is not supported in this browser");
     }
 
+    const effectiveRpId = resolveRpId(rpId);
+
     const challenge = base64ToBuffer(challengeB64);
 
     const publicKeyCredentialRequestOptions = {
         challenge,
-        rpId: rpId || undefined,
+        rpId: effectiveRpId,
         userVerification: "preferred",
         timeout: 60000
     };
 
-    const assertion = await navigator.credentials.get({
-        publicKey: publicKeyCredentialRequestOptions
-    });
+    let assertion;
+    try {
+        assertion = await navigator.credentials.get({
+            publicKey: publicKeyCredentialRequestOptions
+        });
+    } catch (err) {
+        if (err && err.message && (err.message.includes("cannot be used with the current origin") || err.message.includes("relying party ID"))) {
+            throw new Error("PASSKEY_ORIGIN_MISMATCH: " + err.message);
+        }
+        throw err;
+    }
 
     if (!assertion) {
         throw new Error("Passkey assertion was cancelled");
