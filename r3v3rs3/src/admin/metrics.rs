@@ -61,6 +61,10 @@ pub async fn verify_metrics(
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
     {
+        if let Some(caller) = super::auth::api_token_caller(&state, token) {
+            request.extensions_mut().insert(caller);
+            return next.run(request).await;
+        }
         let username = {
             let data = state.data.lock().await;
             let enabled = data.config.mcp.enabled;

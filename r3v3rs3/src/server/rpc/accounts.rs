@@ -8,11 +8,13 @@ use crate::config::account::new_account;
 use crate::server::state::ServerState;
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::auth::{
-    Account, AccountCreated, AccountInfo, AccountUpdate, MIN_PASSWORD_LENGTH, NewAccount,
-    PasskeyCredential, PasskeyInfo, Role,
+    Account, AccountCreated, AccountInfo, AccountUpdate, ApiToken, ApiTokenCreated, ApiTokenInfo,
+    MIN_PASSWORD_LENGTH, NewAccount, PasskeyCredential, PasskeyInfo, Role, TokenScope,
 };
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
+use rand::distr::{Alphanumeric, SampleString};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 
 /// The longest username. The username is a part of the admin API path of the account.
@@ -41,6 +43,16 @@ impl RpcMethod for GetAccountList {
                         id: pk.id,
                         name: pk.name,
                         created_at: pk.created_at,
+                    })
+                    .collect(),
+                tokens: account
+                    .tokens
+                    .into_iter()
+                    .map(|tok| ApiTokenInfo {
+                        id: tok.id,
+                        name: tok.name,
+                        scope: tok.scope,
+                        created_at: tok.created_at,
                     })
                     .collect(),
             })
@@ -267,6 +279,116 @@ impl RpcMethod for DeletePasskey {
             AuditAction::DeletePasskey,
             &self.username,
             self.credential_id.clone(),
+        ))
+    }
+}
+
+pub struct CreateApiToken {
+    pub username: String,
+    pub name: String,
+    pub scope: TokenScope,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for CreateApiToken {
+    type Output = ApiTokenCreated;
+    const MUTATES: bool = true;
+    const PERMISSION: Permission = Permission::Read;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        let username = self.username;
+        let name = self.name.trim().to_string();
+        if name.is_empty() {
+            return Err(Error::InvalidTokenName { name: self.name });
+        }
+        let scope = self.scope;
+        let raw_token = format!("r3v_{}", Alphanumeric.sample_string(&mut rand::rng(), 32));
+        let token_hash = hex::encode(Sha256::digest(raw_token.as_bytes()));
+        let id = format!("{:08x}", rand::random::<u32>());
+        let created_at = unix_secs();
+
+        let token_entry = ApiToken {
+            id: id.clone(),
+            name: name.clone(),
+            token_hash,
+            scope,
+            created_at,
+        };
+
+        let token_id = id.clone();
+        state
+            .edit_accounts(move |accounts| {
+                let account =
+                    accounts
+                        .get_mut(&username)
+                        .ok_or_else(|| Error::AccountNotFound {
+                            username: username.clone(),
+                        })?;
+                if scope == TokenScope::Edit && account.role == Role::Viewer {
+                    return Err(Error::Forbidden);
+                }
+                account.tokens.retain(|t| t.id != token_id);
+                account.tokens.push(token_entry);
+                Ok(true)
+            })
+            .await?;
+
+        Ok(ApiTokenCreated {
+            id,
+            name,
+            scope,
+            token: raw_token,
+            created_at,
+        })
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(account_record(
+            AuditAction::CreateApiToken,
+            &self.username,
+            self.name.clone(),
+        ))
+    }
+}
+
+pub struct DeleteApiToken {
+    pub username: String,
+    pub token_id: String,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for DeleteApiToken {
+    type Output = ();
+    const MUTATES: bool = true;
+    const PERMISSION: Permission = Permission::Read;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        let username = self.username;
+        let token_id = self.token_id;
+        state
+            .edit_accounts(move |accounts| {
+                let account =
+                    accounts
+                        .get_mut(&username)
+                        .ok_or_else(|| Error::AccountNotFound {
+                            username: username.clone(),
+                        })?;
+                let prev_len = account.tokens.len();
+                account.tokens.retain(|t| t.id != token_id);
+                if account.tokens.len() == prev_len {
+                    return Err(Error::IdNotFound { id: token_id });
+                }
+                Ok(true)
+            })
+            .await?;
+        Ok(())
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        Some(account_record(
+            AuditAction::DeleteApiToken,
+            &self.username,
+            self.token_id.clone(),
         ))
     }
 }

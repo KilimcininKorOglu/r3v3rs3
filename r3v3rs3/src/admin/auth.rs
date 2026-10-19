@@ -18,11 +18,13 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use r3v3rs3_api::{
     audit::AuditAction,
     auth::{
-        LoginMethod, LoginRequest, LoginResponse, PasskeyChallenge, PasskeyCredential,
-        PasskeyRegisterRequest, SessionInfo,
+        ApiTokenCreated, ApiTokenInfo, CreateApiTokenRequest, LoginMethod, LoginRequest,
+        LoginResponse, PasskeyChallenge, PasskeyCredential, PasskeyRegisterRequest, Role,
+        SessionInfo, TokenScope,
     },
     error::{Error, ErrorMessage},
 };
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
@@ -394,6 +396,102 @@ pub async fn delete_passkey(
     Ok(Json(()))
 }
 
+/// Returns the API tokens belonging to the current account.
+#[utoipa::path(
+    get,
+    path = "/tokens",
+    tag = "auth",
+    operation_id = "list_tokens",
+    responses(
+        (status = 200, description = "The API tokens of the account.", body = [ApiTokenInfo]),
+        ErrorResponses
+    )
+)]
+pub async fn list_tokens(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Vec<ApiTokenInfo>>, AppError> {
+    let accounts = state.accounts.borrow();
+    let account = accounts
+        .get(&caller.username)
+        .ok_or_else(|| Error::AccountNotFound {
+            username: caller.username.clone(),
+        })?;
+    let tokens = account
+        .tokens
+        .iter()
+        .map(|tok| ApiTokenInfo {
+            id: tok.id.clone(),
+            name: tok.name.clone(),
+            scope: tok.scope,
+            created_at: tok.created_at,
+        })
+        .collect();
+    Ok(Json(tokens))
+}
+
+/// Creates a persistent API token for the current account.
+#[utoipa::path(
+    post,
+    path = "/tokens",
+    tag = "auth",
+    operation_id = "create_token",
+    request_body = CreateApiTokenRequest,
+    responses(
+        (status = 200, description = "The API token was created.", body = ApiTokenCreated),
+        ErrorResponses
+    )
+)]
+pub async fn create_token(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<CreateApiTokenRequest>,
+) -> Result<Json<ApiTokenCreated>, AppError> {
+    if caller.role == Role::Viewer && request.scope == TokenScope::Edit {
+        return Err(Error::Forbidden.into());
+    }
+    let result = state
+        .call(
+            &caller,
+            crate::server::rpc::accounts::CreateApiToken {
+                username: caller.username.clone(),
+                name: request.name,
+                scope: request.scope,
+            },
+        )
+        .await?;
+    Ok(Json(*result))
+}
+
+/// Deletes an API token belonging to the current account.
+#[utoipa::path(
+    delete,
+    path = "/tokens/{id}",
+    tag = "auth",
+    operation_id = "delete_token",
+    params(("id" = String, Path, description = "Token ID.")),
+    responses(
+        (status = 200, description = "The API token was deleted."),
+        ErrorResponses
+    )
+)]
+pub async fn delete_token(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Json<()>, AppError> {
+    state
+        .call(
+            &caller,
+            crate::server::rpc::accounts::DeleteApiToken {
+                username: caller.username.clone(),
+                token_id: id,
+            },
+        )
+        .await?;
+    Ok(Json(()))
+}
+
 fn sanitize_rp_domain(raw: &str) -> String {
     let domain = raw.split(':').next().unwrap_or("localhost");
     if domain == "127.0.0.1" || domain == "::1" {
@@ -452,29 +550,49 @@ pub async fn verify_and_consume_challenge(
     data.passkey_challenges.consume(challenge, Instant::now())
 }
 
-/// Accepts a request with an active admin session or a valid OAuth Bearer token and adds its `Caller` to the request.
+pub(crate) fn api_token_caller(state: &AppState, token: &str) -> Option<Caller> {
+    let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
+    state.accounts.borrow().token_caller(&token_hash)
+}
+
+async fn resolve_caller(
+    state: &AppState,
+    bearer: Option<&str>,
+    cookie: Option<&str>,
+) -> Result<Caller, Error> {
+    if let Some(token) = bearer {
+        if let Some(caller) = api_token_caller(state, token) {
+            return Ok(caller);
+        }
+        if let Ok(caller) = bearer_caller(state, token).await {
+            return Ok(caller);
+        }
+        if let Ok(caller) = session_caller(state, token).await {
+            return Ok(caller);
+        }
+    }
+    if let Some(token) = cookie
+        && let Ok(caller) = session_caller(state, token).await
+    {
+        return Ok(caller);
+    }
+    Err(Error::Unauthorized)
+}
+
+/// Accepts a request with an active admin session, API token, or valid OAuth Bearer token and adds its `Caller` to the request.
 pub async fn verify(
     State(state): State<AppState>,
     jar: CookieJar,
     mut request: Request,
     next: Next,
 ) -> Response {
-    let token = jar.get("token").map(|c| c.value().to_string()).or_else(|| {
-        request
-            .headers()
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|val| val.to_str().ok())
-            .and_then(|val| val.strip_prefix("Bearer "))
-            .map(str::to_string)
-    });
-    let Some(token) = token else {
-        return AppError::R3v3rs3(Error::Unauthorized).into_response();
-    };
-    let caller_res = match session_caller(&state, &token).await {
-        Ok(caller) => Ok(caller),
-        Err(_) => bearer_caller(&state, &token).await,
-    };
-    match caller_res {
+    let bearer = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|val| val.to_str().ok())
+        .and_then(|val| val.strip_prefix("Bearer "));
+    let cookie = jar.get("token").map(|c| c.value());
+    match resolve_caller(&state, bearer, cookie).await {
         Ok(mut caller) => {
             caller.client = request
                 .extensions()

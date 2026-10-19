@@ -445,7 +445,9 @@ fn session_routes() -> OpenApiRouter<AppState> {
             "/auth",
             OpenApiRouter::new()
                 .routes(routes!(auth::register_passkey))
-                .routes(routes!(auth::delete_passkey)),
+                .routes(routes!(auth::delete_passkey))
+                .routes(routes!(auth::list_tokens, auth::create_token))
+                .routes(routes!(auth::delete_token)),
         )
         .nest(
             "/accounts",

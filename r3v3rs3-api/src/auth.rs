@@ -53,6 +53,65 @@ pub struct Account {
     /// Registered passkeys for WebAuthn authentication.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub passkeys: Vec<PasskeyCredential>,
+
+    /// Registered persistent API tokens.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tokens: Vec<ApiToken>,
+}
+
+/// The permission scope of an API token.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenScope {
+    /// Read-only access to inspect state and configuration.
+    #[default]
+    Read,
+    /// Read and write access to manage resources according to the account's role.
+    Edit,
+}
+
+/// A stored API token credential of an account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ApiToken {
+    pub id: String,
+    pub name: String,
+    pub token_hash: String,
+    #[serde(default)]
+    pub scope: TokenScope,
+    #[serde(default)]
+    pub created_at: u64,
+}
+
+/// Public information about an API token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ApiTokenInfo {
+    pub id: String,
+    pub name: String,
+    pub scope: TokenScope,
+    #[serde(default)]
+    pub created_at: u64,
+}
+
+/// Request to create a new API token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CreateApiTokenRequest {
+    #[schema(example = "CI/CD Deployment")]
+    pub name: String,
+    #[serde(default)]
+    pub scope: TokenScope,
+}
+
+/// Returned once when an API token is created.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ApiTokenCreated {
+    pub id: String,
+    pub name: String,
+    pub scope: TokenScope,
+    #[schema(example = "r3v_abcdef0123456789...")]
+    pub token: String,
+    pub created_at: u64,
 }
 
 /// A stored WebAuthn passkey credential.
@@ -85,6 +144,10 @@ impl fmt::Debug for Account {
             .field("proxies", &self.proxies)
             .field("credentials_changed_at", &self.credentials_changed_at)
             .field("passkeys", &self.passkeys)
+            .field(
+                "tokens",
+                &self.tokens.iter().map(|t| &t.name).collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -104,6 +167,9 @@ pub struct AccountInfo {
     /// Registered passkeys for WebAuthn authentication.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub passkeys: Vec<PasskeyInfo>,
+    /// Registered API tokens.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tokens: Vec<ApiTokenInfo>,
 }
 
 #[derive(Deserialize, Serialize, ToSchema)]
@@ -275,5 +341,30 @@ mod tests {
             "role": "owner",
         }));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn api_token_round_trip_and_scope() {
+        let token = ApiToken {
+            id: "tok1".into(),
+            name: "Deploy Key".into(),
+            token_hash: "abcdef0123456789".into(),
+            scope: TokenScope::Edit,
+            created_at: 1_700_000_000,
+        };
+        let val = serde_json::to_value(&token).unwrap();
+        assert_eq!(val["scope"], "edit");
+        let parsed: ApiToken = serde_json::from_value(val).unwrap();
+        assert_eq!(parsed, token);
+
+        let read_token: ApiToken = serde_json::from_value(serde_json::json!({
+            "id": "tok2",
+            "name": "Read Key",
+            "token_hash": "hash2",
+            "scope": "read",
+        }))
+        .unwrap();
+        assert_eq!(read_token.scope, TokenScope::Read);
+        assert_eq!(read_token.created_at, 0);
     }
 }

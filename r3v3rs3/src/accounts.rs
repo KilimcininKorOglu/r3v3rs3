@@ -3,7 +3,7 @@
 //! started.
 
 use crate::sessions::SessionRecord;
-use r3v3rs3_api::auth::{Account, Role};
+use r3v3rs3_api::auth::{Account, Role, TokenScope};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
@@ -104,12 +104,22 @@ impl Caller {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountTokenEntry {
+    pub id: String,
+    pub name: String,
+    pub token_hash: String,
+    pub scope: TokenScope,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountEntry {
     pub role: Role,
     /// The proxies that the account sees. `None` means every proxy.
     pub proxies: Option<BTreeSet<ShortId>>,
     pub credentials_changed_at: u64,
     pub passkey_ids: Vec<String>,
+    pub tokens: Vec<AccountTokenEntry>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -127,6 +137,17 @@ impl AccountDirectory {
                     proxies: account.proxies.clone(),
                     credentials_changed_at: account.credentials_changed_at,
                     passkey_ids: account.passkeys.iter().map(|pk| pk.id.clone()).collect(),
+                    tokens: account
+                        .tokens
+                        .iter()
+                        .map(|tok| AccountTokenEntry {
+                            id: tok.id.clone(),
+                            name: tok.name.clone(),
+                            token_hash: tok.token_hash.clone(),
+                            scope: tok.scope,
+                            created_at: tok.created_at,
+                        })
+                        .collect(),
                 };
                 (name.clone(), entry)
             })
@@ -145,6 +166,24 @@ impl AccountDirectory {
             } else {
                 None
             }
+        })
+    }
+
+    /// Resolves an API token to its caller. A read token gets viewer permissions; an edit token
+    /// gets the account's permissions.
+    pub fn token_caller(&self, token_hash: &str) -> Option<Caller> {
+        self.accounts.iter().find_map(|(name, entry)| {
+            let token = entry.tokens.iter().find(|t| t.token_hash == token_hash)?;
+            let role = match token.scope {
+                TokenScope::Read => Role::Viewer,
+                TokenScope::Edit => entry.role,
+            };
+            Some(Caller {
+                username: name.clone(),
+                role,
+                proxies: entry.proxies.clone(),
+                client: None,
+            })
         })
     }
 
@@ -194,6 +233,7 @@ mod tests {
             proxies,
             credentials_changed_at: 7,
             passkey_ids: Vec::new(),
+            tokens: Vec::new(),
         };
         assert_eq!(directory.get("editor"), Some(&expected));
         assert_eq!(directory.get("admin"), None);
@@ -323,5 +363,69 @@ mod tests {
             viewer.authorize_platform(Permission::Edit),
             Err(Error::Forbidden)
         ));
+    }
+
+    #[test]
+    fn api_token_caller_matches_scope_and_role() {
+        use r3v3rs3_api::auth::ApiToken;
+
+        let accounts = HashMap::from([
+            (
+                "admin_user".to_string(),
+                Account {
+                    role: Role::Admin,
+                    tokens: vec![
+                        ApiToken {
+                            id: "t1".into(),
+                            name: "Read".into(),
+                            token_hash: "hash_read".into(),
+                            scope: TokenScope::Read,
+                            created_at: 100,
+                        },
+                        ApiToken {
+                            id: "t2".into(),
+                            name: "Edit".into(),
+                            token_hash: "hash_edit".into(),
+                            scope: TokenScope::Edit,
+                            created_at: 100,
+                        },
+                    ],
+                    ..Default::default()
+                },
+            ),
+            (
+                "editor_user".to_string(),
+                Account {
+                    role: Role::Editor,
+                    tokens: vec![ApiToken {
+                        id: "t3".into(),
+                        name: "Edit".into(),
+                        token_hash: "hash_ed2".into(),
+                        scope: TokenScope::Edit,
+                        created_at: 100,
+                    }],
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let dir = AccountDirectory::new(&accounts);
+
+        // Read token always yields Role::Viewer
+        let read_caller = dir.token_caller("hash_read").unwrap();
+        assert_eq!(read_caller.username, "admin_user");
+        assert_eq!(read_caller.role, Role::Viewer);
+
+        // Edit token for admin yields Role::Admin
+        let edit_admin_caller = dir.token_caller("hash_edit").unwrap();
+        assert_eq!(edit_admin_caller.username, "admin_user");
+        assert_eq!(edit_admin_caller.role, Role::Admin);
+
+        // Edit token for editor yields Role::Editor
+        let edit_editor_caller = dir.token_caller("hash_ed2").unwrap();
+        assert_eq!(edit_editor_caller.username, "editor_user");
+        assert_eq!(edit_editor_caller.role, Role::Editor);
+
+        // Unknown token yields None
+        assert!(dir.token_caller("unknown_hash").is_none());
     }
 }

@@ -117,4 +117,38 @@ On the login screen, click **Sign in with Passkey**. Supported browsers will pro
 | `/api/auth/passkey/{id}` | `DELETE` | Deletes a registered passkey by its credential ID. |
 | `/api/auth/login` | `POST` | Authenticates using `LoginMethod::Passkey` with signed WebAuthn assertion and client data. |
 
+## API Tokens
+
+r3v3rs3 provides persistent personal API tokens for automated scripts, CI/CD pipelines, and Prometheus scrapers so they do not need to authenticate using interactive sessions or session cookies.
+
+### Scopes and Permissions
+
+- **`read`**: Grants read-only access across the panel API (`Role::Viewer`). A read token cannot modify configuration, create proxies, or deploy apps.
+- **`edit`**: Inherits the full operational permissions of the owning account (`Role::Admin` or `Role::Editor`). Accounts with `Role::Viewer` cannot create edit-scoped tokens.
+
+### Token Security
+
+- Each token is generated with a `r3v_` prefix followed by 32 alphanumeric random characters.
+- Only the SHA-256 hash of the token is persisted in `accounts.toml`. The raw secret is displayed exactly once upon generation.
+- Tokens can be created or revoked at any time from the **Accounts** page in the WebUI by editing your account, or via the API endpoints below.
+
+### Usage Example
+
+Pass the token in the standard HTTP `Authorization` header:
+
+```bash
+$ curl -H "Authorization: Bearer r3v_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" \
+    http://localhost:46492/api/proxies
+$ curl -H "Authorization: Bearer r3v_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" \
+    http://localhost:46492/api/metrics
+```
+
+### API Endpoints
+
+| Endpoint | Method | Action |
+|---|---|---|
+| `/api/auth/tokens` | `GET` | Lists active API tokens for the signed-in caller's account. |
+| `/api/auth/tokens` | `POST` | Creates a new API token (`name`, `scope`). Returns the raw secret once. |
+| `/api/auth/tokens/{id}` | `DELETE` | Revokes and deletes an API token by ID. |
+
 The [audit log](@/configuration.md#audit-log) records each change of an account and each sign-in.

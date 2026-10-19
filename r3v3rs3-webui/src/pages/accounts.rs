@@ -12,8 +12,9 @@ use crate::store::{ProxyStore, SessionStore};
 use gloo_net::http::Request;
 use r3v3rs3_api::{
     auth::{
-        AccountCreated, AccountInfo, AccountUpdate, MIN_PASSWORD_LENGTH, NewAccount, PasskeyInfo,
-        PasskeyRegisterRequest, Role,
+        AccountCreated, AccountInfo, AccountUpdate, ApiTokenCreated, ApiTokenInfo,
+        CreateApiTokenRequest, MIN_PASSWORD_LENGTH, NewAccount, PasskeyInfo,
+        PasskeyRegisterRequest, Role, TokenScope,
     },
     error::Error,
     i18n::Locale,
@@ -57,7 +58,7 @@ const CHECKBOX_CLASS: &str =
 
 const PATH: &str = "/accounts";
 
-const COLUMNS: [Column; 5] = [
+const COLUMNS: [Column; 6] = [
     Column {
         label: "accounts.username",
         class: "whitespace-nowrap",
@@ -76,6 +77,10 @@ const COLUMNS: [Column; 5] = [
     },
     Column {
         label: "accounts.passkeys",
+        class: "w-0 whitespace-nowrap text-center",
+    },
+    Column {
+        label: "accounts.tokens",
         class: "w-0 whitespace-nowrap text-center",
     },
 ];
@@ -105,6 +110,7 @@ struct Form {
     proxies: BTreeSet<ShortId>,
     totp: bool,
     passkeys: Vec<PasskeyInfo>,
+    tokens: Vec<ApiTokenInfo>,
 }
 
 impl Form {
@@ -118,6 +124,7 @@ impl Form {
             proxies: info.proxies.clone().unwrap_or_default(),
             totp: info.totp,
             passkeys: info.passkeys.clone(),
+            tokens: info.tokens.clone(),
         }
     }
 }
@@ -232,6 +239,11 @@ fn account_row(
     } else {
         info.passkeys.len().to_string()
     };
+    let tokens_text = if info.tokens.is_empty() {
+        "-".to_string()
+    } else {
+        info.tokens.len().to_string()
+    };
     Row {
         key: info.username.clone(),
         cells: vec![
@@ -240,6 +252,7 @@ fn account_row(
             html! { <>{proxies_label(locale, info.proxies.as_ref(), proxies)}</> },
             html! { <>{locale.t(totp)}</> },
             html! { <>{passkeys_text}</> },
+            html! { <>{tokens_text}</> },
         ],
         actions: row_actions(locale, set_on_click(form, Form::edit(info)), delete),
     }
@@ -278,6 +291,7 @@ fn account_fields(
             }
             if editing {
                 { passkey_list_view(locale, form, own_account, accounts) }
+                { token_list_view(locale, form, own_account, accounts) }
             }
         </>
     }
@@ -584,6 +598,86 @@ fn passkey_item(
     }
 }
 
+fn token_list_view(
+    locale: Locale,
+    form: &UseStateHandle<Form>,
+    own_account: bool,
+    accounts: &AccountList,
+) -> Html {
+    let form_for_add = form.clone();
+    let accounts_for_add = accounts.clone();
+    let on_add_token = Callback::from(move |_| {
+        let form = form_for_add.clone();
+        let accounts = accounts_for_add.clone();
+        spawn_local(async move {
+            add_token_flow(locale, form, accounts).await;
+        });
+    });
+
+    html! {
+        <div class="mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-700">
+            <div class="flex justify-between items-center mb-2">
+                <label class="text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("accounts.tokens")}</label>
+                if own_account {
+                    <button type="button" class="text-xs font-semibold px-2.5 py-1 rounded bg-neutral-800 text-white dark:bg-neutral-700 hover:bg-neutral-600 transition flex items-center gap-1 cursor-pointer" onclick={on_add_token}>
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        {locale.t("accounts.add_token")}
+                    </button>
+                }
+            </div>
+            if form.tokens.is_empty() {
+                <p class={HINT_CLASS}>{locale.t("accounts.no_tokens")}</p>
+            } else {
+                <div class="space-y-2 mt-2">
+                    { for form.tokens.iter().map(|tok| token_item(locale, tok, own_account, accounts, form)) }
+                </div>
+            }
+        </div>
+    }
+}
+
+fn token_item(
+    locale: Locale,
+    tok: &ApiTokenInfo,
+    own_account: bool,
+    accounts: &AccountList,
+    form: &UseStateHandle<Form>,
+) -> Html {
+    let id = tok.id.clone();
+    let accounts = accounts.clone();
+    let form = form.clone();
+    let on_delete = Callback::from(move |_| {
+        let id = id.clone();
+        let accounts = accounts.clone();
+        let form = form.clone();
+        spawn_local(async move {
+            delete_token_action(locale, id, accounts, form).await;
+        });
+    });
+
+    let scope_label = match tok.scope {
+        TokenScope::Read => locale.t("accounts.token_scope_read"),
+        TokenScope::Edit => locale.t("accounts.token_scope_edit"),
+    };
+
+    html! {
+        <div class="flex justify-between items-center p-2 rounded border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800">
+            <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                <span class="text-sm font-medium text-neutral-800 dark:text-neutral-200">{&tok.name}</span>
+                <span class="text-xs px-2 py-0.5 rounded font-mono bg-neutral-100 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">
+                    {scope_label}
+                </span>
+            </div>
+            if own_account {
+                <button type="button" class="text-red-600 hover:text-red-800 dark:hover:text-red-400 p-1 cursor-pointer" onclick={on_delete}>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                </button>
+            }
+        </div>
+    }
+}
+
 async fn fetch_challenge() -> Result<r3v3rs3_api::auth::PasskeyChallenge, String> {
     let response = Request::get(&format!("{API_ENDPOINT}/auth/passkey/challenge"))
         .send()
@@ -728,6 +822,88 @@ async fn delete_passkey_action(locale: Locale, id: String, accounts: AccountList
     }
 }
 
+async fn add_token_flow(locale: Locale, form: UseStateHandle<Form>, accounts: AccountList) {
+    let Some(name) =
+        crate::dialog::prompt(locale, locale.t("accounts.token_name_prompt"), "my-token").await
+    else {
+        return;
+    };
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return;
+    }
+    let is_edit = form.role != Role::Viewer
+        && crate::dialog::confirm(locale, locale.t("accounts.token_scope_prompt")).await;
+    let scope = if is_edit {
+        TokenScope::Edit
+    } else {
+        TokenScope::Read
+    };
+
+    let req = CreateApiTokenRequest { name, scope };
+    let url = format!("{API_ENDPOINT}/auth/tokens");
+    let resp = match Request::post(&url).json(&req) {
+        Ok(r) => r.send().await,
+        Err(err) => {
+            crate::dialog::message(locale, &err.to_string(), crate::dialog::Icon::Error).await;
+            return;
+        }
+    };
+    match resp {
+        Ok(res) if res.ok() => {
+            if let Ok(created) = res.json::<ApiTokenCreated>().await {
+                let msg = format!(
+                    "{}\n\n{}",
+                    locale.t("accounts.token_created_warning"),
+                    created.token
+                );
+                crate::dialog::message(locale, &msg, crate::dialog::Icon::Success).await;
+                let mut updated = (*form).clone();
+                updated.tokens.push(ApiTokenInfo {
+                    id: created.id,
+                    name: created.name,
+                    scope: created.scope,
+                    created_at: created.created_at,
+                });
+                form.set(updated);
+                load(accounts, PATH);
+            }
+        }
+        Ok(res) => {
+            let msg = res
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to create token".to_string());
+            crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await;
+        }
+        Err(err) => {
+            crate::dialog::message(locale, &err.to_string(), crate::dialog::Icon::Error).await;
+        }
+    }
+}
+
+async fn delete_token_action(
+    locale: Locale,
+    id: String,
+    accounts: AccountList,
+    form: UseStateHandle<Form>,
+) {
+    if !crate::dialog::confirm(locale, locale.t("accounts.delete_token_confirm")).await {
+        return;
+    }
+    let res = Request::delete(&format!("{API_ENDPOINT}/auth/tokens/{id}"))
+        .send()
+        .await;
+    if let Ok(res) = res
+        && res.ok()
+    {
+        let mut updated = (*form).clone();
+        updated.tokens.retain(|t| t.id != id);
+        form.set(updated);
+        load(accounts, PATH);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -785,6 +961,7 @@ mod tests {
             proxies: None,
             totp: false,
             passkeys: Vec::new(),
+            tokens: Vec::new(),
         };
         let form = Form {
             restrict: true,

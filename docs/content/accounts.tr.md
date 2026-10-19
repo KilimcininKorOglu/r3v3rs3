@@ -117,4 +117,38 @@ Giriş ekranında **Passkey ile giriş yap** butonuna tıklayın. Destekleyen ta
 | `/api/auth/passkey/{id}` | `DELETE` | Credential ID ile kayıtlı bir passkey'i siler. |
 | `/api/auth/login` | `POST` | İmzalanmış WebAuthn kanıtı ve istemci verisi ile `LoginMethod::Passkey` üzerinden oturum açar. |
 
+## API Token'ları
+
+r3v3rs3, otomasyon betikleri, CI/CD süreçleri ve Prometheus izleme araçlarının oturum çerezlerine ihtiyaç duymadan güvenle istek atabilmesi için kalıcı kişisel API token'ları sunar.
+
+### Kapsamlar ve Yetkiler
+
+- **`read`** (Okuma): Yalnızca okuma yetkisi verir (`Role::Viewer`). Bir okuma token'ı yapılandırmayı değiştiremez, yeni proxy veya app ekleyemez.
+- **`edit`** (Düzenleme): Hesabın tam işlem yetkilerini devralır (`Role::Admin` veya `Role::Editor`). `Role::Viewer` rolündeki hesaplar düzenleme token'ı oluşturamaz.
+
+### Token Güvenliği
+
+- Her token `r3v_` öneki ve ardından gelen rastgele 32 alfasayısal karakterden oluşur.
+- Ham token değeri yalnızca oluşturulduğu anda bir kereye mahsus ekranda gösterilir. `accounts.toml` dosyasında yalnızca SHA-256 özeti saklanır.
+- Token'lar WebUI'daki **Hesaplar** sayfasında hesabınızı düzenleyerek veya aşağıdaki API uç noktaları aracılığıyla dilediğiniz zaman oluşturulabilir veya silinebilir.
+
+### Kullanım Örneği
+
+Token'ı standart HTTP `Authorization` başlığında Bearer olarak iletin:
+
+```bash
+$ curl -H "Authorization: Bearer r3v_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" \
+    http://localhost:46492/api/proxies
+$ curl -H "Authorization: Bearer r3v_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" \
+    http://localhost:46492/api/metrics
+```
+
+### API Endpoint'leri
+
+| Endpoint | Yöntem | İşlem |
+|---|---|---|
+| `/api/auth/tokens` | `GET` | Giriş yapmış hesabın aktif API token'larını listeler. |
+| `/api/auth/tokens` | `POST` | Yeni bir API token'ı (`name`, `scope`) oluşturur ve ham anahtarı tek seferlik döner. |
+| `/api/auth/tokens/{id}` | `DELETE` | ID'si verilen API token'ını iptal eder ve siler. |
+
 [Denetim kaydı](@/configuration.tr.md#denetim-kaydi) her hesap değişikliğini ve her girişi kaydeder.
