@@ -559,6 +559,8 @@
   "http_form.replacement": "Replacement",
   "http_form.replay_body_limit": "Replay Body Limit (Bytes)",
   "http_form.replay_body_limit_name": "Replay body limit",
+  "http_form.require_client_cert": "Require Client Certificate",
+  "http_form.require_client_cert_hint": "Reject requests matching this route unless the client presented a verified TLS client certificate (mTLS).",
   "http_form.request_headers": "Request Headers",
   "http_form.request_headers_error": "Request headers, line {line}: {error}",
   "http_form.requests": "Requests",

@@ -113,6 +113,7 @@ impl Router {
                     response: route.response.map(Arc::new),
                     maintenance: maintenance.clone(),
                     error_pages: error_pages.clone(),
+                    require_client_cert: route.require_client_cert,
                 });
             }
         }
@@ -307,4 +308,6 @@ pub struct FilteredRoute {
     pub maintenance: Arc<r3v3rs3_api::proxy::MaintenanceConfig>,
     /// Custom error pages of the proxy.
     pub error_pages: Arc<[CustomErrorPage]>,
+    /// Requires a verified TLS client certificate.
+    pub require_client_cert: bool,
 }

@@ -370,3 +370,65 @@ async fn admin_api_checks_certificates() -> anyhow::Result<()> {
     std::fs::remove_dir_all(&dir)?;
     Ok(())
 }
+
+#[tokio::test]
+async fn route_level_client_certificate_requirement() -> anyhow::Result<()> {
+    let pki = Pki::new();
+    let upstream = start_echo_upstream().await?;
+    let proxy_port = alloc_tcp_port().await?;
+
+    let mut public_route = http_route("/public", upstream.http_url("/").as_str(), None);
+    public_route.require_client_cert = false;
+
+    let mut secure_route = http_route("/secure", upstream.http_url("/").as_str(), None);
+    secure_route.require_client_cert = true;
+
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![public_route, secure_route],
+        ..Default::default()
+    };
+    let storage = TestStorage::builder()
+        .ports(vec![tls_port(
+            "mtls",
+            proxy_port.multiaddr_https(),
+            ClientAuthMode::Optional,
+            vec![pki.root.id],
+        )])
+        .proxies(vec![http_proxy_entry("proxy", "mtls", proxy)])
+        .certs(pki.certs())
+        .build();
+
+    with_server(storage, |_| async move {
+        // 1. Anonymous client (no client cert presented)
+        let anon_client = pki.client(None)?;
+        let res_public = anon_client
+            .get(proxy_port.https_url("/public"))
+            .send()
+            .await?;
+        assert_eq!(res_public.status(), StatusCode::OK);
+
+        let res_secure = anon_client
+            .get(proxy_port.https_url("/secure"))
+            .send()
+            .await?;
+        assert_eq!(res_secure.status(), StatusCode::FORBIDDEN);
+
+        // 2. Client with verified certificate
+        let cert_client = pki.client(Some(&pki.client))?;
+        let res_public_cert = cert_client
+            .get(proxy_port.https_url("/public"))
+            .send()
+            .await?;
+        assert_eq!(res_public_cert.status(), StatusCode::OK);
+
+        let res_secure_cert = cert_client
+            .get(proxy_port.https_url("/secure"))
+            .send()
+            .await?;
+        assert_eq!(res_secure_cert.status(), StatusCode::OK);
+
+        Ok(())
+    })
+    .await
+}

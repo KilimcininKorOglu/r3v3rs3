@@ -750,7 +750,7 @@ where
         return (ProxiedRequest::Respond(response), response_rewriter);
     }
 
-    let upstream = match check_policies(route, client.ip) {
+    let upstream = match check_policies(route, client.ip, info.client_cert) {
         Ok(upstream) => upstream,
         Err(err) => {
             info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
@@ -977,11 +977,18 @@ fn apply_header_rules(
     response_rewriter.header_rules(route.header_rules.clone(), variables)
 }
 
-/// Applies the client IP filter and the rate limit of the route, and returns the upstream
-/// connections of the route.
-fn check_policies(route: &FilteredRoute, client: std::net::IpAddr) -> Result<Upstream, ProxyError> {
+/// Applies the client IP filter, client certificate requirement and the rate limit of the route,
+/// and returns the upstream connections of the route.
+fn check_policies(
+    route: &FilteredRoute,
+    client: std::net::IpAddr,
+    client_cert: Option<&ClientCertInfo>,
+) -> Result<Upstream, ProxyError> {
     if !route.ip_filter.allows(client) {
         return Err(ProxyError::IpNotAllowed);
+    }
+    if route.require_client_cert && client_cert.is_none() {
+        return Err(ProxyError::ClientCertRequired);
     }
     if let Some(retry_after) = route
         .rate_limiter

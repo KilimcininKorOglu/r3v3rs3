@@ -18,6 +18,9 @@ pub enum ProxyError {
     #[error("client IP address is not allowed")]
     IpNotAllowed,
 
+    #[error("client certificate required")]
+    ClientCertRequired,
+
     #[error("too many requests")]
     TooManyRequests { retry_after: Duration },
 
@@ -53,7 +56,7 @@ impl ProxyError {
             Self::NoUpstreamAvailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::DomainFrontingDetected => StatusCode::MISDIRECTED_REQUEST,
             Self::NoRouteFound => StatusCode::BAD_GATEWAY,
-            Self::IpNotAllowed => StatusCode::FORBIDDEN,
+            Self::IpNotAllowed | Self::ClientCertRequired => StatusCode::FORBIDDEN,
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,

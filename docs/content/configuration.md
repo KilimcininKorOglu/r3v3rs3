@@ -93,6 +93,20 @@ listen = "/ip4/0.0.0.0/tcp/443/https"
 tls_termination = { server_names = ["example.com"], client_auth = "required", client_ca_certs = ["a1b2c3d"] }
 ```
 
+### Route-Level Client Certificate Requirement
+
+When an HTTPS or HTTP over QUIC port uses `Optional` client authentication, individual routes can enforce client certificate verification with `require_client_cert = true`. Requests matching a route with `require_client_cert = true` without a verified client certificate are immediately rejected with `403 Forbidden`. This enables hosting public routes (such as `/`, `/docs`) and mTLS-restricted routes (such as `/admin`, `/internal`) on the very same port:
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+routes = [
+  { path = "/public", servers = [{ url = "http://127.0.0.1:8080/public" }] },
+  { path = "/admin", servers = [{ url = "http://127.0.0.1:8080/admin" }], require_client_cert = true },
+]
+```
+
 ## PROXY Protocol
 
 A load balancer in front of r3v3rs3 can send the client address in a PROXY protocol header (version 1 or 2). TCP, TCP over TLS, HTTP and HTTPS ports can read this header. UDP and HTTP over QUIC ports cannot.

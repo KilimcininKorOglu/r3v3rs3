@@ -481,12 +481,15 @@ pub struct Route {
     /// Replaces the proxy request body limit for this route. `0` has no limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_body_size: Option<u64>,
-    /// Changes the request path before the request goes to an upstream server.
+    /// Change the request path before the request goes to an upstream server.
     #[serde(default, skip_serializing_if = "PathRewrite::is_default")]
     pub rewrite: PathRewrite,
     /// Sends a copy of the requests of this route to other servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mirror: Option<Mirror>,
+    /// Requires a verified TLS client certificate for requests matching this route.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub require_client_cert: bool,
     /// Answers every request of this route with a redirect or a status, instead of sending it to
     /// `servers`. A route with a fixed response has no servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]

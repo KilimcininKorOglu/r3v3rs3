@@ -445,6 +445,7 @@ struct RouteForm {
     mirror_servers: Vec<String>,
     mirror_percent: String,
     mirror_max_body_size: String,
+    require_client_cert: bool,
 }
 
 impl RouteForm {
@@ -493,6 +494,7 @@ impl RouteForm {
             mirror_servers: mirror.servers.iter().map(format_server_line).collect(),
             mirror_percent: mirror.percent.to_string(),
             mirror_max_body_size: mirror.max_body_size.to_string(),
+            require_client_cert: route.require_client_cert,
         }
     }
 
@@ -526,6 +528,7 @@ impl RouteForm {
             mirror_servers: Vec::new(),
             mirror_percent: "100".into(),
             mirror_max_body_size: DEFAULT_MIRROR_BODY_SIZE.to_string(),
+            require_client_cert: false,
         }
     }
 }
@@ -827,6 +830,7 @@ fn route_view(
                 { route_auth_view(locale, routes, index, route) }
             }
             { route_headers_view(locale, routes, index, route) }
+            { route_client_cert_view(locale, routes, index, route) }
             if route.response.kind == RouteKind::Proxy {
                 { route_timeouts_view(locale, routes, index, route) }
                 { route_retry_view(locale, routes, index, route) }
@@ -1157,6 +1161,27 @@ fn route_headers_view(
             }),
         ),
     )
+}
+
+fn route_client_cert_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    html! {
+        <div class="mt-4">
+            { toggle(
+                route_input(routes, index, checked, |route, value| {
+                    route.require_client_cert = value
+                }),
+                route.require_client_cert,
+                locale.t("http_form.require_client_cert"),
+                "",
+            ) }
+            <p class={HINT_CLASS}>{locale.t("http_form.require_client_cert_hint")}</p>
+        </div>
+    }
 }
 
 fn route_timeouts_view(
@@ -2550,6 +2575,7 @@ fn parse_route(
         auth,
         access_list: route.access_list,
         headers,
+        require_client_cert: route.require_client_cert,
         ..target
     })
 }

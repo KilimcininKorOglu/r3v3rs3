@@ -93,6 +93,20 @@ listen = "/ip4/0.0.0.0/tcp/443/https"
 tls_termination = { server_names = ["example.com"], client_auth = "required", client_ca_certs = ["a1b2c3d"] }
 ```
 
+### Route Başına İstemci Sertifikası Zorunluluğu
+
+Bir HTTPS veya QUIC üzerinden HTTP portu `Optional` istemci doğrulaması kullandığında, route bazında `require_client_cert = true` ile istemci sertifikası zorunlu kılınabilir. `require_client_cert = true` olarak yapılandırılmış bir route'a doğrulanmış bir istemci sertifikası olmadan gelen istekler doğrudan `403 Forbidden` ile reddedilir. Böylece aynı port üzerinde hem genel erişime açık route'lar (`/`, `/docs`) hem de mTLS ile kilitlenmiş özel route'lar (`/admin`, `/internal`) birlikte sunulabilir:
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+routes = [
+  { path = "/public", servers = [{ url = "http://127.0.0.1:8080/public" }] },
+  { path = "/admin", servers = [{ url = "http://127.0.0.1:8080/admin" }], require_client_cert = true },
+]
+```
+
 ## PROXY protocol
 
 r3v3rs3 önündeki bir yük dengeleyici, istemci adresini PROXY protocol header'ı (sürüm 1 veya 2) ile gönderebilir. TCP, TLS üzerinden TCP, HTTP ve HTTPS portları bu header'ı okuyabilir. UDP ve QUIC üzerinden HTTP portları okuyamaz.

@@ -559,6 +559,8 @@
   "http_form.replacement": "Yerine Yazılacak Değer",
   "http_form.replay_body_limit": "Yeniden Gönderim Gövde Limiti (Byte)",
   "http_form.replay_body_limit_name": "Yeniden gönderim gövde limiti",
+  "http_form.require_client_cert": "İstemci Sertifikası Zorunlu Kıl",
+  "http_form.require_client_cert_hint": "İstemci doğrulanmış bir TLS istemci sertifikası (mTLS) sunmadığı sürece bu route ile eşleşen istekleri reddeder.",
   "http_form.request_headers": "İstek Header'ları",
   "http_form.request_headers_error": "İstek header'ları, satır {line}: {error}",
   "http_form.requests": "İstek Sayısı",
