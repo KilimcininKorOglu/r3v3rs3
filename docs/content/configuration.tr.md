@@ -562,6 +562,29 @@ routes = [
 ]
 ```
 
+## Eşzamanlı İstek Sınırı (Concurrency Limit)
+
+Her HTTP / HTTPS proxy'sinde aynı anda işlenen (in-flight) eşzamanlı istek sayısını sınırlayabilirsiniz. Rate limit belirli bir zaman dilimindeki toplam istek sayısını kısıtlarken, eşzamanlı istek sınırı yavaş veya paralel isteklerin upstream sunucularını kilitlemesini önler.
+
+- **Maksimum Eşzamanlı İstek**: İstemci başına izin verilen eşzamanlı aktif istek sayısı. `0` limiti kapatır.
+- **Header (isteğe bağlı)**: İstekleri istemci IP'si yerine belirtilen bir istek başlığına göre (örneğin `x-api-key`, `authorization` veya `x-client-id`) gruplar. Boş bırakıldığında istekler "İstemci IP adresi" bölümünde belirlenen adrese göre gruplanır.
+
+Limiti aşan istemci, anında `Retry-After: 1` header'ıyla birlikte `429 Too Many Requests` yanıtı alır. İstek tamamlandığında veya bağlantı kesildiğinde yuva otomatik olarak serbest bırakılır.
+
+Bir route, "Bu Route için Ayrı Eşzamanlı İstek Sınırı Kullan" seçeneğiyle proxy limiti yerine kendi eşzamanlı sınırını belirleyebilir. Route ayarında maksimum istek sayısı `0` ise o route'ta eşzamanlılık sınırı uygulanmaz.
+
+```toml
+[my-proxy]
+protocol = "http"
+vhosts = ["example.com"]
+concurrency_limit = { max = 20 }
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] },
+  { path = "/api", servers = [{ url = "http://127.0.0.1:8080/api" }], concurrency_limit = { max = 5, header = "x-api-key" } },
+  { path = "/health", servers = [{ url = "http://127.0.0.1:8080/health" }], concurrency_limit = { max = 0 } },
+]
+```
+
 ## Kimlik doğrulama
 
 Her HTTP / HTTPS proxy'sinde "Kimlik Doğrulama" bölümünden kimlik doğrulamayı zorunlu hale getirebilirsiniz. Bir route, "Bu Route için Ayrı Kimlik Doğrulama Kullan" seçeneğiyle proxy ayarı yerine kendi ayarını kullanabilir. O route'u bütün istemcilere açmak için "Yok" seçin.

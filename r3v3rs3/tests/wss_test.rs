@@ -74,6 +74,7 @@ async fn wss_proxy() -> anyhow::Result<()> {
                     client_ip: Default::default(),
                     ip_filter: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency_limit: Default::default(),
                     auth: Default::default(),
                     headers: Default::default(),
                     compression: Default::default(),

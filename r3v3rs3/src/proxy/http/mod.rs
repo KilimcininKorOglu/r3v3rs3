@@ -62,6 +62,7 @@ pub(crate) mod cache;
 pub mod cache_share;
 pub(crate) mod client_ip;
 mod compression;
+pub(crate) mod concurrency_limit;
 mod cookie;
 mod error;
 pub(crate) mod filter;
@@ -633,7 +634,13 @@ async fn handshake(
 enum ProxiedRequest<R> {
     /// A request for the upstream server with the upstream connections of the route, and its
     /// cache state when the proxy has a cache.
-    Ok(R, Upstream, Span, Option<CacheRequest>),
+    Ok(
+        R,
+        Upstream,
+        Span,
+        Option<CacheRequest>,
+        Option<concurrency_limit::ConcurrencyGuard>,
+    ),
     /// A response that r3v3rs3 sends without contacting the upstream server.
     Respond(Response<Full<Bytes>>),
     Err(ProxyError),
@@ -744,35 +751,26 @@ where
         .resolve(info.remote.ip(), req.headers(), &crate::cdn::table());
     let action = format!("{} {}", req.method().as_str(), req.uri());
 
-    if route.maintenance.enabled {
-        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, status = route.maintenance.status);
-        let response = maintenance_response(&route.maintenance);
-        return (ProxiedRequest::Respond(response), response_rewriter);
-    }
-
-    let upstream = match check_policies(route, client.ip, info.client_cert) {
+    let upstream = match check_route_access(
+        route,
+        &req,
+        &client,
+        info,
+        header_host.as_deref(),
+        request_host.as_deref(),
+    ) {
         Ok(upstream) => upstream,
-        Err(err) => {
+        Err(EarlyExit::Err(err)) => {
             info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
             return (ProxiedRequest::Err(err), response_rewriter);
         }
+        Err(EarlyExit::Respond(response)) => {
+            if route.maintenance.enabled {
+                info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, status = route.maintenance.status);
+            }
+            return (ProxiedRequest::Respond(*response), response_rewriter);
+        }
     };
-
-    if let Some(redirect) = redirect_of(
-        route,
-        &req,
-        header_host.as_deref(),
-        request_host.as_deref(),
-        info.proto,
-    ) {
-        return (ProxiedRequest::Respond(redirect), response_rewriter);
-    }
-
-    if body_limit::declared_too_large(req.headers(), upstream.max_body_size) {
-        let err = ProxyError::PayloadTooLarge;
-        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
-        return (ProxiedRequest::Err(err), response_rewriter);
-    }
 
     // Authentication removes the credentials, so the cache reads them before. The cache key uses
     // the client host and path, so the selected upstream server does not split the cache.
@@ -803,6 +801,14 @@ where
         return (ProxiedRequest::Err(err), response_rewriter);
     }
 
+    let concurrency_guard = match acquire_concurrency(route, req.headers(), client.ip) {
+        Ok(guard) => guard,
+        Err(err) => {
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
+            return (ProxiedRequest::Err(err), response_rewriter);
+        }
+    };
+
     let prepared = PreparedRequest {
         route,
         res,
@@ -813,8 +819,47 @@ where
         request_host,
         cache_key,
         authorized,
+        concurrency_guard,
     };
     prepare_upstream_request(shared, req, upstream, prepared, response_rewriter)
+}
+
+enum EarlyExit {
+    Respond(Box<Response<Full<Bytes>>>),
+    Err(ProxyError),
+}
+
+fn check_route_access<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    client: &client_ip::ClientAddr,
+    info: &RequestInfo<'_>,
+    header_host: Option<&str>,
+    request_host: Option<&str>,
+) -> Result<Upstream, EarlyExit> {
+    if route.maintenance.enabled {
+        let response = maintenance_response(&route.maintenance);
+        return Err(EarlyExit::Respond(Box::new(response)));
+    }
+    let upstream = check_policies(route, client.ip, info.client_cert).map_err(EarlyExit::Err)?;
+    if let Some(redirect) = redirect_of(route, req, header_host, request_host, info.proto) {
+        return Err(EarlyExit::Respond(Box::new(redirect)));
+    }
+    if body_limit::declared_too_large(req.headers(), upstream.max_body_size) {
+        return Err(EarlyExit::Err(ProxyError::PayloadTooLarge));
+    }
+    Ok(upstream)
+}
+
+fn acquire_concurrency(
+    route: &FilteredRoute,
+    headers: &hyper::HeaderMap,
+    client_ip: std::net::IpAddr,
+) -> Result<Option<concurrency_limit::ConcurrencyGuard>, ProxyError> {
+    match &route.concurrency_limiter {
+        Some(limiter) => limiter.acquire(headers, client_ip).map(Some),
+        None => Ok(None),
+    }
 }
 
 /// The host of the request: the `Host` header, then the SNI name, then the host of the URI.
@@ -877,6 +922,7 @@ struct PreparedRequest<'a> {
     request_host: Option<String>,
     cache_key: String,
     authorized: bool,
+    concurrency_guard: Option<concurrency_limit::ConcurrencyGuard>,
 }
 
 /// Selects the upstream server, applies the header rules and builds the cache request. The route
@@ -902,6 +948,7 @@ where
         request_host,
         cache_key,
         authorized,
+        concurrency_guard,
     } = prepared;
     let resource_id = route.resource_id;
     let secure = info.proto != "http";
@@ -937,7 +984,7 @@ where
         .as_ref()
         .and_then(|cache| CacheRequest::new(cache, &mut req, cache_key, authorized));
     (
-        ProxiedRequest::Ok(req, upstream, span, cache_request),
+        ProxiedRequest::Ok(req, upstream, span, cache_request, concurrency_guard),
         response_rewriter,
     )
 }
@@ -1152,11 +1199,22 @@ where
     B::Error: Into<anyhow::Error>,
 {
     match req {
-        ProxiedRequest::Ok(req, upstream, span, cache_request) => {
+        ProxiedRequest::Ok(req, upstream, span, cache_request, guard) => {
             let req = req.map(|b| BoxBody::new(b.map_err(Into::into)));
-            cache::fetch(&upstream, req, cache_request)
+            let res = cache::fetch(&upstream, req, cache_request)
                 .instrument(span)
-                .await
+                .await;
+            match res {
+                Ok(resp) => {
+                    let (parts, body) = resp.into_parts();
+                    let guarded = concurrency_limit::GuardedBody::new(body, guard);
+                    Ok(Response::from_parts(parts, BoxBody::new(guarded)))
+                }
+                Err(err) => {
+                    drop(guard);
+                    Err(err)
+                }
+            }
         }
         ProxiedRequest::Respond(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
         ProxiedRequest::Err(err) => {

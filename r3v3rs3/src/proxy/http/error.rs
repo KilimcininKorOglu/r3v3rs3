@@ -24,6 +24,9 @@ pub enum ProxyError {
     #[error("too many requests")]
     TooManyRequests { retry_after: Duration },
 
+    #[error("too many concurrent requests")]
+    TooManyConcurrentRequests,
+
     #[error("authentication required")]
     Unauthorized { challenge: HeaderValue },
 
@@ -58,7 +61,9 @@ impl ProxyError {
             Self::NoRouteFound => StatusCode::BAD_GATEWAY,
             Self::IpNotAllowed | Self::ClientCertRequired => StatusCode::FORBIDDEN,
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
-            Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::TooManyRequests { .. } | Self::TooManyConcurrentRequests => {
+                StatusCode::TOO_MANY_REQUESTS
+            }
             Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
             Self::AuthServiceUnavailable
             | Self::UpstreamClientCertInvalid
@@ -76,6 +81,9 @@ pub fn error_headers(err: &anyhow::Error) -> HeaderMap {
         Some(ProxyError::TooManyRequests { retry_after }) => {
             let seconds = retry_after.as_secs() + u64::from(retry_after.subsec_nanos() > 0);
             headers.insert(RETRY_AFTER, HeaderValue::from(seconds.max(1)));
+        }
+        Some(ProxyError::TooManyConcurrentRequests) => {
+            headers.insert(RETRY_AFTER, HeaderValue::from_static("1"));
         }
         Some(ProxyError::Unauthorized { challenge }) => {
             headers.insert(WWW_AUTHENTICATE, challenge.clone());

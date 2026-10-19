@@ -562,6 +562,29 @@ routes = [
 ]
 ```
 
+## Concurrency Limit
+
+You can limit the number of simultaneous (in-flight) requests for each HTTP / HTTPS proxy. While rate limiting restricts requests over a time window, concurrency limiting protects upstreams from being overloaded by slow or parallel requests.
+
+- **Max Concurrent Requests**: Maximum simultaneous active requests allowed. `0` disables concurrency limiting.
+- **Header (optional)**: Group active requests by a request header (such as `x-api-key`, `authorization`, or `x-client-id`) instead of client IP. When empty, requests are grouped by the client IP address resolved by the "Client IP" section.
+
+A client exceeding the concurrency limit immediately receives `429 Too Many Requests` with a `Retry-After: 1` header.
+
+A route can replace the proxy limit with "Override Concurrency Limit for This Route". A route override with `0` max concurrent requests disables concurrency limiting for that route.
+
+```toml
+[my-proxy]
+protocol = "http"
+vhosts = ["example.com"]
+concurrency_limit = { max = 20 }
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] },
+  { path = "/api", servers = [{ url = "http://127.0.0.1:8080/api" }], concurrency_limit = { max = 5, header = "x-api-key" } },
+  { path = "/health", servers = [{ url = "http://127.0.0.1:8080/health" }], concurrency_limit = { max = 0 } },
+]
+```
+
 ## Authentication
 
 You can require authentication for each HTTP / HTTPS proxy in the "Authentication" section. A route can replace the proxy authentication with "Override Authentication for This Route". Select "None" in the override to allow every client on that route.

@@ -2,6 +2,7 @@ use super::affinity::Affinity;
 use super::auth::{Authenticator, SessionService};
 use super::cache::HttpCache;
 use super::client_ip::ClientIpResolver;
+use super::concurrency_limit::ConcurrencyLimiter;
 use super::filter::{FilterResult, MatchRank, RequestFilter};
 use super::header_rules::CompiledHeaderRules;
 use super::mirror::Mirror;
@@ -16,7 +17,7 @@ use r3v3rs3_api::{
     compression::Compression,
     fixed_response::FixedResponse,
     id::ShortId,
-    policy::IpFilter,
+    policy::{ConcurrencyLimit, IpFilter, RateLimit},
     proxy::{CustomErrorPage, HttpProxy, ProxyEntry, ProxyKind, Route, Server},
     upstream::{
         CircuitBreaker, HealthCheck, LoadBalancing, RetryPolicy, StickyCookie, UpstreamTimeouts,
@@ -53,6 +54,9 @@ impl Router {
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
             let proxy_rate_limiter = registries.limiters.limiter((id, None), http.rate_limit);
+            let proxy_concurrency_limiter = registries
+                .concurrency_limiters
+                .limiter((id, None), http.concurrency_limit);
             let proxy_auth = Authenticator::new(http.auth, &tls_client_config, sessions, id);
             let proxy_header_rules = Arc::new(CompiledHeaderRules::new(&http.headers));
             let compression = (!http.compression.is_disabled()).then(|| Arc::new(http.compression));
@@ -76,14 +80,18 @@ impl Router {
                     upstream,
                     &registries.groups,
                 );
+                let (rate_limiter, concurrency_limiter) = resolve_route_limiters(
+                    registries,
+                    (id, Some(index)),
+                    route.rate_limit,
+                    route.concurrency_limit,
+                    &proxy_rate_limiter,
+                    &proxy_concurrency_limiter,
+                );
                 let ip_filter = route
                     .ip_filter
                     .map(Arc::new)
                     .unwrap_or_else(|| proxy_ip_filter.clone());
-                let rate_limiter = match route.rate_limit {
-                    Some(config) => registries.limiters.limiter((id, Some(index)), config),
-                    None => proxy_rate_limiter.clone(),
-                };
                 let auth = route.auth.map_or_else(
                     || proxy_auth.clone(),
                     |policy| Authenticator::new(policy, &tls_client_config, sessions, id),
@@ -104,6 +112,7 @@ impl Router {
                     client_ip: client_ip.clone(),
                     ip_filter,
                     rate_limiter,
+                    concurrency_limiter,
                     auth,
                     header_rules,
                     compression: compression.clone(),
@@ -148,6 +157,28 @@ impl Router {
         }
         best.map(|(_, route)| (route.filter.result(req), route))
     }
+}
+
+fn resolve_route_limiters(
+    registries: &ProxyRegistries,
+    key: (ShortId, Option<usize>),
+    route_rate: Option<RateLimit>,
+    route_concurrency: Option<ConcurrencyLimit>,
+    proxy_rate: &Option<Arc<ClientRateLimiter>>,
+    proxy_concurrency: &Option<Arc<ConcurrencyLimiter>>,
+) -> (
+    Option<Arc<ClientRateLimiter>>,
+    Option<Arc<ConcurrencyLimiter>>,
+) {
+    let rate_limiter = match route_rate {
+        Some(config) => registries.limiters.limiter(key, config),
+        None => proxy_rate.clone(),
+    };
+    let concurrency_limiter = match route_concurrency {
+        Some(config) => registries.concurrency_limiters.limiter(key, config),
+        None => proxy_concurrency.clone(),
+    };
+    (rate_limiter, concurrency_limiter)
 }
 
 /// The upstream settings of an HTTP proxy that its routes share.
@@ -290,6 +321,7 @@ pub struct FilteredRoute {
     pub client_ip: Arc<ClientIpResolver>,
     pub ip_filter: Arc<IpFilter>,
     pub rate_limiter: Option<Arc<ClientRateLimiter>>,
+    pub concurrency_limiter: Option<Arc<ConcurrencyLimiter>>,
     pub auth: Option<Arc<Authenticator>>,
     pub header_rules: Arc<CompiledHeaderRules>,
     /// `None` when the proxy has no compression algorithm.

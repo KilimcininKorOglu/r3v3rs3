@@ -48,6 +48,7 @@ pub(crate) fn tokio_resolver(
 #[derive(Debug, Default)]
 pub struct ProxyRegistries {
     pub limiters: http::rate_limit::LimiterRegistry,
+    pub concurrency_limiters: http::concurrency_limit::ConcurrencyRegistry,
     pub caches: http::cache::CacheRegistry,
     pub groups: health::GroupRegistry,
     pub srv: srv::SrvRegistry,

@@ -18,7 +18,7 @@ use r3v3rs3_api::header_rules::{HeaderRule, HeaderRules, format_header_rules};
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::mirror::{DEFAULT_MIRROR_BODY_SIZE, Mirror};
-use r3v3rs3_api::policy::{AuthPolicy, IpFilter, RateLimit, RatePeriod};
+use r3v3rs3_api::policy::{AuthPolicy, ConcurrencyLimit, IpFilter, RateLimit, RatePeriod};
 use r3v3rs3_api::proxy::{CustomErrorPage, HttpProxy, MaintenanceConfig, Route, Server, ServerUrl};
 use r3v3rs3_api::redirect::{RedirectRule, RedirectStatus};
 use r3v3rs3_api::rewrite::{PathRegex, PathRewrite};
@@ -59,6 +59,7 @@ struct ProxyForm {
     allow: String,
     deny: String,
     rate_limit: RateLimitForm,
+    concurrency_limit: ConcurrencyLimitForm,
     auth: AuthForm,
     access_list: Option<ShortId>,
     request_headers: String,
@@ -120,6 +121,7 @@ impl ProxyForm {
             allow: format_cidr_list(&proxy.ip_filter.allow),
             deny: format_cidr_list(&proxy.ip_filter.deny),
             rate_limit: RateLimitForm::new(&proxy.rate_limit),
+            concurrency_limit: ConcurrencyLimitForm::new(&proxy.concurrency_limit),
             auth: AuthForm::new(&proxy.auth),
             access_list: proxy.access_list,
             request_headers: format_header_rules(&proxy.headers.request),
@@ -425,6 +427,8 @@ struct RouteForm {
     deny: String,
     override_rate_limit: bool,
     rate_limit: RateLimitForm,
+    override_concurrency_limit: bool,
+    concurrency_limit: ConcurrencyLimitForm,
     override_auth: bool,
     auth: AuthForm,
     access_list: Option<ShortId>,
@@ -461,6 +465,10 @@ impl RouteForm {
             deny: format_cidr_list(&ip_filter.deny),
             override_rate_limit: route.rate_limit.is_some(),
             rate_limit: RateLimitForm::new(&route.rate_limit.unwrap_or_default()),
+            override_concurrency_limit: route.concurrency_limit.is_some(),
+            concurrency_limit: ConcurrencyLimitForm::new(
+                &route.concurrency_limit.clone().unwrap_or_default(),
+            ),
             override_auth: route.auth.is_some(),
             auth: AuthForm::new(&route.auth.clone().unwrap_or_default()),
             access_list: route.access_list,
@@ -508,6 +516,8 @@ impl RouteForm {
             deny: String::new(),
             override_rate_limit: false,
             rate_limit: RateLimitForm::new(&RateLimit::default()),
+            override_concurrency_limit: false,
+            concurrency_limit: ConcurrencyLimitForm::new(&ConcurrencyLimit::default()),
             override_auth: false,
             auth: AuthForm::new(&Default::default()),
             access_list: None,
@@ -629,6 +639,21 @@ impl RateLimitForm {
     }
 }
 
+#[derive(Clone, PartialEq)]
+struct ConcurrencyLimitForm {
+    max: String,
+    header: String,
+}
+
+impl ConcurrencyLimitForm {
+    fn new(limit: &ConcurrencyLimit) -> Self {
+        Self {
+            max: limit.max.to_string(),
+            header: limit.header.clone().unwrap_or_default(),
+        }
+    }
+}
+
 #[function_component(HttpProxyConfig)]
 pub fn http_proxy_config(props: &Props) -> Html {
     let locale = use_locale();
@@ -702,6 +727,16 @@ pub fn http_proxy_config(props: &Props) -> Html {
             ) }
             { error_view(errors.get("rate_limit")) }
             <p class={HINT_CLASS}>{locale.t("http_form.rate_limit_hint")}</p>
+
+            <label class={SECTION_CLASS}>{locale.t("http_form.concurrency_limit")}</label>
+            { concurrency_limit_view(
+                locale,
+                &form.concurrency_limit,
+                state_input(&form, text, |form, value| form.concurrency_limit.max = value),
+                state_input(&form, text, |form, value| form.concurrency_limit.header = value),
+            ) }
+            { error_view(errors.get("concurrency_limit")) }
+            <p class={HINT_CLASS}>{locale.t("http_form.concurrency_limit_hint")}</p>
 
             if form.access_list.is_none() {
                 <label class={SECTION_CLASS}>{locale.t("http_form.authentication")}</label>
@@ -826,6 +861,7 @@ fn route_view(
                 { route_ip_filter_view(locale, routes, index, route) }
             }
             { route_rate_limit_view(locale, routes, index, route) }
+            { route_concurrency_limit_view(locale, routes, index, route) }
             if route.access_list.is_none() {
                 { route_auth_view(locale, routes, index, route) }
             }
@@ -1110,6 +1146,33 @@ fn route_rate_limit_view(
             }),
             route_input(routes, index, text, |route, value| {
                 route.rate_limit.burst = value
+            }),
+        ),
+    )
+}
+
+fn route_concurrency_limit_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| {
+            route.override_concurrency_limit = value
+        }),
+        route.override_concurrency_limit,
+        "http_form.override_concurrency_limit",
+        "http_form.route_concurrency_limit_hint",
+        concurrency_limit_view(
+            locale,
+            &route.concurrency_limit,
+            route_input(routes, index, text, |route, value| {
+                route.concurrency_limit.max = value
+            }),
+            route_input(routes, index, text, |route, value| {
+                route.concurrency_limit.header = value
             }),
         ),
     )
@@ -1665,6 +1728,26 @@ fn rate_limit_view(
     }
 }
 
+fn concurrency_limit_view(
+    locale: Locale,
+    limit: &ConcurrencyLimitForm,
+    on_max: Callback<Event>,
+    on_header: Callback<Event>,
+) -> Html {
+    html! {
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("http_form.concurrency_max")}</label>
+                <input type="number" min="0" value={limit.max.clone()} onchange={on_max} class={INPUT_CLASS} />
+            </div>
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("http_form.concurrency_header")}</label>
+                <input type="text" autocapitalize="off" placeholder="X-API-Key" value={limit.header.clone()} onchange={on_header} class={INPUT_CLASS} />
+            </div>
+        </div>
+    }
+}
+
 /// The `period.<value>` keys name every rate period.
 fn period_label(locale: Locale, period: RatePeriod) -> String {
     locale.t(&format!("period.{}", period.as_str())).to_string()
@@ -2025,6 +2108,12 @@ fn get_proxy(
     );
     let (ip_filter, auth) = parse_proxy_access(locale, form, &mut errors);
     let rate_limit = parse_rate_limit(locale, &form.rate_limit, "rate_limit", &mut errors);
+    let concurrency_limit = parse_concurrency_limit(
+        locale,
+        &form.concurrency_limit,
+        "concurrency_limit",
+        &mut errors,
+    );
     let headers = parse_header_rules_form(
         locale,
         &form.request_headers,
@@ -2068,6 +2157,7 @@ fn get_proxy(
         },
         ip_filter,
         rate_limit,
+        concurrency_limit,
         auth,
         access_list: form.access_list,
         headers,
@@ -2463,6 +2553,32 @@ fn parse_rate_limit(
     }
 }
 
+fn parse_concurrency_limit(
+    locale: Locale,
+    form: &ConcurrencyLimitForm,
+    key: &str,
+    errors: &mut HashMap<String, String>,
+) -> ConcurrencyLimit {
+    let max = or_error(
+        parse_count(locale, &form.max, "http_form.concurrency_max"),
+        key,
+        errors,
+    );
+    let header = form.header.trim();
+    let header = if header.is_empty() {
+        None
+    } else {
+        if !r3v3rs3_api::policy::is_header_name(header) {
+            errors.insert(
+                key.into(),
+                locale.tf("error.invalid_header_name", &[("name", header)]),
+            );
+        }
+        Some(header.to_string())
+    };
+    ConcurrencyLimit { max, header }
+}
+
 fn parse_count(locale: Locale, value: &str, name_key: &str) -> Result<u32, String> {
     let value = value.trim();
     if value.is_empty() {
@@ -2546,6 +2662,9 @@ fn parse_route(
     let rate_limit = route
         .override_rate_limit
         .then(|| parse_rate_limit(locale, &route.rate_limit, key, errors));
+    let concurrency_limit = route
+        .override_concurrency_limit
+        .then(|| parse_concurrency_limit(locale, &route.concurrency_limit, key, errors));
     let auth = (own_access && route.override_auth)
         .then(|| or_error(route.auth.parse(locale), key, errors));
     let headers = route.override_headers.then(|| {
@@ -2572,6 +2691,7 @@ fn parse_route(
         path: route.path.clone(),
         ip_filter,
         rate_limit,
+        concurrency_limit,
         auth,
         access_list: route.access_list,
         headers,
@@ -3152,5 +3272,29 @@ mod tests {
         let mut errors = HashMap::new();
         parse_error_pages(Locale::En, &invalid, &mut errors);
         assert!(errors.contains_key("error_pages_0_status"));
+    }
+
+    #[test]
+    fn concurrency_limit_form_round_trips_and_validates_header() {
+        let limit = ConcurrencyLimit {
+            max: 10,
+            header: Some("x-api-key".into()),
+        };
+        let form = ConcurrencyLimitForm::new(&limit);
+        assert_eq!(form.max, "10");
+        assert_eq!(form.header, "x-api-key");
+
+        let mut errors = HashMap::new();
+        let parsed = parse_concurrency_limit(Locale::En, &form, "test", &mut errors);
+        assert!(errors.is_empty());
+        assert_eq!(parsed, limit);
+
+        let invalid = ConcurrencyLimitForm {
+            max: "abc".into(),
+            header: "bad header!".into(),
+        };
+        let mut errors = HashMap::new();
+        let _ = parse_concurrency_limit(Locale::En, &invalid, "test", &mut errors);
+        assert!(errors.contains_key("test"));
     }
 }

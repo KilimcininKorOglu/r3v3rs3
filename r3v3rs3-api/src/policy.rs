@@ -1,3 +1,4 @@
+use crate::error::Error;
 use crate::proxy::ServerUrl;
 use ipnet::IpNet;
 use serde_derive::{Deserialize, Serialize};
@@ -97,6 +98,36 @@ impl RatePeriod {
 
 fn is_zero(value: &u32) -> bool {
     *value == 0
+}
+
+/// Limits concurrent in-flight requests per client IP address or request header (e.g. API key).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ConcurrencyLimit {
+    /// Maximum concurrent in-flight requests allowed. Zero disables the limit.
+    #[serde(default)]
+    pub max: u32,
+
+    /// Request header name to group concurrency by (e.g. "X-API-Key").
+    /// When None or empty, the client IP address is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
+}
+
+impl ConcurrencyLimit {
+    pub fn is_disabled(&self) -> bool {
+        self.max == 0
+    }
+
+    pub fn validate(&self) -> Result<(), Error> {
+        if let Some(ref header) = self.header
+            && !is_header_name(header)
+        {
+            return Err(Error::InvalidHeaderName {
+                name: header.clone(),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Requires clients to authenticate before a request reaches the upstream server.
@@ -469,5 +500,25 @@ mod tests {
             &oidc.allowed_emails
         ));
         assert!(is_email_allowed("anyone@anywhere.com", &[]));
+    }
+
+    #[test]
+    fn concurrency_limit_disabled_and_validation() {
+        let default_limit = ConcurrencyLimit::default();
+        assert!(default_limit.is_disabled());
+        assert!(default_limit.validate().is_ok());
+
+        let active_limit = ConcurrencyLimit {
+            max: 5,
+            header: Some("X-API-Key".into()),
+        };
+        assert!(!active_limit.is_disabled());
+        assert!(active_limit.validate().is_ok());
+
+        let invalid_header = ConcurrencyLimit {
+            max: 5,
+            header: Some("invalid header".into()),
+        };
+        assert!(invalid_header.validate().is_err());
     }
 }

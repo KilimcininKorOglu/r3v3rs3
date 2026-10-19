@@ -6,7 +6,7 @@ use crate::error::Error;
 use crate::fixed_response::FixedResponse;
 use crate::header_rules::HeaderRules;
 use crate::mirror::Mirror;
-use crate::policy::{AuthPolicy, IpFilter, RateLimit};
+use crate::policy::{AuthPolicy, ConcurrencyLimit, IpFilter, RateLimit};
 use crate::proxy_protocol::ProxyProtocolVersion;
 use crate::redirect::RedirectRule;
 use crate::rewrite::PathRewrite;
@@ -139,7 +139,12 @@ fn validate_route_overrides(http: &HttpProxy) -> Result<(), Error> {
         .iter()
         .filter_map(|route| route.sticky.as_ref())
         .chain([&http.sticky])
-        .try_for_each(StickyCookie::validate)
+        .try_for_each(StickyCookie::validate)?;
+    http.routes
+        .iter()
+        .filter_map(|route| route.concurrency_limit.as_ref())
+        .chain([&http.concurrency_limit])
+        .try_for_each(ConcurrencyLimit::validate)
 }
 
 /// Rejects an access list next to the IP filter or the authentication of the same proxy or route.
@@ -227,6 +232,9 @@ pub struct HttpProxy {
     /// Default request rate limit of each client for every route of this proxy.
     #[serde(default, skip_serializing_if = "RateLimit::is_disabled")]
     pub rate_limit: RateLimit,
+    /// Default concurrent in-flight request limit for every route of this proxy.
+    #[serde(default, skip_serializing_if = "ConcurrencyLimit::is_disabled")]
+    pub concurrency_limit: ConcurrencyLimit,
     /// Default authentication for every route of this proxy.
     #[serde(default, skip_serializing_if = "AuthPolicy::is_none")]
     pub auth: AuthPolicy,
@@ -458,6 +466,9 @@ pub struct Route {
     /// Replaces the proxy rate limit for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<RateLimit>,
+    /// Replaces the proxy concurrency limit for this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency_limit: Option<ConcurrencyLimit>,
     /// Replaces the proxy authentication for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthPolicy>,
