@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] - 2026-10-19
+
+### Added
+- Built-in OIDC and OAuth2 authentication: authenticate users via external OpenID Connect and OAuth2 identity providers (Google, GitHub, Authentik, Keycloak, etc.) alongside local credentials.
+- Least connections (`least_conn`) load balancing and replica sticky sessions: route requests to the upstream with the fewest active connections, and support cookie-based sticky sessions across app replicas and agent targets.
+- Stale-while-revalidate caching and instant purge endpoint: serve stale cache entries while asynchronously revalidating in the background, with an API endpoint and CLI command to purge cached routes on demand.
+- Maintenance mode for proxies: one-click maintenance mode toggle returning custom 503 pages while preserving underlying proxy configuration.
+- App store catalog enhancement: categories, real-time search, filtering, and screenshot previews in the one-click application catalog.
+- Configuration backup and restore: export and import full r3v3rs3 configuration archives (ports, proxies, access lists, accounts) via API, CLI, and WebUI.
+- App resource alert rules: automated CPU and memory threshold monitoring with notifications when app containers exceed configured resource limits.
+
+### Fixed
+- WebAuthn RP ID resolution: resolve WebAuthn `rp.id` taking `X-Forwarded-Host` into account when the admin panel is accessed through reverse proxy domains.
+- Unified catalog refresh buttons: align styling, behavior, and status indicators across catalog refresh actions in the WebUI.
+
 ## [2.0.4] - 2026-10-18
 
 ### Added
