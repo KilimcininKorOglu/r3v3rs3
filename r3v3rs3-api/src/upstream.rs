@@ -142,6 +142,8 @@ pub enum LoadBalancing {
     /// Uses the servers in turn, each server as often as its weight.
     #[default]
     RoundRobin,
+    /// Uses the server with the least active connections, weighted by server weight.
+    LeastConn,
     /// Uses a random server. The chance of a server is proportional to its weight.
     Random,
     /// Uses the first healthy server in the list. The other servers are backups.
@@ -152,8 +154,9 @@ pub enum LoadBalancing {
 }
 
 impl LoadBalancing {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::RoundRobin,
+        Self::LeastConn,
         Self::Random,
         Self::First,
         Self::ClientIpHash,
@@ -162,6 +165,7 @@ impl LoadBalancing {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::RoundRobin => "round_robin",
+            Self::LeastConn => "least_conn",
             Self::Random => "random",
             Self::First => "first",
             Self::ClientIpHash => "client_ip_hash",
@@ -456,7 +460,7 @@ fn default_retry_on() -> Vec<RetryOn> {
     vec![RetryOn::Connect]
 }
 
-fn default_sticky_cookie_name() -> String {
+pub fn default_sticky_cookie_name() -> String {
     DEFAULT_STICKY_COOKIE_NAME.to_string()
 }
 

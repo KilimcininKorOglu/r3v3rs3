@@ -599,6 +599,7 @@
   "http_form.whole_number": "{name} tam sayı olmalıdır",
   "load_balancing.client_ip_hash": "İstemci IP hash'i",
   "load_balancing.first": "İlk sağlıklı sunucu",
+  "load_balancing.least_conn": "En az bağlantı (least conn)",
   "load_balancing.random": "Rastgele",
   "load_balancing.round_robin": "Round robin",
   "log.empty": "Log yok.",

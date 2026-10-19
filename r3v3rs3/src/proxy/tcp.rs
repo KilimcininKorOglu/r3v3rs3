@@ -1,6 +1,6 @@
 use super::{
     PortContextEvent, PortStatus, SocketState,
-    health::{self, GroupRegistry, Probe, UpstreamGroup},
+    health::{self, ConnGuard, GroupRegistry, Probe, UpstreamGroup},
     proxy_protocol::{self, Client},
     spawn_connection,
     tls::{Handshake, PortTls, TlsTermination, port_acceptor, port_tls, upstream_client_config},
@@ -228,7 +228,7 @@ impl TcpUpstream {
         &self,
         resolver: &Resolver,
         client: ClientAddrs,
-    ) -> anyhow::Result<(SocketAddr, Box<dyn IoStream>)> {
+    ) -> anyhow::Result<(SocketAddr, Box<dyn IoStream>, ConnGuard)> {
         let mut result = Err(anyhow::anyhow!("the proxy has no upstream server"));
         let permits = self
             .group
@@ -239,15 +239,16 @@ impl TcpUpstream {
             let Some(conn) = self.servers.get(permit.index()) else {
                 continue;
             };
-            result = connect_server(conn, resolver, client).await;
-            match &result {
-                Ok(_) => {
-                    permit.success();
-                    break;
+            let conn_res = connect_server(conn, resolver, client).await;
+            match conn_res {
+                Ok((addr, stream)) => {
+                    let guard = permit.success_keep();
+                    return Ok((addr, stream, guard));
                 }
                 Err(err) => {
                     permit.failure(&err.to_string());
                     warn!(%err, "failed to connect to the upstream server");
+                    result = Err(err);
                 }
             }
         }
@@ -294,7 +295,7 @@ async fn start(
         }
     }
 
-    let (target, mut out) = upstream.connect(&resolver, (remote, local)).await?;
+    let (target, mut out, _guard) = upstream.connect(&resolver, (remote, local)).await?;
     info!(target: "r3v3rs3::access_log", remote = %remote, %peer, %local, %target);
 
     if let Err(err) = tokio::io::copy_bidirectional(&mut stream, &mut out).await {

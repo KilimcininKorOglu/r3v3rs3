@@ -223,6 +223,7 @@ fn app_request(
             targets: Vec::new(),
             load_balancing: None,
             alert_rules: None,
+            sticky: None,
         },
     })
 }

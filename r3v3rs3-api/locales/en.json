@@ -599,6 +599,7 @@
   "http_form.whole_number": "{name} must be a whole number",
   "load_balancing.client_ip_hash": "Client IP hash",
   "load_balancing.first": "First healthy server",
+  "load_balancing.least_conn": "Least connections",
   "load_balancing.random": "Random",
   "load_balancing.round_robin": "Round robin",
   "log.empty": "No logs.",

@@ -355,11 +355,12 @@ routes = [
 Birden fazla upstream sunucusu olan proxy veya HTTP route, istekleri ve bağlantıları `load_balancing` değerine göre dağıtır:
 
 - `round_robin` (varsayılan) sunucuları sırayla kullanır.
+- `least_conn` yeni istek veya bağlantıları sunucu ağırlıklarını hesaba katarak en az aktif bağlantıya sahip sunucuya yönlendirir.
 - `random` rastgele bir sunucu seçer.
 - `first` ilk sağlıklı sunucuyu kullanır. Diğer sunucular yedektir.
 - `client_ip_hash` istemciyi IP adresine göre seçer: o sunucu sağlıklı kaldıkça aynı istemci aynı sunucuya gider. HTTP proxy, belirlenen istemci IP adresini kullanır (bkz. [İstemci IP adresi](#istemci-ip-adresi)). Bir sunucu sağlıksız olursa, servis dışına alınırsa veya silinirse yalnız o sunucunun istemcileri diğer sunuculara geçer.
 
-Her sunucunun `0` ile `65535` arasında bir `weight` değeri vardır (varsayılan `1`). `round_robin` her sunucuyu ağırlığı kadar kullanır. nginx'in smooth weighted round robin yöntemindeki gibi, bir sunucunun sıraları döngüye yayılır. Örneğin `3` ve `1` ağırlıklarında her dört isteğin üçü ilk sunucuya gider. `random` sunucuyu ağırlığıyla orantılı bir olasılıkla seçer. `client_ip_hash` her sunucuya, ağırlığıyla orantılı sayıda istemci adresi verir. `first` ağırlığı dikkate almaz. `weight = 0` olan sunucu, diğer bütün sunucular sağlıksız olsa da yeni istek veya bağlantı almaz. Bu yüzden bir sunucuyu silmeden servis dışına alabilirsiniz. Sunucunun açık TCP bağlantıları ve UDP oturumları devam eder. Her proxy'nin veya HTTP route'unun en az bir sunucusunun ağırlığı `0`'dan büyük olmalıdır.
+Her sunucunun `0` ile `65535` arasında bir `weight` değeri vardır (varsayılan `1`). `round_robin` her sunucuyu ağırlığı kadar kullanır. nginx'in smooth weighted round robin yöntemindeki gibi, bir sunucunun sıraları döngüye yayılır. `least_conn` sunucuları aktif bağlantı sayısının ağırlığa bölümüne göre (`aktif / ağırlık`) sıralar. Örneğin `3` ve `1` ağırlıklarında her dört isteğin üçü ilk sunucuya gider. `random` sunucuyu ağırlığıyla orantılı bir olasılıkla seçer. `client_ip_hash` her sunucuya, ağırlığıyla orantılı sayıda istemci adresi verir. `first` ağırlığı dikkate almaz. `weight = 0` olan sunucu, diğer bütün sunucular sağlıksız olsa da yeni istek veya bağlantı almaz. Bu yüzden bir sunucuyu silmeden servis dışına alabilirsiniz. Sunucunun açık TCP bağlantıları ve UDP oturumları devam eder. Her proxy'nin veya HTTP route'unun en az bir sunucusunun ağırlığı `0`'dan büyük olmalıdır.
 
 HTTP proxy her istek için, TCP proxy her bağlantı için, UDP proxy her istemci oturumu için bir sunucu seçer. Her HTTP route'unun sunucuları ayrı bir gruptur.
 
@@ -434,7 +435,7 @@ routes = [
 
 ## Sticky Session'lar
 
-`sticky`, HTTP proxy'nin her istemcisini bir cookie ile tek bir upstream sunucusunda tutar. Varsayılan olarak kapalıdır.
+`sticky`, HTTP proxy'nin her istemcisini bir cookie ile tek bir upstream sunucusunda tutar. Varsayılan olarak kapalıdır. Bireysel bir HTTP route'u da `route.sticky` ile kendi sticky session ayarını tanımlayabilir veya proxy ayarını geçersiz kılabilir.
 
 - İstemciye giden ilk yanıt `sticky.name` (varsayılan `r3v3rs3_affinity`) cookie'sini yazar. Cookie değeri proxy'nin, route'un ve sunucu URL'inin HMAC-SHA256 imzasıdır. Bu yüzden istemci sahte bir değerle sunucu seçemez. Route'un hiçbir sunucusuna uymayan değer dikkate alınmaz.
 - Geçerli cookie taşıyan istek, sunucu sağlıklı olduğu ve circuit'i açık olmadığı sürece aynı sunucuya gider. `weight = 0` olan sunucu sticky istemcilerini korur, böylece servis dışına alınan sunucu mevcut oturumlarını tamamlar. Aksi halde sunucuyu `load_balancing` seçer ve yanıt yeni bir cookie yazar. Başka bir sunucuya giden yeniden deneme de yeni bir cookie yazar.

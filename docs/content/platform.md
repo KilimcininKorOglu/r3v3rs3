@@ -449,7 +449,7 @@ When the master server is updated to a newer version, it can push the updated `r
 An app can deploy replicas across multiple agent targets and the local target simultaneously:
 
 - In `AppSpec`, set `targets` to a list of target IDs (e.g. `["local", "edge-1", "edge-2"]`).
-- Optionally specify `load_balancing` (`round_robin`, `random`, `first`, or `client_ip_hash`).
+- Optionally specify `load_balancing` (`round_robin`, `least_conn`, `random`, `first`, or `client_ip_hash`) and `sticky` cookie session settings.
 - When a deployment runs, the master prepares the image, runs the container, and waits for health checks across all specified targets.
 - Remote agent ports forward over loopback to the master, and the master's reverse proxy automatically balances traffic across all active replicas using the chosen load balancing algorithm.
 - If an individual agent becomes temporarily offline, the master continues routing traffic among the remaining healthy replicas.

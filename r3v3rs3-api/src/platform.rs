@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::git::{GitRef, RelPath, RepoUrl};
 use crate::id::ShortId;
 use crate::subject_name::SubjectName;
-use crate::upstream::LoadBalancing;
+use crate::upstream::{LoadBalancing, StickyCookie};
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -588,6 +588,10 @@ pub struct AppSpec {
     /// Optional resource alert rules that send notifications when CPU or memory exceeds the threshold.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alert_rules: Option<AlertRules>,
+
+    /// Optional sticky session (cookie-based) across replica targets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sticky: Option<StickyCookie>,
 }
 
 impl AppSpec {
@@ -612,6 +616,9 @@ impl AppSpec {
         }
         if let Some(rules) = &self.alert_rules {
             rules.validate()?;
+        }
+        if let Some(sticky) = &self.sticky {
+            sticky.validate()?;
         }
         self.validate_tag_trigger()
     }

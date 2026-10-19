@@ -84,6 +84,22 @@ async fn start_named_tcp_upstream(name: &'static str) -> anyhow::Result<TestPort
     Ok(port)
 }
 
+/// Starts a TCP upstream server that writes its name and keeps the connection open until closed.
+async fn start_held_tcp_upstream(name: &'static str) -> anyhow::Result<TestPort> {
+    let port = alloc_tcp_port().await?;
+    let listener = TcpListener::bind(port.socket_addr()).await?;
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let _ = stream.write_all(name.as_bytes()).await;
+                let mut buf = [0u8; 1];
+                let _ = stream.read(&mut buf).await;
+            });
+        }
+    });
+    Ok(port)
+}
+
 /// Starts a UDP upstream server that answers each packet with its name.
 async fn start_named_udp_upstream(name: &'static str) -> anyhow::Result<TestPort> {
     let port = alloc_udp_port().await?;
@@ -979,6 +995,101 @@ async fn http_one_attempt_disables_retries() -> anyhow::Result<()> {
     with_server(config, |_| async move {
         let resp = reqwest::get(proxy_port.http_url("/")).await?;
         assert_eq!(resp.status(), 502);
+        Ok(())
+    })
+    .await
+}
+
+async fn read_one_char(stream: &mut TcpStream) -> anyhow::Result<char> {
+    let mut buf = [0u8; 1];
+    timeout(Duration::from_secs(5), stream.read_exact(&mut buf)).await??;
+    Ok(buf[0] as char)
+}
+
+#[tokio::test]
+async fn tcp_least_conn_balances_by_active_connections() -> anyhow::Result<()> {
+    let a = start_held_tcp_upstream("a").await?;
+    let b = start_held_tcp_upstream("b").await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let tcp = TcpProxy {
+        upstream_servers: tcp_servers(&[&a, &b]),
+        load_balancing: LoadBalancing::LeastConn,
+        ..Default::default()
+    };
+    let config = storage(vec![(
+        "tcplc",
+        proxy_port.multiaddr_tcp(),
+        ProxyKind::Tcp(tcp),
+    )]);
+
+    with_server(config, |_| async move {
+        // First connection goes to a (index 0).
+        let mut s1 = TcpStream::connect(proxy_port.socket_addr()).await?;
+        assert_eq!(read_one_char(&mut s1).await?, 'a');
+
+        // With a active, second connection must go to b.
+        let mut s2 = TcpStream::connect(proxy_port.socket_addr()).await?;
+        assert_eq!(read_one_char(&mut s2).await?, 'b');
+
+        // Close connection 1 (releasing a).
+        drop(s1);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // With b still active and a idle, connection 3 must go to a.
+        let mut s3 = TcpStream::connect(proxy_port.socket_addr()).await?;
+        assert_eq!(read_one_char(&mut s3).await?, 'a');
+
+        drop(s2);
+        drop(s3);
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn sticky_cookie_route_override_sets_custom_cookie() -> anyhow::Result<()> {
+    let a = start_cookie_upstream("a").await?;
+    let b = start_cookie_upstream("b").await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let servers = vec![
+        Server::new(a.as_str().parse()?),
+        Server::new(b.as_str().parse()?),
+    ];
+    let proxy = http(HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![
+            Route {
+                path: "/custom".into(),
+                servers: servers.clone(),
+                sticky: Some(StickyCookie {
+                    enabled: true,
+                    name: "custom_sticky".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            Route {
+                servers,
+                ..Default::default()
+            },
+        ],
+        sticky: StickyCookie {
+            enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let config = storage(vec![("stkovr", proxy_port.multiaddr_http(), proxy)]);
+
+    with_server(config, |_| async move {
+        let (status, _, cookie) = get_with_cookie(proxy_port.http_url("/"), None).await?;
+        assert_eq!(status, 200);
+        assert!(cookie.is_none(), "default route should not set cookie");
+
+        let (status, _, cookie) = get_with_cookie(proxy_port.http_url("/custom"), None).await?;
+        assert_eq!(status, 200);
+        let cookie = cookie.expect("route override should set cookie");
+        assert!(cookie.starts_with("custom_sticky="), "{cookie}");
         Ok(())
     })
     .await

@@ -131,7 +131,12 @@ fn validate_route_overrides(http: &HttpProxy) -> Result<(), Error> {
         .iter()
         .filter_map(|route| route.timeouts.as_ref())
         .chain([&http.timeouts])
-        .try_for_each(UpstreamTimeouts::validate)
+        .try_for_each(UpstreamTimeouts::validate)?;
+    http.routes
+        .iter()
+        .filter_map(|route| route.sticky.as_ref())
+        .chain([&http.sticky])
+        .try_for_each(StickyCookie::validate)
 }
 
 /// Rejects an access list next to the IP filter or the authentication of the same proxy or route.
@@ -441,6 +446,9 @@ pub struct Route {
     /// Replaces the proxy retry policy for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry: Option<RetryPolicy>,
+    /// Replaces the proxy sticky sessions for this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sticky: Option<StickyCookie>,
     /// Replaces the proxy request body limit for this route. `0` has no limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_body_size: Option<u64>,

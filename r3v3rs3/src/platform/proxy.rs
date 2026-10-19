@@ -53,6 +53,7 @@ pub fn app_proxy(
             ..Default::default()
         }],
         load_balancing: app.spec.load_balancing.unwrap_or_default(),
+        sticky: app.spec.sticky.clone().unwrap_or_default(),
         ..Default::default()
     };
     let key = app.id.to_string();
@@ -131,6 +132,7 @@ mod tests {
             targets: Vec::new(),
             load_balancing: None,
             alert_rules: None,
+            sticky: None,
         }
     }
 

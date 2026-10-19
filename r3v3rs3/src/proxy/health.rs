@@ -12,7 +12,10 @@ use rand::RngExt;
 use std::{
     hash::Hasher,
     net::IpAddr,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 use tokio::{io::AsyncWriteExt, net::TcpStream, task::JoinSet, time::MissedTickBehavior};
@@ -43,6 +46,8 @@ pub struct UpstreamGroup {
     /// resets the health.
     breakers: Vec<Mutex<Breaker>>,
     probe: Mutex<Option<Arc<Probe>>>,
+    /// Active connections or in-flight requests per server.
+    active_conns: Vec<Arc<AtomicUsize>>,
 }
 
 #[derive(Debug, Default)]
@@ -193,6 +198,7 @@ pub struct Permit {
     index: usize,
     trial: bool,
     reported: bool,
+    active_conn: Option<Arc<AtomicUsize>>,
 }
 
 impl Permit {
@@ -204,6 +210,20 @@ impl Permit {
     pub fn success(mut self) {
         self.group.report_success(self.index);
         self.record(None);
+    }
+
+    /// The server answered, or accepted the connection, and keeps the active connection count.
+    pub fn success_keep(mut self) -> ConnGuard {
+        self.group.report_success(self.index);
+        self.record(None);
+        self.into_guard()
+    }
+
+    fn into_guard(mut self) -> ConnGuard {
+        self.reported = true;
+        ConnGuard {
+            active_conn: self.active_conn.take(),
+        }
     }
 
     /// The connection failed, or the server did not answer.
@@ -227,8 +247,25 @@ impl Permit {
 
 impl Drop for Permit {
     fn drop(&mut self) {
+        if let Some(ref c) = self.active_conn {
+            c.fetch_sub(1, Ordering::SeqCst);
+        }
         if self.trial && !self.reported {
             self.group.release_trial(self.index);
+        }
+    }
+}
+
+/// Holds an active connection count until dropped.
+#[derive(Debug, Default)]
+pub struct ConnGuard {
+    active_conn: Option<Arc<AtomicUsize>>,
+}
+
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        if let Some(ref c) = self.active_conn {
+            c.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -430,6 +467,9 @@ impl UpstreamGroup {
         let servers = members.iter().map(|_| Mutex::default()).collect();
         let current_weights = Mutex::new(vec![0; members.len()]);
         let breakers = members.iter().map(|_| Mutex::default()).collect();
+        let active_conns = (0..members.len())
+            .map(|_| Arc::new(AtomicUsize::new(0)))
+            .collect();
         Self {
             members,
             policy,
@@ -439,6 +479,7 @@ impl UpstreamGroup {
             circuit_breaker: CircuitBreaker::default(),
             breakers,
             probe: Mutex::new(None),
+            active_conns,
         }
     }
 
@@ -479,10 +520,30 @@ impl UpstreamGroup {
     fn order(&self, servers: Vec<usize>, client: IpAddr) -> Vec<usize> {
         match self.policy {
             LoadBalancing::RoundRobin => self.order_round_robin(servers),
+            LoadBalancing::LeastConn => self.order_least_conn(servers),
             LoadBalancing::Random => self.order_random(servers),
             LoadBalancing::First => servers,
             LoadBalancing::ClientIpHash => self.order_hash(servers, client),
         }
+    }
+
+    /// Orders servers by least active connections, weighted by server weight.
+    /// A lower score `active_conns / weight` goes first.
+    fn order_least_conn(&self, servers: Vec<usize>) -> Vec<usize> {
+        let mut keyed = servers
+            .into_iter()
+            .map(|index| {
+                let active = self
+                    .active_conns
+                    .get(index)
+                    .map_or(0, |c| c.load(Ordering::Relaxed));
+                let weight = self.weight(index).max(1);
+                let score = (active as f64) / f64::from(weight);
+                (score, index)
+            })
+            .collect::<Vec<_>>();
+        keyed.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        keyed.into_iter().map(|(_, index)| index).collect()
     }
 
     /// The weighted rendezvous hash: each server gets the score `-ln(u) / weight` for a `u` in
@@ -566,12 +627,24 @@ impl UpstreamGroup {
         } else {
             false
         };
+        let active_conn = self.active_conns.get(index).cloned();
+        if let Some(ref c) = active_conn {
+            c.fetch_add(1, Ordering::SeqCst);
+        }
         Some(Permit {
             group: self.clone(),
             index,
             trial,
             reported: false,
+            active_conn,
         })
+    }
+
+    /// Number of active connections or in-flight requests on the server.
+    pub fn active_connections(&self, index: usize) -> usize {
+        self.active_conns
+            .get(index)
+            .map_or(0, |c| c.load(Ordering::SeqCst))
     }
 
     fn record_circuit(&self, index: usize, trial: bool, failure: Option<&str>) {
@@ -806,6 +879,42 @@ mod tests {
             .map(|_| group.candidates(CLIENT)[0])
             .collect::<Vec<_>>();
         assert_eq!(first, [0, 0, 1, 0, 2, 0, 0, 0, 0, 1, 0, 2, 0, 0]);
+    }
+
+    #[test]
+    fn least_conn_orders_by_active_connections_and_weights() {
+        let group = Arc::new(UpstreamGroup::new(
+            members(&[1, 1, 1]),
+            LoadBalancing::LeastConn,
+            HealthCheck::default(),
+        ));
+        assert_eq!(group.candidates(CLIENT), [0, 1, 2]);
+
+        let permit0 = group.acquire(0).unwrap();
+        assert_eq!(group.active_connections(0), 1);
+        assert_eq!(group.candidates(CLIENT), [1, 2, 0]);
+
+        let permit1 = group.acquire(1).unwrap();
+        assert_eq!(group.candidates(CLIENT), [2, 0, 1]);
+
+        drop(permit0);
+        assert_eq!(group.active_connections(0), 0);
+        assert_eq!(group.candidates(CLIENT), [0, 2, 1]);
+
+        drop(permit1);
+
+        let weighted = Arc::new(UpstreamGroup::new(
+            members(&[2, 1]),
+            LoadBalancing::LeastConn,
+            HealthCheck::default(),
+        ));
+        assert_eq!(weighted.candidates(CLIENT), [0, 1]);
+
+        let _p0 = weighted.acquire(0).unwrap();
+        assert_eq!(weighted.candidates(CLIENT), [1, 0]);
+
+        let _p1 = weighted.acquire(1).unwrap();
+        assert_eq!(weighted.candidates(CLIENT), [0, 1]);
     }
 
     #[test]

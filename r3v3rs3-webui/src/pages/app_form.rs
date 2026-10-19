@@ -12,7 +12,9 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, AppRequest, AppSource, AppSpec, LOCAL_TARGET, TargetEntry};
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::store::StoreApp;
+use r3v3rs3_api::upstream::{DEFAULT_STICKY_COOKIE_NAME, StickyCookie};
 use std::str::FromStr;
+use std::time::Duration;
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
@@ -94,6 +96,9 @@ pub struct AppForm {
     pub load_balancing: String,
     pub alert_cpu_percent: String,
     pub alert_memory_mb: String,
+    pub sticky_enabled: bool,
+    pub sticky_name: String,
+    pub sticky_max_age: String,
 }
 
 impl Default for AppForm {
@@ -131,6 +136,9 @@ impl Default for AppForm {
             load_balancing: String::new(),
             alert_cpu_percent: String::new(),
             alert_memory_mb: String::new(),
+            sticky_enabled: false,
+            sticky_name: String::new(),
+            sticky_max_age: "0".to_string(),
         }
     }
 }
@@ -209,6 +217,18 @@ impl AppForm {
                 .and_then(|r| r.memory_bytes)
                 .map(|b| (b / BYTES_PER_MB).to_string())
                 .unwrap_or_default(),
+            sticky_enabled: spec.sticky.as_ref().is_some_and(|s| s.enabled),
+            sticky_name: spec
+                .sticky
+                .as_ref()
+                .map(|s| s.name.clone())
+                .unwrap_or_default(),
+            sticky_max_age: spec
+                .sticky
+                .as_ref()
+                .and_then(|s| s.max_age)
+                .map(|d| d.as_secs().to_string())
+                .unwrap_or_else(|| "0".into()),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -294,6 +314,28 @@ impl AppForm {
             targets,
             load_balancing,
             alert_rules,
+            sticky: self.parse_sticky(),
+        })
+    }
+
+    fn parse_sticky(&self) -> Option<StickyCookie> {
+        if !self.sticky_enabled {
+            return None;
+        }
+        let max_age_secs = self.sticky_max_age.trim().parse::<u64>().unwrap_or(0);
+        let max_age = if max_age_secs > 0 {
+            Some(Duration::from_secs(max_age_secs))
+        } else {
+            None
+        };
+        Some(StickyCookie {
+            enabled: true,
+            name: if self.sticky_name.trim().is_empty() {
+                DEFAULT_STICKY_COOKIE_NAME.to_string()
+            } else {
+                self.sticky_name.trim().to_string()
+            },
+            max_age,
         })
     }
 
@@ -335,6 +377,7 @@ impl AppForm {
             .collect::<Result<Vec<_>, _>>()?;
         let load_balancing = match self.load_balancing.as_str() {
             "round_robin" => Some(r3v3rs3_api::upstream::LoadBalancing::RoundRobin),
+            "least_conn" => Some(r3v3rs3_api::upstream::LoadBalancing::LeastConn),
             "random" => Some(r3v3rs3_api::upstream::LoadBalancing::Random),
             "first" => Some(r3v3rs3_api::upstream::LoadBalancing::First),
             "client_ip_hash" => Some(r3v3rs3_api::upstream::LoadBalancing::ClientIpHash),
@@ -890,6 +933,51 @@ fn replica_targets_view(
             <p class={HINT_CLASS}>{locale.t("apps.replica_targets_hint")}</p>
             if form.targets.len() > 1 {
                 { load_balancing_select(locale, form) }
+                { sticky_session_select(locale, form) }
+            }
+        </div>
+    }
+}
+
+fn sticky_session_select(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let form_clone = form.clone();
+    let toggle_cb = Callback::from(move |event: Event| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let mut next = (*form_clone).clone();
+        next.sticky_enabled = input.checked();
+        form_clone.set(next);
+    });
+    let form_name = form.clone();
+    let name_cb = Callback::from(move |event: Event| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let mut next = (*form_name).clone();
+        next.sticky_name = input.value();
+        form_name.set(next);
+    });
+    let form_age = form.clone();
+    let max_age_cb = Callback::from(move |event: Event| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let mut next = (*form_age).clone();
+        next.sticky_max_age = input.value();
+        form_age.set(next);
+    });
+    html! {
+        <div class="mt-3">
+            <label class="flex items-center gap-2 cursor-pointer text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                <input type="checkbox" checked={form.sticky_enabled} onchange={toggle_cb} />
+                <span>{locale.t("http_form.enable_sticky_cookie")}</span>
+            </label>
+            if form.sticky_enabled {
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 mt-2">
+                    <div>
+                        <label class={LABEL_CLASS}>{locale.t("http_form.sticky_cookie_name")}</label>
+                        <input type="text" autocapitalize="off" spellcheck="false" placeholder="r3v3rs3_affinity" value={form.sticky_name.clone()} onchange={name_cb} class={INPUT_CLASS} />
+                    </div>
+                    <div>
+                        <label class={LABEL_CLASS}>{locale.t("http_form.sticky_max_age")}</label>
+                        <input type="number" min="0" value={form.sticky_max_age.clone()} onchange={max_age_cb} class={INPUT_CLASS} />
+                    </div>
+                </div>
             }
         </div>
     }

@@ -449,7 +449,7 @@ Master sunucu yeni bir sürüme güncellendiğinde, güncel `r3v3rs3` çalışt�
 Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde replikalar halinde dağıtılabilir:
 
 - `AppSpec` içinde `targets` alanına hedef ID'leri listesi verilir (örn. `["local", "edge-1", "edge-2"]`).
-- İsteğe bağlı olarak `load_balancing` (`round_robin`, `random`, `first` veya `client_ip_hash`) seçilebilir.
+- İsteğe bağlı olarak `load_balancing` (`round_robin`, `least_conn`, `random`, `first` veya `client_ip_hash`) ve `sticky` çerez oturumu (sticky session) ayarları seçilebilir.
 - Bir deployment çalıştığında, master tüm belirtilen hedeflerde imajı hazırlar, konteyneri başlatır ve sağlık kontrollerini bekler.
 - Uzak agent portları master üzerinde loopback forwarder ile eşlenir ve master'ın ters proxysi seçilen yük dengeleme algoritmasıyla trafiği tüm etkin replikalar arasında otomatik dengeler.
 - Herhangi bir agent geçici olarak çevrimdışı kalırsa, master trafiği diğer sağlıklı replikalar arasında yönlendirmeye devam eder.

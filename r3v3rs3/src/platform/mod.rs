@@ -926,6 +926,7 @@ mod tests {
                 targets: Vec::new(),
                 load_balancing: None,
                 alert_rules: None,
+                sticky: None,
             },
         }
     }
