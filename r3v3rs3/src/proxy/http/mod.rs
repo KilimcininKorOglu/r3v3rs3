@@ -793,8 +793,7 @@ where
         Ok(req) => req,
         Err(proxied) => return (*proxied, response_rewriter),
     };
-    if let Some(response) = &route.response {
-        let response = fixed::respond(response, &req);
+    if let Some(response) = handle_purge_or_fixed(route, &req, info, &client, &action) {
         return (ProxiedRequest::Respond(response), response_rewriter);
     }
     if upstream.servers.is_empty() {
@@ -1228,4 +1227,46 @@ fn maintenance_response(
         res.headers_mut().insert(hyper::header::RETRY_AFTER, val);
     }
     res
+}
+
+fn handle_purge_request<B>(route: &FilteredRoute, req: &Request<B>) -> Response<Full<Bytes>> {
+    let (status, msg) = if let Some(cache) = &route.cache {
+        let path = req.uri().path_and_query().map_or("/", |p| p.as_str());
+        let count = cache.purge_path(path);
+        (
+            StatusCode::OK,
+            format!("Purged {} entries matching {}\n", count, req.uri()),
+        )
+    } else {
+        (
+            StatusCode::BAD_REQUEST,
+            "Cache is not enabled for this proxy\n".to_string(),
+        )
+    };
+    let mut response = Response::new(Full::new(Bytes::from(msg)));
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        hyper::header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
+}
+
+fn handle_purge_or_fixed<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    info: &RequestInfo<'_>,
+    client: &client_ip::ClientAddr,
+    action: &str,
+) -> Option<Response<Full<Bytes>>> {
+    if req.method().as_str() == "PURGE" {
+        let resource_id = route.resource_id;
+        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, status = 200);
+        Some(handle_purge_request(route, req))
+    } else {
+        route
+            .response
+            .as_ref()
+            .map(|resp| fixed::respond(resp, req))
+    }
 }

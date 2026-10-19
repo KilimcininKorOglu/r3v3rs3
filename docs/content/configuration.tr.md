@@ -773,6 +773,7 @@ Proxy'den geçen yanıtları "Cache" bölümünden bellekte saklayabilirsiniz. C
 | `max_size` | `67108864` (64 MiB) | Saklanan yanıtlar için byte cinsinden bellek limiti. Cache dolunca r3v3rs3 en az kullanılan yanıtları siler. |
 | `max_entry_size` | `1048576` (1 MiB) | Gövdesi bu değerden büyük yanıtlar saklanmaz. |
 | `default_ttl` | `0s` | `Cache-Control: max-age`, `s-maxage` veya `Expires` içermeyen yanıtın geçerlilik süresi. Değer `0s` ise r3v3rs3 böyle bir yanıtı yalnız `ETag` veya `Last-Modified` header'ı varsa saklar ve her istekte yeniden doğrular. |
+| `stale_while_revalidate` | `0s` | Süresi dolmuş yanıtın arka planda asenkron olarak yeniden doğrulanırken istemciye hemen sunulacağı (`X-Cache: STALE`) pencere. Upstream `Cache-Control` içindeki `stale-while-revalidate` direktifi önceliklidir. |
 
 r3v3rs3 cache'i yalnız `Range`, `Upgrade` ve `Cache-Control: no-store` içermeyen `GET` ve `HEAD` isteklerinde kullanır. `HEAD` isteğine saklanan `GET` yanıtı verilir. İstemci `Cache-Control: no-cache` veya `Pragma: no-cache` gönderirse r3v3rs3 cache'e bakmadan isteği upstream sunucuya iletir ve gelen yeni yanıtı saklar. Cache key, istenen host ile isteğin yol ve sorgu değerinden oluşur. Bu yüzden yük dengelemenin seçtiği upstream sunucu key'i değiştirmez.
 
@@ -787,19 +788,27 @@ r3v3rs3 bir yanıtı yalnız şu koşulların hepsi sağlanırsa saklar:
 
 Geçerlilik süresi için sırasıyla `s-maxage`, `max-age`, `Expires` ve `default_ttl` değerlerine bakılır. `Cache-Control: no-cache` bu süreyi sıfır yapar. Saklanan yanıtın yaşına upstream yanıtındaki `Age` header'ının değeri de eklenir.
 
-Saklanan yanıtın süresi dolmuşsa ve yanıtta `ETag` veya `Last-Modified` header'ı varsa r3v3rs3 `If-None-Match` veya `If-Modified-Since` ile koşullu bir istek gönderir. Upstream sunucu `304 Not Modified` dönerse r3v3rs3 saklanan header'ları günceller ve cache'teki yanıtı gönderir. Validator'ı olan yanıt, süresi dolduktan sonra da bir saat cache'te kalır. Eşleşen `If-None-Match` veya `If-Modified-Since` header'ı gönderen istemci, cache'ten `304 Not Modified` alır.
+Saklanan yanıtın süresi dolmuşsa ve `stale_while_revalidate` (veya upstream `stale-while-revalidate` header direktifi) süresi henüz aşılmamışsa, r3v3rs3 istemciye hemen bayat yanıtı sunar (`X-Cache: STALE`) ve arka planda cache'i tazelemek üzere bloklamayan asenkron bir yeniden doğrulama başlatır. Birden fazla eşzamanlı isteğin aynı anda upstream'e yüklenmesini (dogpiling) engellemek için arka plan doğrulamaları her cache key başına kilitlenir.
+
+Saklanan yanıtın süresi dolmuşsa ve `stale_while_revalidate` penceresinin dışındaysa, yanıtta `ETag` veya `Last-Modified` header'ı varsa r3v3rs3 `If-None-Match` veya `If-Modified-Since` ile koşullu bir istek gönderir. Upstream sunucu `304 Not Modified` dönerse r3v3rs3 saklanan header'ları günceller ve cache'teki yanıtı gönderir. Validator'ı olan yanıt, süresi dolduktan sonra da bir saat cache'te kalır. Eşleşen `If-None-Match` veya `If-Modified-Since` header'ı gönderen istemci, cache'ten `304 Not Modified` alır.
 
 Her cache key için tek bir yanıt saklanır. Yanıtın `Vary` header'ı istek header'larını listeliyorsa saklanan yanıt yalnız bu header'larda aynı değerleri gönderen isteklere verilir.
 
-r3v3rs3, cache'i kullanabilecek isteklerdeki `Accept-Encoding` header'ını siler. Böylece upstream sunucu yanıtları encoding uygulamadan gönderir ve "Sıkıştırma" ayarları yanıtı her istemci için ayrıca sıkıştırır. Bu isteklere verilen yanıtlarda `X-Cache` header'ı bulunur: cache'ten gelen yanıt için `HIT`, upstream sunucudan gelen yanıt için `MISS`. Cache'ten gelen yanıtta ayrıca `Age` header'ı vardır.
+r3v3rs3, cache'i kullanabilecek isteklerdeki `Accept-Encoding` header'ını siler. Böylece upstream sunucu yanıtları encoding uygulamadan gönderir ve "Sıkıştırma" ayarları yanıtı her istemci için ayrıca sıkıştırır. Bu isteklere verilen yanıtlarda `X-Cache` header'ı bulunur: cache'ten gelen yanıt için `HIT`, upstream sunucudan gelen yanıt için `MISS`, arka plan doğrulaması sırasında sunulan yanıt için `STALE`. Cache'ten gelen yanıtta ayrıca `Age` header'ı vardır.
 
-Bir proxy'nin cache'ini boşaltmak için proxy listesindeki "Temizle" linkine tıklayın veya `DELETE /api/proxies/{id}/cache` isteği gönderin. Saklanan yanıtlar, cache ayarları değişene veya sunucu yeniden başlatılana kadar bellekte kalır.
+Cache'teki yanıtları temizlemek için:
+- `DELETE /api/proxies/{id}/cache` (veya belirli bir yol ön ekiyle eşleşen kayıtları silmek için `DELETE /api/proxies/{id}/cache?path=/api/v1/`).
+- `POST /api/proxies/{id}/cache/purge` isteği (isteğe bağlı JSON gövdesi `{"path": "/on-ek"}`).
+- Doğrudan proxy adresine HTTP `PURGE` metodu ile istek (ör. `curl -X PURGE https://app.example.com/data.json`).
+- Veya WebUI proxy listesindeki "Temizle" linkine tıklayın.
+
+Saklanan yanıtlar, cache ayarları değişene veya sunucu yeniden başlatılana kadar bellekte kalır.
 
 ```toml
 [my-app]
 protocol = "http"
 vhosts = ["app.example.com"]
-cache = { enabled = true, max_size = 67108864, max_entry_size = 1048576, default_ttl = "5m" }
+cache = { enabled = true, max_size = 67108864, max_entry_size = 1048576, default_ttl = "5m", stale_while_revalidate = "1m" }
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 

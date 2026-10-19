@@ -23,6 +23,21 @@ pub struct CacheConfig {
     #[serde(default, with = "humantime_serde")]
     #[schema(value_type = String, example = "5m")]
     pub default_ttl: Duration,
+
+    /// Stale-while-revalidate window duration. When non-zero, stale responses within this window
+    /// are served immediately while an asynchronous revalidation runs in the background.
+    /// Used as fallback when upstream does not supply `stale-while-revalidate` in Cache-Control.
+    #[serde(default, with = "humantime_serde")]
+    #[schema(value_type = String, example = "1m")]
+    pub stale_while_revalidate: Duration,
+}
+
+/// Request payload to purge specific or all cache entries.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CachePurge {
+    /// Optional URI path or prefix to purge. When empty or omitted, purges the entire cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 pub const DEFAULT_MAX_SIZE: u64 = 64 * 1024 * 1024;
@@ -59,12 +74,19 @@ mod tests {
 
     #[test]
     fn serde_fills_defaults() {
-        let config: CacheConfig =
-            serde_json::from_str(r#"{"enabled":true,"default_ttl":"5m"}"#).unwrap();
+        let config: CacheConfig = serde_json::from_str(
+            r#"{"enabled":true,"default_ttl":"5m","stale_while_revalidate":"30s"}"#,
+        )
+        .unwrap();
         assert_eq!(config.max_size, DEFAULT_MAX_SIZE);
         assert_eq!(config.max_entry_size, DEFAULT_MAX_ENTRY_SIZE);
         assert_eq!(config.default_ttl, Duration::from_secs(300));
+        assert_eq!(config.stale_while_revalidate, Duration::from_secs(30));
         assert!(CacheConfig::default().is_disabled());
+        assert_eq!(
+            CacheConfig::default().stale_while_revalidate,
+            Duration::ZERO
+        );
     }
 
     #[test]

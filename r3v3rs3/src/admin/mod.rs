@@ -484,7 +484,7 @@ fn proxy_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(proxies::dry_run))
         .routes(routes!(proxies::get, proxies::put, proxies::delete))
         .routes(routes!(proxies::status))
-        .routes(routes!(proxies::purge_cache))
+        .routes(routes!(proxies::purge_cache, proxies::purge_cache_post))
 }
 
 fn access_list_routes() -> OpenApiRouter<AppState> {

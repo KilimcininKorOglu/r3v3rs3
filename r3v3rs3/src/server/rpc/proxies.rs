@@ -80,6 +80,7 @@ impl RpcMethod for GetProxyStatus {
 
 pub struct PurgeProxyCache {
     pub id: ShortId,
+    pub path: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -92,6 +93,12 @@ impl RpcMethod for PurgeProxyCache {
             return Err(Error::IdNotFound {
                 id: self.id.to_string(),
             });
+        }
+        if let Some(path) = &self.path
+            && !path.trim().is_empty()
+        {
+            state.registries.caches.purge_path(self.id, path);
+            return Ok(());
         }
         let at = state.registries.caches.purge(self.id);
         state.storage.purge_shared_cache(self.id, at).await

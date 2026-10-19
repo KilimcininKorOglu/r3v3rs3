@@ -18,7 +18,7 @@ use moka::{Expiry, sync::Cache};
 use pin_project_lite::pin_project;
 use r3v3rs3_api::{cache::CacheConfig, id::ShortId};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     pin::Pin,
     sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError},
@@ -43,6 +43,7 @@ pub struct HttpCache {
     entries: Cache<String, Arc<CachedResponse>>,
     /// The responses that the nodes of a cluster share.
     share: Option<CacheShare>,
+    revalidating: Mutex<HashSet<String>>,
 }
 
 impl fmt::Debug for HttpCache {
@@ -57,18 +58,76 @@ impl fmt::Debug for HttpCache {
 
 impl HttpCache {
     fn new(config: CacheConfig, share: Option<CacheShare>) -> Self {
+        let default_swr = config.stale_while_revalidate;
         let entries = Cache::builder()
             .weigher(|key: &String, entry: &Arc<CachedResponse>| {
                 u32::try_from(key.len() + entry.weight()).unwrap_or(u32::MAX)
             })
             .max_capacity(config.max_size)
-            .expire_after(EntryExpiry)
+            .expire_after(EntryExpiry { default_swr })
             .build();
         Self {
             config,
             entries,
             share,
+            revalidating: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Removes every stored response whose URI path equals or starts with `path`.
+    pub fn purge_path(&self, path: &str) -> usize {
+        let trimmed = path.trim();
+        let mut count = 0;
+        for (key, _) in self.entries.iter() {
+            let key_path = key.split_once(' ').map(|(_, p)| p).unwrap_or(&key);
+            if key_path == trimmed || key_path.starts_with(trimmed) {
+                self.entries.invalidate(&*key);
+                count += 1;
+            }
+        }
+        count
+    }
+
+    fn mark_revalidating(&self, key: &str) -> bool {
+        lock(&self.revalidating).insert(key.to_string())
+    }
+
+    fn finish_revalidating(&self, key: &str) {
+        lock(&self.revalidating).remove(key);
+    }
+
+    fn refresh_entry(
+        &self,
+        key: &str,
+        entry: &CachedResponse,
+        headers: &HeaderMap,
+    ) -> Arc<CachedResponse> {
+        let mut head = entry.head.clone();
+        for name in headers.keys().filter(|name| **name != CONTENT_LENGTH) {
+            head.headers.remove(name);
+            for value in headers.get_all(name) {
+                head.headers.append(name, value.clone());
+            }
+        }
+        head.initial_age = age(headers);
+        head.freshness = freshness(&head.headers, self.config.default_ttl);
+        let refreshed = Arc::new(CachedResponse {
+            head,
+            body: entry.body.clone(),
+            stored_at: Instant::now(),
+        });
+        self.entries.insert(key.to_string(), refreshed.clone());
+        refreshed
+    }
+
+    fn store_entry(&self, key: &str, head: StoredHead, body: Bytes) -> Arc<CachedResponse> {
+        let entry = Arc::new(CachedResponse {
+            head,
+            body,
+            stored_at: Instant::now(),
+        });
+        self.entries.insert(key.to_string(), entry.clone());
+        entry
     }
 }
 
@@ -122,6 +181,14 @@ impl CacheRegistry {
         let at = unix_ms();
         self.purge_at(id, at);
         at
+    }
+
+    /// Removes stored responses of the proxy that match or begin with the path. Returns the purge time in Unix milliseconds.
+    pub fn purge_path(&self, id: ShortId, path: &str) -> u64 {
+        if let Some(cache) = self.caches.get(&id) {
+            cache.purge_path(path);
+        }
+        unix_ms()
     }
 
     /// Purges the cache of each proxy with a later purge than the last purge on this server.
@@ -193,6 +260,16 @@ impl CachedResponse {
         self.age() < self.head.freshness
     }
 
+    fn is_stale_revalidatable(&self, config_swr: Duration) -> bool {
+        let swr =
+            directive_seconds(&self.head.headers, "stale-while-revalidate").unwrap_or(config_swr);
+        if swr.is_zero() {
+            return false;
+        }
+        let age = self.age();
+        age >= self.head.freshness && age < self.head.freshness + swr
+    }
+
     fn matches(&self, request: &HeaderMap) -> bool {
         self.head
             .vary
@@ -260,16 +337,20 @@ impl CachedResponse {
     }
 }
 
-struct EntryExpiry;
+struct EntryExpiry {
+    default_swr: Duration,
+}
 
 impl EntryExpiry {
-    fn lifetime(entry: &CachedResponse) -> Duration {
+    fn lifetime(&self, entry: &CachedResponse) -> Duration {
+        let swr = directive_seconds(&entry.head.headers, "stale-while-revalidate")
+            .unwrap_or(self.default_swr);
         let window = if has_validator(&entry.head.headers) {
             REVALIDATION_WINDOW
         } else {
             Duration::ZERO
         };
-        entry.head.freshness.saturating_sub(entry.head.initial_age) + window
+        entry.head.freshness.saturating_sub(entry.head.initial_age) + swr + window
     }
 }
 
@@ -280,7 +361,7 @@ impl Expiry<String, Arc<CachedResponse>> for EntryExpiry {
         entry: &Arc<CachedResponse>,
         _created_at: Instant,
     ) -> Option<Duration> {
-        Some(Self::lifetime(entry))
+        Some(self.lifetime(entry))
     }
 
     fn expire_after_update(
@@ -290,7 +371,7 @@ impl Expiry<String, Arc<CachedResponse>> for EntryExpiry {
         _updated_at: Instant,
         _duration_until_expiry: Option<Duration>,
     ) -> Option<Duration> {
-        Some(Self::lifetime(entry))
+        Some(self.lifetime(entry))
     }
 }
 
@@ -391,26 +472,62 @@ impl CacheRequest {
         res
     }
 
+    /// Sends a stale stored response while background revalidation is running.
+    fn respond_stale(&self, entry: &CachedResponse) -> Response<ProxyBody> {
+        let mut res = self.respond(entry);
+        res.headers_mut()
+            .insert(X_CACHE, HeaderValue::from_static("STALE"));
+        res
+    }
+
     /// Updates the stored response with the headers of a 304 Not Modified response.
     fn refresh(&self, entry: &CachedResponse, headers: &HeaderMap) -> Arc<CachedResponse> {
-        let mut head = entry.head.clone();
-        for name in headers.keys().filter(|name| **name != CONTENT_LENGTH) {
-            head.headers.remove(name);
-            for value in headers.get_all(name) {
-                head.headers.append(name, value.clone());
-            }
+        self.cache.refresh_entry(&self.key, entry, headers)
+    }
+
+    fn revalidate_background(
+        &self,
+        upstream: &Upstream,
+        entry: &CachedResponse,
+        original_req: &Request<ProxyBody>,
+    ) {
+        if !self.cache.mark_revalidating(&self.key) {
+            return;
         }
-        head.initial_age = age(headers);
-        head.freshness = freshness(&head.headers, self.cache.config.default_ttl);
-        let refreshed = Arc::new(CachedResponse {
-            head,
+        let upstream = upstream.clone();
+        let cache = self.cache.clone();
+        let key = self.key.clone();
+        let stored_entry = Arc::new(CachedResponse {
+            head: entry.head.clone(),
             body: entry.body.clone(),
-            stored_at: Instant::now(),
+            stored_at: entry.stored_at,
         });
-        self.cache
-            .entries
-            .insert(self.key.clone(), refreshed.clone());
-        refreshed
+        let mut reval_req = Request::new(BoxBody::new(Full::new(Bytes::new()).map_err(Into::into)));
+        *reval_req.method_mut() = original_req.method().clone();
+        *reval_req.uri_mut() = original_req.uri().clone();
+        *reval_req.headers_mut() = original_req.headers().clone();
+        *reval_req.extensions_mut() = original_req.extensions().clone();
+        set_validators(reval_req.headers_mut(), &entry.head.headers);
+        let authorized = self.authorized;
+        let head = self.head;
+        let req_headers = self.headers.clone();
+        tokio::spawn(async move {
+            let _guard = RevalidationGuard {
+                cache: cache.clone(),
+                key: key.clone(),
+            };
+            let task = RevalidationTask {
+                upstream,
+                reval_req,
+                cache,
+                key,
+                stored_entry,
+                authorized,
+                head,
+                req_headers,
+            };
+            run_background_revalidation(task).await;
+        });
     }
 
     /// Marks the upstream response as a miss and stores it while the client receives the body.
@@ -454,6 +571,61 @@ impl CacheRequest {
     }
 }
 
+struct RevalidationGuard {
+    cache: Arc<HttpCache>,
+    key: String,
+}
+
+impl Drop for RevalidationGuard {
+    fn drop(&mut self) {
+        self.cache.finish_revalidating(&self.key);
+    }
+}
+
+struct RevalidationTask {
+    upstream: Upstream,
+    reval_req: Request<ProxyBody>,
+    cache: Arc<HttpCache>,
+    key: String,
+    stored_entry: Arc<CachedResponse>,
+    authorized: bool,
+    head: bool,
+    req_headers: HeaderMap,
+}
+
+async fn run_background_revalidation(task: RevalidationTask) {
+    let Ok(res) = task.upstream.request(task.reval_req).await else {
+        return;
+    };
+    if res.status() == StatusCode::NOT_MODIFIED {
+        task.cache
+            .refresh_entry(&task.key, &task.stored_entry, res.headers());
+        return;
+    }
+    if !is_storable(res.status(), res.headers(), task.authorized) || task.head {
+        return;
+    }
+    let (parts, body) = res.into_parts();
+    let Ok(collected) = body.collect().await else {
+        return;
+    };
+    let bytes = collected.to_bytes();
+    if (bytes.len() as u64) > task.cache.config.max_entry_size {
+        return;
+    }
+    let freshness = freshness(&parts.headers, task.cache.config.default_ttl);
+    if let Some(vary) = vary_values(&parts.headers, &task.req_headers) {
+        let head = StoredHead {
+            status: parts.status,
+            headers: parts.headers,
+            vary,
+            initial_age: Duration::ZERO,
+            freshness,
+        };
+        task.cache.store_entry(&task.key, head, bytes);
+    }
+}
+
 /// Sends the request to the upstream server, or answers it from the cache.
 pub async fn fetch(
     upstream: &Upstream,
@@ -469,6 +641,13 @@ pub async fn fetch(
     };
     if let Some(entry) = stored.as_ref().filter(|entry| entry.is_fresh()) {
         return Ok(cache.respond(entry));
+    }
+    if let Some(entry) = stored
+        .as_ref()
+        .filter(|entry| entry.is_stale_revalidatable(cache.cache.config.stale_while_revalidate))
+    {
+        cache.revalidate_background(upstream, entry, &req);
+        return Ok(cache.respond_stale(entry));
     }
     if let Some(entry) = &stored {
         set_validators(req.headers_mut(), &entry.head.headers);

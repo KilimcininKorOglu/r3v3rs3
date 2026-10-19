@@ -773,6 +773,7 @@ You can store proxied responses in memory in the "Cache" section. A stored respo
 | `max_size` | `67108864` (64 MiB) | The memory limit of the stored responses in bytes. When the cache is full, r3v3rs3 removes the least used responses. |
 | `max_entry_size` | `1048576` (1 MiB) | r3v3rs3 does not store a response with a larger body. |
 | `default_ttl` | `0s` | The lifetime of a response without `Cache-Control: max-age`, `s-maxage` or `Expires`. With `0s`, r3v3rs3 stores such a response only when it has an `ETag` or `Last-Modified` header, and revalidates it on every request. |
+| `stale_while_revalidate` | `0s` | Window during which a stale response is served immediately (`X-Cache: STALE`) while r3v3rs3 revalidates it asynchronously in the background. Upstream `stale-while-revalidate` in `Cache-Control` takes precedence. |
 
 r3v3rs3 uses the cache only for `GET` and `HEAD` requests without `Range`, `Upgrade` and `Cache-Control: no-store`. A `HEAD` request uses the stored `GET` response. When the client sends `Cache-Control: no-cache` or `Pragma: no-cache`, r3v3rs3 sends the request to the upstream server and stores the new response. The cache key is the requested host with the path and the query of the request, so the upstream server that load balancing selects does not change the key.
 
@@ -787,19 +788,27 @@ r3v3rs3 stores a response only when all of these conditions are true:
 
 The lifetime comes from `s-maxage`, then `max-age`, then `Expires`, then `default_ttl`. `Cache-Control: no-cache` sets the lifetime to zero. The age of a stored response includes the `Age` header of the upstream response.
 
-When a stored response is stale and has an `ETag` or `Last-Modified` header, r3v3rs3 sends a conditional request with `If-None-Match` or `If-Modified-Since`. When the upstream server answers `304 Not Modified`, r3v3rs3 updates the stored headers and sends the stored response. r3v3rs3 keeps a stale response with a validator for one hour after it expires. A client with a matching `If-None-Match` or `If-Modified-Since` header receives `304 Not Modified` from the cache.
+When a stored response is stale and `stale_while_revalidate` (or upstream `stale-while-revalidate` header directive) has not elapsed, r3v3rs3 immediately responds with the stale cached content and sets `X-Cache: STALE`, while spawning a non-blocking background revalidation to refresh the cache. In-flight background revalidations are locked per cache key to prevent dogpiling.
+
+When a stored response is stale and outside the `stale_while_revalidate` window, if it has an `ETag` or `Last-Modified` header, r3v3rs3 sends a conditional request with `If-None-Match` or `If-Modified-Since`. When the upstream server answers `304 Not Modified`, r3v3rs3 updates the stored headers and sends the stored response. r3v3rs3 keeps a stale response with a validator for one hour after it expires. A client with a matching `If-None-Match` or `If-Modified-Since` header receives `304 Not Modified` from the cache.
 
 r3v3rs3 stores one response for each cache key. When `Vary` names request headers, r3v3rs3 sends the stored response only to a request with the same values of these headers.
 
-r3v3rs3 removes `Accept-Encoding` from the requests that can use the cache, so the upstream server sends unencoded responses. The "Compression" section then compresses the response for each client. Each response to these requests has an `X-Cache` header: `HIT` for a stored response and `MISS` for a response from the upstream server. A response from the cache also has an `Age` header.
+r3v3rs3 removes `Accept-Encoding` from the requests that can use the cache, so the upstream server sends unencoded responses. The "Compression" section then compresses the response for each client. Each response to these requests has an `X-Cache` header: `HIT` for a stored response, `MISS` for a response from the upstream server, and `STALE` when served during background revalidation. A response from the cache also has an `Age` header.
 
-To remove every stored response of a proxy, click "Purge" in the proxy list, or send `DELETE /api/proxies/{id}/cache`. The stored responses stay in memory while the cache settings do not change. A restart or a change of the cache settings removes them.
+To remove stored responses:
+- Send `DELETE /api/proxies/{id}/cache` (or `DELETE /api/proxies/{id}/cache?path=/api/v1/` to purge only entries whose path starts with the given prefix).
+- Send `POST /api/proxies/{id}/cache/purge` with optional JSON body `{"path": "/prefix"}`.
+- Send an HTTP `PURGE` request directly to the proxy URL (e.g. `curl -X PURGE https://app.example.com/data.json`).
+- Or click "Purge" in the proxy list of the WebUI.
+
+The stored responses stay in memory while the cache settings do not change. A restart or a change of the cache settings removes them.
 
 ```toml
 [my-app]
 protocol = "http"
 vhosts = ["app.example.com"]
-cache = { enabled = true, max_size = 67108864, max_entry_size = 1048576, default_ttl = "5m" }
+cache = { enabled = true, max_size = 67108864, max_entry_size = 1048576, default_ttl = "5m", stale_while_revalidate = "1m" }
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 

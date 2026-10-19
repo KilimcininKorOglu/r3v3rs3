@@ -1,17 +1,24 @@
+use axum::{Router, routing::get};
 use mockito::Matcher;
 use r3v3rs3::{
     command::ServerCommand,
-    server::rpc::{ErasedRpcMethod, RpcWrapper, proxies::PurgeProxyCache},
+    server::{
+        ServerChannels,
+        rpc::{ErasedRpcMethod, RpcWrapper, proxies::PurgeProxyCache},
+    },
 };
-use r3v3rs3_api::{cache::CacheConfig, proxy::HttpProxy};
+use r3v3rs3_api::{cache::CacheConfig, id::ShortId, proxy::HttpProxy};
 use reqwest::{
     StatusCode,
     header::{AGE, IF_NONE_MATCH},
 };
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod common;
 use common::{
-    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
+    TestStorage, alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route,
+    serve_http_upstream, with_server,
 };
 
 fn x_cache(resp: &reqwest::Response) -> Option<&str> {
@@ -142,6 +149,7 @@ async fn cache_serves_fresh_responses_and_revalidates_stale_ones() -> anyhow::Re
 
         let arg = Box::new(RpcWrapper::new(PurgeProxyCache {
             id: "proxy1".parse()?,
+            path: None,
         })) as Box<dyn ErasedRpcMethod>;
         channels
             .command
@@ -178,4 +186,164 @@ async fn cache_serves_fresh_responses_and_revalidates_stale_ones() -> anyhow::Re
         mock.assert_async().await;
     }
     Ok(())
+}
+
+async fn check_swr(client: &reqwest::Client, base_url: &url::Url) -> anyhow::Result<()> {
+    let url = base_url.join("/swr")?;
+    let resp = client.get(url.clone()).send().await?;
+    assert_eq!(x_cache(&resp), Some("MISS"));
+    assert_eq!(resp.text().await?, "count 0");
+
+    let resp = client.get(url.clone()).send().await?;
+    assert_eq!(x_cache(&resp), Some("HIT"));
+    assert_eq!(resp.text().await?, "count 0");
+
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+
+    // Serves stale immediately while triggering background revalidation
+    let resp = client.get(url.clone()).send().await?;
+    assert_eq!(x_cache(&resp), Some("STALE"));
+    assert_eq!(resp.text().await?, "count 0");
+
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+    let resp = client.get(url).send().await?;
+    assert_eq!(x_cache(&resp), Some("HIT"));
+    assert_eq!(resp.text().await?, "count 1");
+    Ok(())
+}
+
+async fn check_purge_method(client: &reqwest::Client, base_url: &url::Url) -> anyhow::Result<()> {
+    let swr_url = base_url.join("/swr")?;
+    let purge_resp = client
+        .request(
+            reqwest::Method::from_bytes(b"PURGE").unwrap(),
+            swr_url.clone(),
+        )
+        .send()
+        .await?;
+    assert_eq!(purge_resp.status(), StatusCode::OK);
+    assert!(purge_resp.text().await?.contains("Purged"));
+
+    let resp = client.get(swr_url).send().await?;
+    assert_eq!(x_cache(&resp), Some("MISS"));
+    assert_eq!(resp.text().await?, "count 2");
+    Ok(())
+}
+
+fn swr_router(counter: Arc<AtomicUsize>) -> Router {
+    Router::new()
+        .route(
+            "/swr",
+            get(move || {
+                let n = counter.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    (
+                        [
+                            ("cache-control", "max-age=1, stale-while-revalidate=5"),
+                            ("content-type", "text/plain"),
+                        ],
+                        format!("count {n}"),
+                    )
+                }
+            }),
+        )
+        .route(
+            "/item1",
+            get(|| async {
+                (
+                    [
+                        ("cache-control", "max-age=60"),
+                        ("content-type", "text/plain"),
+                    ],
+                    "item1",
+                )
+            }),
+        )
+        .route(
+            "/item2",
+            get(|| async {
+                (
+                    [
+                        ("cache-control", "max-age=60"),
+                        ("content-type", "text/plain"),
+                    ],
+                    "item2",
+                )
+            }),
+        )
+}
+
+async fn assert_cached_items(
+    client: &reqwest::Client,
+    url1: &url::Url,
+    url2: &url::Url,
+) -> anyhow::Result<()> {
+    let _ = client.get(url1.clone()).send().await?;
+    let r1 = client.get(url1.clone()).send().await?;
+    assert_eq!(x_cache(&r1), Some("HIT"));
+
+    let _ = client.get(url2.clone()).send().await?;
+    let r2 = client.get(url2.clone()).send().await?;
+    assert_eq!(x_cache(&r2), Some("HIT"));
+    Ok(())
+}
+
+async fn check_purge_rpc(
+    client: &reqwest::Client,
+    base_url: &url::Url,
+    channels: &mut ServerChannels,
+    proxy_id: ShortId,
+) -> anyhow::Result<()> {
+    let url1 = base_url.join("/item1")?;
+    let url2 = base_url.join("/item2")?;
+    assert_cached_items(client, &url1, &url2).await?;
+
+    call(
+        channels,
+        PurgeProxyCache {
+            id: proxy_id,
+            path: Some("/item1".into()),
+        },
+    )
+    .await??;
+
+    let r1 = client.get(url1).send().await?;
+    assert_eq!(x_cache(&r1), Some("MISS"));
+    let r2 = client.get(url2).send().await?;
+    assert_eq!(x_cache(&r2), Some("HIT"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn stale_while_revalidate_and_purge() -> anyhow::Result<()> {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let upstream = serve_http_upstream(swr_router(counter)).await?;
+    let port = alloc_tcp_port().await?;
+    let proxy_id: ShortId = "pxswr".parse()?;
+
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse()?],
+        routes: vec![http_route("/", upstream.as_str(), None)],
+        cache: CacheConfig {
+            enabled: true,
+            stale_while_revalidate: std::time::Duration::from_secs(5),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("p_swr", &port)])
+        .proxies(vec![http_proxy_entry("pxswr", "p_swr", proxy)])
+        .build();
+
+    with_server(config, |mut channels| async move {
+        let client = reqwest::Client::new();
+        let base_url = port.http_url("/");
+        check_swr(&client, &base_url).await?;
+        check_purge_method(&client, &base_url).await?;
+        check_purge_rpc(&client, &base_url, &mut channels, proxy_id).await?;
+        Ok(())
+    })
+    .await
 }

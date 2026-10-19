@@ -9,9 +9,10 @@ use crate::server::rpc::proxies::{
 };
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
 };
 use hyper::{Request, Uri};
+use r3v3rs3_api::cache::CachePurge;
 use r3v3rs3_api::fixed_response::FixedResponse;
 use r3v3rs3_api::policy::AuthPolicy;
 use r3v3rs3_api::redirect::RedirectRule;
@@ -88,21 +89,63 @@ pub async fn delete(
     Ok(Json(state.call(&caller, DeleteProxy { id }).await?))
 }
 
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+pub struct CachePurgeQuery {
+    /// Optional URI path or prefix to purge.
+    pub path: Option<String>,
+}
+
 /// Removes the stored responses from the HTTP cache of a proxy.
 #[utoipa::path(
     delete,
     path = "/{id}/cache",
     tag = "proxies",
     operation_id = "purge_proxy_cache",
-    params(("id" = ShortId, Path, description = "Proxy id.")),
+    params(
+        ("id" = ShortId, Path, description = "Proxy id."),
+        CachePurgeQuery,
+    ),
     responses((status = 200, description = "The cache is empty."), NotFoundResponse, ErrorResponses)
 )]
 pub async fn purge_cache(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
+    Query(query): Query<CachePurgeQuery>,
 ) -> Result<Json<Box<()>>, AppError> {
-    Ok(Json(state.call(&caller, PurgeProxyCache { id }).await?))
+    Ok(Json(
+        state
+            .call(
+                &caller,
+                PurgeProxyCache {
+                    id,
+                    path: query.path,
+                },
+            )
+            .await?,
+    ))
+}
+
+/// Purges the HTTP cache of a proxy, either completely or for a specific path.
+#[utoipa::path(
+    post,
+    path = "/{id}/cache/purge",
+    tag = "proxies",
+    operation_id = "purge_proxy_cache_post",
+    params(("id" = ShortId, Path, description = "Proxy id.")),
+    request_body(content = Option<CachePurge>, description = "Optional path to purge"),
+    responses((status = 200, description = "The cache was purged."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn purge_cache_post(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    payload: Option<Json<CachePurge>>,
+) -> Result<Json<Box<()>>, AppError> {
+    let path = payload.and_then(|Json(p)| p.path);
+    Ok(Json(
+        state.call(&caller, PurgeProxyCache { id, path }).await?,
+    ))
 }
 
 /// Adds a proxy.

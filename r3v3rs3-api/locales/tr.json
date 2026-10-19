@@ -567,6 +567,8 @@
   "http_form.sticky_hint": "İstemciye giden ilk yanıt, route'un upstream sunucusunu belirten bir cookie yazar. Bu cookie'yi taşıyan sonraki istekler, sunucu sağlıklı olduğu ve circuit'i açık olmadığı sürece aynı sunucuya gider. Sunucunun ağırlığı 0 olsa da bu kural geçerlidir. Aksi halde sunucuyu yük dengeleme yöntemi seçer ve yanıt yeni bir cookie yazar. Cookie değeri imzalıdır ve upstream sunucu cookie'yi almaz. r3v3rs3 yeniden başlayınca eski cookie'ler geçersiz olur. Tarayıcı kapanınca silinen bir cookie için Cookie Max-Age değerini 0 yapın.",
   "http_form.sticky_max_age": "Cookie Max-Age (Saniye)",
   "http_form.sticky_max_age_name": "Cookie Max-Age",
+  "http_form.stale_while_revalidate": "Stale While Revalidate (Saniye)",
+  "http_form.stale_while_revalidate_name": "Stale while revalidate",
   "http_form.sticky_sessions": "Sticky Session'lar",
   "http_form.strip_prefix": "Route Yolunu Kaldır",
   "http_form.target": "Hedef",

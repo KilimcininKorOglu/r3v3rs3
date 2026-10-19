@@ -567,6 +567,8 @@
   "http_form.sticky_hint": "The first response to a client sets a cookie that names the upstream server of the route. The next requests with the cookie go to that server while the server is healthy and its circuit is not open, also when its weight is 0. Otherwise the load balancing policy selects the server, and the response sets a new cookie. The cookie value is signed, and the upstream server does not receive the cookie. After a restart of r3v3rs3, the old cookies are invalid. Set Cookie Max-Age to 0 for a cookie that ends with the browser session.",
   "http_form.sticky_max_age": "Cookie Max-Age (Seconds)",
   "http_form.sticky_max_age_name": "Cookie Max-Age",
+  "http_form.stale_while_revalidate": "Stale While Revalidate (Seconds)",
+  "http_form.stale_while_revalidate_name": "Stale while revalidate",
   "http_form.sticky_sessions": "Sticky Sessions",
   "http_form.strip_prefix": "Remove Route Path",
   "http_form.target": "Target",

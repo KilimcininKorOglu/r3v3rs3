@@ -367,6 +367,7 @@ struct CacheForm {
     max_size: String,
     max_entry_size: String,
     default_ttl: String,
+    stale_while_revalidate: String,
 }
 
 impl CacheForm {
@@ -376,6 +377,7 @@ impl CacheForm {
             max_size: cache.max_size.to_string(),
             max_entry_size: cache.max_entry_size.to_string(),
             default_ttl: cache.default_ttl.as_secs().to_string(),
+            stale_while_revalidate: cache.stale_while_revalidate.as_secs().to_string(),
         }
     }
 }
@@ -1453,6 +1455,10 @@ fn cache_view(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
                         <label class={LABEL_CLASS}>{locale.t("http_form.default_ttl")}</label>
                         <input type="number" min="0" value={form.cache.default_ttl.clone()} onchange={state_input(form, text, |form, value| form.cache.default_ttl = value)} class={INPUT_CLASS} />
                     </div>
+                    <div>
+                        <label class={LABEL_CLASS}>{locale.t("http_form.stale_while_revalidate")}</label>
+                        <input type="number" min="0" value={form.cache.stale_while_revalidate.clone()} onchange={state_input(form, text, |form, value| form.cache.stale_while_revalidate = value)} class={INPUT_CLASS} />
+                    </div>
                 </div>
             }
         </>
@@ -2155,6 +2161,15 @@ fn parse_cache(
         ),
         default_ttl: Duration::from_secs(or_error(
             parse_size(locale, &form.default_ttl, "http_form.default_ttl_name"),
+            key,
+            errors,
+        )),
+        stale_while_revalidate: Duration::from_secs(or_error(
+            parse_size(
+                locale,
+                &form.stale_while_revalidate,
+                "http_form.stale_while_revalidate_name",
+            ),
             key,
             errors,
         )),
