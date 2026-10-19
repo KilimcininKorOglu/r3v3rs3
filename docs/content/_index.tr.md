@@ -33,7 +33,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 
 - Proxy ve route başına IP izin ve engelleme listeleri. Tek bir adın altında IP filtresi ve kimlik doğrulamayı taşıyan, paylaşılan erişim listeleri.
 - Saniye, dakika veya saat periyotlu, burst'ü ve `Retry-After` header'ı olan istemci başına rate limit. `413` ile istek gövdesi boyut limiti.
-- Kimlik doğrulama: Argon2 hash'iyle Basic auth, Bearer token'ları, forward auth (oauth2-proxy, Authelia) ve TOTP'li yönetim paneli oturumu. Bearer token'lar SHA-256 özeti olarak saklanır ve sabit sürede karşılaştırılır. Giriş denemesi limitleri de vardır.
+- Kimlik doğrulama: Argon2 hash'iyle Basic auth, Bearer token'ları, dahili OIDC / OAuth 2.0 girişi, forward auth (oauth2-proxy, Authelia) ve TOTP'li yönetim paneli oturumu. Bearer token'lar SHA-256 özeti olarak saklanır ve sabit sürede karşılaştırılır. Giriş denemesi limitleri de vardır.
 - Sekiz bilinen CDN'in (Cloudflare, Fastly, Amazon CloudFront, Bunny, Gcore, KeyCDN, Imperva, Google Cloud Load Balancing) ve güvenilen proxy'lerin arkasındaki gerçek istemci IP'si bulunur. CDN aralıkları her gün yenilenir. Güvenilmeyen karşı uçlardan sahte istemci IP header'ları silinir.
 - Değişken kullanan istek ve yanıt header kuralları: `{client_ip}`, `{host}`, `{request_id}`, `{route}`, `{client_cert_subject}` ve `{client_cert_fingerprint}`.
 - Yanıt sıkıştırma (brotli, zstd ve gzip) ve ETag ve Last-Modified yenilemesi, `304` yanıtları, `X-Cache` ve `Age` header'ları ve purge API'si olan bellekte tutulan HTTP cache.

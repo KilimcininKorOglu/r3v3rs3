@@ -111,6 +111,8 @@ pub enum AuthPolicy {
     Forward(Box<ForwardAuth>),
     /// Requires a sign-in with a panel account on the proxied host.
     Session,
+    /// OpenID Connect / OAuth 2.0 authentication.
+    Oidc(Box<OidcAuth>),
 }
 
 impl AuthPolicy {
@@ -214,6 +216,69 @@ pub const DEFAULT_FORWARD_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn default_forward_auth_timeout() -> Duration {
     DEFAULT_FORWARD_AUTH_TIMEOUT
+}
+
+/// OpenID Connect / OAuth 2.0 authentication.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct OidcAuth {
+    /// OIDC Issuer URL (e.g. `https://accounts.google.com` or `https://auth.example.com/realms/main`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub issuer_url: String,
+
+    /// Authorization endpoint URL. If empty and issuer_url is provided, standard paths or discovery are used.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub authorization_url: String,
+
+    /// Token endpoint URL.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub token_url: String,
+
+    /// UserInfo endpoint URL.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub userinfo_url: String,
+
+    /// OAuth 2.0 Client ID.
+    pub client_id: String,
+
+    /// OAuth 2.0 Client Secret. The server seals it and never returns it in plain text.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub client_secret: String,
+
+    /// Set by the server when a client_secret is configured.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub client_secret_set: bool,
+
+    /// Requested scopes (defaults to ["openid", "email", "profile"]).
+    #[serde(default = "default_oidc_scopes", skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
+
+    /// Allowed emails or domain wildcard patterns (e.g. ["*@example.com", "admin@corp.com"]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_emails: Vec<String>,
+}
+
+pub fn default_oidc_scopes() -> Vec<String> {
+    vec!["openid".into(), "email".into(), "profile".into()]
+}
+
+/// Checks whether an email matches any pattern in the allowed list. Empty allowed list matches all.
+pub fn is_email_allowed(email: &str, allowed: &[String]) -> bool {
+    if allowed.is_empty() {
+        return true;
+    }
+    let email_lower = email.to_lowercase();
+    allowed.iter().any(|pattern| {
+        let pat = pattern.trim().to_lowercase();
+        if pat == "*" {
+            true
+        } else if let Some(suffix) = pat.strip_prefix("*@") {
+            email_lower.ends_with(&format!("@{suffix}"))
+        } else if let Some(suffix) = pat.strip_prefix('@') {
+            email_lower.ends_with(&format!("@{suffix}"))
+        } else {
+            email_lower == pat
+        }
+    })
 }
 
 /// Returns true when `name` is a valid HTTP header name (an RFC 9110 token).
@@ -381,5 +446,24 @@ mod tests {
         let limit: RateLimit = serde_json::from_str(r#"{"requests":10,"per":"minute"}"#).unwrap();
         assert_eq!(limit.per, RatePeriod::Minute);
         assert_eq!(limit.burst, 0);
+    }
+
+    #[test]
+    fn oidc_serde_and_allowed_emails() {
+        let json = r#"{"type":"oidc","issuer_url":"https://accounts.google.com","client_id":"cid","allowed_emails":["*@company.com","admin@corp.com"]}"#;
+        let policy: AuthPolicy = serde_json::from_str(json).unwrap();
+        let AuthPolicy::Oidc(oidc) = policy else {
+            panic!("expected oidc auth");
+        };
+        assert_eq!(oidc.issuer_url, "https://accounts.google.com");
+        assert_eq!(oidc.client_id, "cid");
+        assert_eq!(oidc.scopes, default_oidc_scopes());
+        assert!(is_email_allowed("john@company.com", &oidc.allowed_emails));
+        assert!(is_email_allowed("admin@corp.com", &oidc.allowed_emails));
+        assert!(!is_email_allowed(
+            "intruder@other.com",
+            &oidc.allowed_emails
+        ));
+        assert!(is_email_allowed("anyone@anywhere.com", &[]));
     }
 }

@@ -642,6 +642,35 @@ auth = { type = "session" }
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+### Built-in OIDC / OAuth 2.0
+
+Protect applications directly using OpenID Connect and OAuth 2.0 identity providers (Google, GitHub, Keycloak, Authentik, Okta, GitLab, etc.) without requiring an external proxy like oauth2-proxy or Authelia.
+
+- An unauthenticated client accessing a protected path is automatically redirected to the provider's sign-in page via `/.r3v3rs3/auth/oidc/login`.
+- After signing in, the provider redirects back to `/.r3v3rs3/auth/oidc/callback`. r3v3rs3 exchanges the authorization code for tokens, verifies identity, validates the email allowlist, sets an encrypted session cookie (`r3v3rs3_oidc`), and redirects the user back to the original request URL.
+- On authorized upstream requests, r3v3rs3 removes the session cookie and injects `X-Forwarded-User` and `X-Forwarded-Email` headers containing the verified identity.
+- Users can sign out at any time by navigating to `/.r3v3rs3/auth/oidc/logout`.
+
+| Field | Description |
+|---|---|
+| `issuer_url` | The OIDC provider issuer URL (e.g., `https://accounts.google.com` or `https://auth.example.com/realms/master`). Standard authorization and token endpoints are resolved automatically if not specified explicitly. |
+| `authorization_url` | Optional explicit authorization endpoint URL. |
+| `token_url` | Optional explicit token endpoint URL. |
+| `userinfo_url` | Optional explicit userinfo endpoint URL (used if identity claims are not in the ID token). |
+| `client_id` | OAuth 2.0 Client ID registered with the provider. |
+| `client_secret` | OAuth 2.0 Client Secret (stored sealed at rest). |
+| `scopes` | OAuth 2.0 scopes to request (defaults to `["openid", "email", "profile"]`). |
+| `allowed_emails` | List of allowed email addresses or domain wildcards (e.g., `["admin@example.com", "*@company.com"]`). If empty, any user authenticated by the provider is permitted. |
+
+```toml
+[internal-dashboard]
+protocol = "http"
+vhosts = ["dashboard.example.com"]
+auth = { type = "oidc", issuer_url = "https://accounts.google.com", client_id = "your-client-id.apps.googleusercontent.com", client_secret = "your-secret", allowed_emails = ["*@mycompany.com"] }
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
+```
+
+
 ## Access Lists
 
 An access list holds an IP filter and an authentication with a name. Several proxies and routes can use one access list. A change of the list applies to each of them without a restart.

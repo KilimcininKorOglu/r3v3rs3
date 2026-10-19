@@ -113,6 +113,9 @@ pub enum Error {
     #[error("invalid container settings: {reason}")]
     InvalidContainerSpec { reason: String },
 
+    #[error("invalid OIDC settings: {reason}")]
+    InvalidOidcConfig { reason: String },
+
     #[error("the deployment platform is not enabled")]
     PlatformDisabled,
 

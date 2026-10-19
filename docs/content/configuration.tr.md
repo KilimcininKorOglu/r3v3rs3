@@ -642,6 +642,35 @@ auth = { type = "session" }
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+### Dahili OIDC / OAuth 2.0
+
+oauth2-proxy veya Authelia gibi harici bir proxy aracına ihtiyaç duymadan, uygulamalarınızı OpenID Connect ve OAuth 2.0 kimlik sağlayıcılarıyla (Google, GitHub, Keycloak, Authentik, Okta, GitLab vb.) doğrudan r3v3rs3 üzerinden koruyun.
+
+- Korumalı bir adrese gelen doğrulanmamış bir istek, `/.r3v3rs3/auth/oidc/login` aracılığıyla sağlayıcının giriş sayfasına otomatik olarak yönlendirilir.
+- Giriş yapıldıktan sonra sağlayıcı istemciyi `/.r3v3rs3/auth/oidc/callback` adresine geri yönlendirir. r3v3rs3 yetkilendirme kodunu token ile takas eder, kimliği doğrular, izin verilen e-posta listesini kontrol eder, güvenli bir oturum cookie'si (`r3v3rs3_oidc`) oluşturur ve kullanıcıyı asıl gitmek istediği URL'ye yönlendirir.
+- Yetkilendirilen istekler upstream sunucuya iletilirken oturum cookie'si kaldırılır ve doğrulanmış kimliği içeren `X-Forwarded-User` ile `X-Forwarded-Email` header'ları eklenir.
+- Kullanıcılar `/.r3v3rs3/auth/oidc/logout` adresine giderek diledikleri zaman oturumlarını kapatabilir.
+
+| Alan | Açıklama |
+|---|---|
+| `issuer_url` | OIDC sağlayıcısının issuer URL'i (örneğin `https://accounts.google.com` veya `https://auth.example.com/realms/master`). Özel olarak girilmediğinde standart yetkilendirme ve token uç noktaları otomatik olarak çözülür. |
+| `authorization_url` | İsteğe bağlı özel yetkilendirme (authorization) uç noktası URL'i. |
+| `token_url` | İsteğe bağlı özel token uç noktası URL'i. |
+| `userinfo_url` | İsteğe bağlı özel kullanıcı bilgisi (userinfo) uç noktası URL'i (kullanıcı bilgisi doğrudan ID token içinde yer almadığında kullanılır). |
+| `client_id` | Sağlayıcıda kayıtlı OAuth 2.0 İstemci Kimliği (Client ID). |
+| `client_secret` | OAuth 2.0 İstemci Gizli Anahtarı (Client Secret, diskte şifreli saklanır). |
+| `scopes` | Talep edilecek OAuth 2.0 kapsamları (varsayılan: `["openid", "email", "profile"]`). |
+| `allowed_emails` | İzin verilen e-posta adresleri veya alan adı jokerleri (ör. `["admin@example.com", "*@sirket.com"]`). Boş bırakılırsa sağlayıcı tarafından doğrulanan her kullanıcıya izin verilir. |
+
+```toml
+[internal-dashboard]
+protocol = "http"
+vhosts = ["dashboard.example.com"]
+auth = { type = "oidc", issuer_url = "https://accounts.google.com", client_id = "your-client-id.apps.googleusercontent.com", client_secret = "your-secret", allowed_emails = ["*@sirket.com"] }
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
+```
+
+
 ## Erişim listeleri
 
 Erişim listesi, bir IP filtresini ve bir kimlik doğrulamayı bir adla tutar. Birden fazla proxy ve route aynı erişim listesini kullanabilir. Liste değişince değişiklik yeniden başlatma olmadan hepsine uygulanır.

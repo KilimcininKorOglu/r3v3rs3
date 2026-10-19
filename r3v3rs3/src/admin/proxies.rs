@@ -332,6 +332,14 @@ fn auth_description(auth: &AuthPolicy) -> Option<String> {
         AuthPolicy::Bearer(_) => Some("Bearer Token".to_string()),
         AuthPolicy::Forward(f) => Some(format!("Forward Auth ({})", f.url)),
         AuthPolicy::Session => Some("Panel Session".to_string()),
+        AuthPolicy::Oidc(o) => Some(format!(
+            "OpenID Connect ({})",
+            if !o.issuer_url.is_empty() {
+                &o.issuer_url
+            } else {
+                &o.client_id
+            }
+        )),
     }
 }
 

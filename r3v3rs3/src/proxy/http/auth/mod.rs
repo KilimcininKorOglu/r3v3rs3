@@ -10,11 +10,13 @@ use tokio_rustls::rustls::ClientConfig;
 mod basic;
 mod bearer;
 mod forward;
+mod oidc;
 mod session;
 
 use basic::BasicAuthenticator;
 use bearer::BearerAuthenticator;
 use forward::ForwardAuthenticator;
+use oidc::OidcAuthenticator;
 use session::SessionAuthenticator;
 pub use session::SessionService;
 
@@ -25,6 +27,7 @@ pub enum Authenticator {
     Bearer(BearerAuthenticator),
     Forward(Box<ForwardAuthenticator>),
     Session(SessionAuthenticator),
+    Oidc(Box<OidcAuthenticator>),
 }
 
 /// Details of the client request that are not in the request itself.
@@ -84,6 +87,11 @@ impl Authenticator {
             AuthPolicy::Session => {
                 Self::Session(SessionAuthenticator::new(sessions.clone(), proxy))
             }
+            AuthPolicy::Oidc(oidc) => Self::Oidc(Box::new(OidcAuthenticator::new(
+                *oidc,
+                tls_client_config.clone(),
+                sessions.clone(),
+            ))),
         };
         Some(Arc::new(authenticator))
     }
@@ -101,6 +109,7 @@ impl Authenticator {
     {
         match self {
             Self::Session(session) => session.serve(req, ctx).await,
+            Self::Oidc(oidc) => oidc.serve(req, ctx).await,
             _ => ControlFlow::Continue(req),
         }
     }
@@ -117,6 +126,7 @@ impl Authenticator {
             Self::Bearer(bearer) => Ok(bearer.authorize(req.headers_mut())?),
             Self::Forward(forward) => forward.authorize(req, ctx).await,
             Self::Session(session) => session.authorize(req, ctx).await,
+            Self::Oidc(oidc) => oidc.authorize(req, ctx).await,
         }
     }
 }

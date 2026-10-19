@@ -243,6 +243,7 @@ mod tests {
             },
             Error::InvalidDiscoveryConfig { reason: text() },
             Error::InvalidContainerSpec { reason: text() },
+            Error::InvalidOidcConfig { reason: text() },
             Error::PlatformDisabled,
             Error::PlatformFailed,
             Error::AppNameExists { name: text() },

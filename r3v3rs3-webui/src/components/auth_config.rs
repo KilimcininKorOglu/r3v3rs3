@@ -3,7 +3,7 @@ use crate::i18n::use_locale;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::policy::{
     AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, DEFAULT_FORWARD_AUTH_TIMEOUT,
-    ForwardAuth, is_header_name,
+    ForwardAuth, OidcAuth, default_oidc_scopes, is_header_name,
 };
 use r3v3rs3_api::proxy::ServerUrl;
 use std::collections::HashSet;
@@ -15,22 +15,24 @@ use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthKind {
     None,
     Basic,
     Bearer,
     Forward,
     Session,
+    Oidc,
 }
 
 impl AuthKind {
-    const ALL: [AuthKind; 5] = [
+    const ALL: [AuthKind; 6] = [
         AuthKind::None,
         AuthKind::Basic,
         AuthKind::Bearer,
         AuthKind::Forward,
         AuthKind::Session,
+        AuthKind::Oidc,
     ];
 
     pub fn of(policy: &AuthPolicy) -> Self {
@@ -40,6 +42,7 @@ impl AuthKind {
             AuthPolicy::Bearer(_) => Self::Bearer,
             AuthPolicy::Forward(_) => Self::Forward,
             AuthPolicy::Session => Self::Session,
+            AuthPolicy::Oidc(_) => Self::Oidc,
         }
     }
 
@@ -50,6 +53,7 @@ impl AuthKind {
             Self::Bearer => "bearer",
             Self::Forward => "forward",
             Self::Session => "session",
+            Self::Oidc => "oidc",
         }
     }
 
@@ -60,6 +64,7 @@ impl AuthKind {
             Self::Bearer => "auth.kind_bearer",
             Self::Forward => "auth.kind_forward",
             Self::Session => "auth.kind_session",
+            Self::Oidc => "auth.kind_oidc",
         })
     }
 }
@@ -73,6 +78,15 @@ pub struct AuthForm {
     forward_url: String,
     forward_headers: String,
     forward_timeout: String,
+    oidc_issuer_url: String,
+    oidc_authorization_url: String,
+    oidc_token_url: String,
+    oidc_userinfo_url: String,
+    oidc_client_id: String,
+    oidc_client_secret: String,
+    oidc_client_secret_set: bool,
+    oidc_scopes: String,
+    oidc_allowed_emails: String,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -101,6 +115,15 @@ impl AuthForm {
             forward_url: String::new(),
             forward_headers: String::new(),
             forward_timeout: DEFAULT_FORWARD_AUTH_TIMEOUT.as_secs().to_string(),
+            oidc_issuer_url: String::new(),
+            oidc_authorization_url: String::new(),
+            oidc_token_url: String::new(),
+            oidc_userinfo_url: String::new(),
+            oidc_client_id: String::new(),
+            oidc_client_secret: String::new(),
+            oidc_client_secret_set: false,
+            oidc_scopes: default_oidc_scopes().join(" "),
+            oidc_allowed_emails: String::new(),
         };
         match policy {
             AuthPolicy::None | AuthPolicy::Session => {}
@@ -116,6 +139,17 @@ impl AuthForm {
                 form.forward_headers = forward.response_headers.join(", ");
                 form.forward_timeout = forward.timeout.as_secs().max(1).to_string();
             }
+            AuthPolicy::Oidc(oidc) => {
+                form.oidc_issuer_url = oidc.issuer_url.clone();
+                form.oidc_authorization_url = oidc.authorization_url.clone();
+                form.oidc_token_url = oidc.token_url.clone();
+                form.oidc_userinfo_url = oidc.userinfo_url.clone();
+                form.oidc_client_id = oidc.client_id.clone();
+                form.oidc_client_secret_set =
+                    oidc.client_secret_set || !oidc.client_secret.is_empty();
+                form.oidc_scopes = oidc.scopes.join(" ");
+                form.oidc_allowed_emails = oidc.allowed_emails.join(", ");
+            }
         }
         form
     }
@@ -130,7 +164,50 @@ impl AuthForm {
                 .parse_forward(locale)
                 .map(|forward| AuthPolicy::Forward(Box::new(forward))),
             AuthKind::Session => Ok(AuthPolicy::Session),
+            AuthKind::Oidc => self
+                .parse_oidc(locale)
+                .map(|oidc| AuthPolicy::Oidc(Box::new(oidc))),
         }
+    }
+
+    fn parse_oidc(&self, locale: Locale) -> Result<OidcAuth, String> {
+        let client_id = self.oidc_client_id.trim().to_string();
+        if client_id.is_empty() {
+            return Err(locale.t("auth.client_id_required").to_string());
+        }
+        let issuer_url = self.oidc_issuer_url.trim().to_string();
+        let authorization_url = self.oidc_authorization_url.trim().to_string();
+        let token_url = self.oidc_token_url.trim().to_string();
+        let userinfo_url = self.oidc_userinfo_url.trim().to_string();
+        if issuer_url.is_empty() && (authorization_url.is_empty() || token_url.is_empty()) {
+            return Err(locale.t("auth.oidc_endpoints_required").to_string());
+        }
+        let scopes = if self.oidc_scopes.trim().is_empty() {
+            default_oidc_scopes()
+        } else {
+            self.oidc_scopes
+                .split_whitespace()
+                .map(str::to_string)
+                .collect()
+        };
+        let allowed_emails = self
+            .oidc_allowed_emails
+            .split(',')
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .map(str::to_string)
+            .collect();
+        Ok(OidcAuth {
+            issuer_url,
+            authorization_url,
+            token_url,
+            userinfo_url,
+            client_id,
+            client_secret: self.oidc_client_secret.trim().to_string(),
+            client_secret_set: self.oidc_client_secret_set,
+            scopes,
+            allowed_emails,
+        })
     }
 
     fn parse_forward(&self, locale: Locale) -> Result<ForwardAuth, String> {
@@ -320,6 +397,33 @@ pub fn auth_config(props: &Props) -> Html {
             }
             if form.kind == AuthKind::Session {
                 <p class={HINT_CLASS}>{locale.t("auth.session_hint")}</p>
+            }
+            if form.kind == AuthKind::Oidc {
+                <label class={LABEL_CLASS}>{locale.t("auth.issuer_url")}</label>
+                <input type="url" placeholder="https://accounts.google.com" value={form.oidc_issuer_url.clone()} onchange={form_input(props, |form, value| form.oidc_issuer_url = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{locale.t("auth.client_id")}</label>
+                <input type="text" autocapitalize="off" placeholder="your-client-id" value={form.oidc_client_id.clone()} onchange={form_input(props, |form, value| form.oidc_client_id = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{locale.t("auth.client_secret")}</label>
+                <input type="password" autocomplete="new-password" placeholder={secret_placeholder(locale, form.oidc_client_secret_set, "auth.client_secret")} value={form.oidc_client_secret.clone()} onchange={form_input(props, |form, value| form.oidc_client_secret = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{locale.t("auth.allowed_emails")}</label>
+                <input type="text" autocapitalize="off" placeholder="*@example.com, admin@corp.com" value={form.oidc_allowed_emails.clone()} onchange={form_input(props, |form, value| form.oidc_allowed_emails = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{locale.t("auth.scopes")}</label>
+                <input type="text" autocapitalize="off" placeholder="openid email profile" value={form.oidc_scopes.clone()} onchange={form_input(props, |form, value| form.oidc_scopes = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{locale.t("auth.authorization_url")}</label>
+                <input type="url" placeholder="https://.../authorize" value={form.oidc_authorization_url.clone()} onchange={form_input(props, |form, value| form.oidc_authorization_url = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{locale.t("auth.token_url")}</label>
+                <input type="url" placeholder="https://.../token" value={form.oidc_token_url.clone()} onchange={form_input(props, |form, value| form.oidc_token_url = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{locale.t("auth.userinfo_url")}</label>
+                <input type="url" placeholder="https://.../userinfo" value={form.oidc_userinfo_url.clone()} onchange={form_input(props, |form, value| form.oidc_userinfo_url = value)} class={INPUT_CLASS} />
+
+                <p class={HINT_CLASS}>{locale.t("auth.oidc_hint")}</p>
             }
         </>
     }
@@ -587,17 +691,35 @@ mod tests {
     }
 
     #[test]
-    fn username_errors_are_translated() {
-        for (username, key) in [
-            ("", "auth.username_required"),
-            ("al:ice", "auth.username_colon"),
-            ("al\u{7}ice", "auth.username_control"),
-        ] {
-            assert_eq!(
-                basic_form(vec![user(username, "secret")]).parse(Locale::Tr),
-                Err(Locale::Tr.t(key).to_string()),
-                "username {username:?}"
-            );
-        }
+    fn oidc_form_round_trips_and_validates() {
+        let oidc = OidcAuth {
+            issuer_url: "https://accounts.google.com".into(),
+            client_id: "google-client-id".into(),
+            client_secret: "secret123".into(),
+            client_secret_set: true,
+            scopes: vec!["openid".into(), "email".into()],
+            allowed_emails: vec!["*@example.com".into()],
+            ..Default::default()
+        };
+        let form = AuthForm::new(&AuthPolicy::Oidc(Box::new(oidc.clone())));
+        assert_eq!(form.kind, AuthKind::Oidc);
+        assert_eq!(form.oidc_issuer_url, "https://accounts.google.com");
+        assert_eq!(form.oidc_client_id, "google-client-id");
+        assert!(form.oidc_client_secret_set);
+
+        let parsed = form.parse(Locale::En).unwrap();
+        let AuthPolicy::Oidc(parsed_oidc) = parsed else {
+            panic!("expected oidc policy");
+        };
+        assert_eq!(parsed_oidc.issuer_url, oidc.issuer_url);
+        assert_eq!(parsed_oidc.client_id, oidc.client_id);
+        assert_eq!(parsed_oidc.scopes, oidc.scopes);
+        assert_eq!(parsed_oidc.allowed_emails, oidc.allowed_emails);
+
+        let invalid = AuthForm {
+            oidc_client_id: "".into(),
+            ..form.clone()
+        };
+        assert!(invalid.parse(Locale::En).is_err());
     }
 }

@@ -35,7 +35,7 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 
 - IP allow and deny lists per proxy and per route, and shared access lists that carry an IP filter and an authentication under one name
 - Per-client rate limits with second, minute or hour periods, a burst and a `Retry-After` header, and a request body size limit with `413`
-- Basic auth with argon2 hashes, Bearer tokens stored as SHA-256 digests and compared in constant time, forward auth (oauth2-proxy, Authelia) and admin session authentication with TOTP, plus sign-in attempt limits
+- Basic auth with argon2 hashes, Bearer tokens stored as SHA-256 digests and compared in constant time, built-in OIDC / OAuth 2.0 login, forward auth (oauth2-proxy, Authelia) and admin session authentication with TOTP, plus sign-in attempt limits
 - Real client IP resolution behind eight known CDNs (Cloudflare, Fastly, Amazon CloudFront, Bunny, Gcore, KeyCDN, Imperva, Google Cloud Load Balancing) and trusted proxies. The CDN ranges refresh daily, and the forged client IP headers are removed from untrusted peers
 - Request and response header rules with variables: `{client_ip}`, `{host}`, `{request_id}`, `{route}`, `{client_cert_subject}` and `{client_cert_fingerprint}`
 - Response compression (brotli, zstd and gzip) and an in-memory HTTP cache with ETag and Last-Modified revalidation, `304` answers, `X-Cache` and `Age` headers and a purge API

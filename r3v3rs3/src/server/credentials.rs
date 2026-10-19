@@ -3,7 +3,8 @@ use r3v3rs3_api::{
     error::Error,
     header_rules::HeaderRules,
     policy::{
-        AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, ForwardAuth, is_header_name,
+        AuthPolicy, BasicAuth, BasicAuthUser, BearerAuth, BearerToken, ForwardAuth, OidcAuth,
+        is_header_name,
     },
     proxy::{Proxy, ProxyKind},
 };
@@ -41,6 +42,7 @@ pub fn seal_policy(policy: &mut AuthPolicy) -> Result<(), Error> {
         AuthPolicy::Basic(basic) => seal_basic_auth(basic),
         AuthPolicy::Bearer(bearer) => seal_bearer_auth(bearer),
         AuthPolicy::Forward(forward) => validate_forward_auth(forward),
+        AuthPolicy::Oidc(oidc) => validate_oidc_auth(oidc),
     }
 }
 
@@ -106,6 +108,10 @@ pub fn mask_policy(policy: &mut AuthPolicy) {
             token.token_set = !token.token_hash.is_empty();
             token.token_hash.clear();
         }),
+        AuthPolicy::Oidc(oidc) => {
+            oidc.client_secret_set = !oidc.client_secret.is_empty();
+            oidc.client_secret.clear();
+        }
         _ => {}
     }
 }
@@ -132,6 +138,12 @@ pub fn restore_policy(policy: &mut AuthPolicy, previous: &mut AuthPolicy) {
         }
         (AuthPolicy::Bearer(bearer), AuthPolicy::Bearer(old)) => {
             restore(&mut bearer.tokens, &mut old.tokens, token_secret)
+        }
+        (AuthPolicy::Oidc(oidc), AuthPolicy::Oidc(old))
+            if oidc.client_secret.is_empty() && old.client_secret_set =>
+        {
+            oidc.client_secret.clone_from(&old.client_secret);
+            oidc.client_secret_set = true;
         }
         _ => {}
     }
@@ -224,6 +236,22 @@ fn validate_forward_auth(forward: &ForwardAuth) -> Result<(), Error> {
         Some(name) => Err(Error::InvalidHeaderName { name: name.clone() }),
         None => Ok(()),
     }
+}
+
+fn validate_oidc_auth(oidc: &OidcAuth) -> Result<(), Error> {
+    if oidc.client_id.trim().is_empty() {
+        return Err(Error::InvalidOidcConfig {
+            reason: "Client ID is required".into(),
+        });
+    }
+    if oidc.issuer_url.trim().is_empty()
+        && (oidc.authorization_url.trim().is_empty() || oidc.token_url.trim().is_empty())
+    {
+        return Err(Error::InvalidOidcConfig {
+            reason: "Either Issuer URL or both Authorization URL and Token URL are required".into(),
+        });
+    }
+    Ok(())
 }
 
 fn hash_password(password: &str) -> Result<String, Error> {

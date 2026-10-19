@@ -37,7 +37,7 @@ use url::form_urlencoded;
 const COOKIE_NAME: &str = "r3v3rs3_session";
 
 /// Path segments below the route path that lead to the sign-in endpoints.
-const ENDPOINT_PREFIX: [&str; 2] = [".r3v3rs3", "auth"];
+pub(crate) const ENDPOINT_PREFIX: [&str; 2] = [".r3v3rs3", "auth"];
 
 const MAX_FORM_SIZE: usize = 8 * 1024;
 const MAX_REDIRECT_LENGTH: usize = 2048;
@@ -141,6 +141,31 @@ impl SessionService {
             .create(SessionScope::Proxy, record, expiry)
             .await?;
         Ok((token, expiry))
+    }
+
+    pub(crate) async fn create_proxy_session(
+        &self,
+        host: &str,
+        account: &str,
+    ) -> Result<(String, Duration), Error> {
+        let record = SessionRecord::proxy(host, account);
+        self.create_session(record).await
+    }
+
+    pub(crate) async fn get_proxy_session(&self, token: &str, host: &str) -> Option<String> {
+        let expiry = self.state().expiry();
+        match self.backend.get(SessionScope::Proxy, token).await {
+            Ok(Some(record))
+                if record.is_active(expiry) && record.subject.eq_ignore_ascii_case(host) =>
+            {
+                record.account
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) async fn remove_proxy_session(&self, token: &str) {
+        self.remove_session(token).await;
     }
 
     async fn remove_session(&self, token: &str) {
@@ -419,7 +444,7 @@ fn query_redirect<B>(req: &Request<B>) -> String {
 
 /// Returns the target when it is a path on the same host, and `/` otherwise. This prevents an
 /// open redirect to another site.
-fn safe_redirect(target: &str) -> &str {
+pub(crate) fn safe_redirect(target: &str) -> &str {
     let valid = target.starts_with('/')
         && !target.starts_with("//")
         && !target.starts_with("/\\")
