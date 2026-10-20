@@ -119,6 +119,26 @@ async fn the_metrics_need_a_session_or_a_bearer_token() -> anyhow::Result<()> {
         assert!(body.contains("quantile=\"0.95\""));
         assert!(body.contains("quantile=\"0.99\""));
         assert!(body.contains("kind=\"timeout\""));
+        assert!(body.contains("r3v3rs3_event_loop_lag_seconds"));
+
+        // JSON format via Accept header
+        let res_json = client
+            .get(&url)
+            .header("cookie", &cookie)
+            .header("accept", "application/json")
+            .send()
+            .await?;
+        assert_eq!(res_json.status(), StatusCode::OK);
+        assert!(
+            res_json
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .starts_with("application/json")
+        );
+        let val: serde_json::Value = res_json.json().await?;
+        assert!(val.get("event_loop_lag_seconds").is_some());
         Ok(())
     })
     .await

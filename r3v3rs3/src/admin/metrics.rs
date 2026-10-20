@@ -164,6 +164,56 @@ fn format_latency_quantile_metrics(out: &mut String) {
     ));
 }
 
+fn format_system_metrics(out: &mut String, sys: &super::system_metrics::SystemMetricsSnapshot) {
+    if let Some(fds) = sys.open_fds {
+        out.push_str("# HELP r3v3rs3_process_open_fds The number of open file descriptors.\n");
+        out.push_str("# TYPE r3v3rs3_process_open_fds gauge\n");
+        out.push_str("r3v3rs3_process_open_fds ");
+        out.push_str(&fds.to_string());
+        out.push('\n');
+    }
+    if let Some(max) = sys.max_fds {
+        out.push_str(
+            "# HELP r3v3rs3_process_max_fds The maximum number of open file descriptors.\n",
+        );
+        out.push_str("# TYPE r3v3rs3_process_max_fds gauge\n");
+        out.push_str("r3v3rs3_process_max_fds ");
+        out.push_str(&max.to_string());
+        out.push('\n');
+    }
+    format_system_memory_metrics(out, sys);
+    out.push_str(
+        "# HELP r3v3rs3_event_loop_lag_seconds Current Tokio event loop lag in seconds.\n",
+    );
+    out.push_str("# TYPE r3v3rs3_event_loop_lag_seconds gauge\n");
+    out.push_str(&format!(
+        "r3v3rs3_event_loop_lag_seconds {:.6}\n",
+        sys.event_loop_lag_seconds
+    ));
+}
+
+fn format_system_memory_metrics(
+    out: &mut String,
+    sys: &super::system_metrics::SystemMetricsSnapshot,
+) {
+    if let Some(rss) = sys.resident_memory_bytes {
+        out.push_str(
+            "# HELP r3v3rs3_process_resident_memory_bytes Resident memory size in bytes.\n",
+        );
+        out.push_str("# TYPE r3v3rs3_process_resident_memory_bytes gauge\n");
+        out.push_str("r3v3rs3_process_resident_memory_bytes ");
+        out.push_str(&rss.to_string());
+        out.push('\n');
+    }
+    if let Some(vm) = sys.virtual_memory_bytes {
+        out.push_str("# HELP r3v3rs3_process_virtual_memory_bytes Virtual memory size in bytes.\n");
+        out.push_str("# TYPE r3v3rs3_process_virtual_memory_bytes gauge\n");
+        out.push_str("r3v3rs3_process_virtual_memory_bytes ");
+        out.push_str(&vm.to_string());
+        out.push('\n');
+    }
+}
+
 /// Exports the proxy counters in the Prometheus text format.
 #[utoipa::path(
     get,
@@ -176,21 +226,33 @@ fn format_latency_quantile_metrics(out: &mut String) {
     )
 )]
 pub async fn metrics(
+    headers: HeaderMap,
     Extension(_caller): Extension<Caller>,
-) -> Result<([(HeaderName, &'static str); 1], String), AppError> {
+) -> Result<Response, AppError> {
+    let sys = super::system_metrics::collect_system_metrics();
+    if headers
+        .get(header::ACCEPT)
+        .and_then(|val| val.to_str().ok())
+        .is_some_and(|accept| accept.contains("application/json"))
+    {
+        return Ok(axum::Json(sys).into_response());
+    }
+
     let mut out = String::new();
     let values = stats::snapshot();
     format_basic_metrics(&mut out, &values);
     format_upstream_error_metrics(&mut out);
     format_latency_histogram_metrics(&mut out);
     format_latency_quantile_metrics(&mut out);
+    format_system_metrics(&mut out, &sys);
     Ok((
         [(
             HeaderName::from_static("content-type"),
             PROMETHEUS_CONTENT_TYPE,
         )],
         out,
-    ))
+    )
+        .into_response())
 }
 
 const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";

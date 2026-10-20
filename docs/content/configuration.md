@@ -1250,6 +1250,11 @@ A change of the defaults rebuilds every port, so it takes effect without a resta
 - `r3v3rs3_http_request_duration_quantiles_seconds`: recent request duration quantiles (`p50`, `p95`, `p99`) in seconds.
 - `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`: the cache decisions of the cached proxies.
 - `r3v3rs3_open_connections`: the client connection tasks that still run.
+- `r3v3rs3_process_open_fds`, `r3v3rs3_process_max_fds`: open and maximum allowed file descriptors.
+- `r3v3rs3_process_resident_memory_bytes`, `r3v3rs3_process_virtual_memory_bytes`: resident and virtual memory usage in bytes.
+- `r3v3rs3_event_loop_lag_seconds`: current Tokio event loop latency in seconds.
+
+Sending `Accept: application/json` returns the system self-monitoring metrics as a JSON object.
 
 An admin session cookie or a valid MCP Bearer token authorizes the request, so a Prometheus job can scrape it with `bearer_token` while the WebUI uses its cookie. The counters count one process: with worker mode, the worker serves the ports and keeps its own counters, which `GET /api/workers` reports separately.
 

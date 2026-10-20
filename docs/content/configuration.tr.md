@@ -1250,6 +1250,11 @@ Varsayılanlarda yapılan bir değişiklik her portu yeniden kurar, yani restart
 - `r3v3rs3_http_request_duration_quantiles_seconds`: son isteklerin saniye cinsinden gecikme dilimleri (`p50`, `p95`, `p99`).
 - `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`: cache'i açık proxy'lerin cache kararları.
 - `r3v3rs3_open_connections`: açık istemci bağlantıları.
+- `r3v3rs3_process_open_fds`, `r3v3rs3_process_max_fds`: açık ve izin verilen maksimum dosya tanımlayıcı (fd) sayısı.
+- `r3v3rs3_process_resident_memory_bytes`, `r3v3rs3_process_virtual_memory_bytes`: bayt cinsinden yerleşik (RSS) ve sanal bellek kullanımı.
+- `r3v3rs3_event_loop_lag_seconds`: saniye cinsinden anlık Tokio event loop gecikmesi.
+
+`Accept: application/json` başlığı gönderildiğinde sistem öz izleme (self-monitoring) metrikleri JSON formatında döner.
 
 İsteği bir admin session cookie'si veya geçerli bir MCP Bearer token'ı yetkilendirir. Bir Prometheus job'ı `bearer_token` ile scrape ederken WebUI cookie'sini kullanmaya devam edebilir. Sayaçlar tek süreci sayar: worker modunda portları worker sunar ve kendi sayaçlarını tutar, worker durumu ayrıca `GET /api/workers` üzerinden raporlanır.
 

@@ -76,6 +76,7 @@ mod ports;
 mod proxies;
 mod static_file;
 mod store;
+pub(crate) mod system_metrics;
 mod upgrade;
 mod workers;
 
