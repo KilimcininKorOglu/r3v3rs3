@@ -131,10 +131,7 @@ impl Form {
             }
             let entry = row.parse(locale)?;
             if !seen.insert(entry.key.as_str().to_string()) {
-                return Err(locale.tf(
-                    "env_groups.duplicate_key",
-                    &[("key", entry.key.as_str())],
-                ));
+                return Err(locale.tf("env_groups.duplicate_key", &[("key", entry.key.as_str())]));
             }
             variables.push(entry);
         }
