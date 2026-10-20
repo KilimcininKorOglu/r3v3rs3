@@ -750,10 +750,7 @@ impl Platform {
         let parsed = r3v3rs3_api::platform::parse_env_file(&content);
         let vars = parsed
             .into_iter()
-            .map(|(key, value)| EnvVar {
-                key: key.into(),
-                value,
-            })
+            .map(|(key, value)| EnvVar { key, value })
             .collect();
         Ok(vars)
     }

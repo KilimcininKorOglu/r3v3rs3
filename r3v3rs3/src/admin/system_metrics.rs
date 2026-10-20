@@ -9,18 +9,20 @@ static LAG_MONITOR_STARTED: OnceLock<()> = OnceLock::new();
 
 /// Starts the background lag monitor task if not already started.
 pub fn ensure_lag_monitor_started() {
-    LAG_MONITOR_STARTED.get_or_init(|| {
-        tokio::spawn(async {
-            let interval = Duration::from_millis(100);
-            loop {
-                let start = Instant::now();
-                tokio::time::sleep(interval).await;
-                let elapsed = start.elapsed();
-                let lag = elapsed.saturating_sub(interval);
-                EVENT_LOOP_LAG_MICROS.store(lag.as_micros() as u64, Ordering::Relaxed);
-            }
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        LAG_MONITOR_STARTED.get_or_init(|| {
+            handle.spawn(async {
+                let interval = Duration::from_millis(100);
+                loop {
+                    let start = Instant::now();
+                    tokio::time::sleep(interval).await;
+                    let elapsed = start.elapsed();
+                    let lag = elapsed.saturating_sub(interval);
+                    EVENT_LOOP_LAG_MICROS.store(lag.as_micros() as u64, Ordering::Relaxed);
+                }
+            });
         });
-    });
+    }
 }
 
 /// The current event loop lag in microseconds.
@@ -93,8 +95,8 @@ pub fn collect_system_metrics() -> SystemMetricsSnapshot {
 mod tests {
     use super::*;
 
-    #[test]
-    fn system_metrics_returns_valid_snapshot() {
+    #[tokio::test]
+    async fn system_metrics_returns_valid_snapshot() {
         let metrics = collect_system_metrics();
         assert!(metrics.event_loop_lag_seconds >= 0.0);
     }
