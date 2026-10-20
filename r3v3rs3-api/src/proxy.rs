@@ -13,8 +13,9 @@ use crate::rewrite::PathRewrite;
 use crate::upstream::{
     CircuitBreaker, DEFAULT_WEIGHT, HealthCheck, LoadBalancing, RetryPolicy, SrvStatus,
     StickyCookie, UpstreamHealth, UpstreamTimeouts, default_connect_timeout,
-    default_session_idle_timeout, default_weight, is_default_connect_timeout,
-    is_default_session_idle_timeout, is_default_weight, validate_timeout, validate_weights,
+    default_max_datagram_size, default_session_idle_timeout, default_weight,
+    is_default_connect_timeout, is_default_max_datagram_size, is_default_session_idle_timeout,
+    is_default_weight, validate_datagram_size, validate_timeout, validate_weights,
 };
 use crate::vhost::VirtualHost;
 use crate::{id::ShortId, port::UpstreamServer};
@@ -93,6 +94,7 @@ impl ProxyKind {
             Self::Udp(udp) => {
                 validate_timeout(udp.session_idle_timeout)?;
                 validate_weights(udp.upstream_servers.iter().map(|server| server.weight))?;
+                validate_datagram_size(udp.max_datagram_size)?;
                 udp.health_check.validate(false)
             }
             Self::Http(http) => validate_http_upstream(http),
@@ -210,6 +212,12 @@ pub struct UdpProxy {
     )]
     #[schema(value_type = String, example = "60s")]
     pub session_idle_timeout: Duration,
+    /// Maximum UDP datagram payload size in bytes.
+    #[serde(
+        default = "default_max_datagram_size",
+        skip_serializing_if = "is_default_max_datagram_size"
+    )]
+    pub max_datagram_size: usize,
     #[serde(default, skip_serializing_if = "LoadBalancing::is_default")]
     pub load_balancing: LoadBalancing,
     #[serde(default, skip_serializing_if = "HealthCheck::is_default")]

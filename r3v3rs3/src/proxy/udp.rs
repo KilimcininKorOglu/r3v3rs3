@@ -22,7 +22,6 @@ type Resolver = TokioResolver;
 
 const DNS_LOOKUP_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_SESSIONS: usize = 10_000;
-const MAX_DATAGRAM_SIZE: usize = 65527;
 
 #[derive(Debug)]
 pub struct UdpPortContext {
@@ -116,7 +115,12 @@ impl UdpPortContext {
             return;
         };
         session.touch();
-        if let Err(err) = session.socket.send(data).await {
+        let payload = if data.len() > self.upstream.max_datagram_size {
+            &data[..self.upstream.max_datagram_size]
+        } else {
+            data
+        };
+        if let Err(err) = session.socket.send(payload).await {
             session.context.report_failure(&err.to_string());
             self.span.in_scope(|| {
                 debug!(%client, %err, "failed to send the packet to the upstream server");
@@ -144,6 +148,7 @@ impl UdpPortContext {
                 listener: listener.clone(),
                 client,
                 activity: Activity::new(self.upstream.idle_timeout),
+                max_datagram_size: self.upstream.max_datagram_size,
                 group: group.clone(),
                 index,
                 span: self.span.clone(),
@@ -176,14 +181,28 @@ impl UdpPortContext {
 }
 
 /// The upstream servers and the session settings of the UDP proxy of a port.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct UdpUpstream {
     servers: Vec<Connection>,
     idle_timeout: Duration,
+    max_datagram_size: usize,
     load_balancing: LoadBalancing,
     health_check: HealthCheck,
     /// `None` when no proxy of the port has a server.
     group: Option<Arc<UpstreamGroup>>,
+}
+
+impl Default for UdpUpstream {
+    fn default() -> Self {
+        Self {
+            servers: Vec::new(),
+            idle_timeout: r3v3rs3_api::upstream::DEFAULT_SESSION_IDLE_TIMEOUT,
+            max_datagram_size: r3v3rs3_api::upstream::DEFAULT_MAX_DATAGRAM_SIZE,
+            load_balancing: Default::default(),
+            health_check: Default::default(),
+            group: None,
+        }
+    }
 }
 
 impl UdpUpstream {
@@ -213,6 +232,7 @@ impl UdpUpstream {
             upstream = Self {
                 servers,
                 idle_timeout: proxy.session_idle_timeout,
+                max_datagram_size: proxy.max_datagram_size,
                 load_balancing: proxy.load_balancing,
                 health_check: proxy.health_check,
                 group: Some(group),
@@ -225,6 +245,7 @@ impl UdpUpstream {
         same_servers(&self.servers, &other.servers)
             && same_group(&self.group, &other.group)
             && self.idle_timeout == other.idle_timeout
+            && self.max_datagram_size == other.max_datagram_size
             && self.load_balancing == other.load_balancing
             && self.health_check == other.health_check
     }
@@ -279,6 +300,7 @@ struct SessionContext {
     listener: Arc<UdpSocket>,
     client: SocketAddr,
     activity: Activity,
+    max_datagram_size: usize,
     group: Arc<UpstreamGroup>,
     /// The index of the upstream server in `group`.
     index: usize,
@@ -376,7 +398,7 @@ impl Activity {
 /// error, such as an ICMP port unreachable message, counts as a failure.
 async fn relay_replies(socket: Arc<UdpSocket>, context: Arc<SessionContext>) {
     let client = context.client;
-    let mut buf = vec![0; MAX_DATAGRAM_SIZE];
+    let mut buf = vec![0; context.max_datagram_size];
     loop {
         let remaining = context.activity.remaining();
         if remaining.is_zero() {

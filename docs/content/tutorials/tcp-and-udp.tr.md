@@ -41,7 +41,7 @@ $ dig +short @proxy.example.com example.com A
 172.66.147.243
 ```
 
-UDP proxy her istemci adresi için bir oturum açar, her oturumun upstream sunucuya kendi socket'i vardır. İki yönde de **Oturum Boşta Kalma Timeout'u (Saniye)** boyunca paket geçmezse oturum kapanır. Varsayılan 60 saniyedir. Bir port en çok 10.000 oturum tutar, dolduğunda yeni istemcilerin paketlerini atar.
+UDP proxy her istemci adresi için bir oturum açar, her oturumun upstream sunucuya kendi socket'i vardır. İki yönde de **Oturum Boşta Kalma Timeout'u (Saniye)** boyunca paket geçmezse oturum kapanır. Varsayılan 60 saniyedir. İsteğe bağlı olarak **Maksimum Datagram Boyutu (Bayt)** (varsayılan 65527) ayarlanabilir. Bir port en çok 10.000 oturum tutar, dolduğunda yeni istemcilerin paketlerini atar.
 
 ## Adım 3: Mutual TLS ekleyin
 

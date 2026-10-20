@@ -323,6 +323,7 @@ mod tests {
             Error::DuplicateCompressionAlgorithm { algorithm: text() },
             Error::InvalidCacheSize,
             Error::InvalidTimeout,
+            Error::InvalidDatagramSize,
             Error::InvalidHealthCheckPath { path: text() },
             Error::AllServersDrained,
             Error::InvalidCircuitBreaker,

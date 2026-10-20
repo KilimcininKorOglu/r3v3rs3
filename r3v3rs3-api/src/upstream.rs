@@ -6,6 +6,9 @@ use utoipa::ToSchema;
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 pub const DEFAULT_SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+pub const MIN_DATAGRAM_SIZE: usize = 512;
+pub const MAX_DATAGRAM_SIZE: usize = 65527;
+pub const DEFAULT_MAX_DATAGRAM_SIZE: usize = 65527;
 pub const DEFAULT_MAX_FAILS: u32 = 1;
 pub const DEFAULT_FAIL_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -452,6 +455,22 @@ pub fn is_default_session_idle_timeout(timeout: &Duration) -> bool {
     *timeout == DEFAULT_SESSION_IDLE_TIMEOUT
 }
 
+pub fn default_max_datagram_size() -> usize {
+    DEFAULT_MAX_DATAGRAM_SIZE
+}
+
+pub fn is_default_max_datagram_size(size: &usize) -> bool {
+    *size == DEFAULT_MAX_DATAGRAM_SIZE
+}
+
+pub fn validate_datagram_size(size: usize) -> Result<(), Error> {
+    if (MIN_DATAGRAM_SIZE..=MAX_DATAGRAM_SIZE).contains(&size) {
+        Ok(())
+    } else {
+        Err(Error::InvalidDatagramSize)
+    }
+}
+
 fn default_retry_attempts() -> u8 {
     DEFAULT_RETRY_ATTEMPTS
 }
@@ -810,6 +829,24 @@ mod tests {
             ..Default::default()
         };
         assert!(ProxyKind::Udp(udp).validate_upstream().is_err());
+
+        let udp_small = UdpProxy {
+            max_datagram_size: 511,
+            ..Default::default()
+        };
+        assert!(ProxyKind::Udp(udp_small).validate_upstream().is_err());
+
+        let udp_large = UdpProxy {
+            max_datagram_size: 65528,
+            ..Default::default()
+        };
+        assert!(ProxyKind::Udp(udp_large).validate_upstream().is_err());
+
+        let udp_valid = UdpProxy {
+            max_datagram_size: 1500,
+            ..Default::default()
+        };
+        assert!(ProxyKind::Udp(udp_valid).validate_upstream().is_ok());
 
         let request_disabled = UpstreamTimeouts {
             request: Duration::ZERO,

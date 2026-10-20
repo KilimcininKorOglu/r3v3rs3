@@ -352,6 +352,9 @@ pub enum Error {
     #[error("timeout must be greater than zero")]
     InvalidTimeout,
 
+    #[error("maximum datagram size must be between 512 and 65527 bytes")]
+    InvalidDatagramSize,
+
     #[error("health check path must start with / and only HTTP proxies use it: {path}")]
     InvalidHealthCheckPath { path: String },
 

@@ -105,6 +105,60 @@ async fn udp_session_closes_after_the_idle_timeout() -> anyhow::Result<()> {
     .await
 }
 
+#[tokio::test]
+async fn udp_datagram_size_limits_payload() -> anyhow::Result<()> {
+    let upstream_port = alloc_udp_port().await?;
+    let proxy_port = alloc_udp_port().await?;
+    let _sources = start_echo_upstream(&upstream_port).await?;
+    let config = udp_storage_with_size(&proxy_port, &upstream_port, Duration::from_secs(60), 512);
+
+    with_server(config, |_| async move {
+        let proxy = proxy_port.socket_addr();
+        let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
+
+        let large_packet = vec![0x42; 1000];
+        client.send_to(&large_packet, proxy).await?;
+        let reply = recv_reply(&client, proxy).await?;
+        assert_eq!(reply.len(), 512);
+        assert_eq!(reply, vec![0x42; 512]);
+        Ok(())
+    })
+    .await
+}
+
+fn udp_storage_with_size(
+    proxy_port: &TestPort,
+    upstream_port: &TestPort,
+    idle: Duration,
+    max_datagram_size: usize,
+) -> TestStorage {
+    TestStorage::builder()
+        .ports(vec![PortEntry {
+            id: "test".parse().unwrap(),
+            port: Port {
+                active: true,
+                name: String::new(),
+                listen: proxy_port.multiaddr_udp(),
+                opts: Default::default(),
+            },
+        }])
+        .proxies(vec![ProxyEntry {
+            id: "test2".parse().unwrap(),
+            source: None,
+            proxy: Proxy {
+                ports: vec!["test".parse().unwrap()],
+                kind: ProxyKind::Udp(UdpProxy {
+                    upstream_servers: vec![UpstreamServer::new(upstream_port.multiaddr_udp())],
+                    session_idle_timeout: idle,
+                    max_datagram_size,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        }])
+        .build()
+}
+
 async fn recv_reply(client: &UdpSocket, proxy: SocketAddr) -> anyhow::Result<Vec<u8>> {
     let mut buf = [0; 1024];
     let (size, addr) = timeout(Duration::from_secs(5), client.recv_from(&mut buf)).await??;

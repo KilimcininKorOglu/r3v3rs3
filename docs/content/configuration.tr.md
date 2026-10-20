@@ -321,6 +321,8 @@ UDP proxy her istemci adresi için ayrı bir oturum açar. Her oturumun upstream
 
 İki yönde de `session_idle_timeout` süresince (varsayılan `60s`) paket geçmezse oturum kapanır. Upstream socket hata verdiğinde veya portun upstream sunucuları ya da boşta kalma timeout'u değiştiğinde de oturum kapanır. İstemcinin sonraki paketi yeni bir oturum açar. Bir port en fazla 10.000 oturum tutar. Bu sınıra ulaşılınca r3v3rs3 yeni istemcilerin paketlerini düşürür.
 
+`max_datagram_size`, UDP paketleri için bayt cinsinden maksimum yük boyutunu belirler (512 ile 65527 arasında, varsayılan `65527`). Bu boyuttan büyük paketler kırpılır.
+
 ## Upstream timeout'ları
 
 r3v3rs3 upstream sunucuyu sınırlı bir süre bekler. Timeout değerlerini `500ms`, `10s` veya `1m` gibi yazın.

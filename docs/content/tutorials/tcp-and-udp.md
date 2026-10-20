@@ -41,7 +41,7 @@ $ dig +short @proxy.example.com example.com A
 172.66.147.243
 ```
 
-A UDP proxy opens one session for each client address, with its own socket to the upstream server. The session closes when no packet passes in either direction for **Session Idle Timeout (Seconds)**, 60 seconds by default. A port keeps at most 10,000 sessions and drops the packets of new clients when it is full.
+A UDP proxy opens one session for each client address, with its own socket to the upstream server. The session closes when no packet passes in either direction for **Session Idle Timeout (Seconds)**, 60 seconds by default. You can also configure **Maximum Datagram Size (Bytes)** (default 65527 bytes). A port keeps at most 10,000 sessions and drops the packets of new clients when it is full.
 
 ## Step 3: Add Mutual TLS
 
