@@ -85,6 +85,15 @@ pub trait ContainerRuntime: Send + Sync {
     /// The containers of an app, running or not.
     async fn list_containers(&self, app: &AppName) -> anyhow::Result<Vec<ContainerSummary>>;
 
+    /// The containers of a Compose project.
+    async fn list_project_containers(
+        &self,
+        project: &ProjectName,
+    ) -> anyhow::Result<Vec<ContainerSummary>> {
+        let _ = project;
+        Ok(Vec::new())
+    }
+
     /// The last `tail` lines of the standard output and the standard error of a container.
     async fn logs(&self, name: &ContainerName, tail: u32) -> anyhow::Result<String>;
 

@@ -15,6 +15,9 @@ pub const APP_LABEL: &str = "r3v3rs3.app";
 /// The label that Docker Compose puts on the containers and the built images of a project.
 pub const COMPOSE_PROJECT_LABEL: &str = "com.docker.compose.project";
 
+/// The label that Docker Compose puts on containers naming their service.
+pub const COMPOSE_SERVICE_LABEL: &str = "com.docker.compose.service";
+
 /// The longest name of a container, a network, a volume or an app.
 const MAX_NAME_LENGTH: usize = 63;
 
@@ -392,7 +395,7 @@ fn check_label(key: &str, value: &str) -> Result<(), Error> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ContainerHealth {
     Starting,

@@ -23,9 +23,9 @@ use r3v3rs3_api::{
     id::ShortId,
     platform::{
         AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
-        DeploymentEntry, DeploymentTrigger, EnvEntry, EnvGroup, EnvGroupSpec, EnvGroupSummary,
-        GitTokenRequest, ImageUpdateStatus, KeyRotationReport, MetricsQuery, PrunePolicy,
-        PruneResult, RegistryEntry, RegistryRequest, ScheduledCommandRequest,
+        ComposeServiceStatus, DeploymentEntry, DeploymentTrigger, EnvEntry, EnvGroup, EnvGroupSpec,
+        EnvGroupSummary, GitTokenRequest, ImageUpdateStatus, KeyRotationReport, MetricsQuery,
+        PrunePolicy, PruneResult, RegistryEntry, RegistryRequest, ScheduledCommandRequest,
         ScheduledCommandRunResult, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
     },
 };
@@ -577,16 +577,41 @@ pub async fn get_logs(
     let platform = state.platform(&caller, Permission::Read).await?;
     let tail = query.tail.unwrap_or(DEFAULT_LOG_TAIL);
     Ok(Json(
-        platform.app_log(id, tail).await.map_err(platform_error)?,
+        platform
+            .app_log(id, tail, query.service.as_deref())
+            .await
+            .map_err(platform_error)?,
+    ))
+}
+
+/// Returns the status and health of the services of a Compose app.
+#[utoipa::path(
+    get,
+    path = "/{id}/services",
+    tag = "platform",
+    operation_id = "get_app_services",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The list of Compose services.", body = Vec<ComposeServiceStatus>), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_services(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Vec<ComposeServiceStatus>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    Ok(Json(
+        platform.app_services(id).await.map_err(platform_error)?,
     ))
 }
 
 /// Query for live container log streaming.
-#[derive(Debug, Clone, Copy, Default, Deserialize, IntoParams)]
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct AppLogLiveQuery {
     /// Number of initial lines to stream.
     pub tail: Option<u32>,
+    /// Optional service name to stream logs from in a Compose app.
+    pub service: Option<String>,
 }
 
 /// Opens a WebSocket stream for live logs of the running container of an app.
@@ -614,17 +639,24 @@ pub async fn logs_live(
         .unwrap_or(DEFAULT_LOG_TAIL)
         .clamp(1, MAX_LOG_TAIL);
     platform.app(id).await.map_err(platform_error)?;
-    Ok(ws.on_upgrade(move |socket| logs_live_bridge(socket, platform, id, tail)))
+    let service = query.service;
+    Ok(ws.on_upgrade(move |socket| logs_live_bridge(socket, platform, id, tail, service)))
 }
 
-async fn logs_live_bridge(socket: WebSocket, platform: Arc<Platform>, id: ShortId, tail: u32) {
+async fn logs_live_bridge(
+    socket: WebSocket,
+    platform: Arc<Platform>,
+    id: ShortId,
+    tail: u32,
+    service: Option<String>,
+) {
     let (sink, ws_stream) = socket.split();
-    match platform.app_log_stream(id, tail).await {
+    match platform.app_log_stream(id, tail, service.as_deref()).await {
         Ok((raw, response)) => {
             logs_stream_bridge(sink, ws_stream, raw, response).await;
         }
         Err(_) => {
-            logs_poll_bridge(sink, ws_stream, platform, id, tail).await;
+            logs_poll_bridge(sink, ws_stream, platform, id, tail, service).await;
         }
     }
 }
@@ -700,9 +732,10 @@ async fn logs_poll_bridge(
     platform: Arc<Platform>,
     id: ShortId,
     tail: u32,
+    service: Option<String>,
 ) {
     let poller = async {
-        if let Ok(app_log) = platform.app_log(id, tail).await
+        if let Ok(app_log) = platform.app_log(id, tail, service.as_deref()).await
             && !app_log.log.is_empty()
         {
             let _ = sink.send(Message::Text(app_log.log.into())).await;
@@ -711,7 +744,7 @@ async fn logs_poll_bridge(
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
-            let Ok(app_log) = platform.app_log(id, 20).await else {
+            let Ok(app_log) = platform.app_log(id, 20, service.as_deref()).await else {
                 break;
             };
             if !app_log.running {

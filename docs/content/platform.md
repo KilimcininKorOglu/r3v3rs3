@@ -180,6 +180,13 @@ A Compose deployment recreates the service of `service`: Docker stops the old co
 
 r3v3rs3 does not check the other settings of a Compose file. A Compose file can mount a host path, run a privileged container or use the network of the host, so every account that can edit an app can take over the host through it. Give the Edit permission only to accounts that may do that.
 
+#### Compose Service-Level Health and Logs
+
+For Compose applications consisting of multiple services:
+- **Services Card**: The app details page displays a **Services** card listing each service container in the Compose project, including container name, state (`running` or `exited`), container healthcheck status (`Healthy`, `Starting`, `Unhealthy`, or `None`), and exit code if terminated.
+- **Per-Service Logs**: On the app's **Log** page, a **Service** selector dropdown allows operators to switch between all services (the primary traffic container) and any individual container in the Compose project. Both static log retrieval (`GET /api/apps/{id}/logs?service=<name>`) and live WebSocket log streaming (`GET /api/apps/{id}/logs/live?service=<name>`) support the service filter.
+- **API**: The list of service containers and their health status can be queried directly via `GET /api/apps/{id}/services`.
+
 ### Environment Variables
 
 `PUT /api/apps/{id}/env` replaces the environment variables of an app. A variable with `"secret": true` never leaves the server again: the admin API returns it without its value, and an update without a value keeps the current value. r3v3rs3 encrypts every value with `platform.key` and decrypts it only when a container starts.
@@ -548,7 +555,7 @@ The deployment history shows the latest 100 deployments with their status, **Tri
 
 ### Log
 
-The log page shows the last 200 lines of stdout and stderr of the running container and streams new lines in real time over a WebSocket connection. The toolbar offers a live tail toggle (streaming or paused), an auto-scroll switch, real-time search filtering with match counts, and a **Download** button to export the log buffer as a `.txt` file. An app without a running container shows "The app has no running container."
+The log page shows the last 200 lines of stdout and stderr of the running container and streams new lines in real time over a WebSocket connection. The toolbar offers a live tail toggle (streaming or paused), an auto-scroll switch, real-time search filtering with match counts, and a **Download** button to export the log buffer as a `.txt` file. For Docker Compose applications, the toolbar includes a **Service** selector dropdown to switch between the primary traffic container and any specific service container in the project. An app without a running container shows "The app has no running container."
 
 ### Terminal
 

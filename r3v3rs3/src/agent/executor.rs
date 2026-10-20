@@ -148,6 +148,10 @@ impl Executor {
                 .list_containers(&app)
                 .await
                 .map(|containers| AgentOutput::Containers { containers }),
+            AgentRequest::ListProjectContainers { project } => runtime
+                .list_project_containers(&project)
+                .await
+                .map(|containers| AgentOutput::Containers { containers }),
             AgentRequest::Logs { name, tail } => {
                 self.owned(&name).await?;
                 runtime

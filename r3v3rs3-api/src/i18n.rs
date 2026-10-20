@@ -196,6 +196,7 @@ mod tests {
             Error::FailedToRefreshEngines,
             Error::TerminalUnsupported,
             Error::AppNotRunning { name: text() },
+            Error::ServiceNotFound { service: text() },
             Error::InvalidFilePath { path: text() },
             Error::VolumeReadOnly { path: text() },
             Error::HostPortUnavailable { port: 5432 },

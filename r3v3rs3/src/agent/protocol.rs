@@ -103,6 +103,9 @@ pub enum AgentRequest {
     ListContainers {
         app: AppName,
     },
+    ListProjectContainers {
+        project: ProjectName,
+    },
     Logs {
         name: ContainerName,
         tail: u32,

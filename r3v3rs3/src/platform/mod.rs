@@ -47,7 +47,7 @@ use crate::runtime::ContainerRuntime;
 use crate::runtime::docker::{DockerRuntime, ExecHandle};
 use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::app::AppConfig;
-use r3v3rs3_api::container::ContainerName;
+use r3v3rs3_api::container::{COMPOSE_SERVICE_LABEL, ContainerName, ContainerSummary};
 use r3v3rs3_api::discovery::Endpoint;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
@@ -55,8 +55,8 @@ use r3v3rs3_api::git::GitRef;
 use r3v3rs3_api::git_connection::PublicUrl;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, EnvGroup, EnvGroupSpec,
-    EnvGroupSummary, FileEntry, ImageUpdateStatus, LOCAL_TARGET, PlatformConfig,
+    AppEntry, AppLog, AppRequest, ComposeServiceStatus, DeploymentEntry, EnvEntry, EnvGroup,
+    EnvGroupSpec, EnvGroupSummary, FileEntry, ImageUpdateStatus, LOCAL_TARGET, PlatformConfig,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -705,7 +705,12 @@ impl Platform {
 
     /// The last `tail` lines of the container log of the running deployment of an app. An app
     /// without a running deployment has an empty log.
-    pub async fn app_log(&self, id: ShortId, tail: u32) -> anyhow::Result<AppLog> {
+    pub async fn app_log(
+        &self,
+        id: ShortId,
+        tail: u32,
+        service: Option<&str>,
+    ) -> anyhow::Result<AppLog> {
         let app = self.app(id).await?;
         let Some(deployment) = self.store.running_deployment(id).await? else {
             return Ok(AppLog {
@@ -713,7 +718,9 @@ impl Platform {
                 running: false,
             });
         };
-        let name = proxy::container_name(id, deployment)?;
+        let name = self
+            .resolve_container_name(&app, deployment, service)
+            .await?;
         let runtime = self.runtime(app.target);
         let log = runtime.logs(&name, tail.clamp(1, MAX_LOG_TAIL)).await?;
         Ok(AppLog { log, running: true })
@@ -724,6 +731,7 @@ impl Platform {
         &self,
         id: ShortId,
         tail: u32,
+        service: Option<&str>,
     ) -> anyhow::Result<(bool, hyper::Response<hyper::body::Incoming>)> {
         let app = self.app(id).await?;
         let Some(deployment) = self.store.running_deployment(id).await? else {
@@ -732,11 +740,54 @@ impl Platform {
             }
             .into());
         };
-        let name = proxy::container_name(id, deployment)?;
+        let name = self
+            .resolve_container_name(&app, deployment, service)
+            .await?;
         let runtime = self.runtime(app.target);
         runtime
             .logs_stream(&name, tail.clamp(1, MAX_LOG_TAIL))
             .await
+    }
+
+    async fn resolve_container_name(
+        &self,
+        app: &AppEntry,
+        deployment: ShortId,
+        service: Option<&str>,
+    ) -> anyhow::Result<ContainerName> {
+        let Some(service) = service.filter(|s| !s.is_empty()) else {
+            return proxy::container_name(app.id, deployment);
+        };
+        if !app.spec.source.is_compose() {
+            return Err(Error::ServiceNotFound {
+                service: service.to_string(),
+            }
+            .into());
+        }
+        let project = compose::project_name(app.id)?;
+        let runtime = self.runtime(app.target);
+        let containers = runtime.list_project_containers(&project).await?;
+        find_service_container(&containers, service)
+    }
+
+    /// Returns the services and health of a Compose app.
+    pub async fn app_services(&self, id: ShortId) -> anyhow::Result<Vec<ComposeServiceStatus>> {
+        let app = self.app(id).await?;
+        if !app.spec.source.is_compose() {
+            return Ok(Vec::new());
+        }
+        let Some(_deployment) = self.store.running_deployment(id).await? else {
+            return Ok(Vec::new());
+        };
+        let project = compose::project_name(id)?;
+        let runtime = self.runtime(app.target);
+        let containers = runtime.list_project_containers(&project).await?;
+        let mut services = Vec::new();
+        for c in containers {
+            services.push(inspect_service_status(runtime.as_ref(), c).await);
+        }
+        services.sort_by(|a, b| a.service.cmp(&b.service));
+        Ok(services)
     }
 
     /// Opens a terminal into the container of the running deployment of an app. Only the local
@@ -1011,6 +1062,60 @@ pub fn docker_runtime(endpoint: &str) -> anyhow::Result<DockerRuntime> {
         vec![endpoint],
         Arc::new(tls),
     )))
+}
+
+fn find_service_container(
+    containers: &[ContainerSummary],
+    service: &str,
+) -> anyhow::Result<ContainerName> {
+    for c in containers {
+        let matches_service =
+            c.labels.get(COMPOSE_SERVICE_LABEL).map(String::as_str) == Some(service);
+        if matches_service || c.name == service {
+            return Ok(c.name.parse()?);
+        }
+    }
+    Err(Error::ServiceNotFound {
+        service: service.to_string(),
+    }
+    .into())
+}
+
+async fn inspect_service_status(
+    runtime: &dyn ContainerRuntime,
+    summary: ContainerSummary,
+) -> ComposeServiceStatus {
+    let service = summary
+        .labels
+        .get(COMPOSE_SERVICE_LABEL)
+        .cloned()
+        .unwrap_or_else(|| summary.name.clone());
+    let (state, health, exit_code) = match summary.name.parse::<ContainerName>() {
+        Ok(name) => match runtime.inspect_container(&name).await {
+            Ok(Some(info)) => (
+                if info.running {
+                    "running".to_string()
+                } else {
+                    "exited".to_string()
+                },
+                info.health,
+                if !info.running {
+                    Some(info.exit_code)
+                } else {
+                    None
+                },
+            ),
+            _ => (summary.state, None, None),
+        },
+        _ => (summary.state, None, None),
+    };
+    ComposeServiceStatus {
+        service,
+        container: summary.name,
+        state,
+        health,
+        exit_code,
+    }
 }
 
 #[cfg(test)]
@@ -1313,6 +1418,43 @@ mod tests {
         let deleted = platform.delete_env_group(group.id).await?;
         assert_eq!(deleted.id, group.id);
         assert!(platform.list_env_groups().await?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_find_service_container() {
+        let mut labels = BTreeMap::new();
+        labels.insert(COMPOSE_SERVICE_LABEL.to_string(), "web".to_string());
+        let containers = vec![
+            ContainerSummary {
+                id: "c1".to_string(),
+                name: "project-web-1".to_string(),
+                state: "running".to_string(),
+                labels,
+            },
+            ContainerSummary {
+                id: "c2".to_string(),
+                name: "redis".to_string(),
+                state: "running".to_string(),
+                labels: BTreeMap::new(),
+            },
+        ];
+        let found = find_service_container(&containers, "web").unwrap();
+        assert_eq!(found.as_str(), "project-web-1");
+
+        let found_by_name = find_service_container(&containers, "redis").unwrap();
+        assert_eq!(found_by_name.as_str(), "redis");
+
+        let missing = find_service_container(&containers, "db");
+        assert!(missing.is_err());
+    }
+
+    #[tokio::test]
+    async fn non_compose_app_has_no_services() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let app = platform.add_app(request("my-app"), 1000).await?;
+        let services = platform.app_services(app.id).await?;
+        assert!(services.is_empty());
         Ok(())
     }
 }

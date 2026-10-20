@@ -1,7 +1,8 @@
 //! The apps, the targets and the deployments of the deployment platform.
 
 use crate::container::{
-    AppName, EnvKey, ImageRef, ResourceLimits, RestartPolicy, ServiceName, VolumeMount,
+    AppName, ContainerHealth, EnvKey, ImageRef, ResourceLimits, RestartPolicy, ServiceName,
+    VolumeMount,
 };
 use crate::error::Error;
 use crate::git::{GitRef, RelPath, RepoUrl};
@@ -533,6 +534,11 @@ impl AppSource {
                 ..
             } => Some((repository, *connection)),
         }
+    }
+
+    /// Whether this source is a Docker Compose application.
+    pub fn is_compose(&self) -> bool {
+        matches!(self, Self::Compose { .. })
     }
 }
 
@@ -1178,6 +1184,25 @@ pub struct AppLog {
 pub struct AppLogQuery {
     /// The number of lines, from 1 to 1000. The default is 200.
     pub tail: Option<u32>,
+    /// Optional service name to fetch logs from in a Compose app.
+    pub service: Option<String>,
+}
+
+/// Status and health of one service container in a Compose application.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ComposeServiceStatus {
+    /// The service name from the Compose specification.
+    pub service: String,
+    /// The container name.
+    pub container: String,
+    /// The container state (e.g. "running", "exited").
+    pub state: String,
+    /// The container healthcheck status, if configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<ContainerHealth>,
+    /// Exit code of the container if it exited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
 }
 
 /// One entry of a directory inside a volume of an app.

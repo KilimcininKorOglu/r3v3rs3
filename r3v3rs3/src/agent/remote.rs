@@ -205,6 +205,20 @@ impl ContainerRuntime for RemoteRuntime {
         }
     }
 
+    async fn list_project_containers(
+        &self,
+        project: &ProjectName,
+    ) -> anyhow::Result<Vec<ContainerSummary>> {
+        let project = project.clone();
+        match self
+            .call(AgentRequest::ListProjectContainers { project })
+            .await?
+        {
+            AgentOutput::Containers { containers } => Ok(containers),
+            other => Err(unexpected(&other)),
+        }
+    }
+
     async fn logs(&self, name: &ContainerName, tail: u32) -> anyhow::Result<String> {
         let name = name.clone();
         match self.call(AgentRequest::Logs { name, tail }).await? {

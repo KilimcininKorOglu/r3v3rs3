@@ -146,7 +146,7 @@ async fn an_app_on_an_agent_runs_there_and_serves_through_a_forwarder() -> anyho
     assert_ne!(port, setup.agent.runtime.state().host_port);
     assert!(get(port).await?.starts_with("HTTP/1.1 200"));
 
-    let log = setup.platform.app_log(setup.app.id, 10).await?;
+    let log = setup.platform.app_log(setup.app.id, 10, None).await?;
     assert_eq!(log.log, format!("the log of {container}\n"));
     Ok(())
 }
@@ -166,7 +166,11 @@ async fn an_offline_agent_keeps_the_route_and_fails_new_deployments() -> anyhow:
     let answer = get(port).await;
     assert!(answer.as_ref().map_or(true, String::is_empty), "{answer:?}");
 
-    let err = setup.platform.app_log(setup.app.id, 10).await.unwrap_err();
+    let err = setup
+        .platform
+        .app_log(setup.app.id, 10, None)
+        .await
+        .unwrap_err();
     assert!(matches!(api_error(err), Error::AgentOffline { .. }));
     let failed = deploy(&setup).await?;
     assert_eq!(failed.status, DeploymentStatus::Failed);

@@ -137,6 +137,9 @@ pub enum Error {
     #[error("the app has no running deployment: {name}")]
     AppNotRunning { name: String },
 
+    #[error("service {service} not found")]
+    ServiceNotFound { service: String },
+
     #[error("the path is not inside a volume of the app: {path}")]
     InvalidFilePath { path: String },
 
@@ -477,6 +480,7 @@ impl Error {
             Self::IdNotFound { .. }
             | Self::AccountNotFound { .. }
             | Self::AppNotRunning { .. }
+            | Self::ServiceNotFound { .. }
             | Self::BackupNotFound { .. }
             | Self::ScheduledCommandNotFound { .. } => 404,
             Self::Unauthorized => 401,

@@ -454,6 +454,27 @@ impl ContainerRuntime for FakeRuntime {
         Ok(summaries)
     }
 
+    async fn list_project_containers(
+        &self,
+        project: &ProjectName,
+    ) -> anyhow::Result<Vec<ContainerSummary>> {
+        let state = self.check()?;
+        let summaries = state
+            .containers
+            .values()
+            .filter(|info| {
+                info.labels.get(COMPOSE_PROJECT_LABEL).map(String::as_str) == Some(project.as_str())
+            })
+            .map(|info| ContainerSummary {
+                id: info.id.clone(),
+                name: info.name.clone(),
+                state: if info.running { "running" } else { "exited" }.into(),
+                labels: info.labels.clone(),
+            })
+            .collect();
+        Ok(summaries)
+    }
+
     async fn logs(&self, name: &ContainerName, _: u32) -> anyhow::Result<String> {
         let _state = self.check()?;
         Ok(format!("the log of {name}\n"))

@@ -180,6 +180,13 @@ Compose deployment'ı `service` servisini yeniden oluşturur: Docker yeni contai
 
 r3v3rs3, Compose dosyasının diğer ayarlarını denetlemez. Bir Compose dosyası host üzerindeki bir yolu bağlayabilir, privileged container çalıştırabilir veya host'un ağını kullanabilir. Bu yüzden uygulama düzenleyebilen her hesap, bu yolla host'u ele geçirebilir. Edit iznini yalnız buna yetkisi olan hesaplara verin.
 
+#### Compose Servis Düzeyinde Sağlık ve Loglar
+
+Birden fazla servisten oluşan Compose uygulamalarında:
+- **Servisler Kartı**: Uygulama detay sayfası, Compose projesindeki her bir servis konteynerini listeleyen bir **Servisler** kartı gösterir; konteyner adı, çalışma durumu (`running` veya `exited`), sağlık kontrolü durumu (`Sağlıklı`, `Başlatılıyor`, `Sağlıksız` veya `Yok`) ve durmuşsa çıkış kodunu içerir.
+- **Servis Bazlı Loglar**: Uygulamanın **Log** sayfasında yer alan **Servis** seçici menüsü, ana trafik servisinin yanı sıra Compose projesindeki herhangi bir servisin loglarını ayrı ayrı izlemeyi sağlar. Hem statik log alımı (`GET /api/apps/{id}/logs?service=<isim>`) hem de canlı WebSocket log akışı (`GET /api/apps/{id}/logs/live?service=<isim>`) servis filtresini destekler.
+- **API**: Servis konteynerlerinin listesi ve sağlık durumları doğrudan `GET /api/apps/{id}/services` üzerinden sorgulanabilir.
+
 ### Ortam değişkenleri
 
 `PUT /api/apps/{id}/env` bir uygulamanın ortam değişkenlerini değiştirir. `"secret": true` olan bir değişkenin değeri yönetim API'sinden bir daha çıkmaz: API değişkeni değeri olmadan döndürür, değersiz bir güncelleme de mevcut değeri korur. r3v3rs3 her değeri `platform.key` ile şifreler ve yalnız bir container başlarken açar.
@@ -548,7 +555,7 @@ Deployment geçmişi son 100 deployment'ı durumu, **Tetikleyen** (**Elle**, **W
 
 ### Log
 
-Log sayfası çalışan container'ın stdout ve stderr çıktısının son 200 satırını gösterir ve yeni satırları WebSocket bağlantısı üzerinden canlı aktarır. Üst araç çubuğu canlı akış geçişi (canlı veya duraklatıldı), otomatik kaydırma anahtarı, eşleşen satır sayısını gösteren gerçek zamanlı arama/filtreleme kutusu ve log çıktısını `.txt` dosyası olarak dışa aktaran **İndir** butonu sunar. Çalışan container'ı olmayan uygulamada "Uygulamanın çalışan container'ı yok." mesajı görünür.
+Log sayfası çalışan container'ın stdout ve stderr çıktısının son 200 satırını gösterir ve yeni satırları WebSocket bağlantısı üzerinden canlı aktarır. Üst araç çubuğu canlı akış geçişi (canlı veya duraklatıldı), otomatik kaydırma anahtarı, eşleşen satır sayısını gösteren gerçek zamanlı arama/filtreleme kutusu ve log çıktısını `.txt` dosyası olarak dışa aktaran **İndir** butonu sunar. Docker Compose uygulamalarında araç çubuğundaki **Servis** seçici menüsü sayesinde projedeki belirli bir servis konteynerinin stdout ve stderr çıktıları filtrelenebilir. Çalışan container'ı olmayan uygulamada "Uygulamanın çalışan container'ı yok." mesajı görünür.
 
 ### Terminal
 

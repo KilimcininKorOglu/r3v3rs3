@@ -820,6 +820,17 @@ impl ContainerRuntime for DockerRuntime {
         Ok(list.into_iter().map(ListContainer::into_summary).collect())
     }
 
+    async fn list_project_containers(
+        &self,
+        project: &ProjectName,
+    ) -> anyhow::Result<Vec<ContainerSummary>> {
+        let filters =
+            json!({ "label": [format!("{COMPOSE_PROJECT_LABEL}={project}")] }).to_string();
+        let path = format!("/containers/json?all=true&filters={}", encode(&filters));
+        let list: Vec<ListContainer> = self.get(&path).await?;
+        Ok(list.into_iter().map(ListContainer::into_summary).collect())
+    }
+
     async fn logs(&self, name: &ContainerName, tail: u32) -> anyhow::Result<String> {
         let id = container_id(self.find_container(name).await?, name)?;
         let path = format!("/containers/{id}/logs?stdout=true&stderr=true&tail={tail}");

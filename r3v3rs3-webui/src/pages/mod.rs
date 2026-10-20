@@ -16,6 +16,7 @@ mod app_list;
 mod app_log;
 mod app_metrics;
 mod app_repository;
+mod app_services;
 mod app_store;
 mod app_terminal;
 mod app_view;
