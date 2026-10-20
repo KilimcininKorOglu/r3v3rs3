@@ -5,11 +5,13 @@ use super::app_repository::RepositoryPicker;
 use super::resource_page::text_input;
 use r3v3rs3_api::container::{ResourceLimits, RestartPolicy, VolumeMount};
 use r3v3rs3_api::error::Error;
-use r3v3rs3_api::git::{GitRef, RelPath};
+use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
 use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{AppEntry, AppRequest, AppSource, AppSpec, LOCAL_TARGET, TargetEntry};
+use r3v3rs3_api::platform::{
+    AppEntry, AppRequest, AppSource, AppSpec, GitConfigFile, LOCAL_TARGET, TargetEntry,
+};
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::store::StoreApp;
 use r3v3rs3_api::upstream::{DEFAULT_STICKY_COOKIE_NAME, StickyCookie};
@@ -99,6 +101,9 @@ pub struct AppForm {
     pub sticky_enabled: bool,
     pub sticky_name: String,
     pub sticky_max_age: String,
+    pub git_config_path: String,
+    pub git_config_repo: String,
+    pub git_config_branch: String,
 }
 
 impl Default for AppForm {
@@ -139,6 +144,9 @@ impl Default for AppForm {
             sticky_enabled: false,
             sticky_name: String::new(),
             sticky_max_age: "0".to_string(),
+            git_config_path: String::new(),
+            git_config_repo: String::new(),
+            git_config_branch: String::new(),
         }
     }
 }
@@ -229,6 +237,21 @@ impl AppForm {
                 .and_then(|s| s.max_age)
                 .map(|d| d.as_secs().to_string())
                 .unwrap_or_else(|| "0".into()),
+            git_config_path: spec
+                .git_config
+                .as_ref()
+                .map(|c| c.path.to_string())
+                .unwrap_or_default(),
+            git_config_repo: spec
+                .git_config
+                .as_ref()
+                .and_then(|c| c.repository.as_ref().map(ToString::to_string))
+                .unwrap_or_default(),
+            git_config_branch: spec
+                .git_config
+                .as_ref()
+                .and_then(|c| c.branch.as_ref().map(ToString::to_string))
+                .unwrap_or_default(),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -315,7 +338,43 @@ impl AppForm {
             load_balancing,
             alert_rules,
             sticky: self.parse_sticky(),
+            git_config: self.parse_git_config(locale)?,
         })
+    }
+
+    fn parse_git_config(&self, locale: Locale) -> Result<Option<GitConfigFile>, String> {
+        let path_str = self.git_config_path.trim();
+        if path_str.is_empty() {
+            return Ok(None);
+        }
+        let path = path_str
+            .parse::<RelPath>()
+            .map_err(|err| locale.error_message(&err))?;
+        let repository = if !self.git_config_repo.trim().is_empty() {
+            Some(
+                self.git_config_repo
+                    .trim()
+                    .parse::<RepoUrl>()
+                    .map_err(|err| locale.error_message(&err))?,
+            )
+        } else {
+            None
+        };
+        let branch = if !self.git_config_branch.trim().is_empty() {
+            Some(
+                self.git_config_branch
+                    .trim()
+                    .parse::<GitRef>()
+                    .map_err(|err| locale.error_message(&err))?,
+            )
+        } else {
+            None
+        };
+        Ok(Some(GitConfigFile {
+            repository,
+            branch,
+            path,
+        }))
     }
 
     fn parse_sticky(&self) -> Option<StickyCookie> {
@@ -576,8 +635,44 @@ pub fn fields_view(
             if form.kind != SourceKind::Compose {
                 { container_view(locale, form) }
             }
+            { git_config_view(locale, form) }
             { approval_view(locale, form) }
         </>
+    }
+}
+
+fn git_config_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let path_input = text_input(form, |f| &mut f.git_config_path);
+    let repo_input = text_input(form, |f| &mut f.git_config_repo);
+    let branch_input = text_input(form, |f| &mut f.git_config_branch);
+
+    html! {
+        <div class="mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-700">
+            <h4 class="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mb-2">
+                {locale.t("apps.git_config_title")}
+            </h4>
+            <div class="space-y-3">
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("apps.git_config_path")}</label>
+                    <input type="text" autocapitalize="off" autocomplete="off" value={form.git_config_path.clone()} oninput={path_input} placeholder=".env" class={INPUT_CLASS} />
+                    <p class={HINT_CLASS}>{locale.t("apps.git_config_path_hint")}</p>
+                </div>
+                if !form.git_config_path.is_empty() || form.kind == SourceKind::Image {
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class={LABEL_CLASS}>{locale.t("apps.git_config_repo")}</label>
+                            <input type="text" autocapitalize="off" autocomplete="off" value={form.git_config_repo.clone()} oninput={repo_input} placeholder="https://github.com/org/config-repo.git" class={INPUT_CLASS} />
+                            <p class={HINT_CLASS}>{locale.t("apps.git_config_repo_hint")}</p>
+                        </div>
+                        <div>
+                            <label class={LABEL_CLASS}>{locale.t("apps.git_config_branch")}</label>
+                            <input type="text" autocapitalize="off" autocomplete="off" value={form.git_config_branch.clone()} oninput={branch_input} placeholder="main" class={INPUT_CLASS} />
+                            <p class={HINT_CLASS}>{locale.t("apps.git_config_branch_hint")}</p>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
     }
 }
 
@@ -1286,5 +1381,23 @@ mod tests {
             ..image_form()
         };
         assert!(invalid_cpu.parse(Locale::En).is_err());
+    }
+
+    #[test]
+    fn git_config_in_form() {
+        let form = AppForm {
+            git_config_path: "config/prod.env".into(),
+            git_config_repo: "https://github.com/owner/config-repo.git".into(),
+            git_config_branch: "production".into(),
+            ..image_form()
+        };
+        let request = form.parse(Locale::En).unwrap();
+        let cfg = request.spec.git_config.unwrap();
+        assert_eq!(cfg.path.as_str(), "config/prod.env");
+        assert_eq!(
+            cfg.repository.as_ref().map(|r| r.as_str()),
+            Some("https://github.com/owner/config-repo.git")
+        );
+        assert_eq!(cfg.branch.as_ref().map(|b| b.as_str()), Some("production"));
     }
 }

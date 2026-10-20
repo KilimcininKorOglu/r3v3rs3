@@ -657,6 +657,61 @@ pub struct AppSpec {
     /// Optional sticky session (cookie-based) across replica targets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sticky: Option<StickyCookie>,
+
+    /// Optional Git-based environment configuration file loaded during deployment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_config: Option<GitConfigFile>,
+}
+
+/// A Git-based environment configuration file loaded during deployment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GitConfigFile {
+    /// Optional repository URL (if omitted for a Git/Compose app, uses the app's git repository).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "https://github.com/owner/configs.git")]
+    pub repository: Option<RepoUrl>,
+    /// Optional branch or ref (if omitted, uses the app's branch or main).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "main")]
+    pub branch: Option<GitRef>,
+    /// The relative path of the file in the repository (e.g. `.env`, `config/production.env`).
+    #[schema(value_type = String, example = ".env")]
+    pub path: RelPath,
+}
+
+/// Parses environment variables from a `.env`-style file content.
+pub fn parse_env_file(content: &str) -> Vec<(EnvKey, String)> {
+    let mut vars = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line).trim();
+        let Some((key_str, val_str)) = line.split_once('=') else {
+            continue;
+        };
+        let key_str = key_str.trim();
+        let Ok(key) = key_str.parse::<EnvKey>() else {
+            continue;
+        };
+        let val = parse_env_value(val_str.trim());
+        vars.push((key, val));
+    }
+    vars
+}
+
+fn parse_env_value(val: &str) -> String {
+    if (val.starts_with('"') && val.ends_with('"') && val.len() >= 2)
+        || (val.starts_with('\'') && val.ends_with('\'') && val.len() >= 2)
+    {
+        val[1..val.len() - 1].to_string()
+    } else {
+        val.split_once(" #")
+            .map_or(val, |(v, _)| v)
+            .trim()
+            .to_string()
+    }
 }
 
 impl AppSpec {
@@ -685,7 +740,18 @@ impl AppSpec {
         if let Some(sticky) = &self.sticky {
             sticky.validate()?;
         }
+        self.validate_git_config()?;
         self.validate_tag_trigger()
+    }
+
+    fn validate_git_config(&self) -> Result<(), Error> {
+        let Some(config) = &self.git_config else {
+            return Ok(());
+        };
+        if matches!(self.source, AppSource::Image { .. }) && config.repository.is_none() {
+            return Err(invalid("git_config requires repository for image apps"));
+        }
+        Ok(())
     }
 
     fn validate_tag_trigger(&self) -> Result<(), Error> {
@@ -1607,5 +1673,70 @@ mod tests {
             }
         }));
         assert!(invalid_mem.is_err());
+    }
+
+    #[test]
+    fn parse_env_file_parses_values_comments_and_exports() {
+        let content = r#"
+# Comment line
+DATABASE_URL=postgres://user:pass@localhost:5432/db
+PORT=3000 # inline comment
+export SECRET_KEY="super secret value"
+SINGLE_QUOTED='another-secret'
+EMPTY_VAL=
+"#;
+        let vars = parse_env_file(content);
+        assert_eq!(vars.len(), 5);
+        assert_eq!(vars[0].0.as_str(), "DATABASE_URL");
+        assert_eq!(vars[0].1, "postgres://user:pass@localhost:5432/db");
+        assert_eq!(vars[1].0.as_str(), "PORT");
+        assert_eq!(vars[1].1, "3000");
+        assert_eq!(vars[2].0.as_str(), "SECRET_KEY");
+        assert_eq!(vars[2].1, "super secret value");
+        assert_eq!(vars[3].0.as_str(), "SINGLE_QUOTED");
+        assert_eq!(vars[3].1, "another-secret");
+        assert_eq!(vars[4].0.as_str(), "EMPTY_VAL");
+        assert_eq!(vars[4].1, "");
+    }
+
+    #[test]
+    fn git_config_validation() {
+        // Image source requires repository
+        let invalid_image = spec(json!({
+            "source": {"type": "image", "image": "nginx:alpine"},
+            "port": 80,
+            "domains": ["app.example.com"],
+            "git_config": {
+                "path": ".env"
+            }
+        }));
+        assert!(invalid_image.is_err());
+
+        // Image source with repository is valid
+        let valid_image = spec(json!({
+            "source": {"type": "image", "image": "nginx:alpine"},
+            "port": 80,
+            "domains": ["app.example.com"],
+            "git_config": {
+                "repository": "https://github.com/example/config.git",
+                "path": ".env"
+            }
+        }));
+        assert!(valid_image.is_ok());
+
+        // Git source without explicit repository inherits app repository
+        let valid_git = spec(json!({
+            "source": {
+                "type": "git",
+                "repository": "https://github.com/example/app.git",
+                "branch": "main"
+            },
+            "port": 80,
+            "domains": ["app.example.com"],
+            "git_config": {
+                "path": "config/production.env"
+            }
+        }));
+        assert!(valid_git.is_ok());
     }
 }

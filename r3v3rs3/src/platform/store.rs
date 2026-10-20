@@ -1063,6 +1063,7 @@ mod tests {
                 load_balancing: None,
                 alert_rules: None,
                 sticky: None,
+                git_config: None,
             },
             git_token_set: false,
             webhook_secret_set: false,

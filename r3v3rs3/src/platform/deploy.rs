@@ -415,7 +415,7 @@ impl Platform {
             return self.start_container(job).await;
         };
         let name = proxy::container_name(job.app, job.deployment)?;
-        let env = self.open_env(job.app, &job.env)?;
+        let env = self.effective_env(job).await?;
         for target in job.spec.targets_or_default(job.app_target) {
             let backend = self.backend(target);
             let compose = ComposeJob {
@@ -648,7 +648,7 @@ impl Platform {
         app_label: &AppName,
         network: &NetworkName,
     ) -> anyhow::Result<ContainerSpec> {
-        let mut env = self.open_env(job.app, &job.env)?;
+        let mut env = self.effective_env(job).await?;
         let extra_hosts = if job.spec.uses_database.is_some() {
             env.extend(self.database_env(job, runtime).await?);
             vec![(
@@ -674,6 +674,88 @@ impl Platform {
             host_port: job.spec.host_port,
             extra_hosts,
         })
+    }
+
+    async fn effective_env(&self, job: &Job) -> anyhow::Result<Vec<EnvVar>> {
+        let mut vars = if let Some(config) = &job.spec.git_config {
+            self.fetch_git_config_env(job.app, job.deployment, &job.spec, config)
+                .await?
+        } else {
+            Vec::new()
+        };
+        let panel_env = self.open_env(job.app, &job.env)?;
+        for var in panel_env {
+            if let Some(existing) = vars.iter_mut().find(|v| v.key == var.key) {
+                existing.value = var.value;
+            } else {
+                vars.push(var);
+            }
+        }
+        Ok(vars)
+    }
+
+    async fn fetch_git_config_env(
+        &self,
+        app: ShortId,
+        deployment: ShortId,
+        spec: &AppSpec,
+        config: &r3v3rs3_api::platform::GitConfigFile,
+    ) -> anyhow::Result<Vec<EnvVar>> {
+        let (repo, default_branch, connection) = match &config.repository {
+            Some(repo) => (
+                repo.clone(),
+                config.branch.clone().unwrap_or_else(GitRef::main),
+                None,
+            ),
+            None => match &spec.source {
+                AppSource::Git {
+                    repository,
+                    branch,
+                    connection,
+                    ..
+                } => (repository.clone(), branch.clone(), *connection),
+                AppSource::Compose {
+                    repository,
+                    branch,
+                    connection,
+                    ..
+                } => (repository.clone(), branch.clone(), *connection),
+                AppSource::Image { .. } => {
+                    bail!("git_config requires repository for image apps");
+                }
+            },
+        };
+        let branch = config.branch.as_ref().unwrap_or(&default_branch);
+        let checkout_dir = self.build_dir.join(format!("git-env-{deployment}"));
+        tokio::fs::create_dir_all(&checkout_dir).await?;
+        let credential = self.git_credential(app, connection).await?;
+        let fetch_res = self
+            .fetcher
+            .fetch(
+                &repo,
+                crate::build::Revision::Branch(branch),
+                credential.as_ref(),
+                &checkout_dir,
+            )
+            .await;
+        let file_path = checkout_dir.join(config.path.as_str());
+        let read_res = match fetch_res {
+            Ok(_) => tokio::fs::read_to_string(&file_path)
+                .await
+                .with_context(|| format!("failed to read git config file: {}", config.path)),
+            Err(err) => Err(err),
+        };
+        let _ = tokio::fs::remove_dir_all(&checkout_dir).await;
+        let content = read_res?;
+        let parsed = r3v3rs3_api::platform::parse_env_file(&content);
+        let vars = parsed
+            .into_iter()
+            .map(|(key, value)| EnvVar {
+                key: key.into(),
+                value,
+            })
+            .collect();
+        Ok(vars)
     }
 
     fn open_env(&self, app: ShortId, env: &[StoredEnv]) -> anyhow::Result<Vec<EnvVar>> {
@@ -1922,6 +2004,50 @@ mod tests {
 
         let err = setup.platform.approve_deployment(entry.id, "bob").await;
         assert!(err.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_config_env_applied_during_deploy() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        setup.fetcher.state().env_files.push((
+            ".env".into(),
+            "DB_HOST=git-host\nAPP_PORT=8080\nOVERRIDE_ME=git-val\n".into(),
+        ));
+        let mut app = setup.app.clone();
+        app.spec.git_config = Some(r3v3rs3_api::platform::GitConfigFile {
+            repository: Some("https://github.com/example/config.git".parse()?),
+            branch: None,
+            path: ".env".parse()?,
+        });
+        let req = AppRequest {
+            name: app.name,
+            target: app.target,
+            spec: app.spec,
+        };
+        setup.platform.update_app(setup.app.id, req, 1).await?;
+        let override_var = r3v3rs3_api::platform::EnvEntry {
+            key: "OVERRIDE_ME".parse()?,
+            value: Some("panel-val".into()),
+            secret: false,
+        };
+        setup
+            .platform
+            .set_env(setup.app.id, vec![override_var])
+            .await?;
+        deploy(&setup).await?;
+        let state = setup.runtime.state();
+        let last_spec = state.specs.last().context("container spec")?;
+        let get_env = |k: &str| {
+            last_spec
+                .env
+                .iter()
+                .find(|v| v.key.as_str() == k)
+                .map(|v| v.value.as_str())
+        };
+        assert_eq!(get_env("DB_HOST"), Some("git-host"));
+        assert_eq!(get_env("APP_PORT"), Some("8080"));
+        assert_eq!(get_env("OVERRIDE_ME"), Some("panel-val"));
         Ok(())
     }
 }

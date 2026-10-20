@@ -224,6 +224,7 @@ fn app_request(
             load_balancing: None,
             alert_rules: None,
             sticky: None,
+            git_config: None,
         },
     })
 }

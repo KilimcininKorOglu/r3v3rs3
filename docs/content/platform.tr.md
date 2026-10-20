@@ -184,6 +184,16 @@ r3v3rs3, Compose dosyasının diğer ayarlarını denetlemez. Bir Compose dosyas
 
 `PUT /api/apps/{id}/env` bir uygulamanın ortam değişkenlerini değiştirir. `"secret": true` olan bir değişkenin değeri yönetim API'sinden bir daha çıkmaz: API değişkeni değeri olmadan döndürür, değersiz bir güncelleme de mevcut değeri korur. r3v3rs3 her değeri `platform.key` ile şifreler ve yalnız bir container başlarken açar.
 
+#### Git Tabanlı Yapılandırma
+
+Bir uygulama ayrıca deployment sırasında ortam değişkenlerini doğrudan bir Git deposundaki `.env` dosyasından yükleyebilir:
+
+- Uygulama formunda **Yapılandırma Dosya Yolu** alanını belirtin (ör. `.env` veya `config/production.env`) veya `AppSpec` içinde `git_config` alanını yapılandırın.
+- Git ve Compose uygulamalarında dosya varsayılan olarak uygulamanın kendi depo checkout'undan okunur. İsteğe bağlı olarak özel bir **Yapılandırma Deposu** ve **Yapılandırma Dalı** da belirtilebilir.
+- Image uygulamalarında hem depo URL'si hem de dosya yolu belirtilir.
+- Dosya; yorum satırları (`#`), tırnak işaretleri ve `export` önekleri dahil standart `.env` biçimini destekler.
+- Panelden tanımlanan açık ortam değişkenleri, Git deposundan yüklenen değişkenleri geçersiz kılar; böylece panelde yönetilen gizli anahtarlar depo varsayılanlarına göre öncelik kazanır.
+
 ## Veritabanları
 
 **Veritabanları** sayfası bir motorun veritabanını tek tıkla kurar. Motorlar PostgreSQL 17 ve 18, MariaDB 11 ve 12, MySQL 9, MongoDB 8 ve Redis 8'dir; her birinin image tag'i bir sürüme sabitlenmiştir. Engine kataloğu, [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) deposunun `engines.json` dosyasıdır; binary ayrıca gömülü bir kopya taşır ve günde bir kez depodan yenilenir. Sayfadaki **Kataloğu yenile** butonu güncel kataloğu hemen indirir; API ise `POST /api/databases/engines/refresh` ile yeniler.

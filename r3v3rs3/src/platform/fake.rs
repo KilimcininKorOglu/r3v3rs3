@@ -64,6 +64,8 @@ pub struct FetchState {
     pub fetched: Vec<(String, String, Option<String>)>,
     /// The `compose.yaml` of the checkout. Without it the file has no services.
     pub compose_file: Option<String>,
+    /// Additional files to write into the checkout (e.g. `.env`).
+    pub env_files: Vec<(String, String)>,
 }
 
 /// A source fetcher that writes a checkout with `.git` and `app/Dockerfile`.
@@ -88,7 +90,7 @@ impl SourceFetcher for FakeFetcher {
         credential: Option<&GitCredential>,
         dest: &Path,
     ) -> anyhow::Result<String> {
-        let compose = {
+        let (compose, env_files) = {
             let mut state = self.state();
             if let Some(error) = &state.error {
                 bail!("git failed: {error}");
@@ -99,19 +101,35 @@ impl SourceFetcher for FakeFetcher {
                 credential.map(|c| format!("{}:{}", c.user, c.password)),
             );
             state.fetched.push(fetch);
-            state.compose_file.clone()
+            (state.compose_file.clone(), state.env_files.clone())
         };
-        std::fs::create_dir_all(dest.join(".git"))?;
-        std::fs::create_dir_all(dest.join("app"))?;
-        std::fs::write(dest.join(".git/config"), "[core]\n")?;
-        std::fs::write(dest.join("app/Dockerfile"), "FROM scratch\n")?;
-        let compose = compose.unwrap_or_else(|| "services: {}\n".into());
-        std::fs::write(dest.join("compose.yaml"), compose)?;
+        write_checkout_files(dest, compose.as_deref(), &env_files)?;
         Ok(match revision {
             Revision::Branch(_) => COMMIT.into(),
             Revision::Commit(commit) => commit.to_string(),
         })
     }
+}
+
+fn write_checkout_files(
+    dest: &Path,
+    compose: Option<&str>,
+    env_files: &[(String, String)],
+) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dest.join(".git"))?;
+    std::fs::create_dir_all(dest.join("app"))?;
+    std::fs::write(dest.join(".git/config"), "[core]\n")?;
+    std::fs::write(dest.join("app/Dockerfile"), "FROM scratch\n")?;
+    let compose = compose.unwrap_or("services: {}\n");
+    std::fs::write(dest.join("compose.yaml"), compose)?;
+    for (rel, content) in env_files {
+        let target = dest.join(rel);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(target, content)?;
+    }
+    Ok(())
 }
 
 #[derive(Default)]

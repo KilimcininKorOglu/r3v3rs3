@@ -184,6 +184,16 @@ r3v3rs3 does not check the other settings of a Compose file. A Compose file can 
 
 `PUT /api/apps/{id}/env` replaces the environment variables of an app. A variable with `"secret": true` never leaves the server again: the admin API returns it without its value, and an update without a value keeps the current value. r3v3rs3 encrypts every value with `platform.key` and decrypts it only when a container starts.
 
+#### Git-Based Configuration
+
+An app can also load environment variables directly from a `.env` file in a Git repository during deployment:
+
+- In the app form, specify the **Config File Path** (e.g. `.env` or `config/production.env`), or configure `git_config` in `AppSpec`.
+- For Git and Compose apps, the file is read from the app's repository checkout by default. You can optionally specify a dedicated **Config Repository** and **Config Branch**.
+- For Image apps, specify both the repository URL and the file path.
+- The file supports standard `.env` format, including comments (`#`), quotes, and `export` prefixes.
+- Explicit panel environment variables override variables loaded from the Git repository, allowing panel-managed secrets to take precedence over repository defaults.
+
 ## Databases
 
 The **Databases** page installs a database of one engine in one click. The engines are PostgreSQL 17 and 18, MariaDB 11 and 12, MySQL 9, MongoDB 8 and Redis 8, each with its image tag pinned to a version. The engine catalog is the `engines.json` file of the [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) repository; the binary also ships an embedded copy and refreshes from the repository once a day. The **Refresh catalog** button of the page downloads the current catalog at once; the API refreshes it with `POST /api/databases/engines/refresh`.
