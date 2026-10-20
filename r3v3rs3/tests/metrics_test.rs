@@ -106,12 +106,19 @@ async fn the_metrics_need_a_session_or_a_bearer_token() -> anyhow::Result<()> {
             "r3v3rs3_cache_hits_total",
             "r3v3rs3_cache_misses_total",
             "r3v3rs3_open_connections",
+            "r3v3rs3_upstream_errors_by_kind_total",
+            "r3v3rs3_http_request_duration_seconds",
+            "r3v3rs3_http_request_duration_quantiles_seconds",
         ] {
             assert!(
                 body.contains(&format!("# TYPE {name} ")),
                 "the metrics miss {name}"
             );
         }
+        assert!(body.contains("quantile=\"0.5\""));
+        assert!(body.contains("quantile=\"0.95\""));
+        assert!(body.contains("quantile=\"0.99\""));
+        assert!(body.contains("kind=\"timeout\""));
         Ok(())
     })
     .await

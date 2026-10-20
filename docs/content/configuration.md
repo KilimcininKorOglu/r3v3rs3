@@ -1245,6 +1245,9 @@ A change of the defaults rebuilds every port, so it takes effect without a resta
 
 - `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: the proxied requests.
 - `r3v3rs3_upstream_errors_total`: the requests that were answered without a successful upstream response.
+- `r3v3rs3_upstream_errors_by_kind_total`: upstream errors partitioned by failure kind (`timeout`, `connect`, `circuit_open`, `no_route`, `other`).
+- `r3v3rs3_http_request_duration_seconds`: request duration latency histogram with standard buckets (`0.005s` to `10s`), sum, and count.
+- `r3v3rs3_http_request_duration_quantiles_seconds`: recent request duration quantiles (`p50`, `p95`, `p99`) in seconds.
 - `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`: the cache decisions of the cached proxies.
 - `r3v3rs3_open_connections`: the client connection tasks that still run.
 

@@ -95,22 +95,7 @@ pub async fn verify_metrics(
     StatusCode::UNAUTHORIZED.into_response()
 }
 
-/// Exports the proxy counters in the Prometheus text format.
-#[utoipa::path(
-    get,
-    path = "/",
-    tag = "metrics",
-    operation_id = "get_metrics",
-    responses(
-        (status = 200, description = "The metrics in the Prometheus text format.", body = String),
-        (status = 401, description = "No active admin session or Bearer token."),
-    )
-)]
-pub async fn metrics(
-    Extension(_caller): Extension<Caller>,
-) -> Result<([(HeaderName, &'static str); 1], String), AppError> {
-    let mut out = String::new();
-    let values = stats::snapshot();
+fn format_basic_metrics(out: &mut String, values: &[(&str, u64)]) {
     for (name, help, kind) in METRICS {
         out.push_str("# HELP ");
         out.push_str(name);
@@ -128,6 +113,77 @@ pub async fn metrics(
             out.push('\n');
         }
     }
+}
+
+fn format_upstream_error_metrics(out: &mut String) {
+    out.push_str("# HELP r3v3rs3_upstream_errors_by_kind_total The upstream errors partitioned by failure kind.\n");
+    out.push_str("# TYPE r3v3rs3_upstream_errors_by_kind_total counter\n");
+    for (kind, count) in stats::snapshot_upstream_errors() {
+        out.push_str("r3v3rs3_upstream_errors_by_kind_total{kind=\"");
+        out.push_str(kind);
+        out.push_str("\"} ");
+        out.push_str(&count.to_string());
+        out.push('\n');
+    }
+}
+
+fn format_latency_histogram_metrics(out: &mut String) {
+    out.push_str(
+        "# HELP r3v3rs3_http_request_duration_seconds HTTP request latencies in seconds.\n",
+    );
+    out.push_str("# TYPE r3v3rs3_http_request_duration_seconds histogram\n");
+    let (buckets, inf_count, sum, count) = stats::snapshot_latency_histogram();
+    for (le, bucket_count) in buckets {
+        out.push_str("r3v3rs3_http_request_duration_seconds_bucket{le=\"");
+        out.push_str(&le.to_string());
+        out.push_str("\"} ");
+        out.push_str(&bucket_count.to_string());
+        out.push('\n');
+    }
+    out.push_str("r3v3rs3_http_request_duration_seconds_bucket{le=\"+Inf\"} ");
+    out.push_str(&inf_count.to_string());
+    out.push_str("\nr3v3rs3_http_request_duration_seconds_sum ");
+    out.push_str(&format!("{sum:.6}"));
+    out.push_str("\nr3v3rs3_http_request_duration_seconds_count ");
+    out.push_str(&count.to_string());
+    out.push('\n');
+}
+
+fn format_latency_quantile_metrics(out: &mut String) {
+    out.push_str("# HELP r3v3rs3_http_request_duration_quantiles_seconds Request latency quantiles (p50, p95, p99) in seconds.\n");
+    out.push_str("# TYPE r3v3rs3_http_request_duration_quantiles_seconds summary\n");
+    let (p50, p95, p99) = stats::latency_quantiles();
+    out.push_str(&format!(
+        "r3v3rs3_http_request_duration_quantiles_seconds{{quantile=\"0.5\"}} {p50:.6}\n"
+    ));
+    out.push_str(&format!(
+        "r3v3rs3_http_request_duration_quantiles_seconds{{quantile=\"0.95\"}} {p95:.6}\n"
+    ));
+    out.push_str(&format!(
+        "r3v3rs3_http_request_duration_quantiles_seconds{{quantile=\"0.99\"}} {p99:.6}\n"
+    ));
+}
+
+/// Exports the proxy counters in the Prometheus text format.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "metrics",
+    operation_id = "get_metrics",
+    responses(
+        (status = 200, description = "The metrics in the Prometheus text format.", body = String),
+        (status = 401, description = "No active admin session or Bearer token."),
+    )
+)]
+pub async fn metrics(
+    Extension(_caller): Extension<Caller>,
+) -> Result<([(HeaderName, &'static str); 1], String), AppError> {
+    let mut out = String::new();
+    let values = stats::snapshot();
+    format_basic_metrics(&mut out, &values);
+    format_upstream_error_metrics(&mut out);
+    format_latency_histogram_metrics(&mut out);
+    format_latency_quantile_metrics(&mut out);
     Ok((
         [(
             HeaderName::from_static("content-type"),

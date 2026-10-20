@@ -587,6 +587,7 @@ async fn proxied_response(
     info: &RequestInfo<'_>,
     fronting: bool,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
+    let start = std::time::Instant::now();
     crate::proxy::stats::count_http_request();
     let (req, response_rewriter) = if fronting {
         (
@@ -597,7 +598,9 @@ async fn proxied_response(
         route_request(shared, req, info).await
     };
     let res = upstream_response(req).await;
-    response_rewriter.build().map_response(res)
+    let mapped = response_rewriter.build().map_response(res);
+    crate::proxy::stats::record_request_duration(start.elapsed());
+    mapped
 }
 
 /// The details of the TLS connection of a client.
@@ -1225,9 +1228,19 @@ where
         }
         ProxiedRequest::Respond(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
         ProxiedRequest::Err(err) => {
-            crate::proxy::stats::count_upstream_error();
+            crate::proxy::stats::count_upstream_error_kind(classify_proxy_error(&err));
             Err(err.into())
         }
+    }
+}
+
+fn classify_proxy_error(err: &ProxyError) -> crate::proxy::stats::UpstreamErrorKind {
+    use crate::proxy::stats::UpstreamErrorKind;
+    match err {
+        ProxyError::UpstreamTimeout => UpstreamErrorKind::Timeout,
+        ProxyError::NoUpstreamAvailable => UpstreamErrorKind::CircuitOpen,
+        ProxyError::NoRouteFound | ProxyError::NoUpstreamServers => UpstreamErrorKind::NoRoute,
+        _ => UpstreamErrorKind::Other,
     }
 }
 

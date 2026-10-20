@@ -1245,6 +1245,9 @@ Varsayılanlarda yapılan bir değişiklik her portu yeniden kurar, yani restart
 
 - `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: proxy'lenen istekler.
 - `r3v3rs3_upstream_errors_total`: başarılı bir upstream yanıtı olmadan yanıtlanan istekler.
+- `r3v3rs3_upstream_errors_by_kind_total`: hata türüne göre ayrılmış upstream hataları (`timeout`, `connect`, `circuit_open`, `no_route`, `other`).
+- `r3v3rs3_http_request_duration_seconds`: standart sepetlerle (`0.005s` - `10s`), toplam süre ve sayaç içeren istek gecikme histogramı.
+- `r3v3rs3_http_request_duration_quantiles_seconds`: son isteklerin saniye cinsinden gecikme dilimleri (`p50`, `p95`, `p99`).
 - `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`: cache'i açık proxy'lerin cache kararları.
 - `r3v3rs3_open_connections`: açık istemci bağlantıları.
 

@@ -550,8 +550,53 @@ fn finish(
     let result = result.map_err(|err| err.error);
     if let Err(err) = &result {
         error!(%err);
+        crate::proxy::stats::count_upstream_error_kind(classify_upstream_error(err.as_ref()));
     }
     ResponseRewriter::default().map_response(result)
+}
+
+fn classify_upstream_error(
+    err: &(dyn std::error::Error + 'static),
+) -> crate::proxy::stats::UpstreamErrorKind {
+    use crate::proxy::stats::UpstreamErrorKind;
+    if err
+        .downcast_ref::<ProxyError>()
+        .is_some_and(|e| matches!(e, ProxyError::UpstreamTimeout))
+    {
+        return UpstreamErrorKind::Timeout;
+    }
+    if is_timeout(err) {
+        return UpstreamErrorKind::Timeout;
+    }
+    if err
+        .downcast_ref::<hyper_util::client::legacy::Error>()
+        .is_some_and(|e| e.is_connect())
+    {
+        return UpstreamErrorKind::Connect;
+    }
+    if has_io_connect_error(err) {
+        return UpstreamErrorKind::Connect;
+    }
+    UpstreamErrorKind::Other
+}
+
+fn has_io_connect_error(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = err.source();
+    while let Some(s) = source {
+        if s.downcast_ref::<io::Error>().is_some_and(|e| {
+            matches!(
+                e.kind(),
+                io::ErrorKind::ConnectionRefused
+                    | io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::NotConnected
+            )
+        }) {
+            return true;
+        }
+        source = s.source();
+    }
+    false
 }
 
 /// The request of the first try, and a copy of the request for the retries.
