@@ -381,6 +381,10 @@ impl ServerState {
         self.registries
             .srv
             .set_nameserver(self.config.upstream_dns_resolver);
+        self.registries.geoip = Arc::new(crate::proxy::geoip::GeoIpResolver::load_or_fallback(
+            self.config.geoip.database.as_deref(),
+            &self.config_dir,
+        ));
         if !listeners.is_empty()
             && let Err(err) = self.adopt_listeners(listeners).await
         {
@@ -1540,9 +1544,17 @@ impl ServerState {
         let previous_public_url = self.config.public_url.clone();
         let public_url_changed = previous_public_url != config.public_url;
         let upgrade_changed = self.config.upgrade != config.upgrade;
+        let geoip_changed = self.config.geoip != config.geoip;
         self.config.clone_from(&config);
         if upgrade_changed {
             let _ = self.update_interval.send(config.upgrade.check_interval);
+        }
+        if geoip_changed {
+            self.registries.geoip = Arc::new(crate::proxy::geoip::GeoIpResolver::load_or_fallback(
+                config.geoip.database.as_deref(),
+                &self.config_dir,
+            ));
+            self.reload_proxies().await;
         }
         if self
             .registries

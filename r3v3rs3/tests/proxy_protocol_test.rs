@@ -51,8 +51,8 @@ fn filtered_proxy(upstream: &str) -> HttpProxy {
         vhosts: vec!["localhost".parse().unwrap()],
         routes: vec![http_route("/", upstream, None)],
         ip_filter: IpFilter {
-            allow: vec![],
             deny: vec!["203.0.113.0/24".parse().unwrap()],
+            ..Default::default()
         },
         ..Default::default()
     }

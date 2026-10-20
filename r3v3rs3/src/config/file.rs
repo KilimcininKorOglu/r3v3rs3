@@ -197,7 +197,7 @@ mod secret_files_test {
     fn entry(id: &str, name: &str) -> anyhow::Result<AccessListEntry> {
         let ip_filter = IpFilter {
             allow: parse_cidr_list("10.0.0.0/8")?,
-            deny: Vec::new(),
+            ..Default::default()
         };
         let list = AccessList {
             name: name.into(),

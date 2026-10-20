@@ -58,6 +58,8 @@ struct ProxyForm {
     trusted_proxies: String,
     allow: String,
     deny: String,
+    allow_countries: String,
+    deny_countries: String,
     rate_limit: RateLimitForm,
     concurrency_limit: ConcurrencyLimitForm,
     auth: AuthForm,
@@ -120,6 +122,8 @@ impl ProxyForm {
             trusted_proxies: format_cidr_list(&proxy.client_ip.trusted_proxies),
             allow: format_cidr_list(&proxy.ip_filter.allow),
             deny: format_cidr_list(&proxy.ip_filter.deny),
+            allow_countries: proxy.ip_filter.allow_countries.join(", "),
+            deny_countries: proxy.ip_filter.deny_countries.join(", "),
             rate_limit: RateLimitForm::new(&proxy.rate_limit),
             concurrency_limit: ConcurrencyLimitForm::new(&proxy.concurrency_limit),
             auth: AuthForm::new(&proxy.auth),
@@ -425,6 +429,8 @@ struct RouteForm {
     override_ip_filter: bool,
     allow: String,
     deny: String,
+    allow_countries: String,
+    deny_countries: String,
     override_rate_limit: bool,
     rate_limit: RateLimitForm,
     override_concurrency_limit: bool,
@@ -463,6 +469,8 @@ impl RouteForm {
             override_ip_filter: route.ip_filter.is_some(),
             allow: format_cidr_list(&ip_filter.allow),
             deny: format_cidr_list(&ip_filter.deny),
+            allow_countries: ip_filter.allow_countries.join(", "),
+            deny_countries: ip_filter.deny_countries.join(", "),
             override_rate_limit: route.rate_limit.is_some(),
             rate_limit: RateLimitForm::new(&route.rate_limit.unwrap_or_default()),
             override_concurrency_limit: route.concurrency_limit.is_some(),
@@ -514,6 +522,8 @@ impl RouteForm {
             override_ip_filter: false,
             allow: String::new(),
             deny: String::new(),
+            allow_countries: String::new(),
+            deny_countries: String::new(),
             override_rate_limit: false,
             rate_limit: RateLimitForm::new(&RateLimit::default()),
             override_concurrency_limit: false,
@@ -715,6 +725,13 @@ pub fn http_proxy_config(props: &Props) -> Html {
                 <input type="text" autocapitalize="off" value={form.deny.clone()} onchange={state_input(&form, text, |form, value| form.deny = value)} class={INPUT_CLASS} placeholder="203.0.113.0/24" />
                 { error_view(errors.get("deny")) }
                 <p class={HINT_CLASS}>{locale.t("http_form.deny_hint")}</p>
+
+                <label class={LABEL_CLASS}>{locale.t("http_form.allow_countries")}</label>
+                <input type="text" autocapitalize="off" value={form.allow_countries.clone()} onchange={state_input(&form, text, |form, value| form.allow_countries = value)} class={INPUT_CLASS} placeholder="TR, US, DE" />
+
+                <label class={LABEL_CLASS}>{locale.t("http_form.deny_countries")}</label>
+                <input type="text" autocapitalize="off" value={form.deny_countries.clone()} onchange={state_input(&form, text, |form, value| form.deny_countries = value)} class={INPUT_CLASS} placeholder="RU, CN" />
+                <p class={HINT_CLASS}>{locale.t("http_form.countries_hint")}</p>
             }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.rate_limit")}</label>
@@ -1116,6 +1133,13 @@ fn route_ip_filter_view(
 
                 <label class={LABEL_CLASS}>{locale.t("http_form.deny")}</label>
                 <input type="text" autocapitalize="off" placeholder="203.0.113.0/24" value={route.deny.clone()} onchange={route_input(routes, index, text, |route, value| route.deny = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{locale.t("http_form.allow_countries")}</label>
+                <input type="text" autocapitalize="off" placeholder="TR, US, DE" value={route.allow_countries.clone()} onchange={route_input(routes, index, text, |route, value| route.allow_countries = value)} class={INPUT_CLASS} />
+
+                <label class={LABEL_CLASS}>{locale.t("http_form.deny_countries")}</label>
+                <input type="text" autocapitalize="off" placeholder="RU, CN" value={route.deny_countries.clone()} onchange={route_input(routes, index, text, |route, value| route.deny_countries = value)} class={INPUT_CLASS} />
+                <p class={HINT_CLASS}>{locale.t("http_form.countries_hint")}</p>
             </>
         },
     )
@@ -2248,6 +2272,14 @@ fn parse_error_pages(
     result
 }
 
+fn parse_country_list(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(|s| s.trim().to_ascii_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 /// The IP filter and the authentication of the proxy. The access list of the proxy replaces both.
 fn parse_proxy_access(
     locale: Locale,
@@ -2268,6 +2300,8 @@ fn parse_proxy_access(
             "deny",
             errors,
         ),
+        allow_countries: parse_country_list(&form.allow_countries),
+        deny_countries: parse_country_list(&form.deny_countries),
     };
     (ip_filter, or_error(form.auth.parse(locale), "auth", errors))
 }
@@ -2658,6 +2692,8 @@ fn parse_route(
             key,
             errors,
         ),
+        allow_countries: parse_country_list(&route.allow_countries),
+        deny_countries: parse_country_list(&route.deny_countries),
     });
     let rate_limit = route
         .override_rate_limit

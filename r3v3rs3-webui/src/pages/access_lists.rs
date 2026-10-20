@@ -48,6 +48,8 @@ struct Form {
     name: String,
     allow: String,
     deny: String,
+    allow_countries: String,
+    deny_countries: String,
     auth: AuthForm,
 }
 
@@ -58,6 +60,8 @@ impl Default for Form {
             name: String::new(),
             allow: String::new(),
             deny: String::new(),
+            allow_countries: String::new(),
+            deny_countries: String::new(),
             auth: AuthForm::new(&AuthPolicy::None),
         }
     }
@@ -71,6 +75,8 @@ impl Form {
             name: entry.list.name.clone(),
             allow: format_cidr_list(&filter.allow),
             deny: format_cidr_list(&filter.deny),
+            allow_countries: filter.allow_countries.join(", "),
+            deny_countries: filter.deny_countries.join(", "),
             auth: AuthForm::new(&entry.list.auth),
         }
     }
@@ -85,6 +91,8 @@ impl Form {
         let ip_filter = IpFilter {
             allow: parse_cidr_list(&self.allow).map_err(translated)?,
             deny: parse_cidr_list(&self.deny).map_err(translated)?,
+            allow_countries: parse_country_list(&self.allow_countries),
+            deny_countries: parse_country_list(&self.deny_countries),
         };
         Ok(AccessList {
             name: name.to_string(),
@@ -92,6 +100,14 @@ impl Form {
             auth: self.auth.parse(locale)?,
         })
     }
+}
+
+fn parse_country_list(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(|s| s.trim().to_ascii_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 #[function_component(AccessLists)]
@@ -184,6 +200,13 @@ fn form_view(
             <input type="text" autocapitalize="off" placeholder="203.0.113.0/24" value={form.deny.clone()} oninput={text_input(form, |f| &mut f.deny)} class={INPUT_CLASS} />
             <p class={HINT_CLASS}>{locale.t("http_form.deny_hint")}</p>
 
+            <label class={LABEL_CLASS}>{locale.t("http_form.allow_countries")}</label>
+            <input type="text" autocapitalize="off" placeholder="TR, US, DE" value={form.allow_countries.clone()} oninput={text_input(form, |f| &mut f.allow_countries)} class={INPUT_CLASS} />
+
+            <label class={LABEL_CLASS}>{locale.t("http_form.deny_countries")}</label>
+            <input type="text" autocapitalize="off" placeholder="RU, CN" value={form.deny_countries.clone()} oninput={text_input(form, |f| &mut f.deny_countries)} class={INPUT_CLASS} />
+            <p class={HINT_CLASS}>{locale.t("http_form.countries_hint")}</p>
+
             <label class={LABEL_CLASS}>{locale.t("http_form.authentication")}</label>
             <AuthConfig form={form.auth.clone()} onchange={auth_onchange} />
         </>
@@ -226,15 +249,24 @@ fn ip_filter_label(locale: Locale, filter: &IpFilter) -> String {
     if filter.is_empty() {
         return locale.t("access_lists.all_addresses").to_string();
     }
-    [
-        ("access_lists.allowed", &filter.allow),
-        ("access_lists.denied", &filter.deny),
-    ]
-    .into_iter()
-    .filter(|(_, nets)| !nets.is_empty())
-    .map(|(key, nets)| locale.tf(key, &[("list", &format_cidr_list(nets))]))
-    .collect::<Vec<_>>()
-    .join(" ")
+    let parts = [
+        ("access_lists.allowed", format_cidr_list(&filter.allow)),
+        ("access_lists.denied", format_cidr_list(&filter.deny)),
+        (
+            "access_lists.allowed_countries",
+            filter.allow_countries.join(", "),
+        ),
+        (
+            "access_lists.denied_countries",
+            filter.deny_countries.join(", "),
+        ),
+    ];
+    parts
+        .into_iter()
+        .filter(|(_, text)| !text.is_empty())
+        .map(|(key, text)| locale.tf(key, &[("list", &text)]))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Adds the list, or replaces the list with the id `editing`.
@@ -292,6 +324,7 @@ mod tests {
         let filter = IpFilter {
             allow: parse_cidr_list("10.0.0.0/8").unwrap(),
             deny: parse_cidr_list("10.0.0.1/32, 10.0.0.2/32").unwrap(),
+            ..Default::default()
         };
         assert_eq!(
             ip_filter_label(Locale::En, &filter),

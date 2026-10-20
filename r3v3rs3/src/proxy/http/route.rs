@@ -123,6 +123,7 @@ impl Router {
                     maintenance: maintenance.clone(),
                     error_pages: error_pages.clone(),
                     require_client_cert: route.require_client_cert,
+                    geoip: registries.geoip.clone(),
                 });
             }
         }
@@ -342,4 +343,5 @@ pub struct FilteredRoute {
     pub error_pages: Arc<[CustomErrorPage]>,
     /// Requires a verified TLS client certificate.
     pub require_client_cert: bool,
+    pub geoip: Arc<crate::proxy::geoip::GeoIpResolver>,
 }

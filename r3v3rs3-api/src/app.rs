@@ -89,6 +89,19 @@ pub struct AppConfig {
     /// The update check of the panel.
     #[serde(default)]
     pub upgrade: UpgradeConfig,
+
+    /// MaxMind MMDB GeoIP database settings for country filtering.
+    #[serde(default)]
+    pub geoip: GeoIpConfig,
+}
+
+/// MaxMind MMDB GeoIP database configuration.
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GeoIpConfig {
+    /// Path to a MaxMind MMDB database file (e.g. GeoLite2-Country.mmdb or GeoIP2-Country.mmdb).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "/etc/r3v3rs3/GeoLite2-Country.mmdb")]
+    pub database: Option<PathBuf>,
 }
 
 /// How often the server asks the release API whether a newer version exists. When one does,

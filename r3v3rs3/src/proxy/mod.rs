@@ -20,6 +20,7 @@ use tokio::{io::BufStream, net::TcpStream};
 use tokio_rustls::rustls::ServerConfig;
 use tracing::{Instrument, Span, error};
 
+pub mod geoip;
 pub mod health;
 pub mod http;
 pub mod proxy_protocol;
@@ -52,6 +53,7 @@ pub struct ProxyRegistries {
     pub caches: http::cache::CacheRegistry,
     pub groups: health::GroupRegistry,
     pub srv: srv::SrvRegistry,
+    pub geoip: Arc<geoip::GeoIpResolver>,
 }
 
 /// The number of the client connection tasks that are still running. The graceful drain waits

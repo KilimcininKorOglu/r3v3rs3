@@ -68,6 +68,7 @@ ipnet = { version = "2.11.0", features = ["serde"] }
 instant-acme = { version = "0.8.5", default-features = false, features = ["aws-lc-rs"] }
 libc = "0.2.189"
 log = "0.4.19"
+maxminddb = "0.32.0"
 mime_guess = "2.0.4"
 rmcp = { version = "3.5.1", features = [
     "server",

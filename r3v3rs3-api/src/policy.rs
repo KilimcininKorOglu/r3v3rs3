@@ -5,7 +5,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::{net::IpAddr, time::Duration};
 use utoipa::ToSchema;
 
-/// Allows or denies requests by the resolved client IP address.
+/// Allows or denies requests by the resolved client IP address and country.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct IpFilter {
     /// When not empty, only clients in these blocks are allowed.
@@ -17,19 +17,64 @@ pub struct IpFilter {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schema(value_type = [String], example = json!(["203.0.113.0/24"]))]
     pub deny: Vec<IpNet>,
+
+    /// When not empty, only clients from these ISO country codes (e.g. ["TR", "US"]) are allowed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = [String], example = json!(["TR", "US"]))]
+    pub allow_countries: Vec<String>,
+
+    /// Clients from these ISO country codes are always rejected, even when in `allow_countries`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = [String], example = json!(["RU", "CN"]))]
+    pub deny_countries: Vec<String>,
 }
 
 impl IpFilter {
     pub fn is_empty(&self) -> bool {
-        self.allow.is_empty() && self.deny.is_empty()
+        self.allow.is_empty()
+            && self.deny.is_empty()
+            && self.allow_countries.is_empty()
+            && self.deny_countries.is_empty()
     }
 
     pub fn allows(&self, ip: IpAddr) -> bool {
+        self.allows_with_country(ip, None)
+    }
+
+    fn is_country_denied(&self, country: Option<&str>) -> bool {
+        match country {
+            Some(c) => self
+                .deny_countries
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case(c)),
+            None => false,
+        }
+    }
+
+    fn matches_country_allow(&self, country: Option<&str>) -> bool {
+        match country {
+            Some(c) => self
+                .allow_countries
+                .iter()
+                .any(|a| a.eq_ignore_ascii_case(c)),
+            None => false,
+        }
+    }
+
+    pub fn allows_with_country(&self, ip: IpAddr, country: Option<&str>) -> bool {
         let ip = ip.to_canonical();
-        if self.deny.iter().any(|net| net.contains(&ip)) {
+        if self.deny.iter().any(|net| net.contains(&ip)) || self.is_country_denied(country) {
             return false;
         }
-        self.allow.is_empty() || self.allow.iter().any(|net| net.contains(&ip))
+        let in_allow_cidr =
+            !self.allow.is_empty() && self.allow.iter().any(|net| net.contains(&ip));
+        if in_allow_cidr {
+            return true;
+        }
+        if !self.allow_countries.is_empty() {
+            return self.matches_country_allow(country);
+        }
+        self.allow.is_empty()
     }
 }
 
@@ -332,6 +377,7 @@ mod tests {
         IpFilter {
             allow: allow.iter().map(|net| net.parse().unwrap()).collect(),
             deny: deny.iter().map(|net| net.parse().unwrap()).collect(),
+            ..Default::default()
         }
     }
 
@@ -373,6 +419,44 @@ mod tests {
     fn ipv4_mapped_address_matches_ipv4_block() {
         let filter = filter(&[], &["203.0.113.0/24"]);
         assert!(!filter.allows(ip("::ffff:203.0.113.9")));
+    }
+
+    #[test]
+    fn country_allow_and_deny_rules() {
+        let filter = IpFilter {
+            allow_countries: vec!["TR".into(), "DE".into()],
+            deny_countries: vec!["RU".into()],
+            ..Default::default()
+        };
+        assert!(!filter.is_empty());
+        assert!(filter.allows_with_country(ip("1.2.3.4"), Some("TR")));
+        assert!(filter.allows_with_country(ip("1.2.3.4"), Some("de"))); // case-insensitive
+        assert!(!filter.allows_with_country(ip("1.2.3.4"), Some("US")));
+        assert!(!filter.allows_with_country(ip("1.2.3.4"), Some("RU")));
+        assert!(!filter.allows_with_country(ip("1.2.3.4"), None));
+
+        // Deny country takes precedence
+        let filter_conflict = IpFilter {
+            allow_countries: vec!["TR".into()],
+            deny_countries: vec!["TR".into()],
+            ..Default::default()
+        };
+        assert!(!filter_conflict.allows_with_country(ip("1.2.3.4"), Some("TR")));
+    }
+
+    #[test]
+    fn country_filter_allows_whitelisted_cidr_even_without_country() {
+        let filter = IpFilter {
+            allow: vec!["192.168.1.0/24".parse().unwrap()],
+            allow_countries: vec!["TR".into()],
+            ..Default::default()
+        };
+        // Whitelisted local subnet passes even with no country
+        assert!(filter.allows_with_country(ip("192.168.1.50"), None));
+        // Other IPs must match country
+        assert!(filter.allows_with_country(ip("8.8.8.8"), Some("TR")));
+        assert!(!filter.allows_with_country(ip("8.8.8.8"), Some("US")));
+        assert!(!filter.allows_with_country(ip("10.0.0.1"), None));
     }
 
     #[test]

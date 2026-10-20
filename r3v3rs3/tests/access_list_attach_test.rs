@@ -21,8 +21,8 @@ fn office(deny: &[&str]) -> AccessListEntry {
     let list = AccessList {
         name: "Office".into(),
         ip_filter: IpFilter {
-            allow: Vec::new(),
             deny: deny.iter().map(|net| net.parse().unwrap()).collect(),
+            ..Default::default()
         },
         ..Default::default()
     };

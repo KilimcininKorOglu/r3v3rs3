@@ -102,6 +102,7 @@ async fn fixed_responses_answer_without_an_upstream_server() -> anyhow::Result<(
     let deny_all = IpFilter {
         allow: vec![],
         deny: parse_cidr_list("0.0.0.0/0, ::/0")?,
+        ..Default::default()
     };
     let routes = vec![
         fixed(

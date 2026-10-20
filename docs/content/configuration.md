@@ -521,8 +521,10 @@ You can allow or deny clients by IP address for each HTTP / HTTPS proxy. r3v3rs3
 
 - **Denied IP Addresses**: Clients in these IP addresses or CIDR blocks receive `403 Forbidden`.
 - **Allowed IP Addresses**: When the list is not empty, only clients in these IP addresses or CIDR blocks can access the proxy. Other clients receive `403 Forbidden`.
+- **Allowed Countries**: Comma-separated ISO 3166-1 alpha-2 country codes (e.g. `TR`, `US`, `DE`). Requires a MaxMind GeoIP database configured in Settings (`[geoip] database = "/path/to/GeoLite2-Country.mmdb"`).
+- **Denied Countries**: Comma-separated ISO country codes. Denied countries take precedence over allowed countries.
 
-A denied address takes precedence over an allowed address.
+A denied address or country takes precedence over an allowed one. Whitelisted IP CIDRs take precedence to prevent locking out local or VPN addresses.
 
 A route can replace the proxy lists with "Override IP Filter for This Route". The route then uses only its own lists. If both route lists are empty, the route allows every client.
 

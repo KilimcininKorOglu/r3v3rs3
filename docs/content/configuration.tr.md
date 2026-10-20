@@ -521,8 +521,10 @@ Her HTTP / HTTPS proxy'sinde istemcileri IP adresine göre engelleyebilir veya y
 
 - **Engellenen IP Adresleri**: Bu IP adreslerinden veya CIDR bloklarından gelen istemciler `403 Forbidden` alır.
 - **İzin Verilen IP Adresleri**: Liste boş değilse proxy'ye yalnız bu IP adreslerinden veya CIDR bloklarından gelen istemciler erişebilir. Diğer istemciler `403 Forbidden` alır.
+- **İzin Verilen Ülkeler**: Virgülle ayrılmış ISO 3166-1 alpha-2 ülke kodları (ör. `TR`, `US`, `DE`). Ayarlar sayfasında veya `config.toml` içinde bir MaxMind GeoIP veritabanı tanımlanmış olmalıdır (`[geoip] database = "/path/to/GeoLite2-Country.mmdb"`).
+- **Engellenen Ülkeler**: Virgülle ayrılmış ISO ülke kodları. Engellenen ülkeler izin verilenlerin önündedir.
 
-Bir adres iki listeye de uyuyorsa engellenir.
+Engellenen bir adres veya ülke, izin verilenin önüne geçer. İzin verilen CIDR blokları (ör. yerel ağ veya VPN), ülke filtresinden önce değerlendirilerek erişimin kesilmesini önler.
 
 Bir route, "Bu Route için Ayrı IP Filtresi Kullan" seçeneğiyle proxy listeleri yerine yalnız kendi listelerini kullanır. Route'un iki listesi de boşsa bu route'a her istemci erişebilir.
 

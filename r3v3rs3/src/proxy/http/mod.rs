@@ -1031,7 +1031,14 @@ fn check_policies(
     client: std::net::IpAddr,
     client_cert: Option<&ClientCertInfo>,
 ) -> Result<Upstream, ProxyError> {
-    if !route.ip_filter.allows(client) {
+    let country = (!route.ip_filter.allow_countries.is_empty()
+        || !route.ip_filter.deny_countries.is_empty())
+    .then(|| route.geoip.lookup_country(client))
+    .flatten();
+    if !route
+        .ip_filter
+        .allows_with_country(client, country.as_deref())
+    {
         return Err(ProxyError::IpNotAllowed);
     }
     if route.require_client_cert && client_cert.is_none() {

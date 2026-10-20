@@ -92,6 +92,7 @@ struct Fields {
     /// One absolute path per line.
     acme_exec_programs: String,
     acme_exec_timeout: String,
+    geoip_database: String,
 }
 
 impl Fields {
@@ -181,6 +182,12 @@ impl Fields {
                 .collect::<Vec<_>>()
                 .join("\n"),
             acme_exec_timeout: text("/acme_exec/timeout"),
+            geoip_database: config
+                .geoip
+                .database
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
         }
     }
 }
@@ -320,6 +327,10 @@ pub fn settings() -> Html {
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.http3_max_concurrent_bidi_streams_hint")}</p>
             { text_field(&fields, &errors, locale.t("settings.http3_max_concurrent_uni_streams"), "http3_max_concurrent_uni_streams", "10", |f| &mut f.http3_max_concurrent_uni_streams) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.http3_max_concurrent_uni_streams_hint")}</p>
+
+            <h2 class="mt-8 mb-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">{locale.t("settings.geoip")}</h2>
+            { text_field(&fields, &errors, locale.t("settings.geoip_database"), "geoip_database", "/var/lib/GeoIP/GeoLite2-Country.mmdb", |f| &mut f.geoip_database) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.geoip_database_hint")}</p>
 
             { notifications_section(locale, &fields, &errors, &test_notice) }
             { platform_section(locale, &fields, &errors) }
@@ -1107,6 +1118,13 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             mcp: parse_mcp(locale, fields, &mut errors),
             http2,
             http3,
+            geoip: r3v3rs3_api::app::GeoIpConfig {
+                database: if fields.geoip_database.trim().is_empty() {
+                    None
+                } else {
+                    Some(std::path::PathBuf::from(fields.geoip_database.trim()))
+                },
+            },
             upgrade: UpgradeConfig {
                 check_interval: upgrade.upgrade.check_interval,
             },

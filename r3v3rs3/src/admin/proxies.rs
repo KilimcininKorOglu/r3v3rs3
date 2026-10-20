@@ -513,7 +513,7 @@ mod tests {
         let proxy = HttpProxy {
             ip_filter: IpFilter {
                 allow: vec!["10.0.0.0/8".parse().unwrap()],
-                deny: vec![],
+                ..Default::default()
             },
             routes: vec![Route {
                 path: "/".to_string(),

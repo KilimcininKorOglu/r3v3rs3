@@ -84,6 +84,7 @@ async fn ip_filter_allows_and_denies_clients() -> anyhow::Result<()> {
         IpFilter {
             allow: vec![],
             deny: loopback(),
+            ..Default::default()
         },
         ClientIpConfig::default(),
     );
@@ -94,22 +95,22 @@ async fn ip_filter_allows_and_denies_clients() -> anyhow::Result<()> {
                 &upstream,
                 Some(IpFilter {
                     allow: nets(&["10.0.0.0/8"]),
-                    deny: vec![],
+                    ..Default::default()
                 }),
             ),
             http_route("/", &upstream, None),
         ],
         IpFilter {
             allow: loopback(),
-            deny: vec![],
+            ..Default::default()
         },
         ClientIpConfig::default(),
     );
     let deny_forwarded = proxy(
         vec![http_route("/", &upstream, None)],
         IpFilter {
-            allow: vec![],
             deny: nets(&["203.0.113.0/24"]),
+            ..Default::default()
         },
         ClientIpConfig {
             trust_cdn: true,

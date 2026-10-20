@@ -34,6 +34,7 @@ impl AccessList {
             ip_filter: IpFilter {
                 allow: Vec::new(),
                 deny: vec![IpNet::V4(Ipv4Net::default()), IpNet::V6(Ipv6Net::default())],
+                ..Default::default()
             },
             auth: AuthPolicy::None,
         }
@@ -95,6 +96,7 @@ mod tests {
                 ip_filter: IpFilter {
                     allow: parse_cidr_list("10.0.0.0/8").unwrap(),
                     deny: Vec::new(),
+                    ..Default::default()
                 },
                 auth: AuthPolicy::Bearer(BearerAuth::default()),
             },
@@ -123,6 +125,7 @@ mod tests {
             ip_filter: IpFilter {
                 allow: parse_cidr_list("10.0.0.0/8").unwrap(),
                 deny: Vec::new(),
+                ..Default::default()
             },
             auth: AuthPolicy::Session,
         };
