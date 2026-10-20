@@ -49,6 +49,14 @@ pub trait ContainerRuntime: Send + Sync {
     /// every one that no container uses.
     async fn prune_project_images(&self, project: &ProjectName, all: bool) -> anyhow::Result<()>;
 
+    /// Executes disk hygiene prune according to the policy and returns the results.
+    async fn run_prune(
+        &self,
+        _policy: &r3v3rs3_api::platform::PrunePolicy,
+    ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
+        Ok(r3v3rs3_api::platform::PruneResult::default())
+    }
+
     /// Creates a bridge network unless it exists.
     async fn ensure_network(&self, network: &NetworkName, app: &AppName) -> anyhow::Result<()>;
 

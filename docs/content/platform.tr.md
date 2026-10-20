@@ -559,6 +559,15 @@ Admin hesabı ayrıca şunları görür:
 
 `agent_port` ayarlı değilse ekleme ve yeni token işlemleri `400 agent_port_missing` yanıtını alır.
 
+### Disk Hijyeni ve Temizleme Politikası
+
+**Hedefler** sayfası, kullanılmayan Docker kaynaklarını otomatik temizlemek ve disk tükenmesini önlemek için bir **Disk Hijyeni ve Temizleme Politikası** kartı sunar:
+
+- **Otomatik Zamanlanmış Temizlik**: Etkinleştirildiğinde, arka plan işleyicisi kaynakları yapılandırılan zaman aralığına göre (ör. `24h` veya `7days`) temizler.
+- **Kaynak Seçimi**: Kullanılmayan ve artık (dangling) imajlar, durdurulmuş konteynerler, BuildKit derleme önbelleği ve referanssız birimler için ayrı kontrol anahtarları.
+- **Şimdi Temizle**: Anında temizlik başlatmak ve geri kazanılan alan ile silinen öğe sayılarını canlı görmek için **Şimdi Temizle** butonuna tıklayın (veya `POST /api/platform/prune/run` gönderin).
+- **Çalıştırma İstatistikleri**: Son temizleme zamanını ve geri kazanılan disk alanını gösterir.
+
 ## Yönetim API'si
 
 | Route | İzin | Açıklama |
@@ -619,6 +628,9 @@ Admin hesabı ayrıca şunları görür:
 | `POST /api/git/github_apps` | Admin | `{"name": "...", "url": "...", "organization": "...", "redirect_uri": "<callback adresi>"}` gövdesiyle bir GitHub App başlatır. `url` ve `organization` isteğe bağlıdır. Yanıt, tarayıcının GitHub'a gönderdiği form adresini ve manifest'i içerir. |
 | `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Bağlı hesabın veya kurulumun en fazla 50 repository'si. |
 | `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit | Bir reponun en fazla 50 branch'i. |
+| `GET /api/platform/prune` | Read | Disk temizleme politikasını ve hijyen ayarlarını döndürür. |
+| `PUT /api/platform/prune` | Admin | Disk temizleme politikasını günceller. |
+| `POST /api/platform/prune/run` | Admin | Disk hijyeni temizliğini derhal çalıştırır ve geri kazanılan alanı döndürür. |
 | `GET /oauth/git/callback` | State | Sağlayıcının ve yeni bir GitHub App'in callback'i. Bkz. [Bağlanma](#baglanma) ve [GitHub App oluşturma](#github-app-olusturma). |
 
 Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). `[platform] enabled` kapalıyken her platform route'u `503 platform_disabled`, platform veritabanını veya key'ini açamadığında `503 platform_failed` yanıtını verir. Başka bir uygulamanın, hedefin veya bağlantının kullandığı ad `409 app_name_exists`, `409 target_name_exists` veya `409 git_connection_name_exists` alır. Bağlı olmayan bağlantı `409 git_connection_not_connected` alır. GitHub App kurulmadan `POST /api/git/connections/{id}/installation` isteği `409 github_app_not_installed`, sağlayıcıya giden başarısız istek `502 git_provider_failed` alır. Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, deploy eden her webhook isteğini, hedefin her değişikliğini, her agent kaydını, Git sağlayıcı bağlantısının her değişikliğini ve yetkilendirmesini ve bir hesabın başlattığı her webhook kurulumunu kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token veya secret değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Webhook isteğinin özeti uygulamayı, sağlayıcıyı ve deployment'ı adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır. Bağlantının özeti bağlantıyı ve sağlayıcısını adlandırır, client secret'ı veya bir token'ı hiçbir zaman içermez. Yetkilendirmenin özeti hesabı da adlandırır. Webhook kurulumunun özeti uygulamayı adlandırır.

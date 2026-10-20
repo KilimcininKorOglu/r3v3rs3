@@ -345,6 +345,71 @@ fn default_docker_endpoint() -> String {
     "unix:///var/run/docker.sock".to_string()
 }
 
+/// Disk hygiene prune rules and scheduling.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PrunePolicy {
+    /// Whether the automatic prune scheduler is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Interval in hours or days between automatic prune runs, e.g. "24h" or "7days".
+    #[serde(default = "default_prune_interval")]
+    pub interval: String,
+
+    /// Whether to prune unused/dangling images.
+    #[serde(default = "default_true")]
+    pub prune_images: bool,
+
+    /// Whether to prune unused Docker volumes.
+    #[serde(default)]
+    pub prune_volumes: bool,
+
+    /// Whether to prune BuildKit build cache.
+    #[serde(default = "default_true")]
+    pub prune_build_cache: bool,
+
+    /// Whether to prune stopped containers.
+    #[serde(default = "default_true")]
+    pub prune_containers: bool,
+
+    /// The timestamp of the last prune run in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_pruned_at: Option<u64>,
+
+    /// The space reclaimed in the last prune run in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_reclaimed_bytes: Option<u64>,
+}
+
+fn default_prune_interval() -> String {
+    "24h".to_string()
+}
+
+impl Default for PrunePolicy {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval: default_prune_interval(),
+            prune_images: true,
+            prune_volumes: false,
+            prune_build_cache: true,
+            prune_containers: true,
+            last_pruned_at: None,
+            last_reclaimed_bytes: None,
+        }
+    }
+}
+
+/// The result of executing a disk hygiene prune.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PruneResult {
+    pub images_deleted: u64,
+    pub volumes_deleted: u64,
+    pub build_cache_deleted: u64,
+    pub containers_deleted: u64,
+    pub space_reclaimed_bytes: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetKind {

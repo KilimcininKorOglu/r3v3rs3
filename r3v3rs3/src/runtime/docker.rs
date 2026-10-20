@@ -159,6 +159,94 @@ impl DockerRuntime {
         Ok(found.filter(|network| network.name == name.as_str()))
     }
 
+    async fn prune_docker_containers(&self) -> anyhow::Result<(u64, u64)> {
+        let allowed = [StatusCode::CONFLICT];
+        let res = self
+            .send(
+                Method::POST,
+                "/containers/prune",
+                None,
+                &allowed,
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let val: Value = read_json(res).await.unwrap_or_default();
+        let count = val
+            .get("ContainersDeleted")
+            .and_then(|v| v.as_array())
+            .map_or(0, |a| a.len() as u64);
+        let space = val
+            .get("SpaceReclaimed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        Ok((count, space))
+    }
+
+    async fn prune_docker_images(&self) -> anyhow::Result<(u64, u64)> {
+        let filters = json!({ "dangling": ["false"] }).to_string();
+        let path = format!("/images/prune?filters={}", encode(&filters));
+        let allowed = [StatusCode::CONFLICT];
+        let res = self
+            .send(Method::POST, &path, None, &allowed, RESPONSE_TIMEOUT)
+            .await?;
+        let val: Value = read_json(res).await.unwrap_or_default();
+        let count = val
+            .get("ImagesDeleted")
+            .and_then(|v| v.as_array())
+            .map_or(0, |a| a.len() as u64);
+        let space = val
+            .get("SpaceReclaimed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        Ok((count, space))
+    }
+
+    async fn prune_docker_volumes(&self) -> anyhow::Result<(u64, u64)> {
+        let allowed = [StatusCode::CONFLICT];
+        let res = self
+            .send(
+                Method::POST,
+                "/volumes/prune",
+                None,
+                &allowed,
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let val: Value = read_json(res).await.unwrap_or_default();
+        let count = val
+            .get("VolumesDeleted")
+            .and_then(|v| v.as_array())
+            .map_or(0, |a| a.len() as u64);
+        let space = val
+            .get("SpaceReclaimed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        Ok((count, space))
+    }
+
+    async fn prune_docker_build_cache(&self) -> anyhow::Result<(u64, u64)> {
+        let allowed = [StatusCode::CONFLICT];
+        let res = self
+            .send(
+                Method::POST,
+                "/build/prune",
+                None,
+                &allowed,
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let val: Value = read_json(res).await.unwrap_or_default();
+        let count = val
+            .get("CachesDeleted")
+            .and_then(|v| v.as_array())
+            .map_or(0, |a| a.len() as u64);
+        let space = val
+            .get("SpaceReclaimed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        Ok((count, space))
+    }
+
     /// Opens an interactive shell in the container with exactly this name. The stream carries
     /// the raw output of a TTY session, so it needs no frame demux.
     pub async fn exec(
@@ -604,6 +692,34 @@ impl ContainerRuntime for DockerRuntime {
         // 409 Conflict: another prune runs, and the next job prunes again.
         self.call(Method::POST, &path, None, &[StatusCode::CONFLICT])
             .await
+    }
+
+    async fn run_prune(
+        &self,
+        policy: &r3v3rs3_api::platform::PrunePolicy,
+    ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
+        let mut result = r3v3rs3_api::platform::PruneResult::default();
+        if policy.prune_containers {
+            let (count, space) = self.prune_docker_containers().await.unwrap_or_default();
+            result.containers_deleted += count;
+            result.space_reclaimed_bytes += space;
+        }
+        if policy.prune_images {
+            let (count, space) = self.prune_docker_images().await.unwrap_or_default();
+            result.images_deleted += count;
+            result.space_reclaimed_bytes += space;
+        }
+        if policy.prune_volumes {
+            let (count, space) = self.prune_docker_volumes().await.unwrap_or_default();
+            result.volumes_deleted += count;
+            result.space_reclaimed_bytes += space;
+        }
+        if policy.prune_build_cache {
+            let (count, space) = self.prune_docker_build_cache().await.unwrap_or_default();
+            result.build_cache_deleted += count;
+            result.space_reclaimed_bytes += space;
+        }
+        Ok(result)
     }
 
     async fn ensure_network(&self, network: &NetworkName, app: &AppName) -> anyhow::Result<()> {

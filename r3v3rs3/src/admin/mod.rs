@@ -333,7 +333,13 @@ fn platform_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .nest(
             "/platform",
-            OpenApiRouter::new().routes(routes!(platform::rotate_platform_key)),
+            OpenApiRouter::new()
+                .routes(routes!(platform::rotate_platform_key))
+                .routes(routes!(
+                    platform::get_prune_policy,
+                    platform::update_prune_policy
+                ))
+                .routes(routes!(platform::run_prune)),
         )
         .nest(
             "/targets",

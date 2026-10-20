@@ -140,12 +140,24 @@ const SCHEMA: &[&str] = &[
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
     )",
+    "CREATE TABLE IF NOT EXISTS prune_policy (
+        id                   TEXT PRIMARY KEY,
+        enabled              INTEGER NOT NULL,
+        interval             TEXT NOT NULL,
+        prune_images         INTEGER NOT NULL,
+        prune_volumes        INTEGER NOT NULL,
+        prune_build_cache    INTEGER NOT NULL,
+        prune_containers     INTEGER NOT NULL,
+        last_pruned_at       INTEGER,
+        last_reclaimed_bytes INTEGER
+    )",
 ];
 
 mod commands;
 mod connections;
 mod hooks;
 mod metrics;
+mod prune;
 mod registries;
 pub use connections::{PUBLIC_URL, StoredConnection, StoredGithubApp, StoredTokens};
 pub use hooks::StoredHook;

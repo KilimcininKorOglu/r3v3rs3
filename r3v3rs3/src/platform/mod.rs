@@ -20,6 +20,7 @@ mod notices;
 pub mod oauth;
 mod provider;
 pub mod proxy;
+pub mod prune;
 mod publish;
 pub mod registries;
 #[cfg(test)]
@@ -118,6 +119,7 @@ impl PlatformHandle {
                 metrics::spawn_collector(&platform);
                 image_check::spawn_checker(&platform);
                 scheduler::spawn_command_scheduler(&platform);
+                prune::spawn_prune_scheduler(&platform);
                 if let Some(port) = config.platform.agent_port
                     && let Err(err) = platform
                         .start_agent_listener(port, events.subscribe())

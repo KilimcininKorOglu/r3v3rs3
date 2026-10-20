@@ -841,3 +841,47 @@ async fn the_platform_answers_503_until_it_is_enabled() -> anyhow::Result<()> {
     assert!(!dir.0.join("platform.db").exists());
     Ok(())
 }
+
+#[tokio::test]
+async fn prune_policy_get_and_update() -> anyhow::Result<()> {
+    let dir = TempDir::new("platform-prune")?;
+    let mut config = AppConfig::default();
+    config.platform.enabled = true;
+    let storage = TestStorage::builder()
+        .config(config)
+        .account("admin", "admin-secret", Role::Admin, None)
+        .build();
+    with_admin(&dir.0, storage, |addr| async move {
+        let admin = session_cookie(addr, "admin", "admin-secret").await?;
+        let policy = get(addr, "/api/platform/prune", &admin).await?;
+        assert_eq!(policy["enabled"], false);
+        assert_eq!(policy["interval"], "24h");
+        assert_eq!(policy["prune_images"], true);
+
+        let update = json!({
+            "enabled": true,
+            "interval": "12h",
+            "prune_images": true,
+            "prune_volumes": true,
+            "prune_build_cache": false,
+            "prune_containers": true,
+        });
+        let (status, body) = send(
+            addr,
+            Method::PUT,
+            "/api/platform/prune",
+            &admin,
+            Some(update),
+        )
+        .await?;
+        assert_eq!(status, 200, "{body}");
+
+        let updated = get(addr, "/api/platform/prune", &admin).await?;
+        assert_eq!(updated["enabled"], true);
+        assert_eq!(updated["interval"], "12h");
+        assert_eq!(updated["prune_volumes"], true);
+        assert_eq!(updated["prune_build_cache"], false);
+        Ok(())
+    })
+    .await
+}

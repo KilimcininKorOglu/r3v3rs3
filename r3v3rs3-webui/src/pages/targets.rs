@@ -22,8 +22,11 @@ use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
 use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::i18n::Locale;
-use r3v3rs3_api::platform::{TargetEntry, TargetKind, TargetRequest, TargetToken};
-use web_sys::HtmlTextAreaElement;
+use r3v3rs3_api::platform::{
+    PrunePolicy, PruneResult, TargetEntry, TargetKind, TargetRequest, TargetToken,
+};
+use wasm_bindgen_futures::spawn_local;
+use web_sys::{HtmlInputElement, HtmlTextAreaElement};
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
@@ -106,6 +109,7 @@ pub fn targets() -> Html {
             { list_card(locale, targets.is_some(), "targets.empty", &COLUMNS, &rows) }
             if admin {
                 { form_view(locale, &form, &notice, &targets) }
+                <PruneSettings />
             }
         </>
     }
@@ -366,6 +370,228 @@ fn shell_word(value: &str) -> String {
     }
 }
 
+#[function_component(PruneSettings)]
+fn prune_settings() -> Html {
+    let locale = use_locale();
+    let policy = use_state(PrunePolicy::default);
+    let loaded = use_state(|| false);
+    let notice = use_state(|| Option::<Notice<&'static str>>::None);
+    let busy = use_state(|| false);
+
+    let policy_loaded = loaded.clone();
+    let policy_state = policy.clone();
+    use_effect_with((), move |()| {
+        if !*policy_loaded {
+            let policy_state = policy_state.clone();
+            let policy_loaded = policy_loaded.clone();
+            spawn_local(async move {
+                let request = Request::get(&format!("{API_ENDPOINT}/platform/prune"));
+                if let Ok(data) = fetch_json::<PrunePolicy>(locale, request).await {
+                    policy_state.set(data);
+                    policy_loaded.set(true);
+                }
+            });
+        }
+        || ()
+    });
+
+    let run_prune = run_prune_callback(locale, &busy, &policy);
+    let save_policy = save_policy_callback(locale, &busy, &policy, &notice);
+
+    html! {
+        <div class="mt-6 p-6 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm">
+            <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+                {locale.t("targets.prune_title")}
+            </h3>
+            <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1 mb-4">
+                {locale.t("targets.prune_desc")}
+            </p>
+            { notice_view(&notice, |key| html! { {locale.t(key)} }) }
+            { prune_toggles_view(locale, &policy) }
+            { prune_stats_and_actions(locale, &policy, *busy, run_prune, save_policy) }
+        </div>
+    }
+}
+
+fn prune_toggles_view(locale: Locale, policy: &UseStateHandle<PrunePolicy>) -> Html {
+    let toggle_enabled = checkbox_toggle(policy, |p| &mut p.enabled);
+    let toggle_images = checkbox_toggle(policy, |p| &mut p.prune_images);
+    let toggle_containers = checkbox_toggle(policy, |p| &mut p.prune_containers);
+    let toggle_build_cache = checkbox_toggle(policy, |p| &mut p.prune_build_cache);
+    let toggle_volumes = checkbox_toggle(policy, |p| &mut p.prune_volumes);
+    let interval_input = text_input(policy, |p| &mut p.interval);
+
+    html! {
+        <div class="space-y-4">
+            <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
+                <input type="checkbox" checked={policy.enabled} onchange={toggle_enabled} class="w-4 h-4 mr-2 rounded" />
+                {locale.t("targets.prune_enabled")}
+            </label>
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("targets.prune_interval")}</label>
+                <input type="text" autocapitalize="off" autocomplete="off" value={policy.interval.clone()} oninput={interval_input} class={INPUT_CLASS} />
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
+                    <input type="checkbox" checked={policy.prune_images} onchange={toggle_images} class="w-4 h-4 mr-2 rounded" />
+                    {locale.t("targets.prune_images")}
+                </label>
+                <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
+                    <input type="checkbox" checked={policy.prune_containers} onchange={toggle_containers} class="w-4 h-4 mr-2 rounded" />
+                    {locale.t("targets.prune_containers")}
+                </label>
+                <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
+                    <input type="checkbox" checked={policy.prune_build_cache} onchange={toggle_build_cache} class="w-4 h-4 mr-2 rounded" />
+                    {locale.t("targets.prune_build_cache")}
+                </label>
+                <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
+                    <input type="checkbox" checked={policy.prune_volumes} onchange={toggle_volumes} class="w-4 h-4 mr-2 rounded" />
+                    {locale.t("targets.prune_volumes")}
+                </label>
+            </div>
+        </div>
+    }
+}
+
+fn prune_stats_and_actions(
+    locale: Locale,
+    policy: &PrunePolicy,
+    busy: bool,
+    run_prune: Callback<MouseEvent>,
+    save_policy: Callback<MouseEvent>,
+) -> Html {
+    let last_run = match policy.last_pruned_at {
+        Some(secs) => format_time(secs * 1000),
+        None => locale.t("targets.prune_never").to_string(),
+    };
+    let reclaimed = match policy.last_reclaimed_bytes {
+        Some(bytes) => format_disk_bytes(bytes),
+        None => "0 B".to_string(),
+    };
+    html! {
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 mt-4 border-t border-neutral-200 dark:border-neutral-700">
+            <div class="text-xs text-neutral-500 dark:text-neutral-400 space-y-1">
+                <div>{locale.tf("targets.prune_last_run", &[("time", &last_run)])}</div>
+                <div>{locale.tf("targets.prune_last_reclaimed", &[("size", &reclaimed)])}</div>
+            </div>
+            <div class="flex gap-2">
+                <button type="button" class={BUTTON_CLASS} disabled={busy} onclick={run_prune}>
+                    if busy { {locale.t("targets.prune_running")} } else { {locale.t("targets.prune_run_now")} }
+                </button>
+                <button type="button" class={BUTTON_CLASS} disabled={busy} onclick={save_policy}>
+                    {locale.t("targets.prune_save")}
+                </button>
+            </div>
+        </div>
+    }
+}
+
+fn run_prune_callback(
+    locale: Locale,
+    busy: &UseStateHandle<bool>,
+    policy: &UseStateHandle<PrunePolicy>,
+) -> Callback<MouseEvent> {
+    let (busy, policy) = (busy.clone(), policy.clone());
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let (busy, policy) = (busy.clone(), policy.clone());
+        dialog::confirm_then(
+            locale,
+            locale.t("targets.prune_confirm").to_string(),
+            async move {
+                busy.set(true);
+                let request = Request::post(&format!("{API_ENDPOINT}/platform/prune/run"));
+                handle_prune_result(locale, request, policy).await;
+                busy.set(false);
+            },
+        );
+    })
+}
+
+async fn handle_prune_result(
+    locale: Locale,
+    request: gloo_net::http::RequestBuilder,
+    policy: UseStateHandle<PrunePolicy>,
+) {
+    match fetch_json::<PruneResult>(locale, request).await {
+        Ok(result) => {
+            let freed = format_disk_bytes(result.space_reclaimed_bytes);
+            let msg = locale.tf(
+                "targets.prune_result",
+                &[
+                    ("size", &freed),
+                    ("images", &result.images_deleted.to_string()),
+                    ("volumes", &result.volumes_deleted.to_string()),
+                    ("build_cache", &result.build_cache_deleted.to_string()),
+                    ("containers", &result.containers_deleted.to_string()),
+                ],
+            );
+            dialog::message(locale, &msg, Icon::Success).await;
+            refresh_prune_policy(locale, policy).await;
+        }
+        Err(err) => dialog::message(locale, &err, Icon::Error).await,
+    }
+}
+
+async fn refresh_prune_policy(locale: Locale, policy: UseStateHandle<PrunePolicy>) {
+    let req = Request::get(&format!("{API_ENDPOINT}/platform/prune"));
+    if let Ok(updated) = fetch_json::<PrunePolicy>(locale, req).await {
+        policy.set(updated);
+    }
+}
+
+fn save_policy_callback(
+    locale: Locale,
+    busy: &UseStateHandle<bool>,
+    policy: &UseStateHandle<PrunePolicy>,
+    notice: &UseStateHandle<Option<Notice<&'static str>>>,
+) -> Callback<MouseEvent> {
+    let (busy, policy, notice) = (busy.clone(), policy.clone(), notice.clone());
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let (busy, policy, notice) = (busy.clone(), policy.clone(), notice.clone());
+        spawn_local(async move {
+            busy.set(true);
+            let val = (*policy).clone();
+            let req = Request::put(&format!("{API_ENDPOINT}/platform/prune")).json(&val);
+            match req {
+                Ok(req) => match send_request(locale, req).await {
+                    Ok(_) => notice.set(Some(Notice::Saved("targets.prune_saved"))),
+                    Err(err) => notice.set(Some(Notice::Failed(err))),
+                },
+                Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
+            }
+            busy.set(false);
+        });
+    })
+}
+
+fn checkbox_toggle(
+    policy: &UseStateHandle<PrunePolicy>,
+    select: fn(&mut PrunePolicy) -> &mut bool,
+) -> Callback<Event> {
+    let policy = policy.clone();
+    Callback::from(move |event: Event| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let mut updated = (*policy).clone();
+        *select(&mut updated) = input.checked();
+        policy.set(updated);
+    })
+}
+
+fn format_disk_bytes(bytes: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const TIB: f64 = 1024.0 * GIB;
+    let b = bytes as f64;
+    if b >= TIB {
+        format!("{:.1} TiB", b / TIB)
+    } else if b >= GIB {
+        format!("{:.1} GiB", b / GIB)
+    } else {
+        format!("{:.1} MiB", b / (1024.0 * 1024.0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,5 +632,12 @@ mod tests {
         );
         assert_eq!(shell_word("a b;c'd"), r"'a b;c'\''d'");
         assert_eq!(shell_word(""), "''");
+    }
+
+    #[test]
+    fn format_disk_bytes_handles_mib_gib_tib() {
+        assert_eq!(format_disk_bytes(500 * 1024 * 1024), "500.0 MiB");
+        assert_eq!(format_disk_bytes(2 * 1024 * 1024 * 1024), "2.0 GiB");
+        assert_eq!(format_disk_bytes(3 * 1024 * 1024 * 1024 * 1024), "3.0 TiB");
     }
 }

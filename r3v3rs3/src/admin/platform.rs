@@ -24,8 +24,9 @@ use r3v3rs3_api::{
     platform::{
         AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
         DeploymentEntry, DeploymentTrigger, EnvEntry, GitTokenRequest, ImageUpdateStatus,
-        KeyRotationReport, MetricsQuery, RegistryEntry, RegistryRequest, ScheduledCommandRequest,
-        ScheduledCommandRunResult, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
+        KeyRotationReport, MetricsQuery, PrunePolicy, PruneResult, RegistryEntry, RegistryRequest,
+        ScheduledCommandRequest, ScheduledCommandRunResult, TargetEntry, TargetRequest,
+        TargetToken, WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -1461,4 +1462,83 @@ pub async fn delete_registry(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(())
+}
+
+/// The prune policy and disk hygiene settings.
+#[utoipa::path(
+    get,
+    path = "/prune",
+    tag = "platform",
+    operation_id = "get_prune_policy",
+    responses(
+        (status = 200, description = "The prune policy.", body = PrunePolicy),
+        ErrorResponses
+    )
+)]
+pub async fn get_prune_policy(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<PrunePolicy>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let policy = platform.prune_policy().await.map_err(platform_error)?;
+    Ok(Json(policy))
+}
+
+/// Updates the prune policy and disk hygiene settings.
+#[utoipa::path(
+    put,
+    path = "/prune",
+    tag = "platform",
+    operation_id = "update_prune_policy",
+    request_body = PrunePolicy,
+    responses(
+        (status = 200, description = "The prune policy is saved.", body = PrunePolicy),
+        ErrorResponses
+    )
+)]
+pub async fn update_prune_policy(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(policy): Json<PrunePolicy>,
+) -> Result<Json<PrunePolicy>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    platform
+        .update_prune_policy(policy.clone())
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(format!(
+        "Updated prune policy (enabled: {})",
+        policy.enabled
+    ));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(policy))
+}
+
+/// Runs a disk hygiene prune immediately.
+#[utoipa::path(
+    post,
+    path = "/prune/run",
+    tag = "platform",
+    operation_id = "run_prune",
+    responses(
+        (status = 200, description = "The prune results with reclaimed bytes.", body = PruneResult),
+        ErrorResponses
+    )
+)]
+pub async fn run_prune(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<PruneResult>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let result = platform.run_prune().await.map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(format!(
+        "Ran disk prune, reclaimed {} bytes",
+        result.space_reclaimed_bytes
+    ));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(result))
 }

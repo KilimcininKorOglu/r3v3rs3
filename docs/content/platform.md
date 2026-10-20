@@ -559,6 +559,15 @@ An admin account also sees:
 
 Without `agent_port` the add and the new token actions answer `400 agent_port_missing`.
 
+### Disk Hygiene & Prune Policy
+
+The **Targets** page also includes a **Disk Hygiene & Prune Policy** card to automate cleanup of unused Docker resources and prevent disk exhaustion:
+
+- **Automatic Scheduled Pruning**: When enabled, a background worker evaluates and cleans resources on the configured interval (e.g. `24h` or `7days`).
+- **Resource Selection**: Configurable toggles for dangling and unused images, stopped containers, BuildKit build cache, and unused anonymous volumes.
+- **Run Immediately**: Click **Prune Now** (or send `POST /api/platform/prune/run`) to trigger an immediate prune and view the freed disk space and deleted item counts in real time.
+- **Run Statistics**: Displays the timestamp of the last execution and the reclaimed disk space.
+
 ## Admin API
 
 | Route | Permission | Description |
@@ -621,6 +630,9 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 | `POST /api/git/github_apps` | Admin | Starts a GitHub App with `{"name": "...", "url": "...", "organization": "...", "redirect_uri": "<callback address>"}`, `url` and `organization` optional, and returns the form address and the manifest that the browser posts to GitHub. |
 | `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Up to 50 repositories of the connected account or of the installation. |
 | `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit | Up to 50 branches of a repository. |
+| `GET /api/platform/prune` | Read | The prune policy and disk hygiene settings. |
+| `PUT /api/platform/prune` | Admin | Replaces the prune policy. |
+| `POST /api/platform/prune/run` | Admin | Runs disk hygiene prune immediately and returns reclaimed space. |
 | `GET /oauth/git/callback` | The state | The callback of the provider and of a new GitHub App. See [Connect](#connect) and [Create a GitHub App](#create-a-github-app). |
 
 An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). Every platform route answers `503 platform_disabled` when `[platform] enabled` is off, and `503 platform_failed` when the platform failed to open its database or its key. A name that another app, target or connection uses answers `409 app_name_exists`, `409 target_name_exists` or `409 git_connection_name_exists`. A connection that is not connected answers `409 git_connection_not_connected`. `POST /api/git/connections/{id}/installation` before the GitHub App is installed answers `409 github_app_not_installed`, and a failed request to the provider answers `502 git_provider_failed`. The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target, every agent enrollment, every change and authorization of a Git provider connection, and every webhook installation that an account starts. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, an enrollment names the target and the version of the agent, a connection names itself and its provider, never its client secret or a token, an authorization also names the account, and a webhook installation names the app.
