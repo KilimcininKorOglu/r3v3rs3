@@ -194,6 +194,21 @@ Bir uygulama ayrıca deployment sırasında ortam değişkenlerini doğrudan bir
 - Dosya; yorum satırları (`#`), tırnak işaretleri ve `export` önekleri dahil standart `.env` biçimini destekler.
 - Panelden tanımlanan açık ortam değişkenleri, Git deposundan yüklenen değişkenleri geçersiz kılar; böylece panelde yönetilen gizli anahtarlar depo varsayılanlarına göre öncelik kazanır.
 
+#### Çevre Değişkeni Grupları
+
+Çevre değişkeni grupları, birden fazla uygulama tarafından paylaşılan yeniden kullanılabilir yapılandırma değişkenleri ve secret setlerini tek merkezden yönetmenizi sağlar:
+
+- Grupları WebUI'da **Platform -> Çevre Grupları** altından veya `/api/env-groups` üzerinden yönetin.
+- Her grup benzersiz bir ada, isteğe bağlı bir açıklamaya ve isteğe bağlı `"secret": true` gizlemesine sahip anahtar-değer değişkenlerine sahiptir.
+- Uygulama formunda, uygulamaya bağlanacak ortam değişkeni gruplarını işaretleyin (`AppSpec` içindeki `env_groups`).
+- **Öncelik Sırası**: Deployment sırasında ortam değişkenleri şu sırayla birleştirilir:
+  1. Git deposundan yüklenen temel `.env` dosyası (`git_config` belirtildiğinde).
+  2. Bağlı çevre değişkeni grupları (`env_groups` sırasına göre; sonraki gruplar öncekileri geçersiz kılar).
+  3. Doğrudan uygulama üzerinde tanımlanan uygulamaya özel değişkenler (grup tanımlarını geçersiz kılar).
+  4. Bağlı veritabanı bağlantı değişkenleri (ör. `DATABASE_URL`).
+- Çevre değişkeni gruplarındaki gizli değişkenler platform anahtarlarıyla şifrelenir ve anahtar rotasyonu (`POST /api/platform/key/rotate`) sırasında otomatik olarak yeniden mühürlenir.
+- Aktif bir uygulamaya bağlı olan bir çevre değişkeni grubu silinemez.
+
 ## Veritabanları
 
 **Veritabanları** sayfası bir motorun veritabanını tek tıkla kurar. Motorlar PostgreSQL 17 ve 18, MariaDB 11 ve 12, MySQL 9, MongoDB 8 ve Redis 8'dir; her birinin image tag'i bir sürüme sabitlenmiştir. Engine kataloğu, [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) deposunun `engines.json` dosyasıdır; binary ayrıca gömülü bir kopya taşır ve günde bir kez depodan yenilenir. Sayfadaki **Kataloğu yenile** butonu güncel kataloğu hemen indirir; API ise `POST /api/databases/engines/refresh` ile yeniler.

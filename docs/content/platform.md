@@ -194,6 +194,21 @@ An app can also load environment variables directly from a `.env` file in a Git 
 - The file supports standard `.env` format, including comments (`#`), quotes, and `export` prefixes.
 - Explicit panel environment variables override variables loaded from the Git repository, allowing panel-managed secrets to take precedence over repository defaults.
 
+#### Environment Variable Groups
+
+Environment variable groups allow managing reusable collections of configuration variables and secrets shared across multiple apps:
+
+- Manage groups in the WebUI under **Platform -> Environment Variable Groups** or via `/api/env-groups`.
+- Each group has a unique name, an optional description, and a list of key-value variables with optional `"secret": true` masking.
+- In the app form, check the desired environment variable groups to link them to the application (`env_groups` in `AppSpec`).
+- **Precedence Hierarchy**: During deployment, environment variables are merged in the following order:
+  1. Base `.env` file loaded from the Git repository (when `git_config` is specified).
+  2. Linked environment variable groups (in the order listed in `env_groups`; later groups override earlier ones).
+  3. App-specific variables defined directly on the app (override group-level definitions).
+  4. Linked database connection variables (e.g. `DATABASE_URL`).
+- Secret variables stored in environment variable groups are sealed with cluster/platform keys and are resealed during key rotation (`POST /api/platform/key/rotate`).
+- A group cannot be deleted while it is currently linked to any active application.
+
 ## Databases
 
 The **Databases** page installs a database of one engine in one click. The engines are PostgreSQL 17 and 18, MariaDB 11 and 12, MySQL 9, MongoDB 8 and Redis 8, each with its image tag pinned to a version. The engine catalog is the `engines.json` file of the [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) repository; the binary also ships an embedded copy and refreshes from the repository once a day. The **Refresh catalog** button of the page downloads the current catalog at once; the API refreshes it with `POST /api/databases/engines/refresh`.

@@ -17,7 +17,7 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    const NAMESPACES: [&str; 32] = [
+    const NAMESPACES: [&str; 33] = [
         "acme",
         "accounts",
         "apps",
@@ -31,6 +31,7 @@ mod tests {
         "deployments",
         "dns_credentials",
         "discovery",
+        "env_groups",
         "footer",
         "git_connections",
         "http_form",

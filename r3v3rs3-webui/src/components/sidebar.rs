@@ -153,6 +153,13 @@ const GROUPS: &[MenuGroup] = &[
                 access: Access::Platform,
                 subs: NO_SUBS,
             },
+            MenuItem {
+                name: "nav.env_groups",
+                icon: "/assets/icons/document-text.svg",
+                route: Route::EnvGroups,
+                access: Access::Platform,
+                subs: NO_SUBS,
+            },
         ],
     },
     MenuGroup {

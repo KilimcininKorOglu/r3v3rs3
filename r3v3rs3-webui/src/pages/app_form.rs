@@ -104,6 +104,7 @@ pub struct AppForm {
     pub git_config_path: String,
     pub git_config_repo: String,
     pub git_config_branch: String,
+    pub env_groups: Vec<String>,
 }
 
 impl Default for AppForm {
@@ -147,6 +148,7 @@ impl Default for AppForm {
             git_config_path: String::new(),
             git_config_repo: String::new(),
             git_config_branch: String::new(),
+            env_groups: Vec::new(),
         }
     }
 }
@@ -252,6 +254,7 @@ impl AppForm {
                 .as_ref()
                 .and_then(|c| c.branch.as_ref().map(ToString::to_string))
                 .unwrap_or_default(),
+            env_groups: spec.env_groups.iter().map(ToString::to_string).collect(),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -339,6 +342,11 @@ impl AppForm {
             alert_rules,
             sticky: self.parse_sticky(),
             git_config: self.parse_git_config(locale)?,
+            env_groups: self
+                .env_groups
+                .iter()
+                .filter_map(|id| id.parse().ok())
+                .collect(),
         })
     }
 
@@ -609,14 +617,20 @@ fn mount_line(mount: &VolumeMount) -> String {
     format!("{}:{}{suffix}", mount.volume, mount.target.as_str())
 }
 
+/// The options and lists available for selection in the app form.
+pub struct FormOptions<'a> {
+    pub targets: &'a [TargetEntry],
+    pub connections: &'a [GitConnectionEntry],
+    pub ports: &'a [PortEntry],
+    pub databases: &'a [(ShortId, String)],
+    pub env_groups: &'a [(ShortId, String)],
+}
+
 /// The fields of the form. `editing` locks the name of an existing app.
 pub fn fields_view(
     locale: Locale,
     form: &UseStateHandle<AppForm>,
-    targets: &[TargetEntry],
-    connections: &[GitConnectionEntry],
-    ports: &[PortEntry],
-    databases: &[(ShortId, String)],
+    options: FormOptions<'_>,
     editing: bool,
 ) -> Html {
     html! {
@@ -624,20 +638,67 @@ pub fn fields_view(
             <label class={LABEL_CLASS}>{locale.t("common.name")}</label>
             <input type="text" autocapitalize="off" autocomplete="off" value={form.name.clone()} oninput={text_input(form, |f| &mut f.name)} disabled={editing} class={INPUT_CLASS} />
             <p class={HINT_CLASS}>{locale.t("apps.name_hint")}</p>
-            { target_select(locale, form, targets) }
+            { target_select(locale, form, options.targets) }
             { kind_select(locale, form) }
-            { source_view(locale, form, connections) }
+            { source_view(locale, form, options.connections) }
             { text_field(locale, form, "apps.port", Some("apps.port_hint"), |f| &mut f.port) }
             { text_area(locale, form, "apps.domains", "apps.domains_hint", |f| &mut f.domains) }
-            { ports_view(locale, form, ports) }
+            { ports_view(locale, form, options.ports) }
             { text_field(locale, form, "apps.health_check_path", Some("apps.health_check_path_hint"), |f| &mut f.health_check_path) }
-            { database_select(locale, form, databases) }
+            { database_select(locale, form, options.databases) }
+            { env_groups_view(locale, form, options.env_groups) }
             if form.kind != SourceKind::Compose {
                 { container_view(locale, form) }
             }
             { git_config_view(locale, form) }
             { approval_view(locale, form) }
         </>
+    }
+}
+
+fn env_groups_view(
+    locale: Locale,
+    form: &UseStateHandle<AppForm>,
+    env_groups: &[(ShortId, String)],
+) -> Html {
+    if env_groups.is_empty() {
+        return html! {};
+    }
+    let checkboxes = env_groups
+        .iter()
+        .map(|(id, name)| {
+            let id_str = id.to_string();
+            let checked = form.env_groups.contains(&id_str);
+            let state = form.clone();
+            let id_val = id_str.clone();
+            let onchange = Callback::from(move |event: Event| {
+                let input: HtmlInputElement = event.target_unchecked_into();
+                let mut updated = (*state).clone();
+                if input.checked() {
+                    if !updated.env_groups.contains(&id_val) {
+                        updated.env_groups.push(id_val.clone());
+                    }
+                } else {
+                    updated.env_groups.retain(|g| g != &id_val);
+                }
+                state.set(updated);
+            });
+            html! {
+                <label class="flex items-center gap-2 text-sm text-neutral-800 dark:text-neutral-200 cursor-pointer">
+                    <input type="checkbox" value={id_str} checked={checked} {onchange} class="w-4 h-4 rounded text-blue-600" />
+                    <span>{name.clone()}</span>
+                </label>
+            }
+        })
+        .collect::<Html>();
+    html! {
+        <div class="mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-700">
+            <label class={LABEL_CLASS}>{locale.t("apps.env_groups")}</label>
+            <p class={HINT_CLASS}>{locale.t("apps.env_groups_hint")}</p>
+            <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                { checkboxes }
+            </div>
+        </div>
     }
 }
 

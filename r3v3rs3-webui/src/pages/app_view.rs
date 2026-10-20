@@ -4,7 +4,7 @@
 use super::Route;
 use super::app_commands::AppCommands;
 use super::app_env::AppEnv;
-use super::app_form::{AppForm, fields_view};
+use super::app_form::{AppForm, FormOptions, fields_view};
 use super::app_git_token::AppGitToken;
 use super::app_image_update::AppImageUpdate;
 use super::app_metrics::AppMetrics;
@@ -85,9 +85,19 @@ pub fn app_view(props: &Props) -> Html {
     let store = props.store.clone();
     let databases = use_state(Vec::<(ShortId, String)>::new);
     let databases_for_load = databases.clone();
+    let env_groups = use_state(Vec::<(ShortId, String)>::new);
+    let env_groups_for_load = env_groups.clone();
     use_effect_with((props.id, signed_in), move |&(id, signed_in)| {
         if signed_in {
-            load(locale, id, store, can_edit, state, &databases_for_load);
+            load(
+                locale,
+                id,
+                store,
+                can_edit,
+                state,
+                &databases_for_load,
+                &env_groups_for_load,
+            );
         }
     });
 
@@ -101,6 +111,7 @@ pub fn app_view(props: &Props) -> Html {
         connections: &connections,
         ports: &ports,
         databases: &databases,
+        env_groups: &env_groups,
         store_env: &store_env,
         can_edit,
         auto_deploy: props.store.is_some(),
@@ -126,6 +137,8 @@ struct FormInputs<'a> {
     ports: &'a [PortEntry],
     /// The databases that the app can use, as id and name.
     databases: &'a [(ShortId, String)],
+    /// Shared environment variable groups available to link.
+    env_groups: &'a [(ShortId, String)],
     /// The variables of an app store entry that the user fills before the first save.
     store_env: &'a UseStateHandle<Vec<StoreEnvValue>>,
     can_edit: bool,
@@ -149,12 +162,19 @@ fn form_view(
         None => locale.t("apps.add_title").to_string(),
     };
     let touched = app.is_some() || **form != AppForm::default();
+    let options = FormOptions {
+        targets: inputs.targets,
+        connections: inputs.connections,
+        ports: inputs.ports,
+        databases: inputs.databases,
+        env_groups: inputs.env_groups,
+    };
     let card = FormCard {
         title,
         notice: notice_view(notice, |_: &()| html! { {locale.t("apps.saved")} }),
         fields: html! {
             <fieldset disabled={!can_edit}>
-                { fields_view(locale, form, inputs.targets, inputs.connections, inputs.ports, inputs.databases, app.is_some()) }
+                { fields_view(locale, form, options, app.is_some()) }
                 if !inputs.store_env.is_empty() {
                     { store_env_fields(locale, inputs.store_env) }
                 }
@@ -422,8 +442,10 @@ fn load(
     can_edit: bool,
     loaded: Loaded,
     databases: &UseStateHandle<Vec<(ShortId, String)>>,
+    env_groups: &UseStateHandle<Vec<(ShortId, String)>>,
 ) {
     let databases = databases.clone();
+    let env_groups = env_groups.clone();
     let Loaded {
         app,
         form,
@@ -445,6 +467,18 @@ fn load(
             databases.set(
                 list.into_iter()
                     .map(|app| (app.id, app.name.to_string()))
+                    .collect(),
+            );
+        }
+        if let Ok(list) = fetch_json::<Vec<r3v3rs3_api::platform::EnvGroupSummary>>(
+            locale,
+            Request::get(&format!("{API_ENDPOINT}/env-groups")),
+        )
+        .await
+        {
+            env_groups.set(
+                list.into_iter()
+                    .map(|group| (group.id, group.name))
                     .collect(),
             );
         }

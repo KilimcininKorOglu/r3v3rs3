@@ -55,14 +55,14 @@ use r3v3rs3_api::git::GitRef;
 use r3v3rs3_api::git_connection::PublicUrl;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, FileEntry, ImageUpdateStatus,
-    LOCAL_TARGET, PlatformConfig,
+    AppEntry, AppLog, AppRequest, DeploymentEntry, EnvEntry, EnvGroup, EnvGroupSpec,
+    EnvGroupSummary, FileEntry, ImageUpdateStatus, LOCAL_TARGET, PlatformConfig,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use store::{GIT_TOKEN, PlatformStore, StoredEnv, Write};
+use store::{GIT_TOKEN, PlatformStore, StoredEnv, StoredEnvGroup, Write};
 use tokio::sync::{Mutex, Semaphore, broadcast, mpsc};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tracing::error;
@@ -490,6 +490,163 @@ impl Platform {
         self.store.replace_env(id, &stored).await
     }
 
+    /// Lists all environment variable groups with summary information.
+    pub async fn list_env_groups(&self) -> anyhow::Result<Vec<EnvGroupSummary>> {
+        self.store.list_env_groups().await
+    }
+
+    /// The environment variable group and its variables (without secret values).
+    pub async fn env_group(&self, id: ShortId) -> anyhow::Result<EnvGroup> {
+        let stored_group = self
+            .store
+            .env_group(id)
+            .await?
+            .ok_or_else(|| not_found(id))?;
+        let stored_vars = self.store.env_group_vars(id).await?;
+        let variables = stored_vars
+            .into_iter()
+            .map(|var| {
+                let value = if var.secret {
+                    None
+                } else {
+                    Some(self.open_value(id, &var)?)
+                };
+                Ok(EnvEntry {
+                    key: var.key.parse()?,
+                    value,
+                    secret: var.secret,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(EnvGroup {
+            id: stored_group.id,
+            name: stored_group.name,
+            description: stored_group.description,
+            variables,
+            created_at: stored_group.created_at,
+            updated_at: stored_group.updated_at,
+        })
+    }
+
+    /// Creates a new environment variable group.
+    pub async fn create_env_group(&self, spec: EnvGroupSpec, now: u64) -> anyhow::Result<EnvGroup> {
+        spec.validate()?;
+        if self.store.env_group_by_name(&spec.name).await?.is_some() {
+            return Err(Error::InvalidEnvGroup {
+                reason: format!("group with name '{}' already exists", spec.name),
+            }
+            .into());
+        }
+        let id = self.free_env_group_id().await?;
+        let empty_current = BTreeMap::new();
+        let mut vars = Vec::with_capacity(spec.variables.len());
+        for entry in spec.variables {
+            vars.push(self.stored_env(id, entry, &empty_current)?);
+        }
+        self.store
+            .insert_env_group(
+                &StoredEnvGroup {
+                    id,
+                    name: spec.name,
+                    description: spec.description,
+                    created_at: now,
+                    updated_at: now,
+                },
+                &vars,
+            )
+            .await?;
+        self.env_group(id).await
+    }
+
+    /// Updates an environment variable group and replaces its variables.
+    pub async fn update_env_group(
+        &self,
+        id: ShortId,
+        spec: EnvGroupSpec,
+        now: u64,
+    ) -> anyhow::Result<EnvGroup> {
+        spec.validate()?;
+        let current = self
+            .store
+            .env_group(id)
+            .await?
+            .ok_or_else(|| not_found(id))?;
+        self.check_group_name_unique(&spec.name, &current.name)
+            .await?;
+        let vars = self.prepare_updated_group_vars(id, spec.variables).await?;
+        self.store
+            .update_env_group(
+                &StoredEnvGroup {
+                    id,
+                    name: spec.name,
+                    description: spec.description,
+                    created_at: current.created_at,
+                    updated_at: now,
+                },
+                &vars,
+            )
+            .await?;
+        self.env_group(id).await
+    }
+
+    async fn check_group_name_unique(
+        &self,
+        new_name: &str,
+        current_name: &str,
+    ) -> anyhow::Result<()> {
+        if new_name != current_name && self.store.env_group_by_name(new_name).await?.is_some() {
+            return Err(Error::InvalidEnvGroup {
+                reason: format!("group with name '{new_name}' already exists"),
+            }
+            .into());
+        }
+        Ok(())
+    }
+
+    async fn prepare_updated_group_vars(
+        &self,
+        id: ShortId,
+        variables: Vec<EnvEntry>,
+    ) -> anyhow::Result<Vec<StoredEnv>> {
+        let current_vars = self
+            .store
+            .env_group_vars(id)
+            .await?
+            .into_iter()
+            .map(|var| (var.key.clone(), var))
+            .collect::<BTreeMap<_, _>>();
+        let mut vars = Vec::with_capacity(variables.len());
+        for entry in variables {
+            vars.push(self.stored_env(id, entry, &current_vars)?);
+        }
+        Ok(vars)
+    }
+
+    /// Deletes an environment variable group.
+    pub async fn delete_env_group(&self, id: ShortId) -> anyhow::Result<EnvGroup> {
+        let group = self.env_group(id).await?;
+        let apps = self.store.apps().await?;
+        let in_use = apps.iter().any(|app| app.spec.env_groups.contains(&id));
+        if in_use {
+            return Err(Error::InvalidEnvGroup {
+                reason: "cannot delete environment variable group currently linked to apps".into(),
+            }
+            .into());
+        }
+        self.store.delete_env_group(id).await?;
+        Ok(group)
+    }
+
+    async fn free_env_group_id(&self) -> anyhow::Result<ShortId> {
+        for _ in 0..16 {
+            let id = new_id()?;
+            if self.store.env_group(id).await?.is_none() {
+                return Ok(id);
+            }
+        }
+        Err(anyhow::anyhow!("no free env group id"))
+    }
+
     /// Sets the token that clones the private repository of an app, and returns the app.
     pub async fn set_git_token(&self, id: ShortId, token: &str) -> anyhow::Result<AppEntry> {
         self.app(id).await?;
@@ -670,6 +827,11 @@ impl Platform {
         }
         if !self.store.has_target(request.target).await? {
             return Err(not_found(request.target));
+        }
+        for group_id in &request.spec.env_groups {
+            if self.store.env_group(*group_id).await?.is_none() {
+                return Err(not_found(*group_id));
+            }
         }
         self.hook_target(&request.spec).await
     }
@@ -930,6 +1092,7 @@ mod tests {
                 alert_rules: None,
                 sticky: None,
                 git_config: None,
+                env_groups: Vec::new(),
             },
         }
     }
@@ -1063,5 +1226,93 @@ mod tests {
         config.platform.docker = "https://docker.example:2376".into();
         let handle = PlatformHandle::start(&config, &dir, command, &events, audit).await;
         assert!(matches!(handle.get(), Err(Error::PlatformFailed)));
+    }
+
+    #[tokio::test]
+    async fn env_groups_crud_and_app_linking() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+
+        // Create an env group
+        let spec = EnvGroupSpec {
+            name: "Shared Config".to_string(),
+            description: Some("Common configuration".to_string()),
+            variables: vec![
+                env("APP_REGION", Some("eu-west-1"), false),
+                env("SHARED_SECRET", Some("super-secret-123"), true),
+            ],
+        };
+        let group = platform.create_env_group(spec, 1000).await?;
+        assert_eq!(group.name, "Shared Config");
+        assert_eq!(group.variables.len(), 2);
+
+        // List groups
+        let list = platform.list_env_groups().await?;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "Shared Config");
+        assert_eq!(list[0].variable_count, 2);
+
+        // Fetch group
+        let fetched = platform.env_group(group.id).await?;
+        assert_eq!(fetched.name, "Shared Config");
+        let region = fetched
+            .variables
+            .iter()
+            .find(|v| v.key.as_str() == "APP_REGION")
+            .unwrap();
+        assert_eq!(region.value.as_deref(), Some("eu-west-1"));
+        let secret = fetched
+            .variables
+            .iter()
+            .find(|v| v.key.as_str() == "SHARED_SECRET")
+            .unwrap();
+        assert_eq!(secret.value, None);
+        assert!(secret.secret);
+
+        // Update group keeping secret
+        let update_spec = EnvGroupSpec {
+            name: "Shared Config Renamed".to_string(),
+            description: None,
+            variables: vec![
+                env("APP_REGION", Some("us-east-1"), false),
+                env("SHARED_SECRET", None, true),
+                env("EXTRA_FLAG", Some("true"), false),
+            ],
+        };
+        let updated = platform
+            .update_env_group(group.id, update_spec, 2000)
+            .await?;
+        assert_eq!(updated.name, "Shared Config Renamed");
+        assert_eq!(updated.variables.len(), 3);
+
+        // Link to app
+        let mut app_req = request("my-app");
+        app_req.spec.env_groups = vec![group.id];
+        let app = platform.add_app(app_req, 3000).await?;
+        assert_eq!(app.spec.env_groups, vec![group.id]);
+
+        // Attempting to delete linked group fails
+        let del_err = platform.delete_env_group(group.id).await.unwrap_err();
+        assert!(matches!(api_error(del_err), Error::InvalidEnvGroup { .. }));
+
+        // Unlink from app
+        let mut updated_spec = app.spec.clone();
+        updated_spec.env_groups.clear();
+        platform
+            .update_app(
+                app.id,
+                AppRequest {
+                    name: app.name,
+                    target: app.target,
+                    spec: updated_spec,
+                },
+                4000,
+            )
+            .await?;
+
+        // Now delete succeeds
+        let deleted = platform.delete_env_group(group.id).await?;
+        assert_eq!(deleted.id, group.id);
+        assert!(platform.list_env_groups().await?.is_empty());
+        Ok(())
     }
 }

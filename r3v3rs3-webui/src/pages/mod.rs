@@ -26,6 +26,7 @@ mod dashboard;
 mod database_backups;
 mod databases;
 mod dns_credentials;
+mod env_groups;
 mod git_connections;
 mod github_app;
 mod log_view;
@@ -119,6 +120,8 @@ pub enum Route {
     GitConnections,
     #[at("/registries")]
     Registries,
+    #[at("/env-groups")]
+    EnvGroups,
     #[at("/settings")]
     Settings,
     #[at("/accounts")]
@@ -162,6 +165,8 @@ impl Route {
             Route::AccessLists
             | Route::Targets
             | Route::GitConnections
+            | Route::Registries
+            | Route::EnvGroups
             | Route::Settings
             | Route::Accounts
             | Route::Audit => Some(self.clone()),
@@ -202,6 +207,7 @@ pub fn switch(routes: Route) -> Html {
         Route::Targets => html! { <targets::Targets /> },
         Route::GitConnections => html! { <git_connections::GitConnections /> },
         Route::Registries => html! { <registries::Registries /> },
+        Route::EnvGroups => html! { <env_groups::EnvGroups /> },
         Route::Certs => {
             html! { <cert_list::CertList kind={Some(CertKind::Server)} acme={false} /> }
         }

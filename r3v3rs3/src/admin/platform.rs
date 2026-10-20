@@ -23,10 +23,10 @@ use r3v3rs3_api::{
     id::ShortId,
     platform::{
         AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
-        DeploymentEntry, DeploymentTrigger, EnvEntry, GitTokenRequest, ImageUpdateStatus,
-        KeyRotationReport, MetricsQuery, PrunePolicy, PruneResult, RegistryEntry, RegistryRequest,
-        ScheduledCommandRequest, ScheduledCommandRunResult, TargetEntry, TargetRequest,
-        TargetToken, WebhookSecret,
+        DeploymentEntry, DeploymentTrigger, EnvEntry, EnvGroup, EnvGroupSpec, EnvGroupSummary,
+        GitTokenRequest, ImageUpdateStatus, KeyRotationReport, MetricsQuery, PrunePolicy,
+        PruneResult, RegistryEntry, RegistryRequest, ScheduledCommandRequest,
+        ScheduledCommandRunResult, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -1541,4 +1541,126 @@ pub async fn run_prune(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(result))
+}
+
+/// Lists all environment variable groups.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "platform",
+    operation_id = "list_env_groups",
+    responses((status = 200, description = "The environment variable groups.", body = Vec<EnvGroupSummary>), ErrorResponses)
+)]
+pub async fn list_env_groups(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Vec<EnvGroupSummary>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let groups = platform.list_env_groups().await.map_err(platform_error)?;
+    Ok(Json(groups))
+}
+
+/// Creates a new environment variable group.
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "platform",
+    operation_id = "create_env_group",
+    request_body = EnvGroupSpec,
+    responses((status = 200, description = "The created environment variable group.", body = EnvGroup), ErrorResponses)
+)]
+pub async fn create_env_group(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<EnvGroupSpec>,
+) -> Result<Json<EnvGroup>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let group = platform
+        .create_env_group(request, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::AddEnvGroup)
+        .id(group.id)
+        .summary(group.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(group))
+}
+
+/// Retrieves an environment variable group and its variables.
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "get_env_group",
+    params(("id" = ShortId, Path, description = "The environment variable group id")),
+    responses((status = 200, description = "The environment variable group.", body = EnvGroup), ErrorResponses, NotFoundResponse)
+)]
+pub async fn get_env_group(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<EnvGroup>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let group = platform.env_group(id).await.map_err(platform_error)?;
+    Ok(Json(group))
+}
+
+/// Updates an environment variable group and replaces its variables.
+#[utoipa::path(
+    put,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "update_env_group",
+    params(("id" = ShortId, Path, description = "The environment variable group id")),
+    request_body = EnvGroupSpec,
+    responses((status = 200, description = "The updated environment variable group.", body = EnvGroup), ErrorResponses, NotFoundResponse)
+)]
+pub async fn update_env_group(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<EnvGroupSpec>,
+) -> Result<Json<EnvGroup>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let group = platform
+        .update_env_group(id, request, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UpdateEnvGroup)
+        .id(id)
+        .summary(group.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(group))
+}
+
+/// Deletes an environment variable group.
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "delete_env_group",
+    params(("id" = ShortId, Path, description = "The environment variable group id")),
+    responses((status = 200, description = "The deleted environment variable group.", body = EnvGroup), ErrorResponses, NotFoundResponse)
+)]
+pub async fn delete_env_group(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<EnvGroup>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let group = platform
+        .delete_env_group(id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeleteEnvGroup)
+        .id(id)
+        .summary(group.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(group))
 }

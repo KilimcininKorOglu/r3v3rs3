@@ -360,6 +360,19 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 )),
         )
         .nest(
+            "/env-groups",
+            OpenApiRouter::new()
+                .routes(routes!(
+                    platform::list_env_groups,
+                    platform::create_env_group
+                ))
+                .routes(routes!(
+                    platform::get_env_group,
+                    platform::update_env_group,
+                    platform::delete_env_group
+                )),
+        )
+        .nest(
             "/apps",
             OpenApiRouter::new()
                 .routes(routes!(platform::list_apps, platform::add_app))

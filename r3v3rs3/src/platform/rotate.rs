@@ -23,6 +23,7 @@ struct ResealedCounts {
     settings: u32,
     app_secrets: u32,
     registries: u32,
+    env_groups: u32,
 }
 
 async fn reseal_all_tables(
@@ -36,6 +37,7 @@ async fn reseal_all_tables(
         github_apps: reseal_github_apps(pool, keys).await?,
         settings: reseal_settings(pool, keys).await?,
         registries: reseal_registries(pool, keys).await?,
+        env_groups: reseal_env_groups(pool, keys).await?,
     })
 }
 
@@ -70,6 +72,7 @@ pub(super) async fn run_key_rotation(
         resealed_settings: counts.settings,
         resealed_app_secrets: counts.app_secrets,
         resealed_registries: counts.registries,
+        resealed_env_groups: counts.env_groups,
     })
 }
 
@@ -275,6 +278,32 @@ async fn reseal_registries(
     Ok(count)
 }
 
+async fn reseal_env_groups(
+    pool: &SqlitePool,
+    keys: &std::sync::RwLock<ClusterKeys>,
+) -> anyhow::Result<u32> {
+    let rows = sqlx::query("SELECT group_id, key, value FROM env_group_vars")
+        .fetch_all(pool)
+        .await?;
+    let mut count = 0;
+    for row in rows {
+        let group_id_str: String = row.try_get("group_id")?;
+        let group_id: ShortId = group_id_str.parse()?;
+        let key: String = row.try_get("key")?;
+        let value: Vec<u8> = row.try_get("value")?;
+        let aad = env_aad(group_id, &key);
+        let resealed = reseal_value(keys, &aad, &value)?;
+        sqlx::query("UPDATE env_group_vars SET value = ? WHERE group_id = ? AND key = ?")
+            .bind(resealed)
+            .bind(group_id_str)
+            .bind(key)
+            .execute(pool)
+            .await?;
+        count += 1;
+    }
+    Ok(count)
+}
+
 async fn write_key_files(config_dir: &Path, key_text: &str) -> anyhow::Result<()> {
     let key_path = config_dir.join(KEY_FILE);
     let old_key_path = config_dir.join("platform.key.old");
@@ -333,6 +362,7 @@ mod tests {
             alert_rules: None,
             sticky: None,
             git_config: None,
+            env_groups: Vec::new(),
         })
     }
 
@@ -463,6 +493,7 @@ mod tests {
         assert_eq!(report.resealed_app_secrets, 2);
         assert_eq!(report.resealed_settings, 1);
         assert_eq!(report.resealed_registries, 1);
+        assert_eq!(report.resealed_env_groups, 0);
 
         verify_rotated_secrets(&platform, app_id, &webhook_sec).await?;
 

@@ -225,6 +225,7 @@ fn app_request(
             alert_rules: None,
             sticky: None,
             git_config: None,
+            env_groups: Vec::new(),
         },
     })
 }

@@ -683,14 +683,13 @@ impl Platform {
         } else {
             Vec::new()
         };
-        let panel_env = self.open_env(job.app, &job.env)?;
-        for var in panel_env {
-            if let Some(existing) = vars.iter_mut().find(|v| v.key == var.key) {
-                existing.value = var.value;
-            } else {
-                vars.push(var);
-            }
+        for &group_id in &job.spec.env_groups {
+            let group_stored = self.store.env_group_vars(group_id).await?;
+            let group_vars = self.open_env(group_id, &group_stored)?;
+            merge_env_vars(&mut vars, group_vars);
         }
+        let panel_env = self.open_env(job.app, &job.env)?;
+        merge_env_vars(&mut vars, panel_env);
         Ok(vars)
     }
 
@@ -765,7 +764,19 @@ impl Platform {
             })
             .collect()
     }
+}
 
+fn merge_env_vars(target: &mut Vec<EnvVar>, new_vars: Vec<EnvVar>) {
+    for var in new_vars {
+        if let Some(existing) = target.iter_mut().find(|v| v.key == var.key) {
+            existing.value = var.value;
+        } else {
+            target.push(var);
+        }
+    }
+}
+
+impl Platform {
     /// The connection of the database that the app uses, as the environment of the container.
     /// The container reaches the published port of the database over the host gateway.
     async fn database_env(
@@ -2046,5 +2057,91 @@ mod tests {
         assert_eq!(get_env("APP_PORT"), Some("8080"));
         assert_eq!(get_env("OVERRIDE_ME"), Some("panel-val"));
         Ok(())
+    }
+
+    async fn create_test_env_group(
+        platform: &Platform,
+        name: &str,
+        shared: (&str, &str),
+        chain: &str,
+        now: u64,
+    ) -> anyhow::Result<ShortId> {
+        let group = platform
+            .create_env_group(
+                r3v3rs3_api::platform::EnvGroupSpec {
+                    name: name.to_string(),
+                    description: None,
+                    variables: vec![
+                        EnvEntry {
+                            key: shared.0.parse()?,
+                            value: Some(shared.1.to_string()),
+                            secret: false,
+                        },
+                        EnvEntry {
+                            key: "OVERRIDE_CHAIN".parse()?,
+                            value: Some(chain.to_string()),
+                            secret: false,
+                        },
+                    ],
+                },
+                now,
+            )
+            .await?;
+        Ok(group.id)
+    }
+
+    #[tokio::test]
+    async fn env_groups_applied_during_deploy_with_precedence() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let g1 = create_test_env_group(
+            &setup.platform,
+            "Group 1",
+            ("SHARED_ONE", "val-1"),
+            "group1-val",
+            100,
+        )
+        .await?;
+        let g2 = create_test_env_group(
+            &setup.platform,
+            "Group 2",
+            ("SHARED_TWO", "val-2"),
+            "group2-val",
+            200,
+        )
+        .await?;
+
+        let mut app = setup.app.clone();
+        app.spec.env_groups = vec![g1, g2];
+        let req = AppRequest {
+            name: app.name,
+            target: app.target,
+            spec: app.spec,
+        };
+        setup.platform.update_app(setup.app.id, req, 300).await?;
+
+        let override_var = EnvEntry {
+            key: "OVERRIDE_CHAIN".parse()?,
+            value: Some("app-val".into()),
+            secret: false,
+        };
+        setup
+            .platform
+            .set_env(setup.app.id, vec![override_var])
+            .await?;
+
+        deploy(&setup).await?;
+        let state = setup.runtime.state();
+        let last_spec = state.specs.last().context("container spec")?;
+        assert_eq!(env_value(last_spec, "SHARED_ONE"), Some("val-1"));
+        assert_eq!(env_value(last_spec, "SHARED_TWO"), Some("val-2"));
+        assert_eq!(env_value(last_spec, "OVERRIDE_CHAIN"), Some("app-val"));
+        Ok(())
+    }
+
+    fn env_value<'a>(spec: &'a ContainerSpec, key: &str) -> Option<&'a str> {
+        spec.env
+            .iter()
+            .find(|v| v.key.as_str() == key)
+            .map(|v| v.value.as_str())
     }
 }

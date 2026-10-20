@@ -227,6 +227,8 @@ pub struct KeyRotationReport {
     pub resealed_app_secrets: u32,
     #[serde(default)]
     pub resealed_registries: u32,
+    #[serde(default)]
+    pub resealed_env_groups: u32,
 }
 
 /// A container registry credential entry for private image pulls.
@@ -661,6 +663,11 @@ pub struct AppSpec {
     /// Optional Git-based environment configuration file loaded during deployment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_config: Option<GitConfigFile>,
+
+    /// Environment variable groups whose variables are injected into the app's environment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = [String])]
+    pub env_groups: Vec<ShortId>,
 }
 
 /// A Git-based environment configuration file loaded during deployment.
@@ -1205,6 +1212,61 @@ pub struct EnvEntry {
     pub secret: bool,
 }
 
+/// An environment variable group that can be shared across multiple apps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvGroup {
+    pub id: ShortId,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<EnvEntry>,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Summary of an environment variable group in list views.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvGroupSummary {
+    pub id: ShortId,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub variable_count: usize,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Request to create or update an environment variable group.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvGroupSpec {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<EnvEntry>,
+}
+
+impl EnvGroupSpec {
+    pub fn validate(&self) -> Result<(), Error> {
+        let name = self.name.trim();
+        if name.is_empty() {
+            return Err(Error::InvalidEnvGroup {
+                reason: "name cannot be empty".to_string(),
+            });
+        }
+        let mut seen = std::collections::HashSet::new();
+        for var in &self.variables {
+            if !seen.insert(var.key.as_str()) {
+                return Err(Error::InvalidEnvGroup {
+                    reason: format!("duplicate key: {}", var.key.as_str()),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DeploymentStatus {
@@ -1738,5 +1800,51 @@ EMPTY_VAL=
             }
         }));
         assert!(valid_git.is_ok());
+    }
+
+    #[test]
+    fn env_group_validation() {
+        let empty_name = EnvGroupSpec {
+            name: "   ".to_string(),
+            description: None,
+            variables: Vec::new(),
+        };
+        assert!(empty_name.validate().is_err());
+
+        let duplicate_key = EnvGroupSpec {
+            name: "Shared".to_string(),
+            description: None,
+            variables: vec![
+                EnvEntry {
+                    key: "KEY".parse().unwrap(),
+                    value: Some("1".to_string()),
+                    secret: false,
+                },
+                EnvEntry {
+                    key: "KEY".parse().unwrap(),
+                    value: Some("2".to_string()),
+                    secret: false,
+                },
+            ],
+        };
+        assert!(duplicate_key.validate().is_err());
+
+        let valid = EnvGroupSpec {
+            name: "Production Shared".to_string(),
+            description: Some("Common secrets".to_string()),
+            variables: vec![
+                EnvEntry {
+                    key: "KEY1".parse().unwrap(),
+                    value: Some("val1".to_string()),
+                    secret: false,
+                },
+                EnvEntry {
+                    key: "KEY2".parse().unwrap(),
+                    value: None,
+                    secret: true,
+                },
+            ],
+        };
+        assert!(valid.validate().is_ok());
     }
 }

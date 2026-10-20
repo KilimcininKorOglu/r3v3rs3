@@ -465,6 +465,9 @@ pub enum Error {
 
     #[error("invalid registry: {reason}")]
     InvalidRegistry { reason: String },
+
+    #[error("invalid environment variable group: {reason}")]
+    InvalidEnvGroup { reason: String },
 }
 
 impl Error {

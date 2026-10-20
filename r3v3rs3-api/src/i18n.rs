@@ -363,6 +363,7 @@ mod tests {
             Error::InvalidPasskey,
             Error::RegistryExists { server: text() },
             Error::InvalidRegistry { reason: text() },
+            Error::InvalidEnvGroup { reason: text() },
         ]
     }
 

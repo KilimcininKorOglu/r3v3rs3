@@ -151,15 +151,31 @@ const SCHEMA: &[&str] = &[
         last_pruned_at       INTEGER,
         last_reclaimed_bytes INTEGER
     )",
+    "CREATE TABLE IF NOT EXISTS env_groups (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL UNIQUE,
+        description TEXT,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+    )",
+    "CREATE TABLE IF NOT EXISTS env_group_vars (
+        group_id TEXT    NOT NULL REFERENCES env_groups (id) ON DELETE CASCADE,
+        key      TEXT    NOT NULL,
+        value    BLOB    NOT NULL,
+        secret   INTEGER NOT NULL,
+        PRIMARY KEY (group_id, key)
+    )",
 ];
 
 mod commands;
 mod connections;
+mod env_groups;
 mod hooks;
 mod metrics;
 mod prune;
 mod registries;
 pub use connections::{PUBLIC_URL, StoredConnection, StoredGithubApp, StoredTokens};
+pub use env_groups::StoredEnvGroup;
 pub use hooks::StoredHook;
 pub use metrics::AppMetricRow;
 
@@ -1064,6 +1080,7 @@ mod tests {
                 alert_rules: None,
                 sticky: None,
                 git_config: None,
+                env_groups: Vec::new(),
             },
             git_token_set: false,
             webhook_secret_set: false,
