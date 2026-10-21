@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.4] - 2026-10-21
+
+### Added
+- BuildKit remote builder daemon support: configure remote BuildKit endpoints (`buildkit.remote_addr`) to offload heavy compilation from the host server.
+- Automatic cache mount injection for Git builds: inject `# syntax=docker/dockerfile:1` and `--mount=type=cache` presets for Cargo, NPM, PNPM, Yarn, Go, Pip, Maven, and Gradle into Dockerfile `RUN` steps without manual Dockerfile modifications.
+- Custom cache mounts and external cache backends (`cache_from` and `cache_to`) for multi-node and CI layer sharing.
+
 ## [2.1.3] - 2026-10-21
 
 ### Added
