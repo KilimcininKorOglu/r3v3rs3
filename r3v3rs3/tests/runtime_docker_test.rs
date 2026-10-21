@@ -124,6 +124,7 @@ fn spec(names: &Names, image: ImageRef) -> anyhow::Result<ContainerSpec> {
         limits: ResourceLimits {
             memory_bytes: Some(64 << 20),
             nano_cpus: Some(500_000_000),
+            memory_swap_bytes: None,
         },
         publish: Some(80),
         host_port: None,
@@ -363,6 +364,7 @@ async fn an_exec_session_runs_a_command() -> anyhow::Result<()> {
         limits: ResourceLimits {
             memory_bytes: Some(64 << 20),
             nano_cpus: Some(500_000_000),
+            memory_swap_bytes: None,
         },
         publish: None,
         host_port: None,
@@ -401,6 +403,7 @@ async fn a_file_round_trips_through_the_archive() -> anyhow::Result<()> {
         limits: ResourceLimits {
             memory_bytes: Some(64 << 20),
             nano_cpus: Some(500_000_000),
+            memory_swap_bytes: None,
         },
         publish: None,
         host_port: None,

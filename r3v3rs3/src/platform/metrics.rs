@@ -136,12 +136,12 @@ async fn collect_app(
         .inspect_container(&container)
         .await?
         .ok_or_else(|| anyhow::anyhow!("the container {container} disappeared"))?;
+    let now = crate::clock::unix_ms();
+    check_oom_alert(platform, previous, app, &info, now).await;
     if !info.running {
         return Ok(());
     }
     let stats = runtime.stats(&container).await.unwrap_or_default();
-    // The requests count under the resource name of the proxy, which a platform proxy
-    // names after its app.
     let requests = requests
         .iter()
         .find(|(id, _)| *id == app.name.as_str())
@@ -149,17 +149,12 @@ async fn collect_app(
         .unwrap_or(0);
     let (rx, tx, served) =
         previous.deltas(app.id, stats.net_rx_bytes, stats.net_tx_bytes, requests);
-    let health = match info.health {
-        Some(r3v3rs3_api::container::ContainerHealth::Starting) => "starting",
-        Some(r3v3rs3_api::container::ContainerHealth::Healthy) => "healthy",
-        Some(r3v3rs3_api::container::ContainerHealth::Unhealthy) => "unhealthy",
-        None => "",
-    };
+    let health = health_status(info.health);
     platform
         .store
         .insert_app_metric(&super::store::AppMetricRow {
             app: app.id,
-            ts: crate::clock::unix_ms(),
+            ts: now,
             running: true,
             health: health.to_string(),
             cpu: stats.cpu_percent,
@@ -169,48 +164,95 @@ async fn collect_app(
             requests: served,
         })
         .await?;
-    if let Some(rules) = &app.spec.alert_rules {
-        check_app_alerts(platform, previous, app, rules, &stats).await;
-    }
+    check_app_alerts(
+        platform,
+        previous,
+        app,
+        app.spec.alert_rules.as_ref(),
+        &stats,
+    )
+    .await;
     Ok(())
+}
+
+fn health_status(health: Option<r3v3rs3_api::container::ContainerHealth>) -> &'static str {
+    match health {
+        Some(r3v3rs3_api::container::ContainerHealth::Starting) => "starting",
+        Some(r3v3rs3_api::container::ContainerHealth::Healthy) => "healthy",
+        Some(r3v3rs3_api::container::ContainerHealth::Unhealthy) => "unhealthy",
+        None => "",
+    }
+}
+
+async fn check_oom_alert(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    app: &r3v3rs3_api::platform::AppEntry,
+    info: &r3v3rs3_api::container::ContainerInfo,
+    now: u64,
+) {
+    if info.oom_killed && previous.should_alert(app.id, "oom_killed", now) {
+        platform
+            .notify_alert(
+                app.id,
+                app.name.to_string(),
+                "oom_killed",
+                "Container terminated by OOM killer".to_string(),
+                "memory limit exceeded".to_string(),
+            )
+            .await;
+    }
 }
 
 async fn check_app_alerts(
     platform: &Arc<Platform>,
     previous: &Previous,
     app: &r3v3rs3_api::platform::AppEntry,
-    rules: &r3v3rs3_api::platform::AlertRules,
+    rules: Option<&r3v3rs3_api::platform::AlertRules>,
     stats: &r3v3rs3_api::container::ContainerStats,
 ) {
     let now = crate::clock::unix_ms();
-    check_cpu_alert(
-        platform,
-        previous,
-        app,
-        rules.cpu_percent,
-        stats.cpu_percent,
-        now,
-    )
-    .await;
-    check_mem_bytes_alert(
-        platform,
-        previous,
-        app,
-        rules.memory_bytes,
-        stats.memory_bytes,
-        now,
-    )
-    .await;
-    check_mem_pct_alert(
-        platform,
-        previous,
-        app,
-        rules.memory_percent,
-        stats.memory_bytes,
-        stats.memory_limit,
-        now,
-    )
-    .await;
+    if let Some(rules) = rules {
+        check_cpu_alert(
+            platform,
+            previous,
+            app,
+            rules.cpu_percent,
+            stats.cpu_percent,
+            now,
+        )
+        .await;
+        check_mem_bytes_alert(
+            platform,
+            previous,
+            app,
+            rules.memory_bytes,
+            stats.memory_bytes,
+            now,
+        )
+        .await;
+        check_mem_pct_alert(
+            platform,
+            previous,
+            app,
+            rules.memory_percent,
+            stats.memory_bytes,
+            stats.memory_limit,
+            now,
+        )
+        .await;
+    } else if app.spec.limits.memory_bytes.is_some() {
+        check_mem_pct_alert(
+            platform,
+            previous,
+            app,
+            Some(90),
+            stats.memory_bytes,
+            stats.memory_limit,
+            now,
+        )
+        .await;
+    }
 }
 
 async fn check_cpu_alert(

@@ -220,7 +220,7 @@ Bir uygulama ayrıca deployment sırasında ortam değişkenlerini doğrudan bir
 
 **Veritabanları** sayfası bir motorun veritabanını tek tıkla kurar. Motorlar PostgreSQL 17 ve 18, MariaDB 11 ve 12, MySQL 9, MongoDB 8 ve Redis 8'dir; her birinin image tag'i bir sürüme sabitlenmiştir. Engine kataloğu, [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) deposunun `engines.json` dosyasıdır; binary ayrıca gömülü bir kopya taşır ve günde bir kez depodan yenilenir. Sayfadaki **Kataloğu yenile** butonu güncel kataloğu hemen indirir; API ise `POST /api/databases/engines/refresh` ile yeniler.
 
-**Veritabanı ekle** bir motor, bir sürüm, bir ad ve isteğe bağlı olarak bir `127.0.0.1` portu alır. Port boş bırakılırsa sunucu oluşturma anında boş bir port alır ve veritabanı o portu sonradan da korur: bir veritabanının her deployment'ı portunu aynı adrese yayınlar; bir uygulamadan farklı olarak adres değişmez. Oluşturma, local target'ta sürümün image'ıyla, motorun verileri için bir named volume ile ve 32 hex karakterli üretilmiş bir parolayı secret ortam değişkeni olarak taşıyan bir app yaratır. İlk deployment hemen başlar.
+**Veritabanı ekle** bir motor, bir sürüm, bir ad ve isteğe bağlı olarak bir `127.0.0.1` portu alır. İsteğe bağlı **Bellek Sınırı (MB)**, **Swap Sınırı (MB)** ve **CPU Sınırı** alanları kurulum anında container kaynak sınırlandırmalarını (throttling) belirlemeyi sağlar. Port boş bırakılırsa sunucu oluşturma anında boş bir port alır ve veritabanı o portu sonradan da korur: bir veritabanının her deployment'ı portunu aynı adrese yayınlar; bir uygulamadan farklı olarak adres değişmez. Oluşturma, local target'ta sürümün image'ıyla, motorun verileri için bir named volume ile ve 32 hex karakterli üretilmiş bir parolayı secret ortam değişkeni olarak taşıyan bir app yaratır. İlk deployment hemen başlar.
 
 Yanıt, parolayı ve bağlantı dizesini webhook secret gibi bir kez gösterir. Panel her veritabanını motoru, portu ve parolasız bağlantısıyla listeler. Veritabanı r3v3rs3 sunucusunun `127.0.0.1` adresini dinler; yalnız bu sunucudaki uygulamalar ve sunucunun kendi programları ulaşır: bir veritabanının alan adı ve proxy'si yoktur ve satırındaki **Sil** app'i kaldırırken verilerin olduğu volume kalır. Redis parola almaz, bu yüzden portu yerel her istemciye yanıt verir.
 
@@ -399,6 +399,16 @@ Bir uygulamanın kullandığı bağlantı silinemez ve `409 git_connection_in_us
 ### Kaynak Uyarı Kuralları
 
 Bir uygulama, formundaki **CPU Uyarı Eşiği (%)** ve **Bellek Uyarı Eşiği (MB)** alanlarında (veya `AppSpec` içindeki `alert_rules`) uyarı kuralları tanımlayabilir. Periyodik arka plan metrik toplaması sırasında (her 30 saniyede bir), r3v3rs3 container istatistiklerini yapılandırılan eşiklerle karşılaştırır. Kullanım bir eşiğe ulaştığında veya onu aştığında, webhook'a anlık değer ve eşik bilgisiyle bir `app_alert` bildirimi gönderilir. Bildirim kirliliğini önlemek amacıyla aynı uygulama ve metrik için tekrarlanan uyarılar 5 dakikalık bekleme süresiyle sınırlandırılır.
+
+### Konteyner Kaynak Sınırları ve Dikey Ölçekleme
+
+Uygulamalar ve veritabanları, bellek sızıntılarının veya aşırı CPU tüketen işlemlerin sunucu kaynaklarını kilitlemesini önlemek için ayrıntılı donanım kotaları tanımlayabilir:
+
+- **Bellek Sınırı (MB)** (`memory_mb`): Container için azami bellek tahsisi. Boş bırakıldığında sınır konmaz.
+- **Swap Sınırı (MB)** (`swap_mb`): Bellek sınırına ek olarak izin verilen swap bellek miktarı. `0` girildiğinde container için swap tamamen devre dışı bırakılır. Boş bırakıldığında Docker motoru varsayılanı geçerlidir.
+- **CPU Sınırı** (`cpus`): Kesirli veya tam CPU çekirdek kotası, örneğin 1.5 çekirdek için `1.5`.
+- **Dinamik Dikey Ölçekleme (Vertical Scaling)**: WebUI veya `PUT /api/apps/{id}` üzerinden kaynak sınırları güncellendiğinde, r3v3rs3 çalışan container'ın cgroup ayarlarını kesinti olmadan veya container'ı yeniden başlatmadan anında günceller.
+- **OOM Koruması ve Eşik Uyarıları**: Bir container'a bellek sınırı tanımlandığında, r3v3rs3 30 saniyelik periyodik kontrollerde bellek doluluğunu izler ve kullanım %90'a ulaştığında webhook'a `app_alert` (OOM uyarısı) iletir. Container çekirdek OOM killer tarafından sonlandırılırsa anında `oom_killed` uyarısı gönderilir.
 
 ## Yönlendirme
 

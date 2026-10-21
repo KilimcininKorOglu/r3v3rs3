@@ -334,6 +334,9 @@ pub struct ResourceLimits {
     /// The CPU limit in billionths of a CPU. `1_500_000_000` is one and a half CPUs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nano_cpus: Option<u64>,
+    /// Total memory + swap limit in bytes (`-1` for unlimited swap).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_swap_bytes: Option<i64>,
 }
 
 /// A container to create. The image runs its own entrypoint and command.
@@ -411,6 +414,8 @@ pub struct ContainerInfo {
     pub image_id: String,
     pub running: bool,
     pub exit_code: i64,
+    #[serde(default)]
+    pub oom_killed: bool,
     /// `None` when the image declares no health check.
     pub health: Option<ContainerHealth>,
     /// The IP address of the container on each network, IPv4 before IPv6.

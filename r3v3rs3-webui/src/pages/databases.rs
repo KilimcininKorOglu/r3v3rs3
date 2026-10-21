@@ -8,6 +8,7 @@ use crate::auth::use_ensure_auth;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
+use r3v3rs3_api::container::ResourceLimits;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, DatabaseCreated, DatabaseRequest, EngineInfo};
@@ -412,6 +413,9 @@ fn add_form(props: &AddFormProps) -> Html {
     let version = use_state(String::new);
     let name = use_state(String::new);
     let host_port = use_state(String::new);
+    let memory_mb = use_state(String::new);
+    let swap_mb = use_state(String::new);
+    let cpus = use_state(String::new);
     let notice = use_state(|| Option::<String>::None);
     let busy = use_state(|| false);
 
@@ -425,11 +429,14 @@ fn add_form(props: &AddFormProps) -> Html {
         })
     };
     let submit = {
-        let (name, version, host_port, engine, notice, busy) = (
+        let (name, version, host_port, engine, memory_mb, swap_mb, cpus, notice, busy) = (
             name.clone(),
             version.clone(),
             host_port.clone(),
             engine.clone(),
+            memory_mb.clone(),
+            swap_mb.clone(),
+            cpus.clone(),
             notice.clone(),
             busy.clone(),
         );
@@ -445,11 +452,13 @@ fn add_form(props: &AddFormProps) -> Html {
                 notice.set(Some(locale.t("databases.name_invalid").to_string()));
                 return;
             };
+            let limits = parse_db_limits(&memory_mb, &cpus, &swap_mb);
             let request = DatabaseRequest {
                 name: parsed_name,
                 engine,
                 version: version.trim().to_string(),
                 host_port: host_port.trim().parse().ok(),
+                limits,
             };
             let (notice, busy, saved, created) =
                 (notice.clone(), busy.clone(), saved.clone(), created.clone());
@@ -499,30 +508,13 @@ fn add_form(props: &AddFormProps) -> Html {
                         }) }
                     </select>
                 </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("common.name")}</span>
-                    <input type="text" class={INPUT_CLASS} value={(*name).clone()}
-                        oninput={{
-                            let name = name.clone();
-                            Callback::from(move |event: InputEvent| {
-                                let input: web_sys::HtmlInputElement = event.target_unchecked_into();
-                                name.set(input.value());
-                            })
-                        }}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("databases.host_port")}</span>
-                    <input type="text" class={INPUT_CLASS} placeholder={locale.t("databases.host_port_hint")} value={(*host_port).clone()}
-                        oninput={{
-                            let host_port = host_port.clone();
-                            Callback::from(move |event: InputEvent| {
-                                let input: web_sys::HtmlInputElement = event.target_unchecked_into();
-                                host_port.set(input.value());
-                            })
-                        }}
-                    />
-                </label>
+                { form_input(locale.t("common.name").into(), "".into(), &name) }
+                { form_input(locale.t("databases.host_port").into(), locale.t("databases.host_port_hint").into(), &host_port) }
+            </div>
+            <div class="grid gap-3 md:grid-cols-3 mt-3">
+                { form_input(locale.t("databases.memory_mb").into(), "512".into(), &memory_mb) }
+                { form_input(locale.t("databases.swap_mb").into(), "0".into(), &swap_mb) }
+                { form_input(locale.t("databases.cpus").into(), "1.0".into(), &cpus) }
             </div>
             <div class="flex justify-end mt-3">
                 <button type="submit" class="px-3 py-1.5 rounded bg-neutral-100 text-neutral-900 font-medium disabled:opacity-50" disabled={*busy}>
@@ -530,6 +522,43 @@ fn add_form(props: &AddFormProps) -> Html {
                 </button>
             </div>
         </form>
+    }
+}
+
+fn form_input(label: AttrValue, placeholder: AttrValue, value: &UseStateHandle<String>) -> Html {
+    let handle = value.clone();
+    html! {
+        <label class="block">
+            <span class="text-sm text-neutral-400">{label}</span>
+            <input type="text" class={INPUT_CLASS} {placeholder} value={(**value).clone()}
+                oninput={Callback::from(move |event: InputEvent| {
+                    let input: web_sys::HtmlInputElement = event.target_unchecked_into();
+                    handle.set(input.value());
+                })}
+            />
+        </label>
+    }
+}
+
+fn parse_db_limits(memory_mb: &str, cpus: &str, swap_mb: &str) -> ResourceLimits {
+    let mem = memory_mb
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|mb| mb * 1024 * 1024);
+    let nano = cpus
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .map(|c| (c * 1_000_000_000.0) as u64);
+    let swap = match (mem, swap_mb.trim().parse::<u64>().ok()) {
+        (Some(m), Some(s)) => Some(m as i64 + (s * 1024 * 1024) as i64),
+        _ => None,
+    };
+    ResourceLimits {
+        memory_bytes: mem,
+        nano_cpus: nano,
+        memory_swap_bytes: swap,
     }
 }
 

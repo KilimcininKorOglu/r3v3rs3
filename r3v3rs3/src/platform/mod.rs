@@ -383,6 +383,7 @@ impl Platform {
             updated_at: now,
         };
         written(self.store.update_app(&app).await?, &app)?;
+        sync_running_limits(self, &app).await;
         self.sync_app_hook(id, hook, now).await?;
         self.app(id).await
     }
@@ -1116,6 +1117,20 @@ async fn inspect_service_status(
         health,
         exit_code,
     }
+}
+
+/// Dynamically syncs updated resource limits to the running container, if one exists.
+async fn sync_running_limits(platform: &Platform, app: &AppEntry) {
+    let Ok(Some(deployment)) = platform.store.running_deployment(app.id).await else {
+        return;
+    };
+    let Ok(container) = proxy::container_name(app.id, deployment) else {
+        return;
+    };
+    let runtime = platform.runtime(app.target);
+    let _ = runtime
+        .update_container_limits(&container, &app.spec.limits)
+        .await;
 }
 
 #[cfg(test)]

@@ -250,6 +250,7 @@ fn clone_app_request(
         engine: info.engine.clone(),
         version,
         host_port: Some(host_port),
+        limits: request.limits.unwrap_or(source.spec.limits),
     };
     app_request(&db_request, info, host_port)
 }
@@ -303,7 +304,7 @@ fn app_request(
                 read_only: false,
             }],
             restart: Default::default(),
-            limits: Default::default(),
+            limits: request.limits,
             host_port: Some(host_port),
             database: Some(request.engine.clone()),
             uses_database: None,

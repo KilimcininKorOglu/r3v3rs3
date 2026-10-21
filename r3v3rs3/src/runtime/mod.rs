@@ -6,7 +6,7 @@ pub mod docker;
 
 use r3v3rs3_api::container::{
     AppName, ContainerInfo, ContainerName, ContainerSpec, ContainerStats, ContainerSummary,
-    ImageInfo, ImageRef, NetworkName, ProjectName,
+    ImageInfo, ImageRef, NetworkName, ProjectName, ResourceLimits,
 };
 use r3v3rs3_api::git::RelPath;
 use std::time::Duration;
@@ -84,6 +84,16 @@ pub trait ContainerRuntime: Send + Sync {
 
     /// The containers of an app, running or not.
     async fn list_containers(&self, app: &AppName) -> anyhow::Result<Vec<ContainerSummary>>;
+
+    /// Dynamically updates the resource limits of a running container.
+    async fn update_container_limits(
+        &self,
+        name: &ContainerName,
+        limits: &ResourceLimits,
+    ) -> anyhow::Result<()> {
+        let _ = (name, limits);
+        Ok(())
+    }
 
     /// The containers of a Compose project.
     async fn list_project_containers(

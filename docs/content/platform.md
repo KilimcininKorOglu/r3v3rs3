@@ -220,7 +220,7 @@ Environment variable groups allow managing reusable collections of configuration
 
 The **Databases** page installs a database of one engine in one click. The engines are PostgreSQL 17 and 18, MariaDB 11 and 12, MySQL 9, MongoDB 8 and Redis 8, each with its image tag pinned to a version. The engine catalog is the `engines.json` file of the [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) repository; the binary also ships an embedded copy and refreshes from the repository once a day. The **Refresh catalog** button of the page downloads the current catalog at once; the API refreshes it with `POST /api/databases/engines/refresh`.
 
-**Add a database** takes an engine, a version, a name and, optionally, a port of `127.0.0.1`. Without a port the server takes a free one at the creation, and the database keeps that port afterwards: every deployment of a database publishes its port on the same address, unlike an app, whose deployment takes a new port. The creation builds an app on the local target with the image of the version, one named volume for the data of the engine, and a generated password of 32 hex characters as a secret environment variable. The first deployment starts at once.
+**Add a database** takes an engine, a version, a name and, optionally, a port of `127.0.0.1`. Optional **Memory Limit (MB)**, **Swap Limit (MB)**, and **CPU Limit** fields allow setting container resource throttling directly at installation. Without a port the server takes a free one at the creation, and the database keeps that port afterwards: every deployment of a database publishes its port on the same address, unlike an app, whose deployment takes a new port. The creation builds an app on the local target with the image of the version, one named volume for the data of the engine, and a generated password of 32 hex characters as a secret environment variable. The first deployment starts at once.
 
 The response shows the password and the connection string once, like a webhook secret. The panel lists every database with its engine, its port and its connection without the password. The database answers on `127.0.0.1` of the r3v3rs3 server, so only the apps of this server and the programs on the server itself reach it: a database gets no domain and no proxy, and **Delete** on its row removes the app while the volume with the data stays. Redis takes no password, so its port answers to every local client.
 
@@ -399,6 +399,16 @@ The notification webhook of the "Settings" page also gets the events of the plat
 ### Resource Alert Rules
 
 An app can define alert rules in the **CPU Alert Threshold (%)** and **Memory Alert Threshold (MB)** fields of its form (or `alert_rules` in `AppSpec`). During periodic background metrics collection (every 30 seconds), r3v3rs3 compares the container stats with the configured thresholds. When usage reaches or exceeds a threshold, an `app_alert` notification is delivered to the webhook with the current value and threshold. Repeated alerts for the same app and metric are rate-limited with a 5-minute cooldown to avoid notification flood.
+
+### Container Resource Limits & Vertical Scaling
+
+Applications and databases can enforce fine-grained hardware resource quotas to prevent memory leaks or runaway workloads from starving host system resources:
+
+- **Memory Limit (MB)** (`memory_mb`): Maximum memory allocation for the container. Empty sets no limit.
+- **Swap Limit (MB)** (`swap_mb`): Additional swap memory allowance beyond the memory limit. Setting `0` disables swap completely for the container. Empty leaves swap behavior at the Docker engine default.
+- **CPU Limit** (`cpus`): Fractional or whole CPU quota, for example `1.5` for 1.5 CPU cores.
+- **Dynamic Vertical Scaling**: Updating resource limits in the WebUI or via `PUT /api/apps/{id}` instantly adjusts the running container's cgroups in-place on the Docker runtime without downtime or container restarts.
+- **OOM Protection & Threshold Alerts**: When a container has a memory limit configured, r3v3rs3 monitors memory saturation during periodic 30-second sweeps and sends an `app_alert` webhook if usage reaches 90% (OOM warning). If a container is terminated by the kernel OOM killer, an instant `oom_killed` alert is delivered.
 
 ## Routing
 

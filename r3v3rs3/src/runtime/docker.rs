@@ -18,6 +18,7 @@ use hyper::{Method, Response, StatusCode};
 use r3v3rs3_api::container::{
     APP_LABEL, AppName, COMPOSE_PROJECT_LABEL, ContainerHealth, ContainerInfo, ContainerName,
     ContainerSpec, ContainerStats, ContainerSummary, ImageInfo, ImageRef, NetworkName, ProjectName,
+    ResourceLimits,
 };
 use r3v3rs3_api::git::RelPath;
 use r3v3rs3_api::platform::FileEntry;
@@ -820,6 +821,28 @@ impl ContainerRuntime for DockerRuntime {
         Ok(list.into_iter().map(ListContainer::into_summary).collect())
     }
 
+    async fn update_container_limits(
+        &self,
+        name: &ContainerName,
+        limits: &ResourceLimits,
+    ) -> anyhow::Result<()> {
+        let Some(found) = self.find_container(name).await? else {
+            return Ok(());
+        };
+        let mut body = json!({});
+        if let Some(memory) = limits.memory_bytes {
+            body["Memory"] = json!(memory);
+        }
+        if let Some(cpus) = limits.nano_cpus {
+            body["NanoCpus"] = json!(cpus);
+        }
+        if let Some(swap) = limits.memory_swap_bytes {
+            body["MemorySwap"] = json!(swap);
+        }
+        let path = format!("/containers/{}/update", found.id);
+        self.call(Method::POST, &path, Some(&body), &[]).await
+    }
+
     async fn list_project_containers(
         &self,
         project: &ProjectName,
@@ -986,6 +1009,9 @@ fn create_body(spec: &ContainerSpec) -> Value {
     }
     if let Some(cpus) = spec.limits.nano_cpus {
         host_config["NanoCpus"] = json!(cpus);
+    }
+    if let Some(swap) = spec.limits.memory_swap_bytes {
+        host_config["MemorySwap"] = json!(swap);
     }
     let mut body = json!({
         "Image": spec.image.as_str(),
@@ -1227,6 +1253,8 @@ impl StatsDocument {
 struct InspectState {
     running: bool,
     exit_code: i64,
+    #[serde(rename = "OOMKilled", default)]
+    oom_killed: bool,
     #[serde(default)]
     health: Option<InspectHealth>,
 }
@@ -1299,6 +1327,7 @@ impl InspectContainer {
             image_id: self.image,
             running: self.state.running,
             exit_code: self.state.exit_code,
+            oom_killed: self.state.oom_killed,
             health: self
                 .state
                 .health
@@ -1490,6 +1519,7 @@ mod tests {
             limits: ResourceLimits {
                 memory_bytes: Some(256 << 20),
                 nano_cpus: None,
+                memory_swap_bytes: None,
             },
             publish: Some(8080),
             host_port: Some(18080),

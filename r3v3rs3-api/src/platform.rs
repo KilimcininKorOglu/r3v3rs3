@@ -1011,6 +1011,9 @@ pub struct DatabaseRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(example = 5432)]
     pub host_port: Option<u16>,
+    /// Container resource limits (memory, CPU, swap).
+    #[serde(default)]
+    pub limits: ResourceLimits,
 }
 
 /// The body that clones an existing database into a new branch database.
@@ -1023,6 +1026,9 @@ pub struct DatabaseCloneRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(example = 5433)]
     pub host_port: Option<u16>,
+    /// Optional container resource limits. When omitted, inherits the source limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<ResourceLimits>,
 }
 
 /// The new database. The password is shown once, like a webhook secret.

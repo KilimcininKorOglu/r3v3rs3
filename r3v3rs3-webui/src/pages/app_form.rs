@@ -82,6 +82,7 @@ pub struct AppForm {
     pub volumes: String,
     pub restart: RestartPolicy,
     pub memory_mb: String,
+    pub swap_mb: String,
     pub cpus: String,
     /// The fixed host port and the engine of a database app, kept from the saved app. The
     /// app form shows neither, because the Databases page manages them.
@@ -129,6 +130,7 @@ impl Default for AppForm {
             volumes: String::new(),
             restart: RestartPolicy::default(),
             memory_mb: String::new(),
+            swap_mb: String::new(),
             cpus: String::new(),
             host_port: None,
             database: None,
@@ -197,6 +199,14 @@ impl AppForm {
             volumes: lines(spec.volumes.iter().map(mount_line)),
             restart: spec.restart,
             memory_mb: optional(spec.limits.memory_bytes.map(|bytes| bytes / BYTES_PER_MB)),
+            swap_mb: optional(
+                match (spec.limits.memory_bytes, spec.limits.memory_swap_bytes) {
+                    (Some(mem), Some(swap)) if swap >= mem as i64 => {
+                        Some((swap as u64 - mem) / BYTES_PER_MB)
+                    }
+                    _ => None,
+                },
+            ),
             cpus: optional(
                 spec.limits
                     .nano_cpus
@@ -526,11 +536,30 @@ impl AppForm {
         let nano_cpus = non_empty(&self.cpus)
             .map(|value| parse_cpus(locale, value))
             .transpose()?;
+        let memory_swap_bytes = parse_swap(locale, memory_bytes, &self.swap_mb)?;
         Ok(ResourceLimits {
             memory_bytes,
             nano_cpus,
+            memory_swap_bytes,
         })
     }
+}
+
+fn parse_swap(
+    locale: Locale,
+    memory_bytes: Option<u64>,
+    swap_mb: &str,
+) -> Result<Option<i64>, String> {
+    let Some(swap_str) = non_empty(swap_mb) else {
+        return Ok(None);
+    };
+    let Some(mem) = memory_bytes else {
+        return Err(locale.t("apps.swap_requires_memory").to_string());
+    };
+    let mb: u64 = swap_str
+        .parse()
+        .map_err(|_| locale.t("apps.invalid_swap").to_string())?;
+    Ok(Some(mem as i64 + (mb * BYTES_PER_MB) as i64))
 }
 
 fn parse<T: FromStr<Err = Error>>(locale: Locale, value: &str) -> Result<T, String> {
@@ -928,6 +957,7 @@ fn container_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
             { text_area(locale, form, "apps.volumes", "apps.volumes_hint", |f| &mut f.volumes) }
             { restart_select(locale, form) }
             { text_field(locale, form, "apps.memory", Some("apps.memory_hint"), |f| &mut f.memory_mb) }
+            { text_field(locale, form, "apps.swap", Some("apps.swap_hint"), |f| &mut f.swap_mb) }
             { text_field(locale, form, "apps.cpus", Some("apps.cpus_hint"), |f| &mut f.cpus) }
             { text_field(locale, form, "apps.alert_cpu", Some("apps.alert_cpu_hint"), |f| &mut f.alert_cpu_percent) }
             { text_field(locale, form, "apps.alert_memory", Some("apps.alert_memory_hint"), |f| &mut f.alert_memory_mb) }
@@ -1460,5 +1490,27 @@ mod tests {
             Some("https://github.com/owner/config-repo.git")
         );
         assert_eq!(cfg.branch.as_ref().map(|b| b.as_str()), Some("production"));
+    }
+
+    #[test]
+    fn swap_in_form() {
+        let form = AppForm {
+            memory_mb: "512".into(),
+            swap_mb: "256".into(),
+            ..image_form()
+        };
+        let request = form.parse(Locale::En).unwrap();
+        assert_eq!(request.spec.limits.memory_bytes, Some(512 * BYTES_PER_MB));
+        assert_eq!(
+            request.spec.limits.memory_swap_bytes,
+            Some((512 + 256) * BYTES_PER_MB as i64)
+        );
+
+        let swap_without_mem = AppForm {
+            memory_mb: String::new(),
+            swap_mb: "256".into(),
+            ..image_form()
+        };
+        assert!(swap_without_mem.parse(Locale::En).is_err());
     }
 }

@@ -299,6 +299,7 @@ fn container(
         image_id: DIGEST.into(),
         running,
         exit_code: 0,
+        oom_killed: false,
         health: None,
         addresses: BTreeMap::new(),
         labels,
