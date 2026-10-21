@@ -23,13 +23,25 @@ pub(crate) async fn upload(
     entry: &BackupEntry,
     content: Vec<u8>,
 ) -> anyhow::Result<()> {
+    let key = format!("{}/{}.dump.gz", entry.name, entry.id);
+    upload_key(client, config, &key, content).await
+}
+
+/// Uploads content under `{prefix}/{key}` to the configured S3 endpoint.
+pub(crate) async fn upload_key(
+    client: &HttpClient,
+    config: &S3Config,
+    key: &str,
+    content: Vec<u8>,
+) -> anyhow::Result<()> {
     let url = url::Url::parse(&config.endpoint).context("the S3 endpoint is not a URL")?;
     let scheme = url.scheme();
     if scheme != "https" && scheme != "http" {
         bail!("the S3 endpoint must be an http or https URL");
     }
     let host = host(&url);
-    let path = object_path(&url, config, entry);
+    let path = object_key_path(&url, config, key);
+
     let amz_date = sigv4::amz_date(OffsetDateTime::now_utc());
     let payload_hash = hex::encode(Sha256::digest(&content));
     let authorization = sigv4::authorization(
@@ -72,16 +84,12 @@ fn host(url: &url::Url) -> String {
     }
 }
 
-/// The URI path of one backup object: the bucket path of the endpoint, the prefix and the file.
-fn object_path(url: &url::Url, config: &S3Config, entry: &BackupEntry) -> String {
+/// The URI path of one object: the bucket path of the endpoint, the prefix and the key.
+fn object_key_path(url: &url::Url, config: &S3Config, key: &str) -> String {
     let bucket = url.path().trim_matches('/');
     let prefix = config.prefix.trim_matches('/');
-    let parts = [
-        bucket,
-        prefix,
-        &entry.name,
-        &format!("{}.dump.gz", entry.id),
-    ];
+    let clean_key = key.trim_start_matches('/');
+    let parts = [bucket, prefix, clean_key];
     let mut path = String::new();
     for part in parts {
         if !part.is_empty() {
@@ -93,6 +101,13 @@ fn object_path(url: &url::Url, config: &S3Config, entry: &BackupEntry) -> String
         path.push('/');
     }
     path
+}
+
+#[cfg(test)]
+/// The URI path of one backup object: the bucket path of the endpoint, the prefix and the file.
+fn object_path(url: &url::Url, config: &S3Config, entry: &BackupEntry) -> String {
+    let key = format!("{}/{}.dump.gz", entry.name, entry.id);
+    object_key_path(url, config, &key)
 }
 
 #[cfg(test)]

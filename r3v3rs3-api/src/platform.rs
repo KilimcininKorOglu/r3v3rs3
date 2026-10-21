@@ -305,6 +305,18 @@ pub struct BackupEntry {
     pub verification_status: Option<String>,
 }
 
+/// One stored backup or snapshot of an application volume.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct VolumeBackupEntry {
+    pub id: String,
+    pub app: ShortId,
+    pub volume: String,
+    pub path: String,
+    pub size: u64,
+    pub sha256: String,
+    pub created_at: i64,
+}
+
 /// One archived Write-Ahead Logging (WAL) or binary log segment of a database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct WalSegment {

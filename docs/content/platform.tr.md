@@ -651,6 +651,16 @@ Admin hesap, uygulama sayfasında bir **Terminal** linki görür. Link, çalış
 
 Admin hesap, uygulama sayfasında bir **Dosyalar** linki de görür. Link, çalışan container'ın volume'lerindeki dosyaları açar. Sayfa bir volume seçer, dizinlerini listeler ve **Görüntüle** ile bir dizini açar. Bir dosya satırı **İndir**, **Düzenle** ve **Sil** sunar; **Düzenle** 1 MB'a kadar bir dosyayı metin olarak açar ve **Kaydet** geri yazar. Sayfanın üst barı geçerli dizine bir dosya yükler ve bir üst dizine çıkar. Yazma işlemleri read-only olmayan bir volume içinde kalır; sayfa read-only bir volume için yükleme, düzenleme ve silme butonlarını göstermez. Terminal gibi dosyalar da yalnız uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir. Her yazma ve silme işlemi audit log'una `app_file` olarak geçer.
 
+#### Volume Yedekleri, Snapshot'lar ve Doğrudan Arşiv Dışa/İçe Aktarma
+
+Dosyalar sayfası kalıcı volume'ler için kapsamlı yedekleme ve snapshot yönetimi sunar:
+
+- **Snapshot Oluştur**: Çalışan container üzerinden volume'ün tam sıkıştırılmış `.tar.gz` snapshot'ını alır, yerel diskte saklar ve yedekleme ayarlarında S3 yapılandırılmışsa otomatik olarak harici S3 depolamasına yükler.
+- **Snapshot'tan Geri Yükle**: Alınmış bir snapshot'ı tek tıkla doğrudan container volume'ünün içine açarak geri yükler.
+- **Snapshot İndir**: Kayıtlı herhangi bir volume snapshot'ını `.tar.gz` formatında tarayıcıya indirir.
+- **Arşivi Dışa Aktar (.tar.gz)**: Volume'ün canlı içeriğini ayrı bir snapshot dosyası oluşturmadan doğrudan `.tar.gz` akışı olarak indirir.
+- **Arşiv İçe Aktar**: Yüklenen bir `.tar.gz` veya `.tar` arşivini doğrudan aktif volume içine çıkarır (extract eder).
+
 ### Zamanlanmış Komutlar
 
 Uygulama sayfasında çalışan deployment container'ı içinde düzenli aralıklarla tek seferlik veya periyodik komutlar çalıştırmak için bir **Zamanlanmış Komutlar** bölümü yer alır (veritabanı bakımı, cache temizleme, ısınma görevleri vb.).

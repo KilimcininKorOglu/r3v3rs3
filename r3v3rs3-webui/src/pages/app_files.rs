@@ -10,7 +10,7 @@ use crate::store::SessionStore;
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{AppEntry, FileEntry};
+use r3v3rs3_api::platform::{AppEntry, FileEntry, VolumeBackupEntry};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -39,6 +39,7 @@ pub fn app_files(props: &Props) -> Html {
     let app = use_state(|| Option::<AppEntry>::None);
     let dir = use_state(String::new);
     let entries = use_state(Vec::<FileEntry>::new);
+    let backups = use_state(Vec::<VolumeBackupEntry>::new);
     let notice = use_state(|| Option::<String>::None);
     let editing = use_state(|| Option::<Editing>::None);
     let failed = use_state(|| Option::<String>::None);
@@ -53,12 +54,10 @@ pub fn app_files(props: &Props) -> Html {
             }
         });
     }
-
-    // The first volume of the app is the one that the page opens.
     {
-        let app = (*app).clone();
+        let app_val = (*app).clone();
         let (dir, entries, notice) = (dir.clone(), entries.clone(), notice.clone());
-        use_effect_with(app, move |app| {
+        use_effect_with(app_val, move |app| {
             let Some(mount) = app.as_ref().and_then(|app| app.spec.volumes.first()) else {
                 return;
             };
@@ -67,56 +66,60 @@ pub fn app_files(props: &Props) -> Html {
             }
         });
     }
+    let vol_name = (*app)
+        .as_ref()
+        .map(|a| current_volume(a, &dir))
+        .unwrap_or_default();
+    {
+        let backups = backups.clone();
+        let vol_name = vol_name.clone();
+        use_effect_with((signed_in, vol_name), move |(signed_in, vol)| {
+            if *signed_in && !vol.is_empty() {
+                load_volume_backups(app_id, vol, &backups);
+            }
+        });
+    }
 
-    if session.info.is_none() {
+    if !signed_in {
         return html!();
     }
-    let Some(app) = (*app).clone() else {
-        return html! {
-            { failed.as_deref().map(failed_view).unwrap_or_default() }
-        };
+    let Some(app_entry) = (*app).clone() else {
+        return failed.as_deref().map(failed_view).unwrap_or_default();
     };
+    render_files_page(
+        locale, app_id, &app_entry, &vol_name, &dir, &entries, &backups, &notice, &editing,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_files_page(
+    locale: Locale,
+    app_id: ShortId,
+    app: &AppEntry,
+    vol_name: &str,
+    dir: &UseStateHandle<String>,
+    entries: &UseStateHandle<Vec<FileEntry>>,
+    backups: &UseStateHandle<Vec<VolumeBackupEntry>>,
+    notice: &UseStateHandle<Option<String>>,
+    editing: &UseStateHandle<Option<Editing>>,
+) -> Html {
     let title = locale.tf("apps.files_title", &[("name", app.name.as_str())]);
-    let writable = writable_at(&app, &dir);
-    let navigate = {
-        let app_id = props.id;
-        let dir = dir.clone();
-        let entries = entries.clone();
-        let notice = notice.clone();
-        Callback::from(move |path: String| open_dir(app_id, &path, &dir, &entries, &notice))
-    };
-    let edit = {
-        let editing = editing.clone();
-        let notice = notice.clone();
-        Callback::from(move |path: String| open_editor(locale, app_id, &path, &editing, &notice))
-    };
-    let remove = {
-        let dir = dir.clone();
-        let entries = entries.clone();
-        let notice = notice.clone();
-        Callback::from(move |path: String| {
-            confirm_delete(locale, app_id, path, &dir, &entries, &notice)
-        })
-    };
+    let writable = writable_at(app, dir);
+    let actions = build_row_actions(app_id, locale, dir, entries, notice, editing);
     let uploaded = {
-        let app_id = props.id;
-        let dir = dir.clone();
-        let entries = entries.clone();
-        let notice = notice.clone();
-        Callback::from(move |event: Event| {
-            upload(event, app_id, &dir, &entries, &notice);
-        })
+        let (dir, entries, notice) = (dir.clone(), entries.clone(), notice.clone());
+        Callback::from(move |e: Event| upload(e, app_id, &dir, &entries, &notice))
     };
-    let actions = RowActions {
-        navigate,
-        edit,
-        remove,
+    let imported = {
+        let (dir, entries, notice) = (dir.clone(), entries.clone(), notice.clone());
+        let vol = vol_name.to_string();
+        Callback::from(move |e: Event| import_archive(e, app_id, &vol, &dir, &entries, &notice))
     };
     html! {
         <>
             <div class="flex items-center justify-between mb-3">
                 <h1 class="text-xl font-semibold">{title}</h1>
-                <Link<Route> to={Route::AppView { id: props.id }} classes="text-sm text-neutral-400 hover:text-neutral-200">
+                <Link<Route> to={Route::AppView { id: app_id }} classes="text-sm text-neutral-400 hover:text-neutral-200">
                     {locale.t("common.back")}
                 </Link<Route>>
             </div>
@@ -124,10 +127,40 @@ pub fn app_files(props: &Props) -> Html {
             if app.spec.volumes.is_empty() {
                 <p class="text-neutral-400">{locale.t("apps.files_no_volumes")}</p>
             } else {
-                { browser_view(locale, app_id, &app, writable, &dir, &entries, &notice, uploaded, &actions) }
+                { browser_view(locale, app_id, app, vol_name, writable, dir, entries, notice, uploaded, imported, &actions) }
+                { volume_backups_view(locale, app_id, vol_name, writable, backups, notice, dir, entries) }
             }
-            { editor_view(locale, app_id, &editing, &dir, &entries, &notice) }
+            { editor_view(locale, app_id, editing, dir, entries, notice) }
         </>
+    }
+}
+
+fn build_row_actions(
+    app_id: ShortId,
+    locale: Locale,
+    dir: &UseStateHandle<String>,
+    entries: &UseStateHandle<Vec<FileEntry>>,
+    notice: &UseStateHandle<Option<String>>,
+    editing: &UseStateHandle<Option<Editing>>,
+) -> RowActions {
+    let navigate = {
+        let (dir, entries, notice) = (dir.clone(), entries.clone(), notice.clone());
+        Callback::from(move |path: String| open_dir(app_id, &path, &dir, &entries, &notice))
+    };
+    let edit = {
+        let (editing, notice) = (editing.clone(), notice.clone());
+        Callback::from(move |path: String| open_editor(locale, app_id, &path, &editing, &notice))
+    };
+    let remove = {
+        let (dir, entries, notice) = (dir.clone(), entries.clone(), notice.clone());
+        Callback::from(move |path: String| {
+            confirm_delete(locale, app_id, path, &dir, &entries, &notice)
+        })
+    };
+    RowActions {
+        navigate,
+        edit,
+        remove,
     }
 }
 
@@ -157,11 +190,13 @@ fn browser_view(
     locale: Locale,
     app_id: ShortId,
     app: &AppEntry,
+    vol_name: &str,
     writable: bool,
     dir: &UseStateHandle<String>,
     entries: &UseStateHandle<Vec<FileEntry>>,
     notice: &UseStateHandle<Option<String>>,
     uploaded: Callback<Event>,
+    imported: Callback<Event>,
     actions: &RowActions,
 ) -> Html {
     html! {
@@ -202,6 +237,20 @@ fn browser_view(
                     <label class="text-sm px-3 py-1.5 rounded bg-neutral-100 text-neutral-900 font-medium hover:bg-white cursor-pointer">
                         {locale.t("common.upload")}
                         <input type="file" class="hidden" onchange={uploaded} />
+                    </label>
+                }
+                if !vol_name.is_empty() {
+                    <a
+                        href={volume_archive_url(app_id, vol_name)}
+                        class="text-sm px-3 py-1.5 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 hover:bg-neutral-700"
+                    >
+                        {locale.t("apps.volume_export_archive")}
+                    </a>
+                }
+                if writable && !vol_name.is_empty() {
+                    <label class="text-sm px-3 py-1.5 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 hover:bg-neutral-700 cursor-pointer">
+                        {locale.t("apps.volume_import_archive")}
+                        <input type="file" accept=".tar,.tar.gz,.tgz" class="hidden" onchange={imported} />
                     </label>
                 }
             </div>
@@ -567,4 +616,318 @@ fn download_url(app_id: ShortId, path: &str) -> String {
         "{API_ENDPOINT}/apps/{app_id}/files/download?path={}",
         js_sys::encode_uri_component(path)
     )
+}
+
+fn current_volume(app: &AppEntry, dir: &str) -> String {
+    app.spec
+        .volumes
+        .iter()
+        .find(|mount| dir.starts_with(mount.target.as_str()))
+        .map(|mount| mount.volume.to_string())
+        .or_else(|| {
+            app.spec
+                .volumes
+                .first()
+                .map(|mount| mount.volume.to_string())
+        })
+        .unwrap_or_default()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn volume_backups_view(
+    locale: Locale,
+    app_id: ShortId,
+    vol_name: &str,
+    writable: bool,
+    backups: &UseStateHandle<Vec<VolumeBackupEntry>>,
+    notice: &UseStateHandle<Option<String>>,
+    dir: &UseStateHandle<String>,
+    entries: &UseStateHandle<Vec<FileEntry>>,
+) -> Html {
+    let on_create = {
+        let vol_name = vol_name.to_string();
+        let backups = backups.clone();
+        let notice = notice.clone();
+        Callback::from(move |_| {
+            create_snapshot(locale, app_id, &vol_name, &backups, &notice);
+        })
+    };
+    html! {
+        <div class="mt-8 border-t border-neutral-800 pt-6">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h2 class="text-base font-semibold">{locale.t("apps.volume_backups_title")}</h2>
+                    <p class="text-xs text-neutral-400 font-mono mt-0.5">{vol_name.to_string()}</p>
+                </div>
+                if writable && !vol_name.is_empty() {
+                    <button
+                        type="button"
+                        class="text-sm px-3 py-1.5 rounded bg-neutral-100 text-neutral-900 font-medium hover:bg-white"
+                        onclick={on_create}
+                    >
+                        {locale.t("apps.volume_backup_create")}
+                    </button>
+                }
+            </div>
+            if backups.is_empty() {
+                <p class="text-xs text-neutral-500">{locale.t("apps.volume_no_backups")}</p>
+            } else {
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-xs text-neutral-500 border-b border-neutral-800">
+                            <th class="py-1">{"ID"}</th>
+                            <th class="py-1 text-right">{"Size"}</th>
+                            <th class="py-1 text-right">{"Actions"}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        { for backups.iter().cloned().map(|backup| {
+                            backup_row(locale, app_id, vol_name, writable, backup, backups, notice, dir, entries)
+                        }) }
+                    </tbody>
+                </table>
+            }
+        </div>
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn backup_row(
+    locale: Locale,
+    app_id: ShortId,
+    volume: &str,
+    writable: bool,
+    backup: VolumeBackupEntry,
+    backups: &UseStateHandle<Vec<VolumeBackupEntry>>,
+    notice: &UseStateHandle<Option<String>>,
+    dir: &UseStateHandle<String>,
+    entries: &UseStateHandle<Vec<FileEntry>>,
+) -> Html {
+    let backup_id = backup.id.clone();
+    let download_link = volume_backup_download_url(app_id, volume, &backup_id);
+    let on_restore = {
+        let volume = volume.to_string();
+        let backup_id = backup_id.clone();
+        let notice = notice.clone();
+        let dir = dir.clone();
+        let entries = entries.clone();
+        Callback::from(move |_| {
+            restore_snapshot(locale, app_id, &volume, &backup_id, &notice, &dir, &entries);
+        })
+    };
+    let on_delete = {
+        let volume = volume.to_string();
+        let backup_id = backup_id.clone();
+        let backups = backups.clone();
+        let notice = notice.clone();
+        Callback::from(move |_| {
+            delete_snapshot(locale, app_id, &volume, &backup_id, &backups, &notice);
+        })
+    };
+    html! {
+        <tr class="border-b border-neutral-800">
+            <td class="py-2 font-mono text-xs">{backup_id}</td>
+            <td class="py-2 text-right text-xs text-neutral-400 font-mono">{format_bytes(backup.size)}</td>
+            <td class="py-2 text-right space-x-3 text-xs">
+                <a href={download_link} class="text-neutral-400 hover:text-neutral-200">
+                    {locale.t("apps.volume_backup_download")}
+                </a>
+                if writable {
+                    <button type="button" class="text-neutral-400 hover:text-neutral-200" onclick={on_restore}>
+                        {locale.t("apps.volume_backup_restore")}
+                    </button>
+                    <button type="button" class="text-red-400 hover:text-red-300" onclick={on_delete}>
+                        {locale.t("apps.volume_backup_delete")}
+                    </button>
+                }
+            </td>
+        </tr>
+    }
+}
+
+pub(crate) fn format_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+fn load_volume_backups(
+    app_id: ShortId,
+    volume: &str,
+    backups: &UseStateHandle<Vec<VolumeBackupEntry>>,
+) {
+    let backups = backups.clone();
+    let volume = volume.to_string();
+    wasm_bindgen_futures::spawn_local(async move {
+        let request = Request::get(&format!(
+            "{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/backups"
+        ));
+        if let Ok(entries) = fetch_json::<Vec<VolumeBackupEntry>>(Locale::En, request).await {
+            backups.set(entries);
+        }
+    });
+}
+
+fn create_snapshot(
+    locale: Locale,
+    app_id: ShortId,
+    volume: &str,
+    backups: &UseStateHandle<Vec<VolumeBackupEntry>>,
+    notice: &UseStateHandle<Option<String>>,
+) {
+    let volume = volume.to_string();
+    let backups = backups.clone();
+    let notice = notice.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let request = Request::post(&format!(
+            "{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/backups"
+        ));
+        match fetch_json::<VolumeBackupEntry>(locale, request).await {
+            Ok(entry) => {
+                let mut list = (*backups).clone();
+                list.insert(0, entry);
+                backups.set(list);
+            }
+            Err(msg) => notice.set(Some(msg)),
+        }
+    });
+}
+
+fn restore_snapshot(
+    locale: Locale,
+    app_id: ShortId,
+    volume: &str,
+    backup_id: &str,
+    notice: &UseStateHandle<Option<String>>,
+    dir: &UseStateHandle<String>,
+    entries: &UseStateHandle<Vec<FileEntry>>,
+) {
+    let question = locale.tf(
+        "apps.volume_backup_confirm_restore",
+        &[("volume", volume), ("id", backup_id)],
+    );
+    let Ok(request) = Request::post(&format!(
+        "{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/backups/{backup_id}/restore"
+    ))
+    .build() else {
+        return;
+    };
+    let dir = dir.clone();
+    let entries = entries.clone();
+    let notice = notice.clone();
+    let current = dir.to_string();
+    dialog::confirm_then(locale, question, async move {
+        if let Err(msg) = send_ok(request).await {
+            notice.set(Some(msg));
+            return;
+        }
+        open_dir(app_id, &current, &dir, &entries, &notice);
+    });
+}
+
+fn delete_snapshot(
+    locale: Locale,
+    app_id: ShortId,
+    volume: &str,
+    backup_id: &str,
+    backups: &UseStateHandle<Vec<VolumeBackupEntry>>,
+    notice: &UseStateHandle<Option<String>>,
+) {
+    let question = locale.tf("apps.volume_backup_confirm_delete", &[("id", backup_id)]);
+    let Ok(request) = Request::delete(&format!(
+        "{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/backups/{backup_id}"
+    ))
+    .build() else {
+        return;
+    };
+    let backups = backups.clone();
+    let notice = notice.clone();
+    let backup_id = backup_id.to_string();
+    dialog::confirm_then(locale, question, async move {
+        if let Err(msg) = send_ok(request).await {
+            notice.set(Some(msg));
+            return;
+        }
+        let list: Vec<VolumeBackupEntry> = (*backups)
+            .iter()
+            .filter(|b| b.id != backup_id)
+            .cloned()
+            .collect();
+        backups.set(list);
+    });
+}
+
+fn import_archive(
+    event: Event,
+    app_id: ShortId,
+    volume: &str,
+    dir: &UseStateHandle<String>,
+    entries: &UseStateHandle<Vec<FileEntry>>,
+    notice: &UseStateHandle<Option<String>>,
+) {
+    let input: HtmlInputElement = event.target_unchecked_into();
+    let Some(file) = input.files().and_then(|files| files.get(0)) else {
+        return;
+    };
+    let volume = volume.to_string();
+    let entries = entries.clone();
+    let notice = notice.clone();
+    let current = dir.to_string();
+    let dir = dir.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let sent = async {
+            let buffer = file
+                .array_buffer()
+                .await
+                .map_err(|err| err.as_string().unwrap_or_default())?;
+            let request = Request::post(&format!(
+                "{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/archive"
+            ))
+            .header("content-type", "application/gzip")
+            .body(js_sys::Uint8Array::new(&buffer))
+            .map_err(|err| err.to_string())?;
+            send_ok(request).await
+        };
+        if let Err(message) = sent.await {
+            notice.set(Some(message));
+        }
+        open_dir(app_id, &current, &dir, &entries, &notice);
+    });
+}
+
+fn volume_archive_url(app_id: ShortId, volume: &str) -> String {
+    format!("{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/archive")
+}
+
+fn volume_backup_download_url(app_id: ShortId, volume: &str, backup_id: &str) -> String {
+    format!("{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/backups/{backup_id}/download")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_bytes_scales_units() {
+        assert_eq!(format_bytes(500), "500 B");
+        assert_eq!(format_bytes(2048), "2.0 KB");
+        assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MB");
+    }
+
+    #[test]
+    fn volume_urls_format_correctly() {
+        let id: ShortId = "abcd".parse().unwrap();
+        assert_eq!(
+            volume_archive_url(id, "shop-data"),
+            "/api/apps/abcd/volumes/shop-data/archive"
+        );
+        assert_eq!(
+            volume_backup_download_url(id, "shop-data", "snap1"),
+            "/api/apps/abcd/volumes/shop-data/backups/snap1/download"
+        );
+    }
 }

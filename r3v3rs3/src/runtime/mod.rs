@@ -182,4 +182,21 @@ pub trait ContainerRuntime: Send + Sync {
         let _ = (name, path);
         anyhow::bail!("the runtime does not carry the files of a container");
     }
+
+    /// The entire content of a directory inside the container as a tar archive.
+    async fn download_archive(&self, name: &ContainerName, path: &str) -> anyhow::Result<Vec<u8>> {
+        let _ = (name, path);
+        anyhow::bail!("the runtime does not carry the archives of a container");
+    }
+
+    /// Extracts a tar archive into a directory inside the container.
+    async fn upload_archive(
+        &self,
+        name: &ContainerName,
+        path: &str,
+        archive_tar: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        let _ = (name, path, archive_tar);
+        anyhow::bail!("the runtime does not carry the archives of a container");
+    }
 }

@@ -408,7 +408,20 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(platform::terminal))
                 .routes(routes!(app_files::list))
                 .routes(routes!(app_files::download))
-                .routes(routes!(app_files::upload, app_files::delete)),
+                .routes(routes!(app_files::upload, app_files::delete))
+                .routes(routes!(
+                    app_files::list_volume_backups,
+                    app_files::create_volume_backup
+                ))
+                .routes(routes!(
+                    app_files::download_volume_backup,
+                    app_files::restore_volume_backup,
+                    app_files::delete_volume_backup
+                ))
+                .routes(routes!(
+                    app_files::export_volume_archive,
+                    app_files::import_volume_archive
+                )),
         )
         .nest(
             "/deployments",

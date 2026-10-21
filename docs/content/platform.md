@@ -651,6 +651,16 @@ An admin account sees a **Terminal** link on the page of an app. It opens a shel
 
 An admin account also sees a **Files** link on the page of an app. It opens the files of the volumes of the running container. The page selects a volume, lists its directories, and opens a directory on **View**. A file row offers **Download**, **Edit** and **Delete**; **Edit** opens a file up to 1 MB as text, and **Save** writes it back. The toolbar of the page uploads a file into the current directory and steps one directory up. A write stays inside a volume that is not read-only, and the page hides the upload, the edit and the delete of a read-only volume. Like the terminal, the files work only while the app runs on the local Docker Engine of the r3v3rs3 server. Every write and delete goes into the audit log as `app_file`.
 
+#### Volume Backups, Snapshots and Direct Archive Export/Import
+
+The Files page provides complete volume backup and snapshot management for persistent volumes:
+
+- **Create Snapshot**: Captures a full compressed `.tar.gz` snapshot of the volume from the running container, saves it locally, and automatically replicates it to remote S3 storage if configured in the backup settings.
+- **Restore Snapshot**: Restores a previously captured volume snapshot with a single click, unpacking the snapshot archive directly back into the container's volume.
+- **Download Snapshot**: Downloads any stored volume snapshot directly as a compressed `.tar.gz` archive.
+- **Export Volume (.tar.gz)**: Streams and downloads the live contents of the volume directly as a `.tar.gz` archive without requiring an explicit saved snapshot.
+- **Import Volume (.tar.gz)**: Unpacks and extracts an uploaded `.tar.gz` or `.tar` archive directly into the active volume.
+
 ### Scheduled Commands
 
 The page of an app includes a **Scheduled Commands** section to run scheduled or periodic one-off commands inside the container of the running deployment (e.g. database maintenance, cache clear, warmup tasks).

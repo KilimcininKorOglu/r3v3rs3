@@ -491,6 +491,56 @@ impl DockerRuntime {
         Ok(())
     }
 
+    /// The entire content of a directory inside a container as a tar archive.
+    pub async fn download_archive(
+        &self,
+        name: &ContainerName,
+        path: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        let container = self.container_id(name).await?;
+        let response = self
+            .send(
+                Method::GET,
+                &format!(
+                    "/containers/{}/archive?path={}",
+                    container.id,
+                    encode_path(path)
+                ),
+                None,
+                &[],
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let body = read_body_limited(response, MAX_ARCHIVE_SIZE).await?;
+        Ok(body.to_vec())
+    }
+
+    /// Extracts a tar archive into a directory inside a container.
+    pub async fn upload_archive(
+        &self,
+        name: &ContainerName,
+        path: &str,
+        archive_tar: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        let container = self.container_id(name).await?;
+        let path = format!(
+            "/containers/{}/archive?path={}",
+            container.id,
+            encode_path(path)
+        );
+        let request = self
+            .client
+            .builder(Method::PUT, &path)
+            .header(CONTENT_TYPE, "application/x-tar")
+            .body(Full::new(Bytes::from(archive_tar)))?;
+        let response = self
+            .client
+            .send_with(request, RESPONSE_TIMEOUT, &[])
+            .await?;
+        read_body(response).await?;
+        Ok(())
+    }
+
     /// The inspect document of the container with exactly this name, or an error.
     async fn container_id(&self, name: &ContainerName) -> anyhow::Result<InspectContainer> {
         self.find_container(name)
@@ -916,6 +966,19 @@ impl ContainerRuntime for DockerRuntime {
 
     async fn remove_path(&self, name: &ContainerName, path: &str) -> anyhow::Result<()> {
         DockerRuntime::remove_path(self, name, path).await
+    }
+
+    async fn download_archive(&self, name: &ContainerName, path: &str) -> anyhow::Result<Vec<u8>> {
+        DockerRuntime::download_archive(self, name, path).await
+    }
+
+    async fn upload_archive(
+        &self,
+        name: &ContainerName,
+        path: &str,
+        archive_tar: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        DockerRuntime::upload_archive(self, name, path, archive_tar).await
     }
 }
 
