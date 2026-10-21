@@ -266,7 +266,7 @@ impl HttpPortContext {
         .or(quic_ports.first())
         .and_then(|entry| entry.port.listen.port().ok());
 
-        let mut upstream = UpstreamClients::new(certs)?;
+        let mut upstream = UpstreamClients::new(certs, registries.dns.clone())?;
         self.shared.store(Arc::new(SharedContext {
             router: Router::new(
                 proxies,

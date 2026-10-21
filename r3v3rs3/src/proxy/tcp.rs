@@ -1,14 +1,12 @@
 use super::{
     PortContextEvent, PortStatus, SocketState,
+    dns::DnsResolver,
     health::{self, ConnGuard, GroupRegistry, Probe, UpstreamGroup},
     proxy_protocol::{self, Client},
     spawn_connection,
     tls::{Handshake, PortTls, TlsTermination, port_acceptor, port_tls, upstream_client_config},
 };
 use crate::server::cert_list::CertList;
-use hickory_resolver::TokioResolver;
-use hickory_resolver::config::LookupIpStrategy;
-use hickory_resolver::system_conf::read_system_conf;
 use r3v3rs3_api::{error::Error, id::ShortId, multiaddr::Multiaddr};
 use r3v3rs3_api::{
     port::PortEntry,
@@ -38,7 +36,7 @@ use tracing::{Level, Span, debug, error, info, span, warn};
 
 const MAX_BUFFER_SIZE: usize = 4096;
 
-type Resolver = TokioResolver;
+type Resolver = DnsResolver;
 
 #[derive(Debug)]
 pub struct TcpPortContext {
@@ -69,10 +67,8 @@ impl TcpPortContext {
             None
         };
 
-        let (conf, mut opts) = read_system_conf().unwrap_or_default();
-        opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
         let resolver =
-            super::tokio_resolver(conf, opts).map_err(|err| Error::FailedToBuildDnsResolver {
+            DnsResolver::from_system_conf().map_err(|err| Error::FailedToBuildDnsResolver {
                 reason: err.to_string(),
             })?;
 
@@ -115,6 +111,7 @@ impl TcpPortContext {
     pub fn apply(&mut self, new: Self) {
         *self = Self {
             stop_notifier: self.stop_notifier.clone(),
+            resolver: self.resolver.clone(),
             ..new
         };
     }
@@ -338,14 +335,9 @@ async fn resolve_upstream(conn: &Connection, resolver: &Resolver) -> anyhow::Res
         },
         _ => unreachable!(),
     };
-    let resolved = resolver
-        .lookup_ip(&name)
-        .await?
-        .iter()
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("No IP address found for {name}"))?;
-    debug!(name, %resolved);
-    Ok((resolved, conn.port).into())
+    let target = resolver.resolve_addr(&name, conn.port).await?;
+    debug!(name, %target);
+    Ok(target)
 }
 
 /// Connects to the upstream server, sends the PROXY protocol header of the proxy, and runs the TLS

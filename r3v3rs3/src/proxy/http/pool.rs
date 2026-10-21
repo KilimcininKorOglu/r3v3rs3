@@ -1,3 +1,4 @@
+use crate::proxy::dns::DnsResolver;
 use crate::proxy::health::{Permit, UpstreamGroup};
 use crate::proxy::http::error::ProxyError;
 use crate::proxy::http::{HTTP2_MAX_FRAME_SIZE, hyper_tls::client::HttpsConnector};
@@ -35,7 +36,7 @@ use super::rewrite::Rewrite;
 use super::rewriter::ResponseRewriter;
 
 type ProxyBody = BoxBody<Bytes, anyhow::Error>;
-type ProxyClient = Client<HttpsConnector<HttpConnector>, ProxyBody>;
+type ProxyClient = Client<HttpsConnector<HttpConnector<DnsResolver>>, ProxyBody>;
 
 /// Marks a request for a plain HTTP upstream server that accepts HTTP/2 with prior knowledge.
 #[derive(Debug, Clone, Copy)]
@@ -59,13 +60,17 @@ impl fmt::Debug for ConnectionPool {
 }
 
 impl ConnectionPool {
-    pub fn new(tls_client_config: Arc<ClientConfig>, connect_timeout: Duration) -> Self {
+    pub fn new(
+        tls_client_config: Arc<ClientConfig>,
+        connect_timeout: Duration,
+        resolver: DnsResolver,
+    ) -> Self {
         let negotiated = with_alpn(&tls_client_config, &[b"h2", b"http/1.1"]);
         let http1 = with_alpn(&tls_client_config, &[b"http/1.1"]);
         Self {
-            client: build_client(negotiated.clone(), false, connect_timeout),
-            http1_client: build_client(http1, false, connect_timeout),
-            h2c_client: build_client(negotiated, true, connect_timeout),
+            client: build_client(negotiated.clone(), false, connect_timeout, resolver.clone()),
+            http1_client: build_client(http1, false, connect_timeout, resolver.clone()),
+            h2c_client: build_client(negotiated, true, connect_timeout, resolver),
         }
     }
 
@@ -682,14 +687,16 @@ pub struct UpstreamClients<'a> {
     certs: &'a CertList,
     default_config: Arc<ClientConfig>,
     clients: HashMap<(Option<ShortId>, Duration), UpstreamClient>,
+    dns: DnsResolver,
 }
 
 impl<'a> UpstreamClients<'a> {
-    pub fn new(certs: &'a CertList) -> Result<Self, Error> {
+    pub fn new(certs: &'a CertList, dns: DnsResolver) -> Result<Self, Error> {
         Ok(Self {
             certs,
             default_config: Arc::new(upstream_client_config(certs, None)?),
             clients: HashMap::new(),
+            dns,
         })
     }
 
@@ -717,7 +724,11 @@ impl<'a> UpstreamClients<'a> {
         };
         match config {
             Ok(config) => {
-                let pool = Arc::new(ConnectionPool::new(config.clone(), connect_timeout));
+                let pool = Arc::new(ConnectionPool::new(
+                    config.clone(),
+                    connect_timeout,
+                    self.dns.clone(),
+                ));
                 (config, Some(pool))
             }
             Err(err) => {
@@ -738,11 +749,15 @@ fn build_client(
     tls_client_config: Arc<ClientConfig>,
     http2_only: bool,
     connect_timeout: Duration,
+    resolver: DnsResolver,
 ) -> ProxyClient {
     Client::builder(TokioExecutor::new())
         .http2_only(http2_only)
         .http2_max_frame_size(Some(HTTP2_MAX_FRAME_SIZE as u32))
-        .build(HttpsConnector::new(tls_client_config).with_connect_timeout(connect_timeout))
+        .build(
+            HttpsConnector::new_with_resolver(tls_client_config, resolver)
+                .with_connect_timeout(connect_timeout),
+        )
 }
 
 fn empty_body() -> ProxyBody {

@@ -58,12 +58,23 @@ impl HttpsConnector<HttpConnector> {
         http.enforce_http(false);
         HttpsConnector::from((http, tls))
     }
+}
 
+impl<T> HttpsConnector<T> {
     /// Fails a connection with `io::ErrorKind::TimedOut` when the DNS lookup, the TCP connection
     /// and the TLS handshake take longer than `timeout`.
     pub fn with_connect_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = Some(timeout);
         self
+    }
+}
+
+impl<R> HttpsConnector<HttpConnector<R>> {
+    /// Construct a new `HttpsConnector` with a custom DNS resolver.
+    pub fn new_with_resolver(config: Arc<ClientConfig>, resolver: R) -> Self {
+        let mut http = HttpConnector::new_with_resolver(resolver);
+        http.enforce_http(false);
+        HttpsConnector::from((http, tokio_rustls::TlsConnector::from(config)))
     }
 }
 

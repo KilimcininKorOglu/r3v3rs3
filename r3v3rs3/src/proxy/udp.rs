@@ -1,8 +1,6 @@
+use super::dns::DnsResolver;
 use super::health::{self, GroupRegistry, Probe, UpstreamGroup};
 use super::{PortContextEvent, PortStatus, SocketState};
-use hickory_resolver::TokioResolver;
-use hickory_resolver::config::LookupIpStrategy;
-use hickory_resolver::system_conf::read_system_conf;
 use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing};
 use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
@@ -18,9 +16,8 @@ use tokio::task::JoinHandle;
 use tokio_rustls::rustls::pki_types::ServerName;
 use tracing::{Level, Span, debug, error, info, span, warn};
 
-type Resolver = TokioResolver;
+type Resolver = DnsResolver;
 
-const DNS_LOOKUP_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_SESSIONS: usize = 10_000;
 
 #[derive(Debug)]
@@ -41,10 +38,8 @@ impl UdpPortContext {
 
         info!("initializing udp proxy");
 
-        let (conf, mut opts) = read_system_conf().unwrap_or_default();
-        opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
         let resolver =
-            super::tokio_resolver(conf, opts).map_err(|err| Error::FailedToBuildDnsResolver {
+            DnsResolver::from_system_conf().map_err(|err| Error::FailedToBuildDnsResolver {
                 reason: err.to_string(),
             })?;
 
@@ -75,7 +70,10 @@ impl UdpPortContext {
     }
 
     pub fn apply(&mut self, new: Self) {
-        *self = new;
+        *self = Self {
+            resolver: self.resolver.clone(),
+            ..new
+        };
     }
 
     pub fn event(&mut self, event: PortContextEvent) {
@@ -266,32 +264,21 @@ fn same_servers(a: &[Connection], b: &[Connection]) -> bool {
             .all(|(a, b)| a.name == b.name && a.port == b.port)
 }
 
-/// Returns the address of the server. The address is resolved again when its DNS TTL expires.
+/// Returns the address of the server using DNS round-robin and TTL caching.
 async fn resolve(resolver: &Resolver, span: &Span, server: &mut Connection) -> Option<SocketAddr> {
-    if !server.ttl.elapsed().is_zero() {
-        let resolved = resolver.lookup_ip(server.name.to_str().as_ref()).await;
-        let (resolved, ttl): (anyhow::Result<SocketAddr>, Instant) = match resolved {
-            Ok(addrs) => match addrs.iter().next() {
-                Some(addr) => (Ok(SocketAddr::new(addr, server.port)), addrs.valid_until()),
-                None => (
-                    Err(anyhow::anyhow!(
-                        "no IP address found for {}",
-                        server.name.to_str()
-                    )),
-                    addrs.valid_until(),
-                ),
-            },
-            Err(e) => (Err(e.into()), Instant::now() + DNS_LOOKUP_RETRY_INTERVAL),
-        };
-        server.ttl = ttl;
-        match resolved {
-            Ok(addr) => server.addr = Some(addr),
-            Err(e) => span.in_scope(|| {
-                error!("failed to resolve {}: {}", server.name.to_str(), e);
-            }),
+    let host = server.name.to_str();
+    match resolver.resolve_addr(&host, server.port).await {
+        Ok(addr) => {
+            server.addr = Some(addr);
+            Some(addr)
+        }
+        Err(e) => {
+            span.in_scope(|| {
+                error!("failed to resolve {}: {}", host, e);
+            });
+            None
         }
     }
-    server.addr
 }
 
 /// The client, the server and the activity of a session.

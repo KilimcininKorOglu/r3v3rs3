@@ -448,6 +448,17 @@ upstream_servers = [
 ]
 ```
 
+### DNS-Based Upstream Load Balancing
+
+When an upstream server uses a hostname that resolves to multiple IP addresses (e.g. multi-record A/AAAA round-robin DNS, Docker Swarm tasks, Kubernetes headless services, or AWS Route53):
+
+- **Automatic Round Robin**: r3v3rs3 rotates across all resolved IP addresses in round-robin order for subsequent connections or requests.
+- **DNS TTL Caching**: The resolved IP addresses are cached in memory according to the DNS record TTL (`valid_until`), eliminating unnecessary DNS lookups on every request while honoring DNS expiration.
+- **Dynamic Re-resolution**: When the DNS TTL expires, r3v3rs3 automatically queries DNS again. Added, updated, or removed backend IP addresses are discovered dynamically without restarting the server or reloading the proxy configuration.
+- **Failover**: For HTTP and HTTPS upstreams, if the selected IP fails to connect, r3v3rs3 automatically falls back to the remaining resolved IPs in rotation order.
+- **Protocol Support**: DNS round-robin load balancing and TTL caching apply to HTTP/HTTPS upstream pools, TCP proxies, and UDP proxy sessions.
+- **Negative Caching**: If a DNS query fails (e.g. NXDOMAIN or DNS server timeout), r3v3rs3 caches the failure for 5 seconds to prevent DNS flood loops.
+
 ## Circuit Breaker
 
 The circuit breaker stops the traffic to a failing upstream server of an HTTP or TCP proxy for a time. It is off by default. Each server of each HTTP route has its own circuit. UDP proxies have no circuit breaker.

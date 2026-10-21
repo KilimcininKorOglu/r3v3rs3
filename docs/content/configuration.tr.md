@@ -448,6 +448,17 @@ upstream_servers = [
 ]
 ```
 
+### DNS Tabanlı Upstream Yük Dengeleme
+
+Bir upstream sunucusu birden fazla IP adresine çözümlenen bir ana makine adı kullandığında (ör. çoklu A/AAAA kayıtlı round-robin DNS, Docker Swarm servisleri, Kubernetes headless servisleri veya AWS Route53):
+
+- **Otomatik Round Robin**: r3v3rs3 ardışık bağlantılar veya istekler için çözümlenen IP adresleri arasında round-robin sırasıyla rotasyon yapar.
+- **DNS TTL Cache'i**: Çözümlenen IP adresleri, DNS kaydının TTL (Time To Live) süresi boyunca bellekte önbelleğe alınır; böylece her istekte gereksiz DNS sorgusu yapılmaz.
+- **Dinamik Yeniden Çözümleme**: DNS TTL süresi dolduğunda r3v3rs3 otomatik olarak DNS'i yeniden sorgular. Eklenen, güncellenen veya kaldırılan backend IP adresleri, sunucu yeniden başlatılmadan veya proxy yapılandırması yeniden yüklenmeden dinamik olarak algılanır.
+- **Failover**: HTTP ve HTTPS upstream'lerinde seçilen IP'ye bağlanılamazsa r3v3rs3 otomatik olarak rotasyon sırasındaki diğer çözümlenmiş IP'leri dener.
+- **Protokol Desteği**: DNS tabanlı round-robin yük dengeleme ve TTL cache'i; HTTP/HTTPS upstream bağlantı havuzlarında, TCP proxy'lerde ve UDP proxy oturumlarında geçerlidir.
+- **Negatif Cache**: Bir DNS sorgusu başarısız olursa (ör. NXDOMAIN veya DNS sunucu zaman aşımı), DNS sorgu döngülerini önlemek için hata 5 saniye boyunca önbelleğe alınır.
+
 ## Circuit Breaker
 
 Circuit breaker, HTTP veya TCP proxy'nin hata veren bir upstream sunucusuna giden istekleri ve bağlantıları bir süre durdurur. Varsayılan olarak kapalıdır. Her HTTP route'undaki her sunucunun kendi circuit'i vardır. UDP proxy'lerde circuit breaker yoktur.
