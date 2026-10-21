@@ -635,6 +635,28 @@ routes = [
 ]
 ```
 
+## gRPC & gRPC-Web Proxy Desteği
+
+r3v3rs3 yerel olarak HTTP/2 tabanlı gRPC trafiğini yönlendirir ve tarayıcı tabanlı web istemcilerinin arka plandaki gRPC servislerine sorunsuz bağlanabilmesi için otomatik **gRPC-Web proxy dönüştürme** (`grpc_web = true`) yeteneği sunar.
+
+Web tarayıcıları doğrudan HTTP/2 çerçevelemesi yapamaz ve HTTP yanıt trailer başlıklarını (`grpc-status`, `grpc-message`) okuyamaz. `grpc_web` etkinleştirildiğinde:
+- **CORS Ön Kontrolü (Preflight)**: Tarayıcılardan gelen `OPTIONS` preflight isteklerini gerekli `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers` (`content-type,x-grpc-web,x-user-agent`) ve `Access-Control-Expose-Headers` (`grpc-status,grpc-message`) başlıklarıyla anında yanıtlar.
+- **İstek Dönüştürme (Transpilation)**: Tarayıcıdan gelen `application/grpc-web` ve `application/grpc-web+proto` isteklerini standart `application/grpc` protokolüne dönüştürür ve upstream servise `TE: trailers` başlığını ekler.
+- **Trailer Çerçeveleme (Framing)**: Upstream gRPC sunucusunun döndürdüğü `grpc-status` ve `grpc-message` trailer başlıklarını HTTP yanıt akışının sonuna standart gRPC-Web trailer çerçevesi (`0x80` bayt bayrağı + 4-bayt uzunluk + başlık metni) olarak ekler.
+- **HTTP/2 Prior Knowledge (h2c)**: Düz HTTP gRPC sunucularına bağlanırken otomatik olarak HTTP/2 prior knowledge (`h2c`) kullanır.
+
+`grpc_web` proxy genelinde tanımlanabilir veya rota (route) bazında geçersiz kılınabilir:
+
+```toml
+[grpc-service]
+protocol = "https"
+vhosts = ["grpc.example.com"]
+grpc_web = true
+routes = [
+  { path = "/helloworld.Greeter/", servers = [{ url = "http://127.0.0.1:50051/" }] },
+]
+```
+
 ## Rate limit
 
 Her HTTP / HTTPS proxy'sinde bir istemci IP adresinin gönderebileceği istek sayısını sınırlayabilirsiniz. r3v3rs3 istekleri "İstemci IP adresi" bölümünde belirlenen adrese göre sayar.

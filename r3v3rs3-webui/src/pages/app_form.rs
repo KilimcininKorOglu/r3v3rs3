@@ -119,6 +119,7 @@ pub struct AppForm {
     pub buildkit_cache_from: String,
     pub buildkit_cache_to: String,
     pub bot_blocker: bool,
+    pub grpc_web: bool,
 }
 
 impl Default for AppForm {
@@ -176,6 +177,7 @@ impl Default for AppForm {
             buildkit_cache_from: String::new(),
             buildkit_cache_to: String::new(),
             bot_blocker: false,
+            grpc_web: false,
         }
     }
 }
@@ -334,6 +336,7 @@ impl AppForm {
                 .and_then(|b| b.cache_to.clone())
                 .unwrap_or_default(),
             bot_blocker: spec.bot_blocker,
+            grpc_web: spec.grpc_web,
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -431,6 +434,7 @@ impl AppForm {
             preview_of: None,
             buildkit: self.parse_buildkit(),
             bot_blocker: self.bot_blocker,
+            grpc_web: self.grpc_web,
         })
     }
 
@@ -800,6 +804,7 @@ pub fn fields_view(
             { git_config_view(locale, form) }
             { approval_view(locale, form) }
             { bot_blocker_view(locale, form) }
+            { grpc_web_view(locale, form) }
         </>
     }
 }
@@ -924,6 +929,27 @@ fn bot_blocker_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
                 <span class={LABEL_CLASS}>{locale.t("apps.bot_blocker")}</span>
             </label>
             <p class={HINT_CLASS}>{locale.t("apps.bot_blocker_hint")}</p>
+        </div>
+    }
+}
+
+fn grpc_web_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let form_handle = form.clone();
+    let checked = form.grpc_web;
+    let onchange = Callback::from(move |e: Event| {
+        if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+            let mut updated = (*form_handle).clone();
+            updated.grpc_web = target.checked();
+            form_handle.set(updated);
+        }
+    });
+    html! {
+        <div class="mt-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={checked} {onchange} class="w-4 h-4 text-blue-600 bg-neutral-100 border-neutral-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-neutral-800 focus:ring-2 dark:bg-neutral-700 dark:border-neutral-600" />
+                <span class={LABEL_CLASS}>{locale.t("apps.grpc_web")}</span>
+            </label>
+            <p class={HINT_CLASS}>{locale.t("apps.grpc_web_hint")}</p>
         </div>
     }
 }

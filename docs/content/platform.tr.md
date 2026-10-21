@@ -76,6 +76,7 @@ Bir uygulama bir image'ı, container'ın dinlediği portu ve uygulamaya yönlene
 - `restart` değeri `no`, `on-failure`, `unless-stopped` (varsayılan) veya `always` olur.
 - `auto_deploy` (isteğe bağlı, varsayılan `false`), container registry'de yeni bir image tag'i veya güncellenmiş digest tespit edildiğinde otomatik deployment'ı etkinleştirir.
 - `bot_blocker` (isteğe bağlı, varsayılan `false`), uygulamanın proxy route'ları için otomatik yapay zeka kazıyıcı ve bot korumasını etkinleştirir.
+- `grpc_web` (isteğe bağlı, varsayılan `false`), tarayıcı gRPC istemcileri için gRPC-Web dönüştürme desteğini etkinleştirir.
 
 Uygulamanın, alan adlarının veya ortam değişkenlerinin değişikliği sonraki deployment'ta geçerli olur.
 

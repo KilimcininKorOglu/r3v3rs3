@@ -55,6 +55,7 @@ pub fn app_proxy(
         load_balancing: app.spec.load_balancing.unwrap_or_default(),
         sticky: app.spec.sticky.clone().unwrap_or_default(),
         bot_blocker: app.spec.bot_blocker,
+        grpc_web: app.spec.grpc_web,
         ..Default::default()
     };
     let key = app.id.to_string();
@@ -141,6 +142,7 @@ mod tests {
             preview_of: None,
             buildkit: None,
             bot_blocker: false,
+            grpc_web: false,
         }
     }
 

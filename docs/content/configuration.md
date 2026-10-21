@@ -635,6 +635,28 @@ routes = [
 ]
 ```
 
+## gRPC & gRPC-Web Proxy
+
+r3v3rs3 natively proxies HTTP/2 gRPC traffic, and provides automated **gRPC-Web proxy translation** (`grpc_web = true`) for browser clients connecting to backend gRPC services.
+
+Web browsers cannot initiate native HTTP/2 arbitrary framing or inspect HTTP response trailers directly. When `grpc_web` is enabled:
+- **CORS Preflight Automation**: Automatically answers browser `OPTIONS` preflight requests with necessary `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers` (`content-type,x-grpc-web,x-user-agent`) and `Access-Control-Expose-Headers` (`grpc-status,grpc-message`) headers.
+- **Request Transpilation**: Converts incoming browser `application/grpc-web` and `application/grpc-web+proto` requests to standard `application/grpc` and ensures `TE: trailers` is sent upstream.
+- **Trailer Framing**: Automatically encodes upstream gRPC trailers (`grpc-status`, `grpc-message`) into standard gRPC-Web trailer frames (flag byte `0x80` + 4-byte length + header payload) at the end of the HTTP response body stream.
+- **HTTP/2 Prior Knowledge (h2c)**: Automatically enables HTTP/2 prior knowledge when connecting to plain HTTP gRPC backends.
+
+`grpc_web` can be configured globally on an HTTP proxy or overridden per route:
+
+```toml
+[grpc-service]
+protocol = "https"
+vhosts = ["grpc.example.com"]
+grpc_web = true
+routes = [
+  { path = "/helloworld.Greeter/", servers = [{ url = "http://127.0.0.1:50051/" }] },
+]
+```
+
 ## Rate Limit
 
 You can limit the request rate of each client IP address for each HTTP / HTTPS proxy. r3v3rs3 counts requests by the client IP that the "Client IP" section resolves.

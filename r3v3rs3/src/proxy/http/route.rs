@@ -125,6 +125,7 @@ impl Router {
                     require_client_cert: route.require_client_cert,
                     geoip: registries.geoip.clone(),
                     bot_blocker: route.bot_blocker.unwrap_or(http.bot_blocker),
+                    grpc_web: route.grpc_web.unwrap_or(http.grpc_web),
                 });
             }
         }
@@ -346,4 +347,5 @@ pub struct FilteredRoute {
     pub require_client_cert: bool,
     pub geoip: Arc<crate::proxy::geoip::GeoIpResolver>,
     pub bot_blocker: bool,
+    pub grpc_web: bool,
 }

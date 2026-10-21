@@ -146,6 +146,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                     maintenance: Default::default(),
                     error_pages: Vec::new(),
                     bot_blocker: false,
+                    grpc_web: false,
                 })),
                 ..Default::default()
             },
@@ -319,6 +320,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     maintenance: Default::default(),
                     error_pages: Vec::new(),
                     bot_blocker: false,
+                    grpc_web: false,
                 })),
                 ..Default::default()
             },
@@ -411,6 +413,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     maintenance: Default::default(),
                     error_pages: Vec::new(),
                     bot_blocker: false,
+                    grpc_web: false,
                 })),
                 ..Default::default()
             },

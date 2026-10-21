@@ -76,6 +76,7 @@ An app names an image, the port that the container listens on and the domains th
 - `restart` is `no`, `on-failure`, `unless-stopped` (the default) or `always`.
 - `auto_deploy` (optional, default `false`) enables automatic deployment when a newer image tag or updated digest is detected in the container registry.
 - `bot_blocker` (optional, default `false`) enables automated AI scraper and bot protection for the app's proxy routes.
+- `grpc_web` (optional, default `false`) enables gRPC-Web proxy translation for browser gRPC clients.
 
 A change of an app, of its domains or of its environment variables takes effect at the next deployment.
 

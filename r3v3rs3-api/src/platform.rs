@@ -795,6 +795,10 @@ pub struct AppSpec {
     /// When true, blocks automated AI scrapers and aggressive bots.
     #[serde(default, skip_serializing_if = "is_false")]
     pub bot_blocker: bool,
+
+    /// When true, enables gRPC-Web proxy translation for browser clients.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub grpc_web: bool,
 }
 
 /// Configuration for BuildKit remote builders and cache mounts.

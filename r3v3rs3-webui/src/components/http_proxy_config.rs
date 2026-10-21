@@ -79,6 +79,7 @@ struct ProxyForm {
     maintenance: MaintenanceForm,
     error_pages: Vec<ErrorPageForm>,
     bot_blocker: bool,
+    pub grpc_web: bool,
 }
 
 #[derive(Clone, PartialEq, Default)]
@@ -155,6 +156,7 @@ impl ProxyForm {
                 })
                 .collect(),
             bot_blocker: proxy.bot_blocker,
+            grpc_web: proxy.grpc_web,
         }
     }
 }
@@ -460,6 +462,8 @@ struct RouteForm {
     require_client_cert: bool,
     override_bot_blocker: bool,
     bot_blocker: bool,
+    override_grpc_web: bool,
+    grpc_web: bool,
 }
 
 impl RouteForm {
@@ -517,6 +521,8 @@ impl RouteForm {
             require_client_cert: route.require_client_cert,
             override_bot_blocker: route.bot_blocker.is_some(),
             bot_blocker: route.bot_blocker.unwrap_or_default(),
+            override_grpc_web: route.grpc_web.is_some(),
+            grpc_web: route.grpc_web.unwrap_or_default(),
         }
     }
 
@@ -557,6 +563,8 @@ impl RouteForm {
             require_client_cert: false,
             override_bot_blocker: false,
             bot_blocker: false,
+            override_grpc_web: false,
+            grpc_web: false,
         }
     }
 }
@@ -704,6 +712,9 @@ pub fn http_proxy_config(props: &Props) -> Html {
 
             { toggle(state_input(&form, checked, |form, value| form.bot_blocker = value), form.bot_blocker, locale.t("http_form.bot_blocker"), "my-6") }
             <p class={HINT_CLASS}>{locale.t("http_form.bot_blocker_hint")}</p>
+
+            { toggle(state_input(&form, checked, |form, value| form.grpc_web = value), form.grpc_web, locale.t("http_form.grpc_web"), "my-6") }
+            <p class={HINT_CLASS}>{locale.t("http_form.grpc_web_hint")}</p>
 
             <label class={LABEL_CLASS}>{locale.t("http_form.vhosts")}</label>
             <input type="text" autocapitalize="off" value={form.vhosts.clone()} onchange={state_input(&form, text, |form, value| form.vhosts = value)} class={INPUT_CLASS} placeholder="example.com" />
@@ -889,6 +900,7 @@ fn route_view(
                 { route_ip_filter_view(locale, routes, index, route) }
             }
             { route_bot_blocker_view(locale, routes, index, route) }
+            { route_grpc_web_view(locale, routes, index, route) }
             { route_rate_limit_view(locale, routes, index, route) }
             { route_concurrency_limit_view(locale, routes, index, route) }
             if route.access_list.is_none() {
@@ -1173,6 +1185,26 @@ fn route_bot_blocker_view(
         "http_form.route_bot_blocker_hint",
         html! {
             { toggle(route_input(routes, index, checked, |route, value| route.bot_blocker = value), route.bot_blocker, locale.t("http_form.bot_blocker"), "mt-4") }
+        },
+    )
+}
+
+fn route_grpc_web_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| {
+            route.override_grpc_web = value
+        }),
+        route.override_grpc_web,
+        "http_form.override_grpc_web",
+        "http_form.route_grpc_web_hint",
+        html! {
+            { toggle(route_input(routes, index, checked, |route, value| route.grpc_web = value), route.grpc_web, locale.t("http_form.grpc_web"), "mt-4") }
         },
     )
 }
@@ -2232,6 +2264,7 @@ fn get_proxy(
         maintenance,
         error_pages,
         bot_blocker: form.bot_blocker,
+        grpc_web: form.grpc_web,
     })
 }
 
@@ -2766,6 +2799,7 @@ fn parse_route(
         headers,
         require_client_cert: route.require_client_cert,
         bot_blocker: route.override_bot_blocker.then_some(route.bot_blocker),
+        grpc_web: route.override_grpc_web.then_some(route.grpc_web),
         ..target
     })
 }

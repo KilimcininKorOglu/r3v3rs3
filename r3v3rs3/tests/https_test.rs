@@ -89,6 +89,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                     maintenance: Default::default(),
                     error_pages: Vec::new(),
                     bot_blocker: false,
+                    grpc_web: false,
                 })),
                 ..Default::default()
             },
@@ -219,6 +220,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                     maintenance: Default::default(),
                     error_pages: Vec::new(),
                     bot_blocker: false,
+                    grpc_web: false,
                 })),
                 ..Default::default()
             },
@@ -330,6 +332,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                     maintenance: Default::default(),
                     error_pages: Vec::new(),
                     bot_blocker: false,
+                    grpc_web: false,
                 })),
                 ..Default::default()
             },
@@ -456,6 +459,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                     maintenance: Default::default(),
                     error_pages: Vec::new(),
                     bot_blocker: false,
+                    grpc_web: false,
                 })),
                 ..Default::default()
             },

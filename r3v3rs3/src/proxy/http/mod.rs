@@ -68,6 +68,7 @@ mod cookie;
 mod error;
 pub(crate) mod filter;
 mod fixed;
+pub(crate) mod grpc_web;
 mod header_rules;
 pub(crate) mod hyper_tls;
 mod mirror;
@@ -854,6 +855,10 @@ fn check_route_access<B>(
         let response = maintenance_response(&route.maintenance);
         return Err(EarlyExit::Respond(Box::new(response)));
     }
+    if route.grpc_web && grpc_web::is_grpc_web_preflight(req) {
+        let response = grpc_web::cors_preflight_response(req.headers());
+        return Err(EarlyExit::Respond(Box::new(response)));
+    }
     if route.bot_blocker && is_bot_request(req.headers()) {
         return Err(EarlyExit::Err(ProxyError::BotBlocked));
     }
@@ -976,9 +981,20 @@ where
         }
     };
     let response_rewriter = response_rewriter.sticky_cookie(sticky_cookie);
-    if route.h2c {
+    if route.h2c || route.grpc_web {
         req.extensions_mut().insert(UpstreamH2c);
     }
+    let response_rewriter = if route.grpc_web && grpc_web::is_grpc_web_request(req.headers()) {
+        let origin = req
+            .headers()
+            .get(hyper::header::ORIGIN)
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
+        grpc_web::prepare_grpc_request(req.headers_mut());
+        response_rewriter.grpc_web(origin)
+    } else {
+        response_rewriter
+    };
 
     info!(target: "r3v3rs3::access_log", remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
     let span: Span = span!(Level::INFO, "http", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());

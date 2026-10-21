@@ -1236,6 +1236,7 @@ mod tests {
                 preview_of: None,
                 buildkit: None,
                 bot_blocker: false,
+                grpc_web: false,
             },
         }
     }

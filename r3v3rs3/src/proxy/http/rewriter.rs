@@ -190,6 +190,7 @@ pub struct ResponseRewriter {
     /// the cache does not store a response with `Set-Cookie`.
     sticky_cookie: Option<CookieSlot>,
     error_pages: Arc<[CustomErrorPage]>,
+    grpc_web: Option<Option<String>>,
 }
 
 impl ResponseRewriter {
@@ -222,7 +223,11 @@ impl ResponseRewriter {
                         .insert(ALT_SVC, HeaderValue::from_str(&alt_svc)?);
                 }
                 self.apply_post_headers(res.headers_mut());
-                let res = res.map(|body| BoxBody::new(body));
+                let res = if let Some(origin) = &self.grpc_web {
+                    super::grpc_web::transform_response(res, origin.as_deref())
+                } else {
+                    res.map(BoxBody::new)
+                };
                 Ok(match &self.compression {
                     Some(compression) => compression.apply(res),
                     None => res,
@@ -376,6 +381,11 @@ impl ResponseRewriterBuilder {
 
     pub fn error_pages(mut self, pages: Arc<[CustomErrorPage]>) -> Self {
         self.inner.error_pages = pages;
+        self
+    }
+
+    pub fn grpc_web(mut self, origin: Option<String>) -> Self {
+        self.inner.grpc_web = Some(origin);
         self
     }
 

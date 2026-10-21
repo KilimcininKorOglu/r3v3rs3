@@ -301,6 +301,9 @@ pub struct HttpProxy {
     /// When true, blocks automated AI crawlers, scrapers and aggressive bots.
     #[serde(default, skip_serializing_if = "is_false")]
     pub bot_blocker: bool,
+    /// When true, translates gRPC-Web browser client requests and trailers for upstream gRPC servers.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub grpc_web: bool,
 }
 
 /// The default status code of a maintenance response (503 Service Unavailable).
@@ -519,6 +522,9 @@ pub struct Route {
     /// Overrides the proxy bot blocker setting for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bot_blocker: Option<bool>,
+    /// Overrides the proxy gRPC-Web setting for this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grpc_web: Option<bool>,
 }
 
 fn default_route_path() -> String {
