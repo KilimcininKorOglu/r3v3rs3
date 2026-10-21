@@ -933,26 +933,32 @@ pub async fn terminal(
 ) -> Result<Response, AppError> {
     let platform = state.platform(&caller, Permission::Admin).await?;
     let (container, exec) = platform
-        .app_terminal(id, query.cols(), query.rows())
+        .app_terminal(id, query.cols(), query.rows(), query.shell.as_deref())
         .await
         .map_err(platform_error)?;
+    let summary = match &query.shell {
+        Some(shell) if !shell.trim().is_empty() => format!("{container} ({shell})"),
+        _ => container,
+    };
     let record = AuditRecord::new(AuditAction::ExecApp)
         .id(id)
-        .summary(container);
+        .summary(summary);
     state
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(ws.on_upgrade(move |socket| terminal_bridge(socket, exec)))
 }
 
-/// The size of the terminal that the page opens.
-#[derive(Debug, Clone, Copy, Default, Deserialize, IntoParams)]
+/// The size and shell configuration of the terminal that the page opens.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct TerminalQuery {
     /// The columns of the terminal. The default is 80.
     pub cols: Option<u16>,
     /// The rows of the terminal. The default is 24.
     pub rows: Option<u16>,
+    /// Optional shell or CLI command (e.g. `sh`, `bash`, `zsh`, `psql`, `mysql`, `mariadb`, `redis-cli`, `mongosh`, `cli`).
+    pub shell: Option<String>,
 }
 
 impl TerminalQuery {

@@ -754,7 +754,13 @@ The log page shows the last 200 lines of stdout and stderr of the running contai
 
 ### Terminal
 
-An admin account sees a **Terminal** link on the page of an app. It opens a shell in the running container, so commands run inside it, and a resize of the window resizes the terminal of the container. The terminal works only while the app runs on the local Docker Engine of the r3v3rs3 server; an app on an agent target has no terminal yet. Every terminal that an account opens goes into the audit log as `exec_app`.
+An admin account sees a **Terminal** link on the page of an app, as well as a dedicated **CLI** button next to each running database on the Databases page. It opens an interactive terminal in the running container over a WebSocket connection, and a resize of the window resizes the terminal of the container. The terminal toolbar offers quick shell selection and session controls:
+
+- **Shell Selection**: Switch between `/bin/sh`, `/bin/bash`, `/bin/zsh`, or enter custom commands. If an advanced shell like `bash` or `zsh` is not installed in the target container (such as minimal Alpine-based images), the system automatically prints an informative notice and falls back to `/bin/sh` without interrupting the session.
+- **Database CLI Shortcuts**: When opening the terminal of a managed database (PostgreSQL, MySQL, MariaDB, Redis, MongoDB), the page presents a dedicated database CLI shortcut (`psql`, `mysql`, `mariadb`, `redis-cli`, `mongosh`). Authentication credentials and environment variables are automatically applied, dropping the operator directly into the native database prompt.
+- **Session History & Actions**: The **Copy Output** button extracts the active terminal buffer directly to the clipboard, and **Clear** clears the current screen output.
+
+The terminal works while the app runs on the local Docker Engine of the r3v3rs3 server; an app on an agent target has no terminal yet. Every terminal that an account opens goes into the audit log as `exec_app`, including the chosen shell or CLI tool.
 
 ### Files
 
@@ -884,7 +890,7 @@ The **Backups** page (`/backups`) provides a centralized management console for 
 | `GET /api/apps/{id}/logs?tail=200` | Read | The last lines of the container log of the running deployment, from 1 to 1000 lines. `running` is `false` when the app has no running deployment. |
 | `GET /api/apps/{id}/logs/live?tail=200` | Read | Upgrades the connection to a WebSocket live stream of the running container log. |
 | `POST /api/apps/{id}/deploy` | Edit | Starts a deployment. |
-| `GET /api/apps/{id}/terminal` | Admin | Switches the connection to a WebSocket terminal of the running container. |
+| `GET /api/apps/{id}/terminal?shell=` | Admin | Switches the connection to a WebSocket terminal of the running container, with optional shell or database CLI selection. |
 | `GET /api/apps/{id}/files?path=` | Admin | The entries of a directory inside a volume of the running container. |
 | `GET /api/apps/{id}/files/download?path=` | Admin | The content of a file inside a volume. |
 | `PUT /api/apps/{id}/files?path=` | Admin | Writes the request body into a file inside a writable volume. |

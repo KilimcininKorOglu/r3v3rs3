@@ -754,7 +754,13 @@ Log sayfası çalışan container'ın stdout ve stderr çıktısının son 200 s
 
 ### Terminal
 
-Admin hesap, uygulama sayfasında bir **Terminal** linki görür. Link, çalışan container içinde bir shell açar; komutlar container içinde çalışır ve pencerenin boyut değişikliği container terminalinin boyutunu da değiştirir. Terminal yalnız uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir; agent hedefindeki bir uygulamanın henüz terminali yoktur. Bir hesabın açtığı her terminal audit log'una `exec_app` olarak geçer.
+Admin hesap, uygulama sayfasında bir **Terminal** linki, ayrıca Veritabanları sayfasında çalışan her veritabanının yanında doğrudan bir **CLI** butonu görür. Link, WebSocket bağlantısı üzerinden çalışan container içinde etkileşimli bir terminal açar; pencerenin boyut değişikliği container terminalinin boyutunu da değiştirir. Terminal üst araç çubuğu hızlı kabuk seçimi ve oturum kontrolleri sunar:
+
+- **Kabuk Seçimi (Shell Selection)**: `/bin/sh`, `/bin/bash`, `/bin/zsh` arasında tek tıkla geçiş yapabilir veya özel komut girebilirsiniz. Hedef konteynerde `bash` veya `zsh` gibi gelişmiş bir kabuk yüklü değilse (minimalist Alpine tabanlı kalıplar gibi), sistem oturumu koparmadan bilgilendirici bir uyarı yazdırır ve otomatik olarak `/bin/sh` kabuğuna geri döner.
+- **Veritabanı CLI Kısayolları**: Yönetilen bir veritabanının (PostgreSQL, MySQL, MariaDB, Redis, MongoDB) terminaline girildiğinde veya Veritabanları sayfasından doğrudan tıklandığında, ilgili veritabanı motorunun CLI kısayolu (`psql`, `mysql`, `mariadb`, `redis-cli`, `mongosh`) hazır olarak gelir. Konteyner ortam değişkenlerindeki kimlik ve parola bilgileri otomatik uygulanarak doğrudan ilgili konsola bağlanılır.
+- **Oturum Geçmişi & Aksiyonlar**: **Çıktıyı Kopyala** butonu terminal tamponundaki tüm metni doğrudan panoya kopyalar; **Temizle** butonu ise ekran çıktısını anında sıfırlar.
+
+Terminal, uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir; agent hedefindeki bir uygulamanın henüz terminali yoktur. Bir hesabın açtığı her terminal audit log'una, seçilen kabuk veya CLI aracı bilgisiyle birlikte `exec_app` olarak geçer.
 
 ### Dosyalar
 
@@ -882,7 +888,7 @@ Yönetim altındaki **Webhook'lar** sayfası, giden olay bildirim hedeflerini y�
 | `GET /api/apps/{id}/logs?tail=200` | Read | Çalışan deployment'ın container log'unun son satırları, 1 ile 1000 satır arası. Uygulamanın çalışan deployment'ı yoksa `running` değeri `false` olur. |
 | `GET /api/apps/{id}/logs/live?tail=200` | Read | Bağlantıyı çalışan container'ın log'unun canlı WebSocket akışına çevirir. |
 | `POST /api/apps/{id}/deploy` | Edit | Bir deployment başlatır. |
-| `GET /api/apps/{id}/terminal` | Admin | Bağlantıyı çalışan container'ın WebSocket terminaline çevirir. |
+| `GET /api/apps/{id}/terminal?shell=` | Admin | Bağlantıyı çalışan container'ın WebSocket terminaline çevirir (isteğe bağlı kabuk veya DB CLI aracı seçimiyle). |
 | `GET /api/apps/{id}/files?path=` | Admin | Çalışan container'ın bir volume'ündeki dizinin girdilerini döndürür. |
 | `GET /api/apps/{id}/files/download?path=` | Admin | Bir volume içindeki dosyanın içeriğini döndürür. |
 | `PUT /api/apps/{id}/files?path=` | Admin | İstek gövdesini yazılabilir bir volume içindeki dosyaya yazar. |

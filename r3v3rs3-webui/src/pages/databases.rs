@@ -327,6 +327,36 @@ fn admin_ui_store_id(engine: &str) -> &'static str {
 
 fn db_actions(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
     let is_replica = app.spec.replica_of.is_some();
+    let delete = ctx.can_edit.then(|| {
+        let question = ctx
+            .locale
+            .tf("databases.confirm_delete", &[("name", app.name.as_str())]);
+        delete_on_click(
+            ctx.locale,
+            question,
+            format!("/databases/{}", app.id),
+            ctx.reload.clone(),
+        )
+    });
+    html! {
+        <td class="py-1.5 text-right">
+            <Link<Route> to={Route::DatabaseBackups { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
+                {ctx.locale.t("backups.nav")}
+            </Link<Route>>
+            { render_extra_actions(ctx, app, is_replica) }
+            <Link<Route> to={Route::AppView { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
+                {ctx.locale.t("common.view")}
+            </Link<Route>>
+            if let Some(delete) = delete {
+                <a class="text-red-400 hover:text-red-300 cursor-pointer" onclick={delete}>
+                    {ctx.locale.t("common.delete")}
+                </a>
+            }
+        </td>
+    }
+}
+
+fn render_extra_actions(ctx: &RowContext<'_>, app: &AppEntry, is_replica: bool) -> Html {
     let admin_ui_btn = app.spec.database.as_deref().map(|engine| {
         let store = admin_ui_store_id(engine).to_string();
         html! {
@@ -335,6 +365,16 @@ fn db_actions(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
                 classes="text-sm text-purple-400 hover:text-purple-300 mr-3"
             >
                 {ctx.locale.t("databases.admin_ui")}
+            </Link<Route>>
+        }
+    });
+    let terminal_btn = (app.target.to_string() == r3v3rs3_api::platform::LOCAL_TARGET).then(|| {
+        html! {
+            <Link<Route>
+                to={Route::AppTerminal { id: app.id }}
+                classes="text-sm text-amber-400 hover:text-amber-300 cursor-pointer mr-3"
+            >
+                {ctx.locale.t("databases.cli")}
             </Link<Route>>
         }
     });
@@ -358,22 +398,11 @@ fn db_actions(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
             ctx.notice.clone(),
         )
     });
-    let delete = ctx.can_edit.then(|| {
-        let question = ctx
-            .locale
-            .tf("databases.confirm_delete", &[("name", app.name.as_str())]);
-        delete_on_click(
-            ctx.locale,
-            question,
-            format!("/databases/{}", app.id),
-            ctx.reload.clone(),
-        )
-    });
     html! {
-        <td class="py-1.5 text-right">
-            <Link<Route> to={Route::DatabaseBackups { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
-                {ctx.locale.t("backups.nav")}
-            </Link<Route>>
+        <>
+            if let Some(cli) = terminal_btn {
+                {cli}
+            }
             if let Some(admin_ui) = admin_ui_btn {
                 {admin_ui}
             }
@@ -387,15 +416,7 @@ fn db_actions(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
                     {ctx.locale.t("databases.clone")}
                 </a>
             }
-            <Link<Route> to={Route::AppView { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
-                {ctx.locale.t("common.view")}
-            </Link<Route>>
-            if let Some(delete) = delete {
-                <a class="text-red-400 hover:text-red-300 cursor-pointer" onclick={delete}>
-                    {ctx.locale.t("common.delete")}
-                </a>
-            }
-        </td>
+        </>
     }
 }
 

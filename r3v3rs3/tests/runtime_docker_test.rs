@@ -450,7 +450,7 @@ async fn a_file_round_trips_through_the_archive() -> anyhow::Result<()> {
 /// Opens a terminal in the container, runs `echo` through it and reads the answer back.
 async fn exec_echo(runtime: &DockerRuntime, names: &Names) -> anyhow::Result<()> {
     use tokio::io::{AsyncRead, AsyncWrite};
-    let mut handle = runtime.exec(&names.container, 80, 24).await?;
+    let mut handle = runtime.exec(&names.container, 80, 24, &[]).await?;
     handle.stream.write_all(b"echo r3v3rs3-exec-ok\n").await?;
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 512];

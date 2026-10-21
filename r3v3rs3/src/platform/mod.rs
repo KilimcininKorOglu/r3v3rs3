@@ -32,6 +32,7 @@ pub mod rotate;
 mod s3;
 pub mod scheduler;
 pub mod store;
+pub mod terminal;
 pub mod volume_backup;
 pub mod webhook;
 
@@ -818,6 +819,7 @@ impl Platform {
         id: ShortId,
         cols: u16,
         rows: u16,
+        shell: Option<&str>,
     ) -> anyhow::Result<(String, ExecHandle)> {
         let app = self.app(id).await?;
         if !is_local(app.target) {
@@ -830,7 +832,9 @@ impl Platform {
             .into());
         };
         let name = proxy::container_name(id, deployment)?;
-        let exec = self.local.exec(&name, cols, rows).await?;
+        let cmd = terminal::resolve_shell_command(shell, app.spec.database.as_deref());
+        let cmd_refs: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
+        let exec = self.local.exec(&name, cols, rows, &cmd_refs).await?;
         Ok((name.to_string(), exec))
     }
 

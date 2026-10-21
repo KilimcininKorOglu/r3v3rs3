@@ -124,8 +124,9 @@ pub trait ContainerRuntime: Send + Sync {
         name: &ContainerName,
         cols: u16,
         rows: u16,
+        cmd: &[&str],
     ) -> anyhow::Result<docker::ExecHandle> {
-        let _ = (name, cols, rows);
+        let _ = (name, cols, rows, cmd);
         anyhow::bail!("the runtime does not support a terminal");
     }
 

@@ -255,9 +255,15 @@ impl DockerRuntime {
         name: &ContainerName,
         cols: u16,
         rows: u16,
+        cmd: &[&str],
     ) -> anyhow::Result<ExecHandle> {
         let Some(container) = self.find_container(name).await? else {
             bail!("the container {name} is not running");
+        };
+        let cmd_vec: Vec<&str> = if cmd.is_empty() {
+            vec!["/bin/sh"]
+        } else {
+            cmd.to_vec()
         };
         let response = self
             .send(
@@ -268,7 +274,7 @@ impl DockerRuntime {
                     "AttachStdout": true,
                     "AttachStderr": true,
                     "Tty": true,
-                    "Cmd": ["/bin/sh"],
+                    "Cmd": cmd_vec,
                     "Env": ["TERM=xterm-256color"],
                 })),
                 &[],
