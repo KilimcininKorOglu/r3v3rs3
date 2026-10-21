@@ -19,6 +19,56 @@ pub enum Command {
     Agent(AgentArgs),
     /// Serve the listeners that a master hands over over IPC
     Worker(WorkerArgs),
+    /// Create or restore an encrypted disaster recovery bundle
+    DisasterRecovery(DisasterRecoveryArgs),
+}
+
+#[derive(Args)]
+pub struct DisasterRecoveryArgs {
+    #[command(subcommand)]
+    pub action: DisasterRecoveryAction,
+}
+
+#[derive(Subcommand)]
+pub enum DisasterRecoveryAction {
+    /// Create a disaster recovery backup bundle of all platform configuration and databases
+    Backup(DisasterRecoveryBackupCliArgs),
+    /// Restore all platform configuration and databases from a disaster recovery backup bundle
+    Restore(DisasterRecoveryRestoreCliArgs),
+}
+
+#[derive(Args)]
+pub struct DisasterRecoveryBackupCliArgs {
+    /// Path where the encrypted .r3bundle file will be written
+    #[clap(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Passphrase to encrypt the bundle with AES-256-GCM
+    #[clap(short, long, env = "R3V3RS3_DR_PASSPHRASE")]
+    pub passphrase: Option<String>,
+
+    /// Config directory containing r3v3rs3 configuration and databases
+    #[clap(short, long, env = "R3V3RS3_CONFIG_DIR")]
+    pub config_dir: Option<PathBuf>,
+
+    /// Replicate the backup to configured S3 storage
+    #[clap(long, default_value_t = false)]
+    pub upload_s3: bool,
+}
+
+#[derive(Args)]
+pub struct DisasterRecoveryRestoreCliArgs {
+    /// Path to the encrypted .r3bundle file
+    #[clap(short, long)]
+    pub file: PathBuf,
+
+    /// Passphrase to decrypt the bundle
+    #[clap(short, long, env = "R3V3RS3_DR_PASSPHRASE")]
+    pub passphrase: Option<String>,
+
+    /// Target config directory where configuration and databases will be restored
+    #[clap(short, long, env = "R3V3RS3_CONFIG_DIR")]
+    pub config_dir: Option<PathBuf>,
 }
 
 #[derive(Args)]

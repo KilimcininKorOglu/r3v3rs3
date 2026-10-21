@@ -317,6 +317,37 @@ pub struct VolumeBackupEntry {
     pub created_at: i64,
 }
 
+/// One stored disaster recovery backup of the entire platform configuration and database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DisasterRecoveryBackupEntry {
+    pub id: String,
+    pub created_at: i64,
+    pub size: u64,
+    pub sha256: String,
+    pub encrypted: bool,
+    pub s3_replicated: bool,
+    pub files_count: usize,
+}
+
+/// Request to create a new disaster recovery backup.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CreateDisasterRecoveryRequest {
+    /// Passphrase to encrypt the backup bundle with AES-256-GCM.
+    #[serde(default)]
+    pub passphrase: Option<String>,
+    /// Whether to replicate the backup to configured S3 storage.
+    #[serde(default = "default_true")]
+    pub upload_s3: bool,
+}
+
+/// Request to restore platform state from a disaster recovery backup.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RestoreDisasterRecoveryRequest {
+    /// Passphrase used to decrypt the backup bundle.
+    #[serde(default)]
+    pub passphrase: Option<String>,
+}
+
 /// One archived Write-Ahead Logging (WAL) or binary log segment of a database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct WalSegment {

@@ -61,6 +61,7 @@ mod certs;
 mod config;
 mod dashboard;
 mod databases;
+mod disaster_recovery;
 mod discovery;
 mod dns_credentials;
 mod git;
@@ -450,6 +451,15 @@ fn platform_routes() -> OpenApiRouter<AppState> {
         .nest(
             "/backup-config",
             OpenApiRouter::new().routes(routes!(backups::get_config, backups::put_config)),
+        )
+        .nest(
+            "/disaster-recovery",
+            OpenApiRouter::new()
+                .routes(routes!(disaster_recovery::list, disaster_recovery::create))
+                .routes(routes!(disaster_recovery::download))
+                .routes(routes!(disaster_recovery::delete))
+                .routes(routes!(disaster_recovery::restore))
+                .routes(routes!(disaster_recovery::restore_upload)),
         )
         .nest(
             "/git/connections",

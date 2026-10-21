@@ -46,6 +46,51 @@ $ cat r3v3rs3-backup.json | r3v3rs3-cli config restore -f -
 - `GET /api/config/backup`: Returns the complete `ConfigBackup` object. Requires `admin` permission.
 - `POST /api/config/restore`: Restores the configuration from a `ConfigBackup` JSON payload. Hot-reloads all ports, proxies, access lists, and settings immediately. Requires `admin` permission and records an entry in the audit log.
 
+## Disaster Recovery & Encrypted Platform Snapshots (S3)
+
+Unlike standard JSON configuration backups, **Disaster Recovery Snapshots** (`.r3bundle`) capture the full operational state of r3v3rs3 and its Coolify-like deployment platform in a single, AES-256-GCM encrypted bundle:
+
+- **Complete State Included**: Contains `platform.db` (SQLite database with all apps, deployments, databases, and environment variables), `platform.key`, cluster sealing keys (`keys/`), TLS certificates and private keys (`certs/`), user accounts (`accounts.toml`), and all configuration files (`config.toml`, `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`).
+- **AES-256-GCM Encryption**: Encrypted with an optional user-defined passphrase using 10,000 rounds of salted SHA-256 key derivation. Unencrypted data never leaves the server memory.
+- **Automatic S3 Replication**: When remote S3 storage is configured in database backup settings, disaster recovery backups are automatically uploaded to `{prefix}/disaster-recovery/` in the remote bucket.
+- **Single-Command Disaster Recovery**: Allows restoring the entire system onto a completely fresh server with a single CLI command.
+
+### WebUI
+
+Open the **Settings** page and navigate to **Disaster Recovery & Encrypted Snapshots (S3)**:
+- Enter an optional encryption **Passphrase** and check **Upload to remote S3 storage**.
+- Click **Create Encrypted Snapshot** to create a point-in-time `.r3bundle`.
+- Download, restore, or delete existing snapshots from the table.
+- Click **Upload & Restore .r3bundle** to upload an existing bundle file and restore the entire server state with confirmation.
+
+### CLI (Single-Command Restoration on a New Server)
+
+On a new server after installing `r3v3rs3`:
+
+```bash
+# Restore entire platform state from an encrypted bundle
+$ r3v3rs3 disaster-recovery restore --file backup.r3bundle --passphrase "my-secret-passphrase"
+
+# Start the server with all apps, certs, and accounts intact
+$ r3v3rs3 start
+```
+
+To create a disaster recovery backup via CLI:
+
+```bash
+# Create backup bundle with passphrase
+$ r3v3rs3 disaster-recovery backup --output /var/backups/r3v3rs3.r3bundle --passphrase "my-secret-passphrase"
+```
+
+### REST API
+
+- `GET /api/disaster-recovery/backups`: Lists all disaster recovery snapshots with sizes, timestamps, and S3 status.
+- `POST /api/disaster-recovery/backups`: Creates a new encrypted snapshot with optional passphrase and S3 replication.
+- `GET /api/disaster-recovery/backups/{id}/download`: Downloads the `.r3bundle` file.
+- `DELETE /api/disaster-recovery/backups/{id}`: Deletes a disaster recovery backup.
+- `POST /api/disaster-recovery/backups/{id}/restore`: Restores from a stored snapshot ID.
+- `POST /api/disaster-recovery/restore-upload`: Restores from an uploaded `.r3bundle` payload with `X-Passphrase` header.
+
 # Ports
 
 A proxy needs a port. Add one in the "Ports" section.

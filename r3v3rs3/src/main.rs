@@ -42,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
         Command::AddUser(args) => add_user(args).await?,
         Command::Agent(args) => agent(args).await?,
         Command::Worker(args) => worker(args).await?,
+        Command::DisasterRecovery(args) => disaster_recovery_cli(args).await?,
     }
 
     Ok(())
@@ -443,4 +444,61 @@ fn get_log_dir(dir: Option<PathBuf>) -> anyhow::Result<PathBuf> {
         })?;
         Ok(dir.data_dir().join("logs"))
     }
+}
+
+async fn disaster_recovery_cli(args: r3v3rs3::args::DisasterRecoveryArgs) -> anyhow::Result<()> {
+    match args.action {
+        r3v3rs3::args::DisasterRecoveryAction::Backup(cli_args) => {
+            cli_backup_action(cli_args).await?;
+        }
+        r3v3rs3::args::DisasterRecoveryAction::Restore(cli_args) => {
+            cli_restore_action(cli_args).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn cli_backup_action(
+    cli_args: r3v3rs3::args::DisasterRecoveryBackupCliArgs,
+) -> anyhow::Result<()> {
+    let config_dir = get_config_dir(cli_args.config_dir)?;
+    let passphrase = match cli_args.passphrase {
+        Some(p) => p,
+        None => rpassword::prompt_password("Enter encryption passphrase (or blank for none): ")?,
+    };
+    let (entry, path) = r3v3rs3::platform::disaster_recovery::run_cli_backup(
+        &config_dir,
+        cli_args.output.as_deref(),
+        &passphrase,
+        cli_args.upload_s3,
+    )
+    .await?;
+    println!("Disaster recovery backup created successfully:");
+    println!("  ID:          {}", entry.id);
+    println!("  Path:        {}", path.display());
+    println!("  Size:        {} bytes", entry.size);
+    println!("  SHA-256:     {}", entry.sha256);
+    println!("  Files Count: {}", entry.files_count);
+    Ok(())
+}
+
+async fn cli_restore_action(
+    cli_args: r3v3rs3::args::DisasterRecoveryRestoreCliArgs,
+) -> anyhow::Result<()> {
+    let config_dir = get_config_dir(cli_args.config_dir)?;
+    let passphrase = match cli_args.passphrase {
+        Some(p) => p,
+        None => rpassword::prompt_password("Enter decryption passphrase: ")?,
+    };
+    let restored = r3v3rs3::platform::disaster_recovery::run_cli_restore(
+        &cli_args.file,
+        &config_dir,
+        &passphrase,
+    )
+    .await?;
+    println!("Disaster recovery restore completed successfully!");
+    println!("  Files restored: {}", restored);
+    println!("  Config dir:     {}", config_dir.display());
+    println!("\nYou can now start the server with: r3v3rs3 start");
+    Ok(())
 }

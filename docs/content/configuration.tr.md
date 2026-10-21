@@ -46,6 +46,51 @@ $ cat r3v3rs3-backup.json | r3v3rs3-cli config restore -f -
 - `GET /api/config/backup`: Tam `ConfigBackup` nesnesini döner. `admin` yetkisi gerektirir.
 - `POST /api/config/restore`: `ConfigBackup` JSON yükünden yapılandırmayı geri yükler. Bütün portları, proxy'leri, erişim listelerini ve ayarları kesinti olmadan anında yeniden yükler. `admin` yetkisi gerektirir ve denetim kaydına (`RestoreConfig`) işlenir.
 
+## Felaket Kurtarma & Şifreli Platform Yedekleri (S3)
+
+Standart JSON yapılandırma yedeklerinden farklı olarak, **Felaket Kurtarma Paketleri** (`.r3bundle`), r3v3rs3'ün ve Coolify benzeri uygulama dağıtım platformunun tüm çalışma durumunu AES-256-GCM ile şifrelenmiş tek bir arşivde saklar:
+
+- **Tüm Durum Dahil**: `platform.db` (tüm uygulamaları, dağıtımları, veritabanlarını ve ortam değişkenlerini barındıran SQLite veritabanı), `platform.key`, kümeleme mühür anahtarları (`keys/`), TLS sertifikaları ve özel anahtarları (`certs/`), kullanıcı hesapları (`accounts.toml`) ve tüm yapılandırma dosyaları (`config.toml`, `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`) eksiksiz olarak arşivlenir.
+- **AES-256-GCM Şifreleme**: İsteğe bağlı bir parola ve tuzlu SHA-256 anahtar türetimi (10.000 tur) ile AES-256-GCM standardında şifrelenir. Şifrelenmemiş veriler asla sunucu belleği dışına çıkmaz.
+- **Otomatik S3 Senkronizasyonu**: Veritabanı yedekleme ayarlarında S3 uzak depolama yapılandırıldığında, oluşturulan felaket kurtarma yedekleri otomatik olarak uzak bucket içindeki `{prefix}/disaster-recovery/` altına yüklenir.
+- **Tek Komutla Felaket Kurtarma**: Sıfırdan kurulan yeni bir sunucuya tek bir komutla tüm platformu ve verileri eksiksiz aktarabilme imkanı sunar.
+
+### WebUI
+
+**Ayarlar** sayfasını açın ve **Felaket Kurtarma & Şifreli Platform Yedekleri (S3)** kartına gidin:
+- İsteğe bağlı bir şifreleme **Parolası** girin ve **Uzak S3 depolamasına yükle** seçeneğini işaretleyin.
+- **Şifreli Yedek Oluştur** düğmesine tıklayarak anlık bir `.r3bundle` paketi oluşturun.
+- Tablo üzerinden mevcut yedekleri indirin, geri yükleyin veya silin.
+- **.r3bundle Yükle ve Geri Yükle** seçeneğiyle harici bir yedek dosyasını yükleyip tüm platform durumunu onay kutusu ile geri yükleyin.
+
+### CLI (Yeni Sunucuda Tek Komutla Geri Yükleme)
+
+Yeni bir sunucuda `r3v3rs3` kurulduktan sonra:
+
+```bash
+# Şifreli yedek paketinden tüm platform durumunu geri yükleme
+$ r3v3rs3 disaster-recovery restore --file backup.r3bundle --passphrase "gizli-parolam"
+
+# Sunucuyu tüm uygulamalar, sertifikalar ve hesaplarla başlatma
+$ r3v3rs3 start
+```
+
+CLI üzerinden anlık felaket kurtarma yedeği alma:
+
+```bash
+# Parola ile felaket kurtarma yedeği oluşturma
+$ r3v3rs3 disaster-recovery backup --output /var/backups/r3v3rs3.r3bundle --passphrase "gizli-parolam"
+```
+
+### REST API
+
+- `GET /api/disaster-recovery/backups`: Boyutları, zaman damgaları ve S3 durumuyla felaket kurtarma yedeklerini listeler.
+- `POST /api/disaster-recovery/backups`: İsteğe bağlı parola ve S3 yüklemesiyle yeni bir şifreli yedek oluşturur.
+- `GET /api/disaster-recovery/backups/{id}/download`: `.r3bundle` dosyasını indirir.
+- `DELETE /api/disaster-recovery/backups/{id}`: Bir felaket kurtarma yedeğini siler.
+- `POST /api/disaster-recovery/backups/{id}/restore`: Saklanan bir yedek kimliğinden geri yükleme yapar.
+- `POST /api/disaster-recovery/restore-upload`: `X-Passphrase` başlığıyla yüklenen bir `.r3bundle` paketinden geri yükleme yapar.
+
 # Portlar
 
 Proxy eklemeden önce dinlenecek bir port bağlamanız gerekir. Bunu "Portlar" bölümünden yapabilirsiniz.

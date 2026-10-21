@@ -10,6 +10,7 @@ mod build;
 mod compose;
 mod connections;
 pub mod deploy;
+pub mod disaster_recovery;
 #[cfg(test)]
 pub(crate) mod fake;
 mod github_app;

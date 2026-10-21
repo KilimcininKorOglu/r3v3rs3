@@ -19,7 +19,10 @@ use r3v3rs3_api::{
     git_connection::PublicUrl,
     i18n::Locale,
     id::ShortId,
-    platform::PlatformConfig,
+    platform::{
+        CreateDisasterRecoveryRequest, DisasterRecoveryBackupEntry, PlatformConfig,
+        RestoreDisasterRecoveryRequest,
+    },
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
@@ -349,6 +352,7 @@ pub fn settings() -> Html {
         <WorkerStatusCard />
         <BannedIpsCard />
         <BackupRestoreCard />
+        <DisasterRecoveryCard />
         <div ref={upgrade_card_ref}>
             <UpgradeCard />
         </div>
@@ -1691,6 +1695,377 @@ async fn handle_restore_payload(
                 notice.set(Some(Notice::Success(
                     locale.t("settings.restore_success").to_string(),
                 )));
+            }
+            Err(err) => notice.set(Some(Notice::Failed(err))),
+        },
+        Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
+    }
+}
+
+/// Fetches disaster recovery backups.
+async fn fetch_dr_backups(
+    locale: Locale,
+    backups: UseStateHandle<Vec<DisasterRecoveryBackupEntry>>,
+) {
+    let req = Request::get(&format!("{API_ENDPOINT}/disaster-recovery/backups"));
+    if let Ok(built) = req.build()
+        && let Ok(res) = send_request(locale, built).await
+        && let Ok(list) = res.json::<Vec<DisasterRecoveryBackupEntry>>().await
+    {
+        backups.set(list);
+    }
+}
+
+async fn execute_dr_create(
+    locale: Locale,
+    body: CreateDisasterRecoveryRequest,
+    notice: UseStateHandle<Option<Notice>>,
+    load_backups: Callback<()>,
+) {
+    let req = Request::post(&format!("{API_ENDPOINT}/disaster-recovery/backups"))
+        .header("content-type", "application/json")
+        .json(&body);
+    match req {
+        Ok(built) => match send_request(locale, built).await {
+            Ok(_) => load_backups.emit(()),
+            Err(err) => notice.set(Some(Notice::Failed(err))),
+        },
+        Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
+    }
+}
+
+/// The card for disaster recovery backup and full-bundle restore.
+#[function_component(DisasterRecoveryCard)]
+fn disaster_recovery_card() -> Html {
+    let locale = use_locale();
+    let notice = use_state(|| Option::<Notice>::None);
+    let backups = use_state(Vec::<DisasterRecoveryBackupEntry>::new);
+    let passphrase = use_state(String::new);
+    let upload_s3 = use_state(|| true);
+    let is_creating = use_state(|| false);
+    let is_restoring = use_state(|| false);
+
+    let load_backups = {
+        let backups = backups.clone();
+        Callback::from(move |()| {
+            let backups = backups.clone();
+            wasm_bindgen_futures::spawn_local(fetch_dr_backups(locale, backups));
+        })
+    };
+
+    {
+        let load_backups = load_backups.clone();
+        use_effect_with((), move |_| {
+            load_backups.emit(());
+            || ()
+        });
+    }
+
+    let on_create = {
+        let is_creating = is_creating.clone();
+        let notice = notice.clone();
+        let passphrase = passphrase.clone();
+        let upload_s3 = upload_s3.clone();
+        let load_backups = load_backups.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *is_creating {
+                return;
+            }
+            is_creating.set(true);
+            let is_creating = is_creating.clone();
+            let notice = notice.clone();
+            let load_backups = load_backups.clone();
+            let pass = (*passphrase).clone();
+            let body = CreateDisasterRecoveryRequest {
+                passphrase: if pass.is_empty() { None } else { Some(pass) },
+                upload_s3: *upload_s3,
+            };
+            wasm_bindgen_futures::spawn_local(async move {
+                execute_dr_create(locale, body, notice, load_backups).await;
+                is_creating.set(false);
+            });
+        })
+    };
+
+    let on_upload_file = {
+        let is_restoring = is_restoring.clone();
+        let notice = notice.clone();
+        let passphrase = passphrase.clone();
+        let load_backups = load_backups.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlInputElement = event.target_unchecked_into();
+            let Some(file) = input.files().and_then(|files| files.get(0)) else {
+                return;
+            };
+            let notice = notice.clone();
+            let is_restoring = is_restoring.clone();
+            let pass = (*passphrase).clone();
+            let load_backups = load_backups.clone();
+            let question = locale.t("settings.dr_restore_confirm").to_string();
+            dialog::confirm_then(locale, question, async move {
+                is_restoring.set(true);
+                handle_file_upload(file, pass, locale, notice, load_backups).await;
+                is_restoring.set(false);
+            });
+        })
+    };
+
+    html! {
+        <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
+            { notice_view(&notice) }
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">
+                {locale.t("settings.disaster_recovery_title")}
+            </h2>
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+                {locale.t("settings.disaster_recovery_hint")}
+            </p>
+            { render_dr_controls(locale, &passphrase, &upload_s3, &is_creating, &is_restoring, on_create, on_upload_file) }
+            { render_dr_table(locale, &backups, &passphrase, &notice, &load_backups) }
+        </div>
+    }
+}
+
+async fn handle_file_upload(
+    file: web_sys::File,
+    pass: String,
+    locale: Locale,
+    notice: UseStateHandle<Option<Notice>>,
+    load_backups: Callback<()>,
+) {
+    match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
+        Ok(js_buf) => {
+            let uint8_array = js_sys::Uint8Array::new(&js_buf);
+            let bytes = uint8_array.to_vec();
+            handle_restore_upload(locale, bytes, pass, &notice, &load_backups).await;
+        }
+        Err(err) => {
+            notice.set(Some(Notice::Failed(format!("{err:?}"))));
+        }
+    }
+}
+
+fn render_dr_controls(
+    locale: Locale,
+    passphrase: &UseStateHandle<String>,
+    upload_s3: &UseStateHandle<bool>,
+    is_creating: &UseStateHandle<bool>,
+    is_restoring: &UseStateHandle<bool>,
+    on_create: Callback<MouseEvent>,
+    on_upload_file: Callback<Event>,
+) -> Html {
+    let on_pass_change = {
+        let passphrase = passphrase.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            passphrase.set(input.value());
+        })
+    };
+    let on_s3_change = {
+        let upload_s3 = upload_s3.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            upload_s3.set(input.checked());
+        })
+    };
+
+    html! {
+        <div class="mt-4 flex flex-col sm:flex-row flex-wrap items-center gap-3">
+            <div class="w-full sm:w-64">
+                <input
+                    type="password"
+                    placeholder={locale.t("settings.dr_passphrase_placeholder")}
+                    value={(**passphrase).clone()}
+                    onchange={on_pass_change}
+                    class={INPUT_CLASS}
+                />
+            </div>
+            <label class="inline-flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer">
+                <input
+                    type="checkbox"
+                    checked={**upload_s3}
+                    onchange={on_s3_change}
+                    class="rounded border-neutral-300 dark:border-neutral-600 text-blue-600 focus:ring-blue-500"
+                />
+                {locale.t("settings.dr_upload_s3")}
+            </label>
+            <button
+                type="button"
+                onclick={on_create}
+                disabled={**is_creating}
+                class="inline-flex justify-center items-center text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-300 font-medium rounded-lg text-sm px-4 py-2"
+            >
+                {locale.t("settings.create_dr_backup")}
+            </button>
+            <label class="inline-flex justify-center items-center text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 cursor-pointer">
+                {locale.t("settings.upload_restore_dr")}
+                <input
+                    type="file"
+                    accept=".r3bundle"
+                    class="hidden"
+                    onchange={on_upload_file}
+                    disabled={**is_restoring}
+                />
+            </label>
+        </div>
+    }
+}
+
+fn render_dr_table(
+    locale: Locale,
+    backups: &UseStateHandle<Vec<DisasterRecoveryBackupEntry>>,
+    passphrase: &UseStateHandle<String>,
+    notice: &UseStateHandle<Option<Notice>>,
+    load_backups: &Callback<()>,
+) -> Html {
+    if backups.is_empty() {
+        return html! {};
+    }
+    html! {
+        <div class="mt-4 overflow-x-auto border border-neutral-200 dark:border-neutral-700 rounded-md">
+            <table class="w-full text-sm text-left text-neutral-500 dark:text-neutral-400">
+                <thead class="text-xs text-neutral-700 uppercase bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-400">
+                    <tr>
+                        <th class="px-4 py-2">{"ID"}</th>
+                        <th class="px-4 py-2">{"Date"}</th>
+                        <th class="px-4 py-2 text-right">{"Size"}</th>
+                        <th class="px-4 py-2 text-center">{"Files"}</th>
+                        <th class="px-4 py-2 text-center">{"Status"}</th>
+                        <th class="px-4 py-2 text-right">{"Actions"}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    { for backups.iter().map(|entry| render_dr_row(locale, entry, passphrase, notice, load_backups)) }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+fn render_dr_row(
+    locale: Locale,
+    entry: &DisasterRecoveryBackupEntry,
+    passphrase: &UseStateHandle<String>,
+    notice: &UseStateHandle<Option<Notice>>,
+    load_backups: &Callback<()>,
+) -> Html {
+    let date_str = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+        (entry.created_at * 1000) as f64,
+    ))
+    .to_locale_string("en-US", &wasm_bindgen::JsValue::UNDEFINED)
+    .as_string()
+    .unwrap_or_default();
+    let download_url = format!(
+        "{API_ENDPOINT}/disaster-recovery/backups/{}/download",
+        entry.id
+    );
+
+    let on_restore = {
+        let id = entry.id.clone();
+        let pass = (**passphrase).clone();
+        let notice = notice.clone();
+        let load_backups = load_backups.clone();
+        Callback::from(move |_: MouseEvent| {
+            let id = id.clone();
+            let pass = pass.clone();
+            let notice = notice.clone();
+            let load_backups = load_backups.clone();
+            let question = locale.t("settings.dr_restore_confirm").to_string();
+            dialog::confirm_then(locale, question, async move {
+                let body = RestoreDisasterRecoveryRequest {
+                    passphrase: if pass.is_empty() { None } else { Some(pass) },
+                };
+                let req = Request::post(&format!(
+                    "{API_ENDPOINT}/disaster-recovery/backups/{id}/restore"
+                ))
+                .header("content-type", "application/json")
+                .json(&body);
+                if let Ok(built) = req {
+                    match send_request(locale, built).await {
+                        Ok(_) => {
+                            notice.set(Some(Notice::Success(
+                                locale.t("settings.dr_restore_success").to_string(),
+                            )));
+                            load_backups.emit(());
+                        }
+                        Err(err) => notice.set(Some(Notice::Failed(err))),
+                    }
+                }
+            });
+        })
+    };
+
+    let on_delete = {
+        let id = entry.id.clone();
+        let load_backups = load_backups.clone();
+        Callback::from(move |_: MouseEvent| {
+            let id = id.clone();
+            let load_backups = load_backups.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let req =
+                    Request::delete(&format!("{API_ENDPOINT}/disaster-recovery/backups/{id}"));
+                if let Ok(built) = req.build()
+                    && send_request(locale, built).await.is_ok()
+                {
+                    load_backups.emit(());
+                }
+            });
+        })
+    };
+
+    html! {
+        <tr class="border-b dark:border-neutral-700 bg-white dark:bg-neutral-800">
+            <td class="px-4 py-2 font-mono text-xs">{&entry.id}</td>
+            <td class="px-4 py-2 text-xs">{date_str}</td>
+            <td class="px-4 py-2 text-right text-xs font-mono">{crate::pages::app_files::format_bytes(entry.size)}</td>
+            <td class="px-4 py-2 text-center text-xs">{entry.files_count}</td>
+            <td class="px-4 py-2 text-center text-xs">
+                if entry.s3_replicated {
+                    <span class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-xs px-2 py-0.5 rounded font-medium">
+                        {locale.t("settings.dr_s3_badge")}
+                    </span>
+                } else {
+                    <span class="bg-neutral-100 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300 text-xs px-2 py-0.5 rounded font-medium">
+                        {locale.t("settings.dr_local_only")}
+                    </span>
+                }
+            </td>
+            <td class="px-4 py-2 text-right">
+                <a href={download_url} download={format!("{}.r3bundle", entry.id)} class="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 font-medium mr-3">
+                    {locale.t("backups.download")}
+                </a>
+                <button type="button" onclick={on_restore} class="text-xs text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 font-medium mr-3">
+                    {locale.t("backups.restore")}
+                </button>
+                <button type="button" onclick={on_delete} class="text-xs text-red-600 hover:text-red-800 dark:text-red-400 font-medium">
+                    {locale.t("common.delete")}
+                </button>
+            </td>
+        </tr>
+    }
+}
+
+async fn handle_restore_upload(
+    locale: Locale,
+    bytes: Vec<u8>,
+    passphrase: String,
+    notice: &UseStateHandle<Option<Notice>>,
+    load_backups: &Callback<()>,
+) {
+    let mut builder = Request::post(&format!("{API_ENDPOINT}/disaster-recovery/restore-upload"))
+        .header("content-type", "application/octet-stream");
+    if !passphrase.is_empty() {
+        builder = builder.header("x-passphrase", &passphrase);
+    }
+    let req = builder.body(wasm_bindgen::JsValue::from(js_sys::Uint8Array::from(
+        bytes.as_slice(),
+    )));
+    match req {
+        Ok(built) => match send_request(locale, built).await {
+            Ok(_) => {
+                notice.set(Some(Notice::Success(
+                    locale.t("settings.dr_restore_success").to_string(),
+                )));
+                load_backups.emit(());
             }
             Err(err) => notice.set(Some(Notice::Failed(err))),
         },

@@ -137,6 +137,10 @@ pub enum AuditAction {
     UpgradeTarget,
     /// An account restored a configuration backup.
     RestoreConfig,
+    /// An account created a disaster recovery backup.
+    CreateDisasterRecoveryBackup,
+    /// An account restored platform state from a disaster recovery backup.
+    RestoreDisasterRecoveryBackup,
     /// An account added an environment variable group.
     AddEnvGroup,
     /// An account updated an environment variable group.
@@ -146,7 +150,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 82] = [
+    pub const ALL: [AuditAction; 84] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -226,6 +230,8 @@ impl AuditAction {
         Self::DeleteRegistry,
         Self::UpgradeTarget,
         Self::RestoreConfig,
+        Self::CreateDisasterRecoveryBackup,
+        Self::RestoreDisasterRecoveryBackup,
         Self::AddEnvGroup,
         Self::UpdateEnvGroup,
         Self::DeleteEnvGroup,
