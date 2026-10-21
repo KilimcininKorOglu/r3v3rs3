@@ -72,6 +72,10 @@ pub enum AuditAction {
     BackupDatabase,
     /// An account restored the backup of a database.
     RestoreDatabase,
+    /// An account performed point-in-time recovery on a database.
+    PitrRestoreDatabase,
+    /// An account archived a WAL or binary log segment of a database.
+    ArchiveDatabaseWal,
     /// An account changed the backup settings.
     UpdateBackupConfig,
     SetAppGitToken,
@@ -142,7 +146,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 80] = [
+    pub const ALL: [AuditAction; 82] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -183,6 +187,8 @@ impl AuditAction {
         Self::DeleteDatabase,
         Self::BackupDatabase,
         Self::RestoreDatabase,
+        Self::PitrRestoreDatabase,
+        Self::ArchiveDatabaseWal,
         Self::UpdateBackupConfig,
         Self::SetAppGitToken,
         Self::DeleteAppGitToken,

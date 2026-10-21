@@ -158,6 +158,9 @@ pub enum Error {
     #[error("the restore failed: {reason}")]
     RestoreFailed { reason: String },
 
+    #[error("point-in-time recovery target is out of range: {reason}")]
+    PitrTargetOutOfRange { reason: String },
+
     #[error("the backup does not exist: {id}")]
     BackupNotFound { id: String },
 

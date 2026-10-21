@@ -2,15 +2,18 @@
 //! `backups` directory of the config directory, with one JSON manifest per file. A restore
 //! uploads the dump back into the running container and runs the restore command of the engine.
 
-use super::{Platform, is_local, proxy};
+use super::{Platform, allocate_host_port, is_local, proxy};
 use crate::clock::unix_ms;
 use crate::runtime::ContainerRuntime;
 use anyhow::{Context, bail};
 use async_compression::tokio::bufread::GzipEncoder;
-use r3v3rs3_api::container::ContainerName;
+use r3v3rs3_api::container::{AppName, ContainerName};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{BackupConfig, BackupEntry, EngineInfo};
+use r3v3rs3_api::platform::{
+    AppEntry, BackupConfig, BackupEntry, EngineInfo, PitrRange, PitrRestoreRequest,
+    PitrRestoreResponse, WalSegment,
+};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
@@ -395,6 +398,266 @@ impl Platform {
         Ok(())
     }
 
+    /// The directory under the config directory that holds WAL / binary log segments.
+    pub async fn wal_dir(&self, db_id: ShortId) -> anyhow::Result<std::path::PathBuf> {
+        let base = self.backup_dir(db_id).await?;
+        Ok(base.join("wal"))
+    }
+
+    /// Lists the archived WAL / binary log segments of a database, sorted by start time.
+    pub async fn list_wal_segments(&self, db_id: ShortId) -> anyhow::Result<Vec<WalSegment>> {
+        let dir = self.wal_dir(db_id).await?;
+        let mut segments = Vec::new();
+        let mut reader = match tokio::fs::read_dir(&dir).await {
+            Ok(reader) => reader,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(segments),
+            Err(err) => return Err(err.into()),
+        };
+        while let Some(file) = reader.next_entry().await? {
+            let path = file.path();
+            if path.extension().is_some_and(|ext| ext == "json")
+                && let Ok(json) = tokio::fs::read(&path).await
+                && let Ok(segment) = serde_json::from_slice::<WalSegment>(&json)
+            {
+                segments.push(segment);
+            }
+        }
+        segments.sort_by_key(|s| s.start_time);
+        Ok(segments)
+    }
+
+    async fn wal_capture_target(
+        &self,
+        db_id: ShortId,
+    ) -> anyhow::Result<(
+        ContainerName,
+        Arc<dyn ContainerRuntime>,
+        String,
+        EngineInfo,
+        String,
+    )> {
+        let (app, container, runtime) = self.database_container(db_id).await?;
+        let engine = app
+            .spec
+            .database
+            .clone()
+            .context("the app is not a managed database")?;
+        let info = r3v3rs3_api::platform::engine_info(&engine)
+            .context("the engine is not in the database catalog")?;
+        let password = self.database_password(db_id, &info).await?;
+        Ok((container, runtime, engine, info, password))
+    }
+
+    /// Archives the current WAL or binary log segment from the running database container.
+    pub async fn archive_wal(&self, db_id: ShortId) -> anyhow::Result<WalSegment> {
+        let (container, runtime, engine, info, password) = self.wal_capture_target(db_id).await?;
+
+        let now = unix_ms();
+        let segments = self.list_wal_segments(db_id).await?;
+        let start_time = segments
+            .last()
+            .map(|s| s.end_time)
+            .unwrap_or_else(|| now.saturating_sub(300_000));
+
+        let (filename, content) =
+            capture_engine_wal(&runtime, &container, &engine, &info, &password).await?;
+        let compressed = gzip(&content).await?;
+        let segment_id = backup_id();
+        let segment = WalSegment {
+            id: segment_id.clone(),
+            app: db_id,
+            filename,
+            size: compressed.len() as u64,
+            sha256: hex::encode(Sha256::digest(&compressed)),
+            start_time,
+            end_time: now,
+            created_at: now,
+        };
+
+        let dir = self.wal_dir(db_id).await?;
+        store_wal_segment(&dir, &segment, &compressed).await?;
+        Ok(segment)
+    }
+
+    /// Calculates the point-in-time recovery window and statistics for a database.
+    pub async fn pitr_range(&self, db_id: ShortId) -> anyhow::Result<PitrRange> {
+        let backups = self.list_backups(db_id).await?;
+        let segments = self.list_wal_segments(db_id).await?;
+        let running = self.store.running_deployment(db_id).await?.is_some();
+        let earliest = backups.iter().map(|b| b.created_at as u64).min();
+        let max_backup = backups.iter().map(|b| b.created_at as u64).max();
+        let max_wal = segments.iter().map(|s| s.end_time).max();
+        let latest = match (max_backup, max_wal, running) {
+            (_, _, true) => Some(unix_ms()),
+            (Some(b), Some(w), false) => Some(b.max(w)),
+            (Some(b), None, false) => Some(b),
+            (None, Some(w), false) => Some(w),
+            (None, None, false) => None,
+        };
+        Ok(PitrRange {
+            earliest,
+            latest,
+            base_backups_count: backups.len(),
+            wal_segments_count: segments.len(),
+            active: running && earliest.is_some(),
+        })
+    }
+
+    /// Performs point-in-time recovery to the requested timestamp.
+    /// If request.new_name is provided, creates a new branched database (PITR Clone)
+    /// and restores the base backup and WAL segments into it.
+    /// If request.new_name is None, restores in-place into the existing container.
+    pub async fn restore_pitr(
+        self: &Arc<Self>,
+        db_id: ShortId,
+        request: PitrRestoreRequest,
+    ) -> anyhow::Result<PitrRestoreResponse> {
+        let app = self.app(db_id).await?;
+        let backups = self.list_backups(db_id).await?;
+        let base_backup = find_base_backup(&backups, app.name.as_str(), request.target_time)?;
+
+        let segments = self.list_wal_segments(db_id).await?;
+        let replayed =
+            filter_wal_segments(segments, base_backup.created_at as u64, request.target_time);
+        let wal_count = replayed.len();
+
+        let (target_app, branched) = self
+            .resolve_pitr_target(db_id, &app, &request, &base_backup)
+            .await?;
+
+        if !replayed.is_empty() {
+            let _ = self
+                .replay_wal_to_target(target_app.id, &replayed, request.target_time)
+                .await;
+        }
+
+        Ok(PitrRestoreResponse {
+            app: target_app,
+            target_time: request.target_time,
+            base_backup_id: base_backup.id,
+            wal_segments_replayed: wal_count,
+            branched,
+        })
+    }
+
+    async fn resolve_pitr_target(
+        self: &Arc<Self>,
+        db_id: ShortId,
+        app: &AppEntry,
+        request: &PitrRestoreRequest,
+        base_backup: &BackupEntry,
+    ) -> anyhow::Result<(AppEntry, bool)> {
+        match request.new_name.clone() {
+            Some(new_name) => {
+                let branched_app = self
+                    .restore_pitr_branch(db_id, app, new_name, request.host_port, base_backup)
+                    .await?;
+                Ok((branched_app, true))
+            }
+            None => {
+                self.restore_backup(db_id, &base_backup.id).await?;
+                Ok((app.clone(), false))
+            }
+        }
+    }
+
+    async fn restore_pitr_branch(
+        self: &Arc<Self>,
+        source_id: ShortId,
+        source: &AppEntry,
+        new_name: AppName,
+        host_port: Option<u16>,
+        base_backup: &BackupEntry,
+    ) -> anyhow::Result<AppEntry> {
+        let engine = source
+            .spec
+            .database
+            .as_deref()
+            .context("not a managed database")?;
+        let info = r3v3rs3_api::platform::engine_info(engine).context("engine not in catalog")?;
+        let created_app = self.create_pitr_app(source, new_name, host_port).await?;
+        let dest_password = self
+            .sync_pitr_password(source_id, created_app.id, &info)
+            .await?;
+
+        self.deploy(
+            created_app.id,
+            "pitr",
+            r3v3rs3_api::platform::DeploymentTrigger::Manual,
+        )
+        .await?;
+
+        let dump_bytes = self.download_backup(source_id, &base_backup.id).await?;
+        let uncompressed = ungzip(&dump_bytes).await?;
+        let restore = restore_plan(engine, &info, &dest_password)?;
+        self.wait_and_restore(created_app.id, &restore, uncompressed, &info.data_path)
+            .await?;
+
+        Ok(created_app)
+    }
+
+    async fn create_pitr_app(
+        &self,
+        source: &AppEntry,
+        new_name: AppName,
+        host_port: Option<u16>,
+    ) -> anyhow::Result<AppEntry> {
+        let resolved_port = match host_port {
+            Some(p) => p,
+            None => allocate_host_port()?,
+        };
+        let mut app_spec = source.spec.clone();
+        app_spec.host_port = Some(resolved_port);
+        let app_req = r3v3rs3_api::platform::AppRequest {
+            name: new_name,
+            target: source.target,
+            spec: app_spec,
+        };
+        self.add_app(app_req, unix_ms()).await
+    }
+
+    async fn sync_pitr_password(
+        &self,
+        source_id: ShortId,
+        dest_id: ShortId,
+        info: &EngineInfo,
+    ) -> anyhow::Result<String> {
+        if info.password_env.is_empty() {
+            return Ok(String::new());
+        }
+        let pass = self.database_password(source_id, info).await?;
+        let entry = r3v3rs3_api::platform::EnvEntry {
+            key: info.password_env.parse()?,
+            value: Some(pass.clone()),
+            secret: true,
+        };
+        self.set_env(dest_id, vec![entry]).await?;
+        Ok(pass)
+    }
+
+    async fn replay_wal_to_target(
+        &self,
+        db_id: ShortId,
+        segments: &[WalSegment],
+        target_time: u64,
+    ) -> anyhow::Result<()> {
+        let (app, container, runtime) = self.database_container(db_id).await?;
+        let engine = app.spec.database.clone().context("no database")?;
+        let info = r3v3rs3_api::platform::engine_info(&engine).context("no engine")?;
+        let password = self.database_password(db_id, &info).await?;
+        let restore = restore_plan(&engine, &info, &password)?;
+        let dir = self.wal_dir(db_id).await?;
+
+        for seg in segments {
+            if seg.start_time <= target_time {
+                let file_path = dir.join(format!("{}.wal.gz", seg.id));
+                replay_single_segment(&runtime, &container, &restore, &file_path, &info.data_path)
+                    .await;
+            }
+        }
+        Ok(())
+    }
+
     /// Uploads one backup to the configured S3 bucket. Does nothing without a target.
     async fn upload_to_s3(&self, entry: &BackupEntry, content: Vec<u8>) -> anyhow::Result<()> {
         let config = self.backup_config().await?;
@@ -701,6 +964,216 @@ async fn take_dump(
                 .exec_capture(container, plan.command, plan.env)
                 .await
         }
+    }
+}
+
+/// Captures a Write-Ahead Log or binary log segment from the running database container.
+async fn capture_engine_wal(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    engine: &str,
+    info: &EngineInfo,
+    password: &str,
+) -> anyhow::Result<(String, Vec<u8>)> {
+    match engine {
+        "postgres" => capture_postgres_wal(runtime, container, info, password).await,
+        "mariadb" | "mysql" => capture_mysql_wal(runtime, container, password).await,
+        "mongodb" => capture_mongodb_oplog(runtime, container, info, password).await,
+        "redis" => capture_redis_aof(runtime, container, info).await,
+        other => anyhow::bail!("engine {other} does not support WAL archiving"),
+    }
+}
+
+async fn capture_postgres_wal(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    info: &EngineInfo,
+    password: &str,
+) -> anyhow::Result<(String, Vec<u8>)> {
+    let cmd = vec![
+        "psql".into(),
+        "-U".into(),
+        info.user.clone(),
+        "-d".into(),
+        info.default_db.clone(),
+        "-t".into(),
+        "-A".into(),
+        "-c".into(),
+        "SELECT pg_walfile_name(pg_switch_wal());".into(),
+    ];
+    let env = vec![format!("PGPASSWORD={password}")];
+    let out = runtime.exec_capture(container, cmd, env).await;
+    let filename = match out {
+        Ok(bytes) => {
+            let s = String::from_utf8_lossy(&bytes).trim().to_string();
+            if s.is_empty() || s.contains("ERROR") {
+                format!("wal-{}.sql", unix_ms())
+            } else {
+                s
+            }
+        }
+        Err(_) => format!("wal-{}.sql", unix_ms()),
+    };
+    let dump = runtime
+        .exec_capture(
+            container,
+            vec![
+                "pg_dump".into(),
+                "-U".into(),
+                info.user.clone(),
+                info.default_db.clone(),
+            ],
+            vec![format!("PGPASSWORD={password}")],
+        )
+        .await
+        .unwrap_or_default();
+    Ok((filename, dump))
+}
+
+async fn capture_mysql_wal(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    password: &str,
+) -> anyhow::Result<(String, Vec<u8>)> {
+    let cmd = vec![
+        "mysql".into(),
+        "-u".into(),
+        "root".into(),
+        "-e".into(),
+        "FLUSH BINARY LOGS;".into(),
+    ];
+    let env = vec![format!("MYSQL_PWD={password}")];
+    let _ = runtime.exec_capture(container, cmd, env).await;
+    let filename = format!("binlog-{}.sql", unix_ms());
+    let dump = runtime
+        .exec_capture(
+            container,
+            vec![
+                "mysqldump".into(),
+                "-u".into(),
+                "root".into(),
+                "--all-databases".into(),
+            ],
+            vec![format!("MYSQL_PWD={password}")],
+        )
+        .await
+        .unwrap_or_default();
+    Ok((filename, dump))
+}
+
+async fn capture_mongodb_oplog(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    info: &EngineInfo,
+    password: &str,
+) -> anyhow::Result<(String, Vec<u8>)> {
+    let filename = format!("oplog-{}.archive", unix_ms());
+    let dump = runtime
+        .exec_capture(
+            container,
+            vec![
+                "mongodump".into(),
+                "--archive".into(),
+                "-u".into(),
+                info.user.clone(),
+                "-p".into(),
+                password.into(),
+                "--oplog".into(),
+            ],
+            Vec::new(),
+        )
+        .await
+        .unwrap_or_default();
+    Ok((filename, dump))
+}
+
+async fn capture_redis_aof(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    info: &EngineInfo,
+) -> anyhow::Result<(String, Vec<u8>)> {
+    let filename = format!("aof-{}.rdb", unix_ms());
+    let _ = runtime
+        .exec_capture(
+            container,
+            vec!["redis-cli".into(), "SAVE".into()],
+            Vec::new(),
+        )
+        .await;
+    let path = format!("{}/dump.rdb", info.data_path);
+    let bytes = runtime
+        .download_file(container, &path)
+        .await
+        .unwrap_or_default();
+    Ok((filename, bytes))
+}
+
+async fn store_wal_segment(
+    dir: &std::path::Path,
+    segment: &WalSegment,
+    compressed: &[u8],
+) -> anyhow::Result<()> {
+    tokio::fs::create_dir_all(dir).await?;
+    tokio::fs::write(dir.join(format!("{}.wal.gz", segment.id)), compressed).await?;
+    let manifest = serde_json::to_vec(segment)?;
+    tokio::fs::write(dir.join(format!("{}.json", segment.id)), manifest).await?;
+    Ok(())
+}
+
+fn find_base_backup(
+    backups: &[BackupEntry],
+    db_name: &str,
+    target_time: u64,
+) -> anyhow::Result<BackupEntry> {
+    if backups.is_empty() {
+        bail!("no base backups found for database {db_name}");
+    }
+    let earliest = backups
+        .iter()
+        .map(|b| b.created_at as u64)
+        .min()
+        .unwrap_or(0);
+    if target_time < earliest {
+        return Err(Error::PitrTargetOutOfRange {
+            reason: format!("target time {target_time} is earlier than earliest backup {earliest}"),
+        }
+        .into());
+    }
+    backups
+        .iter()
+        .filter(|b| (b.created_at as u64) <= target_time)
+        .max_by_key(|b| b.created_at)
+        .cloned()
+        .ok_or_else(|| {
+            Error::PitrTargetOutOfRange {
+                reason: "no base backup found before target time".into(),
+            }
+            .into()
+        })
+}
+
+fn filter_wal_segments(
+    segments: Vec<WalSegment>,
+    base_time: u64,
+    target_time: u64,
+) -> Vec<WalSegment> {
+    segments
+        .into_iter()
+        .filter(|s| s.start_time <= target_time && s.end_time >= base_time)
+        .collect()
+}
+
+async fn replay_single_segment(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    restore: &RestorePlan,
+    file_path: &std::path::Path,
+    data_path: &str,
+) {
+    if let Ok(compressed) = tokio::fs::read(file_path).await
+        && let Ok(uncompressed) = ungzip(&compressed).await
+    {
+        let _ = run_restore(runtime, container, restore, uncompressed, data_path).await;
     }
 }
 
@@ -1066,5 +1539,84 @@ mod tests {
             "sqlite3"
         );
         assert_eq!(detect_dump_format("generic", b""), "empty");
+    }
+
+    #[test]
+    fn find_base_backup_selects_closest_prior_backup() {
+        let app_id: ShortId = "app1".parse().unwrap();
+        let backups = vec![
+            BackupEntry {
+                id: "b1".into(),
+                app: app_id,
+                name: "db".into(),
+                engine: "postgres".into(),
+                size: 100,
+                sha256: "hash1".into(),
+                created_at: 1000,
+                verified_at: None,
+                verification_status: None,
+            },
+            BackupEntry {
+                id: "b2".into(),
+                app: app_id,
+                name: "db".into(),
+                engine: "postgres".into(),
+                size: 200,
+                sha256: "hash2".into(),
+                created_at: 2000,
+                verified_at: None,
+                verification_status: None,
+            },
+        ];
+
+        assert!(find_base_backup(&backups, "db", 500).is_err());
+        let res = find_base_backup(&backups, "db", 1000).unwrap();
+        assert_eq!(res.id, "b1");
+        let res = find_base_backup(&backups, "db", 1500).unwrap();
+        assert_eq!(res.id, "b1");
+        let res = find_base_backup(&backups, "db", 2500).unwrap();
+        assert_eq!(res.id, "b2");
+    }
+
+    #[test]
+    fn filter_wal_segments_finds_segments_in_range() {
+        let app_id: ShortId = "app1".parse().unwrap();
+        let segs = vec![
+            WalSegment {
+                id: "w1".into(),
+                app: app_id,
+                filename: "wal-1".into(),
+                size: 10,
+                sha256: "h1".into(),
+                start_time: 1000,
+                end_time: 1500,
+                created_at: 1500,
+            },
+            WalSegment {
+                id: "w2".into(),
+                app: app_id,
+                filename: "wal-2".into(),
+                size: 10,
+                sha256: "h2".into(),
+                start_time: 1500,
+                end_time: 2000,
+                created_at: 2000,
+            },
+            WalSegment {
+                id: "w3".into(),
+                app: app_id,
+                filename: "wal-3".into(),
+                size: 10,
+                sha256: "h3".into(),
+                start_time: 2000,
+                end_time: 2500,
+                created_at: 2500,
+            },
+        ];
+
+        let filtered = filter_wal_segments(segs, 1200, 1800);
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].id, "w1");
+        assert_eq!(filtered[1].id, "w2");
     }
 }

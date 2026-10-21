@@ -430,7 +430,9 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(backups::download))
                 .routes(routes!(backups::delete))
                 .routes(routes!(backups::restore))
-                .routes(routes!(backups::test_backup)),
+                .routes(routes!(backups::test_backup))
+                .routes(routes!(backups::get_pitr_range, backups::restore_pitr))
+                .routes(routes!(backups::archive_wal, backups::list_wal_segments)),
         )
         .nest(
             "/backup-config",

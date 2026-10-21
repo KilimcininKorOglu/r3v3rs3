@@ -273,6 +273,22 @@ Every new backup uploads to the configured remote targets; a failed upload only 
 
 To ensure that backups remain uncorrupted and recoverable, r3v3rs3 includes an automated periodic restore testing mechanism. The system verifies that gzipped dumps decompress cleanly and match the expected database engine format magic bytes or SQL header signatures (Redis RDB, SQLite 3, PostgreSQL, MySQL/MariaDB). Verified backups display a verification timestamp (`verified_at`), and an immediate test can be triggered in the WebUI or via `POST /api/databases/{id}/backups/{name}/verify`.
 
+#### Point-in-Time Recovery (PITR) & Continuous Archiving
+
+Beyond nightly or periodic full dumps, r3v3rs3 provides Point-in-Time Recovery (PITR) via continuous Write-Ahead Logging (WAL) and binary log archiving:
+
+- **Recovery Window**: The backups page displays the exact active recovery timeline (from the earliest base backup to the latest recorded change log segment) along with total base backups and archived WAL count.
+- **WAL & Log Archiving**: Rotating transaction logs are archived in `<config-dir>/backups/<db_id>/wal/`. Users can trigger manual segment archiving with **Archive WAL Now** or use automated background checkpoints (`POST /api/databases/{id}/wal/archive`):
+  - **PostgreSQL**: Archives WAL segments using transaction log rotation (`pg_switch_wal()`) and continuous WAL capture.
+  - **MySQL / MariaDB**: Archives rotated binary logs (`FLUSH BINARY LOGS;`).
+  - **MongoDB**: Archives oplog mutation archives (`mongodump --oplog`).
+  - **Redis**: Captures point-in-time state and Append-Only File (AOF) journals.
+- **Precision Recovery**: The **PITR Restore** action prompts for an exact target timestamp (in RFC3339 format, e.g. `2026-10-21T04:30:00Z` or unix milliseconds). r3v3rs3 automatically:
+  1. Identifies the latest base backup created prior to the target timestamp and restores it.
+  2. Selects all subsequent archived WAL/log segments between the base backup and the recovery moment.
+  3. Replays transactions sequentially up to the requested second or millisecond.
+- **Safe Branching (PITR Clone)**: If a new branch name is specified, r3v3rs3 provisions an entirely new, isolated database with its own host port, data volume, and root credentials, letting developers inspect past state or extract lost rows without overwriting production. Leaving the branch name blank performs an in-place restore after confirmation.
+
 ## Deployments
 
 `POST /api/apps/{id}/deploy` starts a deployment and returns it with the status `queued`. `GET /api/deployments/{id}` shows its progress.

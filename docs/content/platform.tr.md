@@ -273,6 +273,22 @@ Her yeni yedek yapılandırılan uzak hedeflere aktarılır; başarısız bir y�
 
 Yedeklerin bozulmadan saklandığını ve geri yüklenebilir olduğunu garanti etmek için r3v3rs3 otomatik periyodik geri yükleme doğrulama testi içerir. Sistem gzipped dump'ların hatasız açıldığını ve ilgili veritabanı motorunun sihirli baytlarıyla veya SQL başlıklarıyla (Redis RDB, SQLite 3, PostgreSQL, MySQL/MariaDB) eşleştiğini doğrular. Doğrulanan yedeklerde onay zaman damgası (`verified_at`) yer alır; ayrıca WebUI üzerinden veya `POST /api/databases/{id}/backups/{name}/verify` ile anında test başlatılabilir.
 
+#### Zaman Noktasına Geri Dönüş (PITR) ve Sürekli Günlük Arşivleme
+
+Gecelik veya periyodik tam dump'ların ötesinde r3v3rs3, sürekli Write-Ahead Logging (WAL) ve ikili günlük (binary log) arşivleme ile Zaman Noktasına Geri Dönüş (Point-in-Time Recovery - PITR) yeteneği sunar:
+
+- **Kurtarma Penceresi (Recovery Window)**: Yedekler sayfasında en eski temel (base) yedekten en son kaydedilen değişiklik günlüğü segmentine kadar olan etkin zaman aralığı, toplam temel yedek ve arşivlenmiş WAL sayısı net bir özetle gösterilir.
+- **WAL ve Günlük Arşivleme**: Dönen işlem günlükleri `<config-dir>/backups/<db_id>/wal/` dizininde arşivlenir. Kullanıcılar **WAL Günlüğünü Arşivle** butonuyla anında manuel arşiv tetikleyebilir veya arka plan kontrol noktalarını kullanabilir (`POST /api/databases/{id}/wal/archive`):
+  - **PostgreSQL**: İşlem günlüğü rotasyonu (`pg_switch_wal()`) ve sürekli WAL yakalamasıyla segmentleri arşivler.
+  - **MySQL / MariaDB**: Döndürülen ikili günlükleri (`FLUSH BINARY LOGS;`) arşivler.
+  - **MongoDB**: Oplog mutasyon arşivlerini (`mongodump --oplog`) depolar.
+  - **Redis**: Anlık durum görüntüsünü ve Yalnızca-Ekleme Günlüğü (AOF) kayıtlarını yakalar.
+- **Hassas Dakikaya Geri Dönüş**: **Zaman Noktasına Geri Yükle (PITR)** işlemi hedeflenen kesin zaman damgasını sorar (RFC3339 biçimi, örn. `2026-10-21T04:30:00Z` veya unix milisaniyesi). r3v3rs3 otomatik olarak:
+  1. Hedef zamandan önceki en güncel temel yedeği belirler ve geri yükler.
+  2. Temel yedek ile hedef an arasındaki tüm arşivlenmiş WAL/günlük segmentlerini sıralı biçimde seçer.
+  3. İşlemleri istenen saniyeye veya milisaniyeye kadar artımlı olarak yeniden uygular (replay).
+- **Güvenli Dal Oluşturma (PITR Clone)**: İsteğe bağlı olarak yeni bir dal (branch) adı girilirse, r3v3rs3 mevcut canlı veritabanını bozmadan tamamen ayrı bir host portu, data volume'ü ve yetkileriyle yeni bir veritabanı kurar. Böylece geliştiriciler canlı ortamı kesintiye uğratmadan geçmiş veriyi inceleyebilir veya silinen tabloları kurtarabilir. Dal adı boş bırakıldığında onay ile mevcut veritabanı üzerinde geri yükleme yapılır.
+
 ## Deployment'lar
 
 `POST /api/apps/{id}/deploy` bir deployment başlatır ve onu `queued` durumuyla döndürür. `GET /api/deployments/{id}` ilerlemeyi gösterir.

@@ -305,6 +305,59 @@ pub struct BackupEntry {
     pub verification_status: Option<String>,
 }
 
+/// One archived Write-Ahead Logging (WAL) or binary log segment of a database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WalSegment {
+    pub id: String,
+    pub app: ShortId,
+    pub filename: String,
+    pub size: u64,
+    pub sha256: String,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub created_at: u64,
+}
+
+/// Point-in-time recovery range and statistics for a database.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PitrRange {
+    /// Earliest timestamp (unix ms) to which the database can be recovered.
+    pub earliest: Option<u64>,
+    /// Latest timestamp (unix ms) to which the database can be recovered.
+    pub latest: Option<u64>,
+    /// Number of base backups available in the recovery window.
+    pub base_backups_count: usize,
+    /// Number of archived WAL / binary log segments.
+    pub wal_segments_count: usize,
+    /// Whether point-in-time recovery is available.
+    pub active: bool,
+}
+
+/// Request to restore a database to a specific point in time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PitrRestoreRequest {
+    /// Target unix millisecond timestamp to recover to.
+    pub target_time: u64,
+    /// Optional name if restoring as a new branched database (PITR Clone).
+    /// If None, restores in-place into the existing database.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "main-postgres-pitr")]
+    pub new_name: Option<AppName>,
+    /// Optional host port if restoring as a new database.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_port: Option<u16>,
+}
+
+/// Result of a point-in-time recovery operation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct PitrRestoreResponse {
+    pub app: AppEntry,
+    pub target_time: u64,
+    pub base_backup_id: String,
+    pub wal_segments_replayed: usize,
+    pub branched: bool,
+}
+
 /// The longest health check path.
 const MAX_HEALTH_PATH_LENGTH: usize = 1024;
 

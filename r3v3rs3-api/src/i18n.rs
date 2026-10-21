@@ -203,6 +203,7 @@ mod tests {
             Error::DatabaseInUse { name: text() },
             Error::BackupFailed { reason: text() },
             Error::RestoreFailed { reason: text() },
+            Error::PitrTargetOutOfRange { reason: text() },
             Error::BackupNotFound { id: text() },
             Error::ScheduledCommandNotFound {
                 id: "abc".parse().unwrap(),

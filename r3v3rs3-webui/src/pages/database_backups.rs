@@ -11,9 +11,12 @@ use crate::format::format_time;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
+use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{BackupConfig, BackupEntry, RsyncConfig, S3Config, SftpConfig};
+use r3v3rs3_api::platform::{
+    BackupConfig, BackupEntry, PitrRange, PitrRestoreRequest, RsyncConfig, S3Config, SftpConfig,
+};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -139,6 +142,7 @@ pub fn database_backups(props: &Props) -> Html {
     let (session, _) = use_store::<SessionStore>();
     let backups = use_state(Vec::<BackupEntry>::new);
     let config = use_state(|| Option::<BackupConfig>::None);
+    let pitr_range = use_state(|| Option::<PitrRange>::None);
     let notice = use_state(|| Option::<Notice<&'static str>>::None);
     let form = use_state(FormState::default);
     let busy = use_state(|| false);
@@ -147,15 +151,16 @@ pub fn database_backups(props: &Props) -> Html {
     let signed_in = session.info.is_some();
     let can_edit = session.can_edit();
     {
-        let (backups, config, form, notice) = (
+        let (backups, config, form, notice, pitr_range) = (
             backups.clone(),
             config.clone(),
             form.clone(),
             notice.clone(),
+            pitr_range.clone(),
         );
         use_effect_with((signed_in, id), move |&(signed_in, id)| {
             if signed_in {
-                reload(locale, &backups, &config, &form, &notice, id);
+                reload(locale, &backups, &config, &form, &notice, &pitr_range, id);
             }
         });
     }
@@ -165,18 +170,20 @@ pub fn database_backups(props: &Props) -> Html {
     }
     let navigator = use_navigator().unwrap();
     let reload = {
-        let (backups, config, form, notice) = (
+        let (backups, config, form, notice, pitr_range) = (
             backups.clone(),
             config.clone(),
             form.clone(),
             notice.clone(),
+            pitr_range.clone(),
         );
-        Callback::from(move |()| reload(locale, &backups, &config, &form, &notice, id))
+        Callback::from(move |()| reload(locale, &backups, &config, &form, &notice, &pitr_range, id))
     };
     html! {
         <>
             { back_header(locale, &navigator, locale.t("backups.title").to_string()) }
             { notice_view(&notice, |key| html! { {locale.t(key)} }) }
+            { pitr_banner_view(locale, id, (*pitr_range).as_ref(), can_edit, &notice, &reload) }
             if can_edit {
                 <div class="mb-4">
                     <button type="button" class={BUTTON_CLASS} disabled={*busy}
@@ -212,6 +219,7 @@ fn reload(
     config: &UseStateHandle<Option<BackupConfig>>,
     form: &UseStateHandle<FormState>,
     notice: &UseStateHandle<Option<Notice<&'static str>>>,
+    pitr_range: &UseStateHandle<Option<PitrRange>>,
     id: ShortId,
 ) {
     let (backups, notice) = (backups.clone(), notice.clone());
@@ -240,6 +248,185 @@ fn reload(
             config.set(Some(loaded));
         }
     });
+    let pitr_state = pitr_range.clone();
+    spawn_local(async move {
+        if let Ok(loaded) = fetch_json::<PitrRange>(
+            locale,
+            Request::get(&format!("{API_ENDPOINT}/databases/{id}/pitr")),
+        )
+        .await
+        {
+            pitr_state.set(Some(loaded));
+        }
+    });
+}
+
+fn parse_datetime_ms(input: &str) -> Option<u64> {
+    let trimmed = input.trim();
+    if let Ok(ms) = trimmed.parse::<u64>() {
+        return Some(ms);
+    }
+    if let Ok(dt) =
+        time::OffsetDateTime::parse(trimmed, &time::format_description::well_known::Rfc3339)
+    {
+        let nanos = dt.unix_timestamp_nanos();
+        if nanos >= 0 {
+            return Some((nanos / 1_000_000) as u64);
+        }
+    }
+    None
+}
+
+fn pitr_restore_action(
+    locale: Locale,
+    id: ShortId,
+    default_time: u64,
+    reload: Callback<()>,
+) -> Callback<MouseEvent> {
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let prompt_text = locale.t("databases.pitr_prompt");
+        let default_val = format_time(default_time);
+        let reload = reload.clone();
+        spawn_local(async move {
+            let Some(input) = dialog::prompt(locale, prompt_text, &default_val).await else {
+                return;
+            };
+            let Some(target_time) = parse_datetime_ms(&input) else {
+                dialog::message(
+                    locale,
+                    locale.t("error.pitr_target_out_of_range"),
+                    Icon::Error,
+                )
+                .await;
+                return;
+            };
+            let branch_prompt = locale.t("databases.pitr_branch_prompt");
+            let branch_input = dialog::prompt(locale, branch_prompt, "")
+                .await
+                .unwrap_or_default();
+            let trimmed = branch_input.trim();
+            let new_name = if !trimmed.is_empty() {
+                trimmed.parse().ok()
+            } else {
+                None
+            };
+            send_pitr_restore(locale, id, target_time, new_name, reload).await;
+        });
+    })
+}
+
+async fn send_pitr_restore(
+    locale: Locale,
+    id: ShortId,
+    target_time: u64,
+    new_name: Option<AppName>,
+    reload: Callback<()>,
+) {
+    let req_body = PitrRestoreRequest {
+        target_time,
+        new_name,
+        host_port: None,
+    };
+    let Ok(body) = serde_json::to_string(&req_body) else {
+        return;
+    };
+    let req = Request::post(&format!("{API_ENDPOINT}/databases/{id}/pitr/restore"))
+        .header("Content-Type", "application/json")
+        .body(body);
+    match req {
+        Ok(b) => match b.send().await {
+            Ok(res) if res.ok() => {
+                dialog::message(locale, locale.t("databases.pitr_restored"), Icon::Success).await;
+                reload.emit(());
+            }
+            Ok(res) => {
+                let msg = res.text().await.unwrap_or_default();
+                dialog::message(locale, &msg, Icon::Error).await;
+            }
+            Err(e) => dialog::message(locale, &e.to_string(), Icon::Error).await,
+        },
+        Err(e) => dialog::message(locale, &e.to_string(), Icon::Error).await,
+    }
+}
+
+fn archive_wal_action(
+    id: ShortId,
+    notice: UseStateHandle<Option<Notice<&'static str>>>,
+    reload: Callback<()>,
+) -> Callback<MouseEvent> {
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let notice = notice.clone();
+        let reload = reload.clone();
+        spawn_local(async move {
+            let req = Request::post(&format!("{API_ENDPOINT}/databases/{id}/wal/archive"))
+                .send()
+                .await;
+            match req {
+                Ok(res) if res.ok() => {
+                    notice.set(Some(Notice::Saved("databases.wal_archived")));
+                    reload.emit(());
+                }
+                Ok(res) => {
+                    let msg = res.text().await.unwrap_or_default();
+                    notice.set(Some(Notice::Failed(msg)));
+                }
+                Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
+            }
+        });
+    })
+}
+
+fn pitr_banner_view(
+    locale: Locale,
+    id: ShortId,
+    pitr: Option<&PitrRange>,
+    can_edit: bool,
+    notice: &UseStateHandle<Option<Notice<&'static str>>>,
+    reload: &Callback<()>,
+) -> Html {
+    let Some(pitr) = pitr else {
+        return html!();
+    };
+    let window_text = match (pitr.earliest, pitr.latest) {
+        (Some(earliest), Some(latest)) => {
+            format!("{} → {}", format_time(earliest), format_time(latest))
+        }
+        _ => locale.t("databases.pitr_no_window").to_string(),
+    };
+    let restore_btn = (can_edit && pitr.earliest.is_some()).then(|| {
+        let def_time = pitr.latest.unwrap_or_else(|| pitr.earliest.unwrap_or(0));
+        let onclick = pitr_restore_action(locale, id, def_time, reload.clone());
+        html! {
+            <button type="button" class="px-3 py-1.5 rounded bg-blue-600 text-white font-medium hover:bg-blue-500 mr-2 text-sm" {onclick}>
+                {locale.t("databases.pitr_restore")}
+            </button>
+        }
+    });
+    let wal_btn = can_edit.then(|| {
+        let onclick = archive_wal_action(id, notice.clone(), reload.clone());
+        html! {
+            <button type="button" class="px-3 py-1.5 rounded bg-neutral-700 text-neutral-200 font-medium hover:bg-neutral-600 text-sm" {onclick}>
+                {locale.t("databases.wal_archive")}
+            </button>
+        }
+    });
+    html! {
+        <div class="mb-4 p-3 bg-neutral-800/80 rounded border border-neutral-700 flex flex-wrap items-center justify-between gap-2">
+            <div>
+                <span class="font-medium text-neutral-200 mr-2">{locale.t("databases.pitr_window")}</span>
+                <span class="font-mono text-neutral-300 text-sm">{window_text}</span>
+                <span class="ml-3 text-xs text-neutral-400">
+                    {format!("({} base, {} WAL)", pitr.base_backups_count, pitr.wal_segments_count)}
+                </span>
+            </div>
+            <div class="flex items-center">
+                { restore_btn }
+                { wal_btn }
+            </div>
+        </div>
+    }
 }
 
 impl FormState {

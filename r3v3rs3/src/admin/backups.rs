@@ -15,7 +15,10 @@ use axum::{
 use r3v3rs3_api::{
     audit::AuditAction,
     id::ShortId,
-    platform::{BackupConfig, BackupEntry, BackupVerifyReport},
+    platform::{
+        BackupConfig, BackupEntry, BackupVerifyReport, PitrRange, PitrRestoreRequest,
+        PitrRestoreResponse, WalSegment,
+    },
 };
 
 /// Lists the backups of a database, newest first.
@@ -224,4 +227,104 @@ pub async fn put_config(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(()))
+}
+
+/// Returns the point-in-time recovery range and statistics for a database.
+#[utoipa::path(
+    get,
+    path = "/{id}/pitr",
+    tag = "platform",
+    operation_id = "get_database_pitr_range",
+    params(("id" = ShortId, Path, description = "Database app id.")),
+    responses((status = 200, description = "The PITR recovery window and stats.", body = PitrRange), ErrorResponses)
+)]
+pub async fn get_pitr_range(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<PitrRange>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let range = platform.pitr_range(id).await.map_err(platform_error)?;
+    Ok(Json(range))
+}
+
+/// Restores a database to a specific point in time (PITR).
+#[utoipa::path(
+    post,
+    path = "/{id}/pitr/restore",
+    tag = "platform",
+    operation_id = "restore_database_pitr",
+    params(("id" = ShortId, Path, description = "Database app id.")),
+    request_body = PitrRestoreRequest,
+    responses((status = 200, description = "The PITR restore result.", body = PitrRestoreResponse), NotFoundResponse, ErrorResponses)
+)]
+pub async fn restore_pitr(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<PitrRestoreRequest>,
+) -> Result<Json<PitrRestoreResponse>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let resp = platform
+        .restore_pitr(id, request)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::PitrRestoreDatabase)
+        .id(id)
+        .summary(format!(
+            "{}: PITR target {} (branched: {})",
+            resp.app.name, resp.target_time, resp.branched
+        ));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(resp))
+}
+
+/// Archives the current WAL or binary log segment from the running database container.
+#[utoipa::path(
+    post,
+    path = "/{id}/wal/archive",
+    tag = "platform",
+    operation_id = "archive_database_wal",
+    params(("id" = ShortId, Path, description = "Database app id.")),
+    responses((status = 200, description = "The archived WAL segment.", body = WalSegment), NotFoundResponse, ErrorResponses)
+)]
+pub async fn archive_wal(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<WalSegment>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let segment = platform.archive_wal(id).await.map_err(platform_error)?;
+    let app = platform.app(id).await.map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::ArchiveDatabaseWal)
+        .id(id)
+        .summary(format!("{}: archived WAL {}", app.name, segment.filename));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(segment))
+}
+
+/// Lists archived WAL and binary log segments for a database.
+#[utoipa::path(
+    get,
+    path = "/{id}/wal/segments",
+    tag = "platform",
+    operation_id = "list_database_wal_segments",
+    params(("id" = ShortId, Path, description = "Database app id.")),
+    responses((status = 200, description = "The archived WAL segments.", body = [WalSegment]), ErrorResponses)
+)]
+pub async fn list_wal_segments(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Vec<WalSegment>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let segments = platform
+        .list_wal_segments(id)
+        .await
+        .map_err(platform_error)?;
+    Ok(Json(segments))
 }
