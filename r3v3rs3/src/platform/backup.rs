@@ -195,6 +195,51 @@ impl Platform {
         Ok(entries)
     }
 
+    /// Lists all database backups across all databases, sorted newest first.
+    pub async fn list_all_backups(&self) -> anyhow::Result<Vec<BackupEntry>> {
+        let apps = self.apps().await?;
+        let mut all = Vec::new();
+        for app in apps.into_iter().filter(|a| a.spec.database.is_some()) {
+            if let Ok(backups) = self.list_backups(app.id).await {
+                all.extend(backups);
+            }
+        }
+        all.sort_by_key(|entry| std::cmp::Reverse(entry.created_at));
+        Ok(all)
+    }
+
+    /// Computes high-level statistics and overview of all backups in the platform.
+    pub async fn backups_overview(&self) -> anyhow::Result<r3v3rs3_api::platform::BackupsOverview> {
+        let all = self.list_all_backups().await?;
+        let config = self.backup_config().await?;
+        let total_bytes: u64 = all.iter().map(|b| b.size).sum();
+        let total_backups = all.len();
+        let last_backup_at = all.first().map(|b| b.created_at);
+        let total_databases = self
+            .apps()
+            .await?
+            .into_iter()
+            .filter(|app| app.spec.database.is_some())
+            .count();
+        let s3_enabled = config.s3.is_some();
+        let heartbeat_configured = config
+            .heartbeat_url
+            .as_ref()
+            .is_some_and(|u| !u.trim().is_empty());
+
+        Ok(r3v3rs3_api::platform::BackupsOverview {
+            total_backups,
+            total_bytes,
+            total_databases,
+            last_backup_at,
+            schedule: config.schedule,
+            s3_enabled,
+            retention_count: config.keep,
+            restore_test_enabled: config.restore_test_enabled,
+            heartbeat_configured,
+        })
+    }
+
     /// Dumps the database of the local target into the backup directory, and applies the
     /// retention of the settings.
     pub async fn run_backup(&self, db_id: ShortId) -> anyhow::Result<BackupEntry> {
@@ -1663,7 +1708,46 @@ pub fn spawn_scheduler(platform: Arc<Platform>) {
     });
 }
 
+fn ping_heartbeat(url_opt: &Option<String>) {
+    if let Some(url) = url_opt
+        && !url.trim().is_empty()
+    {
+        let url = url.clone();
+        tokio::spawn(async move {
+            if let Ok(client) = crate::cdn::fetch::build_client().await
+                && let Ok(req) = hyper::Request::builder()
+                    .method(hyper::Method::GET)
+                    .uri(&url)
+                    .header(
+                        hyper::header::USER_AGENT,
+                        concat!("r3v3rs3-heartbeat/", env!("CARGO_PKG_VERSION")),
+                    )
+                    .body(http_body_util::Full::new(hyper::body::Bytes::new()))
+            {
+                let _ =
+                    tokio::time::timeout(std::time::Duration::from_secs(10), client.request(req))
+                        .await;
+            }
+        });
+    }
+}
+
 impl Platform {
+    async fn dispatch_backup_failure(&self, app_name: &str, app_id: ShortId, err: &anyhow::Error) {
+        let summary = format!("Scheduled backup failed for database '{app_name}'");
+        let data = serde_json::json!({
+            "db_id": app_id.to_string(),
+            "db_name": app_name,
+            "error": err.to_string(),
+        });
+        self.dispatch_webhook_event(
+            r3v3rs3_api::webhook::WebhookEvent::BackupFailure,
+            summary,
+            data,
+        )
+        .await;
+    }
+
     /// Takes the backup of every managed database that the schedule is due for.
     async fn run_scheduled_backups(&self) -> anyhow::Result<()> {
         let config = self.backup_config().await?;
@@ -1681,12 +1765,17 @@ impl Platform {
                 .first()
                 .map(|entry| entry.created_at);
             if now >= slot && last.is_none_or(|created_at| created_at < slot) {
-                if let Err(err) = self.run_backup(app.id).await {
-                    tracing::error!(
-                        err = format!("{err:#}"),
-                        database = %app.name,
-                        "the scheduled backup failed"
-                    );
+                match self.run_backup(app.id).await {
+                    Ok(_) => ping_heartbeat(&config.heartbeat_url),
+                    Err(err) => {
+                        tracing::error!(
+                            err = format!("{err:#}"),
+                            database = %app.name,
+                            "the scheduled backup failed"
+                        );
+                        self.dispatch_backup_failure(app.name.as_str(), app.id, &err)
+                            .await;
+                    }
                 }
             } else if config.restore_test_enabled {
                 self.verify_untested_backup(app.id).await;
@@ -1995,6 +2084,18 @@ mod tests {
         assert!(parse_backup_snapshot("databases", "databases/shop/1a2b.json", 100, "").is_none());
         assert!(
             parse_backup_snapshot("databases", "disaster-recovery/123.r3bundle", 100, "").is_none()
+        );
+    }
+
+    #[test]
+    fn backup_config_heartbeat_url_roundtrip() {
+        let json = r#"{"schedule":"03:00","keep":14,"heartbeat_url":"https://hc-ping.com/123"}"#;
+        let config: BackupConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.schedule, "03:00");
+        assert_eq!(config.keep, 14);
+        assert_eq!(
+            config.heartbeat_url.as_deref(),
+            Some("https://hc-ping.com/123")
         );
     }
 }

@@ -140,6 +140,9 @@ pub struct BackupConfig {
     pub rsync: Option<RsyncConfig>,
     /// Whether periodic restore testing (decompression and integrity validation) is performed.
     pub restore_test_enabled: bool,
+    /// Optional dead man's snitch / heartbeat URL pinged on successful automated backup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat_url: Option<String>,
 }
 
 impl Default for BackupConfig {
@@ -151,6 +154,7 @@ impl Default for BackupConfig {
             sftp: None,
             rsync: None,
             restore_test_enabled: true,
+            heartbeat_url: None,
         }
     }
 }
@@ -305,6 +309,27 @@ pub struct BackupEntry {
     /// Verification result message or status ("valid", "error: ...").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_status: Option<String>,
+}
+
+/// Global summary and statistics of all backups in the platform.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BackupsOverview {
+    pub total_backups: usize,
+    pub total_bytes: u64,
+    pub total_databases: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_backup_at: Option<i64>,
+    pub schedule: String,
+    pub s3_enabled: bool,
+    pub retention_count: u32,
+    pub restore_test_enabled: bool,
+    pub heartbeat_configured: bool,
+}
+
+/// Request to run a manual backup for a specified database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RunBackupRequest {
+    pub database_id: ShortId,
 }
 
 /// One stored backup or snapshot of an application volume.

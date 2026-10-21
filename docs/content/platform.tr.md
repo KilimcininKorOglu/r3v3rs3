@@ -314,11 +314,12 @@ Görsel veri inceleme, sorgulama ve şema yönetimi için r3v3rs3, **App Store**
 
 Veritabanı satırındaki **Yedekler** bağlantısı o veritabanının yedeklerini açar. **Şimdi yedekle**, engine'in dump'ını container'ın içinde çalıştırır (`pg_dump`, `mariadb-dump`, `mysqldump` veya `mongodump`; Redis `SAVE` çalıştırır ve dump dosyasını alır), gzip'ler ve config dizinindeki `backups` dizinine kaydeder; veritabanı başına bir klasör, dosyanın SHA-256'sını taşıyan bir JSON manifest ile birlikte. Bir yedek parola içermez. Agent target üzerindeki bir veritabanı yedek alamaz; çünkü dump container'ın içinde çalışır.
 
-Aynı sayfadaki yedekleme ayarları, her veritabanının yedeklendiği UTC'deki günlük saati, veritabanı başına kalacak yedek sayısını (en eskiler önce gider) ve uzak depolama hedeflerini yapılandırır:
+Aynı sayfadaki yedekleme ayarları, her veritabanının yedeklendiği UTC'deki günlük saati, veritabanı başına kalacak yedek sayısını (en eskiler önce gider), uzak depolama hedeflerini ve nabız (heartbeat) izleme kontrolünü yapılandırır:
 
 - **S3**: Bucket'ı yolunda taşıyan bir `http` veya `https` endpoint, bir region, bir key prefix, bir access key ve secret key.
 - **SFTP**: `host`, `port` (varsayılan 22), `user`, hedef `path` ve isteğe bağlı SSH private key (veya parola) ile aktarım.
 - **rsync**: SSH üzerinden uzak hedef dizine `rsync` ile yedek aktarımı.
+- **Dead Man's Snitch / Heartbeat İzleme**: İsteğe bağlı bir sinyal (ping) URL'si (örn. Healthchecks.io, Dead Man's Snitch veya Better Stack). Günlük planlı yedekler başarıyla tamamlandığında r3v3rs3 bu adrese `r3v3rs3-heartbeat` User-Agent başlığıyla bir HTTP GET çağrısı yapar. Herhangi bir planlı yedekleme başarısız olursa bu ping atlanarak yerine `backup.failure` giden webhook bildirimi gönderilir; böylece harici servisler sessiz yedekleme arızalarını anında fark eder.
 
 Her yeni yedek yapılandırılan uzak hedeflere aktarılır; başarısız bir yükleme yalnız sunucu log'una geçer, çünkü yerel kopya vardır. Uzak kimlik bilgileri `platform.key` ile şifrelenir.
 
@@ -687,7 +688,7 @@ Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde repl
 
 ## WebUI
 
-**Kontrol Paneli** (`/`), sistem durumunun, portların, proxy'lerin, uygulamaların, veritabanlarının, hedeflerin, disk depolama alanının ve mevcut güncellemelerin tek ekranda özetini sunar. Kenar çubuğundaki **Platform** grubu **Projeler**, **Uygulamalar**, **App Store**, **Veritabanları**, **Hedefler**, **Git Sağlayıcıları**, **Registry'ler** ve **Çevre Grupları** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** ve **Registry'ler** sayfaları Edit/Admin izni olan hesaba görünür. Orada bağlantı veya registry ekleme, değiştirme ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
+**Kontrol Paneli** (`/`), sistem durumunun, portların, proxy'lerin, uygulamaların, veritabanlarının, hedeflerin, disk depolama alanının ve mevcut güncellemelerin tek ekranda özetini sunar. Kenar çubuğundaki **Platform** grubu **Projeler**, **Uygulamalar**, **App Store**, **Veritabanları**, **Yedekler**, **Hedefler**, **Git Sağlayıcıları**, **Registry'ler** ve **Çevre Grupları** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** ve **Registry'ler** sayfaları Edit/Admin izni olan hesaba görünür. Orada bağlantı veya registry ekleme, değiştirme ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
 
 ### Kontrol Paneli
 
@@ -815,10 +816,29 @@ Yönetim altındaki **Webhook'lar** sayfası, giden olay bildirim hedeflerini y�
   - **Kategorize Edilmiş Olay Seçimi**: Dört kategori altında gruplanmış onay kutuları (Deployment'lar, Veritabanları & Yedekler, Güvenlik & Sertifikalar, Sistem & Düğümler) ve tek tıkla **Tümünü Seç** / **Seçimi Temizle** düğmeleri.
 - **Webhook Testi**: Yapılandırmayı kaydetmeden önce bağlantıyı ve imza doğrulamasını doğrulamak için hedef uç noktaya anında bir `test.ping` yükü gönderme.
 
+### Yedekler
+
+**Yedekler** sayfası (`/backups`), tüm platformdaki veritabanı ve volume yedeklerini, otomatik zamanlamaları, olağanüstü durum kurtarmayı (disaster recovery) ve sistem sağlığı izlemesini tek bir noktadan yönetir:
+
+- **Durum Kartları**: Toplam alınan yedek sayısı, tüketilen birikimli disk alanı, en son alınan yedeğin zaman damgası, yapılandırılan cron takvimi, Dead Man's Snitch / Heartbeat izleme durumu ve uzak S3 eşitleme durumunu gösteren gerçek zamanlı göstergeler.
+- **Birleşik Yedekler Tablosu**: Tüm veritabanı motorlarındaki (PostgreSQL, MySQL, MariaDB, MongoDB, Redis) yedekleri motor etiketleri, veritabanı adı, yedek kimliği, boyutu, oluşturulma tarihi ve otomatik geri yükleme doğrulama durum rozeti ile listeler.
+- **Arama ve Motor Filtreleri**: Veritabanı adı veya yedek kimliğine göre anında arama, ayrıca motor seçimine göre filtreleme.
+- **Satır İşlemleri**:
+  - **İndir**: Sıkıştırılmış `.dump.gz` dosyasını doğrudan indirme.
+  - **Doğrula**: Canlı veritabanını değiştirmeden yedeğin açılabilirliğini ve sihirli bayt / SQL başlık bütünlüğünü anında test etme.
+  - **Geri Yükle**: Onay sonrasında aktif veritabanı verisinin yerine seçilen yedeği canlı container'a yazma.
+  - **Sil**: Yerel yedek dosyasını ve manifest verisini silme.
+- **Şimdi Yedek Al Modalı**: Sistemde yapılandırılmış herhangi bir veritabanını açılır listeden seçerek anında yedekleme tetikleme.
+- **Olağanüstü Durum Kurtarma Çekmecesi**: Uzak S3 uyumlu bulut depolamada saklanan snapshot'ları inceleme ve geri yükleme.
+- **Ayarlar Modalı**: Otomatik UTC günlük yedekleme saatini, saklanacak yedek limitini, uzak depolama hedeflerini (S3, SFTP, rsync) ve Dead Man's Snitch / Heartbeat ping URL'sini yapılandırma.
+
 ## Yönetim API'si
 
 | Route | İzin | Açıklama |
 |---|---|---|
+| `GET /api/backups` | Read | Tüm veritabanlarındaki yedekleri motor ve meta verileriyle listeler. |
+| `GET /api/backups/overview` | Read | Tüm veritabanları genelinde özet istatistikler, zamanlama, saklama ve heartbeat izleme durumu. |
+| `POST /api/backups/run` | Edit | Belirtilen bir veritabanının anında yedeğini alır. |
 | `GET /api/targets` | Read | Uygulamaları çalıştıran Docker host'ları ve agent'larının durumu. |
 | `POST /api/targets` | Admin | Bir agent hedefi ekler ve kayıt token'ını bir kez döndürür. |
 | `POST /api/targets/upgrade` | Admin | Bağlı tüm eski sürümlü agent hedeflerine en güncel ikili dosyayı iter. |

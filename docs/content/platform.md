@@ -314,11 +314,12 @@ On the **Databases** page, each database row includes a direct **Web UI** action
 
 The **Backups** link on a database row opens its backups. **Back up now** runs the dump of the engine inside the container (`pg_dump`, `mariadb-dump`, `mysqldump` or `mongodump`; Redis runs `SAVE` and takes its dump file), gzips it and stores it in the `backups` directory of the config directory, one folder per database, with a JSON manifest that carries the SHA-256 of the file. A backup holds no password. A database on an agent target takes no backup, because the dump runs in the container itself.
 
-The backup settings on the same page configure the daily time in UTC that every database is backed up at, the number of backups per database that survive (the oldest go first), and remote upload destinations:
+The backup settings configure the daily time in UTC that every database is backed up at, the number of backups per database that survive (the oldest go first), remote upload destinations, and heartbeat health checks:
 
 - **S3**: An S3-compatible bucket endpoint with region, path prefix, access key, and secret key.
 - **SFTP**: Uploads dumps via SSH/SFTP specifying `host`, `port` (default 22), `user`, target `path`, and an optional private key or password.
 - **rsync**: Transfers dumps using `rsync` over SSH to a remote target directory.
+- **Dead Man's Snitch / Heartbeat Monitoring**: An optional heartbeat ping URL (e.g., Healthchecks.io, Dead Man's Snitch, or Better Stack). Upon successful execution of daily scheduled backups, r3v3rs3 sends an HTTP GET ping with the `r3v3rs3-heartbeat` User-Agent to this endpoint. If any scheduled backup fails, the ping is skipped and a `backup.failure` outbound webhook is dispatched instead, alerting external monitoring services to silent backup failures.
 
 Every new backup uploads to the configured remote targets; a failed upload only goes into the server log, because the local copy exists. Remote credentials are encrypted with `platform.key`.
 
@@ -687,7 +688,7 @@ When pulling private container images (such as from private Docker Hub repositor
 
 ## WebUI
 
-The **Dashboard** (`/`) provides a single-screen overview of the system state, ports, proxies, apps, databases, targets, disk storage space, and available updates. The **Platform** group of the sidebar holds the **Projects**, **Apps**, **App Store**, **Databases**, **Targets**, **Git Providers**, **Registries** and **Environment Variable Groups** pages, and appears only while the platform is on. The **Git Providers** and **Registries** pages appear for an account with the Edit/Admin permission. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+The **Dashboard** (`/`) provides a single-screen overview of the system state, ports, proxies, apps, databases, targets, disk storage space, and available updates. The **Platform** group of the sidebar holds the **Projects**, **Apps**, **App Store**, **Databases**, **Backups**, **Targets**, **Git Providers**, **Registries** and **Environment Variable Groups** pages, and appears only while the platform is on. The **Git Providers** and **Registries** pages appear for an account with the Edit/Admin permission. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
 
 ### Dashboard
 
@@ -815,10 +816,29 @@ The **Webhooks** page under Administration provides a centralized dashboard for 
   - **Categorized Event Selection**: Checkboxes grouped by category (Deployments, Databases & Backups, Security & Certificates, System & Nodes) with one-click **Select All** and **Deselect All** buttons.
 - **Test Webhook**: Send an immediate `test.ping` payload to the target endpoint to verify connectivity and signature validation before saving.
 
+### Backups
+
+The **Backups** page (`/backups`) provides a centralized management console for database and volume backups, automated schedules, disaster recovery, and health monitoring across the entire platform:
+
+- **KPI Cards**: Real-time overview metrics displaying total backup archives, cumulative disk space consumed, timestamp of the most recent backup, configured cron schedule, Dead Man's Snitch / Heartbeat monitor status, and remote S3 backup sync status.
+- **Unified Backups Table**: Displays all backups across all database engines (PostgreSQL, MySQL, MariaDB, MongoDB, Redis) and volumes with engine tags, database name, backup identifier, size, creation date, and automated restore verification status badge.
+- **Search & Engine Filters**: Instant search filter by database name or backup ID, plus engine dropdown filtering.
+- **Row Actions**:
+  - **Download**: Direct `.dump.gz` download link.
+  - **Verify**: On-demand integrity test decompressing the dump and validating magic bytes/SQL headers without modifying the database.
+  - **Restore**: In-place container restore replacing active database data with the selected dump after confirmation.
+  - **Delete**: Deletes the local backup file and metadata.
+- **Take Backup Now Modal**: Quick one-click execution modal to trigger an immediate backup for any selected database on the system.
+- **Disaster Recovery Drawer**: Inspect and restore snapshots stored in remote S3-compatible cloud storage.
+- **Settings Modal**: Configure automated UTC daily backup schedules, retention counts, remote storage targets (S3, SFTP, rsync), and Dead Man's Snitch / Heartbeat ping URL.
+
 ## Admin API
 
 | Route | Permission | Description |
 |---|---|---|
+| `GET /api/backups` | Read | Lists all database backups across all databases with engine and metadata. |
+| `GET /api/backups/overview` | Read | Aggregated statistics, schedule, retention, and heartbeat monitoring status across all databases. |
+| `POST /api/backups/run` | Edit | Triggers an immediate backup of a specified database. |
 | `GET /api/store` | Read | The app store catalog with its state. |
 | `POST /api/store/refresh` | Edit | Downloads the catalog from the repository and applies it. |
 | `GET /api/targets` | Read | The Docker hosts that run apps, with the state of their agents. |

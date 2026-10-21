@@ -147,6 +147,13 @@ const GROUPS: &[MenuGroup] = &[
                 subs: NO_SUBS,
             },
             MenuItem {
+                name: "nav.backups",
+                icon: "/assets/icons/cloud-upload.svg",
+                route: Route::Backups,
+                access: Access::PlatformEdit,
+                subs: NO_SUBS,
+            },
+            MenuItem {
                 name: "nav.targets",
                 icon: "/assets/icons/server.svg",
                 route: Route::Targets,

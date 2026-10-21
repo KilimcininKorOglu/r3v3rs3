@@ -491,6 +491,13 @@ fn platform_routes() -> OpenApiRouter<AppState> {
             OpenApiRouter::new().routes(routes!(backups::get_config, backups::put_config)),
         )
         .nest(
+            "/backups",
+            OpenApiRouter::new()
+                .routes(routes!(backups::list_all))
+                .routes(routes!(backups::overview))
+                .routes(routes!(backups::run_backup_now)),
+        )
+        .nest(
             "/disaster-recovery",
             OpenApiRouter::new()
                 .routes(routes!(disaster_recovery::list, disaster_recovery::create))

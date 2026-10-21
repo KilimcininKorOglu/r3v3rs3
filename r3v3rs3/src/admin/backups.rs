@@ -16,9 +16,9 @@ use r3v3rs3_api::{
     audit::AuditAction,
     id::ShortId,
     platform::{
-        BackupConfig, BackupEntry, BackupVerifyReport, PitrRange, PitrRestoreRequest,
-        PitrRestoreResponse, RestoreFromS3Request, RestoreFromS3Response, S3BackupSnapshot,
-        S3DownloadQuery, S3SnapshotsQuery, WalSegment,
+        BackupConfig, BackupEntry, BackupVerifyReport, BackupsOverview, PitrRange,
+        PitrRestoreRequest, PitrRestoreResponse, RestoreFromS3Request, RestoreFromS3Response,
+        RunBackupRequest, S3BackupSnapshot, S3DownloadQuery, S3SnapshotsQuery, WalSegment,
     },
 };
 
@@ -408,4 +408,72 @@ pub async fn restore_s3(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(resp))
+}
+
+/// Lists all database backups across all databases, newest first.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "platform",
+    operation_id = "list_all_backups",
+    responses((status = 200, description = "All database backups across the platform.", body = Vec<BackupEntry>), ErrorResponses)
+)]
+pub async fn list_all(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Vec<BackupEntry>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    Ok(Json(
+        platform.list_all_backups().await.map_err(platform_error)?,
+    ))
+}
+
+/// Returns the global backup summary and statistics across the platform.
+#[utoipa::path(
+    get,
+    path = "/overview",
+    tag = "platform",
+    operation_id = "get_backups_overview",
+    responses((status = 200, description = "Backup overview and metrics.", body = BackupsOverview), ErrorResponses)
+)]
+pub async fn overview(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<BackupsOverview>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    Ok(Json(
+        platform.backups_overview().await.map_err(platform_error)?,
+    ))
+}
+
+/// Takes a manual backup for the requested database immediately.
+#[utoipa::path(
+    post,
+    path = "/run",
+    tag = "platform",
+    operation_id = "run_database_backup_now",
+    request_body = RunBackupRequest,
+    responses((status = 200, description = "The taken backup.", body = BackupEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn run_backup_now(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(req): Json<RunBackupRequest>,
+) -> Result<Json<BackupEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let entry = platform
+        .run_backup(req.database_id)
+        .await
+        .map_err(platform_error)?;
+    let app = platform
+        .app(req.database_id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::BackupDatabase)
+        .id(req.database_id)
+        .summary(app.name.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(entry))
 }

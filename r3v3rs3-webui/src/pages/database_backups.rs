@@ -33,6 +33,7 @@ const BUTTON_CLASS: &str =
 struct FormState {
     schedule: String,
     keep: String,
+    heartbeat_url: String,
     endpoint: String,
     region: String,
     prefix: String,
@@ -55,6 +56,7 @@ impl Default for FormState {
         Self {
             schedule: String::new(),
             keep: "7".into(),
+            heartbeat_url: String::new(),
             endpoint: String::new(),
             region: String::new(),
             prefix: String::new(),
@@ -82,6 +84,7 @@ impl FormState {
         Self {
             schedule: config.schedule.clone(),
             keep: config.keep.to_string(),
+            heartbeat_url: config.heartbeat_url.clone().unwrap_or_default(),
             endpoint: s3.endpoint,
             region: s3.region,
             prefix: s3.prefix,
@@ -132,6 +135,14 @@ impl FormState {
             sftp,
             rsync,
             restore_test_enabled: self.restore_test_enabled,
+            heartbeat_url: {
+                let trimmed = self.heartbeat_url.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            },
         }
     }
 }
@@ -751,6 +762,14 @@ fn settings_view(
                         onchange={checkbox_input(form, |state| &mut state.restore_test_enabled)}
                     />
                     <span class="text-sm text-neutral-300">{locale.t("backups.restore_test_enabled")}</span>
+                </label>
+                <label class="block md:col-span-2">
+                    <span class="text-sm text-neutral-400">{locale.t("backups.heartbeat_url")}</span>
+                    <input type="text" class={INPUT_CLASS} placeholder="https://hc-ping.com/..."
+                        value={form.heartbeat_url.clone()}
+                        onchange={text_input(form, |state| &mut state.heartbeat_url)}
+                    />
+                    <span class="text-xs text-neutral-500">{locale.t("backups.heartbeat_url_hint")}</span>
                 </label>
             </div>
             <p class="font-medium mt-4 mb-2">{locale.t("backups.s3")}</p>

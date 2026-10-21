@@ -22,6 +22,7 @@ mod app_terminal;
 mod app_view;
 mod app_webhook;
 mod audit;
+pub mod backups;
 pub mod cert_list;
 mod dashboard;
 mod database_backups;
@@ -120,6 +121,8 @@ pub enum Route {
     Databases,
     #[at("/databases/:id/backups")]
     DatabaseBackups { id: ShortId },
+    #[at("/backups")]
+    Backups,
     #[at("/targets")]
     Targets,
     #[at("/git_connections")]
@@ -182,6 +185,7 @@ impl Route {
             | Route::Settings
             | Route::Accounts
             | Route::Webhooks
+            | Route::Backups
             | Route::Audit => Some(self.clone()),
             _ => None,
         }
@@ -208,6 +212,7 @@ pub fn switch(routes: Route) -> Html {
         Route::DatabaseBackups { id } => {
             html! { <database_backups::DatabaseBackups {id} /> }
         }
+        Route::Backups => html! { <backups::Backups /> },
         Route::AppStore => html! { <app_store::AppStore /> },
         Route::NewStoreApp { store } => {
             html! { <app_view::AppView store={Some(store)} /> }
