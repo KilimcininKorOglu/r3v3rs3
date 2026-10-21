@@ -80,6 +80,7 @@ mod store;
 pub(crate) mod system_metrics;
 mod traffic;
 mod upgrade;
+mod webhooks;
 mod workers;
 
 /// The scopes of the access token that a request to the MCP endpoint carried.
@@ -374,6 +375,17 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     platform::get_env_group,
                     platform::update_env_group,
                     platform::delete_env_group
+                )),
+        )
+        .nest(
+            "/webhooks",
+            OpenApiRouter::new()
+                .routes(routes!(webhooks::list_webhooks, webhooks::create_webhook))
+                .routes(routes!(webhooks::test_webhook))
+                .routes(routes!(
+                    webhooks::get_webhook,
+                    webhooks::update_webhook,
+                    webhooks::delete_webhook
                 )),
         )
         .nest(

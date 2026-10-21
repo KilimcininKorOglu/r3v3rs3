@@ -194,6 +194,13 @@ const GROUPS: &[MenuGroup] = &[
                 subs: NO_SUBS,
             },
             MenuItem {
+                name: "nav.webhooks",
+                icon: "/assets/icons/swap-horizontal.svg",
+                route: Route::Webhooks,
+                access: Access::AdminOnly,
+                subs: NO_SUBS,
+            },
+            MenuItem {
                 name: "nav.settings",
                 icon: "/assets/icons/settings.svg",
                 route: Route::Settings,

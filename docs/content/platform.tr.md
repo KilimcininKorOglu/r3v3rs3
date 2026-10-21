@@ -515,6 +515,65 @@ Uygulamalar ve veritabanları, bellek sızıntılarının veya aşırı CPU tük
 - **Dinamik Dikey Ölçekleme (Vertical Scaling)**: WebUI veya `PUT /api/apps/{id}` üzerinden kaynak sınırları güncellendiğinde, r3v3rs3 çalışan container'ın cgroup ayarlarını kesinti olmadan veya container'ı yeniden başlatmadan anında günceller.
 - **OOM Koruması ve Eşik Uyarıları**: Bir container'a bellek sınırı tanımlandığında, r3v3rs3 30 saniyelik periyodik kontrollerde bellek doluluğunu izler ve kullanım %90'a ulaştığında webhook'a `app_alert` (OOM uyarısı) iletir. Container çekirdek OOM killer tarafından sonlandırılırsa anında `oom_killed` uyarısı gönderilir.
 
+## Giden Webhook'lar & Olay Bildirimleri
+
+Platform, sistemde meydana gelen olayları harici izleme, bildirim ve otomasyon servislerine (Slack, Discord, PagerDuty, n8n, Datadog veya özel web servisleri) gerçek zamanlı olarak iletmek için merkezi bir giden webhook motoru içerir. Ayarlar sayfasındaki tekli bildirim webhook'undan farklı olarak, giden webhook yöneticisi birden fazla uç noktayı, ayrıntılı olay aboneliklerini, özel HTTP başlıklarını, şifreli imzalama anahtarlarını ve anında test gönderimini destekler.
+
+### Olay Kategorileri ve Türleri
+
+Yöneticiler, her webhook hedefi için dört ana kategori altında sunulan 14 olay türünden istediklerini seçerek abone olabilir:
+
+| Kategori | Olay Kodu | Açıklama |
+|---|---|---|
+| **Deployment'lar** | `deploy.success` | Uygulama deployment'ı başarıyla tamamlandı ve container sağlıklı. |
+| | `deploy.failure` | Uygulama deployment'ı derleme, çekme veya başlatma sırasında başarısız oldu. |
+| | `deploy.pending_approval` | Deployment oluşturuldu ancak manuel onay bekliyor. |
+| | `app.crashed` | Uygulama container'ı sıfır dışı bir çıkış koduyla beklenmedik şekilde çöktü veya kapandı. |
+| **Veritabanları & Yedekler** | `backup.success` | Veritabanı yedeği başarıyla alındı ve yerel diske kaydedildi. |
+| | `backup.failure` | Veritabanı dump alma veya yedekleme işlemi başarısız oldu. |
+| | `backup.upload_failed` | Veritabanı yedeğinin uzak depoya (S3/R2/SFTP) yüklenmesi başarısız oldu. |
+| | `backup.restored` | Veritabanı yerel veya uzak yedek snapshot'ından başarıyla geri yüklendi. |
+| **Güvenlik & Sertifikalar** | `cert.expiring` | TLS sertifikasının süresinin dolmasına 30 günden az kaldı. |
+| | `cert.renewed` | TLS sertifikası ACME üzerinden başarıyla yenilendi. |
+| | `cert.renewal_failed` | TLS sertifikası yenileme denemesi başarısız oldu. |
+| | `security.ip_banned` | İstemci IP adresi hız sınırı veya güvenlik kuralı nedeniyle yasaklandı. |
+| **Sistem & Düğümler** | `target.offline` | Agent düğümü kalp atışı göndermeyi durdurdu ve çevrimdışı olarak işaretlendi. |
+| | `system.disk_pressure` | Hedef düğüm disk doluluk oranı uyarı eşiğini aştı. |
+| **Sistem** | `test.ping` | WebUI veya API üzerinden manuel olarak gönderilen test ping'i. |
+
+### Yük Formatı ve Başlıklar
+
+Webhook'lar standart bir zarf formatında `Content-Type: application/json` başlığıyla HTTP `POST` istekleri gönderir:
+
+```json
+{
+  "id": "del_01j...",
+  "event": "deploy.success",
+  "created_at": "2026-10-21T21:40:00Z",
+  "timestamp": 1792618800,
+  "summary": "Deployment running: my-app (prod)",
+  "data": {
+    "app_id": "app_01j...",
+    "app_name": "my-app",
+    "deployment_id": "dep_01j...",
+    "environment": "production"
+  }
+}
+```
+
+İletim aşağıdaki HTTP başlıklarını içerir:
+- `Content-Type: application/json`
+- `User-Agent: r3v3rs3-Webhook/2.0`
+- `X-R3v3rs3-Event`: Olay kodu (örn. `deploy.success`).
+- `X-R3v3rs3-Delivery`: Benzersiz UUID iletim tanıtıcısı.
+- `X-R3v3rs3-Signature`: Webhook imzalama anahtarı tanımlanmışsa `sha256=<hex_digest>` biçiminde HMAC-SHA256 imzası.
+
+Alıcılar, istek gövdesinin HMAC-SHA256 özetini yapılandırılan gizli anahtar ile hesaplayıp `X-R3v3rs3-Signature` başlığındaki hex özetiyle sabit zamanlı karşılaştırma (constant-time comparison) yaparak isteğin r3v3rs3'ten geldiğini doğrulayabilir.
+
+### Gizli Anahtar Şifreleme ve Güvenlik
+
+Webhook imzalama anahtarları, platformun zarf şifrelemesi kullanılarak `platform.key` ile disk üzerinde AES-256-GCM ile şifrelenir. Düz metin anahtar asla API'den döndürülmez veya denetim günlüklerine yazılmaz. Platform ana anahtarı döndürüldüğünde (key rotation), yapılandırılmış tüm webhook anahtarları otomatik olarak yeni anahtarla yeniden mühürlenir.
+
 ## Yönlendirme
 
 Platform, en az bir alan adı olan her çalışan uygulama için bir proxy ekler. Bu proxy'ler `Platform` sağlayıcısından gelir. Bu yüzden [servis keşfi](@/discovery.tr.md) proxy'leri gibi salt okunurdur ve proxy listesi sağlayıcının durumunu gösterir. Her proxy:
@@ -743,6 +802,19 @@ Admin hesabı ayrıca şunları görür:
 - **Şimdi Temizle**: Anında temizlik başlatmak ve geri kazanılan alan ile silinen öğe sayılarını canlı görmek için **Şimdi Temizle** butonuna tıklayın (veya `POST /api/platform/prune/run` gönderin).
 - **Çalıştırma İstatistikleri**: Son temizleme zamanını ve geri kazanılan disk alanını gösterir.
 
+### Webhook'lar
+
+Yönetim altındaki **Webhook'lar** sayfası, giden olay bildirim hedeflerini yönetmek için merkezi bir kontrol paneli sunar:
+
+- **Webhook Listesi**: Yapılandırılan tüm webhook'ları hedef URL, atanan isim, aktif/pasif rozeti, mühürlü anahtar durumu rozeti ve abone olunan olay etiketleriyle birlikte listeler.
+- **Webhook Ekleme / Düzenleme Modalı**:
+  - **İsim ve URL**: Hedef webhook uç noktası (örn. `https://hooks.slack.com/...`).
+  - **Özel Başlıklar**: İsteğe bağlı özel HTTP başlıkları JSON nesnesi (örn. `{"Authorization": "Bearer ...", "X-Custom-Token": "..."}`).
+  - **İmzalama Anahtarı**: HMAC-SHA256 yük imzalama için paylaşılan gizli anahtar.
+  - **Aktif/Pasif**: Hedefi silmeden bildirim gönderimini geçici olarak durdurma veya açma.
+  - **Kategorize Edilmiş Olay Seçimi**: Dört kategori altında gruplanmış onay kutuları (Deployment'lar, Veritabanları & Yedekler, Güvenlik & Sertifikalar, Sistem & Düğümler) ve tek tıkla **Tümünü Seç** / **Seçimi Temizle** düğmeleri.
+- **Webhook Testi**: Yapılandırmayı kaydetmeden önce bağlantıyı ve imza doğrulamasını doğrulamak için hedef uç noktaya anında bir `test.ping` yükü gönderme.
+
 ## Yönetim API'si
 
 | Route | İzin | Açıklama |
@@ -819,6 +891,12 @@ Admin hesabı ayrıca şunları görür:
 | `GET /api/platform/prune` | Read | Disk temizleme politikasını ve hijyen ayarlarını döndürür. |
 | `PUT /api/platform/prune` | Admin | Disk temizleme politikasını günceller. |
 | `POST /api/platform/prune/run` | Admin | Disk hijyeni temizliğini derhal çalıştırır ve geri kazanılan alanı döndürür. |
+| `GET /api/webhooks` | Read | Yapılandırılmış tüm giden webhook'ları listeler. |
+| `POST /api/webhooks` | Admin | Yeni bir giden webhook oluşturur. |
+| `GET /api/webhooks/{id}` | Read | Bir giden webhook'un ayrıntılarını döndürür. |
+| `PUT /api/webhooks/{id}` | Admin | Bir giden webhook yapılandırmasını veya anahtarını günceller. |
+| `DELETE /api/webhooks/{id}` | Admin | Bir giden webhook'u siler. |
+| `POST /api/webhooks/test` | Admin | Hedef URL'ye anında test ping yükü gönderir. |
 | `GET /oauth/git/callback` | State | Sağlayıcının ve yeni bir GitHub App'in callback'i. Bkz. [Bağlanma](#baglanma) ve [GitHub App oluşturma](#github-app-olusturma). |
 
 Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). `[platform] enabled` kapalıyken her platform route'u `503 platform_disabled`, platform veritabanını veya key'ini açamadığında `503 platform_failed` yanıtını verir. Başka bir uygulamanın, hedefin veya bağlantının kullandığı ad `409 app_name_exists`, `409 target_name_exists` veya `409 git_connection_name_exists` alır. Bağlı olmayan bağlantı `409 git_connection_not_connected` alır. GitHub App kurulmadan `POST /api/git/connections/{id}/installation` isteği `409 github_app_not_installed`, sağlayıcıya giden başarısız istek `502 git_provider_failed` alır. Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, deploy eden her webhook isteğini, hedefin her değişikliğini, her agent kaydını, Git sağlayıcı bağlantısının her değişikliğini ve yetkilendirmesini ve bir hesabın başlattığı her webhook kurulumunu kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token veya secret değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Webhook isteğinin özeti uygulamayı, sağlayıcıyı ve deployment'ı adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır. Bağlantının özeti bağlantıyı ve sağlayıcısını adlandırır, client secret'ı veya bir token'ı hiçbir zaman içermez. Yetkilendirmenin özeti hesabı da adlandırır. Webhook kurulumunun özeti uygulamayı adlandırır.

@@ -40,8 +40,47 @@ impl Platform {
         deployment: DeploymentRef<'_>,
         error: Option<String>,
     ) {
-        let notification = Notification::deployment(event, deployment.summary(), error);
+        let notification = Notification::deployment(event, deployment.summary(), error.clone());
         send(&self.command, notification).await;
+
+        match event {
+            NotificationEvent::DeploymentRunning => {
+                let summary = format!("Deployment of app '{}' succeeded", deployment.app_name);
+                let data = serde_json::json!({
+                    "deployment_id": deployment.id.to_string(),
+                    "app_id": deployment.app.to_string(),
+                    "app_name": deployment.app_name.to_string(),
+                    "trigger": deployment.trigger.as_str(),
+                });
+                self.dispatch_webhook_event(
+                    r3v3rs3_api::webhook::WebhookEvent::DeploySuccess,
+                    summary,
+                    data,
+                )
+                .await;
+            }
+            NotificationEvent::DeploymentFailed => {
+                let summary = format!(
+                    "Deployment of app '{}' failed: {}",
+                    deployment.app_name,
+                    error.as_deref().unwrap_or("unknown error")
+                );
+                let data = serde_json::json!({
+                    "deployment_id": deployment.id.to_string(),
+                    "app_id": deployment.app.to_string(),
+                    "app_name": deployment.app_name.to_string(),
+                    "trigger": deployment.trigger.as_str(),
+                    "error": error,
+                });
+                self.dispatch_webhook_event(
+                    r3v3rs3_api::webhook::WebhookEvent::DeployFailure,
+                    summary,
+                    data,
+                )
+                .await;
+            }
+            _ => {}
+        }
     }
 
     /// Sends the connection event of the agent of a target to the server.
@@ -55,8 +94,28 @@ impl Platform {
                 target.to_string()
             }
         };
-        let notification = Notification::agent(event, TargetSummary { id: target, name });
+        let notification = Notification::agent(
+            event,
+            TargetSummary {
+                id: target,
+                name: name.clone(),
+            },
+        );
         send(&self.command, notification).await;
+
+        if event == NotificationEvent::AgentOffline {
+            let summary = format!("Agent target '{name}' went offline");
+            let data = serde_json::json!({
+                "target_id": target.to_string(),
+                "target_name": name,
+            });
+            self.dispatch_webhook_event(
+                r3v3rs3_api::webhook::WebhookEvent::TargetOffline,
+                summary,
+                data,
+            )
+            .await;
+        }
     }
 
     /// Sends an app resource alert to the server webhook.

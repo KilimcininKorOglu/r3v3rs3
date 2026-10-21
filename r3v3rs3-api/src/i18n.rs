@@ -370,6 +370,11 @@ mod tests {
             Error::InvalidEnvGroup { reason: text() },
             Error::InvalidProject { reason: text() },
             Error::InvalidEnvironment { reason: text() },
+            Error::WebhookNotFound {
+                id: "wh".parse().unwrap(),
+            },
+            Error::InvalidWebhook { reason: text() },
+            Error::WebhookDeliveryFailed { reason: text() },
         ]
     }
 

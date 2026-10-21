@@ -486,6 +486,18 @@ pub enum Error {
 
     #[error("invalid environment: {reason}")]
     InvalidEnvironment { reason: String },
+
+    #[error("webhook not found: {id}")]
+    WebhookNotFound {
+        #[schema(value_type = String)]
+        id: ShortId,
+    },
+
+    #[error("invalid webhook: {reason}")]
+    InvalidWebhook { reason: String },
+
+    #[error("webhook delivery failed: {reason}")]
+    WebhookDeliveryFailed { reason: String },
 }
 
 impl Error {
@@ -497,7 +509,8 @@ impl Error {
             | Self::AppNotRunning { .. }
             | Self::ServiceNotFound { .. }
             | Self::BackupNotFound { .. }
-            | Self::ScheduledCommandNotFound { .. } => 404,
+            | Self::ScheduledCommandNotFound { .. }
+            | Self::WebhookNotFound { .. } => 404,
             Self::Unauthorized => 401,
             Self::Forbidden
             | Self::ProxyReadOnly { .. }
@@ -521,7 +534,8 @@ impl Error {
             Self::NotificationFailed { .. }
             | Self::GitProviderFailed { .. }
             | Self::FailedToRefreshAppStore
-            | Self::FailedToRefreshEngines => 502,
+            | Self::FailedToRefreshEngines
+            | Self::WebhookDeliveryFailed { .. } => 502,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig
             | Self::FailedToInvokeRpc

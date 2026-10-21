@@ -24,6 +24,7 @@ struct ResealedCounts {
     app_secrets: u32,
     registries: u32,
     env_groups: u32,
+    webhooks: u32,
 }
 
 async fn reseal_all_tables(
@@ -39,6 +40,7 @@ async fn reseal_all_tables(
         registries: reseal_registries(pool, keys).await?,
         env_groups: reseal_env_groups(pool, keys).await?
             + reseal_project_env_vars(pool, keys).await?,
+        webhooks: reseal_webhooks(pool, keys).await?,
     })
 }
 
@@ -74,6 +76,7 @@ pub(super) async fn run_key_rotation(
         resealed_app_secrets: counts.app_secrets,
         resealed_registries: counts.registries,
         resealed_env_groups: counts.env_groups,
+        resealed_webhooks: counts.webhooks,
     })
 }
 
@@ -331,6 +334,30 @@ async fn reseal_project_env_vars(
     Ok(count)
 }
 
+async fn reseal_webhooks(
+    pool: &SqlitePool,
+    keys: &std::sync::RwLock<ClusterKeys>,
+) -> anyhow::Result<u32> {
+    let rows = sqlx::query("SELECT id, secret FROM outbound_webhooks WHERE secret IS NOT NULL")
+        .fetch_all(pool)
+        .await?;
+    let mut count = 0;
+    for row in rows {
+        let id_str: String = row.try_get("id")?;
+        let id: ShortId = id_str.parse()?;
+        let secret: Vec<u8> = row.try_get("secret")?;
+        let aad = super::webhook::webhook_aad(id);
+        let resealed = reseal_value(keys, &aad, &secret)?;
+        sqlx::query("UPDATE outbound_webhooks SET secret = ? WHERE id = ?")
+            .bind(resealed)
+            .bind(id_str)
+            .execute(pool)
+            .await?;
+        count += 1;
+    }
+    Ok(count)
+}
+
 async fn write_key_files(config_dir: &Path, key_text: &str) -> anyhow::Result<()> {
     let key_path = config_dir.join(KEY_FILE);
     let old_key_path = config_dir.join("platform.key.old");
@@ -529,6 +556,7 @@ mod tests {
         assert_eq!(report.resealed_settings, 1);
         assert_eq!(report.resealed_registries, 1);
         assert_eq!(report.resealed_env_groups, 0);
+        assert_eq!(report.resealed_webhooks, 0);
 
         verify_rotated_secrets(&platform, app_id, &webhook_sec).await?;
 

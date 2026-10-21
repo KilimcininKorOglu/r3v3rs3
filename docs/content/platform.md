@@ -515,6 +515,65 @@ Applications and databases can enforce fine-grained hardware resource quotas to 
 - **Dynamic Vertical Scaling**: Updating resource limits in the WebUI or via `PUT /api/apps/{id}` instantly adjusts the running container's cgroups in-place on the Docker runtime without downtime or container restarts.
 - **OOM Protection & Threshold Alerts**: When a container has a memory limit configured, r3v3rs3 monitors memory saturation during periodic 30-second sweeps and sends an `app_alert` webhook if usage reaches 90% (OOM warning). If a container is terminated by the kernel OOM killer, an instant `oom_killed` alert is delivered.
 
+## Outbound Webhooks & Event Notifications
+
+The platform includes a centralized outbound webhook hub to stream real-time events to external monitoring, notification, and automation services (such as Slack, Discord, PagerDuty, n8n, Datadog, or custom web services). Unlike the single notification webhook in Settings, the outbound webhook manager supports multiple endpoints, granular event subscriptions, custom HTTP headers, sealed signing secrets, and instant test delivery.
+
+### Event Categories & Types
+
+Administrators can selectively subscribe each webhook target to specific events across four categories:
+
+| Category | Event Code | Description |
+|---|---|---|
+| **Deployments** | `deploy.success` | App deployment completed successfully and container is healthy. |
+| | `deploy.failure` | App deployment failed during build, pull, or startup. |
+| | `deploy.pending_approval` | Deployment triggered but paused waiting for manual approval. |
+| | `app.crashed` | App container exited unexpectedly with a non-zero status code. |
+| **Databases & Backups** | `backup.success` | Database backup completed and saved locally. |
+| | `backup.failure` | Database dump or backup operation failed. |
+| | `backup.upload_failed` | Uploading a database backup to remote storage (S3/R2/SFTP) failed. |
+| | `backup.restored` | Database successfully restored from a local or remote backup snapshot. |
+| **Security & Certificates** | `cert.expiring` | TLS certificate is within 30 days of expiration. |
+| | `cert.renewed` | TLS certificate renewed successfully via ACME. |
+| | `cert.renewal_failed` | TLS certificate renewal attempt failed. |
+| | `security.ip_banned` | Client IP address banned due to rate limiting or security policies. |
+| **System & Nodes** | `target.offline` | Agent node stopped sending heartbeats and was marked offline. |
+| | `system.disk_pressure` | Target node disk usage exceeded the alert threshold. |
+| **System** | `test.ping` | Test ping sent manually from the WebUI or API. |
+
+### Payload Format & Headers
+
+Webhooks deliver an HTTP `POST` request with `Content-Type: application/json` and a standard envelope:
+
+```json
+{
+  "id": "del_01j...",
+  "event": "deploy.success",
+  "created_at": "2026-10-21T21:40:00Z",
+  "timestamp": 1792618800,
+  "summary": "Deployment running: my-app (prod)",
+  "data": {
+    "app_id": "app_01j...",
+    "app_name": "my-app",
+    "deployment_id": "dep_01j...",
+    "environment": "production"
+  }
+}
+```
+
+The delivery includes the following HTTP headers:
+- `Content-Type: application/json`
+- `User-Agent: r3v3rs3-Webhook/2.0`
+- `X-R3v3rs3-Event`: The event code (e.g. `deploy.success`).
+- `X-R3v3rs3-Delivery`: A unique UUID delivery identifier.
+- `X-R3v3rs3-Signature`: When a webhook signing secret is configured, an HMAC-SHA256 signature in the format `sha256=<hex_digest>`.
+
+Receivers can verify authenticity by computing the HMAC-SHA256 of the raw request body with the configured secret and performing a constant-time comparison against the hex digest in `X-R3v3rs3-Signature`.
+
+### Secret Sealing & Storage
+
+Webhook secrets are encrypted at rest with `platform.key` (AES-256-GCM) using the platform's envelope encryption. The plaintext secret is never returned by the API or stored in audit logs. Rotating the platform master key automatically re-encrypts all configured webhook secrets.
+
 ## Routing
 
 The platform adds one proxy for each running app that has at least one domain. The proxies come from the `Platform` provider, so they are read-only like the proxies of [service discovery](@/discovery.md), and the proxy list shows the provider status. Each proxy:
@@ -743,6 +802,19 @@ The **Targets** page also includes a **Disk Hygiene & Prune Policy** card to aut
 - **Run Immediately**: Click **Prune Now** (or send `POST /api/platform/prune/run`) to trigger an immediate prune and view the freed disk space and deleted item counts in real time.
 - **Run Statistics**: Displays the timestamp of the last execution and the reclaimed disk space.
 
+### Webhooks
+
+The **Webhooks** page under Administration provides a centralized dashboard for managing outbound event notification targets:
+
+- **Webhook List**: Displays all configured webhooks with their target URL, assigned name, active/inactive badge, sealed secret status badge, and subscribed event tags.
+- **Add / Edit Webhook Modal**:
+  - **Name & URL**: Target webhook endpoint (e.g. `https://hooks.slack.com/...`).
+  - **Custom Headers**: Optional JSON object of custom headers (e.g. `{"Authorization": "Bearer ...", "X-Custom-Token": "..."}`).
+  - **Signing Secret**: Optional shared secret for HMAC-SHA256 payload signing.
+  - **Active Toggle**: Enable or disable deliveries to the target without deleting it.
+  - **Categorized Event Selection**: Checkboxes grouped by category (Deployments, Databases & Backups, Security & Certificates, System & Nodes) with one-click **Select All** and **Deselect All** buttons.
+- **Test Webhook**: Send an immediate `test.ping` payload to the target endpoint to verify connectivity and signature validation before saving.
+
 ## Admin API
 
 | Route | Permission | Description |
@@ -821,6 +893,12 @@ The **Targets** page also includes a **Disk Hygiene & Prune Policy** card to aut
 | `GET /api/platform/prune` | Read | The prune policy and disk hygiene settings. |
 | `PUT /api/platform/prune` | Admin | Replaces the prune policy. |
 | `POST /api/platform/prune/run` | Admin | Runs disk hygiene prune immediately and returns reclaimed space. |
+| `GET /api/webhooks` | Read | Lists all configured outbound webhooks. |
+| `POST /api/webhooks` | Admin | Creates a new outbound webhook. |
+| `GET /api/webhooks/{id}` | Read | Returns details of an outbound webhook. |
+| `PUT /api/webhooks/{id}` | Admin | Updates an outbound webhook configuration or secret. |
+| `DELETE /api/webhooks/{id}` | Admin | Deletes an outbound webhook. |
+| `POST /api/webhooks/test` | Admin | Sends an immediate test ping payload to a target URL. |
 | `GET /oauth/git/callback` | The state | The callback of the provider and of a new GitHub App. See [Connect](#connect) and [Create a GitHub App](#create-a-github-app). |
 
 An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). Every platform route answers `503 platform_disabled` when `[platform] enabled` is off, and `503 platform_failed` when the platform failed to open its database or its key. A name that another app, target or connection uses answers `409 app_name_exists`, `409 target_name_exists` or `409 git_connection_name_exists`. A connection that is not connected answers `409 git_connection_not_connected`. `POST /api/git/connections/{id}/installation` before the GitHub App is installed answers `409 github_app_not_installed`, and a failed request to the provider answers `502 git_provider_failed`. The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target, every agent enrollment, every change and authorization of a Git provider connection, and every webhook installation that an account starts. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, an enrollment names the target and the version of the agent, a connection names itself and its provider, never its client secret or a token, an authorization also names the account, and a webhook installation names the app.

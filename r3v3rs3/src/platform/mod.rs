@@ -32,7 +32,8 @@ pub mod rotate;
 mod s3;
 pub mod scheduler;
 pub mod store;
-pub(crate) mod volume_backup;
+pub mod volume_backup;
+pub mod webhook;
 
 use crate::agent::compose::RemoteCompose;
 use crate::agent::forward::Forwarders;

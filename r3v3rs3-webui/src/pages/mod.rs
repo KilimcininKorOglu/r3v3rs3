@@ -49,6 +49,7 @@ mod store_env;
 mod targets;
 pub mod traffic;
 mod upload;
+mod webhooks;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Routable)]
 #[serde(rename_all = "snake_case")]
@@ -133,6 +134,8 @@ pub enum Route {
     Settings,
     #[at("/accounts")]
     Accounts,
+    #[at("/webhooks")]
+    Webhooks,
     #[at("/audit")]
     Audit,
     #[not_found]
@@ -178,6 +181,7 @@ impl Route {
             | Route::Projects
             | Route::Settings
             | Route::Accounts
+            | Route::Webhooks
             | Route::Audit => Some(self.clone()),
             _ => None,
         }
@@ -236,6 +240,7 @@ pub fn switch(routes: Route) -> Html {
         Route::Upload => html! { <upload::Upload /> },
         Route::Settings => html! { <settings::Settings /> },
         Route::Accounts => html! { <accounts::Accounts /> },
+        Route::Webhooks => html! { <webhooks::Webhooks /> },
         Route::Audit => html! { <audit::AuditLog /> },
         Route::NotFound => html! { <Redirect<Route> to={Route::Home}/> },
     }

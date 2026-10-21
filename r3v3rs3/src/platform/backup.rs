@@ -244,6 +244,24 @@ impl Platform {
         self.dispatch_remote_backups(entry, &compressed, &dump_path, &manifest_path)
             .await;
 
+        let summary = format!(
+            "Backup of database '{}' completed successfully ({} bytes)",
+            entry.name, entry.size
+        );
+        let data = serde_json::json!({
+            "backup_id": entry.id,
+            "db_id": db_id.to_string(),
+            "db_name": entry.name,
+            "engine": entry.engine,
+            "size_bytes": entry.size,
+        });
+        self.dispatch_webhook_event(
+            r3v3rs3_api::webhook::WebhookEvent::BackupSuccess,
+            summary,
+            data,
+        )
+        .await;
+
         let config = self.backup_config().await.unwrap_or_default();
         if config.restore_test_enabled {
             let _ = self.verify_backup(db_id, &entry.id).await;
@@ -263,6 +281,23 @@ impl Platform {
                 err = format!("{err:#}"),
                 "failed to upload the backup to S3"
             );
+            let summary = format!(
+                "Remote S3 backup upload failed for database '{}'",
+                entry.name
+            );
+            let data = serde_json::json!({
+                "backup_id": entry.id,
+                "db_id": entry.app.to_string(),
+                "db_name": entry.name,
+                "target": "s3",
+                "error": err.to_string(),
+            });
+            self.dispatch_webhook_event(
+                r3v3rs3_api::webhook::WebhookEvent::BackupUploadFailed,
+                summary,
+                data,
+            )
+            .await;
         }
         if let Err(err) = self.upload_to_sftp(entry, dump_path, manifest_path).await {
             tracing::error!(
@@ -317,6 +352,24 @@ impl Platform {
             .map_err(|err| Error::RestoreFailed {
                 reason: format!("{err:#}"),
             })?;
+
+        let summary = format!(
+            "Backup '{backup_id}' restored successfully into database '{}'",
+            app.name
+        );
+        let data = serde_json::json!({
+            "backup_id": backup_id,
+            "db_id": db_id.to_string(),
+            "db_name": app.name.to_string(),
+            "engine": engine,
+        });
+        self.dispatch_webhook_event(
+            r3v3rs3_api::webhook::WebhookEvent::BackupRestored,
+            summary,
+            data,
+        )
+        .await;
+
         Ok(())
     }
 

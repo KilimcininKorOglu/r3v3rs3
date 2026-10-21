@@ -188,6 +188,16 @@ const SCHEMA: &[&str] = &[
         secret         INTEGER NOT NULL,
         PRIMARY KEY (environment_id, key)
     )",
+    "CREATE TABLE IF NOT EXISTS outbound_webhooks (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        url        TEXT NOT NULL,
+        secret     BLOB,
+        enabled    INTEGER NOT NULL,
+        events     TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )",
 ];
 
 mod commands;
@@ -198,11 +208,13 @@ mod metrics;
 mod projects;
 mod prune;
 mod registries;
+mod webhooks;
 pub use connections::{PUBLIC_URL, StoredConnection, StoredGithubApp, StoredTokens};
 pub use env_groups::StoredEnvGroup;
 pub use hooks::StoredHook;
 pub use metrics::AppMetricRow;
 pub use projects::{StoredProject, StoredProjectEnvironment};
+pub use webhooks::StoredWebhook;
 
 /// The secret of an app that holds its Git token.
 pub const GIT_TOKEN: &str = "git_token";
