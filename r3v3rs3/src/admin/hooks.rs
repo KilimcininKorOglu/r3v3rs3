@@ -57,7 +57,10 @@ pub async fn app_hook(
         .map_err(platform_error)?;
     let status = match response.outcome {
         HookOutcome::Queued => StatusCode::ACCEPTED,
-        HookOutcome::Deployed | HookOutcome::Ignored => StatusCode::OK,
+        HookOutcome::Deployed
+        | HookOutcome::PreviewDeployed
+        | HookOutcome::PreviewDestroyed
+        | HookOutcome::Ignored => StatusCode::OK,
     };
     if response.outcome != HookOutcome::Ignored {
         let started = response

@@ -39,6 +39,9 @@ impl Platform {
     /// The webhook target of a spec whose source has a connection. The connection must exist,
     /// and the repository must be one of its provider.
     pub(super) async fn hook_target(&self, spec: &AppSpec) -> anyhow::Result<Option<HookTarget>> {
+        if spec.preview_of.is_some() {
+            return Ok(None);
+        }
         let Some((repository, Some(connection))) = spec.source.repository() else {
             return Ok(None);
         };

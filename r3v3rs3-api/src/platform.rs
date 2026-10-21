@@ -732,6 +732,36 @@ pub struct AppSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schema(value_type = [String])]
     pub env_groups: Vec<ShortId>,
+
+    /// Optional ephemeral preview deployment configuration for Pull Requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<PreviewConfig>,
+
+    /// If this app is an ephemeral preview environment, the id of the parent app and PR number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_of: Option<PreviewParent>,
+}
+
+/// Configuration for ephemeral preview deployments for pull/merge requests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PreviewConfig {
+    /// Whether ephemeral preview deployments are enabled for this app.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Optional custom domain template (e.g. `pr-{pr}.app.example.com`).
+    /// Supported placeholders: `{pr}` (pull request number) and `{app}` (app name).
+    /// If omitted or empty, defaults to `pr-{pr}.{primary_domain}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "pr-{pr}.app.example.com")]
+    pub domain_template: Option<String>,
+}
+
+/// Metadata identifying an ephemeral preview environment created from a parent app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PreviewParent {
+    #[schema(value_type = String)]
+    pub parent_id: ShortId,
+    pub pr_number: u64,
 }
 
 /// A Git-based environment configuration file loaded during deployment.
@@ -1247,6 +1277,10 @@ pub enum HookOutcome {
     Deployed,
     /// A deployment of the app was running, so a new deployment starts after it.
     Queued,
+    /// An ephemeral preview environment deployment was created or updated for a pull request.
+    PreviewDeployed,
+    /// An ephemeral preview environment was deleted because the pull request was closed.
+    PreviewDestroyed,
     /// The request was a ping, or an event or a branch that does not deploy the app.
     Ignored,
 }

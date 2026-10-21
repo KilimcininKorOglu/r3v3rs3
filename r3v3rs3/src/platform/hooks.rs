@@ -6,12 +6,15 @@ use super::{Platform, not_found};
 use anyhow::Context as _;
 use hmac::{Hmac, KeyInit, Mac};
 use hyper::header::HeaderMap;
+use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git::GitRef;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppSource, DeploymentTrigger, HookOutcome, HookResponse, WebhookSecret,
+    AppEntry, AppRequest, AppSource, AppSpec, DeploymentTrigger, HookOutcome, HookResponse,
+    PreviewParent, WebhookSecret,
 };
+use r3v3rs3_api::subject_name::SubjectName;
 use serde_derive::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -106,6 +109,14 @@ impl Signature<'_> {
             Provider::Generic => true,
         }
     }
+
+    fn is_pull_request(&self) -> bool {
+        match self.provider {
+            Provider::GitHub | Provider::Gitea => self.event == Some("pull_request"),
+            Provider::GitLab => self.event == Some("Merge Request Hook"),
+            Provider::Generic => false,
+        }
+    }
 }
 
 /// Whether `mac` is the hex HMAC-SHA256 of the body with the secret. The check takes the same
@@ -146,6 +157,138 @@ struct Push {
 enum PushTarget {
     Deploy(Option<GitRef>),
     Ignore,
+}
+
+/// What a webhook request should perform.
+#[derive(Debug, PartialEq, Eq)]
+enum HookAction {
+    Deploy(Option<GitRef>),
+    PullRequest(PrPayload),
+    Ignore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrAction {
+    Opened,
+    Synchronize,
+    Reopened,
+    Closed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrPayload {
+    pub action: PrAction,
+    pub number: u64,
+    pub branch: String,
+    pub commit: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GitHubPrEvent {
+    action: Option<String>,
+    number: Option<u64>,
+    pull_request: Option<GitHubPrData>,
+}
+
+#[derive(Deserialize)]
+struct GitHubPrData {
+    number: Option<u64>,
+    head: Option<GitHubPrHead>,
+}
+
+#[derive(Deserialize)]
+struct GitHubPrHead {
+    #[serde(rename = "ref")]
+    branch: Option<String>,
+    sha: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GitLabMrEvent {
+    object_attributes: Option<GitLabMrAttributes>,
+}
+
+#[derive(Deserialize)]
+struct GitLabMrAttributes {
+    action: Option<String>,
+    iid: Option<u64>,
+    source_branch: Option<String>,
+    last_commit: Option<GitLabMrCommit>,
+}
+
+#[derive(Deserialize)]
+struct GitLabMrCommit {
+    id: Option<String>,
+}
+
+fn parse_github_pr(body: &[u8]) -> Option<PrPayload> {
+    let event: GitHubPrEvent = serde_json::from_slice(body).ok()?;
+    let action_str = event.action.as_deref()?;
+    let action = match action_str {
+        "opened" => PrAction::Opened,
+        "synchronize" => PrAction::Synchronize,
+        "reopened" => PrAction::Reopened,
+        "closed" => PrAction::Closed,
+        _ => return None,
+    };
+    let number = event
+        .number
+        .or_else(|| event.pull_request.as_ref().and_then(|p| p.number))?;
+    let head = event.pull_request.as_ref().and_then(|p| p.head.as_ref())?;
+    let branch = head.branch.clone()?;
+    let commit = head.sha.clone();
+    Some(PrPayload {
+        action,
+        number,
+        branch,
+        commit,
+    })
+}
+
+fn parse_gitlab_mr(body: &[u8]) -> Option<PrPayload> {
+    let event: GitLabMrEvent = serde_json::from_slice(body).ok()?;
+    let attrs = event.object_attributes.as_ref()?;
+    let action_str = attrs.action.as_deref()?;
+    let action = match action_str {
+        "open" => PrAction::Opened,
+        "update" => PrAction::Synchronize,
+        "reopen" => PrAction::Reopened,
+        "close" => PrAction::Closed,
+        _ => return None,
+    };
+    let number = attrs.iid?;
+    let branch = attrs.source_branch.clone()?;
+    let commit = attrs.last_commit.as_ref().and_then(|c| c.id.clone());
+    Some(PrPayload {
+        action,
+        number,
+        branch,
+        commit,
+    })
+}
+
+fn parse_pr_payload(provider: Provider, body: &[u8]) -> Option<PrPayload> {
+    match provider {
+        Provider::GitHub | Provider::Gitea => parse_github_pr(body),
+        Provider::GitLab => parse_gitlab_mr(body),
+        Provider::Generic => None,
+    }
+}
+
+fn hook_action(signature: &Signature, app: &AppEntry, body: &[u8]) -> Result<HookAction, Error> {
+    if signature.is_push() {
+        return match push_target(signature, app, body)? {
+            PushTarget::Deploy(target_ref) => Ok(HookAction::Deploy(target_ref)),
+            PushTarget::Ignore => Ok(HookAction::Ignore),
+        };
+    }
+    if signature.is_pull_request()
+        && app.spec.preview.as_ref().is_some_and(|p| p.enabled)
+        && let Some(pr) = parse_pr_payload(signature.provider, body)
+    {
+        return Ok(HookAction::PullRequest(pr));
+    }
+    Ok(HookAction::Ignore)
 }
 
 /// Whether the push deploys the app, and with which target ref (if specified).
@@ -202,6 +345,76 @@ fn check_push_ref(
         return Ok(PushTarget::Deploy(None));
     }
     Ok(PushTarget::Ignore)
+}
+
+fn preview_app_name(parent_name: &str, pr_number: u64) -> Result<AppName, Error> {
+    let suffix = format!("-pr-{pr_number}");
+    let max_base_len = 63_usize.saturating_sub(suffix.len());
+    let base = if parent_name.len() > max_base_len {
+        &parent_name[..max_base_len]
+    } else {
+        parent_name
+    };
+    let base = base.trim_end_matches('-');
+    let name_str = format!("{base}{suffix}");
+    name_str.parse::<AppName>()
+}
+
+fn derive_preview_domain(parent: &AppEntry, pr_number: u64) -> Result<SubjectName, Error> {
+    if let Some(template) = parent
+        .spec
+        .preview
+        .as_ref()
+        .and_then(|p| p.domain_template.as_deref())
+        .filter(|t| !t.is_empty())
+    {
+        let domain_str = template
+            .replace("{pr}", &pr_number.to_string())
+            .replace("{app}", parent.name.as_str());
+        return domain_str
+            .parse::<SubjectName>()
+            .map_err(|e| Error::InvalidContainerSpec {
+                reason: format!("invalid preview domain template: {e}"),
+            });
+    }
+
+    if let Some(SubjectName::DnsName(domain)) = parent.spec.domains.first() {
+        let domain_str = format!("pr-{pr_number}.{domain}");
+        return domain_str
+            .parse::<SubjectName>()
+            .map_err(|e| Error::InvalidContainerSpec {
+                reason: format!("invalid preview domain: {e}"),
+            });
+    }
+
+    let domain_str = format!("pr-{pr_number}-{}.localhost", parent.name.as_str());
+    domain_str
+        .parse::<SubjectName>()
+        .map_err(|e| Error::InvalidContainerSpec {
+            reason: format!("invalid preview domain: {e}"),
+        })
+}
+
+fn preview_app_spec(parent: &AppEntry, pr: &PrPayload, domain: SubjectName) -> AppSpec {
+    let mut spec = parent.spec.clone();
+    if let Ok(branch_ref) = pr.branch.parse::<GitRef>() {
+        match &mut spec.source {
+            AppSource::Git { branch, .. } | AppSource::Compose { branch, .. } => {
+                *branch = branch_ref;
+            }
+            AppSource::Image { .. } => {}
+        }
+    }
+    spec.domains = vec![domain];
+    spec.host_port = None;
+    spec.tag_trigger = None;
+    spec.auto_deploy = false;
+    spec.preview = None;
+    spec.preview_of = Some(PreviewParent {
+        parent_id: parent.id,
+        pr_number: pr.number,
+    });
+    spec
 }
 
 impl Platform {
@@ -283,14 +496,152 @@ impl Platform {
         let signature = Signature::of(headers)
             .filter(|signature| signature.verify(&secret, body))
             .ok_or(Error::Unauthorized)?;
-        let response = match push_target(&signature, &app, body)? {
-            PushTarget::Deploy(target_ref) => self.hook_deploy(id, target_ref).await?,
-            PushTarget::Ignore => HookResponse {
+        let action = hook_action(&signature, &app, body)?;
+        let response = match action {
+            HookAction::Deploy(target_ref) => self.hook_deploy(id, target_ref).await?,
+            HookAction::PullRequest(pr) => self.handle_pull_request(&app, pr).await?,
+            HookAction::Ignore => HookResponse {
                 outcome: HookOutcome::Ignored,
                 deployment: None,
             },
         };
         Ok((app, signature.provider, response))
+    }
+
+    async fn find_preview_app(
+        &self,
+        parent_id: ShortId,
+        pr_number: u64,
+    ) -> anyhow::Result<Option<AppEntry>> {
+        let apps = self.apps().await?;
+        Ok(apps.into_iter().find(|app| {
+            app.spec
+                .preview_of
+                .as_ref()
+                .is_some_and(|p| p.parent_id == parent_id && p.pr_number == pr_number)
+        }))
+    }
+
+    async fn copy_git_token(
+        &self,
+        from: ShortId,
+        to: ShortId,
+        has_token: bool,
+    ) -> anyhow::Result<()> {
+        if has_token
+            && let Some(token) = self.git_token(from).await?
+        {
+            self.set_git_token(to, &token).await?;
+        }
+        Ok(())
+    }
+
+    async fn create_preview_app(
+        self: &Arc<Self>,
+        parent: &AppEntry,
+        pr: &PrPayload,
+    ) -> anyhow::Result<AppEntry> {
+        let name = preview_app_name(parent.name.as_str(), pr.number)?;
+        let domain = derive_preview_domain(parent, pr.number)?;
+        let spec = preview_app_spec(parent, pr, domain);
+        let request = AppRequest {
+            name,
+            target: parent.target,
+            spec,
+        };
+        let preview_app = self.add_app(request, crate::clock::unix_ms()).await?;
+        self.copy_app_env(parent.id, preview_app.id).await?;
+        self.copy_git_token(parent.id, preview_app.id, parent.git_token_set)
+            .await?;
+        Ok(preview_app)
+    }
+
+    async fn update_preview_app(
+        &self,
+        existing: &AppEntry,
+        pr: &PrPayload,
+    ) -> anyhow::Result<AppEntry> {
+        let mut request = AppRequest {
+            name: existing.name.clone(),
+            target: existing.target,
+            spec: existing.spec.clone(),
+        };
+        if let Ok(branch_ref) = pr.branch.parse::<GitRef>() {
+            match &mut request.spec.source {
+                AppSource::Git { branch, .. } | AppSource::Compose { branch, .. } => {
+                    *branch = branch_ref;
+                }
+                AppSource::Image { .. } => {}
+            }
+        }
+        self.update_app(existing.id, request, crate::clock::unix_ms())
+            .await
+    }
+
+    async fn handle_pull_request(
+        self: &Arc<Self>,
+        parent: &AppEntry,
+        pr: PrPayload,
+    ) -> anyhow::Result<HookResponse> {
+        match pr.action {
+            PrAction::Opened | PrAction::Reopened | PrAction::Synchronize => {
+                self.deploy_preview(parent, pr).await
+            }
+            PrAction::Closed => self.close_preview(parent, pr.number).await,
+        }
+    }
+
+    async fn deploy_preview(
+        self: &Arc<Self>,
+        parent: &AppEntry,
+        pr: PrPayload,
+    ) -> anyhow::Result<HookResponse> {
+        let target_app = match self.find_preview_app(parent.id, pr.number).await? {
+            Some(existing) => self.update_preview_app(&existing, &pr).await?,
+            None => self.create_preview_app(parent, &pr).await?,
+        };
+        let target_ref = pr.commit.as_deref().and_then(|c| c.parse().ok());
+        let resp = self.hook_deploy(target_app.id, target_ref).await?;
+        let outcome = match resp.outcome {
+            HookOutcome::Deployed => HookOutcome::PreviewDeployed,
+            other => other,
+        };
+        Ok(HookResponse {
+            outcome,
+            deployment: resp.deployment,
+        })
+    }
+
+    async fn close_preview(
+        self: &Arc<Self>,
+        parent: &AppEntry,
+        pr_number: u64,
+    ) -> anyhow::Result<HookResponse> {
+        let Some(existing) = self.find_preview_app(parent.id, pr_number).await? else {
+            return Ok(HookResponse {
+                outcome: HookOutcome::Ignored,
+                deployment: None,
+            });
+        };
+        for _ in 0..30 {
+            match self.delete_app(existing.id).await {
+                Ok(_) => {
+                    return Ok(HookResponse {
+                        outcome: HookOutcome::PreviewDestroyed,
+                        deployment: None,
+                    });
+                }
+                Err(err) if matches!(err.downcast_ref(), Some(Error::AppBusy { .. })) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        self.delete_app(existing.id).await?;
+        Ok(HookResponse {
+            outcome: HookOutcome::PreviewDestroyed,
+            deployment: None,
+        })
     }
 
     /// Deploys the app, or queues one deployment while a deployment of the app runs.
@@ -627,6 +978,181 @@ mod tests {
             .hook(app.id, &signed("push", &branch_body), &branch_body)
             .await?;
         assert_eq!(outcome(&result), (Provider::GitHub, HookOutcome::Queued));
+        Ok(())
+    }
+
+    #[test]
+    fn preview_app_name_and_domain_generation() {
+        let name = preview_app_name("my-service", 42).unwrap();
+        assert_eq!(name.as_str(), "my-service-pr-42");
+
+        let long = "a".repeat(60);
+        let long_name = preview_app_name(&long, 1234).unwrap();
+        assert!(long_name.as_str().len() <= 63);
+        assert!(long_name.as_str().ends_with("-pr-1234"));
+
+        let mut parent_req = git_request("parent-app");
+        parent_req.spec.domains = vec!["app.example.com".parse().unwrap()];
+        let parent = AppEntry {
+            id: "p1".parse().unwrap(),
+            name: parent_req.name,
+            target: parent_req.target,
+            spec: parent_req.spec,
+            git_token_set: false,
+            webhook_secret_set: false,
+            hook: None,
+            update: None,
+            catalog_update: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        // Derives from parent's primary domain
+        let domain = derive_preview_domain(&parent, 42).unwrap();
+        assert_eq!(domain.to_string(), "pr-42.app.example.com");
+
+        // Custom template
+        let mut custom_parent = parent.clone();
+        custom_parent.spec.preview = Some(r3v3rs3_api::platform::PreviewConfig {
+            enabled: true,
+            domain_template: Some("preview-{pr}-{app}.test.org".to_string()),
+        });
+        let custom_domain = derive_preview_domain(&custom_parent, 99).unwrap();
+        assert_eq!(custom_domain.to_string(), "preview-99-parent-app.test.org");
+    }
+
+    async fn wait_deployments(platform: &Platform, id: ShortId) -> anyhow::Result<()> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let deployments = platform.deployments(id).await?;
+            if !deployments.is_empty() && deployments.iter().all(|d| d.finished_at.is_some()) {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                anyhow::bail!("timed out waiting for deployments of {id}");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn github_pull_request_open_and_sync() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let mut req = git_request("main-app");
+        req.spec.preview = Some(r3v3rs3_api::platform::PreviewConfig {
+            enabled: true,
+            domain_template: None,
+        });
+        let parent = platform.add_app(req, 1).await?;
+        let (_, secret) = platform.new_webhook_secret(parent.id).await?;
+        let signed = |event, body: &[u8]| github(&secret.secret, event, body);
+
+        // PR Opened
+        let pr_open_body = br#"{"action":"opened","number":42,"pull_request":{"head":{"ref":"feature-pr","sha":"commit1"}}}"#;
+        let res = platform
+            .hook(
+                parent.id,
+                &signed("pull_request", pr_open_body),
+                pr_open_body,
+            )
+            .await?;
+        assert_eq!(
+            outcome(&res),
+            (Provider::GitHub, HookOutcome::PreviewDeployed)
+        );
+
+        let preview = platform
+            .find_preview_app(parent.id, 42)
+            .await?
+            .expect("preview app must exist");
+        assert_eq!(preview.name.as_str(), "main-app-pr-42");
+        wait_deployments(&platform, preview.id).await?;
+
+        // PR Synchronize
+        let pr_sync_body = br#"{"action":"synchronize","number":42,"pull_request":{"head":{"ref":"feature-pr","sha":"commit2"}}}"#;
+        let res = platform
+            .hook(
+                parent.id,
+                &signed("pull_request", pr_sync_body),
+                pr_sync_body,
+            )
+            .await?;
+        assert_eq!(
+            outcome(&res),
+            (Provider::GitHub, HookOutcome::PreviewDeployed)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn github_pull_request_close() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let mut req = git_request("main-app");
+        req.spec.preview = Some(r3v3rs3_api::platform::PreviewConfig {
+            enabled: true,
+            domain_template: None,
+        });
+        let parent = platform.add_app(req, 1).await?;
+        let (_, secret) = platform.new_webhook_secret(parent.id).await?;
+        let signed = |event, body: &[u8]| github(&secret.secret, event, body);
+
+        let pr_open = br#"{"action":"opened","number":42,"pull_request":{"head":{"ref":"feat"}}}"#;
+        platform
+            .hook(parent.id, &signed("pull_request", pr_open), pr_open)
+            .await?;
+        let preview = platform.find_preview_app(parent.id, 42).await?.unwrap();
+        wait_deployments(&platform, preview.id).await?;
+
+        let pr_close = br#"{"action":"closed","number":42,"pull_request":{"head":{"ref":"feat"}}}"#;
+        let res = platform
+            .hook(parent.id, &signed("pull_request", pr_close), pr_close)
+            .await?;
+        assert_eq!(
+            outcome(&res),
+            (Provider::GitHub, HookOutcome::PreviewDestroyed)
+        );
+        assert!(platform.find_preview_app(parent.id, 42).await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn gitlab_merge_request_lifecycle() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let mut req = git_request("gitlab-app");
+        req.spec.preview = Some(r3v3rs3_api::platform::PreviewConfig {
+            enabled: true,
+            domain_template: None,
+        });
+        let parent = platform.add_app(req, 1).await?;
+        let (_, secret) = platform.new_webhook_secret(parent.id).await?;
+
+        let mr_open =
+            br#"{"object_attributes":{"action":"open","iid":7,"source_branch":"feature-gl"}}"#;
+        let headers = headers(&[
+            ("x-gitlab-event", "Merge Request Hook".to_string()),
+            ("x-gitlab-token", secret.secret.clone()),
+        ]);
+        let res = platform.hook(parent.id, &headers, mr_open).await?;
+        assert_eq!(
+            outcome(&res),
+            (Provider::GitLab, HookOutcome::PreviewDeployed)
+        );
+
+        let preview = platform
+            .find_preview_app(parent.id, 7)
+            .await?
+            .expect("preview app exists");
+        assert_eq!(preview.name.as_str(), "gitlab-app-pr-7");
+        wait_deployments(&platform, preview.id).await?;
+
+        let mr_close =
+            br#"{"object_attributes":{"action":"close","iid":7,"source_branch":"feature-gl"}}"#;
+        let res = platform.hook(parent.id, &headers, mr_close).await?;
+        assert_eq!(
+            outcome(&res),
+            (Provider::GitLab, HookOutcome::PreviewDestroyed)
+        );
+        assert!(platform.find_preview_app(parent.id, 7).await?.is_none());
         Ok(())
     }
 }

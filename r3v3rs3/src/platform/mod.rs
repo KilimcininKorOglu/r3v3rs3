@@ -491,6 +491,22 @@ impl Platform {
         self.store.replace_env(id, &stored).await
     }
 
+    /// Copies all environment variables from one app to another, re-sealing them with the target app's AAD.
+    pub(super) async fn copy_app_env(&self, from: ShortId, to: ShortId) -> anyhow::Result<()> {
+        let source_vars = self.store.env(from).await?;
+        let mut new_vars = Vec::with_capacity(source_vars.len());
+        for var in source_vars {
+            let value = self.open_value(from, &var)?;
+            let sealed = self.keys().seal(&env_aad(to, &var.key), value.as_bytes())?;
+            new_vars.push(crate::platform::store::StoredEnv {
+                key: var.key,
+                sealed,
+                secret: var.secret,
+            });
+        }
+        self.store.replace_env(to, &new_vars).await
+    }
+
     /// Lists all environment variable groups with summary information.
     pub async fn list_env_groups(&self) -> anyhow::Result<Vec<EnvGroupSummary>> {
         self.store.list_env_groups().await
@@ -1214,6 +1230,8 @@ mod tests {
                 sticky: None,
                 git_config: None,
                 env_groups: Vec::new(),
+                preview: None,
+                preview_of: None,
             },
         }
     }

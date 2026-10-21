@@ -357,11 +357,12 @@ Hangi istek deploy eder:
 
 - Git veya Compose uygulaması, `ref` değeri `refs/heads/<branch>` veya `refs/tags/<branch>` olan bir push ile deploy olur. Burada `<branch>` uygulamanın branch alanıdır. Branch'i silen bir push deploy etmez.
 - `tag_trigger` tanımlandığında (örneğin `v*` veya `release-*`), bu kalıba uyan bir etiket (tag) push edildiğinde otomatik olarak o etiket deploy edilir.
+- Geçici önizleme ortamları etkinleştirildiğinde (`preview`), Pull Request / Merge Request olayları izole bir önizleme uygulamasını (`<uygulama>-pr-<numara>`) otomatik olarak yönetir: `opened` veya `reopened` önizleme uygulamasını oluşturur ve ona özel bir alan adında deploy eder (`preview_deployed`), `synchronize` yeni commit'leri deploy eder ve `closed` önizleme uygulamasını yok ederek tüm kaynakları serbest bırakır (`preview_destroyed`).
 - Image uygulamasının branch'i yoktur. Bu yüzden imzalı her push onu yeniden deploy eder ve r3v3rs3 image'ın tag'ini yeniden çeker.
 - Başka bir göndericinin isteği gövdesi ne olursa olsun her zaman deploy eder.
 - Ping, başka bir branch'e push veya başka bir olay `200` ve `{"outcome": "ignored"}` yanıtını alır.
 
-Deploy eden istek `200` ve `{"outcome": "deployed", "deployment": {...}}` yanıtını alır. Deployment'ın tetikleyeni `webhook`, hesabı `webhook` olur. Çalışan bir deployment sırasında gelen push `202` ve `{"outcome": "queued"}` yanıtını alır. Çalışan deployment bitince branch'in en son commit'iyle bir deployment daha başlar. Böylece kuyruktaki tek deployment aradaki bütün push'ları kapsar. r3v3rs3 kuyruğu bellekte tutar, bu yüzden yeniden başlatma kuyruğu siler.
+Deploy eden istek `200` ve `{"outcome": "deployed", "deployment": {...}}` (veya pull request'ler için `{"outcome": "preview_deployed", "deployment": {...}}`) yanıtını alır. Kapatılan bir pull request `200` ve `{"outcome": "preview_destroyed"}` yanıtını alır. Çalışan bir deployment sırasında gelen push `202` ve `{"outcome": "queued"}` yanıtını alır. Çalışan deployment bitince branch'in en son commit'iyle bir deployment daha başlar. Böylece kuyruktaki tek deployment aradaki bütün push'ları kapsar. r3v3rs3 kuyruğu bellekte tutar, bu yüzden yeniden başlatma kuyruğu siler.
 
 | Durum kodu | Nedeni |
 |---|---|
@@ -372,6 +373,15 @@ Deploy eden istek `200` ve `{"outcome": "deployed", "deployment": {...}}` yanıt
 | `503 platform_disabled` | Deploy platformu kapalıdır. |
 
 Gövde en fazla 5 MiB olabilir. Denetim kaydı, bir deployment başlatan veya kuyruğa alan her isteği göndericinin adresiyle ve hesapsız olarak kaydeder.
+
+### Geçici Önizleme Ortamları (Pull Request'ler)
+
+Git ve Compose uygulamaları için r3v3rs3, her pull request veya merge request için izole geçici önizleme ortamlarını otomatik olarak dağıtabilir.
+
+- **WebUI'de Açma**: Uygulama ayarları formunda **Geçici Pull Request Önizleme Ortamları** seçeneğini işaretleyin.
+- **Alan Adı Şablonu**: `{pr}` ve `{app}` yer tutucularını kullanarak isteğe bağlı bir alan adı kalıbı belirleyin (örn. `pr-{pr}.app.example.com`). Boş bırakıldığında r3v3rs3 uygulamanın birincil alan adını önekler (`pr-{pr}.<alan_adi>`) veya `pr-{pr}-{app}.localhost` kullanır.
+- **Ortam Değişkenleri & Secret'lar**: Önizleme ortamları ana uygulamanın tüm ortam değişkenlerini, şifrelenmiş secret'larını ve Git erişim token'larını otomatik olarak devralır. Host portları ana uygulama veya diğer önizlemelerle port çakışmasını önlemek için dinamik olarak serbest bırakılır.
+- **Otomatik Yaşam Döngüsü**: Pull Request açıldığında veya yeniden açıldığında r3v3rs3 önizleme uygulamasını oluşturur ve trafiği ona yönlendirir. Pull request'e gönderilen yeni commit'ler güncellemeleri tetikler (`synchronize`). Pull Request kapatıldığında veya merge edildiğinde r3v3rs3 önizleme uygulamasını, konteynerlerini, proxy route'larını ve volume'lerini tamamen temizler.
 
 ## Git sağlayıcıları
 

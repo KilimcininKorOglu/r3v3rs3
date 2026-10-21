@@ -346,6 +346,8 @@ fn replica_app_request(
             sticky: None,
             git_config: None,
             env_groups: Vec::new(),
+            preview: None,
+            preview_of: None,
         },
     })
 }
@@ -478,6 +480,8 @@ fn app_request(
             sticky: None,
             git_config: None,
             env_groups: Vec::new(),
+            preview: None,
+            preview_of: None,
         },
     })
 }

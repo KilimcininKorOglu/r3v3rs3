@@ -136,6 +136,8 @@ mod tests {
             sticky: None,
             git_config: None,
             env_groups: Vec::new(),
+            preview: None,
+            preview_of: None,
         }
     }
 

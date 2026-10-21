@@ -1082,6 +1082,8 @@ mod tests {
                 sticky: None,
                 git_config: None,
                 env_groups: Vec::new(),
+                preview: None,
+                preview_of: None,
             },
             git_token_set: false,
             webhook_secret_set: false,

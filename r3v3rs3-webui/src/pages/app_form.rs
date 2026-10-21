@@ -10,7 +10,8 @@ use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppRequest, AppSource, AppSpec, GitConfigFile, LOCAL_TARGET, TargetEntry,
+    AppEntry, AppRequest, AppSource, AppSpec, GitConfigFile, LOCAL_TARGET, PreviewConfig,
+    TargetEntry,
 };
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::store::StoreApp;
@@ -106,6 +107,8 @@ pub struct AppForm {
     pub git_config_repo: String,
     pub git_config_branch: String,
     pub env_groups: Vec<String>,
+    pub preview_enabled: bool,
+    pub preview_domain_template: String,
 }
 
 impl Default for AppForm {
@@ -151,6 +154,8 @@ impl Default for AppForm {
             git_config_repo: String::new(),
             git_config_branch: String::new(),
             env_groups: Vec::new(),
+            preview_enabled: false,
+            preview_domain_template: String::new(),
         }
     }
 }
@@ -265,6 +270,12 @@ impl AppForm {
                 .and_then(|c| c.branch.as_ref().map(ToString::to_string))
                 .unwrap_or_default(),
             env_groups: spec.env_groups.iter().map(ToString::to_string).collect(),
+            preview_enabled: spec.preview.as_ref().is_some_and(|p| p.enabled),
+            preview_domain_template: spec
+                .preview
+                .as_ref()
+                .and_then(|p| p.domain_template.clone())
+                .unwrap_or_default(),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -358,6 +369,18 @@ impl AppForm {
                 .iter()
                 .filter_map(|id| id.parse().ok())
                 .collect(),
+            preview: self.parse_preview(),
+            preview_of: None,
+        })
+    }
+
+    fn parse_preview(&self) -> Option<PreviewConfig> {
+        if !self.preview_enabled {
+            return None;
+        }
+        Some(PreviewConfig {
+            enabled: true,
+            domain_template: non_empty(&self.preview_domain_template).map(str::to_string),
         })
     }
 
@@ -907,6 +930,7 @@ fn source_view(
             <>
                 { repository_view(locale, form, connections) }
                 { text_field(locale, form, "apps.tag_trigger", Some("apps.tag_trigger_hint"), |f| &mut f.tag_trigger) }
+                { preview_view(locale, form) }
                 { text_field(locale, form, "apps.context", Some("apps.context_hint"), |f| &mut f.context) }
                 { text_field(locale, form, "apps.dockerfile", Some("apps.dockerfile_hint"), |f| &mut f.dockerfile) }
             </>
@@ -915,10 +939,37 @@ fn source_view(
             <>
                 { repository_view(locale, form, connections) }
                 { text_field(locale, form, "apps.tag_trigger", Some("apps.tag_trigger_hint"), |f| &mut f.tag_trigger) }
+                { preview_view(locale, form) }
                 { text_field(locale, form, "apps.compose_file", Some("apps.compose_file_hint"), |f| &mut f.compose_file) }
                 { text_field(locale, form, "apps.service", Some("apps.service_hint"), |f| &mut f.service) }
             </>
         },
+    }
+}
+
+fn preview_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let form_handle = form.clone();
+    let checked = form.preview_enabled;
+    let onchange = Callback::from(move |e: Event| {
+        if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+            let mut updated = (*form_handle).clone();
+            updated.preview_enabled = target.checked();
+            form_handle.set(updated);
+        }
+    });
+    html! {
+        <div class="mt-4 p-3 bg-neutral-50 dark:bg-neutral-800/40 rounded-lg border border-neutral-200 dark:border-neutral-700">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={checked} {onchange} class="w-4 h-4 text-blue-600 bg-neutral-100 border-neutral-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-neutral-800 focus:ring-2 dark:bg-neutral-700 dark:border-neutral-600" />
+                <span class={LABEL_CLASS}>{locale.t("apps.preview_enabled")}</span>
+            </label>
+            <p class={HINT_CLASS}>{locale.t("apps.preview_enabled_hint")}</p>
+            if checked {
+                <div class="mt-3">
+                    { text_field(locale, form, "apps.preview_domain_template", Some("apps.preview_domain_template_hint"), |f| &mut f.preview_domain_template) }
+                </div>
+            }
+        </div>
     }
 }
 
@@ -1513,5 +1564,21 @@ mod tests {
             ..image_form()
         };
         assert!(swap_without_mem.parse(Locale::En).is_err());
+    }
+
+    #[test]
+    fn preview_in_form() {
+        let form = AppForm {
+            preview_enabled: true,
+            preview_domain_template: "pr-{pr}.app.example.com".into(),
+            ..image_form()
+        };
+        let request = form.parse(Locale::En).unwrap();
+        let preview = request.spec.preview.unwrap();
+        assert!(preview.enabled);
+        assert_eq!(
+            preview.domain_template.as_deref(),
+            Some("pr-{pr}.app.example.com")
+        );
     }
 }

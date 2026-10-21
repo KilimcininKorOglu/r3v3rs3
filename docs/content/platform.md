@@ -357,11 +357,12 @@ Which request deploys:
 
 - A Git or a Compose app deploys for a push whose `ref` is `refs/heads/<branch>` or `refs/tags/<branch>`, where `<branch>` is the branch field of the app. A push that deletes the branch does not deploy.
 - When `tag_trigger` is configured (for example `v*` or `release-*`), pushing a tag that matches the pattern automatically deploys that tag.
+- When ephemeral preview deployments are enabled (`preview`), Pull Request / Merge Request events automatically manage an isolated preview app (`<app>-pr-<number>`): `opened` or `reopened` provisions and deploys the preview app on a dedicated domain (`preview_deployed`), `synchronize` deploys new commits, and `closed` destroys the preview app and frees all resources (`preview_destroyed`).
 - An image app has no branch, so every signed push deploys it again, and r3v3rs3 pulls the tag of the image again.
 - A request of another sender always deploys, with any body.
 - A ping, a push to another branch, or another event answers `200` with `{"outcome": "ignored"}`.
 
-A deploying request answers `200` with `{"outcome": "deployed", "deployment": {...}}`. The deployment has the trigger `webhook` and the account `webhook`. A push during a running deployment answers `202` with `{"outcome": "queued"}`. When the running deployment ends, one more deployment starts with the latest commit of the branch, so one queued deployment covers every push that arrived in between. r3v3rs3 keeps the queue in memory, so a restart drops it.
+A deploying request answers `200` with `{"outcome": "deployed", "deployment": {...}}` (or `{"outcome": "preview_deployed", "deployment": {...}}` for pull requests). A closed pull request answers `200` with `{"outcome": "preview_destroyed"}`. A push during a running deployment answers `202` with `{"outcome": "queued"}`. When the running deployment ends, one more deployment starts with the latest commit of the branch, so one queued deployment covers every push that arrived in between. r3v3rs3 keeps the queue in memory, so a restart drops it.
 
 | Status | Reason |
 |---|---|
@@ -372,6 +373,15 @@ A deploying request answers `200` with `{"outcome": "deployed", "deployment": {.
 | `503 platform_disabled` | The deployment platform is off. |
 
 The body can be up to 5 MiB. The audit log records every request that deployed or queued a deployment, with the address of the sender, and without an account.
+
+### Ephemeral Preview Deployments (Pull Requests)
+
+For Git and Compose apps, r3v3rs3 can automatically deploy temporary preview environments for every pull request or merge request.
+
+- **Enable in WebUI**: In the app settings form, toggle **Ephemeral Pull Request Previews**.
+- **Domain Template**: Configure an optional domain pattern using `{pr}` and `{app}` placeholders, such as `pr-{pr}.app.example.com`. When left blank, r3v3rs3 automatically prefixes the app's primary domain (`pr-{pr}.<primary_domain>`), or falls back to `pr-{pr}-{app}.localhost`.
+- **Environment & Secrets**: Preview environments inherit all environment variables, sealed secrets, and Git access tokens from the parent app. Host ports are automatically unpinned so preview containers never conflict with the primary application or other preview environments.
+- **Automated Lifecycle**: When a pull request is opened or reopened, r3v3rs3 provisions the preview app and routes traffic to it. New commits pushed to the pull request trigger updates (`synchronize`). When the pull request is closed or merged, r3v3rs3 automatically removes the preview app, stops its containers, and cleans up all associated proxy routes and volumes.
 
 ## Git Providers
 
