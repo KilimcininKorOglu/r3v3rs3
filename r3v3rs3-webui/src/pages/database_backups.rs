@@ -163,15 +163,7 @@ pub fn database_backups(props: &Props) -> Html {
         );
         use_effect_with((signed_in, id), move |&(signed_in, id)| {
             if signed_in {
-                reload(
-                    locale,
-                    &backups,
-                    &config,
-                    &form,
-                    &notice,
-                    &pitr_range,
-                    id,
-                );
+                reload(locale, &backups, &config, &form, &notice, &pitr_range, id);
                 fetch_s3_snapshots(locale, &s3_snapshots);
             }
         });
@@ -191,15 +183,7 @@ pub fn database_backups(props: &Props) -> Html {
             pitr_range.clone(),
         );
         Callback::from(move |()| {
-            reload(
-                locale,
-                &backups,
-                &config,
-                &form,
-                &notice,
-                &pitr_range,
-                id,
-            );
+            reload(locale, &backups, &config, &form, &notice, &pitr_range, id);
             fetch_s3_snapshots(locale, &s3_snapshots);
         })
     };
