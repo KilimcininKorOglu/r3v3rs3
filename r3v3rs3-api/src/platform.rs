@@ -859,9 +859,6 @@ impl AppSpec {
         let Some(pattern) = &self.tag_trigger else {
             return Ok(());
         };
-        if matches!(self.source, AppSource::Image { .. }) {
-            return Err(invalid("a tag trigger requires a git or compose source"));
-        }
         validate_tag_pattern(pattern)
     }
 

@@ -7,8 +7,8 @@ use crate::audit::AuditRecord;
 use axum::{
     Json,
     body::Bytes,
-    extract::{ConnectInfo, Path, State},
-    http::{HeaderMap, StatusCode},
+    extract::{ConnectInfo, Path, Query, State},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
 use r3v3rs3_api::{
@@ -17,7 +17,20 @@ use r3v3rs3_api::{
     id::ShortId,
     platform::{HookOutcome, HookResponse},
 };
+use serde_derive::Deserialize;
 use std::net::SocketAddr;
+use utoipa::IntoParams;
+
+/// Query parameters for webhooks from registries (Docker Hub, Quay) or direct triggers.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+pub struct WebhookQuery {
+    /// Webhook secret token for container registries (Docker Hub, Quay) or direct callers.
+    #[serde(default)]
+    pub secret: Option<String>,
+    /// Alternative query parameter for the webhook secret token.
+    #[serde(default)]
+    pub token: Option<String>,
+}
 
 /// Deploys an app for a signed push event of GitHub, GitLab, Gitea or Forgejo, or for a signed
 /// request of another sender. The request needs no session: the signature header proves it.
@@ -27,7 +40,10 @@ use std::net::SocketAddr;
     tag = "platform",
     operation_id = "app_webhook",
     security(()),
-    params(("id" = ShortId, Path, description = "App id.")),
+    params(
+        ("id" = ShortId, Path, description = "App id."),
+        WebhookQuery,
+    ),
     request_body(content = String, description = "The event of the Git provider.", content_type = "application/json"),
     responses(
         (status = 200, description = "The request started a deployment, or its event or branch does not deploy the app.", body = HookResponse),
@@ -43,9 +59,16 @@ pub async fn app_hook(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path(id): Path<ShortId>,
-    headers: HeaderMap,
+    Query(query): Query<WebhookQuery>,
+    mut headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, AppError> {
+    if let Some(token) = query.secret.as_deref().or(query.token.as_deref())
+        && !headers.contains_key("x-webhook-token")
+        && let Ok(val) = HeaderValue::from_str(token)
+    {
+        headers.insert("x-webhook-token", val);
+    }
     let platform = state
         .call_system(crate::server::rpc::auth::GetPlatform)
         .await?

@@ -6,7 +6,7 @@ use super::{Platform, not_found};
 use anyhow::Context as _;
 use hmac::{Hmac, KeyInit, Mac};
 use hyper::header::HeaderMap;
-use r3v3rs3_api::container::AppName;
+use r3v3rs3_api::container::{AppName, ImageRef};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git::GitRef;
 use r3v3rs3_api::id::ShortId;
@@ -27,13 +27,16 @@ use tracing::error;
 /// The username of the deployments that a webhook starts.
 pub const HOOK_USERNAME: &str = "webhook";
 
-/// The Git provider of a webhook request, named by its signature header.
+/// The provider or sender of a webhook request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {
     GitHub,
     /// Gitea and Forgejo.
     Gitea,
     GitLab,
+    DockerHub,
+    Harbor,
+    Quay,
     /// Any sender that signs the body like GitHub does, for example a CI job.
     Generic,
 }
@@ -44,6 +47,9 @@ impl Provider {
             Self::GitHub => "github",
             Self::Gitea => "gitea",
             Self::GitLab => "gitlab",
+            Self::DockerHub => "dockerhub",
+            Self::Harbor => "harbor",
+            Self::Quay => "quay",
             Self::Generic => "generic",
         }
     }
@@ -72,30 +78,92 @@ struct Signature<'a> {
     provider: Provider,
     value: &'a str,
     event: Option<&'a str>,
+    is_token: bool,
+}
+
+fn detect_registry_provider(body: &[u8]) -> Provider {
+    let Ok(val) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return Provider::Generic;
+    };
+    if val.get("push_data").is_some() {
+        return Provider::DockerHub;
+    }
+    if val.get("event_data").is_some()
+        || val.get("type").and_then(|t| t.as_str()) == Some("PUSH_ARTIFACT")
+    {
+        return Provider::Harbor;
+    }
+    if val.get("updated_tags").is_some() {
+        return Provider::Quay;
+    }
+    Provider::Generic
+}
+
+fn extract_direct_token(headers: &HeaderMap) -> Option<&str> {
+    for name in ["x-webhook-token", "x-webhook-secret", "x-registry-token"] {
+        if let Some(val) = headers.get(name).and_then(|v| v.to_str().ok()) {
+            return Some(val);
+        }
+    }
+    if let Some(auth) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        if let Some(token) = auth.strip_prefix("Bearer ") {
+            return Some(token.trim());
+        }
+        if let Some(token) = auth.strip_prefix("bearer ") {
+            return Some(token.trim());
+        }
+        return Some(auth.trim());
+    }
+    None
 }
 
 impl Signature<'_> {
-    /// The first signature header of the request.
-    fn of(headers: &HeaderMap) -> Option<Signature<'_>> {
-        SIGNATURES.iter().find_map(|&(name, provider, event)| {
-            let value = headers.get(name)?.to_str().ok()?;
+    /// The signature or authorization token of the request.
+    fn of<'a>(headers: &'a HeaderMap, body: &[u8]) -> Option<Signature<'a>> {
+        for &(name, mut provider, event) in &SIGNATURES {
+            let Some(val_header) = headers.get(name) else {
+                continue;
+            };
+            let Ok(value) = val_header.to_str() else {
+                continue;
+            };
             let event = event
-                .and_then(|event| headers.get(event))
-                .and_then(|event| event.to_str().ok());
-            Some(Signature {
+                .and_then(|ev| headers.get(ev))
+                .and_then(|ev| ev.to_str().ok());
+            if provider == Provider::Generic {
+                let detected = detect_registry_provider(body);
+                if detected != Provider::Generic {
+                    provider = detected;
+                }
+            }
+            return Some(Signature {
                 provider,
                 value,
                 event,
-            })
-        })
+                is_token: provider == Provider::GitLab,
+            });
+        }
+        if let Some(token) = extract_direct_token(headers) {
+            let provider = detect_registry_provider(body);
+            return Some(Signature {
+                provider,
+                value: token,
+                event: None,
+                is_token: true,
+            });
+        }
+        None
     }
 
-    /// Whether the secret of the app signed the body. GitLab sends the secret itself.
+    /// Whether the secret of the app signed the body or matches the token.
     fn verify(&self, secret: &[u8], body: &[u8]) -> bool {
+        if self.is_token {
+            return same_token(self.value.as_bytes(), secret);
+        }
         match self.provider {
             Provider::GitLab => same_token(self.value.as_bytes(), secret),
             Provider::Gitea => same_mac(secret, body, self.value),
-            Provider::GitHub | Provider::Generic => self
+            _ => self
                 .value
                 .strip_prefix("sha256=")
                 .is_some_and(|mac| same_mac(secret, body, mac)),
@@ -104,9 +172,10 @@ impl Signature<'_> {
 
     fn is_push(&self) -> bool {
         match self.provider {
-            Provider::GitHub | Provider::Gitea => self.event == Some("push"),
+            Provider::GitHub => matches!(self.event, Some("push" | "package" | "registry_package")),
+            Provider::Gitea => self.event == Some("push"),
             Provider::GitLab => matches!(self.event, Some("Push Hook" | "Tag Push Hook")),
-            Provider::Generic => true,
+            _ => true,
         }
     }
 
@@ -114,7 +183,7 @@ impl Signature<'_> {
         match self.provider {
             Provider::GitHub | Provider::Gitea => self.event == Some("pull_request"),
             Provider::GitLab => self.event == Some("Merge Request Hook"),
-            Provider::Generic => false,
+            _ => false,
         }
     }
 }
@@ -271,7 +340,7 @@ fn parse_pr_payload(provider: Provider, body: &[u8]) -> Option<PrPayload> {
     match provider {
         Provider::GitHub | Provider::Gitea => parse_github_pr(body),
         Provider::GitLab => parse_gitlab_mr(body),
-        Provider::Generic => None,
+        _ => None,
     }
 }
 
@@ -291,29 +360,336 @@ fn hook_action(signature: &Signature, app: &AppEntry, body: &[u8]) -> Result<Hoo
     Ok(HookAction::Ignore)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryPush {
+    pub repository: Option<String>,
+    pub tag: Option<String>,
+    pub digest: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DockerHubPayload {
+    push_data: Option<DockerHubPushData>,
+    repository: Option<DockerHubRepo>,
+}
+
+#[derive(Deserialize)]
+struct DockerHubPushData {
+    tag: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DockerHubRepo {
+    repo_name: Option<String>,
+    name: Option<String>,
+}
+
+fn parse_dockerhub_payload(body: &[u8]) -> Option<RegistryPush> {
+    let payload: DockerHubPayload = serde_json::from_slice(body).ok()?;
+    let tag = payload.push_data?.tag?;
+    let repo = payload.repository.and_then(|r| r.repo_name.or(r.name));
+    Some(RegistryPush {
+        repository: repo,
+        tag: Some(tag),
+        digest: None,
+    })
+}
+
+#[derive(Deserialize)]
+struct GitHubPackagePayload {
+    action: Option<String>,
+    package: Option<GitHubPackageData>,
+    registry_package: Option<GitHubRegistryData>,
+    repository: Option<GitHubPackageRepo>,
+}
+
+#[derive(Deserialize)]
+struct GitHubPackageData {
+    name: Option<String>,
+    package_version: Option<GitHubPackageVersion>,
+}
+
+#[derive(Deserialize)]
+struct GitHubPackageVersion {
+    version: Option<String>,
+    container_metadata: Option<GitHubContainerMetadata>,
+}
+
+#[derive(Deserialize)]
+struct GitHubContainerMetadata {
+    tag: Option<GitHubTagMetadata>,
+}
+
+#[derive(Deserialize)]
+struct GitHubTagMetadata {
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GitHubRegistryData {
+    name: Option<String>,
+    package_version: Option<GitHubRegistryVersion>,
+}
+
+#[derive(Deserialize)]
+struct GitHubRegistryVersion {
+    version: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GitHubPackageRepo {
+    full_name: Option<String>,
+    name: Option<String>,
+}
+
+fn extract_gh_tag(payload: &GitHubPackagePayload) -> Option<String> {
+    if let Some(pkg) = &payload.package
+        && let Some(ver) = &pkg.package_version
+    {
+        if let Some(meta) = &ver.container_metadata
+            && let Some(tag_meta) = &meta.tag
+            && let Some(name) = &tag_meta.name
+        {
+            return Some(name.clone());
+        }
+        if let Some(version) = &ver.version {
+            return Some(version.clone());
+        }
+    }
+    if let Some(reg) = &payload.registry_package
+        && let Some(ver) = &reg.package_version
+        && let Some(version) = &ver.version
+    {
+        return Some(version.clone());
+    }
+    None
+}
+
+fn extract_gh_repo(payload: &GitHubPackagePayload) -> Option<String> {
+    if let Some(repo) = &payload.repository {
+        if let Some(full) = &repo.full_name {
+            return Some(full.clone());
+        }
+        if let Some(name) = &repo.name {
+            return Some(name.clone());
+        }
+    }
+    if let Some(pkg) = &payload.package
+        && let Some(name) = &pkg.name
+    {
+        return Some(name.clone());
+    }
+    if let Some(reg) = &payload.registry_package
+        && let Some(name) = &reg.name
+    {
+        return Some(name.clone());
+    }
+    None
+}
+
+fn parse_github_package(body: &[u8]) -> Option<RegistryPush> {
+    let payload: GitHubPackagePayload = serde_json::from_slice(body).ok()?;
+    if matches!(payload.action.as_deref(), Some("deleted")) {
+        return None;
+    }
+    let tag = extract_gh_tag(&payload);
+    let repo = extract_gh_repo(&payload);
+    if tag.is_none() && repo.is_none() {
+        return None;
+    }
+    Some(RegistryPush {
+        repository: repo,
+        tag,
+        digest: None,
+    })
+}
+
+#[derive(Deserialize)]
+struct HarborPayload {
+    #[serde(rename = "type")]
+    event_type: Option<String>,
+    event_data: Option<HarborEventData>,
+}
+
+#[derive(Deserialize)]
+struct HarborEventData {
+    repository: Option<HarborRepo>,
+    resources: Option<Vec<HarborResource>>,
+}
+
+#[derive(Deserialize)]
+struct HarborRepo {
+    name: Option<String>,
+    repo_full_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct HarborResource {
+    tag: Option<String>,
+    digest: Option<String>,
+}
+
+fn parse_harbor_payload(body: &[u8]) -> Option<RegistryPush> {
+    let payload: HarborPayload = serde_json::from_slice(body).ok()?;
+    if matches!(payload.event_type.as_deref(), Some(t) if t != "PUSH_ARTIFACT") {
+        return None;
+    }
+    let data = payload.event_data?;
+    let resource = data.resources?.into_iter().next()?;
+    let repo = data.repository.and_then(|r| r.repo_full_name.or(r.name));
+    Some(RegistryPush {
+        repository: repo,
+        tag: resource.tag,
+        digest: resource.digest,
+    })
+}
+
+#[derive(Deserialize)]
+struct QuayPayload {
+    repository: Option<String>,
+    updated_tags: Option<Vec<String>>,
+}
+
+fn parse_quay_payload(body: &[u8]) -> Option<RegistryPush> {
+    let payload: QuayPayload = serde_json::from_slice(body).ok()?;
+    let tag = payload.updated_tags?.into_iter().next()?;
+    Some(RegistryPush {
+        repository: payload.repository,
+        tag: Some(tag),
+        digest: None,
+    })
+}
+
+#[derive(Deserialize)]
+struct GenericImagePayload {
+    image: Option<String>,
+    repository: Option<String>,
+    tag: Option<String>,
+}
+
+fn parse_generic_image_payload(body: &[u8]) -> Option<RegistryPush> {
+    let payload: GenericImagePayload = serde_json::from_slice(body).ok()?;
+    if let Some(image_str) = payload.image
+        && let Ok(img) = image_str.parse::<ImageRef>()
+    {
+        return Some(RegistryPush {
+            repository: Some(img.repository().to_string()),
+            tag: Some(img.tag_or_digest().to_string()),
+            digest: None,
+        });
+    }
+    if payload.repository.is_some() || payload.tag.is_some() {
+        return Some(RegistryPush {
+            repository: payload.repository,
+            tag: payload.tag,
+            digest: None,
+        });
+    }
+    None
+}
+
+fn parse_registry_push(
+    provider: Provider,
+    event: Option<&str>,
+    body: &[u8],
+) -> Option<RegistryPush> {
+    if (matches!(event, Some("package" | "registry_package")) || provider == Provider::GitHub)
+        && let Some(push) = parse_github_package(body)
+    {
+        return Some(push);
+    }
+    if let Some(push) = parse_dockerhub_payload(body) {
+        return Some(push);
+    }
+    if let Some(push) = parse_harbor_payload(body) {
+        return Some(push);
+    }
+    if let Some(push) = parse_quay_payload(body) {
+        return Some(push);
+    }
+    parse_generic_image_payload(body)
+}
+
+fn matches_repository(app_repo: &str, payload_repo: &str) -> bool {
+    if app_repo == payload_repo {
+        return true;
+    }
+    let app_name = app_repo.rsplit_once('/').map_or(app_repo, |(_, r)| r);
+    let payload_name = payload_repo
+        .rsplit_once('/')
+        .map_or(payload_repo, |(_, r)| r);
+    if app_name != payload_name {
+        return false;
+    }
+    app_repo.ends_with(payload_repo) || payload_repo.ends_with(app_repo)
+}
+
+fn check_image_tag(
+    app: &AppEntry,
+    image: &ImageRef,
+    tag: Option<&str>,
+) -> Result<PushTarget, Error> {
+    let Some(tag) = tag else {
+        return Ok(PushTarget::Deploy(None));
+    };
+    if let Some(pattern) = app.spec.tag_trigger.as_deref()
+        && r3v3rs3_api::platform::matches_tag_pattern(pattern, tag)
+    {
+        let target = tag.parse().map_err(|_| Error::InvalidWebhookPayload {
+            reason: format!("invalid tag name: {tag}"),
+        })?;
+        return Ok(PushTarget::Deploy(Some(target)));
+    }
+    if tag == image.tag_or_digest() {
+        return Ok(PushTarget::Deploy(None));
+    }
+    Ok(PushTarget::Ignore)
+}
+
+fn image_push_target(
+    app: &AppEntry,
+    image: &ImageRef,
+    push: Option<RegistryPush>,
+) -> Result<PushTarget, Error> {
+    let Some(push) = push else {
+        return Ok(PushTarget::Deploy(None));
+    };
+    if let Some(ref repo) = push.repository
+        && !matches_repository(image.repository(), repo)
+    {
+        return Ok(PushTarget::Ignore);
+    }
+    check_image_tag(app, image, push.tag.as_deref())
+}
+
 /// Whether the push deploys the app, and with which target ref (if specified).
 fn push_target(signature: &Signature, app: &AppEntry, body: &[u8]) -> Result<PushTarget, Error> {
     if !signature.is_push() {
         return Ok(PushTarget::Ignore);
     }
-    let (AppSource::Git { branch, .. } | AppSource::Compose { branch, .. }) = &app.spec.source
-    else {
-        return Ok(PushTarget::Deploy(None));
-    };
-    if signature.provider == Provider::Generic {
-        return Ok(PushTarget::Deploy(None));
+    match &app.spec.source {
+        AppSource::Image { image } => {
+            let registry_push = parse_registry_push(signature.provider, signature.event, body);
+            image_push_target(app, image, registry_push)
+        }
+        AppSource::Git { branch, .. } | AppSource::Compose { branch, .. } => {
+            if signature.provider == Provider::Generic {
+                return Ok(PushTarget::Deploy(None));
+            }
+            let push: Push =
+                serde_json::from_slice(body).map_err(|err| Error::InvalidWebhookPayload {
+                    reason: err.to_string(),
+                })?;
+            if push.deleted || is_empty_commit(push.after.as_deref()) {
+                return Ok(PushTarget::Ignore);
+            }
+            check_push_ref(
+                branch.as_str(),
+                app.spec.tag_trigger.as_deref(),
+                &push.git_ref,
+            )
+        }
     }
-    let push: Push = serde_json::from_slice(body).map_err(|err| Error::InvalidWebhookPayload {
-        reason: err.to_string(),
-    })?;
-    if push.deleted || is_empty_commit(push.after.as_deref()) {
-        return Ok(PushTarget::Ignore);
-    }
-    check_push_ref(
-        branch.as_str(),
-        app.spec.tag_trigger.as_deref(),
-        &push.git_ref,
-    )
 }
 
 fn is_empty_commit(after: Option<&str>) -> bool {
@@ -493,7 +869,7 @@ impl Platform {
             .webhook_secret(id)
             .await?
             .ok_or_else(|| not_found(id))?;
-        let signature = Signature::of(headers)
+        let signature = Signature::of(headers, body)
             .filter(|signature| signature.verify(&secret, body))
             .ok_or(Error::Unauthorized)?;
         let action = hook_action(&signature, &app, body)?;
@@ -782,7 +1158,7 @@ mod tests {
             ),
         ];
         for (headers, provider) in cases {
-            let signature = Signature::of(&headers).unwrap();
+            let signature = Signature::of(&headers, &body).unwrap();
             assert_eq!(signature.provider, provider);
             assert!(signature.verify(b"s3cret", &body), "{provider:?}");
             assert!(!signature.verify(b"other", &body), "{provider:?}");
@@ -796,8 +1172,12 @@ mod tests {
         }
         // A GitHub signature needs its prefix, and a request needs a signature.
         let bare = headers(&[("x-hub-signature-256", mac)]);
-        assert!(!Signature::of(&bare).unwrap().verify(b"s3cret", &body));
-        assert!(Signature::of(&HeaderMap::new()).is_none());
+        assert!(
+            !Signature::of(&bare, &body)
+                .unwrap()
+                .verify(b"s3cret", &body)
+        );
+        assert!(Signature::of(&HeaderMap::new(), &body).is_none());
     }
 
     /// Sends a request that the secret signs, and returns its error.
@@ -1151,6 +1531,107 @@ mod tests {
             (Provider::GitLab, HookOutcome::PreviewDestroyed)
         );
         assert!(platform.find_preview_app(parent.id, 7).await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn docker_hub_webhook_deploys_image_app() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let mut req = request("hub-app");
+        req.spec.source = AppSource::Image {
+            image: "myorg/backend:latest".parse().unwrap(),
+        };
+        let app = platform.add_app(req, 1).await?;
+        let (_, secret) = platform.new_webhook_secret(app.id).await?;
+
+        // 1. Matching tag and repository -> Deployed
+        let body = br#"{"push_data":{"tag":"latest"},"repository":{"repo_name":"myorg/backend"}}"#;
+        let headers = headers(&[("x-webhook-token", secret.secret.clone())]);
+        let res = platform.hook(app.id, &headers, body).await?;
+        assert_eq!(outcome(&res), (Provider::DockerHub, HookOutcome::Deployed));
+
+        // 2. Mismatched repository -> Ignored
+        let other_repo =
+            br#"{"push_data":{"tag":"latest"},"repository":{"repo_name":"otherorg/other"}}"#;
+        let res = platform.hook(app.id, &headers, other_repo).await?;
+        assert_eq!(outcome(&res), (Provider::DockerHub, HookOutcome::Ignored));
+
+        // 3. Mismatched tag -> Ignored
+        let other_tag =
+            br#"{"push_data":{"tag":"v2-dev"},"repository":{"repo_name":"myorg/backend"}}"#;
+        let res = platform.hook(app.id, &headers, other_tag).await?;
+        assert_eq!(outcome(&res), (Provider::DockerHub, HookOutcome::Ignored));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ghcr_package_webhook_updates_tag_trigger() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let mut req = request("ghcr-app");
+        req.spec.source = AppSource::Image {
+            image: "ghcr.io/org/service:v1.0".parse().unwrap(),
+        };
+        req.spec.tag_trigger = Some("v*".to_string());
+        let app = platform.add_app(req, 1).await?;
+        let (_, secret) = platform.new_webhook_secret(app.id).await?;
+
+        let body = br#"{
+            "action": "published",
+            "package": {
+                "name": "service",
+                "package_version": {
+                    "version": "v1.2",
+                    "container_metadata": {
+                        "tag": { "name": "v1.2" }
+                    }
+                }
+            },
+            "repository": { "full_name": "org/service" }
+        }"#;
+        let mac = github_mac(&secret.secret, body);
+        let headers = headers(&[
+            ("x-github-event", "package".to_string()),
+            ("x-hub-signature-256", format!("sha256={mac}")),
+        ]);
+        let res = platform.hook(app.id, &headers, body).await?;
+        assert_eq!(outcome(&res), (Provider::GitHub, HookOutcome::Deployed));
+
+        let updated = platform.app(app.id).await?;
+        let AppSource::Image { image } = updated.spec.source else {
+            panic!("expected image source");
+        };
+        assert_eq!(image.as_str(), "ghcr.io/org/service:v1.2");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn harbor_and_quay_webhooks_deploy() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let mut req = request("registry-app");
+        req.spec.source = AppSource::Image {
+            image: "harbor.domain/library/app:1.25".parse().unwrap(),
+        };
+        let app = platform.add_app(req, 1).await?;
+        let (_, secret) = platform.new_webhook_secret(app.id).await?;
+
+        // Harbor with Authorization: Bearer
+        let harbor_body = br#"{
+            "type": "PUSH_ARTIFACT",
+            "event_data": {
+                "repository": { "repo_full_name": "library/app" },
+                "resources": [{ "tag": "1.25", "digest": "sha256:abc" }]
+            }
+        }"#;
+        let harbor_headers = headers(&[("authorization", format!("Bearer {}", secret.secret))]);
+        let res = platform.hook(app.id, &harbor_headers, harbor_body).await?;
+        assert_eq!(outcome(&res), (Provider::Harbor, HookOutcome::Deployed));
+        wait_deployments(&platform, app.id).await?;
+
+        // Quay with x-webhook-secret
+        let quay_body = br#"{"repository":"library/app","updated_tags":["1.25"]}"#;
+        let quay_headers = headers(&[("x-webhook-secret", secret.secret.clone())]);
+        let res = platform.hook(app.id, &quay_headers, quay_body).await?;
+        assert_eq!(outcome(&res), (Provider::Quay, HookOutcome::Deployed));
         Ok(())
     }
 }

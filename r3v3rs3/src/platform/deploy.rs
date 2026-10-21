@@ -217,6 +217,18 @@ impl Platform {
         self.deploy_with_ref(id, username, trigger, None).await
     }
 
+    async fn sync_image_spec(&self, app: &AppEntry, spec: &AppSpec) -> anyhow::Result<()> {
+        if matches!(app.spec.source, AppSource::Image { .. }) && spec.source != app.spec.source {
+            let request = r3v3rs3_api::platform::AppRequest {
+                name: app.name.clone(),
+                target: app.target,
+                spec: spec.clone(),
+            };
+            self.update_app(app.id, request, unix_ms()).await?;
+        }
+        Ok(())
+    }
+
     /// Starts a deployment of an app, optionally overriding the source branch or tag.
     pub async fn deploy_with_ref(
         self: &Arc<Self>,
@@ -227,14 +239,8 @@ impl Platform {
     ) -> anyhow::Result<DeploymentEntry> {
         let app = self.app(id).await?;
         let mut spec = app.spec.clone();
-        if let Some(ref target_ref) = git_ref {
-            match &mut spec.source {
-                AppSource::Git { branch, .. } | AppSource::Compose { branch, .. } => {
-                    *branch = target_ref.clone();
-                }
-                AppSource::Image { .. } => {}
-            }
-        }
+        apply_target_ref(&mut spec, git_ref.as_ref());
+        self.sync_image_spec(&app, &spec).await?;
         let env = self.store.env(id).await?;
         let new = NewDeployment::new(&app, trigger, username, &spec, &env)?;
         if let Some(reason) = needs_approval(&spec) {
@@ -975,6 +981,23 @@ fn needs_approval(spec: &AppSpec) -> Option<&'static str> {
         }
     }
     None
+}
+
+fn apply_target_ref(spec: &mut AppSpec, target_ref: Option<&GitRef>) {
+    let Some(target) = target_ref else {
+        return;
+    };
+    match &mut spec.source {
+        AppSource::Git { branch, .. } | AppSource::Compose { branch, .. } => {
+            *branch = target.clone();
+        }
+        AppSource::Image { image } => {
+            let repo = image.repository();
+            if let Ok(new_image) = format!("{repo}:{target}").parse::<ImageRef>() {
+                *image = new_image;
+            }
+        }
+    }
 }
 
 /// The last lines of the container log, for a failure message.

@@ -348,17 +348,20 @@ The provider sends its events to `POST /hooks/apps/{id}` on the address of the a
 
 | Provider | Setting |
 |---|---|
-| GitHub | **Payload URL** is the hook address, **Content type** is `application/json`, and **Secret** is the secret. GitHub signs the body in the `X-Hub-Signature-256` header. |
+| GitHub / GHCR | **Payload URL** is the hook address, **Content type** is `application/json`, and **Secret** is the secret. GitHub signs the body in the `X-Hub-Signature-256` header. Supports Git push, Pull Request events, and GitHub Container Registry (`package` / `registry_package`) push events. |
 | Gitea, Forgejo | **Target URL** is the hook address, **POST Content Type** is `application/json`, and **Secret** is the secret. The provider signs the body in the `X-Gitea-Signature` or `X-Forgejo-Signature` header. |
-| GitLab | **URL** is the hook address, and **Secret token** is the secret. GitLab sends the secret itself in the `X-Gitlab-Token` header. Enable **Push events**, and **Tag push events** when the branch field of the app names a tag. |
-| Another sender | Sign the body with HMAC-SHA256 and the secret, and send the hex signature as `X-Signature-256: sha256=<hex>`. A CI job can deploy an image app this way after it pushes a new image. |
+| GitLab | **URL** is the hook address, and **Secret token** is the secret. GitLab sends the secret itself in the `X-Gitlab-Token` header. Enable **Push events**, and **Tag push events** when the branch field of the app names a tag. Supports Merge Request events. |
+| Docker Hub | Webhook URL is `<hook address>?secret=<secret>`. Docker Hub sends a JSON payload with `push_data` and `repository`. |
+| Harbor | Webhook URL is the hook address with an `Authorization: Bearer <secret>` auth header. Harbor sends `PUSH_ARTIFACT` events with resource tags and digests. |
+| Quay | Webhook URL is `<hook address>?secret=<secret>` or send an `X-Webhook-Secret: <secret>` header. Quay sends notification events with `updated_tags`. |
+| Another sender | Sign the body with HMAC-SHA256 and the secret as `X-Signature-256: sha256=<hex>`, or pass the secret token via `Authorization: Bearer <secret>`, `X-Webhook-Token: <secret>`, or `?secret=<secret>` query parameter. A CI job or custom registry can trigger blue-green deployments this way. |
 
 Which request deploys:
 
 - A Git or a Compose app deploys for a push whose `ref` is `refs/heads/<branch>` or `refs/tags/<branch>`, where `<branch>` is the branch field of the app. A push that deletes the branch does not deploy.
 - When `tag_trigger` is configured (for example `v*` or `release-*`), pushing a tag that matches the pattern automatically deploys that tag.
 - When ephemeral preview deployments are enabled (`preview`), Pull Request / Merge Request events automatically manage an isolated preview app (`<app>-pr-<number>`): `opened` or `reopened` provisions and deploys the preview app on a dedicated domain (`preview_deployed`), `synchronize` deploys new commits, and `closed` destroys the preview app and frees all resources (`preview_destroyed`).
-- An image app has no branch, so every signed push deploys it again, and r3v3rs3 pulls the tag of the image again.
+- An image app automatically updates and deploys blue-green when a container registry (Docker Hub, GHCR, Harbor, Quay) or generic webhook delivers a push event for the app's repository. If the pushed tag matches the currently configured tag (such as `:latest`), the new digest is pulled and deployed with zero downtime. If `tag_trigger` is configured (for example `v*` or `release-*`) and the pushed tag matches the pattern, the app's image reference is updated to the new tag and deployed. A push for a mismatched repository or an unrelated tag is safely ignored.
 - A request of another sender always deploys, with any body.
 - A ping, a push to another branch, or another event answers `200` with `{"outcome": "ignored"}`.
 

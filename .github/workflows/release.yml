@@ -118,7 +118,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-cli-${{ matrix.target }}.tar.gz
+        run: gh release upload "$GITHUB_REF_NAME" --clobber r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-cli-${{ matrix.target }}.tar.gz
 
   # The main push already ran the Rust workflow for this commit. The release runs the test
   # suite again only when that proof is missing, for example on a moved or older tag. A Rust
@@ -325,14 +325,14 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') && matrix.archive == 'tar.gz'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" "r3v3rs3-cli-${{ matrix.target }}.tar.gz"
+        run: gh release upload "$GITHUB_REF_NAME" --clobber "r3v3rs3-cli-${{ matrix.target }}.tar.gz"
       - name: Upload the archive
         if: startsWith(github.ref, 'refs/tags/v') && matrix.archive == 'zip'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # The default shell here is pwsh, where $GITHUB_REF_NAME is not a PowerShell
         # variable, so the tag comes from the context.
-        run: gh release upload "${{ github.ref_name }}" "r3v3rs3-cli-${{ matrix.target }}.zip"
+        run: gh release upload "${{ github.ref_name }}" --clobber "r3v3rs3-cli-${{ matrix.target }}.zip"
 
   publish:
     name: Publish release

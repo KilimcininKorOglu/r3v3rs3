@@ -348,17 +348,20 @@ Sağlayıcı olaylarını yönetim API'sinin adresindeki `POST /hooks/apps/{id}`
 
 | Sağlayıcı | Ayar |
 |---|---|
-| GitHub | **Payload URL** hook adresidir, **Content type** `application/json` değeridir, **Secret** secret'tır. GitHub gövdeyi `X-Hub-Signature-256` header'ında imzalar. |
+| GitHub / GHCR | **Payload URL** hook adresidir, **Content type** `application/json` değeridir, **Secret** secret'tır. GitHub gövdeyi `X-Hub-Signature-256` header'ında imzalar. Git push, Pull Request olaylarını ve GitHub Container Registry (`package` / `registry_package`) yayınlama olaylarını destekler. |
 | Gitea, Forgejo | **Target URL** hook adresidir, **POST Content Type** `application/json` değeridir, **Secret** secret'tır. Sağlayıcı gövdeyi `X-Gitea-Signature` veya `X-Forgejo-Signature` header'ında imzalar. |
-| GitLab | **URL** hook adresidir, **Secret token** secret'tır. GitLab secret'ın kendisini `X-Gitlab-Token` header'ında gönderir. **Push events** seçeneğini açın. Uygulamanın branch alanı bir tag adıysa **Tag push events** seçeneğini de açın. |
-| Başka bir gönderici | Gövdeyi secret ile HMAC-SHA256 kullanarak imzalayın ve hex imzayı `X-Signature-256: sha256=<hex>` olarak gönderin. Bir CI işi yeni bir image push ettikten sonra image uygulamasını bu yolla deploy edebilir. |
+| GitLab | **URL** hook adresidir, **Secret token** secret'tır. GitLab secret'ın kendisini `X-Gitlab-Token` header'ında gönderir. **Push events** seçeneğini açın. Uygulamanın branch alanı bir tag adıysa **Tag push events** seçeneğini de açın. Merge Request olaylarını destekler. |
+| Docker Hub | Webhook URL'i `<hook adresi>?secret=<secret>` şeklindedir. Docker Hub `push_data` ve `repository` içeren JSON gövdesi gönderir. |
+| Harbor | Webhook URL'i hook adresidir ve `Authorization: Bearer <secret>` yetkilendirme header'ı kullanılır. Harbor kaynak etiketleri ve özetleriyle `PUSH_ARTIFACT` olayları gönderir. |
+| Quay | Webhook URL'i `<hook adresi>?secret=<secret>` şeklindedir veya `X-Webhook-Secret: <secret>` header'ı gönderilir. Quay `updated_tags` içeren bildirimler gönderir. |
+| Başka bir gönderici | Gövdeyi secret ile HMAC-SHA256 kullanarak imzalayın (`X-Signature-256: sha256=<hex>`) veya secret belirtecini `Authorization: Bearer <secret>`, `X-Webhook-Token: <secret>` ya da `?secret=<secret>` sorgu parametresiyle iletin. Bir CI işi veya özel registry bu yöntemle sıfır kesintili blue-green deployment tetikleyebilir. |
 
 Hangi istek deploy eder:
 
 - Git veya Compose uygulaması, `ref` değeri `refs/heads/<branch>` veya `refs/tags/<branch>` olan bir push ile deploy olur. Burada `<branch>` uygulamanın branch alanıdır. Branch'i silen bir push deploy etmez.
 - `tag_trigger` tanımlandığında (örneğin `v*` veya `release-*`), bu kalıba uyan bir etiket (tag) push edildiğinde otomatik olarak o etiket deploy edilir.
 - Geçici önizleme ortamları etkinleştirildiğinde (`preview`), Pull Request / Merge Request olayları izole bir önizleme uygulamasını (`<uygulama>-pr-<numara>`) otomatik olarak yönetir: `opened` veya `reopened` önizleme uygulamasını oluşturur ve ona özel bir alan adında deploy eder (`preview_deployed`), `synchronize` yeni commit'leri deploy eder ve `closed` önizleme uygulamasını yok ederek tüm kaynakları serbest bırakır (`preview_destroyed`).
-- Image uygulamasının branch'i yoktur. Bu yüzden imzalı her push onu yeniden deploy eder ve r3v3rs3 image'ın tag'ini yeniden çeker.
+- Image uygulaması, bir container registry (Docker Hub, GHCR, Harbor, Quay) veya genel webhook uygulamanın deposuna yeni bir push bildirdiğinde otomatik olarak sıfır kesintiyle (blue-green) güncellenir ve deploy edilir. Gönderilen etiket mevcut etiketle eşleşirse (örneğin `:latest`), yeni digest çekilerek sıfır kesintiyle devreye alınır. Eğer `tag_trigger` tanımlıysa (örneğin `v*` veya `release-*`) ve gelen etiket bu kalıba uyuyorsa, uygulamanın image referansı yeni etiketle güncellenir ve deploy edilir. Farklı bir depoya veya eşleşmeyen bir etikete ait push'lar güvenle yoksayılır (`ignored`).
 - Başka bir göndericinin isteği gövdesi ne olursa olsun her zaman deploy eder.
 - Ping, başka bir branch'e push veya başka bir olay `200` ve `{"outcome": "ignored"}` yanıtını alır.
 
