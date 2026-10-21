@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.4] - 2026-10-21
+
+### Added
+- Centralized Backups Center: Dedicated control plane (`/backups`) consolidating database and volume backups, storage metrics, schedules, and disaster recovery across all engines in a unified management dashboard.
+- Dead Man's Snitch & Heartbeat Monitoring: Automated HTTP GET ping (`r3v3rs3-heartbeat`) to external snitch monitoring endpoints (Healthchecks.io, Dead Man's Snitch, Better Stack) upon successful daily scheduled backup completion, with outbound `backup.failure` alerts on failures.
+- Unified Backups Overview & Metrics: 4 real-time KPI indicators displaying total backups, cumulative storage consumed, latest backup timestamp, automated cron schedule, heartbeat status, and remote S3 backup status.
+- Engine Filtering & Search: Instant text filtering by database name or backup ID, combined with database engine dropdown filters (PostgreSQL, MySQL, MariaDB, MongoDB, Redis).
+- On-Demand Backup & Verification Actions: Quick modal to trigger immediate backups for any selected database, alongside in-place restore and one-click decompression integrity tests.
+- Admin API Backups Endpoints: `GET /api/backups`, `GET /api/backups/overview`, and `POST /api/backups/run` registered in OpenAPI specifications.
+
 ## [2.2.3] - 2026-10-21
 
 ### Added
