@@ -1661,3 +1661,23 @@ A path with a directory writes into that directory, and a bare file name writes 
 The log directory holds these files and `log.db`, the database of the log page and the audit log. The `R3V3RS3_LOG_DIR` environment variable or the `--log-dir` command-line option sets it. The default is `$XDG_DATA_HOME/r3v3rs3/logs` or `$HOME/.local/share/r3v3rs3/logs`.
 
 Set the log level with the `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` environment variable or the `--log-level`, `--access-log-level` command-line option. The default level is `info`, and `off` turns a log off. `R3V3RS3_LOG_FORMAT` or `--log-format` selects `text` (the default) or `json` for both logs.
+
+# Live Access Log Streaming & Traffic Inspection
+
+In addition to writing file logs, r3v3rs3 includes an in-memory real-time access log ring buffer and streaming engine. HTTP and WebSocket requests flowing through reverse proxies are captured with status codes, latencies, client IPs, hosts, paths, and methods.
+
+## WebUI Traffic View
+
+The panel provides an interactive live traffic dashboard accessible at `/traffic` and linked from proxy inspection pages:
+- **Real-Time Stream**: Live Server-Sent Events (SSE) update the table in real time as requests arrive.
+- **Color-Coded Status Inspection**: Visual badges for `2xx` (success), `3xx` (redirect), `4xx` (client error), and `5xx` (server error).
+- **Latency Monitoring**: Color-coded response latencies (< 50ms green, 50–300ms amber, > 300ms red).
+- **Interactive Filtering**: Filter incoming or historical logs by HTTP status code, URL path, client IP, host, or HTTP method.
+- **Controls**: Pause/resume stream, toggle automatic pinning to latest entries, clear in-memory buffer, and export logs to JSON.
+
+## Admin API
+
+The traffic endpoints are protected by session authentication and respect multi-tenant proxy scoping:
+
+- `GET /api/traffic`: Returns recent access log entries matching optional query filters (`status`, `search`, `resource_id`, `limit`, `since_id`).
+- `GET /api/traffic/live`: Streams live incoming access log entries as `text/event-stream` Server-Sent Events (SSE).

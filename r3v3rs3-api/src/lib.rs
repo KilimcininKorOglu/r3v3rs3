@@ -34,5 +34,6 @@ pub mod rewrite;
 pub mod store;
 pub mod subject_name;
 pub mod tls;
+pub mod traffic;
 pub mod upstream;
 pub mod vhost;

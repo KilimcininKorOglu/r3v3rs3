@@ -20,6 +20,7 @@ use tokio::{io::BufStream, net::TcpStream};
 use tokio_rustls::rustls::ServerConfig;
 use tracing::{Instrument, Span, error};
 
+pub mod access_log;
 pub mod dns;
 pub mod geoip;
 pub mod health;

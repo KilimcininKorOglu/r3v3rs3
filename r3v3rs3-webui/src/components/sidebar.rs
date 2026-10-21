@@ -93,6 +93,13 @@ const GROUPS: &[MenuGroup] = &[
                 subs: NO_SUBS,
             },
             MenuItem {
+                name: "nav.traffic",
+                icon: "/assets/icons/document-text.svg",
+                route: Route::Traffic,
+                access: Access::All,
+                subs: NO_SUBS,
+            },
+            MenuItem {
                 name: "nav.access_lists",
                 icon: "/assets/icons/shield-checkmark.svg",
                 route: Route::AccessLists,

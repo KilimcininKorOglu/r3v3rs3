@@ -78,6 +78,7 @@ mod proxies;
 mod static_file;
 mod store;
 pub(crate) mod system_metrics;
+mod traffic;
 mod upgrade;
 mod workers;
 
@@ -517,6 +518,12 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
         .nest("/ports", port_routes())
         .nest("/proxies", proxy_routes())
         .nest("/access_lists", access_list_routes())
+        .nest(
+            "/traffic",
+            OpenApiRouter::new()
+                .routes(routes!(traffic::get))
+                .routes(routes!(traffic::live)),
+        )
 }
 
 fn port_routes() -> OpenApiRouter<AppState> {

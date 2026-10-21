@@ -46,6 +46,7 @@ mod self_sign;
 mod settings;
 mod store_env;
 mod targets;
+pub mod traffic;
 mod upload;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Routable)]
@@ -69,6 +70,8 @@ pub enum Route {
     Proxies,
     #[at("/proxies/:id/log")]
     ProxyLogView { id: ShortId },
+    #[at("/traffic")]
+    Traffic,
     #[at("/certs")]
     Certs,
     #[at("/certs/client")]
@@ -164,6 +167,7 @@ impl Route {
             Route::AppStore | Route::NewStoreApp { .. } => Some(Route::AppStore),
             Route::Databases | Route::DatabaseBackups { .. } => Some(Route::Databases),
             Route::AccessLists
+            | Route::Traffic
             | Route::Targets
             | Route::GitConnections
             | Route::Registries
@@ -189,6 +193,7 @@ pub fn switch(routes: Route) -> Html {
         Route::ProxyLogView { id } => html! { <log_view::LogView id={id.to_string()} /> },
         Route::ProxyView { id } => html! { <proxy_view::ProxyView {id} /> },
         Route::NewProxy => html! { <new_proxy::NewProxy /> },
+        Route::Traffic => html! { <traffic::TrafficView /> },
         Route::AccessLists => html! { <access_lists::AccessLists /> },
         Route::Apps => html! { <app_list::AppList /> },
         Route::Databases => html! { <databases::Databases /> },

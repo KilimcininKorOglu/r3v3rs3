@@ -64,6 +64,9 @@ pub fn proxy_view(props: &Props) -> Html {
                     </fieldset>
 
                     <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
+                        <Link<Route> to={Route::Traffic} classes="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 font-medium rounded-lg text-sm px-4 py-2">
+                            {locale.t("proxies.view_traffic")}
+                        </Link<Route>>
                         <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
                             {locale.t(if proxy_entry.is_discovered() || !can_edit { "common.back" } else { "common.cancel" })}
                         </button>

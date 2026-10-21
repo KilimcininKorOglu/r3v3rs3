@@ -1661,3 +1661,23 @@ Dizin içeren bir yol o dizine yazar. Yalnız dosya adı verilirse dosya log diz
 Log dizini bu dosyaları ve log sayfasıyla denetim kaydının veritabanı olan `log.db` dosyasını tutar. Dizini `R3V3RS3_LOG_DIR` ortam değişkeni veya `--log-dir` komut satırı seçeneği belirler. Varsayılan dizin `$XDG_DATA_HOME/r3v3rs3/logs` veya `$HOME/.local/share/r3v3rs3/logs` olur.
 
 Log seviyesini değiştirmek için `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` ortam değişkenlerini veya `--log-level`, `--access-log-level` komut satırı seçeneklerini kullanın. Varsayılan seviye `info` olur. `off` log'u kapatır. `R3V3RS3_LOG_FORMAT` veya `--log-format` iki log için `text` (varsayılan) veya `json` biçimini seçer.
+
+# Gerçek Zamanlı Trafik Akışı ve Canlı Erişim Logu
+
+r3v3rs3, dosya loglarının yanı sıra bellek içi (in-memory) gerçek zamanlı bir erişim logu halka arabelleği (ring buffer) ve canlı akış motoru barındırır. Ters proxy üzerinden geçen HTTP ve WebSocket istekleri; durum kodları, gecikme süreleri, istemci IP'leri, host, yol ve HTTP metotlarıyla anlık olarak yakalanır.
+
+## WebUI Trafik Akışı Paneli
+
+Yönetim paneli üzerinde `/traffic` adresinden ve proxy detay sayfalarından erişilebilen etkileşimli bir canlı trafik paneli bulunur:
+- **Gerçek Zamanlı Akış**: Sunucu Tarafından Gönderilen Olaylar (SSE) ile yeni istekler geldiği anda tabloya gerçek zamanlı olarak akar.
+- **Durum Kodları Renklendirmesi**: `2xx` (başarılı), `3xx` (yönlendirme), `4xx` (istemci hatası) ve `5xx` (sunucu hatası) için renkli rozetler.
+- **Gecikme Süresi İzleme**: Anlık yanıt gecikme süreleri görsel rozetlerle (< 50ms yeşil, 50–300ms sarı, > 300ms kırmızı) listelenir.
+- **Etkileşimli Filtreleme**: HTTP durum kodu, URL yolu, istemci IP'si, host veya HTTP metoduna göre anında filtreleme.
+- **Kontroller**: Akışı duraklatma/devam ettirme, otomatik kaydırma (auto-scroll), arabelleği temizleme ve JSON formatında dışa aktarma.
+
+## Yönetim API'si (Admin API)
+
+Trafik uç noktaları oturum doğrulaması ile korunur ve çok kiracılı proxy erişim sınırlarını (scoping) uygular:
+
+- `GET /api/traffic`: İsteğe bağlı filtrelerle (`status`, `search`, `resource_id`, `limit`, `since_id`) eşleşen son erişim loglarını döner.
+- `GET /api/traffic/live`: Gelen erişim loglarını `text/event-stream` (Server-Sent Events) olarak gerçek zamanlı akıtır.

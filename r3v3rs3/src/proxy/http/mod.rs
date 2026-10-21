@@ -40,6 +40,7 @@ use quinn::{
 };
 use r3v3rs3_api::app::{Http2Limits, Http3Limits};
 use r3v3rs3_api::error::Error;
+use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::{PortStatus, SocketState};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry, proxy_protocol::ProxyProtocolReceive};
 use rewriter::{RequestRewriter, ResponseRewriter, ResponseRewriterBuilder};
@@ -591,18 +592,78 @@ async fn proxied_response(
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let start = std::time::Instant::now();
     crate::proxy::stats::count_http_request();
-    let (req, response_rewriter) = if fronting {
+    let method = req.method().to_string();
+    let uri = req.uri().to_string();
+    let host = req
+        .headers()
+        .get(hyper::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let proto = info.proto.to_string();
+
+    let (req, response_rewriter, resource_id, client_ip) = if fronting {
         (
             ProxiedRequest::Err(ProxyError::DomainFrontingDetected),
             ResponseRewriter::builder(),
+            None,
+            info.remote.ip(),
         )
     } else {
         route_request(shared, req, info).await
     };
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
-    crate::proxy::stats::record_request_duration(start.elapsed());
+    let duration = start.elapsed();
+    crate::proxy::stats::record_request_duration(duration);
+
+    record_access_log(
+        AccessLogMeta {
+            resource_id,
+            client_ip,
+            method,
+            host,
+            uri,
+            proto,
+        },
+        duration,
+        &mapped,
+    );
+
     mapped
+}
+
+struct AccessLogMeta {
+    resource_id: Option<ShortId>,
+    client_ip: std::net::IpAddr,
+    method: String,
+    host: String,
+    uri: String,
+    proto: String,
+}
+
+fn record_access_log<B>(
+    meta: AccessLogMeta,
+    duration: std::time::Duration,
+    mapped: &Result<Response<B>, anyhow::Error>,
+) {
+    let (status, error) = match mapped {
+        Ok(res) => (res.status().as_u16(), None),
+        Err(err) => (502, Some(err.to_string())),
+    };
+    crate::proxy::access_log::record(r3v3rs3_api::traffic::AccessLogEntry {
+        id: 0,
+        timestamp: time::OffsetDateTime::now_utc(),
+        resource_id: meta.resource_id,
+        client_ip: meta.client_ip.to_string(),
+        method: meta.method,
+        host: meta.host,
+        uri: meta.uri,
+        status,
+        latency_ms: duration.as_secs_f64() * 1000.0,
+        proto: meta.proto,
+        error,
+    });
 }
 
 /// The details of the TLS connection of a client.
@@ -729,7 +790,12 @@ async fn route_request<B>(
     shared: &SharedContext,
     req: Request<B>,
     info: &RequestInfo<'_>,
-) -> (ProxiedRequest<Request<B>>, ResponseRewriterBuilder)
+) -> (
+    ProxiedRequest<Request<B>>,
+    ResponseRewriterBuilder,
+    Option<ShortId>,
+    std::net::IpAddr,
+)
 where
     B: Body<Data = Bytes>,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -743,6 +809,8 @@ where
         return (
             ProxiedRequest::Err(ProxyError::NoRouteFound),
             response_rewriter.error_pages(error_pages),
+            None,
+            info.remote.ip(),
         );
     };
     let response_rewriter = configure_response_rewriter(response_rewriter, route, &req);
@@ -767,13 +835,23 @@ where
         Ok(upstream) => upstream,
         Err(EarlyExit::Err(err)) => {
             info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
-            return (ProxiedRequest::Err(err), response_rewriter);
+            return (
+                ProxiedRequest::Err(err),
+                response_rewriter,
+                Some(resource_id),
+                client.ip,
+            );
         }
         Err(EarlyExit::Respond(response)) => {
             if route.maintenance.enabled {
                 info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, status = route.maintenance.status);
             }
-            return (ProxiedRequest::Respond(*response), response_rewriter);
+            return (
+                ProxiedRequest::Respond(*response),
+                response_rewriter,
+                Some(resource_id),
+                client.ip,
+            );
         }
     };
 
@@ -795,22 +873,39 @@ where
     };
     let req = match authenticate_request(route, req, &auth_ctx, info, &client, &action).await {
         Ok(req) => req,
-        Err(proxied) => return (*proxied, response_rewriter),
+        Err(proxied) => {
+            return (*proxied, response_rewriter, Some(resource_id), client.ip);
+        }
     };
     if let Some(response) = handle_purge_or_fixed(route, &req, info, &client, &action) {
-        return (ProxiedRequest::Respond(response), response_rewriter);
+        return (
+            ProxiedRequest::Respond(response),
+            response_rewriter,
+            Some(resource_id),
+            client.ip,
+        );
     }
     if upstream.servers.is_empty() {
         let err = ProxyError::NoUpstreamServers;
         info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
-        return (ProxiedRequest::Err(err), response_rewriter);
+        return (
+            ProxiedRequest::Err(err),
+            response_rewriter,
+            Some(resource_id),
+            client.ip,
+        );
     }
 
     let concurrency_guard = match acquire_concurrency(route, req.headers(), client.ip) {
         Ok(guard) => guard,
         Err(err) => {
             info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
-            return (ProxiedRequest::Err(err), response_rewriter);
+            return (
+                ProxiedRequest::Err(err),
+                response_rewriter,
+                Some(resource_id),
+                client.ip,
+            );
         }
     };
 
@@ -954,7 +1049,12 @@ fn prepare_upstream_request<B>(
     upstream: Upstream,
     prepared: PreparedRequest<'_>,
     response_rewriter: ResponseRewriterBuilder,
-) -> (ProxiedRequest<Request<B>>, ResponseRewriterBuilder)
+) -> (
+    ProxiedRequest<Request<B>>,
+    ResponseRewriterBuilder,
+    Option<ShortId>,
+    std::net::IpAddr,
+)
 where
     B: Body<Data = Bytes>,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -977,7 +1077,12 @@ where
         Ok(sticky_cookie) => sticky_cookie,
         Err(err) => {
             info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
-            return (ProxiedRequest::Err(err), response_rewriter);
+            return (
+                ProxiedRequest::Err(err),
+                response_rewriter,
+                Some(resource_id),
+                client.ip,
+            );
         }
     };
     let response_rewriter = response_rewriter.sticky_cookie(sticky_cookie);
@@ -1018,6 +1123,8 @@ where
     (
         ProxiedRequest::Ok(req, upstream, span, cache_request, concurrency_guard),
         response_rewriter,
+        Some(resource_id),
+        client.ip,
     )
 }
 
@@ -1178,13 +1285,36 @@ where
         proto: "h3",
         client_cert: ctx.client_cert.as_deref(),
     };
+    let start = std::time::Instant::now();
+    let method = req.method().to_string();
+    let uri = req.uri().to_string();
+    let host = req
+        .headers()
+        .get(hyper::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
     // The body is attached before routing, so an authenticator can read a form submission.
     let (mut send, recv) = stream.split();
     let body = BoxBody::new(StreamBody::new(StreamWrapper::<T> { stream: recv }));
-    let (req, response_rewriter) = route_request(shared, req.map(|()| body), &info).await;
+    let (req, response_rewriter, resource_id, client_ip) =
+        route_request(shared, req.map(|()| body), &info).await;
 
     let res = upstream_response(req).await;
-    let (parts, body) = response_rewriter.build().map_response(res)?.into_parts();
+    let mapped = response_rewriter.build().map_response(res);
+    record_access_log(
+        AccessLogMeta {
+            resource_id,
+            client_ip,
+            method,
+            host,
+            uri,
+            proto: "h3".to_string(),
+        },
+        start.elapsed(),
+        &mapped,
+    );
+    let (parts, body) = mapped?.into_parts();
     let mut res = Response::from_parts(parts, ());
     res.headers_mut().remove("transfer-encoding");
     let mut res_stream = BodyStream::new(body);
