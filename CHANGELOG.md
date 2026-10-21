@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.10] - 2026-10-21
+
+### Added
+- Extended Prometheus `/api/metrics` endpoint instrumentation: network bandwidth throughput counters (`r3v3rs3_rx_bytes_total`, `r3v3rs3_tx_bytes_total`), HTTP response status class counters (`r3v3rs3_http_responses_by_status_total`), TLS handshake latency histograms and quantiles (`r3v3rs3_tls_handshake_duration_seconds`, `r3v3rs3_tls_handshake_duration_quantiles_seconds`), TLS handshake error counters (`r3v3rs3_tls_handshake_errors_total`), and cache bypass tracking (`r3v3rs3_cache_bypasses_total`).
+- Dedicated ready-to-import Grafana dashboard endpoint (`GET /api/metrics/grafana`) returning a comprehensive 5-section observability dashboard for throughput, HTTP status distribution, latency histograms, TLS timings, upstream errors, and system health.
+- WebUI shortcut: added direct "Grafana Dashboard" download button to the Live Traffic page.
+
 ## [2.1.9] - 2026-10-21
 
 ### Added
