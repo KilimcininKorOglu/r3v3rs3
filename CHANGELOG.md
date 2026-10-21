@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.3] - 2026-10-21
+
+### Added
+- Centralized Outbound Webhooks & Event Notification Center: Dedicated outbound webhook hub to stream real-time events to external monitoring and automation services (Slack, Discord, n8n, Datadog, PagerDuty, or custom HTTP endpoints).
+- Granular Event Subscriptions: Support for 14 event types across 4 distinct categories (Deployments: `deploy.success`, `deploy.failure`, `deploy.pending_approval`, `app.crashed`; Databases & Backups: `backup.success`, `backup.failure`, `backup.upload_failed`, `backup.restored`; Security & Certificates: `cert.expiring`, `cert.renewed`, `cert.renewal_failed`, `security.ip_banned`; System & Nodes: `target.offline`, `system.disk_pressure`; plus `test.ping`).
+- Industry-Standard Payload & Delivery Headers: Structured JSON payload schema with UUID identifiers, Unix and ISO timestamps, human-readable summaries, and standard headers (`X-R3v3rs3-Event`, `X-R3v3rs3-Delivery`, and `X-R3v3rs3-Signature: sha256=<hex>`).
+- Sealed Secret Storage & HMAC-SHA256 Signing: Webhook signing secrets are encrypted at rest with AES-256-GCM via `platform.key` and re-sealed automatically upon master key rotation.
+- WebUI Webhooks Dashboard: New dedicated management page under Administration (`/webhooks`) featuring categorized event selection chips ("Select All" / "Deselect All"), secret status badges, custom header configuration, and instant test ping delivery.
+- Admin API Endpoints: 6 REST endpoints under `/api/webhooks` for CRUD operations and live test ping triggering.
+
 ## [2.2.2] - 2026-10-21
 
 ### Added
