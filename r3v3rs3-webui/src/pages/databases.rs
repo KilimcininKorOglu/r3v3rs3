@@ -13,6 +13,7 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, DatabaseCreated, DatabaseReplicaRequest, DatabaseRequest, EngineInfo,
+    S3BackupSnapshot,
 };
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -124,6 +125,71 @@ fn refresh_callback(
     })
 }
 
+fn s3_load_callback(
+    locale: Locale,
+    s3_snapshots: &UseStateHandle<Vec<S3BackupSnapshot>>,
+    s3_loading: &UseStateHandle<bool>,
+    notice: &UseStateHandle<Option<Notice<()>>>,
+) -> Callback<()> {
+    let (s3_snapshots, s3_loading, notice) =
+        (s3_snapshots.clone(), s3_loading.clone(), notice.clone());
+    Callback::from(move |()| {
+        let (s3_snapshots, s3_loading, notice) =
+            (s3_snapshots.clone(), s3_loading.clone(), notice.clone());
+        s3_loading.set(true);
+        spawn_local(async move {
+            s3_loading.set(false);
+            match fetch_json::<Vec<S3BackupSnapshot>>(
+                locale,
+                Request::get(&format!("{API_ENDPOINT}/databases/s3/backups")),
+            )
+            .await
+            {
+                Ok(list) => s3_snapshots.set(list),
+                Err(e) => notice.set(Some(Notice::Failed(e))),
+            }
+        });
+    })
+}
+
+fn s3_toggle_callback(
+    s3_open: &UseStateHandle<bool>,
+    load_s3: Callback<()>,
+) -> Callback<MouseEvent> {
+    let s3_open = s3_open.clone();
+    Callback::from(move |_| {
+        let next = !*s3_open;
+        s3_open.set(next);
+        if next {
+            load_s3.emit(());
+        }
+    })
+}
+
+fn db_header_bar(
+    locale: Locale,
+    can_edit: bool,
+    refreshing: bool,
+    toggle_s3: Callback<MouseEvent>,
+    refresh_engines: Callback<MouseEvent>,
+) -> Html {
+    html! {
+        <div class="flex items-center justify-between mb-3">
+            <h1 class="text-xl font-semibold">{locale.t("nav.databases")}</h1>
+            <div class="flex items-center space-x-2">
+                <button type="button" class="px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-500 text-sm shrink-0" onclick={toggle_s3}>
+                    {locale.t("databases.s3_browser")}
+                </button>
+                if can_edit {
+                    <button type="button" class="px-3 py-1.5 rounded bg-neutral-700 text-neutral-100 hover:bg-neutral-600 disabled:opacity-50 text-sm shrink-0" disabled={refreshing} onclick={refresh_engines}>
+                        {locale.t("databases.refresh")}
+                    </button>
+                }
+            </div>
+        </div>
+    }
+}
+
 #[function_component(Databases)]
 pub fn databases() -> Html {
     use_ensure_auth();
@@ -135,6 +201,10 @@ pub fn databases() -> Html {
     let created = use_state(|| Option::<DatabaseCreated>::None);
     let apps = use_state(Vec::<AppEntry>::new);
     let refreshing = use_state(|| false);
+    let s3_open = use_state(|| false);
+    let s3_snapshots = use_state(Vec::<S3BackupSnapshot>::new);
+    let s3_filter = use_state(String::new);
+    let s3_loading = use_state(|| false);
 
     let signed_in = session.info.is_some();
     let can_edit = session.can_edit();
@@ -162,17 +232,27 @@ pub fn databases() -> Html {
         })
     };
     let refresh_engines = refresh_callback(locale, &engines, &notice, &refreshing);
+    let load_s3 = s3_load_callback(locale, &s3_snapshots, &s3_loading, &notice);
+    let toggle_s3 = s3_toggle_callback(&s3_open, load_s3.clone());
+    let header = db_header_bar(locale, can_edit, *refreshing, toggle_s3, refresh_engines);
     html! {
         <>
-            <div class="flex items-center justify-between mb-3">
-                <h1 class="text-xl font-semibold">{locale.t("nav.databases")}</h1>
-                if can_edit {
-                    <button type="button" class="px-3 py-1.5 rounded bg-neutral-700 text-neutral-100 hover:bg-neutral-600 disabled:opacity-50 text-sm shrink-0" disabled={*refreshing} onclick={refresh_engines}>
-                        {locale.t("databases.refresh")}
-                    </button>
-                }
-            </div>
+            { header }
             { notice_view(&notice, |_| html! { {locale.t("databases.refreshed")} }) }
+            if *s3_open {
+                { s3_browser_panel(S3BrowserContext {
+                    locale,
+                    snapshots: &s3_snapshots,
+                    engines: &engines,
+                    filter: &s3_filter,
+                    loading: *s3_loading,
+                    can_edit,
+                    load: load_s3.clone(),
+                    saved: reload.clone(),
+                    notice: notice.clone(),
+                    created: created.clone(),
+                }) }
+            }
             { (*created)
                 .clone()
                 .map(|value| created_view(locale, value, &engines, &created))
@@ -781,5 +861,204 @@ async fn send_replica(
             notice.set(Some(Notice::Failed(msg)));
         }
         Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
+    }
+}
+
+fn format_size(size: u64) -> String {
+    if size >= 1024 * 1024 {
+        format!("{:.1} MiB", size as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} KiB", size as f64 / 1024.0)
+    }
+}
+
+async fn send_s3_restore(
+    locale: Locale,
+    snap: S3BackupSnapshot,
+    new_name: String,
+    engine: String,
+    created: UseStateHandle<Option<DatabaseCreated>>,
+    notice: UseStateHandle<Option<Notice<()>>>,
+    saved: Callback<()>,
+) {
+    let payload = serde_json::json!({
+        "key": snap.key,
+        "new_database_name": new_name,
+        "engine": engine,
+    });
+    let req = Request::post(&format!("{API_ENDPOINT}/databases/s3/restore"))
+        .header("Content-Type", "application/json")
+        .body(payload.to_string());
+    match req {
+        Ok(b) => match b.send().await {
+            Ok(res) if res.ok() => {
+                crate::dialog::message(
+                    locale,
+                    locale.t("databases.s3_restored"),
+                    crate::dialog::Icon::Success,
+                )
+                .await;
+                created.set(None);
+                notice.set(Some(Notice::Saved(())));
+                saved.emit(());
+            }
+            Ok(res) => {
+                let msg = res.text().await.unwrap_or_default();
+                notice.set(Some(Notice::Failed(msg)));
+            }
+            Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
+        },
+        Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
+    }
+}
+
+fn restore_s3_action(
+    locale: Locale,
+    snap: &S3BackupSnapshot,
+    engines: &[EngineInfo],
+    saved: Callback<()>,
+    created: UseStateHandle<Option<DatabaseCreated>>,
+    notice: UseStateHandle<Option<Notice<()>>>,
+) -> Callback<MouseEvent> {
+    let snap = snap.clone();
+    let default_name = format!("{}-restored", snap.database_name);
+    let engine = engines
+        .iter()
+        .find(|e| snap.database_name.starts_with(&e.engine))
+        .map(|e| e.engine.clone())
+        .unwrap_or_else(|| "postgres".to_string());
+    Callback::from(move |_| {
+        let (snap, default_name, engine, saved, created, notice) = (
+            snap.clone(),
+            default_name.clone(),
+            engine.clone(),
+            saved.clone(),
+            created.clone(),
+            notice.clone(),
+        );
+        spawn_local(async move {
+            let prompt = locale.t("databases.s3_new_name_prompt");
+            if let Some(name) = crate::dialog::prompt(locale, prompt, &default_name).await {
+                let trimmed = name.trim().to_string();
+                if !trimmed.is_empty() {
+                    send_s3_restore(locale, snap, trimmed, engine, created, notice, saved).await;
+                }
+            }
+        });
+    })
+}
+
+struct S3BrowserContext<'a> {
+    locale: Locale,
+    snapshots: &'a [S3BackupSnapshot],
+    engines: &'a [EngineInfo],
+    filter: &'a UseStateHandle<String>,
+    loading: bool,
+    can_edit: bool,
+    load: Callback<()>,
+    saved: Callback<()>,
+    notice: UseStateHandle<Option<Notice<()>>>,
+    created: UseStateHandle<Option<DatabaseCreated>>,
+}
+
+fn s3_browser_panel(ctx: S3BrowserContext<'_>) -> Html {
+    let S3BrowserContext {
+        locale,
+        snapshots,
+        engines,
+        filter,
+        loading,
+        can_edit,
+        load,
+        saved,
+        notice,
+        created,
+    } = ctx;
+    let filter_text = (**filter).to_lowercase();
+    let rows = snapshots
+        .iter()
+        .filter(|s| {
+            filter_text.is_empty()
+                || s.database_name.to_lowercase().contains(&filter_text)
+                || s.key.to_lowercase().contains(&filter_text)
+        })
+        .map(|snap| {
+            let download = format!("{API_ENDPOINT}/databases/s3/download?key={}", snap.key);
+            let restore = can_edit.then(|| {
+                restore_s3_action(
+                    locale,
+                    snap,
+                    engines,
+                    saved.clone(),
+                    created.clone(),
+                    notice.clone(),
+                )
+            });
+            html! {
+                <tr class="border-b border-neutral-700">
+                    <td class="py-1.5 font-medium">{&snap.database_name}</td>
+                    <td class="py-1.5 font-mono text-neutral-400">{&snap.backup_id}</td>
+                    <td class="py-1.5 font-mono text-neutral-400">{format_size(snap.size)}</td>
+                    <td class="py-1.5 text-neutral-400">{&snap.last_modified}</td>
+                    <td class="py-1.5 text-right">
+                        <a class="text-sm text-neutral-400 hover:text-neutral-200 mr-3" href={download} download={format!("{}.dump.gz", snap.backup_id)}>
+                            {locale.t("backups.download")}
+                        </a>
+                        if let Some(restore) = restore {
+                            <button type="button" class="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-500 font-medium" onclick={restore}>
+                                {locale.t("databases.s3_restore_new")}
+                            </button>
+                        }
+                    </td>
+                </tr>
+            }
+        });
+    let on_search = {
+        let filter = filter.clone();
+        Callback::from(move |e: InputEvent| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            filter.set(input.value());
+        })
+    };
+    let on_refresh = Callback::from(move |_| load.emit(()));
+    html! {
+        <div class="rounded border border-neutral-700 bg-neutral-800/80 p-4 mb-4">
+            <div class="flex items-center justify-between mb-2">
+                <div>
+                    <h2 class="text-base font-semibold text-neutral-100">{locale.t("databases.s3_dr_title")}</h2>
+                    <p class="text-xs text-neutral-400">{locale.t("databases.s3_dr_desc")}</p>
+                </div>
+                <button type="button" class="px-2.5 py-1 text-xs rounded bg-neutral-700 text-neutral-200 hover:bg-neutral-600" onclick={on_refresh}>
+                    {locale.t("databases.s3_refresh")}
+                </button>
+            </div>
+            <div class="my-3">
+                <input
+                    type="text"
+                    class={INPUT_CLASS}
+                    placeholder={locale.t("databases.s3_filter_placeholder").to_string()}
+                    value={(**filter).clone()}
+                    oninput={on_search}
+                />
+            </div>
+            if loading {
+                <p class="text-xs text-neutral-400">{locale.t("common.loading")}</p>
+            } else if snapshots.is_empty() {
+                <p class="text-xs text-neutral-400">{locale.t("databases.s3_empty")}</p>
+            } else {
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-neutral-400">
+                            <th class="py-1.5 font-medium">{locale.t("common.name")}</th>
+                            <th class="py-1.5 font-medium">{locale.t("backups.title")}</th>
+                            <th class="py-1.5 font-medium">{locale.t("backups.size")}</th>
+                            <th class="py-1.5 font-medium">{locale.t("backups.time")}</th>
+                            <th />
+                        </tr>
+                    </thead>
+                    <tbody>{ for rows }</tbody>
+                </table>
+            }
+        </div>
     }
 }

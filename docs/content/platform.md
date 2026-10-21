@@ -344,6 +344,15 @@ Beyond nightly or periodic full dumps, r3v3rs3 provides Point-in-Time Recovery (
   3. Replays transactions sequentially up to the requested second or millisecond.
 - **Safe Branching (PITR Clone)**: If a new branch name is specified, r3v3rs3 provisions an entirely new, isolated database with its own host port, data volume, and root credentials, letting developers inspect past state or extract lost rows without overwriting production. Leaving the branch name blank performs an in-place restore after confirmation.
 
+#### Remote S3 Backup Browser & Disaster Recovery
+
+When local storage is destroyed, disks fail, or a host is rebuilt from scratch, r3v3rs3 connects directly to external AWS S3, Cloudflare R2, or MinIO buckets to browse, download, and restore archived snapshots:
+
+- **S3 Snapshot Browser**: View all database dumps stored in the configured S3 bucket via the WebUI or `GET /api/databases/s3/backups`. The browser displays the originating database name, backup ID, uncompressed size, and timestamp, with live text filtering.
+- **Direct Snapshot Download**: Download any remote dump archive directly to your workstation via `GET /api/databases/s3/download?key={key}`.
+- **In-Place S3 Restore**: Revert an existing managed database to any past S3 snapshot with one click (`POST /api/databases/s3/restore` with `target_db_id`).
+- **Disaster Recovery Provisioning**: When rebuilding after catastrophic hardware loss or server relocation, provision a brand new, fully configured database directly from an S3 snapshot (`POST /api/databases/s3/restore` with `new_database_name` and `engine`). r3v3rs3 launches the container runtime, creates isolated persistent volumes, pulls and uncompresses the remote snapshot, and automatically runs the database engine's restore pipeline in the background.
+
 ## Deployments
 
 `POST /api/apps/{id}/deploy` starts a deployment and returns it with the status `queued`. `GET /api/deployments/{id}` shows its progress.

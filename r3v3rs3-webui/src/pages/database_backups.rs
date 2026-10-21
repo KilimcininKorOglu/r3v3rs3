@@ -15,7 +15,8 @@ use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    BackupConfig, BackupEntry, PitrRange, PitrRestoreRequest, RsyncConfig, S3Config, SftpConfig,
+    BackupConfig, BackupEntry, PitrRange, PitrRestoreRequest, RsyncConfig, S3BackupSnapshot,
+    S3Config, SftpConfig,
 };
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -141,6 +142,7 @@ pub fn database_backups(props: &Props) -> Html {
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
     let backups = use_state(Vec::<BackupEntry>::new);
+    let s3_snapshots = use_state(Vec::<S3BackupSnapshot>::new);
     let config = use_state(|| Option::<BackupConfig>::None);
     let pitr_range = use_state(|| Option::<PitrRange>::None);
     let notice = use_state(|| Option::<Notice<&'static str>>::None);
@@ -151,8 +153,9 @@ pub fn database_backups(props: &Props) -> Html {
     let signed_in = session.info.is_some();
     let can_edit = session.can_edit();
     {
-        let (backups, config, form, notice, pitr_range) = (
+        let (backups, s3_snapshots, config, form, notice, pitr_range) = (
             backups.clone(),
+            s3_snapshots.clone(),
             config.clone(),
             form.clone(),
             notice.clone(),
@@ -160,7 +163,16 @@ pub fn database_backups(props: &Props) -> Html {
         );
         use_effect_with((signed_in, id), move |&(signed_in, id)| {
             if signed_in {
-                reload(locale, &backups, &config, &form, &notice, &pitr_range, id);
+                reload(
+                    locale,
+                    &backups,
+                    &config,
+                    &form,
+                    &notice,
+                    &pitr_range,
+                    id,
+                );
+                fetch_s3_snapshots(locale, &s3_snapshots);
             }
         });
     }
@@ -170,14 +182,26 @@ pub fn database_backups(props: &Props) -> Html {
     }
     let navigator = use_navigator().unwrap();
     let reload = {
-        let (backups, config, form, notice, pitr_range) = (
+        let (backups, s3_snapshots, config, form, notice, pitr_range) = (
             backups.clone(),
+            s3_snapshots.clone(),
             config.clone(),
             form.clone(),
             notice.clone(),
             pitr_range.clone(),
         );
-        Callback::from(move |()| reload(locale, &backups, &config, &form, &notice, &pitr_range, id))
+        Callback::from(move |()| {
+            reload(
+                locale,
+                &backups,
+                &config,
+                &form,
+                &notice,
+                &pitr_range,
+                id,
+            );
+            fetch_s3_snapshots(locale, &s3_snapshots);
+        })
     };
     html! {
         <>
@@ -199,6 +223,7 @@ pub fn database_backups(props: &Props) -> Html {
                 </div>
             }
             { list_view(locale, id, &backups, can_edit, reload.clone()) }
+            { s3_list_view(locale, id, &s3_snapshots, can_edit, reload.clone()) }
             if can_edit {
                 { settings_view(locale, &config, &form, &notice) }
             }
@@ -209,6 +234,20 @@ pub fn database_backups(props: &Props) -> Html {
 #[derive(Properties, PartialEq)]
 pub struct Props {
     pub id: ShortId,
+}
+
+fn fetch_s3_snapshots(locale: Locale, s3_snapshots: &UseStateHandle<Vec<S3BackupSnapshot>>) {
+    let s3_state = s3_snapshots.clone();
+    spawn_local(async move {
+        if let Ok(loaded) = fetch_json::<Vec<S3BackupSnapshot>>(
+            locale,
+            Request::get(&format!("{API_ENDPOINT}/databases/s3/backups")),
+        )
+        .await
+        {
+            s3_state.set(loaded);
+        }
+    });
 }
 
 /// Reads the backups and the settings again, and fills the form from the settings when it is
@@ -472,9 +511,9 @@ fn restore_on_click(locale: Locale, id: ShortId, entry: &BackupEntry) -> Callbac
                     Ok(_) => {
                         dialog::message(locale, locale.t("backups.restored"), Icon::Success).await
                     }
-                    Err(message) => dialog::message(locale, &message, Icon::Error).await,
+                    Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
                 },
-                Err(message) => dialog::message(locale, &message, Icon::Error).await,
+                Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
             }
         });
     })
@@ -586,6 +625,90 @@ fn format_size(size: u64) -> String {
         format!("{:.1} MiB", size as f64 / (1024.0 * 1024.0))
     } else {
         format!("{:.1} KiB", size as f64 / 1024.0)
+    }
+}
+
+fn restore_s3_on_click(
+    locale: Locale,
+    id: ShortId,
+    snap: &S3BackupSnapshot,
+    reload: Callback<()>,
+) -> Callback<MouseEvent> {
+    let snap = snap.clone();
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let question = locale.tf("databases.s3_restore_question", &[("key", &snap.key)]);
+        let reload = reload.clone();
+        let key = snap.key.clone();
+        dialog::confirm_then(locale, question, async move {
+            let req_body = serde_json::json!({
+                "key": key,
+                "target_db_id": id,
+            });
+            let sent = Request::post(&format!("{API_ENDPOINT}/databases/s3/restore"))
+                .header("Content-Type", "application/json")
+                .body(req_body.to_string());
+            match sent {
+                Ok(req) => match send_request(locale, req).await {
+                    Ok(_) => {
+                        dialog::message(locale, locale.t("databases.s3_restored"), Icon::Success)
+                            .await;
+                        reload.emit(());
+                    }
+                    Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
+                },
+                Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
+            }
+        });
+    })
+}
+
+fn s3_list_view(
+    locale: Locale,
+    id: ShortId,
+    s3_snapshots: &[S3BackupSnapshot],
+    can_edit: bool,
+    reload: Callback<()>,
+) -> Html {
+    if s3_snapshots.is_empty() {
+        return html!();
+    }
+    let rows = s3_snapshots.iter().map(|snap| {
+        let download = format!("{API_ENDPOINT}/databases/s3/download?key={}", snap.key);
+        let restore = can_edit.then(|| restore_s3_on_click(locale, id, snap, reload.clone()));
+        html! {
+            <tr class="border-b border-neutral-700">
+                <td class="py-1.5 font-mono text-sm text-neutral-300">{&snap.database_name}{"/"}{&snap.backup_id}</td>
+                <td class="py-1.5 font-mono text-neutral-400">{format_size(snap.size)}</td>
+                <td class="py-1.5 text-neutral-400">{&snap.last_modified}</td>
+                <td class="py-1.5 text-right">
+                    <a class="text-sm text-neutral-400 hover:text-neutral-200 mr-3" href={download} download={format!("{}.dump.gz", snap.backup_id)}>
+                        {locale.t("backups.download")}
+                    </a>
+                    if let Some(restore) = restore {
+                        <a class="text-sm text-blue-400 hover:text-blue-300 cursor-pointer" onclick={restore}>
+                            {locale.t("databases.s3_restore")}
+                        </a>
+                    }
+                </td>
+            </tr>
+        }
+    });
+    html! {
+        <div class="mt-6 rounded border border-neutral-700 p-4">
+            <p class="font-medium mb-2 text-neutral-200">{locale.t("databases.s3_browser")}</p>
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-neutral-400">
+                        <th class="py-1.5 font-medium">{locale.t("databases.engine")}</th>
+                        <th class="py-1.5 font-medium">{locale.t("backups.size")}</th>
+                        <th class="py-1.5 font-medium">{locale.t("backups.time")}</th>
+                        <th />
+                    </tr>
+                </thead>
+                <tbody>{ for rows }</tbody>
+            </table>
+        </div>
     }
 }
 

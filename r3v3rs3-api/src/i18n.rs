@@ -205,6 +205,8 @@ mod tests {
             Error::RestoreFailed { reason: text() },
             Error::PitrTargetOutOfRange { reason: text() },
             Error::BackupNotFound { id: text() },
+            Error::S3NotConfigured,
+            Error::S3OperationFailed { reason: text() },
             Error::ScheduledCommandNotFound {
                 id: "abc".parse().unwrap(),
             },

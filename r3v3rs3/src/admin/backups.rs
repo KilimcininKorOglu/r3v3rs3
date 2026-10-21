@@ -8,7 +8,7 @@ use crate::accounts::{Caller, Permission};
 use crate::audit::AuditRecord;
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::header::CONTENT_DISPOSITION,
     response::IntoResponse,
 };
@@ -17,7 +17,8 @@ use r3v3rs3_api::{
     id::ShortId,
     platform::{
         BackupConfig, BackupEntry, BackupVerifyReport, PitrRange, PitrRestoreRequest,
-        PitrRestoreResponse, WalSegment,
+        PitrRestoreResponse, RestoreFromS3Request, RestoreFromS3Response, S3BackupSnapshot,
+        S3DownloadQuery, S3SnapshotsQuery, WalSegment,
     },
 };
 
@@ -327,4 +328,84 @@ pub async fn list_wal_segments(
         .await
         .map_err(platform_error)?;
     Ok(Json(segments))
+}
+
+/// Lists remote database backup snapshots stored in S3/R2 storage.
+#[utoipa::path(
+    get,
+    path = "/s3/backups",
+    tag = "platform",
+    operation_id = "list_s3_database_backups",
+    params(S3SnapshotsQuery),
+    responses((status = 200, description = "The S3 backup snapshots.", body = Vec<S3BackupSnapshot>), ErrorResponses)
+)]
+pub async fn list_s3(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<S3SnapshotsQuery>,
+) -> Result<Json<Vec<S3BackupSnapshot>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let snapshots = platform
+        .list_s3_backups(query.database.as_deref())
+        .await
+        .map_err(platform_error)?;
+    Ok(Json(snapshots))
+}
+
+/// Downloads a database backup snapshot directly from S3.
+#[utoipa::path(
+    get,
+    path = "/s3/download",
+    tag = "platform",
+    operation_id = "download_s3_database_backup",
+    params(S3DownloadQuery),
+    responses((status = 200, description = "The S3 backup dump file.", content_type = "application/octet-stream", body = Vec<u8>), NotFoundResponse, ErrorResponses)
+)]
+pub async fn download_s3(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<S3DownloadQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let content = platform
+        .download_s3_backup(&query.key)
+        .await
+        .map_err(platform_error)?;
+    let filename = query.key.rsplit('/').next().unwrap_or("backup.dump.gz");
+    let headers = [
+        ("content-type", "application/octet-stream".to_string()),
+        (
+            CONTENT_DISPOSITION.as_str(),
+            format!("attachment; filename=\"{filename}\""),
+        ),
+    ];
+    Ok((headers, content))
+}
+
+/// Restores a database from an S3 remote backup snapshot.
+#[utoipa::path(
+    post,
+    path = "/s3/restore",
+    tag = "platform",
+    operation_id = "restore_s3_database_backup",
+    request_body = RestoreFromS3Request,
+    responses((status = 200, description = "The restore result.", body = RestoreFromS3Response), NotFoundResponse, ErrorResponses)
+)]
+pub async fn restore_s3(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<RestoreFromS3Request>,
+) -> Result<Json<RestoreFromS3Response>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let key = request.key.clone();
+    let resp = platform
+        .restore_s3_backup(request, &caller.username)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::RestoreDatabaseFromS3)
+        .summary(format!("restored from S3 key {key}"));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(resp))
 }

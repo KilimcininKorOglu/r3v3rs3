@@ -344,6 +344,15 @@ Gecelik veya periyodik tam dump'ların ötesinde r3v3rs3, sürekli Write-Ahead L
   3. İşlemleri istenen saniyeye veya milisaniyeye kadar artımlı olarak yeniden uygular (replay).
 - **Güvenli Dal Oluşturma (PITR Clone)**: İsteğe bağlı olarak yeni bir dal (branch) adı girilirse, r3v3rs3 mevcut canlı veritabanını bozmadan tamamen ayrı bir host portu, data volume'ü ve yetkileriyle yeni bir veritabanı kurar. Böylece geliştiriciler canlı ortamı kesintiye uğratmadan geçmiş veriyi inceleyebilir veya silinen tabloları kurtarabilir. Dal adı boş bırakıldığında onay ile mevcut veritabanı üzerinde geri yükleme yapılır.
 
+#### Uzak S3 Yedek Gezgini & Felaket Kurtarma (Disaster Recovery)
+
+Yerel depolama alanı kaybolduğunda, diskler arızalandığında veya sunucu sıfırdan kurulduğunda r3v3rs3; AWS S3, Cloudflare R2 veya MinIO uzak deposundaki snapshot'ları doğrudan keşfetme, indirme ve geri yükleme imkanı sunar:
+
+- **S3 Snapshot Gezgini**: WebUI üzerindeki **S3 / Uzak Yedekler** paneli veya `GET /api/databases/s3/backups` uç noktasıyla uzak bucket'ta arşivlenen tüm veritabanı yedeklerini canlı olarak listeleyin. Gezgin; kaynak veritabanı adı, yedek kimliği, dosya boyutu ve zaman damgası bilgileriyle anlık arama/filtreleme sağlar.
+- **Doğrudan Snapshot İndirme**: Uzak depodaki herhangi bir veritabanı dump arşivini `GET /api/databases/s3/download?key={key}` ile doğrudan yerel bilgisayarınıza indirin.
+- **Mevcut Veritabanına S3'ten Geri Yükleme**: Çalışan bir veritabanını tek tıkla S3'teki herhangi bir geçmiş snapshot'a döndürün (`POST /api/databases/s3/restore` ve `target_db_id`).
+- **Felaket Kurtarma Sihirbazı (Disaster Recovery)**: Sunucu tamamen çöktüğünde veya sıfırdan yeni bir sunucu kurulduğunda, S3 snapshot'ından tek tıkla yepyeni ve çalışan bir veritabanı ayağa kaldırın (`POST /api/databases/s3/restore`, `new_database_name` ve `engine`). r3v3rs3 konteyner ortamını hazırlar, kalıcı volume'ü bağlar, uzak yedeği indirip açarak arkaplanda ilgili veritabanı motoruna otomatik olarak geri yükler.
+
 ## Deployment'lar
 
 `POST /api/apps/{id}/deploy` bir deployment başlatır ve onu `queued` durumuyla döndürür. `GET /api/deployments/{id}` ilerlemeyi gösterir.

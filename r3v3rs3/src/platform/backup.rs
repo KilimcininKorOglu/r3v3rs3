@@ -12,7 +12,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, BackupConfig, BackupEntry, EngineInfo, PitrRange, PitrRestoreRequest,
-    PitrRestoreResponse, WalSegment,
+    PitrRestoreResponse, RestoreFromS3Request, RestoreFromS3Response, S3BackupSnapshot, WalSegment,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -398,6 +398,249 @@ impl Platform {
         Ok(())
     }
 
+    /// Lists database backup snapshots stored in the configured S3 storage.
+    pub async fn list_s3_backups(
+        &self,
+        db_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<S3BackupSnapshot>> {
+        let config = self.backup_config().await?;
+        let Some(s3) = config.s3 else {
+            return Err(Error::S3NotConfigured.into());
+        };
+        let Some(secret) = self.s3_secret().await? else {
+            return Err(Error::S3NotConfigured.into());
+        };
+        let s3 = r3v3rs3_api::platform::S3Config {
+            secret_key: secret,
+            ..s3
+        };
+        let http_client = self.http().await?;
+        let filter = db_filter.unwrap_or_default();
+        let items = super::s3::list_objects(http_client, &s3, filter)
+            .await
+            .map_err(|err| Error::S3OperationFailed {
+                reason: err.to_string(),
+            })?;
+        let mut snapshots = Vec::new();
+        for item in items {
+            if let Some(snap) =
+                parse_backup_snapshot(&s3.prefix, &item.key, item.size, &item.last_modified)
+            {
+                if let Some(f) = db_filter
+                    && !snap.database_name.eq_ignore_ascii_case(f)
+                {
+                    continue;
+                }
+                snapshots.push(snap);
+            }
+        }
+        snapshots.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+        Ok(snapshots)
+    }
+
+    /// Downloads the content of one S3 backup snapshot.
+    pub async fn download_s3_backup(&self, key: &str) -> anyhow::Result<Vec<u8>> {
+        let config = self.backup_config().await?;
+        let Some(s3) = config.s3 else {
+            return Err(Error::S3NotConfigured.into());
+        };
+        let Some(secret) = self.s3_secret().await? else {
+            return Err(Error::S3NotConfigured.into());
+        };
+        let s3 = r3v3rs3_api::platform::S3Config {
+            secret_key: secret,
+            ..s3
+        };
+        let http_client = self.http().await?;
+        super::s3::download_key(http_client, &s3, key)
+            .await
+            .map_err(|err| {
+                Error::S3OperationFailed {
+                    reason: err.to_string(),
+                }
+                .into()
+            })
+    }
+
+    /// Restores a database from an S3 remote backup snapshot.
+    pub async fn restore_s3_backup(
+        self: &Arc<Self>,
+        req: RestoreFromS3Request,
+        caller: &str,
+    ) -> anyhow::Result<RestoreFromS3Response> {
+        let raw_bytes = self.download_s3_backup(&req.key).await?;
+        let dump_bytes = if is_gzipped(&raw_bytes) {
+            ungzip(&raw_bytes).await?
+        } else {
+            raw_bytes
+        };
+        if let Some(target_id) = req.target_db_id {
+            self.restore_s3_into_existing(target_id, dump_bytes).await
+        } else {
+            self.restore_s3_as_new(req, caller, dump_bytes).await
+        }
+    }
+
+    async fn restore_s3_into_existing(
+        &self,
+        target_id: ShortId,
+        dump_bytes: Vec<u8>,
+    ) -> anyhow::Result<RestoreFromS3Response> {
+        let (app, container, runtime) = self.database_container(target_id).await?;
+        let engine = app
+            .spec
+            .database
+            .clone()
+            .context("the target app is not a managed database")?;
+        let info = r3v3rs3_api::platform::engine_info(&engine)
+            .context("the engine is not in the database catalog")?;
+        let password = self.database_password(target_id, &info).await?;
+        let plan = restore_plan(&engine, &info, &password)?;
+        run_restore(&runtime, &container, &plan, dump_bytes, &info.data_path)
+            .await
+            .map_err(|err| Error::RestoreFailed {
+                reason: format!("{err:#}"),
+            })?;
+        Ok(RestoreFromS3Response {
+            success: true,
+            message: format!("restored snapshot into {}", app.name),
+            app_id: Some(app.id),
+            app_name: Some(app.name.to_string()),
+        })
+    }
+
+    async fn restore_s3_as_new(
+        self: &Arc<Self>,
+        req: RestoreFromS3Request,
+        caller: &str,
+        dump_bytes: Vec<u8>,
+    ) -> anyhow::Result<RestoreFromS3Response> {
+        let (app_req, engine_key, info) = resolve_s3_restore_app(&req)?;
+        let app = self.add_app(app_req, unix_ms()).await?;
+        let password = self.init_db_password(app.id, &info).await?;
+        let restore = restore_plan(&engine_key, &info, &password)?;
+        let platform = self.clone();
+        let data_path = info.data_path.clone();
+
+        self.deploy(
+            app.id,
+            caller,
+            r3v3rs3_api::platform::DeploymentTrigger::Manual,
+        )
+        .await?;
+
+        tokio::spawn(async move {
+            if let Err(err) = platform
+                .wait_and_restore(app.id, &restore, dump_bytes, &data_path)
+                .await
+            {
+                tracing::error!(%err, app = %app.id, "failed to restore S3 disaster recovery dump");
+            }
+        });
+
+        Ok(RestoreFromS3Response {
+            success: true,
+            message: format!("created database {} and scheduled restore", app.name),
+            app_id: Some(app.id),
+            app_name: Some(app.name.to_string()),
+        })
+    }
+
+    async fn init_db_password(&self, db_id: ShortId, info: &EngineInfo) -> anyhow::Result<String> {
+        if info.password_env.is_empty() {
+            return Ok(String::new());
+        }
+        let password = format!("{:032x}", rand::random::<u128>());
+        let entry = r3v3rs3_api::platform::EnvEntry {
+            key: info.password_env.parse()?,
+            value: Some(password.clone()),
+            secret: true,
+        };
+        self.set_env(db_id, vec![entry]).await?;
+        Ok(password)
+    }
+}
+
+fn create_database_spec(
+    new_name: &AppName,
+    engine_key: &str,
+    version: &str,
+    info: &EngineInfo,
+    host_port: u16,
+) -> anyhow::Result<r3v3rs3_api::platform::AppSpec> {
+    let volume = format!("{}-data", new_name.as_str()).parse()?;
+    let target = info.data_path.parse()?;
+    Ok(r3v3rs3_api::platform::AppSpec {
+        source: r3v3rs3_api::platform::AppSource::Image {
+            image: version.parse()?,
+        },
+        port: info.container_port,
+        domains: Vec::new(),
+        ports: Vec::new(),
+        health_check_path: None,
+        volumes: vec![r3v3rs3_api::container::VolumeMount {
+            volume,
+            target,
+            read_only: false,
+        }],
+        restart: Default::default(),
+        limits: Default::default(),
+        host_port: Some(host_port),
+        database: Some(engine_key.to_string()),
+        bot_blocker: false,
+        grpc_web: false,
+        uses_database: None,
+        replica_of: None,
+        auto_deploy: false,
+        require_approval: false,
+        deploy_window: None,
+        tag_trigger: None,
+        store_app_id: None,
+        targets: Vec::new(),
+        load_balancing: None,
+        alert_rules: None,
+        sticky: None,
+        git_config: None,
+        env_groups: Vec::new(),
+        preview: None,
+        preview_of: None,
+        buildkit: None,
+        project_id: None,
+        environment_id: None,
+    })
+}
+
+fn resolve_s3_restore_app(
+    req: &RestoreFromS3Request,
+) -> anyhow::Result<(r3v3rs3_api::platform::AppRequest, String, EngineInfo)> {
+    let new_name = req
+        .new_database_name
+        .clone()
+        .context("either target_db_id or new_database_name must be provided")?;
+    let engine_key = req
+        .engine
+        .clone()
+        .context("engine must be specified when restoring as a new database")?;
+    let info = r3v3rs3_api::platform::engine_info(&engine_key)
+        .context("the engine is not in the database catalog")?;
+    let version = req
+        .version
+        .clone()
+        .unwrap_or_else(|| info.versions.first().cloned().unwrap_or_default());
+    let host_port = match req.host_port {
+        Some(p) => p,
+        None => allocate_host_port()?,
+    };
+    let spec = create_database_spec(&new_name, &engine_key, &version, &info, host_port)?;
+    let app_req = r3v3rs3_api::platform::AppRequest {
+        name: new_name,
+        target: r3v3rs3_api::platform::LOCAL_TARGET.parse()?,
+        spec,
+    };
+    Ok((app_req, engine_key, info))
+}
+
+impl Platform {
     /// The directory under the config directory that holds WAL / binary log segments.
     pub async fn wal_dir(&self, db_id: ShortId) -> anyhow::Result<std::path::PathBuf> {
         let base = self.backup_dir(db_id).await?;
@@ -1456,6 +1699,63 @@ async fn ungzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
     Ok(plain)
 }
 
+fn is_gzipped(bytes: &[u8]) -> bool {
+    bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b
+}
+
+/// Extracts the database name and backup ID from an S3 object key.
+pub(crate) fn parse_backup_snapshot(
+    prefix: &str,
+    key: &str,
+    size: u64,
+    last_modified: &str,
+) -> Option<S3BackupSnapshot> {
+    let clean_prefix = prefix.trim_matches('/');
+    let clean_key = key.trim_start_matches('/');
+    let path = if !clean_prefix.is_empty() && clean_key.starts_with(clean_prefix) {
+        clean_key[clean_prefix.len()..].trim_start_matches('/')
+    } else {
+        clean_key
+    };
+
+    let (stem, _ext) = strip_dump_extension(path)?;
+    let parts: Vec<&str> = stem.split('/').filter(|s| !s.is_empty()).collect();
+    let (db_name, backup_id) = match parts.as_slice() {
+        [db, id] => (db.to_string(), id.to_string()),
+        [single] => {
+            if let Some((db, id)) = single.split_once('-') {
+                (db.to_string(), id.to_string())
+            } else {
+                (single.to_string(), single.to_string())
+            }
+        }
+        [first, .., last] => (first.to_string(), last.to_string()),
+        _ => return None,
+    };
+
+    Some(S3BackupSnapshot {
+        key: key.to_string(),
+        database_name: db_name,
+        backup_id,
+        size,
+        last_modified: last_modified.to_string(),
+    })
+}
+
+fn strip_dump_extension(path: &str) -> Option<(&str, &str)> {
+    if let Some(stem) = path.strip_suffix(".dump.gz") {
+        Some((stem, ".dump.gz"))
+    } else if let Some(stem) = path.strip_suffix(".dump") {
+        Some((stem, ".dump"))
+    } else if let Some(stem) = path.strip_suffix(".sql.gz") {
+        Some((stem, ".sql.gz"))
+    } else if let Some(stem) = path.strip_suffix(".sql") {
+        Some((stem, ".sql"))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1618,5 +1918,30 @@ mod tests {
         assert_eq!(filtered.len(), 2);
         assert_eq!(filtered[0].id, "w1");
         assert_eq!(filtered[1].id, "w2");
+    }
+
+    #[test]
+    fn parses_s3_backup_snapshot_key() {
+        let snap = parse_backup_snapshot(
+            "databases",
+            "databases/shop/1a2b.dump.gz",
+            1024,
+            "2026-10-21T18:00:00Z",
+        )
+        .unwrap();
+        assert_eq!(snap.database_name, "shop");
+        assert_eq!(snap.backup_id, "1a2b");
+        assert_eq!(snap.size, 1024);
+
+        let snap_noprefix =
+            parse_backup_snapshot("", "users/snap99.sql.gz", 2048, "2026-10-21T19:00:00Z").unwrap();
+        assert_eq!(snap_noprefix.database_name, "users");
+        assert_eq!(snap_noprefix.backup_id, "snap99");
+
+        // Non-backup dump files are ignored
+        assert!(parse_backup_snapshot("databases", "databases/shop/1a2b.json", 100, "").is_none());
+        assert!(
+            parse_backup_snapshot("databases", "disaster-recovery/123.r3bundle", 100, "").is_none()
+        );
     }
 }

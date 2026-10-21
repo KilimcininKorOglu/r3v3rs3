@@ -164,6 +164,12 @@ pub enum Error {
     #[error("the backup does not exist: {id}")]
     BackupNotFound { id: String },
 
+    #[error("the S3 backup target is not configured")]
+    S3NotConfigured,
+
+    #[error("the S3 operation failed: {reason}")]
+    S3OperationFailed { reason: String },
+
     #[error("the enrollment token is invalid or was used already")]
     InvalidEnrollmentToken,
 
@@ -523,7 +529,8 @@ impl Error {
             | Self::FailedToLoadAccounts
             | Self::FailedToCreateCertificateArchive
             | Self::BackupFailed { .. }
-            | Self::RestoreFailed { .. } => 500,
+            | Self::RestoreFailed { .. }
+            | Self::S3OperationFailed { .. } => 500,
             _ => 400,
         }
     }

@@ -401,6 +401,71 @@ pub struct PitrRestoreResponse {
     pub branched: bool,
 }
 
+/// One remote S3 backup snapshot of a database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct S3BackupSnapshot {
+    /// S3 object key, e.g. "databases/shop/1a2b.dump.gz" or "shop/1a2b.dump.gz".
+    pub key: String,
+    /// Database name extracted from key, e.g. "shop".
+    pub database_name: String,
+    /// Backup file ID, e.g. "1a2b".
+    pub backup_id: String,
+    /// Size in bytes.
+    pub size: u64,
+    /// Last modified timestamp string.
+    pub last_modified: String,
+}
+
+/// Request to restore a database from an S3 remote backup snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RestoreFromS3Request {
+    /// The S3 object key to restore from.
+    pub key: String,
+    /// Optional target database ID (to restore into an existing database).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_db_id: Option<ShortId>,
+    /// Optional new database name (if restoring as a new database for disaster recovery).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "shop-restored")]
+    pub new_database_name: Option<AppName>,
+    /// Optional engine type if restoring as a new database (e.g. "postgres", "mysql", "redis", "mariadb", "mongo").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    /// Optional image version/tag if restoring as a new database.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Optional host port if restoring as a new database.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_port: Option<u16>,
+}
+
+/// Response after initiating or completing an S3 restore.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RestoreFromS3Response {
+    pub success: bool,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<ShortId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+}
+
+/// Query filter for listing S3 backup snapshots.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct S3SnapshotsQuery {
+    /// Optional database name filter.
+    pub database: Option<String>,
+}
+
+/// Query parameter for downloading an S3 backup snapshot.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct S3DownloadQuery {
+    /// The S3 object key to download.
+    pub key: String,
+}
+
 /// The longest health check path.
 const MAX_HEALTH_PATH_LENGTH: usize = 1024;
 

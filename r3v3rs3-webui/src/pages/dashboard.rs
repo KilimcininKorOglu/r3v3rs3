@@ -3,7 +3,6 @@
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::data_list::status_badge;
-use crate::components::update_banner::UpdateBanner;
 use crate::format::format_time;
 use crate::i18n::use_locale;
 use crate::pages::Route;
@@ -59,7 +58,6 @@ pub fn dashboard() -> Html {
 
     html! {
         <div class="space-y-6">
-            <UpdateBanner />
             { render_stat_cards(locale, &data) }
             if let Some(disk) = &data.disk {
                 { render_disk_card(locale, disk) }
