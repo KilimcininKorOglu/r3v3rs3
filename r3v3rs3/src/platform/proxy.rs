@@ -143,6 +143,8 @@ mod tests {
             buildkit: None,
             bot_blocker: false,
             grpc_web: false,
+            project_id: None,
+            environment_id: None,
         }
     }
 

@@ -48,6 +48,17 @@ Platform anahtarını yenilemek için **Ayarlar** sayfasındaki **Deployment Pla
 
 Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın.
 
+## Projeler ve Ortamlar
+
+Uygulamalar ve veritabanları, **Projeler** (örn. *E-Ticaret*, *Faturalandırma*, *Analitik*) ve alt kademedeki **Ortamlar** (örn. *Production*, *Staging*, *Development*) altında organize edilebilir. Bu hiyerarşi hem düzenli bir yönetim hem de ortam düzeyinde paylaşılan yapılandırma desteği sunar:
+
+- **Projeler**: Üst düzey organizasyon kapsayıcılarıdır. Bir proje oluşturulduğunda varsayılan olarak bir `production` ortamı oluşturulur; istenirse virgülle ayrılarak özel varsayılan ortamlar da tanımlanabilir.
+- **Ortamlar**: Bir proje altındaki yalıtılmış dağıtım katmanlarıdır. Her ortam kendi uygulamalarını, veritabanlarını ve paylaşılan ortak ortam değişkenlerini barındırır.
+- **Ortam Değişkenleri**: Bir ortam, ortak anahtar-değer yapılandırmaları ve gizli değişkenler (secret) tanımlayabilir. Bu ortamda çalışan tüm uygulamalar söz konusu değişkenleri otomatik olarak miras alır.
+- **Miras Alma & Öncelik Sıralaması**: Dağıtım sırasında ortam değişkenleri katı bir öncelik sırasıyla birleştirilir (bkz. [Ortam değişkenleri](#ortam-degiskenleri)).
+- **Bağımsız Uygulamalar**: Uygulamalar ve veritabanları projesiz (bağımsız, `project_id: null`) kalabilir veya oluşturulurken/güncellenirken herhangi bir proje ve ortama atanabilir.
+- **WebUI Filtreleme**: Uygulamalar ve Veritabanları kontrol panelleri, kaynakları proje ve ortama göre filtrelemeyi ve mevcut katmanlarını rozetlerle göstermeyi destekler.
+
 ## Uygulamalar
 
 Bir uygulama bir image'ı, container'ın dinlediği portu ve uygulamaya yönlenen alan adlarını belirtir:
@@ -228,8 +239,9 @@ Bir uygulama ayrıca deployment sırasında ortam değişkenlerini doğrudan bir
 - **Öncelik Sırası**: Deployment sırasında ortam değişkenleri şu sırayla birleştirilir:
   1. Git deposundan yüklenen temel `.env` dosyası (`git_config` belirtildiğinde).
   2. Bağlı çevre değişkeni grupları (`env_groups` sırasına göre; sonraki gruplar öncekileri geçersiz kılar).
-  3. Doğrudan uygulama üzerinde tanımlanan uygulamaya özel değişkenler (grup tanımlarını geçersiz kılar).
-  4. Bağlı veritabanı bağlantı değişkenleri (ör. `DATABASE_URL`).
+  3. Proje Ortamı düzeyinde tanımlanan paylaşılan ortam değişkenleri (`/api/projects/{project_id}/environments/{environment_id}/env`).
+  4. Doğrudan uygulama üzerinde tanımlanan uygulamaya özel değişkenler (grup ve ortam tanımlarını geçersiz kılar).
+  5. Bağlı veritabanı bağlantı değişkenleri (ör. `DATABASE_URL`).
 - Çevre değişkeni gruplarındaki gizli değişkenler platform anahtarlarıyla şifrelenir ve anahtar rotasyonu (`POST /api/platform/key/rotate`) sırasında otomatik olarak yeniden mühürlenir.
 - Aktif bir uygulamaya bağlı olan bir çevre değişkeni grubu silinemez.
 
@@ -592,7 +604,7 @@ Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde repl
 
 ## WebUI
 
-**Kontrol Paneli** (`/`), sistem durumunun, portların, proxy'lerin, uygulamaların, veritabanlarının, hedeflerin, disk depolama alanının ve mevcut güncellemelerin tek ekranda özetini sunar. Kenar çubuğundaki **Platform** grubu **Uygulamalar**, **App Store**, **Veritabanları**, **Hedefler**, **Git Sağlayıcıları** ve **Registry'ler** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** ve **Registry'ler** sayfaları Edit/Admin izni olan hesaba görünür. Orada bağlantı veya registry ekleme, değiştirme ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
+**Kontrol Paneli** (`/`), sistem durumunun, portların, proxy'lerin, uygulamaların, veritabanlarının, hedeflerin, disk depolama alanının ve mevcut güncellemelerin tek ekranda özetini sunar. Kenar çubuğundaki **Platform** grubu **Projeler**, **Uygulamalar**, **App Store**, **Veritabanları**, **Hedefler**, **Git Sağlayıcıları**, **Registry'ler** ve **Çevre Grupları** sayfalarını içerir. Grup yalnız platform açıkken görünür. **Git Sağlayıcıları** ve **Registry'ler** sayfaları Edit/Admin izni olan hesaba görünür. Orada bağlantı veya registry ekleme, değiştirme ve silme yalnız admin'e açıktır. Grup yalnız proxy listesi olmayan hesaplarda görünür. Read izni olan hesap uygulamaları, deployment'larını ve log'larını görür. Edit izni uygulama ekler, değiştirir, deploy eder ve siler.
 
 ### Kontrol Paneli
 
@@ -602,6 +614,15 @@ Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde repl
 - **Son Dağıtımlar**: Tüm uygulamalardaki en son deployment işleri; çalışma durumunu, tetikleyici kaynağını ve başlama zamanını görüntüler.
 - **Hızlı Bağlantılar**: Proxy, port ve uygulama oluşturmak veya App Store kataloğunu keşfetmek için doğrudan kısayollar.
 - **Admin API**: `GET /api/dashboard` uç noktası `DashboardSummary` nesnesini döndürür.
+
+### Projeler
+
+**Projeler** sayfası uygulamaları ve veritabanlarını yapılandırılmış projeler ve dağıtım ortamları altında organize eder:
+
+- Projeler (örn. *E-Ticaret*) oluşturun ve isteğe bağlı olarak ilk ortam adlarını belirleyin (varsayılan: `production`).
+- Her proje altında birden fazla yalıtılmış ortam yönetin (örn. `production`, `staging`, `preview`).
+- Ortamdaki tüm uygulamaların otomatik olarak miras alacağı paylaşılan ortak ortam değişkenlerini ve şifrelenmiş gizli anahtarları yapılandırın.
+- Belirli bir projeye veya ortama ait uygulamaları ve veritabanlarını filtrelemek ve görüntülemek için doğrudan hızlı bağlantılar.
 
 ### Uygulamalar
 
@@ -712,6 +733,18 @@ Admin hesabı ayrıca şunları görür:
 | `POST /api/registries` | Admin | Konteyner registry kimlik bilgisi ekler. |
 | `PUT /api/registries/{id}` | Admin | Konteyner registry kimlik bilgilerini günceller. |
 | `DELETE /api/registries/{id}` | Admin | Konteyner registry kimlik bilgilerini siler. |
+| `GET /api/projects` | Read | Tüm projeleri ortamlarıyla birlikte listeler. |
+| `POST /api/projects` | Edit | İsteğe bağlı varsayılan ortamlarla yeni bir proje oluşturur. |
+| `GET /api/projects/{id}` | Read | Ortamları ve uygulama sayısıyla proje ayrıntılarını döndürür. |
+| `PUT /api/projects/{id}` | Edit | Proje adını ve açıklamasını günceller. |
+| `DELETE /api/projects/{id}` | Edit | Bir projeyi siler. |
+| `GET /api/projects/{id}/environments` | Read | Bir projenin ortamlarını listeler. |
+| `POST /api/projects/{id}/environments` | Edit | Bir projeye yeni bir ortam ekler. |
+| `GET /api/projects/{id}/environments/{env_id}` | Read | Ortam ayrıntılarını döndürür. |
+| `PUT /api/projects/{id}/environments/{env_id}` | Edit | Ortam adını ve açıklamasını günceller. |
+| `DELETE /api/projects/{id}/environments/{env_id}` | Edit | Bir ortamı siler. |
+| `GET /api/projects/{id}/environments/{env_id}/env` | Edit | Secret değerleri olmadan paylaşılan ortam değişkenlerini döndürür. |
+| `PUT /api/projects/{id}/environments/{env_id}/env` | Edit | Bir ortam için paylaşılan ortak ortam değişkenlerini değiştirir. |
 | `GET /api/apps` | Read | Uygulamalar. |
 | `POST /api/apps` | Edit | Uygulama ekler. |
 | `GET /api/apps/{id}` | Read | Bir uygulamayı döndürür. |

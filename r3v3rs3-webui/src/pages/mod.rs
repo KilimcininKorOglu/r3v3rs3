@@ -38,6 +38,7 @@ mod new_port;
 mod new_proxy;
 mod port_list;
 mod port_view;
+mod projects;
 mod proxy_list;
 mod proxy_view;
 mod registries;
@@ -126,6 +127,8 @@ pub enum Route {
     Registries,
     #[at("/env-groups")]
     EnvGroups,
+    #[at("/projects")]
+    Projects,
     #[at("/settings")]
     Settings,
     #[at("/accounts")]
@@ -172,6 +175,7 @@ impl Route {
             | Route::GitConnections
             | Route::Registries
             | Route::EnvGroups
+            | Route::Projects
             | Route::Settings
             | Route::Accounts
             | Route::Audit => Some(self.clone()),
@@ -214,6 +218,7 @@ pub fn switch(routes: Route) -> Html {
         Route::GitConnections => html! { <git_connections::GitConnections /> },
         Route::Registries => html! { <registries::Registries /> },
         Route::EnvGroups => html! { <env_groups::EnvGroups /> },
+        Route::Projects => html! { <projects::Projects /> },
         Route::Certs => {
             html! { <cert_list::CertList kind={Some(CertKind::Server)} acme={false} /> }
         }

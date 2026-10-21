@@ -728,6 +728,11 @@ impl Platform {
             let group_vars = self.open_env(group_id, &group_stored)?;
             merge_env_vars(&mut vars, group_vars);
         }
+        if let Some(env_id) = job.spec.environment_id {
+            let env_stored = self.store.environment_vars(env_id).await?;
+            let env_vars = self.open_env(env_id, &env_stored)?;
+            merge_env_vars(&mut vars, env_vars);
+        }
         let panel_env = self.open_env(job.app, &job.env)?;
         merge_env_vars(&mut vars, panel_env);
         Ok(vars)
@@ -2313,6 +2318,78 @@ mod tests {
         assert_eq!(env_value(last_spec, "SHARED_ONE"), Some("val-1"));
         assert_eq!(env_value(last_spec, "SHARED_TWO"), Some("val-2"));
         assert_eq!(env_value(last_spec, "OVERRIDE_CHAIN"), Some("app-val"));
+        Ok(())
+    }
+
+    async fn setup_project_with_env(platform: &Platform) -> anyhow::Result<(ShortId, ShortId)> {
+        let project = platform
+            .create_project(
+                r3v3rs3_api::platform::ProjectSpec {
+                    name: "E-Commerce".into(),
+                    description: None,
+                    default_environments: vec!["production".into()],
+                },
+                100,
+            )
+            .await?;
+        let env_id = project.environments[0].id;
+        platform
+            .set_environment_env(
+                env_id,
+                r3v3rs3_api::platform::EnvironmentEnvSpec {
+                    variables: vec![
+                        EnvEntry {
+                            key: "ENV_SHARED".parse()?,
+                            value: Some("env-prod-val".into()),
+                            secret: false,
+                        },
+                        EnvEntry {
+                            key: "OVERRIDE_VAR".parse()?,
+                            value: Some("env-val".into()),
+                            secret: false,
+                        },
+                    ],
+                },
+            )
+            .await?;
+        Ok((project.id, env_id))
+    }
+
+    #[tokio::test]
+    async fn project_environment_env_applied_during_deploy_with_precedence() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let (project_id, env_id) = setup_project_with_env(&setup.platform).await?;
+
+        let mut app = setup.app.clone();
+        app.spec.project_id = Some(project_id);
+        app.spec.environment_id = Some(env_id);
+        let req = AppRequest {
+            name: app.name,
+            target: app.target,
+            spec: app.spec,
+        };
+        setup.platform.update_app(setup.app.id, req, 200).await?;
+
+        setup
+            .platform
+            .set_env(
+                setup.app.id,
+                vec![EnvEntry {
+                    key: "OVERRIDE_VAR".parse()?,
+                    value: Some("app-override-val".into()),
+                    secret: false,
+                }],
+            )
+            .await?;
+
+        deploy(&setup).await?;
+        let state = setup.runtime.state();
+        let last_spec = state.specs.last().context("container spec")?;
+        assert_eq!(env_value(last_spec, "ENV_SHARED"), Some("env-prod-val"));
+        assert_eq!(
+            env_value(last_spec, "OVERRIDE_VAR"),
+            Some("app-override-val")
+        );
         Ok(())
     }
 

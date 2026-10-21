@@ -339,6 +339,24 @@ fn add_button(locale: Locale, navigator: &Navigator) -> Html {
     }
 }
 
+fn name_cell(locale: Locale, app: &AppEntry) -> Html {
+    html! {
+        <div class="flex items-center gap-2">
+            <span>{app.name.as_str()}</span>
+            if let Some(preview) = &app.spec.preview_of {
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">
+                    {format!("PR #{}", preview.pr_number)}
+                </span>
+            }
+            if app.spec.project_id.is_some() {
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                    {locale.t("projects.project")}
+                </span>
+            }
+        </div>
+    }
+}
+
 fn app_row(
     locale: Locale,
     row: AppRow,
@@ -394,16 +412,7 @@ fn app_row(
     Row {
         key: row.app.id.to_string(),
         cells: vec![
-            html! {
-                <div class="flex items-center gap-2">
-                    <span>{row.app.name.as_str()}</span>
-                    if let Some(preview) = &row.app.spec.preview_of {
-                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">
-                            {format!("PR #{}", preview.pr_number)}
-                        </span>
-                    }
-                </div>
-            },
+            name_cell(locale, &row.app),
             source_cell(locale, &row.app),
             html! { <>{domains_cell}</> },
             deployment_cell(locale, row.latest.as_ref()),

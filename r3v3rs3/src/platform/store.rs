@@ -165,6 +165,29 @@ const SCHEMA: &[&str] = &[
         secret   INTEGER NOT NULL,
         PRIMARY KEY (group_id, key)
     )",
+    "CREATE TABLE IF NOT EXISTS projects (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL UNIQUE,
+        description TEXT,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+    )",
+    "CREATE TABLE IF NOT EXISTS project_environments (
+        id          TEXT PRIMARY KEY,
+        project_id  TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        name        TEXT NOT NULL,
+        description TEXT,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL,
+        UNIQUE (project_id, name)
+    )",
+    "CREATE TABLE IF NOT EXISTS project_env_vars (
+        environment_id TEXT NOT NULL REFERENCES project_environments (id) ON DELETE CASCADE,
+        key            TEXT NOT NULL,
+        value          BLOB NOT NULL,
+        secret         INTEGER NOT NULL,
+        PRIMARY KEY (environment_id, key)
+    )",
 ];
 
 mod commands;
@@ -172,12 +195,14 @@ mod connections;
 mod env_groups;
 mod hooks;
 mod metrics;
+mod projects;
 mod prune;
 mod registries;
 pub use connections::{PUBLIC_URL, StoredConnection, StoredGithubApp, StoredTokens};
 pub use env_groups::StoredEnvGroup;
 pub use hooks::StoredHook;
 pub use metrics::AppMetricRow;
+pub use projects::{StoredProject, StoredProjectEnvironment};
 
 /// The secret of an app that holds its Git token.
 pub const GIT_TOKEN: &str = "git_token";
@@ -1087,6 +1112,8 @@ mod tests {
                 buildkit: None,
                 bot_blocker: false,
                 grpc_web: false,
+                project_id: None,
+                environment_id: None,
             },
             git_token_set: false,
             webhook_secret_set: false,

@@ -37,7 +37,8 @@ async fn reseal_all_tables(
         github_apps: reseal_github_apps(pool, keys).await?,
         settings: reseal_settings(pool, keys).await?,
         registries: reseal_registries(pool, keys).await?,
-        env_groups: reseal_env_groups(pool, keys).await?,
+        env_groups: reseal_env_groups(pool, keys).await?
+            + reseal_project_env_vars(pool, keys).await?,
     })
 }
 
@@ -304,6 +305,32 @@ async fn reseal_env_groups(
     Ok(count)
 }
 
+async fn reseal_project_env_vars(
+    pool: &SqlitePool,
+    keys: &std::sync::RwLock<ClusterKeys>,
+) -> anyhow::Result<u32> {
+    let rows = sqlx::query("SELECT environment_id, key, value FROM project_env_vars")
+        .fetch_all(pool)
+        .await?;
+    let mut count = 0;
+    for row in rows {
+        let env_id_str: String = row.try_get("environment_id")?;
+        let env_id: ShortId = env_id_str.parse()?;
+        let key: String = row.try_get("key")?;
+        let value: Vec<u8> = row.try_get("value")?;
+        let aad = env_aad(env_id, &key);
+        let resealed = reseal_value(keys, &aad, &value)?;
+        sqlx::query("UPDATE project_env_vars SET value = ? WHERE environment_id = ? AND key = ?")
+            .bind(resealed)
+            .bind(env_id_str)
+            .bind(key)
+            .execute(pool)
+            .await?;
+        count += 1;
+    }
+    Ok(count)
+}
+
 async fn write_key_files(config_dir: &Path, key_text: &str) -> anyhow::Result<()> {
     let key_path = config_dir.join(KEY_FILE);
     let old_key_path = config_dir.join("platform.key.old");
@@ -369,6 +396,8 @@ mod tests {
             buildkit: None,
             bot_blocker: false,
             grpc_web: false,
+            project_id: None,
+            environment_id: None,
         })
     }
 

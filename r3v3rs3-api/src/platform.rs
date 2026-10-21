@@ -799,6 +799,16 @@ pub struct AppSpec {
     /// When true, enables gRPC-Web proxy translation for browser clients.
     #[serde(default, skip_serializing_if = "is_false")]
     pub grpc_web: bool,
+
+    /// Optional project that this app belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub project_id: Option<ShortId>,
+
+    /// Optional environment within the project that this app belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub environment_id: Option<ShortId>,
 }
 
 /// Configuration for BuildKit remote builders and cache mounts.
@@ -1250,6 +1260,14 @@ pub struct DatabaseRequest {
     /// Container resource limits (memory, CPU, swap).
     #[serde(default)]
     pub limits: ResourceLimits,
+    /// Optional project that this database belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub project_id: Option<ShortId>,
+    /// Optional environment within the project that this database belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub environment_id: Option<ShortId>,
 }
 
 /// The body that clones an existing database into a new branch database.
@@ -1280,6 +1298,14 @@ pub struct DatabaseReplicaRequest {
     /// Container resource limits (memory, CPU, swap).
     #[serde(default)]
     pub limits: ResourceLimits,
+    /// Optional project that this database belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub project_id: Option<ShortId>,
+    /// Optional environment within the project that this database belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub environment_id: Option<ShortId>,
 }
 
 /// The new database. The password is shown once, like a webhook secret.
@@ -1557,6 +1583,131 @@ impl EnvGroupSpec {
         for var in &self.variables {
             if !seen.insert(var.key.as_str()) {
                 return Err(Error::InvalidEnvGroup {
+                    reason: format!("duplicate key: {}", var.key.as_str()),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A platform project that groups related applications and environments.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Project {
+    pub id: ShortId,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub environments: Vec<ProjectEnvironmentSummary>,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Summary of a project in list views.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ProjectSummary {
+    pub id: ShortId,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub environments_count: usize,
+    pub apps_count: usize,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Request to create or update a project.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ProjectSpec {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub default_environments: Vec<String>,
+}
+
+impl ProjectSpec {
+    pub fn validate(&self) -> Result<(), Error> {
+        let name = self.name.trim();
+        if name.is_empty() {
+            return Err(Error::InvalidProject {
+                reason: "name cannot be empty".to_string(),
+            });
+        }
+        for env_name in &self.default_environments {
+            if env_name.trim().is_empty() {
+                return Err(Error::InvalidEnvironment {
+                    reason: "environment name cannot be empty".to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// An environment under a project (e.g. production, staging, development) with its shared variables.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ProjectEnvironment {
+    pub id: ShortId,
+    pub project_id: ShortId,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<EnvEntry>,
+    pub apps_count: usize,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Summary of a project environment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ProjectEnvironmentSummary {
+    pub id: ShortId,
+    pub project_id: ShortId,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub variable_count: usize,
+    pub apps_count: usize,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Request to create or update an environment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvironmentSpec {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl EnvironmentSpec {
+    pub fn validate(&self) -> Result<(), Error> {
+        let name = self.name.trim();
+        if name.is_empty() {
+            return Err(Error::InvalidEnvironment {
+                reason: "name cannot be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Request to replace the environment variables of a project environment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvironmentEnvSpec {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<EnvEntry>,
+}
+
+impl EnvironmentEnvSpec {
+    pub fn validate(&self) -> Result<(), Error> {
+        let mut seen = std::collections::HashSet::new();
+        for var in &self.variables {
+            if !seen.insert(var.key.as_str()) {
+                return Err(Error::InvalidEnvironment {
                     reason: format!("duplicate key: {}", var.key.as_str()),
                 });
             }
@@ -2144,5 +2295,57 @@ EMPTY_VAL=
             ],
         };
         assert!(valid.validate().is_ok());
+    }
+
+    #[test]
+    fn project_and_environment_validation() {
+        let empty_project = ProjectSpec {
+            name: "  ".to_string(),
+            description: None,
+            default_environments: vec!["production".to_string()],
+        };
+        assert!(empty_project.validate().is_err());
+
+        let invalid_env_name = ProjectSpec {
+            name: "Shop".to_string(),
+            description: None,
+            default_environments: vec!["   ".to_string()],
+        };
+        assert!(invalid_env_name.validate().is_err());
+
+        let valid_project = ProjectSpec {
+            name: "E-Commerce".to_string(),
+            description: Some("Storefront and APIs".to_string()),
+            default_environments: vec!["production".to_string(), "staging".to_string()],
+        };
+        assert!(valid_project.validate().is_ok());
+
+        let empty_env = EnvironmentSpec {
+            name: " ".to_string(),
+            description: None,
+        };
+        assert!(empty_env.validate().is_err());
+
+        let valid_env = EnvironmentSpec {
+            name: "production".to_string(),
+            description: Some("Live traffic".to_string()),
+        };
+        assert!(valid_env.validate().is_ok());
+
+        let dup_env_vars = EnvironmentEnvSpec {
+            variables: vec![
+                EnvEntry {
+                    key: "DB_PORT".parse().unwrap(),
+                    value: Some("5432".to_string()),
+                    secret: false,
+                },
+                EnvEntry {
+                    key: "DB_PORT".parse().unwrap(),
+                    value: Some("5433".to_string()),
+                    secret: false,
+                },
+            ],
+        };
+        assert!(dup_env_vars.validate().is_err());
     }
 }

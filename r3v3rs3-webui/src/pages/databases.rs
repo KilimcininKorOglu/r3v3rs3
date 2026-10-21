@@ -337,6 +337,11 @@ fn db_row(ctx: &RowContext<'_>, app: &AppEntry, users: &str) -> Html {
                         {ctx.locale.t("databases.read_replica")}
                     </span>
                 }
+                if app.spec.project_id.is_some() {
+                    <span class="ml-2 px-1.5 py-0.5 text-xs rounded bg-emerald-900/40 text-emerald-300 border border-emerald-700">
+                        {ctx.locale.t("projects.project")}
+                    </span>
+                }
             </td>
             <td class="py-1.5 text-neutral-400">{engine}</td>
             <td class="py-1.5 font-mono text-neutral-400">{port_of(app).to_string()}</td>
@@ -504,6 +509,8 @@ fn add_form(props: &AddFormProps) -> Html {
                 version: version.trim().to_string(),
                 host_port: host_port.trim().parse().ok(),
                 limits,
+                project_id: None,
+                environment_id: None,
             };
             let (notice, busy, saved, created) =
                 (notice.clone(), busy.clone(), saved.clone(), created.clone());
@@ -744,6 +751,8 @@ async fn send_replica(
         name: app_name,
         host_port: None,
         limits: ResourceLimits::default(),
+        project_id: None,
+        environment_id: None,
     };
     let Ok(body) = serde_json::to_string(&payload) else {
         return;

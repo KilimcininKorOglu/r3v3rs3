@@ -377,6 +377,26 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 )),
         )
         .nest(
+            "/projects",
+            OpenApiRouter::new()
+                .routes(routes!(platform::list_projects, platform::create_project))
+                .routes(routes!(
+                    platform::get_project,
+                    platform::update_project,
+                    platform::delete_project
+                ))
+                .routes(routes!(platform::create_environment))
+                .routes(routes!(
+                    platform::get_environment,
+                    platform::update_environment,
+                    platform::delete_environment
+                ))
+                .routes(routes!(
+                    platform::get_environment_env,
+                    platform::put_environment_env
+                )),
+        )
+        .nest(
             "/apps",
             OpenApiRouter::new()
                 .routes(routes!(platform::list_apps, platform::add_app))

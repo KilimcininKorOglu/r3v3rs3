@@ -48,6 +48,17 @@ To rotate the encryption key, click **Rotate Key** in the **Settings** page unde
 
 Access to the Docker socket is equal to root access on the host. Enable the platform only on a server where r3v3rs3 may control every container.
 
+## Projects and Environments
+
+Applications and databases can be organized into **Projects** (e.g. *E-Commerce*, *Billing*, *Analytics*) and sub-tier **Environments** (e.g. *Production*, *Staging*, *Development*). This hierarchy provides structured organization, scoping, and environment-level configuration sharing:
+
+- **Projects**: High-level organizational containers. When creating a project, a default `production` environment is provisioned automatically, or custom default environments can be supplied as a comma-separated list.
+- **Environments**: Isolated deployment tiers within a project. Each environment holds its own apps, databases, and shared environment variables.
+- **Environment Variables**: An environment can define shared key-value configuration and secrets. All applications deployed within that environment automatically inherit these variables.
+- **Inheritance & Precedence**: During deployment, environment variables are merged in strict order (see [Environment Variables](#environment-variables)).
+- **Standalone Apps**: Apps and databases can remain standalone (`project_id: null`) or be linked to any project and environment at creation or update.
+- **WebUI Filtering**: The Apps and Databases dashboards allow filtering resources by project and environment, displaying clear badges for their current tier.
+
 ## Apps
 
 An app names an image, the port that the container listens on and the domains that route to it:
@@ -228,8 +239,9 @@ Environment variable groups allow managing reusable collections of configuration
 - **Precedence Hierarchy**: During deployment, environment variables are merged in the following order:
   1. Base `.env` file loaded from the Git repository (when `git_config` is specified).
   2. Linked environment variable groups (in the order listed in `env_groups`; later groups override earlier ones).
-  3. App-specific variables defined directly on the app (override group-level definitions).
-  4. Linked database connection variables (e.g. `DATABASE_URL`).
+  3. Environment shared variables defined at the Project Environment level (`/api/projects/{project_id}/environments/{environment_id}/env`).
+  4. App-specific variables defined directly on the app (override group and environment-level definitions).
+  5. Linked database connection variables (e.g. `DATABASE_URL`).
 - Secret variables stored in environment variable groups are sealed with cluster/platform keys and are resealed during key rotation (`POST /api/platform/key/rotate`).
 - A group cannot be deleted while it is currently linked to any active application.
 
@@ -592,7 +604,7 @@ When pulling private container images (such as from private Docker Hub repositor
 
 ## WebUI
 
-The **Dashboard** (`/`) provides a single-screen overview of the system state, ports, proxies, apps, databases, targets, disk storage space, and available updates. The **Platform** group of the sidebar holds the **Apps**, **App Store**, **Databases**, **Targets**, **Git Providers** and **Registries** pages, and appears only while the platform is on. The **Git Providers** and **Registries** pages appear for an account with the Edit/Admin permission. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
+The **Dashboard** (`/`) provides a single-screen overview of the system state, ports, proxies, apps, databases, targets, disk storage space, and available updates. The **Platform** group of the sidebar holds the **Projects**, **Apps**, **App Store**, **Databases**, **Targets**, **Git Providers**, **Registries** and **Environment Variable Groups** pages, and appears only while the platform is on. The **Git Providers** and **Registries** pages appear for an account with the Edit/Admin permission. The group appears only for an account without a proxy list. An account with the Read permission sees the apps, their deployments and their logs. The Edit permission adds, changes, deploys and deletes apps.
 
 ### Dashboard
 
@@ -602,6 +614,15 @@ The **Dashboard** summarizes system operations on a single unified screen:
 - **Recent Deployments**: The latest deployment jobs across all apps, displaying execution status, trigger source, and start time.
 - **Quick Links**: Direct shortcuts to create proxies, ports, and apps, or explore the catalog in the App Store.
 - **Admin API**: `GET /api/dashboard` returns the `DashboardSummary` object.
+
+### Projects
+
+The **Projects** page organizes applications and databases under structured projects and deployment environments:
+
+- Create projects (e.g. *E-Commerce*) and optionally customize their initial environment names (defaults to `production`).
+- Manage multiple isolated environments within each project (e.g. `production`, `staging`, `preview`).
+- Configure environment-level shared variables and encrypted secrets that all apps in the environment automatically inherit.
+- Direct quick links to filter and view apps and databases belonging to any specific project or environment.
 
 ### Apps
 
@@ -714,6 +735,18 @@ The **Targets** page also includes a **Disk Hygiene & Prune Policy** card to aut
 | `POST /api/registries` | Admin | Adds container registry credentials. |
 | `PUT /api/registries/{id}` | Admin | Updates container registry credentials. |
 | `DELETE /api/registries/{id}` | Admin | Deletes container registry credentials. |
+| `GET /api/projects` | Read | Lists all projects with their environments. |
+| `POST /api/projects` | Edit | Creates a new project with optional default environments. |
+| `GET /api/projects/{id}` | Read | Returns project details with environments and app count. |
+| `PUT /api/projects/{id}` | Edit | Replaces project name and description. |
+| `DELETE /api/projects/{id}` | Edit | Deletes a project. |
+| `GET /api/projects/{id}/environments` | Read | Lists environments of a project. |
+| `POST /api/projects/{id}/environments` | Edit | Adds an environment to a project. |
+| `GET /api/projects/{id}/environments/{env_id}` | Read | Returns environment details. |
+| `PUT /api/projects/{id}/environments/{env_id}` | Edit | Updates environment name and description. |
+| `DELETE /api/projects/{id}/environments/{env_id}` | Edit | Deletes an environment. |
+| `GET /api/projects/{id}/environments/{env_id}/env` | Edit | Returns shared environment variables without secret values. |
+| `PUT /api/projects/{id}/environments/{env_id}/env` | Edit | Replaces shared environment variables for an environment. |
 | `GET /api/apps` | Read | The apps. |
 | `POST /api/apps` | Edit | Adds an app. |
 | `GET /api/apps/{id}` | Read | Returns an app. |

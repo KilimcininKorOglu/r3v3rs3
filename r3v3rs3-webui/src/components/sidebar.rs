@@ -119,6 +119,13 @@ const GROUPS: &[MenuGroup] = &[
         name: "nav.group_platform",
         items: &[
             MenuItem {
+                name: "nav.projects",
+                icon: "/assets/icons/folder.svg",
+                route: Route::Projects,
+                access: Access::Platform,
+                subs: NO_SUBS,
+            },
+            MenuItem {
                 name: "nav.apps",
                 icon: "/assets/icons/cube.svg",
                 route: Route::Apps,

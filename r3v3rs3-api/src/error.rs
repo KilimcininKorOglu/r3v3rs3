@@ -474,6 +474,12 @@ pub enum Error {
 
     #[error("invalid environment variable group: {reason}")]
     InvalidEnvGroup { reason: String },
+
+    #[error("invalid project: {reason}")]
+    InvalidProject { reason: String },
+
+    #[error("invalid environment: {reason}")]
+    InvalidEnvironment { reason: String },
 }
 
 impl Error {

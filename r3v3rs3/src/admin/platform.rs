@@ -24,7 +24,8 @@ use r3v3rs3_api::{
     platform::{
         AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
         ComposeServiceStatus, DeploymentEntry, DeploymentTrigger, EnvEntry, EnvGroup, EnvGroupSpec,
-        EnvGroupSummary, GitTokenRequest, ImageUpdateStatus, KeyRotationReport, MetricsQuery,
+        EnvGroupSummary, EnvironmentEnvSpec, EnvironmentSpec, GitTokenRequest, ImageUpdateStatus,
+        KeyRotationReport, MetricsQuery, Project, ProjectEnvironment, ProjectSpec, ProjectSummary,
         PrunePolicy, PruneResult, RegistryEntry, RegistryRequest, ScheduledCommandRequest,
         ScheduledCommandRunResult, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
     },
@@ -1696,4 +1697,294 @@ pub async fn delete_env_group(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(group))
+}
+
+/// Lists all projects.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "platform",
+    operation_id = "list_projects",
+    responses((status = 200, description = "The projects.", body = Vec<ProjectSummary>), ErrorResponses)
+)]
+pub async fn list_projects(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Vec<ProjectSummary>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let projects = platform.list_projects().await.map_err(platform_error)?;
+    Ok(Json(projects))
+}
+
+/// Creates a new project.
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "platform",
+    operation_id = "create_project",
+    request_body = ProjectSpec,
+    responses((status = 200, description = "The created project.", body = Project), ErrorResponses)
+)]
+pub async fn create_project(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<ProjectSpec>,
+) -> Result<Json<Project>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let project = platform
+        .create_project(request, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::AddProject)
+        .id(project.id)
+        .summary(project.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(project))
+}
+
+/// Retrieves a project and its environments.
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "get_project",
+    params(("id" = ShortId, Path, description = "The project id")),
+    responses((status = 200, description = "The project.", body = Project), ErrorResponses, NotFoundResponse)
+)]
+pub async fn get_project(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Project>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let project = platform.project(id).await.map_err(platform_error)?;
+    Ok(Json(project))
+}
+
+/// Updates a project.
+#[utoipa::path(
+    put,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "update_project",
+    params(("id" = ShortId, Path, description = "The project id")),
+    request_body = ProjectSpec,
+    responses((status = 200, description = "The updated project.", body = Project), ErrorResponses, NotFoundResponse)
+)]
+pub async fn update_project(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<ProjectSpec>,
+) -> Result<Json<Project>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let project = platform
+        .update_project(id, request, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UpdateProject)
+        .id(id)
+        .summary(project.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(project))
+}
+
+/// Deletes a project.
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "delete_project",
+    params(("id" = ShortId, Path, description = "The project id")),
+    responses((status = 200, description = "The deleted project.", body = Project), ErrorResponses, NotFoundResponse)
+)]
+pub async fn delete_project(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Project>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let project = platform.delete_project(id).await.map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeleteProject)
+        .id(id)
+        .summary(project.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(project))
+}
+
+/// Creates a new environment in a project.
+#[utoipa::path(
+    post,
+    path = "/{id}/environments",
+    tag = "platform",
+    operation_id = "create_environment",
+    params(("id" = ShortId, Path, description = "The project id")),
+    request_body = EnvironmentSpec,
+    responses((status = 200, description = "The created environment.", body = ProjectEnvironment), ErrorResponses, NotFoundResponse)
+)]
+pub async fn create_environment(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<EnvironmentSpec>,
+) -> Result<Json<ProjectEnvironment>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let env = platform
+        .create_environment(id, request, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::AddEnvironment)
+        .id(env.id)
+        .summary(env.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(env))
+}
+
+/// Retrieves an environment and its variables.
+#[utoipa::path(
+    get,
+    path = "/{id}/environments/{env_id}",
+    tag = "platform",
+    operation_id = "get_environment",
+    params(
+        ("id" = ShortId, Path, description = "The project id"),
+        ("env_id" = ShortId, Path, description = "The environment id")
+    ),
+    responses((status = 200, description = "The environment.", body = ProjectEnvironment), ErrorResponses, NotFoundResponse)
+)]
+pub async fn get_environment(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((_id, env_id)): Path<(ShortId, ShortId)>,
+) -> Result<Json<ProjectEnvironment>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let env = platform.environment(env_id).await.map_err(platform_error)?;
+    Ok(Json(env))
+}
+
+/// Updates an environment.
+#[utoipa::path(
+    put,
+    path = "/{id}/environments/{env_id}",
+    tag = "platform",
+    operation_id = "update_environment",
+    params(
+        ("id" = ShortId, Path, description = "The project id"),
+        ("env_id" = ShortId, Path, description = "The environment id")
+    ),
+    request_body = EnvironmentSpec,
+    responses((status = 200, description = "The updated environment.", body = ProjectEnvironment), ErrorResponses, NotFoundResponse)
+)]
+pub async fn update_environment(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((_id, env_id)): Path<(ShortId, ShortId)>,
+    Json(request): Json<EnvironmentSpec>,
+) -> Result<Json<ProjectEnvironment>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let env = platform
+        .update_environment(env_id, request, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UpdateEnvironment)
+        .id(env_id)
+        .summary(env.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(env))
+}
+
+/// Deletes an environment.
+#[utoipa::path(
+    delete,
+    path = "/{id}/environments/{env_id}",
+    tag = "platform",
+    operation_id = "delete_environment",
+    params(
+        ("id" = ShortId, Path, description = "The project id"),
+        ("env_id" = ShortId, Path, description = "The environment id")
+    ),
+    responses((status = 200, description = "The deleted environment.", body = ProjectEnvironment), ErrorResponses, NotFoundResponse)
+)]
+pub async fn delete_environment(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((_id, env_id)): Path<(ShortId, ShortId)>,
+) -> Result<Json<ProjectEnvironment>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let env = platform
+        .delete_environment(env_id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeleteEnvironment)
+        .id(env_id)
+        .summary(env.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(env))
+}
+
+/// Retrieves the environment variables of an environment.
+#[utoipa::path(
+    get,
+    path = "/{id}/environments/{env_id}/env",
+    tag = "platform",
+    operation_id = "get_environment_env",
+    params(
+        ("id" = ShortId, Path, description = "The project id"),
+        ("env_id" = ShortId, Path, description = "The environment id")
+    ),
+    responses((status = 200, description = "The environment variables.", body = Vec<EnvEntry>), ErrorResponses, NotFoundResponse)
+)]
+pub async fn get_environment_env(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((_id, env_id)): Path<(ShortId, ShortId)>,
+) -> Result<Json<Vec<EnvEntry>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let env = platform.environment(env_id).await.map_err(platform_error)?;
+    Ok(Json(env.variables))
+}
+
+/// Updates the environment variables of an environment.
+#[utoipa::path(
+    put,
+    path = "/{id}/environments/{env_id}/env",
+    tag = "platform",
+    operation_id = "put_environment_env",
+    params(
+        ("id" = ShortId, Path, description = "The project id"),
+        ("env_id" = ShortId, Path, description = "The environment id")
+    ),
+    request_body = EnvironmentEnvSpec,
+    responses((status = 200, description = "The updated environment variables.", body = Vec<EnvEntry>), ErrorResponses, NotFoundResponse)
+)]
+pub async fn put_environment_env(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((_id, env_id)): Path<(ShortId, ShortId)>,
+    Json(request): Json<EnvironmentEnvSpec>,
+) -> Result<Json<Vec<EnvEntry>>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let env = platform
+        .set_environment_env(env_id, request)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UpdateEnvironmentEnv)
+        .id(env_id)
+        .summary(env.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(env.variables))
 }

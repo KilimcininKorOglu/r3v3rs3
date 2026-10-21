@@ -147,10 +147,24 @@ pub enum AuditAction {
     UpdateEnvGroup,
     /// An account deleted an environment variable group.
     DeleteEnvGroup,
+    /// An account added a project.
+    AddProject,
+    /// An account updated a project.
+    UpdateProject,
+    /// An account deleted a project.
+    DeleteProject,
+    /// An account added an environment to a project.
+    AddEnvironment,
+    /// An account updated an environment in a project.
+    UpdateEnvironment,
+    /// An account deleted an environment from a project.
+    DeleteEnvironment,
+    /// An account updated environment variables of a project environment.
+    UpdateEnvironmentEnv,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 84] = [
+    pub const ALL: [AuditAction; 91] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -235,6 +249,13 @@ impl AuditAction {
         Self::AddEnvGroup,
         Self::UpdateEnvGroup,
         Self::DeleteEnvGroup,
+        Self::AddProject,
+        Self::UpdateProject,
+        Self::DeleteProject,
+        Self::AddEnvironment,
+        Self::UpdateEnvironment,
+        Self::DeleteEnvironment,
+        Self::UpdateEnvironmentEnv,
     ];
 }
 

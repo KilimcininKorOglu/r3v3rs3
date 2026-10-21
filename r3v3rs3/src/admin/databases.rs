@@ -351,6 +351,8 @@ fn replica_app_request(
             preview: None,
             preview_of: None,
             buildkit: None,
+            project_id: request.project_id,
+            environment_id: request.environment_id,
         },
     })
 }
@@ -414,6 +416,8 @@ fn clone_app_request(
         version,
         host_port: Some(host_port),
         limits: request.limits.unwrap_or(source.spec.limits),
+        project_id: source.spec.project_id,
+        environment_id: source.spec.environment_id,
     };
     app_request(&db_request, info, host_port)
 }
@@ -488,6 +492,8 @@ fn app_request(
             preview: None,
             preview_of: None,
             buildkit: None,
+            project_id: request.project_id,
+            environment_id: request.environment_id,
         },
     })
 }

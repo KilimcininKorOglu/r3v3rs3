@@ -120,6 +120,8 @@ pub struct AppForm {
     pub buildkit_cache_to: String,
     pub bot_blocker: bool,
     pub grpc_web: bool,
+    pub project_id: Option<String>,
+    pub environment_id: Option<String>,
 }
 
 impl Default for AppForm {
@@ -178,6 +180,8 @@ impl Default for AppForm {
             buildkit_cache_to: String::new(),
             bot_blocker: false,
             grpc_web: false,
+            project_id: None,
+            environment_id: None,
         }
     }
 }
@@ -337,6 +341,8 @@ impl AppForm {
                 .unwrap_or_default(),
             bot_blocker: spec.bot_blocker,
             grpc_web: spec.grpc_web,
+            project_id: spec.project_id.map(|id| id.to_string()),
+            environment_id: spec.environment_id.map(|id| id.to_string()),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -435,6 +441,11 @@ impl AppForm {
             buildkit: self.parse_buildkit(),
             bot_blocker: self.bot_blocker,
             grpc_web: self.grpc_web,
+            project_id: self.project_id.as_deref().and_then(|id| id.parse().ok()),
+            environment_id: self
+                .environment_id
+                .as_deref()
+                .and_then(|id| id.parse().ok()),
         })
     }
 

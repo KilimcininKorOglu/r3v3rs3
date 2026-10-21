@@ -366,6 +366,8 @@ mod tests {
             Error::RegistryExists { server: text() },
             Error::InvalidRegistry { reason: text() },
             Error::InvalidEnvGroup { reason: text() },
+            Error::InvalidProject { reason: text() },
+            Error::InvalidEnvironment { reason: text() },
         ]
     }
 

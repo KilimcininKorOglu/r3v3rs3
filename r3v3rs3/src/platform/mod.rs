@@ -19,6 +19,7 @@ pub mod image_check;
 mod metrics;
 mod notices;
 pub mod oauth;
+pub mod projects;
 mod provider;
 pub mod proxy;
 pub mod prune;
@@ -1237,6 +1238,8 @@ mod tests {
                 buildkit: None,
                 bot_blocker: false,
                 grpc_web: false,
+                project_id: None,
+                environment_id: None,
             },
         }
     }
@@ -1457,6 +1460,75 @@ mod tests {
         let deleted = platform.delete_env_group(group.id).await?;
         assert_eq!(deleted.id, group.id);
         assert!(platform.list_env_groups().await?.is_empty());
+        Ok(())
+    }
+
+    async fn setup_test_project_and_env(platform: &Platform) -> anyhow::Result<(ShortId, ShortId)> {
+        let spec = r3v3rs3_api::platform::ProjectSpec {
+            name: "Shop Project".to_string(),
+            description: Some("Storefront".to_string()),
+            default_environments: vec!["production".to_string(), "staging".to_string()],
+        };
+        let project = platform.create_project(spec, 1000).await?;
+        let prod_env_id = project.environments[0].id;
+        platform
+            .set_environment_env(
+                prod_env_id,
+                r3v3rs3_api::platform::EnvironmentEnvSpec {
+                    variables: vec![
+                        env("API_URL", Some("https://api.shop.com"), false),
+                        env("API_SECRET", Some("super-secret-key"), true),
+                    ],
+                },
+            )
+            .await?;
+        Ok((project.id, prod_env_id))
+    }
+
+    #[tokio::test]
+    async fn projects_and_environments_crud_and_app_linking() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let (project_id, prod_env_id) = setup_test_project_and_env(&platform).await?;
+
+        let list = platform.list_projects().await?;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "Shop Project");
+        assert_eq!(list[0].environments_count, 2);
+
+        let fetched_env = platform.environment(prod_env_id).await?;
+        assert_eq!(fetched_env.variables.len(), 2);
+        let secret = fetched_env
+            .variables
+            .iter()
+            .find(|v| v.key.as_str() == "API_SECRET")
+            .unwrap();
+        assert_eq!(secret.value, None);
+        assert!(secret.secret);
+
+        let mut app_req = request("shop-frontend");
+        app_req.spec.project_id = Some(project_id);
+        app_req.spec.environment_id = Some(prod_env_id);
+        let app = platform.add_app(app_req, 2000).await?;
+        assert_eq!(app.spec.project_id, Some(project_id));
+        assert_eq!(app.spec.environment_id, Some(prod_env_id));
+
+        let proj_details = platform.project(project_id).await?;
+        let prod_apps = proj_details
+            .environments
+            .iter()
+            .find(|e| e.id == prod_env_id)
+            .unwrap()
+            .apps_count;
+        assert_eq!(prod_apps, 1);
+
+        let del_err = platform.delete_project(project_id).await.unwrap_err();
+        assert!(matches!(api_error(del_err), Error::InvalidProject { .. }));
+
+        platform.delete_app(app.id).await?;
+
+        let deleted = platform.delete_project(project_id).await?;
+        assert_eq!(deleted.id, project_id);
+        assert!(platform.list_projects().await?.is_empty());
         Ok(())
     }
 
