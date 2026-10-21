@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.8] - 2026-10-21
+
+### Added
+- Native gRPC and gRPC-Web proxy routing and protocol translation mode (`grpc_web`) for HTTP/HTTPS proxies, individual routes, and platform applications.
+- Automated browser CORS preflight handling for gRPC-Web requests: automatically responds to `OPTIONS` preflight with required `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers` (`content-type,x-grpc-web,x-user-agent`), and `Access-Control-Expose-Headers` (`grpc-status,grpc-message`).
+- Browser request transpilation: converts incoming `application/grpc-web` and `application/grpc-web+proto` requests to upstream `application/grpc` and ensures `TE: trailers` is propagated.
+- End-of-stream trailer framing: encodes upstream gRPC trailer metadata (`grpc-status`, `grpc-message`) into standard gRPC-Web trailer frames (flag byte `0x80` + 4-byte big-endian length + headers) appended to the HTTP response stream.
+- Automatic HTTP/2 prior knowledge (`h2c`) injection for plain HTTP upstream gRPC services.
+- WebUI toggles for gRPC-Web on proxy creation/editing, route settings, and platform application forms.
+
 ## [2.1.7] - 2026-10-21
 
 ### Added
