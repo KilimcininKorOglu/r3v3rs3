@@ -528,9 +528,7 @@ impl Platform {
         to: ShortId,
         has_token: bool,
     ) -> anyhow::Result<()> {
-        if has_token
-            && let Some(token) = self.git_token(from).await?
-        {
+        if has_token && let Some(token) = self.git_token(from).await? {
             self.set_git_token(to, &token).await?;
         }
         Ok(())
