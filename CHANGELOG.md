@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-10-21
+
+### Added
+- One-click database web management UIs: pre-configured catalog templates in App Store for pgAdmin 4, phpMyAdmin, Redis Commander, Adminer, and Mongo Express, with direct Web UI launch shortcuts on the Databases page.
+
 ## [2.1.0] - 2026-10-21
 
 ### Added
