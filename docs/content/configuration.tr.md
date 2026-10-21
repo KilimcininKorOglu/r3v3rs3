@@ -597,6 +597,44 @@ routes = [
 ]
 ```
 
+## Bot Engelleme (Yapay Zeka Kazıyıcı & Bot Koruması)
+
+Web sitelerinizi ve uygulamalarınızı otomatik yapay zeka kazıyıcılarından (AI scraper), büyük dil modeli (LLM) eğitim botlarından ve veri madencilerinden tek bir anahtarla koruyabilirsiniz.
+
+Bir HTTP / HTTPS proxy'sinde **AI Kazıyıcıları & Botları Engelle** (`bot_blocker = true`) etkinleştirildiğinde, r3v3rs3 gelen her isteğin `User-Agent` başlığını sıfır bellek tahsisli (zero-allocation) akış eşleyicisiyle denetler. Bilinen yapay zeka botları ve kazıyıcılar tespit edildiğinde istek upstream sunucunuza iletilmeden anında `403 Forbidden` (`error.bot_blocked`) ile reddedilir.
+
+### Engellenen Yapay Zeka Botları ve Kazıyıcılar
+
+Dahili engelleme listesi popüler ticari yapay zeka veri toplayıcılarını kapsar:
+- **OpenAI**: `GPTBot`, `ChatGPT-User`, `OAI-SearchBot`
+- **Anthropic**: `ClaudeBot`, `Claude-Web`, `anthropic-ai`
+- **ByteDance / TikTok**: `Bytespider`
+- **Common Crawl**: `CCBot`
+- **Perplexity AI**: `PerplexityBot`
+- **Cohere**: `cohere-ai`
+- **Diffbot**: `Diffbot`
+- **Meta**: `FacebookBot`, `Meta-ExternalAgent`
+- **Google**: `Google-Extended`
+- **Amazon**: `Amazonbot`
+- **Genel Kazıyıcılar**: `Scrapy`, `SemrushBot`
+
+### Route Düzeyinde Geçersiz Kılma
+
+Bir route, "Bu Route için Bot Engelleyiciyi Özelleştir" seçeneğiyle proxy ayarını geçersiz kılabilir:
+- Genel API veya webhook uç noktalarında bot engelleyiciyi kapatarak (`false`) otomatik istemcilere izin verebilirsiniz.
+- Özel içerik veya hassas HTML sayfalarında proxy ayarı kapalı olsa dahi engelleyiciyi açabilirsiniz (`true`).
+
+```toml
+[my-proxy]
+protocol = "http"
+vhosts = ["example.com"]
+bot_blocker = true
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] },
+  { path = "/api/public", servers = [{ url = "http://127.0.0.1:8080/api" }], bot_blocker = false },
+]
+```
+
 ## Rate limit
 
 Her HTTP / HTTPS proxy'sinde bir istemci IP adresinin gönderebileceği istek sayısını sınırlayabilirsiniz. r3v3rs3 istekleri "İstemci IP adresi" bölümünde belirlenen adrese göre sayar.

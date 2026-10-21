@@ -597,6 +597,44 @@ routes = [
 ]
 ```
 
+## Bot Blocker (AI Scraper & Crawler Protection)
+
+You can protect your website or application from automated AI scrapers, LLM training crawlers, and aggressive data miners with a single switch.
+
+When **Block AI Scrapers & Bots** (`bot_blocker = true`) is enabled on an HTTP / HTTPS proxy, r3v3rs3 inspects the `User-Agent` header of every incoming request using a zero-allocation streaming matcher. If the agent matches known AI scrapers or crawlers, the request is immediately dropped with `403 Forbidden` (`error.bot_blocked`) before reaching your upstream servers.
+
+### Blocked AI Agents & Crawlers
+
+The built-in blocklist includes all major commercial AI data extractors and scrapers:
+- **OpenAI**: `GPTBot`, `ChatGPT-User`, `OAI-SearchBot`
+- **Anthropic**: `ClaudeBot`, `Claude-Web`, `anthropic-ai`
+- **ByteDance / TikTok**: `Bytespider`
+- **Common Crawl**: `CCBot`
+- **Perplexity AI**: `PerplexityBot`
+- **Cohere**: `cohere-ai`
+- **Diffbot**: `Diffbot`
+- **Meta**: `FacebookBot`, `Meta-ExternalAgent`
+- **Google**: `Google-Extended`
+- **Amazon**: `Amazonbot`
+- **General Scrapers**: `Scrapy`, `SemrushBot`
+
+### Route Overrides
+
+A route can override the proxy setting using "Override Bot Blocker for This Route":
+- Set to disabled (`false`) on public API or webhook endpoints to allow automated clients.
+- Set to enabled (`true`) on private content or sensitive HTML routes.
+
+```toml
+[my-proxy]
+protocol = "http"
+vhosts = ["example.com"]
+bot_blocker = true
+routes = [
+  { path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] },
+  { path = "/api/public", servers = [{ url = "http://127.0.0.1:8080/api" }], bot_blocker = false },
+]
+```
+
 ## Rate Limit
 
 You can limit the request rate of each client IP address for each HTTP / HTTPS proxy. r3v3rs3 counts requests by the client IP that the "Client IP" section resolves.

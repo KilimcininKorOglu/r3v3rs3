@@ -78,6 +78,7 @@ struct ProxyForm {
     redirects: String,
     maintenance: MaintenanceForm,
     error_pages: Vec<ErrorPageForm>,
+    bot_blocker: bool,
 }
 
 #[derive(Clone, PartialEq, Default)]
@@ -153,6 +154,7 @@ impl ProxyForm {
                     body: p.body.clone(),
                 })
                 .collect(),
+            bot_blocker: proxy.bot_blocker,
         }
     }
 }
@@ -456,6 +458,8 @@ struct RouteForm {
     mirror_percent: String,
     mirror_max_body_size: String,
     require_client_cert: bool,
+    override_bot_blocker: bool,
+    bot_blocker: bool,
 }
 
 impl RouteForm {
@@ -511,6 +515,8 @@ impl RouteForm {
             mirror_percent: mirror.percent.to_string(),
             mirror_max_body_size: mirror.max_body_size.to_string(),
             require_client_cert: route.require_client_cert,
+            override_bot_blocker: route.bot_blocker.is_some(),
+            bot_blocker: route.bot_blocker.unwrap_or_default(),
         }
     }
 
@@ -549,6 +555,8 @@ impl RouteForm {
             mirror_percent: "100".into(),
             mirror_max_body_size: DEFAULT_MIRROR_BODY_SIZE.to_string(),
             require_client_cert: false,
+            override_bot_blocker: false,
+            bot_blocker: false,
         }
     }
 }
@@ -693,6 +701,9 @@ pub fn http_proxy_config(props: &Props) -> Html {
     html! {
         <>
             { toggle(state_input(&form, checked, |form, value| form.upgrade_insecure = value), form.upgrade_insecure, locale.t("http_form.upgrade_insecure"), "my-6") }
+
+            { toggle(state_input(&form, checked, |form, value| form.bot_blocker = value), form.bot_blocker, locale.t("http_form.bot_blocker"), "my-6") }
+            <p class={HINT_CLASS}>{locale.t("http_form.bot_blocker_hint")}</p>
 
             <label class={LABEL_CLASS}>{locale.t("http_form.vhosts")}</label>
             <input type="text" autocapitalize="off" value={form.vhosts.clone()} onchange={state_input(&form, text, |form, value| form.vhosts = value)} class={INPUT_CLASS} placeholder="example.com" />
@@ -877,6 +888,7 @@ fn route_view(
             if route.access_list.is_none() {
                 { route_ip_filter_view(locale, routes, index, route) }
             }
+            { route_bot_blocker_view(locale, routes, index, route) }
             { route_rate_limit_view(locale, routes, index, route) }
             { route_concurrency_limit_view(locale, routes, index, route) }
             if route.access_list.is_none() {
@@ -1141,6 +1153,26 @@ fn route_ip_filter_view(
                 <input type="text" autocapitalize="off" placeholder="RU, CN" value={route.deny_countries.clone()} onchange={route_input(routes, index, text, |route, value| route.deny_countries = value)} class={INPUT_CLASS} />
                 <p class={HINT_CLASS}>{locale.t("http_form.countries_hint")}</p>
             </>
+        },
+    )
+}
+
+fn route_bot_blocker_view(
+    locale: Locale,
+    routes: &UseStateHandle<Vec<RouteForm>>,
+    index: usize,
+    route: &RouteForm,
+) -> Html {
+    route_override_view(
+        locale,
+        route_input(routes, index, checked, |route, value| {
+            route.override_bot_blocker = value
+        }),
+        route.override_bot_blocker,
+        "http_form.override_bot_blocker",
+        "http_form.route_bot_blocker_hint",
+        html! {
+            { toggle(route_input(routes, index, checked, |route, value| route.bot_blocker = value), route.bot_blocker, locale.t("http_form.bot_blocker"), "mt-4") }
         },
     )
 }
@@ -2199,6 +2231,7 @@ fn get_proxy(
         redirects,
         maintenance,
         error_pages,
+        bot_blocker: form.bot_blocker,
     })
 }
 
@@ -2732,6 +2765,7 @@ fn parse_route(
         access_list: route.access_list,
         headers,
         require_client_cert: route.require_client_cert,
+        bot_blocker: route.override_bot_blocker.then_some(route.bot_blocker),
         ..target
     })
 }

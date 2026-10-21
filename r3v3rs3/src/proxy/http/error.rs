@@ -50,6 +50,9 @@ pub enum ProxyError {
 
     #[error("the request URI for the upstream server cannot be built")]
     UpstreamUriInvalid,
+
+    #[error("automated AI scraper or crawler blocked")]
+    BotBlocked,
 }
 
 impl ProxyError {
@@ -59,7 +62,9 @@ impl ProxyError {
             Self::NoUpstreamAvailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::DomainFrontingDetected => StatusCode::MISDIRECTED_REQUEST,
             Self::NoRouteFound => StatusCode::BAD_GATEWAY,
-            Self::IpNotAllowed | Self::ClientCertRequired => StatusCode::FORBIDDEN,
+            Self::IpNotAllowed | Self::ClientCertRequired | Self::BotBlocked => {
+                StatusCode::FORBIDDEN
+            }
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::TooManyRequests { .. } | Self::TooManyConcurrentRequests => {
                 StatusCode::TOO_MANY_REQUESTS

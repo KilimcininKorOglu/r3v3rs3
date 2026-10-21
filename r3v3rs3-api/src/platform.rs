@@ -670,6 +670,10 @@ impl AlertRules {
     }
 }
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// What a deployment of an app runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AppSpec {
@@ -787,6 +791,10 @@ pub struct AppSpec {
     /// Optional BuildKit configuration for Git-based image builds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub buildkit: Option<BuildKitConfig>,
+
+    /// When true, blocks automated AI scrapers and aggressive bots.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub bot_blocker: bool,
 }
 
 /// Configuration for BuildKit remote builders and cache mounts.

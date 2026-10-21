@@ -69,6 +69,7 @@ async fn ws_proxy() -> anyhow::Result<()> {
                     client_cert: None,
                     maintenance: Default::default(),
                     error_pages: Vec::new(),
+                    bot_blocker: false,
                 })),
                 ..Default::default()
             },

@@ -1235,6 +1235,7 @@ mod tests {
                 preview: None,
                 preview_of: None,
                 buildkit: None,
+                bot_blocker: false,
             },
         }
     }

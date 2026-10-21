@@ -1085,6 +1085,7 @@ mod tests {
                 preview: None,
                 preview_of: None,
                 buildkit: None,
+                bot_blocker: false,
             },
             git_token_set: false,
             webhook_secret_set: false,

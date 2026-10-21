@@ -58,6 +58,7 @@ use tracing::{Instrument, Level, Span, debug, error, info, span};
 mod affinity;
 mod auth;
 mod body_limit;
+pub(crate) mod bot;
 pub(crate) mod cache;
 pub mod cache_share;
 pub(crate) mod client_ip;
@@ -832,6 +833,15 @@ enum EarlyExit {
     Err(ProxyError),
 }
 
+fn is_bot_request(headers: &hyper::HeaderMap) -> bool {
+    if let Some(user_agent) = headers.get(hyper::header::USER_AGENT)
+        && let Ok(ua_str) = user_agent.to_str()
+    {
+        return bot::is_bot_or_ai_scraper(ua_str);
+    }
+    false
+}
+
 fn check_route_access<B>(
     route: &FilteredRoute,
     req: &Request<B>,
@@ -843,6 +853,9 @@ fn check_route_access<B>(
     if route.maintenance.enabled {
         let response = maintenance_response(&route.maintenance);
         return Err(EarlyExit::Respond(Box::new(response)));
+    }
+    if route.bot_blocker && is_bot_request(req.headers()) {
+        return Err(EarlyExit::Err(ProxyError::BotBlocked));
     }
     let upstream = check_policies(route, client.ip, info.client_cert).map_err(EarlyExit::Err)?;
     if let Some(redirect) = redirect_of(route, req, header_host, request_host, info.proto) {

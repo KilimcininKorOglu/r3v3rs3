@@ -75,6 +75,7 @@ An app names an image, the port that the container listens on and the domains th
 - `volumes` mounts named Docker volumes, and `"read_only": true` mounts one read-only. A host path cannot be mounted.
 - `restart` is `no`, `on-failure`, `unless-stopped` (the default) or `always`.
 - `auto_deploy` (optional, default `false`) enables automatic deployment when a newer image tag or updated digest is detected in the container registry.
+- `bot_blocker` (optional, default `false`) enables automated AI scraper and bot protection for the app's proxy routes.
 
 A change of an app, of its domains or of its environment variables takes effect at the next deployment.
 

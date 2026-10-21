@@ -298,6 +298,9 @@ pub struct HttpProxy {
     /// Custom error pages for HTTP status codes (e.g. 404, 502) replacing default error responses.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub error_pages: Vec<CustomErrorPage>,
+    /// When true, blocks automated AI crawlers, scrapers and aggressive bots.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub bot_blocker: bool,
 }
 
 /// The default status code of a maintenance response (503 Service Unavailable).
@@ -513,6 +516,9 @@ pub struct Route {
     /// `servers`. A route with a fixed response has no servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response: Option<FixedResponse>,
+    /// Overrides the proxy bot blocker setting for this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_blocker: Option<bool>,
 }
 
 fn default_route_path() -> String {
