@@ -201,6 +201,12 @@ const SCHEMA: &[&str] = &[
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
     )",
+    "CREATE TABLE IF NOT EXISTS node_alert_rules (
+        id                            TEXT PRIMARY KEY,
+        enabled                       INTEGER NOT NULL,
+        min_free_disk_percent         INTEGER,
+        bandwidth_spike_bytes_per_sec INTEGER
+    )",
 ];
 
 mod commands;
@@ -208,6 +214,7 @@ mod connections;
 mod env_groups;
 mod hooks;
 mod metrics;
+mod node_alerts;
 mod projects;
 mod prune;
 mod registries;
@@ -1493,6 +1500,24 @@ mod tests {
             message: Some("no health".into()),
         };
         assert_eq!(store.deployments(shop.id, 10).await?, [expected]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn node_alert_rules_round_trip() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let default_rules = store.get_node_alert_rules().await?;
+        assert!(default_rules.enabled);
+        assert_eq!(default_rules.min_free_disk_percent, Some(10));
+
+        let custom = r3v3rs3_api::platform::NodeAlertRules {
+            enabled: false,
+            min_free_disk_percent: Some(25),
+            bandwidth_spike_bytes_per_sec: Some(50_000_000),
+        };
+        store.save_node_alert_rules(&custom).await?;
+        let fetched = store.get_node_alert_rules().await?;
+        assert_eq!(fetched, custom);
         Ok(())
     }
 }

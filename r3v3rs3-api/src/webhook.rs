@@ -66,13 +66,15 @@ pub enum WebhookEvent {
     // Node & System events
     TargetOffline,
     SystemDiskPressure,
+    SystemDiskLow,
+    SystemBandwidthSpike,
 
     // Test ping
     TestPing,
 }
 
 impl WebhookEvent {
-    pub const ALL: [WebhookEvent; 15] = [
+    pub const ALL: [WebhookEvent; 17] = [
         Self::DeploySuccess,
         Self::DeployFailure,
         Self::DeployPendingApproval,
@@ -87,6 +89,8 @@ impl WebhookEvent {
         Self::SecurityIpBanned,
         Self::TargetOffline,
         Self::SystemDiskPressure,
+        Self::SystemDiskLow,
+        Self::SystemBandwidthSpike,
         Self::TestPing,
     ];
 
@@ -106,6 +110,8 @@ impl WebhookEvent {
             Self::SecurityIpBanned => "security.ip_banned",
             Self::TargetOffline => "target.offline",
             Self::SystemDiskPressure => "system.disk_pressure",
+            Self::SystemDiskLow => "system.disk_low",
+            Self::SystemBandwidthSpike => "system.bandwidth_spike",
             Self::TestPing => "test.ping",
         }
     }
@@ -124,7 +130,10 @@ impl WebhookEvent {
             | Self::CertRenewed
             | Self::CertRenewalFailed
             | Self::SecurityIpBanned => WebhookEventCategory::Security,
-            Self::TargetOffline | Self::SystemDiskPressure => WebhookEventCategory::System,
+            Self::TargetOffline
+            | Self::SystemDiskPressure
+            | Self::SystemDiskLow
+            | Self::SystemBandwidthSpike => WebhookEventCategory::System,
             Self::TestPing => WebhookEventCategory::Test,
         }
     }
@@ -155,6 +164,8 @@ impl FromStr for WebhookEvent {
             "security.ip_banned" => Ok(Self::SecurityIpBanned),
             "target.offline" => Ok(Self::TargetOffline),
             "system.disk_pressure" => Ok(Self::SystemDiskPressure),
+            "system.disk_low" => Ok(Self::SystemDiskLow),
+            "system.bandwidth_spike" => Ok(Self::SystemBandwidthSpike),
             "test.ping" => Ok(Self::TestPing),
             _ => Err(Error::InvalidWebhook {
                 reason: format!("unknown event '{s}'"),

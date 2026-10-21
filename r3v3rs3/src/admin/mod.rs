@@ -344,7 +344,11 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     platform::get_prune_policy,
                     platform::update_prune_policy
                 ))
-                .routes(routes!(platform::run_prune)),
+                .routes(routes!(platform::run_prune))
+                .routes(routes!(
+                    platform::get_node_alerts,
+                    platform::update_node_alerts
+                )),
         )
         .nest(
             "/targets",

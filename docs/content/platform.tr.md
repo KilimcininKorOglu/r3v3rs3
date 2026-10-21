@@ -812,6 +812,15 @@ Admin hesabı ayrıca şunları görür:
 - **Şimdi Temizle**: Anında temizlik başlatmak ve geri kazanılan alan ile silinen öğe sayılarını canlı görmek için **Şimdi Temizle** butonuna tıklayın (veya `POST /api/platform/prune/run` gönderin).
 - **Çalıştırma İstatistikleri**: Son zamanlanmış temizleme, son acil durum disk basıncı temizleme zamanını ve geri kazanılan disk alanını gösterir.
 
+### Düğüm Eşik Alarmları
+
+**Hedefler** sayfası, ana makine kaynaklarını sürekli izlemek ve kritik eşiklere ulaşıldığında giden webhook bildirimleri göndermek için bir **Düğüm Eşik Alarm Kuralları** kartı sunar:
+
+- **Düşük Boş Disk Alanı Uyarısı (`system.disk_low`)**: Kullanılabilir düğüm disk alanı yapılandırılan yüzde eşiğine (varsayılan: %10) veya altına düştüğünde alarm tetikler. Bildirim yükü toplam, kullanılabilir ve kullanılan disk baytlarını, geçerli boş yüzdeyi ve tetikleme eşiğini içerir.
+- **Bant Genişliği Sıçrama Algılama (`system.bandwidth_spike`)**: Toplam düğüm ağ çıkış hızını saniye başına bayt cinsinden yapılandırılan eşikle karşılaştırarak ani trafik artışlarını algılar (WebUI'da MB/s cinsinden yapılandırılır). Linux üzerinde `/proc/net/dev` sayaçları, yedek olarak da konteyner ağ hızları üzerinden ölçülür.
+- **Spam Önleme Bekleme Süresi (Cooldown)**: Dahili 15 dakikalık bekleme süresi, uzun süreli yüksek trafik veya sürekli düşük disk durumlarında bildirim bombardımanını engeller.
+- **Giden Webhook'lar ve Denetim Kayıtları**: Abone olunan giden webhook'lar bildirimleri `Sistem` kategorisi altında alır ve kural değişiklikleri denetim günlüğünde kayıt altına alınır.
+
 ### Webhook'lar
 
 Yönetim altındaki **Webhook'lar** sayfası, giden olay bildirim hedeflerini yönetmek için merkezi bir kontrol paneli sunar:

@@ -277,6 +277,8 @@ fn event_label(_locale: Locale, event: WebhookEvent) -> &'static str {
         WebhookEvent::SecurityIpBanned => "webhooks.event_security_ip_banned",
         WebhookEvent::TargetOffline => "webhooks.event_target_offline",
         WebhookEvent::SystemDiskPressure => "webhooks.event_system_disk_pressure",
+        WebhookEvent::SystemDiskLow => "webhooks.event_system_disk_low",
+        WebhookEvent::SystemBandwidthSpike => "webhooks.event_system_bandwidth_spike",
         WebhookEvent::TestPing => "webhooks.event_test_ping",
     }
 }

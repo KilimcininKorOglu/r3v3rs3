@@ -25,9 +25,10 @@ use r3v3rs3_api::{
         AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
         ComposeServiceStatus, DeploymentEntry, DeploymentTrigger, EnvEntry, EnvGroup, EnvGroupSpec,
         EnvGroupSummary, EnvironmentEnvSpec, EnvironmentSpec, GitTokenRequest, ImageUpdateStatus,
-        KeyRotationReport, MetricsQuery, Project, ProjectEnvironment, ProjectSpec, ProjectSummary,
-        PrunePolicy, PruneResult, RegistryEntry, RegistryRequest, ScheduledCommandRequest,
-        ScheduledCommandRunResult, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
+        KeyRotationReport, MetricsQuery, NodeAlertRules, Project, ProjectEnvironment, ProjectSpec,
+        ProjectSummary, PrunePolicy, PruneResult, RegistryEntry, RegistryRequest,
+        ScheduledCommandRequest, ScheduledCommandRunResult, TargetEntry, TargetRequest,
+        TargetToken, WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -1638,6 +1639,59 @@ pub async fn run_prune(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(result))
+}
+
+/// Reads the host node threshold alert rules.
+#[utoipa::path(
+    get,
+    path = "/node_alerts",
+    tag = "platform",
+    operation_id = "get_node_alerts",
+    responses(
+        (status = 200, description = "The node threshold alert rules.", body = NodeAlertRules),
+        ErrorResponses
+    )
+)]
+pub async fn get_node_alerts(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<NodeAlertRules>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let rules = platform.node_alert_rules().await.map_err(platform_error)?;
+    Ok(Json(rules))
+}
+
+/// Updates the host node threshold alert rules.
+#[utoipa::path(
+    put,
+    path = "/node_alerts",
+    tag = "platform",
+    operation_id = "update_node_alerts",
+    request_body = NodeAlertRules,
+    responses(
+        (status = 200, description = "The node threshold alert rules are saved.", body = NodeAlertRules),
+        ErrorResponses
+    )
+)]
+pub async fn update_node_alerts(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(rules): Json<NodeAlertRules>,
+) -> Result<Json<NodeAlertRules>, AppError> {
+    rules.validate().map_err(AppError::from)?;
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    platform
+        .update_node_alert_rules(rules)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UpdateNodeAlertRules).summary(format!(
+        "Updated node alert rules (enabled: {})",
+        rules.enabled
+    ));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(rules))
 }
 
 /// Lists all environment variable groups.

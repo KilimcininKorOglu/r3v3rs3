@@ -175,10 +175,12 @@ pub enum AuditAction {
     DrainTarget,
     /// An account undrained a target, restoring it to traffic.
     UndrainTarget,
+    /// An account updated the node-level threshold alert rules.
+    UpdateNodeAlertRules,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 98] = [
+    pub const ALL: [AuditAction; 99] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -277,6 +279,7 @@ impl AuditAction {
         Self::TestOutboundWebhook,
         Self::DrainTarget,
         Self::UndrainTarget,
+        Self::UpdateNodeAlertRules,
     ];
 }
 

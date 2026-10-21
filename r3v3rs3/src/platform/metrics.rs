@@ -18,6 +18,8 @@ const RETENTION: u64 = 24 * 60 * 60 * 1000;
 struct Previous {
     samples: Mutex<BTreeMap<ShortId, (u64, u64, u64)>>,
     alerts: Mutex<BTreeMap<(ShortId, &'static str), u64>>,
+    node_alerts: Mutex<BTreeMap<&'static str, u64>>,
+    host_net: Mutex<Option<(u64, u64, u64)>>,
 }
 
 impl Previous {
@@ -52,6 +54,22 @@ impl Previous {
         alerts.insert((app, metric), now);
         true
     }
+
+    /// Checks whether an alert for a node metric can be fired or is within cooldown (15 minutes).
+    fn should_alert_node(&self, metric: &'static str, now: u64) -> bool {
+        const NODE_COOLDOWN_MS: u64 = 15 * 60 * 1000;
+        let mut alerts = self
+            .node_alerts
+            .lock()
+            .expect("the node alert map is intact");
+        if let Some(&last) = alerts.get(metric)
+            && now.saturating_sub(last) < NODE_COOLDOWN_MS
+        {
+            return false;
+        }
+        alerts.insert(metric, now);
+        true
+    }
 }
 
 /// Runs the collector until the platform shuts down.
@@ -74,6 +92,19 @@ pub(super) fn spawn_collector(platform: &Arc<Platform>) {
 }
 
 impl Platform {
+    /// Reads the current node threshold alert rules.
+    pub async fn node_alert_rules(&self) -> anyhow::Result<r3v3rs3_api::platform::NodeAlertRules> {
+        self.store.get_node_alert_rules().await
+    }
+
+    /// Saves the node threshold alert rules.
+    pub async fn update_node_alert_rules(
+        &self,
+        rules: r3v3rs3_api::platform::NodeAlertRules,
+    ) -> anyhow::Result<()> {
+        self.store.save_node_alert_rules(&rules).await
+    }
+
     /// The recorded samples of an app, oldest first, over the last hours.
     pub async fn app_metrics(
         &self,
@@ -105,15 +136,24 @@ impl Platform {
 async fn collect_round(platform: &Arc<Platform>, previous: &Previous) -> anyhow::Result<()> {
     let now = crate::clock::unix_ms();
     let requests = crate::proxy::stats::snapshot_resources();
+    let mut total_rx: u64 = 0;
+    let mut total_tx: u64 = 0;
     for app in platform.apps().await? {
-        if let Err(err) = collect_app(platform, previous, &app, &requests).await {
-            tracing::error!(
-                err = format!("{err:#}"),
-                app = %app.name,
-                "failed to collect the metrics of the app"
-            );
+        match collect_app(platform, previous, &app, &requests).await {
+            Ok((rx, tx)) => {
+                total_rx = total_rx.saturating_add(rx);
+                total_tx = total_tx.saturating_add(tx);
+            }
+            Err(err) => {
+                tracing::error!(
+                    err = format!("{err:#}"),
+                    app = %app.name,
+                    "failed to collect the metrics of the app"
+                );
+            }
         }
     }
+    check_node_alerts(platform, previous, now, total_rx, total_tx).await;
     platform
         .store
         .trim_app_metrics(now.saturating_sub(RETENTION))
@@ -126,9 +166,9 @@ async fn collect_app(
     previous: &Previous,
     app: &r3v3rs3_api::platform::AppEntry,
     requests: &[(String, u64)],
-) -> anyhow::Result<()> {
+) -> anyhow::Result<(u64, u64)> {
     let Some(deployment) = platform.store.running_deployment(app.id).await? else {
-        return Ok(());
+        return Ok((0, 0));
     };
     let container = proxy::container_name(app.id, deployment)?;
     let runtime = platform.runtime(app.target);
@@ -139,7 +179,7 @@ async fn collect_app(
     let now = crate::clock::unix_ms();
     check_oom_alert(platform, previous, app, &info, now).await;
     if !info.running {
-        return Ok(());
+        return Ok((0, 0));
     }
     let stats = runtime.stats(&container).await.unwrap_or_default();
     let requests = requests
@@ -172,7 +212,7 @@ async fn collect_app(
         &stats,
     )
     .await;
-    Ok(())
+    Ok((rx, tx))
 }
 
 fn health_status(health: Option<r3v3rs3_api::container::ContainerHealth>) -> &'static str {
@@ -328,6 +368,154 @@ async fn check_mem_pct_alert(
     }
 }
 
+async fn check_node_alerts(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    now: u64,
+    container_rx_delta: u64,
+    container_tx_delta: u64,
+) {
+    let rules = match platform.node_alert_rules().await {
+        Ok(rules) => rules,
+        Err(err) => {
+            tracing::warn!(%err, "failed to read node alert rules");
+            return;
+        }
+    };
+    if !rules.enabled {
+        return;
+    }
+    check_node_disk_alert(platform, previous, &rules, now).await;
+    check_node_bandwidth_alert(
+        platform,
+        previous,
+        &rules,
+        now,
+        container_rx_delta,
+        container_tx_delta,
+    )
+    .await;
+}
+
+async fn check_node_disk_alert(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    rules: &r3v3rs3_api::platform::NodeAlertRules,
+    now: u64,
+) {
+    let Some(min_free_pct) = rules.min_free_disk_percent else {
+        return;
+    };
+    let Some(space) = super::prune::system_disk_space() else {
+        return;
+    };
+    let free_pct = ((space.available_bytes as f64 / space.total_bytes.max(1) as f64) * 100.0) as u8;
+    if free_pct <= min_free_pct && previous.should_alert_node("disk_low", now) {
+        let avail_mb = space.available_bytes / 1024 / 1024;
+        let total_mb = space.total_bytes / 1024 / 1024;
+        let summary = format!(
+            "Node free disk space is low: {free_pct}% free ({avail_mb} MB available of {total_mb} MB, threshold: <={min_free_pct}%)"
+        );
+        let payload = serde_json::json!({
+            "node": "local",
+            "free_percent": free_pct,
+            "available_bytes": space.available_bytes,
+            "total_bytes": space.total_bytes,
+            "used_percent": space.used_percent,
+            "threshold_percent": min_free_pct
+        });
+        platform
+            .dispatch_webhook_event(
+                r3v3rs3_api::webhook::WebhookEvent::SystemDiskLow,
+                summary,
+                payload,
+            )
+            .await;
+    }
+}
+
+fn host_network_bytes() -> Option<(u64, u64)> {
+    let content = std::fs::read_to_string("/proc/net/dev").ok()?;
+    let mut total_rx = 0u64;
+    let mut total_tx = 0u64;
+    for line in content.lines().skip(2) {
+        let Some((iface, rest)) = line.split_once(':') else {
+            continue;
+        };
+        if iface.trim() == "lo" {
+            continue;
+        }
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        if fields.len() >= 9
+            && let (Ok(rx), Ok(tx)) = (fields[0].parse::<u64>(), fields[8].parse::<u64>())
+        {
+            total_rx = total_rx.saturating_add(rx);
+            total_tx = total_tx.saturating_add(tx);
+        }
+    }
+    Some((total_rx, total_tx))
+}
+
+fn calculate_bandwidth_rate(
+    previous: &Previous,
+    now: u64,
+    container_rx_delta: u64,
+    container_tx_delta: u64,
+) -> u64 {
+    let (current_rx, current_tx) = host_network_bytes().unwrap_or((0, 0));
+    let mut host_net = previous.host_net.lock().expect("host net lock");
+    match *host_net {
+        Some((prev_rx, prev_tx, prev_ts)) if current_rx > 0 && current_tx > 0 => {
+            *host_net = Some((current_rx, current_tx, now));
+            let delta_rx = current_rx.saturating_sub(prev_rx);
+            let delta_tx = current_tx.saturating_sub(prev_tx);
+            let elapsed_secs = (now.saturating_sub(prev_ts) / 1000).max(1);
+            (delta_rx + delta_tx) / elapsed_secs
+        }
+        _ => {
+            if current_rx > 0 && current_tx > 0 {
+                *host_net = Some((current_rx, current_tx, now));
+            }
+            (container_rx_delta + container_tx_delta) / COLLECT_INTERVAL.as_secs().max(1)
+        }
+    }
+}
+
+async fn check_node_bandwidth_alert(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    rules: &r3v3rs3_api::platform::NodeAlertRules,
+    now: u64,
+    container_rx_delta: u64,
+    container_tx_delta: u64,
+) {
+    let Some(threshold_bps) = rules.bandwidth_spike_bytes_per_sec else {
+        return;
+    };
+    let rate_bps = calculate_bandwidth_rate(previous, now, container_rx_delta, container_tx_delta);
+
+    if rate_bps >= threshold_bps && previous.should_alert_node("bandwidth_spike", now) {
+        let rate_mb_s = rate_bps as f64 / 1_000_000.0;
+        let threshold_mb_s = threshold_bps as f64 / 1_000_000.0;
+        let summary = format!(
+            "Node network bandwidth spike detected: {rate_mb_s:.2} MB/s (threshold: {threshold_mb_s:.2} MB/s)"
+        );
+        let payload = serde_json::json!({
+            "node": "local",
+            "bytes_per_sec": rate_bps,
+            "threshold_bytes_per_sec": threshold_bps,
+            "mb_per_sec": rate_mb_s
+        });
+        platform
+            .dispatch_webhook_event(
+                r3v3rs3_api::webhook::WebhookEvent::SystemBandwidthSpike,
+                summary,
+                payload,
+            )
+            .await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::store::AppMetricRow;
@@ -402,5 +590,27 @@ mod tests {
         assert!(previous.should_alert(app, "memory_bytes", t0 + 60_000));
         // After 5 minutes, alert fires again
         assert!(previous.should_alert(app, "cpu", t0 + 300_001));
+    }
+
+    #[test]
+    fn node_alert_cooldown_prevents_spam() {
+        let previous = Previous::default();
+        let t0 = 1_000_000;
+        assert!(previous.should_alert_node("disk_low", t0));
+        // Alert within 15 minutes (900_000 ms) is suppressed
+        assert!(!previous.should_alert_node("disk_low", t0 + 60_000));
+        assert!(!previous.should_alert_node("disk_low", t0 + 899_999));
+        // Different node metric succeeds immediately
+        assert!(previous.should_alert_node("bandwidth_spike", t0 + 60_000));
+        // After 15 minutes, fires again
+        assert!(previous.should_alert_node("disk_low", t0 + 900_001));
+    }
+
+    #[test]
+    fn bandwidth_rate_fallback() {
+        let previous = Previous::default();
+        // 30MB total delta over 30s interval = 1MB/s = 1_000_000 bytes/sec
+        let rate = calculate_bandwidth_rate(&previous, 100_000, 15_000_000, 15_000_000);
+        assert_eq!(rate, 1_000_000);
     }
 }

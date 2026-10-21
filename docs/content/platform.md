@@ -812,6 +812,15 @@ The **Targets** page also includes a **Disk Hygiene & Prune Policy** card to aut
 - **Run Immediately**: Click **Prune Now** (or send `POST /api/platform/prune/run`) to trigger an immediate prune and view the freed disk space and deleted item counts in real time.
 - **Run Statistics**: Displays the timestamp of the last scheduled execution, the last emergency disk pressure execution, and the total reclaimed disk space.
 
+### Node Threshold Alerts
+
+The **Targets** page includes a **Node Threshold Alert Rules** configuration card to continuously monitor host node resources and trigger outbound webhook notifications:
+
+- **Low Free Disk Space Warning (`system.disk_low`)**: Fires an alert whenever available node disk space drops to or below the configured percentage threshold (default: 10%). The notification payload contains total, available, and used disk bytes, current free percentage, and the threshold.
+- **Bandwidth Spike Anomaly Detection (`system.bandwidth_spike`)**: Detects sudden traffic surges by evaluating throughput rates in bytes per second against the configured threshold (configured in MB/s in the WebUI). Measured via host interface counters in `/proc/net/dev` with fallback to container network rates.
+- **Anti-Spam Cooldown**: Built-in 15-minute cooldown prevents alert flooding during persistent high traffic or prolonged low disk situations.
+- **Outbound Webhooks & Auditing**: Subscribed outbound webhooks receive JSON alerts under the `System` category, and rules configuration changes are tracked in the audit trail.
+
 ### Webhooks
 
 The **Webhooks** page under Administration provides a centralized dashboard for managing outbound event notification targets:

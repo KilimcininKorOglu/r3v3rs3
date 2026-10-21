@@ -23,7 +23,7 @@ use gloo_timers::callback::Interval;
 use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::platform::{
-    PrunePolicy, PruneResult, TargetEntry, TargetKind, TargetRequest, TargetToken,
+    NodeAlertRules, PrunePolicy, PruneResult, TargetEntry, TargetKind, TargetRequest, TargetToken,
 };
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlTextAreaElement};
@@ -110,6 +110,7 @@ pub fn targets() -> Html {
             if admin {
                 { form_view(locale, &form, &notice, &targets) }
                 <PruneSettings />
+                <NodeAlertSettings />
             }
         </>
     }
@@ -650,16 +651,169 @@ fn save_policy_callback(
     })
 }
 
-fn checkbox_toggle(
-    policy: &UseStateHandle<PrunePolicy>,
-    select: fn(&mut PrunePolicy) -> &mut bool,
+fn checkbox_toggle<T: Clone + 'static>(
+    state: &UseStateHandle<T>,
+    select: fn(&mut T) -> &mut bool,
 ) -> Callback<Event> {
-    let policy = policy.clone();
+    let state = state.clone();
     Callback::from(move |event: Event| {
         let input: HtmlInputElement = event.target_unchecked_into();
-        let mut updated = (*policy).clone();
+        let mut updated = (*state).clone();
         *select(&mut updated) = input.checked();
-        policy.set(updated);
+        state.set(updated);
+    })
+}
+
+#[function_component(NodeAlertSettings)]
+fn node_alert_settings() -> Html {
+    let locale = use_locale();
+    let rules = use_state(NodeAlertRules::default);
+    let loaded = use_state(|| false);
+    let busy = use_state(|| false);
+    let notice = use_state(|| Option::<Notice<&'static str>>::None);
+
+    let rules_loaded = loaded.clone();
+    let rules_state = rules.clone();
+    use_effect_with((), move |()| {
+        if !*rules_loaded {
+            let rules_state = rules_state.clone();
+            let rules_loaded = rules_loaded.clone();
+            spawn_local(async move {
+                let request = Request::get(&format!("{API_ENDPOINT}/platform/node_alerts"));
+                if let Ok(data) = fetch_json::<NodeAlertRules>(locale, request).await {
+                    rules_state.set(data);
+                    rules_loaded.set(true);
+                }
+            });
+        }
+        || ()
+    });
+
+    let save_rules = save_node_alerts_callback(locale, &busy, &rules, &notice);
+
+    html! {
+        <div class="mt-6 p-6 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm">
+            <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+                {locale.t("targets.node_alerts_title")}
+            </h3>
+            <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1 mb-4">
+                {locale.t("targets.node_alerts_desc")}
+            </p>
+            { notice_view(&notice, |key| html! { {locale.t(key)} }) }
+            { node_alerts_form_view(locale, &rules) }
+            <div class="flex justify-end pt-4 mt-4 border-t border-neutral-200 dark:border-neutral-700">
+                <button type="button" class={BUTTON_CLASS} disabled={*busy} onclick={save_rules}>
+                    {locale.t("targets.node_alerts_save")}
+                </button>
+            </div>
+        </div>
+    }
+}
+
+fn node_alerts_form_view(locale: Locale, rules: &UseStateHandle<NodeAlertRules>) -> Html {
+    let toggle_enabled = checkbox_toggle(rules, |r| &mut r.enabled);
+    let disk_val = rules
+        .min_free_disk_percent
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let disk_input = node_alert_disk_input(rules);
+    let bw_val = rules
+        .bandwidth_spike_bytes_per_sec
+        .map(|v| (v / 1_000_000).to_string())
+        .unwrap_or_default();
+    let bw_input = node_alert_bw_input(rules);
+
+    html! {
+        <div class="space-y-4">
+            <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
+                <input type="checkbox" checked={rules.enabled} onchange={toggle_enabled} class="w-4 h-4 mr-2 rounded" />
+                {locale.t("targets.node_alerts_enabled")}
+            </label>
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("targets.node_alerts_min_disk")}</label>
+                <div class="flex items-center gap-2">
+                    <input
+                        type="number"
+                        min="1"
+                        max="90"
+                        placeholder="10"
+                        value={disk_val}
+                        oninput={disk_input}
+                        class={INPUT_CLASS}
+                    />
+                    <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{"%"}</span>
+                </div>
+                <p class={HINT_CLASS}>{locale.t("targets.node_alerts_min_disk_hint")}</p>
+            </div>
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("targets.node_alerts_bandwidth")}</label>
+                <div class="flex items-center gap-2">
+                    <input
+                        type="number"
+                        min="1"
+                        placeholder="100"
+                        value={bw_val}
+                        oninput={bw_input}
+                        class={INPUT_CLASS}
+                    />
+                    <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{"MB/s"}</span>
+                </div>
+                <p class={HINT_CLASS}>{locale.t("targets.node_alerts_bandwidth_hint")}</p>
+            </div>
+        </div>
+    }
+}
+
+fn node_alert_disk_input(rules: &UseStateHandle<NodeAlertRules>) -> Callback<InputEvent> {
+    let rules = rules.clone();
+    Callback::from(move |event: InputEvent| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let val = input.value().trim().parse::<u8>().ok();
+        let mut updated = *rules;
+        updated.min_free_disk_percent = val;
+        rules.set(updated);
+    })
+}
+
+fn node_alert_bw_input(rules: &UseStateHandle<NodeAlertRules>) -> Callback<InputEvent> {
+    let rules = rules.clone();
+    Callback::from(move |event: InputEvent| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let val = input
+            .value()
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .map(|mb| mb * 1_000_000);
+        let mut updated = *rules;
+        updated.bandwidth_spike_bytes_per_sec = val;
+        rules.set(updated);
+    })
+}
+
+fn save_node_alerts_callback(
+    locale: Locale,
+    busy: &UseStateHandle<bool>,
+    rules: &UseStateHandle<NodeAlertRules>,
+    notice: &UseStateHandle<Option<Notice<&'static str>>>,
+) -> Callback<MouseEvent> {
+    let (busy, rules, notice) = (busy.clone(), rules.clone(), notice.clone());
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let (busy, rules, notice) = (busy.clone(), rules.clone(), notice.clone());
+        spawn_local(async move {
+            busy.set(true);
+            let val = *rules;
+            let req = Request::put(&format!("{API_ENDPOINT}/platform/node_alerts")).json(&val);
+            match req {
+                Ok(req) => match send_request(locale, req).await {
+                    Ok(_) => notice.set(Some(Notice::Saved("targets.node_alerts_saved"))),
+                    Err(err) => notice.set(Some(Notice::Failed(err))),
+                },
+                Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
+            }
+            busy.set(false);
+        });
     })
 }
 

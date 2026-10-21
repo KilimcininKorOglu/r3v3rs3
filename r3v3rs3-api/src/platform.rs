@@ -780,6 +780,50 @@ impl AlertRules {
     }
 }
 
+/// Alert thresholds for host nodes, triggering webhook notifications when free disk space is low or bandwidth spikes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NodeAlertRules {
+    /// Whether node-level threshold alerts are enabled.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Minimum free disk space percentage before an alert is fired (e.g. 10 for < 10% free space).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_free_disk_percent: Option<u8>,
+    /// Network bandwidth spike threshold in bytes per second (e.g. 104_857_600 for 100 MB/s).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bandwidth_spike_bytes_per_sec: Option<u64>,
+}
+
+impl Default for NodeAlertRules {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_free_disk_percent: Some(10),
+            bandwidth_spike_bytes_per_sec: None,
+        }
+    }
+}
+
+impl NodeAlertRules {
+    pub fn validate(&self) -> Result<(), Error> {
+        if let Some(pct) = self.min_free_disk_percent
+            && (pct == 0 || pct > 90)
+        {
+            return Err(invalid(
+                "the minimum free disk percentage must be between 1 and 90",
+            ));
+        }
+        if let Some(bw) = self.bandwidth_spike_bytes_per_sec
+            && bw == 0
+        {
+            return Err(invalid(
+                "the bandwidth spike threshold must be greater than 0",
+            ));
+        }
+        Ok(())
+    }
+}
+
 fn is_false(b: &bool) -> bool {
     !*b
 }
@@ -2376,6 +2420,36 @@ mod tests {
             }
         }));
         assert!(invalid_mem.is_err());
+    }
+
+    #[test]
+    fn node_alert_rules_validation() {
+        let default_rules = NodeAlertRules::default();
+        assert!(default_rules.enabled);
+        assert_eq!(default_rules.min_free_disk_percent, Some(10));
+        assert_eq!(default_rules.bandwidth_spike_bytes_per_sec, None);
+        assert!(default_rules.validate().is_ok());
+
+        let custom = NodeAlertRules {
+            enabled: true,
+            min_free_disk_percent: Some(15),
+            bandwidth_spike_bytes_per_sec: Some(104_857_600),
+        };
+        assert!(custom.validate().is_ok());
+
+        let invalid_disk = NodeAlertRules {
+            enabled: true,
+            min_free_disk_percent: Some(95),
+            bandwidth_spike_bytes_per_sec: None,
+        };
+        assert!(invalid_disk.validate().is_err());
+
+        let zero_bw = NodeAlertRules {
+            enabled: true,
+            min_free_disk_percent: None,
+            bandwidth_spike_bytes_per_sec: Some(0),
+        };
+        assert!(zero_bw.validate().is_err());
     }
 
     #[test]
