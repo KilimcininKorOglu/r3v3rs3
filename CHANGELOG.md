@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.7] - 2026-10-21
+
+### Added
+- Automated AI scraper and crawler bot protection switch (`bot_blocker`) for HTTP/HTTPS proxies, individual routes, and platform applications.
+- Zero-allocation streaming User-Agent matcher blocking commercial AI training crawlers and aggressive data scrapers: GPTBot, ChatGPT-User, OAI-SearchBot, ClaudeBot, Claude-Web, anthropic-ai, Bytespider, CCBot, PerplexityBot, cohere-ai, Diffbot, FacebookBot, Meta-ExternalAgent, Google-Extended, Amazonbot, Scrapy, and SemrushBot.
+- Granular per-route overrides: selectively enable or disable bot blocking on public API endpoints or sensitive web routes.
+- WebUI toggles for bot protection on proxy creation/edit, route options, and application forms.
+
 ## [2.1.6] - 2026-10-21
 
 ### Added
