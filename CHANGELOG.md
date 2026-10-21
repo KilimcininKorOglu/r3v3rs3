@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.5] - 2026-10-22
+
+### Added
+- Multi-Node Dynamic Active Health Checks: Proactive background polling for application replicas deployed across multiple nodes; automatically wires `health_check_path` (or active TCP connection probes every 10 seconds for multi-replica apps) into the reverse proxy engine.
+- Automated Outlier Detection & Circuit Breaker: Outlier detection policy isolating failing replicas when failure ratio exceeds 50% over a 10s window for 30 seconds, automatically diverting client traffic to healthy nodes without dropped requests.
+- Target Node Drain & Maintenance Mode: Ability to place agent and local targets into maintenance mode ("Drain"), seamlessly removing their containers from active proxy load balancing pools while permitting in-flight connections to drain gracefully.
+- Admin API Target Drain Endpoints: `POST /api/targets/{id}/drain` and `POST /api/targets/{id}/undrain` registered in OpenAPI specifications with dedicated audit logging (`AuditAction::DrainTarget`, `AuditAction::UndrainTarget`).
+- WebUI Node Drain Controls & Drained Status Badge: One-click "Drain" and "Undrain" maintenance toggles with confirmation dialogs on the Targets page, alongside a visual purple "Drained" status badge for affected nodes.
+
 ## [2.2.4] - 2026-10-21
 
 ### Added
