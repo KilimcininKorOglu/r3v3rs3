@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.9] - 2026-10-21
+
+### Added
+- Real-time live access log streaming and interactive traffic inspection dashboard in WebUI with color-coded HTTP status badges (`2xx`, `3xx`, `4xx`, `5xx`), latency metrics (<50ms, 50-300ms, >300ms), and multi-criteria filters (proxy, client IP, HTTP status, search keyword).
+- Live Server-Sent Events (SSE) streaming endpoint (`GET /api/traffic/live`) with real-time push of access log entries matching client filters.
+- Recent in-memory circular access log buffer endpoint (`GET /api/traffic`) with query parameters and proxy scope authorization.
+- Instant proxy traffic shortcut: added "View Traffic" navigation button to proxy overview page.
+
+### Changed
+- CI: fixed test-gate workflow job boolean logic to accurately detect successful Rust runs on release commits and skip redundant test execution.
+
 ## [2.1.8] - 2026-10-21
 
 ### Added
