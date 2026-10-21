@@ -1534,6 +1534,8 @@
   "traffic.auto_scroll": "Otomatik Kaydır",
   "traffic.clear": "Temizle",
   "traffic.download": "Logları Dışa Aktar",
+  "traffic.grafana_dashboard": "Grafana Panosu",
+  "traffic.grafana_tooltip": "Grafana için hazır içe aktarılabilir pano JSON dosyasını indir",
   "traffic.search_placeholder": "URL, IP, host veya metot ile filtrele...",
   "traffic.filter_all_status": "Tüm Durum Kodları",
   "traffic.filter_2xx": "2xx Başarılı",

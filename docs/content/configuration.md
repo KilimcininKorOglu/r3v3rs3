@@ -1361,12 +1361,17 @@ A change of the defaults rebuilds every port, so it takes effect without a resta
 
 `GET /api/metrics` returns the counters of the running process in the Prometheus text format (`text/plain; version=0.0.4`):
 
-- `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: the proxied requests.
+- `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: the proxied requests across TCP/TLS and QUIC.
+- `r3v3rs3_rx_bytes_total`, `r3v3rs3_tx_bytes_total`: total network throughput in bytes received and transmitted to clients.
+- `r3v3rs3_http_responses_by_status_total`: HTTP responses partitioned by status class (`2xx`, `3xx`, `4xx`, `5xx`).
 - `r3v3rs3_upstream_errors_total`: the requests that were answered without a successful upstream response.
 - `r3v3rs3_upstream_errors_by_kind_total`: upstream errors partitioned by failure kind (`timeout`, `connect`, `circuit_open`, `no_route`, `other`).
 - `r3v3rs3_http_request_duration_seconds`: request duration latency histogram with standard buckets (`0.005s` to `10s`), sum, and count.
 - `r3v3rs3_http_request_duration_quantiles_seconds`: recent request duration quantiles (`p50`, `p95`, `p99`) in seconds.
-- `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`: the cache decisions of the cached proxies.
+- `r3v3rs3_tls_handshakes_total`, `r3v3rs3_tls_handshake_errors_total`: total completed and failed TLS handshakes.
+- `r3v3rs3_tls_handshake_duration_seconds`: TLS handshake duration latency histogram with buckets (`0.001s` to `2.5s`), sum, and count.
+- `r3v3rs3_tls_handshake_duration_quantiles_seconds`: recent TLS handshake duration quantiles (`p50`, `p95`, `p99`) in seconds.
+- `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`, `r3v3rs3_cache_bypasses_total`: cache decisions (hits, misses, and uncacheable bypasses).
 - `r3v3rs3_open_connections`: the client connection tasks that still run.
 - `r3v3rs3_process_open_fds`, `r3v3rs3_process_max_fds`: open and maximum allowed file descriptors.
 - `r3v3rs3_process_resident_memory_bytes`, `r3v3rs3_process_virtual_memory_bytes`: resident and virtual memory usage in bytes.
@@ -1374,7 +1379,32 @@ A change of the defaults rebuilds every port, so it takes effect without a resta
 
 Sending `Accept: application/json` returns the system self-monitoring metrics as a JSON object.
 
-An admin session cookie or a valid MCP Bearer token authorizes the request, so a Prometheus job can scrape it with `bearer_token` while the WebUI uses its cookie. The counters count one process: with worker mode, the worker serves the ports and keeps its own counters, which `GET /api/workers` reports separately.
+An admin session cookie or a valid MCP / API Bearer token authorizes the request, so a Prometheus job can scrape it with `bearer_token` while the WebUI uses its cookie. The counters count one process: with worker mode, the worker serves the ports and keeps its own counters, which `GET /api/workers` reports separately.
+
+### Grafana Dashboard
+
+A production-ready Grafana dashboard is bundled directly into r3v3rs3. You can download it directly from the endpoint `GET /api/metrics/grafana` or via the **Grafana Dashboard** button on the Live Traffic page in the WebUI.
+
+The dashboard includes 5 visual sections:
+1. **Key Performance Indicators**: Total request throughput rate, active connection count, p95 request latency, cache hit ratio, TLS handshake success rate, and Tokio runtime event loop lag.
+2. **Traffic & Throughput**: Protocols comparison (HTTP/1.1 & HTTP/2 vs HTTP/3), response status classes distribution (2xx, 3xx, 4xx, 5xx), and RX/TX network bandwidth.
+3. **Latency & TLS Performance**: Request latency quantiles (p50, p95, p99), TLS handshake duration quantiles, and TLS handshake volume vs failure rate.
+4. **Upstream Reliability & Caching**: Upstream errors breakdown by failure kind (timeout, connect, circuit breaker, no route), and cache hit/miss/bypass rates.
+5. **System Health & Resources**: Resident (RSS) and Virtual (VM) process memory consumption, open file descriptors vs limits, and event loop latency.
+
+Example Prometheus scrape configuration:
+
+```yaml
+scrape_configs:
+  - job_name: 'r3v3rs3'
+    metrics_path: '/api/metrics'
+    scheme: 'http'
+    static_configs:
+      - targets: ['127.0.0.1:46492']
+    authorization:
+      type: Bearer
+      credentials: 'YOUR_API_TOKEN'
+```
 
 ## MCP Server
 

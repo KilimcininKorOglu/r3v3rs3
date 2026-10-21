@@ -14,7 +14,7 @@ use axum::{
 use axum_extra::extract::CookieJar;
 
 /// The exported metrics with their Prometheus HELP and TYPE lines.
-const METRICS: [(&str, &str, &str); 6] = [
+const METRICS: [(&str, &str, &str); 11] = [
     (
         "r3v3rs3_http_requests_total",
         "The proxied HTTP requests on the TCP and TLS ports of this process.",
@@ -23,6 +23,16 @@ const METRICS: [(&str, &str, &str); 6] = [
     (
         "r3v3rs3_h3_requests_total",
         "The proxied HTTP/3 requests on the QUIC ports of this process.",
+        "counter",
+    ),
+    (
+        "r3v3rs3_rx_bytes_total",
+        "The total bytes received from clients by this process.",
+        "counter",
+    ),
+    (
+        "r3v3rs3_tx_bytes_total",
+        "The total bytes transmitted to clients by this process.",
         "counter",
     ),
     (
@@ -41,9 +51,24 @@ const METRICS: [(&str, &str, &str); 6] = [
         "counter",
     ),
     (
+        "r3v3rs3_cache_bypasses_total",
+        "The requests that bypassed the cache.",
+        "counter",
+    ),
+    (
         "r3v3rs3_open_connections",
         "The client connection tasks that still run in this process.",
         "gauge",
+    ),
+    (
+        "r3v3rs3_tls_handshakes_total",
+        "The completed TLS handshakes of this process.",
+        "counter",
+    ),
+    (
+        "r3v3rs3_tls_handshake_errors_total",
+        "The failed TLS handshakes of this process.",
+        "counter",
     ),
 ];
 
@@ -164,6 +189,57 @@ fn format_latency_quantile_metrics(out: &mut String) {
     ));
 }
 
+fn format_http_status_metrics(out: &mut String) {
+    out.push_str(
+        "# HELP r3v3rs3_http_responses_by_status_total The HTTP responses partitioned by status class.\n",
+    );
+    out.push_str("# TYPE r3v3rs3_http_responses_by_status_total counter\n");
+    for (status, count) in stats::snapshot_http_statuses() {
+        out.push_str("r3v3rs3_http_responses_by_status_total{status=\"");
+        out.push_str(status);
+        out.push_str("\"} ");
+        out.push_str(&count.to_string());
+        out.push('\n');
+    }
+}
+
+fn format_tls_handshake_histogram_metrics(out: &mut String) {
+    out.push_str(
+        "# HELP r3v3rs3_tls_handshake_duration_seconds TLS handshake latencies in seconds.\n",
+    );
+    out.push_str("# TYPE r3v3rs3_tls_handshake_duration_seconds histogram\n");
+    let (buckets, inf_count, sum, count) = stats::snapshot_tls_handshake_histogram();
+    for (le, bucket_count) in buckets {
+        out.push_str("r3v3rs3_tls_handshake_duration_seconds_bucket{le=\"");
+        out.push_str(&le.to_string());
+        out.push_str("\"} ");
+        out.push_str(&bucket_count.to_string());
+        out.push('\n');
+    }
+    out.push_str("r3v3rs3_tls_handshake_duration_seconds_bucket{le=\"+Inf\"} ");
+    out.push_str(&inf_count.to_string());
+    out.push_str("\nr3v3rs3_tls_handshake_duration_seconds_sum ");
+    out.push_str(&format!("{sum:.6}"));
+    out.push_str("\nr3v3rs3_tls_handshake_duration_seconds_count ");
+    out.push_str(&count.to_string());
+    out.push('\n');
+}
+
+fn format_tls_handshake_quantile_metrics(out: &mut String) {
+    out.push_str("# HELP r3v3rs3_tls_handshake_duration_quantiles_seconds TLS handshake latency quantiles (p50, p95, p99) in seconds.\n");
+    out.push_str("# TYPE r3v3rs3_tls_handshake_duration_quantiles_seconds summary\n");
+    let (p50, p95, p99) = stats::tls_latency_quantiles();
+    out.push_str(&format!(
+        "r3v3rs3_tls_handshake_duration_quantiles_seconds{{quantile=\"0.5\"}} {p50:.6}\n"
+    ));
+    out.push_str(&format!(
+        "r3v3rs3_tls_handshake_duration_quantiles_seconds{{quantile=\"0.95\"}} {p95:.6}\n"
+    ));
+    out.push_str(&format!(
+        "r3v3rs3_tls_handshake_duration_quantiles_seconds{{quantile=\"0.99\"}} {p99:.6}\n"
+    ));
+}
+
 fn format_system_metrics(out: &mut String, sys: &super::system_metrics::SystemMetricsSnapshot) {
     if let Some(fds) = sys.open_fds {
         out.push_str("# HELP r3v3rs3_process_open_fds The number of open file descriptors.\n");
@@ -241,9 +317,12 @@ pub async fn metrics(
     let mut out = String::new();
     let values = stats::snapshot();
     format_basic_metrics(&mut out, &values);
+    format_http_status_metrics(&mut out);
     format_upstream_error_metrics(&mut out);
     format_latency_histogram_metrics(&mut out);
     format_latency_quantile_metrics(&mut out);
+    format_tls_handshake_histogram_metrics(&mut out);
+    format_tls_handshake_quantile_metrics(&mut out);
     format_system_metrics(&mut out, &sys);
     Ok((
         [(
@@ -256,3 +335,31 @@ pub async fn metrics(
 }
 
 const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
+
+/// Exports the pre-configured Grafana dashboard JSON.
+#[utoipa::path(
+    get,
+    path = "/grafana",
+    tag = "metrics",
+    operation_id = "get_grafana_dashboard",
+    responses(
+        (status = 200, description = "The ready-to-import Grafana dashboard JSON.", body = String),
+        (status = 401, description = "No active admin session or Bearer token."),
+    )
+)]
+pub async fn grafana_dashboard(
+    Extension(_caller): Extension<Caller>,
+) -> Result<Response, AppError> {
+    const DASHBOARD: &str = include_str!("../../data/r3v3rs3-grafana.json");
+    Ok((
+        [
+            (
+                HeaderName::from_static("content-type"),
+                "application/json; charset=utf-8",
+            ),
+            (HeaderName::from_static("cache-control"), "no-store"),
+        ],
+        DASHBOARD,
+    )
+        .into_response())
+}

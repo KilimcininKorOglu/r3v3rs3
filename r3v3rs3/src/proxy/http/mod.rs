@@ -592,6 +592,14 @@ async fn proxied_response(
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let start = std::time::Instant::now();
     crate::proxy::stats::count_http_request();
+    if let Some(cl) = req
+        .headers()
+        .get(hyper::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        crate::proxy::stats::record_rx_bytes(cl);
+    }
     let method = req.method().to_string();
     let uri = req.uri().to_string();
     let host = req
@@ -648,9 +656,20 @@ fn record_access_log<B>(
     mapped: &Result<Response<B>, anyhow::Error>,
 ) {
     let (status, error) = match mapped {
-        Ok(res) => (res.status().as_u16(), None),
+        Ok(res) => {
+            if let Some(cl) = res
+                .headers()
+                .get(hyper::header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+            {
+                crate::proxy::stats::record_tx_bytes(cl);
+            }
+            (res.status().as_u16(), None)
+        }
         Err(err) => (502, Some(err.to_string())),
     };
+    crate::proxy::stats::record_http_response(status);
     crate::proxy::access_log::record(r3v3rs3_api::traffic::AccessLogEntry {
         id: 0,
         timestamp: time::OffsetDateTime::now_utc(),
@@ -685,8 +704,17 @@ async fn handshake(
         return Ok(Some((stream, TlsInfo::default())));
     };
     debug!(%remote, "server: tls handshake");
-    let Handshake::Established(accepted) = tls.accept(stream).await? else {
-        return Ok(None);
+    let start = std::time::Instant::now();
+    let accepted = match tls.accept(stream).await {
+        Ok(Handshake::Established(accepted)) => {
+            super::stats::record_tls_handshake(start.elapsed());
+            accepted
+        }
+        Ok(Handshake::ChallengeServed) => return Ok(None),
+        Err(err) => {
+            super::stats::count_tls_handshake_error();
+            return Err(err.into());
+        }
     };
     let conn = &accepted.get_ref().1;
     let info = TlsInfo {
@@ -1120,6 +1148,9 @@ where
         .cache
         .as_ref()
         .and_then(|cache| CacheRequest::new(cache, &mut req, cache_key, authorized));
+    if route.cache.is_some() && cache_request.is_none() {
+        super::stats::count_cache_bypass();
+    }
     (
         ProxiedRequest::Ok(req, upstream, span, cache_request, concurrency_guard),
         response_rewriter,
@@ -1288,6 +1319,14 @@ where
     let start = std::time::Instant::now();
     let method = req.method().to_string();
     let uri = req.uri().to_string();
+    if let Some(cl) = req
+        .headers()
+        .get(hyper::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        crate::proxy::stats::record_rx_bytes(cl);
+    }
     let host = req
         .headers()
         .get(hyper::header::HOST)
@@ -1302,6 +1341,8 @@ where
 
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
+    let duration = start.elapsed();
+    crate::proxy::stats::record_request_duration(duration);
     record_access_log(
         AccessLogMeta {
             resource_id,
@@ -1311,7 +1352,7 @@ where
             uri,
             proto: "h3".to_string(),
         },
-        start.elapsed(),
+        duration,
         &mapped,
     );
     let (parts, body) = mapped?.into_parts();

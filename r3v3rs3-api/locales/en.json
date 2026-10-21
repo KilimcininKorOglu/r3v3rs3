@@ -1534,6 +1534,8 @@
   "traffic.auto_scroll": "Auto-scroll",
   "traffic.clear": "Clear",
   "traffic.download": "Export Logs",
+  "traffic.grafana_dashboard": "Grafana Dashboard",
+  "traffic.grafana_tooltip": "Download ready-to-import Grafana dashboard JSON",
   "traffic.search_placeholder": "Filter by URL, IP, host, method...",
   "traffic.filter_all_status": "All Statuses",
   "traffic.filter_2xx": "2xx Success",

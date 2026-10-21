@@ -1361,12 +1361,17 @@ Varsayılanlarda yapılan bir değişiklik her portu yeniden kurar, yani restart
 
 `GET /api/metrics` çalışan sürecin sayaçlarını Prometheus text formatında (`text/plain; version=0.0.4`) döndürür:
 
-- `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: proxy'lenen istekler.
+- `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: TCP/TLS ve QUIC üzerinde proxy'lenen istekler.
+- `r3v3rs3_rx_bytes_total`, `r3v3rs3_tx_bytes_total`: istemcilerden alınan ve istemcilere iletilen toplam ağ bant genişliği (bayt).
+- `r3v3rs3_http_responses_by_status_total`: durum sınıfına göre ayrılmış HTTP yanıtları (`2xx`, `3xx`, `4xx`, `5xx`).
 - `r3v3rs3_upstream_errors_total`: başarılı bir upstream yanıtı olmadan yanıtlanan istekler.
 - `r3v3rs3_upstream_errors_by_kind_total`: hata türüne göre ayrılmış upstream hataları (`timeout`, `connect`, `circuit_open`, `no_route`, `other`).
 - `r3v3rs3_http_request_duration_seconds`: standart sepetlerle (`0.005s` - `10s`), toplam süre ve sayaç içeren istek gecikme histogramı.
 - `r3v3rs3_http_request_duration_quantiles_seconds`: son isteklerin saniye cinsinden gecikme dilimleri (`p50`, `p95`, `p99`).
-- `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`: cache'i açık proxy'lerin cache kararları.
+- `r3v3rs3_tls_handshakes_total`, `r3v3rs3_tls_handshake_errors_total`: tamamlanan ve başarısız olan toplam TLS el sıkışmaları.
+- `r3v3rs3_tls_handshake_duration_seconds`: sepetlerle (`0.001s` - `2.5s`), toplam süre ve sayaç içeren TLS el sıkışma gecikme histogramı.
+- `r3v3rs3_tls_handshake_duration_quantiles_seconds`: son TLS el sıkışmalarının saniye cinsinden gecikme dilimleri (`p50`, `p95`, `p99`).
+- `r3v3rs3_cache_hits_total`, `r3v3rs3_cache_misses_total`, `r3v3rs3_cache_bypasses_total`: cache kararları (isabet, kaçırma ve atlama).
 - `r3v3rs3_open_connections`: açık istemci bağlantıları.
 - `r3v3rs3_process_open_fds`, `r3v3rs3_process_max_fds`: açık ve izin verilen maksimum dosya tanımlayıcı (fd) sayısı.
 - `r3v3rs3_process_resident_memory_bytes`, `r3v3rs3_process_virtual_memory_bytes`: bayt cinsinden yerleşik (RSS) ve sanal bellek kullanımı.
@@ -1374,7 +1379,32 @@ Varsayılanlarda yapılan bir değişiklik her portu yeniden kurar, yani restart
 
 `Accept: application/json` başlığı gönderildiğinde sistem öz izleme (self-monitoring) metrikleri JSON formatında döner.
 
-İsteği bir admin session cookie'si veya geçerli bir MCP Bearer token'ı yetkilendirir. Bir Prometheus job'ı `bearer_token` ile scrape ederken WebUI cookie'sini kullanmaya devam edebilir. Sayaçlar tek süreci sayar: worker modunda portları worker sunar ve kendi sayaçlarını tutar, worker durumu ayrıca `GET /api/workers` üzerinden raporlanır.
+İsteği bir admin session cookie'si veya geçerli bir MCP / API Bearer token'ı yetkilendirir. Bir Prometheus job'ı `bearer_token` ile scrape ederken WebUI cookie'sini kullanmaya devam edebilir. Sayaçlar tek süreci sayar: worker modunda portları worker sunar ve kendi sayaçlarını tutar, worker durumu ayrıca `GET /api/workers` üzerinden raporlanır.
+
+### Grafana Panosu
+
+r3v3rs3 ile doğrudan paketlenmiş, üretime hazır bir Grafana panosu sunulur. Bu panoyu `GET /api/metrics/grafana` uç noktasından veya WebUI Canlı Trafik sayfasındaki **Grafana Panosu** butonu üzerinden doğrudan JSON olarak indirebilirsiniz.
+
+Pano 5 görsel bölüm içerir:
+1. **Temel Performans Göstergeleri (KPI)**: Toplam istek akış hızı, aktif bağlantı sayısı, p95 istek gecikmesi, önbellek isabet oranı (cache hit ratio), TLS el sıkışma başarı oranı ve Tokio event loop gecikmesi.
+2. **Trafik & Akış Hızı**: Protokol karşılaştırması (HTTP/1.1 & HTTP/2 ile HTTP/3), HTTP yanıt durum dağılımı (2xx, 3xx, 4xx, 5xx) ve gelen/giden ağ bant genişliği (RX/TX).
+3. **Gecikme & TLS Performansı**: İstek gecikme dilimleri (p50, p95, p99), TLS el sıkışma süresi dilimleri ve TLS el sıkışma başarı/hata oranları.
+4. **Upstream Güvenilirliği & Önbellekleme**: Hata türüne göre upstream hataları (zaman aşımı, bağlantı hatası, devre kesici, rota bulunamadı) ve önbellek kararları.
+5. **Sistem Sağlığı & Kaynaklar**: Yerleşik (RSS) ve sanal bellek kullanımı, açık dosya tanımlayıcıları ile sınırları ve olay döngüsü gecikmesi.
+
+Örnek Prometheus scrape yapılandırması:
+
+```yaml
+scrape_configs:
+  - job_name: 'r3v3rs3'
+    metrics_path: '/api/metrics'
+    scheme: 'http'
+    static_configs:
+      - targets: ['127.0.0.1:46492']
+    authorization:
+      type: Bearer
+      credentials: 'YOUR_API_TOKEN'
+```
 
 ## MCP Sunucusu
 

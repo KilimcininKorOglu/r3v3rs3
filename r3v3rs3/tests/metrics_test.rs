@@ -102,19 +102,28 @@ async fn the_metrics_need_a_session_or_a_bearer_token() -> anyhow::Result<()> {
         for name in [
             "r3v3rs3_http_requests_total",
             "r3v3rs3_h3_requests_total",
+            "r3v3rs3_rx_bytes_total",
+            "r3v3rs3_tx_bytes_total",
             "r3v3rs3_upstream_errors_total",
             "r3v3rs3_cache_hits_total",
             "r3v3rs3_cache_misses_total",
+            "r3v3rs3_cache_bypasses_total",
             "r3v3rs3_open_connections",
+            "r3v3rs3_tls_handshakes_total",
+            "r3v3rs3_tls_handshake_errors_total",
+            "r3v3rs3_http_responses_by_status_total",
             "r3v3rs3_upstream_errors_by_kind_total",
             "r3v3rs3_http_request_duration_seconds",
             "r3v3rs3_http_request_duration_quantiles_seconds",
+            "r3v3rs3_tls_handshake_duration_seconds",
+            "r3v3rs3_tls_handshake_duration_quantiles_seconds",
         ] {
             assert!(
                 body.contains(&format!("# TYPE {name} ")),
                 "the metrics miss {name}"
             );
         }
+        assert!(body.contains("status=\"2xx\""));
         assert!(body.contains("quantile=\"0.5\""));
         assert!(body.contains("quantile=\"0.95\""));
         assert!(body.contains("quantile=\"0.99\""));
@@ -139,6 +148,38 @@ async fn the_metrics_need_a_session_or_a_bearer_token() -> anyhow::Result<()> {
         );
         let val: serde_json::Value = res_json.json().await?;
         assert!(val.get("event_loop_lag_seconds").is_some());
+
+        // Grafana dashboard endpoint
+        let grafana_url = format!("http://{addr}/api/metrics/grafana");
+        let res_grafana_anon = client.get(&grafana_url).send().await?;
+        assert_eq!(res_grafana_anon.status(), StatusCode::UNAUTHORIZED);
+
+        let res_grafana = client
+            .get(&grafana_url)
+            .header("cookie", &cookie)
+            .send()
+            .await?;
+        assert_eq!(res_grafana.status(), StatusCode::OK);
+        assert!(
+            res_grafana
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .starts_with("application/json")
+        );
+        let dash: serde_json::Value = res_grafana.json().await?;
+        assert_eq!(
+            dash.get("title").and_then(|v| v.as_str()),
+            Some("r3v3rs3 Reverse Proxy Overview")
+        );
+        assert!(
+            dash.get("panels")
+                .and_then(|v| v.as_array())
+                .map(|p| p.len())
+                .unwrap_or(0)
+                >= 10
+        );
         Ok(())
     })
     .await

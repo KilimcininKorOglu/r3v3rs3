@@ -165,6 +165,18 @@ fn header_view(locale: Locale, on_back: Callback<MouseEvent>, controls: HeaderCo
                 >
                     {locale.t("traffic.download")}
                 </button>
+                <a
+                    href="/api/metrics/grafana"
+                    target="_blank"
+                    download="r3v3rs3-grafana-overview.json"
+                    title={locale.t("traffic.grafana_tooltip")}
+                    class="inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-medium"
+                >
+                    <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    {locale.t("traffic.grafana_dashboard")}
+                </a>
             </div>
         </div>
     }

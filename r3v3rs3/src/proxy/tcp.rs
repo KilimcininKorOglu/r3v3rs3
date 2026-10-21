@@ -286,17 +286,31 @@ async fn start(
     let mut stream: Box<dyn IoStream> = Box::new(server_stream);
     if let Some(tls) = tls {
         debug!(%remote, "server: tls handshake");
-        match tls.accept(stream).await? {
-            Handshake::Established(accepted) => stream = accepted,
-            Handshake::ChallengeServed => return Ok(()),
+        let start = std::time::Instant::now();
+        match tls.accept(stream).await {
+            Ok(Handshake::Established(accepted)) => {
+                super::stats::record_tls_handshake(start.elapsed());
+                stream = accepted;
+            }
+            Ok(Handshake::ChallengeServed) => return Ok(()),
+            Err(err) => {
+                super::stats::count_tls_handshake_error();
+                return Err(err.into());
+            }
         }
     }
 
     let (target, mut out, _guard) = upstream.connect(&resolver, (remote, local)).await?;
     info!(target: "r3v3rs3::access_log", remote = %remote, %peer, %local, %target);
 
-    if let Err(err) = tokio::io::copy_bidirectional(&mut stream, &mut out).await {
-        error!("{err}");
+    match tokio::io::copy_bidirectional(&mut stream, &mut out).await {
+        Ok((rx, tx)) => {
+            super::stats::record_rx_bytes(rx);
+            super::stats::record_tx_bytes(tx);
+        }
+        Err(err) => {
+            error!("{err}");
+        }
     }
 
     stream.shutdown().await?;

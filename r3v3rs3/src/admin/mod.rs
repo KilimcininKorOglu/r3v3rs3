@@ -313,7 +313,9 @@ fn metrics_routes(state: &AppState) -> OpenApiRouter<AppState> {
     let verify = middleware::from_fn_with_state(state.clone(), metrics::verify_metrics);
     OpenApiRouter::new().nest(
         "/api/metrics",
-        OpenApiRouter::new().routes(routes!(metrics::metrics).layer(verify)),
+        OpenApiRouter::new()
+            .routes(routes!(metrics::metrics).layer(verify.clone()))
+            .routes(routes!(metrics::grafana_dashboard).layer(verify)),
     )
 }
 
