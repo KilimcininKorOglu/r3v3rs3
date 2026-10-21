@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.6] - 2026-10-22
+
+### Added
+- Reactive Disk-Pressure Emergency Pruning: Automated Docker resource pruning triggered whenever node disk usage meets or exceeds the configured percentage threshold (default: 85%), with a 15-minute anti-thrashing cooldown and audit logging.
+- Outbound Disk Pressure Webhooks: Dispatches `system.disk_pressure` webhook event notifications detailing reclaimed disk bytes and deleted container, image, cache, and volume counts upon emergency prune execution.
+- WebUI Disk Pressure Threshold Control: Configurable threshold input field (%) with explanatory hints and last emergency prune execution timestamp on the Targets page.
+- Web Terminal Multi-Shell Selection: Interactive shell switcher supporting `/bin/sh`, `/bin/bash`, and `/bin/zsh` with automatic graceful fallback to `/bin/sh` on minimalist container images.
+- Database CLI Console Shortcuts: Direct one-click interactive terminal shortcuts for managed databases (`psql`, `mysql`, `mariadb`, `redis-cli`, `mongosh`) with pre-applied connection credentials.
+- Web Terminal Session Utilities: In-browser terminal tools to clear screen buffer and copy full session console output directly to the clipboard.
+
+### Changed
+- Streamlined Release Pipeline: Removed crates.io publish step from CI workflows; releases and distribution are strictly focused on GitHub Releases and `install.sh`.
+
 ## [2.2.5] - 2026-10-22
 
 ### Added
