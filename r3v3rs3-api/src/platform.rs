@@ -740,6 +740,84 @@ pub struct AppSpec {
     /// If this app is an ephemeral preview environment, the id of the parent app and PR number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_of: Option<PreviewParent>,
+
+    /// Optional BuildKit configuration for Git-based image builds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buildkit: Option<BuildKitConfig>,
+}
+
+/// Configuration for BuildKit remote builders and cache mounts.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BuildKitConfig {
+    /// Whether BuildKit is enabled for building this app's image.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Remote BuildKit daemon address (e.g. `tcp://buildkitd:1234` or `unix:///run/buildkit/buildkitd.sock`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "tcp://buildkitd:1234")]
+    pub remote_addr: Option<String>,
+
+    /// Preset cache mounts to enable for popular language ecosystems.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cache_mounts: Vec<CacheMountPreset>,
+
+    /// Additional custom directory paths to mount as BuildKit cache.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(example = json!(["/root/.cargo/registry", "/root/.npm"]))]
+    pub custom_cache_paths: Vec<String>,
+
+    /// Optional external cache source for `--cache-from` (e.g. `type=local,src=/tmp/cache` or `type=registry,ref=...`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "type=registry,ref=myregistry/cache:app")]
+    pub cache_from: Option<String>,
+
+    /// Optional external cache destination for `--cache-to` (e.g. `type=local,dest=/tmp/cache,mode=max`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "type=registry,ref=myregistry/cache:app,mode=max")]
+    pub cache_to: Option<String>,
+}
+
+/// Popular language ecosystem cache mount presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheMountPreset {
+    Cargo,
+    Npm,
+    Pnpm,
+    Yarn,
+    Go,
+    Pip,
+    Maven,
+    Gradle,
+}
+
+impl CacheMountPreset {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Cargo => "cargo",
+            Self::Npm => "npm",
+            Self::Pnpm => "pnpm",
+            Self::Yarn => "yarn",
+            Self::Go => "go",
+            Self::Pip => "pip",
+            Self::Maven => "maven",
+            Self::Gradle => "gradle",
+        }
+    }
+
+    pub fn paths(self) -> &'static [&'static str] {
+        match self {
+            Self::Cargo => &["/root/.cargo/registry", "/root/.cargo/git", "/app/target"],
+            Self::Npm => &["/root/.npm"],
+            Self::Pnpm => &["/root/.local/share/pnpm/store"],
+            Self::Yarn => &["/usr/local/share/.cache/yarn"],
+            Self::Go => &["/root/.cache/go-build", "/go/pkg/mod"],
+            Self::Pip => &["/root/.cache/pip"],
+            Self::Maven => &["/root/.m2"],
+            Self::Gradle => &["/root/.gradle"],
+        }
+    }
 }
 
 /// Configuration for ephemeral preview deployments for pull/merge requests.
@@ -822,13 +900,14 @@ impl AppSpec {
         }
         self.validate_domains()?;
         self.validate_compose()?;
-        self.validate_optional_fields()?;
+        self.validate_runtime_policies()?;
+        self.validate_build_options()?;
         self.validate_volumes()?;
         self.validate_database()?;
         self.validate_targets()
     }
 
-    fn validate_optional_fields(&self) -> Result<(), Error> {
+    fn validate_runtime_policies(&self) -> Result<(), Error> {
         if let Some(path) = &self.health_check_path {
             validate_health_path(path)?;
         }
@@ -841,8 +920,25 @@ impl AppSpec {
         if let Some(sticky) = &self.sticky {
             sticky.validate()?;
         }
+        Ok(())
+    }
+
+    fn validate_build_options(&self) -> Result<(), Error> {
         self.validate_git_config()?;
+        self.validate_buildkit()?;
         self.validate_tag_trigger()
+    }
+
+    fn validate_buildkit(&self) -> Result<(), Error> {
+        let Some(buildkit) = &self.buildkit else {
+            return Ok(());
+        };
+        if buildkit.enabled && !matches!(self.source, AppSource::Git { .. }) {
+            return Err(invalid(
+                "BuildKit can only be enabled for Git-based applications",
+            ));
+        }
+        Ok(())
     }
 
     fn validate_git_config(&self) -> Result<(), Error> {

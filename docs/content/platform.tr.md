@@ -141,7 +141,22 @@ Private bir repo, bir [Git sağlayıcı](#git-saglayicilari) bağlantısı veya 
 
 r3v3rs3'ü çalıştıran sunucuda `git` binary'si bulunmalıdır. r3v3rs3, `git`'i host'un yapılandırması ve hook'lar olmadan, yalnız HTTPS üzerinden çalıştırır. Build context'inde `.git` dizini yer almaz. Context'teki bir sembolik link link olarak kalır. Bu yüzden bir build, repo dışındaki bir dosyayı okuyamaz. Context en fazla 512 MiB olabilir.
 
-Docker image'ı klasik builder ile build eder. Aynı anda iki build çalışır, diğerleri sırada bekler. Builder, çok aşamalı bir Dockerfile'ın aşamalarını build cache'i olarak saklar. Bu yüzden aynı uygulamanın sonraki build'i daha hızlı biter. `docker image prune` bu cache'i siler.
+Docker image'ı builder ile build eder. Aynı anda iki build çalışır, diğerleri sırada bekler. Builder, çok aşamalı bir Dockerfile'ın aşamalarını build cache'i olarak saklar. Bu yüzden aynı uygulamanın sonraki build'i daha hızlı biter. `docker image prune` bu cache'i siler.
+
+#### BuildKit ve Derleme Önbellekleri
+
+Git tabanlı uygulamalar derlenirken r3v3rs3, otomatik önbellek bağlama (cache mount) enjeksiyonu ile Docker Buildx / BuildKit derleyicisini destekler:
+
+- **BuildKit ve Derleme Önbelleğini Etkinleştir**: Eski klasik Docker derleyicisi yerine `docker buildx build --load` komutunu çalıştırır.
+- **Uzak BuildKit Derleyicisi**: Ağır derleme işlemlerini ana sunucudan dışarı aktarmak için isteğe bağlı olarak harici bir BuildKit daemon uç noktasına (`buildkit.remote_addr`, ör. `tcp://10.0.0.5:1234` veya `unix:///run/buildkit/buildkitd.sock`) bağlanabilir.
+- **Otomatik Önbellek Bağlama Şablonları**: r3v3rs3, popüler programlama dilleri ve paket yöneticileri için Dockerfile'ı elle değiştirmeye gerek kalmadan `# syntax=docker/dockerfile:1` ve `--mount=type=cache` yönergelerini `RUN` adımlarına otomatik olarak enjekte eder:
+  - `Cargo`: `/usr/local/cargo/registry` ve `/root/.cargo/registry` dizinlerini önbelleğe alır.
+  - `Npm` / `Pnpm` / `Yarn`: `/root/.npm`, `/root/.pnpm-store` ve `/usr/local/share/.cache/yarn` dizinlerini önbelleğe alır.
+  - `Go`: `/go/pkg/mod` ve `/root/.cache/go-build` dizinlerini önbelleğe alır.
+  - `Pip`: `/root/.cache/pip` dizinini önbelleğe alır.
+  - `Maven` / `Gradle`: `/root/.m2` ve `/root/.gradle` dizinlerini önbelleğe alır.
+- **Özel Önbellek Bağlamaları**: Konteyner içinde satır başına özel hedef dizin yolları belirleyebilirsiniz.
+- **Dış Önbellek Desteği**: Katmanların birden çok sunucu veya CI çalıştırmasında yeniden kullanılabilmesi için `cache_from` ve `cache_to` parametrelerini (ör. `type=registry,ref=myregistry/app:cache,mode=max` veya `type=local,src=...`) yapılandırabilirsiniz.
 
 ### Compose kaynağı
 

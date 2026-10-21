@@ -366,6 +366,7 @@ mod tests {
             env_groups: Vec::new(),
             preview: None,
             preview_of: None,
+            buildkit: None,
         })
     }
 

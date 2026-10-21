@@ -10,7 +10,7 @@ use anyhow::Context as _;
 use r3v3rs3_api::container::ImageRef;
 use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::DeploymentStatus;
+use r3v3rs3_api::platform::{BuildKitConfig, DeploymentStatus};
 use std::path::Path;
 use tracing::error;
 
@@ -33,6 +33,7 @@ pub(super) struct GitBuild {
     pub dockerfile: RelPath,
     /// The Git provider connection that clones the repository.
     pub connection: Option<ShortId>,
+    pub buildkit: Option<r3v3rs3_api::platform::BuildKitConfig>,
 }
 
 impl Platform {
@@ -79,10 +80,13 @@ impl Platform {
             )
             .await?;
         self.store.set_commit_sha(deployment, &sha).await?;
+        let tag = build_tag(app, deployment)?;
+        if let Some(img_id) = try_buildkit(source, &checkout, &tag).await {
+            return Ok(img_id);
+        }
         let context = source.context.clone();
         let archive =
             tokio::task::spawn_blocking(move || context_archive(&checkout, &context)).await??;
-        let tag = build_tag(app, deployment)?;
         runtime.build_image(archive, &source.dockerfile, &tag).await
     }
 
@@ -124,6 +128,31 @@ impl Platform {
                 .await?;
         }
         Ok(())
+    }
+}
+
+async fn try_buildkit(source: &GitBuild, checkout: &Path, tag: &ImageRef) -> Option<String> {
+    let config = source.buildkit.as_ref()?;
+    if !config.enabled {
+        return None;
+    }
+    let context_path = checkout.join(source.context.as_str());
+    let dockerfile_path = checkout.join(source.dockerfile.as_str());
+    prepare_buildkit_dockerfile(&dockerfile_path, config).await;
+    let runner = crate::build::buildkit::BuildKitRunner::new(None::<String>);
+    runner
+        .build(&context_path, &dockerfile_path, tag, config)
+        .await
+        .ok()
+}
+
+async fn prepare_buildkit_dockerfile(dockerfile_path: &Path, config: &BuildKitConfig) {
+    if config.cache_mounts.is_empty() && config.custom_cache_paths.is_empty() {
+        return;
+    }
+    if let Ok(content) = tokio::fs::read_to_string(dockerfile_path).await {
+        let optimized = crate::build::buildkit::inject_cache_mounts(&content, config);
+        let _ = tokio::fs::write(dockerfile_path, optimized).await;
     }
 }
 

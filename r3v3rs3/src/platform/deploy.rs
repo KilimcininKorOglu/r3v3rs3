@@ -119,6 +119,7 @@ impl From<AppSource> for JobImage {
                 context,
                 dockerfile,
                 connection,
+                buildkit: None,
             }),
             AppSource::Compose {
                 repository,
@@ -138,6 +139,39 @@ impl From<AppSource> for JobImage {
 }
 
 impl JobImage {
+    pub fn from_spec(spec: &AppSpec) -> Self {
+        match &spec.source {
+            AppSource::Image { image } => Self::Pull(image.clone()),
+            AppSource::Git {
+                repository,
+                branch,
+                context,
+                dockerfile,
+                connection,
+            } => Self::Build(GitBuild {
+                repository: repository.clone(),
+                branch: branch.clone(),
+                context: context.clone(),
+                dockerfile: dockerfile.clone(),
+                connection: *connection,
+                buildkit: spec.buildkit.clone(),
+            }),
+            AppSource::Compose {
+                repository,
+                branch,
+                file,
+                service,
+                connection,
+            } => Self::Compose(ComposeBuild {
+                repository: repository.clone(),
+                revision: SourceRevision::Branch(branch.clone()),
+                file: file.clone(),
+                service: service.clone(),
+                connection: *connection,
+            }),
+        }
+    }
+
     /// What a rollback to `source` starts: the image that it ran, or for a Compose app its
     /// commit.
     fn rollback(spec: &AppSpec, source: &DeploymentEntry) -> Result<Self, Error> {
@@ -246,7 +280,7 @@ impl Platform {
         if let Some(reason) = needs_approval(&spec) {
             return self.insert_pending(new.pending(reason)).await;
         }
-        let image = JobImage::from(spec.source.clone());
+        let image = JobImage::from_spec(&spec);
         let lock = self.lock_app(&app)?;
         self.start_job(lock, &app, new, image).await
     }

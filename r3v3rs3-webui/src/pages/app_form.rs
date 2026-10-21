@@ -10,8 +10,8 @@ use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppRequest, AppSource, AppSpec, GitConfigFile, LOCAL_TARGET, PreviewConfig,
-    TargetEntry,
+    AppEntry, AppRequest, AppSource, AppSpec, BuildKitConfig, CacheMountPreset, GitConfigFile,
+    LOCAL_TARGET, PreviewConfig, TargetEntry,
 };
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::store::StoreApp;
@@ -109,6 +109,15 @@ pub struct AppForm {
     pub env_groups: Vec<String>,
     pub preview_enabled: bool,
     pub preview_domain_template: String,
+    pub buildkit_enabled: bool,
+    pub buildkit_remote_addr: String,
+    pub buildkit_cache_cargo: bool,
+    pub buildkit_cache_npm: bool,
+    pub buildkit_cache_go: bool,
+    pub buildkit_cache_pip: bool,
+    pub buildkit_custom_cache: String,
+    pub buildkit_cache_from: String,
+    pub buildkit_cache_to: String,
 }
 
 impl Default for AppForm {
@@ -156,6 +165,15 @@ impl Default for AppForm {
             env_groups: Vec::new(),
             preview_enabled: false,
             preview_domain_template: String::new(),
+            buildkit_enabled: false,
+            buildkit_remote_addr: String::new(),
+            buildkit_cache_cargo: false,
+            buildkit_cache_npm: false,
+            buildkit_cache_go: false,
+            buildkit_cache_pip: false,
+            buildkit_custom_cache: String::new(),
+            buildkit_cache_from: String::new(),
+            buildkit_cache_to: String::new(),
         }
     }
 }
@@ -276,6 +294,43 @@ impl AppForm {
                 .as_ref()
                 .and_then(|p| p.domain_template.clone())
                 .unwrap_or_default(),
+            buildkit_enabled: spec.buildkit.as_ref().is_some_and(|b| b.enabled),
+            buildkit_remote_addr: spec
+                .buildkit
+                .as_ref()
+                .and_then(|b| b.remote_addr.clone())
+                .unwrap_or_default(),
+            buildkit_cache_cargo: spec
+                .buildkit
+                .as_ref()
+                .is_some_and(|b| b.cache_mounts.contains(&CacheMountPreset::Cargo)),
+            buildkit_cache_npm: spec
+                .buildkit
+                .as_ref()
+                .is_some_and(|b| b.cache_mounts.contains(&CacheMountPreset::Npm)),
+            buildkit_cache_go: spec
+                .buildkit
+                .as_ref()
+                .is_some_and(|b| b.cache_mounts.contains(&CacheMountPreset::Go)),
+            buildkit_cache_pip: spec
+                .buildkit
+                .as_ref()
+                .is_some_and(|b| b.cache_mounts.contains(&CacheMountPreset::Pip)),
+            buildkit_custom_cache: spec
+                .buildkit
+                .as_ref()
+                .map(|b| b.custom_cache_paths.join("\n"))
+                .unwrap_or_default(),
+            buildkit_cache_from: spec
+                .buildkit
+                .as_ref()
+                .and_then(|b| b.cache_from.clone())
+                .unwrap_or_default(),
+            buildkit_cache_to: spec
+                .buildkit
+                .as_ref()
+                .and_then(|b| b.cache_to.clone())
+                .unwrap_or_default(),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -371,6 +426,41 @@ impl AppForm {
                 .collect(),
             preview: self.parse_preview(),
             preview_of: None,
+            buildkit: self.parse_buildkit(),
+        })
+    }
+
+    fn parse_buildkit(&self) -> Option<BuildKitConfig> {
+        if !self.buildkit_enabled {
+            return None;
+        }
+        let mut presets = Vec::new();
+        if self.buildkit_cache_cargo {
+            presets.push(CacheMountPreset::Cargo);
+        }
+        if self.buildkit_cache_npm {
+            presets.push(CacheMountPreset::Npm);
+        }
+        if self.buildkit_cache_go {
+            presets.push(CacheMountPreset::Go);
+        }
+        if self.buildkit_cache_pip {
+            presets.push(CacheMountPreset::Pip);
+        }
+        let custom_cache_paths = self
+            .buildkit_custom_cache
+            .lines()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        Some(BuildKitConfig {
+            enabled: true,
+            remote_addr: non_empty(&self.buildkit_remote_addr).map(str::to_string),
+            cache_mounts: presets,
+            custom_cache_paths,
+            cache_from: non_empty(&self.buildkit_cache_from).map(str::to_string),
+            cache_to: non_empty(&self.buildkit_cache_to).map(str::to_string),
         })
     }
 
@@ -931,6 +1021,7 @@ fn source_view(
                 { repository_view(locale, form, connections) }
                 { text_field(locale, form, "apps.tag_trigger", Some("apps.tag_trigger_hint"), |f| &mut f.tag_trigger) }
                 { preview_view(locale, form) }
+                { buildkit_view(locale, form) }
                 { text_field(locale, form, "apps.context", Some("apps.context_hint"), |f| &mut f.context) }
                 { text_field(locale, form, "apps.dockerfile", Some("apps.dockerfile_hint"), |f| &mut f.dockerfile) }
             </>
@@ -967,6 +1058,96 @@ fn preview_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
             if checked {
                 <div class="mt-3">
                     { text_field(locale, form, "apps.preview_domain_template", Some("apps.preview_domain_template_hint"), |f| &mut f.preview_domain_template) }
+                </div>
+            }
+        </div>
+    }
+}
+
+fn buildkit_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let form_handle = form.clone();
+    let checked = form.buildkit_enabled;
+    let onchange = Callback::from(move |e: Event| {
+        if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+            let mut updated = (*form_handle).clone();
+            updated.buildkit_enabled = target.checked();
+            form_handle.set(updated);
+        }
+    });
+    let on_cargo = {
+        let form = form.clone();
+        Callback::from(move |e: Event| {
+            if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+                let mut u = (*form).clone();
+                u.buildkit_cache_cargo = target.checked();
+                form.set(u);
+            }
+        })
+    };
+    let on_npm = {
+        let form = form.clone();
+        Callback::from(move |e: Event| {
+            if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+                let mut u = (*form).clone();
+                u.buildkit_cache_npm = target.checked();
+                form.set(u);
+            }
+        })
+    };
+    let on_go = {
+        let form = form.clone();
+        Callback::from(move |e: Event| {
+            if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+                let mut u = (*form).clone();
+                u.buildkit_cache_go = target.checked();
+                form.set(u);
+            }
+        })
+    };
+    let on_pip = {
+        let form = form.clone();
+        Callback::from(move |e: Event| {
+            if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+                let mut u = (*form).clone();
+                u.buildkit_cache_pip = target.checked();
+                form.set(u);
+            }
+        })
+    };
+    html! {
+        <div class="mt-4 rounded border border-neutral-200 dark:border-neutral-700 p-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" {checked} {onchange} class="rounded border-neutral-300 text-neutral-900 focus:ring-0 dark:border-neutral-600 dark:bg-neutral-800" />
+                <span class={LABEL_CLASS}>{locale.t("apps.buildkit_enabled")}</span>
+            </label>
+            <p class={HINT_CLASS}>{locale.t("apps.buildkit_enabled_hint")}</p>
+            if checked {
+                <div class="mt-3 space-y-3">
+                    { text_field(locale, form, "apps.buildkit_remote_addr", Some("apps.buildkit_remote_addr_hint"), |f| &mut f.buildkit_remote_addr) }
+                    <div>
+                        <span class={LABEL_CLASS}>{locale.t("apps.buildkit_cache_presets")}</span>
+                        <div class="mt-2 flex flex-wrap gap-4 text-sm">
+                            <label class="flex items-center gap-1.5 cursor-pointer">
+                                <input type="checkbox" checked={form.buildkit_cache_cargo} onchange={on_cargo} />
+                                <span>{"Rust (Cargo)"}</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 cursor-pointer">
+                                <input type="checkbox" checked={form.buildkit_cache_npm} onchange={on_npm} />
+                                <span>{"Node.js (NPM)"}</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 cursor-pointer">
+                                <input type="checkbox" checked={form.buildkit_cache_go} onchange={on_go} />
+                                <span>{"Go"}</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 cursor-pointer">
+                                <input type="checkbox" checked={form.buildkit_cache_pip} onchange={on_pip} />
+                                <span>{"Python (Pip)"}</span>
+                            </label>
+                        </div>
+                    </div>
+                    { text_area(locale, form, "apps.buildkit_custom_cache", "apps.buildkit_custom_cache_hint", |f| &mut f.buildkit_custom_cache) }
+                    { text_field(locale, form, "apps.buildkit_cache_from", Some("apps.buildkit_cache_from_hint"), |f| &mut f.buildkit_cache_from) }
+                    { text_field(locale, form, "apps.buildkit_cache_to", Some("apps.buildkit_cache_to_hint"), |f| &mut f.buildkit_cache_to) }
                 </div>
             }
         </div>
@@ -1579,6 +1760,41 @@ mod tests {
         assert_eq!(
             preview.domain_template.as_deref(),
             Some("pr-{pr}.app.example.com")
+        );
+    }
+
+    #[test]
+    fn buildkit_in_form() {
+        let form = AppForm {
+            kind: SourceKind::Git,
+            repository: "https://github.com/owner/shop.git".into(),
+            buildkit_enabled: true,
+            buildkit_remote_addr: "tcp://10.0.0.5:1234".into(),
+            buildkit_cache_cargo: true,
+            buildkit_cache_npm: true,
+            buildkit_custom_cache: "/root/.cache/custom\n/tmp/build-cache".into(),
+            buildkit_cache_from: "type=registry,ref=test/app:cache".into(),
+            buildkit_cache_to: "type=registry,ref=test/app:cache,mode=max".into(),
+            ..image_form()
+        };
+        let request = form.parse(Locale::En).unwrap();
+        let bk = request.spec.buildkit.unwrap();
+        assert!(bk.enabled);
+        assert_eq!(bk.remote_addr.as_deref(), Some("tcp://10.0.0.5:1234"));
+        assert!(bk.cache_mounts.contains(&CacheMountPreset::Cargo));
+        assert!(bk.cache_mounts.contains(&CacheMountPreset::Npm));
+        assert!(!bk.cache_mounts.contains(&CacheMountPreset::Go));
+        assert_eq!(
+            bk.custom_cache_paths,
+            vec!["/root/.cache/custom", "/tmp/build-cache"]
+        );
+        assert_eq!(
+            bk.cache_from.as_deref(),
+            Some("type=registry,ref=test/app:cache")
+        );
+        assert_eq!(
+            bk.cache_to.as_deref(),
+            Some("type=registry,ref=test/app:cache,mode=max")
         );
     }
 }

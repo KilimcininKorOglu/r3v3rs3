@@ -141,7 +141,22 @@ A private repository needs a [Git provider](#git-providers) connection or an acc
 
 The server that runs r3v3rs3 needs the `git` binary. r3v3rs3 runs `git` without the configuration of the host, without hooks and only over HTTPS. The build context holds no `.git` directory, and a symbolic link in it stays a link, so a build does not read a file from outside the repository. The context can hold up to 512 MiB.
 
-Docker builds the image with its classic builder. Two builds run at the same time, and every other build waits. The builder keeps the stages of a multi-stage Dockerfile as its build cache, so the next build of the same app is faster. `docker image prune` removes that cache.
+Docker builds the image with its builder. Two builds run at the same time, and every other build waits. The builder keeps the stages of a multi-stage Dockerfile as its build cache, so the next build of the same app is faster. `docker image prune` removes that cache.
+
+#### BuildKit and Cache Mounts
+
+When building images for Git applications, r3v3rs3 supports Docker Buildx / BuildKit with automatic cache mount injection:
+
+- **Enable BuildKit & Build Cache**: Automatically invokes `docker buildx build --load` instead of the legacy Docker builder.
+- **Remote BuildKit Builder**: Optionally point to an external BuildKit daemon endpoint (`buildkit.remote_addr`, e.g. `tcp://10.0.0.5:1234` or `unix:///run/buildkit/buildkitd.sock`) to offload heavy compilation from the host server.
+- **Automatic Cache Mount Presets**: r3v3rs3 can automatically inject `# syntax=docker/dockerfile:1` and `--mount=type=cache` directives into Dockerfile `RUN` steps for common language ecosystems without requiring manual Dockerfile modifications:
+  - `Cargo`: Caches `/usr/local/cargo/registry` and `/root/.cargo/registry`.
+  - `Npm` / `Pnpm` / `Yarn`: Caches `/root/.npm`, `/root/.pnpm-store`, and `/usr/local/share/.cache/yarn`.
+  - `Go`: Caches `/go/pkg/mod` and `/root/.cache/go-build`.
+  - `Pip`: Caches `/root/.cache/pip`.
+  - `Maven` / `Gradle`: Caches `/root/.m2` and `/root/.gradle`.
+- **Custom Cache Mounts**: Add custom target paths inside the build container.
+- **External Cache Backends**: Configure `cache_from` and `cache_to` (e.g. `type=registry,ref=myregistry/app:cache,mode=max` or `type=local,src=...`) to reuse build layers across multiple worker nodes or CI runs.
 
 ### Compose Source
 

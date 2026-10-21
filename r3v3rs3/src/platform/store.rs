@@ -1084,6 +1084,7 @@ mod tests {
                 env_groups: Vec::new(),
                 preview: None,
                 preview_of: None,
+                buildkit: None,
             },
             git_token_set: false,
             webhook_secret_set: false,

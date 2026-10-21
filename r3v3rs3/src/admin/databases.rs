@@ -348,6 +348,7 @@ fn replica_app_request(
             env_groups: Vec::new(),
             preview: None,
             preview_of: None,
+            buildkit: None,
         },
     })
 }
@@ -482,6 +483,7 @@ fn app_request(
             env_groups: Vec::new(),
             preview: None,
             preview_of: None,
+            buildkit: None,
         },
     })
 }

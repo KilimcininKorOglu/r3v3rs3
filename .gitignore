@@ -13,3 +13,6 @@ minisign.key
 # A separate repository that lives inside this working tree
 /r3v3rs3-apps/
 plan.md
+
+!/r3v3rs3/src/build/
+!/r3v3rs3/src/build/**
