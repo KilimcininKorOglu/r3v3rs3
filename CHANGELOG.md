@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-10-21
+
+### Added
+- Visual Docker Compose Editor: Integrated visual Compose YAML editor with real-time YAML syntax validation, line numbering, and error gutter markers powered by client-side `serde_yaml`.
+- Environment Variable & Secret Auto-Completion: Quick-insert chips and completion for environment variables (`${VAR_NAME}`) and encrypted secrets across application, project environment, and shared environment groups.
+- One-Click Architectural Templates: Built-in scaffolding templates for Nginx Web Server, Node.js + PostgreSQL, Python + Redis, and WordPress + MySQL stacks.
+- Automatic Service Detection: Real-time parsing of declared services under `services:`, with clickable pills to select and designate the primary routing service.
+- Inline Compose Deployment Support: Apps can now be created and deployed directly from inline Compose YAML (`compose_yaml` in `AppSource::Compose`) without requiring an external Git repository.
+- Interactive Syntax Preview Mode: Tokenized visual preview styling YAML keys, comments, string values, and variable interpolations.
+
 ## [2.2.0] - 2026-10-21
 
 ### Added
