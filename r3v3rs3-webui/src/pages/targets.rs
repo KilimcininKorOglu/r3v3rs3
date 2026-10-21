@@ -465,6 +465,11 @@ fn prune_toggles_view(locale: Locale, policy: &UseStateHandle<PrunePolicy>) -> H
     let toggle_build_cache = checkbox_toggle(policy, |p| &mut p.prune_build_cache);
     let toggle_volumes = checkbox_toggle(policy, |p| &mut p.prune_volumes);
     let interval_input = text_input(policy, |p| &mut p.interval);
+    let threshold_val = policy
+        .disk_pressure_threshold
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let threshold_input = threshold_input_callback(policy);
 
     html! {
         <div class="space-y-4">
@@ -475,6 +480,22 @@ fn prune_toggles_view(locale: Locale, policy: &UseStateHandle<PrunePolicy>) -> H
             <div>
                 <label class={LABEL_CLASS}>{locale.t("targets.prune_interval")}</label>
                 <input type="text" autocapitalize="off" autocomplete="off" value={policy.interval.clone()} oninput={interval_input} class={INPUT_CLASS} />
+            </div>
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("targets.prune_disk_pressure_threshold")}</label>
+                <div class="flex items-center gap-2">
+                    <input
+                        type="number"
+                        min="10"
+                        max="99"
+                        placeholder="85"
+                        value={threshold_val}
+                        oninput={threshold_input}
+                        class={INPUT_CLASS}
+                    />
+                    <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{"%"}</span>
+                </div>
+                <p class={HINT_CLASS}>{locale.t("targets.prune_disk_pressure_hint")}</p>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
                 <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
@@ -498,6 +519,17 @@ fn prune_toggles_view(locale: Locale, policy: &UseStateHandle<PrunePolicy>) -> H
     }
 }
 
+fn threshold_input_callback(policy: &UseStateHandle<PrunePolicy>) -> Callback<InputEvent> {
+    let policy = policy.clone();
+    Callback::from(move |event: InputEvent| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let val = input.value().trim().parse::<u8>().ok();
+        let mut updated = (*policy).clone();
+        updated.disk_pressure_threshold = val;
+        policy.set(updated);
+    })
+}
+
 fn prune_stats_and_actions(
     locale: Locale,
     policy: &PrunePolicy,
@@ -513,10 +545,17 @@ fn prune_stats_and_actions(
         Some(bytes) => format_disk_bytes(bytes),
         None => "0 B".to_string(),
     };
+    let last_pressure = policy.last_pressure_pruned_at.map(|secs| {
+        let time = format_time(secs * 1000);
+        locale.tf("targets.prune_last_pressure_run", &[("time", &time)])
+    });
     html! {
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 mt-4 border-t border-neutral-200 dark:border-neutral-700">
             <div class="text-xs text-neutral-500 dark:text-neutral-400 space-y-1">
                 <div>{locale.tf("targets.prune_last_run", &[("time", &last_run)])}</div>
+                if let Some(msg) = last_pressure {
+                    <div>{msg}</div>
+                }
                 <div>{locale.tf("targets.prune_last_reclaimed", &[("size", &reclaimed)])}</div>
             </div>
             <div class="flex gap-2">

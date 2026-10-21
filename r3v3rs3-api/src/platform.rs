@@ -547,6 +547,10 @@ pub struct PrunePolicy {
     #[serde(default = "default_prune_interval")]
     pub interval: String,
 
+    /// Optional disk usage percentage threshold (10-99%) that triggers an immediate reactive emergency prune.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_pressure_threshold: Option<u8>,
+
     /// Whether to prune unused/dangling images.
     #[serde(default = "default_true")]
     pub prune_images: bool,
@@ -567,6 +571,10 @@ pub struct PrunePolicy {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_pruned_at: Option<u64>,
 
+    /// The timestamp of the last reactive disk pressure prune run in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_pressure_pruned_at: Option<u64>,
+
     /// The space reclaimed in the last prune run in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_reclaimed_bytes: Option<u64>,
@@ -581,11 +589,13 @@ impl Default for PrunePolicy {
         Self {
             enabled: false,
             interval: default_prune_interval(),
+            disk_pressure_threshold: Some(85),
             prune_images: true,
             prune_volumes: false,
             prune_build_cache: true,
             prune_containers: true,
             last_pruned_at: None,
+            last_pressure_pruned_at: None,
             last_reclaimed_bytes: None,
         }
     }

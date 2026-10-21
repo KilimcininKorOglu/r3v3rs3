@@ -142,15 +142,17 @@ const SCHEMA: &[&str] = &[
         updated_at INTEGER NOT NULL
     )",
     "CREATE TABLE IF NOT EXISTS prune_policy (
-        id                   TEXT PRIMARY KEY,
-        enabled              INTEGER NOT NULL,
-        interval             TEXT NOT NULL,
-        prune_images         INTEGER NOT NULL,
-        prune_volumes        INTEGER NOT NULL,
-        prune_build_cache    INTEGER NOT NULL,
-        prune_containers     INTEGER NOT NULL,
-        last_pruned_at       INTEGER,
-        last_reclaimed_bytes INTEGER
+        id                      TEXT PRIMARY KEY,
+        enabled                 INTEGER NOT NULL,
+        interval                TEXT NOT NULL,
+        disk_pressure_threshold INTEGER,
+        prune_images            INTEGER NOT NULL,
+        prune_volumes           INTEGER NOT NULL,
+        prune_build_cache       INTEGER NOT NULL,
+        prune_containers        INTEGER NOT NULL,
+        last_pruned_at          INTEGER,
+        last_pressure_pruned_at INTEGER,
+        last_reclaimed_bytes    INTEGER
     )",
     "CREATE TABLE IF NOT EXISTS env_groups (
         id          TEXT PRIMARY KEY,
@@ -354,6 +356,12 @@ impl PlatformStore {
             sqlx::query(statement).execute(&pool).await?;
         }
         let _ = sqlx::query("ALTER TABLE targets ADD COLUMN drained INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN disk_pressure_threshold INTEGER")
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN last_pressure_pruned_at INTEGER")
             .execute(&pool)
             .await;
         Ok(Self { pool })

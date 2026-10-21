@@ -807,9 +807,10 @@ Without `agent_port` the add and the new token actions answer `400 agent_port_mi
 The **Targets** page also includes a **Disk Hygiene & Prune Policy** card to automate cleanup of unused Docker resources and prevent disk exhaustion:
 
 - **Automatic Scheduled Pruning**: When enabled, a background worker evaluates and cleans resources on the configured interval (e.g. `24h` or `7days`).
+- **Disk-Pressure Reactive Pruning**: In addition to scheduled intervals, an emergency prune triggers automatically whenever node disk usage reaches or exceeds the configured percentage threshold (default: 85%). A 15-minute cooldown prevents rapid thrashing loops, and each triggered emergency cleanup dispatches an outbound `system.disk_pressure` webhook notification and records an audit log entry with reclaimed space details. Setting the threshold to empty disables reactive pruning.
 - **Resource Selection**: Configurable toggles for dangling and unused images, stopped containers, BuildKit build cache, and unused anonymous volumes.
 - **Run Immediately**: Click **Prune Now** (or send `POST /api/platform/prune/run`) to trigger an immediate prune and view the freed disk space and deleted item counts in real time.
-- **Run Statistics**: Displays the timestamp of the last execution and the reclaimed disk space.
+- **Run Statistics**: Displays the timestamp of the last scheduled execution, the last emergency disk pressure execution, and the total reclaimed disk space.
 
 ### Webhooks
 

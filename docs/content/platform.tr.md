@@ -807,9 +807,10 @@ Admin hesabı ayrıca şunları görür:
 **Hedefler** sayfası, kullanılmayan Docker kaynaklarını otomatik temizlemek ve disk tükenmesini önlemek için bir **Disk Hijyeni ve Temizleme Politikası** kartı sunar:
 
 - **Otomatik Zamanlanmış Temizlik**: Etkinleştirildiğinde, arka plan işleyicisi kaynakları yapılandırılan zaman aralığına göre (ör. `24h` veya `7days`) temizler.
+- **Disk Basıncına Duyarlı Acil Temizlik**: Zamanlanmış aralıklara ek olarak, düğüm disk kullanımı yapılandırılan yüzde eşiğine (varsayılan: %85) ulaştığında veya aştığında otomatik bir acil durum temizliği tetiklenir. 15 dakikalık bekleme süresi (cooldown) peş peşe gereksiz döngüleri engeller; tetiklenen her acil temizlik `system.disk_pressure` giden webhook bildirimini ateşler ve geri kazanılan alan ayrıntılarıyla denetim günlüğü kaydı oluşturur. Eşik boş bırakılarak reaktif temizlik devre dışı bırakılabilir.
 - **Kaynak Seçimi**: Kullanılmayan ve artık (dangling) imajlar, durdurulmuş konteynerler, BuildKit derleme önbelleği ve referanssız birimler için ayrı kontrol anahtarları.
 - **Şimdi Temizle**: Anında temizlik başlatmak ve geri kazanılan alan ile silinen öğe sayılarını canlı görmek için **Şimdi Temizle** butonuna tıklayın (veya `POST /api/platform/prune/run` gönderin).
-- **Çalıştırma İstatistikleri**: Son temizleme zamanını ve geri kazanılan disk alanını gösterir.
+- **Çalıştırma İstatistikleri**: Son zamanlanmış temizleme, son acil durum disk basıncı temizleme zamanını ve geri kazanılan disk alanını gösterir.
 
 ### Webhook'lar
 
