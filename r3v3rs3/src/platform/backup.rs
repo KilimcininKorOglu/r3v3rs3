@@ -317,6 +317,84 @@ impl Platform {
         Ok(())
     }
 
+    /// Extracts the dump bytes of a source database, either from its running container or from
+    /// its latest backup.
+    async fn get_clone_dump(
+        &self,
+        source_id: ShortId,
+        engine: &str,
+        info: &EngineInfo,
+    ) -> anyhow::Result<Vec<u8>> {
+        if let Ok((_app, container, runtime)) = self.database_container(source_id).await {
+            let password = self.database_password(source_id, info).await?;
+            let plan = dump_plan(engine, info, &password)?;
+            if let Ok(dump) = take_dump(&runtime, &container, plan).await {
+                return Ok(dump);
+            }
+        }
+        let backups = self.list_backups(source_id).await?;
+        if let Some(latest) = backups.first() {
+            let compressed = self.download_backup(source_id, &latest.id).await?;
+            return ungzip(&compressed).await;
+        }
+        bail!("source database is not running and has no backups to clone from");
+    }
+
+    /// Waits for a cloned database container to be ready and restores the dump bytes into it.
+    async fn wait_and_restore(
+        &self,
+        db_id: ShortId,
+        plan: &RestorePlan,
+        dump: Vec<u8>,
+        data_path: &str,
+    ) -> anyhow::Result<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            if let Ok((_app, container, runtime)) = self.database_container(db_id).await
+                && run_restore(&runtime, &container, plan, dump.clone(), data_path)
+                    .await
+                    .is_ok()
+            {
+                tracing::info!(%db_id, "database clone restored successfully");
+                return Ok(());
+            }
+        }
+        bail!("timed out waiting for cloned database container to be ready for restore");
+    }
+
+    /// Copies data from a source database into a newly deployed cloned database.
+    pub async fn restore_clone_data(
+        self: &Arc<Self>,
+        source_id: ShortId,
+        dest_id: ShortId,
+        dest_password: &str,
+    ) -> anyhow::Result<()> {
+        let source = self.app(source_id).await?;
+        let engine = source
+            .spec
+            .database
+            .clone()
+            .context("the source app is not a managed database")?;
+        let info = r3v3rs3_api::platform::engine_info(&engine)
+            .context("the engine is not in the database catalog")?;
+
+        let dump_bytes = self.get_clone_dump(source_id, &engine, &info).await?;
+        let restore = restore_plan(&engine, &info, dest_password)?;
+        let platform = self.clone();
+        let data_path = info.data_path.clone();
+
+        tokio::spawn(async move {
+            if let Err(err) = platform
+                .wait_and_restore(dest_id, &restore, dump_bytes, &data_path)
+                .await
+            {
+                tracing::error!(%err, app = %dest_id, "failed to restore cloned data into new database");
+            }
+        });
+        Ok(())
+    }
+
     /// Uploads one backup to the configured S3 bucket. Does nothing without a target.
     async fn upload_to_s3(&self, entry: &BackupEntry, content: Vec<u8>) -> anyhow::Result<()> {
         let config = self.backup_config().await?;

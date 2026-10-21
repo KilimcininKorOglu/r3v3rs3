@@ -62,6 +62,8 @@ pub enum AuditAction {
     AppFile,
     /// An account created a database app.
     CreateDatabase,
+    /// An account cloned a database app.
+    CloneDatabase,
     /// An account deleted a database app.
     DeleteDatabase,
     /// An account took the backup of a database.
@@ -138,7 +140,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 78] = [
+    pub const ALL: [AuditAction; 79] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -174,6 +176,7 @@ impl AuditAction {
         Self::ExecApp,
         Self::AppFile,
         Self::CreateDatabase,
+        Self::CloneDatabase,
         Self::DeleteDatabase,
         Self::BackupDatabase,
         Self::RestoreDatabase,

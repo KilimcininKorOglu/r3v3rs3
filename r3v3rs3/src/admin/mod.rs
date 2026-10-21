@@ -424,6 +424,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(databases::engines, databases::refresh_engines))
                 .routes(routes!(databases::list, databases::create))
                 .routes(routes!(databases::delete))
+                .routes(routes!(databases::clone))
                 .routes(routes!(backups::list, backups::create))
                 .routes(routes!(backups::download))
                 .routes(routes!(backups::delete))

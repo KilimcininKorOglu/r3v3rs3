@@ -234,6 +234,15 @@ Enjekte edilen kullanıcı veritabanının root kullanıcısıdır; r3v3rs3 app 
 
 Veritabanı local target ister ve sayfayı yalnız Edit izni olan bir hesap görür. Her oluşturma ve silme audit log'una geçer.
 
+### Veritabanı Klonlama ve Branching
+
+Veritabanı satırındaki **Klonla** butonu, mevcut bir veritabanının bağımsız yeni bir kopyasını (branch) oluşturur:
+
+- **Adlandırma ve Kurulum**: Yeni veritabanı adını (varsayılan `{name}-clone`) ve isteğe bağlı host portunu sorarak r3v3rs3, kendi özel volume'ü (`{name}-data`), benzersiz yeni parolası ve `127.0.0.1` üzerinde ayrılan portuyla yeni bir veritabanı uygulaması oluşturur.
+- **Canlı Dump veya Yedekten Geri Yükleme**: Kaynak veritabanı çalışıyorsa r3v3rs3 doğrudan çalışan container'dan `exec` ile anlık canlı dump alır. Kaynak veritabanı durdurulmuşsa otomatik olarak en son doğrulanmış yedek dump'ını kullanır.
+- **Otomatik Geri Yükleme**: Yeni veritabanı container'ı başlatılıp sağlıklı duruma geldikten sonra, dump verisi otomatik olarak klonlanan yeni veritabanına aktarılır.
+- **İzole Test ve Staging**: Klonlanan veritabanı tamamen bağımsız bir volume, port ve kimlik bilgilerine sahip olduğundan geliştiricilerin canlı veriyi etkilemeden migrasyonları test etmesine, staging ortamı kurmasına veya hata ayıklamasına olanak tanır.
+
 ### Yedekler
 
 Veritabanı satırındaki **Yedekler** bağlantısı o veritabanının yedeklerini açar. **Şimdi yedekle**, engine'in dump'ını container'ın içinde çalıştırır (`pg_dump`, `mariadb-dump`, `mysqldump` veya `mongodump`; Redis `SAVE` çalıştırır ve dump dosyasını alır), gzip'ler ve config dizinindeki `backups` dizinine kaydeder; veritabanı başına bir klasör, dosyanın SHA-256'sını taşıyan bir JSON manifest ile birlikte. Bir yedek parola içermez. Agent target üzerindeki bir veritabanı yedek alamaz; çünkü dump container'ın içinde çalışır.
@@ -645,6 +654,7 @@ Admin hesabı ayrıca şunları görür:
 | `GET /api/databases/engines` | Read | Panelin sunduğu motorlar ve sürümler. |
 | `POST /api/databases/engines/refresh` | Edit | Engine kataloğunu r3v3rs3-apps deposundan indirir. |
 | `POST /api/databases` | Edit | Bir veritabanı oluşturur, deployment'ını başlatır ve parolasını bir kez döndürür. |
+| `POST /api/databases/{id}/clone` | Edit | Mevcut bir veritabanını klonlar, deployment'ını başlatır ve verileri aktarır. |
 | `DELETE /api/databases/{id}` | Edit | Veritabanı app'ini siler. Volume'ü kalır. |
 | `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
 | `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |

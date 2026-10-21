@@ -1013,6 +1013,18 @@ pub struct DatabaseRequest {
     pub host_port: Option<u16>,
 }
 
+/// The body that clones an existing database into a new branch database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DatabaseCloneRequest {
+    #[schema(value_type = String, example = "main-postgres-clone")]
+    pub name: AppName,
+    /// A fixed port of `127.0.0.1`. Empty takes a free port, which stays the port of the
+    /// database afterwards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 5433)]
+    pub host_port: Option<u16>,
+}
+
 /// The new database. The password is shown once, like a webhook secret.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct DatabaseCreated {

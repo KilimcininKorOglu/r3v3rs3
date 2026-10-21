@@ -234,6 +234,15 @@ The injected user is the root user of the database, because r3v3rs3 creates no p
 
 A database needs the local target, and only an account with the Edit permission sees the page. Every creation and deletion goes into the audit log.
 
+### Database Cloning & Branching
+
+The **Clone** button on a database row creates a new, independent copy (branch) of an existing database:
+
+- **Prompt & Creation**: Asking for a new database name (defaults to `{name}-clone`) and an optional host port, r3v3rs3 creates a new database app with its own dedicated volume (`{name}-data`), a unique generated password, and an allocated port on `127.0.0.1`.
+- **Live Stream or Backup Fallback**: If the source database is currently running, r3v3rs3 takes a live dump directly from the running container via `exec`. If the source database is stopped, it automatically uses the latest verified backup dump.
+- **Automated Restore**: Once the new database container is initialized and healthy, the dump data is automatically restored into the cloned database.
+- **Isolated Testing**: The cloned database has its own isolated volume, port, and credentials, allowing developers to test migrations, run staging environments, or debug against production data without affecting the primary database.
+
 ### Backups
 
 The **Backups** link on a database row opens its backups. **Back up now** runs the dump of the engine inside the container (`pg_dump`, `mariadb-dump`, `mysqldump` or `mongodump`; Redis runs `SAVE` and takes its dump file), gzips it and stores it in the `backups` directory of the config directory, one folder per database, with a JSON manifest that carries the SHA-256 of the file. A backup holds no password. A database on an agent target takes no backup, because the dump runs in the container itself.
@@ -647,6 +656,7 @@ The **Targets** page also includes a **Disk Hygiene & Prune Policy** card to aut
 | `GET /api/databases/engines` | Read | The engines and the versions that the panel offers. |
 | `POST /api/databases/engines/refresh` | Edit | Downloads the engine catalog from the r3v3rs3-apps repository. |
 | `POST /api/databases` | Edit | Creates a database, deploys it and returns its password once. |
+| `POST /api/databases/{id}/clone` | Edit | Clones an existing database, deploys it and restores the data. |
 | `DELETE /api/databases/{id}` | Edit | Deletes the database app. Its volume stays. |
 | `GET /api/deployments/{id}` | Read | Returns a deployment. |
 | `POST /api/deployments/{id}/rollback` | Edit | Repeats an earlier deployment. |

@@ -179,10 +179,18 @@ pub fn databases() -> Html {
                     locale={locale}
                     engines={(*engines).clone()}
                     saved={reload.clone()}
-                    created={created}
+                    created={created.clone()}
                 />
             }
-            { list_view(locale, &databases, &apps, &engines, can_edit, reload.clone()) }
+            { list_view(
+                locale,
+                &databases,
+                &apps,
+                &engines,
+                can_edit,
+                reload.clone(),
+                CloneState { created: &created, notice: &notice },
+            ) }
         </>
     }
 }
@@ -212,6 +220,11 @@ fn connection(app: &AppEntry, engines: &[EngineInfo]) -> String {
     }
 }
 
+struct CloneState<'a> {
+    created: &'a UseStateHandle<Option<DatabaseCreated>>,
+    notice: &'a UseStateHandle<Option<Notice<()>>>,
+}
+
 /// The table of the databases, with the number of the apps that use each one.
 fn list_view(
     locale: Locale,
@@ -220,10 +233,12 @@ fn list_view(
     engines: &[EngineInfo],
     can_edit: bool,
     reload: Callback<()>,
+    clone_state: CloneState<'_>,
 ) -> Html {
     if databases.is_empty() {
         return html! { <p class="text-neutral-400 mt-2">{locale.t("databases.empty")}</p> };
     }
+    let (created, notice) = (clone_state.created, clone_state.notice);
     let users_of = |id: ShortId| {
         apps.iter()
             .filter(|app| app.spec.uses_database == Some(id))
@@ -242,6 +257,28 @@ fn list_view(
                 .map(|info| info.label.clone())
                 .unwrap_or_else(|| app.spec.database.clone().unwrap_or_default());
             let users = users_of(app.id);
+            let clone_btn = can_edit.then(|| {
+                let id = app.id;
+                let default_name = format!("{}-clone", app.name);
+                let reload = reload.clone();
+                let created = created.clone();
+                let notice = notice.clone();
+                Callback::from(move |_| {
+                    let default_name = default_name.clone();
+                    let reload = reload.clone();
+                    let created = created.clone();
+                    let notice = notice.clone();
+                    spawn_local(async move {
+                        let prompt = locale.t("databases.clone_prompt");
+                        if let Some(name) = crate::dialog::prompt(locale, prompt, &default_name).await {
+                            let trimmed = name.trim().to_string();
+                            if !trimmed.is_empty() {
+                                send_clone(id, trimmed, created, notice, reload).await;
+                            }
+                        }
+                    });
+                })
+            });
             let delete = can_edit.then(|| {
                 let question =
                     locale.tf("databases.confirm_delete", &[("name", app.name.as_str())]);
@@ -263,6 +300,11 @@ fn list_view(
                         <Link<Route> to={Route::DatabaseBackups { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
                             {locale.t("backups.nav")}
                         </Link<Route>>
+                        if let Some(clone) = clone_btn {
+                            <a class="text-sm text-blue-400 hover:text-blue-300 cursor-pointer mr-3" onclick={clone}>
+                                {locale.t("databases.clone")}
+                            </a>
+                        }
                         <Link<Route> to={Route::AppView { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
                             {locale.t("common.view")}
                         </Link<Route>>
@@ -519,4 +561,40 @@ async fn send_create(
         Err(err) => notice.set(Some(err.to_string())),
     }
     busy.set(false);
+}
+
+/// Clones an existing database and shows its connection and password panel.
+async fn send_clone(
+    id: ShortId,
+    name: String,
+    created: UseStateHandle<Option<DatabaseCreated>>,
+    notice: UseStateHandle<Option<Notice<()>>>,
+    saved: Callback<()>,
+) {
+    let body = serde_json::json!({ "name": name });
+    let req = Request::post(&format!("{API_ENDPOINT}/databases/{id}/clone"))
+        .header("Content-Type", "application/json")
+        .body(body.to_string());
+    let sent = match req {
+        Ok(b) => b.send().await,
+        Err(e) => {
+            notice.set(Some(Notice::Failed(e.to_string())));
+            return;
+        }
+    };
+    match sent {
+        Ok(res) if res.ok() => match res.json::<DatabaseCreated>().await {
+            Ok(data) => {
+                created.set(Some(data));
+                notice.set(Some(Notice::Saved(())));
+                saved.emit(());
+            }
+            Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
+        },
+        Ok(res) => {
+            let msg = res.text().await.unwrap_or_default();
+            notice.set(Some(Notice::Failed(msg)));
+        }
+        Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
+    }
 }

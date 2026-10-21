@@ -19,8 +19,8 @@ use r3v3rs3_api::{
     error::Error,
     id::ShortId,
     platform::{
-        AppEntry, AppRequest, AppSource, AppSpec, DatabaseCreated, DatabaseRequest,
-        DeploymentTrigger, EngineInfo, LOCAL_TARGET,
+        AppEntry, AppRequest, AppSource, AppSpec, DatabaseCloneRequest, DatabaseCreated,
+        DatabaseRequest, DeploymentTrigger, EngineInfo, LOCAL_TARGET,
     },
 };
 use std::sync::Arc;
@@ -160,6 +160,98 @@ pub async fn create(
         user: info.user.clone(),
         database: info.default_db.clone(),
     }))
+}
+
+/// Clones an existing database: creates a new database branch, deploys it, and restores
+/// the data from the source database.
+#[utoipa::path(
+    post,
+    path = "/{id}/clone",
+    tag = "platform",
+    operation_id = "clone_database",
+    params(("id" = ShortId, Path, description = "Source database id.")),
+    request_body = DatabaseCloneRequest,
+    responses((status = 200, description = "The cloned database.", body = DatabaseCreated), NotFoundResponse, ErrorResponses)
+)]
+pub async fn clone(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<DatabaseCloneRequest>,
+) -> Result<Json<DatabaseCreated>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let source = platform.app(id).await.map_err(platform_error)?;
+    let info = source_engine_info(&source)?;
+    let host_port = resolve_host_port(request.host_port)?;
+    let app_req = clone_app_request(&source, &request, &info, host_port).map_err(into_app_error)?;
+    let app = platform
+        .add_app(app_req, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    let password = set_password(&platform, &app, &info).await?;
+    platform
+        .deploy(app.id, &caller.username, DeploymentTrigger::Manual)
+        .await
+        .map_err(platform_error)?;
+    let _ = platform
+        .restore_clone_data(id, app.id, password.as_deref().unwrap_or_default())
+        .await;
+    record_clone_audit(&state, &caller, &app, &source).await;
+    Ok(Json(DatabaseCreated {
+        app,
+        password,
+        host_port,
+        user: info.user,
+        database: info.default_db,
+    }))
+}
+
+fn source_engine_info(source: &AppEntry) -> Result<EngineInfo, AppError> {
+    let engine = source.spec.database.as_deref().ok_or_else(|| {
+        AppError::R3v3rs3(Error::InvalidContainerSpec {
+            reason: format!("the app {} is not a managed database", source.name),
+        })
+    })?;
+    r3v3rs3_api::platform::engine_info(engine).ok_or_else(|| {
+        AppError::R3v3rs3(Error::InvalidContainerSpec {
+            reason: format!("the engine {engine} is not in the database catalog"),
+        })
+    })
+}
+
+fn resolve_host_port(port: Option<u16>) -> Result<u16, AppError> {
+    match port {
+        Some(p) => Ok(p),
+        None => allocate_host_port().map_err(platform_error),
+    }
+}
+
+async fn record_clone_audit(state: &AppState, caller: &Caller, app: &AppEntry, source: &AppEntry) {
+    let record = AuditRecord::new(AuditAction::CloneDatabase)
+        .id(app.id)
+        .summary(format!("{} from {}", app.name, source.name));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+}
+
+fn clone_app_request(
+    source: &AppEntry,
+    request: &DatabaseCloneRequest,
+    info: &EngineInfo,
+    host_port: u16,
+) -> Result<AppRequest, Error> {
+    let version = match &source.spec.source {
+        AppSource::Image { image } => image.to_string(),
+        _ => info.versions[0].clone(),
+    };
+    let db_request = DatabaseRequest {
+        name: request.name.clone(),
+        engine: info.engine.clone(),
+        version,
+        host_port: Some(host_port),
+    };
+    app_request(&db_request, info, host_port)
 }
 
 /// Deletes a database app. Its volume stays.
