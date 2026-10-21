@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.5] - 2026-10-21
+
+### Added
+- Persistent volume backups and snapshots: create point-in-time `.tar.gz` snapshots of container persistent volume directories via Docker Archive streaming API with zero external dependencies.
+- Snapshot restore and deletion: restore historical volume snapshots or delete old snapshots directly from WebUI and REST API.
+- Direct archive export and import: download live volume contents as `.tar.gz` archives or import/extract uploaded `.tar.gz` archives into existing container volumes.
+- Automatic S3 cloud replication: snapshot backups automatically upload to S3 backup buckets when S3 storage is configured.
+- WebUI volume snapshot manager: interactive snapshot browser, archive export/import buttons, and live restore confirmations on the app file manager page.
+
 ## [2.1.4] - 2026-10-21
 
 ### Added
