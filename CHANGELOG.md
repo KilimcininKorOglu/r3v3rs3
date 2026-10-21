@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.3] - 2026-10-21
+
+### Added
+- Webhook-based container registry automatic deployments: automated payload parsing and authentication for Docker Hub (`push_data`), GHCR / GitHub Packages (`package` and `registry_package`), Harbor (`PUSH_ARTIFACT`), Quay (`updated_tags`), and generic image webhooks with HMAC-SHA256, Bearer token, or `?secret=` query parameter.
+- Tag matching and tag pattern triggers for image apps: automatic zero-downtime blue-green redeployments when the pushed tag matches the app's image or configured `tag_trigger` pattern.
+
 ## [2.1.2] - 2026-10-21
 
 ### Added
