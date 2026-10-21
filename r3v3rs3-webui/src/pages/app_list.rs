@@ -454,10 +454,13 @@ fn source_cell(locale: Locale, app: &AppEntry) -> Html {
         ),
         AppSource::Compose {
             repository, branch, ..
-        } => (
-            "apps.source_compose",
-            format!("{}#{}", repository.as_str(), branch.as_str()),
-        ),
+        } => {
+            let detail = match repository {
+                Some(repo) => format!("{}#{}", repo.as_str(), branch.as_str()),
+                None => locale.t("compose.mode_inline").to_string(),
+            };
+            ("apps.source_compose", detail)
+        }
     };
     html! {
         <div>

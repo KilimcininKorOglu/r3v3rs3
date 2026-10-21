@@ -53,12 +53,13 @@ impl SourceRevision {
 /// The Compose source of one deployment.
 #[derive(Debug, Clone)]
 pub(super) struct ComposeBuild {
-    pub repository: RepoUrl,
+    pub repository: Option<RepoUrl>,
     pub revision: SourceRevision,
     pub file: Option<RelPath>,
     pub service: ServiceName,
     /// The Git provider connection that clones the repository.
     pub connection: Option<ShortId>,
+    pub compose_yaml: Option<String>,
 }
 
 /// One deployment of a Compose app.
@@ -119,8 +120,8 @@ impl Platform {
             .await?;
         tokio::fs::create_dir_all(dir).await?;
         let checkout = dir.join("src");
-        self.check_out(job, &checkout).await?;
-        let file = compose_file(&checkout, job.source.file.as_ref())?;
+        self.prepare_checkout(job, &checkout).await?;
+        let file = Self::resolve_compose_file(&checkout, job).await?;
         let override_file = dir.join(OVERRIDE_FILE);
         tokio::fs::write(&override_file, override_text(job)?).await?;
         let files = vec![file, override_file];
@@ -133,13 +134,40 @@ impl Platform {
         Ok(files)
     }
 
+    async fn prepare_checkout(&self, job: &ComposeJob<'_>, checkout: &Path) -> anyhow::Result<()> {
+        if let Some(repo) = &job.source.repository {
+            self.check_out(job, repo, checkout).await
+        } else {
+            tokio::fs::create_dir_all(checkout).await?;
+            self.store.set_commit_sha(job.deployment, "inline").await
+        }
+    }
+
+    async fn resolve_compose_file(
+        checkout: &Path,
+        job: &ComposeJob<'_>,
+    ) -> anyhow::Result<PathBuf> {
+        if let Some(yaml) = &job.source.compose_yaml {
+            let path = checkout.join("compose.yaml");
+            tokio::fs::write(&path, yaml).await?;
+            Ok(path)
+        } else {
+            compose_file(checkout, job.source.file.as_ref())
+        }
+    }
+
     /// Checks out the revision of the deployment and records its commit.
-    async fn check_out(&self, job: &ComposeJob<'_>, checkout: &Path) -> anyhow::Result<()> {
+    async fn check_out(
+        &self,
+        job: &ComposeJob<'_>,
+        repo: &RepoUrl,
+        checkout: &Path,
+    ) -> anyhow::Result<()> {
         let credential = self.git_credential(job.app, job.source.connection).await?;
         let sha = self
             .fetcher
             .fetch(
-                &job.source.repository,
+                repo,
                 job.source.revision.as_revision(),
                 credential.as_ref(),
                 checkout,
@@ -327,10 +355,11 @@ mod tests {
     fn the_override_names_the_variables_without_their_values() -> anyhow::Result<()> {
         let source = ComposeBuild {
             connection: None,
-            repository: "https://git.example.com/team/shop.git".parse()?,
+            repository: Some("https://git.example.com/team/shop.git".parse()?),
             revision: SourceRevision::Branch(GitRef::main()),
             file: None,
             service: "web".parse()?,
+            compose_yaml: None,
         };
         let env = [EnvVar {
             key: "DATABASE_URL".parse()?,

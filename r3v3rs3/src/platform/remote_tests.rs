@@ -230,10 +230,11 @@ fn compose_request() -> anyhow::Result<AppRequest> {
     let mut stack = request("stack");
     stack.spec.source = AppSource::Compose {
         connection: None,
-        repository: "https://git.example.com/team/stack.git".parse()?,
+        repository: Some("https://git.example.com/team/stack.git".parse()?),
         branch: "release".parse()?,
         file: None,
         service: "web".parse()?,
+        compose_yaml: None,
     };
     Ok(stack)
 }

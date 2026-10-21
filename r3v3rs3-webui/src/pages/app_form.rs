@@ -3,6 +3,7 @@
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::app_repository::RepositoryPicker;
 use super::resource_page::text_input;
+use crate::components::compose_editor::ComposeEditor;
 use r3v3rs3_api::container::{ResourceLimits, RestartPolicy, VolumeMount};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
@@ -70,6 +71,8 @@ pub struct AppForm {
     pub context: String,
     pub dockerfile: String,
     pub compose_file: String,
+    pub compose_yaml: String,
+    pub compose_inline: bool,
     pub service: String,
     pub port: String,
     /// One domain on each line.
@@ -137,6 +140,8 @@ impl Default for AppForm {
             context: RelPath::root().to_string(),
             dockerfile: RelPath::dockerfile().to_string(),
             compose_file: String::new(),
+            compose_yaml: String::new(),
+            compose_inline: true,
             service: String::new(),
             port: String::new(),
             domains: String::new(),
@@ -376,21 +381,34 @@ impl AppForm {
                 file,
                 service,
                 connection,
-            } => Self {
-                kind: SourceKind::Compose,
-                connection: optional(connection.as_ref()),
-                repository: repository.to_string(),
-                branch: branch.to_string(),
-                compose_file: optional(file.as_ref()),
-                service: service.to_string(),
-                ..self
-            },
+                compose_yaml,
+            } => {
+                let is_inline = compose_yaml.is_some() || repository.is_none();
+                Self {
+                    kind: SourceKind::Compose,
+                    connection: optional(connection.as_ref()),
+                    repository: repository
+                        .as_ref()
+                        .map(|r| r.to_string())
+                        .unwrap_or_default(),
+                    branch: branch.to_string(),
+                    compose_file: optional(file.as_ref()),
+                    compose_yaml: compose_yaml.clone().unwrap_or_default(),
+                    compose_inline: is_inline,
+                    service: service.to_string(),
+                    ..self
+                }
+            }
         }
     }
 
     /// Whether the source has a Git repository, so the app can use a Git token.
     pub fn uses_git(&self) -> bool {
-        self.kind != SourceKind::Image
+        match self.kind {
+            SourceKind::Image => false,
+            SourceKind::Git => true,
+            SourceKind::Compose => !self.compose_inline || !self.repository.trim().is_empty(),
+        }
     }
 
     /// Checks the form and returns the request. The error is a message in the selected language.
@@ -616,12 +634,20 @@ impl AppForm {
         let file = non_empty(&self.compose_file)
             .map(|file| parse(locale, file))
             .transpose()?;
+        let repository = non_empty(&self.repository)
+            .map(|repo| parse(locale, repo))
+            .transpose()?;
+        let compose_yaml = non_empty(&self.compose_yaml);
+        if repository.is_none() && compose_yaml.is_none() {
+            return Err(locale.t("compose.require_source").to_string());
+        }
         Ok(AppSource::Compose {
-            repository: parse(locale, self.repository.trim())?,
+            repository,
             branch: parse(locale, self.branch.trim())?,
             file,
             service: parse(locale, self.service.trim())?,
             connection: self.connection(),
+            compose_yaml: compose_yaml.map(|s| s.to_string()),
         })
     }
 
@@ -1089,15 +1115,108 @@ fn source_view(
                 { text_field(locale, form, "apps.dockerfile", Some("apps.dockerfile_hint"), |f| &mut f.dockerfile) }
             </>
         },
-        SourceKind::Compose => html! {
-            <>
-                { repository_view(locale, form, connections) }
-                { text_field(locale, form, "apps.tag_trigger", Some("apps.tag_trigger_hint"), |f| &mut f.tag_trigger) }
-                { preview_view(locale, form) }
-                { text_field(locale, form, "apps.compose_file", Some("apps.compose_file_hint"), |f| &mut f.compose_file) }
-                { text_field(locale, form, "apps.service", Some("apps.service_hint"), |f| &mut f.service) }
-            </>
-        },
+        SourceKind::Compose => compose_source_view(locale, form, connections),
+    }
+}
+
+fn compose_source_view(
+    locale: Locale,
+    form: &UseStateHandle<AppForm>,
+    connections: &[GitConnectionEntry],
+) -> Html {
+    html! {
+        <div class="space-y-4">
+            { compose_mode_switch(locale, form) }
+            if form.compose_inline {
+                { compose_inline_view(locale, form) }
+            } else {
+                { compose_git_view(locale, form, connections) }
+            }
+        </div>
+    }
+}
+
+fn compose_mode_switch(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let form_inline = form.clone();
+    let on_inline = Callback::from(move |_| {
+        let mut updated = (*form_inline).clone();
+        updated.compose_inline = true;
+        form_inline.set(updated);
+    });
+
+    let form_git = form.clone();
+    let on_git = Callback::from(move |_| {
+        let mut updated = (*form_git).clone();
+        updated.compose_inline = false;
+        form_git.set(updated);
+    });
+
+    let inline_btn = if form.compose_inline {
+        "px-3 py-1.5 text-xs font-semibold rounded-md bg-primary-600 text-white shadow-sm"
+    } else {
+        "px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-200"
+    };
+
+    let git_btn = if !form.compose_inline {
+        "px-3 py-1.5 text-xs font-semibold rounded-md bg-primary-600 text-white shadow-sm"
+    } else {
+        "px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-200"
+    };
+
+    html! {
+        <div class="inline-flex rounded-lg p-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700">
+            <button type="button" class={inline_btn} onclick={on_inline}>
+                {locale.t("compose.mode_inline")}
+            </button>
+            <button type="button" class={git_btn} onclick={on_git}>
+                {locale.t("compose.mode_git")}
+            </button>
+        </div>
+    }
+}
+
+fn compose_inline_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let form_handle = form.clone();
+    let onchange = Callback::from(move |yaml: String| {
+        let mut updated = (*form_handle).clone();
+        updated.compose_yaml = yaml;
+        form_handle.set(updated);
+    });
+
+    let form_svc = form.clone();
+    let onservice_selected = Callback::from(move |svc: String| {
+        let mut updated = (*form_svc).clone();
+        updated.service = svc;
+        form_svc.set(updated);
+    });
+
+    html! {
+        <>
+            <ComposeEditor
+                value={form.compose_yaml.clone()}
+                {onchange}
+                {locale}
+                current_service={Some(form.service.clone())}
+                onservice_selected={Some(onservice_selected)}
+            />
+            { text_field(locale, form, "apps.service", Some("apps.service_hint"), |f| &mut f.service) }
+        </>
+    }
+}
+
+fn compose_git_view(
+    locale: Locale,
+    form: &UseStateHandle<AppForm>,
+    connections: &[GitConnectionEntry],
+) -> Html {
+    html! {
+        <>
+            { repository_view(locale, form, connections) }
+            { text_field(locale, form, "apps.tag_trigger", Some("apps.tag_trigger_hint"), |f| &mut f.tag_trigger) }
+            { preview_view(locale, form) }
+            { text_field(locale, form, "apps.compose_file", Some("apps.compose_file_hint"), |f| &mut f.compose_file) }
+            { text_field(locale, form, "apps.service", Some("apps.service_hint"), |f| &mut f.service) }
+        </>
     }
 }
 
@@ -1577,6 +1696,31 @@ mod tests {
             panic!("expected a Compose source: {:?}", request.spec.source);
         };
         assert_eq!((file, branch.as_str()), (&None, "main"));
+    }
+
+    #[test]
+    fn an_inline_compose_form_parses_and_keeps_yaml() {
+        let yaml = "services:\n  api:\n    image: node:20\n";
+        let form = AppForm {
+            kind: SourceKind::Compose,
+            compose_inline: true,
+            compose_yaml: yaml.into(),
+            service: "api".into(),
+            ..image_form()
+        };
+        let request = form.parse(Locale::En).unwrap();
+        let AppSource::Compose {
+            repository,
+            compose_yaml,
+            service,
+            ..
+        } = request.spec.source
+        else {
+            panic!("expected compose");
+        };
+        assert!(repository.is_none());
+        assert_eq!(compose_yaml.as_deref(), Some(yaml.trim()));
+        assert_eq!(service.as_str(), "api");
     }
 
     #[test]

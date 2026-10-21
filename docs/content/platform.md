@@ -215,6 +215,21 @@ For Compose applications consisting of multiple services:
 - **Per-Service Logs**: On the app's **Log** page, a **Service** selector dropdown allows operators to switch between all services (the primary traffic container) and any individual container in the Compose project. Both static log retrieval (`GET /api/apps/{id}/logs?service=<name>`) and live WebSocket log streaming (`GET /api/apps/{id}/logs/live?service=<name>`) support the service filter.
 - **API**: The list of service containers and their health status can be queried directly via `GET /api/apps/{id}/services`.
 
+#### Visual Compose Editor and Environment Variable Completion
+
+The WebUI includes a visual Docker Compose YAML editor that makes creating and managing multi-service stacks intuitive and error-free:
+
+- **Inline Compose YAML Support**: Applications can be deployed directly from inline YAML (`compose_yaml` in `AppSource::Compose`) without creating an external Git repository, or by pointing to a remote Git repository file.
+- **Real-Time YAML Syntax Validation**: Powered by `serde_yaml`, the editor continuously validates YAML structure as you type. If an indentation, mapping, or formatting error occurs, the editor immediately flags the exact line in the gutter and displays a clear error explanation.
+- **Service Detection & Click-to-Route**: The editor automatically detects and displays all services defined under `services:`. Clicking any detected service pill sets it as the primary routing service for external domain traffic.
+- **Environment Variable & Secret Completion**: Quickly insert environment variables and encrypted secrets (`${VAR_NAME}`) directly into the YAML with dedicated chips and syntax completion.
+- **Starter Architecture Templates**: One-click boilerplate templates for popular deployment patterns:
+  - *Nginx Web Server* (standalone web container with port mappings).
+  - *Node.js + PostgreSQL* (full-stack API connected to a persistent PostgreSQL database).
+  - *Python + Redis* (background task/caching queue architecture).
+  - *WordPress + MySQL* (complete CMS with database backend).
+- **Syntax Preview**: Switch between interactive edit mode and token-highlighted preview mode with colorized keys, strings, and variable references.
+
 ### Environment Variables
 
 `PUT /api/apps/{id}/env` replaces the environment variables of an app. A variable with `"secret": true` never leaves the server again: the admin API returns it without its value, and an update without a value keeps the current value. r3v3rs3 encrypts every value with `platform.key` and decrypts it only when a container starts.

@@ -127,12 +127,14 @@ impl From<AppSource> for JobImage {
                 file,
                 service,
                 connection,
+                compose_yaml,
             } => Self::Compose(ComposeBuild {
                 repository,
                 revision: SourceRevision::Branch(branch),
                 file,
                 service,
                 connection,
+                compose_yaml,
             }),
         }
     }
@@ -162,12 +164,14 @@ impl JobImage {
                 file,
                 service,
                 connection,
+                compose_yaml,
             } => Self::Compose(ComposeBuild {
                 repository: repository.clone(),
                 revision: SourceRevision::Branch(branch.clone()),
                 file: file.clone(),
                 service: service.clone(),
                 connection: *connection,
+                compose_yaml: compose_yaml.clone(),
             }),
         }
     }
@@ -178,6 +182,9 @@ impl JobImage {
         let unavailable = || Error::RollbackUnavailable { id: source.id };
         let mut image = Self::from(spec.source.clone());
         if let Self::Compose(build) = &mut image {
+            if build.repository.is_none() {
+                return Ok(image);
+            }
             let commit = source
                 .commit_sha
                 .as_deref()
@@ -759,13 +766,16 @@ impl Platform {
                     ..
                 } => (repository.clone(), branch.clone(), *connection),
                 AppSource::Compose {
-                    repository,
+                    repository: Some(repository),
                     branch,
                     connection,
                     ..
                 } => (repository.clone(), branch.clone(), *connection),
-                AppSource::Image { .. } => {
-                    bail!("git_config requires repository for image apps");
+                AppSource::Compose {
+                    repository: None, ..
+                }
+                | AppSource::Image { .. } => {
+                    bail!("git_config requires repository for image or inline compose apps");
                 }
             },
         };
@@ -1277,10 +1287,11 @@ mod tests {
     fn compose_source() -> anyhow::Result<AppSource> {
         Ok(AppSource::Compose {
             connection: None,
-            repository: "https://git.example.com/team/stack.git".parse()?,
+            repository: Some("https://git.example.com/team/stack.git".parse()?),
             branch: "release".parse()?,
             file: None,
             service: "web".parse()?,
+            compose_yaml: None,
         })
     }
 

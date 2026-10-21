@@ -1365,11 +1365,12 @@ fn apply_catalog_upgrade(
             _ => None,
         };
         spec.source = r3v3rs3_api::platform::AppSource::Compose {
-            repository: repo,
+            repository: Some(repo),
             branch,
             file,
             service,
             connection,
+            compose_yaml: None,
         };
     }
     Ok(())

@@ -215,6 +215,21 @@ Birden fazla servisten oluşan Compose uygulamalarında:
 - **Servis Bazlı Loglar**: Uygulamanın **Log** sayfasında yer alan **Servis** seçici menüsü, ana trafik servisinin yanı sıra Compose projesindeki herhangi bir servisin loglarını ayrı ayrı izlemeyi sağlar. Hem statik log alımı (`GET /api/apps/{id}/logs?service=<isim>`) hem de canlı WebSocket log akışı (`GET /api/apps/{id}/logs/live?service=<isim>`) servis filtresini destekler.
 - **API**: Servis konteynerlerinin listesi ve sağlık durumları doğrudan `GET /api/apps/{id}/services` üzerinden sorgulanabilir.
 
+#### Görsel Compose Editörü ve Çevre Değişkeni Tamamlama
+
+WebUI, çok servisli stack'leri yapılandırmayı sezgisel ve hatasız hale getiren görsel bir Docker Compose YAML editörü sunar:
+
+- **Doğrudan (Inline) Compose YAML Desteği**: Uygulamalar harici bir Git deposuna ihtiyaç duymadan doğrudan panel üzerinden girilen Compose YAML (`AppSource::Compose` içindeki `compose_yaml`) ile veya geleneksel Git deposundaki dosya yolu üzerinden dağıtılabilir.
+- **Gerçek Zamanlı YAML Sözdizimi Doğrulama**: `serde_yaml` ile güçlendirilen editör, yazım anında YAML yapısını anlık olarak denetler. Girintileme (indentation), anahtar eşleme veya sözdizimi hatalarında ilgili satır sol kenar numarasında kırmızıyla işaretlenir ve anlaşılır hata bildirimi gösterilir.
+- **Servis Tespiti ve Tek Tıkla Yönlendirme**: Editör, `services:` altında tanımlanan tüm servisleri otomatik olarak tespit edip etiket olarak listeler. Herhangi bir servis etiketine tıklamak, o servisi dış alan adı trafiğini alan ana yönlendirme servisi olarak ayarlar.
+- **Çevre Değişkeni ve Secret Tamamlama**: Uygulamaya, proje ortamına veya çevre gruplarına ait değişkenler ile şifreli gizli anahtarlar (`${DEGISKEN_ADI}`) hızlı ekleme butonları ve sözdizimi tamamlama ile doğrudan YAML içine yerleştirilebilir.
+- **Hazır Mimari Şablonları**: Popüler dağıtım mimarileri için tek tıkla yüklenebilen başlangıç şablonları:
+  - *Nginx Web Sunucusu* (port yönlendirmeli bağımsız web konteyneri).
+  - *Node.js + PostgreSQL* (kalıcı veritabanına bağlı API servisi).
+  - *Python + Redis* (önbellek ve kuyruk mimarisi).
+  - *WordPress + MySQL* (veritabanı arka uçlu eksiksiz CMS).
+- **Sözdizimi Önizleme**: Etkileşimli düzenleme modu ile anahtarları, değerleri ve değişken referanslarını renklendiren sözdizimi önizleme modu arasında geçiş yapılabilir.
+
 ### Ortam değişkenleri
 
 `PUT /api/apps/{id}/env` bir uygulamanın ortam değişkenlerini değiştirir. `"secret": true` olan bir değişkenin değeri yönetim API'sinden bir daha çıkmaz: API değişkeni değeri olmadan döndürür, değersiz bir güncelleme de mevcut değeri korur. r3v3rs3 her değeri `platform.key` ile şifreler ve yalnız bir container başlarken açar.

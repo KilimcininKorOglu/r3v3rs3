@@ -593,8 +593,9 @@ pub enum AppSource {
     /// A branch of a Git repository that r3v3rs3 starts with `docker compose`. A deployment
     /// recreates the changed services instead of running the new version next to the old one.
     Compose {
-        #[schema(value_type = String, example = "https://github.com/owner/shop.git")]
-        repository: RepoUrl,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schema(value_type = Option<String>, example = "https://github.com/owner/shop.git")]
+        repository: Option<RepoUrl>,
         #[serde(default = "GitRef::main")]
         #[schema(value_type = String, example = "main")]
         branch: GitRef,
@@ -611,6 +612,10 @@ pub enum AppSource {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schema(value_type = Option<String>)]
         connection: Option<ShortId>,
+        /// Inline Docker Compose YAML specification.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schema(value_type = Option<String>)]
+        compose_yaml: Option<String>,
     },
 }
 
@@ -623,12 +628,12 @@ impl AppSource {
                 repository,
                 connection,
                 ..
-            }
-            | Self::Compose {
+            } => Some((repository, *connection)),
+            Self::Compose {
                 repository,
                 connection,
                 ..
-            } => Some((repository, *connection)),
+            } => repository.as_ref().map(|r| (r, *connection)),
         }
     }
 
@@ -1106,17 +1111,68 @@ impl AppSpec {
 
     /// The Compose file sets the volumes, the restart policy and the limits of its services.
     fn validate_compose(&self) -> Result<(), Error> {
-        let compose = matches!(self.source, AppSource::Compose { .. });
+        let AppSource::Compose {
+            repository,
+            compose_yaml,
+            service,
+            ..
+        } = &self.source
+        else {
+            return Ok(());
+        };
         let customized = !self.volumes.is_empty()
             || self.restart != RestartPolicy::default()
             || self.limits != ResourceLimits::default();
-        if compose && customized {
+        if customized {
             return Err(invalid(
                 "a Compose app sets its volumes, restart policy and limits in its Compose file",
             ));
         }
+        if repository.is_none() && compose_yaml.is_none() {
+            return Err(invalid(
+                "a Compose app requires either a repository or inline compose_yaml",
+            ));
+        }
+        if let Some(yaml) = compose_yaml {
+            validate_compose_yaml(yaml, service.as_str())?;
+        }
         Ok(())
     }
+}
+
+/// Validates compose YAML syntax and checks whether the primary routing service exists.
+pub fn validate_compose_yaml(yaml: &str, service: &str) -> Result<(), Error> {
+    let services = parse_compose_services(yaml)
+        .map_err(|err| invalid(&format!("invalid compose YAML: {err}")))?;
+    if !services.is_empty() && !services.iter().any(|s| s == service) {
+        return Err(invalid(&format!(
+            "service '{service}' not found in compose YAML (declared: {})",
+            services.join(", ")
+        )));
+    }
+    Ok(())
+}
+
+/// Parses compose YAML and extracts declared service names.
+pub fn parse_compose_services(yaml: &str) -> Result<Vec<String>, String> {
+    let val: serde_yaml::Value = serde_yaml::from_str(yaml).map_err(|err| {
+        let line = err.location().map(|l| l.line()).unwrap_or(1);
+        format!("Line {line}: {err}")
+    })?;
+    let Some(map) = val.as_mapping() else {
+        return Err("compose YAML must be a mapping of top-level keys".into());
+    };
+    let Some(services) = map
+        .get(serde_yaml::Value::String("services".into()))
+        .and_then(|s| s.as_mapping())
+    else {
+        return Ok(Vec::new());
+    };
+    let names = services
+        .keys()
+        .filter_map(|k| k.as_str().map(|s| s.to_string()))
+        .collect();
+    Ok(names)
 }
 
 fn validate_health_path(path: &str) -> Result<(), Error> {
@@ -2015,6 +2071,37 @@ mod tests {
             input[field] = value;
             assert!(spec(input).is_err(), "{field}");
         }
+    }
+
+    #[test]
+    fn inline_compose_yaml_validation_and_parsing() {
+        let valid_yaml =
+            "services:\n  web:\n    image: nginx:latest\n  redis:\n    image: redis:alpine\n";
+        let services = parse_compose_services(valid_yaml).unwrap();
+        assert_eq!(services, vec!["web", "redis"]);
+
+        let spec_json = json!({
+            "source": {
+                "type": "compose",
+                "service": "web",
+                "compose_yaml": valid_yaml,
+            },
+            "port": 80,
+        });
+        assert!(spec(spec_json).is_ok());
+
+        let invalid_syntax = "services:\n  web: image: broken";
+        assert!(parse_compose_services(invalid_syntax).is_err());
+
+        let mismatch_service = json!({
+            "source": {
+                "type": "compose",
+                "service": "nonexistent",
+                "compose_yaml": valid_yaml,
+            },
+            "port": 80,
+        });
+        assert!(spec(mismatch_service).is_err());
     }
 
     #[test]
