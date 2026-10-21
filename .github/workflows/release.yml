@@ -139,19 +139,19 @@ jobs:
             runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow Rust --commit "$GITHUB_SHA" --json conclusion,status)
             if [ "$(echo "$runs" | jq 'length')" -eq 0 ]; then
               echo "this commit has no Rust run, the tests run here"
-              echo "tested=true" >> "$GITHUB_OUTPUT"
+              echo "tested=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             conclusion=$(echo "$runs" | jq -r '[.[] | select(.status == "completed")] | map(.conclusion) | sort | last // "running"')
             case "$conclusion" in
               success)
                 echo "the Rust run of $GITHUB_SHA is green, the tests are skipped"
-                echo "tested=false" >> "$GITHUB_OUTPUT"
+                echo "tested=true" >> "$GITHUB_OUTPUT"
                 exit 0
                 ;;
               failure | cancelled | startup_failure | timed_out)
                 echo "the Rust run of $GITHUB_SHA is $conclusion" >&2
-                echo "tested=true" >> "$GITHUB_OUTPUT"
+                echo "tested=false" >> "$GITHUB_OUTPUT"
                 exit 0
                 ;;
             esac
@@ -159,12 +159,12 @@ jobs:
             sleep 30
           done
           echo "no finished Rust run of $GITHUB_SHA within 20 minutes" >&2
-          echo "tested=true" >> "$GITHUB_OUTPUT"
+          echo "tested=false" >> "$GITHUB_OUTPUT"
 
   test:
     name: Test
     needs: test-gate
-    if: needs.test-gate.outputs.tested == 'false'
+    if: needs.test-gate.outputs.tested != 'true'
     uses: ./.github/workflows/rust.yml
 
   # Signs the checksums of the release assets, so a download verifies against the public key
