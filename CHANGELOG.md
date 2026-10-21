@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.6] - 2026-10-21
+
+### Added
+- Disaster recovery encrypted platform snapshot bundles (`.r3bundle`): complete zero-knowledge encrypted backups capturing SQLite databases (`platform.db`), sealing keys (`platform.key`, `keys/*.key`), TLS certificates (`certs/`), accounts (`accounts.toml`), and server configuration (`*.toml`).
+- Passphrase-based AES-256-GCM encryption with 10,000-round PBKDF2/SHA-256 key derivation.
+- Automatic and manual S3 disaster recovery replication for off-site disaster recovery storage.
+- Single-command disaster recovery CLI commands: `r3v3rs3 disaster-recovery backup` and `r3v3rs3 disaster-recovery restore` for instant bare-metal restoration on fresh servers.
+- WebUI disaster recovery manager: interactive snapshot browser, encrypted creation dialog, download links, one-click state restore, and direct bundle upload & restore.
+
 ## [2.1.5] - 2026-10-21
 
 ### Added
