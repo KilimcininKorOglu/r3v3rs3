@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-10-21
+
+### Added
+- Project & Environment Stacking: Hierarchical organization of platform applications and databases under Projects (e.g. "E-Commerce") and isolated deployment Environments (e.g. "Production", "Staging", "Development").
+- Environment-level Shared Variables: Secure, encrypted shared environment variables and secrets defined per environment, automatically inherited by all member applications during deployment.
+- Hierarchical Environment Variable Resolution: Strict 5-tier inheritance precedence during app deployment: Git config < Env groups < Environment shared variables < App-level overrides < Database connection variables.
+- Dedicated WebUI Management: New "Projects" page under Platform menu for project/environment CRUD, variable management, and filtered navigation.
+- Project & Environment Scoping: Added project and environment badges and filters to Apps and Databases dashboards, plus selection fields in application creation and edit forms.
+- Admin API: 11 new REST endpoints under `/api/projects` for project, environment, and environment variable lifecycle management.
+
 ## [2.1.10] - 2026-10-21
 
 ### Added
