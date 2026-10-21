@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.7] - 2026-10-22
+
+### Added
+- Advanced Host Node Disk and Network Bandwidth Threshold Alerts: Automated node-level resource threshold monitoring triggering outbound webhook events and audit logs.
+- Low Free Disk Warning Alert: Dispatches `system.disk_low` webhook notifications when available host node disk space drops to or below the configured percentage threshold (default: 10%), detailing available, used, and total disk bytes.
+- Bandwidth Spike Anomaly Detection: Dispatches `system.bandwidth_spike` webhook notifications when total network throughput rate exceeds the configured bytes-per-second limit, measured via `/proc/net/dev` with fallback to container network rates.
+- Anti-Spam Notification Cooldown: 15-minute suppression window preventing alert fatigue during sustained high traffic or prolonged low disk conditions.
+- WebUI Node Threshold Alert Controls: Interactive configuration card on the Targets page to toggle alerts, configure low disk free space percentages, and set bandwidth spike thresholds in MB/s.
+- Admin API Node Alerts Endpoints: Registered `GET /api/platform/node_alerts` and `PUT /api/platform/node_alerts` in OpenAPI specs with dedicated audit logging (`AuditAction::UpdateNodeAlertRules`).
+- Webhook Event Registry: Exposed `system.disk_low` and `system.bandwidth_spike` in outbound webhook subscriptions under the System category.
+
 ## [2.2.6] - 2026-10-22
 
 ### Added
