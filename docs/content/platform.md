@@ -669,6 +669,8 @@ An app can deploy replicas across multiple agent targets and the local target si
 - When a deployment runs, the master prepares the image, runs the container, and waits for health checks across all specified targets.
 - Remote agent ports forward over loopback to the master, and the master's reverse proxy automatically balances traffic across all active replicas using the chosen load balancing algorithm.
 - If an individual agent becomes temporarily offline, the master continues routing traffic among the remaining healthy replicas.
+- **Active Health Checks & Outlier Detection**: When an app configures `health_check_path`, r3v3rs3 proactively polls each replica over HTTP every 10 seconds. Multi-replica apps without an explicit HTTP health check path automatically perform active TCP connection probes every 10s. A circuit breaker with outlier detection (50% failure ratio over a 10s window) automatically isolates failing replicas for 30 seconds, routing client requests strictly to healthy nodes.
+- **Target Maintenance & Node Drain**: An admin can put any node into maintenance mode ("Drain") from the **Targets** page or via `POST /api/targets/{id}/drain`. When drained, r3v3rs3 excludes the node from the active upstream proxy pools without dropping existing connections. Clicking **Undrain** or calling `POST /api/targets/{id}/undrain` immediately restores the target to active load balancing.
 
 ## Container Registries
 
@@ -846,6 +848,8 @@ The **Backups** page (`/backups`) provides a centralized management console for 
 | `POST /api/targets/upgrade` | Admin | Pushes the latest binary to all connected outdated agent targets. |
 | `POST /api/targets/{id}/token` | Admin | Returns a new enrollment token of an agent target. |
 | `POST /api/targets/{id}/upgrade` | Admin | Pushes the latest server binary to an agent target to upgrade it. |
+| `POST /api/targets/{id}/drain` | Admin | Puts a target into maintenance mode, removing its containers from active routing. |
+| `POST /api/targets/{id}/undrain` | Admin | Restores a drained target to active proxy routing. |
 | `DELETE /api/targets/{id}` | Admin | Deletes an agent target without apps and disconnects its agent. |
 | `GET /api/registries` | Read | The configured container registries for image pulls. |
 | `POST /api/registries` | Admin | Adds container registry credentials. |

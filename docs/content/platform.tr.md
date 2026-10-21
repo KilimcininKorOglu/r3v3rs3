@@ -669,6 +669,8 @@ Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde repl
 - Bir deployment çalıştığında, master tüm belirtilen hedeflerde imajı hazırlar, konteyneri başlatır ve sağlık kontrollerini bekler.
 - Uzak agent portları master üzerinde loopback forwarder ile eşlenir ve master'ın ters proxysi seçilen yük dengeleme algoritmasıyla trafiği tüm etkin replikalar arasında otomatik dengeler.
 - Herhangi bir agent geçici olarak çevrimdışı kalırsa, master trafiği diğer sağlıklı replikalar arasında yönlendirmeye devam eder.
+- **Aktif Sağlık Kontrolleri & Outlier Tespiti**: Bir uygulama `health_check_path` tanımladığında, r3v3rs3 her 10 saniyede bir HTTP üzerinden tüm replikaları periyodik olarak sorgular. Açık bir HTTP kontrol yolu belirtilmeyen çoklu replikalı uygulamalarda ise her 10 saniyede bir aktif TCP bağlantı yoklaması yapılır. Devre kesici (circuit breaker) ve anomali tespiti (10 saniyelik pencerede %50 hata oranı eşiği), arızalanan replikaları 30 saniye boyunca otomatik olarak devreden çıkararak trafiği yalnızca sağlıklı düğümlere yönlendirir.
+- **Düğüm Bakımı & Havuz Drenajı (Node Drain)**: Sistem yöneticisi, **Hedefler** sayfasından veya `POST /api/targets/{id}/drain` çağrısıyla herhangi bir hedef düğümü bakım moduna ("Drenaj") alabilir. Drenaj durumundaki düğüm, mevcut açık bağlantıları kesintiye uğratmadan yeni trafik yönlendirme havuzundan çıkarılır. **Aktif et** butonuna tıklanarak veya `POST /api/targets/{id}/undrain` çağrısıyla düğüm sıfır kesintiyle yeniden yük dengeleme havuzuna alınır.
 
 ## Konteyner Registry'leri
 
@@ -844,6 +846,8 @@ Yönetim altındaki **Webhook'lar** sayfası, giden olay bildirim hedeflerini y�
 | `POST /api/targets/upgrade` | Admin | Bağlı tüm eski sürümlü agent hedeflerine en güncel ikili dosyayı iter. |
 | `POST /api/targets/{id}/token` | Admin | Bir agent hedefinin yeni kayıt token'ını döndürür. |
 | `POST /api/targets/{id}/upgrade` | Admin | Belirtilen agent hedefine en güncel ikili dosyayı iterek hedefin agent'ını günceller. |
+| `POST /api/targets/{id}/drain` | Admin | Bir hedefi bakım moduna alır, konteynerlerini aktif yönlendirmeden çıkarır. |
+| `POST /api/targets/{id}/undrain` | Admin | Drenajdaki bir hedefi tekrar aktif yönlendirme havuzuna alır. |
 | `DELETE /api/targets/{id}` | Admin | Uygulaması olmayan bir agent hedefini siler ve agent'ının bağlantısını keser. |
 | `GET /api/registries` | Read | İmaj çekme için yapılandırılmış konteyner registry'leri. |
 | `POST /api/registries` | Admin | Konteyner registry kimlik bilgisi ekler. |

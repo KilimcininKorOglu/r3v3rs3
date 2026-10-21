@@ -22,7 +22,8 @@ const SCHEMA: &[&str] = &[
         token_hash       TEXT,
         cert_fingerprint TEXT,
         last_seen_at     INTEGER,
-        created_at       INTEGER NOT NULL
+        created_at       INTEGER NOT NULL,
+        drained          INTEGER NOT NULL DEFAULT 0
     )",
     "CREATE TABLE IF NOT EXISTS apps (
         id         TEXT PRIMARY KEY,
@@ -352,6 +353,9 @@ impl PlatformStore {
         for &statement in SCHEMA {
             sqlx::query(statement).execute(&pool).await?;
         }
+        let _ = sqlx::query("ALTER TABLE targets ADD COLUMN drained INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
         Ok(Self { pool })
     }
 
@@ -362,7 +366,7 @@ impl PlatformStore {
     /// Adds the local target unless it exists.
     pub async fn ensure_local_target(&self, now: u64) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO targets (id, name, kind, created_at) VALUES (?, ?, 'local', ?)
+            "INSERT INTO targets (id, name, kind, created_at, drained) VALUES (?, ?, 'local', ?, 0)
             ON CONFLICT (id) DO NOTHING",
         )
         .bind(LOCAL_TARGET)
@@ -375,7 +379,7 @@ impl PlatformStore {
 
     pub async fn targets(&self) -> anyhow::Result<Vec<TargetEntry>> {
         let rows = sqlx::query(
-            "SELECT id, name, kind, last_seen_at, cert_fingerprint IS NOT NULL AS enrolled
+            "SELECT id, name, kind, last_seen_at, cert_fingerprint IS NOT NULL AS enrolled, drained
             FROM targets ORDER BY name",
         )
         .fetch_all(&self.pool)
@@ -471,6 +475,16 @@ impl PlatformStore {
     /// Deletes an agent target. Returns false when no agent target has the id.
     pub async fn delete_target(&self, id: ShortId) -> anyhow::Result<bool> {
         let result = sqlx::query("DELETE FROM targets WHERE id = ? AND kind = 'agent'")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Sets the drained state of a target for maintenance.
+    pub async fn set_target_drained(&self, id: ShortId, drained: bool) -> anyhow::Result<bool> {
+        let result = sqlx::query("UPDATE targets SET drained = ? WHERE id = ?")
+            .bind(if drained { 1 } else { 0 })
             .bind(id.to_string())
             .execute(&self.pool)
             .await?;
@@ -939,6 +953,10 @@ fn target_of(row: &SqliteRow) -> anyhow::Result<TargetEntry> {
     };
     // The local target runs on the server itself, so it is enrolled and online.
     let local = kind == TargetKind::Local;
+    let drained = row
+        .try_get::<i64, _>("drained")
+        .map(|v| v != 0)
+        .unwrap_or(false);
     Ok(TargetEntry {
         id: id_of(row, "id")?,
         name: row.try_get("name")?,
@@ -946,6 +964,7 @@ fn target_of(row: &SqliteRow) -> anyhow::Result<TargetEntry> {
         last_seen_at: optional_time_of(row, "last_seen_at")?,
         enrolled: local || row.try_get::<bool, _>("enrolled")?,
         online: local,
+        drained,
         version: None,
     })
 }

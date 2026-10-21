@@ -626,6 +626,9 @@ pub struct TargetEntry {
     /// Whether the target runs containers now: the local target, or a connected agent.
     #[serde(default)]
     pub online: bool,
+    /// Whether the target is drained for maintenance (no new traffic is routed to it).
+    #[serde(default)]
+    pub drained: bool,
     /// The version of the connected agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,

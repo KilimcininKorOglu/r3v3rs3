@@ -107,6 +107,19 @@ impl Platform {
         self.target_token(id, &token).await
     }
 
+    /// Sets the drained state of a target for maintenance and updates the proxy routes.
+    pub async fn set_target_drained(
+        &self,
+        id: ShortId,
+        drained: bool,
+    ) -> anyhow::Result<TargetEntry> {
+        if !self.store.set_target_drained(id, drained).await? {
+            return Err(not_found(id));
+        }
+        self.publish().await;
+        self.target(id).await
+    }
+
     /// Deletes an agent target without apps and closes the connection of its agent.
     pub async fn delete_target(&self, id: ShortId) -> anyhow::Result<TargetEntry> {
         let target = self.agent_target(id).await?;

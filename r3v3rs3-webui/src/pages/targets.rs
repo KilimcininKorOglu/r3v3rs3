@@ -149,8 +149,8 @@ fn target_row(
     };
     let last_seen = target.last_seen_at.map(format_time).unwrap_or_default();
     let version = target.version.clone().unwrap_or_default();
-    let actions = if admin && target.kind == TargetKind::Agent {
-        agent_actions(locale, target, targets, notice)
+    let actions = if admin {
+        target_actions(locale, target, targets, notice)
     } else {
         html! {}
     };
@@ -169,7 +169,9 @@ fn target_row(
 
 /// The translation key and the dot color of the state of a target.
 pub(super) fn target_status(target: &TargetEntry) -> (&'static str, &'static str) {
-    if !target.enrolled {
+    if target.drained {
+        ("targets.status_drained", "bg-purple-500")
+    } else if !target.enrolled {
         ("targets.status_pending", "bg-yellow-400")
     } else if target.online {
         ("targets.status_online", "bg-green-500")
@@ -178,7 +180,7 @@ pub(super) fn target_status(target: &TargetEntry) -> (&'static str, &'static str
     }
 }
 
-fn agent_actions(
+fn target_actions(
     locale: Locale,
     target: &TargetEntry,
     targets: &TargetList,
@@ -186,6 +188,24 @@ fn agent_actions(
 ) -> Html {
     let name = target.name.as_str();
     let path = format!("{PATH}/{}", target.id);
+    let drain_button = if target.drained {
+        let question = locale.tf("targets.confirm_undrain", &[("name", name)]);
+        let onclick = drain_on_click(locale, question, format!("{path}/undrain"), targets);
+        html! {
+            <a class={LINK_CLASS} {onclick}>{locale.t("targets.undrain")}</a>
+        }
+    } else {
+        let question = locale.tf("targets.confirm_drain", &[("name", name)]);
+        let onclick = drain_on_click(locale, question, format!("{path}/drain"), targets);
+        html! {
+            <a class={LINK_CLASS} {onclick}>{locale.t("targets.drain")}</a>
+        }
+    };
+
+    if target.kind == TargetKind::Local {
+        return drain_button;
+    }
+
     let question = locale.tf("targets.confirm_delete", &[("name", name)]);
     let delete = delete_on_click(
         locale,
@@ -204,11 +224,36 @@ fn agent_actions(
     });
     html! {
         <>
+            { drain_button }
             { upgrade }
             <a class={LINK_CLASS} onclick={renew}>{locale.t("targets.new_token")}</a>
             <a class={DANGER_LINK_CLASS} onclick={delete}>{locale.t("common.delete")}</a>
         </>
     }
+}
+
+fn drain_on_click(
+    locale: Locale,
+    question: String,
+    path: String,
+    targets: &TargetList,
+) -> Callback<MouseEvent> {
+    let reload = reload_callback(targets, PATH);
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let (path, reload) = (path.clone(), reload.clone());
+        dialog::confirm_then(locale, question.clone(), async move {
+            let request = Request::post(&format!("{API_ENDPOINT}{path}"));
+            match fetch_json::<serde_json::Value>(locale, request).await {
+                Ok(_) => {
+                    reload.emit(());
+                }
+                Err(err) => {
+                    dialog::message(locale, &err, Icon::Error).await;
+                }
+            }
+        });
+    })
 }
 
 fn upgrade_on_click(
@@ -596,7 +641,7 @@ fn format_disk_bytes(bytes: u64) -> String {
 mod tests {
     use super::*;
 
-    fn target(enrolled: bool, online: bool) -> TargetEntry {
+    fn target(enrolled: bool, online: bool, drained: bool) -> TargetEntry {
         TargetEntry {
             id: "fzn-txd".parse().unwrap(),
             name: "edge".into(),
@@ -604,6 +649,7 @@ mod tests {
             last_seen_at: None,
             enrolled,
             online,
+            drained,
             version: None,
         }
     }
@@ -611,9 +657,11 @@ mod tests {
     #[test]
     fn every_state_of_a_target_has_a_translated_name() {
         let cases = [
-            (target(false, false), "targets.status_pending"),
-            (target(true, true), "targets.status_online"),
-            (target(true, false), "targets.status_offline"),
+            (target(false, false, false), "targets.status_pending"),
+            (target(true, true, false), "targets.status_online"),
+            (target(true, false, false), "targets.status_offline"),
+            (target(true, true, true), "targets.status_drained"),
+            (target(false, false, true), "targets.status_drained"),
         ];
         for (target, expected) in cases {
             let (key, _) = target_status(&target);

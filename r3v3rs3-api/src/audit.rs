@@ -171,10 +171,14 @@ pub enum AuditAction {
     DeleteOutboundWebhook,
     /// An account tested an outbound webhook.
     TestOutboundWebhook,
+    /// An account drained a target for maintenance.
+    DrainTarget,
+    /// An account undrained a target, restoring it to traffic.
+    UndrainTarget,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 96] = [
+    pub const ALL: [AuditAction; 98] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -271,6 +275,8 @@ impl AuditAction {
         Self::UpdateOutboundWebhook,
         Self::DeleteOutboundWebhook,
         Self::TestOutboundWebhook,
+        Self::DrainTarget,
+        Self::UndrainTarget,
     ];
 }
 

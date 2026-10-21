@@ -191,6 +191,62 @@ pub async fn upgrade_target(
     Ok(Json(updated))
 }
 
+/// Drains a target for maintenance, removing it from active load balancing pools.
+#[utoipa::path(
+    post,
+    path = "/{id}/drain",
+    tag = "platform",
+    operation_id = "drain_target",
+    params(("id" = ShortId, Path, description = "Target id.")),
+    responses((status = 200, description = "The target with its drained state.", body = TargetEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn drain_target(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<TargetEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let updated = platform
+        .set_target_drained(id, true)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DrainTarget)
+        .id(id)
+        .summary(updated.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(updated))
+}
+
+/// Restores a drained target, returning it to active load balancing pools.
+#[utoipa::path(
+    post,
+    path = "/{id}/undrain",
+    tag = "platform",
+    operation_id = "undrain_target",
+    params(("id" = ShortId, Path, description = "Target id.")),
+    responses((status = 200, description = "The target with its active state.", body = TargetEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn undrain_target(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<TargetEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let updated = platform
+        .set_target_drained(id, false)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::UndrainTarget)
+        .id(id)
+        .summary(updated.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(updated))
+}
+
 /// Upgrades all connected agents by pushing the latest server binary to them.
 #[utoipa::path(
     post,

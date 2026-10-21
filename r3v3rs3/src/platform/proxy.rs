@@ -8,7 +8,9 @@ use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryProvider, DiscoverySource,
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppSpec, PlatformConfig};
 use r3v3rs3_api::proxy::{HttpProxy, ProxyKind, Route, Server, ServerUrl};
+use r3v3rs3_api::upstream::{CircuitBreaker, HealthCheck};
 use r3v3rs3_api::vhost::VirtualHost;
+use std::time::Duration;
 
 /// The name of the container of one deployment.
 pub fn container_name(app: ShortId, deployment: ShortId) -> anyhow::Result<ContainerName> {
@@ -40,6 +42,8 @@ pub fn app_proxy(
             Ok(Server::new(url))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
+    let health_check = app_health_check(app.spec, app.host_ports.len());
+    let circuit_breaker = app_circuit_breaker(app.host_ports.len());
     let http = HttpProxy {
         vhosts: app
             .spec
@@ -53,6 +57,8 @@ pub fn app_proxy(
             ..Default::default()
         }],
         load_balancing: app.spec.load_balancing.unwrap_or_default(),
+        health_check,
+        circuit_breaker,
         sticky: app.spec.sticky.clone().unwrap_or_default(),
         bot_blocker: app.spec.bot_blocker,
         grpc_web: app.spec.grpc_web,
@@ -78,6 +84,42 @@ pub fn app_proxy(
             kind: ProxyKind::Http(Box::new(http)),
         },
     }))
+}
+
+fn app_health_check(spec: &AppSpec, host_count: usize) -> HealthCheck {
+    if let Some(path) = &spec.health_check_path {
+        HealthCheck {
+            max_fails: 3,
+            fail_timeout: Duration::from_secs(30),
+            interval: Duration::from_secs(10),
+            timeout: Duration::from_secs(5),
+            path: path.clone(),
+        }
+    } else if host_count > 1 {
+        HealthCheck {
+            max_fails: 3,
+            fail_timeout: Duration::from_secs(30),
+            interval: Duration::from_secs(10),
+            timeout: Duration::from_secs(5),
+            path: String::new(),
+        }
+    } else {
+        HealthCheck::default()
+    }
+}
+
+fn app_circuit_breaker(host_count: usize) -> CircuitBreaker {
+    if host_count > 1 {
+        CircuitBreaker {
+            enabled: true,
+            min_requests: 3,
+            failure_ratio: 50,
+            window: Duration::from_secs(10),
+            open_duration: Duration::from_secs(30),
+        }
+    } else {
+        CircuitBreaker::default()
+    }
 }
 
 /// The snapshot of a successful read. The issues name the apps that got no proxy.
@@ -209,6 +251,27 @@ mod tests {
             http.load_balancing,
             r3v3rs3_api::upstream::LoadBalancing::ClientIpHash
         );
+        assert!(http.health_check.is_active());
+        assert_eq!(http.circuit_breaker.failure_ratio, 50);
+        Ok(())
+    }
+
+    #[test]
+    fn an_app_proxy_configures_active_health_check() -> anyhow::Result<()> {
+        let mut shop_spec = spec(&["shop.example.com"]);
+        shop_spec.health_check_path = Some("/status".into());
+        let app = LiveApp {
+            id: "abc-def".parse()?,
+            name: "shop",
+            spec: &shop_spec,
+            host_ports: vec![49153],
+        };
+        let proxy = app_proxy(&app, &PlatformConfig::default())?.expect("a proxy");
+        let ProxyKind::Http(http) = &proxy.definition.kind else {
+            panic!("an HTTP proxy");
+        };
+        assert!(http.health_check.is_active());
+        assert_eq!(http.health_check.path, "/status");
         Ok(())
     }
 

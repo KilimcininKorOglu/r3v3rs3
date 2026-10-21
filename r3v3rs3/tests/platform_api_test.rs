@@ -133,7 +133,7 @@ async fn check_read_access(addr: SocketAddr, viewer: &str, scoped: &str) -> anyh
     let targets = get(addr, "/api/targets", viewer).await?;
     assert_eq!(
         targets,
-        json!([{"id": "local", "name": "local", "kind": "local", "enrolled": true, "online": true}])
+        json!([{"id": "local", "name": "local", "kind": "local", "enrolled": true, "online": true, "drained": false}])
     );
     let (status, _) = send(addr, Method::GET, APPS, scoped, None).await?;
     assert_eq!(status, 403);
@@ -443,8 +443,33 @@ async fn manage_targets(addr: SocketAddr) -> anyhow::Result<()> {
     let (id, first) = check_target_add(addr, &admin, &editor).await?;
     let second = check_target_token(addr, &admin, &editor, &id).await?;
     assert_ne!(first, second);
+    check_target_drain(addr, &admin, &editor, &id).await?;
     check_target_delete(addr, &admin, &editor, &id).await?;
     check_target_audit(addr, &admin, &id, &[&first, &second]).await
+}
+
+async fn check_target_drain(
+    addr: SocketAddr,
+    admin: &str,
+    editor: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let drain_path = format!("{TARGETS}/{id}/drain");
+    let undrain_path = format!("{TARGETS}/{id}/undrain");
+
+    let (status, _) = send(addr, Method::POST, &drain_path, editor, None).await?;
+    assert_eq!(status, 403);
+
+    let (status, text) = send(addr, Method::POST, &drain_path, admin, None).await?;
+    assert_eq!(status, 200, "{text}");
+    let val: Value = serde_json::from_str(&text)?;
+    assert_eq!(val["drained"], true);
+
+    let (status, text) = send(addr, Method::POST, &undrain_path, admin, None).await?;
+    assert_eq!(status, 200, "{text}");
+    let val: Value = serde_json::from_str(&text)?;
+    assert_eq!(val["drained"], false);
+    Ok(())
 }
 
 /// Only an admin adds a target, and the answer carries its token once.
@@ -526,7 +551,16 @@ async fn check_target_audit(
         .iter()
         .map(|entry| entry["action"].as_str().unwrap_or_default())
         .collect::<Vec<_>>();
-    assert_eq!(actions, ["delete_target", "new_target_token", "add_target"]);
+    assert_eq!(
+        actions,
+        [
+            "delete_target",
+            "undrain_target",
+            "drain_target",
+            "new_target_token",
+            "add_target"
+        ]
+    );
     assert!(entries.iter().all(|entry| entry["summary"] == "edge"));
     let text = Value::Array(entries).to_string();
     assert!(tokens.iter().all(|token| !text.contains(token)), "{text}");

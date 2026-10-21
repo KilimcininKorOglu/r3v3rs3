@@ -69,7 +69,16 @@ impl Platform {
     ) -> anyhow::Result<(Vec<u16>, Vec<DiscoveryIssue>)> {
         let mut host_ports = Vec::new();
         let mut issues = Vec::new();
+        let targets = self.store.targets().await.unwrap_or_default();
+        let drained: std::collections::HashSet<_> = targets
+            .into_iter()
+            .filter(|t| t.drained)
+            .map(|t| t.id)
+            .collect();
         for target in deployment.spec.targets_or_default(deployment.target) {
+            if drained.contains(&target) {
+                continue;
+            }
             match self.published_port(deployment, target).await? {
                 Ok(host_port) => host_ports.push(host_port),
                 Err(message) => issues.push(DiscoveryIssue {
