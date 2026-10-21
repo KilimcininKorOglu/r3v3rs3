@@ -64,7 +64,7 @@ jobs:
       - name: Build webui
         run: cd r3v3rs3-webui && trunk build --cargo-profile web-release --release
       - name: Upload webui
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb99ba841c # v4.6.1
+        uses: actions/upload-artifact@v7
         with:
           name: webui
           path: r3v3rs3/dist/webui
