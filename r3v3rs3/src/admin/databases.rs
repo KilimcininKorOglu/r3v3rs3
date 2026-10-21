@@ -20,7 +20,7 @@ use r3v3rs3_api::{
     id::ShortId,
     platform::{
         AppEntry, AppRequest, AppSource, AppSpec, DatabaseCloneRequest, DatabaseCreated,
-        DatabaseRequest, DeploymentTrigger, EngineInfo, LOCAL_TARGET,
+        DatabaseReplicaRequest, DatabaseRequest, DeploymentTrigger, EngineInfo, LOCAL_TARGET,
     },
 };
 use std::sync::Arc;
@@ -206,6 +206,164 @@ pub async fn clone(
     }))
 }
 
+/// Lists the read replicas of a primary database.
+#[utoipa::path(
+    get,
+    path = "/{id}/replicas",
+    tag = "platform",
+    operation_id = "list_database_replicas",
+    params(("id" = ShortId, Path, description = "Primary database id.")),
+    responses((status = 200, description = "The read replicas of the database.", body = [AppEntry]), NotFoundResponse, ErrorResponses)
+)]
+pub async fn list_replicas(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Vec<AppEntry>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let _primary = platform.app(id).await.map_err(platform_error)?;
+    let apps = platform.apps().await.map_err(platform_error)?;
+    let replicas = apps
+        .into_iter()
+        .filter(|app| app.spec.replica_of == Some(id))
+        .collect();
+    Ok(Json(replicas))
+}
+
+/// Creates a read replica of an existing primary database.
+#[utoipa::path(
+    post,
+    path = "/{id}/replicas",
+    tag = "platform",
+    operation_id = "create_database_replica",
+    params(("id" = ShortId, Path, description = "Primary database id.")),
+    request_body = DatabaseReplicaRequest,
+    responses((status = 200, description = "The new read replica database.", body = DatabaseCreated), NotFoundResponse, ErrorResponses)
+)]
+pub async fn create_replica(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<DatabaseReplicaRequest>,
+) -> Result<Json<DatabaseCreated>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let primary = platform.app(id).await.map_err(platform_error)?;
+    if primary.spec.replica_of.is_some() {
+        return Err(Error::InvalidContainerSpec {
+            reason: "replicas can only be created from primary databases".to_string(),
+        }
+        .into());
+    }
+    let info = source_engine_info(&primary)?;
+    let host_port = resolve_host_port(request.host_port)?;
+    let app_req =
+        replica_app_request(&primary, &request, &info, host_port).map_err(into_app_error)?;
+    let app = platform
+        .add_app(app_req, unix_ms())
+        .await
+        .map_err(platform_error)?;
+    let password = sync_replica_password(&platform, &primary, &app, &info).await?;
+    platform
+        .deploy(app.id, &caller.username, DeploymentTrigger::Manual)
+        .await
+        .map_err(platform_error)?;
+    record_replica_audit(&state, &caller, &app, &primary).await;
+    Ok(Json(DatabaseCreated {
+        app,
+        password,
+        host_port,
+        user: info.user,
+        database: info.default_db,
+    }))
+}
+
+async fn sync_replica_password(
+    platform: &Arc<crate::platform::Platform>,
+    primary: &AppEntry,
+    replica: &AppEntry,
+    info: &EngineInfo,
+) -> Result<Option<String>, AppError> {
+    use r3v3rs3_api::platform::EnvEntry;
+    if info.password_env.is_empty() {
+        return Ok(None);
+    }
+    let primary_password = platform
+        .open_password(primary.id, info)
+        .await
+        .map_err(platform_error)?;
+    let entry = EnvEntry {
+        key: info.password_env.parse().map_err(into_app_error)?,
+        value: Some(primary_password.clone()),
+        secret: true,
+    };
+    platform
+        .set_env(replica.id, vec![entry])
+        .await
+        .map_err(platform_error)?;
+    Ok(Some(primary_password))
+}
+
+fn replica_app_request(
+    primary: &AppEntry,
+    request: &DatabaseReplicaRequest,
+    info: &EngineInfo,
+    host_port: u16,
+) -> Result<AppRequest, Error> {
+    let version = match &primary.spec.source {
+        AppSource::Image { image } => image.to_string(),
+        _ => info.versions[0].clone(),
+    };
+    Ok(AppRequest {
+        name: request.name.clone(),
+        target: LOCAL_TARGET.parse()?,
+        spec: AppSpec {
+            source: AppSource::Image {
+                image: version.parse()?,
+            },
+            port: info.container_port,
+            domains: Vec::new(),
+            ports: Vec::new(),
+            health_check_path: None,
+            volumes: vec![VolumeMount {
+                volume: volume_name(request.name.as_str())?,
+                target: info.data_path.parse()?,
+                read_only: false,
+            }],
+            restart: Default::default(),
+            limits: request.limits,
+            host_port: Some(host_port),
+            database: primary.spec.database.clone(),
+            uses_database: None,
+            replica_of: Some(primary.id),
+            auto_deploy: false,
+            require_approval: false,
+            deploy_window: None,
+            tag_trigger: None,
+            store_app_id: None,
+            targets: Vec::new(),
+            load_balancing: None,
+            alert_rules: None,
+            sticky: None,
+            git_config: None,
+            env_groups: Vec::new(),
+        },
+    })
+}
+
+async fn record_replica_audit(
+    state: &AppState,
+    caller: &Caller,
+    app: &AppEntry,
+    primary: &AppEntry,
+) {
+    let record = AuditRecord::new(AuditAction::CreateDatabaseReplica)
+        .id(app.id)
+        .summary(format!("{} replica of {}", app.name, primary.name));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+}
+
 fn source_engine_info(source: &AppEntry) -> Result<EngineInfo, AppError> {
     let engine = source.spec.database.as_deref().ok_or_else(|| {
         AppError::R3v3rs3(Error::InvalidContainerSpec {
@@ -308,6 +466,7 @@ fn app_request(
             host_port: Some(host_port),
             database: Some(request.engine.clone()),
             uses_database: None,
+            replica_of: None,
             auto_deploy: false,
             require_approval: false,
             deploy_window: None,

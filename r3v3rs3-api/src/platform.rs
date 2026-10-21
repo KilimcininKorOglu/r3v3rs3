@@ -628,6 +628,11 @@ pub struct AppSpec {
     #[schema(value_type = Option<String>)]
     pub uses_database: Option<ShortId>,
 
+    /// When this database is a read replica, the id of the primary database it replicates from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub replica_of: Option<ShortId>,
+
     /// Whether updates to the app image (newer tag or digest) should be deployed automatically.
     #[serde(default)]
     pub auto_deploy: bool,
@@ -1029,6 +1034,21 @@ pub struct DatabaseCloneRequest {
     /// Optional container resource limits. When omitted, inherits the source limits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<ResourceLimits>,
+}
+
+/// The body that creates a read replica of an existing primary database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DatabaseReplicaRequest {
+    #[schema(value_type = String, example = "main-postgres-replica")]
+    pub name: AppName,
+    /// A fixed port of `127.0.0.1`. Empty takes a free port, which stays the port of the
+    /// database afterwards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 5433)]
+    pub host_port: Option<u16>,
+    /// Container resource limits (memory, CPU, swap).
+    #[serde(default)]
+    pub limits: ResourceLimits,
 }
 
 /// The new database. The password is shown once, like a webhook secret.

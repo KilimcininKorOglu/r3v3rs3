@@ -342,6 +342,7 @@ impl AppForm {
             host_port: self.host_port,
             database: self.database.clone(),
             uses_database: self.uses_database,
+            replica_of: None,
             auto_deploy: self.auto_deploy,
             require_approval: self.require_approval,
             deploy_window: non_empty(&self.deploy_window).map(str::to_string),

@@ -1202,6 +1202,7 @@ mod tests {
                 host_port: None,
                 database: None,
                 uses_database: None,
+                replica_of: None,
                 auto_deploy: false,
                 require_approval: false,
                 deploy_window: None,

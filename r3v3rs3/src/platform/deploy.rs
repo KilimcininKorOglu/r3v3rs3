@@ -798,8 +798,9 @@ impl Platform {
         };
         ensure_database_running(runtime, db_id, &db.name).await?;
         let password = self.open_password(db_id, &info).await?;
+        let replicas = self.running_replica_ports(db_id, runtime).await;
         let mut env = Vec::new();
-        for (key, value) in connection_values(&info, host_port, password) {
+        for (key, value) in connection_values(&info, host_port, password, &replicas) {
             env.push(EnvVar {
                 key: key.parse()?,
                 value,
@@ -809,7 +810,7 @@ impl Platform {
     }
 
     /// Opens the password of the database, which its creation stored as a secret variable.
-    async fn open_password(
+    pub(crate) async fn open_password(
         &self,
         db_id: ShortId,
         info: &r3v3rs3_api::platform::EngineInfo,
@@ -822,6 +823,29 @@ impl Platform {
             Some(var) => self.open_value(db_id, var),
             None => Ok(String::new()),
         }
+    }
+
+    /// Finds the published ports of all running read replicas of the database.
+    async fn running_replica_ports(
+        &self,
+        db_id: ShortId,
+        runtime: &dyn ContainerRuntime,
+    ) -> Vec<u16> {
+        let Ok(apps) = self.store.apps().await else {
+            return Vec::new();
+        };
+        let mut ports = Vec::new();
+        for app in apps {
+            if app.spec.replica_of == Some(db_id)
+                && let Some(port) = app.spec.host_port
+                && ensure_database_running(runtime, app.id, &app.name)
+                    .await
+                    .is_ok()
+            {
+                ports.push(port);
+            }
+        }
+        ports
     }
 
     /// Waits until the container passes its health check. A stopped container fails at once.
@@ -1044,12 +1068,13 @@ async fn ensure_database_running(
     }
 }
 
-/// The environment entries of a database connection: the variables of the engine and
-/// DATABASE_URL, for `host.docker.internal` on the host.
+/// The environment entries of a database connection: the variables of the engine,
+/// DATABASE_URL, and read replica URLs, for `host.docker.internal` on the host.
 fn connection_values(
     info: &r3v3rs3_api::platform::EngineInfo,
     host_port: u16,
     password: String,
+    replicas: &[u16],
 ) -> Vec<(String, String)> {
     let host = "host.docker.internal";
     let mut values = vec![
@@ -1064,19 +1089,45 @@ fn connection_values(
             info.default_db.clone(),
         ));
     }
-    let url = match (info.user.is_empty(), info.url_database) {
-        (true, _) => format!("{}://{host}:{host_port}", info.url_scheme),
+    let url = format_url(info, host, host_port, &password);
+    values.push(("DATABASE_URL".to_string(), url));
+    if !replicas.is_empty() {
+        let read_port = replicas[0];
+        let read_url = format_url(info, host, read_port, &password);
+        values.push(("DATABASE_READ_URL".to_string(), read_url.clone()));
+        values.push(("DATABASE_REPLICA_URL".to_string(), read_url));
+        values.push((format!("{}_READ_HOST", info.env_prefix), host.to_string()));
+        values.push((
+            format!("{}_READ_PORT", info.env_prefix),
+            read_port.to_string(),
+        ));
+        let all_urls = replicas
+            .iter()
+            .map(|&port| format_url(info, host, port, &password))
+            .collect::<Vec<_>>()
+            .join(",");
+        values.push(("DATABASE_READ_URLS".to_string(), all_urls));
+    }
+    values
+}
+
+fn format_url(
+    info: &r3v3rs3_api::platform::EngineInfo,
+    host: &str,
+    port: u16,
+    password: &str,
+) -> String {
+    match (info.user.is_empty(), info.url_database) {
+        (true, _) => format!("{}://{host}:{port}", info.url_scheme),
         (false, true) => format!(
-            "{}://{}:{password}@{host}:{host_port}/{}",
+            "{}://{}:{password}@{host}:{port}/{}",
             info.url_scheme, info.user, info.default_db
         ),
         (false, false) => format!(
-            "{}://{}:{password}@{host}:{host_port}",
+            "{}://{}:{password}@{host}:{port}",
             info.url_scheme, info.user
         ),
-    };
-    values.push(("DATABASE_URL".to_string(), url));
-    values
+    }
 }
 
 #[cfg(test)]
@@ -1749,6 +1800,76 @@ mod tests {
         let err = platform.delete_app(db_id).await.unwrap_err();
         let err = err.downcast::<Error>().context("an api error")?;
         assert!(matches!(err, Error::DatabaseInUse { .. }), "{err}");
+        Ok(())
+    }
+
+    async fn add_and_deploy_replica(
+        platform: &Arc<Platform>,
+        db_id: ShortId,
+    ) -> anyhow::Result<(ShortId, u16)> {
+        let replica_port = std::net::TcpListener::bind(("127.0.0.1", 0))?
+            .local_addr()?
+            .port();
+        let mut replica_req = request("db-replica");
+        replica_req.spec.host_port = Some(replica_port);
+        replica_req.spec.replica_of = Some(db_id);
+        let replica = platform.add_app(replica_req, 3).await?;
+        let rep_dep = platform
+            .deploy(replica.id, "alice", DeploymentTrigger::Manual)
+            .await?;
+        settled(platform, &[db_id, replica.id], rep_dep.id).await?;
+        Ok((replica.id, replica_port))
+    }
+
+    #[tokio::test]
+    async fn a_deployment_injects_read_replicas_connection_urls() -> anyhow::Result<()> {
+        let (platform, runtime, linked, _dir, host_port) = setup_with_database().await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        let (rep_id, replica_port) = add_and_deploy_replica(&platform, db_id).await?;
+
+        let entry = platform
+            .deploy(linked.id, "alice", DeploymentTrigger::Manual)
+            .await?;
+        let entry = settled(&platform, &[db_id, rep_id, linked.id], entry.id).await?;
+        assert_eq!(entry.status, DeploymentStatus::Running);
+
+        let created = runtime
+            .state()
+            .specs
+            .last()
+            .cloned()
+            .context("the created container")?;
+
+        let env = |key: &str| {
+            created
+                .env
+                .iter()
+                .find(|var| var.key.as_str() == key)
+                .map(|var| var.value.clone())
+        };
+
+        assert_eq!(
+            env("DATABASE_URL").as_deref(),
+            Some(&*format!(
+                "postgres://postgres:s3cret@host.docker.internal:{host_port}/postgres"
+            ))
+        );
+        assert_eq!(
+            env("DATABASE_READ_URL").as_deref(),
+            Some(&*format!(
+                "postgres://postgres:s3cret@host.docker.internal:{replica_port}/postgres"
+            ))
+        );
+        assert_eq!(
+            env("DATABASE_READ_URLS").as_deref(),
+            Some(&*format!(
+                "postgres://postgres:s3cret@host.docker.internal:{replica_port}/postgres"
+            ))
+        );
+        assert_eq!(
+            env("POSTGRES_READ_PORT").as_deref(),
+            Some(&*replica_port.to_string())
+        );
         Ok(())
     }
 

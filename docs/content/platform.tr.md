@@ -243,6 +243,18 @@ Veritabanı satırındaki **Klonla** butonu, mevcut bir veritabanının bağıms
 - **Otomatik Geri Yükleme**: Yeni veritabanı container'ı başlatılıp sağlıklı duruma geldikten sonra, dump verisi otomatik olarak klonlanan yeni veritabanına aktarılır.
 - **İzole Test ve Staging**: Klonlanan veritabanı tamamen bağımsız bir volume, port ve kimlik bilgilerine sahip olduğundan geliştiricilerin canlı veriyi etkilemeden migrasyonları test etmesine, staging ortamı kurmasına veya hata ayıklamasına olanak tanır.
 
+### Veritabanı Read Replica & Okuma Yük Dengeleme
+
+Yüksek okuma trafiği ve okuma/yazma ayrımı (read/write splitting) için her veritabanı satırında **Replica Oluştur** işlemi bulunur:
+
+- **Tek Tıkla Kurulum**: Yeni replica adını (varsayılan `{name}-replica`) soran r3v3rs3, birincil (Primary) veritabanına bağlı (`replica_of`) yeni bir kopya veritabanı oluşturur. Birincil veritabanının kimlik doğrulama parolasını otomatik olarak kopyaya eşitler ve replica container'ını ayağa kaldırır.
+- **Ayrılmış Okuma Uç Noktası**: Her replica kendi bağımsız host portu ve volume'ü üzerinde çalışarak raporlama ve yoğun okuma sorgularının yazma trafiğini yavaşlatmasını önler.
+- **Otomatik Çoklu Replica Ortam Değişkeni Enjeksiyonu**: Bir uygulama, aktif read replica'ları bulunan bir birincil veritabanına bağlandığında, r3v3rs3 container ortamına şu değişkenleri otomatik olarak ekler:
+  - `DATABASE_URL`: Yazma işlemleri için birincil veritabanı bağlantı adresi.
+  - `DATABASE_READ_URL` ve `DATABASE_REPLICA_URL`: Aktif read replica'yı hedefleyen bağlantı adresi.
+  - `DATABASE_READ_URLS`: Aktif tüm replica bağlantı adreslerinin virgülle ayrılmış listesi; çoklu sunucu destekleyen bağlantı havuzlarının (JDBC, Prisma, pgpool, typeorm vb.) okuma trafiğini tüm replikalar arasında dağıtmasını sağlar.
+  - Motora özel read değişkenleri (ör. `POSTGRES_READ_HOST`, `POSTGRES_READ_PORT`, `MYSQL_READ_HOST` vb.).
+
 ### Yedekler
 
 Veritabanı satırındaki **Yedekler** bağlantısı o veritabanının yedeklerini açar. **Şimdi yedekle**, engine'in dump'ını container'ın içinde çalıştırır (`pg_dump`, `mariadb-dump`, `mysqldump` veya `mongodump`; Redis `SAVE` çalıştırır ve dump dosyasını alır), gzip'ler ve config dizinindeki `backups` dizinine kaydeder; veritabanı başına bir klasör, dosyanın SHA-256'sını taşıyan bir JSON manifest ile birlikte. Bir yedek parola içermez. Agent target üzerindeki bir veritabanı yedek alamaz; çünkü dump container'ın içinde çalışır.

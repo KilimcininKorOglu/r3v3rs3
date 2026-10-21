@@ -11,7 +11,9 @@ use gloo_net::http::Request;
 use r3v3rs3_api::container::ResourceLimits;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{AppEntry, DatabaseCreated, DatabaseRequest, EngineInfo};
+use r3v3rs3_api::platform::{
+    AppEntry, DatabaseCreated, DatabaseReplicaRequest, DatabaseRequest, EngineInfo,
+};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -184,13 +186,16 @@ pub fn databases() -> Html {
                 />
             }
             { list_view(
-                locale,
                 &databases,
                 &apps,
-                &engines,
-                can_edit,
-                reload.clone(),
-                CloneState { created: &created, notice: &notice },
+                RowContext {
+                    locale,
+                    engines: &engines,
+                    can_edit,
+                    reload: reload.clone(),
+                    created: &created,
+                    notice: &notice,
+                },
             ) }
         </>
     }
@@ -221,113 +226,129 @@ fn connection(app: &AppEntry, engines: &[EngineInfo]) -> String {
     }
 }
 
-struct CloneState<'a> {
+struct RowContext<'a> {
+    locale: Locale,
+    engines: &'a [EngineInfo],
+    can_edit: bool,
+    reload: Callback<()>,
     created: &'a UseStateHandle<Option<DatabaseCreated>>,
     notice: &'a UseStateHandle<Option<Notice<()>>>,
 }
 
-/// The table of the databases, with the number of the apps that use each one.
-fn list_view(
-    locale: Locale,
-    databases: &[AppEntry],
-    apps: &[AppEntry],
-    engines: &[EngineInfo],
-    can_edit: bool,
-    reload: Callback<()>,
-    clone_state: CloneState<'_>,
-) -> Html {
-    if databases.is_empty() {
-        return html! { <p class="text-neutral-400 mt-2">{locale.t("databases.empty")}</p> };
+fn db_actions(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
+    let is_replica = app.spec.replica_of.is_some();
+    let clone_btn = ctx.can_edit.then(|| {
+        clone_action(
+            ctx.locale,
+            app.id,
+            app.name.as_str(),
+            ctx.reload.clone(),
+            ctx.created.clone(),
+            ctx.notice.clone(),
+        )
+    });
+    let replica_btn = (ctx.can_edit && !is_replica).then(|| {
+        replica_action(
+            ctx.locale,
+            app.id,
+            app.name.as_str(),
+            ctx.reload.clone(),
+            ctx.created.clone(),
+            ctx.notice.clone(),
+        )
+    });
+    let delete = ctx.can_edit.then(|| {
+        let question = ctx
+            .locale
+            .tf("databases.confirm_delete", &[("name", app.name.as_str())]);
+        delete_on_click(
+            ctx.locale,
+            question,
+            format!("/databases/{}", app.id),
+            ctx.reload.clone(),
+        )
+    });
+    html! {
+        <td class="py-1.5 text-right">
+            <Link<Route> to={Route::DatabaseBackups { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
+                {ctx.locale.t("backups.nav")}
+            </Link<Route>>
+            if let Some(replica) = replica_btn {
+                <a class="text-sm text-green-400 hover:text-green-300 cursor-pointer mr-3" onclick={replica}>
+                    {ctx.locale.t("databases.create_replica")}
+                </a>
+            }
+            if let Some(clone) = clone_btn {
+                <a class="text-sm text-blue-400 hover:text-blue-300 cursor-pointer mr-3" onclick={clone}>
+                    {ctx.locale.t("databases.clone")}
+                </a>
+            }
+            <Link<Route> to={Route::AppView { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
+                {ctx.locale.t("common.view")}
+            </Link<Route>>
+            if let Some(delete) = delete {
+                <a class="text-red-400 hover:text-red-300 cursor-pointer" onclick={delete}>
+                    {ctx.locale.t("common.delete")}
+                </a>
+            }
+        </td>
     }
-    let (created, notice) = (clone_state.created, clone_state.notice);
-    let users_of = |id: ShortId| {
-        apps.iter()
-            .filter(|app| app.spec.uses_database == Some(id))
-            .map(|app| app.name.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
+}
+
+fn db_row(ctx: &RowContext<'_>, app: &AppEntry, users: &str) -> Html {
+    let is_replica = app.spec.replica_of.is_some();
+    let engine = app
+        .spec
+        .database
+        .as_deref()
+        .and_then(|key| engine_of(ctx.engines, key))
+        .map(|info| info.label.clone())
+        .unwrap_or_else(|| app.spec.database.clone().unwrap_or_default());
+    html! {
+        <tr class="border-b border-neutral-700">
+            <td class="py-1.5 font-medium">
+                {app.name.to_string()}
+                if is_replica {
+                    <span class="ml-2 px-1.5 py-0.5 text-xs rounded bg-neutral-700 text-neutral-300">
+                        {ctx.locale.t("databases.read_replica")}
+                    </span>
+                }
+            </td>
+            <td class="py-1.5 text-neutral-400">{engine}</td>
+            <td class="py-1.5 font-mono text-neutral-400">{port_of(app).to_string()}</td>
+            <td class="py-1.5 font-mono text-neutral-400">{connection(app, ctx.engines)}</td>
+            <td class="py-1.5 text-neutral-400">{users}</td>
+            { db_actions(ctx, app) }
+        </tr>
+    }
+}
+
+/// The table of the databases, with the number of the apps that use each one.
+fn list_view(databases: &[AppEntry], apps: &[AppEntry], ctx: RowContext<'_>) -> Html {
+    if databases.is_empty() {
+        return html! { <p class="text-neutral-400 mt-2">{ctx.locale.t("databases.empty")}</p> };
+    }
     let rows = databases
         .iter()
         .map(|app| {
-            let engine = app
-                .spec
-                .database
-                .as_deref()
-                .and_then(|key| engine_of(engines, key))
-                .map(|info| info.label.clone())
-                .unwrap_or_else(|| app.spec.database.clone().unwrap_or_default());
-            let users = users_of(app.id);
-            let clone_btn = can_edit.then(|| {
-                let id = app.id;
-                let default_name = format!("{}-clone", app.name);
-                let reload = reload.clone();
-                let created = created.clone();
-                let notice = notice.clone();
-                Callback::from(move |_| {
-                    let default_name = default_name.clone();
-                    let reload = reload.clone();
-                    let created = created.clone();
-                    let notice = notice.clone();
-                    spawn_local(async move {
-                        let prompt = locale.t("databases.clone_prompt");
-                        if let Some(name) = crate::dialog::prompt(locale, prompt, &default_name).await {
-                            let trimmed = name.trim().to_string();
-                            if !trimmed.is_empty() {
-                                send_clone(id, trimmed, created, notice, reload).await;
-                            }
-                        }
-                    });
-                })
-            });
-            let delete = can_edit.then(|| {
-                let question =
-                    locale.tf("databases.confirm_delete", &[("name", app.name.as_str())]);
-                delete_on_click(
-                    locale,
-                    question,
-                    format!("/databases/{}", app.id),
-                    reload.clone(),
-                )
-            });
-            html! {
-                <tr class="border-b border-neutral-700">
-                    <td class="py-1.5">{app.name.to_string()}</td>
-                    <td class="py-1.5 text-neutral-400">{engine}</td>
-                    <td class="py-1.5 font-mono text-neutral-400">{port_of(app).to_string()}</td>
-                    <td class="py-1.5 font-mono text-neutral-400">{connection(app, engines)}</td>
-                    <td class="py-1.5 text-neutral-400">{users}</td>
-                    <td class="py-1.5 text-right">
-                        <Link<Route> to={Route::DatabaseBackups { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
-                            {locale.t("backups.nav")}
-                        </Link<Route>>
-                        if let Some(clone) = clone_btn {
-                            <a class="text-sm text-blue-400 hover:text-blue-300 cursor-pointer mr-3" onclick={clone}>
-                                {locale.t("databases.clone")}
-                            </a>
-                        }
-                        <Link<Route> to={Route::AppView { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
-                            {locale.t("common.view")}
-                        </Link<Route>>
-                        if let Some(delete) = delete {
-                            <a class="text-red-400 hover:text-red-300" onclick={delete}>
-                                {locale.t("common.delete")}
-                            </a>
-                        }
-                    </td>
-                </tr>
-            }
+            let users = apps
+                .iter()
+                .filter(|a| a.spec.uses_database == Some(app.id))
+                .map(|a| a.name.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            db_row(&ctx, app, &users)
         })
         .collect::<Vec<_>>();
     html! {
         <table class="w-full text-sm mt-3">
             <thead>
                 <tr class="text-left text-neutral-400">
-                    <th class="py-1.5 font-medium">{locale.t("common.name")}</th>
-                    <th class="py-1.5 font-medium">{locale.t("databases.engine")}</th>
-                    <th class="py-1.5 font-medium">{locale.t("common.port")}</th>
-                    <th class="py-1.5 font-medium">{locale.t("databases.connection")}</th>
-                    <th class="py-1.5 font-medium">{locale.t("databases.apps")}</th>
+                    <th class="py-1.5 font-medium">{ctx.locale.t("common.name")}</th>
+                    <th class="py-1.5 font-medium">{ctx.locale.t("databases.engine")}</th>
+                    <th class="py-1.5 font-medium">{ctx.locale.t("common.port")}</th>
+                    <th class="py-1.5 font-medium">{ctx.locale.t("databases.connection")}</th>
+                    <th class="py-1.5 font-medium">{ctx.locale.t("databases.apps")}</th>
                     <th />
                 </tr>
             </thead>
@@ -604,6 +625,108 @@ async fn send_clone(
     let req = Request::post(&format!("{API_ENDPOINT}/databases/{id}/clone"))
         .header("Content-Type", "application/json")
         .body(body.to_string());
+    let sent = match req {
+        Ok(b) => b.send().await,
+        Err(e) => {
+            notice.set(Some(Notice::Failed(e.to_string())));
+            return;
+        }
+    };
+    match sent {
+        Ok(res) if res.ok() => match res.json::<DatabaseCreated>().await {
+            Ok(data) => {
+                created.set(Some(data));
+                notice.set(Some(Notice::Saved(())));
+                saved.emit(());
+            }
+            Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
+        },
+        Ok(res) => {
+            let msg = res.text().await.unwrap_or_default();
+            notice.set(Some(Notice::Failed(msg)));
+        }
+        Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
+    }
+}
+
+fn clone_action(
+    locale: Locale,
+    id: ShortId,
+    name: &str,
+    reload: Callback<()>,
+    created: UseStateHandle<Option<DatabaseCreated>>,
+    notice: UseStateHandle<Option<Notice<()>>>,
+) -> Callback<MouseEvent> {
+    let default_name = format!("{name}-clone");
+    Callback::from(move |_| {
+        let (default_name, reload, created, notice) = (
+            default_name.clone(),
+            reload.clone(),
+            created.clone(),
+            notice.clone(),
+        );
+        spawn_local(async move {
+            let prompt = locale.t("databases.clone_prompt");
+            if let Some(name) = crate::dialog::prompt(locale, prompt, &default_name).await {
+                let trimmed = name.trim().to_string();
+                if !trimmed.is_empty() {
+                    send_clone(id, trimmed, created, notice, reload).await;
+                }
+            }
+        });
+    })
+}
+
+fn replica_action(
+    locale: Locale,
+    id: ShortId,
+    name: &str,
+    reload: Callback<()>,
+    created: UseStateHandle<Option<DatabaseCreated>>,
+    notice: UseStateHandle<Option<Notice<()>>>,
+) -> Callback<MouseEvent> {
+    let default_name = format!("{name}-replica");
+    Callback::from(move |_| {
+        let (default_name, reload, created, notice) = (
+            default_name.clone(),
+            reload.clone(),
+            created.clone(),
+            notice.clone(),
+        );
+        spawn_local(async move {
+            let prompt = locale.t("databases.replica_prompt");
+            if let Some(name) = crate::dialog::prompt(locale, prompt, &default_name).await {
+                let trimmed = name.trim().to_string();
+                if !trimmed.is_empty() {
+                    send_replica(id, trimmed, created, notice, reload).await;
+                }
+            }
+        });
+    })
+}
+
+/// Creates a read replica of an existing database and displays its details.
+async fn send_replica(
+    id: ShortId,
+    name: String,
+    created: UseStateHandle<Option<DatabaseCreated>>,
+    notice: UseStateHandle<Option<Notice<()>>>,
+    saved: Callback<()>,
+) {
+    let Ok(app_name) = name.parse() else {
+        return;
+    };
+    let payload = DatabaseReplicaRequest {
+        name: app_name,
+        host_port: None,
+        limits: ResourceLimits::default(),
+    };
+    let Ok(body) = serde_json::to_string(&payload) else {
+        return;
+    };
+    let req = Request::post(&format!("{API_ENDPOINT}/databases/{id}/replicas"))
+        .header("Content-Type", "application/json")
+        .body(body);
     let sent = match req {
         Ok(b) => b.send().await,
         Err(e) => {

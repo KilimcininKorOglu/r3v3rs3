@@ -243,6 +243,18 @@ The **Clone** button on a database row creates a new, independent copy (branch) 
 - **Automated Restore**: Once the new database container is initialized and healthy, the dump data is automatically restored into the cloned database.
 - **Isolated Testing**: The cloned database has its own isolated volume, port, and credentials, allowing developers to test migrations, run staging environments, or debug against production data without affecting the primary database.
 
+### Database Read Replicas & Read Load Balancing
+
+For high read traffic and read/write splitting, a database row features a **Create Replica** action:
+
+- **One-Click Provisioning**: Asking for a replica name (defaults to `{name}-replica`), r3v3rs3 provisions a new replica database pointing to the primary database (`replica_of`). It automatically synchronizes the root authentication credentials with the primary and starts the replica container.
+- **Dedicated Read Endpoint**: Each replica operates on its own dedicated host port and volume, isolating read-heavy analytical or reporting queries from write traffic.
+- **Automatic Multi-Replica Environment Injection**: When an application binds to a primary database that has running read replicas, r3v3rs3 automatically enriches its container environment:
+  - `DATABASE_URL`: The primary database connection string for writes.
+  - `DATABASE_READ_URL` & `DATABASE_REPLICA_URL`: Connection strings targeting the primary's active read replicas.
+  - `DATABASE_READ_URLS`: A comma-separated list of all active read replica connection strings, directly consumable by multi-host connection pools (such as JDBC, Prisma, pgpool, or typeorm) to balance read traffic across all replicas.
+  - Engine-specific read variables (e.g., `POSTGRES_READ_HOST`, `POSTGRES_READ_PORT`, `MYSQL_READ_HOST`, etc.).
+
 ### Backups
 
 The **Backups** link on a database row opens its backups. **Back up now** runs the dump of the engine inside the container (`pg_dump`, `mariadb-dump`, `mysqldump` or `mongodump`; Redis runs `SAVE` and takes its dump file), gzips it and stores it in the `backups` directory of the config directory, one folder per database, with a JSON manifest that carries the SHA-256 of the file. A backup holds no password. A database on an agent target takes no backup, because the dump runs in the container itself.
