@@ -255,6 +255,17 @@ For high read traffic and read/write splitting, a database row features a **Crea
   - `DATABASE_READ_URLS`: A comma-separated list of all active read replica connection strings, directly consumable by multi-host connection pools (such as JDBC, Prisma, pgpool, or typeorm) to balance read traffic across all replicas.
   - Engine-specific read variables (e.g., `POSTGRES_READ_HOST`, `POSTGRES_READ_PORT`, `MYSQL_READ_HOST`, etc.).
 
+### Database Web Administration UIs
+
+For visual inspection, querying, and schema management, r3v3rs3 provides official one-click database management web interfaces in the **App Store**:
+- **pgAdmin 4**: Feature-rich administration and SQL development platform for PostgreSQL.
+- **phpMyAdmin**: Web interface for MySQL and MariaDB management with arbitrary server support.
+- **Redis Commander**: Fast web-based key-value management tool for Redis instances.
+- **Adminer**: Lightweight, single-container multi-engine database manager (PostgreSQL, MySQL, SQLite, MongoDB).
+- **Mongo Express**: Interactive document and collection manager for MongoDB.
+
+On the **Databases** page, each database row includes a direct **Web UI** action that opens the corresponding App Store template pre-configured for the database engine.
+
 ### Backups
 
 The **Backups** link on a database row opens its backups. **Back up now** runs the dump of the engine inside the container (`pg_dump`, `mariadb-dump`, `mysqldump` or `mongodump`; Redis runs `SAVE` and takes its dump file), gzips it and stores it in the `backups` directory of the config directory, one folder per database, with a JSON manifest that carries the SHA-256 of the file. A backup holds no password. A database on an agent target takes no backup, because the dump runs in the container itself.

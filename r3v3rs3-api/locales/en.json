@@ -1143,6 +1143,8 @@
   "databases.wal_archive": "Archive WAL Now",
   "databases.wal_archived": "WAL segment archived successfully.",
   "databases.wal_segments": "WAL / Binary Log Segments",
+  "databases.admin_ui": "Web UI",
+  "databases.admin_ui_hint": "Launch web management UI",
   "databases.apps": "Used by",
   "metrics.title": "Metrics",
   "metrics.waiting": "No samples yet. The collector records one every 30 seconds while the app runs.",

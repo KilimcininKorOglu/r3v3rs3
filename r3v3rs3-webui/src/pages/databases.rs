@@ -235,8 +235,29 @@ struct RowContext<'a> {
     notice: &'a UseStateHandle<Option<Notice<()>>>,
 }
 
+fn admin_ui_store_id(engine: &str) -> &'static str {
+    match engine {
+        "postgres" => "pgadmin",
+        "mysql" | "mariadb" => "phpmyadmin",
+        "redis" => "redis-commander",
+        "mongodb" => "mongo-express",
+        _ => "adminer",
+    }
+}
+
 fn db_actions(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
     let is_replica = app.spec.replica_of.is_some();
+    let admin_ui_btn = app.spec.database.as_deref().map(|engine| {
+        let store = admin_ui_store_id(engine).to_string();
+        html! {
+            <Link<Route>
+                to={Route::NewStoreApp { store }}
+                classes="text-sm text-purple-400 hover:text-purple-300 mr-3"
+            >
+                {ctx.locale.t("databases.admin_ui")}
+            </Link<Route>>
+        }
+    });
     let clone_btn = ctx.can_edit.then(|| {
         clone_action(
             ctx.locale,
@@ -273,6 +294,9 @@ fn db_actions(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
             <Link<Route> to={Route::DatabaseBackups { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
                 {ctx.locale.t("backups.nav")}
             </Link<Route>>
+            if let Some(admin_ui) = admin_ui_btn {
+                {admin_ui}
+            }
             if let Some(replica) = replica_btn {
                 <a class="text-sm text-green-400 hover:text-green-300 cursor-pointer mr-3" onclick={replica}>
                     {ctx.locale.t("databases.create_replica")}

@@ -255,6 +255,17 @@ Yüksek okuma trafiği ve okuma/yazma ayrımı (read/write splitting) için her 
   - `DATABASE_READ_URLS`: Aktif tüm replica bağlantı adreslerinin virgülle ayrılmış listesi; çoklu sunucu destekleyen bağlantı havuzlarının (JDBC, Prisma, pgpool, typeorm vb.) okuma trafiğini tüm replikalar arasında dağıtmasını sağlar.
   - Motora özel read değişkenleri (ör. `POSTGRES_READ_HOST`, `POSTGRES_READ_PORT`, `MYSQL_READ_HOST` vb.).
 
+### Veritabanı Web Yönetim Arayüzleri
+
+Görsel veri inceleme, sorgulama ve şema yönetimi için r3v3rs3, **App Store** bünyesinde resmi tek tıkla kurulabilir veritabanı yönetim arayüzleri sunar:
+- **pgAdmin 4**: PostgreSQL için zengin özellikli yönetim ve SQL geliştirme platformu.
+- **phpMyAdmin**: MySQL ve MariaDB veritabanları için web yönetim arayüzü.
+- **Redis Commander**: Redis örnekleri için hızlı web tabanlı anahtar-değer yönetim aracı.
+- **Adminer**: Tek container'da çoklu motor destekleyen (PostgreSQL, MySQL, SQLite, MongoDB) hafif veritabanı yöneticisi.
+- **Mongo Express**: MongoDB için etkileşimli döküman ve koleksiyon yönetim paneli.
+
+**Veritabanları** sayfasında her veritabanı satırı, ilgili veritabanı motoruna uygun App Store şablonunu doğrudan açan bir **Web Arayüzü** kısayol bağlantısı içerir.
+
 ### Yedekler
 
 Veritabanı satırındaki **Yedekler** bağlantısı o veritabanının yedeklerini açar. **Şimdi yedekle**, engine'in dump'ını container'ın içinde çalıştırır (`pg_dump`, `mariadb-dump`, `mysqldump` veya `mongodump`; Redis `SAVE` çalıştırır ve dump dosyasını alır), gzip'ler ve config dizinindeki `backups` dizinine kaydeder; veritabanı başına bir klasör, dosyanın SHA-256'sını taşıyan bir JSON manifest ile birlikte. Bir yedek parola içermez. Agent target üzerindeki bir veritabanı yedek alamaz; çünkü dump container'ın içinde çalışır.

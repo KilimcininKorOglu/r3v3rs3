@@ -792,6 +792,123 @@
       ],
       "category": "Database",
       "category_tr": "Veritabanı"
+    },
+    {
+      "id": "pgadmin",
+      "name": "pgAdmin 4",
+      "description": "Comprehensive web-based administration and development platform for PostgreSQL.",
+      "description_tr": "PostgreSQL için kapsamlı web tabanlı yönetim ve geliştirme platformu.",
+      "image": "dpage/pgadmin4:latest",
+      "port": 80,
+      "health_check_path": "/misc/ping",
+      "website": "https://www.pgadmin.org",
+      "category": "Database",
+      "category_tr": "Veritabanı",
+      "screenshot": "https://www.pgadmin.org/static/screenshots/dashboard.png",
+      "env": [
+        {
+          "key": "PGADMIN_DEFAULT_EMAIL",
+          "description": "Initial administrator email address.",
+          "description_tr": "Yönetici ilk e-posta adresi.",
+          "secret": false
+        },
+        {
+          "key": "PGADMIN_DEFAULT_PASSWORD",
+          "description": "Initial administrator password.",
+          "description_tr": "Yönetici ilk parolası.",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "phpmyadmin",
+      "name": "phpMyAdmin",
+      "description": "Web-based database administration tool for MySQL and MariaDB.",
+      "description_tr": "MySQL ve MariaDB için web tabanlı veritabanı yönetim aracı.",
+      "image": "phpmyadmin:latest",
+      "port": 80,
+      "website": "https://www.phpmyadmin.net",
+      "category": "Database",
+      "category_tr": "Veritabanı",
+      "screenshot": "https://www.phpmyadmin.net/static/images/screen-home.png",
+      "env": [
+        {
+          "key": "PMA_ARBITRARY",
+          "description": "Allow connecting to arbitrary database hosts (set to 1).",
+          "description_tr": "İsteğe bağlı veritabanı sunucularına bağlanmaya izin ver (1 olarak ayarlayın).",
+          "secret": false
+        },
+        {
+          "key": "PMA_HOST",
+          "description": "Default MySQL/MariaDB container or host name.",
+          "description_tr": "Varsayılan MySQL/MariaDB container veya sunucu adı.",
+          "secret": false
+        }
+      ]
+    },
+    {
+      "id": "redis-commander",
+      "name": "Redis Commander",
+      "description": "Fast web-based management tool for Redis key-value stores.",
+      "description_tr": "Redis anahtar-değer depoları için hızlı web yönetim arayüzü.",
+      "image": "rediscommander/redis-commander:latest",
+      "port": 8081,
+      "website": "https://github.com/joeferner/redis-commander",
+      "category": "Database",
+      "category_tr": "Veritabanı",
+      "screenshot": "https://raw.githubusercontent.com/joeferner/redis-commander/master/screenshots/screen1.png",
+      "env": [
+        {
+          "key": "REDIS_HOSTS",
+          "description": "Redis connection definition: label:host:port:db:password (e.g. local:my-redis:6379).",
+          "description_tr": "Redis bağlantı tanımı: etiket:sunucu:port:db:parola (örn. local:my-redis:6379).",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "adminer",
+      "name": "Adminer",
+      "description": "Lightweight, full-featured database management in a single container for PostgreSQL, MySQL, SQLite, and MongoDB.",
+      "description_tr": "PostgreSQL, MySQL, SQLite ve MongoDB için tek container'da hafif, tam özellikli veritabanı yönetim aracı.",
+      "image": "adminer:latest",
+      "port": 8080,
+      "website": "https://www.adminer.org",
+      "category": "Database",
+      "category_tr": "Veritabanı",
+      "screenshot": "https://www.adminer.org/static/images/screen.png"
+    },
+    {
+      "id": "mongo-express",
+      "name": "Mongo Express",
+      "description": "Web-based administrative interface for MongoDB written in Node.js.",
+      "description_tr": "MongoDB için Node.js ile yazılmış web tabanlı yönetim arayüzü.",
+      "image": "mongo-express:latest",
+      "port": 8081,
+      "website": "https://github.com/mongo-express/mongo-express",
+      "category": "Database",
+      "category_tr": "Veritabanı",
+      "screenshot": "https://raw.githubusercontent.com/mongo-express/mongo-express/master/screenshot.png",
+      "env": [
+        {
+          "key": "ME_CONFIG_MONGODB_URL",
+          "description": "MongoDB connection string (e.g. mongodb://user:pass@internal-mongo:27017/admin).",
+          "description_tr": "MongoDB bağlantı adresi (örn. mongodb://user:pass@internal-mongo:27017/admin).",
+          "secret": true
+        },
+        {
+          "key": "ME_CONFIG_BASICAUTH_USERNAME",
+          "description": "Web interface login username.",
+          "description_tr": "Web arayüzü giriş kullanıcı adı.",
+          "secret": false
+        },
+        {
+          "key": "ME_CONFIG_BASICAUTH_PASSWORD",
+          "description": "Web interface login password.",
+          "description_tr": "Web arayüzü giriş parolası.",
+          "secret": true
+        }
+      ]
     }
   ]
 }
