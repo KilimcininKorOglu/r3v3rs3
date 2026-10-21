@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-10-21
+
+### Added
+- Point-in-time recovery (PITR) and continuous WAL archiving: Write-Ahead Log rotation and archiving for PostgreSQL, MySQL, MongoDB, and Redis with precise second-level replay and non-destructive PITR branch cloning.
+- Database read replicas and read traffic load balancing: one-click read replica creation with PostgreSQL streaming replication, MySQL binary replication, and automated upstream load balancing across read instances.
+- Container resource limits and vertical scaling: configurable CPU quota, RAM limits, swap limits, and OOM killer protection for deployed apps and managed databases.
+- Database cloning and branching: one-click staging branch creation from running database containers or verified backup dumps with isolated volume and port provisioning.
+- DNS-based upstream load balancing: resolve upstream hostnames to multiple IP addresses with round-robin traffic distribution and TTL-aware caching.
+- Compose service health and per-service log viewer: real-time container health monitoring and filtered log streaming for individual services within Docker Compose applications.
+- Shared environment variable groups: define reusable environment variable collections and link them across multiple applications.
+- Configurable datagram size and session timeout settings for UDP reverse proxies.
+- Git-based configuration file loading: automatically read environment variables from repository `.env` or custom config files during app deployment.
+- Disk hygiene prune policy: automated cleanup of dangling Docker images, stopped containers, build caches, and temporary archives.
+- Self-monitoring system metrics: Prometheus-compatible instrumentation for file descriptor usage, process memory consumption, and Tokio runtime event loop lag.
+- Latency histograms and upstream error counters: p50, p95, and p99 request latency distribution metrics and upstream HTTP error counters.
+- GeoIP country filtering: MaxMind MMDB-backed country and continent access rule enforcement at route and proxy levels.
+- Persistent scoped API tokens: generate long-lived bearer tokens with granular role-based permissions and proxy scopes.
+- Per-IP and per-API-key concurrency limits: rate-limiting and connection caps to protect upstream services against abuse.
+- User list file support: load basic authentication credentials from external htpasswd-style user list files.
+- Route-level client certificate requirement for mTLS: enforce mutual TLS verification conditionally per route.
+- Custom error pages for HTTP proxies: render custom branded HTML templates for 4xx and 5xx reverse proxy errors.
+
+### Fixed
+- System metrics test runtime and asynchronous test execution stability under Clippy.
+
 ## [2.0.5] - 2026-10-19
 
 ### Added
