@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-10-21
+
+### Added
+- Remote S3 Backup Browser & Disaster Recovery: Interactive remote backup snapshot browser directly querying external S3/R2 storage buckets using SigV4 AWS-compliant `ListObjectsV2` and `GetObject`.
+- Database Disaster Recovery: Ability to restore a remote S3 backup into a newly created isolated database container or in-place into an existing database with a single click.
+- Direct S3 Snapshot Downloads: Stream and download backup archives (`.dump.gz`) from remote S3 buckets through the authenticated admin API proxy.
+- Admin API S3 Endpoints: `GET /databases/s3/backups` (remote snapshot listing and filtering), `GET /databases/s3/download` (direct download streaming), and `POST /databases/s3/restore` (disaster recovery and in-place restore).
+- WebUI Snapshot Drawers: Integrated S3 disaster recovery browser panel in the main Databases dashboard and a remote snapshot table in the Database Backups detail view.
+
+### Fixed
+- Duplicate Update Banner: Eliminated duplicate version update notification on the dashboard by removing redundant local page rendering and retaining the global layout banner.
+
 ## [2.2.1] - 2026-10-21
 
 ### Added
