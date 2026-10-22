@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.6] - 2026-10-22
+
+### Added
+- Cross-Environment Configuration & Secret Diff Engine: High-performance comparison engine (`diff_environments`) performing in-memory evaluation of variables and secrets across project environments, classifying entries into `Identical`, `Different Value`, `Missing in Target`, or `Missing in Source`.
+- Zero-Leak Cryptographic Secret Re-Sealing: Secure secret synchronization pipeline (`sync_environment_env`) that opens encrypted secrets in server-side memory and re-seals them using the target environment's cryptographic Associated Authenticated Data (`env_aad`), preventing cross-row decryption attacks without ever exposing plaintext secrets to the WebUI or API clients.
+- One-Click Cross-Environment Synchronization: Support for multiple synchronization modes: `SyncMissing` (syncs missing variables without overwriting existing target values), `CloneAll` (full overwrite/clone), and `SelectedKeys` (granular single-key sync).
+- WebUI Multi-Environment Manager & Diff Console: Redesigned Environments modal with horizontal navigation tabs for each environment, plus a dedicated **Compare & Sync** tab featuring interactive source/target selectors, real-time diff metric badges, side-by-side diff table, and one-click key synchronization.
+- Cross-Environment Admin API Endpoints: Added `GET /api/projects/{id}/environments/{source_id}/diff/{target_id}` and `POST /api/projects/{id}/environments/sync` with full OpenAPI 3.1 documentation and audit logging (`AuditAction::SyncEnvironmentEnv`).
+
 ## [2.3.5] - 2026-10-22
 
 ### Added
