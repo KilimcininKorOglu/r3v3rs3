@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.9] - 2026-10-22
+
+### Added
+- Visual GeoIP Rule Wizard Card: Replaced plain text comma-separated country code inputs across HTTP proxies, route IP overrides, and access lists with an interactive visual rule wizard card.
+- Single-Click GeoIP Enforcement Modes: Intuitive mode switcher supporting "Disabled (Off)", "Allowlist (Only Selected)", "Denylist (Block Selected)", and "Advanced (Allow & Deny)" with contextual summary banners describing enforcement behavior.
+- Instant Regional Country Presets: Pre-configured single-click presets to generate policies for Turkey (TR), European Union (EU 27 member states), North America (US, CA, MX), G7 Nations, DACH (DE, AT, CH), APAC, LATAM, MENA, and Nordic regions.
+- Country Search Autocomplete & Filter: Search any ISO-3166-1 country by alpha-2 code, English name, or Turkish name with real-time autocompletion dropdown.
+- Interactive Tag Chip Badges: Selected countries render as visual chips showing alpha-2 code and localized display name with quick one-click removal buttons.
+- Collapsible Direct CSV Input Fallback: Expandable raw input fields for bulk copying and pasting comma-separated country codes.
+
 ## [2.2.8] - 2026-10-22
 
 ### Added
