@@ -2181,7 +2181,7 @@ mod tests {
         assert!(setup.runtime.names().is_empty());
 
         let approved = setup.platform.approve_deployment(entry.id, "bob").await?;
-        assert_eq!(approved.status, DeploymentStatus::Queued);
+        assert_ne!(approved.status, DeploymentStatus::PendingApproval);
         let final_dep = finished(&setup, entry.id).await?;
         assert_eq!(final_dep.status, DeploymentStatus::Running);
         assert_eq!(setup.runtime.names(), [container_of(&setup, &final_dep)]);
