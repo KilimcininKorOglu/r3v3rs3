@@ -91,7 +91,7 @@ fn bulk_toolbar(locale: Locale, sel: &SelectionProps) -> Option<Html> {
     }
     let clear = sel.on_clear.clone();
     Some(html! {
-        <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-neutral-100 dark:bg-neutral-750 border-b border-neutral-300 dark:border-neutral-700">
+        <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-neutral-100 dark:bg-neutral-800 border-b border-neutral-300 dark:border-neutral-700">
             <div class="flex items-center gap-3">
                 <span class="text-sm font-medium text-neutral-800 dark:text-neutral-200">
                     {locale.tf("common.selected_count", &[("count", &sel.selected.len().to_string())])}

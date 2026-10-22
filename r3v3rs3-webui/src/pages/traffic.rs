@@ -727,6 +727,14 @@ fn filters_toolbar_view(
         })
     };
 
+    let status_val = match **status_filter {
+        Some(StatusCategory::Success2xx) => "2xx",
+        Some(StatusCategory::Redirect3xx) => "3xx",
+        Some(StatusCategory::ClientError4xx) => "4xx",
+        Some(StatusCategory::ServerError5xx) => "5xx",
+        None => "all",
+    };
+
     html! {
         <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center flex-wrap">
             <div class="relative flex-1 min-w-[180px]">
@@ -749,20 +757,21 @@ fn filters_toolbar_view(
             </div>
             <select
                 onchange={on_status_change}
+                value={status_val}
                 class="text-xs sm:text-sm px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-                <option value="all">{locale.t("traffic.filter_all_status")}</option>
-                <option value="2xx">{locale.t("traffic.filter_2xx")}</option>
-                <option value="3xx">{locale.t("traffic.filter_3xx")}</option>
-                <option value="4xx">{locale.t("traffic.filter_4xx")}</option>
-                <option value="5xx">{locale.t("traffic.filter_5xx")}</option>
+                <option value="all" selected={status_filter.is_none()}>{locale.t("traffic.filter_all_status")}</option>
+                <option value="2xx" selected={matches!(**status_filter, Some(StatusCategory::Success2xx))}>{locale.t("traffic.filter_2xx")}</option>
+                <option value="3xx" selected={matches!(**status_filter, Some(StatusCategory::Redirect3xx))}>{locale.t("traffic.filter_3xx")}</option>
+                <option value="4xx" selected={matches!(**status_filter, Some(StatusCategory::ClientError4xx))}>{locale.t("traffic.filter_4xx")}</option>
+                <option value="5xx" selected={matches!(**status_filter, Some(StatusCategory::ServerError5xx))}>{locale.t("traffic.filter_5xx")}</option>
             </select>
             <select
                 onchange={on_country_change}
                 value={selected_country.as_deref().unwrap_or("all").to_string()}
                 class="text-xs sm:text-sm px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-                <option value="all">{locale.t("traffic.filter_all_countries")}</option>
+                <option value="all" selected={selected_country.is_none()}>{locale.t("traffic.filter_all_countries")}</option>
                 { for available_countries.iter().map(|code| html! {
                     <option value={code.clone()} selected={selected_country.as_deref() == Some(code)}>{code}</option>
                 }) }
@@ -843,9 +852,9 @@ fn render_entry_row(
         Callback::from(move |_| on_select.emit(entry.clone()))
     };
     let row_cls = if is_selected {
-        "bg-primary-50 dark:bg-primary-950/40 ring-1 ring-primary-500/50 cursor-pointer"
+        "bg-blue-50 dark:bg-blue-950/40 ring-1 ring-blue-500/50 cursor-pointer"
     } else {
-        "hover:bg-neutral-50 dark:hover:bg-neutral-750/50 cursor-pointer"
+        "hover:bg-neutral-100 dark:hover:bg-neutral-700/40 cursor-pointer transition-colors"
     };
 
     html! {

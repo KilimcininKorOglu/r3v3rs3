@@ -159,9 +159,9 @@ fn render_dropdown_header(
     on_dismiss: Callback<MouseEvent>,
 ) -> Html {
     html! {
-        <div class="flex items-center justify-between px-4 py-3 border-b border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-850">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900">
             <div class="flex items-center gap-2">
-                <span class="font-semibold text-sm">{locale.t("anomalies.notifications_center")}</span>
+                <span class="font-semibold text-sm text-neutral-900 dark:text-neutral-100">{locale.t("anomalies.notifications_center")}</span>
                 if count > 0 {
                     <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
                         {format!("{} {}", count, locale.t("anomalies.active_badge"))}
@@ -184,7 +184,7 @@ fn render_dropdown_header(
 
 fn render_dropdown_body(locale: Locale, active_anomalies: &[AnomalyAlert]) -> Html {
     html! {
-        <div class="max-h-80 overflow-y-auto divide-y divide-neutral-200 dark:divide-neutral-700">
+        <div class="max-h-80 overflow-y-auto divide-y divide-neutral-200 dark:divide-neutral-700 bg-white dark:bg-neutral-800">
             if active_anomalies.is_empty() {
                 <div class="flex flex-col items-center justify-center p-6 text-center text-neutral-500 dark:text-neutral-400">
                     <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 mb-2 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -226,7 +226,7 @@ fn render_dropdown_footer(
     };
 
     html! {
-        <div class="flex items-center justify-between px-4 py-2 bg-neutral-50 dark:bg-neutral-850 border-t border-neutral-200 dark:border-neutral-700 text-xs">
+        <div class="flex items-center justify-between px-4 py-2 bg-neutral-50 dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-700 text-xs">
             <button type="button" class="text-blue-600 dark:text-blue-400 hover:underline" onclick={on_traffic}>
                 {locale.t("anomalies.view_traffic")}
             </button>
@@ -263,7 +263,7 @@ fn render_alert_item(locale: Locale, alert: &AnomalyAlert) -> Html {
     };
 
     html! {
-        <div class="p-3 text-xs flex flex-col gap-1 hover:bg-neutral-50 dark:hover:bg-neutral-750 transition">
+        <div class="p-3 text-xs flex flex-col gap-1 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition">
             <div class="flex items-center justify-between gap-2">
                 <span class={classes!("px-1.5", "py-0.5", "rounded", "font-mono", "font-bold", "text-[10px]", badge_class)}>
                     {severity_text}

@@ -174,7 +174,7 @@ fn render_drawer_header(
     let is_ws = entry.is_websocket == Some(true);
 
     html! {
-        <div class="px-5 py-4 border-b border-neutral-200 dark:border-neutral-700 flex items-center justify-between gap-3 bg-neutral-50 dark:bg-neutral-850">
+        <div class="px-5 py-4 border-b border-neutral-200 dark:border-neutral-700 flex items-center justify-between gap-3 bg-neutral-50 dark:bg-neutral-900">
             <div class="flex items-center gap-2 min-w-0">
                 <span class={classes!("px-2", "py-0.5", "rounded", "text-xs", "font-bold", "border", method_cls)}>
                     {&entry.method}
@@ -256,7 +256,7 @@ fn render_overview_tab(locale: &Locale, entry: &AccessLogEntry) -> Html {
 
     html! {
         <div class="space-y-4 text-xs sm:text-sm font-sans">
-            <div class="grid grid-cols-2 gap-3 bg-neutral-50 dark:bg-neutral-750 p-4 rounded-lg border border-neutral-200 dark:border-neutral-700">
+            <div class="grid grid-cols-2 gap-3 bg-neutral-50 dark:bg-neutral-800 p-4 rounded-lg border border-neutral-200 dark:border-neutral-700">
                 <div>
                     <span class="text-neutral-500 dark:text-neutral-400 block text-xs">{locale.t("traffic.col_time")}</span>
                     <span class="font-mono text-neutral-900 dark:text-neutral-100">{time_str}</span>
@@ -283,7 +283,7 @@ fn render_overview_tab(locale: &Locale, entry: &AccessLogEntry) -> Html {
                 </div>
             </div>
 
-            <div class="bg-neutral-50 dark:bg-neutral-750 p-4 rounded-lg border border-neutral-200 dark:border-neutral-700 space-y-2">
+            <div class="bg-neutral-50 dark:bg-neutral-800 p-4 rounded-lg border border-neutral-200 dark:border-neutral-700 space-y-2">
                 <div>
                     <span class="text-neutral-500 dark:text-neutral-400 block text-xs">{"Host"}</span>
                     <span class="font-mono text-neutral-900 dark:text-neutral-100 font-semibold">{&entry.host}</span>
@@ -337,13 +337,13 @@ fn render_headers_tab(locale: &Locale, entry: &AccessLogEntry) -> Html {
 fn render_headers_list(locale: &Locale, headers: &[HeaderEntry]) -> Html {
     if headers.is_empty() {
         return html! {
-            <p class="text-xs text-neutral-400 dark:text-neutral-500 italic p-3 bg-neutral-50 dark:bg-neutral-750 rounded border border-neutral-200 dark:border-neutral-700">
+            <p class="text-xs text-neutral-400 dark:text-neutral-500 italic p-3 bg-neutral-50 dark:bg-neutral-800 rounded border border-neutral-200 dark:border-neutral-700">
                 {locale.t("traffic.no_headers")}
             </p>
         };
     }
     html! {
-        <div class="border border-neutral-200 dark:border-neutral-700 rounded-lg overflow-hidden bg-neutral-50 dark:bg-neutral-750 font-mono text-xs divide-y divide-neutral-200 dark:divide-neutral-700">
+        <div class="border border-neutral-200 dark:border-neutral-700 rounded-lg overflow-hidden bg-neutral-50 dark:bg-neutral-800 font-mono text-xs divide-y divide-neutral-200 dark:divide-neutral-700">
             { for headers.iter().map(render_header_row) }
         </div>
     }
@@ -367,7 +367,7 @@ fn render_payload_tab(
     let body = entry.request_body.as_deref().unwrap_or_default();
     if body.is_empty() {
         return html! {
-            <div class="p-6 text-center text-xs text-neutral-400 dark:text-neutral-500 italic bg-neutral-50 dark:bg-neutral-750 rounded-lg border border-neutral-200 dark:border-neutral-700">
+            <div class="p-6 text-center text-xs text-neutral-400 dark:text-neutral-500 italic bg-neutral-50 dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700">
                 {locale.t("traffic.no_body")}
             </div>
         };
@@ -480,7 +480,7 @@ fn render_replay_response_card(locale: &Locale, res: &RequestReplayResponse) -> 
     let lat_str = format_latency(res.latency_ms);
 
     html! {
-        <div class="p-4 bg-neutral-50 dark:bg-neutral-750 border border-neutral-200 dark:border-neutral-700 rounded-lg space-y-3 font-mono text-xs">
+        <div class="p-4 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg space-y-3 font-mono text-xs">
             <div class="flex items-center justify-between pb-2 border-b border-neutral-200 dark:border-neutral-700">
                 <span class={classes!("px-2", "py-0.5", "rounded", "font-bold", status_cls)}>
                     {format!("{} Response", res.status)}

@@ -134,7 +134,7 @@ pub fn geoip_rule_wizard(props: &GeoIpRuleWizardProps) -> Html {
     };
 
     html! {
-        <div class="rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50/50 dark:bg-neutral-850/50 p-4 space-y-4 shadow-sm">
+        <div class="rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50/50 dark:bg-neutral-900/50 p-4 space-y-4 shadow-sm">
             { header_view(locale) }
             { mode_selector_view(locale, active_mode, on_mode_select) }
             { summary_banner_view(locale, active_mode, allow_list.len(), deny_list.len()) }
@@ -275,7 +275,7 @@ fn presets_bar_view(
                 <button
                     type="button"
                     onclick={on_clear}
-                    class="text-xs px-2.5 py-1 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-750 text-neutral-600 dark:text-neutral-300 font-medium transition-colors"
+                    class="text-xs px-2.5 py-1 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 font-medium transition-colors"
                 >
                     { locale.t("geoip.clear_all") }
                 </button>
@@ -507,7 +507,7 @@ fn render_search_result_item(
         <div
             onclick={onclick}
             class={if is_already_added {
-                "flex items-center justify-between px-3 py-1.5 text-xs text-neutral-400 dark:text-neutral-500 bg-neutral-50 dark:bg-neutral-850 cursor-not-allowed"
+                "flex items-center justify-between px-3 py-1.5 text-xs text-neutral-400 dark:text-neutral-500 bg-neutral-50 dark:bg-neutral-900 cursor-not-allowed"
             } else {
                 "flex items-center justify-between px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer"
             }}
@@ -554,7 +554,7 @@ fn raw_inputs_toggle_view(
     };
 
     html! {
-        <div class="pt-2 border-t border-neutral-200 dark:border-neutral-750">
+        <div class="pt-2 border-t border-neutral-200 dark:border-neutral-700">
             <button
                 type="button"
                 onclick={on_toggle_click}

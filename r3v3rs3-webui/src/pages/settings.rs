@@ -1538,7 +1538,7 @@ fn banned_ips_card() -> Html {
             } else {
                 <div class="mt-4 overflow-x-auto">
                     <table class="w-full text-sm text-left text-neutral-500 dark:text-neutral-400">
-                        <thead class="text-xs uppercase bg-neutral-50 dark:bg-neutral-750 text-neutral-700 dark:text-neutral-300">
+                        <thead class="text-xs uppercase bg-neutral-50 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
                             <tr>
                                 <th class="px-4 py-2">{"IP"}</th>
                                 <th class="px-4 py-2">{locale.t("settings.failures_count")}</th>
@@ -1561,7 +1561,7 @@ fn banned_ips_card() -> Html {
                                 let secs = entry.remaining_seconds % 60;
                                 let time_str = format!("{mins}m {secs}s");
                                 html! {
-                                    <tr class="border-b dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-750">
+                                    <tr class="border-b dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700/50">
                                         <td class="px-4 py-2 font-mono font-medium text-neutral-900 dark:text-white">{entry.ip.to_string()}</td>
                                         <td class="px-4 py-2">{entry.failures}</td>
                                         <td class="px-4 py-2 font-mono text-amber-600 dark:text-amber-400">{time_str}</td>

@@ -232,7 +232,7 @@ fn render_toolbar(
     let topology_class = tab_button_class(**tab == EditorTab::Topology);
 
     html! {
-        <div class="flex items-center justify-between px-3 py-2 bg-neutral-850 border-b border-neutral-700/80 flex-wrap gap-2">
+        <div class="flex items-center justify-between px-3 py-2 bg-neutral-900 border-b border-neutral-700/80 flex-wrap gap-2">
             <div class="flex items-center gap-1.5">
                 <span class="text-xs font-semibold text-neutral-300 mr-2 flex items-center gap-1">
                     <svg class="w-3.5 h-3.5 text-primary-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -258,7 +258,7 @@ fn render_toolbar(
             <div class="flex items-center gap-2">
                 <button
                     type="button"
-                    class="px-2.5 py-1 text-xs font-medium rounded border border-neutral-700 bg-neutral-800 hover:bg-neutral-750 text-neutral-200 flex items-center gap-1"
+                    class="px-2.5 py-1 text-xs font-medium rounded border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 flex items-center gap-1"
                     onclick={toggle_vars}
                 >
                     <span class="text-amber-400 font-bold">{"${}"}</span>
@@ -266,7 +266,7 @@ fn render_toolbar(
                 </button>
                 <button
                     type="button"
-                    class="px-2.5 py-1 text-xs font-medium rounded border border-neutral-700 bg-neutral-800 hover:bg-neutral-750 text-neutral-200 flex items-center gap-1"
+                    class="px-2.5 py-1 text-xs font-medium rounded border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 flex items-center gap-1"
                     onclick={toggle_templates}
                 >
                     <svg class="w-3.5 h-3.5 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
