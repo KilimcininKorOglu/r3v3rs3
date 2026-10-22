@@ -1,4 +1,4 @@
-.PHONY: all build release webui webui-release test test-api test-server test-acme-pebble test-discovery-e2e test-runtime-docker lint fmt fmt-check check check-fast run clean cdn-snapshot
+.PHONY: all build release webui webui-release test test-api test-server test-webui test-acme-pebble test-discovery-e2e test-runtime-docker lint fmt fmt-check check check-fast run clean cdn-snapshot
 
 CARGO ?= cargo
 TRUNK ?= trunk
@@ -23,13 +23,16 @@ webui-release:
 	cd $(WEBUI_DIR) && $(TRUNK) build --cargo-profile web-release --release
 
 test:
-	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 -p r3v3rs3-api --all-features --no-fail-fast
+	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 -p r3v3rs3-api -p r3v3rs3-webui --all-features --no-fail-fast
 
 test-api:
 	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3-api --all-features
 
 test-server:
 	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --all-features
+
+test-webui:
+	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3-webui --all-features
 
 # Runs the ACME DNS-01 and TLS-ALPN-01 end-to-end tests against Pebble in Docker, then removes the
 # containers. Pebble validates TLS-ALPN-01 on port 5001 of the Docker host address.
