@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] - 2026-10-22
+
+### Added
+- Smart Pre-Compression & Direct Static Asset Serving: Enhanced static file serving to automatically negotiate and serve pre-compressed `.zst` (Zstandard), `.br` (Brotli), and `.gz` (Gzip) assets directly from the embedded WebUI bundle with zero runtime CPU compression overhead.
+- Universal Decompression Fallback: Automatic on-the-fly decompression for legacy clients requesting uncompressed responses when only pre-compressed assets are present.
+- Adaptive Compression Quality Tuning: Dynamically adjusts compression levels based on response payload size:
+  - Small payloads (< 8 KB): Brotli level 5, Zstandard level 4, Gzip level 9 (Best) for maximum compression ratios at negligible CPU cost.
+  - Medium payloads (8 KB – 64 KB): Brotli level 4, Zstandard level 3, Gzip level 6 (Default).
+  - Large or streaming payloads (> 64 KB or unmetered streams): Brotli level 3, Zstandard level 1, Gzip level 1 (Fastest) for maximum network throughput without thread saturation.
+- Smart MIME Minimum Size Threshold Adaptation: Dynamically lowers the compression minimum size threshold down to 256 bytes for text, JSON, XML, and SVG API responses, while raising the threshold to 2048 bytes for WebAssembly modules.
+- Incompressible Binary Format Pre-Filtering: Automatically excludes already-compressed media formats (PNG, JPEG, WebP, AVIF, MP4, WOFF, WOFF2, ZIP, TAR, GZ, ZST, 7Z, RAR) from redundant, wasteful re-compression.
+- WebUI Compression Toggles: Added interactive switches for "Adaptive Quality & MIME Level" and "Serve Pre-Compressed Assets" within the HTTP Proxy Compression settings card.
+
 ## [2.3.0] - 2026-10-22
 
 ### Added
