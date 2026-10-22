@@ -8,6 +8,10 @@ on:
   # release.yml runs the tests before it publishes the crates.
   workflow_call:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
