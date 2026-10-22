@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.8] - 2026-10-23
+
+### Added
+- Automated Restore Drill Simulation: Deep in-memory restore simulation and schema extraction for database backups without launching auxiliary containers or affecting production databases.
+- Schema & Data Integrity Analysis: Deep parsing of SQL dumps (PostgreSQL, MySQL, MariaDB) extracting declared table definitions, detecting payload data presence (`COPY` or `INSERT`), and verifying EOF completion markers; plus binary header, version, and checksum verification for Redis RDB and SQLite 3.
+- Backup Drill Diagnostics & Metadata: Verified backups capture execution latency (`drill_duration_ms`), discovered table counts, table name samples, and total schema object metrics stored in backup manifests.
+- WebUI Interactive Drill Inspector: Interactive diagnostics modal accessible by clicking verification badges, displaying status banners, 4-card metric summaries, discovered table chips, and a one-click **Run Restore Drill** dry-run re-tester.
+- Emergency Verification Failure Alerts: Outbound webhook notification (`backup.verification_failed`) dispatched immediately when checksums, decompression, or schema integrity checks fail, alerting operators prior to disaster recovery incidents.
+
 ## [2.3.7] - 2026-10-23
 
 ### Added
