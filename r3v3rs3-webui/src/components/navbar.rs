@@ -56,7 +56,7 @@ pub fn navbar() -> Html {
     }
 
     html! {
-        <nav class="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-4">
+        <nav class="w-full max-w-[1680px] mx-auto px-4 sm:px-6 pt-4">
             <div class="relative rounded-md text-neutral-100 bg-neutral-800 shadow-lg font-medium flex items-stretch">
                 <span class="rounded-l-md flex items-center justify-center px-3 cursor-pointer bg-yellow-300" onclick={logo_onclick}>
                     <img src="/assets/logo.svg" class="object-center w-7 h-7" />

@@ -619,7 +619,7 @@ fn render_env_modal(
 
     html! {
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div class="w-full max-w-4xl rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-800 max-h-[90vh] flex flex-col">
+            <div class="w-full max-w-6xl rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-800 max-h-[90vh] flex flex-col">
                 {render_env_modal_header(locale, state, on_close.clone())}
                 {render_env_modal_tabs(locale, state, env_modal)}
                 {if state.active_tab == EnvModalTab::Variables {

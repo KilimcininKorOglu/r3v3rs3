@@ -87,7 +87,7 @@ fn shell() -> Html {
     html! {
         <div class="min-h-screen flex flex-col">
             <Navbar />
-            <div class="w-full max-w-7xl mx-auto px-4 sm:px-6 py-4 flex-1 flex gap-6">
+            <div class="w-full max-w-[1680px] mx-auto px-4 sm:px-6 py-4 flex-1 flex gap-6">
                 <Sidebar />
                 <main class="flex-1 min-w-0">
                     <UpdateBanner />
