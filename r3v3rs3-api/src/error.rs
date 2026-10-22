@@ -498,6 +498,9 @@ pub enum Error {
 
     #[error("webhook delivery failed: {reason}")]
     WebhookDeliveryFailed { reason: String },
+
+    #[error("grpc operation failed: {reason}")]
+    GrpcError { reason: String },
 }
 
 impl Error {
@@ -535,6 +538,7 @@ impl Error {
             | Self::GitProviderFailed { .. }
             | Self::FailedToRefreshAppStore
             | Self::FailedToRefreshEngines
+            | Self::GrpcError { .. }
             | Self::WebhookDeliveryFailed { .. } => 502,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig

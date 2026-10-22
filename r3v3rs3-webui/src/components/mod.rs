@@ -10,6 +10,7 @@ pub mod dropdown;
 pub mod error_pages_editor;
 pub mod footer;
 pub mod geoip_wizard;
+pub mod grpc_tester;
 pub mod http_proxy_config;
 pub mod language_menu;
 pub mod navbar;

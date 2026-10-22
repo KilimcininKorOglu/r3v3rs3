@@ -688,6 +688,22 @@ routes = [
 ]
 ```
 
+### gRPC Server Reflection ve İnteraktif Test Konsolu
+
+r3v3rs3, upstream servisler için dahili **gRPC Server Reflection** (`grpc.reflection.v1` ve `grpc.reflection.v1alpha`) desteği ile WebUI ve Admin REST API üzerinden kullanılabilen interaktif bir **Test Konsolu** sunar.
+
+#### Özellikler
+- **Otomatik Servis Keşfi**: Yerel `.proto` dosyalarına ihtiyaç duymadan upstream gRPC sunucularında kayıtlı servisleri, metotları, istek ve yanıt mesaj şemalarını Server Reflection protokolü ile otomatik olarak keşfeder.
+- **İnteraktif Metot Çağrısı (Invoke)**: JSON formatında istek gövdesi (payload) ve özel metadata başlıkları (`authorization: Bearer ...`) ile doğrudan unary gRPC metotlarını tetikler.
+- **Detaylı Analiz**: Çağrı sonucunda gRPC durum kodu (`OK (0)`, `NOT_FOUND (5)`, `UNAVAILABLE (14)`), hata mesajları, milisaniye cinsinden gidiş-dönüş gecikmesi (latency), biçimlendirilmiş yanıt JSON'ı ve HTTP/2 trailer başlıklarını görüntüler.
+- **Entegre ve Bağımsız Kullanım**: Hem proxy yapılandırma ekranı içerisinden doğrudan upstream hedefine hem de bağımsız REST uç noktaları üzerinden herhangi bir gRPC sunucusuna yönelik çalıştırılabilir.
+
+#### Admin API Uç Noktaları
+- `POST /api/proxies/{id}/grpc/reflect`: Belirtilen proxy'nin upstream sunucusundan gRPC servislerini keşfeder.
+- `POST /api/proxies/{id}/grpc/invoke`: Belirtilen proxy'nin upstream sunucusunda unary bir RPC çağrısı gerçekleştirir.
+- `POST /api/grpc/reflect`: Herhangi bir hedef gRPC sunucusunda bağımsız servis keşfi yapar (`{"target_url": "http://127.0.0.1:50051"}`).
+- `POST /api/grpc/invoke`: Hedef URL, servis, metot, JSON yükü ve metadata ile bağımsız unary çağrı yürütür.
+
 ## Rate limit
 
 Her HTTP / HTTPS proxy'sinde bir istemci IP adresinin gönderebileceği istek sayısını sınırlayabilirsiniz. r3v3rs3 istekleri "İstemci IP adresi" bölümünde belirlenen adrese göre sayar.

@@ -1,6 +1,7 @@
 use super::auth_config::{AuthConfig, AuthForm};
 use super::domain_ssl_status::DomainCertCoverage;
 use super::error_pages_editor::ErrorPagesEditor;
+use super::grpc_tester::GrpcTester;
 use super::proxy_dry_run::ProxyDryRun;
 use crate::API_ENDPOINT;
 use crate::i18n::use_locale;
@@ -877,9 +878,20 @@ pub fn http_proxy_config(props: &Props) -> Html {
                 route_view(locale, &routes, i, route, &access_lists, errors.get(&format!("routes_{i}")))
             }).collect::<Html>() }
 
-            <ProxyDryRun proxy={current_proxy} />
+            <ProxyDryRun proxy={current_proxy.clone()} />
+            <GrpcTester default_target={default_grpc_target(&current_proxy)} />
         </>
     }
+}
+
+fn default_grpc_target(proxy: &Option<HttpProxy>) -> Option<String> {
+    proxy.as_ref().and_then(|p| {
+        p.routes
+            .iter()
+            .flat_map(|r| &r.servers)
+            .map(|s| s.url.to_string())
+            .next()
+    })
 }
 
 fn route_view(

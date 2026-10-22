@@ -21,6 +21,7 @@ pub mod fixed_response;
 pub mod geoip;
 pub mod git;
 pub mod git_connection;
+pub mod grpc;
 pub mod header_rules;
 pub mod i18n;
 pub mod id;

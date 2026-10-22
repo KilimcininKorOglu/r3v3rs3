@@ -65,6 +65,7 @@ mod disaster_recovery;
 mod discovery;
 mod dns_credentials;
 mod git;
+mod grpc;
 mod hooks;
 mod logs;
 mod mcp;
@@ -575,6 +576,12 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(traffic::live))
                 .routes(routes!(traffic::geo)),
         )
+        .nest(
+            "/grpc",
+            OpenApiRouter::new()
+                .routes(routes!(grpc::reflect_standalone))
+                .routes(routes!(grpc::invoke_standalone)),
+        )
 }
 
 fn port_routes() -> OpenApiRouter<AppState> {
@@ -590,6 +597,8 @@ fn proxy_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(proxies::list, proxies::add))
         .routes(routes!(proxies::dry_run))
+        .routes(routes!(grpc::reflect_proxy))
+        .routes(routes!(grpc::invoke_proxy))
         .routes(routes!(proxies::get, proxies::put, proxies::delete))
         .routes(routes!(proxies::status))
         .routes(routes!(proxies::purge_cache, proxies::purge_cache_post))

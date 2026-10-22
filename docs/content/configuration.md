@@ -688,6 +688,22 @@ routes = [
 ]
 ```
 
+### gRPC Server Reflection & Interactive Test Console
+
+r3v3rs3 includes built-in support for **gRPC Server Reflection** (`grpc.reflection.v1` and `grpc.reflection.v1alpha`) and an interactive **Test Console** directly inside the WebUI and Admin REST API.
+
+#### Features
+- **Automated Service Discovery**: Query upstream gRPC servers to discover registered services, methods, request message schemas, and response message types without requiring local `.proto` files.
+- **Interactive Method Invocation**: Execute unary gRPC requests with custom JSON payloads and metadata headers (e.g. `authorization: Bearer ...`).
+- **Detailed Inspection**: View response status code (`OK (0)`, `NOT_FOUND (5)`, `UNAVAILABLE (14)`), status messages, round-trip latency in milliseconds, formatted response JSON, and gRPC response headers and trailers.
+- **Embedded & Standalone**: Test directly from an existing proxy's configuration panel or via standalone endpoints.
+
+#### Admin API Endpoints
+- `POST /api/proxies/{id}/grpc/reflect`: Discovers services from the upstream server of the given proxy ID.
+- `POST /api/proxies/{id}/grpc/invoke`: Executes a unary RPC on the upstream server of the given proxy ID.
+- `POST /api/grpc/reflect`: Standalone service reflection targeting any reachable gRPC server (`{"target_url": "http://127.0.0.1:50051"}`).
+- `POST /api/grpc/invoke`: Standalone RPC invocation with target URL, service, method, payload, and metadata.
+
 ## Rate Limit
 
 You can limit the request rate of each client IP address for each HTTP / HTTPS proxy. r3v3rs3 counts requests by the client IP that the "Client IP" section resolves.
