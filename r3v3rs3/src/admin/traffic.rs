@@ -7,7 +7,7 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use futures::{Stream, StreamExt};
-use r3v3rs3_api::traffic::{AccessLogEntry, AccessLogQuery};
+use r3v3rs3_api::traffic::{AccessLogEntry, AccessLogQuery, TrafficGeoDistribution};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Returns recent HTTP access logs matching the query filters, newest first.
@@ -67,4 +67,36 @@ fn can_see_entry(caller: &Caller, entry: &AccessLogEntry) -> bool {
         Some(id) => caller.can_see(id),
         None => caller.proxies.is_none(),
     }
+}
+
+/// Returns the aggregated geographic distribution and top countries of recent access traffic.
+#[utoipa::path(
+    get,
+    path = "/geo",
+    tag = "traffic",
+    operation_id = "get_traffic_geo",
+    params(AccessLogQuery),
+    responses((status = 200, description = "Geographical traffic distribution.", body = TrafficGeoDistribution), ErrorResponses)
+)]
+pub async fn geo(
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<AccessLogQuery>,
+) -> Result<Json<TrafficGeoDistribution>, AppError> {
+    if let Some(id) = query.resource_id
+        && !caller.can_see(id)
+    {
+        return Err(AppError::from(r3v3rs3_api::error::Error::IdNotFound {
+            id: id.to_string(),
+        }));
+    }
+    let res = if let Some(id) = query.resource_id {
+        crate::proxy::access_log::geo_distribution(Some(&id))
+    } else if let Some(proxies) = &caller.proxies {
+        crate::proxy::access_log::geo_distribution_matching(|id| {
+            id.is_some_and(|p| proxies.contains(p))
+        })
+    } else {
+        crate::proxy::access_log::geo_distribution(None)
+    };
+    Ok(Json(res))
 }

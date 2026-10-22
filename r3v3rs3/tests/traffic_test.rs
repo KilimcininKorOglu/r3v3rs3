@@ -63,7 +63,7 @@ where
     result
 }
 
-fn sample_log(status: u16, uri: &str, method: &str) -> AccessLogEntry {
+fn sample_log(status: u16, uri: &str, method: &str, country: Option<&str>) -> AccessLogEntry {
     AccessLogEntry {
         id: 0,
         timestamp: OffsetDateTime::now_utc(),
@@ -76,6 +76,7 @@ fn sample_log(status: u16, uri: &str, method: &str) -> AccessLogEntry {
         latency_ms: 15.2,
         proto: "HTTP/1.1".to_string(),
         error: None,
+        country: country.map(ToString::to_string),
     }
 }
 
@@ -131,19 +132,41 @@ async fn verify_filters_and_sse(
     Ok(())
 }
 
+async fn verify_geo(client: &Client, addr: SocketAddr, cookie: &str) -> anyhow::Result<()> {
+    let unauth = client
+        .get(format!("http://{addr}/api/traffic/geo"))
+        .send()
+        .await?;
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+
+    let geo: r3v3rs3_api::traffic::TrafficGeoDistribution = client
+        .get(format!("http://{addr}/api/traffic/geo"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(geo.total_resolved, 2);
+    assert_eq!(geo.top_countries.len(), 1);
+    assert_eq!(geo.top_countries[0].country, "TR");
+    assert_eq!(geo.top_countries[0].count, 2);
+    Ok(())
+}
+
 #[tokio::test]
 async fn traffic_api_lists_and_filters_logs() -> anyhow::Result<()> {
     let dir = TempDir::new("traffic-test")?;
     with_admin(&dir.0, |addr| async move {
         access_log::clear();
-        record(sample_log(200, "/api/v1/health", "GET"));
-        record(sample_log(404, "/unknown/endpoint", "GET"));
-        record(sample_log(500, "/api/v1/crash", "POST"));
+        record(sample_log(200, "/api/v1/health", "GET", Some("TR")));
+        record(sample_log(404, "/unknown/endpoint", "GET", Some("TR")));
+        record(sample_log(500, "/api/v1/crash", "POST", None));
 
         let client = Client::new();
         let cookie = login_when_allowed(addr, "admin", "password").await?;
         verify_list(&client, addr, &cookie).await?;
-        verify_filters_and_sse(&client, addr, &cookie).await
+        verify_filters_and_sse(&client, addr, &cookie).await?;
+        verify_geo(&client, addr, &cookie).await
     })
     .await
 }

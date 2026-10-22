@@ -183,6 +183,7 @@ impl HttpPortContext {
             shared: Arc::new(ArcSwap::from_pointee(SharedContext {
                 router: Default::default(),
                 header_rewriter: Default::default(),
+                geoip: Arc::new(crate::proxy::geoip::GeoIpResolver::empty()),
             })),
             stop_notifier: Arc::new(Notify::new()),
         })
@@ -282,6 +283,7 @@ impl HttpPortContext {
             header_rewriter: RequestRewriter::builder()
                 .set_via(HeaderValue::from_static("r3v3rs3"))
                 .build(),
+            geoip: registries.geoip.clone(),
         }));
 
         if let Some(tls) = &mut self.tls_termination {
@@ -625,10 +627,12 @@ async fn proxied_response(
     let duration = start.elapsed();
     crate::proxy::stats::record_request_duration(duration);
 
+    let country = shared.geoip.lookup_country(client_ip);
     record_access_log(
         AccessLogMeta {
             resource_id,
             client_ip,
+            country,
             method,
             host,
             uri,
@@ -644,6 +648,7 @@ async fn proxied_response(
 struct AccessLogMeta {
     resource_id: Option<ShortId>,
     client_ip: std::net::IpAddr,
+    country: Option<String>,
     method: String,
     host: String,
     uri: String,
@@ -675,6 +680,7 @@ fn record_access_log<B>(
         timestamp: time::OffsetDateTime::now_utc(),
         resource_id: meta.resource_id,
         client_ip: meta.client_ip.to_string(),
+        country: meta.country,
         method: meta.method,
         host: meta.host,
         uri: meta.uri,
@@ -744,6 +750,7 @@ enum ProxiedRequest<R> {
 struct SharedContext {
     pub router: Router,
     pub header_rewriter: RequestRewriter,
+    pub geoip: Arc<crate::proxy::geoip::GeoIpResolver>,
 }
 
 pub trait IoStream: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -1343,10 +1350,12 @@ where
     let mapped = response_rewriter.build().map_response(res);
     let duration = start.elapsed();
     crate::proxy::stats::record_request_duration(duration);
+    let country = shared.geoip.lookup_country(client_ip);
     record_access_log(
         AccessLogMeta {
             resource_id,
             client_ip,
+            country,
             method,
             host,
             uri,

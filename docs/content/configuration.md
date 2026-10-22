@@ -1702,12 +1702,15 @@ The panel provides an interactive live traffic dashboard accessible at `/traffic
 - **Real-Time Stream**: Live Server-Sent Events (SSE) update the table in real time as requests arrive.
 - **Color-Coded Status Inspection**: Visual badges for `2xx` (success), `3xx` (redirect), `4xx` (client error), and `5xx` (server error).
 - **Latency Monitoring**: Color-coded response latencies (< 50ms green, 50–300ms amber, > 300ms red).
-- **Interactive Filtering**: Filter incoming or historical logs by HTTP status code, URL path, client IP, host, or HTTP method.
-- **Controls**: Pause/resume stream, toggle automatic pinning to latest entries, clear in-memory buffer, and export logs to JSON.
+- **Interactive GeoIP World Map & Density Heatmap**: Incoming client IP addresses are resolved against the embedded MaxMind GeoIP database into ISO country codes. An interactive SVG world map displays real-time geographic distribution with color-intensity heat styling. Hovering over a country displays its request count and percentage, and clicking any country or ranking bar instantly filters the live traffic log to requests from that country.
+- **Top Countries Leaderboard**: Displays the top 10 countries ranked by traffic volume with animated progress bars, request counts, and percentage shares.
+- **Geographic & Text Filtering**: Filter incoming or historical logs by country, HTTP status code, URL path, client IP, host, or HTTP method.
+- **Controls**: Pause/resume stream, toggle automatic pinning to latest entries, collapse/expand the Geo Map view, clear in-memory buffer, and export logs to JSON.
 
 ## Admin API
 
 The traffic endpoints are protected by session authentication and respect multi-tenant proxy scoping:
 
-- `GET /api/traffic`: Returns recent access log entries matching optional query filters (`status`, `search`, `resource_id`, `limit`, `since_id`).
+- `GET /api/traffic`: Returns recent access log entries matching optional query filters (`status`, `search`, `country`, `resource_id`, `limit`, `since_id`).
 - `GET /api/traffic/live`: Streams live incoming access log entries as `text/event-stream` Server-Sent Events (SSE).
+- `GET /api/traffic/geo`: Aggregates real-time geographic distribution of access traffic, returning the total count of resolved requests, top 10 ranked countries (`country`, `count`, `percentage`), and the full ISO country code count mapping.

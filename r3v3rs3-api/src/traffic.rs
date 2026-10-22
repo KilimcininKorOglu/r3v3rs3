@@ -24,6 +24,8 @@ pub struct AccessLogEntry {
     pub proto: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
 }
 
 fn serialize_timestamp_ms<S>(timestamp: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
@@ -52,6 +54,29 @@ pub struct AccessLogQuery {
     pub search: Option<String>,
     pub limit: Option<usize>,
     pub since_id: Option<u64>,
+    pub country: Option<String>,
+}
+
+/// Statistics of HTTP traffic originating from a specific country.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct CountryTrafficStat {
+    /// Two-letter ISO country code (e.g. "TR", "US", "DE") or "XX" for unresolved/private IPs.
+    pub country: String,
+    /// Total count of HTTP requests from this country.
+    pub count: u64,
+    /// Percentage of total resolved requests.
+    pub percentage: f64,
+}
+
+/// Aggregated geographical distribution of access traffic across countries.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct TrafficGeoDistribution {
+    /// Total number of requests evaluated with valid country resolution.
+    pub total_resolved: u64,
+    /// Top countries ranked by request count (up to top 10).
+    pub top_countries: Vec<CountryTrafficStat>,
+    /// Full mapping of ISO country code to request count.
+    pub country_counts: std::collections::BTreeMap<String, u64>,
 }
 
 impl AccessLogEntry {
@@ -61,6 +86,7 @@ impl AccessLogEntry {
             && self.matches_status(query.status)
             && self.matches_since_id(query.since_id)
             && self.matches_search(query.search.as_deref())
+            && self.matches_country(query.country.as_deref())
     }
 
     fn matches_resource(&self, resource_id: Option<&ShortId>) -> bool {
@@ -81,6 +107,16 @@ impl AccessLogEntry {
         match since_id {
             Some(min_id) => self.id > min_id,
             None => true,
+        }
+    }
+
+    fn matches_country(&self, country: Option<&str>) -> bool {
+        match country {
+            Some(expected) if !expected.trim().is_empty() => self
+                .country
+                .as_deref()
+                .is_some_and(|c| c.eq_ignore_ascii_case(expected.trim())),
+            _ => true,
         }
     }
 
@@ -114,6 +150,7 @@ mod tests {
             latency_ms: 12.5,
             proto: "HTTP/2.0".to_string(),
             error: None,
+            country: None,
         }
     }
 
@@ -171,5 +208,58 @@ mod tests {
             since_id: Some(5),
             ..Default::default()
         }));
+    }
+
+    #[test]
+    fn query_matching_country() {
+        let mut entry = sample_entry(6, 200, "/");
+        entry.country = Some("TR".to_string());
+
+        assert!(entry.matches(&AccessLogQuery {
+            country: Some("TR".to_string()),
+            ..Default::default()
+        }));
+        assert!(entry.matches(&AccessLogQuery {
+            country: Some("tr".to_string()),
+            ..Default::default()
+        }));
+        assert!(!entry.matches(&AccessLogQuery {
+            country: Some("US".to_string()),
+            ..Default::default()
+        }));
+
+        let no_country = sample_entry(7, 200, "/");
+        assert!(!no_country.matches(&AccessLogQuery {
+            country: Some("TR".to_string()),
+            ..Default::default()
+        }));
+    }
+
+    #[test]
+    fn geo_distribution_serialization() {
+        let mut counts = std::collections::BTreeMap::new();
+        counts.insert("TR".to_string(), 100);
+        counts.insert("DE".to_string(), 50);
+
+        let geo = TrafficGeoDistribution {
+            total_resolved: 150,
+            top_countries: vec![
+                CountryTrafficStat {
+                    country: "TR".to_string(),
+                    count: 100,
+                    percentage: 66.67,
+                },
+                CountryTrafficStat {
+                    country: "DE".to_string(),
+                    count: 50,
+                    percentage: 33.33,
+                },
+            ],
+            country_counts: counts,
+        };
+
+        let json = serde_json::to_string(&geo).unwrap();
+        let decoded: TrafficGeoDistribution = serde_json::from_str(&json).unwrap();
+        assert_eq!(geo, decoded);
     }
 }

@@ -572,7 +572,8 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
             "/traffic",
             OpenApiRouter::new()
                 .routes(routes!(traffic::get))
-                .routes(routes!(traffic::live)),
+                .routes(routes!(traffic::live))
+                .routes(routes!(traffic::geo)),
         )
 }
 

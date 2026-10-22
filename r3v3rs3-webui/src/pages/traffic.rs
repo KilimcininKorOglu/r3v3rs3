@@ -4,7 +4,8 @@ use gloo_net::eventsource::futures::EventSource;
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::traffic::AccessLogEntry;
+use r3v3rs3_api::traffic::{AccessLogEntry, CountryTrafficStat, TrafficGeoDistribution};
+use std::collections::{BTreeMap, BTreeSet};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
@@ -33,11 +34,167 @@ pub struct TrafficStats {
 struct HeaderControls {
     pub live: bool,
     pub auto_scroll: bool,
+    pub show_geo_map: bool,
     pub on_toggle_live: Callback<MouseEvent>,
     pub on_toggle_scroll: Callback<MouseEvent>,
+    pub on_toggle_map: Callback<MouseEvent>,
     pub on_clear: Callback<MouseEvent>,
     pub on_export: Callback<MouseEvent>,
 }
+
+#[derive(Clone, Copy)]
+pub struct CountryMapItem {
+    pub code: &'static str,
+    pub name: &'static str,
+    pub path: &'static str,
+}
+
+pub static CONTINENT_OUTLINES: &[&str] = &[
+    "M 70 80 L 150 75 L 320 60 L 320 140 L 290 140 L 290 220 L 240 225 L 250 280 L 205 280 L 180 230 L 150 190 L 70 120 Z",
+    "M 260 285 L 320 310 L 400 310 L 410 390 L 350 490 L 325 490 L 310 350 Z",
+    "M 450 185 L 470 130 L 515 80 L 560 80 L 565 190 L 525 220 L 445 210 Z",
+    "M 450 225 L 555 220 L 600 220 L 600 260 L 585 385 L 575 445 L 525 435 L 470 310 L 450 250 Z",
+    "M 565 70 L 890 70 L 870 150 L 820 180 L 810 270 L 730 230 L 710 320 L 675 280 L 640 290 L 595 280 L 565 190 Z",
+    "M 760 340 L 890 340 L 935 410 L 925 460 L 870 430 L 760 420 Z",
+];
+
+pub static COUNTRY_PATHS: &[CountryMapItem] = &[
+    CountryMapItem {
+        code: "US",
+        name: "United States",
+        path: "M 150 140 L 290 140 L 290 220 L 190 230 L 150 190 Z M 70 80 L 150 80 L 140 130 L 70 120 Z",
+    },
+    CountryMapItem {
+        code: "CA",
+        name: "Canada",
+        path: "M 140 70 L 320 60 L 320 135 L 140 135 Z",
+    },
+    CountryMapItem {
+        code: "MX",
+        name: "Mexico",
+        path: "M 180 230 L 240 225 L 250 280 L 205 280 Z",
+    },
+    CountryMapItem {
+        code: "BR",
+        name: "Brazil",
+        path: "M 320 310 L 400 310 L 410 390 L 340 410 L 310 350 Z",
+    },
+    CountryMapItem {
+        code: "AR",
+        name: "Argentina",
+        path: "M 320 415 L 360 415 L 350 490 L 325 490 Z",
+    },
+    CountryMapItem {
+        code: "GB",
+        name: "United Kingdom",
+        path: "M 470 130 L 485 125 L 485 150 L 470 150 Z",
+    },
+    CountryMapItem {
+        code: "FR",
+        name: "France",
+        path: "M 475 160 L 505 160 L 500 190 L 475 190 Z",
+    },
+    CountryMapItem {
+        code: "DE",
+        name: "Germany",
+        path: "M 505 145 L 530 145 L 530 175 L 505 175 Z",
+    },
+    CountryMapItem {
+        code: "IT",
+        name: "Italy",
+        path: "M 515 180 L 535 180 L 540 220 L 525 220 Z",
+    },
+    CountryMapItem {
+        code: "ES",
+        name: "Spain",
+        path: "M 450 185 L 475 185 L 470 215 L 445 210 Z",
+    },
+    CountryMapItem {
+        code: "NL",
+        name: "Netherlands",
+        path: "M 498 140 L 510 140 L 510 150 L 498 150 Z",
+    },
+    CountryMapItem {
+        code: "PL",
+        name: "Poland",
+        path: "M 532 145 L 560 145 L 558 175 L 532 175 Z",
+    },
+    CountryMapItem {
+        code: "SE",
+        name: "Sweden",
+        path: "M 515 80 L 560 80 L 550 140 L 515 140 Z",
+    },
+    CountryMapItem {
+        code: "TR",
+        name: "Turkey",
+        path: "M 565 190 L 615 190 L 610 215 L 565 215 Z",
+    },
+    CountryMapItem {
+        code: "RU",
+        name: "Russia",
+        path: "M 565 70 L 890 70 L 870 150 L 565 140 Z",
+    },
+    CountryMapItem {
+        code: "CN",
+        name: "China",
+        path: "M 690 180 L 820 180 L 810 270 L 700 270 Z",
+    },
+    CountryMapItem {
+        code: "IN",
+        name: "India",
+        path: "M 670 230 L 730 230 L 710 320 L 675 280 Z",
+    },
+    CountryMapItem {
+        code: "JP",
+        name: "Japan",
+        path: "M 845 175 L 870 175 L 860 240 L 840 240 Z",
+    },
+    CountryMapItem {
+        code: "KR",
+        name: "South Korea",
+        path: "M 815 195 L 835 195 L 835 220 L 815 220 Z",
+    },
+    CountryMapItem {
+        code: "SG",
+        name: "Singapore",
+        path: "M 735 325 L 748 325 L 748 335 L 735 335 Z",
+    },
+    CountryMapItem {
+        code: "AU",
+        name: "Australia",
+        path: "M 770 340 L 890 340 L 870 430 L 760 420 Z",
+    },
+    CountryMapItem {
+        code: "NZ",
+        name: "New Zealand",
+        path: "M 905 410 L 935 410 L 925 460 L 900 450 Z",
+    },
+    CountryMapItem {
+        code: "ZA",
+        name: "South Africa",
+        path: "M 525 385 L 585 385 L 575 445 L 525 435 Z",
+    },
+    CountryMapItem {
+        code: "EG",
+        name: "Egypt",
+        path: "M 555 220 L 600 220 L 595 260 L 555 260 Z",
+    },
+    CountryMapItem {
+        code: "NG",
+        name: "Nigeria",
+        path: "M 470 260 L 535 260 L 535 320 L 470 310 Z",
+    },
+    CountryMapItem {
+        code: "SA",
+        name: "Saudi Arabia",
+        path: "M 600 225 L 650 235 L 640 290 L 595 280 Z",
+    },
+    CountryMapItem {
+        code: "AE",
+        name: "United Arab Emirates",
+        path: "M 645 250 L 665 250 L 665 270 L 645 270 Z",
+    },
+];
 
 #[function_component(TrafficView)]
 pub fn traffic_view() -> Html {
@@ -47,9 +204,11 @@ pub fn traffic_view() -> Html {
     let entries = use_state(Vec::<AccessLogEntry>::new);
     let live = use_state(|| true);
     let auto_scroll = use_state(|| true);
+    let show_geo_map = use_state(|| true);
     let search = use_state(String::new);
     let status_filter = use_state(|| Option::<StatusCategory>::None);
     let selected_proxy = use_state(|| Option::<ShortId>::None);
+    let selected_country = use_state(|| Option::<String>::None);
     let table_ref = use_node_ref();
 
     use_initial_traffic_load(&entries);
@@ -57,7 +216,15 @@ pub fn traffic_view() -> Html {
     use_traffic_auto_scroll(&table_ref, &auto_scroll, &entries);
 
     let stats = calculate_stats(&entries);
-    let filtered = filter_traffic_logs(&entries, &search, *status_filter, *selected_proxy);
+    let geo_dist = calculate_geo_distribution(&entries);
+    let available_countries = extract_available_countries(&entries);
+    let filtered = filter_traffic_logs(
+        &entries,
+        &search,
+        *status_filter,
+        *selected_proxy,
+        selected_country.as_deref(),
+    );
 
     let on_back = Callback::from(move |_| {
         if let Some(nav) = &navigator {
@@ -67,6 +234,7 @@ pub fn traffic_view() -> Html {
     let controls = HeaderControls {
         live: *live,
         auto_scroll: *auto_scroll,
+        show_geo_map: *show_geo_map,
         on_toggle_live: {
             let live = live.clone();
             Callback::from(move |_: MouseEvent| live.set(!*live))
@@ -74,6 +242,10 @@ pub fn traffic_view() -> Html {
         on_toggle_scroll: {
             let auto_scroll = auto_scroll.clone();
             Callback::from(move |_: MouseEvent| auto_scroll.set(!*auto_scroll))
+        },
+        on_toggle_map: {
+            let show_geo_map = show_geo_map.clone();
+            Callback::from(move |_: MouseEvent| show_geo_map.set(!*show_geo_map))
         },
         on_clear: {
             let entries = entries.clone();
@@ -88,11 +260,21 @@ pub fn traffic_view() -> Html {
         },
     };
 
+    let on_select_country = {
+        let selected_country = selected_country.clone();
+        Callback::from(move |code: Option<String>| {
+            selected_country.set(code);
+        })
+    };
+
     html! {
         <div class="space-y-4">
             { header_view(locale, on_back, controls) }
             { stats_cards_view(locale, &stats) }
-            { filters_toolbar_view(locale, &search, &status_filter, &selected_proxy) }
+            if *show_geo_map {
+                { geo_heatmap_view(locale, &geo_dist, selected_country.as_deref(), on_select_country) }
+            }
+            { filters_toolbar_view(locale, &search, &status_filter, &selected_country, &available_countries) }
             { table_view(locale, &table_ref, &filtered) }
         </div>
     }
@@ -102,8 +284,10 @@ fn header_view(locale: Locale, on_back: Callback<MouseEvent>, controls: HeaderCo
     let HeaderControls {
         live,
         auto_scroll,
+        show_geo_map,
         on_toggle_live,
         on_toggle_scroll,
+        on_toggle_map,
         on_clear,
         on_export,
     } = controls;
@@ -129,6 +313,20 @@ fn header_view(locale: Locale, on_back: Callback<MouseEvent>, controls: HeaderCo
                 </div>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
+                <button
+                    onclick={on_toggle_map}
+                    type="button"
+                    class={if show_geo_map {
+                        "inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-medium"
+                    } else {
+                        "inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 font-medium"
+                    }}
+                >
+                    <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {locale.t("traffic.toggle_map")}
+                </button>
                 <button
                     onclick={on_toggle_live}
                     type="button"
@@ -231,11 +429,215 @@ fn stats_cards_view(locale: Locale, stats: &TrafficStats) -> Html {
     }
 }
 
+fn geo_heatmap_view(
+    locale: Locale,
+    geo: &TrafficGeoDistribution,
+    selected: Option<&str>,
+    on_select: Callback<Option<String>>,
+) -> Html {
+    let on_clear_click = {
+        let on_select = on_select.clone();
+        Callback::from(move |_: MouseEvent| on_select.emit(None))
+    };
+
+    html! {
+        <div class="bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm p-4 space-y-3">
+            <div class="flex items-center justify-between border-b dark:border-neutral-700 pb-2">
+                <div>
+                    <h2 class="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {locale.t("traffic.geo_map_title")}
+                    </h2>
+                    <p class="text-xs text-neutral-500 dark:text-neutral-400">
+                        {locale.t("traffic.geo_map_desc")}
+                    </p>
+                </div>
+                if let Some(code) = selected {
+                    <div class="flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 px-2 py-0.5 rounded text-xs">
+                        <span>{locale.t("traffic.filter_country")}{": "}</span>
+                        <span class="font-bold">{code}</span>
+                        <button
+                            type="button"
+                            onclick={on_clear_click}
+                            class="ml-1 text-amber-600 hover:text-amber-900 dark:hover:text-amber-100 font-bold"
+                        >
+                            {"✕"}
+                        </button>
+                    </div>
+                }
+            </div>
+
+            if geo.total_resolved == 0 {
+                <div class="py-8 text-center text-xs text-neutral-500 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-900/40 rounded border border-dashed border-neutral-300 dark:border-neutral-700">
+                    <p>{locale.t("traffic.no_geo_data")}</p>
+                </div>
+            } else {
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+                    <div class="lg:col-span-2">
+                        { render_world_map_svg(geo, selected, on_select.clone()) }
+                    </div>
+                    <div class="lg:col-span-1">
+                        { render_top_countries_list(locale, geo, selected, on_select) }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+pub fn country_heat_fill(count: u64, max_count: u64, is_selected: bool) -> &'static str {
+    if is_selected {
+        return "#f59e0b";
+    }
+    if count == 0 || max_count == 0 {
+        return "#cbd5e1";
+    }
+    let ratio = count as f64 / max_count as f64;
+    if ratio >= 0.75 {
+        "#1d4ed8"
+    } else if ratio >= 0.50 {
+        "#3b82f6"
+    } else if ratio >= 0.25 {
+        "#60a5fa"
+    } else {
+        "#93c5fd"
+    }
+}
+
+fn render_world_map_svg(
+    geo: &TrafficGeoDistribution,
+    selected: Option<&str>,
+    on_select: Callback<Option<String>>,
+) -> Html {
+    let max_count = geo
+        .top_countries
+        .first()
+        .map(|s| s.count)
+        .unwrap_or(1)
+        .max(1);
+    html! {
+        <div class="w-full bg-slate-50 dark:bg-neutral-900/50 rounded-lg p-2 border border-slate-200 dark:border-neutral-700/60 flex items-center justify-center">
+            <svg viewBox="0 0 1000 500" class="w-full h-auto max-h-64 select-none" xmlns="http://www.w3.org/2000/svg">
+                <g class="continents-base opacity-40">
+                    { for CONTINENT_OUTLINES.iter().map(|d| html! {
+                        <path d={*d} fill="#94a3b8" stroke="#64748b" stroke-width="0.8" />
+                    }) }
+                </g>
+                <g class="countries-layer">
+                    { for COUNTRY_PATHS.iter().map(|c| render_country_svg_path(c, geo, max_count, selected, on_select.clone())) }
+                </g>
+            </svg>
+        </div>
+    }
+}
+
+fn render_country_svg_path(
+    item: &CountryMapItem,
+    geo: &TrafficGeoDistribution,
+    max_count: u64,
+    selected: Option<&str>,
+    on_select: Callback<Option<String>>,
+) -> Html {
+    let is_sel = selected == Some(item.code);
+    let count = geo.country_counts.get(item.code).copied().unwrap_or(0);
+    let fill = country_heat_fill(count, max_count, is_sel);
+    let stroke = if is_sel { "#d97706" } else { "#475569" };
+    let stroke_width = if is_sel { "2" } else { "0.8" };
+    let code = item.code.to_string();
+    let onclick = {
+        let code = code.clone();
+        Callback::from(move |_: MouseEvent| {
+            if is_sel {
+                on_select.emit(None);
+            } else {
+                on_select.emit(Some(code.clone()));
+            }
+        })
+    };
+    let title_text = format!("{}: {} requests", item.name, count);
+
+    html! {
+        <path
+            d={item.path}
+            fill={fill}
+            stroke={stroke}
+            stroke-width={stroke_width}
+            class="transition-colors duration-150 cursor-pointer hover:opacity-80"
+            onclick={onclick}
+        >
+            <title>{title_text}</title>
+        </path>
+    }
+}
+
+fn render_top_countries_list(
+    locale: Locale,
+    geo: &TrafficGeoDistribution,
+    selected: Option<&str>,
+    on_select: Callback<Option<String>>,
+) -> Html {
+    html! {
+        <div class="space-y-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+                {locale.t("traffic.top_countries")}
+            </h3>
+            <div class="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                { for geo.top_countries.iter().map(|stat| render_country_stat_row(stat, selected, on_select.clone())) }
+            </div>
+        </div>
+    }
+}
+
+fn render_country_stat_row(
+    stat: &CountryTrafficStat,
+    selected: Option<&str>,
+    on_select: Callback<Option<String>>,
+) -> Html {
+    let is_sel = selected == Some(&stat.country);
+    let country_code = stat.country.clone();
+    let onclick = {
+        let code = country_code.clone();
+        Callback::from(move |_: MouseEvent| {
+            if is_sel {
+                on_select.emit(None);
+            } else {
+                on_select.emit(Some(code.clone()));
+            }
+        })
+    };
+    let width_style = format!("width: {:.1}%;", stat.percentage.clamp(2.0, 100.0));
+    let row_class = if is_sel {
+        "flex items-center justify-between text-xs p-1.5 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 cursor-pointer"
+    } else {
+        "flex items-center justify-between text-xs p-1.5 rounded hover:bg-neutral-50 dark:hover:bg-neutral-700/50 cursor-pointer"
+    };
+
+    html! {
+        <div class={row_class} onclick={onclick}>
+            <div class="flex items-center gap-2 flex-1 min-w-0 mr-2">
+                <span class="font-mono font-bold text-xs px-1.5 py-0.5 rounded bg-neutral-200 dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200">
+                    {&stat.country}
+                </span>
+                <div class="flex-1 bg-neutral-200 dark:bg-neutral-700 h-2 rounded-full overflow-hidden">
+                    <div class="bg-blue-600 dark:bg-blue-500 h-full rounded-full" style={width_style}></div>
+                </div>
+            </div>
+            <div class="text-right whitespace-nowrap text-xs text-neutral-600 dark:text-neutral-400 font-mono">
+                <span class="font-semibold text-neutral-900 dark:text-neutral-100">{stat.count}</span>
+                <span class="ml-1 text-neutral-500">{"("}{stat.percentage}{"%)"}</span>
+            </div>
+        </div>
+    }
+}
+
 fn filters_toolbar_view(
     locale: Locale,
     search: &UseStateHandle<String>,
     status_filter: &UseStateHandle<Option<StatusCategory>>,
-    _selected_proxy: &UseStateHandle<Option<ShortId>>,
+    selected_country: &UseStateHandle<Option<String>>,
+    available_countries: &[String],
 ) -> Html {
     let on_search_input = {
         let search = search.clone();
@@ -265,10 +667,23 @@ fn filters_toolbar_view(
             }
         })
     };
+    let on_country_change = {
+        let selected_country = selected_country.clone();
+        Callback::from(move |e: Event| {
+            if let Some(select) = e.target_dyn_into::<HtmlSelectElement>() {
+                let val = select.value();
+                if val.is_empty() || val == "all" {
+                    selected_country.set(None);
+                } else {
+                    selected_country.set(Some(val));
+                }
+            }
+        })
+    };
 
     html! {
-        <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-            <div class="relative flex-1">
+        <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center flex-wrap">
+            <div class="relative flex-1 min-w-[180px]">
                 <input
                     type="text"
                     placeholder={locale.t("traffic.search_placeholder")}
@@ -296,6 +711,16 @@ fn filters_toolbar_view(
                 <option value="4xx">{locale.t("traffic.filter_4xx")}</option>
                 <option value="5xx">{locale.t("traffic.filter_5xx")}</option>
             </select>
+            <select
+                onchange={on_country_change}
+                value={selected_country.as_deref().unwrap_or("all").to_string()}
+                class="text-xs sm:text-sm px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+                <option value="all">{locale.t("traffic.filter_all_countries")}</option>
+                { for available_countries.iter().map(|code| html! {
+                    <option value={code.clone()} selected={selected_country.as_deref() == Some(code)}>{code}</option>
+                }) }
+            </select>
         </div>
     }
 }
@@ -321,6 +746,7 @@ fn table_view(locale: Locale, table_ref: &NodeRef, filtered: &[AccessLogEntry]) 
                         <th class="px-3 py-2">{locale.t("traffic.col_method")}</th>
                         <th class="px-3 py-2">{locale.t("traffic.col_path")}</th>
                         <th class="px-3 py-2">{locale.t("traffic.col_client")}</th>
+                        <th class="px-3 py-2">{locale.t("traffic.col_country")}</th>
                         <th class="px-3 py-2">{locale.t("traffic.col_latency")}</th>
                         <th class="px-3 py-2">{locale.t("traffic.col_proxy")}</th>
                     </tr>
@@ -344,6 +770,7 @@ fn render_entry_row(entry: &AccessLogEntry) -> Html {
         .resource_id
         .map(|id| id.to_string())
         .unwrap_or_else(|| "-".to_string());
+    let country_display = entry.country.as_deref().unwrap_or("-");
 
     html! {
         <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-750/50">
@@ -369,6 +796,11 @@ fn render_entry_row(entry: &AccessLogEntry) -> Html {
             </td>
             <td class="px-3 py-2 whitespace-nowrap text-xs text-neutral-600 dark:text-neutral-400">
                 {&entry.client_ip}
+            </td>
+            <td class="px-3 py-2 whitespace-nowrap text-xs">
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-neutral-100 dark:bg-neutral-700/80 text-neutral-800 dark:text-neutral-200 font-mono">
+                    {country_display}
+                </span>
             </td>
             <td class="px-3 py-2 whitespace-nowrap">
                 <span class={latency_cls}>{latency_str}</span>
@@ -465,6 +897,60 @@ pub fn calculate_stats(entries: &[AccessLogEntry]) -> TrafficStats {
     }
 }
 
+pub fn calculate_geo_distribution(entries: &[AccessLogEntry]) -> TrafficGeoDistribution {
+    let mut counts = BTreeMap::<String, u64>::new();
+    let mut total_resolved = 0u64;
+
+    for entry in entries {
+        if let Some(c) = &entry.country {
+            let code = c.trim().to_uppercase();
+            if !code.is_empty() {
+                *counts.entry(code).or_default() += 1;
+                total_resolved += 1;
+            }
+        }
+    }
+
+    let mut list: Vec<(String, u64)> = counts.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    list.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+    let top_countries = list
+        .into_iter()
+        .take(10)
+        .map(|(country, count)| {
+            let percentage = if total_resolved > 0 {
+                ((count as f64 / total_resolved as f64) * 1000.0).round() / 10.0
+            } else {
+                0.0
+            };
+            CountryTrafficStat {
+                country,
+                count,
+                percentage,
+            }
+        })
+        .collect();
+
+    TrafficGeoDistribution {
+        total_resolved,
+        top_countries,
+        country_counts: counts,
+    }
+}
+
+pub fn extract_available_countries(entries: &[AccessLogEntry]) -> Vec<String> {
+    let mut set = BTreeSet::new();
+    for entry in entries {
+        if let Some(c) = &entry.country {
+            let code = c.trim().to_uppercase();
+            if !code.is_empty() {
+                set.insert(code);
+            }
+        }
+    }
+    set.into_iter().collect()
+}
+
 fn matches_status_cat(entry: &AccessLogEntry, cat: Option<StatusCategory>) -> bool {
     let Some(cat) = cat else {
         return true;
@@ -495,17 +981,32 @@ fn matches_search(entry: &AccessLogEntry, query: &str) -> bool {
         || entry.status.to_string().contains(query)
 }
 
+fn matches_entry_country(entry: &AccessLogEntry, country: Option<&str>) -> bool {
+    let Some(expected) = country else {
+        return true;
+    };
+    entry
+        .country
+        .as_deref()
+        .is_some_and(|c| c.eq_ignore_ascii_case(expected))
+}
+
 pub fn filter_traffic_logs(
     entries: &[AccessLogEntry],
     search: &str,
     status: Option<StatusCategory>,
     proxy_id: Option<ShortId>,
+    country: Option<&str>,
 ) -> Vec<AccessLogEntry> {
     let query = search.trim().to_lowercase();
+    let country_query = country.map(str::trim).filter(|c| !c.is_empty());
     entries
         .iter()
         .filter(|e| {
-            matches_status_cat(e, status) && matches_proxy(e, proxy_id) && matches_search(e, &query)
+            matches_status_cat(e, status)
+                && matches_proxy(e, proxy_id)
+                && matches_search(e, &query)
+                && matches_entry_country(e, country_query)
         })
         .cloned()
         .collect()
@@ -587,7 +1088,12 @@ mod tests {
     use super::*;
     use time::OffsetDateTime;
 
-    fn sample_log(status: u16, latency_ms: f64, uri: &str) -> AccessLogEntry {
+    fn sample_log(
+        status: u16,
+        latency_ms: f64,
+        uri: &str,
+        country: Option<&str>,
+    ) -> AccessLogEntry {
         AccessLogEntry {
             id: 1,
             timestamp: OffsetDateTime::UNIX_EPOCH,
@@ -600,16 +1106,17 @@ mod tests {
             latency_ms,
             proto: "HTTP/1.1".to_string(),
             error: None,
+            country: country.map(|c| c.to_string()),
         }
     }
 
     #[test]
     fn test_calculate_stats() {
         let logs = vec![
-            sample_log(200, 10.0, "/api/a"),
-            sample_log(301, 20.0, "/api/b"),
-            sample_log(404, 30.0, "/api/c"),
-            sample_log(500, 40.0, "/api/d"),
+            sample_log(200, 10.0, "/api/a", Some("TR")),
+            sample_log(301, 20.0, "/api/b", Some("US")),
+            sample_log(404, 30.0, "/api/c", None),
+            sample_log(500, 40.0, "/api/d", Some("DE")),
         ];
         let stats = calculate_stats(&logs);
         assert_eq!(stats.total, 4);
@@ -621,19 +1128,67 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_geo_distribution() {
+        let logs = vec![
+            sample_log(200, 10.0, "/api/a", Some("TR")),
+            sample_log(200, 12.0, "/api/b", Some("TR")),
+            sample_log(200, 15.0, "/api/c", Some("US")),
+            sample_log(500, 18.0, "/api/d", None),
+        ];
+        let geo = calculate_geo_distribution(&logs);
+        assert_eq!(geo.total_resolved, 3);
+        assert_eq!(geo.top_countries.len(), 2);
+        assert_eq!(geo.top_countries[0].country, "TR");
+        assert_eq!(geo.top_countries[0].count, 2);
+        assert_eq!(geo.top_countries[0].percentage, 66.7);
+        assert_eq!(geo.top_countries[1].country, "US");
+        assert_eq!(geo.top_countries[1].count, 1);
+        assert_eq!(geo.top_countries[1].percentage, 33.3);
+    }
+
+    #[test]
+    fn test_extract_available_countries() {
+        let logs = vec![
+            sample_log(200, 10.0, "/api/a", Some("TR")),
+            sample_log(200, 12.0, "/api/b", Some("US")),
+            sample_log(200, 15.0, "/api/c", Some("TR")),
+            sample_log(500, 18.0, "/api/d", None),
+        ];
+        let countries = extract_available_countries(&logs);
+        assert_eq!(countries, vec!["TR".to_string(), "US".to_string()]);
+    }
+
+    #[test]
     fn test_filter_traffic_logs() {
         let logs = vec![
-            sample_log(200, 10.0, "/health"),
-            sample_log(404, 20.0, "/missing"),
+            sample_log(200, 10.0, "/health", Some("TR")),
+            sample_log(404, 20.0, "/missing", Some("US")),
         ];
-        let filtered = filter_traffic_logs(&logs, "health", None, None);
+        let filtered = filter_traffic_logs(&logs, "health", None, None, None);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].status, 200);
 
         let filtered_status =
-            filter_traffic_logs(&logs, "", Some(StatusCategory::ClientError4xx), None);
+            filter_traffic_logs(&logs, "", Some(StatusCategory::ClientError4xx), None, None);
         assert_eq!(filtered_status.len(), 1);
         assert_eq!(filtered_status[0].uri, "/missing");
+
+        let filtered_country = filter_traffic_logs(&logs, "", None, None, Some("tr"));
+        assert_eq!(filtered_country.len(), 1);
+        assert_eq!(filtered_country[0].country.as_deref(), Some("TR"));
+
+        let filtered_none = filter_traffic_logs(&logs, "", None, None, Some("de"));
+        assert_eq!(filtered_none.len(), 0);
+    }
+
+    #[test]
+    fn test_country_heat_fill() {
+        assert_eq!(country_heat_fill(10, 10, true), "#f59e0b");
+        assert_eq!(country_heat_fill(0, 10, false), "#cbd5e1");
+        assert_eq!(country_heat_fill(8, 10, false), "#1d4ed8");
+        assert_eq!(country_heat_fill(6, 10, false), "#3b82f6");
+        assert_eq!(country_heat_fill(3, 10, false), "#60a5fa");
+        assert_eq!(country_heat_fill(1, 10, false), "#93c5fd");
     }
 
     #[test]

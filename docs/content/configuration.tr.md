@@ -1702,12 +1702,15 @@ Yönetim paneli üzerinde `/traffic` adresinden ve proxy detay sayfalarından er
 - **Gerçek Zamanlı Akış**: Sunucu Tarafından Gönderilen Olaylar (SSE) ile yeni istekler geldiği anda tabloya gerçek zamanlı olarak akar.
 - **Durum Kodları Renklendirmesi**: `2xx` (başarılı), `3xx` (yönlendirme), `4xx` (istemci hatası) ve `5xx` (sunucu hatası) için renkli rozetler.
 - **Gecikme Süresi İzleme**: Anlık yanıt gecikme süreleri görsel rozetlerle (< 50ms yeşil, 50–300ms sarı, > 300ms kırmızı) listelenir.
-- **Etkileşimli Filtreleme**: HTTP durum kodu, URL yolu, istemci IP'si, host veya HTTP metoduna göre anında filtreleme.
-- **Kontroller**: Akışı duraklatma/devam ettirme, otomatik kaydırma (auto-scroll), arabelleği temizleme ve JSON formatında dışa aktarma.
+- **Etkileşimli GeoIP Dünya Haritası ve Yoğunluk Isı Haritası**: Gelen istemci IP adresleri gömülü MaxMind GeoIP veritabanı üzerinden ISO ülke kodlarına çözümlenir. Etkileşimli SVG dünya haritası, renk yoğunluğuna dayalı ısı haritası ile gerçek zamanlı coğrafi dağılımı görselleştirir. Ülkelerin üzerine gelindiğinde istek sayısı ve yüzdesi görüntülenir; haritadaki bir ülkeye veya sıralama çubuğuna tıklandığında canlı trafik akışı anında o ülkeye filtrelenir.
+- **En Çok İstek Alan Ülkeler Sıralaması**: En çok trafik alan ilk 10 ülkeyi ilerleme çubukları (progress bars), istek sayıları ve yüzde paylarıyla listeler.
+- **Coğrafi ve Metin Filtreleme**: Ülkeye, HTTP durum koduna, URL yoluna, istemci IP'sine, host'a veya HTTP metoduna göre anında filtreleme.
+- **Kontroller**: Akışı duraklatma/devam ettirme, otomatik kaydırma (auto-scroll), harita görünümünü açma/kapatma, arabelleği temizleme ve JSON formatında dışa aktarma.
 
 ## Yönetim API'si (Admin API)
 
 Trafik uç noktaları oturum doğrulaması ile korunur ve çok kiracılı proxy erişim sınırlarını (scoping) uygular:
 
-- `GET /api/traffic`: İsteğe bağlı filtrelerle (`status`, `search`, `resource_id`, `limit`, `since_id`) eşleşen son erişim loglarını döner.
+- `GET /api/traffic`: İsteğe bağlı filtrelerle (`status`, `search`, `country`, `resource_id`, `limit`, `since_id`) eşleşen son erişim loglarını döner.
 - `GET /api/traffic/live`: Gelen erişim loglarını `text/event-stream` (Server-Sent Events) olarak gerçek zamanlı akıtır.
+- `GET /api/traffic/geo`: Canlı erişim trafiğinin coğrafi dağılımını toplu olarak döner; toplam çözümlenen istek sayısını, ilk 10 ülkeyi (`country`, `count`, `percentage`) ve tüm ISO ülke kodlarının istek sayılarını içerir.
