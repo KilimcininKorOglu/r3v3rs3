@@ -59,6 +59,25 @@ Applications and databases can be organized into **Projects** (e.g. *E-Commerce*
 - **Standalone Apps**: Apps and databases can remain standalone (`project_id: null`) or be linked to any project and environment at creation or update.
 - **WebUI Filtering**: The Apps and Databases dashboards allow filtering resources by project and environment, displaying clear badges for their current tier.
 
+### Cross-Environment Config & Secret Sync
+
+r3v3rs3 includes built-in cross-environment diffing and cryptographic secret synchronization to easily manage configuration across deployment tiers (e.g. *Staging* -> *Production* or *Development* -> *Staging*):
+
+- **Visual Diff Comparison**: Side-by-side inspection comparing environment variables and secrets between any two environments within a project.
+- **Diff Analysis & Metrics**:
+  - `Identical`: Key and value (or secret state) match exactly across both environments.
+  - `Different`: Key exists in both environments, but values or secret flags differ.
+  - `Missing in Target`: Key is present in the source environment but missing in the target environment.
+  - `Missing in Source`: Key is present in the target environment but missing in the source environment.
+- **One-Click Synchronization**:
+  - **Sync Missing Keys** (`sync_missing`): Instantly copies all variables and secrets present in the source environment that do not yet exist in the target environment, leaving existing target keys untouched.
+  - **Clone All (Overwrite)** (`clone_all`): Replaces all target environment variables with a full clone from the source environment.
+  - **Single Key Sync** (`selected_keys`): Synchronizes an individual variable from source to target with one click.
+- **Cryptographic Isolation & Zero-Leak Secrets**: Secrets are never returned to the browser in plaintext. When syncing secrets across environments, the server decrypts the value in backend memory and immediately re-seals it using the target environment's cryptographic Associated Authenticated Data (`env_aad(target_env_id, key)`), ensuring that the target environment can decrypt it while preventing unauthorized cross-row decryption attacks.
+- **Admin API**:
+  - `GET /api/projects/{id}/environments/{source_id}/diff/{target_id}`: Returns the `EnvironmentDiffReport` comparing the two environments.
+  - `POST /api/projects/{id}/environments/sync`: Accepts `EnvironmentSyncRequest` (`source_env_id`, `target_env_id`, `mode`, `keys`) and returns `EnvironmentSyncReport`.
+
 ## Apps
 
 An app names an image, the port that the container listens on and the domains that route to it:
@@ -709,6 +728,7 @@ The **Projects** page organizes applications and databases under structured proj
 - Manage multiple isolated environments within each project (e.g. `production`, `staging`, `preview`).
 - Configure environment-level shared variables and encrypted secrets that all apps in the environment automatically inherit.
 - Direct quick links to filter and view apps and databases belonging to any specific project or environment.
+- **Cross-Environment Compare & Sync**: Click **Environments** on any project row to open the multi-environment manager with tabs for each tier and a **Compare & Sync** tab featuring interactive side-by-side variable diffing, one-click synchronization, and individual key sync buttons.
 
 ### Apps
 

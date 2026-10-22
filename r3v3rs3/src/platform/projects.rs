@@ -5,10 +5,11 @@ use crate::platform::store::{StoredEnv, StoredProject, StoredProjectEnvironment}
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    EnvEntry, EnvironmentEnvSpec, EnvironmentSpec, Project, ProjectEnvironment, ProjectSpec,
-    ProjectSummary,
+    EnvDiffEntry, EnvDiffStatus, EnvEntry, EnvironmentDiffReport, EnvironmentEnvSpec,
+    EnvironmentSpec, EnvironmentSyncMode, EnvironmentSyncReport, EnvironmentSyncRequest, Project,
+    ProjectEnvironment, ProjectSpec, ProjectSummary,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 impl Platform {
     /// Lists all projects with their environment and app counts.
@@ -294,6 +295,319 @@ impl Platform {
         }
         self.store.replace_environment_vars(env_id, &vars).await?;
         self.environment(env_id).await
+    }
+
+    async fn validate_project_environments(
+        &self,
+        project_id: ShortId,
+        source_id: ShortId,
+        target_id: ShortId,
+    ) -> anyhow::Result<(ProjectEnvironment, ProjectEnvironment)> {
+        let source_env = self.environment(source_id).await?;
+        let target_env = self.environment(target_id).await?;
+        if source_env.project_id != project_id || target_env.project_id != project_id {
+            return Err(Error::InvalidEnvironment {
+                reason: "environments must belong to the specified project".to_string(),
+            }
+            .into());
+        }
+        Ok((source_env, target_env))
+    }
+
+    /// Compares environment variables and secrets between source and target environments.
+    pub async fn diff_environments(
+        &self,
+        project_id: ShortId,
+        source_id: ShortId,
+        target_id: ShortId,
+    ) -> anyhow::Result<EnvironmentDiffReport> {
+        if source_id == target_id {
+            return Err(Error::InvalidEnvironment {
+                reason: "source and target environments must be different".to_string(),
+            }
+            .into());
+        }
+        let (source_env, target_env) = self
+            .validate_project_environments(project_id, source_id, target_id)
+            .await?;
+
+        let src_vars = self.store.environment_vars(source_id).await?;
+        let tgt_vars = self.store.environment_vars(target_id).await?;
+        let src_map: BTreeMap<String, StoredEnv> =
+            src_vars.into_iter().map(|v| (v.key.clone(), v)).collect();
+        let tgt_map: BTreeMap<String, StoredEnv> =
+            tgt_vars.into_iter().map(|v| (v.key.clone(), v)).collect();
+
+        self.build_diff_report(project_id, &source_env, &target_env, &src_map, &tgt_map)
+    }
+
+    fn build_diff_report(
+        &self,
+        project_id: ShortId,
+        source_env: &ProjectEnvironment,
+        target_env: &ProjectEnvironment,
+        src_map: &BTreeMap<String, StoredEnv>,
+        tgt_map: &BTreeMap<String, StoredEnv>,
+    ) -> anyhow::Result<EnvironmentDiffReport> {
+        let all_keys: BTreeSet<String> = src_map.keys().chain(tgt_map.keys()).cloned().collect();
+        let mut entries = Vec::with_capacity(all_keys.len());
+        let (mut missing_in_target, mut missing_in_source, mut different_values, mut identical) =
+            (0, 0, 0, 0);
+
+        for key_str in &all_keys {
+            let entry = self.compare_single_diff_key(
+                source_env.id,
+                target_env.id,
+                key_str,
+                src_map,
+                tgt_map,
+            )?;
+            match entry.status {
+                EnvDiffStatus::Identical => identical += 1,
+                EnvDiffStatus::Different => different_values += 1,
+                EnvDiffStatus::MissingInTarget => missing_in_target += 1,
+                EnvDiffStatus::MissingInSource => missing_in_source += 1,
+            }
+            entries.push(entry);
+        }
+
+        Ok(EnvironmentDiffReport {
+            project_id,
+            source_env_id: source_env.id,
+            source_env_name: source_env.name.clone(),
+            target_env_id: target_env.id,
+            target_env_name: target_env.name.clone(),
+            entries,
+            total_keys: all_keys.len(),
+            missing_in_target,
+            missing_in_source,
+            different_values,
+            identical,
+        })
+    }
+
+    fn compare_single_diff_key(
+        &self,
+        src_id: ShortId,
+        tgt_id: ShortId,
+        key_str: &str,
+        src_map: &BTreeMap<String, StoredEnv>,
+        tgt_map: &BTreeMap<String, StoredEnv>,
+    ) -> anyhow::Result<EnvDiffEntry> {
+        let key = key_str.parse()?;
+        let src_var = src_map.get(key_str);
+        let tgt_var = tgt_map.get(key_str);
+
+        match (src_var, tgt_var) {
+            (Some(s), None) => Ok(EnvDiffEntry {
+                key,
+                status: EnvDiffStatus::MissingInTarget,
+                source_present: true,
+                target_present: false,
+                source_secret: s.secret,
+                target_secret: false,
+                source_value: (!s.secret)
+                    .then(|| self.open_value(src_id, s))
+                    .transpose()?,
+                target_value: None,
+            }),
+            (None, Some(t)) => Ok(EnvDiffEntry {
+                key,
+                status: EnvDiffStatus::MissingInSource,
+                source_present: false,
+                target_present: true,
+                source_secret: false,
+                target_secret: t.secret,
+                source_value: None,
+                target_value: (!t.secret)
+                    .then(|| self.open_value(tgt_id, t))
+                    .transpose()?,
+            }),
+            (Some(s), Some(t)) => self.compare_existing_diff_entry(src_id, tgt_id, key, s, t),
+            (None, None) => anyhow::bail!("unreachable key in diff"),
+        }
+    }
+
+    fn compare_existing_diff_entry(
+        &self,
+        src_id: ShortId,
+        tgt_id: ShortId,
+        key: r3v3rs3_api::container::EnvKey,
+        s: &StoredEnv,
+        t: &StoredEnv,
+    ) -> anyhow::Result<EnvDiffEntry> {
+        let s_val = self.open_value(src_id, s)?;
+        let t_val = self.open_value(tgt_id, t)?;
+        let is_same = s.secret == t.secret && s_val == t_val;
+        let status = if is_same {
+            EnvDiffStatus::Identical
+        } else {
+            EnvDiffStatus::Different
+        };
+
+        Ok(EnvDiffEntry {
+            key,
+            status,
+            source_present: true,
+            target_present: true,
+            source_secret: s.secret,
+            target_secret: t.secret,
+            source_value: (!s.secret).then_some(s_val),
+            target_value: (!t.secret).then_some(t_val),
+        })
+    }
+
+    fn execute_sync_mode(
+        &self,
+        req: &EnvironmentSyncRequest,
+        src_map: &BTreeMap<String, StoredEnv>,
+        mut tgt_map: BTreeMap<String, StoredEnv>,
+    ) -> anyhow::Result<(
+        Vec<r3v3rs3_api::container::EnvKey>,
+        Vec<r3v3rs3_api::container::EnvKey>,
+        Vec<StoredEnv>,
+    )> {
+        let (added, updated) = match req.mode {
+            EnvironmentSyncMode::SyncMissing => {
+                self.apply_sync_missing(req, src_map, &mut tgt_map)?
+            }
+            EnvironmentSyncMode::CloneAll => self.apply_clone_all(req, src_map, &mut tgt_map)?,
+            EnvironmentSyncMode::SelectedKeys => {
+                self.apply_sync_selected(req, src_map, &mut tgt_map)?
+            }
+        };
+        let final_vars = tgt_map.into_values().collect();
+        Ok((added, updated, final_vars))
+    }
+
+    /// Synchronizes environment variables and secrets from source to target environment.
+    pub async fn sync_environment_env(
+        &self,
+        project_id: ShortId,
+        request: EnvironmentSyncRequest,
+    ) -> anyhow::Result<EnvironmentSyncReport> {
+        request.validate()?;
+        let (_, target_env) = self
+            .validate_project_environments(project_id, request.source_env_id, request.target_env_id)
+            .await?;
+
+        let src_vars = self.store.environment_vars(request.source_env_id).await?;
+        let tgt_vars = self.store.environment_vars(request.target_env_id).await?;
+        let src_map: BTreeMap<String, StoredEnv> =
+            src_vars.into_iter().map(|v| (v.key.clone(), v)).collect();
+        let tgt_map: BTreeMap<String, StoredEnv> =
+            tgt_vars.into_iter().map(|v| (v.key.clone(), v)).collect();
+
+        let (added_keys, updated_keys, final_vars) =
+            self.execute_sync_mode(&request, &src_map, tgt_map)?;
+
+        self.store
+            .replace_environment_vars(request.target_env_id, &final_vars)
+            .await?;
+
+        let synced_count = added_keys.len() + updated_keys.len();
+        Ok(EnvironmentSyncReport {
+            project_id,
+            source_env_id: request.source_env_id,
+            target_env_id: request.target_env_id,
+            target_env_name: target_env.name,
+            synced_count,
+            added_keys,
+            updated_keys,
+            total_variables: final_vars.len(),
+        })
+    }
+
+    fn reseal_var_for_target(
+        &self,
+        src_id: ShortId,
+        tgt_id: ShortId,
+        var: &StoredEnv,
+    ) -> anyhow::Result<StoredEnv> {
+        let raw_val = self.open_value(src_id, var)?;
+        let aad = super::env_aad(tgt_id, &var.key);
+        let sealed = self.keys().seal(&aad, raw_val.as_bytes())?;
+        Ok(StoredEnv {
+            key: var.key.clone(),
+            sealed,
+            secret: var.secret,
+        })
+    }
+
+    fn apply_sync_missing(
+        &self,
+        req: &EnvironmentSyncRequest,
+        src_map: &BTreeMap<String, StoredEnv>,
+        tgt_map: &mut BTreeMap<String, StoredEnv>,
+    ) -> anyhow::Result<(
+        Vec<r3v3rs3_api::container::EnvKey>,
+        Vec<r3v3rs3_api::container::EnvKey>,
+    )> {
+        let mut added = Vec::new();
+        for (key, src_var) in src_map {
+            if !tgt_map.contains_key(key) {
+                let re_sealed =
+                    self.reseal_var_for_target(req.source_env_id, req.target_env_id, src_var)?;
+                tgt_map.insert(key.clone(), re_sealed);
+                added.push(key.parse()?);
+            }
+        }
+        Ok((added, Vec::new()))
+    }
+
+    fn apply_clone_all(
+        &self,
+        req: &EnvironmentSyncRequest,
+        src_map: &BTreeMap<String, StoredEnv>,
+        tgt_map: &mut BTreeMap<String, StoredEnv>,
+    ) -> anyhow::Result<(
+        Vec<r3v3rs3_api::container::EnvKey>,
+        Vec<r3v3rs3_api::container::EnvKey>,
+    )> {
+        let mut added = Vec::new();
+        let mut updated = Vec::new();
+        let old_keys: BTreeSet<String> = tgt_map.keys().cloned().collect();
+        tgt_map.clear();
+
+        for (key, src_var) in src_map {
+            let re_sealed =
+                self.reseal_var_for_target(req.source_env_id, req.target_env_id, src_var)?;
+            if old_keys.contains(key) {
+                updated.push(key.parse()?);
+            } else {
+                added.push(key.parse()?);
+            }
+            tgt_map.insert(key.clone(), re_sealed);
+        }
+        Ok((added, updated))
+    }
+
+    fn apply_sync_selected(
+        &self,
+        req: &EnvironmentSyncRequest,
+        src_map: &BTreeMap<String, StoredEnv>,
+        tgt_map: &mut BTreeMap<String, StoredEnv>,
+    ) -> anyhow::Result<(
+        Vec<r3v3rs3_api::container::EnvKey>,
+        Vec<r3v3rs3_api::container::EnvKey>,
+    )> {
+        let mut added = Vec::new();
+        let mut updated = Vec::new();
+
+        for key_obj in &req.keys {
+            let key_str = key_obj.as_str();
+            if let Some(src_var) = src_map.get(key_str) {
+                let re_sealed =
+                    self.reseal_var_for_target(req.source_env_id, req.target_env_id, src_var)?;
+                if tgt_map.contains_key(key_str) {
+                    updated.push(key_obj.clone());
+                } else {
+                    added.push(key_obj.clone());
+                }
+                tgt_map.insert(key_str.to_string(), re_sealed);
+            }
+        }
+        Ok((added, updated))
     }
 
     async fn free_project_id(&self) -> anyhow::Result<ShortId> {

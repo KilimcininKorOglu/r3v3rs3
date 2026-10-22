@@ -59,6 +59,25 @@ Uygulamalar ve veritabanları, **Projeler** (örn. *E-Ticaret*, *Faturalandırma
 - **Bağımsız Uygulamalar**: Uygulamalar ve veritabanları projesiz (bağımsız, `project_id: null`) kalabilir veya oluşturulurken/güncellenirken herhangi bir proje ve ortama atanabilir.
 - **WebUI Filtreleme**: Uygulamalar ve Veritabanları kontrol panelleri, kaynakları proje ve ortama göre filtrelemeyi ve mevcut katmanlarını rozetlerle göstermeyi destekler.
 
+### Ortamlar Arası Konfigürasyon ve Gizli Anahtar Eşitleme (Cross-Environment Sync)
+
+r3v3rs3, dağıtım katmanları arasında (örn. *Staging* -> *Production* veya *Development* -> *Staging*) ortam değişkenlerini ve gizli anahtarları kolayca yönetmek için yerleşik görsel diff karşılaştırması ve kriptografik secret senkronizasyonu sunar:
+
+- **Görsel Diff Karşılaştırması**: Bir proje altındaki herhangi iki ortam arasındaki değişkenleri ve gizli anahtarları yan yana karşılaştıran detaylı analiz görünümü.
+- **Fark Analizi ve Durum Göstergeleri**:
+  - `Aynı (Identical)`: Anahtar ve değer (veya gizlilik durumu) her iki ortamda da birebir eşleşir.
+  - `Farklı Değer (Different)`: Anahtar her iki ortamda da mevcuttur ancak değerleri veya gizlilik bayrakları farklıdır.
+  - `Hedefte Eksik (Missing in Target)`: Anahtar kaynak ortamda tanımlıdır ancak hedef ortamda mevcut değildir.
+  - `Kaynakta Eksik (Missing in Source)`: Anahtar hedef ortamda tanımlıdır ancak kaynak ortamda mevcut değildir.
+- **Tek Tıkla Eşitleme Seçenekleri**:
+  - **Eksik Değişkenleri Eşitle** (`sync_missing`): Kaynak ortamda bulunan ancak hedef ortamda henüz tanımlanmamış tüm değişken ve gizli anahtarları tek tıkla kopyalar; hedef ortamdaki mevcut değişkenlere dokunmaz.
+  - **Tümünü Klonla (Üzerine Yaz)** (`clone_all`): Hedef ortamdaki tüm değişkenlerin üzerine kaynak ortamın tam bir kopyasını yazar.
+  - **Tekil Anahtar Eşitleme** (`selected_keys`): Tablodaki herhangi bir değişkeni satır bazında tek tıkla hedefe eşitler.
+- **Kriptografik Yalıtım & Sıfır Sızıntılı Gizli Anahtarlar**: Gizli anahtarlar (secrets) tarayıcıya veya API yanıtlarına asla açık metin olarak dönmez. Ortamlar arasında bir gizli anahtar eşitlenirken, sunucu değeri yalnızca kendi belleğinde çözer ve derhal hedef ortamın İlişkili Kimliği Doğrulanmış Verisi (`env_aad(target_env_id, key)`) ile yeniden mühürler (re-seal). Bu sayede hedef ortam anahtarı güvenle kullanırken, veritabanı satırları arası yetkisiz kopyalama saldırıları engellenir.
+- **Admin API**:
+  - `GET /api/projects/{id}/environments/{source_id}/diff/{target_id}`: İki ortamı karşılaştıran `EnvironmentDiffReport` nesnesini döner.
+  - `POST /api/projects/{id}/environments/sync`: `EnvironmentSyncRequest` (`source_env_id`, `target_env_id`, `mode`, `keys`) gövdesini alarak eşitlemeyi gerçekleştirir ve `EnvironmentSyncReport` döner.
+
 ## Uygulamalar
 
 Bir uygulama bir image'ı, container'ın dinlediği portu ve uygulamaya yönlenen alan adlarını belirtir:
@@ -709,6 +728,7 @@ Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde repl
 - Her proje altında birden fazla yalıtılmış ortam yönetin (örn. `production`, `staging`, `preview`).
 - Ortamdaki tüm uygulamaların otomatik olarak miras alacağı paylaşılan ortak ortam değişkenlerini ve şifrelenmiş gizli anahtarları yapılandırın.
 - Belirli bir projeye veya ortama ait uygulamaları ve veritabanlarını filtrelemek ve görüntülemek için doğrudan hızlı bağlantılar.
+- **Ortamlar Arası Karşılaştırma & Eşitleme**: Projeler tablosunda **Ortamlar** butonuna tıklandığında açılan pencerede her ortam için sekmelerin yanı sıra, interaktif yan yana diff tablosu, tek tıkla eksikleri eşitleme ve tekil anahtar kopyalama desteği sunan **Karşılaştır ve Eşitle** sekmesi yer alır.
 
 ### Uygulamalar
 

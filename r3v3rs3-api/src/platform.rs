@@ -1921,6 +1921,110 @@ impl EnvironmentEnvSpec {
     }
 }
 
+/// Status of an environment variable when comparing two project environments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvDiffStatus {
+    /// Key and value are identical in both environments.
+    Identical,
+    /// Both environments have the key, but values or secret flags differ.
+    Different,
+    /// Key exists in the source environment but is missing in the target environment.
+    MissingInTarget,
+    /// Key exists in the target environment but is missing in the source environment.
+    MissingInSource,
+}
+
+/// A single compared variable between source and target environments.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvDiffEntry {
+    #[schema(value_type = String, example = "DATABASE_URL")]
+    pub key: EnvKey,
+    pub status: EnvDiffStatus,
+    pub source_present: bool,
+    pub target_present: bool,
+    pub source_secret: bool,
+    pub target_secret: bool,
+    /// Source value if not secret; None if secret or not present in source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_value: Option<String>,
+    /// Target value if not secret; None if secret or not present in target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_value: Option<String>,
+}
+
+/// Comparison report of environment variables between two environments.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvironmentDiffReport {
+    pub project_id: ShortId,
+    pub source_env_id: ShortId,
+    pub source_env_name: String,
+    pub target_env_id: ShortId,
+    pub target_env_name: String,
+    pub entries: Vec<EnvDiffEntry>,
+    pub total_keys: usize,
+    pub missing_in_target: usize,
+    pub missing_in_source: usize,
+    pub different_values: usize,
+    pub identical: usize,
+}
+
+/// Mode of synchronization from source environment to target environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvironmentSyncMode {
+    /// Synchronize only keys present in source that are missing in target.
+    #[default]
+    SyncMissing,
+    /// Replace all target variables with source variables (full clone).
+    CloneAll,
+    /// Synchronize only the specified list of keys from source to target.
+    SelectedKeys,
+}
+
+/// Request to synchronize environment variables and secrets from source to target environment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvironmentSyncRequest {
+    pub source_env_id: ShortId,
+    pub target_env_id: ShortId,
+    #[serde(default)]
+    pub mode: EnvironmentSyncMode,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = [String])]
+    pub keys: Vec<EnvKey>,
+}
+
+impl EnvironmentSyncRequest {
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.source_env_id == self.target_env_id {
+            return Err(Error::InvalidEnvironment {
+                reason: "source and target environments must be different".to_string(),
+            });
+        }
+        if self.mode == EnvironmentSyncMode::SelectedKeys && self.keys.is_empty() {
+            return Err(Error::InvalidEnvironment {
+                reason: "at least one key must be selected for synchronization".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Result of synchronizing environment variables between environments.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvironmentSyncReport {
+    pub project_id: ShortId,
+    pub source_env_id: ShortId,
+    pub target_env_id: ShortId,
+    pub target_env_name: String,
+    pub synced_count: usize,
+    #[schema(value_type = [String])]
+    pub added_keys: Vec<EnvKey>,
+    #[schema(value_type = [String])]
+    pub updated_keys: Vec<EnvKey>,
+    pub total_variables: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DeploymentStatus {
@@ -2613,5 +2717,38 @@ EMPTY_VAL=
             ],
         };
         assert!(dup_env_vars.validate().is_err());
+
+        // Cross-environment sync request validation
+        let same_env_sync = EnvironmentSyncRequest {
+            source_env_id: "env-1".parse().unwrap(),
+            target_env_id: "env-1".parse().unwrap(),
+            mode: EnvironmentSyncMode::SyncMissing,
+            keys: Vec::new(),
+        };
+        assert!(same_env_sync.validate().is_err());
+
+        let empty_keys_sync = EnvironmentSyncRequest {
+            source_env_id: "env-1".parse().unwrap(),
+            target_env_id: "env-2".parse().unwrap(),
+            mode: EnvironmentSyncMode::SelectedKeys,
+            keys: Vec::new(),
+        };
+        assert!(empty_keys_sync.validate().is_err());
+
+        let valid_sync = EnvironmentSyncRequest {
+            source_env_id: "env-1".parse().unwrap(),
+            target_env_id: "env-2".parse().unwrap(),
+            mode: EnvironmentSyncMode::SyncMissing,
+            keys: Vec::new(),
+        };
+        assert!(valid_sync.validate().is_ok());
+
+        let valid_selected = EnvironmentSyncRequest {
+            source_env_id: "env-1".parse().unwrap(),
+            target_env_id: "env-2".parse().unwrap(),
+            mode: EnvironmentSyncMode::SelectedKeys,
+            keys: vec!["DB_HOST".parse().unwrap()],
+        };
+        assert!(valid_selected.validate().is_ok());
     }
 }

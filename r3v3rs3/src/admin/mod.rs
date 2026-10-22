@@ -416,7 +416,9 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(
                     platform::get_environment_env,
                     platform::put_environment_env
-                )),
+                ))
+                .routes(routes!(platform::diff_environments))
+                .routes(routes!(platform::sync_environment_env)),
         )
         .nest(
             "/apps",

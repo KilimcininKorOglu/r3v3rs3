@@ -163,6 +163,8 @@ pub enum AuditAction {
     DeleteEnvironment,
     /// An account updated environment variables of a project environment.
     UpdateEnvironmentEnv,
+    /// An account synchronized or cloned environment variables across project environments.
+    SyncEnvironmentEnv,
     /// An account added an outbound webhook.
     AddOutboundWebhook,
     /// An account updated an outbound webhook.
@@ -180,7 +182,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 99] = [
+    pub const ALL: [AuditAction; 100] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -273,6 +275,7 @@ impl AuditAction {
         Self::UpdateEnvironment,
         Self::DeleteEnvironment,
         Self::UpdateEnvironmentEnv,
+        Self::SyncEnvironmentEnv,
         Self::AddOutboundWebhook,
         Self::UpdateOutboundWebhook,
         Self::DeleteOutboundWebhook,

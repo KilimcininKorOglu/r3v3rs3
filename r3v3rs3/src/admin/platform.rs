@@ -24,7 +24,8 @@ use r3v3rs3_api::{
     platform::{
         AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
         ComposeServiceStatus, DeploymentEntry, DeploymentTrigger, EnvEntry, EnvGroup, EnvGroupSpec,
-        EnvGroupSummary, EnvironmentEnvSpec, EnvironmentSpec, GitTokenRequest, ImageUpdateStatus,
+        EnvGroupSummary, EnvironmentDiffReport, EnvironmentEnvSpec, EnvironmentSpec,
+        EnvironmentSyncReport, EnvironmentSyncRequest, GitTokenRequest, ImageUpdateStatus,
         KeyRotationReport, MetricsQuery, NodeAlertRules, Project, ProjectEnvironment, ProjectSpec,
         ProjectSummary, PrunePolicy, PruneResult, RegistryEntry, RegistryRequest,
         ScheduledCommandRequest, ScheduledCommandRunResult, TargetEntry, TargetRequest,
@@ -2104,4 +2105,65 @@ pub async fn put_environment_env(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(env.variables))
+}
+
+/// Compares environment variables and secrets between source and target environments.
+#[utoipa::path(
+    get,
+    path = "/{id}/environments/{source_id}/diff/{target_id}",
+    tag = "platform",
+    operation_id = "diff_environments",
+    params(
+        ("id" = ShortId, Path, description = "The project id"),
+        ("source_id" = ShortId, Path, description = "The source environment id"),
+        ("target_id" = ShortId, Path, description = "The target environment id")
+    ),
+    responses((status = 200, description = "The environment comparison report.", body = EnvironmentDiffReport), ErrorResponses, NotFoundResponse)
+)]
+pub async fn diff_environments(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((id, source_id, target_id)): Path<(ShortId, ShortId, ShortId)>,
+) -> Result<Json<EnvironmentDiffReport>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let report = platform
+        .diff_environments(id, source_id, target_id)
+        .await
+        .map_err(platform_error)?;
+    Ok(Json(report))
+}
+
+/// Synchronizes environment variables and secrets from source to target environment.
+#[utoipa::path(
+    post,
+    path = "/{id}/environments/sync",
+    tag = "platform",
+    operation_id = "sync_environment_env",
+    params(
+        ("id" = ShortId, Path, description = "The project id")
+    ),
+    request_body = EnvironmentSyncRequest,
+    responses((status = 200, description = "The synchronization result.", body = EnvironmentSyncReport), ErrorResponses, NotFoundResponse)
+)]
+pub async fn sync_environment_env(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<EnvironmentSyncRequest>,
+) -> Result<Json<EnvironmentSyncReport>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let report = platform
+        .sync_environment_env(id, request)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::SyncEnvironmentEnv)
+        .id(report.target_env_id)
+        .summary(format!(
+            "{} -> {} ({} synced)",
+            report.source_env_id, report.target_env_id, report.synced_count
+        ));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(report))
 }

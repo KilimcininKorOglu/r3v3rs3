@@ -13,9 +13,13 @@ use crate::store::SessionStore;
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{EnvEntry, EnvironmentEnvSpec, Project, ProjectSpec, ProjectSummary};
+use r3v3rs3_api::platform::{
+    EnvDiffEntry, EnvDiffStatus, EnvEntry, EnvironmentDiffReport, EnvironmentEnvSpec,
+    EnvironmentSyncMode, EnvironmentSyncReport, EnvironmentSyncRequest, Project,
+    ProjectEnvironmentSummary, ProjectSpec, ProjectSummary,
+};
 use wasm_bindgen_futures::spawn_local;
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 use yewdux::prelude::*;
 
@@ -54,12 +58,25 @@ struct ProjectFormData {
     default_envs: String,
 }
 
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+enum EnvModalTab {
+    #[default]
+    Variables,
+    CompareSync,
+}
+
+#[derive(Clone, PartialEq, Default, Debug)]
 struct EnvModalState {
     project_id: ShortId,
-    env_id: ShortId,
-    env_name: String,
+    project_name: String,
+    environments: Vec<ProjectEnvironmentSummary>,
+    selected_env_id: ShortId,
+    active_tab: EnvModalTab,
     variables: Vec<EnvVarRow>,
+    diff_source_id: Option<ShortId>,
+    diff_target_id: Option<ShortId>,
+    diff_report: Option<EnvironmentDiffReport>,
+    sync_status_msg: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Default, Debug)]
@@ -311,12 +328,124 @@ fn open_env_modal(project_id: ShortId, modal: UseStateHandle<Option<EnvModalStat
             } else {
                 Vec::new()
             };
+            let diff_source_id = Some(first_env.id);
+            let diff_target_id = p.environments.get(1).map(|e| e.id);
             modal.set(Some(EnvModalState {
                 project_id,
-                env_id: first_env.id,
-                env_name: first_env.name.clone(),
+                project_name: p.name,
+                selected_env_id: first_env.id,
+                environments: p.environments,
+                active_tab: EnvModalTab::Variables,
                 variables: vars.into_iter().map(EnvVarRow::from_entry).collect(),
+                diff_source_id,
+                diff_target_id,
+                diff_report: None,
+                sync_status_msg: None,
             }));
+        }
+    });
+}
+
+fn switch_env_tab(
+    modal: UseStateHandle<Option<EnvModalState>>,
+    project_id: ShortId,
+    env_id: ShortId,
+) {
+    spawn_local(async move {
+        let env_url = format!("{API_ENDPOINT}{PATH}/{project_id}/environments/{env_id}/env");
+        let vars = if let Ok(v_res) = Request::get(&env_url).send().await {
+            v_res.json::<Vec<EnvEntry>>().await.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        modal.set(modal.as_ref().map(|st| {
+            let mut updated = st.clone();
+            updated.selected_env_id = env_id;
+            updated.active_tab = EnvModalTab::Variables;
+            updated.variables = vars.into_iter().map(EnvVarRow::from_entry).collect();
+            updated.sync_status_msg = None;
+            updated
+        }));
+    });
+}
+
+fn switch_compare_tab(modal: UseStateHandle<Option<EnvModalState>>, project_id: ShortId) {
+    if let Some(st) = modal.as_ref() {
+        let source_id = st.diff_source_id.unwrap_or(st.selected_env_id);
+        let target_id = st.diff_target_id.or_else(|| {
+            st.environments
+                .iter()
+                .find(|e| e.id != source_id)
+                .map(|e| e.id)
+        });
+        let mut updated = st.clone();
+        updated.active_tab = EnvModalTab::CompareSync;
+        updated.diff_source_id = Some(source_id);
+        updated.diff_target_id = target_id;
+        updated.sync_status_msg = None;
+        modal.set(Some(updated));
+
+        if let Some(tgt) = target_id
+            && tgt != source_id
+        {
+            fetch_environment_diff(modal, project_id, source_id, tgt);
+        }
+    }
+}
+
+fn fetch_environment_diff(
+    modal: UseStateHandle<Option<EnvModalState>>,
+    project_id: ShortId,
+    source_id: ShortId,
+    target_id: ShortId,
+) {
+    spawn_local(async move {
+        let url =
+            format!("{API_ENDPOINT}{PATH}/{project_id}/environments/{source_id}/diff/{target_id}");
+        if let Ok(res) = Request::get(&url).send().await
+            && let Ok(report) = res.json::<EnvironmentDiffReport>().await
+        {
+            modal.set(modal.as_ref().map(|st| {
+                let mut updated = st.clone();
+                updated.diff_report = Some(report);
+                updated
+            }));
+        }
+    });
+}
+
+fn run_environment_sync(
+    locale: Locale,
+    modal: UseStateHandle<Option<EnvModalState>>,
+    reload: UseStateHandle<u32>,
+    req: EnvironmentSyncRequest,
+    project_id: ShortId,
+) {
+    spawn_local(async move {
+        let url = format!("{API_ENDPOINT}{PATH}/{project_id}/environments/sync");
+        let Ok(req_builder) = Request::post(&url).json(&req) else {
+            return;
+        };
+        let Ok(resp) = req_builder.send().await else {
+            return;
+        };
+        if let Ok(report) = resp.json::<EnvironmentSyncReport>().await {
+            let msg = locale.tf(
+                "projects.sync_success",
+                &[("count", &report.synced_count.to_string())],
+            );
+            fetch_environment_diff(
+                modal.clone(),
+                project_id,
+                req.source_env_id,
+                req.target_env_id,
+            );
+            modal.set(modal.as_ref().map(|st| {
+                let mut updated = st.clone();
+                updated.sync_status_msg = Some(msg);
+                updated
+            }));
+            reload.set(*reload + 1);
         }
     });
 }
@@ -488,6 +617,104 @@ fn render_env_modal(
         Callback::from(move |_| env_modal.set(None))
     };
 
+    html! {
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div class="w-full max-w-4xl rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-800 max-h-[90vh] flex flex-col">
+                {render_env_modal_header(locale, state, on_close.clone())}
+                {render_env_modal_tabs(locale, state, env_modal)}
+                {if state.active_tab == EnvModalTab::Variables {
+                    render_env_variables_tab(locale, state, env_modal, reload, on_close)
+                } else {
+                    render_compare_sync_tab(locale, state, env_modal, reload)
+                }}
+            </div>
+        </div>
+    }
+}
+
+fn render_env_modal_header(
+    locale: Locale,
+    state: &EnvModalState,
+    on_close: Callback<MouseEvent>,
+) -> Html {
+    html! {
+        <div class="flex items-center justify-between border-b pb-3 dark:border-neutral-700">
+            <div>
+                <h3 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+                    {format!("{} - {}", locale.t("projects.env_vars"), state.project_name)}
+                </h3>
+                <p class="text-xs text-neutral-500">
+                    {locale.t("projects.inherited_env_vars")}
+                </p>
+            </div>
+            <button type="button" class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200" onclick={on_close}>
+                {"✕"}
+            </button>
+        </div>
+    }
+}
+
+fn render_env_modal_tabs(
+    locale: Locale,
+    state: &EnvModalState,
+    env_modal: &UseStateHandle<Option<EnvModalState>>,
+) -> Html {
+    let project_id = state.project_id;
+    let is_compare_active = state.active_tab == EnvModalTab::CompareSync;
+
+    let on_compare_click = {
+        let env_modal = env_modal.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            switch_compare_tab(env_modal.clone(), project_id);
+        })
+    };
+
+    html! {
+        <div class="flex items-center space-x-1 border-b dark:border-neutral-700 pt-3 pb-0 text-sm overflow-x-auto">
+            {state.environments.iter().map(|env| {
+                let env_id = env.id;
+                let is_selected = state.active_tab == EnvModalTab::Variables && state.selected_env_id == env_id;
+                let modal_ref = env_modal.clone();
+                let on_tab = Callback::from(move |e: MouseEvent| {
+                    e.prevent_default();
+                    switch_env_tab(modal_ref.clone(), project_id, env_id);
+                });
+                let tab_cls = if is_selected {
+                    "border-b-2 border-primary-600 text-primary-600 dark:text-primary-400 font-semibold px-3 py-2 -mb-[1px]"
+                } else {
+                    "text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 px-3 py-2 -mb-[1px]"
+                };
+                html! {
+                    <button type="button" class={tab_cls} onclick={on_tab}>
+                        {&env.name}
+                    </button>
+                }
+            }).collect::<Html>()}
+
+            <button
+                type="button"
+                class={if is_compare_active {
+                    "border-b-2 border-primary-600 text-primary-600 dark:text-primary-400 font-semibold px-3 py-2 -mb-[1px] ml-auto flex items-center space-x-1"
+                } else {
+                    "text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 px-3 py-2 -mb-[1px] ml-auto flex items-center space-x-1"
+                }}
+                onclick={on_compare_click}
+            >
+                <span>{"⇄"}</span>
+                <span>{locale.t("projects.compare_sync_tab")}</span>
+            </button>
+        </div>
+    }
+}
+
+fn render_env_variables_tab(
+    locale: Locale,
+    state: &EnvModalState,
+    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    reload: &UseStateHandle<u32>,
+    on_close: Callback<MouseEvent>,
+) -> Html {
     let on_add_var = {
         let env_modal = env_modal.clone();
         let state = state.clone();
@@ -522,7 +749,7 @@ fn render_env_modal(
                 let spec = EnvironmentEnvSpec { variables };
                 let url = format!(
                     "{API_ENDPOINT}{PATH}/{}/environments/{}/env",
-                    state.project_id, state.env_id
+                    state.project_id, state.selected_env_id
                 );
                 if send_json(locale, Request::put(&url), &spec).await.is_ok() {
                     env_modal.set(None);
@@ -533,46 +760,433 @@ fn render_env_modal(
     };
 
     html! {
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div class="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-800 max-h-[85vh] flex flex-col">
-                <div class="flex items-center justify-between border-b pb-3 dark:border-neutral-700">
-                    <div>
-                        <h3 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
-                            {format!("{} - {}", locale.t("projects.env_vars"), state.env_name)}
-                        </h3>
-                        <p class="text-xs text-neutral-500">
-                            {locale.t("projects.inherited_env_vars")}
-                        </p>
-                    </div>
-                    <button type="button" class="text-neutral-400 hover:text-neutral-600" onclick={on_close.clone()}>
-                        {"✕"}
-                    </button>
-                </div>
+        <>
+            <div class="flex-1 overflow-y-auto py-4 space-y-3 min-h-[200px]">
+                {state.variables.iter().enumerate().map(|(idx, row)| {
+                    render_var_row(idx, row, env_modal.clone(), state.clone())
+                }).collect::<Html>()}
 
-                <div class="flex-1 overflow-y-auto py-4 space-y-3">
-                    {state.variables.iter().enumerate().map(|(idx, row)| {
-                        render_var_row(idx, row, env_modal.clone(), state.clone())
+                <button
+                    type="button"
+                    class="text-xs text-primary-600 hover:underline font-semibold dark:text-primary-400 mt-2"
+                    onclick={on_add_var}
+                >
+                    {format!("+ {}", locale.t("env_groups.add_variable"))}
+                </button>
+            </div>
+
+            <div class="flex justify-end space-x-3 border-t pt-3 dark:border-neutral-700">
+                <button type="button" class="btn btn-secondary" onclick={on_close}>
+                    {locale.t("common.cancel")}
+                </button>
+                <button type="button" class={BUTTON_CLASS} onclick={on_save}>
+                    {locale.t("common.update")}
+                </button>
+            </div>
+        </>
+    }
+}
+
+fn create_source_change_callback(
+    env_modal: UseStateHandle<Option<EnvModalState>>,
+    state: EnvModalState,
+    project_id: ShortId,
+) -> Callback<Event> {
+    Callback::from(move |e: Event| {
+        if let Some(target) = e.target_dyn_into::<HtmlSelectElement>()
+            && let Ok(id) = target.value().parse::<ShortId>()
+        {
+            let mut updated = state.clone();
+            updated.diff_source_id = Some(id);
+            env_modal.set(Some(updated));
+            if let Some(tgt) = state.diff_target_id
+                && tgt != id
+            {
+                fetch_environment_diff(env_modal.clone(), project_id, id, tgt);
+            }
+        }
+    })
+}
+
+fn create_target_change_callback(
+    env_modal: UseStateHandle<Option<EnvModalState>>,
+    state: EnvModalState,
+    project_id: ShortId,
+) -> Callback<Event> {
+    Callback::from(move |e: Event| {
+        if let Some(target) = e.target_dyn_into::<HtmlSelectElement>()
+            && let Ok(id) = target.value().parse::<ShortId>()
+        {
+            let mut updated = state.clone();
+            updated.diff_target_id = Some(id);
+            env_modal.set(Some(updated));
+            if let Some(src) = state.diff_source_id
+                && src != id
+            {
+                fetch_environment_diff(env_modal.clone(), project_id, src, id);
+            }
+        }
+    })
+}
+
+fn render_compare_controls(
+    locale: Locale,
+    state: &EnvModalState,
+    env_modal: &UseStateHandle<Option<EnvModalState>>,
+) -> Html {
+    let project_id = state.project_id;
+    let source_id = state.diff_source_id;
+    let target_id = state.diff_target_id;
+
+    let on_source_change =
+        create_source_change_callback(env_modal.clone(), state.clone(), project_id);
+    let on_target_change =
+        create_target_change_callback(env_modal.clone(), state.clone(), project_id);
+
+    let on_compare_btn = {
+        let env_modal = env_modal.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            if let (Some(src), Some(tgt)) = (source_id, target_id)
+                && src != tgt
+            {
+                fetch_environment_diff(env_modal.clone(), project_id, src, tgt);
+            }
+        })
+    };
+
+    html! {
+        <div class="flex flex-wrap items-center gap-3 bg-neutral-50 dark:bg-neutral-900/50 p-3 rounded-lg border dark:border-neutral-700">
+            <div class="flex items-center space-x-2">
+                <label class="text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                    {locale.t("projects.source_env")}
+                </label>
+                <select
+                    class="select text-xs py-1 px-2 border rounded dark:bg-neutral-800 dark:border-neutral-700"
+                    onchange={on_source_change}
+                >
+                    {state.environments.iter().map(|env| {
+                        let selected = Some(env.id) == source_id;
+                        html! { <option value={env.id.to_string()} selected={selected}>{&env.name}</option> }
                     }).collect::<Html>()}
+                </select>
+            </div>
 
+            <span class="text-neutral-400">{"➔"}</span>
+
+            <div class="flex items-center space-x-2">
+                <label class="text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                    {locale.t("projects.target_env")}
+                </label>
+                <select
+                    class="select text-xs py-1 px-2 border rounded dark:bg-neutral-800 dark:border-neutral-700"
+                    onchange={on_target_change}
+                >
+                    {state.environments.iter().map(|env| {
+                        let selected = Some(env.id) == target_id;
+                        html! { <option value={env.id.to_string()} selected={selected}>{&env.name}</option> }
+                    }).collect::<Html>()}
+                </select>
+            </div>
+
+            <button
+                type="button"
+                class="btn btn-secondary text-xs px-3 py-1"
+                onclick={on_compare_btn}
+            >
+                {locale.t("projects.compare")}
+            </button>
+        </div>
+    }
+}
+
+fn render_compare_sync_tab(
+    locale: Locale,
+    state: &EnvModalState,
+    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    reload: &UseStateHandle<u32>,
+) -> Html {
+    html! {
+        <div class="flex-1 overflow-y-auto py-4 space-y-4">
+            {render_compare_controls(locale, state, env_modal)}
+
+            {if let Some(msg) = &state.sync_status_msg {
+                html! {
+                    <div class="p-3 text-xs rounded-lg bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-800 flex items-center justify-between">
+                        <span>{"✓ "}{msg}</span>
+                    </div>
+                }
+            } else {
+                html!()
+            }}
+
+            {if let Some(report) = &state.diff_report {
+                html! {
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between flex-wrap gap-2">
+                            {render_diff_summary(locale, report)}
+                            {render_diff_actions(locale, state, report, env_modal, reload)}
+                        </div>
+                        {render_diff_table(locale, state, report, env_modal, reload)}
+                    </div>
+                }
+            } else {
+                html! {
+                    <div class="text-center py-10 text-neutral-400 text-xs">
+                        {locale.t("projects.no_diff_data")}
+                    </div>
+                }
+            }}
+        </div>
+    }
+}
+
+fn render_diff_summary(locale: Locale, report: &EnvironmentDiffReport) -> Html {
+    html! {
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+            <span class="px-2.5 py-1 rounded bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-medium">
+                {locale.tf("projects.diff_total", &[("count", &report.total_keys.to_string())])}
+            </span>
+            <span class="px-2.5 py-1 rounded bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 font-medium">
+                {locale.tf("projects.diff_identical", &[("count", &report.identical.to_string())])}
+            </span>
+            <span class="px-2.5 py-1 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">
+                {locale.tf("projects.diff_different", &[("count", &report.different_values.to_string())])}
+            </span>
+            <span class="px-2.5 py-1 rounded bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 font-medium">
+                {locale.tf("projects.diff_missing_target", &[("count", &report.missing_in_target.to_string())])}
+            </span>
+            <span class="px-2.5 py-1 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium">
+                {locale.tf("projects.diff_missing_source", &[("count", &report.missing_in_source.to_string())])}
+            </span>
+        </div>
+    }
+}
+
+fn render_diff_actions(
+    locale: Locale,
+    state: &EnvModalState,
+    report: &EnvironmentDiffReport,
+    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    reload: &UseStateHandle<u32>,
+) -> Html {
+    let on_sync_missing = {
+        let env_modal = env_modal.clone();
+        let reload = reload.clone();
+        let project_id = state.project_id;
+        let source_id = report.source_env_id;
+        let target_id = report.target_env_id;
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            let req = EnvironmentSyncRequest {
+                source_env_id: source_id,
+                target_env_id: target_id,
+                mode: EnvironmentSyncMode::SyncMissing,
+                keys: Vec::new(),
+            };
+            run_environment_sync(locale, env_modal.clone(), reload.clone(), req, project_id);
+        })
+    };
+
+    let on_clone_all = {
+        let env_modal = env_modal.clone();
+        let reload = reload.clone();
+        let project_id = state.project_id;
+        let source_id = report.source_env_id;
+        let target_id = report.target_env_id;
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            let env_modal = env_modal.clone();
+            let reload = reload.clone();
+            spawn_local(async move {
+                let confirmed = dialog::confirm(locale, locale.t("projects.clone_confirm")).await;
+                if confirmed {
+                    let req = EnvironmentSyncRequest {
+                        source_env_id: source_id,
+                        target_env_id: target_id,
+                        mode: EnvironmentSyncMode::CloneAll,
+                        keys: Vec::new(),
+                    };
+                    run_environment_sync(locale, env_modal, reload, req, project_id);
+                }
+            });
+        })
+    };
+
+    html! {
+        <div class="flex items-center space-x-2">
+            {if report.missing_in_target > 0 {
+                html! {
                     <button
                         type="button"
-                        class="text-xs text-primary-600 hover:underline font-semibold dark:text-primary-400 mt-2"
-                        onclick={on_add_var}
+                        class="px-3 py-1 text-xs font-semibold rounded bg-primary-600 text-white hover:bg-primary-700"
+                        onclick={on_sync_missing}
                     >
-                        {format!("+ {}", locale.t("env_groups.add_variable"))}
+                        {format!("{} ({})", locale.t("projects.sync_missing"), report.missing_in_target)}
                     </button>
-                </div>
+                }
+            } else {
+                html!()
+            }}
 
-                <div class="flex justify-end space-x-3 border-t pt-3 dark:border-neutral-700">
-                    <button type="button" class="btn btn-secondary" onclick={on_close}>
-                        {locale.t("common.cancel")}
-                    </button>
-                    <button type="button" class={BUTTON_CLASS} onclick={on_save}>
-                        {locale.t("common.update")}
-                    </button>
-                </div>
-            </div>
+            <button
+                type="button"
+                class="px-3 py-1 text-xs font-semibold rounded border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700"
+                onclick={on_clone_all}
+            >
+                {locale.t("projects.clone_all")}
+            </button>
         </div>
+    }
+}
+
+fn render_diff_table(
+    locale: Locale,
+    state: &EnvModalState,
+    report: &EnvironmentDiffReport,
+    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    reload: &UseStateHandle<u32>,
+) -> Html {
+    html! {
+        <div class="border rounded-lg overflow-hidden dark:border-neutral-700">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-semibold border-b dark:border-neutral-700">
+                    <tr>
+                        <th class="py-2.5 px-3">{"Key"}</th>
+                        <th class="py-2.5 px-3">{format!("{} ({})", locale.t("projects.source_env"), report.source_env_name)}</th>
+                        <th class="py-2.5 px-3">{format!("{} ({})", locale.t("projects.target_env"), report.target_env_name)}</th>
+                        <th class="py-2.5 px-3">{"Status"}</th>
+                        <th class="py-2.5 px-3 text-right">{"Action"}</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y dark:divide-neutral-700">
+                    {report.entries.iter().map(|entry| {
+                        render_diff_row(locale, state, entry, env_modal, reload)
+                    }).collect::<Html>()}
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+fn render_diff_row(
+    locale: Locale,
+    state: &EnvModalState,
+    entry: &EnvDiffEntry,
+    modal: &UseStateHandle<Option<EnvModalState>>,
+    reload: &UseStateHandle<u32>,
+) -> Html {
+    let key_str = entry.key.as_str().to_string();
+    let is_syncable = entry.source_present
+        && (entry.status == EnvDiffStatus::MissingInTarget
+            || entry.status == EnvDiffStatus::Different);
+
+    let on_sync_key = {
+        let modal = modal.clone();
+        let reload = reload.clone();
+        let project_id = state.project_id;
+        let source_id = state.diff_source_id;
+        let target_id = state.diff_target_id;
+        let key_clone = entry.key.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            if let (Some(src), Some(tgt)) = (source_id, target_id) {
+                let req = EnvironmentSyncRequest {
+                    source_env_id: src,
+                    target_env_id: tgt,
+                    mode: EnvironmentSyncMode::SelectedKeys,
+                    keys: vec![key_clone.clone()],
+                };
+                run_environment_sync(locale, modal.clone(), reload.clone(), req, project_id);
+            }
+        })
+    };
+
+    html! {
+        <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-700/30">
+            <td class="py-2.5 px-3 font-semibold text-neutral-900 dark:text-neutral-100 flex items-center space-x-1.5">
+                <span>{&key_str}</span>
+                {(entry.source_secret || entry.target_secret).then(|| html! {
+                    <span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300">
+                        {"🔒"}
+                    </span>
+                })}
+            </td>
+            <td class="py-2.5 px-3">
+                {render_diff_val_cell(locale, entry.source_present, entry.source_secret, &entry.source_value)}
+            </td>
+            <td class="py-2.5 px-3">
+                {render_diff_val_cell(locale, entry.target_present, entry.target_secret, &entry.target_value)}
+            </td>
+            <td class="py-2.5 px-3">
+                {render_diff_status_badge(locale, entry.status)}
+            </td>
+            <td class="py-2.5 px-3 text-right">
+                {if is_syncable {
+                    html! {
+                        <button
+                            type="button"
+                            class="px-2 py-1 text-xs font-medium text-primary-600 bg-primary-50 hover:bg-primary-100 rounded dark:bg-primary-950/40 dark:text-primary-300 dark:hover:bg-primary-900/50"
+                            onclick={on_sync_key}
+                        >
+                            {locale.t("projects.sync_this_key")}
+                        </button>
+                    }
+                } else {
+                    html! { <span class="text-neutral-300 dark:text-neutral-600">{"-"}</span> }
+                }}
+            </td>
+        </tr>
+    }
+}
+
+fn render_diff_status_badge(locale: Locale, status: EnvDiffStatus) -> Html {
+    let (label_key, badge_cls) = match status {
+        EnvDiffStatus::Identical => (
+            "projects.status_identical",
+            "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+        ),
+        EnvDiffStatus::Different => (
+            "projects.status_different",
+            "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+        ),
+        EnvDiffStatus::MissingInTarget => (
+            "projects.status_missing_target",
+            "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
+        ),
+        EnvDiffStatus::MissingInSource => (
+            "projects.status_missing_source",
+            "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+        ),
+    };
+
+    html! {
+        <span class={format!("inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {badge_cls}")}>
+            {locale.t(label_key)}
+        </span>
+    }
+}
+
+fn render_diff_val_cell(
+    locale: Locale,
+    present: bool,
+    is_secret: bool,
+    val_opt: &Option<String>,
+) -> Html {
+    if !present {
+        return html! { <span class="text-neutral-400 italic">{"-"}</span> };
+    }
+    if is_secret {
+        return html! {
+            <span class="text-neutral-400 italic text-xs font-mono">
+                {locale.t("projects.secret_masked")}
+            </span>
+        };
+    }
+    if let Some(val) = val_opt {
+        html! { <span class="font-mono text-xs text-neutral-800 dark:text-neutral-200 break-all">{val}</span> }
+    } else {
+        html! { <span class="text-neutral-400 italic">{"-"}</span> }
     }
 }
 
