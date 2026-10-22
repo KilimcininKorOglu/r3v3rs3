@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.3] - 2026-10-22
+
+### Added
+- gRPC Server Reflection Protocol v1 & v1alpha: Automatic dynamic discovery of upstream gRPC services, methods, request/response message types, and schema definitions without requiring local proto file compilation.
+- HTTP/2 gRPC Unary Invocation Engine: Native HTTP/2 client engine to invoke gRPC methods directly via dynamic JSON payload encoding and decoding, Protobuf wire serialization, gRPC message framing, custom metadata headers, and trailer status code inspection.
+- gRPC API Endpoints: Added `POST /api/proxies/{id}/grpc/reflect`, `POST /api/proxies/{id}/grpc/invoke`, and standalone `POST /api/grpc/reflect` & `POST /api/grpc/invoke` endpoints with full OpenAPI 3.1 documentation.
+- Interactive WebUI gRPC Test Console: Embedded Postman/gRPCui-style interactive testing tool within the HTTP proxy configuration, featuring service and method dropdown selectors, automatic sample JSON payload generation, custom metadata header editor, latency measurement, and gRPC status code display with payload inspection.
+
 ## [2.3.2] - 2026-10-22
 
 ### Added
