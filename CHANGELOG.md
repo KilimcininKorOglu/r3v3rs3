@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.5] - 2026-10-22
+
+### Added
+- Prometheus & Runtime Anomaly Detection Engine: Autonomous evaluation loop running every 10 seconds monitoring real-time P99 latency, 5xx server error rate, traffic throughput spikes (RPS), and Tokio event loop scheduling lag.
+- WebUI Notification Center: Integrated top navigation bar notification bell featuring a live count badge for active anomalies, flyout list with severity indicators (`CRITICAL` vs `WARNING`), live metric vs threshold comparisons, and one-click alert dismissal.
+- Anomaly Alert Webhook Dispatcher: Automated webhook notifications dispatched on anomaly triggers (`system.high_latency`, `system.high_error_rate`, `system.traffic_spike`, `system.event_loop_lag`) with an integrated 5-minute cooldown per anomaly type to prevent notification storms.
+- Anomaly Alert Threshold Configuration Card: Dedicated Settings card enabling operators to dynamically configure threshold limits and toggle automated anomaly detection without restarting the server.
+- Anomaly Detection API Endpoints: Added `GET /api/system/anomalies`, `GET /api/system/anomalies/rules`, `PUT /api/system/anomalies/rules`, and `POST /api/system/anomalies/dismiss` with full OpenAPI 3.1 documentation.
+
 ## [2.3.4] - 2026-10-22
 
 ### Added
