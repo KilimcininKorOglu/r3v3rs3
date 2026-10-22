@@ -6,6 +6,7 @@ use super::resource_page::{Notice, delete_on_click, notice_view};
 use super::settings::{fetch_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::backup_drill_modal::BackupDrillModal;
 use crate::dialog::{self, Icon};
 use crate::format::format_time;
 use crate::i18n::use_locale;
@@ -154,11 +155,13 @@ pub fn database_backups(props: &Props) -> Html {
     let (session, _) = use_store::<SessionStore>();
     let backups = use_state(Vec::<BackupEntry>::new);
     let s3_snapshots = use_state(Vec::<S3BackupSnapshot>::new);
-    let config = use_state(|| Option::<BackupConfig>::None);
-    let pitr_range = use_state(|| Option::<PitrRange>::None);
-    let notice = use_state(|| Option::<Notice<&'static str>>::None);
+    let config = use_state(Option::<BackupConfig>::default);
+    let pitr_range = use_state(Option::<PitrRange>::default);
+    let notice = use_state(Option::<Notice<&'static str>>::default);
+    let selected_drill_backup = use_state(Option::<BackupEntry>::default);
+    let drill_running = use_state(bool::default);
     let form = use_state(FormState::default);
-    let busy = use_state(|| false);
+    let busy = use_state(bool::default);
     let id = props.id;
 
     let signed_in = session.info.is_some();
@@ -184,40 +187,34 @@ pub fn database_backups(props: &Props) -> Html {
         return html!();
     }
     let navigator = use_navigator().unwrap();
-    let reload = {
-        let (backups, s3_snapshots, config, form, notice, pitr_range) = (
-            backups.clone(),
-            s3_snapshots.clone(),
-            config.clone(),
-            form.clone(),
-            notice.clone(),
-            pitr_range.clone(),
-        );
-        Callback::from(move |()| {
-            reload(locale, &backups, &config, &form, &notice, &pitr_range, id);
-            fetch_s3_snapshots(locale, &s3_snapshots);
-        })
-    };
+    let reload = make_reload_cb(
+        locale,
+        backups.clone(),
+        s3_snapshots.clone(),
+        config.clone(),
+        form.clone(),
+        notice.clone(),
+        pitr_range.clone(),
+        id,
+    );
+    let drill_modal = build_drill_modal(
+        locale,
+        id,
+        &selected_drill_backup,
+        reload.clone(),
+        &drill_running,
+    );
+
     html! {
         <>
             { back_header(locale, &navigator, locale.t("backups.title").to_string()) }
             { notice_view(&notice, |key| html! { {locale.t(key)} }) }
             { pitr_banner_view(locale, id, (*pitr_range).as_ref(), can_edit, &notice, &reload) }
             if can_edit {
-                <div class="mb-4">
-                    <button type="button" class={BUTTON_CLASS} disabled={*busy}
-                        onclick={{
-                            let (busy, notice, reload) = (busy.clone(), notice.clone(), reload.clone());
-                            Callback::from(move |_| {
-                                spawn_local(take_backup(locale, id, busy.clone(), notice.clone(), reload.clone()));
-                            })
-                        }}
-                    >
-                        {locale.t("backups.take")}
-                    </button>
-                </div>
+                { take_backup_button(locale, id, busy.clone(), notice.clone(), reload.clone()) }
             }
-            { list_view(locale, id, &backups, can_edit, reload.clone()) }
+            { list_view(locale, id, &backups, can_edit, reload.clone(), selected_drill_backup.clone()) }
+            { drill_modal }
             { s3_list_view(locale, id, &s3_snapshots, can_edit, reload.clone()) }
             if can_edit {
                 { settings_view(locale, &config, &form, &notice) }
@@ -229,6 +226,23 @@ pub fn database_backups(props: &Props) -> Html {
 #[derive(Properties, PartialEq)]
 pub struct Props {
     pub id: ShortId,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn make_reload_cb(
+    locale: Locale,
+    backups: UseStateHandle<Vec<BackupEntry>>,
+    s3_snapshots: UseStateHandle<Vec<S3BackupSnapshot>>,
+    config: UseStateHandle<Option<BackupConfig>>,
+    form: UseStateHandle<FormState>,
+    notice: UseStateHandle<Option<Notice<&'static str>>>,
+    pitr_range: UseStateHandle<Option<PitrRange>>,
+    id: ShortId,
+) -> Callback<()> {
+    Callback::from(move |()| {
+        reload(locale, &backups, &config, &form, &notice, &pitr_range, id);
+        fetch_s3_snapshots(locale, &s3_snapshots);
+    })
 }
 
 fn fetch_s3_snapshots(locale: Locale, s3_snapshots: &UseStateHandle<Vec<S3BackupSnapshot>>) {
@@ -470,6 +484,29 @@ impl FormState {
     }
 }
 
+fn take_backup_button(
+    locale: Locale,
+    id: ShortId,
+    busy: UseStateHandle<bool>,
+    notice: UseStateHandle<Option<Notice<&'static str>>>,
+    reload: Callback<()>,
+) -> Html {
+    html! {
+        <div class="mb-4">
+            <button type="button" class={BUTTON_CLASS} disabled={*busy}
+                onclick={{
+                    let (busy, notice, reload) = (busy.clone(), notice.clone(), reload.clone());
+                    Callback::from(move |_| {
+                        spawn_local(take_backup(locale, id, busy.clone(), notice.clone(), reload.clone()));
+                    })
+                }}
+            >
+                {locale.t("backups.take")}
+            </button>
+        </div>
+    }
+}
+
 /// Takes a backup now.
 async fn take_backup(
     locale: Locale,
@@ -514,6 +551,47 @@ fn restore_on_click(locale: Locale, id: ShortId, entry: &BackupEntry) -> Callbac
     })
 }
 
+fn build_drill_modal(
+    locale: Locale,
+    id: ShortId,
+    selected_drill_backup: &UseStateHandle<Option<BackupEntry>>,
+    reload: Callback<()>,
+    drill_running: &UseStateHandle<bool>,
+) -> Option<Html> {
+    let entry = (**selected_drill_backup).clone()?;
+    let on_close = {
+        let s = selected_drill_backup.clone();
+        Callback::from(move |()| s.set(None))
+    };
+    let on_rerun = {
+        let (db_id, backup_id) = (id, entry.id.clone());
+        let reload = reload.clone();
+        let s = selected_drill_backup.clone();
+        let drill_running = drill_running.clone();
+        Callback::from(move |()| {
+            let (s, reload, drill_running) = (s.clone(), reload.clone(), drill_running.clone());
+            let path = format!("{API_ENDPOINT}/databases/{db_id}/backups/{backup_id}/test");
+            drill_running.set(true);
+            spawn_local(async move {
+                if let Ok(req) = Request::post(&path).build() {
+                    let _ = send_request(locale, req).await;
+                    reload.emit(());
+                    s.set(None);
+                }
+                drill_running.set(false);
+            });
+        })
+    };
+    Some(html! {
+        <BackupDrillModal
+            entry={entry}
+            on_close={on_close}
+            on_rerun={on_rerun}
+            is_running={**drill_running}
+        />
+    })
+}
+
 /// The table of the backups of the database.
 fn list_view(
     locale: Locale,
@@ -521,6 +599,7 @@ fn list_view(
     backups: &[BackupEntry],
     can_edit: bool,
     reload: Callback<()>,
+    selected_drill_backup: UseStateHandle<Option<BackupEntry>>,
 ) -> Html {
     if backups.is_empty() {
         return html! { <p class="text-neutral-400 mt-2">{locale.t("backups.empty")}</p> };
@@ -541,38 +620,40 @@ fn list_view(
                     reload.clone(),
                 )
             });
-            let test = can_edit.then(|| {
-                let (reload, backup_id) = (reload.clone(), entry.id.clone());
-                Callback::from(move |_| {
-                    let (reload, backup_id) = (reload.clone(), backup_id.clone());
-                    spawn_local(async move {
-                        let _ = Request::post(&format!("{API_ENDPOINT}/databases/{id}/backups/{backup_id}/test")).send().await;
-                        reload.emit(());
-                    });
+            let on_drill_click = {
+                let s = selected_drill_backup.clone();
+                let e = entry.clone();
+                Callback::from(move |ev: MouseEvent| {
+                    ev.prevent_default();
+                    s.set(Some(e.clone()));
                 })
-            });
+            };
             let status_badge = match entry.verification_status.as_deref() {
-                Some("valid") => html! {
-                    <span class="text-xs text-green-400 mr-3" title="Dump verified">
-                        {"✓ "}{locale.t("backups.verified")}
-                    </span>
-                },
-                Some(err) => html! {
-                    <span class="text-xs text-red-400 mr-3" title={err.to_string()}>
-                        {"✗ "}{locale.t("backups.verify_failed")}
-                    </span>
-                },
-                None => {
-                    if let Some(test_click) = test {
-                        html! {
-                            <a class="text-xs text-neutral-400 hover:text-neutral-200 mr-3 cursor-pointer" onclick={test_click}>
-                                {locale.t("backups.test")}
-                            </a>
-                        }
+                Some("valid") => {
+                    let label = if let Some(drill) = &entry.drill && drill.table_count > 0 {
+                        locale.tf(
+                            "backups.drill_passed_tables",
+                            &[("count", &drill.table_count.to_string())],
+                        )
                     } else {
-                        html! {}
+                        format!("✓ {}", locale.t("backups.verified"))
+                    };
+                    html! {
+                        <button type="button" class="text-xs text-green-400 hover:text-green-300 mr-3 cursor-pointer inline-flex items-center gap-1 font-medium" onclick={on_drill_click} title={locale.t("backups.view_drill")}>
+                            {label}
+                        </button>
                     }
                 }
+                Some(err) => html! {
+                    <button type="button" class="text-xs text-red-400 hover:text-red-300 mr-3 cursor-pointer inline-flex items-center gap-1 font-medium" onclick={on_drill_click} title={err.to_string()}>
+                        {"✗ "}{locale.t("backups.verify_failed")}
+                    </button>
+                },
+                None => html! {
+                    <button type="button" class="text-xs text-neutral-400 hover:text-neutral-200 mr-3 cursor-pointer font-medium" onclick={on_drill_click} title={locale.t("backups.view_drill")}>
+                        {locale.t("backups.test")}
+                    </button>
+                },
             };
             html! {
                 <tr class="border-b border-neutral-700">

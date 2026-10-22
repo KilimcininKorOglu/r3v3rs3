@@ -334,6 +334,7 @@ mod tests {
             created_at: 1,
             verified_at: None,
             verification_status: None,
+            drill: None,
         }
     }
 

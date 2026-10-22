@@ -5,6 +5,7 @@ use super::resource_page::{Notice, delete_on_click, notice_view};
 use super::settings::{fetch_json, send_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::backup_drill_modal::BackupDrillModal;
 use crate::dialog::{self, Icon};
 use crate::format::format_time;
 use crate::i18n::use_locale;
@@ -137,6 +138,8 @@ pub fn backups() -> Html {
     let show_s3 = use_state(bool::default);
     let selected_db = use_state(Option::<ShortId>::default);
     let notice = use_state(Option::<Notice<&'static str>>::default);
+    let selected_drill_backup = use_state(|| None::<BackupEntry>);
+    let drill_running = use_state(|| false);
     let can_edit = session.can_edit();
 
     let reload_cb = {
@@ -172,6 +175,45 @@ pub fn backups() -> Html {
 
     let filtered = filter_backups(&backups, &search, &engine);
 
+    let on_select_drill = {
+        let s = selected_drill_backup.clone();
+        Callback::from(move |entry: BackupEntry| s.set(Some(entry)))
+    };
+
+    let drill_modal = (*selected_drill_backup).clone().map(|entry| {
+        let on_close = {
+            let s = selected_drill_backup.clone();
+            Callback::from(move |()| s.set(None))
+        };
+        let on_rerun = {
+            let (id, backup_id) = (entry.app, entry.id.clone());
+            let reload = reload_cb.clone();
+            let s = selected_drill_backup.clone();
+            let drill_running = drill_running.clone();
+            Callback::from(move |()| {
+                let (s, reload, drill_running) = (s.clone(), reload.clone(), drill_running.clone());
+                let path = format!("{API_ENDPOINT}/databases/{id}/backups/{backup_id}/test");
+                drill_running.set(true);
+                spawn_local(async move {
+                    if let Ok(req) = Request::post(&path).build() {
+                        let _ = send_request(locale, req).await;
+                        reload.emit(());
+                        s.set(None);
+                    }
+                    drill_running.set(false);
+                });
+            })
+        };
+        html! {
+            <BackupDrillModal
+                entry={entry}
+                on_close={on_close}
+                on_rerun={on_rerun}
+                is_running={*drill_running}
+            />
+        }
+    });
+
     html! {
         <div class="space-y-6">
             { render_header(locale, can_edit, &show_s3, &show_settings, &show_take) }
@@ -187,8 +229,10 @@ pub fn backups() -> Html {
             { render_filter_bar(locale, &search, &engine) }
 
             <div class="rounded-lg border border-neutral-800 bg-neutral-900/60 overflow-hidden">
-                { render_backups_table(locale, &filtered, can_edit, reload_cb.clone()) }
+                { render_backups_table(locale, &filtered, can_edit, reload_cb.clone(), on_select_drill) }
             </div>
+
+            { drill_modal }
 
             { render_modals(locale, &show_take, &show_settings, &databases, &selected_db, &config, &form, &notice, reload_cb) }
         </div>
@@ -388,6 +432,7 @@ fn render_backups_table(
     backups: &[BackupEntry],
     can_edit: bool,
     reload: Callback<()>,
+    on_select_drill: Callback<BackupEntry>,
 ) -> Html {
     if backups.is_empty() {
         return html! {
@@ -411,7 +456,7 @@ fn render_backups_table(
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-neutral-800/60">
-                    { for backups.iter().map(|b| render_backup_row(locale, b, can_edit, reload.clone())) }
+                    { for backups.iter().map(|b| render_backup_row(locale, b, can_edit, reload.clone(), on_select_drill.clone())) }
                 </tbody>
             </table>
         </div>
@@ -423,6 +468,7 @@ fn render_backup_row(
     entry: &BackupEntry,
     can_edit: bool,
     reload: Callback<()>,
+    on_select_drill: Callback<BackupEntry>,
 ) -> Html {
     let download_url = format!(
         "{API_ENDPOINT}/databases/{}/backups/{}/download",
@@ -430,21 +476,48 @@ fn render_backup_row(
     );
     let filename = format!("{}.dump.gz", entry.id);
 
+    let on_drill_click = {
+        let on_select_drill = on_select_drill.clone();
+        let entry = entry.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            on_select_drill.emit(entry.clone());
+        })
+    };
+
     let verify_badge = match (entry.verified_at, entry.verification_status.as_deref()) {
-        (Some(_), Some("valid")) => html! {
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-950 text-emerald-400 border border-emerald-800">
-                {locale.t("backups.verified")}
-            </span>
-        },
+        (Some(_), Some("valid")) => {
+            let label = if let Some(drill) = &entry.drill
+                && drill.table_count > 0
+            {
+                locale.tf(
+                    "backups.drill_passed_tables",
+                    &[("count", &drill.table_count.to_string())],
+                )
+            } else {
+                locale.t("backups.verified").to_string()
+            };
+            html! {
+                <button type="button" class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-950 text-emerald-400 border border-emerald-800 hover:bg-emerald-900/60 cursor-pointer transition" onclick={on_drill_click} title={locale.t("backups.view_drill")}>
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    {label}
+                </button>
+            }
+        }
         (Some(_), _) => html! {
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-950 text-red-400 border border-red-800">
+            <button type="button" class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-red-950 text-red-400 border border-red-800 hover:bg-red-900/60 cursor-pointer transition" onclick={on_drill_click} title={locale.t("backups.view_drill")}>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
                 {locale.t("backups.verify_failed")}
-            </span>
+            </button>
         },
         _ => html! {
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-neutral-800 text-neutral-400 border border-neutral-700">
+            <button type="button" class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-neutral-800 text-neutral-400 border border-neutral-700 hover:bg-neutral-700/60 cursor-pointer transition" onclick={on_drill_click} title={locale.t("backups.view_drill")}>
                 {locale.t("backups.untested")}
-            </span>
+            </button>
         },
     };
 
@@ -1040,6 +1113,7 @@ mod tests {
                 created_at: 1000,
                 verified_at: Some(1005),
                 verification_status: Some("valid".into()),
+                drill: None,
             },
             BackupEntry {
                 id: "b2".into(),
@@ -1051,6 +1125,7 @@ mod tests {
                 created_at: 2000,
                 verified_at: None,
                 verification_status: None,
+                drill: None,
             },
         ];
 

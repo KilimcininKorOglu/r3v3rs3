@@ -361,7 +361,15 @@ Her yeni yedek yapılandırılan uzak hedeflere aktarılır; başarısız bir y�
 
 **Geri yükle**, kayıtlı dump'ı çalışan container'a yazar ve engine'in restore komutunu çalıştırır (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis dump dosyasını data volume'üne alır ve yeniden başlar; bu yüzden restore, sunucu geri geldikten sonra tamamlanır. Geri yükleme veritabanının verisinin yerine geçer.
 
-Yedeklerin bozulmadan saklandığını ve geri yüklenebilir olduğunu garanti etmek için r3v3rs3 otomatik periyodik geri yükleme doğrulama testi içerir. Sistem gzipped dump'ların hatasız açıldığını ve ilgili veritabanı motorunun sihirli baytlarıyla veya SQL başlıklarıyla (Redis RDB, SQLite 3, PostgreSQL, MySQL/MariaDB) eşleştiğini doğrular. Doğrulanan yedeklerde onay zaman damgası (`verified_at`) yer alır; ayrıca WebUI üzerinden veya `POST /api/databases/{id}/backups/{name}/verify` ile anında test başlatılabilir.
+Yedeklerin bozulmadan saklandığını ve geri yüklenebilir olduğunu garanti etmek için r3v3rs3 otomatik periyodik geri yükleme doğrulama testi ve kurtarma simülasyonu içerir. Sistem gzipped dump'ların hatasız açıldığını, veritabanı format imzalarını ve bellek içi simülasyon bütünlüğünü doğrular:
+
+- **Şema ve Veri Simülasyonu (Restore Drill)**: Canlı veritabanını kirletmeden ve ek container ayağa kaldırmadan bellek içinde dump akışını ayrıştırır:
+  - **SQL Dump'ları (PostgreSQL / MySQL / MariaDB)**: `CREATE TABLE` tanımlarını inceler, tablo adlarını çıkarır, veri yüklerini (`COPY ... FROM stdin` veya `INSERT INTO`) tespit eder ve dosya sonu tamamlanma imzasını (örn. `-- PostgreSQL database dump complete`) kontrol eder.
+  - **Redis RDB**: İkili `REDIS` sihirli baytlarını, sürüm uyumluluğunu ve dosya sonu sağlama toplamını doğrular.
+  - **SQLite 3**: Standart SQLite başlığını, sayfa boyutlarını ve sürüm numaralarını teyit eder.
+- **Tanılama Metrikleri ve Tablo Örnekleri**: Doğrulanan her yedek ayrıntılı metrikler kaydeder: simülasyon süresi (`drill_duration_ms`), tespit edilen tablo sayısı, örnek tablo listesi, şema nesnesi sayısı ve gerçek veri satırlarının varlığı (`has_data`).
+- **Etkileşimli Simülasyon Rapor Modalı**: WebUI'da onay rozetine (`✓ Doğrulandı (N tablo)`) tıklandığında durum banner'ı, format ve süre metrikleri, tablo sayısı ve çıkarılan tablo etiketlerini içeren ayrıntılı bir tanılama modalı açılır. Yöneticiler **Kurtarma Simülasyonu Çalıştır** butonuyla veya `POST /api/databases/{id}/backups/{name}/verify` ile testi anında yeniden başlatabilir.
+- **Acil Doğrulama Hatası Bildirimleri**: Bir yedek sağlama toplamı, gzip açma veya şema simülasyonu aşamasında başarısız olursa r3v3rs3 harici izleme sistemlerini felaket anından önce haberdar etmek için anında `backup.verification_failed` webhook olayını (`BackupVerificationFailed`) tetikler.
 
 #### Zaman Noktasına Geri Dönüş (PITR) ve Sürekli Günlük Arşivleme
 

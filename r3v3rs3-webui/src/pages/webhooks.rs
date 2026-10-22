@@ -271,6 +271,7 @@ fn event_label(_locale: Locale, event: WebhookEvent) -> &'static str {
         WebhookEvent::BackupFailure => "webhooks.event_backup_failure",
         WebhookEvent::BackupUploadFailed => "webhooks.event_backup_upload_failed",
         WebhookEvent::BackupRestored => "webhooks.event_backup_restored",
+        WebhookEvent::BackupVerificationFailed => "webhooks.event_backup_verification_failed",
         WebhookEvent::CertExpiring => "webhooks.event_cert_expiring",
         WebhookEvent::CertRenewed => "webhooks.event_cert_renewed",
         WebhookEvent::CertRenewalFailed => "webhooks.event_cert_renewal_failed",

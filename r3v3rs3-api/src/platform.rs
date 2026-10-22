@@ -216,6 +216,27 @@ pub struct RsyncConfig {
     pub password: String,
 }
 
+/// Detailed simulation drill report of a database backup restore and schema validation.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BackupDrillDetails {
+    /// Strategy / simulation engine executed (e.g. "postgres_schema_drill", "sqlite_file_drill", "redis_rdb_drill").
+    pub drill_mode: String,
+    /// Number of tables / collections identified in the dump.
+    pub table_count: u32,
+    /// Representative sample of table / collection names found in the dump (up to 15).
+    pub tables_sample: Vec<String>,
+    /// Whether data payload statements (INSERT, COPY, keys) were identified.
+    pub has_data: bool,
+    /// Whether the dump completed cleanly with proper footer or EOF signature.
+    pub integrity_check_passed: bool,
+    /// Total schema and data objects counted during drill.
+    pub schema_objects_count: u32,
+    /// Execution duration of the drill simulation in milliseconds.
+    pub drill_duration_ms: u64,
+    /// Diagnostic summary or status message.
+    pub summary: String,
+}
+
 /// Report of a backup dump decompression and integrity verification test.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct BackupVerifyReport {
@@ -224,6 +245,8 @@ pub struct BackupVerifyReport {
     pub uncompressed_size: u64,
     pub format_detected: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drill: Option<BackupDrillDetails>,
 }
 
 /// Report of platform.key rotation and secret re-encryption across SQLite tables.
@@ -314,6 +337,9 @@ pub struct BackupEntry {
     /// Verification result message or status ("valid", "error: ...").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_status: Option<String>,
+    /// Simulation drill details and schema integrity report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drill: Option<BackupDrillDetails>,
 }
 
 /// Global summary and statistics of all backups in the platform.

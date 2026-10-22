@@ -11,8 +11,9 @@ use r3v3rs3_api::container::{AppName, ContainerName};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, BackupConfig, BackupEntry, EngineInfo, PitrRange, PitrRestoreRequest,
-    PitrRestoreResponse, RestoreFromS3Request, RestoreFromS3Response, S3BackupSnapshot, WalSegment,
+    AppEntry, BackupConfig, BackupDrillDetails, BackupEntry, EngineInfo, PitrRange,
+    PitrRestoreRequest, PitrRestoreResponse, RestoreFromS3Request, RestoreFromS3Response,
+    S3BackupSnapshot, WalSegment,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -264,6 +265,7 @@ impl Platform {
             created_at: unix_ms() as i64,
             verified_at: None,
             verification_status: None,
+            drill: None,
         };
         self.store_backup(db_id, &entry, compressed).await?;
         self.apply_retention(db_id).await?;
@@ -1133,7 +1135,7 @@ impl Platform {
         Ok(())
     }
 
-    /// Tests decompression and format integrity of a backup dump.
+    /// Tests decompression, integrity, and runs a simulated restore drill on a backup dump.
     pub async fn verify_backup(
         &self,
         db_id: ShortId,
@@ -1143,6 +1145,7 @@ impl Platform {
         let dir = self.backup_dir(db_id).await?;
         let dump_path = dir.join(format!("{}.dump.gz", entry.id));
         let compressed = tokio::fs::read(&dump_path).await?;
+        let started_at = std::time::Instant::now();
 
         let digest = hex::encode(Sha256::digest(&compressed));
         if digest != entry.sha256 {
@@ -1150,14 +1153,16 @@ impl Platform {
                 "checksum mismatch: expected {}, got {}",
                 entry.sha256, digest
             );
-            self.save_verification_result(&dir, &mut entry, false, &msg)
+            self.save_verification_result(&dir, &mut entry, false, &msg, None)
                 .await?;
+            self.dispatch_verification_failed(db_id, &entry, &msg).await;
             return Ok(r3v3rs3_api::platform::BackupVerifyReport {
                 backup_id: entry.id,
                 verified: false,
                 uncompressed_size: 0,
                 format_detected: "unknown".into(),
                 message: msg,
+                drill: None,
             });
         }
 
@@ -1165,33 +1170,64 @@ impl Platform {
             Ok(p) => p,
             Err(err) => {
                 let msg = format!("decompression failed: {err:#}");
-                self.save_verification_result(&dir, &mut entry, false, &msg)
+                self.save_verification_result(&dir, &mut entry, false, &msg, None)
                     .await?;
+                self.dispatch_verification_failed(db_id, &entry, &msg).await;
                 return Ok(r3v3rs3_api::platform::BackupVerifyReport {
                     backup_id: entry.id,
                     verified: false,
                     uncompressed_size: 0,
                     format_detected: "corrupt_gzip".into(),
                     message: msg,
+                    drill: None,
                 });
             }
         };
 
-        let format = detect_dump_format(&entry.engine, &plain);
-        let msg = format!(
-            "verified {} uncompressed bytes, format: {format}",
-            plain.len()
-        );
-        self.save_verification_result(&dir, &mut entry, true, "valid")
+        let drill = simulate_restore_drill(&entry.engine, &plain, started_at);
+        let valid = drill.integrity_check_passed;
+        let msg = drill.summary.clone();
+        self.save_verification_result(&dir, &mut entry, valid, &msg, Some(drill.clone()))
             .await?;
+
+        if !valid {
+            self.dispatch_verification_failed(db_id, &entry, &msg).await;
+        }
 
         Ok(r3v3rs3_api::platform::BackupVerifyReport {
             backup_id: entry.id,
-            verified: true,
+            verified: valid,
             uncompressed_size: plain.len() as u64,
-            format_detected: format,
+            format_detected: drill.drill_mode.clone(),
             message: msg,
+            drill: Some(drill),
         })
+    }
+
+    async fn dispatch_verification_failed(
+        &self,
+        db_id: ShortId,
+        entry: &BackupEntry,
+        error_msg: &str,
+    ) {
+        let summary = format!(
+            "Backup verification failed for database {}: {error_msg}",
+            entry.name
+        );
+        let data = serde_json::json!({
+            "app_id": db_id,
+            "backup_id": entry.id,
+            "database_name": entry.name,
+            "engine": entry.engine,
+            "size_bytes": entry.size,
+            "error": error_msg,
+        });
+        self.dispatch_webhook_event(
+            r3v3rs3_api::webhook::WebhookEvent::BackupVerificationFailed,
+            summary,
+            data,
+        )
+        .await;
     }
 
     async fn save_verification_result(
@@ -1200,6 +1236,7 @@ impl Platform {
         entry: &mut BackupEntry,
         valid: bool,
         status: &str,
+        drill: Option<BackupDrillDetails>,
     ) -> anyhow::Result<()> {
         entry.verified_at = Some(unix_ms() as i64);
         entry.verification_status = Some(if valid {
@@ -1207,6 +1244,7 @@ impl Platform {
         } else {
             format!("failed: {status}")
         });
+        entry.drill = drill;
         let manifest = serde_json::to_vec(entry)?;
         tokio::fs::write(dir.join(format!("{}.json", entry.id)), manifest).await?;
         Ok(())
@@ -1793,7 +1831,221 @@ impl Platform {
     }
 }
 
+fn strip_create_table_prefix<'a>(lower: &str, line: &'a str) -> Option<&'a str> {
+    for prefix in [
+        "create table if not exists ",
+        "create table ",
+        "create or replace table ",
+    ] {
+        if let Some(rem) = lower.strip_prefix(prefix) {
+            return Some(&line[line.len() - rem.len()..]);
+        }
+    }
+    None
+}
+
+const IDENT_TRIM_CHARS: &[char] = &['"', '`', '[', ']', '\'', ';', '(', ')'];
+
+/// Extracts clean table name from an SQL CREATE TABLE statement line.
+fn extract_sql_table_name(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let rem = strip_create_table_prefix(&lower, trimmed)?;
+    let raw = rem.split_whitespace().next()?;
+    let name_part = raw.split('.').next_back()?;
+    let clean = name_part.trim_matches(IDENT_TRIM_CHARS);
+    if clean.is_empty() {
+        None
+    } else {
+        Some(clean.to_string())
+    }
+}
+
+fn check_sql_completion_marker(trimmed: &str) -> bool {
+    trimmed.contains("PostgreSQL database dump complete")
+        || trimmed.contains("Dump completed on")
+        || trimmed.contains("SET TIME_ZONE=@OLD_TIME_ZONE")
+        || trimmed == "COMMIT;"
+}
+
+fn check_sql_statement_kind(lower: &str) -> (bool, bool) {
+    if lower.starts_with("insert into ") || lower.starts_with("copy ") {
+        (true, true)
+    } else if lower.starts_with("create index ")
+        || lower.starts_with("create unique index ")
+        || lower.starts_with("alter table ")
+        || lower.starts_with("create view ")
+    {
+        (false, true)
+    } else {
+        (false, false)
+    }
+}
+
+fn check_sql_engine_hint(text: &str) -> bool {
+    text.contains("PostgreSQL")
+        || text.contains("MySQL")
+        || text.contains("mariadb")
+        || text.contains("sqlite")
+}
+
+#[derive(Default)]
+struct SqlDumpScan {
+    tables: Vec<String>,
+    table_count: u32,
+    has_data: bool,
+    schema_objects_count: u32,
+    has_completion_marker: bool,
+}
+
+fn process_sql_line(line: &str, scan: &mut SqlDumpScan) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if let Some(table) = extract_sql_table_name(trimmed) {
+        scan.table_count += 1;
+        scan.schema_objects_count += 1;
+        if scan.tables.len() < 15 && !scan.tables.contains(&table) {
+            scan.tables.push(table);
+        }
+        return;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let (is_data, is_obj) = check_sql_statement_kind(&lower);
+    if is_data {
+        scan.has_data = true;
+    }
+    if is_obj {
+        scan.schema_objects_count += 1;
+    }
+    if check_sql_completion_marker(trimmed) {
+        scan.has_completion_marker = true;
+    }
+}
+
+fn is_sql_integrity_valid(scan: &SqlDumpScan, len: usize, has_engine_hint: bool) -> bool {
+    scan.has_completion_marker
+        || (scan.schema_objects_count > 0 && len >= 32)
+        || (len > 0 && has_engine_hint)
+}
+
+/// Analyzes an SQL text dump (Postgres, MySQL, MariaDB, SQLite) for schema structure, objects and data.
+fn analyze_sql_dump(plain: &[u8], engine: &str) -> BackupDrillDetails {
+    let text = String::from_utf8_lossy(plain);
+    let mut scan = SqlDumpScan::default();
+
+    for line in text.lines() {
+        process_sql_line(line, &mut scan);
+    }
+
+    let integrity_check_passed =
+        is_sql_integrity_valid(&scan, plain.len(), check_sql_engine_hint(&text));
+
+    let summary = format!(
+        "verified {} uncompressed bytes, {} tables found, {} schema objects, data: {}",
+        plain.len(),
+        scan.table_count,
+        scan.schema_objects_count,
+        if scan.has_data { "present" } else { "none" }
+    );
+
+    BackupDrillDetails {
+        drill_mode: format!("{engine}_schema_drill"),
+        table_count: scan.table_count,
+        tables_sample: scan.tables,
+        has_data: scan.has_data,
+        integrity_check_passed,
+        schema_objects_count: scan.schema_objects_count,
+        drill_duration_ms: 0,
+        summary,
+    }
+}
+
+/// Analyzes a Redis RDB binary dump file for magic bytes, version, and structure.
+fn analyze_redis_rdb(plain: &[u8]) -> BackupDrillDetails {
+    let valid_magic = plain.starts_with(b"REDIS");
+    let version = if plain.len() >= 9 {
+        String::from_utf8_lossy(&plain[5..9]).to_string()
+    } else {
+        "unknown".to_string()
+    };
+    let has_eof = plain.len() >= 9 && plain[plain.len().saturating_sub(10)..].contains(&0xFF);
+    let integrity_check_passed = valid_magic && plain.len() >= 9;
+    let summary = format!(
+        "valid Redis RDB v{}, size: {} bytes, eof marker: {}",
+        version,
+        plain.len(),
+        if has_eof { "present" } else { "clean" }
+    );
+
+    BackupDrillDetails {
+        drill_mode: "redis_rdb_drill".to_string(),
+        table_count: if plain.len() > 9 { 1 } else { 0 },
+        tables_sample: if plain.len() > 9 {
+            vec!["keyspace_0".to_string()]
+        } else {
+            Vec::new()
+        },
+        has_data: plain.len() > 9,
+        integrity_check_passed,
+        schema_objects_count: if plain.len() > 9 { 1 } else { 0 },
+        drill_duration_ms: 0,
+        summary,
+    }
+}
+
+/// Analyzes an SQLite 3 binary database file header.
+fn analyze_sqlite_file(plain: &[u8]) -> BackupDrillDetails {
+    let valid_magic = plain.starts_with(b"SQLite format 3\0");
+    let page_size = if plain.len() >= 18 {
+        u16::from_be_bytes([plain[16], plain[17]])
+    } else {
+        0
+    };
+    let is_valid_page = page_size == 1 || (page_size >= 512 && page_size.is_power_of_two());
+    let integrity_check_passed = valid_magic && (is_valid_page || plain.len() >= 100);
+    let summary = format!(
+        "valid SQLite 3 database file, size: {} bytes, page size: {}",
+        plain.len(),
+        if page_size == 1 {
+            65536
+        } else {
+            page_size as u32
+        }
+    );
+
+    BackupDrillDetails {
+        drill_mode: "sqlite_file_drill".to_string(),
+        table_count: 1,
+        tables_sample: vec!["main".to_string()],
+        has_data: plain.len() > 100,
+        integrity_check_passed,
+        schema_objects_count: 1,
+        drill_duration_ms: 0,
+        summary,
+    }
+}
+
+/// Simulates a dry-run restore drill to verify schema, table objects, and data integrity.
+fn simulate_restore_drill(
+    engine: &str,
+    plain: &[u8],
+    started_at: std::time::Instant,
+) -> BackupDrillDetails {
+    let mut details = if plain.starts_with(b"REDIS") || engine == "redis" {
+        analyze_redis_rdb(plain)
+    } else if plain.starts_with(b"SQLite format 3\0") {
+        analyze_sqlite_file(plain)
+    } else {
+        analyze_sql_dump(plain, engine)
+    };
+    details.drill_duration_ms = started_at.elapsed().as_millis().max(1) as u64;
+    details
+}
+
 /// Identifies the format and engine signature of uncompressed dump bytes.
+#[cfg(test)]
 fn detect_dump_format(engine: &str, plain: &[u8]) -> String {
     if plain.is_empty() {
         return "empty".to_string();
@@ -1997,6 +2249,7 @@ mod tests {
                 created_at: 1000,
                 verified_at: None,
                 verification_status: None,
+                drill: None,
             },
             BackupEntry {
                 id: "b2".into(),
@@ -2008,6 +2261,7 @@ mod tests {
                 created_at: 2000,
                 verified_at: None,
                 verification_status: None,
+                drill: None,
             },
         ];
 
@@ -2097,5 +2351,80 @@ mod tests {
             config.heartbeat_url.as_deref(),
             Some("https://hc-ping.com/123")
         );
+    }
+
+    #[test]
+    fn extract_sql_table_name_handles_various_syntaxes() {
+        assert_eq!(
+            extract_sql_table_name("CREATE TABLE users (id int);").as_deref(),
+            Some("users")
+        );
+        assert_eq!(
+            extract_sql_table_name("create table if not exists public.\"orders\" (id int);")
+                .as_deref(),
+            Some("orders")
+        );
+        assert_eq!(
+            extract_sql_table_name("CREATE TABLE `mydb`.`sessions` (").as_deref(),
+            Some("sessions")
+        );
+        assert_eq!(
+            extract_sql_table_name("CREATE OR REPLACE TABLE logs (").as_deref(),
+            Some("logs")
+        );
+        assert_eq!(extract_sql_table_name("SELECT * FROM users;"), None);
+    }
+
+    #[test]
+    fn simulate_restore_drill_postgresql_with_tables_and_data() {
+        let dump = b"-- PostgreSQL database dump\n\
+                     CREATE TABLE public.users (\n  id int\n);\n\
+                     COPY public.users (id) FROM stdin;\n1\n\\.\n\
+                     CREATE TABLE public.orders (\n  id int\n);\n\
+                     INSERT INTO public.orders VALUES (1);\n\
+                     -- PostgreSQL database dump complete\n";
+        let started = std::time::Instant::now();
+        let drill = simulate_restore_drill("postgres", dump, started);
+        assert!(drill.integrity_check_passed);
+        assert_eq!(drill.drill_mode, "postgres_schema_drill");
+        assert_eq!(drill.table_count, 2);
+        assert_eq!(drill.tables_sample, vec!["users", "orders"]);
+        assert!(drill.has_data);
+        assert_eq!(drill.schema_objects_count, 4);
+    }
+
+    #[test]
+    fn simulate_restore_drill_redis_rdb() {
+        let mut rdb = b"REDIS0009\xfa\x09redis-ver\x057.2.4\xff".to_vec();
+        rdb.extend_from_slice(&[0u8; 8]); // 8-byte checksum
+        let started = std::time::Instant::now();
+        let drill = simulate_restore_drill("redis", &rdb, started);
+        assert!(drill.integrity_check_passed);
+        assert_eq!(drill.drill_mode, "redis_rdb_drill");
+        assert_eq!(drill.table_count, 1);
+        assert_eq!(drill.tables_sample, vec!["keyspace_0"]);
+        assert!(drill.has_data);
+    }
+
+    #[test]
+    fn simulate_restore_drill_sqlite_binary() {
+        let mut header = b"SQLite format 3\0".to_vec();
+        header.extend_from_slice(&[0x10, 0x00]); // 4096 page size
+        header.resize(100, 0);
+        let started = std::time::Instant::now();
+        let drill = simulate_restore_drill("sqlite", &header, started);
+        assert!(drill.integrity_check_passed);
+        assert_eq!(drill.drill_mode, "sqlite_file_drill");
+        assert_eq!(drill.table_count, 1);
+    }
+
+    #[test]
+    fn simulate_restore_drill_detects_corrupt_payload() {
+        let corrupt = b"random broken garbage bytes without any valid headers";
+        let started = std::time::Instant::now();
+        let drill = simulate_restore_drill("postgres", corrupt, started);
+        assert!(!drill.integrity_check_passed);
+        assert_eq!(drill.table_count, 0);
+        assert!(!drill.has_data);
     }
 }

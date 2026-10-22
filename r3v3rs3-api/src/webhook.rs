@@ -56,6 +56,7 @@ pub enum WebhookEvent {
     BackupFailure,
     BackupUploadFailed,
     BackupRestored,
+    BackupVerificationFailed,
 
     // Security & Certificate events
     CertExpiring,
@@ -78,7 +79,7 @@ pub enum WebhookEvent {
 }
 
 impl WebhookEvent {
-    pub const ALL: [WebhookEvent; 21] = [
+    pub const ALL: [WebhookEvent; 22] = [
         Self::DeploySuccess,
         Self::DeployFailure,
         Self::DeployPendingApproval,
@@ -87,6 +88,7 @@ impl WebhookEvent {
         Self::BackupFailure,
         Self::BackupUploadFailed,
         Self::BackupRestored,
+        Self::BackupVerificationFailed,
         Self::CertExpiring,
         Self::CertRenewed,
         Self::CertRenewalFailed,
@@ -112,6 +114,7 @@ impl WebhookEvent {
             Self::BackupFailure => "backup.failure",
             Self::BackupUploadFailed => "backup.upload_failed",
             Self::BackupRestored => "backup.restored",
+            Self::BackupVerificationFailed => "backup.verification_failed",
             Self::CertExpiring => "cert.expiring",
             Self::CertRenewed => "cert.renewed",
             Self::CertRenewalFailed => "cert.renewal_failed",
@@ -137,7 +140,8 @@ impl WebhookEvent {
             Self::BackupSuccess
             | Self::BackupFailure
             | Self::BackupUploadFailed
-            | Self::BackupRestored => WebhookEventCategory::Backup,
+            | Self::BackupRestored
+            | Self::BackupVerificationFailed => WebhookEventCategory::Backup,
             Self::CertExpiring
             | Self::CertRenewed
             | Self::CertRenewalFailed
@@ -174,6 +178,7 @@ impl FromStr for WebhookEvent {
             "backup.failure" => Ok(Self::BackupFailure),
             "backup.upload_failed" => Ok(Self::BackupUploadFailed),
             "backup.restored" => Ok(Self::BackupRestored),
+            "backup.verification_failed" => Ok(Self::BackupVerificationFailed),
             "cert.expiring" => Ok(Self::CertExpiring),
             "cert.renewed" => Ok(Self::CertRenewed),
             "cert.renewal_failed" => Ok(Self::CertRenewalFailed),

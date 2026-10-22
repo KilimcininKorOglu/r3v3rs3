@@ -361,7 +361,15 @@ Every new backup uploads to the configured remote targets; a failed upload only 
 
 **Restore** writes the stored dump back into the running container and runs the restore command of the engine (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis takes the dump file into its data volume and restarts, so the restore answers after the server is back. A restore replaces the data of the database.
 
-To ensure that backups remain uncorrupted and recoverable, r3v3rs3 includes an automated periodic restore testing mechanism. The system verifies that gzipped dumps decompress cleanly and match the expected database engine format magic bytes or SQL header signatures (Redis RDB, SQLite 3, PostgreSQL, MySQL/MariaDB). Verified backups display a verification timestamp (`verified_at`), and an immediate test can be triggered in the WebUI or via `POST /api/databases/{id}/backups/{name}/verify`.
+To ensure that backups remain uncorrupted and recoverable, r3v3rs3 includes an automated periodic restore testing and dry-run simulation mechanism. The system verifies that gzipped dumps decompress cleanly, matches expected database format signatures, and conducts in-memory restore drill simulations:
+
+- **Schema & Data Drill Simulation**: Without starting auxiliary containers or polluting production databases, the engine decompresses the dump in memory and parses schema objects:
+  - **SQL Dumps (PostgreSQL / MySQL / MariaDB)**: Parses `CREATE TABLE` definitions, extracts declared table names, detects data payloads (`COPY ... FROM stdin` or `INSERT INTO`), and verifies clean EOF completion markers (e.g. `-- PostgreSQL database dump complete`).
+  - **Redis RDB**: Validates binary magic signatures (`REDIS`), version numbers, and file EOF checksums.
+  - **SQLite 3**: Checks standard SQLite header strings, valid page sizes, and format versions.
+- **Verification Diagnostics & Table Samples**: Each verified backup records detailed drill metrics: execution duration (`drill_duration_ms`), discovered table count, a sample of extracted table names, total schema object count, and whether actual row data was found.
+- **Interactive Drill Report Modal**: In the WebUI, clicking the verified badge (`✓ Verified (N tables)`) opens a detailed diagnostics modal showing status banners, format verification stats, duration, payload presence, and extracted table chips. Operators can re-trigger an immediate verification dry-run via **Run Restore Drill** or `POST /api/databases/{id}/backups/{name}/verify`.
+- **Emergency Verification Failure Alerts**: If a backup fails checksum verification, gzip decompression, or schema drill integrity checks, r3v3rs3 dispatches an outbound `backup.verification_failed` webhook event (`BackupVerificationFailed`) to immediately alert monitoring systems before data recovery is needed during an outage.
 
 #### Point-in-Time Recovery (PITR) & Continuous Archiving
 
