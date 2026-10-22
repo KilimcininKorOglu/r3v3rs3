@@ -15,6 +15,7 @@ use tracing_subscriber::filter::LevelFilter;
 mod common;
 use common::{
     TestStorage, alloc_tcp_port, login_when_allowed, send, session_cookie, wait_for_listener,
+    wait_until,
 };
 
 const APPS: &str = "/api/apps";
@@ -392,6 +393,15 @@ async fn check_logs(
 
 /// The audit log names the app changes and the changed keys, never a value.
 async fn check_audit(addr: SocketAddr, admin: &str, id: &str) -> anyhow::Result<()> {
+    wait_until(
+        || async {
+            let entries = get(addr, &format!("/api/audit?resource_id={id}"), admin).await?;
+            let len = entries.as_array().map(|a| a.len()).unwrap_or_default();
+            Ok(len >= 8)
+        },
+        "the audit log does not hold eight app entries",
+    )
+    .await?;
     let entries = get(addr, &format!("/api/audit?resource_id={id}"), admin).await?;
     let entries = entries.as_array().cloned().unwrap_or_default();
     let actions = entries
@@ -545,6 +555,15 @@ async fn check_target_audit(
     id: &str,
     tokens: &[&str],
 ) -> anyhow::Result<()> {
+    wait_until(
+        || async {
+            let entries = get(addr, &format!("/api/audit?resource_id={id}"), admin).await?;
+            let len = entries.as_array().map(|a| a.len()).unwrap_or_default();
+            Ok(len >= 5)
+        },
+        "the audit log does not hold five target entries",
+    )
+    .await?;
     let entries = get(addr, &format!("/api/audit?resource_id={id}"), admin).await?;
     let entries = entries.as_array().cloned().unwrap_or_default();
     let actions = entries
@@ -838,6 +857,15 @@ async fn check_platform_settings(
 
 /// The audit log names the connection and its provider, never the secret.
 async fn check_connection_audit(addr: SocketAddr, admin: &str, id: &str) -> anyhow::Result<()> {
+    wait_until(
+        || async {
+            let entries = get(addr, &format!("/api/audit?resource_id={id}"), admin).await?;
+            let len = entries.as_array().map(|a| a.len()).unwrap_or_default();
+            Ok(len >= 3)
+        },
+        "the audit log does not hold three connection entries",
+    )
+    .await?;
     let entries = get(addr, &format!("/api/audit?resource_id={id}"), admin).await?;
     let entries = entries.as_array().cloned().unwrap_or_default();
     let actions = entries
