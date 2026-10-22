@@ -1376,6 +1376,7 @@
   "backups.drill_integrity": "Structural Integrity",
   "backups.view_drill": "View Drill Report",
   "backups.drill_passed_tables": "Verified ({count} tables)",
+  "backups.close": "Close",
   "backups.sftp": "SFTP target",
   "backups.sftp_host": "SFTP Host",
   "backups.sftp_port": "SFTP Port",

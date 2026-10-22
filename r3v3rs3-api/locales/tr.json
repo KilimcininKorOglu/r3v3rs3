@@ -1376,6 +1376,7 @@
   "backups.drill_integrity": "Yapısal Bütünlük",
   "backups.view_drill": "Simülasyon Raporu",
   "backups.drill_passed_tables": "Doğrulandı ({count} tablo)",
+  "backups.close": "Kapat",
   "backups.sftp": "SFTP hedefi",
   "backups.sftp_host": "SFTP Sunucusu",
   "backups.sftp_port": "SFTP Portu",
