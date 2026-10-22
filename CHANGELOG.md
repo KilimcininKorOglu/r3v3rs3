@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.8] - 2026-10-22
+
+### Added
+- Interactive GeoIP World Map & Real-Time Traffic Heatmap: Client IP addresses are resolved against MaxMind MMDB into ISO country codes across all reverse proxy handlers (HTTP/1.1, HTTP/2, and HTTP/3) with zero latency overhead.
+- Interactive SVG World Map Visualizer: Vector map component displaying global request distribution with logarithmic density heatmap color styling, hover tooltips detailing country name and request metrics, and click-to-filter interaction.
+- Top Countries Ranked Leaderboard: Displays top 10 countries ranked by traffic volume with animated percentage progress indicators, request counts, and quick filter toggles.
+- Geographic Filtering in WebUI: Filter live streaming and historical traffic by country code via toolbar dropdown, interactive map clicking, or active filter tags.
+- Admin API Traffic Geo Distribution Endpoint: `GET /api/traffic/geo` aggregates real-time geographical traffic distribution, returning total resolved requests, ranked top countries, and full ISO code count mappings respecting proxy scoping.
+- Access Log Query Country Filter: `AccessLogQuery` and `/api/traffic` support filtering by country code with case-insensitive matching.
+
 ## [2.2.7] - 2026-10-22
 
 ### Added
