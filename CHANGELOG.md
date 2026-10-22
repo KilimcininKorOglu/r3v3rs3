@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-10-22
+
+### Added
+- Interactive Error Pages Designer & Live Preview: Replaced basic error page text inputs with an interactive visual designer component supporting real-time preview, code editing, and split-view modes.
+- Built-in HTML/CSS Error Page Template Library: Instant one-click templates tailored for common HTTP error codes (400-599):
+  - Minimalist Dark: Sleek dark theme with radiant glow, status pill badge, and return home action button.
+  - Modern Glassmorphism: Frosted glass card with vibrant gradient typography and elegant styling.
+  - Developer Terminal: DevOps / hacker CLI console with simulated HTTP response headers, diagnostics, and blinking cursor.
+  - Illustration Card: Centered modern card featuring clean vector SVG graphics and friendly messaging.
+  - Maintenance Notice: Amber maintenance alert with gear illustration and auto-refresh notices.
+- Sandboxed Live Iframe Rendering: Real-time isolated preview iframe updating instantaneously as HTML/CSS code is edited.
+- Multi-Viewport Device Switcher: Toggle live error page previews across Desktop (100%), Tablet (768px), and Mobile (375px) responsive widths.
+- Quick HTTP Status Presets: Single-click status code selector buttons for 404, 502, 503, 500, 403, and 429.
+- Real-Time Payload Size Counter: Live byte counter comparing custom error page body sizes against the 64 KB storage limit.
+
 ## [2.2.9] - 2026-10-22
 
 ### Added
