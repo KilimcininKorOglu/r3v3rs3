@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.7] - 2026-10-23
+
+### Added
+- Docker Compose Architecture Visualizer: Interactive SVG architecture visualizer and service dependency graph rendered directly in the WebUI for multi-container Compose applications, featuring responsive viewBox pan/zoom controls and node filtering.
+- Dependency & Relationship Edge Engine: Automatic extraction and rendering of directed bezier connections for `depends_on` (with health conditions such as `healthy`, `started`, `completed`), container network memberships, and volume mounts with mount targets and access mode flags (`ro`/`rw`).
+- Real-Time Container Health & Runtime Status: Live color-coded runtime halos (healthy/running green, starting amber, exited/unhealthy red) on topology cards, with primary external traffic entrypoint badges.
+- Node Inspector Flyout: Interactive slide-out drawer displaying container image tags, port mappings, environment variable counts, restart policies, container names, and complete upstream and downstream dependency chains upon clicking any topology card.
+- Live Topology in Compose Editor: Real-time visual architecture preview tab in the Compose YAML editor that dynamically parses and updates the dependency diagram as operators edit Compose YAML or select starter templates.
+- Compose Architecture Topology API: Added `GET /api/apps/{id}/topology` endpoint returning parsed topology nodes, relationships, and health summaries with full OpenAPI 3.1 documentation.
+- Widescreen Desktop Experience: Widened desktop container to 1680px for high-density dashboard layouts, alongside expanded modal dialogs for side-by-side diffing and topology views.
+
 ## [2.3.6] - 2026-10-22
 
 ### Added
