@@ -3232,6 +3232,7 @@ dependencies = [
  "axum-extra",
  "axum-server",
  "base64 0.23.1",
+ "brotli",
  "built",
  "bytes",
  "clap",
@@ -3316,6 +3317,7 @@ dependencies = [
  "utoipa-swagger-ui",
  "x509-parser",
  "yamux",
+ "zstd",
 ]
 
 [[package]]

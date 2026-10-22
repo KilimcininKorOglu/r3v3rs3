@@ -18,9 +18,25 @@ pub struct Compression {
     /// Media types to compress. `text/*` matches every text type.
     #[serde(default = "default_mime_types")]
     pub mime_types: Vec<String>,
+
+    /// Automatically adjust compression quality based on response size and content type.
+    #[serde(default = "default_adaptive_level")]
+    pub adaptive_level: bool,
+
+    /// Serve pre-compressed static assets (.br, .zst, .gz) directly without CPU overhead.
+    #[serde(default = "default_precompressed")]
+    pub precompressed: bool,
 }
 
 pub const DEFAULT_MIN_SIZE: u64 = 1024;
+
+fn default_adaptive_level() -> bool {
+    true
+}
+
+fn default_precompressed() -> bool {
+    true
+}
 
 pub const DEFAULT_MIME_TYPES: &[&str] = &[
     "text/*",
@@ -67,7 +83,8 @@ impl Compression {
         }
     }
 
-    /// Returns true when the media type of a `Content-Type` value is in `mime_types`.
+    /// Returns true when the media type of a `Content-Type` value is in `mime_types`
+    /// and not an inherently pre-compressed format.
     pub fn compresses_type(&self, content_type: &str) -> bool {
         let essence = content_type
             .split(';')
@@ -75,6 +92,9 @@ impl Compression {
             .unwrap_or_default()
             .trim()
             .to_ascii_lowercase();
+        if is_incompressible_type(&essence) {
+            return false;
+        }
         let Some((kind, _)) = essence.split_once('/') else {
             return false;
         };
@@ -82,6 +102,77 @@ impl Compression {
             let pattern = pattern.to_ascii_lowercase();
             pattern == essence || pattern.strip_suffix("/*") == Some(kind)
         })
+    }
+}
+
+const INCOMPRESSIBLE_IMAGE_SUBTYPES: &[&str] = &[
+    "png", "jpeg", "jpg", "webp", "avif", "gif", "jxl", "heic", "heif",
+];
+
+const INCOMPRESSIBLE_APP_TYPES: &[&str] = &[
+    "application/zip",
+    "application/gzip",
+    "application/x-gzip",
+    "application/zstd",
+    "application/x-brotli",
+    "application/x-tar",
+    "application/x-7z-compressed",
+    "application/x-rar-compressed",
+    "application/pdf",
+    "application/vnd.rar",
+];
+
+const INCOMPRESSIBLE_FONTS: &[&str] = &[
+    "font/woff",
+    "font/woff2",
+    "application/font-woff",
+    "application/font-woff2",
+    "application/x-font-woff",
+];
+
+/// Returns true when a MIME media type represents an already-compressed binary format
+/// that should not be dynamically re-compressed.
+pub fn is_incompressible_type(mime: &str) -> bool {
+    let essence = mime
+        .split(';')
+        .next()
+        .unwrap_or(mime)
+        .trim()
+        .to_ascii_lowercase();
+    let Some((kind, subtype)) = essence.split_once('/') else {
+        return false;
+    };
+    if kind == "audio" || kind == "video" {
+        return true;
+    }
+    if kind == "image" && INCOMPRESSIBLE_IMAGE_SUBTYPES.contains(&subtype) {
+        return true;
+    }
+    if INCOMPRESSIBLE_APP_TYPES.contains(&essence.as_str()) {
+        return true;
+    }
+    INCOMPRESSIBLE_FONTS.contains(&essence.as_str())
+}
+
+/// Computes an adaptive minimum content size threshold tailored to the given MIME type.
+pub fn smart_min_size_for_mime(mime: &str, base_min_size: u64) -> u64 {
+    let essence = mime
+        .split(';')
+        .next()
+        .unwrap_or(mime)
+        .trim()
+        .to_ascii_lowercase();
+    if essence.starts_with("text/")
+        || essence == "application/json"
+        || essence == "application/javascript"
+        || essence == "image/svg+xml"
+        || essence == "application/xml"
+    {
+        base_min_size.min(256)
+    } else if essence == "application/wasm" {
+        base_min_size.max(2048)
+    } else {
+        base_min_size
     }
 }
 
@@ -211,5 +302,31 @@ mod tests {
             "text/*, application/json, image/svg+xml"
         );
         assert!(parse_mime_list("text/html, html").is_err());
+    }
+
+    #[test]
+    fn incompressible_types_are_detected() {
+        assert!(is_incompressible_type("image/png"));
+        assert!(is_incompressible_type("image/jpeg"));
+        assert!(is_incompressible_type("image/webp"));
+        assert!(is_incompressible_type("image/avif"));
+        assert!(is_incompressible_type("video/mp4"));
+        assert!(is_incompressible_type("audio/mpeg"));
+        assert!(is_incompressible_type("application/zip"));
+        assert!(is_incompressible_type("font/woff2"));
+        assert!(!is_incompressible_type("text/html"));
+        assert!(!is_incompressible_type("application/json"));
+        assert!(!is_incompressible_type("image/svg+xml"));
+    }
+
+    #[test]
+    fn smart_min_size_adapts_to_mime_type() {
+        assert_eq!(smart_min_size_for_mime("text/html", 1024), 256);
+        assert_eq!(smart_min_size_for_mime("application/json", 1024), 256);
+        assert_eq!(smart_min_size_for_mime("application/wasm", 1024), 2048);
+        assert_eq!(
+            smart_min_size_for_mime("application/octet-stream", 1024),
+            1024
+        );
     }
 }

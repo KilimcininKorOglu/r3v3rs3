@@ -34,6 +34,7 @@ axum = { version = "0.8.1", features = ["ws", "multipart"] }
 axum-extra = { version = "0.12.6", features = ["cookie"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 base64 = "0.23.1"
+brotli = "8.0.4"
 bytes = "1.8.0"
 clap = { version = "4.3.11", features = ["derive", "env"] }
 dashmap = "6.0.1"
@@ -154,6 +155,7 @@ utoipa-axum = "0.2.0"
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "vendored"] }
 x509-parser = "0.18.1"
 yamux = "0.14.1"
+zstd = "0.14.0"
 
 [build-dependencies]
 built = "0.8.1"

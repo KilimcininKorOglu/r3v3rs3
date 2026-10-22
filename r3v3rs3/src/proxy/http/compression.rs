@@ -14,7 +14,7 @@ use hyper::{
     },
     http::HeaderValue,
 };
-use r3v3rs3_api::compression::{Compression, CompressionAlgorithm};
+use r3v3rs3_api::compression::{Compression, CompressionAlgorithm, smart_min_size_for_mime};
 use std::{io, pin::Pin, sync::Arc};
 use tokio::io::AsyncRead;
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -51,11 +51,12 @@ impl ResponseCompression {
         let Some(algorithm) = self.algorithm else {
             return res;
         };
+        let level = resolve_level(&self.config, algorithm, res.headers());
         set_encoded_headers(res.headers_mut(), algorithm);
         if self.head {
             return res;
         }
-        res.map(|body| encode_body(body, algorithm))
+        res.map(|body| encode_body(body, algorithm, level))
     }
 }
 
@@ -161,7 +162,80 @@ fn has_compressible_type(config: &Compression, headers: &HeaderMap) -> bool {
 
 /// A response without `Content-Length` streams a body of unknown size, so it is compressed.
 fn meets_min_size(config: &Compression, headers: &HeaderMap) -> bool {
-    header_number(headers, CONTENT_LENGTH).is_none_or(|length| length >= config.min_size)
+    let min_size = if config.adaptive_level {
+        headers
+            .get(CONTENT_TYPE)
+            .and_then(|val| val.to_str().ok())
+            .map_or(config.min_size, |ct| {
+                smart_min_size_for_mime(ct, config.min_size)
+            })
+    } else {
+        config.min_size
+    };
+    header_number(headers, CONTENT_LENGTH).is_none_or(|length| length >= min_size)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PayloadTier {
+    Small,
+    Medium,
+    LargeOrStream,
+}
+
+fn classify_payload(length: Option<u64>) -> PayloadTier {
+    match length {
+        Some(len) if len < 8 * 1024 => PayloadTier::Small,
+        Some(len) if len <= 64 * 1024 => PayloadTier::Medium,
+        _ => PayloadTier::LargeOrStream,
+    }
+}
+
+fn adaptive_gzip_level(tier: PayloadTier) -> Level {
+    match tier {
+        PayloadTier::Small => Level::Best,
+        PayloadTier::Medium => Level::Default,
+        PayloadTier::LargeOrStream => Level::Fastest,
+    }
+}
+
+fn adaptive_brotli_level(tier: PayloadTier) -> Level {
+    match tier {
+        PayloadTier::Small => Level::Precise(5),
+        PayloadTier::Medium => Level::Precise(4),
+        PayloadTier::LargeOrStream => Level::Precise(3),
+    }
+}
+
+fn adaptive_zstd_level(tier: PayloadTier) -> Level {
+    match tier {
+        PayloadTier::Small => Level::Precise(4),
+        PayloadTier::Medium => Level::Default,
+        PayloadTier::LargeOrStream => Level::Fastest,
+    }
+}
+
+fn default_level(algorithm: CompressionAlgorithm) -> Level {
+    match algorithm {
+        CompressionAlgorithm::Gzip => Level::Default,
+        CompressionAlgorithm::Brotli => Level::Precise(BROTLI_QUALITY),
+        CompressionAlgorithm::Zstd => Level::Default,
+    }
+}
+
+fn resolve_level(
+    config: &Compression,
+    algorithm: CompressionAlgorithm,
+    headers: &HeaderMap,
+) -> Level {
+    if !config.adaptive_level {
+        return default_level(algorithm);
+    }
+    let tier = classify_payload(header_number(headers, CONTENT_LENGTH));
+    match algorithm {
+        CompressionAlgorithm::Gzip => adaptive_gzip_level(tier),
+        CompressionAlgorithm::Brotli => adaptive_brotli_level(tier),
+        CompressionAlgorithm::Zstd => adaptive_zstd_level(tier),
+    }
 }
 
 /// Returns the value of a header that holds a non-negative integer.
@@ -220,15 +294,13 @@ fn weaken_etag(headers: &mut HeaderMap) {
 fn encode_body(
     body: BoxBody<Bytes, anyhow::Error>,
     algorithm: CompressionAlgorithm,
+    level: Level,
 ) -> BoxBody<Bytes, anyhow::Error> {
     let reader = StreamReader::new(body.into_data_stream().map_err(io::Error::other));
     let encoder: Pin<Box<dyn AsyncRead + Send + Sync>> = match algorithm {
-        CompressionAlgorithm::Gzip => Box::pin(GzipEncoder::new(reader)),
-        CompressionAlgorithm::Brotli => Box::pin(BrotliEncoder::with_quality(
-            reader,
-            Level::Precise(BROTLI_QUALITY),
-        )),
-        CompressionAlgorithm::Zstd => Box::pin(ZstdEncoder::new(reader)),
+        CompressionAlgorithm::Gzip => Box::pin(GzipEncoder::with_quality(reader, level)),
+        CompressionAlgorithm::Brotli => Box::pin(BrotliEncoder::with_quality(reader, level)),
+        CompressionAlgorithm::Zstd => Box::pin(ZstdEncoder::with_quality(reader, level)),
     };
     let frames = ReaderStream::new(encoder)
         .map_ok(Frame::data)
@@ -361,5 +433,45 @@ mod tests {
         ));
         assert!(!res.headers().contains_key(CONTENT_ENCODING));
         assert_eq!(res.headers()[VARY], "Accept-Encoding");
+    }
+
+    #[test]
+    fn payload_tier_classification() {
+        assert_eq!(classify_payload(Some(1024)), PayloadTier::Small);
+        assert_eq!(classify_payload(Some(7999)), PayloadTier::Small);
+        assert_eq!(classify_payload(Some(8192)), PayloadTier::Medium);
+        assert_eq!(classify_payload(Some(65536)), PayloadTier::Medium);
+        assert_eq!(classify_payload(Some(65537)), PayloadTier::LargeOrStream);
+        assert_eq!(classify_payload(None), PayloadTier::LargeOrStream);
+    }
+
+    #[test]
+    fn adaptive_level_resolution() {
+        let mut cfg = Compression {
+            adaptive_level: true,
+            ..Default::default()
+        };
+        let small_headers = headers(&[("content-length", "1024")]);
+        let large_headers = headers(&[("content-length", "100000")]);
+        let stream_headers = HeaderMap::new();
+
+        assert!(matches!(
+            resolve_level(&cfg, CompressionAlgorithm::Gzip, &small_headers),
+            Level::Best
+        ));
+        assert!(matches!(
+            resolve_level(&cfg, CompressionAlgorithm::Gzip, &large_headers),
+            Level::Fastest
+        ));
+        assert!(matches!(
+            resolve_level(&cfg, CompressionAlgorithm::Gzip, &stream_headers),
+            Level::Fastest
+        ));
+
+        cfg.adaptive_level = false;
+        assert!(matches!(
+            resolve_level(&cfg, CompressionAlgorithm::Gzip, &small_headers),
+            Level::Default
+        ));
     }
 }

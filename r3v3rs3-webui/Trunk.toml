@@ -7,7 +7,7 @@ stage = "post_build"
 command = "sh"
 command_arguments = [
     "-c",
-    "[ \"$TRUNK_PROFILE\" = \"release\" ] && find \"$TRUNK_STAGING_DIR\" -type f -exec gzip -9 {} \\; || true",
+    "[ \"$TRUNK_PROFILE\" = \"release\" ] && find \"$TRUNK_STAGING_DIR\" -type f -exec gzip -9 -k {} \\; && (command -v brotli >/dev/null 2>&1 && find \"$TRUNK_STAGING_DIR\" -type f ! -name \"*.gz\" -exec brotli -q 11 -k {} \\; || true) && (command -v zstd >/dev/null 2>&1 && find \"$TRUNK_STAGING_DIR\" -type f ! -name \"*.gz\" ! -name \"*.br\" -exec zstd -19 -k -q {} \\; || true) && find \"$TRUNK_STAGING_DIR\" -type f ! -name \"*.gz\" ! -name \"*.br\" ! -name \"*.zst\" -exec rm -f {} + || true",
 ]
 
 [[proxy]]

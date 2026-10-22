@@ -62,49 +62,122 @@ pub async fn fallback(
     serve_file(file_name, &req_headers).await
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StaticEncoding {
+    Zstd,
+    Brotli,
+    Gzip,
+}
+
+impl StaticEncoding {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Zstd => "zst",
+            Self::Brotli => "br",
+            Self::Gzip => "gz",
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Zstd => "zstd",
+            Self::Brotli => "br",
+            Self::Gzip => "gzip",
+        }
+    }
+}
+
+struct SelectedFile<'a> {
+    file: &'a include_dir::File<'a>,
+    file_path: std::path::PathBuf,
+    encoding: Option<StaticEncoding>,
+}
+
+fn find_client_encoding<'a>(file_name: &str, req_headers: &HeaderMap) -> Option<SelectedFile<'a>> {
+    let candidates = [
+        (StaticEncoding::Zstd, accepts_encoding(req_headers, "zstd")),
+        (StaticEncoding::Brotli, accepts_encoding(req_headers, "br")),
+        (StaticEncoding::Gzip, accepts_encoding(req_headers, "gzip")),
+    ];
+    for (enc, accepted) in candidates {
+        if accepted {
+            let path = Path::new("webui").join(format!("{file_name}.{}", enc.extension()));
+            if let Some(file) = STATIC_DIR.get_file(&path) {
+                return Some(SelectedFile {
+                    file,
+                    file_path: path,
+                    encoding: Some(enc),
+                });
+            }
+        }
+    }
+    None
+}
+
+fn find_identity_fallback<'a>(file_name: &str) -> Option<SelectedFile<'a>> {
+    let raw_path = Path::new("webui").join(file_name);
+    if let Some(file) = STATIC_DIR.get_file(&raw_path) {
+        return Some(SelectedFile {
+            file,
+            file_path: raw_path,
+            encoding: None,
+        });
+    }
+    for enc in [
+        StaticEncoding::Gzip,
+        StaticEncoding::Brotli,
+        StaticEncoding::Zstd,
+    ] {
+        let path = Path::new("webui").join(format!("{file_name}.{}", enc.extension()));
+        if let Some(file) = STATIC_DIR.get_file(&path) {
+            return Some(SelectedFile {
+                file,
+                file_path: path,
+                encoding: None,
+            });
+        }
+    }
+    None
+}
+
+fn find_precompressed<'a>(file_name: &str, req_headers: &HeaderMap) -> Option<SelectedFile<'a>> {
+    find_client_encoding(file_name, req_headers).or_else(|| find_identity_fallback(file_name))
+}
+
 /// Answers a file of the embedded WebUI bundle.
 async fn serve_file(file_name: &str, req_headers: &HeaderMap) -> Result<Response, AppError> {
-    let file_path = Path::new("webui").join(format!("{file_name}.gz"));
-
-    let Some(file) = STATIC_DIR.get_file(&file_path) else {
-        return Err(AppError::NotFound);
-    };
+    let selected = find_precompressed(file_name, req_headers).ok_or(AppError::NotFound)?;
 
     let hash = ETAGS
-        .get(file_path.to_string_lossy().as_ref())
+        .get(selected.file_path.to_string_lossy().as_ref())
         .ok_or(AppError::NotFound)?;
-    let gzip = accepts_gzip(req_headers);
 
     let mut headers = HeaderMap::new();
     headers.insert(
         CACHE_CONTROL,
         HeaderValue::from_static(cache_control(file_name)),
     );
-    // The stored file is gzip encoded, so the body differs per Accept-Encoding.
     headers.insert(VARY, HeaderValue::from_static("Accept-Encoding"));
-    if gzip {
-        headers.insert(CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+    if let Some(enc) = selected.encoding {
+        headers.insert(CONTENT_ENCODING, HeaderValue::from_static(enc.as_str()));
     }
 
-    if let Some(etag) = validator(file_name, hash, gzip) {
+    if let Some(etag) = validator_with_encoding(file_name, hash, selected.encoding) {
         headers.insert(ETAG, header_value(&etag)?);
         if matches_etag(req_headers, &etag) {
             return Ok((StatusCode::NOT_MODIFIED, headers, Bytes::new()).into_response());
         }
     }
 
-    let ext = file
-        .path()
-        .file_stem()
-        .and_then(|x| x.to_str())
-        .unwrap_or_default();
-    let mime = mime_guess::from_path(ext).first_or_octet_stream();
+    let mime = mime_guess::from_path(file_name).first_or_octet_stream();
     headers.insert(CONTENT_TYPE, header_value(mime.as_ref())?);
 
-    let body = if gzip {
-        Bytes::from_static(file.contents())
-    } else {
-        Bytes::from(gunzip(file.contents())?)
+    let body = match selected.encoding {
+        Some(_) => Bytes::from_static(selected.file.contents()),
+        None => Bytes::from(decompress_to_identity(
+            &selected.file_path,
+            selected.file.contents(),
+        )?),
     };
     Ok((StatusCode::OK, headers, body).into_response())
 }
@@ -140,11 +213,21 @@ fn login_target(path: &str, query: Option<&str>) -> String {
 
 /// The ETag of a file that a browser revalidates. A hashed bundle file is immutable, so the
 /// browser never revalidates it and it gets no ETag.
+#[cfg(test)]
 fn validator(file_name: &str, hash: &str, gzip: bool) -> Option<String> {
     (!is_immutable(file_name)).then(|| etag_of(hash, gzip))
 }
 
+fn validator_with_encoding(
+    file_name: &str,
+    hash: &str,
+    encoding: Option<StaticEncoding>,
+) -> Option<String> {
+    (!is_immutable(file_name)).then(|| etag_with_encoding(hash, encoding))
+}
+
 /// The gzip body and the plain body are different bytes, so each one gets its own strong ETag.
+#[cfg(test)]
 fn etag_of(hash: &str, gzip: bool) -> String {
     if gzip {
         format!("\"{hash}\"")
@@ -153,15 +236,28 @@ fn etag_of(hash: &str, gzip: bool) -> String {
     }
 }
 
+fn etag_with_encoding(hash: &str, encoding: Option<StaticEncoding>) -> String {
+    match encoding {
+        Some(StaticEncoding::Gzip) => format!("\"{hash}\""),
+        Some(enc) => format!("\"{hash}-{}\"", enc.as_str()),
+        None => format!("\"{hash}-identity\""),
+    }
+}
+
 /// A client that does not list gzip gets the plain body. An explicit `gzip;q=0` refuses gzip.
+#[cfg(test)]
 fn accepts_gzip(headers: &HeaderMap) -> bool {
+    accepts_encoding(headers, "gzip")
+}
+
+fn accepts_encoding(headers: &HeaderMap, coding: &str) -> bool {
     let Some(value) = headers.get(ACCEPT_ENCODING).and_then(|x| x.to_str().ok()) else {
         return false;
     };
     value.split(',').any(|entry| {
         let mut parts = entry.split(';');
-        let coding = parts.next().unwrap_or_default().trim();
-        (coding.eq_ignore_ascii_case("gzip") || coding == "*") && !parts.any(is_zero_quality)
+        let name = parts.next().unwrap_or_default().trim();
+        (name.eq_ignore_ascii_case(coding) || name == "*") && !parts.any(is_zero_quality)
     })
 }
 
@@ -195,6 +291,32 @@ fn gunzip(data: &[u8]) -> Result<Vec<u8>, AppError> {
         .read_to_end(&mut out)
         .map_err(|err| AppError::Anyhow(err.into()))?;
     Ok(out)
+}
+
+fn brotli_decompress(data: &[u8]) -> Result<Vec<u8>, AppError> {
+    let mut out = Vec::new();
+    let mut reader = brotli::Decompressor::new(data, 4096);
+    reader
+        .read_to_end(&mut out)
+        .map_err(|err| AppError::Anyhow(err.into()))?;
+    Ok(out)
+}
+
+fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, AppError> {
+    zstd::decode_all(data).map_err(|err| AppError::Anyhow(err.into()))
+}
+
+fn decompress_to_identity(file_path: &Path, contents: &[u8]) -> Result<Vec<u8>, AppError> {
+    let ext = file_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    match ext {
+        "gz" => gunzip(contents),
+        "br" => brotli_decompress(contents),
+        "zst" => zstd_decompress(contents),
+        _ => Ok(contents.to_vec()),
+    }
 }
 
 /// Paths without a file extension are WebUI routes, so they load index.html.
@@ -273,6 +395,19 @@ mod tests {
     fn etag_is_quoted_and_differs_per_encoding() {
         assert_eq!(etag_of("abc", true), "\"abc\"");
         assert_eq!(etag_of("abc", false), "\"abc-identity\"");
+        assert_eq!(
+            etag_with_encoding("abc", Some(StaticEncoding::Zstd)),
+            "\"abc-zstd\""
+        );
+        assert_eq!(
+            etag_with_encoding("abc", Some(StaticEncoding::Brotli)),
+            "\"abc-br\""
+        );
+        assert_eq!(
+            etag_with_encoding("abc", Some(StaticEncoding::Gzip)),
+            "\"abc\""
+        );
+        assert_eq!(etag_with_encoding("abc", None), "\"abc-identity\"");
     }
 
     #[test]
@@ -317,6 +452,18 @@ mod tests {
         assert!(accepts_gzip(&headers(ACCEPT_ENCODING, "GZIP;q=0.5")));
         assert!(!accepts_gzip(&headers(ACCEPT_ENCODING, "identity")));
         assert!(!accepts_gzip(&HeaderMap::new()));
+        assert!(accepts_encoding(
+            &headers(ACCEPT_ENCODING, "br, gzip"),
+            "br"
+        ));
+        assert!(accepts_encoding(
+            &headers(ACCEPT_ENCODING, "zstd;q=1.0"),
+            "zstd"
+        ));
+        assert!(!accepts_encoding(
+            &headers(ACCEPT_ENCODING, "zstd;q=0"),
+            "zstd"
+        ));
     }
 
     #[test]

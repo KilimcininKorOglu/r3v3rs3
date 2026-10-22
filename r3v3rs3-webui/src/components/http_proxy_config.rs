@@ -414,6 +414,8 @@ struct CompressionForm {
     algorithms: Vec<CompressionAlgorithm>,
     min_size: String,
     mime_types: String,
+    adaptive_level: bool,
+    precompressed: bool,
 }
 
 impl CompressionForm {
@@ -422,6 +424,8 @@ impl CompressionForm {
             algorithms: compression.algorithms.clone(),
             min_size: compression.min_size.to_string(),
             mime_types: format_mime_list(&compression.mime_types),
+            adaptive_level: compression.adaptive_level,
+            precompressed: compression.precompressed,
         }
     }
 }
@@ -1638,6 +1642,20 @@ fn compression_view(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
                     "mt-4",
                 )) }
             </div>
+            <div class="flex flex-wrap gap-x-6 mt-2">
+                { toggle(
+                    state_input(form, checked, |form, value| form.compression.adaptive_level = value),
+                    form.compression.adaptive_level,
+                    locale.t("http_form.adaptive_compression"),
+                    "mt-2",
+                ) }
+                { toggle(
+                    state_input(form, checked, |form, value| form.compression.precompressed = value),
+                    form.compression.precompressed,
+                    locale.t("http_form.precompressed"),
+                    "mt-2",
+                ) }
+            </div>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-4">
                 <div>
                     <label class={LABEL_CLASS}>{locale.t("http_form.min_size")}</label>
@@ -2511,6 +2529,8 @@ fn parse_compression(
             key,
             errors,
         ),
+        adaptive_level: form.adaptive_level,
+        precompressed: form.precompressed,
     }
 }
 

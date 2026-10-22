@@ -970,35 +970,39 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 Proxy'den geçen yanıtları "Sıkıştırma" bölümünden sıkıştırabilirsiniz. Bir veya daha fazla encoding seçtiğinizde sıkıştırma açılır. Hiçbir encoding seçili değilse sıkıştırma kapalıdır.
 
-| Encoding | `Content-Encoding` | Seviye |
-|---|---|---|
-| Brotli | `br` | Kalite 4 |
-| Zstandard | `zstd` | Seviye 3 |
-| Gzip | `gzip` | Seviye 6 |
+| Encoding | `Content-Encoding` | Varsayılan Seviye | Uyarlanabilir Seviyeler (< 8 KB / 8–64 KB / > 64 KB veya Stream) |
+|---|---|---|---|
+| Brotli | `br` | Kalite 4 | Kalite 5 / Kalite 4 / Kalite 3 |
+| Zstandard | `zstd` | Seviye 3 | Seviye 4 / Seviye 3 / Seviye 1 (En Hızlı) |
+| Gzip | `gzip` | Seviye 6 | Seviye 9 (En İyi) / Seviye 6 / Seviye 1 (En Hızlı) |
 
 r3v3rs3 isteğin `Accept-Encoding` header'ını okur ve istemcinin kabul ettiği encoding'lerden `q` değeri en yüksek olanı seçer. Birden fazla encoding aynı `q` değerine sahipse `algorithms` listesindeki sıra geçerli olur. Panelde bu sıra, encoding'leri seçtiğiniz sıradır.
+
+`adaptive_level` etkinleştirildiğinde (varsayılan `true`), r3v3rs3 yanıt boyutuna göre sıkıştırma kalitesini otomatik olarak optimize eder: küçük yanıtlar (< 8 KB) CPU maliyetinin önemsiz olduğu durumlarda en yüksek sıkıştırma oranını kullanır, büyük veya akışlı (stream) yanıtlar ise worker thread'lerin doymasını engellemek için maksimum verim (throughput) seviyelerini tercih eder. Ayrıca metin, JSON ve SVG içerikleri için minimum boyut eşiği dinamik olarak 256 byte'a indirilir.
 
 r3v3rs3 bir yanıtı yalnız şu koşulların hepsi sağlanırsa sıkıştırır:
 
 - Durum kodu `1xx`, `204 No Content`, `206 Partial Content` veya `304 Not Modified` değildir.
 - Upstream sunucu yanıta encoding uygulamamıştır ve yanıtta `Content-Range` header'ı yoktur.
 - `Cache-Control` içinde `no-transform` yoktur.
-- `Content-Type` header'ındaki medya türü `mime_types` listesindedir. `text/*` bütün metin türleriyle eşleşir. r3v3rs3 `text/event-stream` türünü hiçbir zaman sıkıştırmaz, çünkü sıkıştırma server-sent event'leri geciktirir.
-- `Content-Length` değeri en az `min_size` kadardır. `Content-Length` header'ı olmayan stream yanıtları da sıkıştırılır.
+- `Content-Type` header'ındaki medya türü `mime_types` listesindedir ve doğası gereği zaten sıkıştırılmış ikili formatlardan (PNG, JPEG, WebP, AVIF, MP4, WOFF2 veya ZIP gibi) biri değildir. r3v3rs3 `text/event-stream` türünü hiçbir zaman sıkıştırmaz, çünkü sıkıştırma server-sent event'leri geciktirir.
+- `Content-Length` değeri en az `min_size` (veya uyarlanabilir eşik) kadardır. `Content-Length` header'ı olmayan stream yanıtları da sıkıştırılır.
 
 Bu koşulları sağlayan yanıtlarda r3v3rs3 `Vary` header'ına `Accept-Encoding` ekler. Yanıtı sıkıştırdığında `Content-Length` ve `Accept-Ranges` header'larını da siler, güçlü `ETag` değerini zayıf `ETag` değerine çevirir. Yanıt header kuralları sıkıştırmadan önce çalıştığı için bir kural `Cache-Control: no-transform` ayarlayarak sıkıştırmayı engelleyebilir.
 
-| Ayar | Varsayılan |
-|---|---|
-| `algorithms` | Boş. Sıkıştırma kapalıdır. |
-| `min_size` | `1024` byte |
-| `mime_types` | `text/*`, `application/javascript`, `application/json`, `application/manifest+json`, `application/wasm`, `application/xml`, `application/xhtml+xml`, `application/rss+xml`, `application/atom+xml`, `image/svg+xml`, `font/otf`, `font/ttf` |
+| Ayar | Varsayılan | Açıklama |
+|---|---|---|
+| `algorithms` | Boş. Sıkıştırma kapalıdır. | Tercih sırasına göre sıkıştırma algoritmaları listesi (`br`, `zstd`, `gzip`). |
+| `min_size` | `1024` byte | Sıkıştırmanın uygulanması için gereken minimum yanıt boyutu. |
+| `mime_types` | `text/*`, `application/javascript`, `application/json`, `application/manifest+json`, `application/wasm`, `application/xml`, `application/xhtml+xml`, `application/rss+xml`, `application/atom+xml`, `image/svg+xml`, `font/otf`, `font/ttf` | Sıkıştırmaya uygun medya türleri. Zaten sıkıştırılmış formatlar (PNG, JPEG, WebP, AVIF, WOFF2, ZIP) otomatik filtrelenir. |
+| `adaptive_level` | `true` | Yanıt yük boyutuna göre sıkıştırma seviyesini otomatik ayarlar ve metin/JSON için minimum boyut eşiğini 256 byte'a düşürür. |
+| `precompressed` | `true` | Önceden derlenmiş statik dosyaları (`.zst`, `.br`, `.gz`) sıfır CPU maliyetiyle doğrudan sunar. |
 
 ```toml
 [my-app]
 protocol = "http"
 vhosts = ["app.example.com"]
-compression = { algorithms = ["br", "zstd", "gzip"], min_size = 1024, mime_types = ["text/*", "application/json"] }
+compression = { algorithms = ["br", "zstd", "gzip"], min_size = 1024, mime_types = ["text/*", "application/json"], adaptive_level = true, precompressed = true }
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
