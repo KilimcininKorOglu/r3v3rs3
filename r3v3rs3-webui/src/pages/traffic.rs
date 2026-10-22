@@ -1,4 +1,5 @@
 use super::app_log::download_text_file;
+use crate::components::traffic_inspector::TrafficInspector;
 use crate::{API_ENDPOINT, auth::use_ensure_auth, format::format_instant, i18n::use_locale};
 use gloo_net::eventsource::futures::EventSource;
 use gloo_net::http::Request;
@@ -40,6 +41,85 @@ struct HeaderControls {
     pub on_toggle_map: Callback<MouseEvent>,
     pub on_clear: Callback<MouseEvent>,
     pub on_export: Callback<MouseEvent>,
+}
+
+fn create_header_controls(
+    live: &UseStateHandle<bool>,
+    auto_scroll: &UseStateHandle<bool>,
+    show_geo_map: &UseStateHandle<bool>,
+    entries: &UseStateHandle<Vec<AccessLogEntry>>,
+) -> HeaderControls {
+    HeaderControls {
+        live: **live,
+        auto_scroll: **auto_scroll,
+        show_geo_map: **show_geo_map,
+        on_toggle_live: {
+            let live = live.clone();
+            Callback::from(move |_: MouseEvent| live.set(!*live))
+        },
+        on_toggle_scroll: {
+            let auto_scroll = auto_scroll.clone();
+            Callback::from(move |_: MouseEvent| auto_scroll.set(!*auto_scroll))
+        },
+        on_toggle_map: {
+            let show_geo_map = show_geo_map.clone();
+            Callback::from(move |_: MouseEvent| show_geo_map.set(!*show_geo_map))
+        },
+        on_clear: {
+            let entries = entries.clone();
+            Callback::from(move |_: MouseEvent| entries.set(Vec::new()))
+        },
+        on_export: {
+            let entries = entries.clone();
+            Callback::from(move |_: MouseEvent| {
+                let export = export_traffic_json(&entries);
+                download_text_file("access-traffic.json", &export);
+            })
+        },
+    }
+}
+
+fn create_inspector_callbacks(
+    selected_entry: &UseStateHandle<Option<AccessLogEntry>>,
+) -> (Callback<AccessLogEntry>, Callback<()>) {
+    let on_select = {
+        let selected_entry = selected_entry.clone();
+        Callback::from(move |entry: AccessLogEntry| {
+            selected_entry.set(Some(entry));
+        })
+    };
+    let on_close = {
+        let selected_entry = selected_entry.clone();
+        Callback::from(move |_| {
+            selected_entry.set(None);
+        })
+    };
+    (on_select, on_close)
+}
+
+fn create_back_callback(navigator: Option<yew_router::prelude::Navigator>) -> Callback<MouseEvent> {
+    Callback::from(move |_| {
+        if let Some(nav) = &navigator {
+            nav.back();
+        }
+    })
+}
+
+fn create_country_callback(
+    selected_country: &UseStateHandle<Option<String>>,
+) -> Callback<Option<String>> {
+    let selected_country = selected_country.clone();
+    Callback::from(move |code: Option<String>| {
+        selected_country.set(code);
+    })
+}
+
+fn inspector_drawer(entry: &Option<AccessLogEntry>, on_close: Callback<()>) -> Html {
+    if let Some(entry) = entry.clone() {
+        html! { <TrafficInspector entry={entry} on_close={on_close} /> }
+    } else {
+        html! {}
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -209,6 +289,7 @@ pub fn traffic_view() -> Html {
     let status_filter = use_state(|| Option::<StatusCategory>::None);
     let selected_proxy = use_state(|| Option::<ShortId>::None);
     let selected_country = use_state(|| Option::<String>::None);
+    let selected_entry = use_state(|| Option::<AccessLogEntry>::None);
     let table_ref = use_node_ref();
 
     use_initial_traffic_load(&entries);
@@ -226,46 +307,10 @@ pub fn traffic_view() -> Html {
         selected_country.as_deref(),
     );
 
-    let on_back = Callback::from(move |_| {
-        if let Some(nav) = &navigator {
-            nav.back();
-        }
-    });
-    let controls = HeaderControls {
-        live: *live,
-        auto_scroll: *auto_scroll,
-        show_geo_map: *show_geo_map,
-        on_toggle_live: {
-            let live = live.clone();
-            Callback::from(move |_: MouseEvent| live.set(!*live))
-        },
-        on_toggle_scroll: {
-            let auto_scroll = auto_scroll.clone();
-            Callback::from(move |_: MouseEvent| auto_scroll.set(!*auto_scroll))
-        },
-        on_toggle_map: {
-            let show_geo_map = show_geo_map.clone();
-            Callback::from(move |_: MouseEvent| show_geo_map.set(!*show_geo_map))
-        },
-        on_clear: {
-            let entries = entries.clone();
-            Callback::from(move |_: MouseEvent| entries.set(Vec::new()))
-        },
-        on_export: {
-            let entries = entries.clone();
-            Callback::from(move |_: MouseEvent| {
-                let export = export_traffic_json(&entries);
-                download_text_file("access-traffic.json", &export);
-            })
-        },
-    };
-
-    let on_select_country = {
-        let selected_country = selected_country.clone();
-        Callback::from(move |code: Option<String>| {
-            selected_country.set(code);
-        })
-    };
+    let on_back = create_back_callback(navigator);
+    let controls = create_header_controls(&live, &auto_scroll, &show_geo_map, &entries);
+    let on_select_country = create_country_callback(&selected_country);
+    let (on_select_entry, on_close_inspector) = create_inspector_callbacks(&selected_entry);
 
     html! {
         <div class="space-y-4">
@@ -275,7 +320,8 @@ pub fn traffic_view() -> Html {
                 { geo_heatmap_view(locale, &geo_dist, selected_country.as_deref(), on_select_country) }
             }
             { filters_toolbar_view(locale, &search, &status_filter, &selected_country, &available_countries) }
-            { table_view(locale, &table_ref, &filtered) }
+            { table_view(locale, &table_ref, &filtered, selected_entry.as_ref().map(|e| e.id), on_select_entry) }
+            { inspector_drawer(&selected_entry, on_close_inspector) }
         </div>
     }
 }
@@ -725,7 +771,13 @@ fn filters_toolbar_view(
     }
 }
 
-fn table_view(locale: Locale, table_ref: &NodeRef, filtered: &[AccessLogEntry]) -> Html {
+fn table_view(
+    locale: Locale,
+    table_ref: &NodeRef,
+    filtered: &[AccessLogEntry],
+    selected_id: Option<u64>,
+    on_select: Callback<AccessLogEntry>,
+) -> Html {
     if filtered.is_empty() {
         return html! {
             <div class="py-12 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 text-center">
@@ -737,29 +789,44 @@ fn table_view(locale: Locale, table_ref: &NodeRef, filtered: &[AccessLogEntry]) 
     }
 
     html! {
-        <div ref={table_ref.clone()} class="overflow-x-auto overflow-y-auto max-h-[65vh] bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm">
-            <table class="w-full text-left text-xs sm:text-sm">
-                <thead class="bg-neutral-50 dark:bg-neutral-900/60 border-b dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 font-semibold sticky top-0 z-10">
-                    <tr>
-                        <th class="px-3 py-2">{locale.t("traffic.col_time")}</th>
-                        <th class="px-3 py-2">{locale.t("traffic.col_status")}</th>
-                        <th class="px-3 py-2">{locale.t("traffic.col_method")}</th>
-                        <th class="px-3 py-2">{locale.t("traffic.col_path")}</th>
-                        <th class="px-3 py-2">{locale.t("traffic.col_client")}</th>
-                        <th class="px-3 py-2">{locale.t("traffic.col_country")}</th>
-                        <th class="px-3 py-2">{locale.t("traffic.col_latency")}</th>
-                        <th class="px-3 py-2">{locale.t("traffic.col_proxy")}</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-neutral-200 dark:divide-neutral-700 font-mono">
-                    { for filtered.iter().map(render_entry_row) }
-                </tbody>
-            </table>
+        <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400 px-1">
+                <span class="inline-flex items-center gap-1.5 font-medium">
+                    <svg class="w-3.5 h-3.5 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {locale.t("traffic.click_to_inspect")}
+                </span>
+                <span class="font-mono">{format!("{} items", filtered.len())}</span>
+            </div>
+            <div ref={table_ref.clone()} class="overflow-x-auto overflow-y-auto max-h-[65vh] bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm">
+                <table class="w-full text-left text-xs sm:text-sm">
+                    <thead class="bg-neutral-50 dark:bg-neutral-900/60 border-b dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 font-semibold sticky top-0 z-10">
+                        <tr>
+                            <th class="px-3 py-2">{locale.t("traffic.col_time")}</th>
+                            <th class="px-3 py-2">{locale.t("traffic.col_status")}</th>
+                            <th class="px-3 py-2">{locale.t("traffic.col_method")}</th>
+                            <th class="px-3 py-2">{locale.t("traffic.col_path")}</th>
+                            <th class="px-3 py-2">{locale.t("traffic.col_client")}</th>
+                            <th class="px-3 py-2">{locale.t("traffic.col_country")}</th>
+                            <th class="px-3 py-2">{locale.t("traffic.col_latency")}</th>
+                            <th class="px-3 py-2">{locale.t("traffic.col_proxy")}</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-neutral-200 dark:divide-neutral-700 font-mono">
+                        { for filtered.iter().map(|entry| render_entry_row(entry, selected_id == Some(entry.id), on_select.clone())) }
+                    </tbody>
+                </table>
+            </div>
         </div>
     }
 }
 
-fn render_entry_row(entry: &AccessLogEntry) -> Html {
+fn render_entry_row(
+    entry: &AccessLogEntry,
+    is_selected: bool,
+    on_select: Callback<AccessLogEntry>,
+) -> Html {
     let time_str = format_instant(&entry.timestamp);
     let time_part = time_str.split('T').nth(1).unwrap_or(&time_str);
     let status_class = status_badge_class(entry.status);
@@ -771,9 +838,18 @@ fn render_entry_row(entry: &AccessLogEntry) -> Html {
         .map(|id| id.to_string())
         .unwrap_or_else(|| "-".to_string());
     let country_display = entry.country.as_deref().unwrap_or("-");
+    let on_click = {
+        let entry = entry.clone();
+        Callback::from(move |_| on_select.emit(entry.clone()))
+    };
+    let row_cls = if is_selected {
+        "bg-primary-50 dark:bg-primary-950/40 ring-1 ring-primary-500/50 cursor-pointer"
+    } else {
+        "hover:bg-neutral-50 dark:hover:bg-neutral-750/50 cursor-pointer"
+    };
 
     html! {
-        <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-750/50">
+        <tr onclick={on_click} class={row_cls}>
             <td class="px-3 py-2 whitespace-nowrap text-xs text-neutral-500 dark:text-neutral-400">
                 {time_part}
             </td>
@@ -1107,6 +1183,12 @@ mod tests {
             proto: "HTTP/1.1".to_string(),
             error: None,
             country: country.map(|c| c.to_string()),
+            request_headers: Vec::new(),
+            response_headers: Vec::new(),
+            request_body: None,
+            response_body: None,
+            content_type: None,
+            is_websocket: None,
         }
     }
 

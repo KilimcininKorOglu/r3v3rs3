@@ -1757,6 +1757,11 @@ Yönetim paneli üzerinde `/traffic` adresinden ve proxy detay sayfalarından er
 - **En Çok İstek Alan Ülkeler Sıralaması**: En çok trafik alan ilk 10 ülkeyi ilerleme çubukları (progress bars), istek sayıları ve yüzde paylarıyla listeler.
 - **Coğrafi ve Metin Filtreleme**: Ülkeye, HTTP durum koduna, URL yoluna, istemci IP'sine, host'a veya HTTP metoduna göre anında filtreleme.
 - **Kontroller**: Akışı duraklatma/devam ettirme, otomatik kaydırma (auto-scroll), harita görünümünü açma/kapatma, arabelleği temizleme ve JSON formatında dışa aktarma.
+- **Canlı İstek İnceleyici ve Detay Çekmecesi (Inspector Drawer)**: Canlı trafik tablosundaki herhangi bir satıra tıklandığında derinlemesine inceleme sekmeleri sunan bir yan çekmece açılır:
+  - **Genel Bakış (Overview)**: İstemci IP adresi, GeoIP ülkesi, HTTP protokolü, yanıt gecikmesi, zaman damgası, durum kodu ve eşleşen proxy rotası gibi temel istek meta verileri.
+  - **Başlıklar (Headers)**: Gelen istemci istek başlıklarının ve giden sunucu yanıt başlıklarının yapılandırılmış anahtar-değer tablosu.
+  - **Yük/Gövde (Payload)**: Arabelleğe alınan istek gövdelerini (16 KB'a kadar) biçimlendirilmiş JSON ve ham metin görünümleri arasında tek tıkla geçiş yaparak inceleme.
+  - **Tekrarlama & cURL Konsolu (Replay)**: Uç birim için güvenli kaçış karakterleriyle oluşturulmuş **cURL Olarak Kopyala** butonu ve yakalanan istekleri doğrudan kaynak sunuculara veya özel bir URL'ye yeniden gönderen, yanıt durumunu ve gidiş-dönüş gecikme süresini anında ölçen **İsteği Tekrarla** konsolu.
 
 ## Yönetim API'si (Admin API)
 
@@ -1765,3 +1770,5 @@ Trafik uç noktaları oturum doğrulaması ile korunur ve çok kiracılı proxy 
 - `GET /api/traffic`: İsteğe bağlı filtrelerle (`status`, `search`, `country`, `resource_id`, `limit`, `since_id`) eşleşen son erişim loglarını döner.
 - `GET /api/traffic/live`: Gelen erişim loglarını `text/event-stream` (Server-Sent Events) olarak gerçek zamanlı akıtır.
 - `GET /api/traffic/geo`: Canlı erişim trafiğinin coğrafi dağılımını toplu olarak döner; toplam çözümlenen istek sayısını, ilk 10 ülkeyi (`country`, `count`, `percentage`) ve tüm ISO ülke kodlarının istek sayılarını içerir.
+- `GET /api/traffic/{id}`: Belirtilen kimliğe (ID) sahip erişim kaydının yakalanan istek/yanıt başlıkları, gövde içeriği, içerik türü ve WebSocket bayrakları dahil tüm detaylarını döner.
+- `POST /api/traffic/replay`: Belirtilen hedef URL'ye özel başlıklar, gövde ve zaman aşımı süresi (500ms ile 30s arasında sınırlandırılmış) ile bir HTTP veya WebSocket el sıkışma isteğini yeniden gönderir; yanıt durumu, gecikme süresi, hata detayı ve yanıt gövdesini döner.

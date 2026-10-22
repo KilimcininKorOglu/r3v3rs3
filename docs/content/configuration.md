@@ -1757,6 +1757,11 @@ The panel provides an interactive live traffic dashboard accessible at `/traffic
 - **Top Countries Leaderboard**: Displays the top 10 countries ranked by traffic volume with animated progress bars, request counts, and percentage shares.
 - **Geographic & Text Filtering**: Filter incoming or historical logs by country, HTTP status code, URL path, client IP, host, or HTTP method.
 - **Controls**: Pause/resume stream, toggle automatic pinning to latest entries, collapse/expand the Geo Map view, clear in-memory buffer, and export logs to JSON.
+- **Live Request Inspector & Detail Drawer**: Clicking any row in the live traffic table opens an interactive side drawer with deep inspection tabs:
+  - **Overview**: Core request metadata including client IP, GeoIP country, HTTP protocol, latency, timestamp, status, and matched proxy route.
+  - **Headers**: Structured key-value table of both incoming client request headers and outgoing upstream response headers.
+  - **Payload**: Inspect buffered request bodies (up to 16 KB) with a one-click toggle between syntax-formatted JSON and raw text view.
+  - **Replay & cURL Console**: One-click **Copy as cURL** button generating fully escaped, production-accurate CLI commands, and a live **Replay Request** trigger to re-dispatch captured requests directly to upstream endpoints or custom URLs with live status and round-trip latency measurements.
 
 ## Admin API
 
@@ -1765,3 +1770,5 @@ The traffic endpoints are protected by session authentication and respect multi-
 - `GET /api/traffic`: Returns recent access log entries matching optional query filters (`status`, `search`, `country`, `resource_id`, `limit`, `since_id`).
 - `GET /api/traffic/live`: Streams live incoming access log entries as `text/event-stream` Server-Sent Events (SSE).
 - `GET /api/traffic/geo`: Aggregates real-time geographic distribution of access traffic, returning the total count of resolved requests, top 10 ranked countries (`country`, `count`, `percentage`), and the full ISO country code count mapping.
+- `GET /api/traffic/{id}`: Retrieves full inspection details for a specific access log entry by ID, including captured request and response headers, payload, content type, and WebSocket flags.
+- `POST /api/traffic/replay`: Replays an HTTP or WebSocket handshake request against a specified target URL with custom headers, body, and timeout (clamped between 500ms and 30s), returning the status code, latency, error details, and response body.

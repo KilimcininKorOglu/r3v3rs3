@@ -611,6 +611,17 @@ async fn proxied_response(
         .unwrap_or_default()
         .to_string();
     let proto = info.proto.to_string();
+    let request_headers = extract_headers(req.headers());
+    let is_websocket = req
+        .headers()
+        .get(hyper::header::UPGRADE)
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"));
+    let content_type = req
+        .headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(ToString::to_string);
+    let (req, request_body) = buffer_request_body(req, is_websocket).await;
 
     let (req, response_rewriter, resource_id, client_ip) = if fronting {
         (
@@ -637,12 +648,57 @@ async fn proxied_response(
             host,
             uri,
             proto,
+            request_headers,
+            request_body,
+            content_type,
+            is_websocket,
         },
         duration,
         &mapped,
     );
 
     mapped
+}
+
+fn extract_headers(headers: &hyper::HeaderMap) -> Vec<r3v3rs3_api::traffic::HeaderEntry> {
+    headers
+        .iter()
+        .map(|(k, v)| r3v3rs3_api::traffic::HeaderEntry {
+            name: k.to_string(),
+            value: v.to_str().unwrap_or_default().to_string(),
+        })
+        .collect()
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("{0}")]
+struct BodyStreamError(String);
+
+async fn buffer_request_body(
+    req: Request<Incoming>,
+    is_websocket: bool,
+) -> (Request<BoxBody<Bytes, BodyStreamError>>, Option<String>) {
+    let cl = req
+        .headers()
+        .get(hyper::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+    let should_buffer = !is_websocket && matches!(cl, Some(len) if len > 0 && len <= 16384);
+    let (parts, incoming) = req.into_parts();
+    if should_buffer {
+        if let Ok(collected) = incoming.collect().await {
+            let bytes = collected.to_bytes();
+            let preview = String::from_utf8(bytes.to_vec()).ok();
+            let full = Full::new(bytes)
+                .map_err(|e: std::convert::Infallible| -> BodyStreamError { match e {} });
+            return (Request::from_parts(parts, BoxBody::new(full)), preview);
+        }
+        let empty = http_body_util::Empty::new()
+            .map_err(|e: std::convert::Infallible| -> BodyStreamError { match e {} });
+        return (Request::from_parts(parts, BoxBody::new(empty)), None);
+    }
+    let boxed = BoxBody::new(incoming.map_err(|e| BodyStreamError(e.to_string())));
+    (Request::from_parts(parts, boxed), None)
 }
 
 struct AccessLogMeta {
@@ -653,6 +709,10 @@ struct AccessLogMeta {
     host: String,
     uri: String,
     proto: String,
+    request_headers: Vec<r3v3rs3_api::traffic::HeaderEntry>,
+    request_body: Option<String>,
+    content_type: Option<String>,
+    is_websocket: bool,
 }
 
 fn record_access_log<B>(
@@ -660,7 +720,7 @@ fn record_access_log<B>(
     duration: std::time::Duration,
     mapped: &Result<Response<B>, anyhow::Error>,
 ) {
-    let (status, error) = match mapped {
+    let (status, error, response_headers) = match mapped {
         Ok(res) => {
             if let Some(cl) = res
                 .headers()
@@ -670,9 +730,9 @@ fn record_access_log<B>(
             {
                 crate::proxy::stats::record_tx_bytes(cl);
             }
-            (res.status().as_u16(), None)
+            (res.status().as_u16(), None, extract_headers(res.headers()))
         }
-        Err(err) => (502, Some(err.to_string())),
+        Err(err) => (502, Some(err.to_string()), Vec::new()),
     };
     crate::proxy::stats::record_http_response(status);
     crate::proxy::access_log::record(r3v3rs3_api::traffic::AccessLogEntry {
@@ -688,6 +748,12 @@ fn record_access_log<B>(
         latency_ms: duration.as_secs_f64() * 1000.0,
         proto: meta.proto,
         error,
+        request_headers: meta.request_headers,
+        response_headers,
+        request_body: meta.request_body,
+        response_body: None,
+        content_type: meta.content_type,
+        is_websocket: Some(meta.is_websocket),
     });
 }
 
@@ -1340,6 +1406,12 @@ where
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
         .to_string();
+    let request_headers = extract_headers(req.headers());
+    let content_type = req
+        .headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(ToString::to_string);
     // The body is attached before routing, so an authenticator can read a form submission.
     let (mut send, recv) = stream.split();
     let body = BoxBody::new(StreamBody::new(StreamWrapper::<T> { stream: recv }));
@@ -1360,6 +1432,10 @@ where
             host,
             uri,
             proto: "h3".to_string(),
+            request_headers,
+            request_body: None,
+            content_type,
+            is_websocket: false,
         },
         duration,
         &mapped,

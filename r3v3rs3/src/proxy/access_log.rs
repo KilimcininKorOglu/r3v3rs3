@@ -65,6 +65,14 @@ pub fn clear() {
     }
 }
 
+/// Finds a specific access log entry by its unique sequential id.
+pub fn get_by_id(id: u64) -> Option<AccessLogEntry> {
+    let Ok(buf) = STORE.buffer.read() else {
+        return None;
+    };
+    buf.iter().find(|entry| entry.id == id).cloned()
+}
+
 /// Returns the number of currently buffered entries.
 pub fn count() -> usize {
     STORE.buffer.read().map(|b| b.len()).unwrap_or(0)
@@ -144,6 +152,12 @@ mod tests {
             proto: "HTTP/1.1".to_string(),
             error: None,
             country: None,
+            request_headers: Vec::new(),
+            response_headers: Vec::new(),
+            request_body: None,
+            response_body: None,
+            content_type: None,
+            is_websocket: None,
         }
     }
 

@@ -77,6 +77,15 @@ fn sample_log(status: u16, uri: &str, method: &str, country: Option<&str>) -> Ac
         proto: "HTTP/1.1".to_string(),
         error: None,
         country: country.map(ToString::to_string),
+        request_headers: vec![r3v3rs3_api::traffic::HeaderEntry::new("X-Test", "value")],
+        response_headers: vec![r3v3rs3_api::traffic::HeaderEntry::new(
+            "Content-Type",
+            "application/json",
+        )],
+        request_body: Some("{\"test\":true}".to_string()),
+        response_body: None,
+        content_type: Some("application/json".to_string()),
+        is_websocket: Some(false),
     }
 }
 
@@ -153,6 +162,58 @@ async fn verify_geo(client: &Client, addr: SocketAddr, cookie: &str) -> anyhow::
     Ok(())
 }
 
+async fn verify_get_entry_and_replay(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    let items: Vec<AccessLogEntry> = client
+        .get(format!("http://{addr}/api/traffic"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?
+        .json()
+        .await?;
+    let first = &items[0];
+    let single: AccessLogEntry = client
+        .get(format!("http://{addr}/api/traffic/{}", first.id))
+        .header(COOKIE, cookie)
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(single.id, first.id);
+    assert_eq!(single.request_headers.len(), 1);
+    assert_eq!(single.request_body.as_deref(), Some("{\"test\":true}"));
+
+    let not_found = client
+        .get(format!("http://{addr}/api/traffic/999999"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(not_found.status(), StatusCode::NOT_FOUND);
+
+    let replay_req = r3v3rs3_api::traffic::RequestReplayRequest {
+        method: "GET".to_string(),
+        url: format!("http://{addr}/api/traffic"),
+        headers: vec![r3v3rs3_api::traffic::HeaderEntry::new("Cookie", cookie)],
+        body: None,
+        timeout_ms: Some(5000),
+    };
+    let replay_resp: r3v3rs3_api::traffic::RequestReplayResponse = client
+        .post(format!("http://{addr}/api/traffic/replay"))
+        .header(COOKIE, cookie)
+        .json(&replay_req)
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(replay_resp.status, 200);
+    assert!(replay_resp.latency_ms > 0.0);
+    assert!(replay_resp.body.contains("app.example.com"));
+    Ok(())
+}
+
 #[tokio::test]
 async fn traffic_api_lists_and_filters_logs() -> anyhow::Result<()> {
     let dir = TempDir::new("traffic-test")?;
@@ -166,7 +227,8 @@ async fn traffic_api_lists_and_filters_logs() -> anyhow::Result<()> {
         let cookie = login_when_allowed(addr, "admin", "password").await?;
         verify_list(&client, addr, &cookie).await?;
         verify_filters_and_sse(&client, addr, &cookie).await?;
-        verify_geo(&client, addr, &cookie).await
+        verify_geo(&client, addr, &cookie).await?;
+        verify_get_entry_and_replay(&client, addr, &cookie).await
     })
     .await
 }

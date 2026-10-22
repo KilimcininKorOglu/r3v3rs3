@@ -3,6 +3,22 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
 
+/// A single HTTP header entry (key-value pair).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct HeaderEntry {
+    pub name: String,
+    pub value: String,
+}
+
+impl HeaderEntry {
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: value.into(),
+        }
+    }
+}
+
 /// An HTTP access log record emitted by the proxy engine.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct AccessLogEntry {
@@ -26,6 +42,43 @@ pub struct AccessLogEntry {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub country: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub request_headers: Vec<HeaderEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_headers: Vec<HeaderEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_websocket: Option<bool>,
+}
+
+/// Request payload to replay an HTTP or WebSocket handshake request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RequestReplayRequest {
+    pub method: String,
+    pub url: String,
+    #[serde(default)]
+    pub headers: Vec<HeaderEntry>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+/// Execution result of a replayed request.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct RequestReplayResponse {
+    pub status: u16,
+    pub latency_ms: f64,
+    #[serde(default)]
+    pub headers: Vec<HeaderEntry>,
+    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 fn serialize_timestamp_ms<S>(timestamp: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
@@ -151,6 +204,12 @@ mod tests {
             proto: "HTTP/2.0".to_string(),
             error: None,
             country: None,
+            request_headers: vec![HeaderEntry::new("User-Agent", "r3v3rs3-test")],
+            response_headers: vec![HeaderEntry::new("Content-Type", "application/json")],
+            request_body: None,
+            response_body: None,
+            content_type: Some("application/json".to_string()),
+            is_websocket: Some(false),
         }
     }
 
@@ -261,5 +320,30 @@ mod tests {
         let json = serde_json::to_string(&geo).unwrap();
         let decoded: TrafficGeoDistribution = serde_json::from_str(&json).unwrap();
         assert_eq!(geo, decoded);
+    }
+
+    #[test]
+    fn replay_models_serde_roundtrip() {
+        let req = RequestReplayRequest {
+            method: "POST".to_string(),
+            url: "https://example.com/api/echo".to_string(),
+            headers: vec![HeaderEntry::new("Authorization", "Bearer token123")],
+            body: Some(r#"{"hello":"world"}"#.to_string()),
+            timeout_ms: Some(5000),
+        };
+        let req_json = serde_json::to_string(&req).unwrap();
+        let req_decoded: RequestReplayRequest = serde_json::from_str(&req_json).unwrap();
+        assert_eq!(req, req_decoded);
+
+        let resp = RequestReplayResponse {
+            status: 200,
+            latency_ms: 45.2,
+            headers: vec![HeaderEntry::new("Content-Type", "application/json")],
+            body: r#"{"ok":true}"#.to_string(),
+            error: None,
+        };
+        let resp_json = serde_json::to_string(&resp).unwrap();
+        let resp_decoded: RequestReplayResponse = serde_json::from_str(&resp_json).unwrap();
+        assert_eq!(resp, resp_decoded);
     }
 }
