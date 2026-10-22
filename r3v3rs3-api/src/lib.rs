@@ -1,5 +1,6 @@
 pub mod access_list;
 pub mod acme;
+pub mod anomaly;
 pub mod app;
 pub mod audit;
 pub mod auth;

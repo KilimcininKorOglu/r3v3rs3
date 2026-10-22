@@ -50,6 +50,7 @@ use utoipa_swagger_ui::SwaggerUi;
 mod access_lists;
 mod accounts;
 mod acme;
+mod anomaly;
 mod app_files;
 mod app_info;
 mod audit;
@@ -158,6 +159,8 @@ pub async fn start_admin_on(
     });
 
     let mut event_recv = event.subscribe();
+    let config_dir = app_state.data.lock().await.app_info.config_path.clone();
+    anomaly::ensure_anomaly_monitor_running(app_state.clone(), config_dir);
     let app = admin_router(app_state)?;
 
     axum::serve(
@@ -583,6 +586,13 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
             OpenApiRouter::new()
                 .routes(routes!(grpc::reflect_standalone))
                 .routes(routes!(grpc::invoke_standalone)),
+        )
+        .nest(
+            "/system/anomalies",
+            OpenApiRouter::new()
+                .routes(routes!(anomaly::get_snapshot))
+                .routes(routes!(anomaly::get_rules, anomaly::update_rules))
+                .routes(routes!(anomaly::dismiss)),
         )
 }
 

@@ -1457,6 +1457,31 @@ scrape_configs:
       credentials: 'YOUR_API_TOKEN'
 ```
 
+### Prometheus Anomali Alarmları ve Bildirim Merkezi
+
+r3v3rs3, canlı Prometheus trafik ve çalışma zamanı metriklerini izleyen, anomalileri tespit edip alarmlar üreten, webhook bildirimleri gönderen ve WebUI üst çubuğundaki **Bildirim Merkezi** üzerinde durumları anlık gösteren yerleşik bir anomali tespit motoru içerir:
+
+- **Gerçek Zamanlı Değerlendirme Döngüsü**: Sunucu her 10 saniyede bir son trafik metriklerini ve çalışma zamanı sağlığını yapılandırılan eşik değerlerine göre değerlendirir:
+  - **P99 Gecikme Anomalisi (`max_p99_latency_ms`)**: 99. yüzdelik dilim yanıt süresi eşik değerini aştığında tetiklenir (varsayılan `1000ms`).
+  - **5xx Hata Oranı Anomalisi (`max_5xx_percent`)**: Son değerlendirme penceresindeki 5xx sunucu yanıt hatası yüzdesi eşiği aştığında tetiklenir (varsayılan `%5`).
+  - **Trafik Artışı / Ani İstek Dalgası (`max_request_rate_rps`)**: Gelen saniye başına istek hacmi (RPS) yapılandırılan sınırı aştığında tetiklenir.
+  - **Event Loop Gecikmesi Anomalisi (`max_event_loop_lag_ms`)**: Tokio asenkron çalışma zamanı yürütme gecikmesi eşiği aştığında tetiklenir (varsayılan `150ms`).
+- **WebUI Bildirim Merkezi**:
+  - Üst gezinme çubuğundaki zil simgesi, aktif anomali sayısını canlı kırmızı bir rozetle gösterir.
+  - Zile tıklandığında açılan menü; aktif anomalileri, önem derecelerini (`CRITICAL` veya `WARNING`), anlık ölçülen değerleri ve eşik sınırlarını gösterir; "Alarmları Temizle" butonuyla aktif bildirimler temizlenebilir.
+- **Webhook Bildirimleri ve Fırtına Koruması**:
+  - Tespit edilen anomaliler, yapılandırılmış bildirim uç noktalarına webhook olayları (`system.high_latency`, `system.high_error_rate`, `system.traffic_spike`, `system.event_loop_lag`) olarak iletilir.
+  - Olay türü başına 5 dakikalık otomatik bekleme süresi (cooldown) ile kesintisiz arıza durumlarında bildirim fırtınaları engellenir.
+- **WebUI Üzerinden Eşik Yapılandırması**:
+  - **Ayarlar** sayfasındaki **Anomali Alarm Eşikleri** kartından otomatik kontroller etkinleştirilebilir/devre dışı bırakılabilir ve sayısal eşik sınırları güncellenebilir.
+
+#### Admin API
+
+- `GET /api/system/anomalies`: Aktif anomalileri, son anomali geçmişini, canlı metrikleri ve mevcut kural eşiklerini döndürür.
+- `GET /api/system/anomalies/rules`: Mevcut anomali alarm eşik kurallarını döndürür.
+- `PUT /api/system/anomalies/rules`: Anomali alarm eşik kurallarını günceller.
+- `POST /api/system/anomalies/dismiss`: Aktif durumdaki tüm anomali alarmlarını temizler.
+
 ## MCP Sunucusu
 
 Admin API, araçlarını `/api/mcp` üzerinde Model Context Protocol ile yayınlar. AI client'lar böylece portları, proxy'leri ve sertifikaları inceleyebilir ve proxy'leri, admin API ile aynı yetki kontrolleri ve aynı audit log üzerinden değiştirebilir.

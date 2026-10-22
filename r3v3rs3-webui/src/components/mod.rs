@@ -1,5 +1,6 @@
 pub mod acme_form;
 pub mod acme_provider;
+pub mod anomaly_rules;
 pub mod auth_config;
 pub mod compose_editor;
 pub mod custom_acme;
@@ -14,6 +15,7 @@ pub mod grpc_tester;
 pub mod http_proxy_config;
 pub mod language_menu;
 pub mod navbar;
+pub mod notification_center;
 pub mod port_config;
 pub mod proxy_config;
 pub mod proxy_dry_run;

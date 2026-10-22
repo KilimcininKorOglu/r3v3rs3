@@ -376,6 +376,7 @@ mod tests {
             Error::InvalidWebhook { reason: text() },
             Error::WebhookDeliveryFailed { reason: text() },
             Error::GrpcError { reason: text() },
+            Error::InvalidAnomalyAlertRules { reason: text() },
         ]
     }
 

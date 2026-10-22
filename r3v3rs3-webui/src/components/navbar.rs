@@ -1,4 +1,5 @@
 use super::language_menu::LanguageMenu;
+use super::notification_center::NotificationCenter;
 use super::sidebar::Menu;
 use super::theme_menu::ThemeMenu;
 use crate::dialog;
@@ -62,6 +63,7 @@ pub fn navbar() -> Html {
                 </span>
                 <span class="hidden sm:flex items-center px-4 font-semibold">{"r3v3rs3"}</span>
                 <div class="flex ml-auto">
+                    <NotificationCenter class={classes!(MENU_BUTTON_CLASS.to_vec())} />
                     <LanguageMenu class={classes!(MENU_BUTTON_CLASS.to_vec())} />
                     <ThemeMenu class={classes!(MENU_BUTTON_CLASS.to_vec())} />
                     <button type="button" class="hidden md:flex rounded-r-md px-4 py-3 cursor-pointer hover:bg-neutral-600 items-center" onclick={logout_onclick.clone()}>

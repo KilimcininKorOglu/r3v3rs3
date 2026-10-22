@@ -501,6 +501,9 @@ pub enum Error {
 
     #[error("grpc operation failed: {reason}")]
     GrpcError { reason: String },
+
+    #[error("invalid anomaly alert rules: {reason}")]
+    InvalidAnomalyAlertRules { reason: String },
 }
 
 impl Error {

@@ -279,6 +279,10 @@ fn event_label(_locale: Locale, event: WebhookEvent) -> &'static str {
         WebhookEvent::SystemDiskPressure => "webhooks.event_system_disk_pressure",
         WebhookEvent::SystemDiskLow => "webhooks.event_system_disk_low",
         WebhookEvent::SystemBandwidthSpike => "webhooks.event_system_bandwidth_spike",
+        WebhookEvent::SystemHighLatency => "webhooks.event_system_high_latency",
+        WebhookEvent::SystemHighErrorRate => "webhooks.event_system_high_error_rate",
+        WebhookEvent::SystemTrafficSpike => "webhooks.event_system_traffic_spike",
+        WebhookEvent::SystemEventLoopLag => "webhooks.event_system_event_loop_lag",
         WebhookEvent::TestPing => "webhooks.event_test_ping",
     }
 }

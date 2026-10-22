@@ -68,13 +68,17 @@ pub enum WebhookEvent {
     SystemDiskPressure,
     SystemDiskLow,
     SystemBandwidthSpike,
+    SystemHighLatency,
+    SystemHighErrorRate,
+    SystemTrafficSpike,
+    SystemEventLoopLag,
 
     // Test ping
     TestPing,
 }
 
 impl WebhookEvent {
-    pub const ALL: [WebhookEvent; 17] = [
+    pub const ALL: [WebhookEvent; 21] = [
         Self::DeploySuccess,
         Self::DeployFailure,
         Self::DeployPendingApproval,
@@ -91,6 +95,10 @@ impl WebhookEvent {
         Self::SystemDiskPressure,
         Self::SystemDiskLow,
         Self::SystemBandwidthSpike,
+        Self::SystemHighLatency,
+        Self::SystemHighErrorRate,
+        Self::SystemTrafficSpike,
+        Self::SystemEventLoopLag,
         Self::TestPing,
     ];
 
@@ -112,6 +120,10 @@ impl WebhookEvent {
             Self::SystemDiskPressure => "system.disk_pressure",
             Self::SystemDiskLow => "system.disk_low",
             Self::SystemBandwidthSpike => "system.bandwidth_spike",
+            Self::SystemHighLatency => "system.high_latency",
+            Self::SystemHighErrorRate => "system.high_error_rate",
+            Self::SystemTrafficSpike => "system.traffic_spike",
+            Self::SystemEventLoopLag => "system.event_loop_lag",
             Self::TestPing => "test.ping",
         }
     }
@@ -133,7 +145,11 @@ impl WebhookEvent {
             Self::TargetOffline
             | Self::SystemDiskPressure
             | Self::SystemDiskLow
-            | Self::SystemBandwidthSpike => WebhookEventCategory::System,
+            | Self::SystemBandwidthSpike
+            | Self::SystemHighLatency
+            | Self::SystemHighErrorRate
+            | Self::SystemTrafficSpike
+            | Self::SystemEventLoopLag => WebhookEventCategory::System,
             Self::TestPing => WebhookEventCategory::Test,
         }
     }
@@ -166,6 +182,10 @@ impl FromStr for WebhookEvent {
             "system.disk_pressure" => Ok(Self::SystemDiskPressure),
             "system.disk_low" => Ok(Self::SystemDiskLow),
             "system.bandwidth_spike" => Ok(Self::SystemBandwidthSpike),
+            "system.high_latency" => Ok(Self::SystemHighLatency),
+            "system.high_error_rate" => Ok(Self::SystemHighErrorRate),
+            "system.traffic_spike" => Ok(Self::SystemTrafficSpike),
+            "system.event_loop_lag" => Ok(Self::SystemEventLoopLag),
             "test.ping" => Ok(Self::TestPing),
             _ => Err(Error::InvalidWebhook {
                 reason: format!("unknown event '{s}'"),

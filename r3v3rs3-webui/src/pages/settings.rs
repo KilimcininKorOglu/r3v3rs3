@@ -1,3 +1,4 @@
+use crate::components::anomaly_rules::AnomalyRulesCard;
 use crate::components::http_proxy_config::{
     client_cert_label, parse_optional_id, use_client_certs,
 };
@@ -353,6 +354,7 @@ pub fn settings() -> Html {
         <BannedIpsCard />
         <BackupRestoreCard />
         <DisasterRecoveryCard />
+        <AnomalyRulesCard />
         <div ref={upgrade_card_ref}>
             <UpgradeCard />
         </div>

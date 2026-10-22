@@ -1457,6 +1457,31 @@ scrape_configs:
       credentials: 'YOUR_API_TOKEN'
 ```
 
+### Prometheus Anomaly Alerts & Notification Center
+
+r3v3rs3 includes an autonomous real-time anomaly detection engine that monitors live Prometheus traffic and runtime metrics, triggers alerts, dispatches webhooks, and surfaces critical issues in the built-in **Notification Center**:
+
+- **Real-Time Evaluation Loop**: Every 10 seconds, the server assesses recent request metrics and runtime health against configured thresholds:
+  - **P99 Latency Anomaly (`max_p99_latency_ms`)**: Triggers when 99th percentile response latency exceeds the limit (default `1000ms`).
+  - **5xx Error Rate Anomaly (`max_5xx_percent`)**: Triggers when the percentage of 5xx server errors in the recent evaluation window exceeds the threshold (default `5%`).
+  - **Traffic Surge / Spike (`max_request_rate_rps`)**: Triggers when total incoming request throughput exceeds the configured requests-per-second limit.
+  - **Event Loop Lag Anomaly (`max_event_loop_lag_ms`)**: Triggers when Tokio asynchronous runtime scheduler lag exceeds the threshold (default `150ms`).
+- **WebUI Notification Center**:
+  - The top navigation bar features an active notification bell icon displaying a live red badge with the count of active anomaly alerts.
+  - Clicking the bell opens a flyout displaying current active anomalies, their severity (`CRITICAL` or `WARNING`), current metric values vs. thresholds, and a "Dismiss Alerts" button.
+- **Webhook Dispatching & Storm Prevention**:
+  - Detected anomalies dispatch webhook events (`system.high_latency`, `system.high_error_rate`, `system.traffic_spike`, `system.event_loop_lag`) to configured notification endpoints.
+  - An automatic 5-minute cooldown per anomaly type prevents notification flood and alert storms during persistent incidents.
+- **Configuring Thresholds in WebUI**:
+  - Visit **Settings** and locate the **Anomaly Alert Thresholds** card to enable/disable automated anomaly alerts and customize detection limits.
+
+#### Admin API
+
+- `GET /api/system/anomalies`: Returns the current snapshot of active anomalies, recent anomaly history, live metrics, and active alert rules.
+- `GET /api/system/anomalies/rules`: Returns current anomaly alert threshold rules.
+- `PUT /api/system/anomalies/rules`: Updates anomaly alert threshold rules.
+- `POST /api/system/anomalies/dismiss`: Dismisses all currently active anomaly alerts.
+
 ## MCP Server
 
 The admin API exposes its tools over the Model Context Protocol at `/api/mcp`. AI clients can then inspect the ports, the proxies and the certificates, and change the proxies, with the same permission checks and the same audit log as the admin API.
