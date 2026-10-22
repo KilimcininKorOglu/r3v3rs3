@@ -729,7 +729,7 @@ The **App Store** page lists the catalog of the apps that install in one click, 
 
 **Add** opens an empty app form. **Source** selects **Image**, **Git** or **Compose**, and the form shows the fields of that source. A Git or a Compose app can pick its repository through a **Git provider connection**, see [Apps with a Connection](#apps-with-a-connection). A Compose app hides **Volumes**, **Restart Policy**, **Memory Limit (MB)** and **CPU Limit**, because its Compose file sets them.
 
-- **Domains** takes one domain on each line.
+- **Domains** takes one domain on each line. r3v3rs3 inspects the configured domains in real time and automatically applies **Wildcard SSL Auto-Sharing**: if an active wildcard certificate (such as `*.example.com`) exists on the server, subdomains (e.g. `api.example.com`, `shop.example.com`) are instantly covered with zero manual TLS configuration or duplicate certificate orders. When custom external domains are added, the UI displays CNAME setup instructions pointing to the public host along with a one-click **Verify CNAME** button that verifies public DNS records.
 - **Volumes** takes one mount on each line: `volume:/path`, or `volume:/path:ro` for a read-only mount.
 - **Memory Limit (MB)** takes a whole number of megabytes, and **CPU Limit** a number of CPUs such as `1.5`. An empty field sets no limit.
 

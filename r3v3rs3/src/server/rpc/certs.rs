@@ -1,12 +1,17 @@
 use super::RpcMethod;
-use crate::{accounts::Permission, audit::AuditRecord, certs::Cert, server::state::ServerState};
+use crate::{
+    accounts::Permission, audit::AuditRecord, certs::Cert, server::cert_list::CertList,
+    server::state::ServerState,
+};
 use flate2::{Compression, write::GzEncoder};
 use hyper::body::Bytes;
 use r3v3rs3_api::{
     audit::AuditAction,
-    cert::{CertInfo, DeleteCertResult, DeleteCertStatus, MAX_DELETE_CERTS},
+    cert::{CertInfo, CertKind, DeleteCertResult, DeleteCertStatus, MAX_DELETE_CERTS},
+    cert_coverage::{DomainCoverageInfo, DomainSslStatus, extract_root_domain},
     error::Error,
     id::ShortId,
+    subject_name::SubjectName,
 };
 use std::{collections::HashSet, sync::Arc, time::SystemTime};
 use tar::Header;
@@ -236,6 +241,129 @@ fn cert_to_tar_gz(cert: &Cert) -> anyhow::Result<Bytes> {
     Ok(buf.into())
 }
 
+pub struct GetCertCoverage {
+    pub domains: Vec<String>,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for GetCertCoverage {
+    type Output = Vec<DomainCoverageInfo>;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        let default_target = state
+            .config()
+            .public_url
+            .as_ref()
+            .and_then(|u| url::Url::parse(u.as_str()).ok())
+            .and_then(|u| u.host_str().map(ToString::to_string))
+            .unwrap_or_else(|| "localhost".to_string());
+        Ok(check_domains_coverage(
+            &state.certs,
+            &self.domains,
+            &default_target,
+        ))
+    }
+}
+
+pub fn check_domains_coverage(
+    certs: &CertList,
+    domains: &[String],
+    default_target: &str,
+) -> Vec<DomainCoverageInfo> {
+    domains
+        .iter()
+        .map(|domain| evaluate_domain_coverage(certs, domain, default_target))
+        .collect()
+}
+
+fn find_active_wildcard_cert<'a>(
+    certs: &'a CertList,
+    domain: &str,
+) -> Option<(&'a Arc<Cert>, String)> {
+    for cert in certs.iter() {
+        if cert.kind != CertKind::Server || cert.key.is_none() || !cert.is_valid() {
+            continue;
+        }
+        for san in &cert.san {
+            if let SubjectName::WildcardDnsName(root) = san
+                && san.test(domain)
+            {
+                return Some((cert, format!("*.{root}")));
+            }
+        }
+    }
+    None
+}
+
+fn find_active_dedicated_cert<'a>(
+    certs: &'a CertList,
+    subject: &SubjectName,
+) -> Option<&'a Arc<Cert>> {
+    certs.iter().find(|cert| {
+        cert.kind == CertKind::Server
+            && cert.key.is_some()
+            && cert.is_valid()
+            && cert.has_subject_name(subject)
+    })
+}
+
+fn find_expired_cert<'a>(certs: &'a CertList, subject: &SubjectName) -> Option<&'a Arc<Cert>> {
+    certs.iter().find(|cert| {
+        cert.kind == CertKind::Server
+            && cert.key.is_some()
+            && cert.has_subject_name(subject)
+            && !cert.is_valid()
+    })
+}
+
+fn evaluate_domain_coverage(
+    certs: &CertList,
+    domain: &str,
+    default_target: &str,
+) -> DomainCoverageInfo {
+    let clean_domain = domain.trim().trim_end_matches('.');
+    let Ok(subject) = clean_domain.parse::<SubjectName>() else {
+        return DomainCoverageInfo::new(clean_domain, DomainSslStatus::NoCertificate);
+    };
+
+    if let Some((wildcard_cert, pattern)) = find_active_wildcard_cert(certs, clean_domain) {
+        return DomainCoverageInfo::new(
+            clean_domain,
+            DomainSslStatus::CoveredByWildcard {
+                wildcard_cert_id: wildcard_cert.id,
+                pattern,
+            },
+        );
+    }
+
+    if let Some(dedicated_cert) = find_active_dedicated_cert(certs, &subject) {
+        return DomainCoverageInfo::new(
+            clean_domain,
+            DomainSslStatus::DedicatedCert {
+                cert_id: dedicated_cert.id,
+            },
+        );
+    }
+
+    if let Some(expired_cert) = find_expired_cert(certs, &subject) {
+        return DomainCoverageInfo::new(
+            clean_domain,
+            DomainSslStatus::Expired {
+                cert_id: expired_cert.id,
+            },
+        );
+    }
+
+    let status = if extract_root_domain(clean_domain).is_some() {
+        DomainSslStatus::CnameOrExternal {
+            suggested_cname_target: default_target.to_string(),
+        }
+    } else {
+        DomainSslStatus::NoCertificate
+    };
+    DomainCoverageInfo::new(clean_domain, status)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +389,49 @@ mod tests {
                 ("chain.pem".to_string(), 0o644),
                 ("key.pem".to_string(), 0o600)
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_domains_coverage() {
+        let root = Cert::new_ca().unwrap();
+        let wildcard =
+            Arc::new(Cert::new_self_signed(&["*.example.com".parse().unwrap()], &root).unwrap());
+        let dedicated =
+            Arc::new(Cert::new_self_signed(&["myapi.other.com".parse().unwrap()], &root).unwrap());
+
+        let certs = CertList::new([wildcard.clone(), dedicated.clone()]).await;
+
+        let results = check_domains_coverage(
+            &certs,
+            &[
+                "sub.example.com".to_string(),
+                "myapi.other.com".to_string(),
+                "portal.custom.org".to_string(),
+            ],
+            "app.example.com",
+        );
+
+        assert_eq!(results.len(), 3);
+        assert!(results[0].is_wildcard_shared);
+        assert_eq!(
+            results[0].status,
+            DomainSslStatus::CoveredByWildcard {
+                wildcard_cert_id: wildcard.id,
+                pattern: "*.example.com".to_string(),
+            }
+        );
+        assert_eq!(
+            results[1].status,
+            DomainSslStatus::DedicatedCert {
+                cert_id: dedicated.id,
+            }
+        );
+        assert_eq!(
+            results[2].status,
+            DomainSslStatus::CnameOrExternal {
+                suggested_cname_target: "app.example.com".to_string(),
+            }
         );
     }
 }

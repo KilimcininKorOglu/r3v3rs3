@@ -626,6 +626,8 @@ fn cert_file_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(certs::self_sign))
         .routes(routes!(certs::upload))
         .routes(routes!(certs::delete_many))
+        .routes(routes!(certs::check_coverage))
+        .routes(routes!(certs::verify_cname))
         .routes(routes!(certs::get, certs::delete))
         .routes(routes!(certs::download))
 }

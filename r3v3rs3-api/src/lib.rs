@@ -6,6 +6,7 @@ pub mod auth;
 pub mod cache;
 pub mod cdn;
 pub mod cert;
+pub mod cert_coverage;
 pub mod cidr;
 pub mod client_ip;
 pub mod compression;

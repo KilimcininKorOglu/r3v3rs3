@@ -729,7 +729,7 @@ Sayfa, bitmemiş bir deployment varken uygulamaları 2 saniyede bir, yoksa 10 sa
 
 **Ekle** boş bir uygulama formu açar. **Kaynak** alanında **Image**, **Git** veya **Compose** seçilir ve form o kaynağın alanlarını gösterir. Git veya Compose uygulaması reposunu bir **Git sağlayıcı bağlantısı** ile seçebilir, bkz. [Bağlantılı uygulamalar](#baglantili-uygulamalar). Compose uygulamasında **Volume'lar**, **Yeniden başlatma politikası**, **Bellek limiti (MB)** ve **CPU limiti** gizlenir, çünkü bunları Compose dosyası ayarlar.
 
-- **Alan adları** alanına her satıra bir alan adı yazın.
+- **Alan adları** alanına her satıra bir alan adı yazın. r3v3rs3 yapılandırılan alan adlarını gerçek zamanlı denetler ve **Otomatik Wildcard SSL Paylaşımı** uygular: sunucuda aktif bir wildcard sertifikası (`*.example.com` gibi) varsa, alt alan adları (`api.example.com`, `shop.example.com`) ek bir TLS ayarına veya yinelenen sertifika siparişine gerek kalmadan anında korunur. Harici özel alan adları eklendiğinde WebUI, genel ana bilgisayara yönlenen CNAME kurulum yönergeleri ve tek tıkla genel DNS kayıtlarını sorgulayan **CNAME Doğrula** butonunu sunar.
 - **Volume'lar** alanına her satıra bir mount yazın: `volume:/yol`, salt okunur mount için `volume:/yol:ro`.
 - **Bellek limiti (MB)** tam bir megabayt değeri, **CPU limiti** `1.5` gibi bir CPU sayısı alır. Boş alan limit koymaz.
 

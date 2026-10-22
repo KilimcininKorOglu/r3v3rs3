@@ -1135,7 +1135,7 @@ TLS üzerinden TCP ve HTTPS proxy'leri için bir sunucu sertifikası gerekir. Su
 2. Bir dosyadan sertifika içe aktarın (yalnız PEM formatı).
 3. Sertifikayı [ACME](https://letsencrypt.org/how-it-works/) ile otomatik alın.
 
-r3v3rs3, TLS client hello mesajındaki SNI (Server Name Indication) değerine göre uygun sertifikayı otomatik olarak seçer.
+r3v3rs3, TLS client hello mesajındaki SNI (Server Name Indication) değerine göre uygun sertifikayı otomatik olarak seçer. **Otomatik Wildcard SSL Paylaşımı** ile sunucuda bulunan bir wildcard sertifika (`*.example.com` gibi), proxy'ler ve platform uygulamalarındaki tüm eşleşen alt alan adlarını manuel sertifika seçimi yapmaya gerek kalmadan otomatik olarak korur. Yönetim API'si ayrıca kapsam durumunu raporlamak için `/api/certs/coverage` ve harici özel alan adlarının DNS CNAME yönlendirmesini doğrulamak için `/api/certs/verify_cname` uç noktalarını sunar.
 
 ## İstemci sertifikaları
 

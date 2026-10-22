@@ -1,4 +1,5 @@
 use super::auth_config::{AuthConfig, AuthForm};
+use super::domain_ssl_status::DomainCertCoverage;
 use super::error_pages_editor::ErrorPagesEditor;
 use super::proxy_dry_run::ProxyDryRun;
 use crate::API_ENDPOINT;
@@ -725,6 +726,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
             <input type="text" autocapitalize="off" value={form.vhosts.clone()} onchange={state_input(&form, text, |form, value| form.vhosts = value)} class={INPUT_CLASS} placeholder="example.com" />
             { error_view(errors.get("vhosts")) }
             <p class={HINT_CLASS}>{locale.t("http_form.vhosts_hint")}</p>
+            <DomainCertCoverage domains={split_vhosts(&form.vhosts)} />
 
             { toggle(state_input(&form, checked, |form, value| form.trust_cdn = value), form.trust_cdn, locale.t("http_form.trust_cdn"), "mt-6") }
             <p class={HINT_CLASS}>{locale.t("http_form.trust_cdn_hint")}</p>
@@ -2678,6 +2680,15 @@ fn parse_count(locale: Locale, value: &str, name_key: &str) -> Result<u32, Strin
             &[("name", locale.t(name_key)), ("max", &u32::MAX.to_string())],
         )
     })
+}
+
+fn split_vhosts(vhosts: &str) -> Vec<String> {
+    vhosts
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
 
 fn parse_vhosts(

@@ -3,7 +3,9 @@ use super::{AppError, AppState};
 use crate::{
     accounts::Caller,
     certs::Cert,
-    server::rpc::certs::{AddCert, DeleteCert, DeleteCerts, DownloadCert, GetCert, GetCertList},
+    server::rpc::certs::{
+        AddCert, DeleteCert, DeleteCerts, DownloadCert, GetCert, GetCertCoverage, GetCertList,
+    },
 };
 use axum::{
     Extension, Json,
@@ -16,6 +18,7 @@ use r3v3rs3_api::{
         CertInfo, CertPostBody, DeleteCertResult, DeleteCertsRequest, SelfSignedCertKind,
         SelfSignedCertRequest, UploadQuery,
     },
+    cert_coverage::{CnameVerifyResult, DomainCoverageInfo},
     error::Error,
     id::ShortId,
 };
@@ -34,6 +37,64 @@ pub async fn list(
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<Box<Vec<CertInfo>>>, AppError> {
     Ok(Json(state.call(&caller, GetCertList).await?))
+}
+
+/// Parameters for querying public DNS CNAME verification.
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+pub struct CnameVerifyQuery {
+    pub domain: String,
+    pub expected_target: Option<String>,
+}
+
+/// Checks certificate coverage and wildcard auto-sharing status for a list of domains.
+#[utoipa::path(
+    post,
+    path = "/coverage",
+    tag = "certs",
+    operation_id = "check_cert_coverage",
+    request_body = Vec<String>,
+    responses((status = 200, description = "The certificate coverage report for each domain.", body = Vec<DomainCoverageInfo>), ErrorResponses)
+)]
+pub async fn check_coverage(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(domains): Json<Vec<String>>,
+) -> Result<Json<Box<Vec<DomainCoverageInfo>>>, AppError> {
+    Ok(Json(
+        state.call(&caller, GetCertCoverage { domains }).await?,
+    ))
+}
+
+/// Queries public DNS to verify if a domain's CNAME record points to the expected target.
+#[utoipa::path(
+    get,
+    path = "/verify_cname",
+    tag = "certs",
+    operation_id = "verify_cname",
+    params(CnameVerifyQuery),
+    responses((status = 200, description = "The CNAME verification result.", body = CnameVerifyResult), ErrorResponses)
+)]
+pub async fn verify_cname(
+    State(state): State<AppState>,
+    Extension(_caller): Extension<Caller>,
+    Query(query): Query<CnameVerifyQuery>,
+) -> Result<Json<CnameVerifyResult>, AppError> {
+    let fallback = {
+        let data = state.data.lock().await;
+        data.config
+            .public_url
+            .as_ref()
+            .and_then(|u| url::Url::parse(u.as_str()).ok())
+            .and_then(|u| u.host_str().map(ToString::to_string))
+            .unwrap_or_else(|| "localhost".to_string())
+    };
+    let result = crate::certs::cname::verify_domain_cname(
+        &query.domain,
+        query.expected_target.as_deref(),
+        &fallback,
+    )
+    .await;
+    Ok(Json(result))
 }
 
 /// Returns one certificate.

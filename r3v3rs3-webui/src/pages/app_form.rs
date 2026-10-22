@@ -4,6 +4,7 @@ use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::app_repository::RepositoryPicker;
 use super::resource_page::text_input;
 use crate::components::compose_editor::ComposeEditor;
+use crate::components::domain_ssl_status::DomainCertCoverage;
 use r3v3rs3_api::container::{ResourceLimits, RestartPolicy, VolumeMount};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
@@ -772,6 +773,14 @@ fn parse_cpus(locale: Locale, value: &str) -> Result<u64, String> {
     }
 }
 
+fn split_domains(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
 /// Parses every line that is not blank.
 fn parse_lines<T>(
     locale: Locale,
@@ -831,6 +840,7 @@ pub fn fields_view(
             { source_view(locale, form, options.connections) }
             { text_field(locale, form, "apps.port", Some("apps.port_hint"), |f| &mut f.port) }
             { text_area(locale, form, "apps.domains", "apps.domains_hint", |f| &mut f.domains) }
+            <DomainCertCoverage domains={split_domains(&form.domains)} />
             { ports_view(locale, form, options.ports) }
             { text_field(locale, form, "apps.health_check_path", Some("apps.health_check_path_hint"), |f| &mut f.health_check_path) }
             { database_select(locale, form, options.databases) }

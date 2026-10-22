@@ -1135,7 +1135,7 @@ A TCP over TLS or HTTPS proxy needs a server certificate. There are three ways t
 2. Import a certificate from a file (PEM format only)
 3. Use [ACME](https://letsencrypt.org/how-it-works/) to automatically provision a certificate
 
-r3v3rs3 selects the certificate from the SNI (Server Name Indication) in the TLS client hello message.
+r3v3rs3 selects the certificate from the SNI (Server Name Indication) in the TLS client hello message. With **Wildcard SSL Auto-Sharing**, an existing wildcard certificate (such as `*.example.com`) automatically covers all matching subdomains across proxies and platform applications with zero manual certificate selection. The admin API also exposes `/api/certs/coverage` to report coverage and `/api/certs/verify_cname` to verify public DNS CNAME delegation for external custom domains.
 
 ## Client Certificates
 
