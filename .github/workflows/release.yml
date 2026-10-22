@@ -4,12 +4,6 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - main
-    paths:
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - ".github/workflows/release.yml"
   # A manual run builds the WebUI and all binaries and publishes nothing.
   workflow_dispatch:
 
@@ -121,45 +115,85 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" --clobber r3v3rs3-${{ matrix.target }}.tar.xz r3v3rs3-cli-${{ matrix.target }}.tar.gz
 
-  # The main push already ran the Rust workflow for this commit. The release runs the test
-  # suite again only when that proof is missing, for example on a moved or older tag. A Rust
-  # run that is still queued or in progress is worth waiting for, so the gate polls for it
-  # before it decides to test again.
+  # The main push already ran the Rust workflow for this commit (or its parent feature commit).
+  # The release runs the test suite again only when that proof is missing, for example on a moved
+  # or older tag. A Rust run that is still queued or in progress is worth waiting for, so the gate
+  # polls for it before it decides to test again.
   test-gate:
     name: Test gate
     runs-on: ubuntu-24.04
     outputs:
       tested: ${{ steps.check.outputs.tested }}
     steps:
-      - name: Check for a green Rust run of this commit
+      - name: Check for a green Rust run of this commit or its parent
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for i in $(seq 1 40); do
-            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow Rust --commit "$GITHUB_SHA" --json conclusion,status)
+          parent=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.parents[0].sha // empty' 2>/dev/null || true)
+          if [ -n "$parent" ]; then
+            echo "Found parent commit: $parent"
+          fi
+
+          check_commit_run() {
+            local target="$1"
+            [ -z "$target" ] && { echo "none"; return; }
+            local runs
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow Rust --commit "$target" --json conclusion,status)
             if [ "$(echo "$runs" | jq 'length')" -eq 0 ]; then
-              echo "this commit has no Rust run, the tests run here"
-              echo "tested=false" >> "$GITHUB_OUTPUT"
-              exit 0
+              echo "none"
+              return
             fi
+            local conclusion
             conclusion=$(echo "$runs" | jq -r '[.[] | select(.status == "completed")] | map(.conclusion) | sort | last // "running"')
-            case "$conclusion" in
+            echo "$conclusion"
+          }
+
+          for i in $(seq 1 40); do
+            # 1. Check current commit (e.g. if the tag commit itself was pushed to main)
+            res=$(check_commit_run "$GITHUB_SHA")
+            case "$res" in
               success)
                 echo "the Rust run of $GITHUB_SHA is green, the tests are skipped"
                 echo "tested=true" >> "$GITHUB_OUTPUT"
                 exit 0
                 ;;
               failure | cancelled | startup_failure | timed_out)
-                echo "the Rust run of $GITHUB_SHA is $conclusion" >&2
+                echo "the Rust run of $GITHUB_SHA is $res" >&2
                 echo "tested=false" >> "$GITHUB_OUTPUT"
                 exit 0
                 ;;
             esac
-            echo "the Rust run of $GITHUB_SHA is not finished yet ($i/40)"
+
+            # 2. Check parent commit (for release bump commits where the parent feature commit already passed CI)
+            if [ -n "$parent" ]; then
+              parent_res=$(check_commit_run "$parent")
+              case "$parent_res" in
+                success)
+                  echo "the Rust run of parent commit $parent is green, the tests are skipped"
+                  echo "tested=true" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+                failure | cancelled | startup_failure | timed_out)
+                  echo "the Rust run of parent commit $parent is $parent_res" >&2
+                  ;;
+              esac
+            fi
+
+            # If neither commit has any Rust run and we gave it a moment to appear
+            if [ "$res" = "none" ] && { [ -z "$parent" ] || [ "${parent_res:-none}" = "none" ]; }; then
+              if [ "$i" -ge 3 ]; then
+                echo "neither commit nor its parent has a Rust run, the tests run here"
+                echo "tested=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+
+            echo "Rust run is not finished yet (target: $res, parent: ${parent_res:-none}) ($i/40)"
             sleep 30
           done
-          echo "no finished Rust run of $GITHUB_SHA within 20 minutes" >&2
+
+          echo "no finished Rust run within 20 minutes" >&2
           echo "tested=false" >> "$GITHUB_OUTPUT"
 
   test:
