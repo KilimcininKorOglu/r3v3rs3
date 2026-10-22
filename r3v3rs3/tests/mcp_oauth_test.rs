@@ -240,112 +240,135 @@ async fn the_authorization_code_flow_issues_tokens() -> anyhow::Result<()> {
         let client = Client::new();
         let cookie = session(&client, &addr).await?;
         let (verifier, challenge) = pkce();
-        let state = "st4te";
-        let consent = no_redirect()
-            .post(format!("http://{addr}/oauth/authorize"))
-            .header("cookie", &cookie)
-            .form(&[
-                ("client_id", CLIENT_ID),
-                ("redirect_uri", REDIRECT_URI),
-                ("state", state),
-                ("code_challenge", challenge.as_str()),
-                ("scope", "read edit"),
-                ("decision", "approve"),
-            ])
-            .send()
-            .await?;
-        assert_eq!(consent.status(), StatusCode::SEE_OTHER);
-        let location = consent.headers().get("location").unwrap().to_str()?;
-        assert!(location.starts_with(REDIRECT_URI), "{location}");
-        let code = location
-            .split("code=")
-            .nth(1)
-            .and_then(|rest| rest.split('&').next())
-            .unwrap()
-            .to_string();
 
-        // The code trades for tokens with the right verifier.
-        let tokens: Value = client
-            .post(format!("http://{addr}/oauth/token"))
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("code", code.as_str()),
-                ("redirect_uri", REDIRECT_URI),
-                ("client_id", CLIENT_ID),
-                ("code_verifier", verifier.as_str()),
-            ])
-            .send()
-            .await?
-            .json()
-            .await?;
-        assert_eq!(tokens["token_type"], json!("Bearer"));
-        assert_eq!(tokens["scope"], json!("read edit"));
-        let access = tokens["access_token"].as_str().unwrap().to_string();
-        let refresh = tokens["refresh_token"].as_str().unwrap().to_string();
+        let code = authorize_and_get_code(addr, &cookie, &challenge).await?;
+        let (access, refresh) = trade_code_for_tokens(&client, addr, &code, &verifier).await?;
+        assert_code_replay_and_bad_verifier(&client, addr, &code).await?;
+        assert_refresh_token_rotation(&client, addr, &refresh, &access).await?;
 
-        // The same code trades only once.
-        let replay: Value = client
-            .post(format!("http://{addr}/oauth/token"))
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("code", code.as_str()),
-                ("redirect_uri", REDIRECT_URI),
-                ("client_id", CLIENT_ID),
-                ("code_verifier", verifier.as_str()),
-            ])
-            .send()
-            .await?
-            .json()
-            .await?;
-        assert_eq!(replay["error"], json!("invalid_grant"));
-
-        // A wrong verifier does not trade either.
-        let (_, challenge) = pkce();
-        let bad = client
-            .post(format!("http://{addr}/oauth/token"))
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("code", "unused"),
-                ("redirect_uri", REDIRECT_URI),
-                ("client_id", CLIENT_ID),
-                (
-                    "code_verifier",
-                    "wrong-verifier-wrong-verifier-wrong-verifier",
-                ),
-            ])
-            .send()
-            .await?;
-        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
-        let _ = challenge;
-
-        // The refresh token rotates.
-        let rotated: Value = client
-            .post(format!("http://{addr}/oauth/token"))
-            .form(&[
-                ("grant_type", "refresh_token"),
-                ("refresh_token", refresh.as_str()),
-            ])
-            .send()
-            .await?
-            .json()
-            .await?;
-        assert_eq!(rotated["scope"], json!("read edit"));
-        assert_ne!(rotated["refresh_token"], json!(refresh));
-        assert_ne!(rotated["access_token"], json!(access));
-
-        // The old refresh token is invalid after the rotation.
-        let replayed = client
-            .post(format!("http://{addr}/oauth/token"))
-            .form(&[
-                ("grant_type", "refresh_token"),
-                ("refresh_token", refresh.as_str()),
-            ])
-            .send()
-            .await?;
-        assert_eq!(replayed.status(), StatusCode::BAD_REQUEST);
         Ok(())
     })
     .await
+}
+
+async fn authorize_and_get_code(
+    addr: SocketAddr,
+    cookie: &str,
+    challenge: &str,
+) -> anyhow::Result<String> {
+    let consent = no_redirect()
+        .post(format!("http://{addr}/oauth/authorize"))
+        .header("cookie", cookie)
+        .form(&[
+            ("client_id", CLIENT_ID),
+            ("redirect_uri", REDIRECT_URI),
+            ("state", "st4te"),
+            ("code_challenge", challenge),
+            ("scope", "read edit"),
+            ("decision", "approve"),
+        ])
+        .send()
+        .await?;
+    assert_eq!(consent.status(), StatusCode::SEE_OTHER);
+    let location = consent.headers().get("location").unwrap().to_str()?;
+    assert!(location.starts_with(REDIRECT_URI), "{location}");
+    let code = location
+        .split("code=")
+        .nth(1)
+        .and_then(|rest| rest.split('&').next())
+        .unwrap()
+        .to_string();
+    Ok(code)
+}
+
+async fn trade_code_for_tokens(
+    client: &Client,
+    addr: SocketAddr,
+    code: &str,
+    verifier: &str,
+) -> anyhow::Result<(String, String)> {
+    let tokens: Value = client
+        .post(format!("http://{addr}/oauth/token"))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", REDIRECT_URI),
+            ("client_id", CLIENT_ID),
+            ("code_verifier", verifier),
+        ])
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(tokens["token_type"], json!("Bearer"));
+    assert_eq!(tokens["scope"], json!("read edit"));
+    let access = tokens["access_token"].as_str().unwrap().to_string();
+    let refresh = tokens["refresh_token"].as_str().unwrap().to_string();
+    Ok((access, refresh))
+}
+
+async fn assert_code_replay_and_bad_verifier(
+    client: &Client,
+    addr: SocketAddr,
+    code: &str,
+) -> anyhow::Result<()> {
+    let replay: Value = client
+        .post(format!("http://{addr}/oauth/token"))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", REDIRECT_URI),
+            ("client_id", CLIENT_ID),
+            ("code_verifier", "any-verifier"),
+        ])
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(replay["error"], json!("invalid_grant"));
+
+    let bad = client
+        .post(format!("http://{addr}/oauth/token"))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", "unused"),
+            ("redirect_uri", REDIRECT_URI),
+            ("client_id", CLIENT_ID),
+            (
+                "code_verifier",
+                "wrong-verifier-wrong-verifier-wrong-verifier",
+            ),
+        ])
+        .send()
+        .await?;
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+async fn assert_refresh_token_rotation(
+    client: &Client,
+    addr: SocketAddr,
+    refresh: &str,
+    access: &str,
+) -> anyhow::Result<()> {
+    let rotated: Value = client
+        .post(format!("http://{addr}/oauth/token"))
+        .form(&[("grant_type", "refresh_token"), ("refresh_token", refresh)])
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(rotated["scope"], json!("read edit"));
+    assert_ne!(rotated["refresh_token"], json!(refresh));
+    assert_ne!(rotated["access_token"], json!(access));
+
+    let replayed = client
+        .post(format!("http://{addr}/oauth/token"))
+        .form(&[("grant_type", "refresh_token"), ("refresh_token", refresh)])
+        .send()
+        .await?;
+    assert_eq!(replayed.status(), StatusCode::BAD_REQUEST);
+    Ok(())
 }
 
 #[tokio::test]
@@ -524,78 +547,84 @@ impl rmcp::ClientHandler for TestClient {}
 
 #[tokio::test]
 async fn the_mcp_endpoint_serves_the_tools() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-server")?;
+    with_admin(&dir.0, |addr| async move {
+        let token = access_token(&addr).await?;
+        assert_mcp_anonymous_and_raw(addr, &token).await?;
+        assert_mcp_client_tools(addr, &token).await?;
+        Ok(())
+    })
+    .await
+}
+
+async fn assert_mcp_anonymous_and_raw(addr: SocketAddr, token: &str) -> anyhow::Result<()> {
+    // Without a token the endpoint points at the resource metadata.
+    let anonymous = Client::new()
+        .post(format!("http://{addr}/api/mcp"))
+        .header("accept", "application/json")
+        .body("{}")
+        .send()
+        .await?;
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+    let www = anonymous
+        .headers()
+        .get("www-authenticate")
+        .unwrap()
+        .to_str()?;
+    assert!(www.contains("oauth-protected-resource"), "{www}");
+
+    // The raw request with the token must pass the middleware.
+    let authorized = Client::new()
+        .post(format!("http://{addr}/api/mcp"))
+        .header("authorization", format!("Bearer {token}"))
+        .header("accept", "application/json, text/event-stream")
+        .json(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "r3v3rs3-test", "version": "0.0.1"},
+            }
+        }))
+        .send()
+        .await?;
+    let status = authorized.status();
+    let body = authorized.text().await?;
+    assert!(status.is_success(), "{status} {body}");
+    Ok(())
+}
+
+async fn assert_mcp_client_tools(addr: SocketAddr, token: &str) -> anyhow::Result<()> {
     use rmcp::model::CallToolRequestParams;
     use rmcp::service::serve_client;
     use rmcp::transport::streamable_http_client::{
         StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
     };
 
-    let dir = TempDir::new("mcp-server")?;
-    with_admin(&dir.0, |addr| async move {
-        let token = access_token(&addr).await?;
+    let transport = StreamableHttpClientTransport::from_config(
+        StreamableHttpClientTransportConfig::with_uri(format!("http://{addr}/api/mcp"))
+            .auth_header(token),
+    );
+    let client = serve_client(TestClient, transport).await?;
 
-        // Without a token the endpoint points at the resource metadata.
-        let anonymous = Client::new()
-            .post(format!("http://{addr}/api/mcp"))
-            .header("accept", "application/json")
-            .body("{}")
-            .send()
-            .await?;
-        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
-        let www = anonymous
-            .headers()
-            .get("www-authenticate")
-            .unwrap()
-            .to_str()?;
-        assert!(www.contains("oauth-protected-resource"), "{www}");
+    let tools = client.list_tools(Default::default()).await?;
+    let names: Vec<&str> = tools.tools.iter().map(|tool| tool.name.as_ref()).collect();
+    assert!(names.contains(&"list_proxies"), "{names:?}");
+    assert!(names.contains(&"server_status"), "{names:?}");
 
-        // The raw request with the token must pass the middleware.
-        let authorized = Client::new()
-            .post(format!("http://{addr}/api/mcp"))
-            .header("authorization", format!("Bearer {token}"))
-            .header("accept", "application/json, text/event-stream")
-            .json(&json!({
-                "jsonrpc": "2.0", "id": 1, "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {"name": "r3v3rs3-test", "version": "0.0.1"},
-                }
-            }))
-            .send()
-            .await?;
-        let status = authorized.status();
-        let body = authorized.text().await?;
-        eprintln!("raw initialize: status={status} body={body}");
-        assert!(status.is_success(), "{status} {body}");
+    let result = client
+        .call_tool(CallToolRequestParams::new("server_status"))
+        .await?;
+    let text = result
+        .content
+        .first()
+        .and_then(|content| content.as_text())
+        .map(|text| text.text.clone())
+        .unwrap_or_default();
+    assert!(text.contains("workers"), "{text}");
 
-        let transport = StreamableHttpClientTransport::from_config(
-            StreamableHttpClientTransportConfig::with_uri(format!("http://{addr}/api/mcp"))
-                // The transport adds the `Bearer ` prefix itself.
-                .auth_header(&token),
-        );
-        let client = serve_client(TestClient, transport).await?;
-
-        let tools = client.list_tools(Default::default()).await?;
-        let names: Vec<&str> = tools.tools.iter().map(|tool| tool.name.as_ref()).collect();
-        assert!(names.contains(&"list_proxies"), "{names:?}");
-        assert!(names.contains(&"server_status"), "{names:?}");
-
-        let result = client
-            .call_tool(CallToolRequestParams::new("server_status"))
-            .await?;
-        let text = result
-            .content
-            .first()
-            .and_then(|content| content.as_text())
-            .map(|text| text.text.clone())
-            .unwrap_or_default();
-        assert!(text.contains("workers"), "{text}");
-
-        client.cancel().await?;
-        Ok(())
-    })
-    .await
+    client.cancel().await?;
+    Ok(())
 }
 
 /// The command line client connects with an explicit `--token` and prints the tools.
@@ -606,8 +635,12 @@ async fn the_client_binary_lists_the_tools() -> anyhow::Result<()> {
         let token = access_token(&addr).await?;
 
         // The client binary of the workspace, built up to date before the test runs it.
-        let binary =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/debug/r3v3rs3-cli");
+        let binary = match std::env::var("CARGO_TARGET_DIR") {
+            Ok(dir) => std::path::PathBuf::from(dir).join("debug/r3v3rs3-cli"),
+            Err(_) => {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/debug/r3v3rs3-cli")
+            }
+        };
         let status = std::process::Command::new("cargo")
             .args(["build", "-p", "r3v3rs3-cli"])
             .status()

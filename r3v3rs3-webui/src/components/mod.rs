@@ -3,6 +3,7 @@ pub mod acme_provider;
 pub mod anomaly_rules;
 pub mod auth_config;
 pub mod compose_editor;
+pub mod compose_topology;
 pub mod custom_acme;
 pub mod data_list;
 pub mod discovery_status;

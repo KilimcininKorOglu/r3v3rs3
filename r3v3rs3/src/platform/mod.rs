@@ -60,8 +60,9 @@ use r3v3rs3_api::git::GitRef;
 use r3v3rs3_api::git_connection::PublicUrl;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppLog, AppRequest, ComposeServiceStatus, DeploymentEntry, EnvEntry, EnvGroup,
-    EnvGroupSpec, EnvGroupSummary, FileEntry, ImageUpdateStatus, LOCAL_TARGET, PlatformConfig,
+    AppEntry, AppLog, AppRequest, ComposeServiceStatus, ComposeTopology, DeploymentEntry, EnvEntry,
+    EnvGroup, EnvGroupSpec, EnvGroupSummary, FileEntry, ImageUpdateStatus, LOCAL_TARGET,
+    PlatformConfig, parse_compose_topology,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -810,6 +811,41 @@ impl Platform {
         }
         services.sort_by(|a, b| a.service.cmp(&b.service));
         Ok(services)
+    }
+
+    /// Returns the architecture dependency graph and topology of a Compose app.
+    pub async fn app_topology(&self, id: ShortId) -> anyhow::Result<ComposeTopology> {
+        let app = self.app(id).await?;
+        let (yaml, entrypoint) = match &app.spec.source {
+            r3v3rs3_api::platform::AppSource::Compose {
+                compose_yaml,
+                service,
+                file,
+                ..
+            } => {
+                let y = if let Some(inline) = compose_yaml {
+                    inline.clone()
+                } else {
+                    let app_dir = self.compose_dir.join(id.to_string());
+                    let src_dir = app_dir.join("src");
+                    let file_path = if let Some(f) = file {
+                        src_dir.join(f.as_str())
+                    } else {
+                        src_dir.join("compose.yaml")
+                    };
+                    tokio::fs::read_to_string(&file_path)
+                        .await
+                        .unwrap_or_default()
+                };
+                (y, Some(service.to_string()))
+            }
+            _ => (String::new(), None),
+        };
+
+        let statuses = self.app_services(id).await.unwrap_or_default();
+        let topology = parse_compose_topology(&yaml, Some(&statuses), entrypoint.as_deref())
+            .map_err(|e| anyhow::anyhow!("failed to parse compose topology: {e}"))?;
+        Ok(topology)
     }
 
     /// Opens a terminal into the container of the running deployment of an app. Only the local

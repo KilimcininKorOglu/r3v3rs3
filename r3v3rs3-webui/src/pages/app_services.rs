@@ -1,16 +1,23 @@
-//! Service-level health and container status for Docker Compose applications.
+//! Service-level health, container status and architecture topology for Docker Compose applications.
 
 use super::Route;
 use super::settings::fetch_json;
 use crate::API_ENDPOINT;
+use crate::components::compose_topology::ComposeTopologyGraph;
 use gloo_net::http::Request;
 use r3v3rs3_api::container::ContainerHealth;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::ComposeServiceStatus;
+use r3v3rs3_api::platform::{ComposeServiceStatus, ComposeTopology};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ComposeViewMode {
+    Graph,
+    Table,
+}
 
 #[derive(Properties, PartialEq)]
 pub struct Props {
@@ -23,18 +30,22 @@ pub fn app_services(props: &Props) -> Html {
     let locale = props.locale;
     let id = props.id;
     let services = use_state(|| Option::<Vec<ComposeServiceStatus>>::None);
+    let topology = use_state(|| Option::<ComposeTopology>::None);
+    let view_mode = use_state(|| ComposeViewMode::Graph);
 
     {
         let services = services.clone();
+        let topology = topology.clone();
         use_effect_with(id, move |&id| {
-            load_services(locale, id, services);
+            load_data(locale, id, services, topology);
         });
     }
 
     let refresh = {
         let services = services.clone();
+        let topology = topology.clone();
         Callback::from(move |_: MouseEvent| {
-            load_services(locale, id, services.clone());
+            load_data(locale, id, services.clone(), topology.clone());
         })
     };
 
@@ -42,20 +53,70 @@ pub fn app_services(props: &Props) -> Html {
         return html! {};
     };
 
-    if list.is_empty() {
+    if list.is_empty() && topology.is_none() {
         return html! {};
     }
 
     html! {
         <div class="mt-8 bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 rounded-md p-4 sm:p-6">
-            <div class="flex items-center justify-between mb-4">
-                <div>
-                    <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                        {locale.t("apps.compose_services")}
-                    </h3>
-                    <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                        {locale.t("apps.compose_services_desc")}
-                    </p>
+            { render_header(locale, &view_mode, &refresh) }
+
+            if *view_mode == ComposeViewMode::Graph {
+                if let Some(topo) = (*topology).as_ref() {
+                    <ComposeTopologyGraph topology={topo.clone()} {locale} />
+                } else {
+                    <div class="py-8 text-center text-xs text-neutral-400">
+                        {locale.t("compose.topology_empty")}
+                    </div>
+                }
+            } else {
+                { services_table(locale, id, list) }
+            }
+        </div>
+    }
+}
+
+fn render_header(
+    locale: Locale,
+    view_mode: &UseStateHandle<ComposeViewMode>,
+    refresh: &Callback<MouseEvent>,
+) -> Html {
+    let current_mode = **view_mode;
+    let set_graph = {
+        let view_mode = view_mode.clone();
+        Callback::from(move |_| view_mode.set(ComposeViewMode::Graph))
+    };
+    let set_table = {
+        let view_mode = view_mode.clone();
+        Callback::from(move |_| view_mode.set(ComposeViewMode::Table))
+    };
+
+    html! {
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-5 pb-3 border-b border-neutral-200 dark:border-neutral-700">
+            <div>
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                    {locale.t("compose.topology_title")}
+                </h3>
+                <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    {locale.t("compose.topology_desc")}
+                </p>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="inline-flex rounded-lg p-0.5 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700">
+                    <button
+                        type="button"
+                        onclick={set_graph}
+                        class={tab_class(current_mode == ComposeViewMode::Graph)}
+                    >
+                        {locale.t("compose.topology_tab_graph")}
+                    </button>
+                    <button
+                        type="button"
+                        onclick={set_table}
+                        class={tab_class(current_mode == ComposeViewMode::Table)}
+                    >
+                        {locale.t("compose.topology_tab_table")}
+                    </button>
                 </div>
                 <button
                     type="button"
@@ -65,21 +126,33 @@ pub fn app_services(props: &Props) -> Html {
                     {locale.t("apps.log_refresh")}
                 </button>
             </div>
-            { services_table(locale, id, list) }
         </div>
     }
 }
 
-fn load_services(
+fn tab_class(active: bool) -> &'static str {
+    if active {
+        "px-3 py-1 text-xs font-semibold rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-sm"
+    } else {
+        "px-3 py-1 text-xs font-medium rounded-md text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
+    }
+}
+
+fn load_data(
     locale: Locale,
     id: ShortId,
     services: UseStateHandle<Option<Vec<ComposeServiceStatus>>>,
+    topology: UseStateHandle<Option<ComposeTopology>>,
 ) {
     spawn_local(async move {
         let path = format!("{API_ENDPOINT}/apps/{id}/services");
         if let Ok(list) = fetch_json::<Vec<ComposeServiceStatus>>(locale, Request::get(&path)).await
         {
             services.set(Some(list));
+        }
+        let topo_path = format!("{API_ENDPOINT}/apps/{id}/topology");
+        if let Ok(topo) = fetch_json::<ComposeTopology>(locale, Request::get(&topo_path)).await {
+            topology.set(Some(topo));
         }
     });
 }

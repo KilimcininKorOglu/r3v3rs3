@@ -23,13 +23,13 @@ use r3v3rs3_api::{
     id::ShortId,
     platform::{
         AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
-        ComposeServiceStatus, DeploymentEntry, DeploymentTrigger, EnvEntry, EnvGroup, EnvGroupSpec,
-        EnvGroupSummary, EnvironmentDiffReport, EnvironmentEnvSpec, EnvironmentSpec,
-        EnvironmentSyncReport, EnvironmentSyncRequest, GitTokenRequest, ImageUpdateStatus,
-        KeyRotationReport, MetricsQuery, NodeAlertRules, Project, ProjectEnvironment, ProjectSpec,
-        ProjectSummary, PrunePolicy, PruneResult, RegistryEntry, RegistryRequest,
-        ScheduledCommandRequest, ScheduledCommandRunResult, TargetEntry, TargetRequest,
-        TargetToken, WebhookSecret,
+        ComposeServiceStatus, ComposeTopology, DeploymentEntry, DeploymentTrigger, EnvEntry,
+        EnvGroup, EnvGroupSpec, EnvGroupSummary, EnvironmentDiffReport, EnvironmentEnvSpec,
+        EnvironmentSpec, EnvironmentSyncReport, EnvironmentSyncRequest, GitTokenRequest,
+        ImageUpdateStatus, KeyRotationReport, MetricsQuery, NodeAlertRules, Project,
+        ProjectEnvironment, ProjectSpec, ProjectSummary, PrunePolicy, PruneResult, RegistryEntry,
+        RegistryRequest, ScheduledCommandRequest, ScheduledCommandRunResult, TargetEntry,
+        TargetRequest, TargetToken, WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -660,6 +660,26 @@ pub async fn get_services(
     let platform = state.platform(&caller, Permission::Read).await?;
     Ok(Json(
         platform.app_services(id).await.map_err(platform_error)?,
+    ))
+}
+
+/// Returns the architecture dependency graph and topology of a Compose app.
+#[utoipa::path(
+    get,
+    path = "/{id}/topology",
+    tag = "platform",
+    operation_id = "get_app_topology",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The Compose architecture topology.", body = ComposeTopology), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_topology(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<ComposeTopology>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    Ok(Json(
+        platform.app_topology(id).await.map_err(platform_error)?,
     ))
 }
 

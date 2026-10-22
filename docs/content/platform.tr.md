@@ -234,6 +234,21 @@ Birden fazla servisten oluşan Compose uygulamalarında:
 - **Servis Bazlı Loglar**: Uygulamanın **Log** sayfasında yer alan **Servis** seçici menüsü, ana trafik servisinin yanı sıra Compose projesindeki herhangi bir servisin loglarını ayrı ayrı izlemeyi sağlar. Hem statik log alımı (`GET /api/apps/{id}/logs?service=<isim>`) hem de canlı WebSocket log akışı (`GET /api/apps/{id}/logs/live?service=<isim>`) servis filtresini destekler.
 - **API**: Servis konteynerlerinin listesi ve sağlık durumları doğrudan `GET /api/apps/{id}/services` üzerinden sorgulanabilir.
 
+#### Compose Mimari Topolojisi ve Servis Bağımlılık Grafiği
+
+Docker Compose uygulamaları için r3v3rs3, etkileşimli bir SVG mimari görselleştiricisi ve servis bağımlılık grafiği sunar:
+
+- **Etkileşimli Mimari Grafiği**: Tanımlanan tüm servisleri, ağları ve kalıcı birimleri (volumes) bağımlılık hiyerarşisine göre dizilmiş görsel kartlar halinde sunar.
+- **Bağımlılık ve İlişki Bağlantıları**:
+  - `depends_on`: Servislerin başlama ve çalışma bağımlılıklarını gösteren mavi yönlü bezier okları; sağlık koşulu etiketleriyle (`healthy`, `started`, `completed`) birlikte gösterilir.
+  - `networks`: Konteynerlerin dahil olduğu ortak ağları gösteren kesikli camgöbeği (cyan) bağlantılar.
+  - `volumes`: Kalıcı birim ve host bağlamalarını (bind mount) gösteren noktalı mor bağlantılar; erişim modları (`ro`/`rw`) ve hedef bağlama yolları ile gösterilir.
+- **Gerçek Zamanlı Sağlık ve Çalışma Durumu**: Düğümler anlık çalışma durumunu renkli göstergelerle yansıtır: çalışan ve sağlıklı servisler için yeşil, başlatılanlar için sarı/kehribar, durdurulmuş veya sağlıksız servisler için kırmızı. Dış alan adı trafiğini karşılayan ana giriş servisi özel mavi yönlendirme rozetiyle vurgulanır.
+- **Düğüm İnceleyici Paneli**: Herhangi bir düğüme tıklandığında imaj etiketleri, port eşlemeleri, çevre değişkeni sayısı, yeniden başlatma politikası, konteyner adı ve bağlı tüm alt/üst servis ilişkilerini özetleyen detaylı bir inceleme çekmecesi açılır.
+- **Filtreleme ve Yakınlaştırma**: Düğüm türüne göre anında filtreleme (Tümü, Servisler, Ağlar, Birimler) ve ölçeklenebilir yakınlaştırma/uzaklaştırma kontrolleri sunar.
+- **Compose Editöründe Canlı Önizleme**: Görsel Compose YAML editöründe yer alan **Mimari Grafiği** sekmesi sayesinde şablon seçerken veya YAML yazarken mimari grafiği canlı olarak otomatik çizilir.
+- **API**: Mimari topoloji ve bağımlılık grafiği doğrudan `GET /api/apps/{id}/topology` üzerinden sorgulanabilir.
+
 #### Görsel Compose Editörü ve Çevre Değişkeni Tamamlama
 
 WebUI, çok servisli stack'leri yapılandırmayı sezgisel ve hatasız hale getiren görsel bir Docker Compose YAML editörü sunar:

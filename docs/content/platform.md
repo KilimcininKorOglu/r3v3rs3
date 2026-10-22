@@ -234,6 +234,21 @@ For Compose applications consisting of multiple services:
 - **Per-Service Logs**: On the app's **Log** page, a **Service** selector dropdown allows operators to switch between all services (the primary traffic container) and any individual container in the Compose project. Both static log retrieval (`GET /api/apps/{id}/logs?service=<name>`) and live WebSocket log streaming (`GET /api/apps/{id}/logs/live?service=<name>`) support the service filter.
 - **API**: The list of service containers and their health status can be queried directly via `GET /api/apps/{id}/services`.
 
+#### Compose Architecture Topology and Service Dependency Graph
+
+For Docker Compose applications, r3v3rs3 provides an interactive SVG architecture visualizer and service dependency graph:
+
+- **Interactive Architecture Graph**: Visually displays all declared services, networks, and persistent volume mounts as modular cards arranged in dependency order.
+- **Dependency & Relationship Edges**:
+  - `depends_on`: Solid blue directed bezier arrows indicating service boot dependencies, annotated with health conditions (`healthy`, `started`, `completed`).
+  - `networks`: Dashed cyan connections representing container network attachments.
+  - `volumes`: Dotted purple connections showing persistent volume attachments and bind mounts, with access mode labels (`ro`/`rw`) and mount paths.
+- **Real-Time Health & Runtime Status**: Nodes display live runtime indicators: green halos for healthy/running containers, amber for starting/restarting, and red for exited or unhealthy states. The primary external traffic entrypoint is highlighted with a blue route badge.
+- **Node Inspector Flyout**: Clicking any node opens an inspection panel detailing image tags, port mappings, environment variable counts, restart policies, container names, and complete upstream/downstream dependency lists.
+- **Filter & Zoom Controls**: Filter by node type (All, Services, Networks, Volumes) and zoom in/out with responsive viewBox scaling.
+- **Live Preview in Compose Editor**: The WebUI Compose YAML editor includes a dedicated **Architecture Graph** tab that renders the dependency topology in real time as you edit or select templates.
+- **API**: Query the complete parsed topology and dependency graph via `GET /api/apps/{id}/topology`.
+
 #### Visual Compose Editor and Environment Variable Completion
 
 The WebUI includes a visual Docker Compose YAML editor that makes creating and managing multi-service stacks intuitive and error-free:

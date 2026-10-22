@@ -441,6 +441,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(platform::get_logs))
                 .routes(routes!(platform::logs_live))
                 .routes(routes!(platform::get_services))
+                .routes(routes!(platform::get_topology))
                 .routes(routes!(platform::deploy_app))
                 .routes(routes!(platform::check_app_update))
                 .routes(routes!(platform::upgrade_app_catalog))

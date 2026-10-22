@@ -1,5 +1,6 @@
+use crate::components::compose_topology::ComposeTopologyGraph;
 use r3v3rs3_api::i18n::Locale;
-use r3v3rs3_api::platform::parse_compose_services;
+use r3v3rs3_api::platform::{parse_compose_services, parse_compose_topology};
 use web_sys::HtmlTextAreaElement;
 use yew::prelude::*;
 
@@ -66,6 +67,7 @@ const TEMPLATE_WORDPRESS: &str = r#"services:
 enum EditorTab {
     Edit,
     Preview,
+    Topology,
 }
 
 #[derive(Properties, PartialEq)]
@@ -119,13 +121,7 @@ pub fn compose_editor(props: &ComposeEditorProps) -> Html {
         let value = props.value.clone();
         let onchange = props.onchange.clone();
         Callback::from(move |var: String| {
-            let insertion = format!("${{{var}}}");
-            let new_val = if value.ends_with(' ') || value.ends_with(':') || value.ends_with('\n') {
-                format!("{value}{insertion}")
-            } else {
-                format!("{value} {insertion}")
-            };
-            onchange.emit(new_val);
+            onchange.emit(append_variable_token(&value, &var));
         })
     };
 
@@ -135,24 +131,65 @@ pub fn compose_editor(props: &ComposeEditorProps) -> Html {
             { render_templates_menu(props.locale, &show_templates, &on_apply_template) }
             { render_variables_bar(props.locale, &show_vars, &props.suggestions, &on_insert_var) }
             { render_validation_status(props.locale, validation.as_ref(), props.current_service.as_deref(), props.onservice_selected.as_ref()) }
-
-            if *tab == EditorTab::Edit {
-                <div class="flex font-mono text-xs leading-6 overflow-x-auto bg-neutral-950">
-                    { render_gutter(&props.value, error_line) }
-                    <textarea
-                        class="flex-1 bg-transparent text-neutral-200 p-2 outline-none resize-y min-h-[280px] font-mono text-xs leading-6"
-                        value={props.value.clone()}
-                        {oninput}
-                        placeholder={props.locale.t("compose.editor_title")}
-                        spellcheck="false"
-                    />
-                </div>
-            } else {
-                <div class="p-3 bg-neutral-950 min-h-[280px] overflow-x-auto font-mono text-xs leading-6">
-                    { render_preview(&props.value) }
-                </div>
-            }
+            { render_tab_body(*tab, &props.value, error_line, &oninput, props.locale, props.current_service.as_deref()) }
         </div>
+    }
+}
+
+fn append_variable_token(value: &str, var: &str) -> String {
+    let insertion = format!("${{{var}}}");
+    if value.ends_with(' ') || value.ends_with(':') || value.ends_with('\n') {
+        format!("{value}{insertion}")
+    } else {
+        format!("{value} {insertion}")
+    }
+}
+
+fn render_tab_body(
+    tab: EditorTab,
+    value: &str,
+    error_line: Option<usize>,
+    oninput: &Callback<InputEvent>,
+    locale: Locale,
+    current_service: Option<&str>,
+) -> Html {
+    match tab {
+        EditorTab::Edit => html! {
+            <div class="flex font-mono text-xs leading-6 overflow-x-auto bg-neutral-950">
+                { render_gutter(value, error_line) }
+                <textarea
+                    class="flex-1 bg-transparent text-neutral-200 p-2 outline-none resize-y min-h-[280px] font-mono text-xs leading-6"
+                    value={value.to_string()}
+                    oninput={oninput.clone()}
+                    placeholder={locale.t("compose.editor_title")}
+                    spellcheck="false"
+                />
+            </div>
+        },
+        EditorTab::Topology => render_editor_topology(locale, value, current_service),
+        EditorTab::Preview => html! {
+            <div class="p-3 bg-neutral-950 min-h-[280px] overflow-x-auto font-mono text-xs leading-6">
+                { render_preview(value) }
+            </div>
+        },
+    }
+}
+
+fn render_editor_topology(locale: Locale, value: &str, current_service: Option<&str>) -> Html {
+    match parse_compose_topology(value, None, current_service) {
+        Ok(topo) => html! {
+            <div class="p-3 bg-neutral-950 min-h-[280px]">
+                <ComposeTopologyGraph topology={topo} {locale} />
+            </div>
+        },
+        Err(err) => html! {
+            <div class="p-6 bg-neutral-950 min-h-[280px] flex items-center justify-center text-center">
+                <div class="text-xs text-rose-400 font-mono">
+                    <span class="font-bold">{locale.t("compose.syntax_error")}{": "}</span>
+                    {err}
+                </div>
+            </div>
+        },
     }
 }
 
@@ -177,6 +214,10 @@ fn render_toolbar(
         let tab = tab.clone();
         Callback::from(move |_| tab.set(EditorTab::Preview))
     };
+    let set_topology = {
+        let tab = tab.clone();
+        Callback::from(move |_| tab.set(EditorTab::Topology))
+    };
     let toggle_vars = {
         let show_vars = show_vars.clone();
         Callback::from(move |_| show_vars.set(!*show_vars))
@@ -186,16 +227,9 @@ fn render_toolbar(
         Callback::from(move |_| show_templates.set(!*show_templates))
     };
 
-    let edit_class = if **tab == EditorTab::Edit {
-        "px-2.5 py-1 text-xs font-medium rounded bg-neutral-800 text-white shadow-sm"
-    } else {
-        "px-2.5 py-1 text-xs font-medium text-neutral-400 hover:text-white"
-    };
-    let preview_class = if **tab == EditorTab::Preview {
-        "px-2.5 py-1 text-xs font-medium rounded bg-neutral-800 text-white shadow-sm"
-    } else {
-        "px-2.5 py-1 text-xs font-medium text-neutral-400 hover:text-white"
-    };
+    let edit_class = tab_button_class(**tab == EditorTab::Edit);
+    let preview_class = tab_button_class(**tab == EditorTab::Preview);
+    let topology_class = tab_button_class(**tab == EditorTab::Topology);
 
     html! {
         <div class="flex items-center justify-between px-3 py-2 bg-neutral-850 border-b border-neutral-700/80 flex-wrap gap-2">
@@ -212,6 +246,9 @@ fn render_toolbar(
                 <div class="inline-flex rounded-md p-0.5 bg-neutral-900 border border-neutral-700">
                     <button type="button" class={edit_class} onclick={set_edit}>
                         {locale.t("compose.tab_edit")}
+                    </button>
+                    <button type="button" class={topology_class} onclick={set_topology}>
+                        {locale.t("compose.tab_topology")}
                     </button>
                     <button type="button" class={preview_class} onclick={set_preview}>
                         {locale.t("compose.tab_preview")}
@@ -501,4 +538,12 @@ fn render_tokens_with_vars(text: &str) -> Html {
     }
 
     html! { <>{ for parts }</> }
+}
+
+fn tab_button_class(active: bool) -> &'static str {
+    if active {
+        "px-2.5 py-1 text-xs font-medium rounded bg-neutral-800 text-white shadow-sm"
+    } else {
+        "px-2.5 py-1 text-xs font-medium text-neutral-400 hover:text-white"
+    }
 }

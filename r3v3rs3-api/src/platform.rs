@@ -1,5 +1,10 @@
 //! The apps, the targets and the deployments of the deployment platform.
 
+pub use crate::compose_graph::{
+    ComposeEdge, ComposeEdgeKind, ComposeNetworkDetails, ComposeNode, ComposeNodeKind,
+    ComposeServiceDetails, ComposeTopology, ComposeTopologySummary, ComposeVolumeDetails,
+    parse_compose_topology,
+};
 use crate::container::{
     AppName, ContainerHealth, EnvKey, ImageRef, ResourceLimits, RestartPolicy, ServiceName,
     VolumeMount,
