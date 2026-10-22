@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.4] - 2026-10-22
+
+### Added
+- Live Request Inspector & Detail Drawer: An interactive slide-over drawer accessible directly from the live traffic monitor (`/traffic`) displaying detailed request diagnostics across Overview, Headers, Payload, and Replay tabs.
+- Full Request & Response Header Inspection: Deep inspection of parsed client request headers and upstream response headers formatted in a searchable key-value table.
+- Body Buffering & Smart Payload Viewer: In-memory capture of request bodies (up to 16 KB) for non-WebSocket requests with syntax-highlighted formatted JSON and raw text toggle modes.
+- Copy as cURL: One-click generation of terminal-ready, escaped cURL commands directly reproducible from captured request headers and payloads.
+- Traffic Replay Engine & Console: Interactive replay runner allowing operators to re-dispatch captured HTTP or WebSocket handshake requests to target endpoints or custom URLs with live status code reporting and round-trip latency measurements.
+- Traffic Inspection API Endpoints: Added `GET /api/traffic/{id}` to fetch complete access log details and `POST /api/traffic/replay` to replay requests with custom timeouts, hop-by-hop header filtering, and response body capture.
+
 ## [2.3.3] - 2026-10-22
 
 ### Added
