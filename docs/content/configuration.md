@@ -347,7 +347,21 @@ An HTTP / HTTPS proxy can define custom HTML error pages for standard HTTP error
 - `status` (integer, 400–599): The HTTP error status code.
 - `body` (string, max 64 KB): The custom HTML content for the error page.
 
-In the WebUI, scroll down to the **Custom Error Pages** section on the HTTP proxy page to add or remove error pages.
+### Visual Error Pages Designer & Live Preview
+
+In the WebUI, the **Custom Error Pages** section on the HTTP proxy configuration page provides an interactive designer:
+
+- **Ready-Made HTML/CSS Template Library**: Instantly apply responsive, dark-mode friendly, self-contained templates:
+  - **Minimalist Dark**: Sleek dark background with radial glow, status badge, and clean action buttons.
+  - **Modern Glassmorphism**: Frosted glass card with vibrant gradient typography and elegant styling.
+  - **Developer Terminal**: CLI console with simulated HTTP headers, diagnostics, and blinking cursor.
+  - **Illustration Card**: Centered card featuring clean inline vector SVG graphics and friendly messaging.
+  - **Maintenance Notice**: Amber maintenance alert with gear illustration and auto-refresh notices.
+- **Real-Time Live Preview**: Render pages inside an isolated, sandboxed preview iframe updated live as you type.
+- **Three View Modes**: Switch between **HTML/CSS Code** editor, **Live Preview**, or **Split View** (side-by-side editing and live rendering).
+- **Responsive Viewport Controls**: Preview designs across **Desktop (100%)**, **Tablet (768px)**, and **Mobile (375px)** device widths.
+- **Quick Status Presets**: Single-click buttons to set common error codes (`404`, `502`, `503`, `500`, `403`, `429`).
+- **Live Size Counter**: Displays current payload byte size against the 64 KB limit.
 
 ```toml
 [my-app]

@@ -347,7 +347,21 @@ Bir HTTP / HTTPS proxy'si, standart HTTP hata durumları (400 ile 599 arası, ö
 - `status` (tamsayı, 400–599): HTTP hata durum kodu.
 - `body` (metin, en fazla 64 KB): Hata sayfası için özel HTML içeriği.
 
-WebUI'da, HTTP proxy düzenleme sayfasındaki **Özel Hata Sayfaları** kartından hata sayfaları ekleyebilir veya silebilirsiniz.
+### Görsel Hata Sayfası Tasarımcısı & Canlı Önizleme
+
+WebUI üzerinde, HTTP proxy yapılandırma sayfasındaki **Özel Hata Sayfaları** bölümü gelişmiş ve etkileşimli bir tasarımcı sunar:
+
+- **Hazır HTML/CSS Şablon Kütüphanesi**: Tek tıkla uygulanabilen, responsive, karanlık mod uyumlu ve harici bağımlılık gerektirmeyen şablonlar:
+  - **Minimalist Koyu**: Radyal ışıltı, durum rozeti ve modern butonlarla şık koyu tema.
+  - **Modern Cam**: Canlı degradeli tipografi ve zarif buzlu cam (glassmorphism) kart tasarımı.
+  - **Geliştirici Terminali**: Simüle edilmiş HTTP başlıkları, teşhis satırları ve yanıp sönen imleç içeren CLI konsol teması.
+  - **İllüstrasyonlu Kart**: Temiz dahili vektör SVG grafiği ve samimi kullanıcı mesajları içeren ortalanmış modern kart.
+  - **Bakım Bildirimi**: Dişli çark illüstrasyonu ve canlı durum rozeti içeren kehribar bakım uyarısı.
+- **Gerçek Zamanlı Canlı Önizleme**: Siz kodu düzenledikçe anında güncellenen yalıtılmış ve korumalı (sandboxed) iframe önizleme penceresi.
+- **Üç Görünüm Modu**: **HTML/CSS Kodu** editörü, **Canlı Önizleme** veya **Yan Yana Görünüm** (kod editörü ve canlı önizleme aynı anda).
+- **Duyarlı Görüntüleme Alanı (Viewport) Kontrolleri**: Tasarımı **Masaüstü (%100)**, **Tablet (768px)** ve **Mobil (375px)** genişliklerinde test edebilme.
+- **Hızlı Kod Kısayolları**: Sık kullanılan durum kodlarını (`404`, `502`, `503`, `500`, `403`, `429`) tek tıkla seçme butonları.
+- **Canlı Boyut Sayacı**: Kodun boyutunu 64 KB sınırına göre anlık olarak gösteren bayt sayacı.
 
 ```toml
 [my-app]

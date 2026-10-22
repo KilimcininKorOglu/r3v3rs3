@@ -14,6 +14,7 @@ pub mod container;
 pub mod dashboard;
 pub mod discovery;
 pub mod error;
+pub mod error_page_templates;
 pub mod event;
 pub mod fixed_response;
 pub mod geoip;

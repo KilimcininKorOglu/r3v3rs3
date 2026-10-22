@@ -1,4 +1,5 @@
 use super::auth_config::{AuthConfig, AuthForm};
+use super::error_pages_editor::ErrorPagesEditor;
 use super::proxy_dry_run::ProxyDryRun;
 use crate::API_ENDPOINT;
 use crate::i18n::use_locale;
@@ -1714,64 +1715,24 @@ fn maintenance_view(
 }
 
 fn error_pages_view(
-    locale: Locale,
+    _locale: Locale,
     form: &UseStateHandle<ProxyForm>,
     errors: &HashMap<String, String>,
 ) -> Html {
-    let pages = &form.error_pages;
-    let add_page = {
+    let on_change = {
         let form = form.clone();
-        Callback::from(move |_| {
+        Callback::from(move |updated_pages| {
             let mut updated = (*form).clone();
-            updated.error_pages.push(ErrorPageForm::default());
+            updated.error_pages = updated_pages;
             form.set(updated);
         })
     };
     html! {
-        <div class="mt-6 p-4 rounded-lg bg-neutral-100 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700">
-            <div class="flex items-center justify-between">
-                <div>
-                    <label class="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">{locale.t("http_form.error_pages")}</label>
-                    <p class={HINT_CLASS}>{locale.t("http_form.error_pages_hint")}</p>
-                </div>
-                <button type="button" onclick={add_page} class={classes!(BUTTON_CLASS, "rounded-lg")}>
-                    {locale.t("http_form.add_error_page")}
-                </button>
-            </div>
-            if !pages.is_empty() {
-                <div class="mt-4 space-y-4">
-                    { for pages.iter().enumerate().map(|(index, page)| {
-                        let remove = {
-                            let form = form.clone();
-                            Callback::from(move |_| {
-                                let mut updated = (*form).clone();
-                                updated.error_pages.remove(index);
-                                form.set(updated);
-                            })
-                        };
-                        let status_err = errors.get(&format!("error_pages_{index}_status"));
-                        let body_err = errors.get(&format!("error_pages_{index}_body"));
-                        html! {
-                            <div class="p-3 border rounded-md border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-900">
-                                <div class="flex items-center justify-between mb-2">
-                                    <div class="w-32">
-                                        <label class={LABEL_CLASS}>{locale.t("http_form.error_page_status")}</label>
-                                        <input type="number" min="400" max="599" value={page.status.clone()} onchange={error_page_input(form, index, text, |page, value| page.status = value)} class={INPUT_CLASS} placeholder="404" />
-                                        { error_view(status_err) }
-                                    </div>
-                                    <button type="button" onclick={remove} class="text-sm font-medium text-red-600 hover:text-red-700 dark:text-red-400">
-                                        {locale.t("http_form.remove_error_page")}
-                                    </button>
-                                </div>
-                                <label class={LABEL_CLASS}>{locale.t("http_form.error_page_body")}</label>
-                                <textarea rows="3" autocapitalize="off" spellcheck="false" placeholder={locale.t("http_form.error_page_body_placeholder")} value={page.body.clone()} onchange={error_page_input(form, index, text_area, |page, value| page.body = value)} class={classes!(INPUT_CLASS, "font-mono")} />
-                                { error_view(body_err) }
-                            </div>
-                        }
-                    }) }
-                </div>
-            }
-        </div>
+        <ErrorPagesEditor
+            error_pages={form.error_pages.clone()}
+            on_change={on_change}
+            errors={errors.clone()}
+        />
     }
 }
 
@@ -2182,23 +2143,6 @@ fn route_input<V: 'static>(
     update: fn(&mut RouteForm, V),
 ) -> Callback<Event> {
     item_update(routes, index, update).reform(move |event: Event| read(&event))
-}
-
-fn error_page_input<V: 'static>(
-    form: &UseStateHandle<ProxyForm>,
-    index: usize,
-    read: fn(&Event) -> V,
-    update: fn(&mut ErrorPageForm, V),
-) -> Callback<Event> {
-    let form = form.clone();
-    Callback::from(move |event: Event| {
-        let value = read(&event);
-        let mut updated = (*form).clone();
-        if let Some(item) = updated.error_pages.get_mut(index) {
-            update(item, value);
-            form.set(updated);
-        }
-    })
 }
 
 fn get_proxy(
