@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.2] - 2026-10-22
+
+### Added
+- Automatic Wildcard SSL Sharing: Applications and reverse proxies deployed under a common root domain automatically detect and share existing wildcard certificates (`*.example.com`) with zero manual TLS configuration or redundant ACME orders.
+- Domain Certificate Coverage API: Added `POST /api/certs/coverage` endpoint that analyses configured domain lists, detects matching wildcard or dedicated certificates, and identifies domains requiring external CNAME delegation.
+- Asynchronous Public DNS CNAME Verification Engine: Added `GET /api/certs/verify_cname` utilizing Hickory DNS to inspect public CNAME DNS records and verify proper delegation pointing to the cluster public hostname.
+- Interactive WebUI SSL Status Badges & CNAME Guidance: Visual SSL status badges rendered directly beneath the domain textarea in platform app creation and virtual host configuration in HTTP proxies, with one-click interactive CNAME verification and target copy helpers.
+
 ## [2.3.1] - 2026-10-22
 
 ### Added
