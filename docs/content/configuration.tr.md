@@ -584,6 +584,23 @@ Her HTTP / HTTPS proxy'sinde istemcileri IP adresine göre engelleyebilir veya y
 
 Engellenen bir adres veya ülke, izin verilenin önüne geçer. İzin verilen CIDR blokları (ör. yerel ağ veya VPN), ülke filtresinden önce değerlendirilerek erişimin kesilmesini önler.
 
+### GeoIP Kural Sihirbazı & Bölgesel Şablonlar
+
+WebUI üzerinde ülke bazlı erişim politikası, proxy ayarları, route geçersiz kılmaları ve erişim listeleri (access lists) sayfalarında yer alan görsel **GeoIP Kural Sihirbazı** kartıyla yönetilir:
+
+- **Uygulama Modları**:
+  - `Devre Dışı (Off)`: Ülke filtresi uygulanmaz. İstekler yalnızca IP adres blokları ve CIDR kurallarıyla denetlenir.
+  - `İzin Listesi (Yalnızca Seçilenler)`: Yalnızca belirlenen ülkelerden gelen ziyaretçilere izin verilir; diğer ülkeler `403 Forbidden` yanıtı alır.
+  - `Engelleme Listesi (Seçilenleri Engelle)`: Belirlenen ülkelerden gelen trafik anında `403 Forbidden` ile kesilir; diğer tüm ülkeler kabul edilir.
+  - `Gelişmiş (İzin Ver & Engelle)`: Hem izin verilen hem engellenen ülke listelerini aynı anda yapılandırma imkanı sunar (engellenen ülkeler önceliklidir).
+- **Tek Tıkla Bölgesel Şablonlar**:
+  - Yaygın coğrafi ülke gruplarını tek tıkla yükleyin: **Türkiye** (`TR`), **Avrupa Birliği** (27 üye ülke), **Kuzey Amerika** (`US`, `CA`, `MX`), **G7 Ülkeleri**, **DACH** (`DE`, `AT`, `CH`), **APAC**, **LATAM**, **MENA**, **Nordic** veya **Temizle**.
+- **Görsel Ülke Arama & Rozetler (Chips)**:
+  - ISO alpha-2 ülke kodu, Türkçe veya İngilizce ülke adına göre anında arama ve otomatik tamamlama.
+  - Seçilen ülkeler bayrak/kod ve yerelleştirilmiş ülke adıyla kaldırılabilir rozetler halinde listelenir.
+- **Doğrudan CSV Girişi**:
+  - Açılır-kapanır metin kutusu ile virgülle ayrılmış ISO ülke kodlarını toplu olarak kopyalama veya yapıştırma desteği.
+
 Bir route, "Bu Route için Ayrı IP Filtresi Kullan" seçeneğiyle proxy listeleri yerine yalnız kendi listelerini kullanır. Route'un iki listesi de boşsa bu route'a her istemci erişebilir.
 
 ```toml

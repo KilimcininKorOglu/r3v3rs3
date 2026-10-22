@@ -16,6 +16,7 @@ pub mod discovery;
 pub mod error;
 pub mod event;
 pub mod fixed_response;
+pub mod geoip;
 pub mod git;
 pub mod git_connection;
 pub mod header_rules;

@@ -748,12 +748,22 @@ pub fn http_proxy_config(props: &Props) -> Html {
                 { error_view(errors.get("deny")) }
                 <p class={HINT_CLASS}>{locale.t("http_form.deny_hint")}</p>
 
-                <label class={LABEL_CLASS}>{locale.t("http_form.allow_countries")}</label>
-                <input type="text" autocapitalize="off" value={form.allow_countries.clone()} onchange={state_input(&form, text, |form, value| form.allow_countries = value)} class={INPUT_CLASS} placeholder="TR, US, DE" />
-
-                <label class={LABEL_CLASS}>{locale.t("http_form.deny_countries")}</label>
-                <input type="text" autocapitalize="off" value={form.deny_countries.clone()} onchange={state_input(&form, text, |form, value| form.deny_countries = value)} class={INPUT_CLASS} placeholder="RU, CN" />
-                <p class={HINT_CLASS}>{locale.t("http_form.countries_hint")}</p>
+                <div class="pt-2">
+                    <crate::components::geoip_wizard::GeoIpRuleWizard
+                        allow_countries={form.allow_countries.clone()}
+                        deny_countries={form.deny_countries.clone()}
+                        on_allow_change={let form = form.clone(); Callback::from(move |val: String| {
+                            let mut f = (*form).clone();
+                            f.allow_countries = val;
+                            form.set(f);
+                        })}
+                        on_deny_change={let form = form.clone(); Callback::from(move |val: String| {
+                            let mut f = (*form).clone();
+                            f.deny_countries = val;
+                            form.set(f);
+                        })}
+                    />
+                </div>
             }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.rate_limit")}</label>
@@ -1158,12 +1168,26 @@ fn route_ip_filter_view(
                 <label class={LABEL_CLASS}>{locale.t("http_form.deny")}</label>
                 <input type="text" autocapitalize="off" placeholder="203.0.113.0/24" value={route.deny.clone()} onchange={route_input(routes, index, text, |route, value| route.deny = value)} class={INPUT_CLASS} />
 
-                <label class={LABEL_CLASS}>{locale.t("http_form.allow_countries")}</label>
-                <input type="text" autocapitalize="off" placeholder="TR, US, DE" value={route.allow_countries.clone()} onchange={route_input(routes, index, text, |route, value| route.allow_countries = value)} class={INPUT_CLASS} />
-
-                <label class={LABEL_CLASS}>{locale.t("http_form.deny_countries")}</label>
-                <input type="text" autocapitalize="off" placeholder="RU, CN" value={route.deny_countries.clone()} onchange={route_input(routes, index, text, |route, value| route.deny_countries = value)} class={INPUT_CLASS} />
-                <p class={HINT_CLASS}>{locale.t("http_form.countries_hint")}</p>
+                <div class="pt-2">
+                    <crate::components::geoip_wizard::GeoIpRuleWizard
+                        allow_countries={route.allow_countries.clone()}
+                        deny_countries={route.deny_countries.clone()}
+                        on_allow_change={let routes = routes.clone(); Callback::from(move |val: String| {
+                            let mut list = (*routes).clone();
+                            if let Some(r) = list.get_mut(index) {
+                                r.allow_countries = val;
+                                routes.set(list);
+                            }
+                        })}
+                        on_deny_change={let routes = routes.clone(); Callback::from(move |val: String| {
+                            let mut list = (*routes).clone();
+                            if let Some(r) = list.get_mut(index) {
+                                r.deny_countries = val;
+                                routes.set(list);
+                            }
+                        })}
+                    />
+                </div>
             </>
         },
     )

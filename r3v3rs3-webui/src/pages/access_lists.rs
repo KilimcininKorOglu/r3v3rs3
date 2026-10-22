@@ -200,12 +200,22 @@ fn form_view(
             <input type="text" autocapitalize="off" placeholder="203.0.113.0/24" value={form.deny.clone()} oninput={text_input(form, |f| &mut f.deny)} class={INPUT_CLASS} />
             <p class={HINT_CLASS}>{locale.t("http_form.deny_hint")}</p>
 
-            <label class={LABEL_CLASS}>{locale.t("http_form.allow_countries")}</label>
-            <input type="text" autocapitalize="off" placeholder="TR, US, DE" value={form.allow_countries.clone()} oninput={text_input(form, |f| &mut f.allow_countries)} class={INPUT_CLASS} />
-
-            <label class={LABEL_CLASS}>{locale.t("http_form.deny_countries")}</label>
-            <input type="text" autocapitalize="off" placeholder="RU, CN" value={form.deny_countries.clone()} oninput={text_input(form, |f| &mut f.deny_countries)} class={INPUT_CLASS} />
-            <p class={HINT_CLASS}>{locale.t("http_form.countries_hint")}</p>
+            <div class="pt-2">
+                <crate::components::geoip_wizard::GeoIpRuleWizard
+                    allow_countries={form.allow_countries.clone()}
+                    deny_countries={form.deny_countries.clone()}
+                    on_allow_change={let form = form.clone(); Callback::from(move |val: String| {
+                        let mut f = (*form).clone();
+                        f.allow_countries = val;
+                        form.set(f);
+                    })}
+                    on_deny_change={let form = form.clone(); Callback::from(move |val: String| {
+                        let mut f = (*form).clone();
+                        f.deny_countries = val;
+                        form.set(f);
+                    })}
+                />
+            </div>
 
             <label class={LABEL_CLASS}>{locale.t("http_form.authentication")}</label>
             <AuthConfig form={form.auth.clone()} onchange={auth_onchange} />

@@ -7,6 +7,7 @@ pub mod data_list;
 pub mod discovery_status;
 pub mod dropdown;
 pub mod footer;
+pub mod geoip_wizard;
 pub mod http_proxy_config;
 pub mod language_menu;
 pub mod navbar;

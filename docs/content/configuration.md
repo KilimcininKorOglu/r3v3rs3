@@ -584,6 +584,23 @@ You can allow or deny clients by IP address for each HTTP / HTTPS proxy. r3v3rs3
 
 A denied address or country takes precedence over an allowed one. Whitelisted IP CIDRs take precedence to prevent locking out local or VPN addresses.
 
+### GeoIP Rule Wizard & Regional Presets
+
+In the WebUI, configuring country-based access is streamlined through the visual **GeoIP Rule Wizard** card, available across proxy settings, route overrides, and access lists:
+
+- **Enforcement Modes**:
+  - `Disabled (Off)`: Country-based filtering is inactive. Incoming requests are evaluated purely against IP address rules.
+  - `Allowlist (Only Selected)`: Only traffic originating from specified countries is admitted; all other client countries receive `403 Forbidden`.
+  - `Denylist (Block Selected)`: Traffic originating from specified countries is immediately dropped with `403 Forbidden`; all other client countries are allowed.
+  - `Advanced (Allow & Deny)`: Allows defining both permitted and blocked lists simultaneously (denied countries take precedence).
+- **One-Click Regional Presets**:
+  - Instantly load standard country groups: **Turkey** (`TR`), **European Union** (EU 27 member states), **North America** (`US`, `CA`, `MX`), **G7 Nations**, **DACH** (`DE`, `AT`, `CH`), **APAC**, **LATAM**, **MENA**, **Nordic**, or **Clear All**.
+- **Visual Search & Tag Chips**:
+  - Search any country by ISO alpha-2 code, English name, or Turkish name with real-time autocompletion.
+  - Selected countries appear as removable tag chips showing their ISO code and localized country name.
+- **Direct CSV Fallback**:
+  - A collapsible text box allows pasting or copying comma-separated ISO country codes directly for bulk imports.
+
 A route can replace the proxy lists with "Override IP Filter for This Route". The route then uses only its own lists. If both route lists are empty, the route allows every client.
 
 ```toml
