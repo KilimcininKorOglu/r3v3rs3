@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.9] - 2026-10-23
+
+### Added
+- Container Log Rotation Policy: Automatically enforce Docker container logging limits (`max-size: 50m`, `max-file: 3`) on all deployed applications and databases to prevent host disk exhaustion.
+- On-Demand Log Vacuum: Added active log truncation and rotated log removal (`.1`, `.2`) via `POST /api/apps/{id}/logs/vacuum` and `POST /api/platform/logs/vacuum`.
+- Log Size Inspection: Added `GET /api/apps/{id}/logs/size` reporting active container log file sizes, rotated log counts, and total byte footprint.
+- Target Prune Auto-Vacuum Integration: Extended target prune policies with `prune_logs`, `log_vacuum_threshold_mb`, `container_log_max_size`, and `container_log_max_file` settings.
+- WebUI Log Vacuum Controls: Added live container log size badges and an on-demand "Vacuum Logs" action button on the Application Logs page, along with container log prune configuration cards in Targets.
+- 100% MCP & CLI Parity: Added MCP tools (`get_app_log_size`, `vacuum_app_logs`, `vacuum_all_logs`, `run_platform_prune`) and CLI commands (`r3 app log-size`, `r3 app vacuum-logs`, `r3 platform vacuum-logs`).
+- Native Binary Renaming: Renamed CLI client binary directly to `r3` across all platforms (producing `r3` / `r3.exe`), and server binary to `r3-server` with `r3-agent` symlink.
+
+### Changed
+- Disentangled Model Context Protocol (MCP) server integration from the command-line client (`r3v3rs3-cli`), separating CLI client responsibilities from MCP endpoint hosting.
+- Updated documentation and installer scripts (`install.sh`, `install-cli.sh`, `install-cli.ps1`) to use `r3` and `r3-server`.
+
 ## [2.4.8] - 2026-10-23
 
 ### Added
