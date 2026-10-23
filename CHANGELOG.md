@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.5] - 2026-10-23
+
+### Added
+- Self-Hosted App Store Assets: Hosted all 58 application official vector/raster logos and high-resolution UI screenshots directly in the dedicated `r3v3rs3-apps` repository, eliminating broken external links and third-party rate limits.
+- App Store Logo Badges: Added `logo` field to `StoreApp` and rendered rounded badges in WebUI catalog cards next to application titles.
+
+### Fixed
+- Missing Download Icon in Audit View: Added `download.svg` icon to WebUI assets, resolving 404 errors when viewing the audit log export action.
+
 ## [2.4.4] - 2026-10-23
 
 ### Added
