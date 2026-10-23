@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.4] - 2026-10-23
+
+### Added
+- Unified SQLite Database Architecture (`r3v3rs3.db`): Consolidated server configuration, reverse proxies, port bindings, access lists, ACME settings, DNS provider credentials, user accounts, and deployment platform operational state into a single unified SQLite database engine with WAL journaling and atomic transaction guarantees.
+- Automatic Legacy Configuration Migration: Built-in startup migrator that automatically imports legacy flat files (`config.toml`, `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `dns-credentials.toml`, `accounts.toml`, `notifications.json`, and `platform.db`) into `r3v3rs3.db` and safely renames migrated files to `*.migrated` with zero data loss.
+- Master Encryption Key Hardening (`r3v3rs3.key`): Unified master encryption key under `r3v3rs3.key` with strict `0600` permissions for AES-256-GCM sealing of secrets, Git tokens, and DNS credentials, migrating legacy `platform.key` on boot.
+- Preserved Disk Storage & Log Isolation: Retained certificate files on disk under `certs/<kind>/<id>/*.pem` with relative database path references, kept external catalog JSON datasets (`cdn-ranges.json`, `app-store.json`, `engines.json`) on disk, and preserved dedicated `log.db` for high-throughput tracing isolation.
+
 ## [2.4.3] - 2026-10-23
 
 ### Added
