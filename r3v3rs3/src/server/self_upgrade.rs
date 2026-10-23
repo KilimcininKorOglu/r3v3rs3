@@ -91,7 +91,10 @@ fn parse_release_for(json: &str, current: &str, target: &str) -> anyhow::Result<
     let asset = release
         .assets
         .iter()
-        .find(|asset| asset.name == format!("r3v3rs3-{target}.tar.xz"))
+        .find(|asset| {
+            asset.name == format!("r3-server-{target}.tar.xz")
+                || asset.name == format!("r3v3rs3-{target}.tar.xz")
+        })
         .context("the release has no archive for this platform")?;
     let digest = asset
         .digest
@@ -324,7 +327,11 @@ fn extract(archive: &std::path::Path, dir: &std::path::Path) -> anyhow::Result<P
         .arg(&staging)
         .status()
         .context("tar is not available")?;
-    let extracted = staging.join("r3v3rs3");
+    let extracted = if staging.join("r3-server").exists() {
+        staging.join("r3-server")
+    } else {
+        staging.join("r3v3rs3")
+    };
     if !status.success() {
         std::fs::remove_dir_all(&staging).ok();
         bail!("tar exited with {status}");

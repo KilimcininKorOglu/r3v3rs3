@@ -50,7 +50,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 - A single binary with a built-in WebUI in English and Turkish, with light, dark and system themes. Configuration changes apply without a restart
 - An admin API with an OpenAPI document and a Swagger UI ([Admin API](@/configuration.md#admin-api))
 - A Prometheus metrics endpoint at `GET /api/metrics` with request, cache and connection counters ([Metrics](@/configuration.md#metrics))
-- An MCP server at `/api/mcp` over OAuth 2.1 with PKCE and `read` and `edit` scopes, for AI hosts such as Claude Code that connect to the address directly, plus the `r3v3rs3-cli` command line client for scripts and terminals ([MCP Server](@/configuration.md#mcp-server))
+- An MCP server at `/api/mcp` over OAuth 2.1 with PKCE and `read` and `edit` scopes, for AI hosts such as Claude Code that connect to the address directly, plus the `r3` command line client for scripts and terminals ([MCP Server](@/configuration.md#mcp-server))
 - Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists, TOTP and an audit log with retention ([Accounts](@/accounts.md))
 - Access and server logs with hourly file rotation, a text or JSON format, and the `log.db` database behind the log and audit pages ([Logging](@/configuration.md#logging))
 - An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down ([Worker Processes](@/configuration.md#worker-processes))

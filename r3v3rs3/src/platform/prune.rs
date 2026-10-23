@@ -182,6 +182,15 @@ impl Platform {
         Ok(result)
     }
 
+    /// Vacuums container logs across the platform exceeding the optional MB threshold.
+    pub async fn vacuum_all_logs(
+        &self,
+        threshold_mb: Option<u64>,
+    ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+        let threshold_bytes = threshold_mb.map(|mb| mb.saturating_mul(1024 * 1024));
+        self.local.vacuum_all_logs(threshold_bytes).await
+    }
+
     /// Executes an emergency disk pressure prune, dispatches a system.disk_pressure webhook,
     /// and records the event in audit logs.
     pub async fn run_pressure_prune(
@@ -245,6 +254,8 @@ mod tests {
         assert!(policy.prune_images);
         assert!(policy.prune_build_cache);
         assert!(policy.prune_containers);
+        assert!(policy.prune_logs);
+        assert_eq!(policy.log_vacuum_threshold_mb, Some(50));
         assert!(!policy.prune_volumes);
         assert_eq!(policy.last_pressure_pruned_at, None);
     }

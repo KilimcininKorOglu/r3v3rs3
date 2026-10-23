@@ -19,6 +19,7 @@ use futures::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use r3v3rs3_api::{
     audit::AuditAction,
+    container::{AppLogsOverview, LogVacuumResult},
     error::Error,
     id::ShortId,
     platform::{
@@ -641,6 +642,54 @@ pub async fn get_logs(
             .await
             .map_err(platform_error)?,
     ))
+}
+
+/// Returns the container log file sizes and overview for an app.
+#[utoipa::path(
+    get,
+    path = "/{id}/logs/size",
+    tag = "platform",
+    operation_id = "get_app_log_size",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The container log sizes.", body = AppLogsOverview), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_log_size(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AppLogsOverview>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    Ok(Json(
+        platform.app_log_size(id).await.map_err(platform_error)?,
+    ))
+}
+
+/// Truncates (vacuums) the container log files of an app.
+#[utoipa::path(
+    post,
+    path = "/{id}/logs/vacuum",
+    tag = "platform",
+    operation_id = "vacuum_app_logs",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The log vacuum result.", body = LogVacuumResult), NotFoundResponse, ErrorResponses)
+)]
+pub async fn vacuum_app_logs(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<LogVacuumResult>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let result = platform.vacuum_app_logs(id).await.map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::VacuumLogs)
+        .id(id)
+        .summary(format!(
+            "Vacuumed container logs, freed {} bytes",
+            result.freed_bytes
+        ));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(result))
 }
 
 /// Returns the status and health of the services of a Compose app.
@@ -1655,6 +1704,41 @@ pub async fn run_prune(
     let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(format!(
         "Ran disk prune, reclaimed {} bytes",
         result.space_reclaimed_bytes
+    ));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(result))
+}
+
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+pub struct VacuumQuery {
+    /// Optional threshold in MB. Only log files exceeding this size are truncated.
+    pub threshold_mb: Option<u64>,
+}
+
+/// Truncates (vacuums) container log files across the platform.
+#[utoipa::path(
+    post,
+    path = "/logs/vacuum",
+    tag = "platform",
+    operation_id = "vacuum_platform_logs",
+    params(VacuumQuery),
+    responses((status = 200, description = "The platform log vacuum result.", body = LogVacuumResult), ErrorResponses)
+)]
+pub async fn vacuum_platform_logs(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<VacuumQuery>,
+) -> Result<Json<LogVacuumResult>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let result = platform
+        .vacuum_all_logs(query.threshold_mb)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::VacuumLogs).summary(format!(
+        "Platform vacuumed container logs, freed {} bytes across {} files",
+        result.freed_bytes, result.truncated_files
     ));
     state
         .record_audit(&caller.username, caller.client, record)

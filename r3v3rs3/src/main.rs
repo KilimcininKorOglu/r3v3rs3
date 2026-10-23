@@ -494,6 +494,6 @@ async fn cli_restore_action(
     println!("Disaster recovery restore completed successfully!");
     println!("  Files restored: {}", restored);
     println!("  Config dir:     {}", config_dir.display());
-    println!("\nYou can now start the server with: r3v3rs3 start");
+    println!("\nYou can now start the server with: r3-server start");
     Ok(())
 }

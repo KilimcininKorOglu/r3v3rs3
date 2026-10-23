@@ -598,6 +598,22 @@ pub struct PrunePolicy {
     #[serde(default = "default_true")]
     pub prune_containers: bool,
 
+    /// Whether to vacuum/truncate container log files during prune.
+    #[serde(default = "default_true")]
+    pub prune_logs: bool,
+
+    /// Optional threshold in MB for vacuuming container logs (e.g. 50 MB). Logs below this are kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_vacuum_threshold_mb: Option<u64>,
+
+    /// Default Docker max-size log rotation limit applied to containers (e.g. "50m").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_log_max_size: Option<String>,
+
+    /// Default Docker max-file log rotation count applied to containers (e.g. "3").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_log_max_file: Option<String>,
+
     /// The timestamp of the last prune run in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_pruned_at: Option<u64>,
@@ -625,6 +641,10 @@ impl Default for PrunePolicy {
             prune_volumes: false,
             prune_build_cache: true,
             prune_containers: true,
+            prune_logs: true,
+            log_vacuum_threshold_mb: Some(50),
+            container_log_max_size: Some("50m".to_string()),
+            container_log_max_file: Some("3".to_string()),
             last_pruned_at: None,
             last_pressure_pruned_at: None,
             last_reclaimed_bytes: None,
@@ -639,6 +659,7 @@ pub struct PruneResult {
     pub volumes_deleted: u64,
     pub build_cache_deleted: u64,
     pub containers_deleted: u64,
+    pub logs_truncated: u64,
     pub space_reclaimed_bytes: u64,
 }
 

@@ -385,6 +385,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     platform::update_prune_policy
                 ))
                 .routes(routes!(platform::run_prune))
+                .routes(routes!(platform::vacuum_platform_logs))
                 .routes(routes!(
                     platform::get_node_alerts,
                     platform::update_node_alerts
@@ -475,6 +476,8 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(platform::list_deployments))
                 .routes(routes!(platform::get_app_metrics))
                 .routes(routes!(platform::get_logs))
+                .routes(routes!(platform::get_log_size))
+                .routes(routes!(platform::vacuum_app_logs))
                 .routes(routes!(platform::logs_live))
                 .routes(routes!(platform::get_services))
                 .routes(routes!(platform::get_topology))

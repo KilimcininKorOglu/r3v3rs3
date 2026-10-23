@@ -8,6 +8,10 @@ repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
 description = "A command line client for the r3v3rs3 admin API"
 authors = ["KilimcininKorOglu <k@keremgok.tr>"]
 
+[[bin]]
+name = "r3"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0.71"
 base64 = "0.23.1"
@@ -21,10 +25,6 @@ reqwest = { version = "0.13.5", default-features = false, features = [
     "json",
     "form",
     "multipart",
-] }
-rmcp = { version = "3.5.1", features = [
-    "client",
-    "transport-streamable-http-client-reqwest",
 ] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "logging"] }
 serde = { version = "1.0.171", features = ["derive"] }

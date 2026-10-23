@@ -8,12 +8,14 @@
 set -euo pipefail
 
 REPO="KilimcininKorOglu/r3v3rs3"
-BIN="/usr/local/bin/r3v3rs3"
+BIN="/usr/local/bin/r3-server"
+AGENT_BIN="/usr/local/bin/r3-agent"
+CLI_BIN="/usr/local/bin/r3"
 CONFIG_DIR="/etc/r3v3rs3"
 LOG_DIR="/var/log/r3v3rs3"
-UNIT="/etc/systemd/system/r3v3rs3.service"
+UNIT="/etc/systemd/system/r3-server.service"
 DEFAULT_WEBUI="127.0.0.1:46492"
-AGENT_UNIT="/etc/systemd/system/r3v3rs3-agent.service"
+AGENT_UNIT="/etc/systemd/system/r3-agent.service"
 AGENT_DATA_DIR="/var/lib/r3v3rs3-agent"
 # The token is readable only by root and lives only until the enrollment.
 AGENT_TOKEN_FILE="$AGENT_DATA_DIR/token.env"
@@ -165,23 +167,59 @@ install_binary() {
 	json=$(fetch_release_json)
 	tag=$(printf '%s' "$json" | grep -oE '"tag_name": *"[^"]*"' | awk -F'"' '{ print $4; exit }')
 	[ -n "$tag" ] || die "the release information has no tag"
-	file="r3v3rs3-$target.tar.xz"
+	file="r3-server-$target.tar.xz"
 	digest=$(asset_digest "$json" "$file")
+	if [ -z "$digest" ]; then
+		file="r3v3rs3-$target.tar.xz"
+		digest=$(asset_digest "$json" "$file")
+	fi
 	[ -n "$digest" ] || die "release $tag has no sha256 digest for $file"
 
 	tmp=$(mktemp -d)
 	# shellcheck disable=SC2064 # expand the path now, the variable is local
 	trap "rm -rf '$tmp'" EXIT
-	info "Downloading r3v3rs3 $tag for $target"
+	info "Downloading r3-server $tag for $target"
 	curl -fsSL -o "$tmp/$file" "https://github.com/$REPO/releases/download/$tag/$file"
 	echo "$digest  $tmp/$file" | sha256sum -c --quiet - || die "the sha256 digest of $file does not match"
-	tar -xJf "$tmp/$file" -C "$tmp" r3v3rs3
+	if tar -tf "$tmp/$file" | grep -q "r3-server"; then
+		tar -xJf "$tmp/$file" -C "$tmp" r3-server
+		install -m 0755 "$tmp/r3-server" "$BIN.new"
+	else
+		tar -xJf "$tmp/$file" -C "$tmp" r3v3rs3
+		install -m 0755 "$tmp/r3v3rs3" "$BIN.new"
+	fi
 
 	# Replace the file with a rename, because the running service holds the old binary open.
-	install -m 0755 "$tmp/r3v3rs3" "$BIN.new"
 	mv -f "$BIN.new" "$BIN"
+	ln -sf "$BIN" "$AGENT_BIN"
+	ln -sf "$BIN" "/usr/local/bin/r3v3rs3"
 	"$BIN" --help >/dev/null || die "$BIN does not start on this system; the release needs a newer glibc"
 	installed_tag=$tag
+
+	if [ "$agent" = false ]; then
+		local cli_file="r3-$target.tar.gz"
+		local cli_digest
+		cli_digest=$(asset_digest "$json" "$cli_file")
+		if [ -z "$cli_digest" ]; then
+			cli_file="r3v3rs3-cli-$target.tar.gz"
+			cli_digest=$(asset_digest "$json" "$cli_file")
+		fi
+		if [ -n "$cli_digest" ]; then
+			info "Downloading r3 $tag for $target"
+			if curl -fsSL -o "$tmp/$cli_file" "https://github.com/$REPO/releases/download/$tag/$cli_file" 2>/dev/null; then
+				if echo "$cli_digest  $tmp/$cli_file" | sha256sum -c --quiet - 2>/dev/null; then
+					if tar -tf "$tmp/$cli_file" 2>/dev/null | grep -q "r3$"; then
+						tar -xzf "$tmp/$cli_file" -C "$tmp" r3 2>/dev/null || true
+						[ -f "$tmp/r3" ] && install -m 0755 "$tmp/r3" "$CLI_BIN"
+					else
+						tar -xzf "$tmp/$cli_file" -C "$tmp" r3v3rs3-cli 2>/dev/null || true
+						[ -f "$tmp/r3v3rs3-cli" ] && install -m 0755 "$tmp/r3v3rs3-cli" "$CLI_BIN"
+					fi
+					ln -sf "$CLI_BIN" "/usr/local/bin/r3v3rs3-cli"
+				fi
+			fi
+		fi
+	fi
 }
 
 choose_webui() {
@@ -223,7 +261,7 @@ create_admin() {
 write_unit() {
 	cat >"$UNIT" <<EOF
 [Unit]
-Description=r3v3rs3 reverse proxy
+Description=r3-server reverse proxy
 Documentation=https://r3v3rs3.keremgok.tr/
 Wants=network-online.target
 After=network-online.target
@@ -431,7 +469,7 @@ write_token_file() {
 write_agent_unit() {
 	cat >"$AGENT_UNIT" <<EOF
 [Unit]
-Description=r3v3rs3 agent of a deployment platform target
+Description=r3-agent of a deployment platform target
 Documentation=https://r3v3rs3.keremgok.tr/platform/
 Wants=network-online.target
 After=network-online.target docker.service
@@ -442,7 +480,7 @@ Environment=R3V3RS3_AGENT_MASTER=$master
 Environment=R3V3RS3_AGENT_DATA_DIR=$AGENT_DATA_DIR
 # Holds the enrollment token until the agent is enrolled.
 EnvironmentFile=-$AGENT_TOKEN_FILE
-ExecStart=$BIN agent
+ExecStart=$AGENT_BIN agent
 # The agent closes its connection gracefully on SIGINT.
 KillSignal=SIGINT
 Restart=always
@@ -454,8 +492,8 @@ EOF
 }
 
 agent_failed() {
-	systemctl --no-pager status r3v3rs3-agent || true
-	journalctl --no-pager -u r3v3rs3-agent -n 50 || true
+	systemctl --no-pager status r3-agent || systemctl --no-pager status r3v3rs3-agent || true
+	journalctl --no-pager -u r3-agent -u r3v3rs3-agent -n 50 || true
 	die "$*"
 }
 
@@ -473,20 +511,20 @@ wait_for_enrollment() {
 
 start_agent() {
 	systemctl daemon-reload
-	systemctl enable r3v3rs3-agent >/dev/null 2>&1
-	systemctl restart r3v3rs3-agent
+	systemctl enable r3-agent >/dev/null 2>&1
+	systemctl restart r3-agent
 	if [ -z "$token" ]; then
 		sleep 2
-		systemctl is-active --quiet r3v3rs3-agent || agent_failed "the agent service did not start"
+		systemctl is-active --quiet r3-agent || agent_failed "the agent service did not start"
 		return
 	fi
 	if ! wait_for_enrollment; then
-		systemctl stop r3v3rs3-agent
+		systemctl stop r3-agent >/dev/null 2>&1 || true
 		rm -f "$AGENT_TOKEN_FILE"
 		restore_identity
 		# An agent of an earlier enrollment keeps running with its old identity.
 		if is_enrolled; then
-			systemctl start r3v3rs3-agent
+			systemctl start r3-agent
 		fi
 		agent_failed "the agent did not enroll at $master within 30 seconds"
 	fi
@@ -513,12 +551,12 @@ main_agent() {
 
 	cat <<EOF
 
-The r3v3rs3 $installed_tag agent is running and connected to $master.
+The r3-agent $installed_tag is running and connected to $master.
 
-  Binary:   $BIN
+  Binary:   $AGENT_BIN
   Data:     $AGENT_DATA_DIR
-  Logs:     journalctl -u r3v3rs3-agent
-  Service:  systemctl status|restart|stop r3v3rs3-agent
+  Logs:     journalctl -u r3-agent
+  Service:  systemctl status|restart|stop r3-agent
 
 Run the script again with --agent to upgrade. The Targets page of the master shows the state of
 the target.
@@ -544,21 +582,23 @@ main() {
 
 	write_unit
 	systemctl daemon-reload
-	systemctl enable r3v3rs3 >/dev/null 2>&1
-	systemctl restart r3v3rs3
+	systemctl enable r3-server >/dev/null 2>&1
+	systemctl restart r3-server
 	open_firewall
 	wait_for_webui
 	create_admin
 
 	cat <<EOF
 
-r3v3rs3 $installed_tag is running.
+r3-server $installed_tag is running.
 
   WebUI:    http://$webui/
-  Binary:   $BIN
+  Server:   $BIN
+  Agent:    $AGENT_BIN
+  CLI:      $CLI_BIN
   Config:   $CONFIG_DIR
-  Logs:     $LOG_DIR and journalctl -u r3v3rs3
-  Service:  systemctl status|restart|stop r3v3rs3
+  Logs:     $LOG_DIR and journalctl -u r3-server
+  Service:  systemctl status|restart|stop r3-server
   Add user: $BIN add-user --config-dir $CONFIG_DIR <name>
 EOF
 	if [ "$account_created" = true ]; then

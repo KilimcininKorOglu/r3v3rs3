@@ -200,4 +200,28 @@ pub trait ContainerRuntime: Send + Sync {
         let _ = (name, path, archive_tar);
         anyhow::bail!("the runtime does not carry the archives of a container");
     }
+
+    /// Returns container log file sizes and status.
+    async fn container_log_info(
+        &self,
+        _name: &ContainerName,
+    ) -> anyhow::Result<Option<r3v3rs3_api::container::ContainerLogInfo>> {
+        Ok(None)
+    }
+
+    /// Truncates/vacuums the log files for the named container.
+    async fn vacuum_container_logs(
+        &self,
+        _name: &ContainerName,
+    ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+        Ok(r3v3rs3_api::container::LogVacuumResult::default())
+    }
+
+    /// Vacuums all container logs across the runtime exceeding the optional byte threshold.
+    async fn vacuum_all_logs(
+        &self,
+        _threshold_bytes: Option<u64>,
+    ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+        Ok(r3v3rs3_api::container::LogVacuumResult::default())
+    }
 }

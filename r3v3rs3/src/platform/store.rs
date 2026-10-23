@@ -150,6 +150,10 @@ const SCHEMA: &[&str] = &[
         prune_volumes           INTEGER NOT NULL,
         prune_build_cache       INTEGER NOT NULL,
         prune_containers        INTEGER NOT NULL,
+        prune_logs              INTEGER NOT NULL DEFAULT 1,
+        log_vacuum_threshold_mb INTEGER,
+        container_log_max_size  TEXT,
+        container_log_max_file  TEXT,
         last_pruned_at          INTEGER,
         last_pressure_pruned_at INTEGER,
         last_reclaimed_bytes    INTEGER
@@ -386,6 +390,20 @@ impl PlatformStore {
             .execute(&pool)
             .await;
         let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN last_pressure_pruned_at INTEGER")
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query(
+            "ALTER TABLE prune_policy ADD COLUMN prune_logs INTEGER NOT NULL DEFAULT 1",
+        )
+        .execute(&pool)
+        .await;
+        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN log_vacuum_threshold_mb INTEGER")
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN container_log_max_size TEXT")
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN container_log_max_file TEXT")
             .execute(&pool)
             .await;
         Ok(Self { pool })

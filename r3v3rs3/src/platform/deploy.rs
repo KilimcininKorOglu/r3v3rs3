@@ -720,6 +720,8 @@ impl Platform {
             publish: Some(job.spec.port),
             host_port: job.spec.host_port,
             extra_hosts,
+            log_max_size: None,
+            log_max_file: None,
         })
     }
 

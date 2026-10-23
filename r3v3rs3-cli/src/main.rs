@@ -1,24 +1,19 @@
 //! A command line client for the r3v3rs3 admin API.
 //!
 //! `login` runs the OAuth 2.1 authorization code flow in the browser and stores the tokens.
-//! `tools` and `call` connect to `/api/mcp` with the stored access token.
 
 mod api_client;
 mod oauth;
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
-use rmcp::model::CallToolRequestParams;
-use rmcp::service::serve_client;
-use rmcp::transport::streamable_http_client::{
-    StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
-};
 use sha2::Digest;
 use std::time::Duration;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "r3v3rs3-cli",
+    name = "r3",
+    bin_name = "r3",
     about = "A command line client for the r3v3rs3 admin API"
 )]
 struct Args {
@@ -26,9 +21,8 @@ struct Args {
     /// except `update` needs it.
     server: Option<String>,
 
-    /// An access token instead of the stored tokens, for scripts. The token must carry the
-    /// scopes that the tool needs.
-    #[arg(long, env = "R3V3RS3_MCP_TOKEN", hide_env_values = true)]
+    /// An access token instead of the stored tokens, for scripts.
+    #[arg(long, env = "R3V3RS3_TOKEN", hide_env_values = true)]
     token: Option<String>,
 
     #[command(subcommand)]
@@ -39,14 +33,6 @@ struct Args {
 enum Command {
     /// Runs the OAuth authorization flow in the browser and stores the tokens.
     Login,
-    /// Lists the tools that the server exposes.
-    Tools,
-    /// Calls one tool. The arguments are one JSON object, for example '{"id": "abc"}'.
-    Call {
-        name: String,
-        #[clap(default_value = "{}")]
-        arguments: String,
-    },
     /// Manage listening ports.
     #[command(subcommand)]
     Port(PortCommand),
@@ -249,6 +235,10 @@ pub enum AppCommand {
         #[arg(required = true)]
         pairs: Vec<String>,
     },
+    /// Shows container log file sizes of an application.
+    LogSize { id: String },
+    /// Truncates (vacuums) container log files of an application.
+    VacuumLogs { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -462,13 +452,13 @@ pub enum PlatformCommand {
     Prune,
     /// Rotates the platform encryption key and re-encrypts all stored secrets.
     RotateKey,
+    /// Truncates (vacuums) container log files across the platform.
+    VacuumLogs {
+        /// Optional minimum size threshold in MB for vacuuming.
+        #[arg(long)]
+        threshold_mb: Option<u64>,
+    },
 }
-
-/// A silent client: this program prints the results itself.
-#[derive(Clone, Default)]
-struct QuietClient;
-
-impl rmcp::ClientHandler for QuietClient {}
 
 fn http_client() -> anyhow::Result<reqwest::Client> {
     reqwest::Client::builder()
@@ -483,20 +473,6 @@ fn origin(server: &str) -> anyhow::Result<String> {
         .parse()
         .map_err(|err| anyhow::anyhow!("invalid server URL: {err}"))?;
     Ok(url.origin().ascii_serialization())
-}
-
-async fn connect(
-    server: &str,
-    access_token: &str,
-) -> anyhow::Result<rmcp::service::RunningService<rmcp::service::RoleClient, QuietClient>> {
-    let transport = StreamableHttpClientTransport::from_config(
-        StreamableHttpClientTransportConfig::with_uri(format!("{server}/api/mcp"))
-            // The transport adds the `Bearer ` prefix itself.
-            .auth_header(access_token),
-    );
-    serve_client(QuietClient, transport)
-        .await
-        .map_err(|err| anyhow::anyhow!("the MCP handshake failed: {err}"))
 }
 
 /// The explicit `--token` of the command, or the stored tokens refreshed when needed.
@@ -538,16 +514,9 @@ async fn run_with_token(
     token: Option<String>,
     cmd: Command,
 ) -> anyhow::Result<()> {
-    match cmd {
-        Command::Tools => tools(client, server, token).await,
-        Command::Call { name, arguments } => call(client, server, token, &name, &arguments).await,
-        Command::Login | Command::Update => unreachable!(),
-        other => {
-            let access_token = access_token_of(client, server, token).await?;
-            let api = api_client::ApiClient::new(client.clone(), server.to_string(), access_token);
-            run_api(&api, other).await
-        }
-    }
+    let access_token = access_token_of(client, server, token).await?;
+    let api = api_client::ApiClient::new(client.clone(), server.to_string(), access_token);
+    run_api(&api, cmd).await
 }
 
 async fn run_api(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()> {
@@ -592,6 +561,9 @@ async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyh
         PlatformCommand::Status => api.platform_status().await,
         PlatformCommand::Metrics => api.platform_metrics().await,
         PlatformCommand::Prune => api.platform_prune().await,
+        PlatformCommand::VacuumLogs { threshold_mb } => {
+            api.vacuum_platform_logs(threshold_mb).await
+        }
     }
 }
 
@@ -670,6 +642,8 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
         AppCommand::Logs { id, tail } => api.app_logs(&id, tail).await,
         AppCommand::Env { id } => api.get_app_env(&id).await,
         AppCommand::SetEnv { id, pairs } => api.set_app_env(&id, &pairs).await,
+        AppCommand::LogSize { id } => api.app_log_size(&id).await,
+        AppCommand::VacuumLogs { id } => api.vacuum_app_logs(&id).await,
     }
 }
 
@@ -816,60 +790,6 @@ async fn login(client: &reqwest::Client, server: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Prints one line per tool with its description.
-async fn tools(
-    client: &reqwest::Client,
-    server: &str,
-    token: Option<String>,
-) -> anyhow::Result<()> {
-    let access_token = access_token_of(client, server, token).await?;
-    let mcp = connect(server, &access_token).await?;
-    let tools = mcp.list_tools(Default::default()).await?;
-    for tool in &tools.tools {
-        println!(
-            "{}\n    {}",
-            tool.name,
-            tool.description.as_deref().unwrap_or("")
-        );
-    }
-    mcp.cancel().await?;
-    Ok(())
-}
-
-/// Calls one tool and prints its text content.
-async fn call(
-    client: &reqwest::Client,
-    server: &str,
-    token: Option<String>,
-    name: &str,
-    arguments: &str,
-) -> anyhow::Result<()> {
-    let access_token = access_token_of(client, server, token).await?;
-    let value: serde_json::Value = serde_json::from_str(arguments)
-        .map_err(|err| anyhow::anyhow!("the arguments are not one JSON object: {err}"))?;
-    let Some(arguments) = value.as_object() else {
-        bail!("the arguments must be one JSON object");
-    };
-    let mcp = connect(server, &access_token).await?;
-    let mut params = CallToolRequestParams::new(name.to_string());
-    params.arguments = Some(arguments.clone());
-    let result = mcp
-        .call_tool(params)
-        .await
-        .map_err(|err| anyhow::anyhow!("the tool call failed: {err}"))?;
-    for content in &result.content {
-        if let Some(text) = content.as_text() {
-            println!("{}", text.text);
-        }
-    }
-    let errored = result.is_error == Some(true);
-    mcp.cancel().await?;
-    if errored {
-        bail!("the tool answered with an error");
-    }
-    Ok(())
-}
-
 /// The GitHub repository that ships the releases of this client.
 const RELEASES_API: &str = "https://api.github.com/repos/KilimcininKorOglu/r3v3rs3/releases/latest";
 
@@ -877,11 +797,11 @@ const RELEASES_API: &str = "https://api.github.com/repos/KilimcininKorOglu/r3v3r
 /// so they run on every distribution regardless of the installed libc.
 fn asset_name() -> anyhow::Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("linux", "x86_64") => Ok("r3v3rs3-cli-x86_64-unknown-linux-musl.tar.gz"),
-        ("linux", "aarch64") => Ok("r3v3rs3-cli-aarch64-unknown-linux-musl.tar.gz"),
-        ("macos", "x86_64") => Ok("r3v3rs3-cli-x86_64-apple-darwin.tar.gz"),
-        ("macos", "aarch64") => Ok("r3v3rs3-cli-aarch64-apple-darwin.tar.gz"),
-        ("windows", "x86_64") => Ok("r3v3rs3-cli-x86_64-pc-windows-msvc.zip"),
+        ("linux", "x86_64") => Ok("r3-x86_64-unknown-linux-musl.tar.gz"),
+        ("linux", "aarch64") => Ok("r3-aarch64-unknown-linux-musl.tar.gz"),
+        ("macos", "x86_64") => Ok("r3-x86_64-apple-darwin.tar.gz"),
+        ("macos", "aarch64") => Ok("r3-aarch64-apple-darwin.tar.gz"),
+        ("windows", "x86_64") => Ok("r3-x86_64-pc-windows-msvc.zip"),
         (os, arch) => bail!("no release archive exists for {os}/{arch}"),
     }
 }
@@ -889,9 +809,9 @@ fn asset_name() -> anyhow::Result<&'static str> {
 /// The name of the executable inside the archive of this platform.
 fn binary_name() -> &'static str {
     if std::env::consts::OS == "windows" {
-        "r3v3rs3-cli.exe"
+        "r3.exe"
     } else {
-        "r3v3rs3-cli"
+        "r3"
     }
 }
 
@@ -910,7 +830,7 @@ fn newer_than(latest: &str, current: &str) -> Option<bool> {
 async fn latest_version(client: &reqwest::Client) -> anyhow::Result<String> {
     let release: serde_json::Value = client
         .get(RELEASES_API)
-        .header(reqwest::header::USER_AGENT, "r3v3rs3-cli")
+        .header(reqwest::header::USER_AGENT, "r3")
         .send()
         .await
         .context("the release API did not answer")?
@@ -946,13 +866,13 @@ async fn update(client: &reqwest::Client) -> anyhow::Result<()> {
     let current = env!("CARGO_PKG_VERSION");
     match newer_than(&latest, current) {
         Some(false) => {
-            println!("r3v3rs3-cli {current} is the newest release.");
+            println!("r3 {current} is the newest release.");
             return Ok(());
         }
         None => bail!("the release version {latest} is not three numbers"),
         Some(true) => {}
     }
-    println!("Downloading r3v3rs3-cli {latest}...");
+    println!("Downloading r3 {latest}...");
     let base = format!("https://github.com/KilimcininKorOglu/r3v3rs3/releases/download/v{latest}");
     let sums = download(client, &format!("{base}/SHA256SUMS")).await?;
     let archive = download(client, &format!("{base}/{asset}")).await?;
@@ -963,7 +883,7 @@ async fn update(client: &reqwest::Client) -> anyhow::Result<()> {
         bail!("the sha256 digest of {asset} does not match the checksums of the release");
     }
     install(&archive)?;
-    println!("r3v3rs3-cli {latest} is installed. The next run uses it.");
+    println!("r3 {latest} is installed. The next run uses it.");
     Ok(())
 }
 
@@ -971,7 +891,7 @@ async fn update(client: &reqwest::Client) -> anyhow::Result<()> {
 async fn download(client: &reqwest::Client, url: &str) -> anyhow::Result<Vec<u8>> {
     client
         .get(url)
-        .header(reqwest::header::USER_AGENT, "r3v3rs3-cli")
+        .header(reqwest::header::USER_AGENT, "r3")
         .send()
         .await
         .with_context(|| format!("{url} did not answer"))?
@@ -990,7 +910,7 @@ fn install(archive: &[u8]) -> anyhow::Result<()> {
         .parent()
         .context("the running binary has no directory")?
         .to_path_buf();
-    let temporary = dir.join(format!(".r3v3rs3-cli.new.{}", std::process::id()));
+    let temporary = dir.join(format!(".r3.new.{}", std::process::id()));
     let bytes = unpack(archive)?;
     std::fs::write(&temporary, &bytes)
         .context("the binary could not be written next to the running one")?;
@@ -1004,7 +924,7 @@ fn install(archive: &[u8]) -> anyhow::Result<()> {
     // this process until it exits. Windows locks the running file, so the old binary
     // moves aside first and the next update removes it.
     if std::fs::rename(&temporary, &exe).is_err() {
-        let aside = dir.join("r3v3rs3-cli.old");
+        let aside = dir.join("r3.old");
         let _ = std::fs::remove_file(&aside);
         std::fs::rename(&exe, &aside).context("the old binary could not be moved aside")?;
         std::fs::rename(&temporary, &exe).context("the running binary could not be replaced")?;
@@ -1017,7 +937,7 @@ fn unpack_zip(archive: &[u8], name: &str) -> anyhow::Result<Vec<u8>> {
     let mut zip = zip::ZipArchive::new(reader).context("the archive is not readable")?;
     let mut file = zip
         .by_name(name)
-        .context("the archive holds no r3v3rs3-cli binary")?;
+        .context("the archive holds no r3 binary")?;
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut file, &mut bytes)
         .context("the archive could not be unpacked")?;
@@ -1041,7 +961,7 @@ fn unpack_tar_gz(archive: &[u8], name: &str) -> anyhow::Result<Vec<u8>> {
             return Ok(bytes);
         }
     }
-    bail!("the archive holds no r3v3rs3-cli binary")
+    bail!("the archive holds no r3 binary")
 }
 
 /// Reads the executable out of the tar.gz or the zip archive of this platform.
@@ -1069,11 +989,11 @@ mod tests {
 
     #[test]
     fn the_digest_is_read_from_the_sum_file_with_or_without_a_dot_prefix() {
-        let sums = "abc123  ./r3v3rs3-cli-x86_64-unknown-linux-musl.tar.gz\ndef456  SHA256SUMS\n";
+        let sums = "abc123  ./r3-x86_64-unknown-linux-musl.tar.gz\ndef456  SHA256SUMS\n";
         assert_eq!(
-            digest_of(sums, "r3v3rs3-cli-x86_64-unknown-linux-musl.tar.gz").unwrap(),
+            digest_of(sums, "r3-x86_64-unknown-linux-musl.tar.gz").unwrap(),
             "abc123"
         );
-        assert!(digest_of(sums, "r3v3rs3-cli-aarch64-unknown-linux-musl.tar.gz").is_err());
+        assert!(digest_of(sums, "r3-aarch64-unknown-linux-musl.tar.gz").is_err());
     }
 }

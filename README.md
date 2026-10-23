@@ -52,7 +52,7 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 - A single binary with a built-in WebUI in English and Turkish, with light, dark and system themes. Configuration changes apply without a restart
 - An admin API with an OpenAPI document and a Swagger UI
 - A Prometheus metrics endpoint at `GET /api/metrics` with request, cache and connection counters
-- An MCP server at `/api/mcp` over OAuth 2.1 with PKCE and `read` and `edit` scopes, for AI hosts such as Claude Code that connect to the address directly, plus the `r3v3rs3-cli` command line client for scripts and terminals
+- An MCP server at `/api/mcp` over OAuth 2.1 with PKCE and `read` and `edit` scopes, for AI hosts such as Claude Code that connect to the address directly, plus the `r3` command line client for scripts and terminals
 - Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists, TOTP and an audit log with retention
 - Access and server logs with hourly file rotation, a text or JSON format, and the `log.db` database behind the log and audit pages
 - An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down
@@ -126,23 +126,23 @@ cargo install r3v3rs3
 
 ### GitHub Releases
 
-Download the archive for your architecture from the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases), extract it and put the `r3v3rs3` binary in a directory of your `$PATH`.
+Download the archive for your architecture from the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases), extract it and put the `r3-server` binary in a directory of your `$PATH`.
 
 ## Starting the server
 
 Create an account for the admin panel. The command asks for a password of at least 8 characters:
 
 ```bash
-r3v3rs3 add-user admin
+r3-server add-user admin
 ```
 
 Start the server:
 
 ```bash
-r3v3rs3 start
+r3-server start
 ```
 
-Open the admin panel at [http://localhost:46492/](http://localhost:46492/). `r3v3rs3 start --help` lists the options. Each option also reads an environment variable, for example `R3V3RS3_WEBUI`, `R3V3RS3_CONFIG_DIR` and `R3V3RS3_LOG_DIR`. The default config directory is `~/.config/r3v3rs3`, and the default log directory is `~/.local/share/r3v3rs3/logs`.
+Open the admin panel at [http://localhost:46492/](http://localhost:46492/). `r3-server start --help` lists the options. Each option also reads an environment variable, for example `R3V3RS3_WEBUI`, `R3V3RS3_CONFIG_DIR` and `R3V3RS3_LOG_DIR`. The default config directory is `~/.config/r3v3rs3`, and the default log directory is `~/.local/share/r3v3rs3/logs`.
 
 The admin API has an OpenAPI document at `/api/openapi.json` and a Swagger UI at `/api/docs/`. Both require a signed-in session. See [Admin API](https://r3v3rs3.keremgok.tr/configuration/#admin-api) in the documentation.
 

@@ -4,6 +4,7 @@ use std::{net::SocketAddr, path::PathBuf};
 use tracing_subscriber::filter::LevelFilter;
 
 #[derive(Parser)]
+#[command(name = "r3-server", bin_name = "r3-server")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,

@@ -14,7 +14,7 @@ build:
 	$(CARGO) build --workspace --all-targets --all-features
 
 release: webui-release
-	$(CARGO) build --bin r3v3rs3 --release
+	$(CARGO) build --bin r3-server --release
 
 webui:
 	cd $(WEBUI_DIR) && $(TRUNK) build
@@ -74,7 +74,7 @@ check-fast:
 	$(CARGO) check --workspace --all-targets --all-features
 
 run:
-	$(CARGO) run --bin r3v3rs3 -- start
+	$(CARGO) run --bin r3-server -- start
 
 # Downloads the CDN IP ranges into r3v3rs3/data/cdn-ranges.json.
 cdn-snapshot:

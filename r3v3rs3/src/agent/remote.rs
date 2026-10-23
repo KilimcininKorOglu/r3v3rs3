@@ -271,6 +271,8 @@ mod tests {
             publish: Some(80),
             host_port: None,
             extra_hosts: Vec::new(),
+            log_max_size: None,
+            log_max_file: None,
         }
     }
 

@@ -31,20 +31,20 @@ Open the **Settings** page and scroll to **Configuration Backup & Restore**:
 
 ### CLI
 
-The `r3v3rs3-cli` provides dedicated commands:
+The `r3` CLI provides dedicated commands:
 
 ```bash
 # Export configuration backup to a file
-$ r3v3rs3-cli config backup -o r3v3rs3-backup.json
+$ r3 config backup -o r3v3rs3-backup.json
 
 # Export backup to stdout (e.g. for piping or remote backup scripts)
-$ r3v3rs3-cli config backup
+$ r3 config backup
 
 # Restore configuration from a file
-$ r3v3rs3-cli config restore -f r3v3rs3-backup.json
+$ r3 config restore -f r3v3rs3-backup.json
 
 # Restore configuration from standard input
-$ cat r3v3rs3-backup.json | r3v3rs3-cli config restore -f -
+$ cat r3v3rs3-backup.json | r3 config restore -f -
 ```
 
 ### REST API
@@ -1526,7 +1526,7 @@ Tokens and dynamically registered clients are persisted in SQLite (`r3v3rs3.db`)
 
 How a client connects depends on the client. An AI host that speaks the MCP authorization flow, such as Claude Code or Cursor, needs no extra program: it adds this server as an HTTP MCP server, for example with `claude mcp add --transport http --scope user r3v3rs3 https://panel.example.com/api/mcp`, and its own `Authenticate` action of the `/mcp` command runs the same authorization flow in the browser. The command line client below serves the other cases: scripts, cron jobs and servers without a browser session, where one command signs in once and stores its tokens for every later call.
 
-The repository ships a command line client in `r3v3rs3-cli`. The installer script downloads the prebuilt binary of the newest release from GitHub, verifies its sha256 digest, and installs it:
+The repository ships a command line client in `r3` (`r3v3rs3-cli` crate). The installer script downloads the prebuilt binary of the newest release from GitHub, verifies its sha256 digest, and installs it:
 
 ```sh
 # Linux and macOS:
@@ -1538,143 +1538,145 @@ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/inst
 irm https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install-cli.ps1 | iex
 ```
 
-On Windows the binary lands in `%LOCALAPPDATA%\Programs\r3v3rs3-cli`, which you add to your `PATH`. The script installs into `/usr/local/bin` on Linux and macOS, and `INSTALL_DIR` overrides that directory. A specific release installs with `--version vX.Y.Z`, and the archives of every platform are on the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases) as well.
+On Windows the binary lands in `%LOCALAPPDATA%\Programs\r3`, which you add to your `PATH`. The script installs into `/usr/local/bin` on Linux and macOS, and `INSTALL_DIR` overrides that directory. A specific release installs with `--version vX.Y.Z`, and the archives of every platform are on the [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases) as well.
 
 Then:
 
 ```sh
-r3v3rs3-cli http://127.0.0.1:46492 login
-r3v3rs3-cli http://127.0.0.1:46492 tools
-r3v3rs3-cli http://127.0.0.1:46492 call server_status
+r3 http://127.0.0.1:46492 login
+r3 http://127.0.0.1:46492 platform status
 ```
 
-`login` opens the consent page in the browser and stores the tokens in the config directory. A script can pass an access token directly with `--token` or the `R3V3RS3_MCP_TOKEN` environment variable. The `update` command installs a newer release over the running binary and verifies its sha256 digest against the checksums of the release.
+`login` opens the consent page in the browser and stores the tokens in the config directory. A script can pass an access token directly with `--token` or the `R3V3RS3_TOKEN` environment variable. The `update` command installs a newer release over the running binary and verifies its sha256 digest against the checksums of the release.
 
 ### Full resource management
 
-`r3v3rs3-cli` provides direct first-class commands to manage all aspects of the reverse proxy and PaaS platform:
+`r3` provides direct first-class commands to manage all aspects of the reverse proxy and PaaS platform:
 
 ```sh
 # Ports
-r3v3rs3-cli <server> port list
-r3v3rs3-cli <server> port get <id>
-r3v3rs3-cli <server> port add <spec.json|yaml|->
-r3v3rs3-cli <server> port delete <id>
-r3v3rs3-cli <server> port reset <id>
+r3 <server> port list
+r3 <server> port get <id>
+r3 <server> port add <spec.json|yaml|->
+r3 <server> port delete <id>
+r3 <server> port reset <id>
 
 # Proxies
-r3v3rs3-cli <server> proxy list
-r3v3rs3-cli <server> proxy get <id>
-r3v3rs3-cli <server> proxy add <proxy.json|yaml|->
-r3v3rs3-cli <server> proxy status <id>
-r3v3rs3-cli <server> proxy purge-cache <id> [--path /static]
-r3v3rs3-cli <server> proxy delete <id>
+r3 <server> proxy list
+r3 <server> proxy get <id>
+r3 <server> proxy add <proxy.json|yaml|->
+r3 <server> proxy status <id>
+r3 <server> proxy purge-cache <id> [--path /static]
+r3 <server> proxy delete <id>
 
 # Certificates & ACME
-r3v3rs3-cli <server> cert list
-r3v3rs3-cli <server> cert get <id>
-r3v3rs3-cli <server> cert upload --cert server.crt --key server.key
-r3v3rs3-cli <server> cert coverage
-r3v3rs3-cli <server> cert delete <id>
-r3v3rs3-cli <server> acme list
-r3v3rs3-cli <server> acme get <id>
-r3v3rs3-cli <server> acme add <acme.json|yaml|->
-r3v3rs3-cli <server> acme order <id>
-r3v3rs3-cli <server> acme delete <id>
+r3 <server> cert list
+r3 <server> cert get <id>
+r3 <server> cert upload --cert server.crt --key server.key
+r3 <server> cert coverage
+r3 <server> cert delete <id>
+r3 <server> acme list
+r3 <server> acme get <id>
+r3 <server> acme add <acme.json|yaml|->
+r3 <server> acme order <id>
+r3 <server> acme delete <id>
 
 # Access Lists & DNS Providers
-r3v3rs3-cli <server> acl list
-r3v3rs3-cli <server> acl get <id>
-r3v3rs3-cli <server> acl add <acl.json|yaml|->
-r3v3rs3-cli <server> acl delete <id>
-r3v3rs3-cli <server> dns list
-r3v3rs3-cli <server> dns get <id>
-r3v3rs3-cli <server> dns add <dns.json|yaml|->
-r3v3rs3-cli <server> dns delete <id>
+r3 <server> acl list
+r3 <server> acl get <id>
+r3 <server> acl add <acl.json|yaml|->
+r3 <server> acl delete <id>
+r3 <server> dns list
+r3 <server> dns get <id>
+r3 <server> dns add <dns.json|yaml|->
+r3 <server> dns delete <id>
 
 # Deployed Applications
-r3v3rs3-cli <server> app list
-r3v3rs3-cli <server> app get <id>
-r3v3rs3-cli <server> app add <app.json|yaml|->
-r3v3rs3-cli <server> app deploy <id>
-r3v3rs3-cli <server> app rollback <id>
-r3v3rs3-cli <server> app start <id>
-r3v3rs3-cli <server> app stop <id>
-r3v3rs3-cli <server> app restart <id>
-r3v3rs3-cli <server> app logs <id> [--tail 100]
-r3v3rs3-cli <server> app env <id>
-r3v3rs3-cli <server> app set-env <id> KEY=VAL [KEY2=VAL2...]
-r3v3rs3-cli <server> app delete <id>
+r3 <server> app list
+r3 <server> app get <id>
+r3 <server> app add <app.json|yaml|->
+r3 <server> app deploy <id>
+r3 <server> app rollback <id>
+r3 <server> app start <id>
+r3 <server> app stop <id>
+r3 <server> app restart <id>
+r3 <server> app logs <id> [--tail 100]
+r3 <server> app log-size <id>
+r3 <server> app vacuum-logs <id>
+r3 <server> app env <id>
+r3 <server> app set-env <id> KEY=VAL [KEY2=VAL2...]
+r3 <server> app delete <id>
 
 # Managed Databases
-r3v3rs3-cli <server> db list
-r3v3rs3-cli <server> db get <id>
-r3v3rs3-cli <server> db create --name my-db --engine postgresql [--version 17] [--password secret]
-r3v3rs3-cli <server> db clone <id> --name my-db-clone
-r3v3rs3-cli <server> db replica <id> --name my-db-replica
-r3v3rs3-cli <server> db logs <id> [--tail 100]
-r3v3rs3-cli <server> db delete <id>
+r3 <server> db list
+r3 <server> db get <id>
+r3 <server> db create --name my-db --engine postgresql [--version 17] [--password secret]
+r3 <server> db clone <id> --name my-db-clone
+r3 <server> db replica <id> --name my-db-replica
+r3 <server> db logs <id> [--tail 100]
+r3 <server> db delete <id>
 
 # Backups
-r3v3rs3-cli <server> backup config
-r3v3rs3-cli <server> backup list <database-id>
-r3v3rs3-cli <server> backup create <database-id>
-r3v3rs3-cli <server> backup restore <database-id> <backup-id>
-r3v3rs3-cli <server> backup delete <database-id> <backup-id>
+r3 <server> backup config
+r3 <server> backup list <database-id>
+r3 <server> backup create <database-id>
+r3 <server> backup restore <database-id> <backup-id>
+r3 <server> backup delete <database-id> <backup-id>
 
 # Multi-Node Agent Targets
-r3v3rs3-cli <server> target list
-r3v3rs3-cli <server> target get <id>
-r3v3rs3-cli <server> target add --name worker-1 --host 10.0.0.5 --port 46493
-r3v3rs3-cli <server> target drain <id>
-r3v3rs3-cli <server> target undrain <id>
-r3v3rs3-cli <server> target token
-r3v3rs3-cli <server> target delete <id>
+r3 <server> target list
+r3 <server> target get <id>
+r3 <server> target add --name worker-1 --host 10.0.0.5 --port 46493
+r3 <server> target drain <id>
+r3 <server> target undrain <id>
+r3 <server> target token
+r3 <server> target delete <id>
 
 # Projects & Environments
-r3v3rs3-cli <server> project list
-r3v3rs3-cli <server> project get <id>
-r3v3rs3-cli <server> project add --name my-project [--description "Core apps"]
-r3v3rs3-cli <server> project sync-env <project-id> --from staging --to production
-r3v3rs3-cli <server> project delete <id>
+r3 <server> project list
+r3 <server> project get <id>
+r3 <server> project add --name my-project [--description "Core apps"]
+r3 <server> project sync-env <project-id> --from staging --to production
+r3 <server> project delete <id>
 
 # App Store & One-Click Templates
-r3v3rs3-cli <server> store list
-r3v3rs3-cli <server> store refresh
-r3v3rs3-cli <server> store install <store-app-id> --name my-service [--domain service.example.com]
+r3 <server> store list
+r3 <server> store refresh
+r3 <server> store install <store-app-id> --name my-service [--domain service.example.com]
 
 # Security & Banned IPs
-r3v3rs3-cli <server> security banned-ips
-r3v3rs3-cli <server> security unban <ip>
+r3 <server> security banned-ips
+r3 <server> security unban <ip>
 
 # Webhooks & Scheduled Cron Jobs
-r3v3rs3-cli <server> webhook list
-r3v3rs3-cli <server> webhook get <id>
-r3v3rs3-cli <server> webhook add <webhook.json|yaml|->
-r3v3rs3-cli <server> webhook test <id>
-r3v3rs3-cli <server> webhook delete <id>
-r3v3rs3-cli <server> cron list <app-id>
-r3v3rs3-cli <server> cron add <app-id> --cron "0 * * * *" --command "php artisan schedule:run" [--name hourly]
-r3v3rs3-cli <server> cron run <app-id> <job-id>
-r3v3rs3-cli <server> cron delete <app-id> <job-id>
+r3 <server> webhook list
+r3 <server> webhook get <id>
+r3 <server> webhook add <webhook.json|yaml|->
+r3 <server> webhook test <id>
+r3 <server> webhook delete <id>
+r3 <server> cron list <app-id>
+r3 <server> cron add <app-id> --cron "0 * * * *" --command "php artisan schedule:run" [--name hourly]
+r3 <server> cron run <app-id> <job-id>
+r3 <server> cron delete <app-id> <job-id>
 
 # Platform Status & Maintenance
-r3v3rs3-cli <server> platform status
-r3v3rs3-cli <server> platform metrics
-r3v3rs3-cli <server> platform prune
-r3v3rs3-cli <server> platform rotate-key
+r3 <server> platform status
+r3 <server> platform metrics
+r3 <server> platform prune
+r3 <server> platform vacuum-logs [--threshold-mb 50]
+r3 <server> platform rotate-key
 ```
 
 ### Declarative manifests (`apply -f`)
 
-For CI/CD pipelines and automated configuration, `r3v3rs3-cli apply -f <file>` applies a declarative YAML or JSON manifest to configure ports, proxies, and applications idempotently:
+For CI/CD pipelines and automated configuration, `r3 apply -f <file>` applies a declarative YAML or JSON manifest to configure ports, proxies, and applications idempotently:
 
 ```sh
 # Apply from a file
-r3v3rs3-cli http://127.0.0.1:46492 apply -f infrastructure.yaml
+r3 http://127.0.0.1:46492 apply -f infrastructure.yaml
 
 # Apply from stdin
-cat infrastructure.yaml | r3v3rs3-cli http://127.0.0.1:46492 apply -f -
+cat infrastructure.yaml | r3 http://127.0.0.1:46492 apply -f -
 ```
 
 An example manifest in YAML:

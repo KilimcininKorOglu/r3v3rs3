@@ -589,6 +589,21 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn app_log_size(&self, id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, &format!("/api/apps/{id}/logs/size"), None)
+            .await?;
+        print_json(&res)
+    }
+
+    pub async fn vacuum_app_logs(&self, id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::POST, &format!("/api/apps/{id}/logs/vacuum"), None)
+            .await?;
+        println!("app/{id} container logs vacuumed");
+        print_json(&res)
+    }
+
     pub async fn get_app_env(&self, id: &str) -> anyhow::Result<()> {
         let res = self
             .request(Method::GET, &format!("/api/apps/{id}/env"), None)
@@ -1148,6 +1163,16 @@ impl ApiClient {
             .request(Method::POST, "/api/platform/prune", None)
             .await?;
         println!("platform disk hygiene prune completed");
+        print_json(&res)
+    }
+
+    pub async fn vacuum_platform_logs(&self, threshold_mb: Option<u64>) -> anyhow::Result<()> {
+        let url = match threshold_mb {
+            Some(mb) => format!("/api/platform/logs/vacuum?threshold_mb={mb}"),
+            None => "/api/platform/logs/vacuum".to_string(),
+        };
+        let res = self.request(Method::POST, &url, None).await?;
+        println!("platform container logs vacuum completed");
         print_json(&res)
     }
 

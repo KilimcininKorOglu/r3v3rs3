@@ -17,7 +17,11 @@ license = "MIT"
 repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
 homepage = "https://r3v3rs3.keremgok.tr/"
 readme = "../README.md"
-default-run = "r3v3rs3"
+default-run = "r3-server"
+
+[[bin]]
+name = "r3-server"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.71"

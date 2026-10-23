@@ -76,7 +76,7 @@ async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> 
         }])
         .await?;
 
-    let exe = env!("CARGO_BIN_EXE_r3v3rs3");
+    let exe = env!("CARGO_BIN_EXE_r3-server");
     let mut first = std::process::Command::new(exe)
         .args([
             "start",

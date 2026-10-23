@@ -626,12 +626,18 @@ fn prune_toggles_view(locale: Locale, policy: &UseStateHandle<PrunePolicy>) -> H
     let toggle_containers = checkbox_toggle(policy, |p| &mut p.prune_containers);
     let toggle_build_cache = checkbox_toggle(policy, |p| &mut p.prune_build_cache);
     let toggle_volumes = checkbox_toggle(policy, |p| &mut p.prune_volumes);
+    let toggle_logs = checkbox_toggle(policy, |p| &mut p.prune_logs);
     let interval_input = text_input(policy, |p| &mut p.interval);
     let threshold_val = policy
         .disk_pressure_threshold
         .map(|v| v.to_string())
         .unwrap_or_default();
     let threshold_input = threshold_input_callback(policy);
+    let log_threshold_val = policy
+        .log_vacuum_threshold_mb
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let log_threshold_input = log_threshold_input_callback(policy);
 
     html! {
         <div class="space-y-4">
@@ -676,7 +682,28 @@ fn prune_toggles_view(locale: Locale, policy: &UseStateHandle<PrunePolicy>) -> H
                     <input type="checkbox" checked={policy.prune_volumes} onchange={toggle_volumes} class="w-4 h-4 mr-2 rounded" />
                     {locale.t("targets.prune_volumes")}
                 </label>
+                <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
+                    <input type="checkbox" checked={policy.prune_logs} onchange={toggle_logs} class="w-4 h-4 mr-2 rounded" />
+                    {locale.t("targets.prune_logs")}
+                </label>
             </div>
+            if policy.prune_logs {
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("targets.prune_log_threshold")}</label>
+                    <div class="flex items-center gap-2">
+                        <input
+                            type="number"
+                            min="1"
+                            placeholder="50"
+                            value={log_threshold_val}
+                            oninput={log_threshold_input}
+                            class={INPUT_CLASS}
+                        />
+                        <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{"MB"}</span>
+                    </div>
+                    <p class={HINT_CLASS}>{locale.t("targets.prune_log_threshold_hint")}</p>
+                </div>
+            }
         </div>
     }
 }
@@ -688,6 +715,17 @@ fn threshold_input_callback(policy: &UseStateHandle<PrunePolicy>) -> Callback<In
         let val = input.value().trim().parse::<u8>().ok();
         let mut updated = (*policy).clone();
         updated.disk_pressure_threshold = val;
+        policy.set(updated);
+    })
+}
+
+fn log_threshold_input_callback(policy: &UseStateHandle<PrunePolicy>) -> Callback<InputEvent> {
+    let policy = policy.clone();
+    Callback::from(move |event: InputEvent| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let val = input.value().trim().parse::<u64>().ok();
+        let mut updated = (*policy).clone();
+        updated.log_vacuum_threshold_mb = val;
         policy.set(updated);
     })
 }
@@ -770,6 +808,7 @@ async fn handle_prune_result(
                     ("volumes", &result.volumes_deleted.to_string()),
                     ("build_cache", &result.build_cache_deleted.to_string()),
                     ("containers", &result.containers_deleted.to_string()),
+                    ("logs", &result.logs_truncated.to_string()),
                 ],
             );
             dialog::message(locale, &msg, Icon::Success).await;

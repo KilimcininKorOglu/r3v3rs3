@@ -88,7 +88,7 @@ async fn a_worker_serves_the_listeners_of_the_master() -> anyhow::Result<()> {
 
     let child_fd = unsafe { libc::dup(worker_end.as_raw_fd()) };
     assert!(child_fd >= 0);
-    let exe = env!("CARGO_BIN_EXE_r3v3rs3");
+    let exe = env!("CARGO_BIN_EXE_r3-server");
     let mut command = std::process::Command::new(exe);
     command
         .args([
@@ -242,7 +242,7 @@ async fn the_supervisor_serves_the_ports_through_a_worker() -> anyhow::Result<()
     let supervisor = r3v3rs3::server::supervisor::run(
         channels.event.clone(),
         channels.command.clone(),
-        std::path::PathBuf::from(env!("CARGO_BIN_EXE_r3v3rs3")),
+        std::path::PathBuf::from(env!("CARGO_BIN_EXE_r3-server")),
         app_info,
         app,
         manifest,

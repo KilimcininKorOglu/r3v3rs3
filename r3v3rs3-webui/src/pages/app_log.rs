@@ -5,6 +5,8 @@ use super::app_list::SLOW_REFRESH_MS;
 use super::settings::{failure_box, fetch_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::dialog::{self, Icon};
+use crate::format::format_bytes;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -80,6 +82,7 @@ pub fn app_log_view(props: &Props) -> Html {
 
     let title = page_title(locale, &page);
     let content_props = ContentProps {
+        id,
         locale,
         page: &page,
         pre_ref,
@@ -157,6 +160,7 @@ fn use_log_stream_effect(
 }
 
 struct ContentProps<'a> {
+    id: ShortId,
     locale: Locale,
     page: &'a Loaded,
     pre_ref: NodeRef,
@@ -199,6 +203,32 @@ fn log_box_view(page: &LogPage, props: ContentProps<'_>) -> Html {
         let filename = download_filename(&app_name, service_name.as_deref());
         download_text_file(&filename, &log_text);
     });
+    let app_id = props.id;
+    let on_vacuum = {
+        let refresh = refresh.clone();
+        Callback::from(move |_: MouseEvent| {
+            let refresh = refresh.clone();
+            dialog::confirm_then(
+                locale,
+                locale.t("apps.log_vacuum_confirm").to_string(),
+                async move {
+                    let req = Request::post(&format!("{API_ENDPOINT}/apps/{app_id}/logs/vacuum"));
+                    if let Ok(res) =
+                        fetch_json::<r3v3rs3_api::container::LogVacuumResult>(locale, req).await
+                    {
+                        let freed = format_bytes(res.freed_bytes);
+                        dialog::message(
+                            locale,
+                            &locale.tf("apps.log_vacuum_success", &[("size", &freed)]),
+                            Icon::Success,
+                        )
+                        .await;
+                        refresh.emit(MouseEvent::new("click").unwrap());
+                    }
+                },
+            );
+        })
+    };
 
     let toolbar_props = ToolbarProps {
         locale,
@@ -208,6 +238,7 @@ fn log_box_view(page: &LogPage, props: ContentProps<'_>) -> Html {
         selected_service,
         services: &page.services,
         on_download,
+        on_vacuum,
         refresh,
     };
 
@@ -237,6 +268,7 @@ struct ToolbarProps<'a> {
     selected_service: &'a UseStateHandle<Option<String>>,
     services: &'a [String],
     on_download: Callback<MouseEvent>,
+    on_vacuum: Callback<MouseEvent>,
     refresh: Callback<MouseEvent>,
 }
 
@@ -249,6 +281,7 @@ fn toolbar_view(props: ToolbarProps<'_>) -> Html {
         selected_service,
         services,
         on_download,
+        on_vacuum,
         refresh,
     } = props;
 
@@ -365,6 +398,16 @@ fn toolbar_view(props: ToolbarProps<'_>) -> Html {
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                     </svg>
                     {locale.t("apps.log_download")}
+                </button>
+                <button
+                    onclick={on_vacuum}
+                    type="button"
+                    class="inline-flex items-center text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40 font-medium"
+                >
+                    <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                    {locale.t("apps.log_vacuum")}
                 </button>
             </div>
         </div>

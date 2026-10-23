@@ -367,6 +367,12 @@ pub struct ContainerSpec {
     /// Extra entries of `/etc/hosts` of the container, as `host` and `ip` pairs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_hosts: Vec<(String, String)>,
+    /// Docker log-opt max-size (default: "50m").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_max_size: Option<String>,
+    /// Docker log-opt max-file (default: "3").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_max_file: Option<String>,
 }
 
 impl ContainerSpec {
@@ -433,6 +439,32 @@ pub struct ContainerSummary {
     /// The Docker state, for example `running` or `exited`.
     pub state: String,
     pub labels: BTreeMap<String, String>,
+}
+
+/// Container log file size and status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ContainerLogInfo {
+    pub container_id: String,
+    pub container_name: String,
+    pub log_path: Option<String>,
+    pub size_bytes: u64,
+    pub rotated_files_count: usize,
+}
+
+/// Aggregated container log files overview for an app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AppLogsOverview {
+    pub app_id: String,
+    pub total_size_bytes: u64,
+    pub containers: Vec<ContainerLogInfo>,
+}
+
+/// The result of truncating / vacuuming container log files.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct LogVacuumResult {
+    pub app_id: Option<String>,
+    pub truncated_files: usize,
+    pub freed_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -554,6 +586,8 @@ mod tests {
             publish: None,
             host_port: None,
             extra_hosts: Vec::new(),
+            log_max_size: None,
+            log_max_file: None,
         };
         assert!(spec.validate().is_ok());
         spec.env[0].value = "a\0b".into();

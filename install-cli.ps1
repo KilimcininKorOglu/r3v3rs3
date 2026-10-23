@@ -1,19 +1,19 @@
-# Installs the newest r3v3rs3-cli binary from the GitHub releases of r3v3rs3.
+# Installs the newest r3 command line client from the GitHub releases of r3v3rs3.
 # Runs on Windows in PowerShell. Pass a release tag with -Version v1.7.3.
-# INSTALL_DIR (default %LOCALAPPDATA%\Programs\r3v3rs3-cli) overrides the target.
+# INSTALL_DIR (default %LOCALAPPDATA%\Programs\r3) overrides the target.
 param(
     [string]$Version = "",
-    [string]$InstallDir = "$env:LOCALAPPDATA\Programs\r3v3rs3-cli"
+    [string]$InstallDir = "$env:LOCALAPPDATA\Programs\r3"
 )
 
 $ErrorActionPreference = "Stop"
 $Repo = "KilimcininKorOglu/r3v3rs3"
-$Headers = @{ "user-agent" = "r3v3rs3-cli installer" }
+$Headers = @{ "user-agent" = "r3 installer" }
 
 switch ($env:PROCESSOR_ARCHITECTURE) {
-    "AMD64" { $Asset = "r3v3rs3-cli-x86_64-pc-windows-msvc.zip" }
+    "AMD64" { $Asset = "r3-x86_64-pc-windows-msvc.zip" }
     default {
-        Write-Error "r3v3rs3-cli ships no archive for $env:PROCESSOR_ARCHITECTURE. Linux and macOS use install-cli.sh."
+        Write-Error "r3 ships no archive for $env:PROCESSOR_ARCHITECTURE. Linux and macOS use install-cli.sh."
     }
 }
 
@@ -24,10 +24,10 @@ if (-not $Version) {
 if (-not $Version.StartsWith("v")) { $Version = "v$Version" }
 $Base = "https://github.com/$Repo/releases/download/$Version"
 
-$Work = Join-Path ([System.IO.Path]::GetTempPath()) ("r3v3rs3-cli-" + [System.Guid]::NewGuid().ToString("N"))
+$Work = Join-Path ([System.IO.Path]::GetTempPath()) ("r3-" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $Work | Out-Null
 try {
-    Write-Host "Downloading r3v3rs3-cli $Version..."
+    Write-Host "Downloading r3 $Version..."
     Invoke-WebRequest -Headers $Headers "$Base/SHA256SUMS" -OutFile "$Work\SHA256SUMS"
     Invoke-WebRequest -Headers $Headers "$Base/$Asset" -OutFile "$Work\$Asset"
 
@@ -41,8 +41,8 @@ try {
 
     Expand-Archive -Path "$Work\$Asset" -DestinationPath $Work\unpack
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-    Copy-Item "$Work\unpack\r3v3rs3-cli.exe" "$InstallDir\r3v3rs3-cli.exe" -Force
-    Write-Host "r3v3rs3-cli $Version is installed in $InstallDir."
+    Copy-Item "$Work\unpack\r3.exe" "$InstallDir\r3.exe" -Force
+    Write-Host "r3 $Version is installed in $InstallDir."
     # The user Path of the registry carries the directory across sessions; the running
     # session gets it too, so the binary works without a restart of the terminal.
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -51,7 +51,7 @@ try {
         $env:PATH += ";$InstallDir"
         Write-Host "$InstallDir was added to your user PATH."
     }
-    Write-Host "Run 'r3v3rs3-cli update' to upgrade it later."
+    Write-Host "Run 'r3 update' to upgrade it later."
 }
 finally {
     Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue

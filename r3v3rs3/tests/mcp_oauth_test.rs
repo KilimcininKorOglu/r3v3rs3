@@ -674,19 +674,17 @@ async fn assert_mcp_client_tools(addr: SocketAddr, token: &str) -> anyhow::Resul
     Ok(())
 }
 
-/// The command line client connects with an explicit `--token` and prints the tools.
+/// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
-async fn the_client_binary_lists_the_tools() -> anyhow::Result<()> {
+async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
     let dir = TempDir::new("mcp-cli")?;
     with_admin(&dir.0, |addr| async move {
         let token = access_token(&addr).await?;
 
         // The client binary of the workspace, built up to date before the test runs it.
         let binary = match std::env::var("CARGO_TARGET_DIR") {
-            Ok(dir) => std::path::PathBuf::from(dir).join("debug/r3v3rs3-cli"),
-            Err(_) => {
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/debug/r3v3rs3-cli")
-            }
+            Ok(dir) => std::path::PathBuf::from(dir).join("debug/r3"),
+            Err(_) => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/debug/r3"),
         };
         let status = std::process::Command::new("cargo")
             .args(["build", "-p", "r3v3rs3-cli"])
@@ -713,7 +711,7 @@ async fn the_client_binary_lists_the_tools() -> anyhow::Result<()> {
             .await
             .map_err(|err| anyhow::anyhow!("the client task failed: {err}"))?
         }
-        let output = run_client(&binary, &addr, &token, &["tools"]).await?;
+        let output = run_client(&binary, &addr, &token, &["config", "get"]).await?;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         assert!(
             output.status.success(),
@@ -721,13 +719,11 @@ async fn the_client_binary_lists_the_tools() -> anyhow::Result<()> {
             stdout,
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(stdout.contains("server_status"), "{stdout}");
-        assert!(stdout.contains("list_proxies"), "{stdout}");
 
-        let output = run_client(&binary, &addr, &token, &["call", "server_status"]).await?;
+        let output = run_client(&binary, &addr, &token, &["proxy", "list"]).await?;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         assert!(
-            output.status.success() && stdout.contains("workers"),
+            output.status.success(),
             "{stdout} {}",
             String::from_utf8_lossy(&output.stderr)
         );

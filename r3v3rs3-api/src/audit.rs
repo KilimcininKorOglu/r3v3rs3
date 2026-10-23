@@ -179,10 +179,12 @@ pub enum AuditAction {
     UndrainTarget,
     /// An account updated the node-level threshold alert rules.
     UpdateNodeAlertRules,
+    /// An account truncated or vacuumed container log files.
+    VacuumLogs,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 100] = [
+    pub const ALL: [AuditAction; 101] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -283,6 +285,7 @@ impl AuditAction {
         Self::DrainTarget,
         Self::UndrainTarget,
         Self::UpdateNodeAlertRules,
+        Self::VacuumLogs,
     ];
 }
 

@@ -7,6 +7,7 @@
 
 use super::{AppState, McpScope};
 use crate::accounts::{Caller, Permission};
+use crate::audit::AuditRecord;
 use crate::server::rpc::access_lists::{
     AddAccessList, DeleteAccessList, GetAccessLists, UpdateAccessList,
 };
@@ -24,6 +25,7 @@ use crate::server::rpc::proxies::{
 };
 use crate::server::rpc::workers::GetWorkers;
 use http::request::Parts;
+use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::proxy::{Proxy, ProxyEntry};
@@ -241,6 +243,13 @@ pub struct CreateDrBackupParams {
     pub passphrase: Option<String>,
     /// Whether to replicate the backup to configured S3 storage.
     pub upload_s3: Option<bool>,
+}
+
+/// The arguments of `vacuum_all_logs`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct VacuumLogsParams {
+    /// Optional size threshold in megabytes. Only log files exceeding this size are truncated.
+    pub threshold_mb: Option<u64>,
 }
 
 /// The caller of the request, which the Bearer middleware inserted.
@@ -1239,6 +1248,54 @@ impl McpServer {
         json_result(logs)
     }
 
+    /// Inspect container log file sizes and overview for an application.
+    #[tool(description = "Inspect container log file sizes and storage status for an application.")]
+    async fn get_app_log_size(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Read)
+            .await
+            .map_err(any_error)?;
+        let overview = platform.app_log_size(id).await.map_err(any_error)?;
+        json_result(overview)
+    }
+
+    /// Truncate (vacuum) container log files for an application.
+    #[tool(
+        description = "Truncate (vacuum) container log files for an application to reclaim disk space immediately. Needs the edit scope."
+    )]
+    async fn vacuum_app_logs(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let res = platform.vacuum_app_logs(id).await.map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::VacuumLogs)
+            .id(id)
+            .summary(format!(
+                "Vacuumed container logs, freed {} bytes",
+                res.freed_bytes
+            ));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(res)
+    }
+
     /// Get environment variables of an application.
     #[tool(description = "Get environment variables of an application.")]
     async fn get_app_env(
@@ -1824,6 +1881,62 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(backup.0)
+    }
+
+    /// Truncate (vacuum) container logs across the platform.
+    #[tool(
+        description = "Truncate (vacuum) container logs across the platform exceeding the optional MB threshold. Needs the edit scope."
+    )]
+    async fn vacuum_all_logs(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<VacuumLogsParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let res = platform
+            .vacuum_all_logs(params.threshold_mb)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::VacuumLogs).summary(format!(
+            "Platform vacuumed container logs, freed {} bytes",
+            res.freed_bytes
+        ));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(res)
+    }
+
+    /// Execute automated Docker disk hygiene prune immediately.
+    #[tool(
+        description = "Execute Docker disk hygiene prune immediately to remove dangling images, stopped containers, build caches, and old logs according to the configured policy. Needs the edit scope."
+    )]
+    async fn run_platform_prune(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let res = platform.run_prune().await.map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(format!(
+            "Ran disk prune, reclaimed {} bytes",
+            res.space_reclaimed_bytes
+        ));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(res)
     }
 }
 

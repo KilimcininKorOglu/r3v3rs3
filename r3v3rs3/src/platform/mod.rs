@@ -52,7 +52,9 @@ use crate::runtime::ContainerRuntime;
 use crate::runtime::docker::{DockerRuntime, ExecHandle};
 use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::app::AppConfig;
-use r3v3rs3_api::container::{COMPOSE_SERVICE_LABEL, ContainerName, ContainerSummary};
+use r3v3rs3_api::container::{
+    AppLogsOverview, COMPOSE_SERVICE_LABEL, ContainerName, ContainerSummary, LogVacuumResult,
+};
 use r3v3rs3_api::discovery::Endpoint;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
@@ -773,6 +775,85 @@ impl Platform {
         runtime
             .logs_stream(&name, tail.clamp(1, MAX_LOG_TAIL))
             .await
+    }
+
+    /// Returns the aggregated log file sizes and container log info for an app.
+    pub async fn app_log_size(&self, id: ShortId) -> anyhow::Result<AppLogsOverview> {
+        let app = self.app(id).await?;
+        let Some(deployment) = self.store.running_deployment(id).await? else {
+            return Ok(AppLogsOverview {
+                app_id: id.to_string(),
+                total_size_bytes: 0,
+                containers: Vec::new(),
+            });
+        };
+        let runtime = self.runtime(app.target);
+        let cnames = self.collect_app_container_names(&app, deployment).await?;
+        let mut containers = Vec::new();
+        let mut total_size_bytes = 0u64;
+
+        for cname in cnames {
+            if let Ok(Some(info)) = runtime.container_log_info(&cname).await {
+                total_size_bytes += info.size_bytes;
+                containers.push(info);
+            }
+        }
+
+        Ok(AppLogsOverview {
+            app_id: id.to_string(),
+            total_size_bytes,
+            containers,
+        })
+    }
+
+    /// Vacuums (truncates) container log files for an app.
+    pub async fn vacuum_app_logs(&self, id: ShortId) -> anyhow::Result<LogVacuumResult> {
+        let app = self.app(id).await?;
+        let Some(deployment) = self.store.running_deployment(id).await? else {
+            return Ok(LogVacuumResult {
+                app_id: Some(id.to_string()),
+                truncated_files: 0,
+                freed_bytes: 0,
+            });
+        };
+        let runtime = self.runtime(app.target);
+        let cnames = self.collect_app_container_names(&app, deployment).await?;
+        let mut truncated_files = 0usize;
+        let mut freed_bytes = 0u64;
+
+        for cname in cnames {
+            if let Ok(res) = runtime.vacuum_container_logs(&cname).await {
+                truncated_files += res.truncated_files;
+                freed_bytes += res.freed_bytes;
+            }
+        }
+
+        Ok(LogVacuumResult {
+            app_id: Some(id.to_string()),
+            truncated_files,
+            freed_bytes,
+        })
+    }
+
+    async fn collect_app_container_names(
+        &self,
+        app: &AppEntry,
+        deployment: ShortId,
+    ) -> anyhow::Result<Vec<ContainerName>> {
+        if app.spec.source.is_compose() {
+            let project = compose::project_name(app.id)?;
+            let runtime = self.runtime(app.target);
+            let list = runtime.list_project_containers(&project).await?;
+            let mut names = Vec::new();
+            for item in list {
+                if let Ok(cname) = item.name.parse::<ContainerName>() {
+                    names.push(cname);
+                }
+            }
+            Ok(names)
+        } else {
+            Ok(vec![proxy::container_name(app.id, deployment)?])
+        }
     }
 
     async fn resolve_container_name(

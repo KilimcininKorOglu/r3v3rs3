@@ -776,6 +776,17 @@ impl ContainerRuntime for DockerRuntime {
             result.build_cache_deleted += count;
             result.space_reclaimed_bytes += space;
         }
+        if policy.prune_logs {
+            let threshold_bytes = policy
+                .log_vacuum_threshold_mb
+                .map(|mb| mb.saturating_mul(1024 * 1024));
+            let vacuum_res = self
+                .vacuum_all_logs(threshold_bytes)
+                .await
+                .unwrap_or_default();
+            result.logs_truncated += vacuum_res.truncated_files as u64;
+            result.space_reclaimed_bytes += vacuum_res.freed_bytes;
+        }
         Ok(result)
     }
 
@@ -986,6 +997,179 @@ impl ContainerRuntime for DockerRuntime {
     ) -> anyhow::Result<()> {
         DockerRuntime::upload_archive(self, name, path, archive_tar).await
     }
+
+    async fn container_log_info(
+        &self,
+        name: &ContainerName,
+    ) -> anyhow::Result<Option<r3v3rs3_api::container::ContainerLogInfo>> {
+        let Some(container) = self.find_container(name).await? else {
+            return Ok(None);
+        };
+        let (size_bytes, rotated_files_count) = match &container.log_path {
+            Some(lpath) => inspect_container_log_files(lpath),
+            None => (0, 0),
+        };
+        Ok(Some(r3v3rs3_api::container::ContainerLogInfo {
+            container_id: container.id,
+            container_name: container.name.trim_start_matches('/').to_string(),
+            log_path: container.log_path,
+            size_bytes,
+            rotated_files_count,
+        }))
+    }
+
+    async fn vacuum_container_logs(
+        &self,
+        name: &ContainerName,
+    ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+        let Some(container) = self.find_container(name).await? else {
+            return Ok(r3v3rs3_api::container::LogVacuumResult::default());
+        };
+        let (truncated_files, freed_bytes) = match &container.log_path {
+            Some(lpath) => vacuum_container_log_files(lpath),
+            None => (0, 0),
+        };
+        Ok(r3v3rs3_api::container::LogVacuumResult {
+            app_id: None,
+            truncated_files,
+            freed_bytes,
+        })
+    }
+
+    async fn vacuum_all_logs(
+        &self,
+        threshold_bytes: Option<u64>,
+    ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+        let list: Vec<ListContainer> = self.get("/containers/json?all=true").await?;
+        let min_bytes = threshold_bytes.unwrap_or(0);
+        let mut total_files = 0usize;
+        let mut total_freed = 0u64;
+
+        for item in list {
+            let path = format!("/containers/{}/json", item.id);
+            let inspected = match self.get_optional::<InspectContainer>(&path).await {
+                Ok(Some(i)) => i,
+                _ => continue,
+            };
+            let Some(ref lpath) = inspected.log_path else {
+                continue;
+            };
+            let (size, _) = inspect_container_log_files(lpath);
+            if size >= min_bytes {
+                let (files, freed) = vacuum_container_log_files(lpath);
+                total_files += files;
+                total_freed += freed;
+            }
+        }
+
+        Ok(r3v3rs3_api::container::LogVacuumResult {
+            app_id: None,
+            truncated_files: total_files,
+            freed_bytes: total_freed,
+        })
+    }
+}
+
+fn inspect_active_log(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+fn inspect_rotated_logs(path: &std::path::Path) -> (u64, usize) {
+    let Some(parent) = path.parent() else {
+        return (0, 0);
+    };
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return (0, 0);
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return (0, 0);
+    };
+
+    let mut size = 0u64;
+    let mut count = 0usize;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p == path {
+            continue;
+        }
+        let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
+        if !name.starts_with(file_name) || !is_file {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            size += meta.len();
+            count += 1;
+        }
+    }
+    (size, count)
+}
+
+fn vacuum_active_log(path: &std::path::Path) -> (usize, u64) {
+    if let Ok(meta) = std::fs::metadata(path) {
+        let size = meta.len();
+        if std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .is_ok()
+        {
+            return (1, size);
+        }
+    }
+    (0, 0)
+}
+
+fn vacuum_rotated_logs(path: &std::path::Path) -> (usize, u64) {
+    let Some(parent) = path.parent() else {
+        return (0, 0);
+    };
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return (0, 0);
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return (0, 0);
+    };
+
+    let mut count = 0usize;
+    let mut freed = 0u64;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p == path {
+            continue;
+        }
+        let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
+        if !name.starts_with(file_name) || !is_file {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            let size = meta.len();
+            if std::fs::remove_file(&p).is_ok() {
+                count += 1;
+                freed += size;
+            }
+        }
+    }
+    (count, freed)
+}
+
+fn inspect_container_log_files(log_path: &str) -> (u64, usize) {
+    let path = std::path::Path::new(log_path);
+    let active_size = inspect_active_log(path);
+    let (rotated_size, count) = inspect_rotated_logs(path);
+    (active_size + rotated_size, count)
+}
+
+fn vacuum_container_log_files(log_path: &str) -> (usize, u64) {
+    let path = std::path::Path::new(log_path);
+    let (active_count, active_freed) = vacuum_active_log(path);
+    let (rotated_count, rotated_freed) = vacuum_rotated_logs(path);
+    (active_count + rotated_count, active_freed + rotated_freed)
 }
 
 fn container_id(found: Option<InspectContainer>, name: &ContainerName) -> anyhow::Result<String> {
@@ -1069,9 +1253,19 @@ fn create_body(spec: &ContainerSpec) -> Value {
             })
         })
         .collect::<Vec<_>>();
+    let max_size = spec.log_max_size.as_deref().unwrap_or("50m");
+    let max_file = spec.log_max_file.as_deref().unwrap_or("3");
+    let log_config = json!({
+        "Type": "json-file",
+        "Config": {
+            "max-size": max_size,
+            "max-file": max_file,
+        }
+    });
     let mut host_config = json!({
         "RestartPolicy": { "Name": spec.restart.docker_name() },
         "Mounts": mounts,
+        "LogConfig": log_config,
     });
     if let Some(memory) = spec.limits.memory_bytes {
         host_config["Memory"] = json!(memory);
@@ -1215,6 +1409,8 @@ struct InspectContainer {
     name: String,
     image: String,
     state: InspectState,
+    #[serde(default)]
+    log_path: Option<String>,
     #[serde(default)]
     config: Option<InspectConfig>,
     #[serde(default)]
@@ -1596,6 +1792,8 @@ mod tests {
                 "host.docker.internal".to_string(),
                 "host-gateway".to_string(),
             )],
+            log_max_size: None,
+            log_max_file: None,
         };
         let expected = json!({
             "Image": "nginx@sha256:abc",
@@ -1609,6 +1807,13 @@ mod tests {
                     "Target": "/data",
                     "ReadOnly": true,
                 }],
+                "LogConfig": {
+                    "Type": "json-file",
+                    "Config": {
+                        "max-size": "50m",
+                        "max-file": "3"
+                    }
+                },
                 "Memory": 268435456,
                 "NetworkMode": "r3v3rs3-shop",
                 "ExtraHosts": ["host.docker.internal:host-gateway"],
