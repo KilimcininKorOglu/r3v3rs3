@@ -176,6 +176,20 @@ fn target_row(
 }
 
 fn target_link_quality_view(locale: Locale, target: &TargetEntry) -> Html {
+    if target.kind == TargetKind::Local {
+        return html! {
+            <div class="flex items-center gap-1.5 py-0.5">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border bg-green-100 text-green-800 dark:bg-green-950/60 dark:text-green-300 border-green-200 dark:border-green-800/60">
+                    <span class="w-1.5 h-1.5 rounded-full bg-green-500" />
+                    { locale.t("targets.kind_local") }
+                </span>
+                <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200/60 dark:border-neutral-700/60">
+                    { locale.t("targets.capacity_full") }
+                </span>
+            </div>
+        };
+    }
+
     if !target.online {
         return html! {
             <span class="text-xs text-neutral-400 dark:text-neutral-500 font-mono">{"—"}</span>

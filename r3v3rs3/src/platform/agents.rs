@@ -54,11 +54,6 @@ impl Platform {
         for target in &mut targets {
             if target.kind == TargetKind::Local {
                 target.online = true;
-                target.latency_ms = Some(0.1);
-                target.jitter_ms = Some(0.0);
-                target.packet_loss_percent = Some(0.0);
-                target.quality = Some(AgentLinkQuality::Excellent);
-                target.latency_samples = vec![0.1];
             } else if let Some(status) = self.agents.status(target.id) {
                 target.online = true;
                 target.version = Some(status.version);
