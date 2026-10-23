@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.8] - 2026-10-23
+
+### Added
+- 100% CLI First Autonomous Administration Parity: Expanded `r3v3rs3-cli` with first-class command sets providing 100% operational parity with the WebUI, API, and MCP server, enabling terminal users and CI/CD pipelines to manage the entire reverse proxy and PaaS stack headlessly.
+- Comprehensive CLI Management Commands:
+  - `port add`, `port get`, `port delete`, `port reset`: Full lifecycle management of listening sockets and port interfaces.
+  - `proxy add`, `proxy get`, `proxy status`, `proxy purge-cache`, `proxy delete`: Reverse proxy routing configuration and path-selective cache invalidation.
+  - `cert list`, `cert get`, `cert upload`, `cert coverage`, `cert delete`: TLS certificate inspection, multipart certificate/key upload, and domain coverage analysis.
+  - `acme list`, `acme get`, `acme add`, `acme order`, `acme delete`: Automated ACME certificate order management and DNS-01 provider linking.
+  - `acl list`, `acl get`, `acl add`, `acl delete`: Access control list management and IP rule configuration.
+  - `dns list`, `dns get`, `dns add`, `dns delete`: DNS-01 provider credential management.
+  - `app add`, `app get`, `app logs`, `app env`, `app set-env`, `app rollback`, `app start`, `app stop`, `app restart`, `app delete`: PaaS container lifecycle, streaming logs, and environment variable configuration.
+  - `db list`, `db get`, `db create`, `db clone`, `db replica`, `db logs`, `db delete`: Managed database provisioning, replica/clone management, and streaming logs.
+  - `backup list`, `backup create`, `backup restore`, `backup delete`, `backup config`: Database backup management and storage configuration.
+  - `target list`, `target get`, `target add`, `target drain`, `target undrain`, `target token`, `target delete`: Multi-node agent target clustering and traffic draining.
+  - `project list`, `project get`, `project add`, `project sync-env`, `project delete`: Project grouping and cross-environment secret synchronization.
+  - `store list`, `store refresh`, `store install`: One-click App Store catalog browsing and template installation.
+  - `security banned-ips`, `security unban`: Security monitoring and IP unbanning.
+  - `webhook list`, `webhook get`, `webhook add`, `webhook test`, `webhook delete`: Outgoing event webhook management and ping tests.
+  - `cron list`, `cron add`, `cron run`, `cron delete`: In-container scheduled command management and manual execution triggers.
+  - `platform status`, `platform metrics`, `platform prune`, `platform rotate-key`: System status, hardware metrics, container disk hygiene prune, and AES encryption key rotation.
+- Flexible Payload Input: Supported JSON and YAML payloads inline, from local files, or directly streamed via standard input (`-`) across all management commands.
+
 ## [2.4.7] - 2026-10-23
 
 ### Added
