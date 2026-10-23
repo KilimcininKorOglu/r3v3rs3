@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.3] - 2026-10-23
+
+### Added
+- Persistent MCP OAuth 2.1 Backend: Stored dynamic clients and issued OAuth 2.1 authorization tokens (both access and 30-day refresh tokens) in the SQLite platform database (`platform.db`), ensuring developer sessions survive server restarts and reboots.
+- Automatic Background Token Rotation: Enabled remote MCP clients (such as Google Cloud Code) to rotate expired access tokens transparently in the background across restarts without prompting users for re-authentication.
+- WebUI Active MCP Sessions Card: Added a live active MCP sessions inspector to the WebUI Settings page displaying client names, client IDs, authorized usernames, granted scopes, and creation/expiration timestamps with human-readable formatting.
+- One-Click Session Revocation: Added immediate token revocation via standard red trash action icon button (`ActionIconButton`) with sweetalert confirmation dialog and admin permission checks (`DELETE /api/mcp/sessions/{id}`).
+
 ## [2.4.2] - 2026-10-23
 
 ### Added
