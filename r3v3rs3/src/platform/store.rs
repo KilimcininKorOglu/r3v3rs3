@@ -209,7 +209,9 @@ const SCHEMA: &[&str] = &[
         id                            TEXT PRIMARY KEY,
         enabled                       INTEGER NOT NULL,
         min_free_disk_percent         INTEGER,
-        bandwidth_spike_bytes_per_sec INTEGER
+        bandwidth_spike_bytes_per_sec INTEGER,
+        max_fd_ratio_percent          INTEGER,
+        max_time_wait_sockets         INTEGER
     )",
     "CREATE TABLE IF NOT EXISTS mcp_clients (
         id            TEXT PRIMARY KEY,
@@ -406,6 +408,13 @@ impl PlatformStore {
         let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN container_log_max_file TEXT")
             .execute(&pool)
             .await;
+        let _ = sqlx::query("ALTER TABLE node_alert_rules ADD COLUMN max_fd_ratio_percent INTEGER")
+            .execute(&pool)
+            .await;
+        let _ =
+            sqlx::query("ALTER TABLE node_alert_rules ADD COLUMN max_time_wait_sockets INTEGER")
+                .execute(&pool)
+                .await;
         Ok(Self { pool })
     }
 
@@ -1549,11 +1558,15 @@ mod tests {
         let default_rules = store.get_node_alert_rules().await?;
         assert!(default_rules.enabled);
         assert_eq!(default_rules.min_free_disk_percent, Some(10));
+        assert_eq!(default_rules.max_fd_ratio_percent, Some(80));
+        assert_eq!(default_rules.max_time_wait_sockets, None);
 
         let custom = r3v3rs3_api::platform::NodeAlertRules {
             enabled: false,
             min_free_disk_percent: Some(25),
             bandwidth_spike_bytes_per_sec: Some(50_000_000),
+            max_fd_ratio_percent: Some(85),
+            max_time_wait_sockets: Some(15_000),
         };
         store.save_node_alert_rules(&custom).await?;
         let fetched = store.get_node_alert_rules().await?;

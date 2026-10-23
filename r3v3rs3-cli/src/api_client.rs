@@ -1186,6 +1186,35 @@ impl ApiClient {
         print_json(&res)
     }
 
+    pub async fn get_node_alerts(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/platform/node_alerts", None)
+            .await?;
+        print_json(&res)
+    }
+
+    pub async fn set_node_alerts(
+        &self,
+        enabled: bool,
+        min_disk_percent: Option<u8>,
+        bandwidth_spike: Option<u64>,
+        max_fd_percent: Option<u8>,
+        max_time_wait: Option<u32>,
+    ) -> anyhow::Result<()> {
+        let body = serde_json::json!({
+            "enabled": enabled,
+            "min_free_disk_percent": min_disk_percent,
+            "bandwidth_spike_bytes_per_sec": bandwidth_spike,
+            "max_fd_ratio_percent": max_fd_percent,
+            "max_time_wait_sockets": max_time_wait,
+        });
+        let res = self
+            .request(Method::PUT, "/api/platform/node_alerts", Some(&body))
+            .await?;
+        println!("Node threshold alert rules updated successfully.");
+        print_json(&res)
+    }
+
     // --- Apply operation ---
 
     pub async fn apply_manifest(&self, content: &str) -> anyhow::Result<()> {

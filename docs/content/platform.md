@@ -880,8 +880,11 @@ The **Targets** page includes a **Node Threshold Alert Rules** configuration car
 
 - **Low Free Disk Space Warning (`system.disk_low`)**: Fires an alert whenever available node disk space drops to or below the configured percentage threshold (default: 10%). The notification payload contains total, available, and used disk bytes, current free percentage, and the threshold.
 - **Bandwidth Spike Anomaly Detection (`system.bandwidth_spike`)**: Detects sudden traffic surges by evaluating throughput rates in bytes per second against the configured threshold (configured in MB/s in the WebUI). Measured via host interface counters in `/proc/net/dev` with fallback to container network rates.
+- **File Descriptor Exhaustion Warning (`system.fd_exhaustion`)**: Evaluates active open file descriptors from `/proc/self/fd` against the process maximum limit (`rlimit` NOFILE). Triggers an emergency webhook notification when the usage percentage reaches or exceeds the threshold (default: 80%).
+- **Socket / TIME_WAIT Exhaustion Warning (`system.socket_exhaustion`)**: Parses socket allocations from `/proc/net/sockstat` and alerts when the count of TCP sockets in `TIME_WAIT` state exceeds the configured maximum threshold (e.g. 10,000 sockets), preventing local ephemeral port exhaustion under heavy concurrent traffic.
 - **Anti-Spam Cooldown**: Built-in 15-minute cooldown prevents alert flooding during persistent high traffic or prolonged low disk situations.
 - **Outbound Webhooks & Auditing**: Subscribed outbound webhooks receive JSON alerts under the `System` category, and rules configuration changes are tracked in the audit trail.
+- **CLI & MCP Parity**: Fully manageable via `r3 platform node-alerts` and `r3 platform set-node-alerts` CLI commands, as well as `get_node_alerts` and `update_node_alerts` MCP tools.
 
 ### Webhooks
 

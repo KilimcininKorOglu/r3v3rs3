@@ -458,6 +458,26 @@ pub enum PlatformCommand {
         #[arg(long)]
         threshold_mb: Option<u64>,
     },
+    /// Shows the host node resource threshold alert rules.
+    NodeAlerts,
+    /// Updates the host node resource threshold alert rules.
+    SetNodeAlerts {
+        /// Enable or disable node alerts (default: true).
+        #[arg(long, default_value = "true")]
+        enabled: bool,
+        /// Minimum free disk space percentage threshold (e.g. 10).
+        #[arg(long)]
+        min_disk_percent: Option<u8>,
+        /// Bandwidth spike threshold in bytes/sec (e.g. 104857600 for 100 MB/s).
+        #[arg(long)]
+        bandwidth_spike: Option<u64>,
+        /// Maximum open file descriptor ratio percentage threshold (e.g. 80).
+        #[arg(long)]
+        max_fd_percent: Option<u8>,
+        /// Maximum TCP TIME_WAIT socket count threshold (e.g. 10000).
+        #[arg(long)]
+        max_time_wait: Option<u32>,
+    },
 }
 
 fn http_client() -> anyhow::Result<reqwest::Client> {
@@ -563,6 +583,23 @@ async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyh
         PlatformCommand::Prune => api.platform_prune().await,
         PlatformCommand::VacuumLogs { threshold_mb } => {
             api.vacuum_platform_logs(threshold_mb).await
+        }
+        PlatformCommand::NodeAlerts => api.get_node_alerts().await,
+        PlatformCommand::SetNodeAlerts {
+            enabled,
+            min_disk_percent,
+            bandwidth_spike,
+            max_fd_percent,
+            max_time_wait,
+        } => {
+            api.set_node_alerts(
+                enabled,
+                min_disk_percent,
+                bandwidth_spike,
+                max_fd_percent,
+                max_time_wait,
+            )
+            .await
         }
     }
 }

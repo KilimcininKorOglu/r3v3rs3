@@ -912,6 +912,19 @@ fn node_alert_settings() -> Html {
 
 fn node_alerts_form_view(locale: Locale, rules: &UseStateHandle<NodeAlertRules>) -> Html {
     let toggle_enabled = checkbox_toggle(rules, |r| &mut r.enabled);
+    html! {
+        <div class="space-y-4">
+            <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
+                <input type="checkbox" checked={rules.enabled} onchange={toggle_enabled} class="w-4 h-4 mr-2 rounded" />
+                {locale.t("targets.node_alerts_enabled")}
+            </label>
+            { node_alerts_disk_bw_fields(locale, rules) }
+            { node_alerts_fd_socket_fields(locale, rules) }
+        </div>
+    }
+}
+
+fn node_alerts_disk_bw_fields(locale: Locale, rules: &UseStateHandle<NodeAlertRules>) -> Html {
     let disk_val = rules
         .min_free_disk_percent
         .map(|v| v.to_string())
@@ -924,11 +937,7 @@ fn node_alerts_form_view(locale: Locale, rules: &UseStateHandle<NodeAlertRules>)
     let bw_input = node_alert_bw_input(rules);
 
     html! {
-        <div class="space-y-4">
-            <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
-                <input type="checkbox" checked={rules.enabled} onchange={toggle_enabled} class="w-4 h-4 mr-2 rounded" />
-                {locale.t("targets.node_alerts_enabled")}
-            </label>
+        <>
             <div>
                 <label class={LABEL_CLASS}>{locale.t("targets.node_alerts_min_disk")}</label>
                 <div class="flex items-center gap-2">
@@ -960,7 +969,56 @@ fn node_alerts_form_view(locale: Locale, rules: &UseStateHandle<NodeAlertRules>)
                 </div>
                 <p class={HINT_CLASS}>{locale.t("targets.node_alerts_bandwidth_hint")}</p>
             </div>
-        </div>
+        </>
+    }
+}
+
+fn node_alerts_fd_socket_fields(locale: Locale, rules: &UseStateHandle<NodeAlertRules>) -> Html {
+    let fd_val = rules
+        .max_fd_ratio_percent
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let fd_input = node_alert_fd_input(rules);
+    let tw_val = rules
+        .max_time_wait_sockets
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let tw_input = node_alert_tw_input(rules);
+
+    html! {
+        <>
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("targets.node_alerts_max_fd")}</label>
+                <div class="flex items-center gap-2">
+                    <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        placeholder="80"
+                        value={fd_val}
+                        oninput={fd_input}
+                        class={INPUT_CLASS}
+                    />
+                    <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{"%"}</span>
+                </div>
+                <p class={HINT_CLASS}>{locale.t("targets.node_alerts_max_fd_hint")}</p>
+            </div>
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("targets.node_alerts_max_time_wait")}</label>
+                <div class="flex items-center gap-2">
+                    <input
+                        type="number"
+                        min="100"
+                        placeholder="10000"
+                        value={tw_val}
+                        oninput={tw_input}
+                        class={INPUT_CLASS}
+                    />
+                    <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{"sockets"}</span>
+                </div>
+                <p class={HINT_CLASS}>{locale.t("targets.node_alerts_max_time_wait_hint")}</p>
+            </div>
+        </>
     }
 }
 
@@ -987,6 +1045,28 @@ fn node_alert_bw_input(rules: &UseStateHandle<NodeAlertRules>) -> Callback<Input
             .map(|mb| mb * 1_000_000);
         let mut updated = *rules;
         updated.bandwidth_spike_bytes_per_sec = val;
+        rules.set(updated);
+    })
+}
+
+fn node_alert_fd_input(rules: &UseStateHandle<NodeAlertRules>) -> Callback<InputEvent> {
+    let rules = rules.clone();
+    Callback::from(move |event: InputEvent| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let val = input.value().trim().parse::<u8>().ok();
+        let mut updated = *rules;
+        updated.max_fd_ratio_percent = val;
+        rules.set(updated);
+    })
+}
+
+fn node_alert_tw_input(rules: &UseStateHandle<NodeAlertRules>) -> Callback<InputEvent> {
+    let rules = rules.clone();
+    Callback::from(move |event: InputEvent| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let val = input.value().trim().parse::<u32>().ok();
+        let mut updated = *rules;
+        updated.max_time_wait_sockets = val;
         rules.set(updated);
     })
 }

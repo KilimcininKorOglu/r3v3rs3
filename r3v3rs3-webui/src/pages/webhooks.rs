@@ -284,6 +284,8 @@ fn event_label(_locale: Locale, event: WebhookEvent) -> &'static str {
         WebhookEvent::SystemHighErrorRate => "webhooks.event_system_high_error_rate",
         WebhookEvent::SystemTrafficSpike => "webhooks.event_system_traffic_spike",
         WebhookEvent::SystemEventLoopLag => "webhooks.event_system_event_loop_lag",
+        WebhookEvent::SystemFdExhaustion => "webhooks.event_system_fd_exhaustion",
+        WebhookEvent::SystemSocketExhaustion => "webhooks.event_system_socket_exhaustion",
         WebhookEvent::TestPing => "webhooks.event_test_ping",
     }
 }

@@ -258,6 +258,7 @@ fn format_system_metrics(out: &mut String, sys: &super::system_metrics::SystemMe
         out.push('\n');
     }
     format_system_memory_metrics(out, sys);
+    format_system_socket_metrics(out, sys);
     out.push_str(
         "# HELP r3v3rs3_event_loop_lag_seconds Current Tokio event loop lag in seconds.\n",
     );
@@ -266,6 +267,26 @@ fn format_system_metrics(out: &mut String, sys: &super::system_metrics::SystemMe
         "r3v3rs3_event_loop_lag_seconds {:.6}\n",
         sys.event_loop_lag_seconds
     ));
+}
+
+fn format_system_socket_metrics(
+    out: &mut String,
+    sys: &super::system_metrics::SystemMetricsSnapshot,
+) {
+    if let Some(tw) = sys.tcp_tw {
+        out.push_str("# HELP r3v3rs3_host_tcp_tw TCP sockets in TIME_WAIT state.\n");
+        out.push_str("# TYPE r3v3rs3_host_tcp_tw gauge\n");
+        out.push_str("r3v3rs3_host_tcp_tw ");
+        out.push_str(&tw.to_string());
+        out.push('\n');
+    }
+    if let Some(inuse) = sys.tcp_inuse {
+        out.push_str("# HELP r3v3rs3_host_tcp_inuse Active TCP sockets in use.\n");
+        out.push_str("# TYPE r3v3rs3_host_tcp_inuse gauge\n");
+        out.push_str("r3v3rs3_host_tcp_inuse ");
+        out.push_str(&inuse.to_string());
+        out.push('\n');
+    }
 }
 
 fn format_system_memory_metrics(

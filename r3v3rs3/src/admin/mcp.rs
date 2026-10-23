@@ -252,6 +252,21 @@ pub struct VacuumLogsParams {
     pub threshold_mb: Option<u64>,
 }
 
+/// The arguments of `update_node_alerts`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateNodeAlertsParams {
+    /// Whether node resource threshold alerts are enabled.
+    pub enabled: bool,
+    /// Low free disk space percentage threshold (e.g. 10 for <= 10% free space).
+    pub min_free_disk_percent: Option<u8>,
+    /// Bandwidth spike threshold in bytes per second (e.g. 104857600 for 100 MB/s).
+    pub bandwidth_spike_bytes_per_sec: Option<u64>,
+    /// Maximum open file descriptor ratio percentage threshold (e.g. 80 for >= 80% limit).
+    pub max_fd_ratio_percent: Option<u8>,
+    /// Maximum TCP TIME_WAIT socket count threshold (e.g. 10000).
+    pub max_time_wait_sockets: Option<u32>,
+}
+
 /// The caller of the request, which the Bearer middleware inserted.
 fn caller_of(parts: &Parts) -> Result<Caller, ErrorData> {
     parts
@@ -1937,6 +1952,62 @@ impl McpServer {
             .record_audit(&caller.username, caller.client, record)
             .await;
         json_result(res)
+    }
+
+    /// Read the host node resource threshold alert rules.
+    #[tool(
+        description = "Get host node resource threshold alert rules (disk space, bandwidth spike, file descriptor exhaustion, and socket exhaustion). Needs the read scope."
+    )]
+    async fn get_node_alerts(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Read)
+            .await
+            .map_err(any_error)?;
+        let rules = platform.node_alert_rules().await.map_err(any_error)?;
+        json_result(rules)
+    }
+
+    /// Update the host node resource threshold alert rules.
+    #[tool(
+        description = "Update host node resource threshold alert rules (disk space, bandwidth spike, file descriptor exhaustion, and socket exhaustion). Needs the edit scope."
+    )]
+    async fn update_node_alerts(
+        &self,
+        Parameters(params): Parameters<UpdateNodeAlertsParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let rules = r3v3rs3_api::platform::NodeAlertRules {
+            enabled: params.enabled,
+            min_free_disk_percent: params.min_free_disk_percent,
+            bandwidth_spike_bytes_per_sec: params.bandwidth_spike_bytes_per_sec,
+            max_fd_ratio_percent: params.max_fd_ratio_percent,
+            max_time_wait_sockets: params.max_time_wait_sockets,
+        };
+        rules.validate().map_err(any_error)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        platform
+            .update_node_alert_rules(rules)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::UpdateNodeAlertRules).summary(format!(
+            "Updated node alert rules via MCP (enabled: {})",
+            rules.enabled
+        ));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(rules)
     }
 }
 

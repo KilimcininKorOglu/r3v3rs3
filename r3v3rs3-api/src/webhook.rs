@@ -73,13 +73,15 @@ pub enum WebhookEvent {
     SystemHighErrorRate,
     SystemTrafficSpike,
     SystemEventLoopLag,
+    SystemFdExhaustion,
+    SystemSocketExhaustion,
 
     // Test ping
     TestPing,
 }
 
 impl WebhookEvent {
-    pub const ALL: [WebhookEvent; 22] = [
+    pub const ALL: [WebhookEvent; 24] = [
         Self::DeploySuccess,
         Self::DeployFailure,
         Self::DeployPendingApproval,
@@ -101,6 +103,8 @@ impl WebhookEvent {
         Self::SystemHighErrorRate,
         Self::SystemTrafficSpike,
         Self::SystemEventLoopLag,
+        Self::SystemFdExhaustion,
+        Self::SystemSocketExhaustion,
         Self::TestPing,
     ];
 
@@ -127,6 +131,8 @@ impl WebhookEvent {
             Self::SystemHighErrorRate => "system.high_error_rate",
             Self::SystemTrafficSpike => "system.traffic_spike",
             Self::SystemEventLoopLag => "system.event_loop_lag",
+            Self::SystemFdExhaustion => "system.fd_exhaustion",
+            Self::SystemSocketExhaustion => "system.socket_exhaustion",
             Self::TestPing => "test.ping",
         }
     }
@@ -153,7 +159,9 @@ impl WebhookEvent {
             | Self::SystemHighLatency
             | Self::SystemHighErrorRate
             | Self::SystemTrafficSpike
-            | Self::SystemEventLoopLag => WebhookEventCategory::System,
+            | Self::SystemEventLoopLag
+            | Self::SystemFdExhaustion
+            | Self::SystemSocketExhaustion => WebhookEventCategory::System,
             Self::TestPing => WebhookEventCategory::Test,
         }
     }
@@ -191,6 +199,8 @@ impl FromStr for WebhookEvent {
             "system.high_error_rate" => Ok(Self::SystemHighErrorRate),
             "system.traffic_spike" => Ok(Self::SystemTrafficSpike),
             "system.event_loop_lag" => Ok(Self::SystemEventLoopLag),
+            "system.fd_exhaustion" => Ok(Self::SystemFdExhaustion),
+            "system.socket_exhaustion" => Ok(Self::SystemSocketExhaustion),
             "test.ping" => Ok(Self::TestPing),
             _ => Err(Error::InvalidWebhook {
                 reason: format!("unknown event '{s}'"),

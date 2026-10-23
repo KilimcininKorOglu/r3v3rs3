@@ -71,23 +71,78 @@ pub fn memory_bytes() -> (Option<u64>, Option<u64>) {
     )
 }
 
+/// Host socket statistics parsed from `/proc/net/sockstat`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct SocketStats {
+    pub total_used: Option<u64>,
+    pub tcp_inuse: Option<u64>,
+    pub tcp_tw: Option<u64>,
+}
+
+/// Reads and parses `/proc/net/sockstat`.
+pub fn socket_stats() -> SocketStats {
+    let Ok(content) = std::fs::read_to_string("/proc/net/sockstat") else {
+        return SocketStats::default();
+    };
+    parse_sockstat(&content)
+}
+
+fn parse_sockstat(content: &str) -> SocketStats {
+    let mut stats = SocketStats::default();
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+        if parts[0] == "sockets:" && parts.len() >= 3 && parts[1] == "used" {
+            stats.total_used = parts[2].parse::<u64>().ok();
+        } else if parts[0] == "TCP:" {
+            let mut i = 1;
+            while i + 1 < parts.len() {
+                if parts[i] == "inuse" {
+                    stats.tcp_inuse = parts[i + 1].parse::<u64>().ok();
+                } else if parts[i] == "tw" {
+                    stats.tcp_tw = parts[i + 1].parse::<u64>().ok();
+                }
+                i += 2;
+            }
+        }
+    }
+    stats
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SystemMetricsSnapshot {
     pub open_fds: Option<u64>,
     pub max_fds: Option<u64>,
+    pub fd_usage_percent: Option<f64>,
     pub resident_memory_bytes: Option<u64>,
     pub virtual_memory_bytes: Option<u64>,
     pub event_loop_lag_seconds: f64,
+    pub sockets_used: Option<u64>,
+    pub tcp_inuse: Option<u64>,
+    pub tcp_tw: Option<u64>,
 }
 
 pub fn collect_system_metrics() -> SystemMetricsSnapshot {
     let (rss, vm) = memory_bytes();
+    let open = open_fds();
+    let max = max_fds();
+    let fd_usage_percent = match (open, max) {
+        (Some(o), Some(m)) if m > 0 => Some(((o as f64 / m as f64) * 1000.0).round() / 10.0),
+        _ => None,
+    };
+    let sock = socket_stats();
     SystemMetricsSnapshot {
-        open_fds: open_fds(),
-        max_fds: max_fds(),
+        open_fds: open,
+        max_fds: max,
+        fd_usage_percent,
         resident_memory_bytes: rss,
         virtual_memory_bytes: vm,
         event_loop_lag_seconds: event_loop_lag_micros() as f64 / 1_000_000.0,
+        sockets_used: sock.total_used,
+        tcp_inuse: sock.tcp_inuse,
+        tcp_tw: sock.tcp_tw,
     }
 }
 
@@ -99,5 +154,15 @@ mod tests {
     async fn system_metrics_returns_valid_snapshot() {
         let metrics = collect_system_metrics();
         assert!(metrics.event_loop_lag_seconds >= 0.0);
+    }
+
+    #[test]
+    fn parse_sockstat_sample() {
+        let sample =
+            "sockets: used 342\nTCP: inuse 28 orphan 0 tw 142 alloc 35 mem 3\nUDP: inuse 7 mem 3\n";
+        let stats = parse_sockstat(sample);
+        assert_eq!(stats.total_used, Some(342));
+        assert_eq!(stats.tcp_inuse, Some(28));
+        assert_eq!(stats.tcp_tw, Some(142));
     }
 }

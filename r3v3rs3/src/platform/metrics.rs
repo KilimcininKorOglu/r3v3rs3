@@ -395,6 +395,8 @@ async fn check_node_alerts(
         container_tx_delta,
     )
     .await;
+    check_node_fd_alert(platform, previous, &rules, now).await;
+    check_node_socket_alert(platform, previous, &rules, now).await;
 }
 
 async fn check_node_disk_alert(
@@ -509,6 +511,82 @@ async fn check_node_bandwidth_alert(
         platform
             .dispatch_webhook_event(
                 r3v3rs3_api::webhook::WebhookEvent::SystemBandwidthSpike,
+                summary,
+                payload,
+            )
+            .await;
+    }
+}
+
+async fn check_node_fd_alert(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    rules: &r3v3rs3_api::platform::NodeAlertRules,
+    now: u64,
+) {
+    let Some(max_fd_pct) = rules.max_fd_ratio_percent else {
+        return;
+    };
+    let (Some(open), Some(max)) = (
+        crate::admin::system_metrics::open_fds(),
+        crate::admin::system_metrics::max_fds(),
+    ) else {
+        return;
+    };
+    if max == 0 {
+        return;
+    }
+    let usage_pct = ((open as f64 / max as f64) * 100.0) as u8;
+    if usage_pct >= max_fd_pct && previous.should_alert_node("fd_exhaustion", now) {
+        let summary = format!(
+            "Node open file descriptor exhaustion warning: {usage_pct}% used ({open} open of {max} max limit, threshold: >={max_fd_pct}%)"
+        );
+        let payload = serde_json::json!({
+            "node": "local",
+            "open_fds": open,
+            "max_fds": max,
+            "usage_percent": usage_pct,
+            "threshold_percent": max_fd_pct,
+        });
+        platform
+            .dispatch_webhook_event(
+                r3v3rs3_api::webhook::WebhookEvent::SystemFdExhaustion,
+                summary,
+                payload,
+            )
+            .await;
+    }
+}
+
+async fn check_node_socket_alert(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    rules: &r3v3rs3_api::platform::NodeAlertRules,
+    now: u64,
+) {
+    let Some(max_tw) = rules.max_time_wait_sockets else {
+        return;
+    };
+    let sock = crate::admin::system_metrics::socket_stats();
+    let Some(tw) = sock.tcp_tw else {
+        return;
+    };
+    if tw >= max_tw as u64 && previous.should_alert_node("socket_exhaustion", now) {
+        let inuse = sock.tcp_inuse.unwrap_or(0);
+        let total = sock.total_used.unwrap_or(0);
+        let summary = format!(
+            "Node TCP socket / TIME_WAIT exhaustion warning: {tw} TIME_WAIT sockets (threshold: >={max_tw}, active inuse: {inuse}, total sockets: {total})"
+        );
+        let payload = serde_json::json!({
+            "node": "local",
+            "tcp_tw": tw,
+            "tcp_inuse": inuse,
+            "total_sockets": total,
+            "threshold_tw": max_tw,
+        });
+        platform
+            .dispatch_webhook_event(
+                r3v3rs3_api::webhook::WebhookEvent::SystemSocketExhaustion,
                 summary,
                 payload,
             )

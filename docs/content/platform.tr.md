@@ -880,8 +880,11 @@ Admin hesabı ayrıca şunları görür:
 
 - **Düşük Boş Disk Alanı Uyarısı (`system.disk_low`)**: Kullanılabilir düğüm disk alanı yapılandırılan yüzde eşiğine (varsayılan: %10) veya altına düştüğünde alarm tetikler. Bildirim yükü toplam, kullanılabilir ve kullanılan disk baytlarını, geçerli boş yüzdeyi ve tetikleme eşiğini içerir.
 - **Bant Genişliği Sıçrama Algılama (`system.bandwidth_spike`)**: Toplam düğüm ağ çıkış hızını saniye başına bayt cinsinden yapılandırılan eşikle karşılaştırarak ani trafik artışlarını algılar (WebUI'da MB/s cinsinden yapılandırılır). Linux üzerinde `/proc/net/dev` sayaçları, yedek olarak da konteyner ağ hızları üzerinden ölçülür.
+- **Dosya Tanımlayıcı Tükenme Uyarısı (`system.fd_exhaustion`)**: `/proc/self/fd` üzerinden açık dosya tanımlayıcılarını işlem üst sınırı (`rlimit` NOFILE) ile karşılaştırır. Kullanım oranı yapılandırılan eşiğe (varsayılan: %80) ulaştığında veya aştığında acil durum webhook uyarısı fırlatır.
+- **Soket / TIME_WAIT Tükenme Uyarısı (`system.socket_exhaustion`)**: `/proc/net/sockstat` üzerinden soket durumunu okur ve TCP `TIME_WAIT` soket sayısı yapılandırılan üst sınırı (örn. 10.000) aştığında uyarı fırlatarak yerel port tükenmesini (ephemeral port exhaustion) erkenden haber verir.
 - **Spam Önleme Bekleme Süresi (Cooldown)**: Dahili 15 dakikalık bekleme süresi, uzun süreli yüksek trafik veya sürekli düşük disk durumlarında bildirim bombardımanını engeller.
 - **Giden Webhook'lar ve Denetim Kayıtları**: Abone olunan giden webhook'lar bildirimleri `Sistem` kategorisi altında alır ve kural değişiklikleri denetim günlüğünde kayıt altına alınır.
+- **CLI & MCP Eşitliği**: `r3 platform node-alerts` ve `r3 platform set-node-alerts` CLI alt komutları ile `get_node_alerts` ve `update_node_alerts` MCP araçları üzerinden %100 yönetilebilir.
 
 ### Webhook'lar
 
