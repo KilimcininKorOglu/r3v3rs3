@@ -1490,7 +1490,23 @@ r3v3rs3, canlı Prometheus trafik ve çalışma zamanı metriklerini izleyen, an
 
 ## MCP Sunucusu
 
-Admin API, araçlarını `/api/mcp` üzerinde Model Context Protocol ile yayınlar. AI client'lar böylece portları, proxy'leri ve sertifikaları inceleyebilir ve proxy'leri, admin API ile aynı yetki kontrolleri ve aynı audit log üzerinden değiştirebilir.
+Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable HTTP, 2025-03-26 spesifikasyonu) ile yayınlar. **%100 MCP Yönetim Eşitliği (MCP Parity)** ile ters proxy rotaları, dinleyici portlar, ACME sertifikaları, PaaS uygulamaları, Docker Compose yığınları, tek tıkla kurulan App Store katalog uygulamaları, yönetilen veritabanları, otomatik yedeklemeler, uzak agent düğümleri ve felaket kurtarma anlık görüntüleri dahil sistemdeki her bir özellik, bir insanın WebUI'yi açmasına gerek kalmadan bir yapay zeka ajanı tarafından otonom olarak %100 yönetilebilir.
+
+### Otonom MCP Araç Seti
+
+| Kategori | Araçlar ve İşlemler | Açıklama |
+|---|---|---|
+| **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları ve fail2ban kaba kuvvet IP engeli yönetimi. |
+| **Portlar** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Dinleyici port yaşam döngüsü: dinleme adresleri, TLS sonlandırma ayarları, soket yeniden başlatma/yenileme ve sunucu ağ arayüzlerini listeleme. |
+| **Proxy'ler** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | HTTP, WebSocket, TCP, UDP, TLS ve HTTP/3 için ters proxy yapılandırması, upstream sağlık durumu ve yol bazlı önbellek temizleme (purge). |
+| **Sertifikalar ve ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `list_dns_credentials` | TLS sertifikası inceleme, alan adı kapsam kontrolü, otomatik ACME sertifika talepleri (HTTP-01, TLS-ALPN-01, DNS-01), anlık sertifika yenileme ve DNS sağlayıcı kimlik bilgileri yönetimi. |
+| **Erişim Listeleri** | `list_access_lists`, `add_access_list`, `update_access_list`, `delete_access_list` | CIDR IP filtreleme, HTTP basic authentication ve özel bearer token'lar içeren erişim kontrol listeleri. |
+| **PaaS Uygulamaları** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update` | Otonom PaaS konteyner yaşam döngüsü: Docker image/git/compose uygulaması dağıtımı, konteyner log akışı, ortam değişkeni yönetimi, önceki dağıtıma geri alma (rollback) ve Docker registry güncelleme kontrolü. |
+| **App Store Kataloğu** | `get_store`, `refresh_store`, `install_store_app` | Küratörlü tek tıkla kurulum şablonlarının (veritabanları, paneller, CMS, analitik) katalogdan doğrudan tam yapılandırılmış ve yönlendirilmiş uygulamalar olarak otonom kurulumu. |
+| **Yönetilen Veritabanları ve Yedekler** | `list_databases`, `list_database_engines`, `create_database`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config` | Otomatik üretilen kimlik bilgileriyle PostgreSQL, MySQL, Redis, MariaDB ve MongoDB sağlama, anlık yedek alma, yedek silme ve S3/SFTP/rsync uzak depolama ayarları. |
+| **Agent Hedef Düğümleri** | `list_targets`, `add_target`, `delete_target` | Çok düğümlü Docker agent altyapısı, tek kullanımlık kayıt token'ı üretme ve hedef düğümleri kaldırma. |
+| **Projeler ve Ortam Grupları** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group` | Proje organizasyonu, çoklu ortam izolasyonu ve paylaşılan ortak ortam değişkeni grupları. |
+| **Felaket Kurtarma** | `list_dr_backups`, `create_dr_backup` | İsteğe bağlı AES-256-GCM şifrelemeli ve otomatik S3 replikasyonlu tam sistem yedek anlık görüntüleri. |
 
 MCP sunucusu varsayılan olarak kapalıdır. Panelin ayarlar sayfası onu sunucu çalışırken açar ve giriş yapmasına izin verilecek client'ları tutar. `config.toml` aynı bölümü taşır:
 

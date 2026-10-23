@@ -869,6 +869,16 @@ impl From<r3v3rs3_api::error::Error> for AppError {
     }
 }
 
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound => write!(f, "not found"),
+            Self::Anyhow(err) => write!(f, "{err}"),
+            Self::R3v3rs3(err) => write!(f, "{err}"),
+        }
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let code;

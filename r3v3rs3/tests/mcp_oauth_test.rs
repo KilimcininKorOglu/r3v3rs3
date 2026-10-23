@@ -611,6 +611,17 @@ async fn assert_mcp_client_tools(addr: SocketAddr, token: &str) -> anyhow::Resul
     let names: Vec<&str> = tools.tools.iter().map(|tool| tool.name.as_ref()).collect();
     assert!(names.contains(&"list_proxies"), "{names:?}");
     assert!(names.contains(&"server_status"), "{names:?}");
+    assert!(names.contains(&"list_ports"), "{names:?}");
+    assert!(names.contains(&"list_apps"), "{names:?}");
+    assert!(names.contains(&"get_store"), "{names:?}");
+    assert!(names.contains(&"install_store_app"), "{names:?}");
+    assert!(names.contains(&"list_databases"), "{names:?}");
+    assert!(names.contains(&"list_database_engines"), "{names:?}");
+    assert!(names.contains(&"list_targets"), "{names:?}");
+    assert!(names.contains(&"list_projects"), "{names:?}");
+    assert!(names.contains(&"list_env_groups"), "{names:?}");
+    assert!(names.contains(&"list_dr_backups"), "{names:?}");
+    assert!(names.contains(&"get_system_metrics"), "{names:?}");
 
     let result = client
         .call_tool(CallToolRequestParams::new("server_status"))
@@ -622,6 +633,42 @@ async fn assert_mcp_client_tools(addr: SocketAddr, token: &str) -> anyhow::Resul
         .map(|text| text.text.clone())
         .unwrap_or_default();
     assert!(text.contains("workers"), "{text}");
+
+    let metrics_result = client
+        .call_tool(CallToolRequestParams::new("get_system_metrics"))
+        .await?;
+    let metrics_text = metrics_result
+        .content
+        .first()
+        .and_then(|content| content.as_text())
+        .map(|text| text.text.clone())
+        .unwrap_or_default();
+    assert!(
+        metrics_text.contains("event_loop_lag_seconds"),
+        "{metrics_text}"
+    );
+
+    let store_result = client
+        .call_tool(CallToolRequestParams::new("get_store"))
+        .await?;
+    let store_text = store_result
+        .content
+        .first()
+        .and_then(|content| content.as_text())
+        .map(|text| text.text.clone())
+        .unwrap_or_default();
+    assert!(store_text.contains("catalog"), "{store_text}");
+
+    let ports_result = client
+        .call_tool(CallToolRequestParams::new("list_ports"))
+        .await?;
+    let ports_text = ports_result
+        .content
+        .first()
+        .and_then(|content| content.as_text())
+        .map(|text| text.text.clone())
+        .unwrap_or_default();
+    assert!(ports_text.starts_with('['), "{ports_text}");
 
     client.cancel().await?;
     Ok(())

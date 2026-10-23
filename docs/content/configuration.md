@@ -1490,7 +1490,23 @@ r3v3rs3 includes an autonomous real-time anomaly detection engine that monitors 
 
 ## MCP Server
 
-The admin API exposes its tools over the Model Context Protocol at `/api/mcp`. AI clients can then inspect the ports, the proxies and the certificates, and change the proxies, with the same permission checks and the same audit log as the admin API.
+The admin API exposes its complete tool suite over the Model Context Protocol at `/api/mcp` (Streamable HTTP, spec 2025-03-26). With **100% MCP Management Parity**, every single administrative feature, proxy route, port listener, ACME certificate, PaaS application, Docker Compose stack, one-click App Store catalog app, managed database, automated backup, agent target node, and disaster recovery snapshot is fully manageable autonomously via MCP without needing a human operator to open the WebUI.
+
+### Autonomous MCP Tool Suite
+
+| Category | Tools & Operations | Description |
+|---|---|---|
+| **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, and fail2ban brute-force ban management. |
+| **Ports** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Complete port listener lifecycle: bind addresses, TLS termination options, socket reset/reload, and host interface enumeration. |
+| **Proxies** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | Reverse proxy configuration for HTTP, WebSocket, TCP, UDP, TLS, and HTTP/3, upstream health status, and path-selective cache purging. |
+| **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `list_dns_credentials` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), instant certificate orders/renewals, and DNS credential management. |
+| **Access Lists** | `list_access_lists`, `add_access_list`, `update_access_list`, `delete_access_list` | Access control lists with CIDR IP filtering, HTTP basic authentication, and custom bearer tokens. |
+| **PaaS Applications** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update` | Autonomous PaaS container lifecycle: image/git/compose app deployment, container log streaming, environment variable injection, deployment rollbacks, and Docker registry update detection. |
+| **App Store Catalog** | `get_store`, `refresh_store`, `install_store_app` | Instant deployment of curated one-click templates (databases, dashboards, CMS, wikis, analytics) directly from the store into fully configured and routed applications. |
+| **Managed Databases & Backups** | `list_databases`, `list_database_engines`, `create_database`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config` | Provisioning PostgreSQL, MySQL, Redis, MariaDB, and MongoDB with automated credentials, immediate backup creation, snapshot deletion, and S3/SFTP/rsync remote storage configuration. |
+| **Agent Target Nodes** | `list_targets`, `add_target`, `delete_target` | Multi-node Docker agent infrastructure, one-time enrollment token issuance, and target decommissioning. |
+| **Projects & Env Groups** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group` | Project organization, multi-environment isolation, and shared environment variable groups. |
+| **Disaster Recovery** | `list_dr_backups`, `create_dr_backup` | Full system snapshot archives with optional AES-256-GCM encryption and automatic S3 replication. |
 
 The MCP server is off by default. The settings page of the panel turns it on while the server runs and holds the clients that may sign in. `config.toml` carries the same section:
 
