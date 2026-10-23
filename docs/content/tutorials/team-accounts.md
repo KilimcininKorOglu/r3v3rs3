@@ -14,14 +14,14 @@ You need an admin account from [Getting Started](@/tutorials/getting-started.md)
 
 Three roles exist. A proxy list narrows an editor or a viewer further:
 
-| Action | Admin | Editor | Editor with a proxy list | Viewer |
-|---|---|---|---|---|
-| Read the proxies | every proxy | every proxy | the proxies of its list | every proxy, or its list |
-| Add a proxy | yes | yes | yes, and its list gets the new proxy | no |
-| Change or delete a proxy, purge its cache | yes | yes | the proxies of its list | no |
-| Read the ports, certificates, ACME entries, access lists | yes | yes | yes | yes |
-| Change the ports, certificates, ACME entries, access lists | yes | yes | no | no |
-| Read or change the settings and the accounts, read the audit log | yes | no | no | no |
+| Action                                                           | Admin       | Editor      | Editor with a proxy list             | Viewer                   |
+|------------------------------------------------------------------|-------------|-------------|--------------------------------------|--------------------------|
+| Read the proxies                                                 | every proxy | every proxy | the proxies of its list              | every proxy, or its list |
+| Add a proxy                                                      | yes         | yes         | yes, and its list gets the new proxy | no                       |
+| Change or delete a proxy, purge its cache                        | yes         | yes         | the proxies of its list              | no                       |
+| Read the ports, certificates, ACME entries, access lists         | yes         | yes         | yes                                  | yes                      |
+| Change the ports, certificates, ACME entries, access lists       | yes         | yes         | no                                   | no                       |
+| Read or change the settings and the accounts, read the audit log | yes         | no          | no                                   | no                       |
 
 An admin always sees every proxy, so an admin cannot have a proxy list. An account without a list sees every proxy.
 
@@ -183,7 +183,7 @@ The changes that r3v3rs3 makes by itself, for example a certificate renewal or a
 
 ## Where the Accounts Live
 
-`accounts.toml` in the configuration directory holds the accounts with their password hashes, written with mode `0600`.
+User accounts, password hashes, passkeys, and API tokens are stored in the unified SQLite database (`r3v3rs3.db`). Legacy `accounts.toml` files are automatically migrated on startup.
 
 ## Reference
 

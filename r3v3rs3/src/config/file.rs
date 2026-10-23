@@ -255,9 +255,14 @@ impl FileStorage {
                     write_new_key_file(&path).await?;
                 }
                 let mut paths = vec![path];
-                let old_key_path = self.dir.join("platform.key.old");
+                let old_key_path = self.dir.join(crate::platform::KEY_FILE_OLD);
                 if fs::try_exists(&old_key_path).await? {
                     paths.push(old_key_path);
+                } else {
+                    let legacy_old = self.dir.join("platform.key.old");
+                    if fs::try_exists(&legacy_old).await? {
+                        paths.push(legacy_old);
+                    }
                 }
                 load_keys(&paths).await
             })

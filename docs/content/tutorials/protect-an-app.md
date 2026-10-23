@@ -8,12 +8,12 @@ weight = 7
 
 This guide puts an internal application behind r3v3rs3 and lets in only the people who should reach it. It uses four mechanisms together:
 
-| Mechanism | Answer to a client that fails it |
-|---|---|
-| IP filter | `403 Forbidden` |
-| Rate limit | `429 Too Many Requests` with `Retry-After` |
-| Authentication | `401 Unauthorized` |
-| Audit log | Records who changed the configuration |
+| Mechanism      | Answer to a client that fails it           |
+|----------------|--------------------------------------------|
+| IP filter      | `403 Forbidden`                            |
+| Rate limit     | `429 Too Many Requests` with `Retry-After` |
+| Authentication | `401 Unauthorized`                         |
+| Audit log      | Records who changed the configuration      |
 
 r3v3rs3 checks them in this order: IP filter, rate limit, HTTPS redirect, redirect rules, authentication. A blocked address never reaches the password check, and a client over the limit never reaches the upstream server.
 
@@ -84,12 +84,12 @@ A route can hold its own limit. Give the sign-in path of your application a tigh
 
 Basic Auth needs no other service, but it shows a browser dialog and has no sign-out. Three other methods fit other cases:
 
-| Method | Use it when |
-|---|---|
-| **Basic Auth** | A few people share a password, and a browser dialog is enough. |
-| **Bearer Token** | A script or a CI job calls an API. Create the token with `openssl rand -hex 32`. |
+| Method            | Use it when                                                                                       |
+|-------------------|---------------------------------------------------------------------------------------------------|
+| **Basic Auth**    | A few people share a password, and a browser dialog is enough.                                    |
+| **Bearer Token**  | A script or a CI job calls an API. Create the token with `openssl rand -hex 32`.                  |
 | **Admin Session** | Your application has no sign-in of its own, and the people already have an r3v3rs3 panel account. |
-| **Forward Auth** | An external service decides, for example oauth2-proxy or Authelia with an identity provider. |
+| **Forward Auth**  | An external service decides, for example oauth2-proxy or Authelia with an identity provider.      |
 
 **Admin Session** serves a sign-in page at `/.r3v3rs3/auth/login` below the route path. It accepts only an account that sees the proxy, and it asks for the TOTP code of an account with TOTP. Add a sign-out button to your application:
 

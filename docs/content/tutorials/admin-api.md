@@ -173,11 +173,11 @@ $ curl -s -b cookies.txt -X POST http://localhost:46492/api/accounts \
 
 The three roles:
 
-| Role | What it can do |
-|---|---|
-| `admin` | Everything, including accounts, settings and the audit log. |
+| Role     | What it can do                                                                                                                                                                  |
+|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `admin`  | Everything, including accounts, settings and the audit log.                                                                                                                     |
 | `editor` | Changes the ports, the proxies, the certificates, the ACME entries, the access lists and the apps. With a proxy list, it adds proxies and changes only the proxies of its list. |
-| `viewer` | Reads only. |
+| `viewer` | Reads only.                                                                                                                                                                     |
 
 A `viewer` reads the proxy list but cannot change anything. With the cookie of a `viewer` account in `viewer.txt`:
 

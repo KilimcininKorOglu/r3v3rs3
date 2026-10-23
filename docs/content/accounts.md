@@ -10,19 +10,19 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 
 ## Roles
 
-| Action | Admin | Editor | Editor with a proxy list | Viewer |
-|---|---|---|---|---|
-| Read the proxies | every proxy | every proxy | the proxies of its list | every proxy, or the proxies of its list |
-| Add a proxy | yes | yes | yes, and its list gets the new proxy | no |
-| Change or delete a proxy, purge its cache | yes | yes | the proxies of its list | no |
-| Read the ports, the certificates, the ACME entries and the access lists | yes | yes | yes | yes |
-| Change the ports, the certificates, the ACME entries and the access lists, download a certificate, refresh the CDN IP ranges | yes | yes | no | no |
-| Read or change the settings and the accounts, read the audit log | yes | no | no | no |
-| Read the apps, the targets, the deployments and the container logs of the deployment platform | yes | yes | no | yes, without a proxy list |
-| Add, change or delete an app, read or change its environment variables, set or delete its Git token, create or delete its webhook secret, deploy an app, roll back a deployment | yes | yes | no | no |
-| Add an agent target, create its enrollment token, delete it | yes | no | no | no |
-| Read the Git provider connections, list the repositories and the branches of a connection, install the webhook of an app again | yes | yes | no | no |
-| Add, change, connect or delete a Git provider connection, create or install a GitHub App | yes | no | no | no |
+| Action                                                                                                                                                                          | Admin       | Editor      | Editor with a proxy list             | Viewer                                  |
+|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|-------------|--------------------------------------|-----------------------------------------|
+| Read the proxies                                                                                                                                                                | every proxy | every proxy | the proxies of its list              | every proxy, or the proxies of its list |
+| Add a proxy                                                                                                                                                                     | yes         | yes         | yes, and its list gets the new proxy | no                                      |
+| Change or delete a proxy, purge its cache                                                                                                                                       | yes         | yes         | the proxies of its list              | no                                      |
+| Read the ports, the certificates, the ACME entries and the access lists                                                                                                         | yes         | yes         | yes                                  | yes                                     |
+| Change the ports, the certificates, the ACME entries and the access lists, download a certificate, refresh the CDN IP ranges                                                    | yes         | yes         | no                                   | no                                      |
+| Read or change the settings and the accounts, read the audit log                                                                                                                | yes         | no          | no                                   | no                                      |
+| Read the apps, the targets, the deployments and the container logs of the deployment platform                                                                                   | yes         | yes         | no                                   | yes, without a proxy list               |
+| Add, change or delete an app, read or change its environment variables, set or delete its Git token, create or delete its webhook secret, deploy an app, roll back a deployment | yes         | yes         | no                                   | no                                      |
+| Add an agent target, create its enrollment token, delete it                                                                                                                     | yes         | no          | no                                   | no                                      |
+| Read the Git provider connections, list the repositories and the branches of a connection, install the webhook of an app again                                                  | yes         | yes         | no                                   | no                                      |
+| Add, change, connect or delete a Git provider connection, create or install a GitHub App                                                                                        | yes         | no          | no                                   | no                                      |
 
 - An account without a proxy list sees every proxy. An admin always sees every proxy, so an admin cannot have a proxy list.
 - A proxy that is not in the list of an account does not exist for the account. The admin API answers `404 id_not_found`.
@@ -43,7 +43,7 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 - A change of the role, the proxy list or the password ends the sessions that started before the change. This applies to the admin panel sessions and to the Admin Session sign-ins of the proxies.
 - A deleted account loses its sessions.
 
-`accounts.toml` in the configuration directory holds the accounts with their password hashes. r3v3rs3 writes the file with mode `0600`.
+User accounts, their password hashes, passkeys, and API tokens are securely stored in the unified SQLite database (`r3v3rs3.db`). Any existing `accounts.toml` file is automatically imported into SQLite on startup and migrated.
 
 ## Create an Account
 
@@ -62,12 +62,12 @@ $ r3v3rs3 add-user bob --role viewer --totp
 
 Only an admin account can call these endpoints.
 
-| Endpoint | Action |
-|---|---|
-| `GET /api/accounts` | Lists the accounts with the role, the proxy list and whether TOTP is on. |
-| `POST /api/accounts` | Adds an account. The response holds `totp_secret` when TOTP is on. |
-| `PUT /api/accounts/{username}` | Changes the role, the proxy list and, optionally, the password. |
-| `DELETE /api/accounts/{username}` | Deletes the account. |
+| Endpoint                          | Action                                                                   |
+|-----------------------------------|--------------------------------------------------------------------------|
+| `GET /api/accounts`               | Lists the accounts with the role, the proxy list and whether TOTP is on. |
+| `POST /api/accounts`              | Adds an account. The response holds `totp_secret` when TOTP is on.       |
+| `PUT /api/accounts/{username}`    | Changes the role, the proxy list and, optionally, the password.          |
+| `DELETE /api/accounts/{username}` | Deletes the account.                                                     |
 
 ```bash
 $ curl -b cookies.txt -H 'Content-Type: application/json' \
@@ -80,13 +80,13 @@ $ curl -b cookies.txt -X PUT -H 'Content-Type: application/json' \
 
 An update without `proxies` removes the proxy list, and an update without `password` keeps the password.
 
-| Response | Cause |
-|---|---|
-| `400 password_too_short` | The password has fewer than 8 characters. |
-| `400 invalid_username` | The username breaks the username rules. |
-| `400 invalid_account_scope` | An admin account has a proxy list. |
-| `409 account_exists` | An account with the username exists. |
-| `404 account_not_found` | No account has the username. |
+| Response                    | Cause                                     |
+|-----------------------------|-------------------------------------------|
+| `400 password_too_short`    | The password has fewer than 8 characters. |
+| `400 invalid_username`      | The username breaks the username rules.   |
+| `400 invalid_account_scope` | An admin account has a proxy list.        |
+| `409 account_exists`        | An account with the username exists.      |
+| `404 account_not_found`     | No account has the username.              |
 
 `GET /api/session` returns the username, the role and the proxy list of the signed-in account.
 
@@ -110,12 +110,12 @@ On the login screen, click **Sign in with Passkey**. Supported browsers will pro
 
 ### API Endpoints
 
-| Endpoint | Method | Action |
-|---|---|---|
-| `/api/auth/passkey/challenge` | `GET` | Obtains a single-use random challenge for WebAuthn authentication or registration. |
-| `/api/auth/passkey/register` | `POST` | Registers a newly created passkey credential for the signed-in caller. |
-| `/api/auth/passkey/{id}` | `DELETE` | Deletes a registered passkey by its credential ID. |
-| `/api/auth/login` | `POST` | Authenticates using `LoginMethod::Passkey` with signed WebAuthn assertion and client data. |
+| Endpoint                      | Method   | Action                                                                                     |
+|-------------------------------|----------|--------------------------------------------------------------------------------------------|
+| `/api/auth/passkey/challenge` | `GET`    | Obtains a single-use random challenge for WebAuthn authentication or registration.         |
+| `/api/auth/passkey/register`  | `POST`   | Registers a newly created passkey credential for the signed-in caller.                     |
+| `/api/auth/passkey/{id}`      | `DELETE` | Deletes a registered passkey by its credential ID.                                         |
+| `/api/auth/login`             | `POST`   | Authenticates using `LoginMethod::Passkey` with signed WebAuthn assertion and client data. |
 
 ## API Tokens
 
@@ -129,7 +129,7 @@ r3v3rs3 provides persistent personal API tokens for automated scripts, CI/CD pip
 ### Token Security
 
 - Each token is generated with a `r3v_` prefix followed by 32 alphanumeric random characters.
-- Only the SHA-256 hash of the token is persisted in `accounts.toml`. The raw secret is displayed exactly once upon generation.
+- Only the SHA-256 hash of the token is persisted in `r3v3rs3.db`. The raw secret is displayed exactly once upon generation.
 - Tokens can be created or revoked at any time from the **Accounts** page in the WebUI by editing your account, or via the API endpoints below.
 
 ### Usage Example
@@ -145,10 +145,10 @@ $ curl -H "Authorization: Bearer r3v_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" \
 
 ### API Endpoints
 
-| Endpoint | Method | Action |
-|---|---|---|
-| `/api/auth/tokens` | `GET` | Lists active API tokens for the signed-in caller's account. |
-| `/api/auth/tokens` | `POST` | Creates a new API token (`name`, `scope`). Returns the raw secret once. |
-| `/api/auth/tokens/{id}` | `DELETE` | Revokes and deletes an API token by ID. |
+| Endpoint                | Method   | Action                                                                  |
+|-------------------------|----------|-------------------------------------------------------------------------|
+| `/api/auth/tokens`      | `GET`    | Lists active API tokens for the signed-in caller's account.             |
+| `/api/auth/tokens`      | `POST`   | Creates a new API token (`name`, `scope`). Returns the raw secret once. |
+| `/api/auth/tokens/{id}` | `DELETE` | Revokes and deletes an API token by ID.                                 |
 
 The [audit log](@/configuration.md#audit-log) records each change of an account and each sign-in.

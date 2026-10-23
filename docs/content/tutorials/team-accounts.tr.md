@@ -14,14 +14,14 @@ Beş kişinin paylaştığı tek bir admin parolası bir yetki modeli değildir.
 
 Üç rol vardır. Proxy listesi, editör ve izleyici rolünü daha da daraltır:
 
-| İşlem | Admin | Editör | Proxy listesi olan editör | İzleyici |
-|---|---|---|---|---|
-| Proxy'leri okumak | her proxy | her proxy | listesindeki proxy'ler | her proxy veya listesindekiler |
-| Proxy eklemek | evet | evet | evet, yeni proxy listesine girer | hayır |
-| Proxy değiştirmek, silmek, cache'ini temizlemek | evet | evet | listesindeki proxy'ler | hayır |
-| Port, sertifika, ACME kaydı ve erişim listesi okumak | evet | evet | evet | evet |
-| Port, sertifika, ACME kaydı ve erişim listesi değiştirmek | evet | evet | hayır | hayır |
-| Ayarları ve hesapları okumak veya değiştirmek, denetim kaydını okumak | evet | hayır | hayır | hayır |
+| İşlem                                                                 | Admin     | Editör    | Proxy listesi olan editör        | İzleyici                       |
+|-----------------------------------------------------------------------|-----------|-----------|----------------------------------|--------------------------------|
+| Proxy'leri okumak                                                     | her proxy | her proxy | listesindeki proxy'ler           | her proxy veya listesindekiler |
+| Proxy eklemek                                                         | evet      | evet      | evet, yeni proxy listesine girer | hayır                          |
+| Proxy değiştirmek, silmek, cache'ini temizlemek                       | evet      | evet      | listesindeki proxy'ler           | hayır                          |
+| Port, sertifika, ACME kaydı ve erişim listesi okumak                  | evet      | evet      | evet                             | evet                           |
+| Port, sertifika, ACME kaydı ve erişim listesi değiştirmek             | evet      | evet      | hayır                            | hayır                          |
+| Ayarları ve hesapları okumak veya değiştirmek, denetim kaydını okumak | evet      | hayır     | hayır                            | hayır                          |
 
 Admin her zaman bütün proxy'leri görür, bu yüzden admin hesabının proxy listesi olamaz. Listesi olmayan hesap her proxy'yi görür.
 
@@ -183,7 +183,7 @@ r3v3rs3'ün kendi yaptığı değişiklikler, örneğin sertifika yenileme veya 
 
 ## Hesaplar nerede durur
 
-Yapılandırma dizinindeki `accounts.toml` hesapları parola hash'leriyle tutar ve `0600` izinleriyle yazılır.
+Kullanıcı hesapları, parola hash'leri, geçiş anahtarları (passkey) ve API token'ları birleşik SQLite veritabanında (`r3v3rs3.db`) tutulur. Eski `accounts.toml` dosyaları başlangıçta otomatik olarak migrasyonla içeri aktarılır.
 
 ## Referans
 

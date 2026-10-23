@@ -21,10 +21,10 @@ DNS-01 is the only challenge that gets a wildcard certificate. It also needs no 
 
 Create a credential that can write the `_acme-challenge` TXT records of the zone. r3v3rs3 creates each record before the validation and deletes it after.
 
-| Provider | Credential | Permissions |
-|---|---|---|
-| Cloudflare | API Token | `Zone:Read` and `DNS:Edit` for the zone |
-| Route 53 | Access Key ID, Secret Access Key | `route53:ListHostedZones` and `route53:ChangeResourceRecordSets` |
+| Provider   | Credential                       | Permissions                                                      |
+|------------|----------------------------------|------------------------------------------------------------------|
+| Cloudflare | API Token                        | `Zone:Read` and `DNS:Edit` for the zone                          |
+| Route 53   | Access Key ID, Secret Access Key | `route53:ListHostedZones` and `route53:ChangeResourceRecordSets` |
 
 The [DNS-01 table](@/configuration.md#dns-01) lists the other 13 providers with their credentials. Two of them need no hosting provider: the webhook provider calls a service of your own, and the exec provider runs a program on the r3v3rs3 host.
 

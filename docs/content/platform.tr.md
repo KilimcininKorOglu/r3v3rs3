@@ -26,25 +26,25 @@ agent_port = 9443
 agent_host = "master.example.com"
 ```
 
-| Key | Varsayılan | Açıklama |
-|---|---|---|
-| `enabled` | `false` | Platformu başlatır. |
-| `docker` | `unix:///var/run/docker.sock` | Docker Engine API'si: bir Unix socket'i veya düz TCP. TLS desteklenmez. |
-| `proxy_ports` | boş | Kendi portlarını seçmeyen bir uygulamayı sunan portların adları veya id'leri, örneğin HTTP portu ve HTTPS portu. Bu liste de boşsa böyle bir uygulama tüm HTTP ve HTTPS portlarını alır. |
-| `acme` | yok | Uygulamaların alan adlarına sertifika sipariş eden ACME kaydının id'si. Bu değer yoksa uygulamalar sertifika almaz. Ayarlar kartı bu değeri korur; kayıtları ACME sayfası yönetir. |
-| `agent_port` | yok | Uzak sunuculardaki agent'ların bağlandığı TCP portu. Sunucu bu portu bütün IPv4 adreslerinde dinler. Bu değer yoksa sunucu hiçbir agent'ı kabul etmez. [Agent hedefleri](#agent-hedefleri) bölümüne bakın. Ayarlar kartı bu değeri korur. |
-| `agent_host` | yok | **Hedefler** sayfasındaki agent komutlarında bu sunucunun host adı veya adresi. Bu değer yoksa sayfa kendi adresindeki host adını kullanır. Ayarlar kartı bu değeri korur. |
+| Key           | Varsayılan                    | Açıklama                                                                                                                                                                                                                                  |
+|---------------|-------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`     | `false`                       | Platformu başlatır.                                                                                                                                                                                                                       |
+| `docker`      | `unix:///var/run/docker.sock` | Docker Engine API'si: bir Unix socket'i veya düz TCP. TLS desteklenmez.                                                                                                                                                                   |
+| `proxy_ports` | boş                           | Kendi portlarını seçmeyen bir uygulamayı sunan portların adları veya id'leri, örneğin HTTP portu ve HTTPS portu. Bu liste de boşsa böyle bir uygulama tüm HTTP ve HTTPS portlarını alır.                                                  |
+| `acme`        | yok                           | Uygulamaların alan adlarına sertifika sipariş eden ACME kaydının id'si. Bu değer yoksa uygulamalar sertifika almaz. Ayarlar kartı bu değeri korur; kayıtları ACME sayfası yönetir.                                                        |
+| `agent_port`  | yok                           | Uzak sunuculardaki agent'ların bağlandığı TCP portu. Sunucu bu portu bütün IPv4 adreslerinde dinler. Bu değer yoksa sunucu hiçbir agent'ı kabul etmez. [Agent hedefleri](#agent-hedefleri) bölümüne bakın. Ayarlar kartı bu değeri korur. |
+| `agent_host`  | yok                           | **Hedefler** sayfasındaki agent komutlarında bu sunucunun host adı veya adresi. Bu değer yoksa sayfa kendi adresindeki host adını kullanır. Ayarlar kartı bu değeri korur.                                                                |
 
 Ayar kartı `enabled`, `docker` ve `proxy_ports` değerlerini değiştirir; değişiklik sunucu yeniden başlatılmadan geçerli olur. `acme`, `agent_port` ve `agent_host` değerleri kartta korunur, ama kart onları düzenlemez.
 
-Platform ilk başlangıçta yapılandırma dizininde iki dosya oluşturur:
+Platform ilk başlangıçta yapılandırma dizininde iki temel dosya oluşturur:
 
-- `platform.db`: uygulamalar, ortam değişkenleri, deployment'lar, hedefler ve Git sağlayıcı bağlantıları.
-- `platform.key`: ortam değişkenlerinin değerlerini, uygulamaların Git token'larını ve webhook secret'larını, Git sağlayıcı bağlantılarının client secret'larını, private key'lerini ve token'larını şifreleyen key. Dosya modu `0600` olur. Bu dosyanın yedeğini `platform.db` yedeğinin yanında saklayın, çünkü değerler bu key olmadan açılmaz.
+- `r3v3rs3.db`: tüm sunucu yapılandırmasıyla birlikte uygulamaları, ortam değişkenlerini, deployment'ları, hedefleri ve Git sağlayıcı bağlantılarını saklayan birleşik SQLite veritabanı.
+- `r3v3rs3.key`: ortam değişkenlerinin değerlerini, uygulamaların Git token'larını ve webhook secret'larını, Git sağlayıcı bağlantılarının client secret'larını, private key'lerini ve token'larını şifreleyen anahtar. Dosya modu `0600` olur. Bu dosyanın yedeğini `r3v3rs3.db` yedeğinin yanında saklayın, çünkü şifreli değerler bu anahtar olmadan açılamaz.
 
 #### Anahtar Rotasyonu (Key Rotation)
 
-Platform anahtarını yenilemek için **Ayarlar** sayfasındaki **Deployment Platform** kartında **Anahtarı Yenile** butonuna tıklayın, CLI'da `r3v3rs3-cli platform rotate-key` çalıştırın veya `POST /api/platform/key/rotate` çağrısı yapın. Bu işlem yeni bir 256-bit AES anahtarı üretir, `platform.db` içindeki tüm gizli verileri eski anahtarla çözüp tek bir veritabanı işleminde yeni anahtarla yeniden mühürler, yeni `platform.key` dosyasını yazar ve önceki anahtarı güvenli biçimde `platform.key.old` (`0600` moduyla) dosyasına arşivler.
+Platform anahtarını yenilemek için **Ayarlar** sayfasındaki **Deployment Platform** kartında **Anahtarı Yenile** butonuna tıklayın, CLI'da `r3v3rs3-cli platform rotate-key` çalıştırın veya `POST /api/platform/key/rotate` çağrısı yapın. Bu işlem yeni bir 256-bit AES anahtarı üretir, `r3v3rs3.db` içindeki tüm gizli verileri eski anahtarla çözüp tek bir veritabanı işleminde yeni anahtarla yeniden mühürler, yeni `r3v3rs3.key` dosyasını yazar ve önceki anahtarı güvenli biçimde `r3v3rs3.key.old` (`0600` moduyla) dosyasına arşivler.
 
 Docker socket'ine erişim, host üzerinde root erişimine eşittir. Platformu yalnız r3v3rs3'ün her container'ı yönetebileceği bir sunucuda açın.
 
@@ -160,16 +160,16 @@ App Store'dan kurulan bir uygulamanın katalogda daha yeni bir sürümü bulundu
 }
 ```
 
-| Alan | Varsayılan | Açıklama |
-|---|---|---|
-| `repository` | | Kullanıcı adı, parola, sorgu veya fragment içermeyen bir `https://` URL'si. |
-| `branch` | `main` | Bir branch veya tag. |
-| `context` | `.` | Docker'ın build context olarak aldığı repo dizini. |
-| `dockerfile` | `Dockerfile` | `context` dizinine göre Dockerfile yolu. |
-| `connection` | yok | Bir [Git sağlayıcı](#git-saglayicilari) bağlantısının id'si. Bağlantı repoyu clone eder ve webhook'unu kurar. |
-| `tag_trigger` | yok | Push edildiğinde eşleşen etiketleri (tag) otomatik olarak deploy eden etiket kalıbı (örn. `v*`, `release-*`). |
+| Alan          | Varsayılan   | Açıklama                                                                                                      |
+|---------------|--------------|---------------------------------------------------------------------------------------------------------------|
+| `repository`  |              | Kullanıcı adı, parola, sorgu veya fragment içermeyen bir `https://` URL'si.                                   |
+| `branch`      | `main`       | Bir branch veya tag.                                                                                          |
+| `context`     | `.`          | Docker'ın build context olarak aldığı repo dizini.                                                            |
+| `dockerfile`  | `Dockerfile` | `context` dizinine göre Dockerfile yolu.                                                                      |
+| `connection`  | yok          | Bir [Git sağlayıcı](#git-saglayicilari) bağlantısının id'si. Bağlantı repoyu clone eder ve webhook'unu kurar. |
+| `tag_trigger` | yok          | Push edildiğinde eşleşen etiketleri (tag) otomatik olarak deploy eden etiket kalıbı (örn. `v*`, `release-*`). |
 
-Private bir repo, bir [Git sağlayıcı](#git-saglayicilari) bağlantısı veya uygulamanın erişim token'ını gerektirir. Erişim token'ı örnekleri: reponun içeriğini okuma izni olan bir GitHub fine-grained token'ı, `read_repository` kapsamı olan bir GitLab token'ı veya `read:repository` kapsamı olan bir Gitea token'ı. `PUT /api/apps/{id}/git_token`, `{"token": "..."}` gövdesiyle token'ı ayarlar. `DELETE /api/apps/{id}/git_token` token'ı siler. r3v3rs3 token'ı `platform.key` ile şifreler. Yönetim API'si token'ı hiçbir zaman döndürmez, uygulamada yalnız `"git_token_set": true` görünür. r3v3rs3 token'ı, clone sırasında `x-access-token` kullanıcı adıyla HTTP Basic kimlik doğrulaması olarak kullanır. Token URL'de veya komut satırında yer almaz, git'e bir ortam değişkeniyle ulaşır.
+Private bir repo, bir [Git sağlayıcı](#git-saglayicilari) bağlantısı veya uygulamanın erişim token'ını gerektirir. Erişim token'ı örnekleri: reponun içeriğini okuma izni olan bir GitHub fine-grained token'ı, `read_repository` kapsamı olan bir GitLab token'ı veya `read:repository` kapsamı olan bir Gitea token'ı. `PUT /api/apps/{id}/git_token`, `{"token": "..."}` gövdesiyle token'ı ayarlar. `DELETE /api/apps/{id}/git_token` token'ı siler. r3v3rs3 token'ı `r3v3rs3.key` ile şifreler. Yönetim API'si token'ı hiçbir zaman döndürmez, uygulamada yalnız `"git_token_set": true` görünür. r3v3rs3 token'ı, clone sırasında `x-access-token` kullanıcı adıyla HTTP Basic kimlik doğrulaması olarak kullanır. Token URL'de veya komut satırında yer almaz, git'e bir ortam değişkeniyle ulaşır.
 
 r3v3rs3'ü çalıştıran sunucuda `git` binary'si bulunmalıdır. r3v3rs3, `git`'i host'un yapılandırması ve hook'lar olmadan, yalnız HTTPS üzerinden çalıştırır. Build context'inde `.git` dizini yer almaz. Context'teki bir sembolik link link olarak kalır. Bu yüzden bir build, repo dışındaki bir dosyayı okuyamaz. Context en fazla 512 MiB olabilir.
 
@@ -204,14 +204,14 @@ Git tabanlı uygulamalar derlenirken r3v3rs3, otomatik önbellek bağlama (cache
 }
 ```
 
-| Alan | Varsayılan | Açıklama |
-|---|---|---|
-| `repository` | | Git kaynağındaki gibi bir `https://` URL'si. Private bir repoyu bağlantı veya uygulamanın Git token'ı clone eder. |
-| `branch` | `main` | Bir branch veya tag. |
-| `file` | `compose.yaml`, `compose.yml`, `docker-compose.yaml` ve `docker-compose.yml` dosyalarından ilk bulunan | Reponun köküne göre Compose dosyası. Dosyadaki göreli yollar dosyanın kendi dizinine göre çözülür. |
-| `service` | | Alan adına gelen istekleri `port` üzerinde alan servis. Servis adı küçük harf, rakam ve `_.-` içerir. |
-| `connection` | yok | Git kaynağındaki gibi bir [Git sağlayıcı](#git-saglayicilari) bağlantısının id'si. |
-| `tag_trigger` | yok | Push edildiğinde eşleşen etiketleri (tag) otomatik olarak deploy eden etiket kalıbı (örn. `v*`, `release-*`). |
+| Alan          | Varsayılan                                                                                             | Açıklama                                                                                                          |
+|---------------|--------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| `repository`  |                                                                                                        | Git kaynağındaki gibi bir `https://` URL'si. Private bir repoyu bağlantı veya uygulamanın Git token'ı clone eder. |
+| `branch`      | `main`                                                                                                 | Bir branch veya tag.                                                                                              |
+| `file`        | `compose.yaml`, `compose.yml`, `docker-compose.yaml` ve `docker-compose.yml` dosyalarından ilk bulunan | Reponun köküne göre Compose dosyası. Dosyadaki göreli yollar dosyanın kendi dizinine göre çözülür.                |
+| `service`     |                                                                                                        | Alan adına gelen istekleri `port` üzerinde alan servis. Servis adı küçük harf, rakam ve `_.-` içerir.             |
+| `connection`  | yok                                                                                                    | Git kaynağındaki gibi bir [Git sağlayıcı](#git-saglayicilari) bağlantısının id'si.                                |
+| `tag_trigger` | yok                                                                                                    | Push edildiğinde eşleşen etiketleri (tag) otomatik olarak deploy eden etiket kalıbı (örn. `v*`, `release-*`).     |
 
 Sunucuda `git` binary'si ve Compose eklentisi olan `docker` binary'si bulunmalıdır. r3v3rs3, `docker compose` komutunu `r3v3rs3-<app id>` Compose projesiyle çalıştırır ve `service` servisi için şu ayarları yapan bir dosya ekler:
 
@@ -266,7 +266,7 @@ WebUI, çok servisli stack'leri yapılandırmayı sezgisel ve hatasız hale geti
 
 ### Ortam değişkenleri
 
-`PUT /api/apps/{id}/env` bir uygulamanın ortam değişkenlerini değiştirir. `"secret": true` olan bir değişkenin değeri yönetim API'sinden bir daha çıkmaz: API değişkeni değeri olmadan döndürür, değersiz bir güncelleme de mevcut değeri korur. r3v3rs3 her değeri `platform.key` ile şifreler ve yalnız bir container başlarken açar.
+`PUT /api/apps/{id}/env` bir uygulamanın ortam değişkenlerini değiştirir. `"secret": true` olan bir değişkenin değeri yönetim API'sinden bir daha çıkmaz: API değişkeni değeri olmadan döndürür, değersiz bir güncelleme de mevcut değeri korur. r3v3rs3 her değeri `r3v3rs3.key` ile şifreler ve yalnız bir container başlarken açar.
 
 #### Git Tabanlı Yapılandırma
 
@@ -355,7 +355,7 @@ Aynı sayfadaki yedekleme ayarları, her veritabanının yedeklendiği UTC'deki 
 - **rsync**: SSH üzerinden uzak hedef dizine `rsync` ile yedek aktarımı.
 - **Dead Man's Snitch / Heartbeat İzleme**: İsteğe bağlı bir sinyal (ping) URL'si (örn. Healthchecks.io, Dead Man's Snitch veya Better Stack). Günlük planlı yedekler başarıyla tamamlandığında r3v3rs3 bu adrese `r3v3rs3-heartbeat` User-Agent başlığıyla bir HTTP GET çağrısı yapar. Herhangi bir planlı yedekleme başarısız olursa bu ping atlanarak yerine `backup.failure` giden webhook bildirimi gönderilir; böylece harici servisler sessiz yedekleme arızalarını anında fark eder.
 
-Her yeni yedek yapılandırılan uzak hedeflere aktarılır; başarısız bir yükleme yalnız sunucu log'una geçer, çünkü yerel kopya vardır. Uzak kimlik bilgileri `platform.key` ile şifrelenir.
+Her yeni yedek yapılandırılan uzak hedeflere aktarılır; başarısız bir yükleme yalnız sunucu log'una geçer, çünkü yerel kopya vardır. Uzak kimlik bilgileri `r3v3rs3.key` ile şifrelenir.
 
 #### Geri Yükleme & Periyodik Doğrulama Testi
 
@@ -408,16 +408,16 @@ Yerel depolama alanı kaybolduğunda, diskler arızalandığında veya sunucu s�
 
 Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment sürerken gelen ikinci deploy, geri alma veya silme isteği `409 app_busy` alır. Bir deployment sürerken gelen [webhook](#webhook-lar) push'u ise bir deployment daha kuyruğa alır. Sunucu yeniden başlarsa bitmemiş deployment `the server stopped during the deployment` mesajıyla `failed` olur ve `deployment_failed` bildirimi gönderilir.
 
-| Durum | Anlamı |
-|---|---|
-| `pending_approval` | Dağıtım manuel onay veya bakım penceresi bekliyor. |
-| `queued` | Deployment başlamayı bekliyor. |
-| `building` | r3v3rs3 branch'i clone ediyor ve image'ı build ediyor veya Compose dosyasını okuyor. |
-| `deploying` | Image çekiliyor, `docker compose up` çalışıyor veya yeni container sağlık kontrolünü bekliyor. |
-| `running` | Deployment'ın container'ı uygulamayı sunuyor. |
-| `superseded` | Daha yeni bir deployment bunun yerini aldı. |
-| `failed` | Deployment durdu. Nedeni `message` alanındadır. |
-| `cancelled` | Dağıtım reddedildi veya iptal edildi. Nedeni `message` alanındadır. |
+| Durum              | Anlamı                                                                                         |
+|--------------------|------------------------------------------------------------------------------------------------|
+| `pending_approval` | Dağıtım manuel onay veya bakım penceresi bekliyor.                                             |
+| `queued`           | Deployment başlamayı bekliyor.                                                                 |
+| `building`         | r3v3rs3 branch'i clone ediyor ve image'ı build ediyor veya Compose dosyasını okuyor.           |
+| `deploying`        | Image çekiliyor, `docker compose up` çalışıyor veya yeni container sağlık kontrolünü bekliyor. |
+| `running`          | Deployment'ın container'ı uygulamayı sunuyor.                                                  |
+| `superseded`       | Daha yeni bir deployment bunun yerini aldı.                                                    |
+| `failed`           | Deployment durdu. Nedeni `message` alanındadır.                                                |
+| `cancelled`        | Dağıtım reddedildi veya iptal edildi. Nedeni `message` alanındadır.                            |
 
 ### Geri alma
 
@@ -438,18 +438,18 @@ Bir uygulama manuel onay gerektirebilir veya dağıtımları planlı bir bakım 
 
 ## Webhook'lar
 
-Webhook, Git sağlayıcısı bir push olayı gönderdiğinde uygulamayı deploy eder. `POST /api/apps/{id}/webhook_secret` uygulamanın secret'ını oluşturur ve onu bir kez döndürür. Secret 64 hex karakterdir ve r3v3rs3 onu `platform.key` ile şifreler. İkinci bir çağrı yeni bir secret oluşturur ve eski secret hemen çalışmaz olur. `DELETE /api/apps/{id}/webhook_secret` webhook'u kapatır.
+Webhook, Git sağlayıcısı bir push olayı gönderdiğinde uygulamayı deploy eder. `POST /api/apps/{id}/webhook_secret` uygulamanın secret'ını oluşturur ve onu bir kez döndürür. Secret 64 hex karakterdir ve r3v3rs3 onu `r3v3rs3.key` ile şifreler. İkinci bir çağrı yeni bir secret oluşturur ve eski secret hemen çalışmaz olur. `DELETE /api/apps/{id}/webhook_secret` webhook'u kapatır.
 
 Sağlayıcı olaylarını yönetim API'sinin adresindeki `POST /hooks/apps/{id}` route'una gönderir. Bu route oturum istemez, çünkü her isteği kendi imzası doğrular. Yönetim API'si varsayılan olarak `127.0.0.1` üzerinde dinler, bu yüzden sağlayıcının API'ye ulaşacak bir yolu olmalıdır: herkese açık bir alan adının `/hooks/` yol önekini yönetim portuna gönderen bir proxy ekleyin ve yönetim API'sinin diğer yollarını kapalı tutun.
 
-| Sağlayıcı | Ayar |
-|---|---|
-| GitHub / GHCR | **Payload URL** hook adresidir, **Content type** `application/json` değeridir, **Secret** secret'tır. GitHub gövdeyi `X-Hub-Signature-256` header'ında imzalar. Git push, Pull Request olaylarını ve GitHub Container Registry (`package` / `registry_package`) yayınlama olaylarını destekler. |
-| Gitea, Forgejo | **Target URL** hook adresidir, **POST Content Type** `application/json` değeridir, **Secret** secret'tır. Sağlayıcı gövdeyi `X-Gitea-Signature` veya `X-Forgejo-Signature` header'ında imzalar. |
-| GitLab | **URL** hook adresidir, **Secret token** secret'tır. GitLab secret'ın kendisini `X-Gitlab-Token` header'ında gönderir. **Push events** seçeneğini açın. Uygulamanın branch alanı bir tag adıysa **Tag push events** seçeneğini de açın. Merge Request olaylarını destekler. |
-| Docker Hub | Webhook URL'i `<hook adresi>?secret=<secret>` şeklindedir. Docker Hub `push_data` ve `repository` içeren JSON gövdesi gönderir. |
-| Harbor | Webhook URL'i hook adresidir ve `Authorization: Bearer <secret>` yetkilendirme header'ı kullanılır. Harbor kaynak etiketleri ve özetleriyle `PUSH_ARTIFACT` olayları gönderir. |
-| Quay | Webhook URL'i `<hook adresi>?secret=<secret>` şeklindedir veya `X-Webhook-Secret: <secret>` header'ı gönderilir. Quay `updated_tags` içeren bildirimler gönderir. |
+| Sağlayıcı           | Ayar                                                                                                                                                                                                                                                                                                                              |
+|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| GitHub / GHCR       | **Payload URL** hook adresidir, **Content type** `application/json` değeridir, **Secret** secret'tır. GitHub gövdeyi `X-Hub-Signature-256` header'ında imzalar. Git push, Pull Request olaylarını ve GitHub Container Registry (`package` / `registry_package`) yayınlama olaylarını destekler.                                   |
+| Gitea, Forgejo      | **Target URL** hook adresidir, **POST Content Type** `application/json` değeridir, **Secret** secret'tır. Sağlayıcı gövdeyi `X-Gitea-Signature` veya `X-Forgejo-Signature` header'ında imzalar.                                                                                                                                   |
+| GitLab              | **URL** hook adresidir, **Secret token** secret'tır. GitLab secret'ın kendisini `X-Gitlab-Token` header'ında gönderir. **Push events** seçeneğini açın. Uygulamanın branch alanı bir tag adıysa **Tag push events** seçeneğini de açın. Merge Request olaylarını destekler.                                                       |
+| Docker Hub          | Webhook URL'i `<hook adresi>?secret=<secret>` şeklindedir. Docker Hub `push_data` ve `repository` içeren JSON gövdesi gönderir.                                                                                                                                                                                                   |
+| Harbor              | Webhook URL'i hook adresidir ve `Authorization: Bearer <secret>` yetkilendirme header'ı kullanılır. Harbor kaynak etiketleri ve özetleriyle `PUSH_ARTIFACT` olayları gönderir.                                                                                                                                                    |
+| Quay                | Webhook URL'i `<hook adresi>?secret=<secret>` şeklindedir veya `X-Webhook-Secret: <secret>` header'ı gönderilir. Quay `updated_tags` içeren bildirimler gönderir.                                                                                                                                                                 |
 | Başka bir gönderici | Gövdeyi secret ile HMAC-SHA256 kullanarak imzalayın (`X-Signature-256: sha256=<hex>`) veya secret belirtecini `Authorization: Bearer <secret>`, `X-Webhook-Token: <secret>` ya da `?secret=<secret>` sorgu parametresiyle iletin. Bir CI işi veya özel registry bu yöntemle sıfır kesintili blue-green deployment tetikleyebilir. |
 
 Hangi istek deploy eder:
@@ -463,13 +463,13 @@ Hangi istek deploy eder:
 
 Deploy eden istek `200` ve `{"outcome": "deployed", "deployment": {...}}` (veya pull request'ler için `{"outcome": "preview_deployed", "deployment": {...}}`) yanıtını alır. Kapatılan bir pull request `200` ve `{"outcome": "preview_destroyed"}` yanıtını alır. Çalışan bir deployment sırasında gelen push `202` ve `{"outcome": "queued"}` yanıtını alır. Çalışan deployment bitince branch'in en son commit'iyle bir deployment daha başlar. Böylece kuyruktaki tek deployment aradaki bütün push'ları kapsar. r3v3rs3 kuyruğu bellekte tutar, bu yüzden yeniden başlatma kuyruğu siler.
 
-| Durum kodu | Nedeni |
-|---|---|
-| `400 invalid_webhook_payload` | GitHub, Gitea veya GitLab push'unun gövdesi JSON değildir, örneğin içerik türü `application/x-www-form-urlencoded` olduğunda. |
-| `401 unauthorized` | İmza yoktur veya yanlıştır. |
-| `404 id_not_found` | Bu id ile bir uygulama yoktur veya uygulamanın webhook secret'ı yoktur. |
-| `429` | İstemci art arda 10'dan fazla istek, bundan sonra da saniyede birden fazla istek gönderdi. `POST /hooks/apps/{id}` ve `GET /oauth/git/callback` bu limiti her istemci adresi için paylaşır. |
-| `503 platform_disabled` | Deploy platformu kapalıdır. |
+| Durum kodu                    | Nedeni                                                                                                                                                                                      |
+|-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `400 invalid_webhook_payload` | GitHub, Gitea veya GitLab push'unun gövdesi JSON değildir, örneğin içerik türü `application/x-www-form-urlencoded` olduğunda.                                                               |
+| `401 unauthorized`            | İmza yoktur veya yanlıştır.                                                                                                                                                                 |
+| `404 id_not_found`            | Bu id ile bir uygulama yoktur veya uygulamanın webhook secret'ı yoktur.                                                                                                                     |
+| `429`                         | İstemci art arda 10'dan fazla istek, bundan sonra da saniyede birden fazla istek gönderdi. `POST /hooks/apps/{id}` ve `GET /oauth/git/callback` bu limiti her istemci adresi için paylaşır. |
+| `503 platform_disabled`       | Deploy platformu kapalıdır.                                                                                                                                                                 |
 
 Gövde en fazla 5 MiB olabilir. Denetim kaydı, bir deployment başlatan veya kuyruğa alan her isteği göndericinin adresiyle ve hesapsız olarak kaydeder.
 
@@ -505,16 +505,16 @@ Kurulum sayfasında hesabı veya organizasyonu ve repository'leri seçin. GitHub
 
 GitHub, callback ve dönüş adreslerini uygulama oluştuğu andaki WebUI adresiyle saklar. WebUI adresi değişirse bu adresleri uygulamanın GitHub ayarlarında değiştirin.
 
-r3v3rs3, client secret'ı ve private key'i `platform.key` ile şifreler. Yönetim API'si onları hiçbir zaman döndürmez. Her GitHub isteği için r3v3rs3 private key ile imzalanmış bir JWT'yle bir installation token'ı alır. Token bir saat geçerlidir ve r3v3rs3 onu süresi dolmadan yeniler. Uygulama GitHub'da kaldırılırsa bağlantı **Yeniden bağlanın** durumuna geçer. **Yeniden bağlan** kurulum sayfasını açar. Bir GitHub App bağlantısında yalnız ad değişir.
+r3v3rs3, client secret'ı ve private key'i `r3v3rs3.key` ile şifreler. Yönetim API'si onları hiçbir zaman döndürmez. Her GitHub isteği için r3v3rs3 private key ile imzalanmış bir JWT'yle bir installation token'ı alır. Token bir saat geçerlidir ve r3v3rs3 onu süresi dolmadan yeniler. Uygulama GitHub'da kaldırılırsa bağlantı **Yeniden bağlanın** durumuna geçer. **Yeniden bağlan** kurulum sayfasını açar. Bir GitHub App bağlantısında yalnız ad değişir.
 
 ### GitLab ve Gitea
 
 Callback adresi, WebUI adresinin sonuna `/oauth/git/callback` eklenerek oluşur, örneğin `https://r3v3rs3.example.com/oauth/git/callback`. **Git Sağlayıcıları** sayfası bu adresi kullandığınız sayfaya göre gösterir. Sağlayıcı admin'in tarayıcısını bu adrese geri gönderir. Bu yüzden adres, genel adres değil, admin'in açtığı adres olmalıdır.
 
-| Sağlayıcı | Yer | Ayarlar |
-|---|---|---|
-| GitLab | **Preferences**, **Applications**, veya bir grubun ya da sunucunun **Applications** sayfası | **Redirect URI** callback adresidir. `api` scope'unu seçin ve **Confidential** seçeneğini açık bırakın. |
-| Gitea | **Settings**, **Applications**, **Manage OAuth2 Applications** | **Redirect URI** callback adresidir. **Confidential Client** seçeneğini açık bırakın. r3v3rs3 `read:repository`, `write:repository` ve `read:user` scope'larını ister. |
+| Sağlayıcı | Yer                                                                                         | Ayarlar                                                                                                                                                                |
+|-----------|---------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| GitLab    | **Preferences**, **Applications**, veya bir grubun ya da sunucunun **Applications** sayfası | **Redirect URI** callback adresidir. `api` scope'unu seçin ve **Confidential** seçeneğini açık bırakın.                                                                |
+| Gitea     | **Settings**, **Applications**, **Manage OAuth2 Applications**                              | **Redirect URI** callback adresidir. **Confidential Client** seçeneğini açık bırakın. r3v3rs3 `read:repository`, `write:repository` ve `read:user` scope'larını ister. |
 
 Sağlayıcı bir client id ve bir client secret gösterir. İkisini de **Git Sağlayıcıları** sayfasında ekleyin. GitLab bağlantısı, kendi GitLab'ınızın adresini girmezseniz `https://gitlab.com` kullanır. Gitea bağlantısı sunucusunun adresini ister. Sağlayıcı adresi `https://` kullanır. `http://` yalnız bir loopback adresinde kabul edilir.
 
@@ -522,7 +522,7 @@ Sağlayıcı bir client id ve bir client secret gösterir. İkisini de **Git Sa�
 
 Bir GitLab veya Gitea bağlantısının satırındaki **Bağlan** sağlayıcının yetkilendirme sayfasını açar. Hesap erişime izin verince sağlayıcı tarayıcıyı callback adresine geri gönderir ve r3v3rs3 kodu hesabın token'larıyla değiştirir. Yetkilendirme PKCE kullanır. State bir kez ve 10 dakika boyunca geçerlidir. Sayfa **Bağlı** durumunu ve hesabın adını gösterir.
 
-r3v3rs3, client secret'ı ve token'ları `platform.key` ile şifreler. Yönetim API'si onları hiçbir zaman döndürmez. GitLab ve Gitea token'larının süresi dolar. Bu yüzden r3v3rs3 token'ı kullanmadan önce refresh token'ıyla yeniler. Sağlayıcı yenilemeyi reddederse bağlantı **Yeniden bağlanın** durumunu gösterir ve **Yeniden bağlan** bağlantıyı yeniden yetkilendirir. Bir bağlantının sağlayıcısını, adresini veya client id'sini değiştirmek de bağlantıyı koparır.
+r3v3rs3, client secret'ı ve token'ları `r3v3rs3.key` ile şifreler. Yönetim API'si onları hiçbir zaman döndürmez. GitLab ve Gitea token'larının süresi dolar. Bu yüzden r3v3rs3 token'ı kullanmadan önce refresh token'ıyla yeniler. Sağlayıcı yenilemeyi reddederse bağlantı **Yeniden bağlanın** durumunu gösterir ve **Yeniden bağlan** bağlantıyı yeniden yetkilendirir. Bir bağlantının sağlayıcısını, adresini veya client id'sini değiştirmek de bağlantıyı koparır.
 
 ### Bağlantılı uygulamalar
 
@@ -566,23 +566,23 @@ Platform, sistemde meydana gelen olayları harici izleme, bildirim ve otomasyon 
 
 Yöneticiler, her webhook hedefi için dört ana kategori altında sunulan 14 olay türünden istediklerini seçerek abone olabilir:
 
-| Kategori | Olay Kodu | Açıklama |
-|---|---|---|
-| **Deployment'lar** | `deploy.success` | Uygulama deployment'ı başarıyla tamamlandı ve container sağlıklı. |
-| | `deploy.failure` | Uygulama deployment'ı derleme, çekme veya başlatma sırasında başarısız oldu. |
-| | `deploy.pending_approval` | Deployment oluşturuldu ancak manuel onay bekliyor. |
-| | `app.crashed` | Uygulama container'ı sıfır dışı bir çıkış koduyla beklenmedik şekilde çöktü veya kapandı. |
-| **Veritabanları & Yedekler** | `backup.success` | Veritabanı yedeği başarıyla alındı ve yerel diske kaydedildi. |
-| | `backup.failure` | Veritabanı dump alma veya yedekleme işlemi başarısız oldu. |
-| | `backup.upload_failed` | Veritabanı yedeğinin uzak depoya (S3/R2/SFTP) yüklenmesi başarısız oldu. |
-| | `backup.restored` | Veritabanı yerel veya uzak yedek snapshot'ından başarıyla geri yüklendi. |
-| **Güvenlik & Sertifikalar** | `cert.expiring` | TLS sertifikasının süresinin dolmasına 30 günden az kaldı. |
-| | `cert.renewed` | TLS sertifikası ACME üzerinden başarıyla yenilendi. |
-| | `cert.renewal_failed` | TLS sertifikası yenileme denemesi başarısız oldu. |
-| | `security.ip_banned` | İstemci IP adresi hız sınırı veya güvenlik kuralı nedeniyle yasaklandı. |
-| **Sistem & Düğümler** | `target.offline` | Agent düğümü kalp atışı göndermeyi durdurdu ve çevrimdışı olarak işaretlendi. |
-| | `system.disk_pressure` | Hedef düğüm disk doluluk oranı uyarı eşiğini aştı. |
-| **Sistem** | `test.ping` | WebUI veya API üzerinden manuel olarak gönderilen test ping'i. |
+| Kategori                     | Olay Kodu                 | Açıklama                                                                                  |
+|------------------------------|---------------------------|-------------------------------------------------------------------------------------------|
+| **Deployment'lar**           | `deploy.success`          | Uygulama deployment'ı başarıyla tamamlandı ve container sağlıklı.                         |
+|                              | `deploy.failure`          | Uygulama deployment'ı derleme, çekme veya başlatma sırasında başarısız oldu.              |
+|                              | `deploy.pending_approval` | Deployment oluşturuldu ancak manuel onay bekliyor.                                        |
+|                              | `app.crashed`             | Uygulama container'ı sıfır dışı bir çıkış koduyla beklenmedik şekilde çöktü veya kapandı. |
+| **Veritabanları & Yedekler** | `backup.success`          | Veritabanı yedeği başarıyla alındı ve yerel diske kaydedildi.                             |
+|                              | `backup.failure`          | Veritabanı dump alma veya yedekleme işlemi başarısız oldu.                                |
+|                              | `backup.upload_failed`    | Veritabanı yedeğinin uzak depoya (S3/R2/SFTP) yüklenmesi başarısız oldu.                  |
+|                              | `backup.restored`         | Veritabanı yerel veya uzak yedek snapshot'ından başarıyla geri yüklendi.                  |
+| **Güvenlik & Sertifikalar**  | `cert.expiring`           | TLS sertifikasının süresinin dolmasına 30 günden az kaldı.                                |
+|                              | `cert.renewed`            | TLS sertifikası ACME üzerinden başarıyla yenilendi.                                       |
+|                              | `cert.renewal_failed`     | TLS sertifikası yenileme denemesi başarısız oldu.                                         |
+|                              | `security.ip_banned`      | İstemci IP adresi hız sınırı veya güvenlik kuralı nedeniyle yasaklandı.                   |
+| **Sistem & Düğümler**        | `target.offline`          | Agent düğümü kalp atışı göndermeyi durdurdu ve çevrimdışı olarak işaretlendi.             |
+|                              | `system.disk_pressure`    | Hedef düğüm disk doluluk oranı uyarı eşiğini aştı.                                        |
+| **Sistem**                   | `test.ping`               | WebUI veya API üzerinden manuel olarak gönderilen test ping'i.                            |
 
 ### Yük Formatı ve Başlıklar
 
@@ -615,7 +615,7 @@ Alıcılar, istek gövdesinin HMAC-SHA256 özetini yapılandırılan gizli anaht
 
 ### Gizli Anahtar Şifreleme ve Güvenlik
 
-Webhook imzalama anahtarları, platformun zarf şifrelemesi kullanılarak `platform.key` ile disk üzerinde AES-256-GCM ile şifrelenir. Düz metin anahtar asla API'den döndürülmez veya denetim günlüklerine yazılmaz. Platform ana anahtarı döndürüldüğünde (key rotation), yapılandırılmış tüm webhook anahtarları otomatik olarak yeni anahtarla yeniden mühürlenir.
+Webhook imzalama anahtarları, platformun zarf şifrelemesi kullanılarak `r3v3rs3.key` ile disk üzerinde AES-256-GCM ile şifrelenir. Düz metin anahtar asla API'den döndürülmez veya denetim günlüklerine yazılmaz. Platform ana anahtarı döndürüldüğünde (key rotation), yapılandırılmış tüm webhook anahtarları otomatik olarak yeni anahtarla yeniden mühürlenir.
 
 ## Yönlendirme
 
@@ -656,13 +656,13 @@ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/inst
 
 Script binary'yi kurar, `/var/lib/r3v3rs3-agent` veri dizinini kullanan `r3v3rs3-agent` systemd servisini oluşturur, agent kaydolana kadar bekler ve sonra token'ı siler. Token unit dosyasına hiç yazılmaz. Güncellemek için script'i `--agent` ile yeniden çalıştırın. Kayıtlı bir agent token istemez. Yeni bir token ile script agent'ı yeniden kaydeder. Bu kayıt başarısız olursa önceki kimliği geri yükler.
 
-| Seçenek | Ortam değişkeni | Varsayılan | Açıklama |
-|---|---|---|---|
-| `--master` | `R3V3RS3_AGENT_MASTER` | | Master'ın agent portu, `HOST:PORT` biçiminde. |
-| `--token` | `R3V3RS3_AGENT_TOKEN` | | Kayıt token'ı. Yalnız ilk başlangıçta gerekir. Kayıtlı bir agent bu değeri kullanmaz. |
-| `--data-dir` | `R3V3RS3_AGENT_DATA_DIR` | kullanıcının veri dizinindeki `agent` | Agent'ın key'i, sertifikası ve Compose dosyaları. |
-| `--docker` | `R3V3RS3_AGENT_DOCKER` | `unix:///var/run/docker.sock` | Agent host'unun Docker Engine API'si. |
-| `--log-level` | `R3V3RS3_AGENT_LOG_LEVEL` | `info` | Log seviyesi. |
+| Seçenek       | Ortam değişkeni           | Varsayılan                            | Açıklama                                                                              |
+|---------------|---------------------------|---------------------------------------|---------------------------------------------------------------------------------------|
+| `--master`    | `R3V3RS3_AGENT_MASTER`    |                                       | Master'ın agent portu, `HOST:PORT` biçiminde.                                         |
+| `--token`     | `R3V3RS3_AGENT_TOKEN`     |                                       | Kayıt token'ı. Yalnız ilk başlangıçta gerekir. Kayıtlı bir agent bu değeri kullanmaz. |
+| `--data-dir`  | `R3V3RS3_AGENT_DATA_DIR`  | kullanıcının veri dizinindeki `agent` | Agent'ın key'i, sertifikası ve Compose dosyaları.                                     |
+| `--docker`    | `R3V3RS3_AGENT_DOCKER`    | `unix:///var/run/docker.sock`         | Agent host'unun Docker Engine API'si.                                                 |
+| `--log-level` | `R3V3RS3_AGENT_LOG_LEVEL` | `info`                                | Log seviyesi.                                                                         |
 
 Veri dizini `agent.key` (mod `0600`), `agent.pem`, `ca.pem`, `target` dosyalarını ve `compose/` dizinini içerir. Agent SIGINT ile düzgün kapanır.
 
@@ -740,7 +740,7 @@ Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde repl
 }
 ```
 
-- Registry parolaları ve kişisel erişim token'ları `platform.key` ile mühürlenir ve yalnızca standart Docker `X-Registry-Auth` ile imaj çekme sırasında hedef konteyner motoruna iletilmek üzere açılır.
+- Registry parolaları ve kişisel erişim token'ları `r3v3rs3.key` ile mühürlenir ve yalnızca standart Docker `X-Registry-Auth` ile imaj çekme sırasında hedef konteyner motoruna iletilmek üzere açılır.
 - Anahtar döndürme (`POST /api/platform/key/rotate`), depolanan tüm registry sırlarını tek bir atomik işlemde çözüp yeni anahtarla yeniden mühürler.
 - Bir imaj uygulaması deploy edilirken, r3v3rs3 ilgili registry sunucusunu (örn. `ghcr.io` veya `docker.io` / `registry-1.docker.io`) tespit eder, eşleşen kimlik bilgilerini ekler ve çekme isteğini yerel motora veya uzak agent'lara iletir.
 
@@ -909,91 +909,91 @@ Yönetim altındaki **Webhook'lar** sayfası, giden olay bildirim hedeflerini y�
 
 ## Yönetim API'si
 
-| Route | İzin | Açıklama |
-|---|---|---|
-| `GET /api/backups` | Read | Tüm veritabanlarındaki yedekleri motor ve meta verileriyle listeler. |
-| `GET /api/backups/overview` | Read | Tüm veritabanları genelinde özet istatistikler, zamanlama, saklama ve heartbeat izleme durumu. |
-| `POST /api/backups/run` | Edit | Belirtilen bir veritabanının anında yedeğini alır. |
-| `GET /api/targets` | Read | Uygulamaları çalıştıran Docker host'ları ve agent'larının durumu. |
-| `POST /api/targets` | Admin | Bir agent hedefi ekler ve kayıt token'ını bir kez döndürür. |
-| `POST /api/targets/upgrade` | Admin | Bağlı tüm eski sürümlü agent hedeflerine en güncel ikili dosyayı iter. |
-| `POST /api/targets/{id}/token` | Admin | Bir agent hedefinin yeni kayıt token'ını döndürür. |
-| `POST /api/targets/{id}/upgrade` | Admin | Belirtilen agent hedefine en güncel ikili dosyayı iterek hedefin agent'ını günceller. |
-| `POST /api/targets/{id}/drain` | Admin | Bir hedefi bakım moduna alır, konteynerlerini aktif yönlendirmeden çıkarır. |
-| `POST /api/targets/{id}/undrain` | Admin | Drenajdaki bir hedefi tekrar aktif yönlendirme havuzuna alır. |
-| `DELETE /api/targets/{id}` | Admin | Uygulaması olmayan bir agent hedefini siler ve agent'ının bağlantısını keser. |
-| `GET /api/registries` | Read | İmaj çekme için yapılandırılmış konteyner registry'leri. |
-| `POST /api/registries` | Admin | Konteyner registry kimlik bilgisi ekler. |
-| `PUT /api/registries/{id}` | Admin | Konteyner registry kimlik bilgilerini günceller. |
-| `DELETE /api/registries/{id}` | Admin | Konteyner registry kimlik bilgilerini siler. |
-| `GET /api/projects` | Read | Tüm projeleri ortamlarıyla birlikte listeler. |
-| `POST /api/projects` | Edit | İsteğe bağlı varsayılan ortamlarla yeni bir proje oluşturur. |
-| `GET /api/projects/{id}` | Read | Ortamları ve uygulama sayısıyla proje ayrıntılarını döndürür. |
-| `PUT /api/projects/{id}` | Edit | Proje adını ve açıklamasını günceller. |
-| `DELETE /api/projects/{id}` | Edit | Bir projeyi siler. |
-| `GET /api/projects/{id}/environments` | Read | Bir projenin ortamlarını listeler. |
-| `POST /api/projects/{id}/environments` | Edit | Bir projeye yeni bir ortam ekler. |
-| `GET /api/projects/{id}/environments/{env_id}` | Read | Ortam ayrıntılarını döndürür. |
-| `PUT /api/projects/{id}/environments/{env_id}` | Edit | Ortam adını ve açıklamasını günceller. |
-| `DELETE /api/projects/{id}/environments/{env_id}` | Edit | Bir ortamı siler. |
-| `GET /api/projects/{id}/environments/{env_id}/env` | Edit | Secret değerleri olmadan paylaşılan ortam değişkenlerini döndürür. |
-| `PUT /api/projects/{id}/environments/{env_id}/env` | Edit | Bir ortam için paylaşılan ortak ortam değişkenlerini değiştirir. |
-| `GET /api/apps` | Read | Uygulamalar. |
-| `POST /api/apps` | Edit | Uygulama ekler. |
-| `GET /api/apps/{id}` | Read | Bir uygulamayı döndürür. |
-| `PUT /api/apps/{id}` | Edit | Bir uygulamayı değiştirir. |
-| `DELETE /api/apps/{id}` | Edit | Bir uygulamayı container'larıyla birlikte siler. |
-| `GET /api/apps/{id}/env` | Edit | Secret değerleri olmadan ortam değişkenleri. |
-| `PUT /api/apps/{id}/env` | Edit | Ortam değişkenlerini değiştirir. |
-| `PUT /api/apps/{id}/git_token` | Edit | Private bir reponun token'ını ayarlar. |
-| `DELETE /api/apps/{id}/git_token` | Edit | Token'ı siler. |
-| `POST /api/apps/{id}/webhook_secret` | Edit | Yeni bir webhook secret'ı oluşturur ve onu bir kez döndürür. |
-| `DELETE /api/apps/{id}/webhook_secret` | Edit | Webhook'u kapatır. |
-| `POST /api/apps/{id}/hook` | Edit | Bağlantısı olan bir uygulamanın webhook'unu yeniden kurar. |
-| `POST /hooks/apps/{id}` | İmza | İmzalı bir push ile uygulamayı deploy eder. Bkz. [Webhook'lar](#webhook-lar). |
-| `GET /api/apps/{id}/deployments` | Read | Bir uygulamanın son 100 deployment'ı. |
-| `GET /api/apps/{id}/logs?tail=200` | Read | Çalışan deployment'ın container log'unun son satırları, 1 ile 1000 satır arası. Uygulamanın çalışan deployment'ı yoksa `running` değeri `false` olur. |
-| `GET /api/apps/{id}/logs/live?tail=200` | Read | Bağlantıyı çalışan container'ın log'unun canlı WebSocket akışına çevirir. |
-| `POST /api/apps/{id}/deploy` | Edit | Bir deployment başlatır. |
-| `GET /api/apps/{id}/terminal?shell=` | Admin | Bağlantıyı çalışan container'ın WebSocket terminaline çevirir (isteğe bağlı kabuk veya DB CLI aracı seçimiyle). |
-| `GET /api/apps/{id}/files?path=` | Admin | Çalışan container'ın bir volume'ündeki dizinin girdilerini döndürür. |
-| `GET /api/apps/{id}/files/download?path=` | Admin | Bir volume içindeki dosyanın içeriğini döndürür. |
-| `PUT /api/apps/{id}/files?path=` | Admin | İstek gövdesini yazılabilir bir volume içindeki dosyaya yazar. |
-| `DELETE /api/apps/{id}/files?path=` | Admin | Yazılabilir bir volume içindeki dosyayı veya dizini siler. |
-| `GET /api/apps/{id}/commands` | Read | Bir uygulamanın zamanlanmış komutlarını listeler. |
-| `POST /api/apps/{id}/commands` | Edit | Uygulamaya yeni bir zamanlanmış komut ekler. |
-| `PUT /api/apps/{id}/commands/{cmd_id}` | Edit | Mevcut bir zamanlanmış komutu günceller. |
-| `DELETE /api/apps/{id}/commands/{cmd_id}` | Edit | Bir zamanlanmış komutu siler. |
-| `POST /api/apps/{id}/commands/{cmd_id}/run` | Edit | Zamanlanmış bir komutu container içinde derhal çalıştırır ve çıktısını döner. |
-| `GET /api/databases` | Read | Veritabanı uygulamaları; motor, port ve bağlantılarıyla. |
-| `GET /api/databases/engines` | Read | Panelin sunduğu motorlar ve sürümler. |
-| `POST /api/databases/engines/refresh` | Edit | Engine kataloğunu r3v3rs3-apps deposundan indirir. |
-| `POST /api/databases` | Edit | Bir veritabanı oluşturur, deployment'ını başlatır ve parolasını bir kez döndürür. |
-| `POST /api/databases/{id}/clone` | Edit | Mevcut bir veritabanını klonlar, deployment'ını başlatır ve verileri aktarır. |
-| `DELETE /api/databases/{id}` | Edit | Veritabanı app'ini siler. Volume'ü kalır. |
-| `GET /api/deployments/{id}` | Read | Bir deployment'ı döndürür. |
-| `POST /api/deployments/{id}/rollback` | Edit | Önceki bir deployment'ı tekrarlar. |
-| `POST /api/deployments/{id}/approve` | Edit | Bekleyen bir dağıtımı onaylar ve başlatır. |
-| `POST /api/deployments/{id}/reject` | Edit | Bekleyen bir dağıtımı reddeder. |
-| `GET /api/git/connections` | Edit | Secret'lar ve token'lar olmadan Git sağlayıcı bağlantıları. |
-| `POST /api/git/connections` | Admin | GitLab veya Gitea bağlantısı ekler. |
-| `GET /api/git/connections/{id}` | Edit | Bir bağlantıyı döndürür. |
-| `PUT /api/git/connections/{id}` | Admin | Bir bağlantıyı değiştirir. `client_secret` yoksa mevcut secret kalır. GitHub App bağlantısında yalnız ad değişir. |
-| `DELETE /api/git/connections/{id}` | Admin | Hiçbir uygulamanın kullanmadığı bir bağlantıyı siler. |
-| `POST /api/git/connections/{id}/authorize` | Admin | `{"redirect_uri": "<callback adresi>"}` gövdesiyle bir yetkilendirme başlatır ve sağlayıcının sayfasını, GitHub App'te ise kurulum sayfasını döndürür. |
-| `POST /api/git/connections/{id}/installation` | Admin | GitHub App'in kurulumunu GitHub'dan okur ve bağlantıyı bağlar. |
-| `POST /api/git/github_apps` | Admin | `{"name": "...", "url": "...", "organization": "...", "redirect_uri": "<callback adresi>"}` gövdesiyle bir GitHub App başlatır. `url` ve `organization` isteğe bağlıdır. Yanıt, tarayıcının GitHub'a gönderdiği form adresini ve manifest'i içerir. |
-| `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Bağlı hesabın veya kurulumun en fazla 50 repository'si. |
-| `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit | Bir reponun en fazla 50 branch'i. |
-| `GET /api/platform/prune` | Read | Disk temizleme politikasını ve hijyen ayarlarını döndürür. |
-| `PUT /api/platform/prune` | Admin | Disk temizleme politikasını günceller. |
-| `POST /api/platform/prune/run` | Admin | Disk hijyeni temizliğini derhal çalıştırır ve geri kazanılan alanı döndürür. |
-| `GET /api/webhooks` | Read | Yapılandırılmış tüm giden webhook'ları listeler. |
-| `POST /api/webhooks` | Admin | Yeni bir giden webhook oluşturur. |
-| `GET /api/webhooks/{id}` | Read | Bir giden webhook'un ayrıntılarını döndürür. |
-| `PUT /api/webhooks/{id}` | Admin | Bir giden webhook yapılandırmasını veya anahtarını günceller. |
-| `DELETE /api/webhooks/{id}` | Admin | Bir giden webhook'u siler. |
-| `POST /api/webhooks/test` | Admin | Hedef URL'ye anında test ping yükü gönderir. |
-| `GET /oauth/git/callback` | State | Sağlayıcının ve yeni bir GitHub App'in callback'i. Bkz. [Bağlanma](#baglanma) ve [GitHub App oluşturma](#github-app-olusturma). |
+| Route                                                          | İzin  | Açıklama                                                                                                                                                                                                                                            |
+|----------------------------------------------------------------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `GET /api/backups`                                             | Read  | Tüm veritabanlarındaki yedekleri motor ve meta verileriyle listeler.                                                                                                                                                                                |
+| `GET /api/backups/overview`                                    | Read  | Tüm veritabanları genelinde özet istatistikler, zamanlama, saklama ve heartbeat izleme durumu.                                                                                                                                                      |
+| `POST /api/backups/run`                                        | Edit  | Belirtilen bir veritabanının anında yedeğini alır.                                                                                                                                                                                                  |
+| `GET /api/targets`                                             | Read  | Uygulamaları çalıştıran Docker host'ları ve agent'larının durumu.                                                                                                                                                                                   |
+| `POST /api/targets`                                            | Admin | Bir agent hedefi ekler ve kayıt token'ını bir kez döndürür.                                                                                                                                                                                         |
+| `POST /api/targets/upgrade`                                    | Admin | Bağlı tüm eski sürümlü agent hedeflerine en güncel ikili dosyayı iter.                                                                                                                                                                              |
+| `POST /api/targets/{id}/token`                                 | Admin | Bir agent hedefinin yeni kayıt token'ını döndürür.                                                                                                                                                                                                  |
+| `POST /api/targets/{id}/upgrade`                               | Admin | Belirtilen agent hedefine en güncel ikili dosyayı iterek hedefin agent'ını günceller.                                                                                                                                                               |
+| `POST /api/targets/{id}/drain`                                 | Admin | Bir hedefi bakım moduna alır, konteynerlerini aktif yönlendirmeden çıkarır.                                                                                                                                                                         |
+| `POST /api/targets/{id}/undrain`                               | Admin | Drenajdaki bir hedefi tekrar aktif yönlendirme havuzuna alır.                                                                                                                                                                                       |
+| `DELETE /api/targets/{id}`                                     | Admin | Uygulaması olmayan bir agent hedefini siler ve agent'ının bağlantısını keser.                                                                                                                                                                       |
+| `GET /api/registries`                                          | Read  | İmaj çekme için yapılandırılmış konteyner registry'leri.                                                                                                                                                                                            |
+| `POST /api/registries`                                         | Admin | Konteyner registry kimlik bilgisi ekler.                                                                                                                                                                                                            |
+| `PUT /api/registries/{id}`                                     | Admin | Konteyner registry kimlik bilgilerini günceller.                                                                                                                                                                                                    |
+| `DELETE /api/registries/{id}`                                  | Admin | Konteyner registry kimlik bilgilerini siler.                                                                                                                                                                                                        |
+| `GET /api/projects`                                            | Read  | Tüm projeleri ortamlarıyla birlikte listeler.                                                                                                                                                                                                       |
+| `POST /api/projects`                                           | Edit  | İsteğe bağlı varsayılan ortamlarla yeni bir proje oluşturur.                                                                                                                                                                                        |
+| `GET /api/projects/{id}`                                       | Read  | Ortamları ve uygulama sayısıyla proje ayrıntılarını döndürür.                                                                                                                                                                                       |
+| `PUT /api/projects/{id}`                                       | Edit  | Proje adını ve açıklamasını günceller.                                                                                                                                                                                                              |
+| `DELETE /api/projects/{id}`                                    | Edit  | Bir projeyi siler.                                                                                                                                                                                                                                  |
+| `GET /api/projects/{id}/environments`                          | Read  | Bir projenin ortamlarını listeler.                                                                                                                                                                                                                  |
+| `POST /api/projects/{id}/environments`                         | Edit  | Bir projeye yeni bir ortam ekler.                                                                                                                                                                                                                   |
+| `GET /api/projects/{id}/environments/{env_id}`                 | Read  | Ortam ayrıntılarını döndürür.                                                                                                                                                                                                                       |
+| `PUT /api/projects/{id}/environments/{env_id}`                 | Edit  | Ortam adını ve açıklamasını günceller.                                                                                                                                                                                                              |
+| `DELETE /api/projects/{id}/environments/{env_id}`              | Edit  | Bir ortamı siler.                                                                                                                                                                                                                                   |
+| `GET /api/projects/{id}/environments/{env_id}/env`             | Edit  | Secret değerleri olmadan paylaşılan ortam değişkenlerini döndürür.                                                                                                                                                                                  |
+| `PUT /api/projects/{id}/environments/{env_id}/env`             | Edit  | Bir ortam için paylaşılan ortak ortam değişkenlerini değiştirir.                                                                                                                                                                                    |
+| `GET /api/apps`                                                | Read  | Uygulamalar.                                                                                                                                                                                                                                        |
+| `POST /api/apps`                                               | Edit  | Uygulama ekler.                                                                                                                                                                                                                                     |
+| `GET /api/apps/{id}`                                           | Read  | Bir uygulamayı döndürür.                                                                                                                                                                                                                            |
+| `PUT /api/apps/{id}`                                           | Edit  | Bir uygulamayı değiştirir.                                                                                                                                                                                                                          |
+| `DELETE /api/apps/{id}`                                        | Edit  | Bir uygulamayı container'larıyla birlikte siler.                                                                                                                                                                                                    |
+| `GET /api/apps/{id}/env`                                       | Edit  | Secret değerleri olmadan ortam değişkenleri.                                                                                                                                                                                                        |
+| `PUT /api/apps/{id}/env`                                       | Edit  | Ortam değişkenlerini değiştirir.                                                                                                                                                                                                                    |
+| `PUT /api/apps/{id}/git_token`                                 | Edit  | Private bir reponun token'ını ayarlar.                                                                                                                                                                                                              |
+| `DELETE /api/apps/{id}/git_token`                              | Edit  | Token'ı siler.                                                                                                                                                                                                                                      |
+| `POST /api/apps/{id}/webhook_secret`                           | Edit  | Yeni bir webhook secret'ı oluşturur ve onu bir kez döndürür.                                                                                                                                                                                        |
+| `DELETE /api/apps/{id}/webhook_secret`                         | Edit  | Webhook'u kapatır.                                                                                                                                                                                                                                  |
+| `POST /api/apps/{id}/hook`                                     | Edit  | Bağlantısı olan bir uygulamanın webhook'unu yeniden kurar.                                                                                                                                                                                          |
+| `POST /hooks/apps/{id}`                                        | İmza  | İmzalı bir push ile uygulamayı deploy eder. Bkz. [Webhook'lar](#webhook-lar).                                                                                                                                                                       |
+| `GET /api/apps/{id}/deployments`                               | Read  | Bir uygulamanın son 100 deployment'ı.                                                                                                                                                                                                               |
+| `GET /api/apps/{id}/logs?tail=200`                             | Read  | Çalışan deployment'ın container log'unun son satırları, 1 ile 1000 satır arası. Uygulamanın çalışan deployment'ı yoksa `running` değeri `false` olur.                                                                                               |
+| `GET /api/apps/{id}/logs/live?tail=200`                        | Read  | Bağlantıyı çalışan container'ın log'unun canlı WebSocket akışına çevirir.                                                                                                                                                                           |
+| `POST /api/apps/{id}/deploy`                                   | Edit  | Bir deployment başlatır.                                                                                                                                                                                                                            |
+| `GET /api/apps/{id}/terminal?shell=`                           | Admin | Bağlantıyı çalışan container'ın WebSocket terminaline çevirir (isteğe bağlı kabuk veya DB CLI aracı seçimiyle).                                                                                                                                     |
+| `GET /api/apps/{id}/files?path=`                               | Admin | Çalışan container'ın bir volume'ündeki dizinin girdilerini döndürür.                                                                                                                                                                                |
+| `GET /api/apps/{id}/files/download?path=`                      | Admin | Bir volume içindeki dosyanın içeriğini döndürür.                                                                                                                                                                                                    |
+| `PUT /api/apps/{id}/files?path=`                               | Admin | İstek gövdesini yazılabilir bir volume içindeki dosyaya yazar.                                                                                                                                                                                      |
+| `DELETE /api/apps/{id}/files?path=`                            | Admin | Yazılabilir bir volume içindeki dosyayı veya dizini siler.                                                                                                                                                                                          |
+| `GET /api/apps/{id}/commands`                                  | Read  | Bir uygulamanın zamanlanmış komutlarını listeler.                                                                                                                                                                                                   |
+| `POST /api/apps/{id}/commands`                                 | Edit  | Uygulamaya yeni bir zamanlanmış komut ekler.                                                                                                                                                                                                        |
+| `PUT /api/apps/{id}/commands/{cmd_id}`                         | Edit  | Mevcut bir zamanlanmış komutu günceller.                                                                                                                                                                                                            |
+| `DELETE /api/apps/{id}/commands/{cmd_id}`                      | Edit  | Bir zamanlanmış komutu siler.                                                                                                                                                                                                                       |
+| `POST /api/apps/{id}/commands/{cmd_id}/run`                    | Edit  | Zamanlanmış bir komutu container içinde derhal çalıştırır ve çıktısını döner.                                                                                                                                                                       |
+| `GET /api/databases`                                           | Read  | Veritabanı uygulamaları; motor, port ve bağlantılarıyla.                                                                                                                                                                                            |
+| `GET /api/databases/engines`                                   | Read  | Panelin sunduğu motorlar ve sürümler.                                                                                                                                                                                                               |
+| `POST /api/databases/engines/refresh`                          | Edit  | Engine kataloğunu r3v3rs3-apps deposundan indirir.                                                                                                                                                                                                  |
+| `POST /api/databases`                                          | Edit  | Bir veritabanı oluşturur, deployment'ını başlatır ve parolasını bir kez döndürür.                                                                                                                                                                   |
+| `POST /api/databases/{id}/clone`                               | Edit  | Mevcut bir veritabanını klonlar, deployment'ını başlatır ve verileri aktarır.                                                                                                                                                                       |
+| `DELETE /api/databases/{id}`                                   | Edit  | Veritabanı app'ini siler. Volume'ü kalır.                                                                                                                                                                                                           |
+| `GET /api/deployments/{id}`                                    | Read  | Bir deployment'ı döndürür.                                                                                                                                                                                                                          |
+| `POST /api/deployments/{id}/rollback`                          | Edit  | Önceki bir deployment'ı tekrarlar.                                                                                                                                                                                                                  |
+| `POST /api/deployments/{id}/approve`                           | Edit  | Bekleyen bir dağıtımı onaylar ve başlatır.                                                                                                                                                                                                          |
+| `POST /api/deployments/{id}/reject`                            | Edit  | Bekleyen bir dağıtımı reddeder.                                                                                                                                                                                                                     |
+| `GET /api/git/connections`                                     | Edit  | Secret'lar ve token'lar olmadan Git sağlayıcı bağlantıları.                                                                                                                                                                                         |
+| `POST /api/git/connections`                                    | Admin | GitLab veya Gitea bağlantısı ekler.                                                                                                                                                                                                                 |
+| `GET /api/git/connections/{id}`                                | Edit  | Bir bağlantıyı döndürür.                                                                                                                                                                                                                            |
+| `PUT /api/git/connections/{id}`                                | Admin | Bir bağlantıyı değiştirir. `client_secret` yoksa mevcut secret kalır. GitHub App bağlantısında yalnız ad değişir.                                                                                                                                   |
+| `DELETE /api/git/connections/{id}`                             | Admin | Hiçbir uygulamanın kullanmadığı bir bağlantıyı siler.                                                                                                                                                                                               |
+| `POST /api/git/connections/{id}/authorize`                     | Admin | `{"redirect_uri": "<callback adresi>"}` gövdesiyle bir yetkilendirme başlatır ve sağlayıcının sayfasını, GitHub App'te ise kurulum sayfasını döndürür.                                                                                              |
+| `POST /api/git/connections/{id}/installation`                  | Admin | GitHub App'in kurulumunu GitHub'dan okur ve bağlantıyı bağlar.                                                                                                                                                                                      |
+| `POST /api/git/github_apps`                                    | Admin | `{"name": "...", "url": "...", "organization": "...", "redirect_uri": "<callback adresi>"}` gövdesiyle bir GitHub App başlatır. `url` ve `organization` isteğe bağlıdır. Yanıt, tarayıcının GitHub'a gönderdiği form adresini ve manifest'i içerir. |
+| `GET /api/git/connections/{id}/repositories?search=&page=`     | Edit  | Bağlı hesabın veya kurulumun en fazla 50 repository'si.                                                                                                                                                                                             |
+| `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit  | Bir reponun en fazla 50 branch'i.                                                                                                                                                                                                                   |
+| `GET /api/platform/prune`                                      | Read  | Disk temizleme politikasını ve hijyen ayarlarını döndürür.                                                                                                                                                                                          |
+| `PUT /api/platform/prune`                                      | Admin | Disk temizleme politikasını günceller.                                                                                                                                                                                                              |
+| `POST /api/platform/prune/run`                                 | Admin | Disk hijyeni temizliğini derhal çalıştırır ve geri kazanılan alanı döndürür.                                                                                                                                                                        |
+| `GET /api/webhooks`                                            | Read  | Yapılandırılmış tüm giden webhook'ları listeler.                                                                                                                                                                                                    |
+| `POST /api/webhooks`                                           | Admin | Yeni bir giden webhook oluşturur.                                                                                                                                                                                                                   |
+| `GET /api/webhooks/{id}`                                       | Read  | Bir giden webhook'un ayrıntılarını döndürür.                                                                                                                                                                                                        |
+| `PUT /api/webhooks/{id}`                                       | Admin | Bir giden webhook yapılandırmasını veya anahtarını günceller.                                                                                                                                                                                       |
+| `DELETE /api/webhooks/{id}`                                    | Admin | Bir giden webhook'u siler.                                                                                                                                                                                                                          |
+| `POST /api/webhooks/test`                                      | Admin | Hedef URL'ye anında test ping yükü gönderir.                                                                                                                                                                                                        |
+| `GET /oauth/git/callback`                                      | State | Sağlayıcının ve yeni bir GitHub App'in callback'i. Bkz. [Bağlanma](#baglanma) ve [GitHub App oluşturma](#github-app-olusturma).                                                                                                                     |
 
 Proxy listesi olan hesap, her platform route'u için `403 forbidden` alır. Bkz. [Hesaplar](@/accounts.tr.md). `[platform] enabled` kapalıyken her platform route'u `503 platform_disabled`, platform veritabanını veya key'ini açamadığında `503 platform_failed` yanıtını verir. Başka bir uygulamanın, hedefin veya bağlantının kullandığı ad `409 app_name_exists`, `409 target_name_exists` veya `409 git_connection_name_exists` alır. Bağlı olmayan bağlantı `409 git_connection_not_connected` alır. GitHub App kurulmadan `POST /api/git/connections/{id}/installation` isteği `409 github_app_not_installed`, sağlayıcıya giden başarısız istek `502 git_provider_failed` alır. Denetim kaydı, uygulamanın her değişikliğini, her deployment'ı, her geri almayı, deploy eden her webhook isteğini, hedefin her değişikliğini, her agent kaydını, Git sağlayıcı bağlantısının her değişikliğini ve yetkilendirmesini ve bir hesabın başlattığı her webhook kurulumunu kaydeder. Ortam değişkeni değişikliğinin özeti key'leri adlandırır, hiçbir değeri içermez. Token veya secret değişikliğinin özeti yalnız uygulamayı veya hedefi adlandırır. Webhook isteğinin özeti uygulamayı, sağlayıcıyı ve deployment'ı adlandırır. Agent kaydının özeti hedefi ve agent'ın sürümünü adlandırır. Bağlantının özeti bağlantıyı ve sağlayıcısını adlandırır, client secret'ı veya bir token'ı hiçbir zaman içermez. Yetkilendirmenin özeti hesabı da adlandırır. Webhook kurulumunun özeti uygulamayı adlandırır.

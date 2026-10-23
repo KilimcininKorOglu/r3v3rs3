@@ -102,13 +102,13 @@ $ ssh -L 46492:127.0.0.1:46492 kullanici@sunucunuz
 
 ## Dosyalar nerede
 
-| Yol | İçerik |
-|---|---|
-| `/usr/local/bin/r3v3rs3` | Binary. |
-| `/etc/r3v3rs3` | `accounts.toml`, `proxies.toml`, `ports.toml`, `access_lists.toml`, `acme.toml`, `config.toml` ve sertifikalar. Dizinin modu `0700` değeridir. |
-| `/var/log/r3v3rs3` | Denetim kaydını tutan `log.db`. Dizinin modu `0750` değeridir. |
+| Yol                      | İçerik                                                                                                                 |
+|--------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `/usr/local/bin/r3v3rs3` | Binary.                                                                                                                |
+| `/etc/r3v3rs3`           | `r3v3rs3.db` (birleşik veritabanı), `r3v3rs3.key` (ana şifreleme anahtarı) ve `certs/`. Dizinin modu `0700` değeridir. |
+| `/var/log/r3v3rs3`       | Denetim kaydını tutan `log.db`. Dizinin modu `0750` değeridir.                                                         |
 
-Sunucu log'unu `journalctl -u r3v3rs3` gösterir. `/etc/r3v3rs3/acme.toml` dosyası ACME hesap key'lerini ve DNS sağlayıcılarının kimlik bilgilerini düz metin tutar, bu yüzden bütün dizini yedekleyin ve yedeği koruyun.
+Sunucu log'unu `journalctl -u r3v3rs3` gösterir. `/etc/r3v3rs3/r3v3rs3.db` tüm yapılandırma ve durum verilerini, `r3v3rs3.key` ise ana şifreleme anahtarını tutar; bu yüzden bütün dizini yedekleyin ve yedeği koruyun.
 
 ## Yükseltme
 

@@ -4,18 +4,24 @@ description = "Yapılandırma"
 weight = 0
 +++
 
-# Yapılandırma dosyası
+# Yapılandırma ve Veri Depolama
 
-Yapılandırma dizinindeki `config.toml` sunucunun ayarlarını taşır. Dosya yoksa sunucu, başlangıçta bütün ayarları varsayılan değerleriyle dosyaya yazar; böylece yeni bir kurulum sunucunun neyi okuduğunu görür. Var olan bir dosyanın üzerine asla yazılmaz.
+r3v3rs3; sunucu yapılandırmasını, ters proxy kurallarını, portları, erişim listelerini, ACME ayarlarını, kullanıcı hesaplarını ve deployment platformu verilerini yapılandırma dizininde (varsayılan `/etc/r3v3rs3`) yer alan birleşik bir SQLite veritabanında (`r3v3rs3.db`) saklar.
 
-Panelin ayarlar sayfası bütün bölümleri sunucu çalışırken yönetir ve bir kayıt restart olmadan uygulanır. İstisna `worker_mode`'dur: process'in kendisini değiştirir, yalnız `config.toml` belirler ve bir değişiklik restart ile uygulanır.
+- **Birleşik SQLite Veritabanı (`r3v3rs3.db`)**: Atomik transaction'lar ve WAL modu sayesinde yüksek eşzamanlılık, kesintisiz veri bütünlüğü ve restart sonrasında sıfır kayıp güvencesi sunar.
+- **Ana Şifreleme Anahtarı (`r3v3rs3.key`)**: Hassas kimlik bilgileri (DNS API anahtarları, Git token'ları, ortam değişkeni gizli değerleri), `0600` dosya izinlerine sahip `r3v3rs3.key` anahtarı ile AES-256-GCM kullanılarak mühürlenir.
+- **Diskte Saklanan Dosyalar**: TLS PEM sertifika ve private key dosyaları `certs/<tür>/<id>/*.pem` altında diskte dosya olarak tutulur (göreli yolları `r3v3rs3.db` içinde saklanır). Harici JSON veri setleri (`cdn-ranges.json`, `app-store.json`, `engines.json`) katalog senkronizasyonu için diskte dosya olarak kalır.
+- **Log Ayrıştırma (`log.db`)**: Yüksek frekanslı tracing ve istek kayıtları, `r3v3rs3.db` üzerinde kilitlenmeyi ve şişmeyi önlemek için ayrı bir `log.db` veritabanında tutulur.
+- **Otomatik Legacy Migrasyon**: Yapılandırma dizininde eski düz dosyalar (`config.toml`, `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `dns-credentials.toml`, `accounts.toml`, `notifications.json` veya `platform.db` / `platform.key`) tespit edildiğinde r3v3rs3 açılışta bu verileri otomatik olarak `r3v3rs3.db` veritabanına aktarır ve orijinal dosyaları güvenle `*.migrated` olarak yeniden adlandırır; böylece hiçbir veri kaybı yaşanmaz.
+
+Panelin ayarlar sayfası sunucu çalışırken bütün ayarları yönetir ve değişiklikler restart gerekmeden derhal uygulanır. İstisna `worker_mode`'dur: process mimarisini değiştirir; ayarlardan veya CLI'dan tanımlanabilir ve restart ile geçerlilik kazanır.
 
 ## Yapılandırma Yedeği ve Geri Yükleme
 
 r3v3rs3 tüm yapılandırmasını (ayarlar, portlar, proxy'ler, erişim listeleri, ACME yapılandırmaları ve depolama dosyaları) tek bir JSON yedek dosyasına aktarabilir ve başka bir sunucuya geri yükleyebilir:
 
 - **Gizli anahtarlar maskeli**: Webhook belirteçleri, proxy ve erişim listesi parola özetleri ve ACME sağlayıcı API anahtarları gibi hassas bilgiler yedek dosyasında maskelenir; böylece yedekler güvenle saklanabilir ve taşınabilir.
-- **Hesaplar hariç**: Kullanıcı hesapları (`accounts.toml`) yedekleme ve geri yükleme işlemlerine kesinlikle dahil edilmez. Bir sunucuya yedek geri yüklendiğinde mevcut yönetici hesapları ve parolaları değişmeden korunur.
+- **Hesaplar hariç**: Kullanıcı hesapları yapılandırma yedekleme ve geri yükleme işlemlerine kesinlikle dahil edilmez. Bir sunucuya yedek geri yüklendiğinde mevcut yönetici hesapları ve parolaları değişmeden korunur.
 
 ### WebUI
 
@@ -50,7 +56,7 @@ $ cat r3v3rs3-backup.json | r3v3rs3-cli config restore -f -
 
 Standart JSON yapılandırma yedeklerinden farklı olarak, **Felaket Kurtarma Paketleri** (`.r3bundle`), r3v3rs3'ün ve Coolify benzeri uygulama dağıtım platformunun tüm çalışma durumunu AES-256-GCM ile şifrelenmiş tek bir arşivde saklar:
 
-- **Tüm Durum Dahil**: `platform.db` (tüm uygulamaları, dağıtımları, veritabanlarını ve ortam değişkenlerini barındıran SQLite veritabanı), `platform.key`, kümeleme mühür anahtarları (`keys/`), TLS sertifikaları ve özel anahtarları (`certs/`), kullanıcı hesapları (`accounts.toml`) ve tüm yapılandırma dosyaları (`config.toml`, `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`) eksiksiz olarak arşivlenir.
+- **Tüm Durum Dahil**: `r3v3rs3.db` (tüm ayarları, portları, proxy'leri, erişim listelerini, ACME sertifikalarını, kullanıcı hesaplarını, uygulamaları, dağıtımları, veritabanlarını ve ortam değişkenlerini barındıran birleşik SQLite veritabanı), `r3v3rs3.key`, kümeleme mühür anahtarları (`keys/`), TLS sertifikaları ve özel anahtarları (`certs/`) ve varsa eski yedek dosyaları eksiksiz olarak arşivlenir.
 - **AES-256-GCM Şifreleme**: İsteğe bağlı bir parola ve tuzlu SHA-256 anahtar türetimi (10.000 tur) ile AES-256-GCM standardında şifrelenir. Şifrelenmemiş veriler asla sunucu belleği dışına çıkmaz.
 - **Otomatik S3 Senkronizasyonu**: Veritabanı yedekleme ayarlarında S3 uzak depolama yapılandırıldığında, oluşturulan felaket kurtarma yedekleri otomatik olarak uzak bucket içindeki `{prefix}/disaster-recovery/` altına yüklenir.
 - **Tek Komutla Felaket Kurtarma**: Sıfırdan kurulan yeni bir sunucuya tek bir komutla tüm platformu ve verileri eksiksiz aktarabilme imkanı sunar.
@@ -120,11 +126,11 @@ tls_termination = { server_names = ["example.com", "*.example.com"] }
 
 HTTPS, QUIC üzerinden HTTP ve TLS üzerinden TCP portları istemcinin sertifikasını doğrulayabilir (mutual TLS). Modu "İstemci Kimlik Doğrulaması" alanından seçin:
 
-| Mod | Davranış |
-|---|---|
-| Kapalı | Port istemci sertifikası istemez. Varsayılan mod budur. |
+| Mod          | Davranış                                                                                                               |
+|--------------|------------------------------------------------------------------------------------------------------------------------|
+| Kapalı       | Port istemci sertifikası istemez. Varsayılan mod budur.                                                                |
 | İsteğe bağlı | Port sertifika ister, fakat sertifikasız istemcileri de kabul eder. İstemcinin gönderdiği sertifika geçerli olmalıdır. |
-| Zorunlu | İstemci geçerli bir sertifika göndermezse TLS handshake başarısız olur. |
+| Zorunlu      | İstemci geçerli bir sertifika göndermezse TLS handshake başarısız olur.                                                |
 
 İsteğe bağlı ve Zorunlu modlarda "İstemci CA Sertifikaları" listesinden bir veya daha fazla kök sertifika seçin. İstemci sertifikası bunlardan biriyle imzalanmış olmalıdır. Sistemin kök sertifikaları kullanılmaz. r3v3rs3, kök sertifika seçilmemiş veya kök olmayan bir sertifika seçilmiş port ayarını reddeder. Bir portun kullandığı kök sertifika silinemez.
 
@@ -808,13 +814,13 @@ r3v3rs3 her isteğe izin verilip verilmeyeceğini oauth2-proxy veya Authelia gib
 
 r3v3rs3 her istemci isteğinde doğrulama URL'ine bir `GET` isteği gönderir. Bu istek, bağlantı header'ları ve `Host` dışında istemcinin bütün header'larını taşır. Bunlara ek olarak şu header'lar da eklenir:
 
-| Header | Değer |
-|---|---|
-| `X-Forwarded-Method` | İstemci isteğinin method'u. |
-| `X-Forwarded-Proto` | `http` veya `https`. |
-| `X-Forwarded-Host` | İstemci isteğinin host'u. |
-| `X-Forwarded-Uri` | İstemci isteğinin yol ve sorgu kısmı. |
-| `X-Forwarded-For` | "İstemci IP adresi" bölümünde belirlenen istemci IP adresi. |
+| Header               | Değer                                                       |
+|----------------------|-------------------------------------------------------------|
+| `X-Forwarded-Method` | İstemci isteğinin method'u.                                 |
+| `X-Forwarded-Proto`  | `http` veya `https`.                                        |
+| `X-Forwarded-Host`   | İstemci isteğinin host'u.                                   |
+| `X-Forwarded-Uri`    | İstemci isteğinin yol ve sorgu kısmı.                       |
+| `X-Forwarded-For`    | "İstemci IP adresi" bölümünde belirlenen istemci IP adresi. |
 
 - **2xx yanıt**: r3v3rs3 isteği upstream sunucuya gönderir. "Kopyalanacak Yanıt Header'ları" alanında listelenen header'ları doğrulama yanıtından upstream isteğine kopyalar. r3v3rs3 önce istemci isteğindeki aynı adlı header'ları siler, böylece istemci bu header'ları kendisi gönderemez.
 - **Diğer yanıtlar**: r3v3rs3 doğrulama yanıtını (durum kodu, header'lar ve en fazla 64 KiB gövde) istemciye gönderir. Bu sayede giriş sayfasına yapılan yönlendirmeler de çalışır.
@@ -839,11 +845,11 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 Bu kimlik doğrulamayı kullanan her route, kendi yolunun altında şu endpoint'leri sunar. `/` route'unun giriş sayfası `/.r3v3rs3/auth/login` adresindedir. `/admin` route'unda bu adres `/admin/.r3v3rs3/auth/login` olur.
 
-| Endpoint | Method | İşlem |
-|---|---|---|
-| `.r3v3rs3/auth/login` | `GET` | Giriş formunu gösterir. |
-| `.r3v3rs3/auth/login` | `POST` | Kullanıcı adını, parolayı ve TOTP kodunu kontrol eder, ardından oturum cookie'sini ayarlar. |
-| `.r3v3rs3/auth/logout` | `POST` | Oturumu sonlandırır ve oturum cookie'sini siler. |
+| Endpoint               | Method | İşlem                                                                                       |
+|------------------------|--------|---------------------------------------------------------------------------------------------|
+| `.r3v3rs3/auth/login`  | `GET`  | Giriş formunu gösterir.                                                                     |
+| `.r3v3rs3/auth/login`  | `POST` | Kullanıcı adını, parolayı ve TOTP kodunu kontrol eder, ardından oturum cookie'sini ayarlar. |
+| `.r3v3rs3/auth/logout` | `POST` | Oturumu sonlandırır ve oturum cookie'sini siler.                                            |
 
 TOTP kodu yalnız TOTP'si açık hesaplarda istenir. `r3v3rs3_session` cookie'si `HttpOnly` ve `SameSite=Lax` özelliklerini taşır; HTTPS ve HTTP/3 bağlantılarında `Secure` özelliği de eklenir. Cookie'nin `Domain` özelliği yoktur ve r3v3rs3 bir oturumu yalnız istemcinin giriş yaptığı host'ta kabul eder. r3v3rs3, isteği upstream sunucuya göndermeden önce oturum cookie'sini siler.
 
@@ -877,16 +883,16 @@ oauth2-proxy veya Authelia gibi harici bir proxy aracına ihtiyaç duymadan, uyg
 - Yetkilendirilen istekler upstream sunucuya iletilirken oturum cookie'si kaldırılır ve doğrulanmış kimliği içeren `X-Forwarded-User` ile `X-Forwarded-Email` header'ları eklenir.
 - Kullanıcılar `/.r3v3rs3/auth/oidc/logout` adresine giderek diledikleri zaman oturumlarını kapatabilir.
 
-| Alan | Açıklama |
-|---|---|
-| `issuer_url` | OIDC sağlayıcısının issuer URL'i (örneğin `https://accounts.google.com` veya `https://auth.example.com/realms/master`). Özel olarak girilmediğinde standart yetkilendirme ve token uç noktaları otomatik olarak çözülür. |
-| `authorization_url` | İsteğe bağlı özel yetkilendirme (authorization) uç noktası URL'i. |
-| `token_url` | İsteğe bağlı özel token uç noktası URL'i. |
-| `userinfo_url` | İsteğe bağlı özel kullanıcı bilgisi (userinfo) uç noktası URL'i (kullanıcı bilgisi doğrudan ID token içinde yer almadığında kullanılır). |
-| `client_id` | Sağlayıcıda kayıtlı OAuth 2.0 İstemci Kimliği (Client ID). |
-| `client_secret` | OAuth 2.0 İstemci Gizli Anahtarı (Client Secret, diskte şifreli saklanır). |
-| `scopes` | Talep edilecek OAuth 2.0 kapsamları (varsayılan: `["openid", "email", "profile"]`). |
-| `allowed_emails` | İzin verilen e-posta adresleri veya alan adı jokerleri (ör. `["admin@example.com", "*@sirket.com"]`). Boş bırakılırsa sağlayıcı tarafından doğrulanan her kullanıcıya izin verilir. |
+| Alan                | Açıklama                                                                                                                                                                                                                 |
+|---------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `issuer_url`        | OIDC sağlayıcısının issuer URL'i (örneğin `https://accounts.google.com` veya `https://auth.example.com/realms/master`). Özel olarak girilmediğinde standart yetkilendirme ve token uç noktaları otomatik olarak çözülür. |
+| `authorization_url` | İsteğe bağlı özel yetkilendirme (authorization) uç noktası URL'i.                                                                                                                                                        |
+| `token_url`         | İsteğe bağlı özel token uç noktası URL'i.                                                                                                                                                                                |
+| `userinfo_url`      | İsteğe bağlı özel kullanıcı bilgisi (userinfo) uç noktası URL'i (kullanıcı bilgisi doğrudan ID token içinde yer almadığında kullanılır).                                                                                 |
+| `client_id`         | Sağlayıcıda kayıtlı OAuth 2.0 İstemci Kimliği (Client ID).                                                                                                                                                               |
+| `client_secret`     | OAuth 2.0 İstemci Gizli Anahtarı (Client Secret, diskte şifreli saklanır).                                                                                                                                               |
+| `scopes`            | Talep edilecek OAuth 2.0 kapsamları (varsayılan: `["openid", "email", "profile"]`).                                                                                                                                      |
+| `allowed_emails`    | İzin verilen e-posta adresleri veya alan adı jokerleri (ör. `["admin@example.com", "*@sirket.com"]`). Boş bırakılırsa sağlayıcı tarafından doğrulanan her kullanıcıya izin verilir.                                      |
 
 ```toml
 [internal-dashboard]
@@ -932,12 +938,12 @@ routes = [
 ]
 ```
 
-| Endpoint | İşlem |
-|---|---|
-| `GET /api/access_lists` | Erişim listelerini listeler. |
-| `POST /api/access_lists` | Bir erişim listesi ekler. |
-| `PUT /api/access_lists/{id}` | Bir erişim listesini değiştirir. Güncelleme yeni parola veya token taşımıyorsa mevcut hash'ler korunur. |
-| `DELETE /api/access_lists/{id}` | Bir erişim listesini siler. |
+| Endpoint                        | İşlem                                                                                                   |
+|---------------------------------|---------------------------------------------------------------------------------------------------------|
+| `GET /api/access_lists`         | Erişim listelerini listeler.                                                                            |
+| `POST /api/access_lists`        | Bir erişim listesi ekler.                                                                               |
+| `PUT /api/access_lists/{id}`    | Bir erişim listesini değiştirir. Güncelleme yeni parola veya token taşımıyorsa mevcut hash'ler korunur. |
+| `DELETE /api/access_lists/{id}` | Bir erişim listesini siler.                                                                             |
 
 Her hesap listeleri okur. Listeleri yalnız admin veya proxy listesi olmayan editör değiştirir. Ayrıntılar için [Hesaplar](@/accounts.tr.md) sayfasına bakın.
 
@@ -947,11 +953,11 @@ Proxy'den geçen isteklerin ve yanıtların header'larını "Header Kuralları" 
 
 Her satıra bir kural yazın:
 
-| Kural | İşlem |
-|---|---|
-| `set Name: value` | Header'ın mevcut değerlerini bu değerle değiştirir. |
-| `append Name: value` | Mevcut değerleri koruyarak bir değer ekler. |
-| `remove Name` | Header'ı siler. |
+| Kural                | İşlem                                               |
+|----------------------|-----------------------------------------------------|
+| `set Name: value`    | Header'ın mevcut değerlerini bu değerle değiştirir. |
+| `append Name: value` | Mevcut değerleri koruyarak bir değer ekler.         |
+| `remove Name`        | Header'ı siler.                                     |
 
 Boş satırlar ve `#` ile başlayan satırlar atlanır.
 
@@ -960,15 +966,15 @@ Boş satırlar ve `#` ile başlayan satırlar atlanır.
 
 Değerlerde şu değişkenleri kullanabilirsiniz. Süslü parantez yazmak için `{{` ve `}}` kullanın.
 
-| Değişken | Değer |
-|---|---|
-| `{client_ip}` | "İstemci IP adresi" bölümünde belirlenen istemci IP adresi. |
-| `{host}` | İstenen host adı. |
-| `{scheme}` | `http` veya `https`. |
-| `{request_id}` | Rastgele 32 karakterlik hex ID. Aynı isteğin istek ve yanıt kuralları aynı ID'yi kullanır. |
-| `{route}` | Eşleşen route'un yolu, örneğin `/api`. |
-| `{client_cert_subject}` | Doğrulanan istemci sertifikasının subject değeri, örneğin `CN=client.example.com`. İstemci sertifikası yoksa boştur. |
-| `{client_cert_fingerprint}` | Doğrulanan istemci sertifikasının hex SHA-256 fingerprint'i. İstemci sertifikası yoksa boştur. |
+| Değişken                    | Değer                                                                                                                |
+|-----------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `{client_ip}`               | "İstemci IP adresi" bölümünde belirlenen istemci IP adresi.                                                          |
+| `{host}`                    | İstenen host adı.                                                                                                    |
+| `{scheme}`                  | `http` veya `https`.                                                                                                 |
+| `{request_id}`              | Rastgele 32 karakterlik hex ID. Aynı isteğin istek ve yanıt kuralları aynı ID'yi kullanır.                           |
+| `{route}`                   | Eşleşen route'un yolu, örneğin `/api`.                                                                               |
+| `{client_cert_subject}`     | Doğrulanan istemci sertifikasının subject değeri, örneğin `CN=client.example.com`. İstemci sertifikası yoksa boştur. |
+| `{client_cert_fingerprint}` | Doğrulanan istemci sertifikasının hex SHA-256 fingerprint'i. İstemci sertifikası yoksa boştur.                       |
 
 İstemci aynı adlı bir header'ı kendisi de gönderebilir. İstemci sertifikası header'ları için `append` yerine `set` kullanın. Böylece kural istemcinin gönderdiği değeri değiştirir.
 
@@ -986,11 +992,11 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 Proxy'den geçen yanıtları "Sıkıştırma" bölümünden sıkıştırabilirsiniz. Bir veya daha fazla encoding seçtiğinizde sıkıştırma açılır. Hiçbir encoding seçili değilse sıkıştırma kapalıdır.
 
-| Encoding | `Content-Encoding` | Varsayılan Seviye | Uyarlanabilir Seviyeler (< 8 KB / 8–64 KB / > 64 KB veya Stream) |
-|---|---|---|---|
-| Brotli | `br` | Kalite 4 | Kalite 5 / Kalite 4 / Kalite 3 |
-| Zstandard | `zstd` | Seviye 3 | Seviye 4 / Seviye 3 / Seviye 1 (En Hızlı) |
-| Gzip | `gzip` | Seviye 6 | Seviye 9 (En İyi) / Seviye 6 / Seviye 1 (En Hızlı) |
+| Encoding  | `Content-Encoding` | Varsayılan Seviye | Uyarlanabilir Seviyeler (< 8 KB / 8–64 KB / > 64 KB veya Stream) |
+|-----------|--------------------|-------------------|------------------------------------------------------------------|
+| Brotli    | `br`               | Kalite 4          | Kalite 5 / Kalite 4 / Kalite 3                                   |
+| Zstandard | `zstd`             | Seviye 3          | Seviye 4 / Seviye 3 / Seviye 1 (En Hızlı)                        |
+| Gzip      | `gzip`             | Seviye 6          | Seviye 9 (En İyi) / Seviye 6 / Seviye 1 (En Hızlı)               |
 
 r3v3rs3 isteğin `Accept-Encoding` header'ını okur ve istemcinin kabul ettiği encoding'lerden `q` değeri en yüksek olanı seçer. Birden fazla encoding aynı `q` değerine sahipse `algorithms` listesindeki sıra geçerli olur. Panelde bu sıra, encoding'leri seçtiğiniz sıradır.
 
@@ -1006,13 +1012,13 @@ r3v3rs3 bir yanıtı yalnız şu koşulların hepsi sağlanırsa sıkıştırır
 
 Bu koşulları sağlayan yanıtlarda r3v3rs3 `Vary` header'ına `Accept-Encoding` ekler. Yanıtı sıkıştırdığında `Content-Length` ve `Accept-Ranges` header'larını da siler, güçlü `ETag` değerini zayıf `ETag` değerine çevirir. Yanıt header kuralları sıkıştırmadan önce çalıştığı için bir kural `Cache-Control: no-transform` ayarlayarak sıkıştırmayı engelleyebilir.
 
-| Ayar | Varsayılan | Açıklama |
-|---|---|---|
-| `algorithms` | Boş. Sıkıştırma kapalıdır. | Tercih sırasına göre sıkıştırma algoritmaları listesi (`br`, `zstd`, `gzip`). |
-| `min_size` | `1024` byte | Sıkıştırmanın uygulanması için gereken minimum yanıt boyutu. |
-| `mime_types` | `text/*`, `application/javascript`, `application/json`, `application/manifest+json`, `application/wasm`, `application/xml`, `application/xhtml+xml`, `application/rss+xml`, `application/atom+xml`, `image/svg+xml`, `font/otf`, `font/ttf` | Sıkıştırmaya uygun medya türleri. Zaten sıkıştırılmış formatlar (PNG, JPEG, WebP, AVIF, WOFF2, ZIP) otomatik filtrelenir. |
-| `adaptive_level` | `true` | Yanıt yük boyutuna göre sıkıştırma seviyesini otomatik ayarlar ve metin/JSON için minimum boyut eşiğini 256 byte'a düşürür. |
-| `precompressed` | `true` | Önceden derlenmiş statik dosyaları (`.zst`, `.br`, `.gz`) sıfır CPU maliyetiyle doğrudan sunar. |
+| Ayar             | Varsayılan                                                                                                                                                                                                                                  | Açıklama                                                                                                                    |
+|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| `algorithms`     | Boş. Sıkıştırma kapalıdır.                                                                                                                                                                                                                  | Tercih sırasına göre sıkıştırma algoritmaları listesi (`br`, `zstd`, `gzip`).                                               |
+| `min_size`       | `1024` byte                                                                                                                                                                                                                                 | Sıkıştırmanın uygulanması için gereken minimum yanıt boyutu.                                                                |
+| `mime_types`     | `text/*`, `application/javascript`, `application/json`, `application/manifest+json`, `application/wasm`, `application/xml`, `application/xhtml+xml`, `application/rss+xml`, `application/atom+xml`, `image/svg+xml`, `font/otf`, `font/ttf` | Sıkıştırmaya uygun medya türleri. Zaten sıkıştırılmış formatlar (PNG, JPEG, WebP, AVIF, WOFF2, ZIP) otomatik filtrelenir.   |
+| `adaptive_level` | `true`                                                                                                                                                                                                                                      | Yanıt yük boyutuna göre sıkıştırma seviyesini otomatik ayarlar ve metin/JSON için minimum boyut eşiğini 256 byte'a düşürür. |
+| `precompressed`  | `true`                                                                                                                                                                                                                                      | Önceden derlenmiş statik dosyaları (`.zst`, `.br`, `.gz`) sıfır CPU maliyetiyle doğrudan sunar.                             |
 
 ```toml
 [my-app]
@@ -1026,13 +1032,13 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 Proxy'den geçen yanıtları "Cache" bölümünden bellekte saklayabilirsiniz. Cache'teki bir yanıt, upstream sunucuya gidilmeden doğrudan istemciye gönderilir. Her proxy'nin ayrı bir cache'i vardır ve proxy'nin bütün route'ları bu cache'i ortak kullanır.
 
-| Ayar | Varsayılan | Açıklama |
-|---|---|---|
-| `enabled` | `false` | Cache'i açar. |
-| `max_size` | `67108864` (64 MiB) | Saklanan yanıtlar için byte cinsinden bellek limiti. Cache dolunca r3v3rs3 en az kullanılan yanıtları siler. |
-| `max_entry_size` | `1048576` (1 MiB) | Gövdesi bu değerden büyük yanıtlar saklanmaz. |
-| `default_ttl` | `0s` | `Cache-Control: max-age`, `s-maxage` veya `Expires` içermeyen yanıtın geçerlilik süresi. Değer `0s` ise r3v3rs3 böyle bir yanıtı yalnız `ETag` veya `Last-Modified` header'ı varsa saklar ve her istekte yeniden doğrular. |
-| `stale_while_revalidate` | `0s` | Süresi dolmuş yanıtın arka planda asenkron olarak yeniden doğrulanırken istemciye hemen sunulacağı (`X-Cache: STALE`) pencere. Upstream `Cache-Control` içindeki `stale-while-revalidate` direktifi önceliklidir. |
+| Ayar                     | Varsayılan          | Açıklama                                                                                                                                                                                                                   |
+|--------------------------|---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`                | `false`             | Cache'i açar.                                                                                                                                                                                                              |
+| `max_size`               | `67108864` (64 MiB) | Saklanan yanıtlar için byte cinsinden bellek limiti. Cache dolunca r3v3rs3 en az kullanılan yanıtları siler.                                                                                                               |
+| `max_entry_size`         | `1048576` (1 MiB)   | Gövdesi bu değerden büyük yanıtlar saklanmaz.                                                                                                                                                                              |
+| `default_ttl`            | `0s`                | `Cache-Control: max-age`, `s-maxage` veya `Expires` içermeyen yanıtın geçerlilik süresi. Değer `0s` ise r3v3rs3 böyle bir yanıtı yalnız `ETag` veya `Last-Modified` header'ı varsa saklar ve her istekte yeniden doğrular. |
+| `stale_while_revalidate` | `0s`                | Süresi dolmuş yanıtın arka planda asenkron olarak yeniden doğrulanırken istemciye hemen sunulacağı (`X-Cache: STALE`) pencere. Upstream `Cache-Control` içindeki `stale-while-revalidate` direktifi önceliklidir.          |
 
 r3v3rs3 cache'i yalnız `Range`, `Upgrade` ve `Cache-Control: no-store` içermeyen `GET` ve `HEAD` isteklerinde kullanır. `HEAD` isteğine saklanan `GET` yanıtı verilir. İstemci `Cache-Control: no-cache` veya `Pragma: no-cache` gönderirse r3v3rs3 cache'e bakmadan isteği upstream sunucuya iletir ve gelen yeni yanıtı saklar. Cache key, istenen host ile isteğin yol ve sorgu değerinden oluşur. Bu yüzden yük dengelemenin seçtiği upstream sunucu key'i değiştirmez.
 
@@ -1176,18 +1182,18 @@ Sertifika listesi, "Sertifika Süre Uyarısı" (varsayılan `14days`) süresi i�
 
 r3v3rs3 şu olaylar için bildirim webhook'una bir JSON `POST` isteği gönderir:
 
-| Olay | Ne zaman |
-|---|---|
-| `certificate_expiring` | Bir sertifika "Sertifika Süre Uyarısı" süresi içinde sona erer. |
-| `certificate_expired` | Bir sertifikanın süresi dolmuştur. |
-| `acme_order_failed` | Bir ACME order başarısız olmuştur. Başarısız her order bir olay gönderir. |
-| `test` | Bir admin test bildirimi göndermiştir. |
-| `deployment_started` | [Deploy platformunun](@/platform.tr.md) bir deployment'ı başlamıştır. |
-| `deployment_running` | Bir deployment bitmiştir ve container'ı çalışır. |
-| `deployment_failed` | Bir deployment başarısız olmuştur. r3v3rs3 yeniden başlarken bitmemiş her deployment'ı başarısız sayar ve bu olayı da gönderir. |
-| `agent_online` | Bir agent master'a bağlanmıştır. Açık bir bağlantının yerini alan yeni bağlantı olay göndermez. |
-| `agent_offline` | Bir agent'ın bağlantısı kopmuştur. Silinen veya yeniden kaydedilen hedef olay göndermez. |
-| `app_alert` | Bir uygulama yapılandırılan CPU veya bellek uyarı eşiğini aşmıştır. |
+| Olay                   | Ne zaman                                                                                                                        |
+|------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| `certificate_expiring` | Bir sertifika "Sertifika Süre Uyarısı" süresi içinde sona erer.                                                                 |
+| `certificate_expired`  | Bir sertifikanın süresi dolmuştur.                                                                                              |
+| `acme_order_failed`    | Bir ACME order başarısız olmuştur. Başarısız her order bir olay gönderir.                                                       |
+| `test`                 | Bir admin test bildirimi göndermiştir.                                                                                          |
+| `deployment_started`   | [Deploy platformunun](@/platform.tr.md) bir deployment'ı başlamıştır.                                                           |
+| `deployment_running`   | Bir deployment bitmiştir ve container'ı çalışır.                                                                                |
+| `deployment_failed`    | Bir deployment başarısız olmuştur. r3v3rs3 yeniden başlarken bitmemiş her deployment'ı başarısız sayar ve bu olayı da gönderir. |
+| `agent_online`         | Bir agent master'a bağlanmıştır. Açık bir bağlantının yerini alan yeni bağlantı olay göndermez.                                 |
+| `agent_offline`        | Bir agent'ın bağlantısı kopmuştur. Silinen veya yeniden kaydedilen hedef olay göndermez.                                        |
+| `app_alert`            | Bir uygulama yapılandırılan CPU veya bellek uyarı eşiğini aşmıştır.                                                             |
 
 ```json
 {"event": "certificate_expiring", "time": 1757894400, "node": "proxy-1", "certificate": {"id": "a1b2c3d", "san": ["example.com"], "not_after": 1759104000}}
@@ -1218,13 +1224,13 @@ webhook = { url = "https://hooks.example.com/r3v3rs3", token = "<token>", timeou
 
 Listedeki onay kutularıyla sertifikaları seçin ve "Seçilenleri Sil" butonuna tıklayın. `{"ids": [...]}` gövdesi ile gönderilen `POST /api/certs/delete` isteği en fazla 200 id için aynı işi yapar. Yanıt, istekteki sırayla her id için bir sonuç taşır:
 
-| Sonuç | Anlamı |
-|---|---|
-| `deleted` | r3v3rs3 sertifikayı sildi. |
-| `in_use` | Bir port, proxy veya servis keşfi sağlayıcısı sertifikayı kullanıyor. Sertifika kalır. |
-| `read_only` | Sertifikayı servis keşfi yönetiyor. Sertifika kalır. |
-| `not_found` | Bu id'ye sahip sertifika yok. |
-| `failed` | Depolama katmanı sertifikayı silmedi. Sunucu log'u nedeni yazar. |
+| Sonuç       | Anlamı                                                                                 |
+|-------------|----------------------------------------------------------------------------------------|
+| `deleted`   | r3v3rs3 sertifikayı sildi.                                                             |
+| `in_use`    | Bir port, proxy veya servis keşfi sağlayıcısı sertifikayı kullanıyor. Sertifika kalır. |
+| `read_only` | Sertifikayı servis keşfi yönetiyor. Sertifika kalır.                                   |
+| `not_found` | Bu id'ye sahip sertifika yok.                                                          |
+| `failed`    | Depolama katmanı sertifikayı silmedi. Sunucu log'u nedeni yazar.                       |
 
 İstekte tekrar eden bir id tek bir sonuç alır.
 
@@ -1240,11 +1246,11 @@ Sertifika otoritesini seçin (Let's Encrypt, Google Trust Services, ZeroSSL, Buy
 
 Sertifika otoritesi, her alan adını sizin yönettiğinizi bir challenge ile doğrular. Challenge'ı "Challenge" alanından seçin.
 
-| Challenge | Nasıl çalışır | Gereksinimler |
-|---|---|---|
-| HTTP-01 | Sertifika otoritesi `http://<domain>/.well-known/acme-challenge/<token>` adresine istek gönderir ve r3v3rs3 yanıt verir. | Her alan adı r3v3rs3'e çözümlenmeli, TCP 80 portu açık ve internetten erişilebilir olmalıdır. Wildcard alan adı kullanılamaz. |
+| Challenge   | Nasıl çalışır                                                                                                                                            | Gereksinimler                                                                                                                  |
+|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| HTTP-01     | Sertifika otoritesi `http://<domain>/.well-known/acme-challenge/<token>` adresine istek gönderir ve r3v3rs3 yanıt verir.                                 | Her alan adı r3v3rs3'e çözümlenmeli, TCP 80 portu açık ve internetten erişilebilir olmalıdır. Wildcard alan adı kullanılamaz.  |
 | TLS-ALPN-01 | Sertifika otoritesi, alan adının 443 portuna `acme-tls/1` ALPN protokolüyle bir TLS bağlantısı açar ve r3v3rs3 bir challenge sertifikasıyla yanıt verir. | Her alan adı r3v3rs3'e çözümlenmeli, TCP 443 portu açık ve internetten erişilebilir olmalıdır. Wildcard alan adı kullanılamaz. |
-| DNS-01 | r3v3rs3, DNS sağlayıcınızın API'si ile `_acme-challenge.<domain>` TXT kaydını oluşturur. | Aşağıdaki tablodaki DNS sağlayıcılarından biri ve zone'u düzenleyebilen bir API kimlik bilgisi. |
+| DNS-01      | r3v3rs3, DNS sağlayıcınızın API'si ile `_acme-challenge.<domain>` TXT kaydını oluşturur.                                                                 | Aşağıdaki tablodaki DNS sağlayıcılarından biri ve zone'u düzenleyebilen bir API kimlik bilgisi.                                |
 
 `*.example.com` gibi bir wildcard alan adı DNS-01 gerektirir. r3v3rs3, HTTP-01 veya TLS-ALPN-01 ile girilen wildcard alan adını reddeder.
 
@@ -1262,23 +1268,23 @@ r3v3rs3 her alan adı için şu adımları uygular:
 
 Sistemin çözümleyicisi cache'teki eski yanıtları döndürebilir. Yayılma kontrolü sık başarısız oluyorsa "DNS Challenge Çözümleyicisi" ayarına `1.1.1.1:53` gibi herkese açık bir çözümleyici veya zone'un yetkili (authoritative) DNS sunucusunu yazın.
 
-| DNS sağlayıcısı | Kimlik bilgileri | Gereken izinler |
-|---|---|---|
-| Cloudflare | API Token | Zone için `Zone:Read` ve `DNS:Edit`. |
-| Route 53 | Access Key ID, Secret Access Key | `route53:ListHostedZones` ve `route53:ChangeResourceRecordSets`. Private hosted zone'lar atlanır. |
-| Azure DNS | Tenant ID, Client ID, Client Secret, Subscription ID | Zone'larda DNS Zone Contributor rolü olan bir service principal. r3v3rs3, subscription'daki DNS zone'larını listeler ve resource group'u zone ID'sinden alır. |
-| Google Cloud DNS | Service Account Key (JSON), Project ID | Zone'ların projesinde DNS Administrator rolü (`roles/dns.admin`) olan bir service account'un JSON key dosyası. Project ID boşsa r3v3rs3 key'in projesini kullanır. Private zone'lar atlanır. |
-| deSEC | API Token | Hesabın bir token'ı. Policy ile sınırlanmış bir token, `_acme-challenge` TXT kayıt kümelerine yazma izni vermelidir. |
-| DigitalOcean | API Token | Alan adlarını okuyabilen, alan adı kayıtlarını oluşturup silebilen bir token. |
-| Gandi | API Token | Alan adlarını okuyabilen ve LiveDNS kayıtlarını değiştirebilen bir personal access token. |
-| Hetzner Cloud | API Token | Okuma ve yazma yetkisi olan bir Hetzner Cloud proje token'ı. Zone, Hetzner Cloud DNS'te olmalıdır. |
-| Linode | API Token | Domains için okuma ve yazma yetkisi olan bir personal access token. |
-| Vultr | API Key | Hesabın API key'i. |
-| Porkbun | API Key, Secret API Key | Porkbun alan adı yönetiminde alan adı için "API Access" açık olmalıdır. |
-| OVHcloud | API Endpoint, Application Key, Application Secret, Consumer Key | `GET /domain/zone`, `POST /domain/zone/*` ve `DELETE /domain/zone/*` yetkileri olan bir consumer key. Endpoint `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` veya `soyoustart-ca` olabilir. r3v3rs3, kayıtları oluşturduktan sonra ve sildikten sonra zone'u yeniler. |
-| Webhook | Webhook URL, Bearer Token | TXT kayıtlarını oluşturan ve silen kendi servisiniz. Aşağıdaki "DNS webhook" bölümüne bakın. |
-| Exec | Program Yolu | r3v3rs3 host'unda TXT kayıtlarını oluşturan ve silen bir program. Aşağıdaki "DNS exec" bölümüne bakın. |
-| RFC 2136 | DNS Sunucusu, Zone, TSIG Key Adı, TSIG Algoritması, TSIG Secret | Dinamik güncelleme (dynamic update) kabul eden bir DNS sunucusu, örneğin BIND, Knot DNS veya PowerDNS. Aşağıdaki "RFC 2136" bölümüne bakın. |
+| DNS sağlayıcısı  | Kimlik bilgileri                                                | Gereken izinler                                                                                                                                                                                                                                                                                   |
+|------------------|-----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Cloudflare       | API Token                                                       | Zone için `Zone:Read` ve `DNS:Edit`.                                                                                                                                                                                                                                                              |
+| Route 53         | Access Key ID, Secret Access Key                                | `route53:ListHostedZones` ve `route53:ChangeResourceRecordSets`. Private hosted zone'lar atlanır.                                                                                                                                                                                                 |
+| Azure DNS        | Tenant ID, Client ID, Client Secret, Subscription ID            | Zone'larda DNS Zone Contributor rolü olan bir service principal. r3v3rs3, subscription'daki DNS zone'larını listeler ve resource group'u zone ID'sinden alır.                                                                                                                                     |
+| Google Cloud DNS | Service Account Key (JSON), Project ID                          | Zone'ların projesinde DNS Administrator rolü (`roles/dns.admin`) olan bir service account'un JSON key dosyası. Project ID boşsa r3v3rs3 key'in projesini kullanır. Private zone'lar atlanır.                                                                                                      |
+| deSEC            | API Token                                                       | Hesabın bir token'ı. Policy ile sınırlanmış bir token, `_acme-challenge` TXT kayıt kümelerine yazma izni vermelidir.                                                                                                                                                                              |
+| DigitalOcean     | API Token                                                       | Alan adlarını okuyabilen, alan adı kayıtlarını oluşturup silebilen bir token.                                                                                                                                                                                                                     |
+| Gandi            | API Token                                                       | Alan adlarını okuyabilen ve LiveDNS kayıtlarını değiştirebilen bir personal access token.                                                                                                                                                                                                         |
+| Hetzner Cloud    | API Token                                                       | Okuma ve yazma yetkisi olan bir Hetzner Cloud proje token'ı. Zone, Hetzner Cloud DNS'te olmalıdır.                                                                                                                                                                                                |
+| Linode           | API Token                                                       | Domains için okuma ve yazma yetkisi olan bir personal access token.                                                                                                                                                                                                                               |
+| Vultr            | API Key                                                         | Hesabın API key'i.                                                                                                                                                                                                                                                                                |
+| Porkbun          | API Key, Secret API Key                                         | Porkbun alan adı yönetiminde alan adı için "API Access" açık olmalıdır.                                                                                                                                                                                                                           |
+| OVHcloud         | API Endpoint, Application Key, Application Secret, Consumer Key | `GET /domain/zone`, `POST /domain/zone/*` ve `DELETE /domain/zone/*` yetkileri olan bir consumer key. Endpoint `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` veya `soyoustart-ca` olabilir. r3v3rs3, kayıtları oluşturduktan sonra ve sildikten sonra zone'u yeniler. |
+| Webhook          | Webhook URL, Bearer Token                                       | TXT kayıtlarını oluşturan ve silen kendi servisiniz. Aşağıdaki "DNS webhook" bölümüne bakın.                                                                                                                                                                                                      |
+| Exec             | Program Yolu                                                    | r3v3rs3 host'unda TXT kayıtlarını oluşturan ve silen bir program. Aşağıdaki "DNS exec" bölümüne bakın.                                                                                                                                                                                            |
+| RFC 2136         | DNS Sunucusu, Zone, TSIG Key Adı, TSIG Algoritması, TSIG Secret | Dinamik güncelleme (dynamic update) kabul eden bir DNS sunucusu, örneğin BIND, Knot DNS veya PowerDNS. Aşağıdaki "RFC 2136" bölümüne bakın.                                                                                                                                                       |
 
 r3v3rs3 bu API'lerin mock sunucularıyla ve [Pebble](https://github.com/letsencrypt/pebble) test sertifika otoritesiyle test edilir. Gerçek sağlayıcı hesaplarıyla test edilmez.
 
@@ -1385,12 +1391,12 @@ Sunucu daha yeni bir release'i kendi başına da kontrol eder. "Ayarlar" sayfas�
 
 Sunucu tarafındaki her bağlantı flood limitleri taşır. `config.toml`'un `[http2]` ve `[http3]` bölümleri, "Ayarlar" sayfasının düzenlediği, her port için varsayılanları tutar:
 
-| Ayar | Varsayılan | Aralık | Sınırladığı şey |
-|---|---|---|---|
-| `http2.max_header_list_size` | 65536 | 1024 ila 1048576 | Bir isteğin `HEADERS` artı CONTINUATION frame'lerinin bayt cinsinden boyutu (CVE-2024-27316). |
-| `http2.max_pending_accept_reset_streams` | 128 | 1 ila 65536 | İstemcinin `GOAWAY` bağlantıyı kapatmadan önce reset'leyebileceği stream sayısı (CVE-2023-44487). |
-| `http3.max_concurrent_bidi_streams` | 100 | 1 ila 100000 | Bir QUIC bağlantısının açabileceği istek stream'leri. |
-| `http3.max_concurrent_uni_streams` | 10 | 1 ila 100000 | Bir QUIC bağlantısının açabileceği kontrol stream'leri. |
+| Ayar                                     | Varsayılan | Aralık           | Sınırladığı şey                                                                                   |
+|------------------------------------------|------------|------------------|---------------------------------------------------------------------------------------------------|
+| `http2.max_header_list_size`             | 65536      | 1024 ila 1048576 | Bir isteğin `HEADERS` artı CONTINUATION frame'lerinin bayt cinsinden boyutu (CVE-2024-27316).     |
+| `http2.max_pending_accept_reset_streams` | 128        | 1 ila 65536      | İstemcinin `GOAWAY` bağlantıyı kapatmadan önce reset'leyebileceği stream sayısı (CVE-2023-44487). |
+| `http3.max_concurrent_bidi_streams`      | 100        | 1 ila 100000     | Bir QUIC bağlantısının açabileceği istek stream'leri.                                             |
+| `http3.max_concurrent_uni_streams`       | 10         | 1 ila 100000     | Bir QUIC bağlantısının açabileceği kontrol stream'leri.                                           |
 
 Header limitinin üstündeki bir isteğin stream'i reset'lenir ve port yeni bağlantılara hizmet vermeye devam eder.
 
@@ -1500,7 +1506,7 @@ redirect_uris = ["http://127.0.0.1:8765/callback"]
 
 Client, PKCE'li OAuth 2.1 authorization code akışıyla giriş yapar: client `/oauth/authorize` adresini tarayıcıda açar, oturum açmış hesap onay formundan client'a izin verir ve client tek kullanımlık kodu `/oauth/token` üzerinde access token ile değiştirir. Token, onayın kapsamını taşır: `read` durumu görür, `edit` ayrıca proxy'leri değiştirir. Metadata belgeleri `/.well-known/oauth-authorization-server` ve `/.well-known/oauth-protected-resource` adreslerindedir.
 
-Token'lar ve dinamik olarak kaydedilen client'lar SQLite (`platform.db`) veritabanında kalıcı olarak saklanır. Sunucunun yeniden başlaması veya güncellenmesi yetkilendirilmiş oturumları korur; client'lar 30 günlük refresh token'larını kullanarak kullanıcıya yeniden giriş sormadan access token'larını arka planda sessizce yeniler. Aktif oturumlar WebUI Ayarlar sayfasındaki "Aktif MCP Oturumları" kartından veya `GET /api/mcp/sessions` ve `DELETE /api/mcp/sessions/{id}` endpoint'leri üzerinden incelenebilir ve sonlandırılabilir (revoke).
+Token'lar ve dinamik olarak kaydedilen client'lar SQLite (`r3v3rs3.db`) veritabanında kalıcı olarak saklanır. Sunucunun yeniden başlaması veya güncellenmesi yetkilendirilmiş oturumları korur; client'lar 30 günlük refresh token'larını kullanarak kullanıcıya yeniden giriş sormadan access token'larını arka planda sessizce yeniler. Aktif oturumlar WebUI Ayarlar sayfasındaki "Aktif MCP Oturumları" kartından veya `GET /api/mcp/sessions` ve `DELETE /api/mcp/sessions/{id}` endpoint'leri üzerinden incelenebilir ve sonlandırılabilir (revoke).
 
 Bağlanma yolu client'a göre değişir. MCP authorization akışını konuşan bir AI host, örneğin Claude Code veya Cursor, ekstra bir programa ihtiyaç duymaz: bu sunucuyu bir HTTP MCP sunucusu olarak ekler, örneğin `claude mcp add --transport http --scope user r3v3rs3 https://panel.example.com/api/mcp` komutuyla, ve `/mcp` komutunun `Authenticate` adımı aynı authorization akışını tarayıcıda çalıştırır. Aşağıdaki komut satırı client'ı diğer durumlar içindir: script'ler, cron job'ları ve tarayıcı oturumu olmayan sunucular; tek komut bir kez giriş yapar ve token'larını sonraki her çağrı için saklar.
 
@@ -1635,7 +1641,7 @@ directory = "https://acme-v02.api.letsencrypt.org/directory"
 
 WebUI'daki "Sertifikalar" altındaki "DNS Kimlik Bilgileri" sayfası, DNS sağlayıcılarının kimlik bilgilerini bir ad altında saklar. Bir sağlayıcı birden çok kimlik bilgisi tutabilir, örneğin hesap başına bir Cloudflare token'ı. ACME formu, DNS-01 challenge için provider bilgilerini yeniden yazmak yerine saklanmış bir kimlik bilgisi seçer. Kimlik bilgisini kullanan her kayıt, token değişikliğini onunla birlikte alır.
 
-Yönetim API'si ve WebUI saklanan kimlik bilgilerini hiçbir zaman döndürmez. Liste, bir kimlik bilgisinin yalnız adını ve sağlayıcısını gösterir. r3v3rs3, kimlik bilgilerini yapılandırma dizinindeki `platform.key` dosyasındaki key ile mühürler ve bu key henüz yoksa ilk kimlik bilgisinde onu oluşturur. Kimlik bilgileri `dns-credentials.toml` dosyasında durur. r3v3rs3 bu dosyayı `0600` izniyle yazar.
+Yönetim API'si ve WebUI saklanan kimlik bilgilerini hiçbir zaman döndürmez. Liste, bir kimlik bilgisinin yalnız adını ve sağlayıcısını gösterir. r3v3rs3, kimlik bilgilerini yapılandırma dizinindeki `r3v3rs3.key` dosyasındaki anahtar ile mühürler ve bu anahtar henüz yoksa ilk kimlik bilgisinde onu oluşturur. Kimlik bilgileri şifreli olarak `r3v3rs3.db` veritabanında saklanır.
 
 `acme.toml` içindeki bir ACME kaydı, bir kimlik bilgisine id'siyle referans verir ve kendi provider'ını taşımaz:
 
@@ -1654,25 +1660,25 @@ Bir ACME kaydının hâlâ referans verdiği kimlik bilgi silinemez. Önce kayı
 
 # Ayarlar
 
-WebUI'daki "Ayarlar" bölümünden, `config.toml` dosyasında saklanan ve bütün sunucuyu etkileyen seçenekleri değiştirebilirsiniz. Değişiklikler hemen uygulanır ve dosyaya yazılır.
+WebUI'daki "Ayarlar" bölümünden, veritabanında (`r3v3rs3.db`) saklanan ve bütün sunucuyu etkileyen seçenekleri değiştirebilirsiniz. Değişiklikler hemen uygulanır ve kaydedilir.
 
-| Ayar | Varsayılan | Açıklama |
-|---|---|---|
-| Oturum Süresi | `1h` | Yönetim paneli oturumunun geçerlilik süresi. En az 5 dakika olabilir. |
-| Görüntüleme Saat Dilimi | `UTC` | Panelin saklanan zamanları gösterdiği IANA saat dilimi, örneğin Europe/Istanbul. Zamanlar UTC olarak saklanmaya devam eder. |
-| Maksimum Giriş Denemesi | `10` | Her istemci IP adresi ve kullanıcı adı için izin verilen başarısız giriş sayısı. |
-| Giriş Denemesi Sıfırlama Süresi | `15m` | Limite ulaşıldıktan sonraki bekleme süresi. |
-| Arka Plan Görevi Aralığı | `1h` | Sertifika yenileme ve log temizleme görevlerinin çalışma aralığı. |
-| HTTP Challenge Adresi | `0.0.0.0:80` | ACME HTTP challenge'larının dinlendiği adres. |
-| TLS-ALPN Challenge Adresi | `0.0.0.0:443` | Hiçbir port bu portu kullanmıyorsa ACME TLS-ALPN-01 challenge'larının dinlendiği adres. |
-| DNS Challenge Çözümleyicisi | boş | r3v3rs3'ün DNS-01 challenge'ının TXT kayıtları görünene kadar sorguladığı DNS sunucusu, örneğin `1.1.1.1:53`. Boş bırakılırsa sistemin çözümleyicisi kullanılır. |
-| Upstream DNS Çözümleyicisi | boş | `http+srv` ve `https+srv` sunucu URL'lerinin SRV sorgularını yanıtlayan DNS sunucusu, örneğin Consul için `127.0.0.1:8600`. Boş bırakılırsa sistemin çözümleyicisi kullanılır. Ayrıntılar için [DNS SRV sunucuları](#dns-srv-sunuculari) bölümüne bakın. |
-| Veritabanı Log Saklama Süresi | `3months` | Log'ların log veritabanında ne kadar tutulacağı. |
-| Denetim Kaydı Saklama Süresi | `1year` | Denetim kaydındaki bir girdinin ne kadar tutulacağı. Ayrıntılar için [Denetim kaydı](#denetim-kaydi) bölümüne bakın. |
-| Sertifika Süre Uyarısı | `14days` | Sertifika listesi bu süre içinde sona erecek sertifikayı işaretler. Webhook bu sertifika için bildirim alır. Ayrıntılar için [Bildirimler](#bildirimler) bölümüne bakın. |
-| Webhook URL | boş | Bildirim webhook'u. Boşsa bildirim gönderilmez. |
-| Webhook Token | boş | Webhook isteklerinin bearer token'ı. Admin API bu değeri döndürmez. |
-| Webhook Timeout | `10s` | Tek bir webhook isteğinin en uzun süresi. |
+| Ayar                            | Varsayılan    | Açıklama                                                                                                                                                                                                                                                 |
+|---------------------------------|---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Oturum Süresi                   | `1h`          | Yönetim paneli oturumunun geçerlilik süresi. En az 5 dakika olabilir.                                                                                                                                                                                    |
+| Görüntüleme Saat Dilimi         | `UTC`         | Panelin saklanan zamanları gösterdiği IANA saat dilimi, örneğin Europe/Istanbul. Zamanlar UTC olarak saklanmaya devam eder.                                                                                                                              |
+| Maksimum Giriş Denemesi         | `10`          | Her istemci IP adresi ve kullanıcı adı için izin verilen başarısız giriş sayısı.                                                                                                                                                                         |
+| Giriş Denemesi Sıfırlama Süresi | `15m`         | Limite ulaşıldıktan sonraki bekleme süresi.                                                                                                                                                                                                              |
+| Arka Plan Görevi Aralığı        | `1h`          | Sertifika yenileme ve log temizleme görevlerinin çalışma aralığı.                                                                                                                                                                                        |
+| HTTP Challenge Adresi           | `0.0.0.0:80`  | ACME HTTP challenge'larının dinlendiği adres.                                                                                                                                                                                                            |
+| TLS-ALPN Challenge Adresi       | `0.0.0.0:443` | Hiçbir port bu portu kullanmıyorsa ACME TLS-ALPN-01 challenge'larının dinlendiği adres.                                                                                                                                                                  |
+| DNS Challenge Çözümleyicisi     | boş           | r3v3rs3'ün DNS-01 challenge'ının TXT kayıtları görünene kadar sorguladığı DNS sunucusu, örneğin `1.1.1.1:53`. Boş bırakılırsa sistemin çözümleyicisi kullanılır.                                                                                         |
+| Upstream DNS Çözümleyicisi      | boş           | `http+srv` ve `https+srv` sunucu URL'lerinin SRV sorgularını yanıtlayan DNS sunucusu, örneğin Consul için `127.0.0.1:8600`. Boş bırakılırsa sistemin çözümleyicisi kullanılır. Ayrıntılar için [DNS SRV sunucuları](#dns-srv-sunuculari) bölümüne bakın. |
+| Veritabanı Log Saklama Süresi   | `3months`     | Log'ların log veritabanında ne kadar tutulacağı.                                                                                                                                                                                                         |
+| Denetim Kaydı Saklama Süresi    | `1year`       | Denetim kaydındaki bir girdinin ne kadar tutulacağı. Ayrıntılar için [Denetim kaydı](#denetim-kaydi) bölümüne bakın.                                                                                                                                     |
+| Sertifika Süre Uyarısı          | `14days`      | Sertifika listesi bu süre içinde sona erecek sertifikayı işaretler. Webhook bu sertifika için bildirim alır. Ayrıntılar için [Bildirimler](#bildirimler) bölümüne bakın.                                                                                 |
+| Webhook URL                     | boş           | Bildirim webhook'u. Boşsa bildirim gönderilmez.                                                                                                                                                                                                          |
+| Webhook Token                   | boş           | Webhook isteklerinin bearer token'ı. Admin API bu değeri döndürmez.                                                                                                                                                                                      |
+| Webhook Timeout                 | `10s`         | Tek bir webhook isteğinin en uzun süresi.                                                                                                                                                                                                                |
 
 Süreleri `30s`, `15m`, `1h` veya `7days` gibi okunabilir bir biçimde yazın.
 
@@ -1760,15 +1766,15 @@ WebUI'daki Denetim Kaydı sayfası kayıtları en yeni kayıttan başlayarak lis
 
 `GET /api/audit` aynı kayıtları döner. Bu endpoint'i yalnız admin hesabı çağırabilir. Sorgu parametrelerinin hepsi isteğe bağlıdır:
 
-| Parametre | Açıklama |
-|---|---|
-| `since` | Unix milisaniye cinsinden en erken zaman. Varsayılan değer, `until` değerinden 31 gün öncesidir. |
-| `until` | Unix milisaniye cinsinden en geç zaman. Varsayılan değer şu andır. |
-| `username` | Kayıtların ait olduğu hesap. |
-| `resource_id` | Değişen kaynağın id'si veya değişen kullanıcı adı. |
-| `action` | Kayıtların eylemi (örneğin `login`, `deploy_app`). |
-| `search` | Hesap, kaynak id veya özet içinde serbest metin araması. |
-| `limit` | Yanıttaki en fazla kayıt sayısı. Varsayılan değer `100`, en yüksek değer `500` olur. |
+| Parametre     | Açıklama                                                                                         |
+|---------------|--------------------------------------------------------------------------------------------------|
+| `since`       | Unix milisaniye cinsinden en erken zaman. Varsayılan değer, `until` değerinden 31 gün öncesidir. |
+| `until`       | Unix milisaniye cinsinden en geç zaman. Varsayılan değer şu andır.                               |
+| `username`    | Kayıtların ait olduğu hesap.                                                                     |
+| `resource_id` | Değişen kaynağın id'si veya değişen kullanıcı adı.                                               |
+| `action`      | Kayıtların eylemi (örneğin `login`, `deploy_app`).                                               |
+| `search`      | Hesap, kaynak id veya özet içinde serbest metin araması.                                         |
+| `limit`       | Yanıttaki en fazla kayıt sayısı. Varsayılan değer `100`, en yüksek değer `500` olur.             |
 
 # Log
 

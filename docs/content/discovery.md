@@ -23,11 +23,11 @@ This page is the reference. To build a working setup with Docker labels, follow 
 
 The proxy list shows the state of each provider, the number of proxies that it added and the definitions that did not become a proxy. The admin API returns the same data at `GET /api/discovery`.
 
-| State | Meaning |
-|---|---|
-| `connecting` | The provider has not read its resources yet. |
-| `running` | The provider has read its resources and watches them for changes. |
-| `error` | The provider cannot read its resources. The proxies of its last read stay active. |
+| State        | Meaning                                                                           |
+|--------------|-----------------------------------------------------------------------------------|
+| `connecting` | The provider has not read its resources yet.                                      |
+| `running`    | The provider has read its resources and watches them for changes.                 |
+| `error`      | The provider cannot read its resources. The proxies of its last read stay active. |
 
 When the [deployment platform](@/platform.md) runs, the list also holds the provider `platform`, which publishes the proxies of the deployed apps.
 
@@ -48,15 +48,15 @@ r3v3rs3.<protocol>.<name>.<field>=<value>
 
 ## Proxy Keys
 
-| Key | Value |
-|---|---|
+| Key              | Value                                                                                                                                                                        |
+|------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `r3v3rs3.enable` | `true` selects the resource when the provider does not read every resource. Any other value, for example `false`, skips the resource, also with `exposed_by_default = true`. |
-| `ports` | Required. Port names or port ids, separated by commas. |
-| `name` | The name in the proxy list. The default is `<name>`. |
-| `active` | `false` adds the proxy as inactive. The default is `true`. |
-| `port` | The port of the upstream server on the address of the resource. |
-| `scheme` | `http` or `https` for `port` of an HTTP proxy. The default is `http`. |
-| `acme` | The id of an ACME entry that orders a certificate for the `vhosts` of an HTTP proxy. See [ACME Certificates](@/discovery.md#acme-certificates). |
+| `ports`          | Required. Port names or port ids, separated by commas.                                                                                                                       |
+| `name`           | The name in the proxy list. The default is `<name>`.                                                                                                                         |
+| `active`         | `false` adds the proxy as inactive. The default is `true`.                                                                                                                   |
+| `port`           | The port of the upstream server on the address of the resource.                                                                                                              |
+| `scheme`         | `http` or `https` for `port` of an HTTP proxy. The default is `http`.                                                                                                        |
+| `acme`           | The id of an ACME entry that orders a certificate for the `vhosts` of an HTTP proxy. See [ACME Certificates](@/discovery.md#acme-certificates).                              |
 
 ## Values
 
@@ -173,13 +173,13 @@ network = "proxy"
 exposed_by_default = false
 ```
 
-| Setting | Meaning |
-|---|---|
-| `enabled` | Starts the provider. |
-| `endpoint` | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` or `https://<host>:<port>`. The default is `unix:///var/run/docker.sock`. |
-| `client_cert` | The id of a client certificate that r3v3rs3 sends to an `https` endpoint. A system root certificate or a root certificate in r3v3rs3 must sign the server certificate. |
-| `network` | The Docker network of the upstream addresses. Leave it empty when each container is on one network. A container that is not on this network, or that is on more than one network while the setting is empty, is an issue. |
-| `exposed_by_default` | `true` reads every container that has `r3v3rs3.` labels. `false` reads only the containers with `r3v3rs3.enable=true`. |
+| Setting              | Meaning                                                                                                                                                                                                                   |
+|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`            | Starts the provider.                                                                                                                                                                                                      |
+| `endpoint`           | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` or `https://<host>:<port>`. The default is `unix:///var/run/docker.sock`.                                                                                  |
+| `client_cert`        | The id of a client certificate that r3v3rs3 sends to an `https` endpoint. A system root certificate or a root certificate in r3v3rs3 must sign the server certificate.                                                    |
+| `network`            | The Docker network of the upstream addresses. Leave it empty when each container is on one network. A container that is not on this network, or that is on more than one network while the setting is empty, is an issue. |
+| `exposed_by_default` | `true` reads every container that has `r3v3rs3.` labels. `false` reads only the containers with `r3v3rs3.enable=true`.                                                                                                    |
 
 A change of the settings restarts the provider without a server restart. The proxies and certificates of the provider are removed at once and return with its first read. Turning the provider off removes them. A certificate that the provider uses cannot be deleted.
 
@@ -230,14 +230,14 @@ password = "<password>"
 prefix = "r3v3rs3"
 ```
 
-| Setting | Meaning |
-|---|---|
-| `enabled` | Starts the provider. |
-| `endpoints` | The HTTP API addresses of the cluster members: `http://<host>:<port>`, `https://<host>:<port>` or `unix://<path>`. When a connection fails, r3v3rs3 connects to the next address. The default is `http://127.0.0.1:2379`. |
-| `client_cert` | The id of a client certificate that r3v3rs3 sends to an `https` endpoint. |
-| `username` | The user of etcd authentication. Leave it empty when authentication is off. |
-| `password` | The password of the user. Set it together with `username`. |
-| `prefix` | The key prefix. The default is `r3v3rs3`. |
+| Setting       | Meaning                                                                                                                                                                                                                   |
+|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`     | Starts the provider.                                                                                                                                                                                                      |
+| `endpoints`   | The HTTP API addresses of the cluster members: `http://<host>:<port>`, `https://<host>:<port>` or `unix://<path>`. When a connection fails, r3v3rs3 connects to the next address. The default is `http://127.0.0.1:2379`. |
+| `client_cert` | The id of a client certificate that r3v3rs3 sends to an `https` endpoint.                                                                                                                                                 |
+| `username`    | The user of etcd authentication. Leave it empty when authentication is off.                                                                                                                                               |
+| `password`    | The password of the user. Set it together with `username`.                                                                                                                                                                |
+| `prefix`      | The key prefix. The default is `r3v3rs3`.                                                                                                                                                                                 |
 
 `endpoints` needs at least one address, and `prefix` cannot be empty.
 

@@ -45,10 +45,10 @@ Two options matter for r3v3rs3:
 
 The browser must reach `/oauth2/` on the same host as the application, because the session cookie belongs to that host. Add a route to your proxy:
 
-| Route | Servers | Authentication |
-|---|---|---|
-| `/oauth2` | `http://127.0.0.1:4180/oauth2/` | **None** |
-| `/` | your application | **Forward Auth** |
+| Route     | Servers                         | Authentication   |
+|-----------|---------------------------------|------------------|
+| `/oauth2` | `http://127.0.0.1:4180/oauth2/` | **None**         |
+| `/`       | your application                | **Forward Auth** |
 
 The longest matching path wins, so `/oauth2/start` goes to oauth2-proxy and everything else goes to the application. r3v3rs3 removes the route path by default (**Remove Route Path**), so the server URL of the `/oauth2` route ends with `/oauth2/`. Turn on **Override Authentication for This Route** on the `/oauth2` route and select **None**; without that, a client would need a session to reach the sign-in page.
 
@@ -56,11 +56,11 @@ The longest matching path wins, so `/oauth2/start` goes to oauth2-proxy and ever
 
 Set the authentication of the proxy to **Forward Auth**:
 
-| Field | Value |
-|---|---|
-| **Auth URL** | `http://127.0.0.1:4180/oauth2/auth` |
+| Field                     | Value                                         |
+|---------------------------|-----------------------------------------------|
+| **Auth URL**              | `http://127.0.0.1:4180/oauth2/auth`           |
 | **Copy Response Headers** | `X-Auth-Request-User`, `X-Auth-Request-Email` |
-| **Timeout (Seconds)** | `10` |
+| **Timeout (Seconds)**     | `10`                                          |
 
 In `proxies.toml`:
 
@@ -93,11 +93,11 @@ The auth request trusts the same root certificates as the upstream requests, and
 
 ## Step 5: What r3v3rs3 Does With the Answer
 
-| Auth response | Result |
-|---|---|
-| 2xx | The request goes to the upstream server with the copied headers. |
-| Any other status | The client receives the auth response: status, headers and a body up to 64 KiB. |
-| No response within the timeout, or a connection error | The client receives 502 Bad Gateway. |
+| Auth response                                         | Result                                                                          |
+|-------------------------------------------------------|---------------------------------------------------------------------------------|
+| 2xx                                                   | The request goes to the upstream server with the copied headers.                |
+| Any other status                                      | The client receives the auth response: status, headers and a body up to 64 KiB. |
+| No response within the timeout, or a connection error | The client receives 502 Bad Gateway.                                            |
 
 The second row is what makes the browser sign-in work. An auth service that answers `302 Found` with a `Location` sends the browser to the login page, and r3v3rs3 passes that redirect through:
 
@@ -162,12 +162,12 @@ A route replaces the authentication of the proxy, so this also works the other w
 
 ## Troubleshooting
 
-| Symptom | Cause |
-|---|---|
-| Every request answers 502 | The auth service does not answer, or the URL is wrong. |
-| The browser loops between the application and the login page | The `/oauth2` route is missing or it is not set to **None**. |
-| The upstream server receives no user header | The header is not in **Copy Response Headers**, or oauth2-proxy runs without `--set-xauthrequest`. |
-| The auth service sees `127.0.0.1` as the client | The [Client IP](@/configuration.md#client-ip) settings do not name your CDN or trusted proxy. |
+| Symptom                                                      | Cause                                                                                              |
+|--------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| Every request answers 502                                    | The auth service does not answer, or the URL is wrong.                                             |
+| The browser loops between the application and the login page | The `/oauth2` route is missing or it is not set to **None**.                                       |
+| The upstream server receives no user header                  | The header is not in **Copy Response Headers**, or oauth2-proxy runs without `--set-xauthrequest`. |
+| The auth service sees `127.0.0.1` as the client              | The [Client IP](@/configuration.md#client-ip) settings do not name your CDN or trusted proxy.      |
 
 ## Reference
 

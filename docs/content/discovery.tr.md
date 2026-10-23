@@ -23,11 +23,11 @@ Bu sayfa referanstır. Docker etiketleriyle çalışan bir kurulum için [Docker
 
 Proxy listesi her sağlayıcının durumunu, eklediği proxy sayısını ve proxy olamayan tanımları gösterir. Yönetim API'si aynı veriyi `GET /api/discovery` adresinde döndürür.
 
-| Durum | Anlamı |
-|---|---|
-| `connecting` | Sağlayıcı kaynaklarını henüz okumadı. |
-| `running` | Sağlayıcı kaynaklarını okudu ve değişiklikleri izliyor. |
-| `error` | Sağlayıcı kaynaklarını okuyamıyor. Son okumasındaki proxy'ler aktif kalır. |
+| Durum        | Anlamı                                                                     |
+|--------------|----------------------------------------------------------------------------|
+| `connecting` | Sağlayıcı kaynaklarını henüz okumadı.                                      |
+| `running`    | Sağlayıcı kaynaklarını okudu ve değişiklikleri izliyor.                    |
+| `error`      | Sağlayıcı kaynaklarını okuyamıyor. Son okumasındaki proxy'ler aktif kalır. |
 
 [Deploy platformu](@/platform.tr.md) çalışırken liste, deploy edilen uygulamaların proxy'lerini yayınlayan `platform` sağlayıcısını da içerir.
 
@@ -48,15 +48,15 @@ r3v3rs3.<protocol>.<name>.<field>=<value>
 
 ## Proxy key'leri
 
-| Key | Değer |
-|---|---|
-| `r3v3rs3.enable` | Sağlayıcı her kaynağı okumuyorsa `true` kaynağı seçer. Başka her değer, örneğin `false`, kaynağı `exposed_by_default = true` iken de atlar. |
-| `ports` | Zorunlu. Virgülle ayrılmış port adları veya port id'leri. |
-| `name` | Proxy listesindeki ad. Varsayılan değer `<name>` olur. |
-| `active` | `false` proxy'yi pasif olarak ekler. Varsayılan değer `true` olur. |
-| `port` | Kaynağın adresindeki upstream sunucunun portu. |
-| `scheme` | HTTP proxy'nin `port` alanı için `http` veya `https`. Varsayılan değer `http` olur. |
-| `acme` | HTTP proxy'nin `vhosts` alanı için sertifika alan ACME kaydının id'si. [ACME sertifikaları](@/discovery.tr.md#acme-sertifikalari) bölümüne bakın. |
+| Key              | Değer                                                                                                                                             |
+|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `r3v3rs3.enable` | Sağlayıcı her kaynağı okumuyorsa `true` kaynağı seçer. Başka her değer, örneğin `false`, kaynağı `exposed_by_default = true` iken de atlar.       |
+| `ports`          | Zorunlu. Virgülle ayrılmış port adları veya port id'leri.                                                                                         |
+| `name`           | Proxy listesindeki ad. Varsayılan değer `<name>` olur.                                                                                            |
+| `active`         | `false` proxy'yi pasif olarak ekler. Varsayılan değer `true` olur.                                                                                |
+| `port`           | Kaynağın adresindeki upstream sunucunun portu.                                                                                                    |
+| `scheme`         | HTTP proxy'nin `port` alanı için `http` veya `https`. Varsayılan değer `http` olur.                                                               |
+| `acme`           | HTTP proxy'nin `vhosts` alanı için sertifika alan ACME kaydının id'si. [ACME sertifikaları](@/discovery.tr.md#acme-sertifikalari) bölümüne bakın. |
 
 ## Değerler
 
@@ -173,13 +173,13 @@ network = "proxy"
 exposed_by_default = false
 ```
 
-| Ayar | Anlamı |
-|---|---|
-| `enabled` | Sağlayıcıyı başlatır. |
-| `endpoint` | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` veya `https://<host>:<port>`. Varsayılan değer `unix:///var/run/docker.sock` olur. |
-| `client_cert` | r3v3rs3'ün `https` endpoint'ine gönderdiği istemci sertifikasının id'si. Sunucu sertifikasını bir sistem kök sertifikası veya r3v3rs3'teki bir kök sertifika imzalamalıdır. |
-| `network` | Upstream adreslerinin alındığı Docker ağı. Her container tek ağa bağlıysa boş bırakın. Bu ağda olmayan veya ayar boşken birden fazla ağa bağlı container sorun sayılır. |
-| `exposed_by_default` | `true`, `r3v3rs3.` etiketi olan her container'ı okur. `false` yalnız `r3v3rs3.enable=true` olan container'ları okur. |
+| Ayar                 | Anlamı                                                                                                                                                                      |
+|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`            | Sağlayıcıyı başlatır.                                                                                                                                                       |
+| `endpoint`           | `unix://<path>`, `tcp://<host>:<port>`, `http://<host>:<port>` veya `https://<host>:<port>`. Varsayılan değer `unix:///var/run/docker.sock` olur.                           |
+| `client_cert`        | r3v3rs3'ün `https` endpoint'ine gönderdiği istemci sertifikasının id'si. Sunucu sertifikasını bir sistem kök sertifikası veya r3v3rs3'teki bir kök sertifika imzalamalıdır. |
+| `network`            | Upstream adreslerinin alındığı Docker ağı. Her container tek ağa bağlıysa boş bırakın. Bu ağda olmayan veya ayar boşken birden fazla ağa bağlı container sorun sayılır.     |
+| `exposed_by_default` | `true`, `r3v3rs3.` etiketi olan her container'ı okur. `false` yalnız `r3v3rs3.enable=true` olan container'ları okur.                                                        |
 
 Ayar değişikliği yalnız sağlayıcıyı yeniden başlatır, sunucu yeniden başlamaz. Sağlayıcının proxy'leri ve sertifikaları hemen kaldırılır ve ilk okumasıyla geri gelir. Sağlayıcıyı kapatmak onları kaldırır. Sağlayıcının kullandığı sertifika silinemez.
 
@@ -232,14 +232,14 @@ password = "<password>"
 prefix = "r3v3rs3"
 ```
 
-| Ayar | Anlamı |
-|---|---|
-| `enabled` | Sağlayıcıyı başlatır. |
-| `endpoints` | Cluster üyelerinin HTTP API adresleri: `http://<host>:<port>`, `https://<host>:<port>` veya `unix://<path>`. Bağlantı başarısız olunca r3v3rs3 sıradaki adrese bağlanır. Varsayılan değer `http://127.0.0.1:2379` olur. |
-| `client_cert` | r3v3rs3'ün `https` endpoint'ine gönderdiği istemci sertifikasının id'si. |
-| `username` | etcd kimlik doğrulamasının kullanıcısı. Kimlik doğrulama kapalıysa boş bırakın. |
-| `password` | Kullanıcının parolası. `username` ile birlikte verin. |
-| `prefix` | Key öneki. Varsayılan değer `r3v3rs3` olur. |
+| Ayar          | Anlamı                                                                                                                                                                                                                  |
+|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`     | Sağlayıcıyı başlatır.                                                                                                                                                                                                   |
+| `endpoints`   | Cluster üyelerinin HTTP API adresleri: `http://<host>:<port>`, `https://<host>:<port>` veya `unix://<path>`. Bağlantı başarısız olunca r3v3rs3 sıradaki adrese bağlanır. Varsayılan değer `http://127.0.0.1:2379` olur. |
+| `client_cert` | r3v3rs3'ün `https` endpoint'ine gönderdiği istemci sertifikasının id'si.                                                                                                                                                |
+| `username`    | etcd kimlik doğrulamasının kullanıcısı. Kimlik doğrulama kapalıysa boş bırakın.                                                                                                                                         |
+| `password`    | Kullanıcının parolası. `username` ile birlikte verin.                                                                                                                                                                   |
+| `prefix`      | Key öneki. Varsayılan değer `r3v3rs3` olur.                                                                                                                                                                             |
 
 `endpoints` en az bir adres içermelidir ve `prefix` boş olamaz.
 

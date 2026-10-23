@@ -8,12 +8,12 @@ weight = 7
 
 Bu rehber iç ağdaki bir uygulamayı r3v3rs3 arkasına alır ve yalnız erişmesi gerekenleri içeri alır. Dört mekanizmayı birlikte kullanır:
 
-| Mekanizma | Geçemeyen istemciye verilen yanıt |
-|---|---|
-| IP filtresi | `403 Forbidden` |
-| Rate limit | `Retry-After` header'ı ile `429 Too Many Requests` |
-| Kimlik doğrulama | `401 Unauthorized` |
-| Denetim kaydı | Yapılandırmayı kimin değiştirdiğini kaydeder |
+| Mekanizma        | Geçemeyen istemciye verilen yanıt                  |
+|------------------|----------------------------------------------------|
+| IP filtresi      | `403 Forbidden`                                    |
+| Rate limit       | `Retry-After` header'ı ile `429 Too Many Requests` |
+| Kimlik doğrulama | `401 Unauthorized`                                 |
+| Denetim kaydı    | Yapılandırmayı kimin değiştirdiğini kaydeder       |
 
 r3v3rs3 bunları şu sırayla uygular: IP filtresi, rate limit, HTTPS yönlendirmesi, yönlendirme kuralları, kimlik doğrulama. Engellenen bir adres parola kontrolüne hiç gelmez, limiti aşan bir istemci upstream sunucuya hiç ulaşmaz.
 
@@ -84,12 +84,12 @@ Bir route kendi limitini tutabilir. Uygulamanızın giriş yoluna daha dar bir l
 
 Basic Auth başka bir servis istemez, ama tarayıcı kutusu gösterir ve çıkış yapma yolu yoktur. Diğer üç yöntem başka durumlara uyar:
 
-| Yöntem | Ne zaman kullanılır |
-|---|---|
-| **Basic Auth** | Birkaç kişi tek bir parolayı paylaşır ve tarayıcı kutusu yeter. |
-| **Bearer Token** | Bir script veya CI işi bir API'yi çağırır. Token'ı `openssl rand -hex 32` ile oluşturun. |
-| **Panel Oturumu** | Uygulamanızın kendi girişi yoktur ve kişilerin zaten r3v3rs3 panel hesabı vardır. |
-| **Forward Auth** | Kararı dış bir servis verir, örneğin bir kimlik sağlayıcısı ile oauth2-proxy veya Authelia. |
+| Yöntem            | Ne zaman kullanılır                                                                         |
+|-------------------|---------------------------------------------------------------------------------------------|
+| **Basic Auth**    | Birkaç kişi tek bir parolayı paylaşır ve tarayıcı kutusu yeter.                             |
+| **Bearer Token**  | Bir script veya CI işi bir API'yi çağırır. Token'ı `openssl rand -hex 32` ile oluşturun.    |
+| **Panel Oturumu** | Uygulamanızın kendi girişi yoktur ve kişilerin zaten r3v3rs3 panel hesabı vardır.           |
+| **Forward Auth**  | Kararı dış bir servis verir, örneğin bir kimlik sağlayıcısı ile oauth2-proxy veya Authelia. |
 
 **Panel Oturumu**, route yolunun altındaki `/.r3v3rs3/auth/login` adresinde bir giriş sayfası sunar. Yalnız proxy'yi gören bir hesabı kabul eder ve TOTP'si olan bir hesaptan TOTP kodunu ister. Uygulamanıza bir çıkış butonu ekleyin:
 

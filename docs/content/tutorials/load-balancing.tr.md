@@ -22,12 +22,12 @@ http://10.0.0.3:9000/
 
 **Yük Dengeleme** alanı proxy'nin yük dengeleme yöntemini seçer:
 
-| Yöntem | Ne yapar |
-|---|---|
-| Round robin | Sunucuları sırayla kullanır. Varsayılan. |
-| Rastgele | Rastgele bir sunucu seçer. |
-| İlk sağlıklı sunucu | İlk sunucuyu kullanır, diğerleri yedektir. |
-| İstemci IP hash'i | Her istemci IP adresini aynı sunucuya gönderir. |
+| Yöntem              | Ne yapar                                        |
+|---------------------|-------------------------------------------------|
+| Round robin         | Sunucuları sırayla kullanır. Varsayılan.        |
+| Rastgele            | Rastgele bir sunucu seçer.                      |
+| İlk sağlıklı sunucu | İlk sunucuyu kullanır, diğerleri yedektir.      |
+| İstemci IP hash'i   | Her istemci IP adresini aynı sunucuya gönderir. |
 
 HTTP proxy her istek için, TCP proxy her bağlantı için, UDP proxy her istemci oturumu için sunucu seçer. Her HTTP route'unun sunucuları ayrı bir gruptur, yani bir proxy'nin iki route'u farklı sunucu listeleri kullanabilir.
 
@@ -128,12 +128,12 @@ Deployment böyle yapılır: bir sunucuyu devre dışı bırakın, oturumların�
 
 Circuit breaker varsayılan olarak kapalıdır. Proxy'de **Circuit Breaker'ı Aç** seçeneğini işaretleyin:
 
-| Alan | Varsayılan | Anlamı |
-|---|---|---|
-| **Hata Oranı (%)** | 50 | Circuit'i açan başarısız istek oranı. |
-| **Minimum İstek Sayısı** | 20 | Oranın sayılması için pencerede gereken istek sayısı. |
-| **Zaman Penceresi (Saniye)** | 10 | Bir sayma penceresinin uzunluğu. |
-| **Açık Kalma Süresi (Saniye)** | 30 | Circuit açıldıktan sonra sunucunun istek almadığı süre. |
+| Alan                           | Varsayılan | Anlamı                                                  |
+|--------------------------------|------------|---------------------------------------------------------|
+| **Hata Oranı (%)**             | 50         | Circuit'i açan başarısız istek oranı.                   |
+| **Minimum İstek Sayısı**       | 20         | Oranın sayılması için pencerede gereken istek sayısı.   |
+| **Zaman Penceresi (Saniye)**   | 10         | Bir sayma penceresinin uzunluğu.                        |
+| **Açık Kalma Süresi (Saniye)** | 30         | Circuit açıldıktan sonra sunucunun istek almadığı süre. |
 
 Bağlantı kurulamazsa, bir timeout dolarsa veya sunucu 502, 503 ya da 504 dönerse istek başarısız sayılır. Açık kalma süresi dolunca tek bir deneme isteği sunucuyu test eder: başarı circuit'i kapatır, hata yeniden açar. Bir route'un bütün sunucularının circuit'i açıksa istemci, hiçbir sunucuya istek gitmeden 503 Service Unavailable alır.
 

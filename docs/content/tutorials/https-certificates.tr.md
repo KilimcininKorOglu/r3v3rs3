@@ -21,10 +21,10 @@ Wildcard sertifika veren tek challenge DNS-01'dir. DNS-01 doğrulama için açı
 
 Zone'daki `_acme-challenge` TXT kayıtlarını yazabilen bir kimlik bilgisi oluşturun. r3v3rs3 her kaydı doğrulamadan önce oluşturur, doğrulamadan sonra siler.
 
-| Sağlayıcı | Kimlik bilgisi | İzinler |
-|---|---|---|
-| Cloudflare | API Token | Zone için `Zone:Read` ve `DNS:Edit` |
-| Route 53 | Access Key ID, Secret Access Key | `route53:ListHostedZones` ve `route53:ChangeResourceRecordSets` |
+| Sağlayıcı  | Kimlik bilgisi                   | İzinler                                                         |
+|------------|----------------------------------|-----------------------------------------------------------------|
+| Cloudflare | API Token                        | Zone için `Zone:Read` ve `DNS:Edit`                             |
+| Route 53   | Access Key ID, Secret Access Key | `route53:ListHostedZones` ve `route53:ChangeResourceRecordSets` |
 
 Diğer 13 sağlayıcıyı kimlik bilgileriyle [DNS-01 tablosu](@/configuration.tr.md#dns-01) listeler. İkisi bir DNS barındırma sağlayıcısı istemez: webhook sağlayıcısı kendi servisinizi çağırır, exec sağlayıcısı r3v3rs3 host'unda bir program çalıştırır.
 

@@ -105,7 +105,7 @@ async fn an_editor_manages_apps_and_their_secrets_stay_hidden() -> anyhow::Resul
     with_admin(&dir.0, storage, manage_apps).await?;
 
     // The key of the environment values is readable only by its owner.
-    let mode = std::fs::metadata(dir.0.join("platform.key"))?
+    let mode = std::fs::metadata(dir.0.join("r3v3rs3.key"))?
         .permissions()
         .mode();
     assert_eq!(mode & 0o777, 0o600);
@@ -900,7 +900,7 @@ async fn the_platform_answers_503_until_it_is_enabled() -> anyhow::Result<()> {
         Ok(())
     })
     .await?;
-    assert!(!dir.0.join("platform.db").exists());
+    assert!(!dir.0.join("r3v3rs3.db").exists());
     Ok(())
 }
 

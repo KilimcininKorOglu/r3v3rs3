@@ -24,29 +24,29 @@ Everything in the tables below has an r3v3rs3 equivalent. Anything that is not t
 
 ## Step 2: Translate the nginx Directives
 
-| nginx | r3v3rs3 |
-|---|---|
-| `listen 443 ssl;` | A port with the protocol **HTTPS** and its **Server Names** |
-| `listen 443 quic;` | A port with the protocol **HTTP over QUIC (HTTP/3)** |
-| `server_name app.example.com;` | **Virtual Hosts** of the proxy |
-| `location /api { }` | A route with the path `/api` |
-| `proxy_pass http://api:8080/v1/;` | A server `http://api:8080/v1/` on the route |
-| `upstream app { server a; server b; }` | Two servers on one route |
-| `server a weight=3;` | `http://a/ 3` in **Target**: the weight follows the URL |
-| `return 301 https://$host$request_uri;` | **Automatically Redirect HTTP to HTTPS** |
-| `rewrite ^/items/([0-9]+)$ /item/$1 break;` | **Path Regex** and **Replacement** on the route |
-| `add_header X-Frame-Options DENY;` | A response header rule: `set X-Frame-Options: DENY` |
-| `auth_basic` and `auth_basic_user_file` | **Basic Auth** with users on the proxy |
-| `auth_request /auth;` | **Forward Auth** with the auth URL |
-| `allow` and `deny` | **Allowed IP Addresses** and **Denied IP Addresses** |
-| `limit_req_zone` and `limit_req` | **Rate Limit** with requests, period and burst |
-| `proxy_cache_path` and `proxy_cache` | **Cache** with a memory limit and a default TTL |
-| `gzip on;` | **Compression** with the algorithms and a minimum size |
-| `return 404;` | A route with the fixed response **Fixed status** |
-| `proxy_set_header X-Real-IP $remote_addr;` | Set only for a trusted proxy or CDN. Otherwise the request header rule `set X-Real-IP: {client_ip}`. See [Client IP](@/configuration.md#client-ip) |
-| `client_max_body_size 10m;` | **Request Body Limit** |
-| `proxy_read_timeout 60s;` | **Request Timeout (Seconds)** of the proxy or the route |
-| `stream { server { proxy_pass db:5432; } }` | A TCP proxy |
+| nginx                                       | r3v3rs3                                                                                                                                            |
+|---------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `listen 443 ssl;`                           | A port with the protocol **HTTPS** and its **Server Names**                                                                                        |
+| `listen 443 quic;`                          | A port with the protocol **HTTP over QUIC (HTTP/3)**                                                                                               |
+| `server_name app.example.com;`              | **Virtual Hosts** of the proxy                                                                                                                     |
+| `location /api { }`                         | A route with the path `/api`                                                                                                                       |
+| `proxy_pass http://api:8080/v1/;`           | A server `http://api:8080/v1/` on the route                                                                                                        |
+| `upstream app { server a; server b; }`      | Two servers on one route                                                                                                                           |
+| `server a weight=3;`                        | `http://a/ 3` in **Target**: the weight follows the URL                                                                                            |
+| `return 301 https://$host$request_uri;`     | **Automatically Redirect HTTP to HTTPS**                                                                                                           |
+| `rewrite ^/items/([0-9]+)$ /item/$1 break;` | **Path Regex** and **Replacement** on the route                                                                                                    |
+| `add_header X-Frame-Options DENY;`          | A response header rule: `set X-Frame-Options: DENY`                                                                                                |
+| `auth_basic` and `auth_basic_user_file`     | **Basic Auth** with users on the proxy                                                                                                             |
+| `auth_request /auth;`                       | **Forward Auth** with the auth URL                                                                                                                 |
+| `allow` and `deny`                          | **Allowed IP Addresses** and **Denied IP Addresses**                                                                                               |
+| `limit_req_zone` and `limit_req`            | **Rate Limit** with requests, period and burst                                                                                                     |
+| `proxy_cache_path` and `proxy_cache`        | **Cache** with a memory limit and a default TTL                                                                                                    |
+| `gzip on;`                                  | **Compression** with the algorithms and a minimum size                                                                                             |
+| `return 404;`                               | A route with the fixed response **Fixed status**                                                                                                   |
+| `proxy_set_header X-Real-IP $remote_addr;`  | Set only for a trusted proxy or CDN. Otherwise the request header rule `set X-Real-IP: {client_ip}`. See [Client IP](@/configuration.md#client-ip) |
+| `client_max_body_size 10m;`                 | **Request Body Limit**                                                                                                                             |
+| `proxy_read_timeout 60s;`                   | **Request Timeout (Seconds)** of the proxy or the route                                                                                            |
+| `stream { server { proxy_pass db:5432; } }` | A TCP proxy                                                                                                                                        |
 
 Two differences that cost people time:
 
@@ -62,28 +62,28 @@ The query string is kept in both cases.
 
 ## Step 3: Translate the Traefik Labels
 
-| Traefik | r3v3rs3 |
-|---|---|
-| `entrypoints` | Ports |
-| `Host(\`app.example.com\`)` | **Virtual Hosts** of the proxy |
-| `PathPrefix(\`/api\`)` | A route with the path `/api` |
-| A router without `PathPrefix` | A route with the path `/` |
-| `service` with `loadBalancer.servers` | The servers of the route |
-| `loadBalancer.healthCheck` | **Health Check Path** and **Check Interval (Seconds)** |
-| `loadBalancer.sticky.cookie` | **Enable Sticky Cookie** with a cookie name |
-| `middlewares.stripPrefix` | The default behavior of a route |
-| `middlewares.addPrefix` | **Add Prefix** |
-| `middlewares.redirectScheme` | **Automatically Redirect HTTP to HTTPS** |
-| `middlewares.redirectRegex` | A redirect rule with `regex`, `target` and `status` |
-| `middlewares.basicAuth` | **Basic Auth** |
-| `middlewares.forwardAuth` | **Forward Auth**. See [Single Sign-On with Forward Auth](@/tutorials/forward-auth.md) |
-| `middlewares.ipAllowList` | **IP Filter** |
-| `middlewares.rateLimit` | **Rate Limit** |
-| `middlewares.headers` | Header rules |
-| `middlewares.compress` | **Compression** |
-| `certresolver` with ACME | An ACME entry. See [HTTPS with a Wildcard Certificate](@/tutorials/https-certificates.md) |
-| Docker labels | Docker service discovery. See [Proxies from Docker](@/tutorials/docker-discovery.md) |
-| A `tcp` router | A TCP proxy |
+| Traefik                               | r3v3rs3                                                                                   |
+|---------------------------------------|-------------------------------------------------------------------------------------------|
+| `entrypoints`                         | Ports                                                                                     |
+| `Host(\`app.example.com\`)`           | **Virtual Hosts** of the proxy                                                            |
+| `PathPrefix(\`/api\`)`                | A route with the path `/api`                                                              |
+| A router without `PathPrefix`         | A route with the path `/`                                                                 |
+| `service` with `loadBalancer.servers` | The servers of the route                                                                  |
+| `loadBalancer.healthCheck`            | **Health Check Path** and **Check Interval (Seconds)**                                    |
+| `loadBalancer.sticky.cookie`          | **Enable Sticky Cookie** with a cookie name                                               |
+| `middlewares.stripPrefix`             | The default behavior of a route                                                           |
+| `middlewares.addPrefix`               | **Add Prefix**                                                                            |
+| `middlewares.redirectScheme`          | **Automatically Redirect HTTP to HTTPS**                                                  |
+| `middlewares.redirectRegex`           | A redirect rule with `regex`, `target` and `status`                                       |
+| `middlewares.basicAuth`               | **Basic Auth**                                                                            |
+| `middlewares.forwardAuth`             | **Forward Auth**. See [Single Sign-On with Forward Auth](@/tutorials/forward-auth.md)     |
+| `middlewares.ipAllowList`             | **IP Filter**                                                                             |
+| `middlewares.rateLimit`               | **Rate Limit**                                                                            |
+| `middlewares.headers`                 | Header rules                                                                              |
+| `middlewares.compress`                | **Compression**                                                                           |
+| `certresolver` with ACME              | An ACME entry. See [HTTPS with a Wildcard Certificate](@/tutorials/https-certificates.md) |
+| Docker labels                         | Docker service discovery. See [Proxies from Docker](@/tutorials/docker-discovery.md)      |
+| A `tcp` router                        | A TCP proxy                                                                               |
 
 A Traefik setup that is built from Docker labels needs the least work: turn on the Docker provider and write the `r3v3rs3.` labels next to the `traefik.` ones. Both proxies then read the same containers, and you can compare them before you remove anything.
 
@@ -164,14 +164,14 @@ After a few days of quiet:
 
 ## What Does Not Have an Equivalent
 
-| Feature | Status |
-|---|---|
-| Lua, njs and other nginx modules | Not available. |
-| An exact path match | Not available. A path matches whole segments as a prefix. |
-| A response body rewrite (`sub_filter`) | Not available. |
-| A disk cache | Not available. The cache is in memory. |
-| HTTP/3 to the upstream server | Not available. The upstream connection uses HTTP/2 or HTTP/1.1. |
-| WebTransport | Not available. |
+| Feature                                | Status                                                          |
+|----------------------------------------|-----------------------------------------------------------------|
+| Lua, njs and other nginx modules       | Not available.                                                  |
+| An exact path match                    | Not available. A path matches whole segments as a prefix.       |
+| A response body rewrite (`sub_filter`) | Not available.                                                  |
+| A disk cache                           | Not available. The cache is in memory.                          |
+| HTTP/3 to the upstream server          | Not available. The upstream connection uses HTTP/2 or HTTP/1.1. |
+| WebTransport                           | Not available.                                                  |
 
 ## Reference
 

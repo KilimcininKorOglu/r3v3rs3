@@ -45,10 +45,10 @@ r3v3rs3 için iki seçenek önemlidir:
 
 Tarayıcı `/oauth2/` adresine uygulamayla aynı host üzerinden ulaşmalıdır, çünkü oturum cookie'si o host'a aittir. Proxy'nize bir route ekleyin:
 
-| Route | Sunucular | Kimlik doğrulama |
-|---|---|---|
-| `/oauth2` | `http://127.0.0.1:4180/oauth2/` | **Yok** |
-| `/` | uygulamanız | **Forward Auth** |
+| Route     | Sunucular                       | Kimlik doğrulama |
+|-----------|---------------------------------|------------------|
+| `/oauth2` | `http://127.0.0.1:4180/oauth2/` | **Yok**          |
+| `/`       | uygulamanız                     | **Forward Auth** |
 
 Yolu en uzun eşleşen route kazanır, yani `/oauth2/start` oauth2-proxy'ye, diğer her şey uygulamaya gider. r3v3rs3 route yolunu varsayılan olarak kaldırır (**Route Yolunu Kaldır**), bu yüzden `/oauth2` route'unun sunucu URL'i `/oauth2/` ile biter. `/oauth2` route'unda **Bu Route için Ayrı Kimlik Doğrulama Kullan** seçeneğini açın ve **Yok** seçin; aksi halde istemci, giriş sayfasına ulaşmak için oturuma ihtiyaç duyar.
 
@@ -56,11 +56,11 @@ Yolu en uzun eşleşen route kazanır, yani `/oauth2/start` oauth2-proxy'ye, di�
 
 Proxy'nin kimlik doğrulamasını **Forward Auth** yapın:
 
-| Alan | Değer |
-|---|---|
-| **Doğrulama URL'i** | `http://127.0.0.1:4180/oauth2/auth` |
+| Alan                               | Değer                                         |
+|------------------------------------|-----------------------------------------------|
+| **Doğrulama URL'i**                | `http://127.0.0.1:4180/oauth2/auth`           |
 | **Kopyalanacak Yanıt Header'ları** | `X-Auth-Request-User`, `X-Auth-Request-Email` |
-| **Timeout (Saniye)** | `10` |
+| **Timeout (Saniye)**               | `10`                                          |
 
 `proxies.toml` içinde:
 
@@ -93,11 +93,11 @@ Doğrulama isteği, upstream isteklerle aynı kök sertifikalara güvenir ve pro
 
 ## Adım 5: r3v3rs3 yanıtı ne yapar
 
-| Doğrulama yanıtı | Sonuç |
-|---|---|
-| 2xx | İstek, kopyalanan header'larla upstream sunucuya gider. |
-| Diğer durum kodları | İstemci doğrulama yanıtını alır: durum kodu, header'lar ve en çok 64 KiB gövde. |
-| Timeout içinde yanıt yok veya bağlantı hatası | İstemci 502 Bad Gateway alır. |
+| Doğrulama yanıtı                              | Sonuç                                                                           |
+|-----------------------------------------------|---------------------------------------------------------------------------------|
+| 2xx                                           | İstek, kopyalanan header'larla upstream sunucuya gider.                         |
+| Diğer durum kodları                           | İstemci doğrulama yanıtını alır: durum kodu, header'lar ve en çok 64 KiB gövde. |
+| Timeout içinde yanıt yok veya bağlantı hatası | İstemci 502 Bad Gateway alır.                                                   |
 
 Tarayıcı girişini mümkün kılan satır ikincisidir. `Location` ile `302 Found` dönen bir doğrulama servisi tarayıcıyı giriş sayfasına gönderir ve r3v3rs3 bu yönlendirmeyi aynen aktarır:
 
@@ -162,12 +162,12 @@ Route, proxy'nin kimlik doğrulamasının yerine geçer. Bu kural tersine de ça
 
 ## Sorun giderme
 
-| Belirti | Sebebi |
-|---|---|
-| Her istek 502 dönüyor | Doğrulama servisi yanıt vermiyor veya URL yanlış. |
-| Tarayıcı uygulama ile giriş sayfası arasında dönüp duruyor | `/oauth2` route'u yok veya kimlik doğrulaması **Yok** değil. |
-| Upstream sunucu kullanıcı header'ını almıyor | Header, **Kopyalanacak Yanıt Header'ları** listesinde yok veya oauth2-proxy `--set-xauthrequest` olmadan çalışıyor. |
-| Doğrulama servisi istemci olarak `127.0.0.1` görüyor | [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) ayarlarında CDN'iniz veya güvenilen proxy'niz tanımlı değil. |
+| Belirti                                                    | Sebebi                                                                                                                    |
+|------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| Her istek 502 dönüyor                                      | Doğrulama servisi yanıt vermiyor veya URL yanlış.                                                                         |
+| Tarayıcı uygulama ile giriş sayfası arasında dönüp duruyor | `/oauth2` route'u yok veya kimlik doğrulaması **Yok** değil.                                                              |
+| Upstream sunucu kullanıcı header'ını almıyor               | Header, **Kopyalanacak Yanıt Header'ları** listesinde yok veya oauth2-proxy `--set-xauthrequest` olmadan çalışıyor.       |
+| Doğrulama servisi istemci olarak `127.0.0.1` görüyor       | [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) ayarlarında CDN'iniz veya güvenilen proxy'niz tanımlı değil. |
 
 ## Referans
 

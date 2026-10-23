@@ -26,25 +26,25 @@ agent_port = 9443
 agent_host = "master.example.com"
 ```
 
-| Key | Default | Description |
-|---|---|---|
-| `enabled` | `false` | Starts the platform. |
-| `docker` | `unix:///var/run/docker.sock` | The Docker Engine API: a Unix socket or plain TCP. TLS is not supported. |
-| `proxy_ports` | empty | The names or the ids of the ports that serve an app that selects no ports of its own, for example the HTTP port and the HTTPS port. When this list is also empty, such an app takes every HTTP and HTTPS port. |
-| `acme` | none | The id of the ACME entry that orders the certificates of the app domains. Without it the apps get no certificate. The settings card keeps this value; the ACME page manages the entries. |
-| `agent_port` | none | The TCP port on every IPv4 address that the agents of remote servers connect to. Without it the server accepts no agent. See [Agent targets](#agent-targets). The settings card keeps this value. |
-| `agent_host` | none | The host name or the address of this server in the agent commands of the **Targets** page. Without it the page uses the host name of its own address. The settings card keeps this value. |
+| Key           | Default                       | Description                                                                                                                                                                                                    |
+|---------------|-------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`     | `false`                       | Starts the platform.                                                                                                                                                                                           |
+| `docker`      | `unix:///var/run/docker.sock` | The Docker Engine API: a Unix socket or plain TCP. TLS is not supported.                                                                                                                                       |
+| `proxy_ports` | empty                         | The names or the ids of the ports that serve an app that selects no ports of its own, for example the HTTP port and the HTTPS port. When this list is also empty, such an app takes every HTTP and HTTPS port. |
+| `acme`        | none                          | The id of the ACME entry that orders the certificates of the app domains. Without it the apps get no certificate. The settings card keeps this value; the ACME page manages the entries.                       |
+| `agent_port`  | none                          | The TCP port on every IPv4 address that the agents of remote servers connect to. Without it the server accepts no agent. See [Agent targets](#agent-targets). The settings card keeps this value.              |
+| `agent_host`  | none                          | The host name or the address of this server in the agent commands of the **Targets** page. Without it the page uses the host name of its own address. The settings card keeps this value.                      |
 
 The settings card applies `enabled`, `docker` and `proxy_ports` while the server runs. `acme`, `agent_port` and `agent_host` stay as they are in the card; a manual change of `config.toml` applies after a restart.
 
-At its first start the platform creates two files in the config directory:
+At its first start the platform creates two essential files in the config directory:
 
-- `platform.db`: the apps, their environment variables, their deployments, the targets and the Git provider connections.
-- `platform.key`: the key that encrypts the environment values, the Git tokens and webhook secrets of the apps, and the client secrets, private keys and tokens of the Git provider connections. Its mode is `0600`. Keep a backup of it next to the backup of `platform.db`, because the values do not open without it.
+- `r3v3rs3.db`: the unified SQLite database storing apps, environment variables, deployments, databases, targets, and Git provider connections alongside all server configuration.
+- `r3v3rs3.key`: the master key that encrypts environment values, Git tokens and webhook secrets of the apps, and client secrets, private keys and tokens of Git provider connections. Its mode is `0600`. Keep a backup of it next to the backup of `r3v3rs3.db`, because encrypted values cannot be opened without it.
 
 #### Key Rotation
 
-To rotate the encryption key, click **Rotate Key** in the **Settings** page under **Deployment Platform**, run `r3v3rs3-cli platform rotate-key` in the CLI, or send `POST /api/platform/key/rotate`. This generates a fresh 256-bit AES key, decrypts every stored secret in `platform.db` using the existing key, re-encrypts them with the new key in a single atomic transaction, writes the new `platform.key`, and safely archives the previous key to `platform.key.old` (with mode `0600`).
+To rotate the encryption key, click **Rotate Key** in the **Settings** page under **Deployment Platform**, run `r3v3rs3-cli platform rotate-key` in the CLI, or send `POST /api/platform/key/rotate`. This generates a fresh 256-bit AES key, decrypts every stored secret in `r3v3rs3.db` using the existing key, re-encrypts them with the new key in a single atomic transaction, writes the new `r3v3rs3.key`, and safely archives the previous key to `r3v3rs3.key.old` (with mode `0600`).
 
 Access to the Docker socket is equal to root access on the host. Enable the platform only on a server where r3v3rs3 may control every container.
 
@@ -160,16 +160,16 @@ An app with a `git` source builds its image from a branch of a repository with t
 }
 ```
 
-| Field | Default | Description |
-|---|---|---|
-| `repository` | | An `https://` URL without a user name, a password, a query or a fragment. |
-| `branch` | `main` | A branch or a tag. |
-| `context` | `.` | The directory of the repository that Docker receives as the build context. |
-| `dockerfile` | `Dockerfile` | The Dockerfile, relative to `context`. |
-| `connection` | none | The id of a [Git provider](#git-providers) connection. The connection clones the repository and installs its webhook. |
-| `tag_trigger` | none | An optional tag pattern (e.g. `v*`, `release-*`) that automatically deploys matching tags when pushed. |
+| Field         | Default      | Description                                                                                                           |
+|---------------|--------------|-----------------------------------------------------------------------------------------------------------------------|
+| `repository`  |              | An `https://` URL without a user name, a password, a query or a fragment.                                             |
+| `branch`      | `main`       | A branch or a tag.                                                                                                    |
+| `context`     | `.`          | The directory of the repository that Docker receives as the build context.                                            |
+| `dockerfile`  | `Dockerfile` | The Dockerfile, relative to `context`.                                                                                |
+| `connection`  | none         | The id of a [Git provider](#git-providers) connection. The connection clones the repository and installs its webhook. |
+| `tag_trigger` | none         | An optional tag pattern (e.g. `v*`, `release-*`) that automatically deploys matching tags when pushed.                |
 
-A private repository needs a [Git provider](#git-providers) connection or an access token of the app. An access token is, for example, a GitHub fine-grained token with read access to the contents of the repository, a GitLab token with the `read_repository` scope, or a Gitea token with the `read:repository` scope. `PUT /api/apps/{id}/git_token` with `{"token": "..."}` sets the token, and `DELETE /api/apps/{id}/git_token` deletes it. r3v3rs3 encrypts the token with `platform.key`, and the admin API never returns it: an app shows only `"git_token_set": true`. git receives the token as HTTP basic authentication with the user name `x-access-token`, through an environment variable instead of the URL or the command line.
+A private repository needs a [Git provider](#git-providers) connection or an access token of the app. An access token is, for example, a GitHub fine-grained token with read access to the contents of the repository, a GitLab token with the `read_repository` scope, or a Gitea token with the `read:repository` scope. `PUT /api/apps/{id}/git_token` with `{"token": "..."}` sets the token, and `DELETE /api/apps/{id}/git_token` deletes it. r3v3rs3 encrypts the token with `r3v3rs3.key`, and the admin API never returns it: an app shows only `"git_token_set": true`. git receives the token as HTTP basic authentication with the user name `x-access-token`, through an environment variable instead of the URL or the command line.
 
 The server that runs r3v3rs3 needs the `git` binary. r3v3rs3 runs `git` without the configuration of the host, without hooks and only over HTTPS. The build context holds no `.git` directory, and a symbolic link in it stays a link, so a build does not read a file from outside the repository. The context can hold up to 512 MiB.
 
@@ -204,14 +204,14 @@ An app with a `compose` source starts the Docker Compose file of a branch of a r
 }
 ```
 
-| Field | Default | Description |
-|---|---|---|
-| `repository` | | An `https://` URL, as for a Git source. The connection or the Git token of the app clones a private repository. |
-| `branch` | `main` | A branch or a tag. |
-| `file` | the first of `compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml` | The Compose file, relative to the root of the repository. Its relative paths resolve against its own directory. |
-| `service` | | The service that receives the requests of the domains on `port`. A service name has lowercase letters, digits and `_.-`. |
-| `connection` | none | The id of a [Git provider](#git-providers) connection, as for a Git source. |
-| `tag_trigger` | none | An optional tag pattern (e.g. `v*`, `release-*`) that automatically deploys matching tags when pushed. |
+| Field         | Default                                                                                    | Description                                                                                                              |
+|---------------|--------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| `repository`  |                                                                                            | An `https://` URL, as for a Git source. The connection or the Git token of the app clones a private repository.          |
+| `branch`      | `main`                                                                                     | A branch or a tag.                                                                                                       |
+| `file`        | the first of `compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml` | The Compose file, relative to the root of the repository. Its relative paths resolve against its own directory.          |
+| `service`     |                                                                                            | The service that receives the requests of the domains on `port`. A service name has lowercase letters, digits and `_.-`. |
+| `connection`  | none                                                                                       | The id of a [Git provider](#git-providers) connection, as for a Git source.                                              |
+| `tag_trigger` | none                                                                                       | An optional tag pattern (e.g. `v*`, `release-*`) that automatically deploys matching tags when pushed.                   |
 
 The server needs the `git` binary and the `docker` binary with the Compose plugin. r3v3rs3 runs `docker compose` with the Compose project `r3v3rs3-<app id>` and adds a file that sets for the service of `service`:
 
@@ -266,7 +266,7 @@ The WebUI includes a visual Docker Compose YAML editor that makes creating and m
 
 ### Environment Variables
 
-`PUT /api/apps/{id}/env` replaces the environment variables of an app. A variable with `"secret": true` never leaves the server again: the admin API returns it without its value, and an update without a value keeps the current value. r3v3rs3 encrypts every value with `platform.key` and decrypts it only when a container starts.
+`PUT /api/apps/{id}/env` replaces the environment variables of an app. A variable with `"secret": true` never leaves the server again: the admin API returns it without its value, and an update without a value keeps the current value. r3v3rs3 encrypts every value with `r3v3rs3.key` and decrypts it only when a container starts.
 
 #### Git-Based Configuration
 
@@ -355,7 +355,7 @@ The backup settings configure the daily time in UTC that every database is backe
 - **rsync**: Transfers dumps using `rsync` over SSH to a remote target directory.
 - **Dead Man's Snitch / Heartbeat Monitoring**: An optional heartbeat ping URL (e.g., Healthchecks.io, Dead Man's Snitch, or Better Stack). Upon successful execution of daily scheduled backups, r3v3rs3 sends an HTTP GET ping with the `r3v3rs3-heartbeat` User-Agent to this endpoint. If any scheduled backup fails, the ping is skipped and a `backup.failure` outbound webhook is dispatched instead, alerting external monitoring services to silent backup failures.
 
-Every new backup uploads to the configured remote targets; a failed upload only goes into the server log, because the local copy exists. Remote credentials are encrypted with `platform.key`.
+Every new backup uploads to the configured remote targets; a failed upload only goes into the server log, because the local copy exists. Remote credentials are encrypted with `r3v3rs3.key`.
 
 #### Restore & Periodic Verification Test
 
@@ -408,16 +408,16 @@ When local storage is destroyed, disks fail, or a host is rebuilt from scratch, 
 
 An app runs one deployment at a time. A second deploy, a rollback or a deletion during a deployment gets `409 app_busy`. A [webhook](#webhooks) push during a deployment queues one more deployment instead. A restart of the server marks an unfinished deployment as `failed` with the message `the server stopped during the deployment`, and sends its `deployment_failed` notification.
 
-| Status | Meaning |
-|---|---|
-| `pending_approval` | The deployment waits for manual approval or for the maintenance deploy window. |
-| `queued` | The deployment waits to start. |
-| `building` | r3v3rs3 clones the branch and builds the image, or reads the Compose file. |
-| `deploying` | The image is pulled, `docker compose up` runs, or the new container waits for its health check. |
-| `running` | The container of the deployment serves the app. |
-| `superseded` | A newer deployment replaced this one. |
-| `failed` | The deployment stopped. `message` holds the reason. |
-| `cancelled` | The deployment was rejected or cancelled. `message` holds the reason. |
+| Status             | Meaning                                                                                         |
+|--------------------|-------------------------------------------------------------------------------------------------|
+| `pending_approval` | The deployment waits for manual approval or for the maintenance deploy window.                  |
+| `queued`           | The deployment waits to start.                                                                  |
+| `building`         | r3v3rs3 clones the branch and builds the image, or reads the Compose file.                      |
+| `deploying`        | The image is pulled, `docker compose up` runs, or the new container waits for its health check. |
+| `running`          | The container of the deployment serves the app.                                                 |
+| `superseded`       | A newer deployment replaced this one.                                                           |
+| `failed`           | The deployment stopped. `message` holds the reason.                                             |
+| `cancelled`        | The deployment was rejected or cancelled. `message` holds the reason.                           |
 
 ### Rollback
 
@@ -438,18 +438,18 @@ An app can require manual approval or restrict deployments to a scheduled mainte
 
 ## Webhooks
 
-A webhook deploys an app when its Git provider sends a push event. `POST /api/apps/{id}/webhook_secret` creates the secret of the app and returns it once. The secret is 64 hex characters, and r3v3rs3 encrypts it with `platform.key`. A second call creates a new secret, and the old one stops working at once. `DELETE /api/apps/{id}/webhook_secret` turns the webhook off.
+A webhook deploys an app when its Git provider sends a push event. `POST /api/apps/{id}/webhook_secret` creates the secret of the app and returns it once. The secret is 64 hex characters, and r3v3rs3 encrypts it with `r3v3rs3.key`. A second call creates a new secret, and the old one stops working at once. `DELETE /api/apps/{id}/webhook_secret` turns the webhook off.
 
 The provider sends its events to `POST /hooks/apps/{id}` on the address of the admin API. This route needs no session, because the signature of each request proves it. The admin API listens on `127.0.0.1` by default, so the provider needs a way in: add a proxy that sends the path prefix `/hooks/` of a public domain to the admin port, and keep every other path of the admin API private.
 
-| Provider | Setting |
-|---|---|
-| GitHub / GHCR | **Payload URL** is the hook address, **Content type** is `application/json`, and **Secret** is the secret. GitHub signs the body in the `X-Hub-Signature-256` header. Supports Git push, Pull Request events, and GitHub Container Registry (`package` / `registry_package`) push events. |
-| Gitea, Forgejo | **Target URL** is the hook address, **POST Content Type** is `application/json`, and **Secret** is the secret. The provider signs the body in the `X-Gitea-Signature` or `X-Forgejo-Signature` header. |
-| GitLab | **URL** is the hook address, and **Secret token** is the secret. GitLab sends the secret itself in the `X-Gitlab-Token` header. Enable **Push events**, and **Tag push events** when the branch field of the app names a tag. Supports Merge Request events. |
-| Docker Hub | Webhook URL is `<hook address>?secret=<secret>`. Docker Hub sends a JSON payload with `push_data` and `repository`. |
-| Harbor | Webhook URL is the hook address with an `Authorization: Bearer <secret>` auth header. Harbor sends `PUSH_ARTIFACT` events with resource tags and digests. |
-| Quay | Webhook URL is `<hook address>?secret=<secret>` or send an `X-Webhook-Secret: <secret>` header. Quay sends notification events with `updated_tags`. |
+| Provider       | Setting                                                                                                                                                                                                                                                                                       |
+|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| GitHub / GHCR  | **Payload URL** is the hook address, **Content type** is `application/json`, and **Secret** is the secret. GitHub signs the body in the `X-Hub-Signature-256` header. Supports Git push, Pull Request events, and GitHub Container Registry (`package` / `registry_package`) push events.     |
+| Gitea, Forgejo | **Target URL** is the hook address, **POST Content Type** is `application/json`, and **Secret** is the secret. The provider signs the body in the `X-Gitea-Signature` or `X-Forgejo-Signature` header.                                                                                        |
+| GitLab         | **URL** is the hook address, and **Secret token** is the secret. GitLab sends the secret itself in the `X-Gitlab-Token` header. Enable **Push events**, and **Tag push events** when the branch field of the app names a tag. Supports Merge Request events.                                  |
+| Docker Hub     | Webhook URL is `<hook address>?secret=<secret>`. Docker Hub sends a JSON payload with `push_data` and `repository`.                                                                                                                                                                           |
+| Harbor         | Webhook URL is the hook address with an `Authorization: Bearer <secret>` auth header. Harbor sends `PUSH_ARTIFACT` events with resource tags and digests.                                                                                                                                     |
+| Quay           | Webhook URL is `<hook address>?secret=<secret>` or send an `X-Webhook-Secret: <secret>` header. Quay sends notification events with `updated_tags`.                                                                                                                                           |
 | Another sender | Sign the body with HMAC-SHA256 and the secret as `X-Signature-256: sha256=<hex>`, or pass the secret token via `Authorization: Bearer <secret>`, `X-Webhook-Token: <secret>`, or `?secret=<secret>` query parameter. A CI job or custom registry can trigger blue-green deployments this way. |
 
 Which request deploys:
@@ -463,13 +463,13 @@ Which request deploys:
 
 A deploying request answers `200` with `{"outcome": "deployed", "deployment": {...}}` (or `{"outcome": "preview_deployed", "deployment": {...}}` for pull requests). A closed pull request answers `200` with `{"outcome": "preview_destroyed"}`. A push during a running deployment answers `202` with `{"outcome": "queued"}`. When the running deployment ends, one more deployment starts with the latest commit of the branch, so one queued deployment covers every push that arrived in between. r3v3rs3 keeps the queue in memory, so a restart drops it.
 
-| Status | Reason |
-|---|---|
-| `400 invalid_webhook_payload` | The body of a GitHub, Gitea or GitLab push is not JSON, for example with the content type `application/x-www-form-urlencoded`. |
-| `401 unauthorized` | The signature is missing or wrong. |
-| `404 id_not_found` | No app has this id, or the app has no webhook secret. |
-| `429` | The client sent more than 10 requests in a burst, or more than one request per second after the burst. `POST /hooks/apps/{id}` and `GET /oauth/git/callback` share this limit for each client address. |
-| `503 platform_disabled` | The deployment platform is off. |
+| Status                        | Reason                                                                                                                                                                                                 |
+|-------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `400 invalid_webhook_payload` | The body of a GitHub, Gitea or GitLab push is not JSON, for example with the content type `application/x-www-form-urlencoded`.                                                                         |
+| `401 unauthorized`            | The signature is missing or wrong.                                                                                                                                                                     |
+| `404 id_not_found`            | No app has this id, or the app has no webhook secret.                                                                                                                                                  |
+| `429`                         | The client sent more than 10 requests in a burst, or more than one request per second after the burst. `POST /hooks/apps/{id}` and `GET /oauth/git/callback` share this limit for each client address. |
+| `503 platform_disabled`       | The deployment platform is off.                                                                                                                                                                        |
 
 The body can be up to 5 MiB. The audit log records every request that deployed or queued a deployment, with the address of the sender, and without an account.
 
@@ -505,16 +505,16 @@ On the installation page, select the account or the organization and the reposit
 
 GitHub keeps the callback and return addresses with the WebUI address of the moment the app was created. When the WebUI address changes, change these addresses in the settings of the app on GitHub.
 
-r3v3rs3 encrypts the client secret and the private key with `platform.key`, and the admin API never returns them. For each GitHub request r3v3rs3 gets an installation token with a JWT signed by the private key. The token lives one hour, and r3v3rs3 renews it before it expires. When the app is uninstalled on GitHub, the connection shows **Connect again**, and **Connect again** opens the installation page. A GitHub App connection changes only its name.
+r3v3rs3 encrypts the client secret and the private key with `r3v3rs3.key`, and the admin API never returns them. For each GitHub request r3v3rs3 gets an installation token with a JWT signed by the private key. The token lives one hour, and r3v3rs3 renews it before it expires. When the app is uninstalled on GitHub, the connection shows **Connect again**, and **Connect again** opens the installation page. A GitHub App connection changes only its name.
 
 ### GitLab and Gitea
 
 The callback address is the address of the WebUI followed by `/oauth/git/callback`, for example `https://r3v3rs3.example.com/oauth/git/callback`. The **Git Providers** page shows this address for the page that you use. The provider sends the browser of the admin back to it, so it must be the address that the admin opens, not the public address.
 
-| Provider | Where | Settings |
-|---|---|---|
-| GitLab | **Preferences**, **Applications**, or the **Applications** of a group or of the instance | **Redirect URI** is the callback address. Select the scope `api`, and keep **Confidential** on. |
-| Gitea | **Settings**, **Applications**, **Manage OAuth2 Applications** | **Redirect URI** is the callback address. Keep **Confidential Client** on. r3v3rs3 asks for the scopes `read:repository`, `write:repository` and `read:user`. |
+| Provider | Where                                                                                    | Settings                                                                                                                                                      |
+|----------|------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| GitLab   | **Preferences**, **Applications**, or the **Applications** of a group or of the instance | **Redirect URI** is the callback address. Select the scope `api`, and keep **Confidential** on.                                                               |
+| Gitea    | **Settings**, **Applications**, **Manage OAuth2 Applications**                           | **Redirect URI** is the callback address. Keep **Confidential Client** on. r3v3rs3 asks for the scopes `read:repository`, `write:repository` and `read:user`. |
 
 The provider shows a client id and a client secret. Add both on the **Git Providers** page. A GitLab connection uses `https://gitlab.com` unless you give the address of your own GitLab. A Gitea connection needs the address of its server. The address of a provider uses `https://`; `http://` is allowed only on a loopback address.
 
@@ -522,7 +522,7 @@ The provider shows a client id and a client secret. Add both on the **Git Provid
 
 **Connect** on the row of a GitLab or Gitea connection opens the authorization page of the provider. After the account allows the access, the provider sends the browser back to the callback address, and r3v3rs3 exchanges the code for the tokens of the account. The authorization uses PKCE, and its state works once and for 10 minutes. The page shows **Connected** and the name of the account.
 
-r3v3rs3 encrypts the client secret and the tokens with `platform.key`, and the admin API never returns them. A GitLab or Gitea token expires, so r3v3rs3 renews it with its refresh token before it uses it. When the provider refuses the renewal, the connection shows **Connect again**, and **Connect again** authorizes it anew. A change of the provider, the address or the client id of a connection also disconnects it.
+r3v3rs3 encrypts the client secret and the tokens with `r3v3rs3.key`, and the admin API never returns them. A GitLab or Gitea token expires, so r3v3rs3 renews it with its refresh token before it uses it. When the provider refuses the renewal, the connection shows **Connect again**, and **Connect again** authorizes it anew. A change of the provider, the address or the client id of a connection also disconnects it.
 
 ### Apps with a Connection
 
@@ -566,23 +566,23 @@ The platform includes a centralized outbound webhook hub to stream real-time eve
 
 Administrators can selectively subscribe each webhook target to specific events across four categories:
 
-| Category | Event Code | Description |
-|---|---|---|
-| **Deployments** | `deploy.success` | App deployment completed successfully and container is healthy. |
-| | `deploy.failure` | App deployment failed during build, pull, or startup. |
-| | `deploy.pending_approval` | Deployment triggered but paused waiting for manual approval. |
-| | `app.crashed` | App container exited unexpectedly with a non-zero status code. |
-| **Databases & Backups** | `backup.success` | Database backup completed and saved locally. |
-| | `backup.failure` | Database dump or backup operation failed. |
-| | `backup.upload_failed` | Uploading a database backup to remote storage (S3/R2/SFTP) failed. |
-| | `backup.restored` | Database successfully restored from a local or remote backup snapshot. |
-| **Security & Certificates** | `cert.expiring` | TLS certificate is within 30 days of expiration. |
-| | `cert.renewed` | TLS certificate renewed successfully via ACME. |
-| | `cert.renewal_failed` | TLS certificate renewal attempt failed. |
-| | `security.ip_banned` | Client IP address banned due to rate limiting or security policies. |
-| **System & Nodes** | `target.offline` | Agent node stopped sending heartbeats and was marked offline. |
-| | `system.disk_pressure` | Target node disk usage exceeded the alert threshold. |
-| **System** | `test.ping` | Test ping sent manually from the WebUI or API. |
+| Category                    | Event Code                | Description                                                            |
+|-----------------------------|---------------------------|------------------------------------------------------------------------|
+| **Deployments**             | `deploy.success`          | App deployment completed successfully and container is healthy.        |
+|                             | `deploy.failure`          | App deployment failed during build, pull, or startup.                  |
+|                             | `deploy.pending_approval` | Deployment triggered but paused waiting for manual approval.           |
+|                             | `app.crashed`             | App container exited unexpectedly with a non-zero status code.         |
+| **Databases & Backups**     | `backup.success`          | Database backup completed and saved locally.                           |
+|                             | `backup.failure`          | Database dump or backup operation failed.                              |
+|                             | `backup.upload_failed`    | Uploading a database backup to remote storage (S3/R2/SFTP) failed.     |
+|                             | `backup.restored`         | Database successfully restored from a local or remote backup snapshot. |
+| **Security & Certificates** | `cert.expiring`           | TLS certificate is within 30 days of expiration.                       |
+|                             | `cert.renewed`            | TLS certificate renewed successfully via ACME.                         |
+|                             | `cert.renewal_failed`     | TLS certificate renewal attempt failed.                                |
+|                             | `security.ip_banned`      | Client IP address banned due to rate limiting or security policies.    |
+| **System & Nodes**          | `target.offline`          | Agent node stopped sending heartbeats and was marked offline.          |
+|                             | `system.disk_pressure`    | Target node disk usage exceeded the alert threshold.                   |
+| **System**                  | `test.ping`               | Test ping sent manually from the WebUI or API.                         |
 
 ### Payload Format & Headers
 
@@ -615,7 +615,7 @@ Receivers can verify authenticity by computing the HMAC-SHA256 of the raw reques
 
 ### Secret Sealing & Storage
 
-Webhook secrets are encrypted at rest with `platform.key` (AES-256-GCM) using the platform's envelope encryption. The plaintext secret is never returned by the API or stored in audit logs. Rotating the platform master key automatically re-encrypts all configured webhook secrets.
+Webhook secrets are encrypted at rest with `r3v3rs3.key` (AES-256-GCM) using the platform's envelope encryption. The plaintext secret is never returned by the API or stored in audit logs. Rotating the platform master key automatically re-encrypts all configured webhook secrets.
 
 ## Routing
 
@@ -656,13 +656,13 @@ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/inst
 
 The script installs the binary, creates the systemd service `r3v3rs3-agent` with the data directory `/var/lib/r3v3rs3-agent`, waits until the agent enrolls and then deletes the token. The token never enters the unit file. Run the script again with `--agent` to upgrade; an enrolled agent needs no token. With a new token the script enrolls the agent again, and when that enrollment fails it restores the earlier identity.
 
-| Option | Environment variable | Default | Description |
-|---|---|---|---|
-| `--master` | `R3V3RS3_AGENT_MASTER` | | The agent port of the master as `HOST:PORT`. |
-| `--token` | `R3V3RS3_AGENT_TOKEN` | | The enrollment token. Only the first start needs it; an enrolled agent ignores it. |
-| `--data-dir` | `R3V3RS3_AGENT_DATA_DIR` | `agent` in the data directory of the user | The key, the certificate and the Compose files of the agent. |
-| `--docker` | `R3V3RS3_AGENT_DOCKER` | `unix:///var/run/docker.sock` | The Docker Engine API of the agent host. |
-| `--log-level` | `R3V3RS3_AGENT_LOG_LEVEL` | `info` | The log level. |
+| Option        | Environment variable      | Default                                   | Description                                                                        |
+|---------------|---------------------------|-------------------------------------------|------------------------------------------------------------------------------------|
+| `--master`    | `R3V3RS3_AGENT_MASTER`    |                                           | The agent port of the master as `HOST:PORT`.                                       |
+| `--token`     | `R3V3RS3_AGENT_TOKEN`     |                                           | The enrollment token. Only the first start needs it; an enrolled agent ignores it. |
+| `--data-dir`  | `R3V3RS3_AGENT_DATA_DIR`  | `agent` in the data directory of the user | The key, the certificate and the Compose files of the agent.                       |
+| `--docker`    | `R3V3RS3_AGENT_DOCKER`    | `unix:///var/run/docker.sock`             | The Docker Engine API of the agent host.                                           |
+| `--log-level` | `R3V3RS3_AGENT_LOG_LEVEL` | `info`                                    | The log level.                                                                     |
 
 The data directory holds `agent.key` (mode `0600`), `agent.pem`, `ca.pem`, `target` and the `compose/` directory. The agent stops gracefully on SIGINT.
 
@@ -740,7 +740,7 @@ When pulling private container images (such as from private Docker Hub repositor
 }
 ```
 
-- Registry passwords and personal access tokens are sealed with `platform.key` and unsealed only when authenticating image pulls via standard Docker `X-Registry-Auth`.
+- Registry passwords and personal access tokens are sealed with `r3v3rs3.key` and unsealed only when authenticating image pulls via standard Docker `X-Registry-Auth`.
 - Key rotation (`POST /api/platform/key/rotate`) automatically unseals and re-encrypts all stored registry secrets in a single transaction.
 - When deploying an image app, r3v3rs3 resolves the registry server (e.g. `ghcr.io` or `docker.io` / `registry-1.docker.io`), attaches authentication credentials, and sends the request to the local engine or remote agents.
 
@@ -909,93 +909,93 @@ The **Backups** page (`/backups`) provides a centralized management console for 
 
 ## Admin API
 
-| Route | Permission | Description |
-|---|---|---|
-| `GET /api/backups` | Read | Lists all database backups across all databases with engine and metadata. |
-| `GET /api/backups/overview` | Read | Aggregated statistics, schedule, retention, and heartbeat monitoring status across all databases. |
-| `POST /api/backups/run` | Edit | Triggers an immediate backup of a specified database. |
-| `GET /api/store` | Read | The app store catalog with its state. |
-| `POST /api/store/refresh` | Edit | Downloads the catalog from the repository and applies it. |
-| `GET /api/targets` | Read | The Docker hosts that run apps, with the state of their agents. |
-| `POST /api/targets` | Admin | Adds an agent target and returns its enrollment token once. |
-| `POST /api/targets/upgrade` | Admin | Pushes the latest binary to all connected outdated agent targets. |
-| `POST /api/targets/{id}/token` | Admin | Returns a new enrollment token of an agent target. |
-| `POST /api/targets/{id}/upgrade` | Admin | Pushes the latest server binary to an agent target to upgrade it. |
-| `POST /api/targets/{id}/drain` | Admin | Puts a target into maintenance mode, removing its containers from active routing. |
-| `POST /api/targets/{id}/undrain` | Admin | Restores a drained target to active proxy routing. |
-| `DELETE /api/targets/{id}` | Admin | Deletes an agent target without apps and disconnects its agent. |
-| `GET /api/registries` | Read | The configured container registries for image pulls. |
-| `POST /api/registries` | Admin | Adds container registry credentials. |
-| `PUT /api/registries/{id}` | Admin | Updates container registry credentials. |
-| `DELETE /api/registries/{id}` | Admin | Deletes container registry credentials. |
-| `GET /api/projects` | Read | Lists all projects with their environments. |
-| `POST /api/projects` | Edit | Creates a new project with optional default environments. |
-| `GET /api/projects/{id}` | Read | Returns project details with environments and app count. |
-| `PUT /api/projects/{id}` | Edit | Replaces project name and description. |
-| `DELETE /api/projects/{id}` | Edit | Deletes a project. |
-| `GET /api/projects/{id}/environments` | Read | Lists environments of a project. |
-| `POST /api/projects/{id}/environments` | Edit | Adds an environment to a project. |
-| `GET /api/projects/{id}/environments/{env_id}` | Read | Returns environment details. |
-| `PUT /api/projects/{id}/environments/{env_id}` | Edit | Updates environment name and description. |
-| `DELETE /api/projects/{id}/environments/{env_id}` | Edit | Deletes an environment. |
-| `GET /api/projects/{id}/environments/{env_id}/env` | Edit | Returns shared environment variables without secret values. |
-| `PUT /api/projects/{id}/environments/{env_id}/env` | Edit | Replaces shared environment variables for an environment. |
-| `GET /api/apps` | Read | The apps. |
-| `POST /api/apps` | Edit | Adds an app. |
-| `GET /api/apps/{id}` | Read | Returns an app. |
-| `PUT /api/apps/{id}` | Edit | Replaces an app. |
-| `DELETE /api/apps/{id}` | Edit | Deletes an app with its containers. |
-| `GET /api/apps/{id}/env` | Edit | The environment variables, without secret values. |
-| `PUT /api/apps/{id}/env` | Edit | Replaces the environment variables. |
-| `PUT /api/apps/{id}/git_token` | Edit | Sets the token of a private repository. |
-| `DELETE /api/apps/{id}/git_token` | Edit | Deletes the token. |
-| `POST /api/apps/{id}/webhook_secret` | Edit | Creates a new webhook secret and returns it once. |
-| `DELETE /api/apps/{id}/webhook_secret` | Edit | Turns the webhook off. |
-| `POST /api/apps/{id}/hook` | Edit | Installs the webhook of an app with a connection again. |
-| `POST /hooks/apps/{id}` | The signature | Deploys the app for a signed push. See [Webhooks](#webhooks). |
-| `GET /api/apps/{id}/deployments` | Read | The latest 100 deployments of an app. |
-| `GET /api/apps/{id}/logs?tail=200` | Read | The last lines of the container log of the running deployment, from 1 to 1000 lines. `running` is `false` when the app has no running deployment. |
-| `GET /api/apps/{id}/logs/live?tail=200` | Read | Upgrades the connection to a WebSocket live stream of the running container log. |
-| `POST /api/apps/{id}/deploy` | Edit | Starts a deployment. |
-| `GET /api/apps/{id}/terminal?shell=` | Admin | Switches the connection to a WebSocket terminal of the running container, with optional shell or database CLI selection. |
-| `GET /api/apps/{id}/files?path=` | Admin | The entries of a directory inside a volume of the running container. |
-| `GET /api/apps/{id}/files/download?path=` | Admin | The content of a file inside a volume. |
-| `PUT /api/apps/{id}/files?path=` | Admin | Writes the request body into a file inside a writable volume. |
-| `DELETE /api/apps/{id}/files?path=` | Admin | Deletes a file or a directory inside a writable volume. |
-| `GET /api/apps/{id}/commands` | Read | The scheduled commands configured for an app. |
-| `POST /api/apps/{id}/commands` | Edit | Adds a scheduled command to an app. |
-| `PUT /api/apps/{id}/commands/{cmd_id}` | Edit | Replaces a scheduled command. |
-| `DELETE /api/apps/{id}/commands/{cmd_id}` | Edit | Deletes a scheduled command. |
-| `POST /api/apps/{id}/commands/{cmd_id}/run` | Edit | Runs a scheduled command inside the container immediately and returns the output. |
-| `GET /api/databases` | Read | The database apps, with their engine, their port and their connection. |
-| `GET /api/databases/engines` | Read | The engines and the versions that the panel offers. |
-| `POST /api/databases/engines/refresh` | Edit | Downloads the engine catalog from the r3v3rs3-apps repository. |
-| `POST /api/databases` | Edit | Creates a database, deploys it and returns its password once. |
-| `POST /api/databases/{id}/clone` | Edit | Clones an existing database, deploys it and restores the data. |
-| `DELETE /api/databases/{id}` | Edit | Deletes the database app. Its volume stays. |
-| `GET /api/deployments/{id}` | Read | Returns a deployment. |
-| `POST /api/deployments/{id}/rollback` | Edit | Repeats an earlier deployment. |
-| `POST /api/deployments/{id}/approve` | Edit | Approves a pending deployment and starts it. |
-| `POST /api/deployments/{id}/reject` | Edit | Rejects a pending deployment. |
-| `GET /api/git/connections` | Edit | The Git provider connections, without secrets or tokens. |
-| `POST /api/git/connections` | Admin | Adds a GitLab or Gitea connection. |
-| `GET /api/git/connections/{id}` | Edit | Returns a connection. |
-| `PUT /api/git/connections/{id}` | Admin | Replaces a connection. Without `client_secret` the current secret stays. A GitHub App connection changes only its name. |
-| `DELETE /api/git/connections/{id}` | Admin | Deletes a connection that no app uses. |
-| `POST /api/git/connections/{id}/authorize` | Admin | Starts an authorization with `{"redirect_uri": "<callback address>"}` and returns the page of the provider, or the installation page of a GitHub App. |
-| `POST /api/git/connections/{id}/installation` | Admin | Reads the installation of the GitHub App from GitHub and connects the connection. |
-| `POST /api/git/github_apps` | Admin | Starts a GitHub App with `{"name": "...", "url": "...", "organization": "...", "redirect_uri": "<callback address>"}`, `url` and `organization` optional, and returns the form address and the manifest that the browser posts to GitHub. |
-| `GET /api/git/connections/{id}/repositories?search=&page=` | Edit | Up to 50 repositories of the connected account or of the installation. |
-| `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit | Up to 50 branches of a repository. |
-| `GET /api/platform/prune` | Read | The prune policy and disk hygiene settings. |
-| `PUT /api/platform/prune` | Admin | Replaces the prune policy. |
-| `POST /api/platform/prune/run` | Admin | Runs disk hygiene prune immediately and returns reclaimed space. |
-| `GET /api/webhooks` | Read | Lists all configured outbound webhooks. |
-| `POST /api/webhooks` | Admin | Creates a new outbound webhook. |
-| `GET /api/webhooks/{id}` | Read | Returns details of an outbound webhook. |
-| `PUT /api/webhooks/{id}` | Admin | Updates an outbound webhook configuration or secret. |
-| `DELETE /api/webhooks/{id}` | Admin | Deletes an outbound webhook. |
-| `POST /api/webhooks/test` | Admin | Sends an immediate test ping payload to a target URL. |
-| `GET /oauth/git/callback` | The state | The callback of the provider and of a new GitHub App. See [Connect](#connect) and [Create a GitHub App](#create-a-github-app). |
+| Route                                                          | Permission    | Description                                                                                                                                                                                                                               |
+|----------------------------------------------------------------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `GET /api/backups`                                             | Read          | Lists all database backups across all databases with engine and metadata.                                                                                                                                                                 |
+| `GET /api/backups/overview`                                    | Read          | Aggregated statistics, schedule, retention, and heartbeat monitoring status across all databases.                                                                                                                                         |
+| `POST /api/backups/run`                                        | Edit          | Triggers an immediate backup of a specified database.                                                                                                                                                                                     |
+| `GET /api/store`                                               | Read          | The app store catalog with its state.                                                                                                                                                                                                     |
+| `POST /api/store/refresh`                                      | Edit          | Downloads the catalog from the repository and applies it.                                                                                                                                                                                 |
+| `GET /api/targets`                                             | Read          | The Docker hosts that run apps, with the state of their agents.                                                                                                                                                                           |
+| `POST /api/targets`                                            | Admin         | Adds an agent target and returns its enrollment token once.                                                                                                                                                                               |
+| `POST /api/targets/upgrade`                                    | Admin         | Pushes the latest binary to all connected outdated agent targets.                                                                                                                                                                         |
+| `POST /api/targets/{id}/token`                                 | Admin         | Returns a new enrollment token of an agent target.                                                                                                                                                                                        |
+| `POST /api/targets/{id}/upgrade`                               | Admin         | Pushes the latest server binary to an agent target to upgrade it.                                                                                                                                                                         |
+| `POST /api/targets/{id}/drain`                                 | Admin         | Puts a target into maintenance mode, removing its containers from active routing.                                                                                                                                                         |
+| `POST /api/targets/{id}/undrain`                               | Admin         | Restores a drained target to active proxy routing.                                                                                                                                                                                        |
+| `DELETE /api/targets/{id}`                                     | Admin         | Deletes an agent target without apps and disconnects its agent.                                                                                                                                                                           |
+| `GET /api/registries`                                          | Read          | The configured container registries for image pulls.                                                                                                                                                                                      |
+| `POST /api/registries`                                         | Admin         | Adds container registry credentials.                                                                                                                                                                                                      |
+| `PUT /api/registries/{id}`                                     | Admin         | Updates container registry credentials.                                                                                                                                                                                                   |
+| `DELETE /api/registries/{id}`                                  | Admin         | Deletes container registry credentials.                                                                                                                                                                                                   |
+| `GET /api/projects`                                            | Read          | Lists all projects with their environments.                                                                                                                                                                                               |
+| `POST /api/projects`                                           | Edit          | Creates a new project with optional default environments.                                                                                                                                                                                 |
+| `GET /api/projects/{id}`                                       | Read          | Returns project details with environments and app count.                                                                                                                                                                                  |
+| `PUT /api/projects/{id}`                                       | Edit          | Replaces project name and description.                                                                                                                                                                                                    |
+| `DELETE /api/projects/{id}`                                    | Edit          | Deletes a project.                                                                                                                                                                                                                        |
+| `GET /api/projects/{id}/environments`                          | Read          | Lists environments of a project.                                                                                                                                                                                                          |
+| `POST /api/projects/{id}/environments`                         | Edit          | Adds an environment to a project.                                                                                                                                                                                                         |
+| `GET /api/projects/{id}/environments/{env_id}`                 | Read          | Returns environment details.                                                                                                                                                                                                              |
+| `PUT /api/projects/{id}/environments/{env_id}`                 | Edit          | Updates environment name and description.                                                                                                                                                                                                 |
+| `DELETE /api/projects/{id}/environments/{env_id}`              | Edit          | Deletes an environment.                                                                                                                                                                                                                   |
+| `GET /api/projects/{id}/environments/{env_id}/env`             | Edit          | Returns shared environment variables without secret values.                                                                                                                                                                               |
+| `PUT /api/projects/{id}/environments/{env_id}/env`             | Edit          | Replaces shared environment variables for an environment.                                                                                                                                                                                 |
+| `GET /api/apps`                                                | Read          | The apps.                                                                                                                                                                                                                                 |
+| `POST /api/apps`                                               | Edit          | Adds an app.                                                                                                                                                                                                                              |
+| `GET /api/apps/{id}`                                           | Read          | Returns an app.                                                                                                                                                                                                                           |
+| `PUT /api/apps/{id}`                                           | Edit          | Replaces an app.                                                                                                                                                                                                                          |
+| `DELETE /api/apps/{id}`                                        | Edit          | Deletes an app with its containers.                                                                                                                                                                                                       |
+| `GET /api/apps/{id}/env`                                       | Edit          | The environment variables, without secret values.                                                                                                                                                                                         |
+| `PUT /api/apps/{id}/env`                                       | Edit          | Replaces the environment variables.                                                                                                                                                                                                       |
+| `PUT /api/apps/{id}/git_token`                                 | Edit          | Sets the token of a private repository.                                                                                                                                                                                                   |
+| `DELETE /api/apps/{id}/git_token`                              | Edit          | Deletes the token.                                                                                                                                                                                                                        |
+| `POST /api/apps/{id}/webhook_secret`                           | Edit          | Creates a new webhook secret and returns it once.                                                                                                                                                                                         |
+| `DELETE /api/apps/{id}/webhook_secret`                         | Edit          | Turns the webhook off.                                                                                                                                                                                                                    |
+| `POST /api/apps/{id}/hook`                                     | Edit          | Installs the webhook of an app with a connection again.                                                                                                                                                                                   |
+| `POST /hooks/apps/{id}`                                        | The signature | Deploys the app for a signed push. See [Webhooks](#webhooks).                                                                                                                                                                             |
+| `GET /api/apps/{id}/deployments`                               | Read          | The latest 100 deployments of an app.                                                                                                                                                                                                     |
+| `GET /api/apps/{id}/logs?tail=200`                             | Read          | The last lines of the container log of the running deployment, from 1 to 1000 lines. `running` is `false` when the app has no running deployment.                                                                                         |
+| `GET /api/apps/{id}/logs/live?tail=200`                        | Read          | Upgrades the connection to a WebSocket live stream of the running container log.                                                                                                                                                          |
+| `POST /api/apps/{id}/deploy`                                   | Edit          | Starts a deployment.                                                                                                                                                                                                                      |
+| `GET /api/apps/{id}/terminal?shell=`                           | Admin         | Switches the connection to a WebSocket terminal of the running container, with optional shell or database CLI selection.                                                                                                                  |
+| `GET /api/apps/{id}/files?path=`                               | Admin         | The entries of a directory inside a volume of the running container.                                                                                                                                                                      |
+| `GET /api/apps/{id}/files/download?path=`                      | Admin         | The content of a file inside a volume.                                                                                                                                                                                                    |
+| `PUT /api/apps/{id}/files?path=`                               | Admin         | Writes the request body into a file inside a writable volume.                                                                                                                                                                             |
+| `DELETE /api/apps/{id}/files?path=`                            | Admin         | Deletes a file or a directory inside a writable volume.                                                                                                                                                                                   |
+| `GET /api/apps/{id}/commands`                                  | Read          | The scheduled commands configured for an app.                                                                                                                                                                                             |
+| `POST /api/apps/{id}/commands`                                 | Edit          | Adds a scheduled command to an app.                                                                                                                                                                                                       |
+| `PUT /api/apps/{id}/commands/{cmd_id}`                         | Edit          | Replaces a scheduled command.                                                                                                                                                                                                             |
+| `DELETE /api/apps/{id}/commands/{cmd_id}`                      | Edit          | Deletes a scheduled command.                                                                                                                                                                                                              |
+| `POST /api/apps/{id}/commands/{cmd_id}/run`                    | Edit          | Runs a scheduled command inside the container immediately and returns the output.                                                                                                                                                         |
+| `GET /api/databases`                                           | Read          | The database apps, with their engine, their port and their connection.                                                                                                                                                                    |
+| `GET /api/databases/engines`                                   | Read          | The engines and the versions that the panel offers.                                                                                                                                                                                       |
+| `POST /api/databases/engines/refresh`                          | Edit          | Downloads the engine catalog from the r3v3rs3-apps repository.                                                                                                                                                                            |
+| `POST /api/databases`                                          | Edit          | Creates a database, deploys it and returns its password once.                                                                                                                                                                             |
+| `POST /api/databases/{id}/clone`                               | Edit          | Clones an existing database, deploys it and restores the data.                                                                                                                                                                            |
+| `DELETE /api/databases/{id}`                                   | Edit          | Deletes the database app. Its volume stays.                                                                                                                                                                                               |
+| `GET /api/deployments/{id}`                                    | Read          | Returns a deployment.                                                                                                                                                                                                                     |
+| `POST /api/deployments/{id}/rollback`                          | Edit          | Repeats an earlier deployment.                                                                                                                                                                                                            |
+| `POST /api/deployments/{id}/approve`                           | Edit          | Approves a pending deployment and starts it.                                                                                                                                                                                              |
+| `POST /api/deployments/{id}/reject`                            | Edit          | Rejects a pending deployment.                                                                                                                                                                                                             |
+| `GET /api/git/connections`                                     | Edit          | The Git provider connections, without secrets or tokens.                                                                                                                                                                                  |
+| `POST /api/git/connections`                                    | Admin         | Adds a GitLab or Gitea connection.                                                                                                                                                                                                        |
+| `GET /api/git/connections/{id}`                                | Edit          | Returns a connection.                                                                                                                                                                                                                     |
+| `PUT /api/git/connections/{id}`                                | Admin         | Replaces a connection. Without `client_secret` the current secret stays. A GitHub App connection changes only its name.                                                                                                                   |
+| `DELETE /api/git/connections/{id}`                             | Admin         | Deletes a connection that no app uses.                                                                                                                                                                                                    |
+| `POST /api/git/connections/{id}/authorize`                     | Admin         | Starts an authorization with `{"redirect_uri": "<callback address>"}` and returns the page of the provider, or the installation page of a GitHub App.                                                                                     |
+| `POST /api/git/connections/{id}/installation`                  | Admin         | Reads the installation of the GitHub App from GitHub and connects the connection.                                                                                                                                                         |
+| `POST /api/git/github_apps`                                    | Admin         | Starts a GitHub App with `{"name": "...", "url": "...", "organization": "...", "redirect_uri": "<callback address>"}`, `url` and `organization` optional, and returns the form address and the manifest that the browser posts to GitHub. |
+| `GET /api/git/connections/{id}/repositories?search=&page=`     | Edit          | Up to 50 repositories of the connected account or of the installation.                                                                                                                                                                    |
+| `GET /api/git/connections/{id}/branches?repository=owner/name` | Edit          | Up to 50 branches of a repository.                                                                                                                                                                                                        |
+| `GET /api/platform/prune`                                      | Read          | The prune policy and disk hygiene settings.                                                                                                                                                                                               |
+| `PUT /api/platform/prune`                                      | Admin         | Replaces the prune policy.                                                                                                                                                                                                                |
+| `POST /api/platform/prune/run`                                 | Admin         | Runs disk hygiene prune immediately and returns reclaimed space.                                                                                                                                                                          |
+| `GET /api/webhooks`                                            | Read          | Lists all configured outbound webhooks.                                                                                                                                                                                                   |
+| `POST /api/webhooks`                                           | Admin         | Creates a new outbound webhook.                                                                                                                                                                                                           |
+| `GET /api/webhooks/{id}`                                       | Read          | Returns details of an outbound webhook.                                                                                                                                                                                                   |
+| `PUT /api/webhooks/{id}`                                       | Admin         | Updates an outbound webhook configuration or secret.                                                                                                                                                                                      |
+| `DELETE /api/webhooks/{id}`                                    | Admin         | Deletes an outbound webhook.                                                                                                                                                                                                              |
+| `POST /api/webhooks/test`                                      | Admin         | Sends an immediate test ping payload to a target URL.                                                                                                                                                                                     |
+| `GET /oauth/git/callback`                                      | The state     | The callback of the provider and of a new GitHub App. See [Connect](#connect) and [Create a GitHub App](#create-a-github-app).                                                                                                            |
 
 An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). Every platform route answers `503 platform_disabled` when `[platform] enabled` is off, and `503 platform_failed` when the platform failed to open its database or its key. A name that another app, target or connection uses answers `409 app_name_exists`, `409 target_name_exists` or `409 git_connection_name_exists`. A connection that is not connected answers `409 git_connection_not_connected`. `POST /api/git/connections/{id}/installation` before the GitHub App is installed answers `409 github_app_not_installed`, and a failed request to the provider answers `502 git_provider_failed`. The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target, every agent enrollment, every change and authorization of a Git provider connection, and every webhook installation that an account starts. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, an enrollment names the target and the version of the agent, a connection names itself and its provider, never its client secret or a token, an authorization also names the account, and a webhook installation names the app.

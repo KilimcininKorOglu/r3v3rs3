@@ -24,6 +24,17 @@ const AAD_BYTES: &[u8] = b"r3v3rs3-disaster-recovery";
 pub const DISASTER_RECOVERY_DIR: &str = "disaster-recovery";
 
 const ROOT_CONFIG_FILES: &[&str] = &[
+    "r3v3rs3.key",
+    "r3v3rs3.db",
+    "r3v3rs3.db-wal",
+    "r3v3rs3.db-shm",
+    "cdn-ranges.json",
+    "app-store.json",
+    "engines.json",
+    "platform.key",
+    "platform.db",
+    "platform.db-wal",
+    "platform.db-shm",
     "config.toml",
     "ports.toml",
     "proxies.toml",
@@ -31,12 +42,6 @@ const ROOT_CONFIG_FILES: &[&str] = &[
     "acme.toml",
     "accounts.toml",
     "notifications.json",
-    "cdn-ranges.json",
-    "app-store.json",
-    "platform.key",
-    "platform.db",
-    "platform.db-wal",
-    "platform.db-shm",
 ];
 
 const SUBDIRS: &[&str] = &["certs", "keys"];

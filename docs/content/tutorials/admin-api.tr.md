@@ -173,11 +173,11 @@ $ curl -s -b cookies.txt -X POST http://localhost:46492/api/accounts \
 
 Üç rol vardır:
 
-| Rol | Ne yapabilir |
-|---|---|
-| `admin` | Her şeyi: hesaplar, ayarlar ve denetim kaydı dahil. |
+| Rol      | Ne yapabilir                                                                                                                                                                        |
+|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `admin`  | Her şeyi: hesaplar, ayarlar ve denetim kaydı dahil.                                                                                                                                 |
 | `editor` | Portları, proxy'leri, sertifikaları, ACME kayıtlarını, erişim listelerini ve uygulamaları değiştirir. Proxy listesi varsa proxy ekler ve yalnız listesindeki proxy'leri değiştirir. |
-| `viewer` | Yalnız okur. |
+| `viewer` | Yalnız okur.                                                                                                                                                                        |
 
 `viewer` rolü proxy listesini okur, ama hiçbir şeyi değiştiremez. `viewer.txt` dosyasında bir `viewer` hesabının cookie'si ile:
 

@@ -74,10 +74,13 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tracing::error;
 
 /// The database of the platform in the config directory.
-pub const DATABASE_FILE: &str = "platform.db";
+pub const DATABASE_FILE: &str = "r3v3rs3.db";
 
 /// The encryption key of the environment variables in the config directory.
-pub const KEY_FILE: &str = "platform.key";
+pub const KEY_FILE: &str = "r3v3rs3.key";
+
+/// The archived previous encryption key after rotation.
+pub const KEY_FILE_OLD: &str = "r3v3rs3.key.old";
 
 /// The most deployments that one list returns.
 pub const DEPLOYMENT_LIST_LIMIT: u32 = 100;
@@ -1085,16 +1088,36 @@ fn new_id() -> anyhow::Result<ShortId> {
 
 /// The key of the environment values, created at the first start.
 async fn open_keys(config_dir: &Path) -> anyhow::Result<ClusterKeys> {
+    ensure_key_files(config_dir).await?;
     let key_path = config_dir.join(KEY_FILE);
-    if !tokio::fs::try_exists(&key_path).await? {
-        write_new_key_file(&key_path).await?;
-    }
     let mut paths = vec![key_path];
-    let old_key_path = config_dir.join("platform.key.old");
+    let old_key_path = config_dir.join("r3v3rs3.key.old");
     if tokio::fs::try_exists(&old_key_path).await? {
         paths.push(old_key_path);
     }
     load_keys(&paths).await
+}
+
+async fn ensure_key_files(config_dir: &Path) -> anyhow::Result<()> {
+    let key_path = config_dir.join(KEY_FILE);
+    let legacy = config_dir.join("platform.key");
+    if !tokio::fs::try_exists(&key_path).await? {
+        if tokio::fs::try_exists(&legacy).await? {
+            tokio::fs::rename(&legacy, &key_path).await?;
+        } else {
+            write_new_key_file(&key_path).await?;
+        }
+    }
+    migrate_old_key_file(config_dir).await
+}
+
+async fn migrate_old_key_file(config_dir: &Path) -> anyhow::Result<()> {
+    let old_key = config_dir.join("r3v3rs3.key.old");
+    let legacy_old = config_dir.join("platform.key.old");
+    if !tokio::fs::try_exists(&old_key).await? && tokio::fs::try_exists(&legacy_old).await? {
+        tokio::fs::rename(&legacy_old, &old_key).await?;
+    }
+    Ok(())
 }
 
 /// The CA of the agent link. Only a server with an agent port needs it.

@@ -102,13 +102,13 @@ Open [http://localhost:46492/](http://localhost:46492/) and sign in with the acc
 
 ## Where the Files Are
 
-| Path | Content |
-|---|---|
-| `/usr/local/bin/r3v3rs3` | The binary. |
-| `/etc/r3v3rs3` | `accounts.toml`, `proxies.toml`, `ports.toml`, `access_lists.toml`, `acme.toml`, `config.toml` and the certificates. The directory has the mode `0700`. |
-| `/var/log/r3v3rs3` | `log.db`, which holds the audit log. The directory has the mode `0750`. |
+| Path                     | Content                                                                                                                 |
+|--------------------------|-------------------------------------------------------------------------------------------------------------------------|
+| `/usr/local/bin/r3v3rs3` | The binary.                                                                                                             |
+| `/etc/r3v3rs3`           | `r3v3rs3.db` (unified database), `r3v3rs3.key` (master encryption key) and `certs/`. The directory has the mode `0700`. |
+| `/var/log/r3v3rs3`       | `log.db`, which holds the audit log. The directory has the mode `0750`.                                                 |
 
-`journalctl -u r3v3rs3` shows the server log. `/etc/r3v3rs3/acme.toml` holds the ACME account keys and the DNS provider credentials in plain text, so back up the whole directory and protect the backup.
+`journalctl -u r3v3rs3` shows the server log. `/etc/r3v3rs3/r3v3rs3.db` holds configuration and operational state, and `r3v3rs3.key` holds the master encryption key, so back up the whole directory and protect the backup.
 
 ## Upgrade
 

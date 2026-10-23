@@ -1,7 +1,7 @@
 //! The zero-downtime upgrade: a SIGUSR2 hands the listeners to a new process, which serves the
 //! port while the old one drains.
 
-use r3v3rs3::config::file::FileStorage;
+use r3v3rs3::config::sqlite::SqliteStorage;
 use r3v3rs3::config::storage::Storage as _;
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::port::UpstreamServer;
@@ -63,7 +63,7 @@ async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> 
 
     let dir = std::env::temp_dir().join(format!("r3v3rs3-upgrade-{}", std::process::id()));
     std::fs::create_dir_all(&dir)?;
-    let storage = FileStorage::new(&dir);
+    let storage = SqliteStorage::open(&dir).await?;
     storage.save_app_config(&AppConfig::default()).await?;
     storage
         .save_ports(&[port_entry("test", proxy_port.multiaddr_tcp())])

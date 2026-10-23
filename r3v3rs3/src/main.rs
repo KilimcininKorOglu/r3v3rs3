@@ -10,8 +10,8 @@ use r3v3rs3::agent::token::EnrollmentToken;
 use r3v3rs3::args::StartArgs;
 use r3v3rs3::args::{AgentArgs, Command};
 use r3v3rs3::build::compose::DockerCompose;
-use r3v3rs3::config::file::FileStorage;
 use r3v3rs3::config::new_appinfo;
+use r3v3rs3::config::sqlite::SqliteStorage;
 use r3v3rs3::config::storage::Storage;
 use r3v3rs3::log::DatabaseLayer;
 use r3v3rs3::server::{Server, ServerChannels};
@@ -100,12 +100,9 @@ async fn worker(args: r3v3rs3::args::WorkerArgs) -> anyhow::Result<()> {
     r3v3rs3::server::worker::run(args.ipc, &config_dir, &log_dir).await
 }
 
-/// Reads `config.toml`. A missing file gives the default config.
+/// Reads the server config. Uses SqliteStorage if present or migrates from config.toml.
 async fn read_local_config(config_dir: &Path) -> anyhow::Result<AppConfig> {
-    if !config_dir.join("config.toml").try_exists()? {
-        return Ok(AppConfig::default());
-    }
-    FileStorage::new(config_dir).read_app_config().await
+    SqliteStorage::read_local_config(config_dir).await
 }
 
 /// Starts the log file, the access log file and the log database. The returned guards flush the
@@ -148,10 +145,8 @@ async fn new_server(
     config_dir: &Path,
     listeners: Vec<r3v3rs3::server::fdmanifest::ListenerFd>,
 ) -> anyhow::Result<(Server, ServerChannels)> {
-    Ok(
-        Server::new_shared_inheriting(app_info, Arc::new(FileStorage::new(config_dir)), listeners)
-            .await,
-    )
+    let storage = Arc::new(SqliteStorage::open(config_dir).await?);
+    Ok(Server::new_shared_inheriting(app_info, storage, listeners).await)
 }
 
 async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()> {
@@ -401,8 +396,8 @@ async fn create_account(
     _local: AppConfig,
     config_dir: &Path,
 ) -> anyhow::Result<r3v3rs3_api::auth::Account> {
-    let files = FileStorage::new(config_dir);
-    Ok(files
+    let storage = SqliteStorage::open(config_dir).await?;
+    Ok(storage
         .add_account(&args.name, password, args.totp, args.role)
         .await?)
 }

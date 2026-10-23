@@ -27,15 +27,15 @@ These stay out of scope for the first version. Each one can follow later without
 
 Two projects were studied. Both are cloned into `helper-projects/` for reference only.
 
-| Topic | NineDeploy (TypeScript) | deploy-monster (Go) | Decision for r3v3rs3 |
-|---|---|---|---|
-| Packaging | pnpm monorepo, Node runtime | One binary, embedded UI | One binary, as today |
-| State | SQLite + Drizzle, 40 tables | SQLite + SQLite KV, optional PostgreSQL | SQLite through the existing `sqlx` dependency |
-| Ingress | Traefik v3 file provider | Own proxy with autocert | The existing r3v3rs3 proxy |
-| Deploy | Blue-green, digest-pinned rollback, cancel checkpoints | Recreate or rolling | Blue-green through the existing health groups, digest-pinned rollback |
-| Agent direction | Core dials the agent | Agent dials the master | Agent dials the master |
-| Agent transport | Plain HTTP with AES-256-GCM sealed envelopes, no TLS | Hijacked HTTP, token, optional mTLS | TLS with required client certificates (mTLS) |
-| Agent commands | Fixed table of about 24 typed operations, operands validated on both ends | Typed message kinds | A closed Rust `enum`, operands validated on both ends |
+| Topic           | NineDeploy (TypeScript)                                                   | deploy-monster (Go)                     | Decision for r3v3rs3                                                  |
+|-----------------|---------------------------------------------------------------------------|-----------------------------------------|-----------------------------------------------------------------------|
+| Packaging       | pnpm monorepo, Node runtime                                               | One binary, embedded UI                 | One binary, as today                                                  |
+| State           | SQLite + Drizzle, 40 tables                                               | SQLite + SQLite KV, optional PostgreSQL | SQLite through the existing `sqlx` dependency                         |
+| Ingress         | Traefik v3 file provider                                                  | Own proxy with autocert                 | The existing r3v3rs3 proxy                                            |
+| Deploy          | Blue-green, digest-pinned rollback, cancel checkpoints                    | Recreate or rolling                     | Blue-green through the existing health groups, digest-pinned rollback |
+| Agent direction | Core dials the agent                                                      | Agent dials the master                  | Agent dials the master                                                |
+| Agent transport | Plain HTTP with AES-256-GCM sealed envelopes, no TLS                      | Hijacked HTTP, token, optional mTLS     | TLS with required client certificates (mTLS)                          |
+| Agent commands  | Fixed table of about 24 typed operations, operands validated on both ends | Typed message kinds                     | A closed Rust `enum`, operands validated on both ends                 |
 
 The two decisions that matter most:
 
@@ -44,20 +44,20 @@ The two decisions that matter most:
 
 ## 4. What r3v3rs3 already provides
 
-| Platform need | Existing code |
-|---|---|
-| HTTP, HTTPS, HTTP/3, TCP, UDP ingress | `r3v3rs3/src/proxy/` |
-| Route selection by host and path | `Router::get_route` in `r3v3rs3/src/proxy/http/filter.rs` |
-| Certificates and ACME | `r3v3rs3/src/certs/`, `r3v3rs3-api/src/acme.rs` |
-| mTLS in both directions | `r3v3rs3/src/proxy/tls.rs` |
-| Health checks, load balancing, circuit breaker | `r3v3rs3/src/proxy/health.rs` |
-| Docker Engine API reads (containers, events) | `r3v3rs3/src/discovery/docker.rs` over `r3v3rs3/src/kv/http.rs` |
-| Accounts, permissions, per-proxy scope | `r3v3rs3/src/accounts.rs` |
-| Admin API with OpenAPI | `r3v3rs3/src/admin/` |
-| SQLite through `sqlx` with an idempotent schema | `r3v3rs3/src/audit.rs`, `r3v3rs3/src/log.rs` |
-| Audit log | `r3v3rs3/src/audit.rs` |
-| Notifications | `r3v3rs3/src/notify.rs` |
-| WebUI with i18n | `r3v3rs3-webui/` |
+| Platform need                                   | Existing code                                                   |
+|-------------------------------------------------|-----------------------------------------------------------------|
+| HTTP, HTTPS, HTTP/3, TCP, UDP ingress           | `r3v3rs3/src/proxy/`                                            |
+| Route selection by host and path                | `Router::get_route` in `r3v3rs3/src/proxy/http/filter.rs`       |
+| Certificates and ACME                           | `r3v3rs3/src/certs/`, `r3v3rs3-api/src/acme.rs`                 |
+| mTLS in both directions                         | `r3v3rs3/src/proxy/tls.rs`                                      |
+| Health checks, load balancing, circuit breaker  | `r3v3rs3/src/proxy/health.rs`                                   |
+| Docker Engine API reads (containers, events)    | `r3v3rs3/src/discovery/docker.rs` over `r3v3rs3/src/kv/http.rs` |
+| Accounts, permissions, per-proxy scope          | `r3v3rs3/src/accounts.rs`                                       |
+| Admin API with OpenAPI                          | `r3v3rs3/src/admin/`                                            |
+| SQLite through `sqlx` with an idempotent schema | `r3v3rs3/src/audit.rs`, `r3v3rs3/src/log.rs`                    |
+| Audit log                                       | `r3v3rs3/src/audit.rs`                                          |
+| Notifications                                   | `r3v3rs3/src/notify.rs`                                         |
+| WebUI with i18n                                 | `r3v3rs3-webui/`                                                |
 
 The new work is the container lifecycle: the domain model, the runtime, the build step, the deploy pipeline and the agent link.
 
@@ -135,14 +135,14 @@ A deployment is one attempt to bring an app to a new version.
 
 - `status`: `queued`, `building`, `deploying`, `running`, `superseded`, `failed`, `cancelled`.
 - `trigger`: `manual`, `webhook`, `rollback`, `api`.
-- `commit_sha`, `image_digest`, `spec` (the app spec at start, as JSON) and `env` (the environment at start, sealed with `platform.key`).
+- `commit_sha`, `image_digest`, `spec` (the app spec at start, as JSON) and `env` (the environment at start, sealed with `r3v3rs3.key`).
 - `log`: the build and deploy output, stored as a file under the data directory.
 
 At most one deployment per app is `running`. A newer `running` deployment marks the previous one `superseded`.
 
 ## 7. Storage
 
-The platform stores its data in one SQLite file, `platform.db`, in the config directory. The file follows the pattern of `SqliteAuditStore`: `CREATE TABLE IF NOT EXISTS` statements run at the first connection, and every query is parameterized.
+The platform stores its data in the unified SQLite file, `r3v3rs3.db`, in the config directory. The file follows the pattern of `SqliteAuditStore`: `CREATE TABLE IF NOT EXISTS` statements run at the first connection, and every query is parameterized.
 
 ```sql
 CREATE TABLE IF NOT EXISTS targets (
@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS app_secrets (
 
 The app spec is one JSON column, as the audit entry is, so a new spec field needs no schema change. Only fields that a query filters on get their own column.
 
-Environment values are encrypted with AES-256-GCM. The key is a 32-byte file `platform.key` in the config directory, created at the first start with mode `0600`. The file has the format of a cluster key file, and the associated data of a value is `app/<app_id>/env/<key>`, so a value copied to another row does not decrypt. A value never leaves the server in plain text except inside the mTLS link to the agent that runs the container.
+Environment values are encrypted with AES-256-GCM. The key is a 32-byte file `r3v3rs3.key` in the config directory, created at the first start with mode `0600`. The file has the format of a cluster key file, and the associated data of a value is `app/<app_id>/env/<key>`, so a value copied to another row does not decrypt. A value never leaves the server in plain text except inside the mTLS link to the agent that runs the container.
 
 ## 8. Deploy pipeline
 
@@ -323,11 +323,11 @@ HTTP/1.1, HTTP/2 and WebSocket run over the tunnel unchanged, and the health che
 
 The platform uses the existing permissions of `r3v3rs3/src/accounts.rs`:
 
-| Action | Permission |
-|---|---|
-| List apps, deployments, targets, read logs | `Read` |
-| Create, change or delete an app, read or change its environment, deploy, restart, roll back | `Edit` |
-| Create, enroll or revoke a target | `Admin` |
+| Action                                                                                      | Permission |
+|---------------------------------------------------------------------------------------------|------------|
+| List apps, deployments, targets, read logs                                                  | `Read`     |
+| Create, change or delete an app, read or change its environment, deploy, restart, roll back | `Edit`     |
+| Create, enroll or revoke a target                                                           | `Admin`    |
 
 The first version has no app lists. An account with a proxy list gets `403 forbidden` for every platform request (`Caller::authorize_platform`). App lists and a separate permission for app changes can follow later. A secret environment value is never returned by the API; the WebUI shows it as set or not set.
 
@@ -366,7 +366,7 @@ WebUI pages: Targets (list, create, enrollment command), Apps (list with status)
 Each phase ends with integration tests and docs, and is usable on its own.
 
 1. **Runtime.** `ContainerRuntime` trait and `runtime::docker` with create, start, stop, remove, inspect, logs, pull, network. Integration test against a local Docker Engine, skipped when no socket exists.
-2. **Store and model.** `platform.db` schema, `r3v3rs3-api` types, RPC methods and admin routes for apps and the local target.
+2. **Store and model.** `r3v3rs3.db` schema, `r3v3rs3-api` types, RPC methods and admin routes for apps and the local target.
 3. **Pipeline for images.** Deploy an `image` source to the local target with blue-green switching and rollback. Generated proxy and ACME entry.
 4. **Build.** Git fetch, Dockerfile build, Compose up. A second Docker image, `ghcr.io/kilimcininkoroglu/r3v3rs3:<version>-platform`, adds the `git` and `docker` binaries (with the Compose plugin). The existing distroless image stays unchanged.
 5. **WebUI.** Targets, Apps, App detail, live log.
@@ -377,7 +377,7 @@ Each phase ends with integration tests and docs, and is usable on its own.
 
 ## 14. Decisions
 
-1. **Cluster mode.** The first version runs on a single server. `platform.db` is local to that server, so the platform refuses to start in cluster mode with a clear error. Cluster support is a later phase.
+1. **Cluster mode.** The first version runs on a single server. `r3v3rs3.db` is local to that server, so the platform refuses to start in cluster mode with a clear error. Cluster support is a later phase.
 2. **Docker image.** A second image with the `-platform` tag suffix carries `git` and `docker`. The default image stays distroless and small. The `platform` target of the `Dockerfile` is `debian:trixie-slim` with `git` from apt and the static `docker` CLI, Compose and buildx plugins of the pinned `docker:<version>-cli` image. buildx is included, because without it Compose builds with the classic builder, which rejects `RUN --mount`. `latest` becomes `latest-platform`. In a container the platform needs host networking and the config directory on the same path as on the host, because the bind mounts of a Compose file resolve on the host. An installation through `install.sh` uses the `git` and `docker` binaries of the host.
 3. **Agent port.** A dedicated `agent_port` setting in `config.toml`, outside the port list (section 10.2).
 4. **Traffic to agent apps.** Through a tunnel inside the agent link, reached through a loopback forwarder on the master (section 10.4). The agent host opens no port to the network.
@@ -389,4 +389,4 @@ Each phase ends with integration tests and docs, and is usable on its own.
 10. **Dockerfile builds.** Through the Docker Engine API, not the `docker` CLI, so a Dockerfile app needs only `git` on the host.
 11. **Compose settings.** r3v3rs3 does not restrict a Compose file: privileged containers, host binds and the host network are allowed, so an account with the Edit permission can take over the host. The user reference states this risk. Only published ports are refused, except the one port of the served service that the override file sets.
 12. **Compose rollback.** A rollback checks out the recorded commit and builds again, instead of keeping the built images of every deployment.
-13. **Git provider connections.** Server-wide connections in `git_connections`, with the client secret and the tokens sealed with `platform.key`. An admin adds and connects them, and an account with the Edit permission uses them. A GitHub connection is a private GitHub App that the manifest flow creates, so no admin copies a client id: GitHub returns a code to the callback, the conversion gives the client values and the private key (sealed in `github_apps`), and after the installation a JWT signed with the private key asks for one-hour installation tokens. The installation is read from `GET /app/installations`, never from the `installation_id` of the setup address. GitHub Enterprise Server works through its own address. GitLab and Gitea stay OAuth applications that an admin registers. Their authorization uses PKCE and a one-time state in memory, and the public callback `/oauth/git/callback` needs no session, because the `SameSite=Strict` session cookie does not follow the redirect of the provider. An app with a `connection` clones with the current token of the connection, which r3v3rs3 refreshes before it expires. The push webhook is installed at the provider on `<public_url>/hooks/apps/{id}`, with `public_url` stored in `platform_settings`, and its state lives in `app_hooks`. A failed installation keeps the app change and shows the error with a reinstall action. The manual Git token and webhook secret stay.
+13. **Git provider connections.** Server-wide connections in `git_connections`, with the client secret and the tokens sealed with `r3v3rs3.key`. An admin adds and connects them, and an account with the Edit permission uses them. A GitHub connection is a private GitHub App that the manifest flow creates, so no admin copies a client id: GitHub returns a code to the callback, the conversion gives the client values and the private key (sealed in `github_apps`), and after the installation a JWT signed with the private key asks for one-hour installation tokens. The installation is read from `GET /app/installations`, never from the `installation_id` of the setup address. GitHub Enterprise Server works through its own address. GitLab and Gitea stay OAuth applications that an admin registers. Their authorization uses PKCE and a one-time state in memory, and the public callback `/oauth/git/callback` needs no session, because the `SameSite=Strict` session cookie does not follow the redirect of the provider. An app with a `connection` clones with the current token of the connection, which r3v3rs3 refreshes before it expires. The push webhook is installed at the provider on `<public_url>/hooks/apps/{id}`, with `public_url` stored in `platform_settings`, and its state lives in `app_hooks`. A failed installation keeps the app change and shows the error with a reinstall action. The manual Git token and webhook secret stay.

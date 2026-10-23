@@ -4,18 +4,24 @@ description = "Configuration"
 weight = 0
 +++
 
-# Config File
+# Configuration & Storage
 
-`config.toml` in the config directory holds the settings of the server. When the file is missing, the server writes it on its start with every setting and its default value, so a fresh install shows what the server reads. A file that exists is never overwritten.
+r3v3rs3 stores all server configuration, reverse proxy rules, ports, access lists, ACME settings, user accounts, and deployment platform data in a unified SQLite database, `r3v3rs3.db`, located in the configuration directory (default `/etc/r3v3rs3`).
 
-The settings page of the panel manages every section while the server runs, and a save applies it without a restart. The exception is the `worker_mode`, which changes the process itself: only `config.toml` sets it, and a restart applies a change.
+- **Unified SQLite Database (`r3v3rs3.db`)**: Atomic transactions and WAL mode ensure high concurrency, immediate durability, and rock-solid reliability across restarts.
+- **Master Encryption Key (`r3v3rs3.key`)**: Sensitive credentials (DNS API keys, Git tokens, environment secrets) are sealed with AES-256-GCM using `r3v3rs3.key` stored with strict `0600` file permissions.
+- **Disk File Persistence**: Certificate PEM files remain on disk under `certs/<kind>/<id>/*.pem` (with relative paths tracked in `r3v3rs3.db`). External JSON datasets (`cdn-ranges.json`, `app-store.json`, `engines.json`) remain plain files on disk for easy catalog sync.
+- **Log Isolation (`log.db`)**: High-throughput tracing and request logs live in a dedicated `log.db` database to prevent write contention and bloat in `r3v3rs3.db`.
+- **Automatic Legacy Migration**: If legacy configuration files (`config.toml`, `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`, `dns-credentials.toml`, `accounts.toml`, `notifications.json`, or `platform.db` / `platform.key`) exist in the configuration directory, r3v3rs3 automatically migrates their contents into `r3v3rs3.db` on startup and safely renames the original files to `*.migrated`, guaranteeing zero data loss.
+
+The settings page of the panel manages configuration options while the server runs, applying updates immediately without requiring a process restart. The exception is `worker_mode`, which changes process clustering architecture: it can be configured in settings or CLI and takes effect on restart.
 
 ## Configuration Backup & Restore
 
 r3v3rs3 can export its entire configuration (settings, ports, proxies, access lists, ACME configs, and storage files) to a single JSON backup file and restore it onto another server:
 
 - **Secrets masked**: Sensitive secrets such as webhook tokens, proxy and access list password hashes, and ACME provider API keys are masked or redacted in the backup file so that backups can be stored or transmitted safely.
-- **Accounts excluded**: User accounts (`accounts.toml`) are strictly excluded from the backup and restore process. When restoring a backup on a server, existing admin credentials remain unchanged.
+- **Accounts excluded**: User accounts are strictly excluded from the configuration backup and restore process. When restoring a backup on a server, existing admin credentials remain unchanged.
 
 ### WebUI
 
@@ -50,7 +56,7 @@ $ cat r3v3rs3-backup.json | r3v3rs3-cli config restore -f -
 
 Unlike standard JSON configuration backups, **Disaster Recovery Snapshots** (`.r3bundle`) capture the full operational state of r3v3rs3 and its Coolify-like deployment platform in a single, AES-256-GCM encrypted bundle:
 
-- **Complete State Included**: Contains `platform.db` (SQLite database with all apps, deployments, databases, and environment variables), `platform.key`, cluster sealing keys (`keys/`), TLS certificates and private keys (`certs/`), user accounts (`accounts.toml`), and all configuration files (`config.toml`, `ports.toml`, `proxies.toml`, `access_lists.toml`, `acme.toml`).
+- **Complete State Included**: Contains `r3v3rs3.db` (unified SQLite database with all settings, ports, proxies, access lists, ACME certificates, user accounts, apps, deployments, databases, and environment variables), `r3v3rs3.key`, cluster sealing keys (`keys/`), TLS certificates and private keys (`certs/`), and legacy backup files if present.
 - **AES-256-GCM Encryption**: Encrypted with an optional user-defined passphrase using 10,000 rounds of salted SHA-256 key derivation. Unencrypted data never leaves the server memory.
 - **Automatic S3 Replication**: When remote S3 storage is configured in database backup settings, disaster recovery backups are automatically uploaded to `{prefix}/disaster-recovery/` in the remote bucket.
 - **Single-Command Disaster Recovery**: Allows restoring the entire system onto a completely fresh server with a single CLI command.
@@ -120,11 +126,11 @@ tls_termination = { server_names = ["example.com", "*.example.com"] }
 
 HTTPS, HTTP over QUIC and TCP over TLS ports can verify the certificate of the client (mutual TLS). Select the mode in "Client Authentication":
 
-| Mode | Behavior |
-|---|---|
-| Off | The port does not ask for a client certificate. This is the default. |
+| Mode     | Behavior                                                                                                                 |
+|----------|--------------------------------------------------------------------------------------------------------------------------|
+| Off      | The port does not ask for a client certificate. This is the default.                                                     |
 | Optional | The port asks for a certificate but also accepts clients without one. A certificate that the client sends must be valid. |
-| Required | The TLS handshake fails when the client sends no valid certificate. |
+| Required | The TLS handshake fails when the client sends no valid certificate.                                                      |
 
 In Optional and Required mode, select one or more root certificates in "Client CA Certificates". A client certificate must be signed by one of them. The system root certificates are not used. r3v3rs3 rejects a port config without a root certificate, or with a certificate that is not a root certificate. A root certificate that a port uses cannot be deleted.
 
@@ -808,13 +814,13 @@ r3v3rs3 asks an external service, for example oauth2-proxy or Authelia, whether 
 
 For each client request, r3v3rs3 sends a `GET` request to the auth URL. The auth request carries the client request headers without the connection headers and `Host`, and these headers:
 
-| Header | Value |
-|---|---|
-| `X-Forwarded-Method` | The client request method. |
-| `X-Forwarded-Proto` | `http` or `https`. |
-| `X-Forwarded-Host` | The client request host. |
-| `X-Forwarded-Uri` | The client request path and query. |
-| `X-Forwarded-For` | The client IP address that the "Client IP" section resolves. |
+| Header               | Value                                                        |
+|----------------------|--------------------------------------------------------------|
+| `X-Forwarded-Method` | The client request method.                                   |
+| `X-Forwarded-Proto`  | `http` or `https`.                                           |
+| `X-Forwarded-Host`   | The client request host.                                     |
+| `X-Forwarded-Uri`    | The client request path and query.                           |
+| `X-Forwarded-For`    | The client IP address that the "Client IP" section resolves. |
 
 - **2xx response**: r3v3rs3 sends the request to the upstream server. It copies the headers in "Copy Response Headers" from the auth response to the upstream request. It removes these headers from the client request first, so a client cannot send them itself.
 - **Other responses**: r3v3rs3 sends the auth response (status, headers and a body up to 64 KiB) to the client. So a redirect to a login page works.
@@ -839,11 +845,11 @@ Clients sign in with an r3v3rs3 panel account, the same account that you use for
 
 Each route with this authentication serves these endpoints below its path. For the route `/`, the sign-in page is `/.r3v3rs3/auth/login`. For the route `/admin`, it is `/admin/.r3v3rs3/auth/login`.
 
-| Endpoint | Method | Action |
-|---|---|---|
-| `.r3v3rs3/auth/login` | `GET` | Shows the sign-in form. |
-| `.r3v3rs3/auth/login` | `POST` | Checks the username, the password and the TOTP code, then sets the session cookie. |
-| `.r3v3rs3/auth/logout` | `POST` | Ends the session and removes the session cookie. |
+| Endpoint               | Method | Action                                                                             |
+|------------------------|--------|------------------------------------------------------------------------------------|
+| `.r3v3rs3/auth/login`  | `GET`  | Shows the sign-in form.                                                            |
+| `.r3v3rs3/auth/login`  | `POST` | Checks the username, the password and the TOTP code, then sets the session cookie. |
+| `.r3v3rs3/auth/logout` | `POST` | Ends the session and removes the session cookie.                                   |
 
 The TOTP code is required only for accounts with TOTP. The session cookie `r3v3rs3_session` has the `HttpOnly` and `SameSite=Lax` attributes, and the `Secure` attribute on HTTPS and HTTP/3. It has no `Domain` attribute, and r3v3rs3 accepts a session only on the host where the client signed in. r3v3rs3 removes the session cookie before it sends the request to the upstream server.
 
@@ -877,16 +883,16 @@ Protect applications directly using OpenID Connect and OAuth 2.0 identity provid
 - On authorized upstream requests, r3v3rs3 removes the session cookie and injects `X-Forwarded-User` and `X-Forwarded-Email` headers containing the verified identity.
 - Users can sign out at any time by navigating to `/.r3v3rs3/auth/oidc/logout`.
 
-| Field | Description |
-|---|---|
-| `issuer_url` | The OIDC provider issuer URL (e.g., `https://accounts.google.com` or `https://auth.example.com/realms/master`). Standard authorization and token endpoints are resolved automatically if not specified explicitly. |
-| `authorization_url` | Optional explicit authorization endpoint URL. |
-| `token_url` | Optional explicit token endpoint URL. |
-| `userinfo_url` | Optional explicit userinfo endpoint URL (used if identity claims are not in the ID token). |
-| `client_id` | OAuth 2.0 Client ID registered with the provider. |
-| `client_secret` | OAuth 2.0 Client Secret (stored sealed at rest). |
-| `scopes` | OAuth 2.0 scopes to request (defaults to `["openid", "email", "profile"]`). |
-| `allowed_emails` | List of allowed email addresses or domain wildcards (e.g., `["admin@example.com", "*@company.com"]`). If empty, any user authenticated by the provider is permitted. |
+| Field               | Description                                                                                                                                                                                                        |
+|---------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `issuer_url`        | The OIDC provider issuer URL (e.g., `https://accounts.google.com` or `https://auth.example.com/realms/master`). Standard authorization and token endpoints are resolved automatically if not specified explicitly. |
+| `authorization_url` | Optional explicit authorization endpoint URL.                                                                                                                                                                      |
+| `token_url`         | Optional explicit token endpoint URL.                                                                                                                                                                              |
+| `userinfo_url`      | Optional explicit userinfo endpoint URL (used if identity claims are not in the ID token).                                                                                                                         |
+| `client_id`         | OAuth 2.0 Client ID registered with the provider.                                                                                                                                                                  |
+| `client_secret`     | OAuth 2.0 Client Secret (stored sealed at rest).                                                                                                                                                                   |
+| `scopes`            | OAuth 2.0 scopes to request (defaults to `["openid", "email", "profile"]`).                                                                                                                                        |
+| `allowed_emails`    | List of allowed email addresses or domain wildcards (e.g., `["admin@example.com", "*@company.com"]`). If empty, any user authenticated by the provider is permitted.                                               |
 
 ```toml
 [internal-dashboard]
@@ -932,12 +938,12 @@ routes = [
 ]
 ```
 
-| Endpoint | Action |
-|---|---|
-| `GET /api/access_lists` | Lists the access lists. |
-| `POST /api/access_lists` | Adds an access list. |
-| `PUT /api/access_lists/{id}` | Changes an access list. A user or a token without a new secret keeps its hash. |
-| `DELETE /api/access_lists/{id}` | Deletes an access list. |
+| Endpoint                        | Action                                                                         |
+|---------------------------------|--------------------------------------------------------------------------------|
+| `GET /api/access_lists`         | Lists the access lists.                                                        |
+| `POST /api/access_lists`        | Adds an access list.                                                           |
+| `PUT /api/access_lists/{id}`    | Changes an access list. A user or a token without a new secret keeps its hash. |
+| `DELETE /api/access_lists/{id}` | Deletes an access list.                                                        |
 
 Every account reads the lists. Only an admin or an editor without a proxy list changes them. See [Accounts](@/accounts.md).
 
@@ -947,11 +953,11 @@ You can change the headers of proxied requests and responses in the "Header Rule
 
 Write one rule per line:
 
-| Rule | Action |
-|---|---|
-| `set Name: value` | Replaces every value of the header. |
+| Rule                 | Action                                      |
+|----------------------|---------------------------------------------|
+| `set Name: value`    | Replaces every value of the header.         |
 | `append Name: value` | Adds a value and keeps the existing values. |
-| `remove Name` | Removes the header. |
+| `remove Name`        | Removes the header.                         |
 
 r3v3rs3 skips empty lines and lines that start with `#`.
 
@@ -960,15 +966,15 @@ r3v3rs3 skips empty lines and lines that start with `#`.
 
 Values can use these variables. Write `{{` and `}}` for a literal brace.
 
-| Variable | Value |
-|---|---|
-| `{client_ip}` | The client IP address that the "Client IP" section resolves. |
-| `{host}` | The requested host name. |
-| `{scheme}` | `http` or `https`. |
-| `{request_id}` | A random 32-character hex ID. The request and response rules of one request use the same ID. |
-| `{route}` | The path of the matched route, e.g. `/api`. |
-| `{client_cert_subject}` | The subject of the verified client certificate, e.g. `CN=client.example.com`. Empty without a client certificate. |
-| `{client_cert_fingerprint}` | The SHA-256 fingerprint of the verified client certificate in hex. Empty without a client certificate. |
+| Variable                    | Value                                                                                                             |
+|-----------------------------|-------------------------------------------------------------------------------------------------------------------|
+| `{client_ip}`               | The client IP address that the "Client IP" section resolves.                                                      |
+| `{host}`                    | The requested host name.                                                                                          |
+| `{scheme}`                  | `http` or `https`.                                                                                                |
+| `{request_id}`              | A random 32-character hex ID. The request and response rules of one request use the same ID.                      |
+| `{route}`                   | The path of the matched route, e.g. `/api`.                                                                       |
+| `{client_cert_subject}`     | The subject of the verified client certificate, e.g. `CN=client.example.com`. Empty without a client certificate. |
+| `{client_cert_fingerprint}` | The SHA-256 fingerprint of the verified client certificate in hex. Empty without a client certificate.            |
 
 A client can send a header with the same name itself. Use `set`, not `append`, for the client certificate headers, so the rule replaces the value of the client.
 
@@ -986,11 +992,11 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 You can compress proxied responses in the "Compression" section. Select one or more encodings to enable compression. Select no encoding to disable compression.
 
-| Encoding | `Content-Encoding` | Default Level | Adaptive Levels (< 8 KB / 8–64 KB / > 64 KB or Stream) |
-|---|---|---|---|
-| Brotli | `br` | Quality 4 | Quality 5 / Quality 4 / Quality 3 |
-| Zstandard | `zstd` | Level 3 | Level 4 / Level 3 / Level 1 (Fastest) |
-| Gzip | `gzip` | Level 6 | Level 9 (Best) / Level 6 / Level 1 (Fastest) |
+| Encoding  | `Content-Encoding` | Default Level | Adaptive Levels (< 8 KB / 8–64 KB / > 64 KB or Stream) |
+|-----------|--------------------|---------------|--------------------------------------------------------|
+| Brotli    | `br`               | Quality 4     | Quality 5 / Quality 4 / Quality 3                      |
+| Zstandard | `zstd`             | Level 3       | Level 4 / Level 3 / Level 1 (Fastest)                  |
+| Gzip      | `gzip`             | Level 6       | Level 9 (Best) / Level 6 / Level 1 (Fastest)           |
 
 r3v3rs3 reads the `Accept-Encoding` header of the request and uses the accepted encoding with the highest `q` value. When the client accepts several encodings with the same `q` value, r3v3rs3 uses the order of `algorithms`. In the panel, the order in which you select the encodings sets this order.
 
@@ -1006,13 +1012,13 @@ r3v3rs3 compresses a response only when all of these conditions are true:
 
 When a response meets these conditions, r3v3rs3 adds `Accept-Encoding` to `Vary`. When r3v3rs3 compresses the response, it also removes `Content-Length` and `Accept-Ranges`, and changes a strong `ETag` to a weak `ETag`. The response header rules run before compression, so a rule can set `Cache-Control: no-transform` to stop compression.
 
-| Setting | Default | Description |
-|---|---|---|
-| `algorithms` | Empty. Compression is disabled. | List of compression algorithms (`br`, `zstd`, `gzip`) in preferred order. |
-| `min_size` | `1024` bytes | Minimum body size required before compression is applied. |
-| `mime_types` | `text/*`, `application/javascript`, `application/json`, `application/manifest+json`, `application/wasm`, `application/xml`, `application/xhtml+xml`, `application/rss+xml`, `application/atom+xml`, `image/svg+xml`, `font/otf`, `font/ttf` | Media types eligible for compression. Incompressible formats (PNG, JPEG, WebP, AVIF, WOFF2, ZIP) are automatically excluded. |
-| `adaptive_level` | `true` | Dynamically adapts compression levels based on response payload size (small payloads use higher ratios, large/streaming payloads use fastest throughput), and lowers min-size threshold down to 256 bytes for text/JSON. |
-| `precompressed` | `true` | Negotiates and serves pre-compressed static assets (`.zst`, `.br`, `.gz`) directly with zero CPU overhead. |
+| Setting          | Default                                                                                                                                                                                                                                     | Description                                                                                                                                                                                                              |
+|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `algorithms`     | Empty. Compression is disabled.                                                                                                                                                                                                             | List of compression algorithms (`br`, `zstd`, `gzip`) in preferred order.                                                                                                                                                |
+| `min_size`       | `1024` bytes                                                                                                                                                                                                                                | Minimum body size required before compression is applied.                                                                                                                                                                |
+| `mime_types`     | `text/*`, `application/javascript`, `application/json`, `application/manifest+json`, `application/wasm`, `application/xml`, `application/xhtml+xml`, `application/rss+xml`, `application/atom+xml`, `image/svg+xml`, `font/otf`, `font/ttf` | Media types eligible for compression. Incompressible formats (PNG, JPEG, WebP, AVIF, WOFF2, ZIP) are automatically excluded.                                                                                             |
+| `adaptive_level` | `true`                                                                                                                                                                                                                                      | Dynamically adapts compression levels based on response payload size (small payloads use higher ratios, large/streaming payloads use fastest throughput), and lowers min-size threshold down to 256 bytes for text/JSON. |
+| `precompressed`  | `true`                                                                                                                                                                                                                                      | Negotiates and serves pre-compressed static assets (`.zst`, `.br`, `.gz`) directly with zero CPU overhead.                                                                                                               |
 
 ```toml
 [my-app]
@@ -1026,13 +1032,13 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 You can store proxied responses in memory in the "Cache" section. A stored response goes to the client without a request to the upstream server. Every route of the proxy shares one cache, and each proxy has its own cache.
 
-| Setting | Default | Description |
-|---|---|---|
-| `enabled` | `false` | Enables the cache. |
-| `max_size` | `67108864` (64 MiB) | The memory limit of the stored responses in bytes. When the cache is full, r3v3rs3 removes the least used responses. |
-| `max_entry_size` | `1048576` (1 MiB) | r3v3rs3 does not store a response with a larger body. |
-| `default_ttl` | `0s` | The lifetime of a response without `Cache-Control: max-age`, `s-maxage` or `Expires`. With `0s`, r3v3rs3 stores such a response only when it has an `ETag` or `Last-Modified` header, and revalidates it on every request. |
-| `stale_while_revalidate` | `0s` | Window during which a stale response is served immediately (`X-Cache: STALE`) while r3v3rs3 revalidates it asynchronously in the background. Upstream `stale-while-revalidate` in `Cache-Control` takes precedence. |
+| Setting                  | Default             | Description                                                                                                                                                                                                                |
+|--------------------------|---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`                | `false`             | Enables the cache.                                                                                                                                                                                                         |
+| `max_size`               | `67108864` (64 MiB) | The memory limit of the stored responses in bytes. When the cache is full, r3v3rs3 removes the least used responses.                                                                                                       |
+| `max_entry_size`         | `1048576` (1 MiB)   | r3v3rs3 does not store a response with a larger body.                                                                                                                                                                      |
+| `default_ttl`            | `0s`                | The lifetime of a response without `Cache-Control: max-age`, `s-maxage` or `Expires`. With `0s`, r3v3rs3 stores such a response only when it has an `ETag` or `Last-Modified` header, and revalidates it on every request. |
+| `stale_while_revalidate` | `0s`                | Window during which a stale response is served immediately (`X-Cache: STALE`) while r3v3rs3 revalidates it asynchronously in the background. Upstream `stale-while-revalidate` in `Cache-Control` takes precedence.        |
 
 r3v3rs3 uses the cache only for `GET` and `HEAD` requests without `Range`, `Upgrade` and `Cache-Control: no-store`. A `HEAD` request uses the stored `GET` response. When the client sends `Cache-Control: no-cache` or `Pragma: no-cache`, r3v3rs3 sends the request to the upstream server and stores the new response. The cache key is the requested host with the path and the query of the request, so the upstream server that load balancing selects does not change the key.
 
@@ -1176,18 +1182,18 @@ The certificate list marks a certificate that expires within "Certificate Expiry
 
 r3v3rs3 sends a JSON `POST` request to the notification webhook for these events:
 
-| Event | When |
-|---|---|
-| `certificate_expiring` | A certificate expires within "Certificate Expiry Warning". |
-| `certificate_expired` | A certificate has expired. |
-| `acme_order_failed` | An ACME order failed. Each failed order sends an event. |
-| `test` | An admin sent a test notification. |
-| `deployment_started` | A deployment of the [deployment platform](@/platform.md) started. |
-| `deployment_running` | A deployment ended, and its container runs. |
-| `deployment_failed` | A deployment failed. A restart of r3v3rs3 also fails each unfinished deployment and sends this event. |
-| `agent_online` | An agent connected to the master. A new connection that replaces an open one sends no event. |
-| `agent_offline` | The connection of an agent ended. A deleted or re-enrolled target sends no event. |
-| `app_alert` | An app exceeded its configured CPU or memory alert threshold. |
+| Event                  | When                                                                                                  |
+|------------------------|-------------------------------------------------------------------------------------------------------|
+| `certificate_expiring` | A certificate expires within "Certificate Expiry Warning".                                            |
+| `certificate_expired`  | A certificate has expired.                                                                            |
+| `acme_order_failed`    | An ACME order failed. Each failed order sends an event.                                               |
+| `test`                 | An admin sent a test notification.                                                                    |
+| `deployment_started`   | A deployment of the [deployment platform](@/platform.md) started.                                     |
+| `deployment_running`   | A deployment ended, and its container runs.                                                           |
+| `deployment_failed`    | A deployment failed. A restart of r3v3rs3 also fails each unfinished deployment and sends this event. |
+| `agent_online`         | An agent connected to the master. A new connection that replaces an open one sends no event.          |
+| `agent_offline`        | The connection of an agent ended. A deleted or re-enrolled target sends no event.                     |
+| `app_alert`            | An app exceeded its configured CPU or memory alert threshold.                                         |
 
 ```json
 {"event": "certificate_expiring", "time": 1757894400, "node": "proxy-1", "certificate": {"id": "a1b2c3d", "san": ["example.com"], "not_after": 1759104000}}
@@ -1218,13 +1224,13 @@ webhook = { url = "https://hooks.example.com/r3v3rs3", token = "<token>", timeou
 
 Select the certificates with the checkboxes of the list, then click "Delete Selected". `POST /api/certs/delete` with the body `{"ids": [...]}` does the same for at most 200 ids. The response holds one result for each id, in the order of the request:
 
-| Result | Meaning |
-|---|---|
-| `deleted` | r3v3rs3 deleted the certificate. |
-| `in_use` | A port, a proxy or a discovery provider uses the certificate, so it stays. |
-| `read_only` | Service discovery manages the certificate, so it stays. |
-| `not_found` | No certificate has the id. |
-| `failed` | The storage did not delete the certificate. The server log names the cause. |
+| Result      | Meaning                                                                     |
+|-------------|-----------------------------------------------------------------------------|
+| `deleted`   | r3v3rs3 deleted the certificate.                                            |
+| `in_use`    | A port, a proxy or a discovery provider uses the certificate, so it stays.  |
+| `read_only` | Service discovery manages the certificate, so it stays.                     |
+| `not_found` | No certificate has the id.                                                  |
+| `failed`    | The storage did not delete the certificate. The server log names the cause. |
 
 An id that the request repeats gets one result.
 
@@ -1240,11 +1246,11 @@ Select the certificate authority (Let's Encrypt, Google Trust Services, ZeroSSL,
 
 The certificate authority checks that you control each domain name with a challenge. Select the challenge in the "Challenge" field.
 
-| Challenge | How it works | Requirements |
-|---|---|---|
-| HTTP-01 | The certificate authority requests `http://<domain>/.well-known/acme-challenge/<token>`, and r3v3rs3 answers. | Every domain name resolves to r3v3rs3, and TCP port 80 is open and accessible from the internet. Wildcard domain names are not possible. |
+| Challenge   | How it works                                                                                                                                                      | Requirements                                                                                                                              |
+|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| HTTP-01     | The certificate authority requests `http://<domain>/.well-known/acme-challenge/<token>`, and r3v3rs3 answers.                                                     | Every domain name resolves to r3v3rs3, and TCP port 80 is open and accessible from the internet. Wildcard domain names are not possible.  |
 | TLS-ALPN-01 | The certificate authority opens a TLS connection to port 443 of the domain with the ALPN protocol `acme-tls/1`, and r3v3rs3 answers with a challenge certificate. | Every domain name resolves to r3v3rs3, and TCP port 443 is open and accessible from the internet. Wildcard domain names are not possible. |
-| DNS-01 | r3v3rs3 creates a TXT record `_acme-challenge.<domain>` through the API of your DNS provider. | A DNS provider from the table below and an API credential that can edit the zone. |
+| DNS-01      | r3v3rs3 creates a TXT record `_acme-challenge.<domain>` through the API of your DNS provider.                                                                     | A DNS provider from the table below and an API credential that can edit the zone.                                                         |
 
 A wildcard domain name such as `*.example.com` needs DNS-01. r3v3rs3 rejects a wildcard domain name with HTTP-01 and TLS-ALPN-01.
 
@@ -1262,23 +1268,23 @@ For each domain name, r3v3rs3 does these steps:
 
 A system resolver can return cached answers. If the propagation check fails often, set "DNS Challenge Resolver" to a public resolver such as `1.1.1.1:53` or to an authoritative name server of the zone.
 
-| DNS provider | Credentials | Required permissions |
-|---|---|---|
-| Cloudflare | API Token | `Zone:Read` and `DNS:Edit` for the zone. |
-| Route 53 | Access Key ID, Secret Access Key | `route53:ListHostedZones` and `route53:ChangeResourceRecordSets`. Private hosted zones are skipped. |
-| Azure DNS | Tenant ID, Client ID, Client Secret, Subscription ID | A service principal with the DNS Zone Contributor role on the zones. r3v3rs3 lists the DNS zones of the subscription and takes the resource group from the zone ID. |
-| Google Cloud DNS | Service Account Key (JSON), Project ID | The JSON key file of a service account with the DNS Administrator role (`roles/dns.admin`) in the project of the zones. Without a Project ID, r3v3rs3 uses the project of the key. Private zones are skipped. |
-| deSEC | API Token | A token of the account. A token with a scoped policy must allow writes to the `_acme-challenge` TXT record sets. |
-| DigitalOcean | API Token | A token that can read domains and create and delete domain records. |
-| Gandi | API Token | A personal access token that can read the domains and change their LiveDNS records. |
-| Hetzner Cloud | API Token | A Hetzner Cloud project token with read and write access. The zone must be in Hetzner Cloud DNS. |
-| Linode | API Token | A personal access token with read and write access to Domains. |
-| Vultr | API Key | The API key of the account. |
-| Porkbun | API Key, Secret API Key | "API Access" is on for the domain in the Porkbun domain management. |
-| OVHcloud | API Endpoint, Application Key, Application Secret, Consumer Key | A consumer key with the rights `GET /domain/zone`, `POST /domain/zone/*` and `DELETE /domain/zone/*`. The endpoint is `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` or `soyoustart-ca`. r3v3rs3 refreshes the zone after it creates the records and after it deletes them. |
-| Webhook | Webhook URL, Bearer Token | A service of your own that creates and deletes the TXT records. See "DNS webhook" below. |
-| Exec | Program Path | A program on the r3v3rs3 host that creates and deletes the TXT records. See "DNS exec" below. |
-| RFC 2136 | DNS Server, Zone, TSIG Key Name, TSIG Algorithm, TSIG Secret | A DNS server that accepts dynamic updates, for example BIND, Knot DNS or PowerDNS. See "RFC 2136" below. |
+| DNS provider     | Credentials                                                     | Required permissions                                                                                                                                                                                                                                                                                   |
+|------------------|-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Cloudflare       | API Token                                                       | `Zone:Read` and `DNS:Edit` for the zone.                                                                                                                                                                                                                                                               |
+| Route 53         | Access Key ID, Secret Access Key                                | `route53:ListHostedZones` and `route53:ChangeResourceRecordSets`. Private hosted zones are skipped.                                                                                                                                                                                                    |
+| Azure DNS        | Tenant ID, Client ID, Client Secret, Subscription ID            | A service principal with the DNS Zone Contributor role on the zones. r3v3rs3 lists the DNS zones of the subscription and takes the resource group from the zone ID.                                                                                                                                    |
+| Google Cloud DNS | Service Account Key (JSON), Project ID                          | The JSON key file of a service account with the DNS Administrator role (`roles/dns.admin`) in the project of the zones. Without a Project ID, r3v3rs3 uses the project of the key. Private zones are skipped.                                                                                          |
+| deSEC            | API Token                                                       | A token of the account. A token with a scoped policy must allow writes to the `_acme-challenge` TXT record sets.                                                                                                                                                                                       |
+| DigitalOcean     | API Token                                                       | A token that can read domains and create and delete domain records.                                                                                                                                                                                                                                    |
+| Gandi            | API Token                                                       | A personal access token that can read the domains and change their LiveDNS records.                                                                                                                                                                                                                    |
+| Hetzner Cloud    | API Token                                                       | A Hetzner Cloud project token with read and write access. The zone must be in Hetzner Cloud DNS.                                                                                                                                                                                                       |
+| Linode           | API Token                                                       | A personal access token with read and write access to Domains.                                                                                                                                                                                                                                         |
+| Vultr            | API Key                                                         | The API key of the account.                                                                                                                                                                                                                                                                            |
+| Porkbun          | API Key, Secret API Key                                         | "API Access" is on for the domain in the Porkbun domain management.                                                                                                                                                                                                                                    |
+| OVHcloud         | API Endpoint, Application Key, Application Secret, Consumer Key | A consumer key with the rights `GET /domain/zone`, `POST /domain/zone/*` and `DELETE /domain/zone/*`. The endpoint is `ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu` or `soyoustart-ca`. r3v3rs3 refreshes the zone after it creates the records and after it deletes them. |
+| Webhook          | Webhook URL, Bearer Token                                       | A service of your own that creates and deletes the TXT records. See "DNS webhook" below.                                                                                                                                                                                                               |
+| Exec             | Program Path                                                    | A program on the r3v3rs3 host that creates and deletes the TXT records. See "DNS exec" below.                                                                                                                                                                                                          |
+| RFC 2136         | DNS Server, Zone, TSIG Key Name, TSIG Algorithm, TSIG Secret    | A DNS server that accepts dynamic updates, for example BIND, Knot DNS or PowerDNS. See "RFC 2136" below.                                                                                                                                                                                               |
 
 r3v3rs3 is tested against mock servers of these APIs and against the [Pebble](https://github.com/letsencrypt/pebble) test certificate authority. It is not tested against real provider accounts.
 
@@ -1385,12 +1391,12 @@ The server also checks for a newer release on its own. The `upgrade.check_interv
 
 Every server-side connection carries flood limits. The `[http2]` and `[http3]` sections of `config.toml`, which the "Settings" page edits, hold the defaults for every port:
 
-| Setting | Default | Range | What it bounds |
-|---|---|---|---|
-| `http2.max_header_list_size` | 65536 | 1024 to 1048576 | The `HEADERS` plus CONTINUATION frames of one request, in bytes (CVE-2024-27316). |
-| `http2.max_pending_accept_reset_streams` | 128 | 1 to 65536 | The streams a client can reset before a `GOAWAY` closes the connection (CVE-2023-44487). |
-| `http3.max_concurrent_bidi_streams` | 100 | 1 to 100000 | The request streams one QUIC connection can open. |
-| `http3.max_concurrent_uni_streams` | 10 | 1 to 100000 | The control streams one QUIC connection can open. |
+| Setting                                  | Default | Range           | What it bounds                                                                           |
+|------------------------------------------|---------|-----------------|------------------------------------------------------------------------------------------|
+| `http2.max_header_list_size`             | 65536   | 1024 to 1048576 | The `HEADERS` plus CONTINUATION frames of one request, in bytes (CVE-2024-27316).        |
+| `http2.max_pending_accept_reset_streams` | 128     | 1 to 65536      | The streams a client can reset before a `GOAWAY` closes the connection (CVE-2023-44487). |
+| `http3.max_concurrent_bidi_streams`      | 100     | 1 to 100000     | The request streams one QUIC connection can open.                                        |
+| `http3.max_concurrent_uni_streams`       | 10      | 1 to 100000     | The control streams one QUIC connection can open.                                        |
 
 A request above the header limit gets its stream reset, and the port keeps serving new connections.
 
@@ -1500,7 +1506,7 @@ redirect_uris = ["http://127.0.0.1:8765/callback"]
 
 A client signs in through the OAuth 2.1 authorization code flow with PKCE: the client opens `/oauth/authorize` in the browser, the signed-in account approves the client on a consent form, and the client trades the one-time code for an access token at `/oauth/token`. The token carries the scopes of the approval: `read` sees the state, `edit` also changes proxies. The metadata documents live at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource`.
 
-Tokens and dynamically registered clients are persisted in SQLite (`platform.db`). A server restart or upgrade preserves the active grants, and clients seamlessly refresh their access tokens using their 30-day refresh tokens without prompting for re-authentication. Active sessions can be viewed and revoked at any time from the WebUI Settings page or via `GET /api/mcp/sessions` and `DELETE /api/mcp/sessions/{id}`.
+Tokens and dynamically registered clients are persisted in SQLite (`r3v3rs3.db`). A server restart or upgrade preserves the active grants, and clients seamlessly refresh their access tokens using their 30-day refresh tokens without prompting for re-authentication. Active sessions can be viewed and revoked at any time from the WebUI Settings page or via `GET /api/mcp/sessions` and `DELETE /api/mcp/sessions/{id}`.
 
 How a client connects depends on the client. An AI host that speaks the MCP authorization flow, such as Claude Code or Cursor, needs no extra program: it adds this server as an HTTP MCP server, for example with `claude mcp add --transport http --scope user r3v3rs3 https://panel.example.com/api/mcp`, and its own `Authenticate` action of the `/mcp` command runs the same authorization flow in the browser. The command line client below serves the other cases: scripts, cron jobs and servers without a browser session, where one command signs in once and stores its tokens for every later call.
 
@@ -1635,7 +1641,7 @@ The `provider` value of `dns_provider` is `cloudflare`, `route53`, `digitalocean
 
 The "DNS Credentials" page below "Certificates" in the WebUI stores the credentials of the DNS providers under a name. A provider can hold several credentials, for example one Cloudflare token per account. The ACME form then picks a stored credential for the DNS-01 challenge instead of typing the provider credentials again, and every entry that uses the credential picks up a token change with it.
 
-The admin API and the WebUI never return the stored credentials, and the list shows only the name and the provider of a credential. r3v3rs3 seals the credentials with the key in `platform.key` in the configuration directory and creates that key on the first credential when it does not exist yet. The credentials live in `dns-credentials.toml`, which r3v3rs3 writes with mode `0600`.
+The admin API and the WebUI never return the stored credentials, and the list shows only the name and the provider of a credential. r3v3rs3 seals the credentials with the master key in `r3v3rs3.key` in the configuration directory and creates that key on the first credential when it does not exist yet. The credentials are encrypted and stored in `r3v3rs3.db`.
 
 An ACME entry in `acme.toml` references a credential by its id and carries no provider of its own:
 
@@ -1654,25 +1660,25 @@ A credential that an ACME entry still references cannot be deleted. Delete the r
 
 # Settings
 
-The "Settings" section of the WebUI edits the server-wide options stored in `config.toml`. Changes take effect immediately and are saved to the file.
+The "Settings" section of the WebUI edits the server-wide options stored in the database (`r3v3rs3.db`). Changes take effect immediately and are persisted.
 
-| Setting | Default | Description |
-|---|---|---|
-| Session Expiry | `1h` | Lifetime of an admin session. The minimum is 5 minutes. |
-| Display Time Zone | `UTC` | The IANA time zone that the panel renders the stored times in, for example Europe/Istanbul. The times stay stored as UTC. |
-| Max Login Attempts | `10` | Failed logins allowed per client IP and username. |
-| Login Attempts Reset | `15m` | Wait time after the limit is reached. |
-| Background Task Interval | `1h` | Interval of certificate renewal and log cleanup tasks. |
-| HTTP Challenge Address | `0.0.0.0:80` | Listening address for ACME HTTP challenges. |
-| TLS-ALPN Challenge Address | `0.0.0.0:443` | Listening address for ACME TLS-ALPN-01 challenges when no port uses its port. |
-| DNS Challenge Resolver | empty | DNS server, for example `1.1.1.1:53`, that r3v3rs3 asks until the TXT records of a DNS-01 challenge are visible. Empty uses the system resolver. |
-| Upstream DNS Resolver | empty | DNS server, for example `127.0.0.1:8600` for Consul, that answers the SRV lookups of `http+srv` and `https+srv` server URLs. Empty uses the system resolver. See [DNS SRV Servers](#dns-srv-servers). |
-| Database Log Retention | `3months` | How long logs are kept in the log database. |
-| Audit Log Retention | `1year` | How long the audit log keeps an entry. See [Audit Log](#audit-log). |
-| Certificate Expiry Warning | `14days` | The certificate list marks a certificate that expires within this time, and the webhook gets a notification for it. See [Notifications](#notifications). |
-| Webhook URL | empty | The notification webhook. Empty sends no notification. |
-| Webhook Token | empty | The bearer token of the webhook requests. The admin API does not return it. |
-| Webhook Timeout | `10s` | The longest time of one webhook request. |
+| Setting                    | Default       | Description                                                                                                                                                                                           |
+|----------------------------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Session Expiry             | `1h`          | Lifetime of an admin session. The minimum is 5 minutes.                                                                                                                                               |
+| Display Time Zone          | `UTC`         | The IANA time zone that the panel renders the stored times in, for example Europe/Istanbul. The times stay stored as UTC.                                                                             |
+| Max Login Attempts         | `10`          | Failed logins allowed per client IP and username.                                                                                                                                                     |
+| Login Attempts Reset       | `15m`         | Wait time after the limit is reached.                                                                                                                                                                 |
+| Background Task Interval   | `1h`          | Interval of certificate renewal and log cleanup tasks.                                                                                                                                                |
+| HTTP Challenge Address     | `0.0.0.0:80`  | Listening address for ACME HTTP challenges.                                                                                                                                                           |
+| TLS-ALPN Challenge Address | `0.0.0.0:443` | Listening address for ACME TLS-ALPN-01 challenges when no port uses its port.                                                                                                                         |
+| DNS Challenge Resolver     | empty         | DNS server, for example `1.1.1.1:53`, that r3v3rs3 asks until the TXT records of a DNS-01 challenge are visible. Empty uses the system resolver.                                                      |
+| Upstream DNS Resolver      | empty         | DNS server, for example `127.0.0.1:8600` for Consul, that answers the SRV lookups of `http+srv` and `https+srv` server URLs. Empty uses the system resolver. See [DNS SRV Servers](#dns-srv-servers). |
+| Database Log Retention     | `3months`     | How long logs are kept in the log database.                                                                                                                                                           |
+| Audit Log Retention        | `1year`       | How long the audit log keeps an entry. See [Audit Log](#audit-log).                                                                                                                                   |
+| Certificate Expiry Warning | `14days`      | The certificate list marks a certificate that expires within this time, and the webhook gets a notification for it. See [Notifications](#notifications).                                              |
+| Webhook URL                | empty         | The notification webhook. Empty sends no notification.                                                                                                                                                |
+| Webhook Token              | empty         | The bearer token of the webhook requests. The admin API does not return it.                                                                                                                           |
+| Webhook Timeout            | `10s`         | The longest time of one webhook request.                                                                                                                                                              |
 
 Durations use a human-readable format, for example `30s`, `15m`, `1h`, or `7days`.
 
@@ -1760,15 +1766,15 @@ The Audit Log page of the WebUI lists the entries, starting with the newest. Onl
 
 `GET /api/audit` returns the same entries. Only an admin account can call it. Each query parameter is optional:
 
-| Parameter | Description |
-|---|---|
-| `since` | The earliest time in Unix milliseconds. The default is 31 days before `until`. |
-| `until` | The latest time in Unix milliseconds. The default is the current time. |
-| `username` | The account of the entries. |
-| `resource_id` | The id of the changed resource, or the changed username. |
-| `action` | The action of the entries (for example `login`, `deploy_app`). |
-| `search` | Free-text search matching username, resource id, or summary. |
-| `limit` | The most entries in the response. The default is `100` and the maximum is `500`. |
+| Parameter     | Description                                                                      |
+|---------------|----------------------------------------------------------------------------------|
+| `since`       | The earliest time in Unix milliseconds. The default is 31 days before `until`.   |
+| `until`       | The latest time in Unix milliseconds. The default is the current time.           |
+| `username`    | The account of the entries.                                                      |
+| `resource_id` | The id of the changed resource, or the changed username.                         |
+| `action`      | The action of the entries (for example `login`, `deploy_app`).                   |
+| `search`      | Free-text search matching username, resource id, or summary.                     |
+| `limit`       | The most entries in the response. The default is `100` and the maximum is `500`. |
 
 # Logging
 

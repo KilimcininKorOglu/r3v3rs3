@@ -24,29 +24,29 @@ Aşağıdaki tablolardaki her maddenin r3v3rs3 karşılığı vardır. Tabloda o
 
 ## Adım 2: nginx direktiflerini çevirin
 
-| nginx | r3v3rs3 |
-|---|---|
-| `listen 443 ssl;` | **HTTPS** protokollü bir port ve onun **Sunucu Adları** alanı |
-| `listen 443 quic;` | **QUIC üzerinden HTTP (HTTP/3)** protokollü bir port |
-| `server_name app.example.com;` | Proxy'nin **Virtual Host'lar** alanı |
-| `location /api { }` | Yolu `/api` olan bir route |
-| `proxy_pass http://api:8080/v1/;` | Route'ta `http://api:8080/v1/` sunucusu |
-| `upstream app { server a; server b; }` | Bir route'ta iki sunucu |
-| `server a weight=3;` | **Hedef** alanında `http://a/ 3`: ağırlık URL'den sonra gelir |
-| `return 301 https://$host$request_uri;` | **HTTP'yi Otomatik Olarak HTTPS'e Yönlendir** |
-| `rewrite ^/items/([0-9]+)$ /item/$1 break;` | Route'ta **Yol Regex'i** ve **Yerine Yazılacak Değer** |
-| `add_header X-Frame-Options DENY;` | Yanıt header'ı kuralı: `set X-Frame-Options: DENY` |
-| `auth_basic` ve `auth_basic_user_file` | Proxy'de kullanıcılarıyla **Basic Auth** |
-| `auth_request /auth;` | **Doğrulama URL'i** ile **Forward Auth** |
-| `allow` ve `deny` | **İzin Verilen IP Adresleri** ve **Engellenen IP Adresleri** |
-| `limit_req_zone` ve `limit_req` | İstek sayısı, süre ve burst ile **Rate Limit** |
-| `proxy_cache_path` ve `proxy_cache` | Bellek limiti ve varsayılan TTL ile **Cache** |
-| `gzip on;` | Algoritmalar ve minimum boyut ile **Sıkıştırma** |
-| `return 404;` | **Sabit durum kodu** route türü |
-| `proxy_set_header X-Real-IP $remote_addr;` | Yalnız güvenilen bir proxy veya CDN için yazılır. Diğer durumda `set X-Real-IP: {client_ip}` istek header'ı kuralı. [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümüne bakın |
-| `client_max_body_size 10m;` | **İstek Gövdesi Limiti** |
-| `proxy_read_timeout 60s;` | Proxy'nin veya route'un **İstek Timeout'u (Saniye)** alanı |
-| `stream { server { proxy_pass db:5432; } }` | TCP proxy |
+| nginx                                       | r3v3rs3                                                                                                                                                                                         |
+|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `listen 443 ssl;`                           | **HTTPS** protokollü bir port ve onun **Sunucu Adları** alanı                                                                                                                                   |
+| `listen 443 quic;`                          | **QUIC üzerinden HTTP (HTTP/3)** protokollü bir port                                                                                                                                            |
+| `server_name app.example.com;`              | Proxy'nin **Virtual Host'lar** alanı                                                                                                                                                            |
+| `location /api { }`                         | Yolu `/api` olan bir route                                                                                                                                                                      |
+| `proxy_pass http://api:8080/v1/;`           | Route'ta `http://api:8080/v1/` sunucusu                                                                                                                                                         |
+| `upstream app { server a; server b; }`      | Bir route'ta iki sunucu                                                                                                                                                                         |
+| `server a weight=3;`                        | **Hedef** alanında `http://a/ 3`: ağırlık URL'den sonra gelir                                                                                                                                   |
+| `return 301 https://$host$request_uri;`     | **HTTP'yi Otomatik Olarak HTTPS'e Yönlendir**                                                                                                                                                   |
+| `rewrite ^/items/([0-9]+)$ /item/$1 break;` | Route'ta **Yol Regex'i** ve **Yerine Yazılacak Değer**                                                                                                                                          |
+| `add_header X-Frame-Options DENY;`          | Yanıt header'ı kuralı: `set X-Frame-Options: DENY`                                                                                                                                              |
+| `auth_basic` ve `auth_basic_user_file`      | Proxy'de kullanıcılarıyla **Basic Auth**                                                                                                                                                        |
+| `auth_request /auth;`                       | **Doğrulama URL'i** ile **Forward Auth**                                                                                                                                                        |
+| `allow` ve `deny`                           | **İzin Verilen IP Adresleri** ve **Engellenen IP Adresleri**                                                                                                                                    |
+| `limit_req_zone` ve `limit_req`             | İstek sayısı, süre ve burst ile **Rate Limit**                                                                                                                                                  |
+| `proxy_cache_path` ve `proxy_cache`         | Bellek limiti ve varsayılan TTL ile **Cache**                                                                                                                                                   |
+| `gzip on;`                                  | Algoritmalar ve minimum boyut ile **Sıkıştırma**                                                                                                                                                |
+| `return 404;`                               | **Sabit durum kodu** route türü                                                                                                                                                                 |
+| `proxy_set_header X-Real-IP $remote_addr;`  | Yalnız güvenilen bir proxy veya CDN için yazılır. Diğer durumda `set X-Real-IP: {client_ip}` istek header'ı kuralı. [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümüne bakın |
+| `client_max_body_size 10m;`                 | **İstek Gövdesi Limiti**                                                                                                                                                                        |
+| `proxy_read_timeout 60s;`                   | Proxy'nin veya route'un **İstek Timeout'u (Saniye)** alanı                                                                                                                                      |
+| `stream { server { proxy_pass db:5432; } }` | TCP proxy                                                                                                                                                                                       |
 
 Zaman kaybettiren iki fark:
 
@@ -62,28 +62,28 @@ Sorgu iki durumda da korunur.
 
 ## Adım 3: Traefik etiketlerini çevirin
 
-| Traefik | r3v3rs3 |
-|---|---|
-| `entrypoints` | Portlar |
-| `Host(\`app.example.com\`)` | Proxy'nin **Virtual Host'lar** alanı |
-| `PathPrefix(\`/api\`)` | Yolu `/api` olan bir route |
-| `PathPrefix` olmayan router | Yolu `/` olan bir route |
-| `loadBalancer.servers` içeren `service` | Route'un sunucuları |
-| `loadBalancer.healthCheck` | **Sağlık Kontrolü Yolu** ve **Kontrol Aralığı (Saniye)** ile sağlık kontrolü |
-| `loadBalancer.sticky.cookie` | Cookie adıyla **Sticky Cookie'yi Aç** |
-| `middlewares.stripPrefix` | Route'un varsayılan davranışı |
-| `middlewares.addPrefix` | **Eklenecek Önek** |
-| `middlewares.redirectScheme` | **HTTP'yi Otomatik Olarak HTTPS'e Yönlendir** |
-| `middlewares.redirectRegex` | `regex`, `target` ve `status` içeren yönlendirme kuralı |
-| `middlewares.basicAuth` | **Basic Auth** |
-| `middlewares.forwardAuth` | **Forward Auth**. [Forward auth ile single sign-on](@/tutorials/forward-auth.tr.md) rehberine bakın |
-| `middlewares.ipAllowList` | **IP Filtresi** |
-| `middlewares.rateLimit` | **Rate Limit** |
-| `middlewares.headers` | Header kuralları |
-| `middlewares.compress` | **Sıkıştırma** |
-| ACME ile `certresolver` | ACME kaydı. [Wildcard sertifika ile HTTPS](@/tutorials/https-certificates.tr.md) rehberine bakın |
-| Docker etiketleri | Docker servis keşfi. [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md) rehberine bakın |
-| `tcp` router | TCP proxy |
+| Traefik                                 | r3v3rs3                                                                                             |
+|-----------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `entrypoints`                           | Portlar                                                                                             |
+| `Host(\`app.example.com\`)`             | Proxy'nin **Virtual Host'lar** alanı                                                                |
+| `PathPrefix(\`/api\`)`                  | Yolu `/api` olan bir route                                                                          |
+| `PathPrefix` olmayan router             | Yolu `/` olan bir route                                                                             |
+| `loadBalancer.servers` içeren `service` | Route'un sunucuları                                                                                 |
+| `loadBalancer.healthCheck`              | **Sağlık Kontrolü Yolu** ve **Kontrol Aralığı (Saniye)** ile sağlık kontrolü                        |
+| `loadBalancer.sticky.cookie`            | Cookie adıyla **Sticky Cookie'yi Aç**                                                               |
+| `middlewares.stripPrefix`               | Route'un varsayılan davranışı                                                                       |
+| `middlewares.addPrefix`                 | **Eklenecek Önek**                                                                                  |
+| `middlewares.redirectScheme`            | **HTTP'yi Otomatik Olarak HTTPS'e Yönlendir**                                                       |
+| `middlewares.redirectRegex`             | `regex`, `target` ve `status` içeren yönlendirme kuralı                                             |
+| `middlewares.basicAuth`                 | **Basic Auth**                                                                                      |
+| `middlewares.forwardAuth`               | **Forward Auth**. [Forward auth ile single sign-on](@/tutorials/forward-auth.tr.md) rehberine bakın |
+| `middlewares.ipAllowList`               | **IP Filtresi**                                                                                     |
+| `middlewares.rateLimit`                 | **Rate Limit**                                                                                      |
+| `middlewares.headers`                   | Header kuralları                                                                                    |
+| `middlewares.compress`                  | **Sıkıştırma**                                                                                      |
+| ACME ile `certresolver`                 | ACME kaydı. [Wildcard sertifika ile HTTPS](@/tutorials/https-certificates.tr.md) rehberine bakın    |
+| Docker etiketleri                       | Docker servis keşfi. [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md) rehberine bakın     |
+| `tcp` router                            | TCP proxy                                                                                           |
 
 Docker etiketleriyle kurulmuş bir Traefik kurulumu en az işi ister: Docker servis keşfini açın ve `traefik.` etiketlerinin yanına `r3v3rs3.` etiketlerini yazın. İki proxy de aynı container'ları okur, hiçbir şeyi silmeden ikisini karşılaştırabilirsiniz.
 
@@ -164,14 +164,14 @@ Birkaç gün sorunsuz geçtikten sonra:
 
 ## Karşılığı olmayanlar
 
-| Özellik | Durum |
-|---|---|
-| Lua, njs ve diğer nginx modülleri | Yok. |
-| Tam yol eşleşmesi | Yok. Yol, bütün segmentleriyle önek olarak eşleşir. |
-| Yanıt gövdesini değiştirme (`sub_filter`) | Yok. |
-| Disk cache | Yok. Cache bellektedir. |
-| Upstream sunucuya HTTP/3 | Yok. Upstream bağlantısı HTTP/2 veya HTTP/1.1 kullanır. |
-| WebTransport | Yok. |
+| Özellik                                   | Durum                                                   |
+|-------------------------------------------|---------------------------------------------------------|
+| Lua, njs ve diğer nginx modülleri         | Yok.                                                    |
+| Tam yol eşleşmesi                         | Yok. Yol, bütün segmentleriyle önek olarak eşleşir.     |
+| Yanıt gövdesini değiştirme (`sub_filter`) | Yok.                                                    |
+| Disk cache                                | Yok. Cache bellektedir.                                 |
+| Upstream sunucuya HTTP/3                  | Yok. Upstream bağlantısı HTTP/2 veya HTTP/1.1 kullanır. |
+| WebTransport                              | Yok.                                                    |
 
 ## Referans
 

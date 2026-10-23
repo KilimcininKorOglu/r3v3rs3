@@ -360,7 +360,7 @@ async fn reseal_webhooks(
 
 async fn write_key_files(config_dir: &Path, key_text: &str) -> anyhow::Result<()> {
     let key_path = config_dir.join(KEY_FILE);
-    let old_key_path = config_dir.join("platform.key.old");
+    let old_key_path = config_dir.join("r3v3rs3.key.old");
     if tokio::fs::try_exists(&key_path).await? {
         let current_text = tokio::fs::read_to_string(&key_path).await?;
         write_private_file(&old_key_path, &current_text).await?;
@@ -561,7 +561,7 @@ mod tests {
         verify_rotated_secrets(&platform, app_id, &webhook_sec).await?;
 
         assert!(tokio::fs::try_exists(dir.0.join(KEY_FILE)).await?);
-        assert!(tokio::fs::try_exists(dir.0.join("platform.key.old")).await?);
+        assert!(tokio::fs::try_exists(dir.0.join("r3v3rs3.key.old")).await?);
 
         verify_fresh_restart(&dir.0, app_id).await?;
         Ok(())

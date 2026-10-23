@@ -22,12 +22,12 @@ http://10.0.0.3:9000/
 
 **Load Balancing** selects the policy of the proxy:
 
-| Policy | What it does |
-|---|---|
-| Round robin | Uses the servers in turn. The default. |
-| Random | Selects a random server. |
-| First healthy server | Uses the first server, the others are backups. |
-| Client IP hash | Sends each client IP address to the same server. |
+| Policy               | What it does                                     |
+|----------------------|--------------------------------------------------|
+| Round robin          | Uses the servers in turn. The default.           |
+| Random               | Selects a random server.                         |
+| First healthy server | Uses the first server, the others are backups.   |
+| Client IP hash       | Sends each client IP address to the same server. |
 
 An HTTP proxy selects a server for each request, a TCP proxy for each connection, and a UDP proxy for each client session. The servers of each HTTP route are a separate group, so two routes of one proxy can use different server sets.
 
@@ -128,12 +128,12 @@ This is the way to deploy: drain one server, wait for its sessions, upgrade it, 
 
 The circuit breaker is off by default. Turn on **Enable Circuit Breaker** on the proxy:
 
-| Field | Default | Meaning |
-|---|---|---|
-| **Failure Ratio (%)** | 50 | The share of failed requests that opens the circuit. |
-| **Minimum Requests** | 20 | The window needs this many requests before the ratio counts. |
-| **Window (Seconds)** | 10 | The length of one counting window. |
-| **Open Duration (Seconds)** | 30 | The time without traffic after the circuit opens. |
+| Field                       | Default | Meaning                                                      |
+|-----------------------------|---------|--------------------------------------------------------------|
+| **Failure Ratio (%)**       | 50      | The share of failed requests that opens the circuit.         |
+| **Minimum Requests**        | 20      | The window needs this many requests before the ratio counts. |
+| **Window (Seconds)**        | 10      | The length of one counting window.                           |
+| **Open Duration (Seconds)** | 30      | The time without traffic after the circuit opens.            |
 
 A request fails when the connection fails, a timeout expires, or the server answers 502, 503 or 504. After Open Duration one trial request tests the server: a success closes the circuit, a failure opens it again. When every server of a route has an open circuit, the client receives 503 Service Unavailable without a request to a server.
 
