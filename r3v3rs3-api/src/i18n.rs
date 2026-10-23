@@ -377,6 +377,7 @@ mod tests {
             Error::WebhookDeliveryFailed { reason: text() },
             Error::GrpcError { reason: text() },
             Error::InvalidAnomalyAlertRules { reason: text() },
+            Error::InvalidAutoQuarantineConfig { reason: text() },
         ]
     }
 

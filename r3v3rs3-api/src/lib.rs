@@ -35,6 +35,7 @@ pub mod policy;
 pub mod port;
 pub mod proxy;
 pub mod proxy_protocol;
+pub mod quarantine;
 pub mod redirect;
 pub mod rewrite;
 pub mod store;

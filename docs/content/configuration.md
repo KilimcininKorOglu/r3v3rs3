@@ -1488,6 +1488,30 @@ r3v3rs3 includes an autonomous real-time anomaly detection engine that monitors 
 - `PUT /api/system/anomalies/rules`: Updates anomaly alert threshold rules.
 - `POST /api/system/anomalies/dismiss`: Dismisses all currently active anomaly alerts.
 
+### Threat Detection & Auto-Quarantine
+
+r3v3rs3 monitors incoming live HTTP and TCP traffic to detect scanner probes, path exploitation attempts, and repeated client error statuses without requiring external threat feed API latency:
+
+- **Local Behavioral Threat Detection**:
+  - Automatically identifies probe patterns such as `/.env`, `/.git`, `/.aws`, `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/phpmyadmin`, and `/config.json`.
+  - Accumulates repeated client status violations (`404`, `403`, `401`) across a sliding time window (default: 60 seconds).
+  - Instantly quarantines offending client IPs when violations reach the threshold (default: 5 violations).
+- **TCP Drop Enforcement**:
+  - Quarantined IP connections are immediately dropped at the TCP listener level before HTTP request parsing or TLS handshakes, consuming near-zero server CPU and memory.
+- **Webhook Alerting**:
+  - Automatically triggers `security.threat_detected` webhook notifications upon IP quarantine.
+- **Management & WebUI Controls**:
+  - View all quarantined IPs, violation counts, and remaining quarantine times in the **Settings > Quarantined IP Addresses** card.
+  - Manually quarantine or release any IP address with a single click.
+
+#### Admin API
+
+- `GET /api/security/quarantine`: Lists all active quarantined IP entries.
+- `POST /api/security/quarantine`: Manually places an IP address into quarantine (`{"ip": "...", "reason": "...", "duration_seconds": 3600}`).
+- `DELETE /api/security/quarantine/{ip}`: Releases an IP address from quarantine early.
+- `GET /api/security/quarantine/config`: Retrieves current auto-quarantine configuration.
+- `PUT /api/security/quarantine/config`: Updates and persists auto-quarantine configuration.
+
 ## MCP Server
 
 The admin API exposes its complete tool suite over the Model Context Protocol at `/api/mcp` (Streamable HTTP, spec 2025-03-26). With **100% MCP Management Parity**, every single administrative feature, proxy route, port listener, ACME certificate, PaaS application, Docker Compose stack, one-click App Store catalog app, managed database, automated backup, agent target node, and disaster recovery snapshot is fully manageable autonomously via MCP without needing a human operator to open the WebUI.
@@ -1496,7 +1520,7 @@ The admin API exposes its complete tool suite over the Model Context Protocol at
 
 | Category | Tools & Operations | Description |
 |---|---|---|
-| **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, and fail2ban brute-force ban management. |
+| **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, fail2ban brute-force bans, and threat auto-quarantine management. |
 | **Ports** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Complete port listener lifecycle: bind addresses, TLS termination options, socket reset/reload, and host interface enumeration. |
 | **Proxies** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | Reverse proxy configuration for HTTP, WebSocket, TCP, UDP, TLS, and HTTP/3, upstream health status, and path-selective cache purging. |
 | **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `list_dns_credentials` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), instant certificate orders/renewals, and DNS credential management. |
@@ -1644,9 +1668,14 @@ r3 <server> store list
 r3 <server> store refresh
 r3 <server> store install <store-app-id> --name my-service [--domain service.example.com]
 
-# Security & Banned IPs
+# Security, Banned & Quarantined IPs
 r3 <server> security banned-ips
 r3 <server> security unban <ip>
+r3 <server> security quarantined-ips
+r3 <server> security quarantine <ip> [--reason "Scanner probe"] [--duration-seconds 3600]
+r3 <server> security unquarantine <ip>
+r3 <server> security quarantine-config
+r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600]
 
 # Webhooks & Scheduled Cron Jobs
 r3 <server> webhook list

@@ -1488,6 +1488,30 @@ r3v3rs3, canlı Prometheus trafik ve çalışma zamanı metriklerini izleyen, an
 - `PUT /api/system/anomalies/rules`: Anomali alarm eşik kurallarını günceller.
 - `POST /api/system/anomalies/dismiss`: Aktif durumdaki tüm anomali alarmlarını temizler.
 
+### Tehdit Algılama ve Otomatik Karantina
+
+r3v3rs3, gelen canlı HTTP ve TCP trafiğini izleyerek dış tehdit istihbaratı API'lerine ihtiyaç duymadan, sıfır gecikmeyle tarayıcı saldırılarını ve ardışık hata durumlarını tespit eder:
+
+- **Yerel Davranışsal Tehdit Tespiti**:
+  - `/.env`, `/.git`, `/.aws`, `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/phpmyadmin` ve `/config.json` gibi tarayıcı ve sonda kalıplarını otomatik olarak yakalar.
+  - Kayan bir zaman penceresinde (varsayılan: 60 saniye) peş peşe alınan HTTP durum ihlallerini (`404`, `403`, `401`) biriktirir.
+  - İhlaller belirlenen eşiğe ulaştığında (varsayılan: 5 ihlal) ilgili client IP adresini anında karantinaya alır.
+- **TCP Drop Yaptırımı**:
+  - Karantinaya alınan IP'lerden gelen bağlantılar, HTTP istek çözümlemesi veya TLS handshake yapılmadan TCP dinleyici seviyesinde anında kapatılır (TCP Drop / Reset). Sunucu CPU ve bellek tüketimi sıfıra indirilir.
+- **Webhook Bildirimi**:
+  - Bir IP karantinaya alındığında otomatik olarak `security.threat_detected` webhook olayı tetiklenir.
+- **Yönetim ve WebUI Kontrolleri**:
+  - Karantinadaki IP'leri, ihlal sayılarını ve kalan karantina sürelerini **Ayarlar > Karantinaya Alınan IP Adresleri** kartında görüntüleyin.
+  - WebUI üzerinden tek tıkla herhangi bir IP adresini manuel karantinaya alın veya serbest bırakın.
+
+#### Admin API
+
+- `GET /api/security/quarantine`: Aktif durumdaki karantinalı IP kayıtlarını listeler.
+- `POST /api/security/quarantine`: Bir IP adresini manuel olarak karantinaya alır (`{"ip": "...", "reason": "...", "duration_seconds": 3600}`).
+- `DELETE /api/security/quarantine/{ip}`: Bir IP adresini karantinadan erken çıkarır.
+- `GET /api/security/quarantine/config`: Mevcut otomatik karantina yapılandırmasını döndürür.
+- `PUT /api/security/quarantine/config`: Otomatik karantina yapılandırmasını günceller ve kalıcı olarak kaydeder.
+
 ## MCP Sunucusu
 
 Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable HTTP, 2025-03-26 spesifikasyonu) ile yayınlar. **%100 MCP Yönetim Eşitliği (MCP Parity)** ile ters proxy rotaları, dinleyici portlar, ACME sertifikaları, PaaS uygulamaları, Docker Compose yığınları, tek tıkla kurulan App Store katalog uygulamaları, yönetilen veritabanları, otomatik yedeklemeler, uzak agent düğümleri ve felaket kurtarma anlık görüntüleri dahil sistemdeki her bir özellik, bir insanın WebUI'yi açmasına gerek kalmadan bir yapay zeka ajanı tarafından otonom olarak %100 yönetilebilir.
@@ -1496,7 +1520,7 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 
 | Kategori | Araçlar ve İşlemler | Açıklama |
 |---|---|---|
-| **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları ve fail2ban kaba kuvvet IP engeli yönetimi. |
+| **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları, fail2ban kaba kuvvet IP engeli ve tehdit otomatik karantina yönetimi. |
 | **Portlar** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Dinleyici port yaşam döngüsü: dinleme adresleri, TLS sonlandırma ayarları, soket yeniden başlatma/yenileme ve sunucu ağ arayüzlerini listeleme. |
 | **Proxy'ler** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | HTTP, WebSocket, TCP, UDP, TLS ve HTTP/3 için ters proxy yapılandırması, upstream sağlık durumu ve yol bazlı önbellek temizleme (purge). |
 | **Sertifikalar ve ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `list_dns_credentials` | TLS sertifikası inceleme, alan adı kapsam kontrolü, otomatik ACME sertifika talepleri (HTTP-01, TLS-ALPN-01, DNS-01), anlık sertifika yenileme ve DNS sağlayıcı kimlik bilgileri yönetimi. |
@@ -1644,9 +1668,14 @@ r3 <server> store list
 r3 <server> store refresh
 r3 <server> store install <store-app-id> --name my-service [--domain service.example.com]
 
-# Güvenlik ve Yasaklı IP'ler
+# Güvenlik, Yasaklı & Karantinalı IP'ler
 r3 <server> security banned-ips
 r3 <server> security unban <ip>
+r3 <server> security quarantined-ips
+r3 <server> security quarantine <ip> [--reason "Tarayıcı sondası"] [--duration-seconds 3600]
+r3 <server> security unquarantine <ip>
+r3 <server> security quarantine-config
+r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600]
 
 # Webhook'lar ve Zamanlanmış Görevler (Cron)
 r3 <server> webhook list

@@ -63,6 +63,7 @@ pub enum WebhookEvent {
     CertRenewed,
     CertRenewalFailed,
     SecurityIpBanned,
+    SecurityThreatDetected,
 
     // Node & System events
     TargetOffline,
@@ -81,7 +82,7 @@ pub enum WebhookEvent {
 }
 
 impl WebhookEvent {
-    pub const ALL: [WebhookEvent; 24] = [
+    pub const ALL: [WebhookEvent; 25] = [
         Self::DeploySuccess,
         Self::DeployFailure,
         Self::DeployPendingApproval,
@@ -95,6 +96,7 @@ impl WebhookEvent {
         Self::CertRenewed,
         Self::CertRenewalFailed,
         Self::SecurityIpBanned,
+        Self::SecurityThreatDetected,
         Self::TargetOffline,
         Self::SystemDiskPressure,
         Self::SystemDiskLow,
@@ -123,6 +125,7 @@ impl WebhookEvent {
             Self::CertRenewed => "cert.renewed",
             Self::CertRenewalFailed => "cert.renewal_failed",
             Self::SecurityIpBanned => "security.ip_banned",
+            Self::SecurityThreatDetected => "security.threat_detected",
             Self::TargetOffline => "target.offline",
             Self::SystemDiskPressure => "system.disk_pressure",
             Self::SystemDiskLow => "system.disk_low",
@@ -151,7 +154,8 @@ impl WebhookEvent {
             Self::CertExpiring
             | Self::CertRenewed
             | Self::CertRenewalFailed
-            | Self::SecurityIpBanned => WebhookEventCategory::Security,
+            | Self::SecurityIpBanned
+            | Self::SecurityThreatDetected => WebhookEventCategory::Security,
             Self::TargetOffline
             | Self::SystemDiskPressure
             | Self::SystemDiskLow
@@ -191,6 +195,7 @@ impl FromStr for WebhookEvent {
             "cert.renewed" => Ok(Self::CertRenewed),
             "cert.renewal_failed" => Ok(Self::CertRenewalFailed),
             "security.ip_banned" => Ok(Self::SecurityIpBanned),
+            "security.threat_detected" => Ok(Self::SecurityThreatDetected),
             "target.offline" => Ok(Self::TargetOffline),
             "system.disk_pressure" => Ok(Self::SystemDiskPressure),
             "system.disk_low" => Ok(Self::SystemDiskLow),

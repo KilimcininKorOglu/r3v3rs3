@@ -384,6 +384,41 @@ pub enum SecurityCommand {
     BannedIps,
     /// Unbans an IP address.
     Unban { ip: String },
+    /// Lists all quarantined IP addresses.
+    QuarantinedIps,
+    /// Quarantines an IP address manually.
+    Quarantine {
+        /// Target IP address to quarantine.
+        ip: String,
+        /// Reason for quarantine.
+        #[arg(long, short = 'r')]
+        reason: Option<String>,
+        /// Duration in seconds.
+        #[arg(long, short = 'd')]
+        duration_seconds: Option<u64>,
+    },
+    /// Releases an IP address from quarantine.
+    Unquarantine {
+        /// Target IP address to release.
+        ip: String,
+    },
+    /// Shows auto-quarantine threat detection configuration.
+    QuarantineConfig,
+    /// Updates auto-quarantine threat detection configuration.
+    SetQuarantineConfig {
+        /// Whether threat detection and quarantine is enabled.
+        #[arg(long)]
+        enabled: Option<bool>,
+        /// Maximum violations allowed in sliding window before ban.
+        #[arg(long)]
+        max_violations: Option<u32>,
+        /// Sliding window in seconds.
+        #[arg(long)]
+        window_seconds: Option<u64>,
+        /// Ban duration in seconds.
+        #[arg(long)]
+        ban_duration_seconds: Option<u64>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -762,6 +797,31 @@ async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyh
     match cmd {
         SecurityCommand::BannedIps => api.list_banned_ips().await,
         SecurityCommand::Unban { ip } => api.unban_ip(&ip).await,
+        SecurityCommand::QuarantinedIps => api.list_quarantined_ips().await,
+        SecurityCommand::Quarantine {
+            ip,
+            reason,
+            duration_seconds,
+        } => {
+            api.quarantine_ip(&ip, reason.as_deref(), duration_seconds)
+                .await
+        }
+        SecurityCommand::Unquarantine { ip } => api.unquarantine_ip(&ip).await,
+        SecurityCommand::QuarantineConfig => api.get_quarantine_config().await,
+        SecurityCommand::SetQuarantineConfig {
+            enabled,
+            max_violations,
+            window_seconds,
+            ban_duration_seconds,
+        } => {
+            api.set_quarantine_config(
+                enabled,
+                max_violations,
+                window_seconds,
+                ban_duration_seconds,
+            )
+            .await
+        }
     }
 }
 

@@ -57,6 +57,7 @@ pub struct ProxyRegistries {
     pub srv: srv::SrvRegistry,
     pub geoip: Arc<geoip::GeoIpResolver>,
     pub dns: dns::DnsResolver,
+    pub quarantine: Arc<crate::security::AutoQuarantineTracker>,
 }
 
 /// The number of the client connection tasks that are still running. The graceful drain waits

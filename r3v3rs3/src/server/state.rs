@@ -385,6 +385,35 @@ impl ServerState {
             self.config.geoip.database.as_deref(),
             &self.config_dir,
         ));
+        self.registries
+            .quarantine
+            .update_config(self.config.auto_quarantine.clone());
+        let (tx, mut rx) =
+            tokio::sync::mpsc::unbounded_channel::<r3v3rs3_api::quarantine::QuarantinedIpEntry>();
+        self.registries.quarantine.set_notifier(tx);
+        let platform_handle = self.platform.clone();
+        tokio::spawn(async move {
+            while let Some(entry) = rx.recv().await {
+                if let crate::platform::PlatformHandle::Ready(platform) = &platform_handle {
+                    let summary = format!("IP {} auto-quarantined: {}", entry.ip, entry.reason);
+                    let payload = serde_json::json!({
+                        "ip": entry.ip.to_string(),
+                        "reason": entry.reason,
+                        "violations": entry.violations,
+                        "banned_at": entry.banned_at,
+                        "banned_until": entry.banned_until,
+                        "remaining_seconds": entry.remaining_seconds,
+                    });
+                    platform
+                        .dispatch_webhook_event(
+                            r3v3rs3_api::webhook::WebhookEvent::SecurityThreatDetected,
+                            summary,
+                            payload,
+                        )
+                        .await;
+                }
+            }
+        });
         if !listeners.is_empty()
             && let Err(err) = self.adopt_listeners(listeners).await
         {
@@ -977,9 +1006,25 @@ impl ServerState {
         }
     }
 
+    fn is_peer_quarantined(&self, stream: &TcpStream) -> bool {
+        match stream.peer_addr() {
+            Ok(peer) => {
+                let quarantined = self.registries.quarantine.is_quarantined(&peer.ip());
+                if quarantined {
+                    tracing::warn!(ip = %peer.ip(), "TCP connection dropped by auto-quarantine");
+                }
+                quarantined
+            }
+            Err(_) => false,
+        }
+    }
+
     /// Starts the connection without waiting for the client, so a slow client does not delay the
     /// server loop.
     pub fn handle_tcp_connection(&self, index: usize, stream: TcpStream) {
+        if self.is_peer_quarantined(&stream) {
+            return;
+        }
         let starter = self
             .ports
             .as_slice()
@@ -1525,6 +1570,7 @@ impl ServerState {
         discovery::validate_config(&config.discovery, &self.certs)?;
         config.notifications.validate()?;
         config.admin.validate()?;
+        config.auto_quarantine.validate()?;
         self.storage.save_app_config(&config).await?;
         self.apply_config(config).await;
         Ok(())
@@ -1578,6 +1624,9 @@ impl ServerState {
             tokio::spawn(async move { platform.refresh_hooks(pending_only).await });
         }
         self.sessions.set_config(config.admin.clone());
+        self.registries
+            .quarantine
+            .update_config(config.auto_quarantine.clone());
         let _ = self.br_sender.send(ServerEvent::AppConfigUpdated {
             config: Box::new(config.masked()),
         });

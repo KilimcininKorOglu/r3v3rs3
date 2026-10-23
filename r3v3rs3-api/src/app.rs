@@ -93,6 +93,10 @@ pub struct AppConfig {
     /// MaxMind MMDB GeoIP database settings for country filtering.
     #[serde(default)]
     pub geoip: GeoIpConfig,
+
+    /// Threat detection and automated IP quarantine settings.
+    #[serde(default)]
+    pub auto_quarantine: crate::quarantine::AutoQuarantineConfig,
 }
 
 /// MaxMind MMDB GeoIP database configuration.

@@ -184,6 +184,7 @@ impl HttpPortContext {
                 router: Default::default(),
                 header_rewriter: Default::default(),
                 geoip: Arc::new(crate::proxy::geoip::GeoIpResolver::empty()),
+                quarantine: Arc::new(crate::security::AutoQuarantineTracker::default()),
             })),
             stop_notifier: Arc::new(Notify::new()),
         })
@@ -284,6 +285,7 @@ impl HttpPortContext {
                 .set_via(HeaderValue::from_static("r3v3rs3"))
                 .build(),
             geoip: registries.geoip.clone(),
+            quarantine: registries.quarantine.clone(),
         }));
 
         if let Some(tls) = &mut self.tls_termination {
@@ -592,6 +594,9 @@ async fn proxied_response(
     info: &RequestInfo<'_>,
     fronting: bool,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
+    if shared.quarantine.is_quarantined(&info.remote.ip()) {
+        return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
+    }
     let start = std::time::Instant::now();
     crate::proxy::stats::count_http_request();
     if let Some(cl) = req
@@ -639,6 +644,7 @@ async fn proxied_response(
     crate::proxy::stats::record_request_duration(duration);
 
     let country = shared.geoip.lookup_country(client_ip);
+    check_and_record_quarantine(&shared.quarantine, client_ip, &uri, &mapped);
     record_access_log(
         AccessLogMeta {
             resource_id,
@@ -757,6 +763,34 @@ fn record_access_log<B>(
     });
 }
 
+fn check_and_record_quarantine<B>(
+    quarantine: &crate::security::AutoQuarantineTracker,
+    client_ip: std::net::IpAddr,
+    uri: &str,
+    mapped: &Result<Response<B>, anyhow::Error>,
+) {
+    let config = quarantine.get_config();
+    if !config.enabled {
+        return;
+    }
+
+    if let Some(pattern) = quarantine.check_scanner_uri(uri) {
+        let reason = format!("Scanner pattern probe: {pattern}");
+        let _ = quarantine.record_violation(client_ip, reason, config.max_violations);
+        return;
+    }
+
+    let status_code = match mapped {
+        Ok(res) => res.status().as_u16(),
+        Err(_) => 500,
+    };
+
+    if quarantine.is_violating_status(status_code) {
+        let reason = format!("Repeated HTTP {status_code} error");
+        let _ = quarantine.record_violation(client_ip, reason, 1);
+    }
+}
+
 /// The details of the TLS connection of a client.
 #[derive(Default)]
 struct TlsInfo {
@@ -817,6 +851,7 @@ struct SharedContext {
     pub router: Router,
     pub header_rewriter: RequestRewriter,
     pub geoip: Arc<crate::proxy::geoip::GeoIpResolver>,
+    pub quarantine: Arc<crate::security::AutoQuarantineTracker>,
 }
 
 pub trait IoStream: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -1381,6 +1416,9 @@ where
 
     crate::proxy::stats::count_h3_request();
     let shared = shared_cache.load();
+    if shared.quarantine.is_quarantined(&ctx.remote.ip()) {
+        return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
+    }
     let info = RequestInfo {
         remote: ctx.remote,
         peer: ctx.remote,
@@ -1423,6 +1461,7 @@ where
     let duration = start.elapsed();
     crate::proxy::stats::record_request_duration(duration);
     let country = shared.geoip.lookup_country(client_ip);
+    check_and_record_quarantine(&shared.quarantine, client_ip, &uri, &mapped);
     record_access_log(
         AccessLogMeta {
             resource_id,

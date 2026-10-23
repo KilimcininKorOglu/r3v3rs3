@@ -504,6 +504,9 @@ pub enum Error {
 
     #[error("invalid anomaly alert rules: {reason}")]
     InvalidAnomalyAlertRules { reason: String },
+
+    #[error("invalid auto-quarantine configuration: {reason}")]
+    InvalidAutoQuarantineConfig { reason: String },
 }
 
 impl Error {

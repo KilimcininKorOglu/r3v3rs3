@@ -276,6 +276,7 @@ fn event_label(_locale: Locale, event: WebhookEvent) -> &'static str {
         WebhookEvent::CertRenewed => "webhooks.event_cert_renewed",
         WebhookEvent::CertRenewalFailed => "webhooks.event_cert_renewal_failed",
         WebhookEvent::SecurityIpBanned => "webhooks.event_security_ip_banned",
+        WebhookEvent::SecurityThreatDetected => "webhooks.event_security_threat_detected",
         WebhookEvent::TargetOffline => "webhooks.event_target_offline",
         WebhookEvent::SystemDiskPressure => "webhooks.event_system_disk_pressure",
         WebhookEvent::SystemDiskLow => "webhooks.event_system_disk_low",

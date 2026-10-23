@@ -181,10 +181,16 @@ pub enum AuditAction {
     UpdateNodeAlertRules,
     /// An account truncated or vacuumed container log files.
     VacuumLogs,
+    /// An account or system quarantined an IP address.
+    QuarantineIp,
+    /// An account unquarantined / unbanned an IP address.
+    UnquarantineIp,
+    /// An account updated the auto-quarantine configuration.
+    UpdateQuarantineConfig,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 101] = [
+    pub const ALL: [AuditAction; 104] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -286,6 +292,9 @@ impl AuditAction {
         Self::UndrainTarget,
         Self::UpdateNodeAlertRules,
         Self::VacuumLogs,
+        Self::QuarantineIp,
+        Self::UnquarantineIp,
+        Self::UpdateQuarantineConfig,
     ];
 }
 

@@ -267,6 +267,34 @@ pub struct UpdateNodeAlertsParams {
     pub max_time_wait_sockets: Option<u32>,
 }
 
+/// The arguments of `quarantine_ip`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct QuarantineIpParams {
+    /// The client IP address to quarantine (IPv4 or IPv6).
+    pub ip: String,
+    /// Reason for quarantine.
+    pub reason: Option<String>,
+    /// Quarantine duration in seconds (default: 3600).
+    pub duration_seconds: Option<u64>,
+}
+
+/// The arguments of `update_quarantine_config`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateQuarantineConfigParams {
+    /// Whether auto-quarantine threat detection is enabled.
+    pub enabled: Option<bool>,
+    /// Max violations within window before ban.
+    pub max_violations: Option<u32>,
+    /// Sliding window duration in seconds.
+    pub window_seconds: Option<u64>,
+    /// Ban duration in seconds.
+    pub ban_duration_seconds: Option<u64>,
+    /// Status codes considered violations (e.g. [404, 403, 401]).
+    pub block_status_codes: Option<Vec<u16>>,
+    /// Scanner URI path substrings (e.g. ["/.env", "/.git"]).
+    pub scanner_patterns: Option<Vec<String>>,
+}
+
 /// The caller of the request, which the Bearer middleware inserted.
 fn caller_of(parts: &Parts) -> Result<Caller, ErrorData> {
     parts
@@ -559,6 +587,122 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(json!({ "unbanned": params.ip }))
+    }
+
+    /// Quarantined client IP addresses.
+    #[tool(
+        description = "List client IP addresses currently quarantined by threat intelligence and behavioral detection."
+    )]
+    async fn list_quarantined_ips(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let quarantined = super::quarantine::list(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(quarantined.0)
+    }
+
+    /// Place a client IP into quarantine.
+    #[tool(
+        description = "Manually place a client IP address into quarantine with a reason and duration. Needs the edit scope."
+    )]
+    async fn quarantine_ip(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<QuarantineIpParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let ip = params
+            .ip
+            .parse::<std::net::IpAddr>()
+            .map_err(|e| ErrorData::invalid_params(format!("invalid IP address: {e}"), None))?;
+        let request = r3v3rs3_api::quarantine::QuarantineIpRequest {
+            ip,
+            reason: params.reason,
+            duration_seconds: params.duration_seconds,
+        };
+        let res = super::quarantine::add(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(res.0)
+    }
+
+    /// Release an IP address from quarantine.
+    #[tool(
+        description = "Release a client IP address from quarantine early. Needs the edit scope."
+    )]
+    async fn unban_quarantined_ip(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IpParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let _ = super::quarantine::delete(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(params.ip.clone()),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(json!({ "unquarantined": params.ip }))
+    }
+
+    /// Get auto-quarantine threat detection configuration.
+    #[tool(
+        description = "Get current auto-quarantine and behavioral threat detection configuration."
+    )]
+    async fn get_quarantine_config(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let config = super::quarantine::get_config(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(config.0)
+    }
+
+    /// Update auto-quarantine threat detection configuration.
+    #[tool(
+        description = "Update and persist auto-quarantine threat detection configuration. Needs the edit scope."
+    )]
+    async fn update_quarantine_config(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateQuarantineConfigParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let current = super::quarantine::get_config(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller.clone()),
+        )
+        .await
+        .map_err(any_error)?;
+        let mut config = *current.0;
+        apply_quarantine_overrides(&mut config, params);
+        let _ = super::quarantine::update_config(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(config),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(json!({ "status": "updated" }))
     }
 
     // ==========================================
@@ -2013,3 +2157,27 @@ impl McpServer {
 
 #[tool_handler(router = self.tool_router)]
 impl rmcp::ServerHandler for McpServer {}
+
+fn apply_quarantine_overrides(
+    config: &mut r3v3rs3_api::quarantine::AutoQuarantineConfig,
+    params: UpdateQuarantineConfigParams,
+) {
+    if let Some(enabled) = params.enabled {
+        config.enabled = enabled;
+    }
+    if let Some(max_violations) = params.max_violations {
+        config.max_violations = max_violations;
+    }
+    if let Some(window_seconds) = params.window_seconds {
+        config.window_seconds = window_seconds;
+    }
+    if let Some(ban_duration_seconds) = params.ban_duration_seconds {
+        config.ban_duration_seconds = ban_duration_seconds;
+    }
+    if let Some(block_status_codes) = params.block_status_codes {
+        config.block_status_codes = block_status_codes;
+    }
+    if let Some(scanner_patterns) = params.scanner_patterns {
+        config.scanner_patterns = scanner_patterns;
+    }
+}

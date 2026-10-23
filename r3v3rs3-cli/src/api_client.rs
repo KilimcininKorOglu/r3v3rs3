@@ -1028,6 +1028,117 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn list_quarantined_ips(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/security/quarantine", None)
+            .await?;
+        if let Some(arr) = res.as_array() {
+            println!(
+                "{:<18} {:<32} {:<12} {:<10}",
+                "IP ADDRESS", "REASON", "VIOLATIONS", "REMAINING"
+            );
+            println!("{:-<18} {:-<32} {:-<12} {:-<10}", "", "", "", "");
+            for item in arr {
+                let ip = item.get("ip").and_then(|v| v.as_str()).unwrap_or("-");
+                let reason = item.get("reason").and_then(|v| v.as_str()).unwrap_or("-");
+                let violations = item.get("violations").and_then(|v| v.as_u64()).unwrap_or(0);
+                let remaining = item
+                    .get("remaining_seconds")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                println!(
+                    "{:<18} {:<32} {:<12} {}s",
+                    ip, reason, violations, remaining
+                );
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
+    pub async fn quarantine_ip(
+        &self,
+        ip: &str,
+        reason: Option<&str>,
+        duration_seconds: Option<u64>,
+    ) -> anyhow::Result<()> {
+        let payload = serde_json::json!({
+            "ip": ip,
+            "reason": reason,
+            "duration_seconds": duration_seconds,
+        });
+        let res = self
+            .request(Method::POST, "/api/security/quarantine", Some(&payload))
+            .await?;
+        println!("ip/{ip} quarantined successfully");
+        print_json(&res)?;
+        Ok(())
+    }
+
+    pub async fn unquarantine_ip(&self, ip: &str) -> anyhow::Result<()> {
+        self.request(
+            Method::DELETE,
+            &format!("/api/security/quarantine/{ip}"),
+            None,
+        )
+        .await?;
+        println!("ip/{ip} released from quarantine");
+        Ok(())
+    }
+
+    pub async fn get_quarantine_config(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/security/quarantine/config", None)
+            .await?;
+        print_json(&res)?;
+        Ok(())
+    }
+
+    pub async fn set_quarantine_config(
+        &self,
+        enabled: Option<bool>,
+        max_violations: Option<u32>,
+        window_seconds: Option<u64>,
+        ban_duration_seconds: Option<u64>,
+    ) -> anyhow::Result<()> {
+        let current = self
+            .request(Method::GET, "/api/security/quarantine/config", None)
+            .await?;
+        let mut config = current;
+        if let Some(obj) = config.as_object_mut() {
+            if let Some(enabled) = enabled {
+                obj.insert("enabled".to_string(), serde_json::json!(enabled));
+            }
+            if let Some(max_violations) = max_violations {
+                obj.insert(
+                    "max_violations".to_string(),
+                    serde_json::json!(max_violations),
+                );
+            }
+            if let Some(window_seconds) = window_seconds {
+                obj.insert(
+                    "window_seconds".to_string(),
+                    serde_json::json!(window_seconds),
+                );
+            }
+            if let Some(ban_duration_seconds) = ban_duration_seconds {
+                obj.insert(
+                    "ban_duration_seconds".to_string(),
+                    serde_json::json!(ban_duration_seconds),
+                );
+            }
+        }
+        self.request(
+            Method::PUT,
+            "/api/security/quarantine/config",
+            Some(&config),
+        )
+        .await?;
+        println!("auto-quarantine configuration updated");
+        Ok(())
+    }
+
     // --- Webhook operations ---
 
     pub async fn list_webhooks(&self) -> anyhow::Result<()> {

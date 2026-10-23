@@ -77,6 +77,7 @@ mod openapi;
 mod platform;
 mod ports;
 mod proxies;
+mod quarantine;
 mod static_file;
 mod store;
 pub(crate) mod system_metrics;
@@ -635,6 +636,13 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(anomaly::get_snapshot))
                 .routes(routes!(anomaly::get_rules, anomaly::update_rules))
                 .routes(routes!(anomaly::dismiss)),
+        )
+        .nest(
+            "/security/quarantine",
+            OpenApiRouter::new()
+                .routes(routes!(quarantine::get_config, quarantine::update_config))
+                .routes(routes!(quarantine::list, quarantine::add))
+                .routes(routes!(quarantine::delete)),
         )
 }
 

@@ -15,6 +15,7 @@ pub mod discovery;
 pub mod dns_credential;
 pub mod ports;
 pub mod proxies;
+pub mod quarantine;
 pub mod workers;
 
 #[async_trait::async_trait]

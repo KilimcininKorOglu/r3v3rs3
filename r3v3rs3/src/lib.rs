@@ -22,5 +22,6 @@ pub mod notify;
 pub mod platform;
 pub mod proxy;
 pub mod runtime;
+pub mod security;
 pub mod server;
 pub mod sessions;
