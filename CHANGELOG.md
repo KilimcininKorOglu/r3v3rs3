@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.2] - 2026-10-23
+
+### Added
+- Standardized Action Icon Buttons (`ActionIconButton`): Replaced raw, text-heavy action links with compact, accessible icon buttons featuring localized hover tooltips (`title`) and `aria-label` screen reader tags across all WebUI tables.
+- Semantic Role & Color Palette: Cohesive visual styling across row actions: Edit (blue pencil), View (neutral slate eye), Terminal (emerald terminal), Files (amber folder), Metrics/Traffic (cyan chart), Logs (indigo document), Deploy/Run (emerald play), Pause/Drain (orange pause), Download (neutral download), Restore/Re-test (teal refresh), and Delete (red trash).
+- Unified Table Spacing & Responsiveness: Streamlined table row action containers (`gap-1.5`) across Proxies, Applications, Ports, Certificates, Database Backups, Targets, Git Connections, and Projects, saving horizontal screen real estate.
+
 ## [2.4.1] - 2026-10-23
 
 ### Added
