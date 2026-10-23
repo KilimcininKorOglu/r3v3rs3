@@ -23,7 +23,8 @@ use gloo_timers::callback::Interval;
 use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::platform::{
-    NodeAlertRules, PrunePolicy, PruneResult, TargetEntry, TargetKind, TargetRequest, TargetToken,
+    AgentLinkQuality, NodeAlertRules, PrunePolicy, PruneResult, TargetEntry, TargetKind,
+    TargetRequest, TargetToken,
 };
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlTextAreaElement};
@@ -39,7 +40,7 @@ const REFRESH_MS: u32 = 10_000;
 const INSTALL_SCRIPT: &str =
     "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh";
 
-const COLUMNS: [Column; 5] = [
+const COLUMNS: [Column; 6] = [
     Column {
         label: "common.name",
         class: "whitespace-nowrap",
@@ -50,6 +51,10 @@ const COLUMNS: [Column; 5] = [
     },
     Column {
         label: "targets.status",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "targets.link_quality",
         class: "whitespace-nowrap",
     },
     Column {
@@ -148,6 +153,7 @@ fn target_row(
         TargetKind::Local => "targets.kind_local",
         TargetKind::Agent => "targets.kind_agent",
     };
+    let link_quality = target_link_quality_view(locale, target);
     let last_seen = target.last_seen_at.map(format_time).unwrap_or_default();
     let version = target.version.clone().unwrap_or_default();
     let actions = if admin {
@@ -161,10 +167,132 @@ fn target_row(
             html! { <>{target.name.clone()}</> },
             html! { <>{locale.t(kind)}</> },
             status_badge(locale.t(status), color),
+            link_quality,
             html! { <span class="whitespace-nowrap">{last_seen}</span> },
             html! { <span class="font-mono">{version}</span> },
         ],
         actions,
+    }
+}
+
+fn target_link_quality_view(locale: Locale, target: &TargetEntry) -> Html {
+    if !target.online {
+        return html! {
+            <span class="text-xs text-neutral-400 dark:text-neutral-500 font-mono">{"—"}</span>
+        };
+    }
+
+    let quality = target.quality.unwrap_or(AgentLinkQuality::Offline);
+    let (badge_style, dot_style, label_key, capacity_key) = quality_styles(quality);
+    let sparkline = render_sparkline(&target.latency_samples, quality);
+    let stats_text = format_quality_stats(target);
+
+    html! {
+        <div class="flex flex-col gap-1 py-0.5">
+            <div class="flex items-center gap-1.5 flex-wrap">
+                <span class={classes!("inline-flex", "items-center", "gap-1", "px-2", "py-0.5", "rounded-md", "text-xs", "font-medium", "border", badge_style)}>
+                    <span class={classes!("w-1.5", "h-1.5", "rounded-full", dot_style)} />
+                    { locale.t(label_key) }
+                </span>
+                <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200/60 dark:border-neutral-700/60">
+                    { locale.t(capacity_key) }
+                </span>
+            </div>
+            <div class="flex items-center gap-2 text-[11px] text-neutral-500 dark:text-neutral-400 font-mono">
+                { sparkline }
+                <span>{ stats_text }</span>
+            </div>
+        </div>
+    }
+}
+
+fn quality_styles(
+    quality: AgentLinkQuality,
+) -> (&'static str, &'static str, &'static str, &'static str) {
+    match quality {
+        AgentLinkQuality::Excellent => (
+            "bg-green-100 text-green-800 dark:bg-green-950/60 dark:text-green-300 border-green-200 dark:border-green-800/60",
+            "bg-green-500",
+            "targets.quality_excellent",
+            "targets.capacity_full",
+        ),
+        AgentLinkQuality::Good => (
+            "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800/60",
+            "bg-blue-500",
+            "targets.quality_good",
+            "targets.capacity_full",
+        ),
+        AgentLinkQuality::Degraded => (
+            "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800/60",
+            "bg-amber-500 animate-pulse",
+            "targets.quality_degraded",
+            "targets.capacity_half",
+        ),
+        AgentLinkQuality::Poor => (
+            "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300 border-red-200 dark:border-red-800/60",
+            "bg-red-500 animate-pulse",
+            "targets.quality_poor",
+            "targets.capacity_critical",
+        ),
+        AgentLinkQuality::Offline => (
+            "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700",
+            "bg-neutral-400",
+            "targets.quality_offline",
+            "targets.capacity_none",
+        ),
+    }
+}
+
+fn format_quality_stats(target: &TargetEntry) -> String {
+    let lat = target.latency_ms.map_or(0.0, |v| (v * 10.0).round() / 10.0);
+    let jit = target.jitter_ms.map_or(0.0, |v| (v * 10.0).round() / 10.0);
+    let loss = target.packet_loss_percent.unwrap_or(0.0);
+    if loss > 0.0 {
+        format!("{lat:.1}ms ±{jit:.1}ms (%{loss:.0} kayıp)")
+    } else {
+        format!("{lat:.1}ms ±{jit:.1}ms")
+    }
+}
+
+fn render_sparkline(samples: &[f64], quality: AgentLinkQuality) -> Html {
+    if samples.len() < 2 {
+        return html! {};
+    }
+    let stroke_color = match quality {
+        AgentLinkQuality::Excellent => "#22c55e",
+        AgentLinkQuality::Good => "#3b82f6",
+        AgentLinkQuality::Degraded => "#f59e0b",
+        AgentLinkQuality::Poor | AgentLinkQuality::Offline => "#ef4444",
+    };
+    let min = samples.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = samples.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let range = (max - min).max(1.0);
+    let width = 44.0;
+    let height = 14.0;
+    let step = width / (samples.len() - 1) as f64;
+
+    let points = samples
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let x = (i as f64) * step;
+            let y = height - ((s - min) / range * (height - 4.0) + 2.0);
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    html! {
+        <svg class="inline-block shrink-0 overflow-visible" width="44" height="14" viewBox="0 0 44 14">
+            <polyline
+                fill="none"
+                stroke={stroke_color}
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                points={points}
+            />
+        </svg>
     }
 }
 
@@ -844,6 +972,11 @@ mod tests {
             online,
             drained,
             version: None,
+            latency_ms: None,
+            jitter_ms: None,
+            packet_loss_percent: None,
+            quality: None,
+            latency_samples: Vec::new(),
         }
     }
 
@@ -880,5 +1013,22 @@ mod tests {
         assert_eq!(format_disk_bytes(500 * 1024 * 1024), "500.0 MiB");
         assert_eq!(format_disk_bytes(2 * 1024 * 1024 * 1024), "2.0 GiB");
         assert_eq!(format_disk_bytes(3 * 1024 * 1024 * 1024 * 1024), "3.0 TiB");
+    }
+
+    #[test]
+    fn quality_styles_and_stats_formatting() {
+        let (badge, dot, label, cap) = quality_styles(AgentLinkQuality::Excellent);
+        assert!(badge.contains("bg-green"));
+        assert_eq!(dot, "bg-green-500");
+        assert_eq!(label, "targets.quality_excellent");
+        assert_eq!(cap, "targets.capacity_full");
+
+        let mut entry = target(true, true, false);
+        entry.latency_ms = Some(14.2);
+        entry.jitter_ms = Some(1.5);
+        assert_eq!(format_quality_stats(&entry), "14.2ms ±1.5ms");
+
+        entry.packet_loss_percent = Some(6.7);
+        assert_eq!(format_quality_stats(&entry), "14.2ms ±1.5ms (%7 kayıp)");
     }
 }

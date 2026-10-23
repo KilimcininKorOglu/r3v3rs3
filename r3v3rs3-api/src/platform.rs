@@ -651,8 +651,41 @@ pub enum TargetKind {
     Agent,
 }
 
+/// The connection quality of an agent link based on latency, jitter, and packet loss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentLinkQuality {
+    Excellent,
+    Good,
+    Degraded,
+    Poor,
+    Offline,
+}
+
+impl AgentLinkQuality {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Excellent => "excellent",
+            Self::Good => "good",
+            Self::Degraded => "degraded",
+            Self::Poor => "poor",
+            Self::Offline => "offline",
+        }
+    }
+
+    /// Weight multiplier used in load balancing. Degraded and Poor links receive reduced traffic.
+    pub const fn default_weight(&self) -> u16 {
+        match self {
+            Self::Excellent | Self::Good => 10,
+            Self::Degraded => 5,
+            Self::Poor => 1,
+            Self::Offline => 0,
+        }
+    }
+}
+
 /// A Docker host that runs the containers of apps.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct TargetEntry {
     #[schema(value_type = String)]
     pub id: ShortId,
@@ -673,6 +706,21 @@ pub struct TargetEntry {
     /// The version of the connected agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// The round-trip latency to the agent in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<f64>,
+    /// The jitter (latency variance) of the agent connection in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jitter_ms: Option<f64>,
+    /// The packet loss percentage of the agent heartbeat pings (0.0 to 100.0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub packet_loss_percent: Option<f64>,
+    /// The estimated link quality grade.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<AgentLinkQuality>,
+    /// Recent latency samples in milliseconds (most recent last, up to 15 samples).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub latency_samples: Vec<f64>,
 }
 
 /// A new agent target.
@@ -683,7 +731,7 @@ pub struct TargetRequest {
 }
 
 /// An agent target with its new enrollment token. The token is shown only once.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct TargetToken {
     pub target: TargetEntry,
     /// The one-time token of `r3v3rs3 agent --token`.

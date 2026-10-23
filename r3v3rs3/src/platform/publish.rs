@@ -1,6 +1,6 @@
 //! Sends the proxies of the running apps to the server.
 
-use super::proxy::{self, LiveApp};
+use super::proxy::{self, HostServer, LiveApp};
 use super::store::RunningDeployment;
 use super::{Platform, is_local};
 use crate::agent::forward::ForwardKey;
@@ -8,6 +8,7 @@ use crate::command::ServerCommand;
 use crate::discovery::DiscoveredProxy;
 use r3v3rs3_api::discovery::DiscoveryIssue;
 use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::platform::AgentLinkQuality;
 use std::sync::Weak;
 use std::time::Duration;
 
@@ -66,7 +67,7 @@ impl Platform {
     async fn deployment_ports(
         &self,
         deployment: &RunningDeployment,
-    ) -> anyhow::Result<(Vec<u16>, Vec<DiscoveryIssue>)> {
+    ) -> anyhow::Result<(Vec<HostServer>, Vec<DiscoveryIssue>)> {
         let mut host_ports = Vec::new();
         let mut issues = Vec::new();
         let targets = self.store.targets().await.unwrap_or_default();
@@ -79,8 +80,9 @@ impl Platform {
             if drained.contains(&target) {
                 continue;
             }
+            let weight = self.target_weight(target);
             match self.published_port(deployment, target).await? {
-                Ok(host_port) => host_ports.push(host_port),
+                Ok(port) => host_ports.push(HostServer { port, weight }),
                 Err(message) => issues.push(DiscoveryIssue {
                     resource: deployment.app_name.to_string(),
                     message,
@@ -88,6 +90,17 @@ impl Platform {
             }
         }
         Ok((host_ports, issues))
+    }
+
+    fn target_weight(&self, target: ShortId) -> u16 {
+        if is_local(target) {
+            return AgentLinkQuality::Excellent.default_weight();
+        }
+        self.agents
+            .status(target)
+            .map_or(AgentLinkQuality::Offline.default_weight(), |status| {
+                status.quality.default_weight()
+            })
     }
 
     /// The port of 127.0.0.1 that reaches the app port of a running deployment, or the reason why

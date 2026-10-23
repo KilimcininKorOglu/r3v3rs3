@@ -14,7 +14,9 @@ use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{TargetEntry, TargetKind, TargetRequest, TargetToken};
+use r3v3rs3_api::platform::{
+    AgentLinkQuality, TargetEntry, TargetKind, TargetRequest, TargetToken,
+};
 use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -50,10 +52,25 @@ impl Platform {
     pub async fn targets(&self) -> anyhow::Result<Vec<TargetEntry>> {
         let mut targets = self.store.targets().await?;
         for target in &mut targets {
-            if let Some(status) = self.agents.status(target.id) {
+            if target.kind == TargetKind::Local {
+                target.online = true;
+                target.latency_ms = Some(0.1);
+                target.jitter_ms = Some(0.0);
+                target.packet_loss_percent = Some(0.0);
+                target.quality = Some(AgentLinkQuality::Excellent);
+                target.latency_samples = vec![0.1];
+            } else if let Some(status) = self.agents.status(target.id) {
                 target.online = true;
                 target.version = Some(status.version);
                 target.last_seen_at = Some(status.last_seen_at);
+                target.latency_ms = status.latency_ms;
+                target.jitter_ms = status.jitter_ms;
+                target.packet_loss_percent = status.packet_loss_percent;
+                target.quality = Some(status.quality);
+                target.latency_samples = status.samples;
+            } else {
+                target.online = false;
+                target.quality = Some(AgentLinkQuality::Offline);
             }
         }
         Ok(targets)

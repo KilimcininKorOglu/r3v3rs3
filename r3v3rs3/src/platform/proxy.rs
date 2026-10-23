@@ -17,12 +17,31 @@ pub fn container_name(app: ShortId, deployment: ShortId) -> anyhow::Result<Conta
     Ok(format!("r3v3rs3-{app}-{deployment}").parse()?)
 }
 
+/// A host server endpoint with its port on 127.0.0.1 and its load balancing weight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostServer {
+    pub port: u16,
+    pub weight: u16,
+}
+
+impl HostServer {
+    pub const fn new(port: u16, weight: u16) -> Self {
+        Self { port, weight }
+    }
+}
+
+impl From<u16> for HostServer {
+    fn from(port: u16) -> Self {
+        Self { port, weight: 1 }
+    }
+}
+
 /// An app whose running containers listen on `host_ports` of 127.0.0.1.
 pub struct LiveApp<'a> {
     pub id: ShortId,
     pub name: &'a str,
     pub spec: &'a AppSpec,
-    pub host_ports: Vec<u16>,
+    pub host_ports: Vec<HostServer>,
 }
 
 /// The proxy of an app. An app without domains gets no proxy, because a proxy without virtual
@@ -37,9 +56,12 @@ pub fn app_proxy(
     let servers = app
         .host_ports
         .iter()
-        .map(|port| {
-            let url = format!("http://127.0.0.1:{port}/").parse::<ServerUrl>()?;
-            Ok(Server::new(url))
+        .map(|host| {
+            let url = format!("http://127.0.0.1:{}/", host.port).parse::<ServerUrl>()?;
+            Ok(Server {
+                url,
+                weight: host.weight,
+            })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     let health_check = app_health_check(app.spec, app.host_ports.len());
@@ -197,7 +219,7 @@ mod tests {
             id: "abc-def".parse()?,
             name: "shop",
             spec: &shop_spec,
-            host_ports: vec![49153],
+            host_ports: vec![HostServer::from(49153)],
         };
         let config = PlatformConfig {
             proxy_ports: vec!["http".into(), "https".into()],
@@ -233,7 +255,7 @@ mod tests {
             id: "abc-def".parse()?,
             name: "shop",
             spec: &shop_spec,
-            host_ports: vec![49153, 49154],
+            host_ports: vec![HostServer::from(49153), HostServer::from(49154)],
         };
         let config = PlatformConfig {
             proxy_ports: vec!["http".into()],
@@ -257,6 +279,32 @@ mod tests {
     }
 
     #[test]
+    fn an_app_proxy_preserves_server_weights() -> anyhow::Result<()> {
+        let shop_spec = spec(&["shop.example.com"]);
+        let app = LiveApp {
+            id: "abc-def".parse()?,
+            name: "shop",
+            spec: &shop_spec,
+            host_ports: vec![
+                HostServer::new(49153, 10),
+                HostServer::new(49154, 5),
+                HostServer::new(49155, 1),
+            ],
+        };
+        let proxy = app_proxy(&app, &PlatformConfig::default())?.expect("a proxy");
+        let ProxyKind::Http(http) = &proxy.definition.kind else {
+            panic!("an HTTP proxy");
+        };
+        let weights = http.routes[0]
+            .servers
+            .iter()
+            .map(|s| s.weight)
+            .collect::<Vec<_>>();
+        assert_eq!(weights, vec![10, 5, 1]);
+        Ok(())
+    }
+
+    #[test]
     fn an_app_proxy_configures_active_health_check() -> anyhow::Result<()> {
         let mut shop_spec = spec(&["shop.example.com"]);
         shop_spec.health_check_path = Some("/status".into());
@@ -264,7 +312,7 @@ mod tests {
             id: "abc-def".parse()?,
             name: "shop",
             spec: &shop_spec,
-            host_ports: vec![49153],
+            host_ports: vec![HostServer::from(49153)],
         };
         let proxy = app_proxy(&app, &PlatformConfig::default())?.expect("a proxy");
         let ProxyKind::Http(http) = &proxy.definition.kind else {
@@ -283,7 +331,7 @@ mod tests {
             id: "abc-def".parse()?,
             name: "shop",
             spec: &app_spec,
-            host_ports: vec![49153],
+            host_ports: vec![HostServer::from(49153)],
         };
         let config = PlatformConfig {
             proxy_ports: vec!["http".into()],
@@ -301,7 +349,7 @@ mod tests {
             id: "abc-def".parse()?,
             name: "shop",
             spec: &spec,
-            host_ports: vec![49153],
+            host_ports: vec![HostServer::from(49153)],
         };
         assert!(app_proxy(&app, &PlatformConfig::default())?.is_none());
         Ok(())

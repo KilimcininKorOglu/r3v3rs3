@@ -702,6 +702,20 @@ Master sunucu yeni bir sürüme güncellendiğinde, güncel `r3v3rs3` çalışt�
 - **Elle Güncelleme**: **Hedefler** sayfasında bir admin, bağlı bir agent satırındaki **Güncelle** butonuna veya tüm bağlı hedeflere en son ikili dosyayı itmek için **Tüm Agent'ları Güncelle** butonuna tıklayabilir.
 - **Yönetim API'si**: `POST /api/targets/{id}/upgrade` belirli bir agent'a güncellemeyi iter, `POST /api/targets/upgrade` ise tüm eski sürümlü bağlı agent'ları günceller.
 
+### Bağlantı Kalitesi, Gecikme Matrisi & Dinamik Yük Dengeleme Ağırlık Azaltma
+
+Master ile bağlı her Agent arasında r3v3rs3, çoklanmış (multiplexed) mTLS tünelinin canlı ağ sağlığını kesintisiz olarak izler:
+
+- **Periyodik RTT & Gecikme Takibi**: Her kalp atışı (heartbeat ping, varsayılan 10 saniye) gidiş-dönüş süresini (RTT) mikrosaniye hassasiyetinde ölçer. Son 15 gecikme örneği bir kayan pencerede tutularak gecikme sapması (jitter) ve paket kaybı yüzdesi dinamik olarak hesaplanır.
+- **Bağlantı Kalitesi Sınıflandırması**:
+  - `Kusursuz` (Yeşil): RTT <= 50ms, jitter <= 15ms, kayıp <= %2. Tam %100 yük dengeleme kapasitesi.
+  - `İyi` (Mavi): RTT <= 150ms, jitter <= 40ms, kayıp <= %10. Tam %100 kapasite.
+  - `Bozulmuş` (Kehribar): RTT <= 350ms, jitter <= 80ms, kayıp <= %25. Trafik payı otomatik olarak %50'ye düşürülür (`weight = 5`).
+  - `Kritik / Zayıf` (Kırmızı): RTT > 350ms, jitter > 80ms veya kayıp > %25. Trafik payı kritik %10 seviyesine indirilir (`weight = 1`).
+  - `Çevrimdışı` (Gri): Agent bağlantısı koptu veya zaman aşımı süresinde yanıt vermedi. Ağırlık `0` değerine çekilir.
+- **Dinamik Yük Dengeleme Ağırlık Azaltma (Dynamic De-weighting)**: Bozulmuş veya kritik durumdaki Agent düğümlerinde çalışan konteynerlere, r3v3rs3'ün ağırlıklı round robin ve en az bağlantı (least connections) motoru üzerinden oransal olarak çok daha az trafik iletilir; böylece yavaşlayan veya paket kaybeden sunucular son kullanıcı deneyimini bozmaz.
+- **WebUI Canlı Kıvılcım Çizgisi (Sparkline) & Metrikler**: **Düğümler (Targets)** sayfası her düğüm için anlık bağlantı kalitesi rozeti, güncel RTT gecikmesi, jitter sapması, paket kaybı, dinamik kapasite rozeti ve son pingleme trendini gösteren mini SVG kıvılcım grafiği sunar.
+
 ### Çoklu Hedef Replika Dağıtımı
 
 Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde replikalar halinde dağıtılabilir:

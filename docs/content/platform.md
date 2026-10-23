@@ -702,6 +702,20 @@ When the master server is updated to a newer version, it can push the updated `r
 - **Manual Upgrade**: On the **Targets** page, an admin can click **Upgrade** on an individual connected agent or **Upgrade All Agents** to push the latest binary to all online targets.
 - **Admin API**: `POST /api/targets/{id}/upgrade` pushes the upgrade to an individual agent, and `POST /api/targets/upgrade` upgrades all outdated online agents.
 
+### Link Quality, Latency Matrix & Dynamic Load Balancer De-weighting
+
+Between the master and each connected agent, r3v3rs3 continually monitors the health of the multiplexed mTLS tunnel:
+
+- **Periodic RTT & Latency Tracking**: Every heartbeat ping (default interval 10 seconds) measures the precise round-trip time (RTT). The last 15 latency samples are maintained in a sliding window to calculate jitter (mean absolute deviation) and packet loss percentage.
+- **Link Quality Classification**:
+  - `Excellent` (Green): RTT <= 50ms, jitter <= 15ms, loss <= 2%. Full 100% load balancing capacity.
+  - `Good` (Blue): RTT <= 150ms, jitter <= 40ms, loss <= 10%. Full 100% capacity.
+  - `Degraded` (Amber): RTT <= 350ms, jitter <= 80ms, loss <= 25%. Traffic share automatically de-weighted by 50% (`weight = 5`).
+  - `Poor` (Red): RTT > 350ms, jitter > 80ms, or loss > 25%. Traffic share de-weighted to critical 10% (`weight = 1`).
+  - `Offline` (Gray): The agent is disconnected or failed to answer pings within the timeout window. Weight drops to `0`.
+- **Dynamic Load Balancer De-weighting**: Upstream servers running on degraded or poor agent nodes receive proportionally less incoming traffic through r3v3rs3's smooth weighted round robin and least connections balancers, protecting clients from sluggish or dropping nodes.
+- **WebUI Sparkline & Metrics**: The **Targets** page renders a live link quality badge, current RTT latency, jitter variance, packet loss, dynamic capacity indicator, and a mini SVG latency sparkline for each connected agent node.
+
 ### Multi-Target Replica Deployment
 
 An app can deploy replicas across multiple agent targets and the local target simultaneously:

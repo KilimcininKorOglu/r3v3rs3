@@ -981,6 +981,11 @@ fn target_of(row: &SqliteRow) -> anyhow::Result<TargetEntry> {
         online: local,
         drained,
         version: None,
+        latency_ms: None,
+        jitter_ms: None,
+        packet_loss_percent: None,
+        quality: None,
+        latency_samples: Vec::new(),
     })
 }
 

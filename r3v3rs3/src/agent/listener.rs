@@ -12,7 +12,7 @@ use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
@@ -152,6 +152,7 @@ impl AgentListener {
             bail!("the agent certificate belongs to no target");
         };
         let (link, task) = Link::spawn(tls.compat());
+        let ping_start = Instant::now();
         let version = match self.ping(&link).await {
             Ok(version) => version,
             Err(err) => {
@@ -159,6 +160,7 @@ impl AgentListener {
                 return Err(err);
             }
         };
+        let initial_latency_ms = ping_start.elapsed().as_secs_f64() * 1000.0;
         info!(%target, version, "an agent connected");
         let now = unix_ms();
         // A reconnect that replaces a session is no change of the connection state: the replaced
@@ -166,6 +168,8 @@ impl AgentListener {
         let (generation, replaced) =
             self.registry
                 .insert(target, link.clone(), version, task.abort_handle(), now);
+        self.registry
+            .record_ping(target, generation, initial_latency_ms, now);
         self.record_contact(target, now).await;
         if !replaced {
             self.directory.online(target).await;
@@ -184,10 +188,18 @@ impl AgentListener {
     async fn heartbeat(&self, target: ShortId, generation: u64, link: &Link) {
         loop {
             tokio::time::sleep(self.timing.ping_interval).await;
-            if self.ping(link).await.is_err() {
-                return;
+            let ping_start = Instant::now();
+            match self.ping(link).await {
+                Ok(_) => {
+                    let latency_ms = ping_start.elapsed().as_secs_f64() * 1000.0;
+                    self.registry
+                        .record_ping(target, generation, latency_ms, unix_ms());
+                }
+                Err(_) => {
+                    self.registry.record_ping_failure(target, generation);
+                    return;
+                }
             }
-            self.registry.seen(target, generation, unix_ms());
         }
     }
 
