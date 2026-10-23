@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.9] - 2026-10-23
+
+### Added
+- Agent Latency & Link Quality Matrix: Real-time RTT latency, jitter (RFC 3550 mean absolute deviation), and packet loss tracking across multiplexed mTLS agent connections.
+- Dynamic Load Balancer De-weighting: Automated link quality classification (`Excellent`, `Good`, `Degraded`, `Poor`, `Offline`) with proportional load balancer de-weighting (`10`, `10`, `5`, `1`, `0`) to reduce traffic to degraded or unstable agent nodes across round-robin and least-connections upstream pools.
+- WebUI Link Quality Badges & Sparkline: Interactive, dark-mode compatible link quality badges, latency stats, and inline SVG latency sparklines on the Targets page.
+
+### Fixed
+- WebUI Dark Mode Styling: Resolved contrast issues in the notification flyout and table row hover states, and corrected the default status filter in the live traffic console.
+
+### Changed
+- CI Workflow Optimization: Enabled parent-commit test gate verification in the release pipeline and added run concurrency groups to eliminate redundant CI runs.
+
 ## [2.3.8] - 2026-10-23
 
 ### Added
