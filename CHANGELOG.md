@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1] - 2026-10-23
+
+### Added
+- IP Reputation & Threat Intelligence Auto-Quarantine: In-memory sliding-window behavioral threat detection inspecting HTTP request paths and repeated client error status codes (404, 403, 401).
+- Scanner Probe Pattern Matching: Instant automatic quarantine on scanner path probes including `/.env`, `wp-admin`, `wp-login.php`, `/.git`, `/phpmyadmin`, `/.aws`, `/xmlrpc.php`, and `/config.json`.
+- Zero-Overhead TCP Drop Enforcement: Quarantined peers have their TCP connections reset/dropped at socket accept level before TLS negotiation or HTTP response generation, minimizing server resource consumption.
+- Webhook Threat Notification: Dispatches `security.threat_detected` (`WebhookEvent::SecurityThreatDetected`) with offending IP, trigger reason, request path, and expiration timestamp.
+- WebUI Quarantine Management Card: Added Quarantined IPs table with unquarantine action icon buttons and manual IP quarantine modal under Settings.
+- 100% MCP & CLI Parity: Added MCP tools (`list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`) and CLI subcommands (`r3 security quarantined-ips`, `quarantine`, `unquarantine`, `quarantine-config`, `set-quarantine-config`).
+- Comprehensive Documentation: Updated English and Turkish documentation with API endpoints, MCP tools table, and CLI usage.
+
 ## [2.5.0] - 2026-10-23
 
 ### Added
