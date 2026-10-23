@@ -53,16 +53,49 @@ enum Command {
     /// Manage reverse proxies.
     #[command(subcommand)]
     Proxy(ProxyCommand),
+    /// Manage TLS/SSL certificates.
+    #[command(subcommand)]
+    Cert(CertCommand),
+    /// Manage ACME automatic certificate orders.
+    #[command(subcommand)]
+    Acme(AcmeCommand),
+    /// Manage IP/CIDR and country access lists.
+    #[command(subcommand)]
+    Acl(AclCommand),
+    /// Manage DNS provider credentials for DNS-01 ACME.
+    #[command(subcommand)]
+    Dns(DnsCommand),
     /// Manage deployed applications.
     #[command(subcommand)]
     App(AppCommand),
+    /// Manage database services.
+    #[command(subcommand)]
+    Db(DbCommand),
     /// Manage database backups.
     #[command(subcommand)]
     Backup(BackupCommand),
+    /// Manage multi-node agent targets.
+    #[command(subcommand)]
+    Target(TargetCommand),
+    /// Manage projects and shared environment variables.
+    #[command(subcommand)]
+    Project(ProjectCommand),
+    /// Browse and install applications from the App Store catalog.
+    #[command(subcommand)]
+    Store(StoreCommand),
+    /// Manage security rules and banned IP addresses.
+    #[command(subcommand)]
+    Security(SecurityCommand),
+    /// Manage outbound webhook integrations.
+    #[command(subcommand)]
+    Webhook(WebhookCommand),
+    /// Manage scheduled background cron commands for applications.
+    #[command(subcommand)]
+    Cron(CronCommand),
     /// Manage server settings and configuration backup/restore.
     #[command(subcommand)]
     Config(ConfigCommand),
-    /// Manage platform operations.
+    /// Manage platform operations and system metrics.
     #[command(subcommand)]
     Platform(PlatformCommand),
     /// Apply a declarative YAML or JSON manifest to configure ports, proxies, and apps.
@@ -82,6 +115,8 @@ pub enum PortCommand {
     List,
     /// Shows configuration of a port.
     Get { id: String },
+    /// Adds a port from inline JSON/YAML, a file path, or stdin ('-').
+    Add { payload: String },
     /// Deletes a port.
     #[command(alias = "rm")]
     Delete { id: String },
@@ -96,13 +131,86 @@ pub enum ProxyCommand {
     List,
     /// Shows configuration of a proxy.
     Get { id: String },
+    /// Adds a proxy from inline JSON/YAML, a file path, or stdin ('-').
+    Add { payload: String },
     /// Shows live status of a proxy.
     Status { id: String },
     /// Deletes a proxy.
     #[command(alias = "rm")]
     Delete { id: String },
     /// Purges cache for a proxy.
-    PurgeCache { id: String },
+    PurgeCache {
+        id: String,
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CertCommand {
+    /// Lists all TLS certificates.
+    #[command(alias = "ls")]
+    List,
+    /// Shows details of a certificate.
+    Get { id: String },
+    /// Uploads a certificate and private key.
+    Upload {
+        #[arg(long)]
+        cert: String,
+        #[arg(long)]
+        key: String,
+        #[arg(long)]
+        kind: Option<String>,
+    },
+    /// Deletes a certificate.
+    #[command(alias = "rm")]
+    Delete { id: String },
+    /// Checks domain certificate coverage.
+    Coverage,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AcmeCommand {
+    /// Lists all ACME certificate orders.
+    #[command(alias = "ls")]
+    List,
+    /// Shows details of an ACME order.
+    Get { id: String },
+    /// Adds an ACME order from inline JSON/YAML, a file path, or stdin ('-').
+    Add { payload: String },
+    /// Deletes an ACME order.
+    #[command(alias = "rm")]
+    Delete { id: String },
+    /// Triggers immediate renewal/issuance order for an ACME entry.
+    Order { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AclCommand {
+    /// Lists all access lists.
+    #[command(alias = "ls")]
+    List,
+    /// Shows details of an access list.
+    Get { id: String },
+    /// Adds an access list from inline JSON/YAML, a file path, or stdin ('-').
+    Add { payload: String },
+    /// Deletes an access list.
+    #[command(alias = "rm")]
+    Delete { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DnsCommand {
+    /// Lists all DNS provider credentials.
+    #[command(alias = "ls")]
+    List,
+    /// Shows details of a DNS credential entry.
+    Get { id: String },
+    /// Adds a DNS credential entry from inline JSON/YAML, a file path, or stdin ('-').
+    Add { payload: String },
+    /// Deletes a DNS credential entry.
+    #[command(alias = "rm")]
+    Delete { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -112,6 +220,8 @@ pub enum AppCommand {
     List,
     /// Shows configuration of an application.
     Get { id: String },
+    /// Adds an application from inline JSON/YAML, a file path, or stdin ('-').
+    Add { payload: String },
     /// Triggers a deployment for an application.
     Deploy { id: String },
     /// Rolls back an application to the previous deployment.
@@ -125,6 +235,61 @@ pub enum AppCommand {
     /// Deletes an application.
     #[command(alias = "rm")]
     Delete { id: String },
+    /// Displays application logs.
+    Logs {
+        id: String,
+        #[arg(long, default_value = "100")]
+        tail: usize,
+    },
+    /// Shows environment variables of an application.
+    Env { id: String },
+    /// Updates environment variables of an application (KEY=VALUE pairs).
+    SetEnv {
+        id: String,
+        #[arg(required = true)]
+        pairs: Vec<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DbCommand {
+    /// Lists all managed databases.
+    #[command(alias = "ls")]
+    List,
+    /// Shows configuration of a database.
+    Get { id: String },
+    /// Provisions a new database container.
+    Create {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        engine: String,
+        #[arg(long)]
+        version: Option<String>,
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// Deletes a database container.
+    #[command(alias = "rm")]
+    Delete { id: String },
+    /// Clones a database to a new instance.
+    Clone {
+        id: String,
+        #[arg(long)]
+        name: String,
+    },
+    /// Creates a read replica of a database.
+    Replica {
+        id: String,
+        #[arg(long)]
+        name: String,
+    },
+    /// Displays database container logs.
+    Logs {
+        id: String,
+        #[arg(long, default_value = "100")]
+        tail: usize,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -139,8 +304,134 @@ pub enum BackupCommand {
         database_id: String,
         backup_id: String,
     },
+    /// Deletes a backup snapshot.
+    #[command(alias = "rm")]
+    Delete {
+        database_id: String,
+        backup_id: String,
+    },
     /// Shows backup configuration.
     Config,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TargetCommand {
+    /// Lists all multi-node agent targets.
+    #[command(alias = "ls")]
+    List,
+    /// Shows details of a target node.
+    Get { id: String },
+    /// Enrolls a new target node.
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        host: String,
+        #[arg(long)]
+        port: u16,
+    },
+    /// Deletes a target node.
+    #[command(alias = "rm")]
+    Delete { id: String },
+    /// Drains a target node for maintenance.
+    Drain { id: String },
+    /// Undrains a target node, restoring it to traffic.
+    Undrain { id: String },
+    /// Generates a new target node enrollment token.
+    Token,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectCommand {
+    /// Lists all projects and their environments.
+    #[command(alias = "ls")]
+    List,
+    /// Shows details of a project.
+    Get { id: String },
+    /// Creates a new project.
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Deletes a project.
+    #[command(alias = "rm")]
+    Delete { id: String },
+    /// Synchronizes shared environment variables between project environments.
+    SyncEnv {
+        #[arg(long)]
+        project: String,
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum StoreCommand {
+    /// Lists available applications in the App Store catalog.
+    #[command(alias = "ls")]
+    List,
+    /// Refreshes the local App Store catalog from the upstream repository.
+    Refresh,
+    /// Installs and routes an application from the App Store catalog.
+    Install {
+        #[arg(long)]
+        app_id: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        domain: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SecurityCommand {
+    /// Lists all banned IP addresses.
+    #[command(alias = "ls")]
+    BannedIps,
+    /// Unbans an IP address.
+    Unban { ip: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum WebhookCommand {
+    /// Lists configured outbound webhooks.
+    #[command(alias = "ls")]
+    List,
+    /// Shows details of an outbound webhook.
+    Get { id: String },
+    /// Adds an outbound webhook from inline JSON/YAML, a file path, or stdin ('-').
+    Add { payload: String },
+    /// Deletes an outbound webhook.
+    #[command(alias = "rm")]
+    Delete { id: String },
+    /// Sends a test ping to an outbound webhook.
+    Test { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CronCommand {
+    /// Lists scheduled background commands for an application.
+    #[command(alias = "ls")]
+    List { app_id: String },
+    /// Adds a scheduled command to an application.
+    Add {
+        app_id: String,
+        #[arg(long)]
+        cron: String,
+        #[arg(long)]
+        command: String,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Deletes a scheduled command.
+    #[command(alias = "rm")]
+    Delete { app_id: String, id: String },
+    /// Runs a scheduled command immediately.
+    Run { app_id: String, id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -163,6 +454,12 @@ pub enum ConfigCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum PlatformCommand {
+    /// Shows server status and runtime version.
+    Status,
+    /// Shows Prometheus system metrics and health.
+    Metrics,
+    /// Runs disk hygiene pruning (containers, unused images, build cache).
+    Prune,
     /// Rotates the platform encryption key and re-encrypts all stored secrets.
     RotateKey,
 }
@@ -257,8 +554,31 @@ async fn run_api(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()
     match cmd {
         Command::Port(c) => run_port(api, c).await,
         Command::Proxy(c) => run_proxy(api, c).await,
+        Command::Cert(c) => run_cert(api, c).await,
+        Command::Acme(c) => run_acme(api, c).await,
+        Command::Acl(c) => run_acl(api, c).await,
+        Command::Dns(c) => run_dns(api, c).await,
+        other => run_api_platform(api, other).await,
+    }
+}
+
+async fn run_api_platform(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()> {
+    match cmd {
         Command::App(c) => run_app(api, c).await,
+        Command::Db(c) => run_db(api, c).await,
         Command::Backup(c) => run_backup(api, c).await,
+        Command::Cron(c) => run_cron(api, c).await,
+        Command::Target(c) => run_target(api, c).await,
+        other => run_api_system(api, other).await,
+    }
+}
+
+async fn run_api_system(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()> {
+    match cmd {
+        Command::Project(c) => run_project(api, c).await,
+        Command::Store(c) => run_store(api, c).await,
+        Command::Security(c) => run_security(api, c).await,
+        Command::Webhook(c) => run_webhook(api, c).await,
         Command::Config(c) => run_config(api, c).await,
         Command::Platform(c) => run_platform(api, c).await,
         Command::Apply { file } => run_apply(api, &file).await,
@@ -269,6 +589,9 @@ async fn run_api(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()
 async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyhow::Result<()> {
     match cmd {
         PlatformCommand::RotateKey => api.rotate_platform_key().await,
+        PlatformCommand::Status => api.platform_status().await,
+        PlatformCommand::Metrics => api.platform_metrics().await,
+        PlatformCommand::Prune => api.platform_prune().await,
     }
 }
 
@@ -276,6 +599,7 @@ async fn run_port(api: &api_client::ApiClient, cmd: PortCommand) -> anyhow::Resu
     match cmd {
         PortCommand::List => api.list_ports().await,
         PortCommand::Get { id } => api.get_port(&id).await,
+        PortCommand::Add { payload } => api.add_port(&payload).await,
         PortCommand::Delete { id } => api.delete_port(&id).await,
         PortCommand::Reset { id } => api.reset_port(&id).await,
     }
@@ -285,9 +609,50 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
     match cmd {
         ProxyCommand::List => api.list_proxies().await,
         ProxyCommand::Get { id } => api.get_proxy(&id).await,
+        ProxyCommand::Add { payload } => api.add_proxy(&payload).await,
         ProxyCommand::Status { id } => api.proxy_status(&id).await,
         ProxyCommand::Delete { id } => api.delete_proxy(&id).await,
-        ProxyCommand::PurgeCache { id } => api.purge_cache(&id).await,
+        ProxyCommand::PurgeCache { id, path } => api.purge_cache(&id, path.as_deref()).await,
+    }
+}
+
+async fn run_cert(api: &api_client::ApiClient, cmd: CertCommand) -> anyhow::Result<()> {
+    match cmd {
+        CertCommand::List => api.list_certs().await,
+        CertCommand::Get { id } => api.get_cert(&id).await,
+        CertCommand::Upload { cert, key, kind } => {
+            api.upload_cert(&cert, &key, kind.as_deref()).await
+        }
+        CertCommand::Delete { id } => api.delete_cert(&id).await,
+        CertCommand::Coverage => api.cert_coverage().await,
+    }
+}
+
+async fn run_acme(api: &api_client::ApiClient, cmd: AcmeCommand) -> anyhow::Result<()> {
+    match cmd {
+        AcmeCommand::List => api.list_acme().await,
+        AcmeCommand::Get { id } => api.get_acme(&id).await,
+        AcmeCommand::Add { payload } => api.add_acme(&payload).await,
+        AcmeCommand::Delete { id } => api.delete_acme(&id).await,
+        AcmeCommand::Order { id } => api.order_acme(&id).await,
+    }
+}
+
+async fn run_acl(api: &api_client::ApiClient, cmd: AclCommand) -> anyhow::Result<()> {
+    match cmd {
+        AclCommand::List => api.list_acls().await,
+        AclCommand::Get { id } => api.get_acl(&id).await,
+        AclCommand::Add { payload } => api.add_acl(&payload).await,
+        AclCommand::Delete { id } => api.delete_acl(&id).await,
+    }
+}
+
+async fn run_dns(api: &api_client::ApiClient, cmd: DnsCommand) -> anyhow::Result<()> {
+    match cmd {
+        DnsCommand::List => api.list_dns().await,
+        DnsCommand::Get { id } => api.get_dns(&id).await,
+        DnsCommand::Add { payload } => api.add_dns(&payload).await,
+        DnsCommand::Delete { id } => api.delete_dns(&id).await,
     }
 }
 
@@ -295,12 +660,36 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
     match cmd {
         AppCommand::List => api.list_apps().await,
         AppCommand::Get { id } => api.get_app(&id).await,
+        AppCommand::Add { payload } => api.add_app(&payload).await,
         AppCommand::Deploy { id } => api.deploy_app(&id).await,
         AppCommand::Rollback { id } => api.rollback_app(&id).await,
         AppCommand::Start { id } => api.start_app(&id).await,
         AppCommand::Stop { id } => api.stop_app(&id).await,
         AppCommand::Restart { id } => api.restart_app(&id).await,
         AppCommand::Delete { id } => api.delete_app(&id).await,
+        AppCommand::Logs { id, tail } => api.app_logs(&id, tail).await,
+        AppCommand::Env { id } => api.get_app_env(&id).await,
+        AppCommand::SetEnv { id, pairs } => api.set_app_env(&id, &pairs).await,
+    }
+}
+
+async fn run_db(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<()> {
+    match cmd {
+        DbCommand::List => api.list_dbs().await,
+        DbCommand::Get { id } => api.get_db(&id).await,
+        DbCommand::Create {
+            name,
+            engine,
+            version,
+            password,
+        } => {
+            api.create_db(&name, &engine, version.as_deref(), password.as_deref())
+                .await
+        }
+        DbCommand::Delete { id } => api.delete_db(&id).await,
+        DbCommand::Clone { id, name } => api.clone_db(&id, &name).await,
+        DbCommand::Replica { id, name } => api.replica_db(&id, &name).await,
+        DbCommand::Logs { id, tail } => api.db_logs(&id, tail).await,
     }
 }
 
@@ -312,7 +701,83 @@ async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::
             database_id,
             backup_id,
         } => api.restore_backup(&database_id, &backup_id).await,
+        BackupCommand::Delete {
+            database_id,
+            backup_id,
+        } => api.delete_backup(&database_id, &backup_id).await,
         BackupCommand::Config => api.backup_config().await,
+    }
+}
+
+async fn run_target(api: &api_client::ApiClient, cmd: TargetCommand) -> anyhow::Result<()> {
+    match cmd {
+        TargetCommand::List => api.list_targets().await,
+        TargetCommand::Get { id } => api.get_target(&id).await,
+        TargetCommand::Add { name, host, port } => api.add_target(&name, &host, port).await,
+        TargetCommand::Delete { id } => api.delete_target(&id).await,
+        TargetCommand::Drain { id } => api.drain_target(&id).await,
+        TargetCommand::Undrain { id } => api.undrain_target(&id).await,
+        TargetCommand::Token => api.new_target_token().await,
+    }
+}
+
+async fn run_project(api: &api_client::ApiClient, cmd: ProjectCommand) -> anyhow::Result<()> {
+    match cmd {
+        ProjectCommand::List => api.list_projects().await,
+        ProjectCommand::Get { id } => api.get_project(&id).await,
+        ProjectCommand::Add { name, description } => {
+            api.create_project(&name, description.as_deref()).await
+        }
+        ProjectCommand::Delete { id } => api.delete_project(&id).await,
+        ProjectCommand::SyncEnv { project, from, to } => {
+            api.sync_project_env(&project, &from, &to).await
+        }
+    }
+}
+
+async fn run_store(api: &api_client::ApiClient, cmd: StoreCommand) -> anyhow::Result<()> {
+    match cmd {
+        StoreCommand::List => api.list_store().await,
+        StoreCommand::Refresh => api.refresh_store().await,
+        StoreCommand::Install {
+            app_id,
+            name,
+            domain,
+        } => api.install_store(&app_id, &name, domain.as_deref()).await,
+    }
+}
+
+async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyhow::Result<()> {
+    match cmd {
+        SecurityCommand::BannedIps => api.list_banned_ips().await,
+        SecurityCommand::Unban { ip } => api.unban_ip(&ip).await,
+    }
+}
+
+async fn run_webhook(api: &api_client::ApiClient, cmd: WebhookCommand) -> anyhow::Result<()> {
+    match cmd {
+        WebhookCommand::List => api.list_webhooks().await,
+        WebhookCommand::Get { id } => api.get_webhook(&id).await,
+        WebhookCommand::Add { payload } => api.add_webhook(&payload).await,
+        WebhookCommand::Delete { id } => api.delete_webhook(&id).await,
+        WebhookCommand::Test { id } => api.test_webhook(&id).await,
+    }
+}
+
+async fn run_cron(api: &api_client::ApiClient, cmd: CronCommand) -> anyhow::Result<()> {
+    match cmd {
+        CronCommand::List { app_id } => api.list_cron(&app_id).await,
+        CronCommand::Add {
+            app_id,
+            cron,
+            command,
+            name,
+        } => {
+            api.add_cron(&app_id, &cron, &command, name.as_deref())
+                .await
+        }
+        CronCommand::Delete { app_id, id } => api.delete_cron(&app_id, &id).await,
+        CronCommand::Run { app_id, id } => api.run_cron(&app_id, &id).await,
     }
 }
 

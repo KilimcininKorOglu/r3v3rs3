@@ -1552,37 +1552,117 @@ r3v3rs3-cli http://127.0.0.1:46492 call server_status
 
 ### Full resource management
 
-`r3v3rs3-cli` provides direct commands to manage ports, reverse proxies, deployed applications, and database backups:
+`r3v3rs3-cli` provides direct first-class commands to manage all aspects of the reverse proxy and PaaS platform:
 
 ```sh
 # Ports
 r3v3rs3-cli <server> port list
 r3v3rs3-cli <server> port get <id>
+r3v3rs3-cli <server> port add <spec.json|yaml|->
 r3v3rs3-cli <server> port delete <id>
 r3v3rs3-cli <server> port reset <id>
 
 # Proxies
 r3v3rs3-cli <server> proxy list
 r3v3rs3-cli <server> proxy get <id>
+r3v3rs3-cli <server> proxy add <proxy.json|yaml|->
 r3v3rs3-cli <server> proxy status <id>
-r3v3rs3-cli <server> proxy purge-cache <id>
+r3v3rs3-cli <server> proxy purge-cache <id> [--path /static]
 r3v3rs3-cli <server> proxy delete <id>
 
-# Apps
+# Certificates & ACME
+r3v3rs3-cli <server> cert list
+r3v3rs3-cli <server> cert get <id>
+r3v3rs3-cli <server> cert upload --cert server.crt --key server.key
+r3v3rs3-cli <server> cert coverage
+r3v3rs3-cli <server> cert delete <id>
+r3v3rs3-cli <server> acme list
+r3v3rs3-cli <server> acme get <id>
+r3v3rs3-cli <server> acme add <acme.json|yaml|->
+r3v3rs3-cli <server> acme order <id>
+r3v3rs3-cli <server> acme delete <id>
+
+# Access Lists & DNS Providers
+r3v3rs3-cli <server> acl list
+r3v3rs3-cli <server> acl get <id>
+r3v3rs3-cli <server> acl add <acl.json|yaml|->
+r3v3rs3-cli <server> acl delete <id>
+r3v3rs3-cli <server> dns list
+r3v3rs3-cli <server> dns get <id>
+r3v3rs3-cli <server> dns add <dns.json|yaml|->
+r3v3rs3-cli <server> dns delete <id>
+
+# Deployed Applications
 r3v3rs3-cli <server> app list
 r3v3rs3-cli <server> app get <id>
+r3v3rs3-cli <server> app add <app.json|yaml|->
 r3v3rs3-cli <server> app deploy <id>
 r3v3rs3-cli <server> app rollback <id>
 r3v3rs3-cli <server> app start <id>
 r3v3rs3-cli <server> app stop <id>
 r3v3rs3-cli <server> app restart <id>
+r3v3rs3-cli <server> app logs <id> [--tail 100]
+r3v3rs3-cli <server> app env <id>
+r3v3rs3-cli <server> app set-env <id> KEY=VAL [KEY2=VAL2...]
 r3v3rs3-cli <server> app delete <id>
+
+# Managed Databases
+r3v3rs3-cli <server> db list
+r3v3rs3-cli <server> db get <id>
+r3v3rs3-cli <server> db create --name my-db --engine postgresql [--version 17] [--password secret]
+r3v3rs3-cli <server> db clone <id> --name my-db-clone
+r3v3rs3-cli <server> db replica <id> --name my-db-replica
+r3v3rs3-cli <server> db logs <id> [--tail 100]
+r3v3rs3-cli <server> db delete <id>
 
 # Backups
 r3v3rs3-cli <server> backup config
 r3v3rs3-cli <server> backup list <database-id>
 r3v3rs3-cli <server> backup create <database-id>
 r3v3rs3-cli <server> backup restore <database-id> <backup-id>
+r3v3rs3-cli <server> backup delete <database-id> <backup-id>
+
+# Multi-Node Agent Targets
+r3v3rs3-cli <server> target list
+r3v3rs3-cli <server> target get <id>
+r3v3rs3-cli <server> target add --name worker-1 --host 10.0.0.5 --port 46493
+r3v3rs3-cli <server> target drain <id>
+r3v3rs3-cli <server> target undrain <id>
+r3v3rs3-cli <server> target token
+r3v3rs3-cli <server> target delete <id>
+
+# Projects & Environments
+r3v3rs3-cli <server> project list
+r3v3rs3-cli <server> project get <id>
+r3v3rs3-cli <server> project add --name my-project [--description "Core apps"]
+r3v3rs3-cli <server> project sync-env <project-id> --from staging --to production
+r3v3rs3-cli <server> project delete <id>
+
+# App Store & One-Click Templates
+r3v3rs3-cli <server> store list
+r3v3rs3-cli <server> store refresh
+r3v3rs3-cli <server> store install <store-app-id> --name my-service [--domain service.example.com]
+
+# Security & Banned IPs
+r3v3rs3-cli <server> security banned-ips
+r3v3rs3-cli <server> security unban <ip>
+
+# Webhooks & Scheduled Cron Jobs
+r3v3rs3-cli <server> webhook list
+r3v3rs3-cli <server> webhook get <id>
+r3v3rs3-cli <server> webhook add <webhook.json|yaml|->
+r3v3rs3-cli <server> webhook test <id>
+r3v3rs3-cli <server> webhook delete <id>
+r3v3rs3-cli <server> cron list <app-id>
+r3v3rs3-cli <server> cron add <app-id> --cron "0 * * * *" --command "php artisan schedule:run" [--name hourly]
+r3v3rs3-cli <server> cron run <app-id> <job-id>
+r3v3rs3-cli <server> cron delete <app-id> <job-id>
+
+# Platform Status & Maintenance
+r3v3rs3-cli <server> platform status
+r3v3rs3-cli <server> platform metrics
+r3v3rs3-cli <server> platform prune
+r3v3rs3-cli <server> platform rotate-key
 ```
 
 ### Declarative manifests (`apply -f`)
