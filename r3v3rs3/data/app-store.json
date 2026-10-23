@@ -13,7 +13,8 @@
       "website": "https://uptime.kuma.pet",
       "category": "Monitoring",
       "category_tr": "İzleme",
-      "screenshot": "https://raw.githubusercontent.com/louislam/uptime-kuma/master/extra/screenshot.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/uptime-kuma.jpg",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/uptime-kuma.svg"
     },
     {
       "id": "memos",
@@ -26,7 +27,8 @@
       "website": "https://www.usememos.com",
       "category": "Productivity",
       "category_tr": "Üretkenlik",
-      "screenshot": "https://www.usememos.com/screenshot.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/memos.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/memos.svg"
     },
     {
       "id": "vaultwarden",
@@ -39,7 +41,8 @@
       "website": "https://github.com/dani-garcia/vaultwarden",
       "category": "Security",
       "category_tr": "Güvenlik",
-      "screenshot": "https://raw.githubusercontent.com/dani-garcia/vaultwarden/main/resources/vaultwarden-logo.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/vaultwarden.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/vaultwarden.svg"
     },
     {
       "id": "gitea",
@@ -52,7 +55,8 @@
       "website": "https://gitea.io",
       "category": "Development",
       "category_tr": "Geliştirme",
-      "screenshot": "https://gitea.io/images/gitea.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/gitea.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/gitea.svg"
     },
     {
       "id": "forgejo",
@@ -64,7 +68,9 @@
       "health_check_path": "/api/healthz",
       "website": "https://forgejo.org",
       "category": "Development",
-      "category_tr": "Geliştirme"
+      "category_tr": "Geliştirme",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/forgejo.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/forgejo.png"
     },
     {
       "id": "woodpecker",
@@ -76,7 +82,9 @@
       "health_check_path": "/healthz",
       "website": "https://woodpecker-ci.org",
       "category": "Development",
-      "category_tr": "Geliştirme"
+      "category_tr": "Geliştirme",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/woodpecker.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/woodpecker.png"
     },
     {
       "id": "n8n",
@@ -89,7 +97,8 @@
       "website": "https://n8n.io",
       "category": "Automation",
       "category_tr": "Otomasyon",
-      "screenshot": "https://n8n.io/images/og-image.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/n8n.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/n8n.svg"
     },
     {
       "id": "it-tools",
@@ -102,7 +111,8 @@
       "website": "https://it-tools.tech",
       "category": "Development",
       "category_tr": "Geliştirme",
-      "screenshot": "https://it-tools.tech/og-image.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/it-tools.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/it-tools.svg"
     },
     {
       "id": "cyberchef",
@@ -114,7 +124,9 @@
       "health_check_path": "/",
       "website": "https://gchq.github.io/CyberChef/",
       "category": "Development",
-      "category_tr": "Geliştirme"
+      "category_tr": "Geliştirme",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/cyberchef.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/cyberchef.svg"
     },
     {
       "id": "stirling-pdf",
@@ -127,7 +139,8 @@
       "website": "https://stirlingpdf.com",
       "category": "Productivity",
       "category_tr": "Üretkenlik",
-      "screenshot": "https://raw.githubusercontent.com/Stirling-Tools/Stirling-PDF/main/docs/homepage.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/stirling-pdf.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/stirling-pdf.svg"
     },
     {
       "id": "drawio",
@@ -140,7 +153,8 @@
       "website": "https://www.drawio.com",
       "category": "Productivity",
       "category_tr": "Üretkenlik",
-      "screenshot": "https://raw.githubusercontent.com/jgraph/drawio/master/src/main/webapp/images/drawlogo256.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/drawio.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/drawio.svg"
     },
     {
       "id": "etherpad",
@@ -152,7 +166,9 @@
       "health_check_path": "/",
       "website": "https://etherpad.org",
       "category": "Productivity",
-      "category_tr": "Üretkenlik"
+      "category_tr": "Üretkenlik",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/etherpad.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/etherpad.png"
     },
     {
       "id": "trilium",
@@ -164,7 +180,9 @@
       "health_check_path": "/",
       "website": "https://github.com/zadam/trilium",
       "category": "Productivity",
-      "category_tr": "Üretkenlik"
+      "category_tr": "Üretkenlik",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/trilium.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/trilium.png"
     },
     {
       "id": "linkding",
@@ -176,7 +194,9 @@
       "health_check_path": "/",
       "website": "https://github.com/sissbruecker/linkding",
       "category": "Productivity",
-      "category_tr": "Üretkenlik"
+      "category_tr": "Üretkenlik",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/linkding.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/linkding.png"
     },
     {
       "id": "readeck",
@@ -188,7 +208,9 @@
       "health_check_path": "/",
       "website": "https://readeck.org",
       "category": "Productivity",
-      "category_tr": "Üretkenlik"
+      "category_tr": "Üretkenlik",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/readeck.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/readeck.svg"
     },
     {
       "id": "vikunja",
@@ -201,7 +223,8 @@
       "website": "https://vikunja.io",
       "category": "Productivity",
       "category_tr": "Üretkenlik",
-      "screenshot": "https://vikunja.io/img/screenshots/vikunja-list-view.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/vikunja.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/vikunja.svg"
     },
     {
       "id": "mealie",
@@ -213,7 +236,9 @@
       "health_check_path": "/",
       "website": "https://mealie.io",
       "category": "Productivity",
-      "category_tr": "Üretkenlik"
+      "category_tr": "Üretkenlik",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/mealie.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/mealie.svg"
     },
     {
       "id": "grocy",
@@ -225,7 +250,9 @@
       "health_check_path": "/",
       "website": "https://grocy.info",
       "category": "Productivity",
-      "category_tr": "Üretkenlik"
+      "category_tr": "Üretkenlik",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/grocy.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/grocy.png"
     },
     {
       "id": "actual-budget",
@@ -238,7 +265,8 @@
       "website": "https://actualbudget.org",
       "category": "Productivity",
       "category_tr": "Üretkenlik",
-      "screenshot": "https://actualbudget.org/assets/images/budget-f8bbfa8804a1df0f2cb2a01ceb6932a5.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/actual-budget.webp",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/actual-budget.svg"
     },
     {
       "id": "nocodb",
@@ -251,7 +279,8 @@
       "website": "https://nocodb.com",
       "category": "Database",
       "category_tr": "Veritabanı",
-      "screenshot": "https://raw.githubusercontent.com/nocodb/nocodb/develop/packages/nocodb/src/public/img/cover.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/nocodb.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/nocodb.svg"
     },
     {
       "id": "grist",
@@ -263,7 +292,9 @@
       "health_check_path": "/status",
       "website": "https://www.getgrist.com",
       "category": "Database",
-      "category_tr": "Veritabanı"
+      "category_tr": "Veritabanı",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/grist.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/grist.png"
     },
     {
       "id": "ghost",
@@ -275,7 +306,9 @@
       "health_check_path": "/",
       "website": "https://ghost.org",
       "category": "Publishing",
-      "category_tr": "Yayıncılık"
+      "category_tr": "Yayıncılık",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/ghost.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/ghost.png"
     },
     {
       "id": "nextcloud",
@@ -287,7 +320,9 @@
       "health_check_path": "/status.php",
       "website": "https://nextcloud.com",
       "category": "Files",
-      "category_tr": "Dosyalar"
+      "category_tr": "Dosyalar",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/nextcloud.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/nextcloud.png"
     },
     {
       "id": "filebrowser",
@@ -299,7 +334,9 @@
       "health_check_path": "/health",
       "website": "https://filebrowser.org",
       "category": "Files",
-      "category_tr": "Dosyalar"
+      "category_tr": "Dosyalar",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/filebrowser.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/filebrowser.png"
     },
     {
       "id": "alist",
@@ -311,7 +348,9 @@
       "health_check_path": "/",
       "website": "https://alist.nn.ci",
       "category": "Files",
-      "category_tr": "Dosyalar"
+      "category_tr": "Dosyalar",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/alist.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/alist.svg"
     },
     {
       "id": "jellyfin",
@@ -324,7 +363,8 @@
       "website": "https://jellyfin.org",
       "category": "Media",
       "category_tr": "Medya",
-      "screenshot": "https://raw.githubusercontent.com/jellyfin/jellyfin-ux/master/branding/SVG/banner-dark.svg"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/jellyfin.svg",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/jellyfin.svg"
     },
     {
       "id": "jellyseerr",
@@ -336,7 +376,9 @@
       "health_check_path": "/api/v1/status",
       "website": "https://github.com/Fallenbagel/jellyseerr",
       "category": "Media",
-      "category_tr": "Medya"
+      "category_tr": "Medya",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/jellyseerr.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/jellyseerr.jpg"
     },
     {
       "id": "navidrome",
@@ -348,7 +390,9 @@
       "health_check_path": "/ping",
       "website": "https://www.navidrome.org",
       "category": "Media",
-      "category_tr": "Medya"
+      "category_tr": "Medya",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/navidrome.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/navidrome.png"
     },
     {
       "id": "syncthing",
@@ -360,7 +404,9 @@
       "health_check_path": "/rest/noauth/health",
       "website": "https://syncthing.net",
       "category": "Files",
-      "category_tr": "Dosyalar"
+      "category_tr": "Dosyalar",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/syncthing.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/syncthing.png"
     },
     {
       "id": "portainer",
@@ -373,7 +419,8 @@
       "website": "https://www.portainer.io",
       "category": "Management",
       "category_tr": "Yönetim",
-      "screenshot": "https://www.portainer.io/hubfs/Portainer-CE-Dashboard.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/portainer.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/portainer.svg"
     },
     {
       "id": "dozzle",
@@ -385,7 +432,9 @@
       "health_check_path": "/health",
       "website": "https://dozzle.dev",
       "category": "Monitoring",
-      "category_tr": "İzleme"
+      "category_tr": "İzleme",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/dozzle.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/dozzle.gif"
     },
     {
       "id": "netdata",
@@ -398,7 +447,8 @@
       "website": "https://www.netdata.cloud",
       "category": "Monitoring",
       "category_tr": "İzleme",
-      "screenshot": "https://raw.githubusercontent.com/netdata/netdata/master/src/web/gui/v2/src/assets/netdata-overview.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/netdata.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/netdata.svg"
     },
     {
       "id": "grafana",
@@ -411,7 +461,8 @@
       "website": "https://grafana.com",
       "category": "Monitoring",
       "category_tr": "İzleme",
-      "screenshot": "https://grafana.com/static/assets/img/blog/grafana-10-dashboards.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/grafana.svg",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/grafana.svg"
     },
     {
       "id": "changedetection",
@@ -423,7 +474,9 @@
       "health_check_path": "/",
       "website": "https://changedetection.io",
       "category": "Monitoring",
-      "category_tr": "İzleme"
+      "category_tr": "İzleme",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/changedetection.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/changedetection.png"
     },
     {
       "id": "rss-bridge",
@@ -435,7 +488,9 @@
       "health_check_path": "/",
       "website": "https://rss-bridge.github.io/rss-bridge/",
       "category": "Automation",
-      "category_tr": "Otomasyon"
+      "category_tr": "Otomasyon",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/rss-bridge.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/rss-bridge.png"
     },
     {
       "id": "searxng",
@@ -447,7 +502,9 @@
       "health_check_path": "/healthz",
       "website": "https://docs.searxng.org",
       "category": "Utilities",
-      "category_tr": "Araçlar"
+      "category_tr": "Araçlar",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/searxng.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/searxng.svg"
     },
     {
       "id": "redlib",
@@ -459,7 +516,9 @@
       "health_check_path": "/",
       "website": "https://github.com/redlib-org/redlib",
       "category": "Utilities",
-      "category_tr": "Araçlar"
+      "category_tr": "Araçlar",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/redlib.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/redlib.png"
     },
     {
       "id": "rimgo",
@@ -471,7 +530,9 @@
       "health_check_path": "/",
       "website": "https://codeberg.org/rimgo/rimgo",
       "category": "Utilities",
-      "category_tr": "Araçlar"
+      "category_tr": "Araçlar",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/rimgo.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/rimgo.svg"
     },
     {
       "id": "gotosocial",
@@ -483,7 +544,9 @@
       "health_check_path": "/livez",
       "website": "https://gotosocial.org",
       "category": "Social",
-      "category_tr": "Sosyal"
+      "category_tr": "Sosyal",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/gotosocial.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/gotosocial.png"
     },
     {
       "id": "pingvin-share",
@@ -495,7 +558,9 @@
       "health_check_path": "/api/health",
       "website": "https://github.com/stonith404/pingvin-share",
       "category": "Files",
-      "category_tr": "Dosyalar"
+      "category_tr": "Dosyalar",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/pingvin-share.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/pingvin-share.png"
     },
     {
       "id": "pairdrop",
@@ -507,7 +572,9 @@
       "health_check_path": "/",
       "website": "https://pairdrop.net",
       "category": "Files",
-      "category_tr": "Dosyalar"
+      "category_tr": "Dosyalar",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/pairdrop.png",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/pairdrop.png"
     },
     {
       "id": "librespeed",
@@ -519,7 +586,9 @@
       "health_check_path": "/",
       "website": "https://librespeed.org",
       "category": "Utilities",
-      "category_tr": "Araçlar"
+      "category_tr": "Araçlar",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/librespeed.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/librespeed.png"
     },
     {
       "id": "homepage",
@@ -532,7 +601,8 @@
       "website": "https://gethomepage.dev",
       "category": "Management",
       "category_tr": "Yönetim",
-      "screenshot": "https://raw.githubusercontent.com/gethomepage/homepage/main/public/images/dashboard.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/homepage.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/homepage.png"
     },
     {
       "id": "heimdall",
@@ -544,7 +614,9 @@
       "health_check_path": "/",
       "website": "https://heimdall.site",
       "category": "Management",
-      "category_tr": "Yönetim"
+      "category_tr": "Yönetim",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/heimdall.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/heimdall.png"
     },
     {
       "id": "apprise-api",
@@ -556,7 +628,9 @@
       "health_check_path": "/status",
       "website": "https://github.com/caronc/apprise-api",
       "category": "Automation",
-      "category_tr": "Otomasyon"
+      "category_tr": "Otomasyon",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/apprise-api.png",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/apprise-api.png"
     },
     {
       "id": "httpbin",
@@ -568,7 +642,9 @@
       "health_check_path": "/status/200",
       "website": "https://httpbin.org",
       "category": "Development",
-      "category_tr": "Geliştirme"
+      "category_tr": "Geliştirme",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/httpbin.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/httpbin.svg"
     },
     {
       "id": "whoami",
@@ -580,7 +656,9 @@
       "health_check_path": "/",
       "website": "https://github.com/traefik/whoami",
       "category": "Development",
-      "category_tr": "Geliştirme"
+      "category_tr": "Geliştirme",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/whoami.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/whoami.svg"
     },
     {
       "id": "umami",
@@ -609,7 +687,8 @@
       ],
       "category": "Analytics",
       "category_tr": "Analitik",
-      "screenshot": "https://umami.is/images/screenshots/overview-desktop.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/umami.png",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/umami.svg"
     },
     {
       "id": "listmonk",
@@ -643,7 +722,9 @@
         }
       ],
       "category": "Publishing",
-      "category_tr": "Yayıncılık"
+      "category_tr": "Yayıncılık",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/listmonk.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/listmonk.png"
     },
     {
       "id": "keycloak",
@@ -677,7 +758,9 @@
         }
       ],
       "category": "Security",
-      "category_tr": "Güvenlik"
+      "category_tr": "Güvenlik",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/keycloak.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/keycloak.svg"
     },
     {
       "id": "mattermost",
@@ -705,7 +788,9 @@
         }
       ],
       "category": "Social",
-      "category_tr": "Sosyal"
+      "category_tr": "Sosyal",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/mattermost.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/mattermost.png"
     },
     {
       "id": "plausible",
@@ -745,7 +830,9 @@
         }
       ],
       "category": "Analytics",
-      "category_tr": "Analitik"
+      "category_tr": "Analitik",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/plausible.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/plausible.webp"
     },
     {
       "id": "directus",
@@ -791,7 +878,9 @@
         }
       ],
       "category": "Database",
-      "category_tr": "Veritabanı"
+      "category_tr": "Veritabanı",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/directus.svg",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/directus.svg"
     },
     {
       "id": "pgadmin",
@@ -804,7 +893,7 @@
       "website": "https://www.pgadmin.org",
       "category": "Database",
       "category_tr": "Veritabanı",
-      "screenshot": "https://www.pgadmin.org/static/screenshots/dashboard.png",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/pgadmin.svg",
       "env": [
         {
           "key": "PGADMIN_DEFAULT_EMAIL",
@@ -818,7 +907,8 @@
           "description_tr": "Yönetici ilk parolası.",
           "secret": true
         }
-      ]
+      ],
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/pgadmin.svg"
     },
     {
       "id": "phpmyadmin",
@@ -830,7 +920,7 @@
       "website": "https://www.phpmyadmin.net",
       "category": "Database",
       "category_tr": "Veritabanı",
-      "screenshot": "https://www.phpmyadmin.net/static/images/screen-home.png",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/phpmyadmin.svg",
       "env": [
         {
           "key": "PMA_ARBITRARY",
@@ -844,7 +934,8 @@
           "description_tr": "Varsayılan MySQL/MariaDB container veya sunucu adı.",
           "secret": false
         }
-      ]
+      ],
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/phpmyadmin.svg"
     },
     {
       "id": "redis-commander",
@@ -856,7 +947,7 @@
       "website": "https://github.com/joeferner/redis-commander",
       "category": "Database",
       "category_tr": "Veritabanı",
-      "screenshot": "https://raw.githubusercontent.com/joeferner/redis-commander/master/screenshots/screen1.png",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/redis-commander.png",
       "env": [
         {
           "key": "REDIS_HOSTS",
@@ -864,7 +955,8 @@
           "description_tr": "Redis bağlantı tanımı: etiket:sunucu:port:db:parola (örn. local:my-redis:6379).",
           "secret": true
         }
-      ]
+      ],
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/redis-commander.svg"
     },
     {
       "id": "adminer",
@@ -876,7 +968,8 @@
       "website": "https://www.adminer.org",
       "category": "Database",
       "category_tr": "Veritabanı",
-      "screenshot": "https://www.adminer.org/static/images/screen.png"
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/adminer.webp",
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/adminer.svg"
     },
     {
       "id": "mongo-express",
@@ -888,7 +981,7 @@
       "website": "https://github.com/mongo-express/mongo-express",
       "category": "Database",
       "category_tr": "Veritabanı",
-      "screenshot": "https://raw.githubusercontent.com/mongo-express/mongo-express/master/screenshot.png",
+      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/mongo-express.png",
       "env": [
         {
           "key": "ME_CONFIG_MONGODB_URL",
@@ -908,7 +1001,8 @@
           "description_tr": "Web arayüzü giriş parolası.",
           "secret": true
         }
-      ]
+      ],
+      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/mongo-express.svg"
     }
   ]
 }

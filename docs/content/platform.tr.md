@@ -135,12 +135,12 @@ Bir **Compose girdisi**, r3v3rs3-apps deposunun `app-store-compose/` altındaki 
 
 Katalog başka Compose kaynağı tutmaz: kendi Compose dosyanızı kuran girdi App Store'a değil, [Uygulamalar](#uygulamalar) sayfasına aittir.
 
-### Kategoriler, Arama ve Ekran Görüntüleri
+### Kategoriler, Arama, Logolar ve Ekran Görüntüleri
 
 App Store, anlık arama ve kategori filtreleme özellikleri sunar:
 - **Arama**: Katalog uygulamalarını ada, açıklamaya, konteyner imajına veya kategoriye göre anında filtreler.
 - **Kategoriler**: Uygulamalar *İzleme*, *Güvenlik*, *Geliştirme*, *Üretkenlik*, *Otomasyon*, *Veritabanı*, *Dosyalar*, *Medya*, *Analitik*, *Sosyal* ve *Yönetim* gibi kategorilere ayrılmıştır. Kataloğu filtrelemek için herhangi bir kategori etiketine tıklayabilir veya tüm uygulamaları görmek için **Tümü** seçeneğini seçebilirsiniz.
-- **Ekran Görüntüleri & Önizleme**: Katalog girdileri ekran görüntüsü önizlemeleri ve kategori rozetleri içerebilir; bu sayede kurulumdan önce uygulamanın arayüzü doğrudan incelenebilir.
+- **Logolar ve Ekran Görüntüleri**: Her katalog girdisi, doğrudan `r3v3rs3-apps` deposunda barındırılan resmi vektörel/raster logo ikonunu ve yüksek çözünürlüklü arayüz ekran görüntüsü önizlemesini içerir; bu sayede harici bağlantı kopmaları olmadan hızlı ve güvenilir biçimde görüntülenir.
 
 ### Katalog Güncellemeleri ve Tek Tıkla Yükseltme
 

@@ -135,12 +135,12 @@ A **Compose entry** points at a Compose file under `app-store-compose/` of the r
 
 The catalog holds no other Compose source: an entry that installs your own Compose file belongs on the [Apps](#apps) page, not in the catalog.
 
-### Categories, Search, and Screenshots
+### Categories, Search, Logos, and Screenshots
 
 The App Store provides instant search and category filtering:
 - **Search**: Filters catalog applications dynamically in real time by name, description, container image, or category.
 - **Categories**: Applications are organized into categories such as *Monitoring*, *Security*, *Development*, *Productivity*, *Automation*, *Database*, *Files*, *Media*, *Analytics*, *Social*, and *Management*. Click any category pill to filter the catalog, or click **All** to display all applications.
-- **Screenshots & Preview**: Catalog entries can feature visual screenshot previews and category badges, providing an immediate preview of the application's interface before installation.
+- **Logos & Screenshots**: Every catalog entry features its official vector/raster logo icon and high-resolution screenshot preview self-hosted directly in the `r3v3rs3-apps` repository, ensuring fast and reliable display without external link rot or third-party rate limits.
 
 ### Catalog Updates and One-Click Upgrade
 

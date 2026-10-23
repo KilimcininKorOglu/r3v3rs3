@@ -37,6 +37,9 @@ pub struct StoreApp {
     /// Optional screenshot URL or image path demonstrating the application.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screenshot: Option<String>,
+    /// Optional logo URL (SVG/PNG) for the application icon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo: Option<String>,
     /// The container image, for example `nginx:1.27`. Set on an image entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,

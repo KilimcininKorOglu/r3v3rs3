@@ -93,6 +93,7 @@ mod tests {
             category: None,
             category_tr: None,
             screenshot: None,
+            logo: None,
             image: Some(format!("{id}:1")),
             port: 80,
             health_check_path: None,
@@ -229,8 +230,12 @@ mod tests {
             assert!(!cat_tr.is_empty(), "entry {} has no category_tr", entry.id);
         }
         assert!(
-            catalog.apps.iter().any(|app| app.screenshot.is_some()),
-            "catalog has no screenshots"
+            catalog.apps.iter().all(|app| app.screenshot.is_some()),
+            "catalog has apps without screenshots"
+        );
+        assert!(
+            catalog.apps.iter().all(|app| app.logo.is_some()),
+            "catalog has apps without logos"
         );
     }
 }

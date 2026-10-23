@@ -242,6 +242,7 @@ fn store_card(locale: Locale, app: &StoreApp) -> Html {
     let tr = locale == Locale::Tr;
     let category = app.category_in(tr);
     let screenshot = app.screenshot.clone();
+    let logo = app.logo.clone();
 
     html! {
         <div class="flex flex-col rounded bg-neutral-800 shadow p-4 gap-2 border border-neutral-700/50 hover:border-neutral-600 transition-colors">
@@ -252,6 +253,9 @@ fn store_card(locale: Locale, app: &StoreApp) -> Html {
             }
             <div class="flex items-start justify-between gap-2">
                 <div class="flex items-center gap-2 flex-wrap">
+                    if let Some(logo_url) = logo {
+                        <img src={logo_url} alt="" class="w-6 h-6 rounded object-contain p-0.5 bg-neutral-900 border border-neutral-700/60 shrink-0" loading="lazy" />
+                    }
                     <h2 class="font-semibold text-neutral-100">{app.name.clone()}</h2>
                     if let Some(cat) = category {
                         <span class="text-xs px-2 py-0.5 rounded-full bg-neutral-700 text-neutral-300 font-medium">
