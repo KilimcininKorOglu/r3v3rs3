@@ -246,7 +246,7 @@ generate_password() {
 # Creates the admin account as the last step of an install. An upgrade keeps the
 # existing accounts and creates no account.
 create_admin() {
-	if [ -s "$CONFIG_DIR/accounts.toml" ]; then
+	if [ -s "$CONFIG_DIR/r3v3rs3.db" ] || [ -f "$CONFIG_DIR/accounts.toml" ] || [ -f "$CONFIG_DIR/accounts.toml.migrated" ]; then
 		return
 	fi
 	if [ -z "$password" ]; then
@@ -546,6 +546,15 @@ main_agent() {
 		set_aside_identity
 		write_token_file
 	fi
+	if systemctl is-active --quiet r3v3rs3-agent 2>/dev/null; then
+		info "Stopping legacy r3v3rs3-agent.service"
+		systemctl stop r3v3rs3-agent 2>/dev/null || true
+	fi
+	if [ -f /etc/systemd/system/r3v3rs3-agent.service ]; then
+		systemctl disable r3v3rs3-agent 2>/dev/null || true
+		rm -f /etc/systemd/system/r3v3rs3-agent.service
+	fi
+
 	write_agent_unit
 	start_agent
 
@@ -579,6 +588,15 @@ main() {
 	install -d -m 0700 "$CONFIG_DIR"
 	install -d -m 0750 "$LOG_DIR"
 	create_admin
+
+	if systemctl is-active --quiet r3v3rs3 2>/dev/null; then
+		info "Stopping legacy r3v3rs3.service"
+		systemctl stop r3v3rs3 2>/dev/null || true
+	fi
+	if [ -f /etc/systemd/system/r3v3rs3.service ]; then
+		systemctl disable r3v3rs3 2>/dev/null || true
+		rm -f /etc/systemd/system/r3v3rs3.service
+	fi
 
 	write_unit
 	systemctl daemon-reload
