@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.10] - 2026-10-23
+
+### Fixed
+- Local Target API Compatibility: Excluded local Docker host from mTLS link latency and jitter metrics in the platform targets API response, ensuring strict compatibility with local target schema assertions while keeping the WebUI status badge crisp.
+
 ## [2.3.9] - 2026-10-23
 
 ### Added
