@@ -58,6 +58,7 @@ pub fn proxy_list() -> Html {
     let (session, _) = use_store::<SessionStore>();
     let can_edit = session.can_edit_proxies();
     let selected = use_state(HashSet::<String>::new);
+    let active_distribution = use_state(|| Option::<(String, Vec<UpstreamHealth>)>::None);
 
     let proxies_dispatcher_for_effect = proxies_dispatcher.clone();
     use_effect_with((), move |_| {
@@ -89,26 +90,36 @@ pub fn proxy_list() -> Html {
         navigator_cloned.push(&Route::NewProxy);
     });
 
+    let ctx = ProxyRowContext {
+        locale,
+        proxies: &proxies,
+        ports: &ports,
+        navigator: &navigator,
+        proxies_dispatcher: &proxies_dispatcher,
+        can_edit,
+        active_distribution: &active_distribution,
+    };
     let rows = proxies
         .entries
         .iter()
-        .map(|entry| {
-            proxy_row(
-                locale,
-                entry,
-                &proxies,
-                &ports,
-                &navigator,
-                &proxies_dispatcher,
-                can_edit,
-            )
-        })
+        .map(|entry| proxy_row(entry, &ctx))
         .collect::<Vec<_>>();
     let selection = build_selection(locale, can_edit, &proxies, &selected, &proxies_dispatcher);
     html! {
         <>
             <DiscoveryStatusCard />
             { selectable_list_card(locale, proxies.loaded, "proxies.empty", &COLUMNS, &rows, selection.as_ref()) }
+            if let Some((proxy_name, upstreams)) = (*active_distribution).clone() {
+                <crate::components::upstream_distribution_modal::UpstreamDistributionModal
+                    {locale}
+                    {proxy_name}
+                    {upstreams}
+                    onclose={{
+                        let active = active_distribution.clone();
+                        Callback::from(move |()| active.set(None))
+                    }}
+                />
+            }
             if can_edit {
                 <div class="flex items-center justify-end my-4">
                     <div>
@@ -227,6 +238,7 @@ struct ProxyRowActions {
     config_onclick: Callback<MouseEvent>,
     config_label: &'static str,
     log_onclick: Callback<MouseEvent>,
+    distribution: Option<Callback<MouseEvent>>,
     maintenance: Option<(bool, Callback<MouseEvent>)>,
     purge: Option<Callback<MouseEvent>>,
     delete: Option<Callback<MouseEvent>>,
@@ -237,6 +249,9 @@ fn render_proxy_actions(locale: Locale, actions: ProxyRowActions) -> Html {
         <>
             <a class={LINK_CLASS} onclick={actions.config_onclick}>{locale.t(actions.config_label)}</a>
             <a class={LINK_CLASS} onclick={actions.log_onclick}>{locale.t("common.log")}</a>
+            if let Some(dist_onclick) = actions.distribution {
+                <a class={LINK_CLASS} onclick={dist_onclick}>{locale.t("proxies.distribution")}</a>
+            }
             if let Some((enabled, cb)) = actions.maintenance {
                 <a class={LINK_CLASS} onclick={cb}>
                     {if enabled { locale.t("proxies.exit_maintenance") } else { locale.t("proxies.enter_maintenance") }}
@@ -252,21 +267,40 @@ fn render_proxy_actions(locale: Locale, actions: ProxyRowActions) -> Html {
     }
 }
 
+fn distribution_callback(
+    name: &str,
+    upstreams: &[UpstreamHealth],
+    active_distribution: &UseStateHandle<Option<(String, Vec<UpstreamHealth>)>>,
+) -> Option<Callback<MouseEvent>> {
+    if upstreams.is_empty() {
+        return None;
+    }
+    let active = active_distribution.clone();
+    let name = name.to_string();
+    let upstreams = upstreams.to_vec();
+    Some(Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        active.set(Some((name.clone(), upstreams.clone())));
+    }))
+}
+
+struct ProxyRowContext<'a> {
+    locale: Locale,
+    proxies: &'a ProxyStore,
+    ports: &'a PortStore,
+    navigator: &'a Navigator,
+    proxies_dispatcher: &'a Dispatch<ProxyStore>,
+    can_edit: bool,
+    active_distribution: &'a UseStateHandle<Option<(String, Vec<UpstreamHealth>)>>,
+}
+
 /// A proxy row. A discovered proxy, or an account that cannot change the proxies, gets only the
 /// read actions.
-fn proxy_row(
-    locale: Locale,
-    entry: &ProxyEntry,
-    proxies: &ProxyStore,
-    ports: &PortStore,
-    navigator: &Navigator,
-    proxies_dispatcher: &Dispatch<ProxyStore>,
-    can_edit: bool,
-) -> Row {
+fn proxy_row(entry: &ProxyEntry, ctx: &ProxyRowContext) -> Row {
     let id = entry.id;
-    let read_only = entry.is_discovered() || !can_edit;
-    let log_onclick = route_onclick(navigator, Route::ProxyLogView { id });
-    let config_onclick = route_onclick(navigator, Route::ProxyView { id });
+    let read_only = entry.is_discovered() || !ctx.can_edit;
+    let log_onclick = route_onclick(ctx.navigator, Route::ProxyLogView { id });
+    let config_onclick = route_onclick(ctx.navigator, Route::ProxyView { id });
     let cache_enabled = matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.cache.enabled);
     let onchange = toggle_onchange(id);
 
@@ -275,28 +309,35 @@ fn proxy_row(
         false => entry.proxy.name.clone(),
     };
 
-    let status = proxies.statuses.get(&id).cloned().unwrap_or_default();
+    let status = ctx.proxies.statuses.get(&id).cloned().unwrap_or_default();
     let config_label = match read_only {
         true => "common.view",
         false => "common.edit",
     };
+    let distribution = distribution_callback(&title, &status.upstreams, ctx.active_distribution);
     let maintenance = if !read_only && let ProxyKind::Http(http) = &entry.proxy.kind {
         Some((
             http.maintenance.enabled,
-            maintenance_onclick(id, !http.maintenance.enabled, proxies_dispatcher.clone()),
+            maintenance_onclick(
+                id,
+                !http.maintenance.enabled,
+                ctx.proxies_dispatcher.clone(),
+            ),
         ))
     } else {
         None
     };
-    let purge = (cache_enabled && can_edit).then(|| purge_onclick(locale, id));
-    let delete = (!read_only).then(|| delete_onclick(locale, id, proxies_dispatcher.clone()));
+    let purge = (cache_enabled && ctx.can_edit).then(|| purge_onclick(ctx.locale, id));
+    let delete =
+        (!read_only).then(|| delete_onclick(ctx.locale, id, ctx.proxies_dispatcher.clone()));
 
     let actions = render_proxy_actions(
-        locale,
+        ctx.locale,
         ProxyRowActions {
             config_onclick,
             config_label,
             log_onclick,
+            distribution,
             maintenance,
             purge,
             delete,
@@ -306,10 +347,10 @@ fn proxy_row(
     Row {
         key: id.to_string(),
         cells: vec![
-            html! { <>{title}</> },
-            source_cell(locale, entry),
-            addresses_cell(entry, ports),
-            status_cell(locale, &status),
+            html! { <>{title.clone()}</> },
+            source_cell(ctx.locale, entry),
+            addresses_cell(entry, ctx.ports),
+            status_cell(ctx.locale, &status, &title, ctx.active_distribution),
             active_toggle(entry.proxy.active, read_only, onchange),
         ],
         actions,
@@ -429,7 +470,12 @@ fn source_label(locale: Locale, entry: &ProxyEntry) -> String {
 
 /// The state of a proxy, and the number of healthy upstream servers. The title of the number lists
 /// the unhealthy servers with their last errors.
-fn status_cell(locale: Locale, status: &ProxyStatus) -> Html {
+fn status_cell(
+    locale: Locale,
+    status: &ProxyStatus,
+    proxy_name: &str,
+    active_distribution: &UseStateHandle<Option<(String, Vec<UpstreamHealth>)>>,
+) -> Html {
     let (status_key, color) = match status.state {
         ProxyState::Active => ("state.active", "bg-green-500"),
         ProxyState::Inactive => ("state.inactive", "bg-neutral-500"),
@@ -454,10 +500,36 @@ fn status_cell(locale: Locale, status: &ProxyStatus) -> Html {
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
+
+    let on_dist_click = {
+        let active = active_distribution.clone();
+        let name = proxy_name.to_string();
+        let upstreams = status.upstreams.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            active.set(Some((name.clone(), upstreams.clone())));
+        })
+    };
+
     html! {
         <div>
             {badge}
-            <span class="block text-xs text-neutral-500 dark:text-neutral-400" title={title}>{text}</span>
+            <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                <span class="block text-xs text-neutral-500 dark:text-neutral-400" title={title}>{text}</span>
+                if !status.upstreams.is_empty() {
+                    <button
+                        type="button"
+                        onclick={on_dist_click}
+                        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 border border-neutral-200/60 dark:border-neutral-700/60 transition cursor-pointer"
+                        title={locale.t("proxies.distribution")}
+                    >
+                        <svg class="w-2.5 h-2.5 text-neutral-500 dark:text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        <span>{locale.t("proxies.distribution")}</span>
+                    </button>
+                }
+            </div>
             { for srv_errors.iter().map(|line| html! {
                 <span class="block text-xs text-red-600 dark:text-red-400">{line}</span>
             }) }
@@ -650,6 +722,7 @@ mod tests {
             failures: 0,
             last_error: last_error.map(Into::into),
             circuit: CircuitState::Closed,
+            ..Default::default()
         };
         let upstreams = [
             server("http://a", true, Some("old error")),

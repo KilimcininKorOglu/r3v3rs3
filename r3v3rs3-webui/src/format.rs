@@ -152,6 +152,37 @@ fn time_left(locale: Locale, seconds: Option<u64>) -> String {
     locale.t("time.less_than_hour").to_string()
 }
 
+const KB: u64 = 1024;
+const MB: u64 = 1024 * KB;
+const GB: u64 = 1024 * MB;
+const TB: u64 = 1024 * GB;
+
+/// Formats a byte size into a human-readable string (B, KB, MB, GB, TB).
+pub fn format_bytes(bytes: u64) -> String {
+    if bytes < KB {
+        format!("{bytes} B")
+    } else if bytes < MB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else if bytes < GB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes < TB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else {
+        format!("{:.2} TB", bytes as f64 / TB as f64)
+    }
+}
+
+/// Formats milliseconds latency into a human-readable string (ms or s).
+pub fn format_latency(ms: f64) -> String {
+    if ms < 1.0 {
+        format!("{ms:.2} ms")
+    } else if ms < 1000.0 {
+        format!("{ms:.1} ms")
+    } else {
+        format!("{:.2} s", ms / 1000.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +209,20 @@ mod tests {
             rfc3339_in_offset(1_500, -5 * 3600),
             Some("1969-12-31T19:00:01.5-05:00".to_owned())
         );
+    }
+
+    #[test]
+    fn format_bytes_scales_units() {
+        assert_eq!(format_bytes(500), "500 B");
+        assert_eq!(format_bytes(2048), "2.0 KB");
+        assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MB");
+        assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.00 GB");
+    }
+
+    #[test]
+    fn format_latency_scales_units() {
+        assert_eq!(format_latency(0.42), "0.42 ms");
+        assert_eq!(format_latency(15.2), "15.2 ms");
+        assert_eq!(format_latency(1500.0), "1.50 s");
     }
 }

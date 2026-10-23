@@ -150,6 +150,26 @@ Her yansıtma sunucusu, kopyalanan isteğin aynı method, header, yol ve gövde 
 
 Kopya, r3v3rs3 istek gövdesinin tamamını okuduktan sonra gider. Cache'ten gelen yanıtlar, upgrade istekleri, maksimum gövde boyutundan (varsayılan 65536 byte) büyük gövdeler ve 64 kopya gönderilirken gelen istekler kopyalanmaz. Kopya, kimlik doğrulamanın kaldırmadığı cookie gibi kimlik bilgilerini taşır. Bu yüzden istekleri yalnız bu veriyle güvendiğiniz bir sunucuya yansıtın.
 
+## Adım 9: Canlı Metrikleri ve Trafik Dağılımını İzleme
+
+Bir proxy birden fazla upstream hedefine sahip olduğunda r3v3rs3 her sunucu düğümü için gerçek zamanlı trafik istatistiklerini takip eder:
+- **Toplam İstek**: Bu sunucuya yönlendirilen toplam istek sayısı.
+- **Aktif Bağlantı**: Anlık işlenen istekler veya aktif açık bağlantılar.
+- **Hata Oranı ve Sayısı**: Bağlantı hataları, zaman aşımları ve upstream hataları.
+- **RTT Gecikme**: Milisaniye cinsinden hareketli ortalama gidiş-dönüş süresi.
+- **Aktarılan Veri**: Kümülatif veri transferi (byte, KB, MB, GB).
+
+WebUI proxy listesinde **Trafik Dağılımı** düğmesine tıklayarak etkileşimli dağılım penceresini açabilirsiniz:
+- **Görsel Dağılım Çubuğu**: İsteklerin upstream düğümler arasındaki oransal dağılımını gösteren renkli segment çubuğu.
+- **Beklenen ve Gerçekleşen Oran**: Yük dengeleme ağırlıklarını fiili trafik payıyla karşılaştırarak dengeleme politikasını doğrulama.
+- **Düğüm Durumu ve Sağlık**: Canlı sağlık rozetleri, hata detayları ve otomatik yenilenen düğüm metrikleri.
+
+Aynı veriler durum API'si üzerinden de alınabilir:
+
+```bash
+$ curl -s -b cookies.txt http://127.0.0.1:46492/api/proxies/<proxy-id>/status
+```
+
 ## WebSocket ve gRPC
 
 İkisi de aynı HTTP proxy üzerinden çalışır, ama farklı ayarlar ister.

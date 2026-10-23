@@ -421,7 +421,7 @@ pub enum ProxyState {
     Unknown,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct ProxyStatus {
     pub state: ProxyState,
     /// The health of the upstream servers. An HTTP proxy lists the servers of each route in route

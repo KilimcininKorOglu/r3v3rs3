@@ -150,6 +150,26 @@ Every mirror server receives a copy of the mirrored requests with the same metho
 
 A copy goes out after r3v3rs3 read the whole request body. A cached response, an upgrade request, a body over the maximum body size (default 65536 bytes) and a request that arrives while 64 copies are in progress are not copied. A copy carries the credentials that authentication does not remove, such as cookies, so mirror only to a server that you trust with that data.
 
+## Step 9: Monitor Live Metrics and Traffic Distribution
+
+When a proxy has multiple upstream targets, r3v3rs3 tracks real-time traffic statistics for each server node:
+- **Total Requests**: Total requests routed to this server.
+- **Active Connections**: Current in-flight requests or active connections.
+- **Error Rate & Count**: Connection failures, timeouts, and upstream errors.
+- **RTT Latency**: Moving average round-trip time in milliseconds.
+- **Throughput**: Cumulative transferred data (bytes, KB, MB, GB).
+
+In the WebUI proxy list, click the **Traffic Distribution** button to open the interactive distribution modal:
+- **Visual Distribution Bar**: Segmented progress bar showing the proportional distribution of requests across upstream nodes.
+- **Expected vs. Actual Ratio**: Compare assigned load-balancing weights against observed traffic share to verify distribution policies.
+- **Node Status & Health**: Live health badges, error details, and per-node metrics refreshed automatically.
+
+The same data is available via the status API:
+
+```bash
+$ curl -s -b cookies.txt http://127.0.0.1:46492/api/proxies/<proxy-id>/status
+```
+
 ## WebSocket and gRPC
 
 Both work over the same HTTP proxy, but they need different settings.

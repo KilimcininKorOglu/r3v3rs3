@@ -3,7 +3,7 @@
 
 use super::settings::fetch_json;
 use crate::API_ENDPOINT;
-use crate::format::format_time;
+use crate::format::{format_bytes, format_time};
 use crate::i18n::use_locale;
 use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
@@ -129,14 +129,5 @@ fn sparkline(locale: Locale, key: &'static str, values: impl Iterator<Item = f64
                     class="text-neutral-500 dark:text-neutral-300" />
             </svg>
         </div>
-    }
-}
-
-/// A size in KiB or MiB.
-fn format_bytes(size: u64) -> String {
-    if size >= 1024 * 1024 {
-        format!("{:.1} MiB", size as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.1} KiB", size as f64 / 1024.0)
     }
 }

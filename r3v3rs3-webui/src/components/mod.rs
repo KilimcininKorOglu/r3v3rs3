@@ -27,4 +27,5 @@ pub mod theme_menu;
 pub mod traffic_inspector;
 pub mod udp_proxy_config;
 pub mod update_banner;
+pub mod upstream_distribution_modal;
 pub mod worker_status;

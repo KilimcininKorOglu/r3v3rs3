@@ -745,15 +745,7 @@ fn backup_row(
     }
 }
 
-pub(crate) fn format_bytes(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{bytes} B")
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    }
-}
+pub(crate) use crate::format::format_bytes;
 
 fn load_volume_backups(
     app_id: ShortId,

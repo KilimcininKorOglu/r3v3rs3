@@ -407,6 +407,8 @@ fn app_row(
         "common.view"
     };
     let view_onclick = link(navigator, Route::AppView { id: row.app.id });
+    let terminal_onclick = link(navigator, Route::AppTerminal { id: row.app.id });
+    let files_onclick = link(navigator, Route::AppFiles { id: row.app.id });
     let deployments_onclick = link(navigator, Route::AppDeployments { id: row.app.id });
     let log_onclick = link(navigator, Route::AppLog { id: row.app.id });
     Row {
@@ -420,6 +422,8 @@ fn app_row(
         actions: html! {
             <>
                 <a class={LINK_CLASS} onclick={view_onclick}>{locale.t(view_label)}</a>
+                <a class={LINK_CLASS} onclick={terminal_onclick}>{locale.t("apps.terminal")}</a>
+                <a class={LINK_CLASS} onclick={files_onclick}>{locale.t("apps.files")}</a>
                 <a class={LINK_CLASS} onclick={deployments_onclick}>{locale.t("apps.deployments")}</a>
                 <a class={LINK_CLASS} onclick={log_onclick}>{locale.t("common.log")}</a>
                 if can_edit && !busy && upgrade_available {

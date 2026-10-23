@@ -300,11 +300,12 @@ async fn start(
         }
     }
 
-    let (target, mut out, _guard) = upstream.connect(&resolver, (remote, local)).await?;
+    let (target, mut out, guard) = upstream.connect(&resolver, (remote, local)).await?;
     info!(target: "r3v3rs3::access_log", remote = %remote, %peer, %local, %target);
 
     match tokio::io::copy_bidirectional(&mut stream, &mut out).await {
         Ok((rx, tx)) => {
+            guard.record_bytes(rx + tx);
             super::stats::record_rx_bytes(rx);
             super::stats::record_tx_bytes(tx);
         }

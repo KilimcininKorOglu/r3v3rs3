@@ -387,8 +387,8 @@ impl CircuitState {
     }
 }
 
-/// The health of one upstream server of a proxy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+/// The health and live metrics of one upstream server of a proxy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct UpstreamHealth {
     /// The URL or the address of the server.
     pub addr: String,
@@ -402,6 +402,39 @@ pub struct UpstreamHealth {
     /// The circuit of the server. A closed circuit is not serialized.
     #[serde(default, skip_serializing_if = "CircuitState::is_closed")]
     pub circuit: CircuitState,
+    /// Total requests routed to this upstream server.
+    #[serde(default)]
+    pub total_requests: u64,
+    /// Currently active in-flight requests or connections.
+    #[serde(default)]
+    pub active_connections: usize,
+    /// Total failed requests or connections.
+    #[serde(default)]
+    pub total_errors: u64,
+    /// Recent average round-trip response time (RTT) in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rtt_ms: Option<f64>,
+    /// Total bytes transferred to and from this upstream server.
+    #[serde(default)]
+    pub total_bytes: u64,
+}
+
+impl Default for UpstreamHealth {
+    fn default() -> Self {
+        Self {
+            addr: String::new(),
+            weight: 1,
+            healthy: true,
+            failures: 0,
+            last_error: None,
+            circuit: CircuitState::Closed,
+            total_requests: 0,
+            active_connections: 0,
+            total_errors: 0,
+            rtt_ms: None,
+            total_bytes: 0,
+        }
+    }
 }
 
 /// The DNS SRV lookup of one server name of a proxy.

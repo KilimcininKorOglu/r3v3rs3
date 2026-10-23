@@ -467,6 +467,12 @@ impl Upstream {
         permit: Permit,
     ) -> Result<Response<ProxyBody>, SendError> {
         let result = self.pool.send(req, self.request_timeout).await;
+        if let Ok(ref res) = result
+            && let Some(cl) = res.headers().get(hyper::header::CONTENT_LENGTH)
+            && let Ok(bytes) = cl.to_str().unwrap_or_default().parse::<u64>()
+        {
+            permit.record_bytes(bytes);
+        }
         match &result {
             Ok(res) if is_gateway_error(res.status()) => {
                 permit.error_response(&format!("the server answered {}", res.status()))

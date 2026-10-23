@@ -897,15 +897,7 @@ fn render_entry_row(
     }
 }
 
-pub fn format_latency(ms: f64) -> String {
-    if ms < 1.0 {
-        format!("{:.2} ms", ms)
-    } else if ms < 1000.0 {
-        format!("{:.1} ms", ms)
-    } else {
-        format!("{:.2} s", ms / 1000.0)
-    }
-}
+pub use crate::format::format_latency;
 
 pub fn status_badge_class(status: u16) -> &'static str {
     match status {

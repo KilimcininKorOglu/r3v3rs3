@@ -14,7 +14,7 @@ use std::{
     net::IpAddr,
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -48,6 +48,50 @@ pub struct UpstreamGroup {
     probe: Mutex<Option<Arc<Probe>>>,
     /// Active connections or in-flight requests per server.
     active_conns: Vec<Arc<AtomicUsize>>,
+    /// Live metrics and request counters per server.
+    metrics: Vec<Arc<ServerLiveMetrics>>,
+}
+
+/// Live traffic metrics and response timings of one upstream server.
+#[derive(Debug, Default)]
+pub struct ServerLiveMetrics {
+    pub requests: AtomicU64,
+    pub errors: AtomicU64,
+    pub total_rtt_micros: AtomicU64,
+    pub rtt_count: AtomicU64,
+    pub last_rtt_micros: AtomicU64,
+    pub total_bytes: AtomicU64,
+}
+
+impl ServerLiveMetrics {
+    pub fn record_request(&self) {
+        self.requests.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_error(&self) {
+        self.errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_rtt(&self, duration: Duration) {
+        let micros = duration.as_micros() as u64;
+        self.last_rtt_micros.store(micros, Ordering::Relaxed);
+        self.total_rtt_micros.fetch_add(micros, Ordering::Relaxed);
+        self.rtt_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_bytes(&self, bytes: u64) {
+        self.total_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn avg_rtt_ms(&self) -> Option<f64> {
+        let count = self.rtt_count.load(Ordering::Relaxed);
+        if count == 0 {
+            let last = self.last_rtt_micros.load(Ordering::Relaxed);
+            return (last > 0).then_some((last as f64) / 1000.0);
+        }
+        let total = self.total_rtt_micros.load(Ordering::Relaxed);
+        Some(((total as f64) / (count as f64)) / 1000.0)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -199,6 +243,8 @@ pub struct Permit {
     trial: bool,
     reported: bool,
     active_conn: Option<Arc<AtomicUsize>>,
+    metrics: Option<Arc<ServerLiveMetrics>>,
+    start: Instant,
 }
 
 impl Permit {
@@ -223,6 +269,7 @@ impl Permit {
         self.reported = true;
         ConnGuard {
             active_conn: self.active_conn.take(),
+            metrics: self.metrics.take(),
         }
     }
 
@@ -239,8 +286,22 @@ impl Permit {
         self.record(Some(error));
     }
 
+    /// Records transferred bytes to and from the upstream server.
+    pub fn record_bytes(&self, bytes: u64) {
+        if let Some(ref m) = self.metrics {
+            m.record_bytes(bytes);
+        }
+    }
+
     fn record(&mut self, failure: Option<&str>) {
         self.reported = true;
+        let elapsed = self.start.elapsed();
+        if let Some(ref m) = self.metrics {
+            m.record_rtt(elapsed);
+            if failure.is_some() {
+                m.record_error();
+            }
+        }
         self.group.record_circuit(self.index, self.trial, failure);
     }
 }
@@ -260,6 +321,15 @@ impl Drop for Permit {
 #[derive(Debug, Default)]
 pub struct ConnGuard {
     active_conn: Option<Arc<AtomicUsize>>,
+    metrics: Option<Arc<ServerLiveMetrics>>,
+}
+
+impl ConnGuard {
+    pub fn record_bytes(&self, bytes: u64) {
+        if let Some(ref m) = self.metrics {
+            m.record_bytes(bytes);
+        }
+    }
 }
 
 impl Drop for ConnGuard {
@@ -470,6 +540,9 @@ impl UpstreamGroup {
         let active_conns = (0..members.len())
             .map(|_| Arc::new(AtomicUsize::new(0)))
             .collect();
+        let metrics = (0..members.len())
+            .map(|_| Arc::new(ServerLiveMetrics::default()))
+            .collect();
         Self {
             members,
             policy,
@@ -480,6 +553,7 @@ impl UpstreamGroup {
             breakers,
             probe: Mutex::new(None),
             active_conns,
+            metrics,
         }
     }
 
@@ -631,12 +705,18 @@ impl UpstreamGroup {
         if let Some(ref c) = active_conn {
             c.fetch_add(1, Ordering::SeqCst);
         }
+        let metrics = self.metrics.get(index).cloned();
+        if let Some(ref m) = metrics {
+            m.record_request();
+        }
         Some(Permit {
             group: self.clone(),
             index,
             trial,
             reported: false,
             active_conn,
+            metrics,
+            start: Instant::now(),
         })
     }
 
@@ -789,6 +869,19 @@ impl UpstreamGroup {
             .filter_map(|(index, member)| {
                 let circuit = self.circuit_state(index);
                 let health = self.health(index)?;
+                let active = self.active_connections(index);
+                let (requests, errors, rtt_ms, total_bytes) = self
+                    .metrics
+                    .get(index)
+                    .map(|m| {
+                        (
+                            m.requests.load(Ordering::Relaxed),
+                            m.errors.load(Ordering::Relaxed),
+                            m.avg_rtt_ms(),
+                            m.total_bytes.load(Ordering::Relaxed),
+                        )
+                    })
+                    .unwrap_or((0, 0, None, 0));
                 Some(UpstreamHealth {
                     addr: member.addr.clone(),
                     weight: member.weight,
@@ -796,6 +889,11 @@ impl UpstreamGroup {
                     healthy: health.is_healthy(now),
                     failures: health.failures,
                     last_error: health.last_error.clone(),
+                    total_requests: requests,
+                    active_connections: active,
+                    total_errors: errors,
+                    rtt_ms,
+                    total_bytes,
                 })
             })
             .collect()
