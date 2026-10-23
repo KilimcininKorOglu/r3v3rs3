@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.3] - 2026-10-23
+
+### Added
+- Automated MaxMind GeoIP MMDB Updater & License Management: Fully autonomous, zero-downtime updater for MaxMind GeoLite2-Country databases with SHA256 integrity verification, safe archive extraction, and lock-free in-memory hot reloading (`ArcSwapOption`).
+- Background Periodic Update Scheduler: Configurable update schedule (`auto_update`, `update_interval_days`, default: 7 days) evaluated every 12 hours on the leader node without impacting proxy throughput.
+- Outbound Webhook Alerts: Added `system.geoip_updated` and `system.geoip_update_failed` under the `System` category with event metadata and failure reporting.
+- WebUI GeoIP Status Card & Controls: Live status card on Settings page displaying loaded state, database path, file size, build epoch date, license configuration status, and an immediate "Update Database Now" action button.
+- 100% MCP & CLI Parity: Added MCP tools (`get_geoip_status`, `update_geoip_database`, `get_geoip_config`, `update_geoip_config`) and CLI subcommands under `r3 security geoip` (`status`, `update`, `config`, `set-config`).
+- Comprehensive Documentation: Updated English and Turkish documentation with API endpoints, MCP tools table, and CLI usage.
+
 ## [2.5.2] - 2026-10-23
 
 ### Fixed
