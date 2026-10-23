@@ -5,7 +5,8 @@ use super::resource_page::BUTTON_CLASS;
 use super::settings::send_json;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
-use crate::components::data_list::{Column, DANGER_LINK_CLASS, Row, list_card};
+use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::data_list::{Column, Row, list_card};
 use crate::dialog;
 use crate::format::format_time;
 use crate::i18n::use_locale;
@@ -272,16 +273,22 @@ fn render_project_row(
 
     let actions = if can_edit {
         html! {
-            <div class="flex items-center space-x-3 text-sm">
-                <button type="button" class="text-primary-600 hover:underline dark:text-primary-400 font-medium" onclick={env_cb}>
-                    {locale.t("projects.environments")}
-                </button>
-                <button type="button" class="text-neutral-600 hover:underline dark:text-neutral-400 font-medium" onclick={edit_cb}>
-                    {locale.t("projects.edit")}
-                </button>
-                <button type="button" class={DANGER_LINK_CLASS} onclick={del_cb}>
-                    {locale.t("projects.delete")}
-                </button>
+            <div class="flex items-center space-x-1.5 text-sm">
+                <ActionIconButton
+                    variant={ActionVariant::Files}
+                    title={locale.t("projects.environments").to_string()}
+                    onclick={env_cb}
+                />
+                <ActionIconButton
+                    variant={ActionVariant::Edit}
+                    title={locale.t("projects.edit").to_string()}
+                    onclick={edit_cb}
+                />
+                <ActionIconButton
+                    variant={ActionVariant::Delete}
+                    title={locale.t("projects.delete").to_string()}
+                    onclick={del_cb}
+                />
             </div>
         }
     } else {

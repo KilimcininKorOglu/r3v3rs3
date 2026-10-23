@@ -1,5 +1,6 @@
 pub mod acme_form;
 pub mod acme_provider;
+pub mod action_button;
 pub mod anomaly_rules;
 pub mod auth_config;
 pub mod backup_drill_modal;

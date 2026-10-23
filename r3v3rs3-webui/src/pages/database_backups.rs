@@ -6,6 +6,7 @@ use super::resource_page::{Notice, delete_on_click, notice_view};
 use super::settings::{fetch_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::backup_drill_modal::BackupDrillModal;
 use crate::dialog::{self, Icon};
 use crate::format::format_time;
@@ -661,20 +662,29 @@ fn list_view(
                     <td class="py-1.5 font-mono text-neutral-400">{format_size(entry.size)}</td>
                     <td class="py-1.5 font-mono text-neutral-400">{entry.sha256.chars().take(12).collect::<String>()}</td>
                     <td class="py-1.5 text-right">
-                        {status_badge}
-                        <a class="text-sm text-neutral-400 hover:text-neutral-200 mr-3" href={download} download={format!("{}.dump.gz", entry.id)}>
-                            {locale.t("backups.download")}
-                        </a>
-                        if let Some(restore) = restore {
-                            <a class="text-sm text-neutral-400 hover:text-neutral-200 mr-3" onclick={restore}>
-                                {locale.t("backups.restore")}
-                            </a>
-                        }
-                        if let Some(delete) = delete {
-                            <a class="text-red-400 hover:text-red-300" onclick={delete}>
-                                {locale.t("common.delete")}
-                            </a>
-                        }
+                        <div class="inline-flex items-center justify-end gap-1.5">
+                            {status_badge}
+                            <ActionIconButton
+                                variant={ActionVariant::Download}
+                                title={locale.t("backups.download").to_string()}
+                                href={download}
+                                download={format!("{}.dump.gz", entry.id)}
+                            />
+                            if let Some(restore) = restore {
+                                <ActionIconButton
+                                    variant={ActionVariant::Restore}
+                                    title={locale.t("backups.restore").to_string()}
+                                    onclick={restore}
+                                />
+                            }
+                            if let Some(delete) = delete {
+                                <ActionIconButton
+                                    variant={ActionVariant::Delete}
+                                    title={locale.t("common.delete").to_string()}
+                                    onclick={delete}
+                                />
+                            }
+                        </div>
                     </td>
                 </tr>
             }

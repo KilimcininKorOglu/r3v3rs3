@@ -1,5 +1,6 @@
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::data_list::{
     Column, LINK_CLASS, Row, SelectionProps, selectable_list_card, status_badge,
 };
@@ -383,34 +384,14 @@ fn app_row(
             }) }
         </span>
     };
-    let busy = row.is_busy();
-    let deploy_onclick = {
-        let deploy = deploy.clone();
-        let row = row.clone();
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            deploy.emit(row.clone());
-        })
-    };
-    let upgrade_available = row.app.catalog_update.is_some();
-    let upgrade_onclick = {
-        let upgrade = upgrade.clone();
-        let row = row.clone();
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            upgrade.emit(row.clone());
-        })
-    };
-    let view_label = if can_edit {
-        "common.edit"
-    } else {
-        "common.view"
-    };
-    let view_onclick = link(navigator, Route::AppView { id: row.app.id });
-    let terminal_onclick = link(navigator, Route::AppTerminal { id: row.app.id });
-    let files_onclick = link(navigator, Route::AppFiles { id: row.app.id });
-    let deployments_onclick = link(navigator, Route::AppDeployments { id: row.app.id });
-    let log_onclick = link(navigator, Route::AppLog { id: row.app.id });
+    let actions = render_app_row_actions(AppRowActionParams {
+        locale,
+        row: &row,
+        can_edit,
+        deploy,
+        upgrade,
+        navigator,
+    });
     Row {
         key: row.app.id.to_string(),
         cells: vec![
@@ -419,21 +400,123 @@ fn app_row(
             html! { <>{domains_cell}</> },
             deployment_cell(locale, row.latest.as_ref()),
         ],
-        actions: html! {
-            <>
-                <a class={LINK_CLASS} onclick={view_onclick}>{locale.t(view_label)}</a>
-                <a class={LINK_CLASS} onclick={terminal_onclick}>{locale.t("apps.terminal")}</a>
-                <a class={LINK_CLASS} onclick={files_onclick}>{locale.t("apps.files")}</a>
-                <a class={LINK_CLASS} onclick={deployments_onclick}>{locale.t("apps.deployments")}</a>
-                <a class={LINK_CLASS} onclick={log_onclick}>{locale.t("common.log")}</a>
-                if can_edit && !busy && upgrade_available {
-                    <a class={LINK_CLASS} onclick={upgrade_onclick}>{locale.t("apps.upgrade_catalog")}</a>
-                }
-                if can_edit && !busy {
-                    <a class={LINK_CLASS} onclick={deploy_onclick}>{locale.t("apps.deploy")}</a>
-                }
-            </>
+        actions,
+    }
+}
+
+struct AppRowActionParams<'a> {
+    locale: Locale,
+    row: &'a AppRow,
+    can_edit: bool,
+    deploy: &'a Callback<AppRow>,
+    upgrade: &'a Callback<AppRow>,
+    navigator: &'a Navigator,
+}
+
+fn render_app_row_actions(params: AppRowActionParams) -> Html {
+    let busy = params.row.is_busy();
+    let upgrade_available = params.row.app.catalog_update.is_some();
+    let view_variant = if params.can_edit {
+        ActionVariant::Edit
+    } else {
+        ActionVariant::View
+    };
+    let view_label = if params.can_edit {
+        "common.edit"
+    } else {
+        "common.view"
+    };
+
+    let view_onclick = link(
+        params.navigator,
+        Route::AppView {
+            id: params.row.app.id,
         },
+    );
+    let terminal_onclick = link(
+        params.navigator,
+        Route::AppTerminal {
+            id: params.row.app.id,
+        },
+    );
+    let files_onclick = link(
+        params.navigator,
+        Route::AppFiles {
+            id: params.row.app.id,
+        },
+    );
+    let deployments_onclick = link(
+        params.navigator,
+        Route::AppDeployments {
+            id: params.row.app.id,
+        },
+    );
+    let log_onclick = link(
+        params.navigator,
+        Route::AppLog {
+            id: params.row.app.id,
+        },
+    );
+
+    let deploy_onclick = {
+        let deploy = params.deploy.clone();
+        let row = params.row.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            deploy.emit(row.clone());
+        })
+    };
+    let upgrade_onclick = {
+        let upgrade = params.upgrade.clone();
+        let row = params.row.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            upgrade.emit(row.clone());
+        })
+    };
+
+    html! {
+        <>
+            <ActionIconButton
+                variant={view_variant}
+                title={params.locale.t(view_label).to_string()}
+                onclick={view_onclick}
+            />
+            <ActionIconButton
+                variant={ActionVariant::Terminal}
+                title={params.locale.t("apps.terminal").to_string()}
+                onclick={terminal_onclick}
+            />
+            <ActionIconButton
+                variant={ActionVariant::Files}
+                title={params.locale.t("apps.files").to_string()}
+                onclick={files_onclick}
+            />
+            <ActionIconButton
+                variant={ActionVariant::Metrics}
+                title={params.locale.t("apps.deployments").to_string()}
+                onclick={deployments_onclick}
+            />
+            <ActionIconButton
+                variant={ActionVariant::Logs}
+                title={params.locale.t("common.log").to_string()}
+                onclick={log_onclick}
+            />
+            if params.can_edit && !busy && upgrade_available {
+                <ActionIconButton
+                    variant={ActionVariant::Restore}
+                    title={params.locale.t("apps.upgrade_catalog").to_string()}
+                    onclick={upgrade_onclick}
+                />
+            }
+            if params.can_edit && !busy {
+                <ActionIconButton
+                    variant={ActionVariant::Play}
+                    title={params.locale.t("apps.deploy").to_string()}
+                    onclick={deploy_onclick}
+                />
+            }
+        </>
     }
 }
 

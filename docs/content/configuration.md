@@ -1700,6 +1700,22 @@ The flag menu in the navbar selects the WebUI language: English or Turkish. The 
 
 The error pages of r3v3rs3 and the Admin Session sign-in page read these cookies too. A browser sends the cookies only to the host of the WebUI, so the pages of a proxy on another host use English and the system theme.
 
+### Action Icon Standard
+
+Table and list rows throughout the WebUI (Proxies, Applications, Ports, Certificates, Targets, Accounts, and Projects) use compact, standardized icon buttons instead of text links. Every action button includes localized hover tooltips (`title`) and `aria-label` screen reader tags, following a unified semantic color scheme:
+
+- **Edit / Settings**: Blue (`#2563eb`)
+- **View / Inspect**: Neutral Slate (`#737373`)
+- **Terminal / Shell**: Emerald Green (`#059669`)
+- **Volume / Files**: Amber Folder (`#d97706`)
+- **Metrics / Distribution**: Cyan Analytics (`#0891b2`)
+- **Logs / Audit**: Indigo Document (`#4f46e5`)
+- **Deploy / Play**: Emerald Play (`#059669`)
+- **Pause / Drain**: Orange Pause (`#ea580c`)
+- **Download / Export**: Neutral Download (`#525252`)
+- **Restore / Re-test**: Teal Refresh (`#0d9488`)
+- **Delete / Purge**: Red Trash (`#dc2626`)
+
 # Admin API
 
 The WebUI uses the admin API under `/api`. r3v3rs3 generates the OpenAPI document of this API from the server code, so the document lists the routes of the running version.

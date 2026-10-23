@@ -4,8 +4,6 @@ use yew::prelude::*;
 
 pub const LINK_CLASS: &str =
     "cursor-pointer font-medium text-blue-600 dark:text-blue-400 hover:underline py-2 md:py-0";
-pub const WARNING_LINK_CLASS: &str =
-    "cursor-pointer font-medium text-orange-600 dark:text-orange-500 hover:underline py-2 md:py-0";
 pub const DANGER_LINK_CLASS: &str =
     "cursor-pointer font-medium text-red-600 dark:text-red-500 hover:underline py-2 md:py-0";
 
@@ -180,7 +178,7 @@ fn table_row(columns: &[Column], row: &Row, selection: Option<&SelectionProps>) 
                 <td class={classes!("px-4", "py-4", column.class, (index == 0).then_some("font-medium text-neutral-900 dark:text-neutral-200"))}>{cell.clone()}</td>
             }) }
             <td class="px-4 py-4 w-0 whitespace-nowrap">
-                <div class="flex items-center justify-end gap-5">{row.actions.clone()}</div>
+                <div class="flex items-center justify-end gap-1.5">{row.actions.clone()}</div>
             </td>
         </tr>
     }
@@ -220,7 +218,7 @@ fn card(locale: Locale, columns: &[Column], row: &Row, selection: Option<&Select
                     </div>
                 }) }
             </dl>
-            <div class="flex flex-wrap items-center justify-end gap-x-5">{row.actions.clone()}</div>
+            <div class="flex flex-wrap items-center justify-end gap-1.5 mt-2">{row.actions.clone()}</div>
         </li>
     }
 }

@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::data_list::{
-    Column, DANGER_LINK_CLASS, LINK_CLASS, Row, SelectionProps, active_toggle,
-    selectable_list_card, status_badge,
+    Column, LINK_CLASS, Row, SelectionProps, active_toggle, selectable_list_card, status_badge,
 };
 use crate::components::discovery_status::DiscoveryStatusCard;
 use crate::i18n::use_locale;
@@ -244,24 +244,55 @@ struct ProxyRowActions {
     delete: Option<Callback<MouseEvent>>,
 }
 
+fn config_action_variant(label: &str) -> ActionVariant {
+    if label == "common.edit" {
+        ActionVariant::Edit
+    } else {
+        ActionVariant::View
+    }
+}
+
 fn render_proxy_actions(locale: Locale, actions: ProxyRowActions) -> Html {
+    let edit_variant = config_action_variant(actions.config_label);
     html! {
         <>
-            <a class={LINK_CLASS} onclick={actions.config_onclick}>{locale.t(actions.config_label)}</a>
-            <a class={LINK_CLASS} onclick={actions.log_onclick}>{locale.t("common.log")}</a>
+            <ActionIconButton
+                variant={edit_variant}
+                title={locale.t(actions.config_label).to_string()}
+                onclick={actions.config_onclick}
+            />
             if let Some(dist_onclick) = actions.distribution {
-                <a class={LINK_CLASS} onclick={dist_onclick}>{locale.t("proxies.distribution")}</a>
+                <ActionIconButton
+                    variant={ActionVariant::Metrics}
+                    title={locale.t("proxies.distribution").to_string()}
+                    onclick={dist_onclick}
+                />
             }
+            <ActionIconButton
+                variant={ActionVariant::Logs}
+                title={locale.t("common.log").to_string()}
+                onclick={actions.log_onclick}
+            />
             if let Some((enabled, cb)) = actions.maintenance {
-                <a class={LINK_CLASS} onclick={cb}>
-                    {if enabled { locale.t("proxies.exit_maintenance") } else { locale.t("proxies.enter_maintenance") }}
-                </a>
+                <ActionIconButton
+                    variant={ActionVariant::Pause}
+                    title={if enabled { locale.t("proxies.exit_maintenance") } else { locale.t("proxies.enter_maintenance") }.to_string()}
+                    onclick={cb}
+                />
             }
             if let Some(purge_onclick) = actions.purge {
-                <a class={LINK_CLASS} onclick={purge_onclick}>{locale.t("proxies.purge")}</a>
+                <ActionIconButton
+                    variant={ActionVariant::Restore}
+                    title={locale.t("proxies.purge").to_string()}
+                    onclick={purge_onclick}
+                />
             }
             if let Some(delete_onclick) = actions.delete {
-                <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
+                <ActionIconButton
+                    variant={ActionVariant::Delete}
+                    title={locale.t("common.delete").to_string()}
+                    onclick={delete_onclick}
+                />
             }
         </>
     }

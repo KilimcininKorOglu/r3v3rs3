@@ -2,7 +2,7 @@
 
 use super::settings::{failure_box, send_request, success_box};
 use crate::API_ENDPOINT;
-use crate::components::data_list::{DANGER_LINK_CLASS, LINK_CLASS};
+use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::dialog::{self, Icon};
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
@@ -71,9 +71,17 @@ pub fn row_actions(
 ) -> Html {
     html! {
         <>
-            <a class={LINK_CLASS} onclick={edit}>{locale.t("common.edit")}</a>
+            <ActionIconButton
+                variant={ActionVariant::Edit}
+                title={locale.t("common.edit").to_string()}
+                onclick={edit}
+            />
             if let Some(onclick) = delete {
-                <a class={DANGER_LINK_CLASS} {onclick}>{locale.t("common.delete")}</a>
+                <ActionIconButton
+                    variant={ActionVariant::Delete}
+                    title={locale.t("common.delete").to_string()}
+                    {onclick}
+                />
             }
         </>
     }

@@ -11,9 +11,8 @@ use super::resource_page::{
 use super::settings::{fetch_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
-use crate::components::data_list::{
-    Column, DANGER_LINK_CLASS, LINK_CLASS, Row, list_card, status_badge,
-};
+use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::data_list::{Column, Row, list_card, status_badge};
 use crate::dialog::{self, Icon};
 use crate::format::format_time;
 use crate::i18n::use_locale;
@@ -335,13 +334,21 @@ fn target_actions(
         let question = locale.tf("targets.confirm_undrain", &[("name", name)]);
         let onclick = drain_on_click(locale, question, format!("{path}/undrain"), targets);
         html! {
-            <a class={LINK_CLASS} {onclick}>{locale.t("targets.undrain")}</a>
+            <ActionIconButton
+                variant={ActionVariant::Play}
+                title={locale.t("targets.undrain").to_string()}
+                {onclick}
+            />
         }
     } else {
         let question = locale.tf("targets.confirm_drain", &[("name", name)]);
         let onclick = drain_on_click(locale, question, format!("{path}/drain"), targets);
         html! {
-            <a class={LINK_CLASS} {onclick}>{locale.t("targets.drain")}</a>
+            <ActionIconButton
+                variant={ActionVariant::Pause}
+                title={locale.t("targets.drain").to_string()}
+                {onclick}
+            />
         }
     };
 
@@ -362,15 +369,27 @@ fn target_actions(
         let question = locale.tf("targets.confirm_upgrade", &[("name", name)]);
         let onclick = upgrade_on_click(locale, question, format!("{path}/upgrade"), targets);
         html! {
-            <a class={LINK_CLASS} {onclick}>{locale.t("targets.upgrade")}</a>
+            <ActionIconButton
+                variant={ActionVariant::Restore}
+                title={locale.t("targets.upgrade").to_string()}
+                {onclick}
+            />
         }
     });
     html! {
         <>
             { drain_button }
             { upgrade }
-            <a class={LINK_CLASS} onclick={renew}>{locale.t("targets.new_token")}</a>
-            <a class={DANGER_LINK_CLASS} onclick={delete}>{locale.t("common.delete")}</a>
+            <ActionIconButton
+                variant={ActionVariant::Edit}
+                title={locale.t("targets.new_token").to_string()}
+                onclick={renew}
+            />
+            <ActionIconButton
+                variant={ActionVariant::Delete}
+                title={locale.t("common.delete").to_string()}
+                onclick={delete}
+            />
         </>
     }
 }

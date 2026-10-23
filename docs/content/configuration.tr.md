@@ -1700,6 +1700,22 @@ WebUI dilini üst çubuktaki bayrak menüsünden seçebilirsiniz: İngilizce vey
 
 r3v3rs3'ün hata sayfaları ve Panel Oturumu giriş sayfası da bu cookie'lere bakar. Ancak tarayıcı bu cookie'leri yalnız WebUI'ın host'una gönderir. Bu yüzden başka bir host'taki proxy'nin sayfaları İngilizce ve sistem temasıyla açılır.
 
+### Standart İkonik Eylem Dili
+
+WebUI genelindeki tüm tablo ve liste satırları (Proxy'ler, Uygulamalar, Portlar, Sertifikalar, Hedefler, Hesaplar ve Projeler), yer kaplayan metin bağlantıları yerine kompakt ve standartlaştırılmış ikon butonları kullanır. Her eylem butonu yerelleştirilmiş alt bilgi ipuçlarına (`title`) ve `aria-label` ekran okuyucu etiketlerine sahip olup semantik bir renk paletini izler:
+
+- **Düzenle / Ayarlar**: Mavi (`#2563eb`)
+- **Görüntüle / İncele**: Nötr Gri (`#737373`)
+- **Terminal / Shell**: Zümrüt Yeşil (`#059669`)
+- **Volume / Dosyalar**: Amber Klasör (`#d97706`)
+- **Metrikler / Trafik Dağılımı**: Cyan Grafik (`#0891b2`)
+- **Loglar / Denetim**: İndigo Belge (`#4f46e5`)
+- **Dağıt / Başlat**: Zümrüt Oynat (`#059669`)
+- **Dondur / Bakım Modu**: Turuncu Duraklat (`#ea580c`)
+- **İndir / Dışa Aktar**: Nötr İndirme (`#525252`)
+- **Geri Yükle / Test Et**: Teal Yenileme (`#0d9488`)
+- **Sil / Temizle**: Kırmızı Çöp Kutusu (`#dc2626`)
+
 # Yönetim API'si
 
 WebUI, `/api` altındaki yönetim API'sini kullanır. r3v3rs3 bu API'nin OpenAPI dokümanını sunucu kodundan üretir. Bu yüzden doküman, çalışan sürümün route'larını listeler.

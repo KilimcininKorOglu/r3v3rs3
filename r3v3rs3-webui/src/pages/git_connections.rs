@@ -13,9 +13,8 @@ use super::settings::{failure_box, send_json, success_box};
 use super::targets::copy_box;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
-use crate::components::data_list::{
-    Column, DANGER_LINK_CLASS, LINK_CLASS, Row, list_card, status_badge,
-};
+use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::data_list::{Column, LINK_CLASS, Row, list_card, status_badge};
 use crate::dialog::{self, Icon};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
@@ -395,9 +394,21 @@ fn admin_actions(
     let delete = delete_on_click(locale, question, path, reload_callback(connections, PATH));
     html! {
         <>
-            <a class={LINK_CLASS} onclick={connect_on_click(locale, entry.id)}>{locale.t(label)}</a>
-            <a class={LINK_CLASS} onclick={set_on_click(form, Form::edit(entry))}>{locale.t("common.edit")}</a>
-            <a class={DANGER_LINK_CLASS} onclick={delete}>{locale.t("common.delete")}</a>
+            <ActionIconButton
+                variant={ActionVariant::Play}
+                title={locale.t(label).to_string()}
+                onclick={connect_on_click(locale, entry.id)}
+            />
+            <ActionIconButton
+                variant={ActionVariant::Edit}
+                title={locale.t("common.edit").to_string()}
+                onclick={set_on_click(form, Form::edit(entry))}
+            />
+            <ActionIconButton
+                variant={ActionVariant::Delete}
+                title={locale.t("common.delete").to_string()}
+                onclick={delete}
+            />
         </>
     }
 }

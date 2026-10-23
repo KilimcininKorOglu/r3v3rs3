@@ -1,8 +1,9 @@
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::acme_form::{dns_provider_label, use_dns_credentials};
+use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::data_list::{
-    Column, DANGER_LINK_CLASS, LINK_CLASS, Row, active_toggle, list_card, status_badge,
+    Column, LINK_CLASS, Row, active_toggle, list_card, status_badge,
 };
 use crate::dialog;
 use crate::format::{format_duration, unix_now};
@@ -442,9 +443,17 @@ fn cert_actions(locale: Locale, entry: &CertInfo, has_private_key: bool, can_edi
     }
     html! {
         <>
-            <a class={LINK_CLASS} onclick={download_onclick(locale, entry.id, has_private_key)}>{locale.t("certs.download")}</a>
+            <ActionIconButton
+                variant={ActionVariant::Download}
+                title={locale.t("certs.download").to_string()}
+                onclick={download_onclick(locale, entry.id, has_private_key)}
+            />
             if entry.source.is_none() {
-                <a class={DANGER_LINK_CLASS} onclick={delete_cert_onclick(locale, entry.id)}>{locale.t("common.delete")}</a>
+                <ActionIconButton
+                    variant={ActionVariant::Delete}
+                    title={locale.t("common.delete").to_string()}
+                    onclick={delete_cert_onclick(locale, entry.id)}
+                />
             }
         </>
     }
@@ -609,10 +618,22 @@ fn acme_row(
         ],
         actions: html! {
             <>
-                <a class={LINK_CLASS} onclick={log_onclick}>{locale.t("common.log")}</a>
+                <ActionIconButton
+                    variant={ActionVariant::Logs}
+                    title={locale.t("common.log").to_string()}
+                    onclick={log_onclick}
+                />
                 if can_edit {
-                    <a class={LINK_CLASS} onclick={order_onclick}>{locale.t("certs.order_now")}</a>
-                    <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>{locale.t("common.delete")}</a>
+                    <ActionIconButton
+                        variant={ActionVariant::Restore}
+                        title={locale.t("certs.order_now").to_string()}
+                        onclick={order_onclick}
+                    />
+                    <ActionIconButton
+                        variant={ActionVariant::Delete}
+                        title={locale.t("common.delete").to_string()}
+                        onclick={delete_onclick}
+                    />
                 }
             </>
         },

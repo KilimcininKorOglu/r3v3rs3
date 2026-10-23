@@ -5,6 +5,7 @@ use super::resource_page::{Notice, delete_on_click, notice_view};
 use super::settings::{fetch_json, send_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::backup_drill_modal::BackupDrillModal;
 use crate::dialog::{self, Icon};
 use crate::format::format_time;
@@ -537,9 +538,11 @@ fn render_backup_row(
             });
         });
         html! {
-            <button type="button" class="text-xs text-blue-400 hover:text-blue-300 font-medium" {onclick}>
-                {locale.t("backups.restore")}
-            </button>
+            <ActionIconButton
+                variant={ActionVariant::Restore}
+                title={locale.t("backups.restore").to_string()}
+                {onclick}
+            />
         }
     });
 
@@ -561,9 +564,11 @@ fn render_backup_row(
             });
         });
         html! {
-            <button type="button" class="text-xs text-neutral-400 hover:text-neutral-200 font-medium" {onclick}>
-                {locale.t("backups.action_verify")}
-            </button>
+            <ActionIconButton
+                variant={ActionVariant::Metrics}
+                title={locale.t("backups.action_verify").to_string()}
+                {onclick}
+            />
         }
     });
 
@@ -572,9 +577,11 @@ fn render_backup_row(
         let path = format!("/databases/{}/backups/{}", entry.app, entry.id);
         let onclick = delete_on_click(locale, question, path, reload.clone());
         html! {
-            <button type="button" class="text-xs text-red-400 hover:text-red-300 font-medium" {onclick}>
-                {locale.t("common.delete")}
-            </button>
+            <ActionIconButton
+                variant={ActionVariant::Delete}
+                title={locale.t("common.delete").to_string()}
+                {onclick}
+            />
         }
     });
 
@@ -593,10 +600,13 @@ fn render_backup_row(
             <td class="px-4 py-3 text-xs text-neutral-400">{format_time(entry.created_at.max(0) as u64)}</td>
             <td class="px-4 py-3">{verify_badge}</td>
             <td class="px-4 py-3 text-right">
-                <div class="flex items-center justify-end gap-3">
-                    <a class="text-xs text-neutral-300 hover:text-white font-medium" href={download_url} download={filename}>
-                        {locale.t("backups.download")}
-                    </a>
+                <div class="flex items-center justify-end gap-1.5">
+                    <ActionIconButton
+                        variant={ActionVariant::Download}
+                        title={locale.t("backups.download").to_string()}
+                        href={download_url}
+                        download={filename}
+                    />
                     {verify_btn}
                     {restore_btn}
                     {delete_btn}
