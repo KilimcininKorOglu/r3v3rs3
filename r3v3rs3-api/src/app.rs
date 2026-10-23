@@ -106,6 +106,47 @@ pub struct GeoIpConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, example = "/etc/r3v3rs3/GeoLite2-Country.mmdb")]
     pub database: Option<PathBuf>,
+
+    /// MaxMind account ID for GeoLite2 / GeoIP2 downloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "123456")]
+    pub account_id: Option<String>,
+
+    /// MaxMind license key for automated MMDB database updates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "ABCD1234efgh5678")]
+    pub license_key: Option<String>,
+
+    /// Whether a license key is saved in storage.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub license_key_set: bool,
+
+    /// Whether automatic periodic GeoIP database updates are enabled.
+    #[serde(default)]
+    pub auto_update: bool,
+
+    /// Interval in days between automatic database updates (default: 7).
+    #[serde(default = "default_geoip_update_interval_days")]
+    pub update_interval_days: u32,
+}
+
+pub fn default_geoip_update_interval_days() -> u32 {
+    7
+}
+
+impl GeoIpConfig {
+    /// Returns a copy of the configuration with the license key masked.
+    pub fn masked(&self) -> Self {
+        let mut masked = self.clone();
+        masked.license_key_set = masked.license_key.take().is_some();
+        masked
+    }
+
+    /// Retains the existing license key if the incoming update does not provide a new one.
+    pub fn keep_secrets(&mut self, current: &Self) {
+        self.license_key_set = false;
+        crate::discovery::keep_secret(&mut self.license_key, &current.license_key);
+    }
 }
 
 /// How often the server asks the release API whether a newer version exists. When one does,
@@ -235,6 +276,7 @@ impl AppConfig {
         Self {
             notifications: self.notifications.masked(),
             discovery: self.discovery.masked(),
+            geoip: self.geoip.masked(),
             ..self.clone()
         }
     }
@@ -243,6 +285,7 @@ impl AppConfig {
     pub fn keep_secrets(&mut self, current: &Self) {
         self.notifications.keep_secrets(&current.notifications);
         self.discovery.keep_secrets(&current.discovery);
+        self.geoip.keep_secrets(&current.geoip);
     }
 
     /// Takes the settings that only `config.toml` sets from the current settings. The worker

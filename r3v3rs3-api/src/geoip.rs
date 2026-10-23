@@ -1,5 +1,10 @@
 //! Country metadata, regional presets, and helper functions for GeoIP access control.
 
+use crate::error::Error;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use utoipa::ToSchema;
+
 /// Basic information about an ISO 3166-1 alpha-2 country.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CountryInfo {
@@ -942,6 +947,69 @@ fn matches_query(country: &CountryInfo, needle: &str, is_tr: bool) -> bool {
         || country.name_en.to_lowercase().contains(needle)
 }
 
+/// Detailed status and metadata of the currently loaded MaxMind MMDB GeoIP database.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GeoIpStatus {
+    /// Whether a GeoIP MMDB database is loaded in memory.
+    pub loaded: bool,
+    /// Path to the loaded MMDB file on disk, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database_path: Option<String>,
+    /// File size in bytes of the MMDB file on disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_size_bytes: Option<u64>,
+    /// Timestamp (UNIX milliseconds) of the MMDB file modification on disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_updated_ms: Option<u64>,
+    /// Build timestamp (UNIX epoch seconds) recorded in the MMDB metadata by MaxMind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_epoch: Option<u64>,
+    /// Database type string from MMDB metadata (e.g. "GeoLite2-Country" or "GeoIP2-Country").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database_type: Option<String>,
+    /// Whether automatic background database updates are enabled.
+    pub auto_update: bool,
+    /// Update interval in days.
+    pub update_interval_days: u32,
+    /// Whether a MaxMind license key is configured.
+    pub license_key_configured: bool,
+    /// Configured MaxMind account ID, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+}
+
+/// Request payload to update GeoIP database update settings.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct UpdateGeoIpConfigRequest {
+    /// MaxMind account ID (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    /// MaxMind license key for downloading GeoLite2-Country.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_key: Option<String>,
+    /// Custom path to the MMDB file (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "/etc/r3v3rs3/GeoLite2-Country.mmdb")]
+    pub database: Option<PathBuf>,
+    /// Whether to enable periodic background updates.
+    #[serde(default)]
+    pub auto_update: bool,
+    /// Interval in days between automatic updates (1 to 90, default: 7).
+    #[serde(default = "crate::app::default_geoip_update_interval_days")]
+    pub update_interval_days: u32,
+}
+
+impl UpdateGeoIpConfigRequest {
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.update_interval_days == 0 || self.update_interval_days > 90 {
+            return Err(Error::InvalidGeoIpConfig {
+                reason: "update_interval_days must be between 1 and 90".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1004,5 +1072,44 @@ mod tests {
 
         let res_code = search_countries("tr", false, 5);
         assert!(res_code.iter().any(|c| c.code == "TR"));
+    }
+
+    #[test]
+    fn test_geoip_status_and_request_validation() {
+        let status = GeoIpStatus {
+            loaded: true,
+            database_path: Some("/etc/r3v3rs3/GeoLite2-Country.mmdb".to_string()),
+            file_size_bytes: Some(4096),
+            last_updated_ms: Some(1700000000000),
+            build_epoch: Some(1699999999),
+            database_type: Some("GeoLite2-Country".to_string()),
+            auto_update: true,
+            update_interval_days: 7,
+            license_key_configured: true,
+            account_id: Some("123456".to_string()),
+        };
+        assert!(status.loaded);
+        assert_eq!(status.update_interval_days, 7);
+
+        let valid_req = UpdateGeoIpConfigRequest {
+            auto_update: true,
+            update_interval_days: 14,
+            ..Default::default()
+        };
+        assert!(valid_req.validate().is_ok());
+
+        let invalid_req = UpdateGeoIpConfigRequest {
+            auto_update: true,
+            update_interval_days: 0,
+            ..Default::default()
+        };
+        assert!(invalid_req.validate().is_err());
+
+        let invalid_req_high = UpdateGeoIpConfigRequest {
+            auto_update: true,
+            update_interval_days: 91,
+            ..Default::default()
+        };
+        assert!(invalid_req_high.validate().is_err());
     }
 }

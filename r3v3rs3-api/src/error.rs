@@ -507,6 +507,15 @@ pub enum Error {
 
     #[error("invalid auto-quarantine configuration: {reason}")]
     InvalidAutoQuarantineConfig { reason: String },
+
+    #[error("invalid GeoIP configuration: {reason}")]
+    InvalidGeoIpConfig { reason: String },
+
+    #[error("GeoIP database update failed: {reason}")]
+    GeoIpUpdateFailed { reason: String },
+
+    #[error("MaxMind license key is required to download GeoIP database updates")]
+    GeoIpLicenseKeyRequired,
 }
 
 impl Error {
@@ -545,6 +554,7 @@ impl Error {
             | Self::FailedToRefreshAppStore
             | Self::FailedToRefreshEngines
             | Self::GrpcError { .. }
+            | Self::GeoIpUpdateFailed { .. }
             | Self::WebhookDeliveryFailed { .. } => 502,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig

@@ -76,13 +76,15 @@ pub enum WebhookEvent {
     SystemEventLoopLag,
     SystemFdExhaustion,
     SystemSocketExhaustion,
+    SystemGeoipUpdated,
+    SystemGeoipUpdateFailed,
 
     // Test ping
     TestPing,
 }
 
 impl WebhookEvent {
-    pub const ALL: [WebhookEvent; 25] = [
+    pub const ALL: [WebhookEvent; 27] = [
         Self::DeploySuccess,
         Self::DeployFailure,
         Self::DeployPendingApproval,
@@ -107,6 +109,8 @@ impl WebhookEvent {
         Self::SystemEventLoopLag,
         Self::SystemFdExhaustion,
         Self::SystemSocketExhaustion,
+        Self::SystemGeoipUpdated,
+        Self::SystemGeoipUpdateFailed,
         Self::TestPing,
     ];
 
@@ -136,6 +140,8 @@ impl WebhookEvent {
             Self::SystemEventLoopLag => "system.event_loop_lag",
             Self::SystemFdExhaustion => "system.fd_exhaustion",
             Self::SystemSocketExhaustion => "system.socket_exhaustion",
+            Self::SystemGeoipUpdated => "system.geoip_updated",
+            Self::SystemGeoipUpdateFailed => "system.geoip_update_failed",
             Self::TestPing => "test.ping",
         }
     }
@@ -165,7 +171,9 @@ impl WebhookEvent {
             | Self::SystemTrafficSpike
             | Self::SystemEventLoopLag
             | Self::SystemFdExhaustion
-            | Self::SystemSocketExhaustion => WebhookEventCategory::System,
+            | Self::SystemSocketExhaustion
+            | Self::SystemGeoipUpdated
+            | Self::SystemGeoipUpdateFailed => WebhookEventCategory::System,
             Self::TestPing => WebhookEventCategory::Test,
         }
     }
@@ -206,6 +214,8 @@ impl FromStr for WebhookEvent {
             "system.event_loop_lag" => Ok(Self::SystemEventLoopLag),
             "system.fd_exhaustion" => Ok(Self::SystemFdExhaustion),
             "system.socket_exhaustion" => Ok(Self::SystemSocketExhaustion),
+            "system.geoip_updated" => Ok(Self::SystemGeoipUpdated),
+            "system.geoip_update_failed" => Ok(Self::SystemGeoipUpdateFailed),
             "test.ping" => Ok(Self::TestPing),
             _ => Err(Error::InvalidWebhook {
                 reason: format!("unknown event '{s}'"),

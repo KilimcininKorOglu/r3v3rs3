@@ -42,6 +42,8 @@ pub enum ServerCommand {
     SetEngines {
         catalog: r3v3rs3_api::platform::EnginesCatalog,
     },
+    /// Periodic check to auto-update the GeoIP database.
+    CheckGeoIpUpdate,
     /// The update check learned the newest release, or that this build is current again.
     SetUpdateAvailable {
         tag: Option<String>,
@@ -111,6 +113,7 @@ impl std::fmt::Debug for ServerCommand {
                 .field("updated_at", &catalog.updated_at)
                 .field("engines", &catalog.engines.len())
                 .finish(),
+            Self::CheckGeoIpUpdate => f.debug_struct("CheckGeoIpUpdate").finish(),
             Self::SetUpdateAvailable { tag } => f
                 .debug_struct("SetUpdateAvailable")
                 .field("tag", tag)

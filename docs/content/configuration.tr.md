@@ -634,6 +634,28 @@ routes = [
 ]
 ```
 
+### Otomatik GeoIP Veritabanı Güncelleme & MaxMind Lisans Yönetimi
+
+r3v3rs3; MaxMind GeoLite2-Country veritabanları için SHA256 bütünlük doğrulaması, güvenli arşiv çıkarma ve lock-free bellek içi hot-reload (`ArcSwapOption`) özelliklerine sahip otonom, sıfır kesintili bir güncelleyici içerir.
+
+- **MaxMind Hesap ve Lisans Entegrasyonu**: Ayarlar üzerinden veya API/CLI/MCP ile MaxMind Hesap ID'nizi ve Lisans Anahtarınızı yapılandırın. Secret'lar güvenli bir biçimde mühürlenir ve yanıtlarda maskelenir.
+- **Yapılandırılabilir Arka Plan Zamanlaması**: `auto_update = true` ve `update_interval_days = 7` (1-90 gün) olarak belirleyin. Leader node, proxy performansını etkilemeden her 12 saatte bir arka planda güncelleme kontrolü gerçekleştirir.
+- **Giden Webhook Bildirimleri**:
+  - `system.geoip_updated`: Yeni bir veritabanı indirilip doğrulandığında ve belleğe hot-swap yapıldığında tetiklenir.
+  - `system.geoip_update_failed`: İndirme, checksum doğrulaması veya arşiv açma başarısız olduğunda hata detaylarıyla tetiklenir.
+- **WebUI, CLI ve MCP Arasında %100 Eşitlik**:
+  - **WebUI**: Ayarlar sayfasında yüklü durumunu, veritabanı dosya yolunu, boyutunu, derleme tarihini, lisans durumunu gösteren canlı durum kartı ve tek tıkla "Update Database Now" butonu.
+  - **CLI**:
+    - `r3 security geoip status`: Yüklü veritabanı durumunu, derleme zamanını, boyutunu ve otomatik güncelleme takvimini gösterir.
+    - `r3 security geoip update`: En güncel GeoLite2-Country MMDB dosyasını indirir ve anında hot-reload eder.
+    - `r3 security geoip config`: GeoIP yapılandırmasını görüntüler.
+    - `r3 security geoip set-config --license-key <KEY> --auto-update true --interval-days 7`: GeoIP ayarlarını günceller.
+  - **MCP Tool'ları**: `get_geoip_status`, `update_geoip_database`, `get_geoip_config`, `update_geoip_config`.
+  - **REST API**:
+    - `GET /api/security/geoip/status`
+    - `PUT /api/security/geoip/config`
+    - `POST /api/security/geoip/update`
+
 ## Bot Engelleme (Yapay Zeka Kazıyıcı & Bot Koruması)
 
 Web sitelerinizi ve uygulamalarınızı otomatik yapay zeka kazıyıcılarından (AI scraper), büyük dil modeli (LLM) eğitim botlarından ve veri madencilerinden tek bir anahtarla koruyabilirsiniz.
@@ -1520,7 +1542,7 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 
 | Kategori | Araçlar ve İşlemler | Açıklama |
 |---|---|---|
-| **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları, fail2ban kaba kuvvet IP engeli ve tehdit otomatik karantina yönetimi. |
+| **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları, fail2ban kaba kuvvet IP engeli, tehdit otomatik karantina yönetimi ve otomatik GeoIP MMDB veritabanı yönetimi. |
 | **Portlar** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Dinleyici port yaşam döngüsü: dinleme adresleri, TLS sonlandırma ayarları, soket yeniden başlatma/yenileme ve sunucu ağ arayüzlerini listeleme. |
 | **Proxy'ler** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | HTTP, WebSocket, TCP, UDP, TLS ve HTTP/3 için ters proxy yapılandırması, upstream sağlık durumu ve yol bazlı önbellek temizleme (purge). |
 | **Sertifikalar ve ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `list_dns_credentials` | TLS sertifikası inceleme, alan adı kapsam kontrolü, otomatik ACME sertifika talepleri (HTTP-01, TLS-ALPN-01, DNS-01), anlık sertifika yenileme ve DNS sağlayıcı kimlik bilgileri yönetimi. |

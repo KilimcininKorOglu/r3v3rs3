@@ -419,6 +419,39 @@ pub enum SecurityCommand {
         #[arg(long)]
         ban_duration_seconds: Option<u64>,
     },
+    /// Manage GeoIP MMDB database, MaxMind licensing, and automated updates.
+    #[command(subcommand)]
+    Geoip(GeoipCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GeoipCommand {
+    /// Shows GeoIP MMDB database status, build timestamp, and auto-update configuration.
+    #[command(alias = "info")]
+    Status,
+    /// Downloads and hot-reloads the latest GeoLite2-Country database from MaxMind.
+    #[command(alias = "refresh")]
+    Update,
+    /// Shows the current GeoIP configuration.
+    Config,
+    /// Updates GeoIP configuration, MaxMind license key, and auto-update interval.
+    SetConfig {
+        /// MaxMind account ID.
+        #[arg(long)]
+        account_id: Option<String>,
+        /// MaxMind license key for GeoLite2-Country downloads.
+        #[arg(long)]
+        license_key: Option<String>,
+        /// Custom path to the MMDB file.
+        #[arg(long)]
+        database: Option<String>,
+        /// Enable or disable automatic periodic background updates.
+        #[arg(long)]
+        auto_update: Option<bool>,
+        /// Background update interval in days (1 to 90).
+        #[arg(long)]
+        interval_days: Option<u32>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -819,6 +852,31 @@ async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyh
                 max_violations,
                 window_seconds,
                 ban_duration_seconds,
+            )
+            .await
+        }
+        SecurityCommand::Geoip(cmd) => run_geoip(api, cmd).await,
+    }
+}
+
+async fn run_geoip(api: &api_client::ApiClient, cmd: GeoipCommand) -> anyhow::Result<()> {
+    match cmd {
+        GeoipCommand::Status => api.get_geoip_status().await,
+        GeoipCommand::Update => api.update_geoip_database().await,
+        GeoipCommand::Config => api.get_geoip_config().await,
+        GeoipCommand::SetConfig {
+            account_id,
+            license_key,
+            database,
+            auto_update,
+            interval_days,
+        } => {
+            api.set_geoip_config(
+                account_id,
+                license_key,
+                database,
+                auto_update,
+                interval_days,
             )
             .await
         }

@@ -158,6 +158,18 @@ impl PlatformHandle {
             Self::Ready(platform) => Ok(platform),
         }
     }
+
+    /// Dispatches an event to all matching outbound webhooks if the platform is ready.
+    pub async fn dispatch_webhook_event(
+        &self,
+        event: r3v3rs3_api::webhook::WebhookEvent,
+        summary: impl Into<String>,
+        data: serde_json::Value,
+    ) {
+        if let Ok(platform) = self.get() {
+            platform.dispatch_webhook_event(event, summary, data).await;
+        }
+    }
 }
 
 /// The runtime and the Compose runner of one target.

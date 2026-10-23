@@ -381,10 +381,9 @@ impl ServerState {
         self.registries
             .srv
             .set_nameserver(self.config.upstream_dns_resolver);
-        self.registries.geoip = Arc::new(crate::proxy::geoip::GeoIpResolver::load_or_fallback(
-            self.config.geoip.database.as_deref(),
-            &self.config_dir,
-        ));
+        self.registries
+            .geoip
+            .reload_or_fallback(self.config.geoip.database.as_deref(), &self.config_dir);
         self.registries
             .quarantine
             .update_config(self.config.auto_quarantine.clone());
@@ -472,6 +471,16 @@ impl ServerState {
                 // Only the master installs the new catalog and stores it.
                 if self.leader && crate::engines::install(catalog.clone()) {
                     log_save_error(self.storage.save_engines(&catalog).await);
+                }
+            }
+            ServerCommand::CheckGeoIpUpdate => {
+                if self.leader {
+                    let mut wrapper = crate::server::rpc::RpcWrapper::new(
+                        crate::server::rpc::geoip::PeriodicGeoIpUpdateCheck,
+                    );
+                    let _ = self
+                        .call_method(&crate::accounts::Caller::system(), &mut wrapper)
+                        .await;
                 }
             }
             ServerCommand::SetUpdateAvailable { tag } => {
@@ -1565,6 +1574,10 @@ impl ServerState {
         &self.config
     }
 
+    pub fn config_dir(&self) -> &std::path::Path {
+        &self.config_dir
+    }
+
     pub async fn set_config(&mut self, mut config: AppConfig) -> Result<(), Error> {
         config.keep_secrets(&self.config);
         config.keep_file_only(&self.config);
@@ -1599,10 +1612,9 @@ impl ServerState {
             let _ = self.update_interval.send(config.upgrade.check_interval);
         }
         if geoip_changed {
-            self.registries.geoip = Arc::new(crate::proxy::geoip::GeoIpResolver::load_or_fallback(
-                config.geoip.database.as_deref(),
-                &self.config_dir,
-            ));
+            self.registries
+                .geoip
+                .reload_or_fallback(config.geoip.database.as_deref(), &self.config_dir);
             self.reload_proxies().await;
         }
         if self

@@ -187,10 +187,14 @@ pub enum AuditAction {
     UnquarantineIp,
     /// An account updated the auto-quarantine configuration.
     UpdateQuarantineConfig,
+    /// An account updated the GeoIP database configuration.
+    UpdateGeoIpConfig,
+    /// An account or scheduled task triggered a GeoIP database update.
+    RefreshGeoIpDatabase,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 104] = [
+    pub const ALL: [AuditAction; 106] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -295,6 +299,8 @@ impl AuditAction {
         Self::QuarantineIp,
         Self::UnquarantineIp,
         Self::UpdateQuarantineConfig,
+        Self::UpdateGeoIpConfig,
+        Self::RefreshGeoIpDatabase,
     ];
 }
 

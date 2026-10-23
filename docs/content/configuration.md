@@ -634,6 +634,28 @@ routes = [
 ]
 ```
 
+### Automated GeoIP Database Updates & MaxMind Licensing
+
+r3v3rs3 includes an autonomous, zero-downtime updater for MaxMind GeoLite2-Country databases with SHA256 integrity verification, safe archive extraction, and lock-free in-memory hot reloading via atomic pointer swaps (`ArcSwapOption`).
+
+- **MaxMind Account & License Integration**: Configure your MaxMind Account ID and License Key in Settings or via API/CLI/MCP. Secrets are safely sealed and masked in responses.
+- **Configurable Background Schedule**: Set `auto_update = true` and `update_interval_days = 7` (1–90 days). The leader node checks for new releases every 12 hours in the background without impacting proxy throughput.
+- **Outbound Webhook Alerts**:
+  - `system.geoip_updated`: Dispatched when a new database is downloaded, verified, and hot-swapped into memory.
+  - `system.geoip_update_failed`: Dispatched with error details if the download, checksum verification, or decompression fails.
+- **100% Operational Parity across WebUI, CLI, and MCP**:
+  - **WebUI**: Real-time status card in Settings displaying loaded state, database path, file size, build epoch date, license configuration status, and an immediate "Update Database Now" button.
+  - **CLI**:
+    - `r3 security geoip status`: View loaded database status, build timestamp, size, and auto-update schedule.
+    - `r3 security geoip update`: Download and hot-reload the latest GeoLite2-Country MMDB.
+    - `r3 security geoip config`: Display GeoIP configuration.
+    - `r3 security geoip set-config --license-key <KEY> --auto-update true --interval-days 7`: Update GeoIP settings.
+  - **MCP Tools**: `get_geoip_status`, `update_geoip_database`, `get_geoip_config`, `update_geoip_config`.
+  - **REST API**:
+    - `GET /api/security/geoip/status`
+    - `PUT /api/security/geoip/config`
+    - `POST /api/security/geoip/update`
+
 ## Bot Blocker (AI Scraper & Crawler Protection)
 
 You can protect your website or application from automated AI scrapers, LLM training crawlers, and aggressive data miners with a single switch.
@@ -1520,7 +1542,7 @@ The admin API exposes its complete tool suite over the Model Context Protocol at
 
 | Category | Tools & Operations | Description |
 |---|---|---|
-| **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, fail2ban brute-force bans, and threat auto-quarantine management. |
+| **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, fail2ban brute-force bans, threat auto-quarantine, and automated GeoIP MMDB database management. |
 | **Ports** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Complete port listener lifecycle: bind addresses, TLS termination options, socket reset/reload, and host interface enumeration. |
 | **Proxies** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | Reverse proxy configuration for HTTP, WebSocket, TCP, UDP, TLS, and HTTP/3, upstream health status, and path-selective cache purging. |
 | **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `list_dns_credentials` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), instant certificate orders/renewals, and DNS credential management. |

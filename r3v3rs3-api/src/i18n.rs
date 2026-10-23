@@ -378,6 +378,9 @@ mod tests {
             Error::GrpcError { reason: text() },
             Error::InvalidAnomalyAlertRules { reason: text() },
             Error::InvalidAutoQuarantineConfig { reason: text() },
+            Error::InvalidGeoIpConfig { reason: text() },
+            Error::GeoIpUpdateFailed { reason: text() },
+            Error::GeoIpLicenseKeyRequired,
         ]
     }
 

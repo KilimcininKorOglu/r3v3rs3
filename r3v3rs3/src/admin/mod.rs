@@ -65,6 +65,7 @@ mod databases;
 mod disaster_recovery;
 mod discovery;
 mod dns_credentials;
+mod geoip;
 mod git;
 mod grpc;
 mod hooks;
@@ -643,6 +644,13 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(quarantine::get_config, quarantine::update_config))
                 .routes(routes!(quarantine::list, quarantine::add))
                 .routes(routes!(quarantine::delete)),
+        )
+        .nest(
+            "/security/geoip",
+            OpenApiRouter::new()
+                .routes(routes!(geoip::status))
+                .routes(routes!(geoip::update_config))
+                .routes(routes!(geoip::update_database)),
         )
 }
 

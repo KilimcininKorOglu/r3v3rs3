@@ -1139,6 +1139,127 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn get_geoip_status(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/security/geoip/status", None)
+            .await?;
+        if let Some(obj) = res.as_object() {
+            let loaded = obj.get("loaded").and_then(|v| v.as_bool()).unwrap_or(false);
+            let path = obj
+                .get("database_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let size = obj
+                .get("file_size_bytes")
+                .and_then(|v| v.as_u64())
+                .map(|b| format!("{:.2} MB", b as f64 / (1024.0 * 1024.0)))
+                .unwrap_or_else(|| "-".to_string());
+            let build = obj
+                .get("build_epoch")
+                .and_then(|v| v.as_i64())
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            let auto_update = obj
+                .get("auto_update")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let interval = obj
+                .get("update_interval_days")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(7);
+            let license_set = obj
+                .get("license_key_configured")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let account_id = obj
+                .get("account_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+
+            println!(
+                "{:<22} {:<10}",
+                "GeoIP Status:",
+                if loaded { "Loaded" } else { "Not Loaded" }
+            );
+            println!("{:<22} {}", "Database Path:", path);
+            println!("{:<22} {}", "Database Size:", size);
+            println!("{:<22} {}", "Build Epoch:", build);
+            println!(
+                "{:<22} {}",
+                "Auto Update:",
+                if auto_update { "Enabled" } else { "Disabled" }
+            );
+            println!("{:<22} {} days", "Update Interval:", interval);
+            println!(
+                "{:<22} {}",
+                "License Key:",
+                if license_set {
+                    "Configured"
+                } else {
+                    "Not Configured"
+                }
+            );
+            println!("{:<22} {}", "Account ID:", account_id);
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_geoip_database(&self) -> anyhow::Result<()> {
+        println!("Downloading and updating GeoIP database from MaxMind...");
+        let res = self
+            .request(Method::POST, "/api/security/geoip/update", None)
+            .await?;
+        println!("GeoIP database downloaded and hot-reloaded successfully.");
+        print_json(&res)?;
+        Ok(())
+    }
+
+    pub async fn get_geoip_config(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/security/geoip/status", None)
+            .await?;
+        print_json(&res)?;
+        Ok(())
+    }
+
+    pub async fn set_geoip_config(
+        &self,
+        account_id: Option<String>,
+        license_key: Option<String>,
+        database: Option<String>,
+        auto_update: Option<bool>,
+        interval_days: Option<u32>,
+    ) -> anyhow::Result<()> {
+        let current = self
+            .request(Method::GET, "/api/security/geoip/status", None)
+            .await?;
+        let curr_auto = current
+            .get("auto_update")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let curr_interval = current
+            .get("update_interval_days")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(7) as u32;
+
+        let payload = serde_json::json!({
+            "account_id": account_id.or_else(|| current.get("account_id").and_then(|v| v.as_str()).map(String::from)),
+            "license_key": license_key,
+            "database": database.or_else(|| current.get("database_path").and_then(|v| v.as_str()).map(String::from)),
+            "auto_update": auto_update.unwrap_or(curr_auto),
+            "update_interval_days": interval_days.unwrap_or(curr_interval),
+        });
+
+        let res = self
+            .request(Method::PUT, "/api/security/geoip/config", Some(&payload))
+            .await?;
+        println!("GeoIP configuration updated successfully.");
+        print_json(&res)?;
+        Ok(())
+    }
+
     // --- Webhook operations ---
 
     pub async fn list_webhooks(&self) -> anyhow::Result<()> {

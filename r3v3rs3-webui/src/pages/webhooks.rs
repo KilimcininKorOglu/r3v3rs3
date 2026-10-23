@@ -287,6 +287,8 @@ fn event_label(_locale: Locale, event: WebhookEvent) -> &'static str {
         WebhookEvent::SystemEventLoopLag => "webhooks.event_system_event_loop_lag",
         WebhookEvent::SystemFdExhaustion => "webhooks.event_system_fd_exhaustion",
         WebhookEvent::SystemSocketExhaustion => "webhooks.event_system_socket_exhaustion",
+        WebhookEvent::SystemGeoipUpdated => "webhooks.event_system_geoip_updated",
+        WebhookEvent::SystemGeoipUpdateFailed => "webhooks.event_system_geoip_update_failed",
         WebhookEvent::TestPing => "webhooks.event_test_ping",
     }
 }

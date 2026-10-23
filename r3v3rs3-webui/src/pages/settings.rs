@@ -99,6 +99,11 @@ struct Fields {
     acme_exec_programs: String,
     acme_exec_timeout: String,
     geoip_database: String,
+    geoip_account_id: String,
+    geoip_license_key: String,
+    geoip_license_key_set: bool,
+    geoip_auto_update: bool,
+    geoip_update_interval_days: String,
 }
 
 impl Fields {
@@ -194,6 +199,11 @@ impl Fields {
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default(),
+            geoip_account_id: config.geoip.account_id.clone().unwrap_or_default(),
+            geoip_license_key: String::new(),
+            geoip_license_key_set: config.geoip.license_key_set,
+            geoip_auto_update: config.geoip.auto_update,
+            geoip_update_interval_days: config.geoip.update_interval_days.to_string(),
         }
     }
 }
@@ -334,9 +344,7 @@ pub fn settings() -> Html {
             { text_field(&fields, &errors, locale.t("settings.http3_max_concurrent_uni_streams"), "http3_max_concurrent_uni_streams", "10", |f| &mut f.http3_max_concurrent_uni_streams) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.http3_max_concurrent_uni_streams_hint")}</p>
 
-            <h2 class="mt-8 mb-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">{locale.t("settings.geoip")}</h2>
-            { text_field(&fields, &errors, locale.t("settings.geoip_database"), "geoip_database", "/var/lib/GeoIP/GeoLite2-Country.mmdb", |f| &mut f.geoip_database) }
-            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.geoip_database_hint")}</p>
+            { geoip_section(locale, &fields, &errors) }
 
             { notifications_section(locale, &fields, &errors, &test_notice) }
             { platform_section(locale, &fields, &errors) }
@@ -352,6 +360,7 @@ pub fn settings() -> Html {
             </div>
         </form>
         <CdnStatusCard />
+        <GeoIpStatusCard />
         <WorkerStatusCard />
         <McpSessionsCard />
         <BannedIpsCard />
@@ -599,6 +608,41 @@ fn mcp_section(
             <p class={HINT_CLASS}>{locale.t("settings.mcp_enabled_hint")}</p>
             { textarea_field(fields, errors, locale.t("settings.mcp_clients"), "mcp_clients", "r3v3rs3-cli, r3v3rs3 CLI client, http://127.0.0.1:8765/callback", |f| &mut f.mcp_clients) }
             <p class={HINT_CLASS}>{locale.t("settings.mcp_clients_hint")}</p>
+        </>
+    }
+}
+
+fn geoip_section(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    let license_set = fields
+        .as_ref()
+        .map(|f| f.geoip_license_key_set)
+        .unwrap_or(false);
+
+    html! {
+        <>
+            { section_title(locale.t("settings.geoip")) }
+            { text_field(fields, errors, locale.t("settings.geoip_database"), "geoip_database", "/var/lib/GeoIP/GeoLite2-Country.mmdb", |f| &mut f.geoip_database) }
+            <p class={HINT_CLASS}>{locale.t("settings.geoip_database_hint")}</p>
+
+            { text_field(fields, errors, locale.t("settings.geoip_account_id"), "geoip_account_id", "123456", |f| &mut f.geoip_account_id) }
+            <p class={HINT_CLASS}>{locale.t("settings.geoip_account_id_hint")}</p>
+
+            { password_field(fields, locale.t("settings.geoip_license_key"), "••••••••", |f| &mut f.geoip_license_key) }
+            if license_set {
+                <p class="mt-2 text-sm text-green-600 dark:text-green-400">{locale.t("settings.geoip_license_key_configured")}</p>
+            } else {
+                <p class={HINT_CLASS}>{locale.t("settings.geoip_license_key_hint")}</p>
+            }
+
+            { checkbox_field(fields, locale.t("settings.geoip_auto_update"), |f| &mut f.geoip_auto_update) }
+            <p class={HINT_CLASS}>{locale.t("settings.geoip_auto_update_hint")}</p>
+
+            { text_field(fields, errors, locale.t("settings.geoip_interval_days"), "geoip_update_interval_days", "7", |f| &mut f.geoip_update_interval_days) }
+            <p class={HINT_CLASS}>{locale.t("settings.geoip_interval_days_hint")}</p>
         </>
     }
 }
@@ -1134,6 +1178,23 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 } else {
                     Some(std::path::PathBuf::from(fields.geoip_database.trim()))
                 },
+                account_id: if fields.geoip_account_id.trim().is_empty() {
+                    None
+                } else {
+                    Some(fields.geoip_account_id.trim().to_string())
+                },
+                license_key: if fields.geoip_license_key.trim().is_empty() {
+                    None
+                } else {
+                    Some(fields.geoip_license_key.trim().to_string())
+                },
+                license_key_set: fields.geoip_license_key_set,
+                auto_update: fields.geoip_auto_update,
+                update_interval_days: fields
+                    .geoip_update_interval_days
+                    .trim()
+                    .parse()
+                    .unwrap_or(7),
             },
             upgrade: UpgradeConfig {
                 check_interval: upgrade.upgrade.check_interval,
@@ -1485,6 +1546,136 @@ async fn get_cdn_status() -> Result<CdnStatus, gloo_net::Error> {
         .await?
         .json()
         .await
+}
+
+#[function_component(GeoIpStatusCard)]
+fn geoip_status_card() -> Html {
+    let locale = use_locale();
+    let reload = use_state(|| 0);
+    let status = use_state(|| Option::<r3v3rs3_api::geoip::GeoIpStatus>::None);
+    let notice = use_state(|| Option::<Notice>::None);
+    let is_loading = use_state(|| false);
+
+    let reload_val = *reload;
+    let status_handle = status.clone();
+    use_effect_with(reload_val, move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Ok(st) = fetch_json::<r3v3rs3_api::geoip::GeoIpStatus>(
+                locale,
+                Request::get(&format!("{API_ENDPOINT}/security/geoip/status")),
+            )
+            .await
+            {
+                status_handle.set(Some(st));
+            }
+        });
+    });
+
+    let on_update_click = {
+        let reload = reload.clone();
+        let notice = notice.clone();
+        let is_loading = is_loading.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *is_loading {
+                return;
+            }
+            is_loading.set(true);
+            let reload = reload.clone();
+            let notice = notice.clone();
+            let is_loading = is_loading.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let req = Request::post(&format!("{API_ENDPOINT}/security/geoip/update"));
+                match fetch_json::<r3v3rs3_api::geoip::GeoIpStatus>(locale, req).await {
+                    Ok(_) => {
+                        notice.set(Some(Notice::Success(
+                            locale.t("settings.geoip_update_success").to_string(),
+                        )));
+                        reload.set(*reload + 1);
+                    }
+                    Err(err) => notice.set(Some(Notice::Failed(err))),
+                }
+                is_loading.set(false);
+            });
+        })
+    };
+
+    html! {
+        <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
+            { notice_view(&notice) }
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
+                <div>
+                    <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.geoip")}</h2>
+                    <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.geoip_database_hint")}</p>
+                </div>
+                <div class="mt-2 sm:mt-0">
+                    { geoip_badge(locale, status.as_ref()) }
+                </div>
+            </div>
+            if let Some(st) = &*status {
+                { geoip_details_view(locale, st) }
+            }
+            <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
+                <button
+                    type="button"
+                    onclick={on_update_click}
+                    disabled={*is_loading}
+                    class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2"
+                >
+                    if *is_loading {
+                        { locale.t("settings.geoip_updating") }
+                    } else {
+                        { locale.t("settings.geoip_update_now") }
+                    }
+                </button>
+            </div>
+        </div>
+    }
+}
+
+fn geoip_badge(locale: Locale, status: Option<&r3v3rs3_api::geoip::GeoIpStatus>) -> Html {
+    let is_loaded = status.map(|s| s.loaded).unwrap_or(false);
+    if is_loaded {
+        html! {
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                { locale.t("settings.geoip_status_loaded") }
+            </span>
+        }
+    } else {
+        html! {
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-300">
+                { locale.t("settings.geoip_status_not_loaded") }
+            </span>
+        }
+    }
+}
+
+fn geoip_details_view(locale: Locale, st: &r3v3rs3_api::geoip::GeoIpStatus) -> Html {
+    let build_date = st
+        .build_epoch
+        .map(|epoch| format_unix_time(locale, epoch as i64))
+        .unwrap_or_else(|| "-".to_string());
+    let size_str = st
+        .file_size_bytes
+        .map(crate::format::format_bytes)
+        .unwrap_or_else(|| "-".to_string());
+    let path_str = st.database_path.as_deref().unwrap_or("-");
+
+    html! {
+        <dl class="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-3 mt-3 pt-3 border-t border-neutral-200 dark:border-neutral-700 text-sm">
+            <div>
+                <dt class="font-medium text-neutral-500 dark:text-neutral-400">{ locale.t("settings.geoip_status_path") }</dt>
+                <dd class="mt-1 text-neutral-900 dark:text-neutral-200 font-mono text-xs truncate" title={path_str.to_string()}>{ path_str }</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-neutral-500 dark:text-neutral-400">{ locale.t("settings.geoip_status_size") }</dt>
+                <dd class="mt-1 text-neutral-900 dark:text-neutral-200">{ size_str }</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-neutral-500 dark:text-neutral-400">{ locale.t("settings.geoip_status_build_epoch") }</dt>
+                <dd class="mt-1 text-neutral-900 dark:text-neutral-200">{ build_date }</dd>
+            </div>
+        </dl>
+    }
 }
 
 #[function_component(BannedIpsCard)]

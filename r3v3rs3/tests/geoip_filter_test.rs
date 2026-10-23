@@ -57,6 +57,7 @@ async fn test_geoip_country_filter() -> anyhow::Result<()> {
         .config(AppConfig {
             geoip: GeoIpConfig {
                 database: Some(test_mmdb),
+                ..Default::default()
             },
             ..Default::default()
         })

@@ -295,6 +295,21 @@ pub struct UpdateQuarantineConfigParams {
     pub scanner_patterns: Option<Vec<String>>,
 }
 
+/// The arguments of `update_geoip_config`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateGeoIpConfigParams {
+    /// MaxMind account ID (optional).
+    pub account_id: Option<String>,
+    /// MaxMind license key for GeoLite2-Country downloads.
+    pub license_key: Option<String>,
+    /// Custom path to the GeoIP MMDB database file (optional).
+    pub database: Option<String>,
+    /// Whether automated background GeoIP MMDB updates are enabled.
+    pub auto_update: Option<bool>,
+    /// Automatic update interval in days (1 to 90).
+    pub update_interval_days: Option<u32>,
+}
+
 /// The caller of the request, which the Bearer middleware inserted.
 fn caller_of(parts: &Parts) -> Result<Caller, ErrorData> {
     parts
@@ -703,6 +718,71 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(json!({ "status": "updated" }))
+    }
+
+    /// Get the current status and metadata of the loaded GeoIP database.
+    #[tool(
+        description = "Get the loaded GeoIP database status, file metadata, build date, and auto-update configuration."
+    )]
+    async fn get_geoip_status(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let status = super::geoip::status(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(status.0)
+    }
+
+    /// Update GeoIP configuration and MaxMind license key.
+    #[tool(
+        description = "Update GeoIP configuration, MaxMind license key, database path, and auto-update interval. Needs the edit scope."
+    )]
+    async fn update_geoip_config(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateGeoIpConfigParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let current = super::geoip::status(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller.clone()),
+        )
+        .await
+        .map_err(any_error)?;
+        let req = build_geoip_update_request(&current.0, params);
+        let updated = super::geoip::update_config(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(req),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(updated.0)
+    }
+
+    /// Download and hot-reload the latest GeoLite2-Country database from MaxMind.
+    #[tool(
+        description = "Immediately download, verify, and hot-reload the latest GeoLite2-Country MMDB database from MaxMind. Needs the edit scope."
+    )]
+    async fn update_geoip_database(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let status = super::geoip::update_database(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(status.0)
     }
 
     // ==========================================
@@ -2179,5 +2259,23 @@ fn apply_quarantine_overrides(
     }
     if let Some(scanner_patterns) = params.scanner_patterns {
         config.scanner_patterns = scanner_patterns;
+    }
+}
+
+fn build_geoip_update_request(
+    current: &r3v3rs3_api::geoip::GeoIpStatus,
+    params: UpdateGeoIpConfigParams,
+) -> r3v3rs3_api::geoip::UpdateGeoIpConfigRequest {
+    r3v3rs3_api::geoip::UpdateGeoIpConfigRequest {
+        account_id: params.account_id.or_else(|| current.account_id.clone()),
+        license_key: params.license_key,
+        database: params
+            .database
+            .map(std::path::PathBuf::from)
+            .or_else(|| current.database_path.as_ref().map(std::path::PathBuf::from)),
+        auto_update: params.auto_update.unwrap_or(current.auto_update),
+        update_interval_days: params
+            .update_interval_days
+            .unwrap_or(current.update_interval_days),
     }
 }
