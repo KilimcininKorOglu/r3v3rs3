@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.7] - 2026-10-23
+
+### Added
+- Multi-Tab Container Web Terminal: Supported multiple concurrent web terminal sessions per container with isolated WebSocket connections, background session preservation across tab switches, tab close controls, and one-click shell presets (`/bin/sh`, `/bin/bash`, `/bin/zsh`, and database CLIs `psql`, `mysql`, `mariadb`, `redis-cli`, `mongosh`).
+- Persistent Terminal Session Command History: Captured and persisted command history memory across active container terminal sessions with Up/Down arrow keyboard navigation in custom command input.
+- Searchable Command History Modal: Added an interactive history dialog with real-time text filtering, single-click command execution, active input insertion, clipboard copying, and history purge capability.
+- Quick Maintenance Command Snippet Panel: Integrated quick-action maintenance command snippets categorized by System, Files, Network, Environment, and Database for immediate container troubleshooting.
+
 ## [2.4.6] - 2026-10-23
 
 ### Added
