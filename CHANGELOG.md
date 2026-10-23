@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.6] - 2026-10-23
+
+### Added
+- 100% MCP First Autonomous Administration Parity: Expanded the Model Context Protocol server (`/api/mcp`) to expose comprehensive tools covering every operational capability across the reverse proxy and PaaS stack, enabling autonomous AI agents to manage the entire platform without opening the WebUI.
+- Autonomous Port & Proxy Lifecycle Tools: Added MCP tools for port creation, configuration updates, socket reload/reset, host network interface inspection, proxy health monitoring, and path-selective cache purging.
+- Automated Certificate & ACME Tools: Added MCP tools for certificate coverage checking across domains, ACME request creation, deletion, and on-demand renewal triggering, plus DNS credential inspection.
+- PaaS Application & Deployment Management Tools: Added MCP tools for application creation, specification updates, container deletion, on-demand deployments, live container log streaming, environment variable management, deployment history listing, and rollback to prior versions.
+- One-Click App Store Installation via MCP: Added `install_store_app` tool to deploy and route catalog applications directly from the curated App Store templates with automated port and domain configuration.
+- Managed Databases & Backups Tools: Added MCP tools to provision PostgreSQL, MySQL, Redis, MariaDB, and MongoDB with automated credentials, take immediate backups, delete snapshots, and manage S3/SFTP/rsync storage configuration.
+- Infrastructure & Security Tools: Added MCP tools for agent target node enrollment, project and shared environment group management, brute-force IP ban inspection and unbanning, system performance metrics, and disaster recovery snapshot creation.
+
 ## [2.4.5] - 2026-10-23
 
 ### Added
