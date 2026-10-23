@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-10-23
+
+### Added
+- Node File Descriptor Exhaustion Alerts: Added `/proc/self/fd` counting against `rlimit` NOFILE limits to detect open file descriptor exhaustion under high traffic load with configurable `max_fd_ratio_percent` threshold (default: 80%).
+- Socket & TIME_WAIT Exhaustion Alerts: Added `/proc/net/sockstat` socket metrics parser (`socket_stats()`) and configurable `max_time_wait_sockets` threshold to detect socket and ephemeral port exhaustion.
+- Outbound Webhooks: Added `system.fd_exhaustion` and `system.socket_exhaustion` webhook event types under the `System` category with full HMAC-SHA256 signature support and 15-minute anti-spam cooldown.
+- WebUI Node Alert Threshold Controls: Added threshold inputs for maximum open file descriptor percentage and maximum TIME_WAIT socket count on the Targets page (`targets.rs`).
+- MCP & CLI Parity: Added `get_node_alerts` and `update_node_alerts` MCP tools in `r3v3rs3/src/admin/mcp.rs`, and `r3 platform node-alerts` and `r3 platform set-node-alerts` subcommands in `r3v3rs3-cli`.
+- Prometheus Metrics Expansion: Added `r3v3rs3_host_sockets_used`, `r3v3rs3_host_tcp_inuse`, and `r3v3rs3_host_tcp_tw` gauges to `/api/metrics`.
+
+### Fixed
+- Installer Database Preservation: Ensured `install.sh` never overwrites or re-initializes existing SQLite databases (`r3v3rs3.db`), preventing credential resets on upgrades.
+- Legacy Service Unit Cleanup: Automatically stop and remove deprecated `r3v3rs3.service` systemd units during installation and upgrade.
+
 ## [2.4.9] - 2026-10-23
 
 ### Added
