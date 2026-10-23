@@ -688,3 +688,84 @@ async fn the_client_binary_lists_the_tools() -> anyhow::Result<()> {
     })
     .await
 }
+
+async fn obtain_tokens_in_flow(addr: SocketAddr) -> anyhow::Result<(String, String)> {
+    let client = Client::new();
+    let cookie = session(&client, &addr).await?;
+    let (verifier, challenge) = pkce();
+    let code = authorize_and_get_code(addr, &cookie, &challenge).await?;
+    trade_code_for_tokens(&client, addr, &code, &verifier).await
+}
+
+async fn check_post_restart_flow(
+    client: &Client,
+    addr: SocketAddr,
+    access: &str,
+    refresh: &str,
+) -> anyhow::Result<()> {
+    let res = client
+        .post(format!("http://{addr}/api/mcp"))
+        .header("Authorization", format!("Bearer {access}"))
+        .json(&json!({ "jsonrpc": "2.0", "method": "tools/list", "id": 1 }))
+        .send()
+        .await?;
+    assert_ne!(res.status(), StatusCode::UNAUTHORIZED);
+
+    let cookie = session(client, &addr).await?;
+    let rotated: Value = client
+        .post(format!("http://{addr}/oauth/token"))
+        .form(&[("grant_type", "refresh_token"), ("refresh_token", refresh)])
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(rotated["token_type"], json!("Bearer"));
+    let new_access = rotated["access_token"].as_str().unwrap().to_string();
+
+    let sessions: Vec<r3v3rs3_api::app::McpSession> = client
+        .get(format!("http://{addr}/api/mcp/sessions"))
+        .header("Cookie", &cookie)
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(sessions.len(), 1);
+    let session_id = sessions[0].id.clone();
+
+    let del = client
+        .delete(format!("http://{addr}/api/mcp/sessions/{session_id}"))
+        .header("Cookie", &cookie)
+        .send()
+        .await?;
+    assert_eq!(del.status(), StatusCode::OK);
+
+    let res = client
+        .post(format!("http://{addr}/api/mcp"))
+        .header("Authorization", format!("Bearer {new_access}"))
+        .json(&json!({ "jsonrpc": "2.0", "method": "tools/list", "id": 1 }))
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_mcp_sessions_survive_server_restart_and_can_be_revoked() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-persist")?;
+    let tokens_cell = std::sync::Arc::new(tokio::sync::Mutex::new((String::new(), String::new())));
+
+    let tokens_clone = tokens_cell.clone();
+    with_admin(&dir.0, |addr| async move {
+        let (access, refresh) = obtain_tokens_in_flow(addr).await?;
+        *tokens_clone.lock().await = (access, refresh);
+        Ok(())
+    })
+    .await?;
+
+    let (access, refresh) = tokens_cell.lock().await.clone();
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        check_post_restart_flow(&client, addr, &access, &refresh).await
+    })
+    .await
+}

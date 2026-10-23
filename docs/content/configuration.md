@@ -1500,7 +1500,7 @@ redirect_uris = ["http://127.0.0.1:8765/callback"]
 
 A client signs in through the OAuth 2.1 authorization code flow with PKCE: the client opens `/oauth/authorize` in the browser, the signed-in account approves the client on a consent form, and the client trades the one-time code for an access token at `/oauth/token`. The token carries the scopes of the approval: `read` sees the state, `edit` also changes proxies. The metadata documents live at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource`.
 
-The tokens live in memory only, so a restart of the server signs every MCP client out, and the refresh tokens of a client stop working.
+Tokens and dynamically registered clients are persisted in SQLite (`platform.db`). A server restart or upgrade preserves the active grants, and clients seamlessly refresh their access tokens using their 30-day refresh tokens without prompting for re-authentication. Active sessions can be viewed and revoked at any time from the WebUI Settings page or via `GET /api/mcp/sessions` and `DELETE /api/mcp/sessions/{id}`.
 
 How a client connects depends on the client. An AI host that speaks the MCP authorization flow, such as Claude Code or Cursor, needs no extra program: it adds this server as an HTTP MCP server, for example with `claude mcp add --transport http --scope user r3v3rs3 https://panel.example.com/api/mcp`, and its own `Authenticate` action of the `/mcp` command runs the same authorization flow in the browser. The command line client below serves the other cases: scripts, cron jobs and servers without a browser session, where one command signs in once and stores its tokens for every later call.
 

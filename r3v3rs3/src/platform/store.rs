@@ -207,6 +207,23 @@ const SCHEMA: &[&str] = &[
         min_free_disk_percent         INTEGER,
         bandwidth_spike_bytes_per_sec INTEGER
     )",
+    "CREATE TABLE IF NOT EXISTS mcp_clients (
+        id            TEXT PRIMARY KEY,
+        name          TEXT NOT NULL,
+        redirect_uris TEXT NOT NULL,
+        created_at    INTEGER NOT NULL
+    )",
+    "CREATE TABLE IF NOT EXISTS mcp_tokens (
+        id                 TEXT PRIMARY KEY,
+        access_token       TEXT NOT NULL UNIQUE,
+        refresh_token      TEXT NOT NULL UNIQUE,
+        client_id          TEXT NOT NULL,
+        username           TEXT NOT NULL,
+        scope              TEXT NOT NULL,
+        expires_at         INTEGER NOT NULL,
+        refresh_expires_at INTEGER NOT NULL,
+        created_at         INTEGER NOT NULL
+    )",
 ];
 
 mod commands;

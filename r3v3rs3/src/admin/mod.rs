@@ -113,7 +113,7 @@ pub async fn start_admin_on(
     app_info: AppInfo,
     listener: tokio::net::TcpListener,
     command: mpsc::Sender<ServerCommand>,
-    mut callback: mpsc::Receiver<RpcCallback>,
+    callback: mpsc::Receiver<RpcCallback>,
     event: broadcast::Sender<ServerEvent>,
     accounts: watch::Receiver<Arc<AccountDirectory>>,
     upgrade: mpsc::Sender<()>,
@@ -130,33 +130,9 @@ pub async fn start_admin_on(
         data: data.clone(),
     };
 
-    let data_clone = data.clone();
-    tokio::spawn(async move {
-        while let Some(cb) = callback.recv().await {
-            let mut data = data_clone.lock().await;
-            if let Some(tx) = data.rpc_callbacks.remove(&cb.id) {
-                let _ = tx.send(cb.result);
-            }
-        }
-    });
-
+    spawn_rpc_callbacks(callback, data.clone());
     load_server_state(&app_state).await?;
-
-    let mut event_recv = event.subscribe();
-    tokio::spawn(async move {
-        loop {
-            match event_recv.recv().await {
-                Ok(ServerEvent::AppConfigUpdated { config }) => {
-                    data.lock().await.config = *config;
-                }
-                Ok(ServerEvent::Shutdown) => break,
-                Err(RecvError::Lagged(n)) => {
-                    warn!("event stream lagged: {}", n);
-                }
-                _ => (),
-            }
-        }
-    });
+    spawn_config_events(event.clone(), data);
 
     let mut event_recv = event.subscribe();
     let config_dir = app_state.data.lock().await.app_info.config_path.clone();
@@ -186,6 +162,50 @@ pub async fn start_admin_on(
     Ok(())
 }
 
+fn spawn_rpc_callbacks(mut callback: mpsc::Receiver<RpcCallback>, data: Arc<Mutex<Data>>) {
+    tokio::spawn(async move {
+        while let Some(cb) = callback.recv().await {
+            let mut data = data.lock().await;
+            if let Some(tx) = data.rpc_callbacks.remove(&cb.id) {
+                let _ = tx.send(cb.result);
+            }
+        }
+    });
+}
+
+fn spawn_config_events(event: broadcast::Sender<ServerEvent>, data: Arc<Mutex<Data>>) {
+    let mut event_recv = event.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match event_recv.recv().await {
+                Ok(ServerEvent::AppConfigUpdated { config }) => {
+                    handle_app_config_update(&data, *config).await;
+                }
+                Ok(ServerEvent::Shutdown) => break,
+                Err(RecvError::Lagged(n)) => {
+                    warn!("event stream lagged: {}", n);
+                }
+                _ => (),
+            }
+        }
+    });
+}
+
+async fn handle_app_config_update(data: &Arc<Mutex<Data>>, config: AppConfig) {
+    let mut data = data.lock().await;
+    data.config = config;
+    let db_path = data
+        .app_info
+        .config_path
+        .join(crate::platform::DATABASE_FILE);
+    if (data.config.mcp.enabled || data.config.platform.enabled || db_path.exists())
+        && !data.mcp.is_persistent()
+        && let Ok(mcp) = oauth2::McpAuthorizations::open(&db_path).await
+    {
+        data.mcp = mcp;
+    }
+}
+
 /// Reads the config, the sessions and the audit log of the server. The server broadcasts its
 /// initial config before the admin API subscribes, so the admin API reads it explicitly.
 async fn load_server_state(app_state: &AppState) -> anyhow::Result<()> {
@@ -210,6 +230,16 @@ async fn load_server_state(app_state: &AppState) -> anyhow::Result<()> {
     data.sessions = *sessions;
     data.audit = Some(*audit);
     data.platform = *platform;
+
+    let db_path = data
+        .app_info
+        .config_path
+        .join(crate::platform::DATABASE_FILE);
+    if (data.config.mcp.enabled || data.config.platform.enabled || db_path.exists())
+        && let Ok(mcp) = oauth2::McpAuthorizations::open(&db_path).await
+    {
+        data.mcp = mcp;
+    }
     Ok(())
 }
 
@@ -331,6 +361,12 @@ fn resource_routes() -> OpenApiRouter<AppState> {
         .merge(cert_routes())
         .merge(info_routes())
         .merge(platform_routes())
+        .nest(
+            "/mcp",
+            OpenApiRouter::new()
+                .routes(routes!(oauth2::list_mcp_sessions))
+                .routes(routes!(oauth2::revoke_mcp_session)),
+        )
         .nest(
             "/upgrade",
             OpenApiRouter::new().routes(routes!(upgrade::upgrade, upgrade::status)),

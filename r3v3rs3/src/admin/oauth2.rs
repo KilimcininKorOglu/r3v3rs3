@@ -2,9 +2,10 @@
 //!
 //! A pre-registered client starts the authorization code flow with PKCE. The account signs in
 //! through the WebUI session, approves the client on a plain form, and the client trades the
-//! code for an opaque access token with a refresh token at the token endpoint. The tokens live
-//! in memory only, so a restart signs every MCP client out. A client that is not in the
-//! configured list registers itself through RFC 7591; the registration lives in memory too.
+//! code for an opaque access token with a refresh token at the token endpoint. The tokens and
+//! dynamically registered clients are persisted in SQLite (`platform.db`), so restarts and updates
+//! preserve authorized sessions. A client that is not in the configured list registers itself
+//! through RFC 7591.
 
 use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
@@ -21,13 +22,14 @@ use axum_extra::extract::CookieJar;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use r3v3rs3_api::app::{McpClientConfig, McpConfig};
+use r3v3rs3_api::app::{McpClientConfig, McpConfig, McpSession};
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use sqlx::{Row as _, SqlitePool};
 use std::collections::HashMap;
 use std::time::Duration;
 use tracing::info;
@@ -44,6 +46,25 @@ pub const SCOPES: [&str; 2] = ["read", "edit"];
 const TOKEN_LENGTH: usize = 48;
 const MAX_GRANTS: usize = 1024;
 
+const SCHEMA_CLIENTS: &str = "CREATE TABLE IF NOT EXISTS mcp_clients (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    redirect_uris TEXT NOT NULL,
+    created_at    INTEGER NOT NULL
+)";
+
+const SCHEMA_TOKENS: &str = "CREATE TABLE IF NOT EXISTS mcp_tokens (
+    id                 TEXT PRIMARY KEY,
+    access_token       TEXT NOT NULL UNIQUE,
+    refresh_token      TEXT NOT NULL UNIQUE,
+    client_id          TEXT NOT NULL,
+    username           TEXT NOT NULL,
+    scope              TEXT NOT NULL,
+    expires_at         INTEGER NOT NULL,
+    refresh_expires_at INTEGER NOT NULL,
+    created_at         INTEGER NOT NULL
+)";
+
 /// The authorization code that a consent approved, before the client trades it.
 #[derive(Debug, Clone)]
 struct AuthorizationCode {
@@ -58,12 +79,14 @@ struct AuthorizationCode {
 /// One signed-in MCP client. The access token is the key of the map.
 #[derive(Debug, Clone)]
 pub struct AccessToken {
+    pub id: String,
     expires_at: u64,
     refresh_expires_at: u64,
     client_id: String,
     username: String,
     pub scope: String,
     refresh_token: String,
+    created_at: u64,
 }
 
 impl AccessToken {
@@ -73,14 +96,152 @@ impl AccessToken {
     }
 }
 
-/// The codes and tokens of the signed-in MCP clients, in memory only.
+async fn db_save_client(pool: &SqlitePool, client: &McpClientConfig) -> anyhow::Result<()> {
+    let uris = serde_json::to_string(&client.redirect_uris)?;
+    let now = unix_now() as i64;
+    sqlx::query(
+        "INSERT INTO mcp_clients (id, name, redirect_uris, created_at) \
+         VALUES (?, ?, ?, ?) \
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, redirect_uris = excluded.redirect_uris",
+    )
+    .bind(&client.id)
+    .bind(&client.name)
+    .bind(uris)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn db_save_token(
+    pool: &SqlitePool,
+    grant: &AccessToken,
+    access_token: &str,
+) -> anyhow::Result<()> {
+    let now = unix_now() as i64;
+    sqlx::query(
+        "INSERT INTO mcp_tokens (id, access_token, refresh_token, client_id, username, scope, expires_at, refresh_expires_at, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&grant.id)
+    .bind(access_token)
+    .bind(&grant.refresh_token)
+    .bind(&grant.client_id)
+    .bind(&grant.username)
+    .bind(&grant.scope)
+    .bind(grant.expires_at as i64)
+    .bind(grant.refresh_expires_at as i64)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn db_delete_token(pool: &SqlitePool, access_or_refresh: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM mcp_tokens WHERE access_token = ? OR refresh_token = ?")
+        .bind(access_or_refresh)
+        .bind(access_or_refresh)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+async fn db_delete_session(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM mcp_tokens WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+async fn db_purge_expired(pool: &SqlitePool, now: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM mcp_tokens WHERE refresh_expires_at <= ?")
+        .bind(now)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+async fn db_load_clients(pool: &SqlitePool) -> anyhow::Result<HashMap<String, McpClientConfig>> {
+    let rows = sqlx::query("SELECT id, name, redirect_uris FROM mcp_clients")
+        .fetch_all(pool)
+        .await?;
+    let mut clients = HashMap::new();
+    for row in rows {
+        let id: String = row.try_get("id")?;
+        let name: String = row.try_get("name")?;
+        let uris_raw: String = row.try_get("redirect_uris")?;
+        let redirect_uris = serde_json::from_str(&uris_raw).unwrap_or_default();
+        clients.insert(
+            id.clone(),
+            McpClientConfig {
+                id,
+                name,
+                redirect_uris,
+            },
+        );
+    }
+    Ok(clients)
+}
+
+type LoadedTokens = (
+    HashMap<String, AccessToken>,
+    HashMap<String, String>,
+    HashMap<String, String>,
+);
+
+fn row_to_token(
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<(String, String, AccessToken), sqlx::Error> {
+    let id: String = row.try_get("id")?;
+    let access_token: String = row.try_get("access_token")?;
+    let refresh_token: String = row.try_get("refresh_token")?;
+    let expires_at: i64 = row.try_get("expires_at")?;
+    let refresh_expires_at: i64 = row.try_get("refresh_expires_at")?;
+    let created_at: i64 = row.try_get("created_at")?;
+    let grant = AccessToken {
+        id,
+        expires_at: expires_at as u64,
+        refresh_expires_at: refresh_expires_at as u64,
+        client_id: row.try_get("client_id")?,
+        username: row.try_get("username")?,
+        scope: row.try_get("scope")?,
+        refresh_token: refresh_token.clone(),
+        created_at: created_at as u64,
+    };
+    Ok((access_token, refresh_token, grant))
+}
+
+async fn db_load_tokens(pool: &SqlitePool, now: i64) -> anyhow::Result<LoadedTokens> {
+    let rows = sqlx::query(
+        "SELECT id, access_token, refresh_token, client_id, username, scope, expires_at, refresh_expires_at, created_at \
+         FROM mcp_tokens WHERE refresh_expires_at > ?",
+    )
+    .bind(now)
+    .fetch_all(pool)
+    .await?;
+    let mut tokens = HashMap::new();
+    let mut refresh = HashMap::new();
+    let mut by_id = HashMap::new();
+    for row in rows {
+        if let Ok((access, ref_tok, grant)) = row_to_token(&row) {
+            by_id.insert(grant.id.clone(), access.clone());
+            refresh.insert(ref_tok, access.clone());
+            tokens.insert(access, grant);
+        }
+    }
+    Ok((tokens, refresh, by_id))
+}
+
+/// The codes and tokens of the signed-in MCP clients, in memory and backed by SQLite.
 #[derive(Default)]
 pub struct McpAuthorizations {
+    pool: Option<SqlitePool>,
     codes: HashMap<String, AuthorizationCode>,
     tokens: HashMap<String, AccessToken>,
     refresh: HashMap<String, String>,
-    /// The clients that registered themselves through RFC 7591, in memory only. A restart
-    /// removes them, and the clients register again on their next sign-in.
+    by_id: HashMap<String, String>,
+    /// The clients that registered themselves through RFC 7591.
     clients: HashMap<String, McpClientConfig>,
 }
 
@@ -88,19 +249,94 @@ pub struct McpAuthorizations {
 const MAX_CLIENTS: usize = 256;
 
 impl McpAuthorizations {
+    /// Whether authorizations are backed by a persistent database.
+    pub fn is_persistent(&self) -> bool {
+        self.pool.is_some()
+    }
+
+    /// Opens the SQLite database at `path`, ensures tables exist, loads saved clients and tokens,
+    /// and purges expired records.
+    pub async fn open(path: &std::path::Path) -> anyhow::Result<Self> {
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+        let pool = SqlitePool::connect_with(options).await?;
+        sqlx::query(SCHEMA_CLIENTS).execute(&pool).await?;
+        sqlx::query(SCHEMA_TOKENS).execute(&pool).await?;
+        let now = unix_now() as i64;
+        let _ = db_purge_expired(&pool, now).await;
+        let clients = db_load_clients(&pool).await.unwrap_or_default();
+        let (tokens, refresh, by_id) = db_load_tokens(&pool, now).await.unwrap_or_default();
+        Ok(Self {
+            pool: Some(pool),
+            codes: HashMap::new(),
+            tokens,
+            refresh,
+            by_id,
+            clients,
+        })
+    }
+
+    /// Lists active authorized MCP client sessions for the admin WebUI.
+    pub fn list_sessions(&self, config_clients: &[McpClientConfig]) -> Vec<McpSession> {
+        let now = unix_now();
+        let mut sessions = Vec::new();
+        for grant in self.tokens.values() {
+            if grant.refresh_expires_at > now {
+                let client_name = McpClientConfig::find(config_clients, &grant.client_id)
+                    .map(|c| c.name.clone())
+                    .or_else(|| self.clients.get(&grant.client_id).map(|c| c.name.clone()))
+                    .unwrap_or_else(|| grant.client_id.clone());
+                sessions.push(McpSession {
+                    id: grant.id.clone(),
+                    client_id: grant.client_id.clone(),
+                    client_name,
+                    username: grant.username.clone(),
+                    scope: grant.scope.clone(),
+                    created_at: grant.created_at,
+                    expires_at: grant.expires_at,
+                    refresh_expires_at: grant.refresh_expires_at,
+                });
+            }
+        }
+        sessions.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+        sessions
+    }
+
+    /// Revokes an active authorized MCP client session by id.
+    pub async fn revoke_session(&mut self, session_id: &str) -> bool {
+        let Some(access_token) = self.by_id.remove(session_id) else {
+            return false;
+        };
+        if let Some(grant) = self.tokens.remove(&access_token) {
+            self.refresh.remove(&grant.refresh_token);
+        }
+        if let Some(pool) = &self.pool {
+            let _ = db_delete_session(pool, session_id).await;
+        }
+        true
+    }
+
     /// Registers a client of the dynamic registration and returns its `client_id`.
-    fn register_client(&mut self, mut client: McpClientConfig) -> Option<String> {
+    pub async fn register_client(&mut self, mut client: McpClientConfig) -> Option<String> {
         if self.clients.len() >= MAX_CLIENTS {
             return None;
         }
         let id = format!("mcp-{}", new_token().to_lowercase());
         client.id = id.clone();
+        if let Some(pool) = &self.pool
+            && let Err(err) = db_save_client(pool, &client).await
+        {
+            tracing::warn!(err = %err, "failed to persist registered MCP client");
+        }
         self.clients.insert(id.clone(), client);
         Some(id)
     }
 
     /// The dynamically registered client with this id, if one exists.
-    fn dynamic_client(&self, id: &str) -> Option<McpClientConfig> {
+    pub fn dynamic_client(&self, id: &str) -> Option<McpClientConfig> {
         self.clients.get(id).cloned()
     }
 
@@ -113,7 +349,7 @@ impl McpAuthorizations {
     }
 
     /// Trades an authorization code for tokens after the PKCE check.
-    fn exchange_code(
+    async fn exchange_code(
         &mut self,
         code: &str,
         client_id: &str,
@@ -132,28 +368,40 @@ impl McpAuthorizations {
             return Err(StatusCode::BAD_REQUEST);
         }
         let username = grant.username.clone();
-        let issued = self.issue_tokens(&grant.client_id, &grant.scope, &grant.username);
+        let issued = self
+            .issue_tokens(&grant.client_id, &grant.scope, &grant.username)
+            .await;
         Ok((username, issued))
     }
 
-    /// Issues a fresh pair of tokens for the account.
-    fn issue_tokens(&mut self, client_id: &str, scope: &str, username: &str) -> IssuedTokens {
+    /// Issues a fresh pair of tokens for the account and persists them.
+    async fn issue_tokens(&mut self, client_id: &str, scope: &str, username: &str) -> IssuedTokens {
         let access_token = new_token();
         let refresh_token = new_token();
         let now = unix_now();
-        self.tokens.insert(
-            access_token.clone(),
-            AccessToken {
-                expires_at: now + ACCESS_TOKEN_LIFETIME.as_secs(),
-                refresh_expires_at: now + REFRESH_TOKEN_LIFETIME.as_secs(),
-                client_id: client_id.to_string(),
-                username: username.to_string(),
-                scope: scope.to_string(),
-                refresh_token: refresh_token.clone(),
-            },
+        let session_id = format!(
+            "mcp-{}",
+            &hex::encode(Sha256::digest(access_token.as_bytes()))[..16]
         );
+        let grant = AccessToken {
+            id: session_id.clone(),
+            expires_at: now + ACCESS_TOKEN_LIFETIME.as_secs(),
+            refresh_expires_at: now + REFRESH_TOKEN_LIFETIME.as_secs(),
+            client_id: client_id.to_string(),
+            username: username.to_string(),
+            scope: scope.to_string(),
+            refresh_token: refresh_token.clone(),
+            created_at: now,
+        };
+        if let Some(pool) = &self.pool
+            && let Err(err) = db_save_token(pool, &grant, &access_token).await
+        {
+            tracing::warn!(err = %err, "failed to persist issued MCP token");
+        }
+        self.tokens.insert(access_token.clone(), grant);
         self.refresh
             .insert(refresh_token.clone(), access_token.clone());
+        self.by_id.insert(session_id, access_token.clone());
         IssuedTokens {
             access_token,
             token_type: "Bearer",
@@ -164,14 +412,23 @@ impl McpAuthorizations {
     }
 
     /// Rotates the tokens of a refresh token: both tokens get fresh values.
-    fn refresh_tokens(&mut self, refresh_token: &str) -> Option<IssuedTokens> {
+    async fn refresh_tokens(&mut self, refresh_token: &str) -> Option<IssuedTokens> {
         let access = self.refresh.remove(refresh_token)?;
         let grant = self.tokens.remove(&access)?;
+        self.by_id.remove(&grant.id);
+        if let Some(pool) = &self.pool
+            && let Err(err) = db_delete_token(pool, refresh_token).await
+        {
+            tracing::warn!(err = %err, "failed to delete rotated MCP refresh token");
+        }
         if grant.refresh_expires_at <= unix_now() {
             self.refresh.remove(&grant.refresh_token);
             return None;
         }
-        Some(self.issue_tokens(&grant.client_id, &grant.scope, &grant.username))
+        Some(
+            self.issue_tokens(&grant.client_id, &grant.scope, &grant.username)
+                .await,
+        )
     }
 
     /// Validates an access token and returns the client that it belongs to.
@@ -197,7 +454,14 @@ impl McpAuthorizations {
         for token in expired {
             if let Some(grant) = self.tokens.remove(&token) {
                 self.refresh.remove(&grant.refresh_token);
+                self.by_id.remove(&grant.id);
             }
+        }
+        if let Some(pool) = &self.pool {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                let _ = db_purge_expired(&pool, now as i64).await;
+            });
         }
     }
 }
@@ -982,7 +1246,7 @@ pub async fn register(
     };
     let issued_at = unix_now();
     let mut data = state.data.lock().await;
-    let Some(id) = data.mcp.register_client(client.clone()) else {
+    let Some(id) = data.mcp.register_client(client.clone()).await else {
         return oauth_error("invalid_client_metadata", "the registration list is full");
     };
     drop(data);
@@ -1040,6 +1304,7 @@ pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -
             match data
                 .mcp
                 .exchange_code(code, client_id, redirect_uri, verifier)
+                .await
             {
                 Ok((_username, issued)) => Json(issued).into_response(),
                 Err(_) => oauth_error("invalid_grant", "the code is unknown, expired or used"),
@@ -1050,7 +1315,7 @@ pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -
                 return oauth_error("invalid_request", "the refresh request misses the token");
             };
             let mut data = state.data.lock().await;
-            match data.mcp.refresh_tokens(refresh_token) {
+            match data.mcp.refresh_tokens(refresh_token).await {
                 Some(issued) => Json(issued).into_response(),
                 None => oauth_error("invalid_grant", "the refresh token is unknown or expired"),
             }
@@ -1059,6 +1324,50 @@ pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -
             "unsupported_grant_type",
             "only authorization_code and refresh_token",
         ),
+    }
+}
+
+/// Lists active authorized MCP client sessions.
+#[utoipa::path(
+    get,
+    path = "/sessions",
+    tag = "mcp",
+    operation_id = "list_mcp_sessions",
+    responses((status = 200, description = "The active MCP sessions.", body = Vec<McpSession>))
+)]
+pub async fn list_mcp_sessions(
+    State(state): State<AppState>,
+    axum::Extension(caller): axum::Extension<Caller>,
+) -> Result<Json<Vec<r3v3rs3_api::app::McpSession>>, AppError> {
+    caller.authorize(crate::accounts::Permission::Admin)?;
+    let data = state.data.lock().await;
+    let sessions = data.mcp.list_sessions(&data.config.mcp.clients);
+    Ok(Json(sessions))
+}
+
+/// Revokes an active authorized MCP client session by id.
+#[utoipa::path(
+    delete,
+    path = "/sessions/{id}",
+    tag = "mcp",
+    operation_id = "revoke_mcp_session",
+    params(("id" = String, Path, description = "The session id to revoke")),
+    responses(
+        (status = 200, description = "Session revoked successfully."),
+        (status = 404, description = "Session not found.")
+    )
+)]
+pub async fn revoke_mcp_session(
+    State(state): State<AppState>,
+    axum::Extension(caller): axum::Extension<Caller>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<StatusCode, AppError> {
+    caller.authorize(crate::accounts::Permission::Admin)?;
+    let mut data = state.data.lock().await;
+    if data.mcp.revoke_session(&id).await {
+        Ok(StatusCode::OK)
+    } else {
+        Err(AppError::NotFound)
     }
 }
 

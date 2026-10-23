@@ -295,6 +295,27 @@ impl McpClientConfig {
     }
 }
 
+/// One authorized MCP client session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpSession {
+    /// The safe session identifier (never exposes raw access or refresh tokens).
+    pub id: String,
+    /// The client id.
+    pub client_id: String,
+    /// The display name of the client.
+    pub client_name: String,
+    /// The username of the authorizing account.
+    pub username: String,
+    /// The granted scopes (e.g. `read`, `read edit`).
+    pub scope: String,
+    /// When the session was started (Unix time in seconds).
+    pub created_at: u64,
+    /// When the access token expires (Unix time in seconds).
+    pub expires_at: u64,
+    /// When the refresh token expires (Unix time in seconds).
+    pub refresh_expires_at: u64,
+}
+
 /// Matches a registered loopback redirect against one with another port.
 fn is_loopback_redirect(registered: &str, redirect_uri: &str) -> bool {
     let (Ok(registered), Ok(uri)) = (Url::parse(registered), Url::parse(redirect_uri)) else {
