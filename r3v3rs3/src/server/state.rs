@@ -1009,6 +1009,9 @@ impl ServerState {
     fn is_peer_quarantined(&self, stream: &TcpStream) -> bool {
         match stream.peer_addr() {
             Ok(peer) => {
+                if peer.ip().is_loopback() {
+                    return false;
+                }
                 let quarantined = self.registries.quarantine.is_quarantined(&peer.ip());
                 if quarantined {
                     tracing::warn!(ip = %peer.ip(), "TCP connection dropped by auto-quarantine");

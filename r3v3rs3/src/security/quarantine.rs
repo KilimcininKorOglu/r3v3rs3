@@ -57,6 +57,9 @@ impl AutoQuarantineTracker {
 
     /// Checks whether an IP address is currently quarantined.
     pub fn is_quarantined(&self, ip: &IpAddr) -> bool {
+        if ip.is_loopback() {
+            return false;
+        }
         let bans = match self.active_bans.read() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -98,7 +101,7 @@ impl AutoQuarantineTracker {
         weight: u32,
     ) -> Option<QuarantinedIpEntry> {
         let config = self.config.load();
-        if !config.enabled || self.is_quarantined(&ip) {
+        if !config.enabled || ip.is_loopback() || self.is_quarantined(&ip) {
             return None;
         }
 
@@ -317,5 +320,21 @@ mod tests {
             Some("/wp-admin".to_string())
         );
         assert_eq!(tracker.check_scanner_uri("/api/users"), None);
+    }
+
+    #[test]
+    fn loopback_is_never_quarantined() {
+        let tracker = AutoQuarantineTracker::default();
+        let loopback_v4: IpAddr = "127.0.0.1".parse().unwrap();
+        let loopback_v6: IpAddr = "::1".parse().unwrap();
+
+        assert!(!tracker.is_quarantined(&loopback_v4));
+        assert!(!tracker.is_quarantined(&loopback_v6));
+
+        assert_eq!(
+            tracker.record_violation(loopback_v4, "Probe".to_string(), 100),
+            None
+        );
+        assert!(!tracker.is_quarantined(&loopback_v4));
     }
 }

@@ -769,6 +769,9 @@ fn check_and_record_quarantine<B>(
     uri: &str,
     mapped: &Result<Response<B>, anyhow::Error>,
 ) {
+    if client_ip.is_loopback() {
+        return;
+    }
     let config = quarantine.get_config();
     if !config.enabled {
         return;
