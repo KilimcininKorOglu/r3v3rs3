@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] - 2026-10-23
+
+### Added
+- Upstream Live Metrics & Health Tracking: Track real-time routed requests, active in-flight connections, error counts/rates, moving average RTT latency, and throughput bytes per upstream node across HTTP and TCP reverse proxy pools.
+- Per-Node Traffic Distribution Modal: Interactive WebUI modal featuring segmented proportional distribution bar, expected weight vs. actual traffic share comparisons, live health and circuit breaker status badges, and aggregate summary metric cards.
+- Centralized Formatting Utilities: Consolidated byte size (`format_bytes`) and latency (`format_latency`) formatting into a unified, shared `format.rs` module across the WebUI.
+- Direct Application Terminal & Files Links: Added one-click action links to every row of the Applications table for immediate access to container web terminal and volume file manager.
+
+### Fixed
+- Sidebar Icon Color Uniformity: Standardized folder and backup cloud SVG icon fills to white, ensuring crisp contrast across light and dark sidebar themes.
+
 ## [2.4.0] - 2026-10-23
 
 ### Fixed
