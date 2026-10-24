@@ -345,6 +345,8 @@ pub enum AppCommand {
     LogSize { id: String },
     /// Truncates (vacuums) container log files of an application.
     VacuumLogs { id: String },
+    /// Shows live container resource throttling, CFS quota, and OOM diagnostic status.
+    Diagnostics { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -938,6 +940,7 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
         AppCommand::SetEnv { id, pairs } => api.set_app_env(&id, &pairs).await,
         AppCommand::LogSize { id } => api.app_log_size(&id).await,
         AppCommand::VacuumLogs { id } => api.vacuum_app_logs(&id).await,
+        AppCommand::Diagnostics { id } => api.app_diagnostics(&id).await,
     }
 }
 

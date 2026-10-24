@@ -558,6 +558,20 @@ Uygulamalar ve veritabanları, bellek sızıntılarının veya aşırı CPU tük
 - **Dinamik Dikey Ölçekleme (Vertical Scaling)**: WebUI veya `PUT /api/apps/{id}` üzerinden kaynak sınırları güncellendiğinde, r3v3rs3 çalışan container'ın cgroup ayarlarını kesinti olmadan veya container'ı yeniden başlatmadan anında günceller.
 - **OOM Koruması ve Eşik Uyarıları**: Bir container'a bellek sınırı tanımlandığında, r3v3rs3 30 saniyelik periyodik kontrollerde bellek doluluğunu izler ve kullanım %90'a ulaştığında webhook'a `app_alert` (OOM uyarısı) iletir. Container çekirdek OOM killer tarafından sonlandırılırsa anında `oom_killed` uyarısı gönderilir.
 
+### Konteyner Kaynak Kısıtlama & OOM Teşhisleri
+
+Konteynerlerin sessizce bellek yetersizliği (OOM Killer) nedeniyle çökmesini veya aşırı CPU kota kısıtlaması (throttling) nedeniyle gecikme yaşamasını önlemek için, r3v3rs3 Docker Engine stats API üzerinden Linux kernel cgroup metriklerini toplar:
+
+- **CPU CFS Kota Kısıtlaması (Throttling)**: Kısıtlanan CPU periyotlarının yüzdesini (`cpu_throttled_percent`), kısıtlanan periyot adedini ve toplam kısıtlanan süreyi milisaniye cinsinden (`cpu_throttled_time_ms`) hesaplar.
+- **Bellek Doygunluğu ve Hata Sayacı**: Tanımlanan limite karşı aktif bellek doluluk oranını ve bellek tahsis hata sayısını (`failcnt` / `oom_kills`) izler.
+- **Otomatik Sağlık Durumu**: Konteyner kaynak durumunu `healthy`, `throttled_warning` (>= %20 kısıtlama), `throttled_critical` (>= %50 kısıtlama), `oom_risk` (>= %90 bellek doluluğu veya tahsis hatası) ve `oom_killed` (çıkış kodu 137 veya OOM flag'i) durumlarına ayırır.
+- **WebUI Teşhis Kartı**: Uygulama görünümünde metrikler panelinin altında canlı tanılama rozeti, sayaçlar ve pratik çözüm önerileriyle görüntülenir.
+- **REST API Endpoint'i**: `GET /api/apps/{id}/diagnostics` uç noktası tam `AppResourceDiagnostics` modelini döner.
+- **%100 MCP & CLI Parity**: `get_app_resource_diagnostics` MCP aracı veya CLI komutu ile doğrudan sorgulanabilir:
+  ```bash
+  r3 app diagnostics <APP_ID>
+  ```
+
 ## Giden Webhook'lar & Olay Bildirimleri
 
 Platform, sistemde meydana gelen olayları harici izleme, bildirim ve otomasyon servislerine (Slack, Discord, PagerDuty, n8n, Datadog veya özel web servisleri) gerçek zamanlı olarak iletmek için merkezi bir giden webhook motoru içerir. Ayarlar sayfasındaki tekli bildirim webhook'undan farklı olarak, giden webhook yöneticisi birden fazla uç noktayı, ayrıntılı olay aboneliklerini, özel HTTP başlıklarını, şifreli imzalama anahtarlarını ve anında test gönderimini destekler.
@@ -572,6 +586,7 @@ Yöneticiler, her webhook hedefi için dört ana kategori altında sunulan 14 ol
 |                              | `deploy.failure`          | Uygulama deployment'ı derleme, çekme veya başlatma sırasında başarısız oldu.              |
 |                              | `deploy.pending_approval` | Deployment oluşturuldu ancak manuel onay bekliyor.                                        |
 |                              | `app.crashed`             | Uygulama container'ı sıfır dışı bir çıkış koduyla beklenmedik şekilde çöktü veya kapandı. |
+|                              | `app.cpu_throttled`       | Konteyner CPU CFS kota kısıtlama oranı uyarı eşiğini aştı.                                |
 | **Veritabanları & Yedekler** | `backup.success`          | Veritabanı yedeği başarıyla alındı ve yerel diske kaydedildi.                             |
 |                              | `backup.failure`          | Veritabanı dump alma veya yedekleme işlemi başarısız oldu.                                |
 |                              | `backup.upload_failed`    | Veritabanı yedeğinin uzak depoya (S3/R2/SFTP) yüklenmesi başarısız oldu.                  |
@@ -582,6 +597,7 @@ Yöneticiler, her webhook hedefi için dört ana kategori altında sunulan 14 ol
 |                              | `security.ip_banned`      | İstemci IP adresi hız sınırı veya güvenlik kuralı nedeniyle yasaklandı.                   |
 | **Sistem & Düğümler**        | `target.offline`          | Agent düğümü kalp atışı göndermeyi durdurdu ve çevrimdışı olarak işaretlendi.             |
 |                              | `system.disk_pressure`    | Hedef düğüm disk doluluk oranı uyarı eşiğini aştı.                                        |
+|                              | `system.oom_kill`         | Konteyner çekirdek OOM killer tarafından sonlandırıldı veya bellek tükendi.               |
 | **Sistem**                   | `test.ping`               | WebUI veya API üzerinden manuel olarak gönderilen test ping'i.                            |
 
 ### Yük Formatı ve Başlıklar

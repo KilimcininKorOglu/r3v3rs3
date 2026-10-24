@@ -947,3 +947,42 @@ async fn prune_policy_get_and_update() -> anyhow::Result<()> {
     })
     .await
 }
+
+#[tokio::test]
+async fn app_resource_diagnostics_endpoint() -> anyhow::Result<()> {
+    let dir = TempDir::new("platform-diagnostics")?;
+    let mut config = AppConfig::default();
+    config.platform.enabled = true;
+    let storage = TestStorage::builder()
+        .config(config)
+        .account("admin", "admin-secret", Role::Admin, None)
+        .build();
+    with_admin(&dir.0, storage, |addr| async move {
+        let admin = session_cookie(addr, "admin", "admin-secret").await?;
+        let request = json!({
+            "name": "diag-app",
+            "target": "local",
+            "spec": {
+                "source": { "type": "image", "image": "redis:alpine" },
+                "port": 6379
+            }
+        });
+        let (status, body) = send(addr, Method::POST, APPS, &admin, Some(request)).await?;
+        assert_eq!(status, 200, "{body}");
+        let app: Value = serde_json::from_str(&body)?;
+        let id = app["id"].as_str().unwrap();
+
+        let diag = get(addr, &format!("{APPS}/{id}/diagnostics"), &admin).await?;
+        assert_eq!(diag["app_id"], id);
+        assert_eq!(diag["app_name"], "diag-app");
+        assert_eq!(diag["running"], false);
+        assert_eq!(diag["status"], "healthy");
+        assert_eq!(diag["cpu_percent"], 0.0);
+        assert_eq!(diag["cpu_throttled_percent"], 0.0);
+        assert_eq!(diag["memory_percent"], 0.0);
+        assert_eq!(diag["oom_killed"], false);
+
+        Ok(())
+    })
+    .await
+}

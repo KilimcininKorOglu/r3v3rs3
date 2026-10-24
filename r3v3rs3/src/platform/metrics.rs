@@ -130,6 +130,112 @@ impl Platform {
             })
             .collect())
     }
+
+    /// Calculates live resource throttling and OOM diagnostic status for an app container.
+    pub async fn app_resource_diagnostics(
+        &self,
+        id: ShortId,
+    ) -> anyhow::Result<r3v3rs3_api::container::AppResourceDiagnostics> {
+        let app = self.app(id).await?;
+        let Some(deployment) = self.store.running_deployment(app.id).await? else {
+            return Ok(r3v3rs3_api::container::AppResourceDiagnostics {
+                app_id: app.id,
+                app_name: app.name.to_string(),
+                running: false,
+                status: r3v3rs3_api::container::ResourceHealthStatus::Healthy,
+                cpu_percent: 0.0,
+                cpu_throttled_percent: 0.0,
+                cpu_throttled_periods: 0,
+                cpu_total_periods: 0,
+                cpu_throttled_time_ms: 0,
+                memory_bytes: 0,
+                memory_limit: 0,
+                memory_percent: 0.0,
+                memory_fail_count: 0,
+                oom_killed: false,
+                exit_code: 0,
+                recommendation: None,
+            });
+        };
+
+        let container = super::proxy::container_name(app.id, deployment)?;
+        let runtime = self.runtime(app.target);
+        let info = runtime
+            .inspect_container(&container)
+            .await?
+            .unwrap_or_default();
+        let stats = runtime.stats(&container).await.unwrap_or_default();
+
+        let mem_pct = if stats.memory_limit > 0 {
+            (stats.memory_bytes as f64 / stats.memory_limit as f64 * 100.0).clamp(0.0, 100.0)
+        } else {
+            0.0
+        };
+
+        let (status, recommendation) = evaluate_resource_health(
+            info.oom_killed,
+            info.running,
+            info.exit_code,
+            mem_pct,
+            stats.memory_fail_count,
+            stats.cpu_throttled_percent,
+        );
+
+        Ok(r3v3rs3_api::container::AppResourceDiagnostics {
+            app_id: app.id,
+            app_name: app.name.to_string(),
+            running: info.running,
+            status,
+            cpu_percent: stats.cpu_percent,
+            cpu_throttled_percent: stats.cpu_throttled_percent,
+            cpu_throttled_periods: stats.cpu_throttled_periods,
+            cpu_total_periods: stats.cpu_total_periods,
+            cpu_throttled_time_ms: stats.cpu_throttled_time_ms,
+            memory_bytes: stats.memory_bytes,
+            memory_limit: stats.memory_limit,
+            memory_percent: mem_pct,
+            memory_fail_count: stats.memory_fail_count,
+            oom_killed: info.oom_killed,
+            exit_code: info.exit_code,
+            recommendation,
+        })
+    }
+}
+
+fn evaluate_resource_health(
+    oom_killed: bool,
+    running: bool,
+    exit_code: i64,
+    mem_pct: f64,
+    fail_count: u64,
+    throttled_pct: f64,
+) -> (r3v3rs3_api::container::ResourceHealthStatus, Option<String>) {
+    use r3v3rs3_api::container::ResourceHealthStatus::*;
+    if oom_killed || (!running && exit_code == 137) {
+        return (
+            OomKilled,
+            Some("Container terminated by OOM killer. Increase memory limit or optimize application memory footprint.".to_string()),
+        );
+    }
+    if mem_pct >= 90.0 || fail_count > 0 {
+        return (
+            OomRisk,
+            Some("Container memory usage is approaching limit or allocation fails. High risk of OOM termination.".to_string()),
+        );
+    }
+    if throttled_pct >= 50.0 {
+        return (
+            ThrottledCritical,
+            Some("Severe CPU CFS throttling (> 50%). Increase CPU quota to avoid service degradation.".to_string()),
+        );
+    }
+    if throttled_pct >= 20.0 {
+        return (
+            ThrottledWarning,
+            Some("Moderate CPU throttling detected (> 20%). Container may experience occasional latency spikes.".to_string()),
+        );
+    }
+    (Healthy, None)
 }
 
 /// Records one sample for every running local app, then trims the old samples.
@@ -231,7 +337,26 @@ async fn check_oom_alert(
     info: &r3v3rs3_api::container::ContainerInfo,
     now: u64,
 ) {
-    if info.oom_killed && previous.should_alert(app.id, "oom_killed", now) {
+    let is_oom = info.oom_killed || (!info.running && info.exit_code == 137);
+    if is_oom && previous.should_alert(app.id, "oom_killed", now) {
+        let summary = format!(
+            "Container for app '{}' was terminated by OOM killer",
+            app.name
+        );
+        let payload = serde_json::json!({
+            "app_id": app.id,
+            "app_name": app.name.as_str(),
+            "container_id": info.id,
+            "oom_killed": true,
+            "exit_code": info.exit_code,
+        });
+        platform
+            .dispatch_webhook_event(
+                r3v3rs3_api::webhook::WebhookEvent::SystemOomKill,
+                summary,
+                payload,
+            )
+            .await;
         platform
             .notify_alert(
                 app.id,
@@ -239,6 +364,45 @@ async fn check_oom_alert(
                 "oom_killed",
                 "Container terminated by OOM killer".to_string(),
                 "memory limit exceeded".to_string(),
+            )
+            .await;
+    }
+}
+
+async fn check_throttling_alert(
+    platform: &Arc<Platform>,
+    previous: &Previous,
+    app: &r3v3rs3_api::platform::AppEntry,
+    stats: &r3v3rs3_api::container::ContainerStats,
+    now: u64,
+) {
+    if stats.cpu_throttled_percent >= 25.0 && previous.should_alert(app.id, "cpu_throttled", now) {
+        let summary = format!(
+            "App '{}' container CPU is throttled: {:.1}% throttled ({} ms throttled)",
+            app.name, stats.cpu_throttled_percent, stats.cpu_throttled_time_ms
+        );
+        let payload = serde_json::json!({
+            "app_id": app.id,
+            "app_name": app.name.as_str(),
+            "cpu_throttled_percent": stats.cpu_throttled_percent,
+            "cpu_throttled_periods": stats.cpu_throttled_periods,
+            "cpu_total_periods": stats.cpu_total_periods,
+            "cpu_throttled_time_ms": stats.cpu_throttled_time_ms,
+        });
+        platform
+            .dispatch_webhook_event(
+                r3v3rs3_api::webhook::WebhookEvent::AppCpuThrottled,
+                summary,
+                payload,
+            )
+            .await;
+        platform
+            .notify_alert(
+                app.id,
+                app.name.to_string(),
+                "cpu_throttled",
+                format!("{:.1}% throttled", stats.cpu_throttled_percent),
+                ">= 25.0%".to_string(),
             )
             .await;
     }
@@ -252,6 +416,7 @@ async fn check_app_alerts(
     stats: &r3v3rs3_api::container::ContainerStats,
 ) {
     let now = crate::clock::unix_ms();
+    check_throttling_alert(platform, previous, app, stats, now).await;
     if let Some(rules) = rules {
         check_cpu_alert(
             platform,

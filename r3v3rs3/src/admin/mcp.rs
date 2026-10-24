@@ -2068,6 +2068,29 @@ impl McpServer {
         json_result(overview)
     }
 
+    /// Get container resource throttling, CFS quota, and OOM diagnostic status for an application.
+    #[tool(
+        description = "Get live container resource throttling, CFS quota, memory saturation, and OOM diagnostic status for an application."
+    )]
+    async fn get_app_resource_diagnostics(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Read)
+            .await
+            .map_err(any_error)?;
+        let diagnostics = platform
+            .app_resource_diagnostics(id)
+            .await
+            .map_err(any_error)?;
+        json_result(diagnostics)
+    }
+
     /// Truncate (vacuum) container log files for an application.
     #[tool(
         description = "Truncate (vacuum) container log files for an application to reclaim disk space immediately. Needs the edit scope."

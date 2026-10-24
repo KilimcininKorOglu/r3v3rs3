@@ -1441,6 +1441,16 @@ struct StatsDocument {
 }
 
 #[derive(Default, Deserialize)]
+struct StatsThrottling {
+    #[serde(default)]
+    periods: u64,
+    #[serde(default)]
+    throttled_periods: u64,
+    #[serde(default)]
+    throttled_time: u64,
+}
+
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct StatsCpu {
     #[serde(default)]
@@ -1449,6 +1459,8 @@ struct StatsCpu {
     system_cpu_usage: Option<u64>,
     #[serde(default)]
     online_cpus: Option<f64>,
+    #[serde(default)]
+    throttling_data: Option<StatsThrottling>,
 }
 
 #[derive(Default, Deserialize)]
@@ -1464,6 +1476,10 @@ struct StatsMemory {
     usage: u64,
     #[serde(default)]
     limit: u64,
+    #[serde(default)]
+    failcnt: Option<u64>,
+    #[serde(default)]
+    stats: Option<BTreeMap<String, u64>>,
 }
 
 #[derive(Default, Deserialize)]
@@ -1472,6 +1488,48 @@ struct StatsNetwork {
     rx_bytes: u64,
     #[serde(default)]
     tx_bytes: u64,
+}
+
+fn compute_cpu_throttling(cpu: &StatsCpu, precpu: &StatsCpu) -> (u64, u64, u64, f64) {
+    let curr = cpu.throttling_data.as_ref();
+    let prev = precpu.throttling_data.as_ref();
+    let total_periods = curr.map(|t| t.periods).unwrap_or(0);
+    let throttled_periods = curr.map(|t| t.throttled_periods).unwrap_or(0);
+    let throttled_time_ns = curr.map(|t| t.throttled_time).unwrap_or(0);
+    let throttled_time_ms = throttled_time_ns / 1_000_000;
+
+    let periods_delta = total_periods.saturating_sub(prev.map(|t| t.periods).unwrap_or(0));
+    let throttled_delta =
+        throttled_periods.saturating_sub(prev.map(|t| t.throttled_periods).unwrap_or(0));
+
+    let throttled_percent = if periods_delta > 0 {
+        (throttled_delta as f64 / periods_delta as f64) * 100.0
+    } else if total_periods > 0 {
+        (throttled_periods as f64 / total_periods as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    (
+        throttled_periods,
+        total_periods,
+        throttled_time_ms,
+        throttled_percent.clamp(0.0, 100.0),
+    )
+}
+
+fn compute_memory_fail_count(mem: &StatsMemory) -> u64 {
+    if let Some(cnt) = mem.failcnt.filter(|&c| c > 0) {
+        return cnt;
+    }
+    if let Some(ref stats) = mem.stats {
+        for key in ["failcnt", "oom_kills", "oom"] {
+            if let Some(&val) = stats.get(key).filter(|&&v| v > 0) {
+                return val;
+            }
+        }
+    }
+    0
 }
 
 impl StatsDocument {
@@ -1503,12 +1561,21 @@ impl StatsDocument {
         let (rx, tx) = networks.into_values().fold((0, 0), |(rx, tx), net| {
             (rx + net.rx_bytes, tx + net.tx_bytes)
         });
+        let (throttled_periods, total_periods, throttled_time_ms, throttled_percent) =
+            compute_cpu_throttling(&self.cpu_stats, &self.precpu_stats);
+        let memory_fail_count = compute_memory_fail_count(&memory);
+
         ContainerStats {
             cpu_percent,
             memory_bytes: memory.usage,
             memory_limit: memory.limit,
             net_rx_bytes: rx,
             net_tx_bytes: tx,
+            cpu_throttled_periods: throttled_periods,
+            cpu_total_periods: total_periods,
+            cpu_throttled_time_ms: throttled_time_ms,
+            cpu_throttled_percent: throttled_percent,
+            memory_fail_count,
         }
     }
 }

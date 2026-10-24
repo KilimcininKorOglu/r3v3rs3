@@ -558,6 +558,20 @@ Applications and databases can enforce fine-grained hardware resource quotas to 
 - **Dynamic Vertical Scaling**: Updating resource limits in the WebUI or via `PUT /api/apps/{id}` instantly adjusts the running container's cgroups in-place on the Docker runtime without downtime or container restarts.
 - **OOM Protection & Threshold Alerts**: When a container has a memory limit configured, r3v3rs3 monitors memory saturation during periodic 30-second sweeps and sends an `app_alert` webhook if usage reaches 90% (OOM warning). If a container is terminated by the kernel OOM killer, an instant `oom_killed` alert is delivered.
 
+### Container Resource Throttling & OOM Diagnostics
+
+To prevent containers from silently crashing due to Out Of Memory (OOM) kills or suffering from severe CPU quota starvation, r3v3rs3 extracts Linux kernel cgroup metrics via the Docker engine stats API:
+
+- **CPU CFS Quota Throttling**: Computes the percentage of elapsed CPU periods throttled (`cpu_throttled_percent`), the throttled period counts, and the cumulative throttled time in milliseconds (`cpu_throttled_time_ms`).
+- **Memory Saturation & Fail Counter**: Tracks actual container memory saturation against configured limits and records memory allocation failure attempts (`failcnt` / `oom_kills`).
+- **Automated Health Status**: Categorizes container resource state into `healthy`, `throttled_warning` (>= 20% throttling), `throttled_critical` (>= 50% throttling), `oom_risk` (>= 90% memory saturation or allocation failures), and `oom_killed` (process exit code 137 or OOM killer flag).
+- **WebUI Diagnostic Card**: Displayed in the application view under the metrics panel, showing live diagnostic badges, metric counters, and actionable remediation recommendations.
+- **REST API Endpoint**: `GET /api/apps/{id}/diagnostics` returns the full `AppResourceDiagnostics` payload.
+- **100% MCP & CLI Parity**: Queryable autonomously with the `get_app_resource_diagnostics` MCP tool or the CLI command:
+  ```bash
+  r3 app diagnostics <APP_ID>
+  ```
+
 ## Outbound Webhooks & Event Notifications
 
 The platform includes a centralized outbound webhook hub to stream real-time events to external monitoring, notification, and automation services (such as Slack, Discord, PagerDuty, n8n, Datadog, or custom web services). Unlike the single notification webhook in Settings, the outbound webhook manager supports multiple endpoints, granular event subscriptions, custom HTTP headers, sealed signing secrets, and instant test delivery.
@@ -572,6 +586,7 @@ Administrators can selectively subscribe each webhook target to specific events 
 |                             | `deploy.failure`          | App deployment failed during build, pull, or startup.                  |
 |                             | `deploy.pending_approval` | Deployment triggered but paused waiting for manual approval.           |
 |                             | `app.crashed`             | App container exited unexpectedly with a non-zero status code.         |
+|                             | `app.cpu_throttled`       | Container CPU CFS quota throttling exceeded warning threshold.         |
 | **Databases & Backups**     | `backup.success`          | Database backup completed and saved locally.                           |
 |                             | `backup.failure`          | Database dump or backup operation failed.                              |
 |                             | `backup.upload_failed`    | Uploading a database backup to remote storage (S3/R2/SFTP) failed.     |
@@ -582,6 +597,7 @@ Administrators can selectively subscribe each webhook target to specific events 
 |                             | `security.ip_banned`      | Client IP address banned due to rate limiting or security policies.    |
 | **System & Nodes**          | `target.offline`          | Agent node stopped sending heartbeats and was marked offline.          |
 |                             | `system.disk_pressure`    | Target node disk usage exceeded the alert threshold.                   |
+|                             | `system.oom_kill`         | Container terminated by kernel OOM killer or memory failure.           |
 | **System**                  | `test.ping`               | Test ping sent manually from the WebUI or API.                         |
 
 ### Payload Format & Headers

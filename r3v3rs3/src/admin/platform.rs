@@ -19,7 +19,7 @@ use futures::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use r3v3rs3_api::{
     audit::AuditAction,
-    container::{AppLogsOverview, LogVacuumResult},
+    container::{AppLogsOverview, AppResourceDiagnostics, LogVacuumResult},
     error::Error,
     id::ShortId,
     platform::{
@@ -920,6 +920,29 @@ pub async fn get_app_metrics(
     Ok(Json(
         platform
             .app_metrics(id, hours)
+            .await
+            .map_err(platform_error)?,
+    ))
+}
+
+/// Shows live container resource throttling, CFS quota, and OOM diagnostic status of an app.
+#[utoipa::path(
+    get,
+    path = "/{id}/diagnostics",
+    tag = "platform",
+    operation_id = "get_app_resource_diagnostics",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The resource diagnostics.", body = AppResourceDiagnostics), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_app_resource_diagnostics(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AppResourceDiagnostics>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    Ok(Json(
+        platform
+            .app_resource_diagnostics(id)
             .await
             .map_err(platform_error)?,
     ))

@@ -3,6 +3,7 @@
 //! safe to put into a Docker API path or query.
 
 use crate::error::Error;
+use crate::id::ShortId;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -413,7 +414,7 @@ pub enum ContainerHealth {
 }
 
 /// The state of one container.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContainerInfo {
     pub id: String,
     pub name: String,
@@ -485,6 +486,54 @@ pub struct ContainerStats {
     /// The bytes that every interface of the container received and sent, cumulative.
     pub net_rx_bytes: u64,
     pub net_tx_bytes: u64,
+    /// The number of periods that container tasks were throttled by CFS quota.
+    #[serde(default)]
+    pub cpu_throttled_periods: u64,
+    /// Total enforcement periods that have elapsed for the container's cgroup.
+    #[serde(default)]
+    pub cpu_total_periods: u64,
+    /// Total time tasks in the cgroup were throttled (in milliseconds).
+    #[serde(default)]
+    pub cpu_throttled_time_ms: u64,
+    /// The percentage of elapsed CFS quota periods that were throttled (0.0 - 100.0).
+    #[serde(default)]
+    pub cpu_throttled_percent: f64,
+    /// The memory allocation failure / limit hit counter (`failcnt` in cgroup v1 or `oom_kills` in v2).
+    #[serde(default)]
+    pub memory_fail_count: u64,
+}
+
+/// Health and diagnostic status of container resource limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceHealthStatus {
+    Healthy,
+    ThrottledWarning,
+    ThrottledCritical,
+    OomRisk,
+    OomKilled,
+}
+
+/// Detailed diagnostic information about CPU throttling, CFS quotas, and memory/OOM pressure.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct AppResourceDiagnostics {
+    #[schema(value_type = String)]
+    pub app_id: ShortId,
+    pub app_name: String,
+    pub running: bool,
+    pub status: ResourceHealthStatus,
+    pub cpu_percent: f64,
+    pub cpu_throttled_percent: f64,
+    pub cpu_throttled_periods: u64,
+    pub cpu_total_periods: u64,
+    pub cpu_throttled_time_ms: u64,
+    pub memory_bytes: u64,
+    pub memory_limit: u64,
+    pub memory_percent: f64,
+    pub memory_fail_count: u64,
+    pub oom_killed: bool,
+    pub exit_code: i64,
+    pub recommendation: Option<String>,
 }
 
 #[cfg(test)]

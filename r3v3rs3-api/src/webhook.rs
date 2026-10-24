@@ -78,13 +78,15 @@ pub enum WebhookEvent {
     SystemSocketExhaustion,
     SystemGeoipUpdated,
     SystemGeoipUpdateFailed,
+    SystemOomKill,
+    AppCpuThrottled,
 
     // Test ping
     TestPing,
 }
 
 impl WebhookEvent {
-    pub const ALL: [WebhookEvent; 27] = [
+    pub const ALL: [WebhookEvent; 29] = [
         Self::DeploySuccess,
         Self::DeployFailure,
         Self::DeployPendingApproval,
@@ -111,6 +113,8 @@ impl WebhookEvent {
         Self::SystemSocketExhaustion,
         Self::SystemGeoipUpdated,
         Self::SystemGeoipUpdateFailed,
+        Self::SystemOomKill,
+        Self::AppCpuThrottled,
         Self::TestPing,
     ];
 
@@ -142,6 +146,8 @@ impl WebhookEvent {
             Self::SystemSocketExhaustion => "system.socket_exhaustion",
             Self::SystemGeoipUpdated => "system.geoip_updated",
             Self::SystemGeoipUpdateFailed => "system.geoip_update_failed",
+            Self::SystemOomKill => "system.oom_kill",
+            Self::AppCpuThrottled => "app.cpu_throttled",
             Self::TestPing => "test.ping",
         }
     }
@@ -151,7 +157,8 @@ impl WebhookEvent {
             Self::DeploySuccess
             | Self::DeployFailure
             | Self::DeployPendingApproval
-            | Self::AppCrashed => WebhookEventCategory::Deployment,
+            | Self::AppCrashed
+            | Self::AppCpuThrottled => WebhookEventCategory::Deployment,
             Self::BackupSuccess
             | Self::BackupFailure
             | Self::BackupUploadFailed
@@ -173,7 +180,8 @@ impl WebhookEvent {
             | Self::SystemFdExhaustion
             | Self::SystemSocketExhaustion
             | Self::SystemGeoipUpdated
-            | Self::SystemGeoipUpdateFailed => WebhookEventCategory::System,
+            | Self::SystemGeoipUpdateFailed
+            | Self::SystemOomKill => WebhookEventCategory::System,
             Self::TestPing => WebhookEventCategory::Test,
         }
     }
@@ -216,6 +224,8 @@ impl FromStr for WebhookEvent {
             "system.socket_exhaustion" => Ok(Self::SystemSocketExhaustion),
             "system.geoip_updated" => Ok(Self::SystemGeoipUpdated),
             "system.geoip_update_failed" => Ok(Self::SystemGeoipUpdateFailed),
+            "system.oom_kill" => Ok(Self::SystemOomKill),
+            "app.cpu_throttled" => Ok(Self::AppCpuThrottled),
             "test.ping" => Ok(Self::TestPing),
             _ => Err(Error::InvalidWebhook {
                 reason: format!("unknown event '{s}'"),
