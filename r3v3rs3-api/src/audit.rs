@@ -191,10 +191,16 @@ pub enum AuditAction {
     UpdateGeoIpConfig,
     /// An account or scheduled task triggered a GeoIP database update.
     RefreshGeoIpDatabase,
+    /// An account added an error page theme.
+    AddErrorPageTheme,
+    /// An account updated an error page theme.
+    UpdateErrorPageTheme,
+    /// An account deleted an error page theme.
+    DeleteErrorPageTheme,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 106] = [
+    pub const ALL: [AuditAction; 109] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -301,6 +307,9 @@ impl AuditAction {
         Self::UpdateQuarantineConfig,
         Self::UpdateGeoIpConfig,
         Self::RefreshGeoIpDatabase,
+        Self::AddErrorPageTheme,
+        Self::UpdateErrorPageTheme,
+        Self::DeleteErrorPageTheme,
     ];
 }
 

@@ -68,6 +68,7 @@ async fn ws_proxy() -> anyhow::Result<()> {
                     redirects: Vec::new(),
                     client_cert: None,
                     maintenance: Default::default(),
+                    error_page_theme: None,
                     error_pages: Vec::new(),
                     bot_blocker: false,
                     grpc_web: false,

@@ -63,7 +63,12 @@ impl Router {
             let proxy_cache = registries.caches.cache_for(id, &http.cache);
             let redirects: Arc<[RedirectRule]> = http.redirects.clone().into();
             let maintenance = Arc::new(http.maintenance);
-            let error_pages: Arc<[CustomErrorPage]> = http.error_pages.into();
+            let effective_error_pages = resolve_effective_error_pages(
+                http.error_page_theme,
+                &http.error_pages,
+                &registries.error_page_themes.load(),
+            );
+            let error_pages: Arc<[CustomErrorPage]> = effective_error_pages.into();
             for (index, route) in http.routes.into_iter().enumerate() {
                 let filter = RequestFilter::new(&http.vhosts, &route);
                 let base_path: String = filter
@@ -348,4 +353,23 @@ pub struct FilteredRoute {
     pub geoip: Arc<crate::proxy::geoip::GeoIpResolver>,
     pub bot_blocker: bool,
     pub grpc_web: bool,
+}
+
+fn resolve_effective_error_pages(
+    theme_id: Option<ShortId>,
+    overrides: &[CustomErrorPage],
+    themes: &[r3v3rs3_api::error_page_theme::ErrorPageTheme],
+) -> Vec<CustomErrorPage> {
+    let mut pages = Vec::new();
+    if let Some(theme) = theme_id.and_then(|id| themes.iter().find(|t| t.id == id)) {
+        pages = theme.pages.clone();
+    }
+    for override_page in overrides {
+        if let Some(existing) = pages.iter_mut().find(|p| p.status == override_page.status) {
+            *existing = override_page.clone();
+        } else {
+            pages.push(override_page.clone());
+        }
+    }
+    pages
 }

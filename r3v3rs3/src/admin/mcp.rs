@@ -310,6 +310,30 @@ pub struct UpdateGeoIpConfigParams {
     pub update_interval_days: Option<u32>,
 }
 
+/// The arguments of `add_error_page_theme`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AddErrorPageThemeParams {
+    /// Human-friendly display name of the theme.
+    pub name: String,
+    /// Optional description of the theme design or purpose.
+    pub description: Option<String>,
+    /// List of custom error pages mapped by HTTP status code (JSON array of {status, body}).
+    pub pages: Option<serde_json::Value>,
+}
+
+/// The arguments of `update_error_page_theme`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateErrorPageThemeParams {
+    /// Unique identifier of the error page theme.
+    pub id: String,
+    /// Human-friendly display name of the theme.
+    pub name: Option<String>,
+    /// Optional description of the theme design or purpose.
+    pub description: Option<String>,
+    /// List of custom error pages mapped by HTTP status code (JSON array of {status, body}).
+    pub pages: Option<serde_json::Value>,
+}
+
 /// The caller of the request, which the Bearer middleware inserted.
 fn caller_of(parts: &Parts) -> Result<Caller, ErrorData> {
     parts
@@ -1324,6 +1348,160 @@ impl McpServer {
     }
 
     // ==========================================
+    // Group 5b: Error Page Themes & Dynamic Variables
+    // ==========================================
+
+    /// List all error page themes.
+    #[tool(description = "List all reusable error page themes in the centralized hub.")]
+    async fn list_error_page_themes(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let themes: Vec<r3v3rs3_api::error_page_theme::ErrorPageTheme> = *self
+            .state
+            .call(
+                &caller,
+                crate::server::rpc::error_page_themes::GetErrorPageThemes,
+            )
+            .await
+            .map_err(tool_error)?;
+        json_result(themes)
+    }
+
+    /// Get an error page theme by id.
+    #[tool(
+        description = "Get detailed configuration of an error page theme including all mapped status code pages."
+    )]
+    async fn get_error_page_theme(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let theme: r3v3rs3_api::error_page_theme::ErrorPageTheme = *self
+            .state
+            .call(
+                &caller,
+                crate::server::rpc::error_page_themes::GetErrorPageTheme { id },
+            )
+            .await
+            .map_err(tool_error)?;
+        json_result(theme)
+    }
+
+    /// Add a new error page theme.
+    #[tool(
+        description = "Create a new error page theme in the centralized pool. Needs the edit scope."
+    )]
+    async fn add_error_page_theme(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AddErrorPageThemeParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let pages = parse_theme_pages(params.pages)?;
+        let theme = r3v3rs3_api::error_page_theme::ErrorPageTheme {
+            id: ShortId::new(),
+            name: params.name,
+            description: params.description.unwrap_or_default(),
+            pages,
+        };
+        let id: ShortId = *self
+            .state
+            .call(
+                &caller,
+                crate::server::rpc::error_page_themes::AddErrorPageTheme { theme },
+            )
+            .await
+            .map_err(tool_error)?;
+        json_result(json!({ "id": id.to_string(), "created": true }))
+    }
+
+    /// Update an existing error page theme.
+    #[tool(description = "Update an existing error page theme. Needs the edit scope.")]
+    async fn update_error_page_theme(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateErrorPageThemeParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let mut theme = (*self
+            .state
+            .call(
+                &caller,
+                crate::server::rpc::error_page_themes::GetErrorPageTheme { id },
+            )
+            .await
+            .map_err(tool_error)?)
+        .clone();
+        if let Some(name) = params.name {
+            theme.name = name;
+        }
+        if let Some(desc) = params.description {
+            theme.description = desc;
+        }
+        if let Some(pages_val) = params.pages {
+            theme.pages = parse_theme_pages(Some(pages_val))?;
+        }
+        self.state
+            .call(
+                &caller,
+                crate::server::rpc::error_page_themes::UpdateErrorPageTheme { theme },
+            )
+            .await
+            .map_err(tool_error)?;
+        json_result(json!({ "id": id.to_string(), "updated": true }))
+    }
+
+    /// Delete an error page theme.
+    #[tool(
+        description = "Delete an error page theme by id. Fails if any proxy uses it. Needs the edit scope."
+    )]
+    async fn delete_error_page_theme(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        self.state
+            .call(
+                &caller,
+                crate::server::rpc::error_page_themes::DeleteErrorPageTheme { id },
+            )
+            .await
+            .map_err(tool_error)?;
+        json_result(json!({ "deleted": id.to_string() }))
+    }
+
+    /// Reset error page themes to default templates.
+    #[tool(
+        description = "Reset error page themes pool to standard built-in themes. Needs the edit scope."
+    )]
+    async fn reset_error_page_themes(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let themes: Vec<r3v3rs3_api::error_page_theme::ErrorPageTheme> = *self
+            .state
+            .call(
+                &caller,
+                crate::server::rpc::error_page_themes::ResetErrorPageThemes,
+            )
+            .await
+            .map_err(tool_error)?;
+        json_result(themes)
+    }
+
+    // ==========================================
     // Group 6: Platform Applications (PaaS)
     // ==========================================
 
@@ -2277,5 +2455,15 @@ fn build_geoip_update_request(
         update_interval_days: params
             .update_interval_days
             .unwrap_or(current.update_interval_days),
+    }
+}
+
+fn parse_theme_pages(
+    pages_val: Option<serde_json::Value>,
+) -> Result<Vec<r3v3rs3_api::proxy::CustomErrorPage>, ErrorData> {
+    match pages_val {
+        Some(val) => serde_json::from_value(val)
+            .map_err(|e| ErrorData::invalid_params(format!("invalid pages array: {e}"), None)),
+        None => Ok(Vec::new()),
     }
 }

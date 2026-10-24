@@ -97,6 +97,10 @@ pub struct AppConfig {
     /// Threat detection and automated IP quarantine settings.
     #[serde(default)]
     pub auto_quarantine: crate::quarantine::AutoQuarantineConfig,
+
+    /// Centralized reusable error page themes pool.
+    #[serde(default)]
+    pub error_page_themes: Vec<crate::error_page_theme::ErrorPageTheme>,
 }
 
 /// MaxMind MMDB GeoIP database configuration.

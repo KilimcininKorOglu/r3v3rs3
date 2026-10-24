@@ -137,9 +137,13 @@ mod tests {
             certs: Vec::new(),
             app: AppConfig::default(),
         }));
-        write_frame(&mut sender, &command).unwrap();
+        let expected = command.clone();
+        let writer = std::thread::spawn(move || {
+            write_frame(&mut sender, &command).unwrap();
+        });
         let received: WorkerCommand = read_frame(&mut receiver).unwrap();
-        assert_eq!(received, command);
+        writer.join().unwrap();
+        assert_eq!(received, expected);
     }
 
     #[test]

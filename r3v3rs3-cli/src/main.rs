@@ -48,6 +48,9 @@ enum Command {
     /// Manage IP/CIDR and country access lists.
     #[command(subcommand)]
     Acl(AclCommand),
+    /// Manage error page themes and dynamic template variables.
+    #[command(subcommand)]
+    ErrorPageTheme(ErrorPageThemeCommand),
     /// Manage DNS provider credentials for DNS-01 ACME.
     #[command(subcommand)]
     Dns(DnsCommand),
@@ -183,6 +186,24 @@ pub enum AclCommand {
     /// Deletes an access list.
     #[command(alias = "rm")]
     Delete { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ErrorPageThemeCommand {
+    /// Lists all error page themes.
+    #[command(alias = "ls")]
+    List,
+    /// Shows an error page theme by id.
+    Get { id: String },
+    /// Adds an error page theme from inline JSON/YAML, a file path, or stdin ('-').
+    Add { payload: String },
+    /// Updates an error page theme from inline JSON/YAML, a file path, or stdin ('-').
+    Update { id: String, payload: String },
+    /// Deletes an error page theme.
+    #[command(alias = "rm")]
+    Delete { id: String },
+    /// Resets error page themes to standard default templates.
+    ResetDefaults,
 }
 
 #[derive(Debug, Subcommand)]
@@ -614,6 +635,7 @@ async fn run_api(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()
         Command::Cert(c) => run_cert(api, c).await,
         Command::Acme(c) => run_acme(api, c).await,
         Command::Acl(c) => run_acl(api, c).await,
+        Command::ErrorPageTheme(c) => run_error_page_theme(api, c).await,
         Command::Dns(c) => run_dns(api, c).await,
         other => run_api_platform(api, other).await,
     }
@@ -721,6 +743,22 @@ async fn run_acl(api: &api_client::ApiClient, cmd: AclCommand) -> anyhow::Result
         AclCommand::Get { id } => api.get_acl(&id).await,
         AclCommand::Add { payload } => api.add_acl(&payload).await,
         AclCommand::Delete { id } => api.delete_acl(&id).await,
+    }
+}
+
+async fn run_error_page_theme(
+    api: &api_client::ApiClient,
+    cmd: ErrorPageThemeCommand,
+) -> anyhow::Result<()> {
+    match cmd {
+        ErrorPageThemeCommand::List => api.list_error_page_themes().await,
+        ErrorPageThemeCommand::Get { id } => api.get_error_page_theme(&id).await,
+        ErrorPageThemeCommand::Add { payload } => api.add_error_page_theme(&payload).await,
+        ErrorPageThemeCommand::Update { id, payload } => {
+            api.update_error_page_theme(&id, &payload).await
+        }
+        ErrorPageThemeCommand::Delete { id } => api.delete_error_page_theme(&id).await,
+        ErrorPageThemeCommand::ResetDefaults => api.reset_error_page_themes().await,
     }
 }
 

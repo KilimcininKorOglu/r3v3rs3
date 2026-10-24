@@ -516,6 +516,21 @@ pub enum Error {
 
     #[error("MaxMind license key is required to download GeoIP database updates")]
     GeoIpLicenseKeyRequired,
+
+    #[error("error page theme not found: {id}")]
+    ErrorPageThemeNotFound {
+        #[schema(value_type = String)]
+        id: ShortId,
+    },
+
+    #[error("invalid error page theme: {reason}")]
+    InvalidErrorPageTheme { reason: String },
+
+    #[error("a proxy uses the error page theme: {id}")]
+    ErrorPageThemeInUse {
+        #[schema(value_type = String)]
+        id: ShortId,
+    },
 }
 
 impl Error {
@@ -528,7 +543,8 @@ impl Error {
             | Self::ServiceNotFound { .. }
             | Self::BackupNotFound { .. }
             | Self::ScheduledCommandNotFound { .. }
-            | Self::WebhookNotFound { .. } => 404,
+            | Self::WebhookNotFound { .. }
+            | Self::ErrorPageThemeNotFound { .. } => 404,
             Self::Unauthorized => 401,
             Self::Forbidden
             | Self::ProxyReadOnly { .. }
@@ -547,7 +563,8 @@ impl Error {
             | Self::TargetInUse { .. }
             | Self::AppTargetFixed { .. }
             | Self::HostPortUnavailable { .. }
-            | Self::DatabaseInUse { .. } => 409,
+            | Self::DatabaseInUse { .. }
+            | Self::ErrorPageThemeInUse { .. } => 409,
             Self::AgentOffline { .. } | Self::PlatformDisabled | Self::PlatformFailed => 503,
             Self::NotificationFailed { .. }
             | Self::GitProviderFailed { .. }

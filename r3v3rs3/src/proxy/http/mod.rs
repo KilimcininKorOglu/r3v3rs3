@@ -945,9 +945,25 @@ where
     let request_host = request_host(&req, header_host.clone(), info.sni);
     let Some((res, route)) = shared.router.get_route(&req, request_host.as_deref()) else {
         let error_pages = shared.router.find_error_pages(request_host.as_deref());
+        let client_cert = info.client_cert.cloned().unwrap_or_default();
+        let fallback_vars = header_rules::HeaderVariables {
+            client_ip: info.remote.ip(),
+            host: request_host.clone().unwrap_or_default(),
+            scheme: if info.proto == "http" {
+                "http"
+            } else {
+                "https"
+            },
+            request_id: header_rules::new_request_id(),
+            route: String::new(),
+            client_cert_subject: client_cert.subject,
+            client_cert_fingerprint: client_cert.fingerprint,
+        };
         return (
             ProxiedRequest::Err(ProxyError::NoRouteFound),
-            response_rewriter.error_pages(error_pages),
+            response_rewriter
+                .error_pages(error_pages)
+                .variables(fallback_vars),
             None,
             info.remote.ip(),
         );
@@ -1280,9 +1296,6 @@ fn apply_header_rules(
     info: &RequestInfo<'_>,
     response_rewriter: ResponseRewriterBuilder,
 ) -> ResponseRewriterBuilder {
-    if route.header_rules.is_empty() {
-        return response_rewriter;
-    }
     let client_cert = info.client_cert.cloned().unwrap_or_default();
     let variables = HeaderVariables {
         client_ip: client,
@@ -1301,6 +1314,9 @@ fn apply_header_rules(
         client_cert_subject: client_cert.subject,
         client_cert_fingerprint: client_cert.fingerprint,
     };
+    if route.header_rules.is_empty() {
+        return response_rewriter.variables(variables);
+    }
     route.header_rules.apply_request(headers, &variables);
     response_rewriter.header_rules(route.header_rules.clone(), variables)
 }

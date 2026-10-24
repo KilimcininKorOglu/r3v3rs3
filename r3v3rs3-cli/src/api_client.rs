@@ -412,6 +412,83 @@ impl ApiClient {
         Ok(())
     }
 
+    // --- Error Page Themes operations ---
+
+    pub async fn list_error_page_themes(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/error-page-themes", None)
+            .await?;
+        if let Some(arr) = res.as_array() {
+            println!("{:<26} {:<28} {:<10} DESCRIPTION", "ID", "NAME", "PAGES");
+            println!("{:-<26} {:-<28} {:-<10} {:-<30}", "", "", "", "");
+            for item in arr {
+                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
+                let pages = item
+                    .get("pages")
+                    .and_then(|p| p.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                let desc = item
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                println!("{:<26} {:<28} {:<10} {}", id, name, pages, desc);
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
+    pub async fn get_error_page_theme(&self, id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, &format!("/api/error-page-themes/{id}"), None)
+            .await?;
+        print_json(&res)
+    }
+
+    pub async fn add_error_page_theme(&self, payload: &str) -> anyhow::Result<()> {
+        let val = load_payload(payload)?;
+        let res = self
+            .request(Method::POST, "/api/error-page-themes", Some(&val))
+            .await?;
+        println!("error-page-theme added");
+        print_json(&res)
+    }
+
+    pub async fn update_error_page_theme(&self, id: &str, payload: &str) -> anyhow::Result<()> {
+        let val = load_payload(payload)?;
+        let res = self
+            .request(
+                Method::PUT,
+                &format!("/api/error-page-themes/{id}"),
+                Some(&val),
+            )
+            .await?;
+        println!("error-page-theme/{id} updated");
+        print_json(&res)
+    }
+
+    pub async fn delete_error_page_theme(&self, id: &str) -> anyhow::Result<()> {
+        self.request(
+            Method::DELETE,
+            &format!("/api/error-page-themes/{id}"),
+            None,
+        )
+        .await?;
+        println!("error-page-theme/{id} deleted");
+        Ok(())
+    }
+
+    pub async fn reset_error_page_themes(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::POST, "/api/error-page-themes/reset-defaults", None)
+            .await?;
+        println!("error-page-themes reset to defaults");
+        print_json(&res)
+    }
+
     // --- DNS Credentials operations ---
 
     pub async fn list_dns(&self) -> anyhow::Result<()> {

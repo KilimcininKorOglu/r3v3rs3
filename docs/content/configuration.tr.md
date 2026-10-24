@@ -373,12 +373,34 @@ WebUI üzerinde, HTTP proxy yapılandırma sayfasındaki **Özel Hata Sayfaları
 [my-app]
 protocol = "http"
 vhosts = ["app.example.com"]
+error_page_theme = "a1b2c3d4"
 error_pages = [
-  { status = 404, body = "<h1>Sayfa Bulunamadı</h1><p>Aradığınız sayfa mevcut değil.</p>" },
-  { status = 502, body = "<h1>Hizmet Kullanılamıyor</h1><p>Sunucularımız şu anda yanıt vermiyor.</p>" },
+  { status = 404, body = "<h1>{{host}} üzerinde Sayfa Bulunamadı</h1><p>Aradığınız sayfa mevcut değil.</p>" },
+  { status = 502, body = "<h1>Hizmet Kullanılamıyor</h1><p>Sunucularımız şu anda yanıt vermiyor. (İzleme: {{request_id}})</p>" },
 ]
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
 ```
+
+### Merkezi Hata Sayfası Temaları Havuzu
+
+Proxy düzeyinde her seferinde ayrı ayrı HTML sayfaları girmek yerine r3v3rs3, platform genelinde yönetilen merkezi bir **Hata Sayfası Temaları (Error Page Themes)** havuzu sunar:
+
+- **Yerleşik Temalar**: Tüm standart hata durum kodları (`400`, `401`, `403`, `404`, `405`, `408`, `429`, `500`, `502`, `503`, `504`) için hazır modern temalarla (`Minimalist Dark`, `Modern Glassmorphism`, `Developer Terminal`, `Illustration Card`, `Maintenance Notice`) birlikte gelir.
+- **Proxy Tema Ataması**: `error_page_theme = "short_id"` ile herhangi bir proxy'ye WebUI, CLI (`r3 proxy update <id> ...`) veya REST API üzerinden tek tıkla hata sayfası teması bağlanabilir.
+- **Proxy Bazlı İnce Ayar / Geçersiz Kılma**: Proxy yapılandırmasında tanımlanan özel `error_pages` girdileri, o durum kodu için atanan temayı geçersiz kılarak öncelik alır.
+- **Varsayılanlara Sıfırlama**: WebUI, CLI (`r3 error-page-theme reset-defaults`) veya MCP (`reset_error_page_themes`) üzerinden yerleşik temalar her zaman varsayılan şablonlara geri döndürülebilir.
+
+### Dinamik Şablon Değişkenleri
+
+Hata sayfası şablonları çalışma zamanında dinamik değişken değişimini destekler. İstemciye hata sayfası yanıtı gönderilmeden önce r3v3rs3 aşağıdaki belirteçleri otomatik olarak doldurur:
+
+| Değişken | Açıklama | Örnek |
+|---|---|---|
+| `{{status}}` | HTTP durum kodu | `502` |
+| `{{message}}` | Standart durum ifadesi veya hata açıklaması | `Bad Gateway` |
+| `{{request_id}}` | İstek için benzersiz izleme (tracing) kimliği | `184f9a0b123` |
+| `{{host}}` | İstenen Host başlığı veya sunucu adı | `app.example.com` |
+| `{{client_ip}}` | İstemci IP adresi (veya güvenilen CDN proxy IP'si) | `203.0.113.195` |
 
 ## UDP oturumları
 

@@ -295,6 +295,9 @@ pub struct HttpProxy {
     /// forwarding to upstreams, preserving all upstream configuration.
     #[serde(default, skip_serializing_if = "MaintenanceConfig::is_disabled")]
     pub maintenance: MaintenanceConfig,
+    /// Optional centralized error page theme applied to this proxy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_page_theme: Option<crate::id::ShortId>,
     /// Custom error pages for HTTP status codes (e.g. 404, 502) replacing default error responses.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub error_pages: Vec<CustomErrorPage>,

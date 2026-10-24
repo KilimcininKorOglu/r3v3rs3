@@ -58,6 +58,8 @@ pub struct ProxyRegistries {
     pub geoip: Arc<geoip::GeoIpResolver>,
     pub dns: dns::DnsResolver,
     pub quarantine: Arc<crate::security::AutoQuarantineTracker>,
+    pub error_page_themes:
+        Arc<arc_swap::ArcSwap<Vec<r3v3rs3_api::error_page_theme::ErrorPageTheme>>>,
 }
 
 /// The number of the client connection tasks that are still running. The graceful drain waits

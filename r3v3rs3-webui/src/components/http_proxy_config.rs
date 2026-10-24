@@ -16,6 +16,7 @@ use r3v3rs3_api::compression::{
     Compression, CompressionAlgorithm, format_mime_list, parse_mime_list,
 };
 use r3v3rs3_api::error::Error;
+use r3v3rs3_api::error_page_theme::ErrorPageTheme;
 use r3v3rs3_api::fixed_response::{FIXED_STATUSES, FixedRedirect, FixedResponse, FixedStatus};
 use r3v3rs3_api::header_rules::{HeaderRule, HeaderRules, format_header_rules};
 use r3v3rs3_api::i18n::Locale;
@@ -80,6 +81,7 @@ struct ProxyForm {
     /// One redirect rule on each line.
     redirects: String,
     maintenance: MaintenanceForm,
+    error_page_theme: Option<ShortId>,
     error_pages: Vec<ErrorPageForm>,
     bot_blocker: bool,
     pub grpc_web: bool,
@@ -150,6 +152,7 @@ impl ProxyForm {
                 .collect::<Vec<_>>()
                 .join("\n"),
             maintenance: MaintenanceForm::new(&proxy.maintenance),
+            error_page_theme: proxy.error_page_theme,
             error_pages: proxy
                 .error_pages
                 .iter()
@@ -695,6 +698,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
     let circuit_breaker = use_state(|| CircuitBreakerForm::new(&props.proxy.circuit_breaker));
     let client_certs = use_client_certs();
     let access_lists = use_access_lists();
+    let themes = use_error_page_themes();
     let routes = use_state(|| {
         let routes = props
             .proxy
@@ -828,7 +832,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
             <p class={HINT_CLASS}>{locale.t("http_form.cache_hint")}</p>
 
             { maintenance_view(locale, &form, &errors) }
-            { error_pages_view(locale, &form, &errors) }
+            { error_pages_view(locale, &form, &errors, &themes) }
 
             <label class={SECTION_CLASS}>{locale.t("http_form.upstream_protocol")}</label>
             <div>
@@ -1746,10 +1750,69 @@ fn maintenance_view(
     }
 }
 
+fn error_page_theme_select(
+    locale: Locale,
+    onchange: Callback<Event>,
+    selected: Option<ShortId>,
+    themes: &[ErrorPageTheme],
+) -> Html {
+    let unknown = selected.filter(|id| themes.iter().all(|t| t.id != *id));
+    let options = html! {
+        <>
+            <option value="" selected={selected.is_none()}>{locale.t("http_form.error_page_theme_none")}</option>
+            { for themes.iter().map(|theme| html! {
+                <option value={theme.id.to_string()} selected={selected == Some(theme.id)}>
+                    {format!("{} ({} {})", theme.name, theme.pages.len(), locale.t("http_form.pages_count_suffix"))}
+                </option>
+            }) }
+            if let Some(id) = unknown {
+                <option value={id.to_string()} selected=true>{id.to_string()}</option>
+            }
+        </>
+    };
+    select_field(
+        locale.t("http_form.error_page_theme"),
+        onchange,
+        options,
+        Some(locale.t("http_form.error_page_theme_hint")),
+    )
+}
+
+fn dynamic_variables_banner(locale: Locale) -> Html {
+    html! {
+        <div class="mt-3 p-3 bg-neutral-50 dark:bg-neutral-800/40 rounded-lg border border-neutral-200 dark:border-neutral-700">
+            <span class="text-xs font-semibold text-neutral-700 dark:text-neutral-300 block mb-1.5">
+                {locale.t("http_form.dynamic_variables_title")}
+            </span>
+            <div class="flex flex-wrap gap-1.5 text-xs">
+                <span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 font-mono">
+                    {"{{status}}"}
+                </span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 font-mono">
+                    {"{{message}}"}
+                </span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 font-mono">
+                    {"{{request_id}}"}
+                </span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 font-mono">
+                    {"{{host}}"}
+                </span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 font-mono">
+                    {"{{client_ip}}"}
+                </span>
+            </div>
+            <p class="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+                {locale.t("http_form.dynamic_variables_hint")}
+            </p>
+        </div>
+    }
+}
+
 fn error_pages_view(
-    _locale: Locale,
+    locale: Locale,
     form: &UseStateHandle<ProxyForm>,
     errors: &HashMap<String, String>,
+    themes: &[ErrorPageTheme],
 ) -> Html {
     let on_change = {
         let form = form.clone();
@@ -1759,12 +1822,26 @@ fn error_pages_view(
             form.set(updated);
         })
     };
+    let theme_select = error_page_theme_select(
+        locale,
+        state_input(form, select_value, |form, value| {
+            form.error_page_theme = parse_optional_id(&value)
+        }),
+        form.error_page_theme,
+        themes,
+    );
     html! {
-        <ErrorPagesEditor
-            error_pages={form.error_pages.clone()}
-            on_change={on_change}
-            errors={errors.clone()}
-        />
+        <div class="mt-6">
+            { theme_select }
+            { dynamic_variables_banner(locale) }
+            <div class="mt-4">
+                <ErrorPagesEditor
+                    error_pages={form.error_pages.clone()}
+                    on_change={on_change}
+                    errors={errors.clone()}
+                />
+            </div>
+        </div>
     }
 }
 
@@ -1868,6 +1945,20 @@ pub fn use_client_certs() -> UseStateHandle<Vec<CertInfo>> {
 #[hook]
 fn use_access_lists() -> UseStateHandle<Vec<AccessListEntry>> {
     use_loaded_list(get_access_lists, |_| true)
+}
+
+/// Loads the error page themes.
+#[hook]
+fn use_error_page_themes() -> UseStateHandle<Vec<ErrorPageTheme>> {
+    use_loaded_list(get_error_page_themes, |_| true)
+}
+
+async fn get_error_page_themes() -> Result<Vec<ErrorPageTheme>, gloo_net::Error> {
+    Request::get(&format!("{API_ENDPOINT}/error-page-themes"))
+        .send()
+        .await?
+        .json()
+        .await
 }
 
 /// Loads a list once with `load` and keeps the items that `keep` accepts. A failed load keeps the
@@ -2262,6 +2353,7 @@ fn get_proxy(
         max_body_size,
         redirects,
         maintenance,
+        error_page_theme: form.error_page_theme,
         error_pages,
         bot_blocker: form.bot_blocker,
         grpc_web: form.grpc_web,

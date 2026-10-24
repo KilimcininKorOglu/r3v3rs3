@@ -373,12 +373,34 @@ In the WebUI, the **Custom Error Pages** section on the HTTP proxy configuration
 [my-app]
 protocol = "http"
 vhosts = ["app.example.com"]
+error_page_theme = "a1b2c3d4"
 error_pages = [
-  { status = 404, body = "<h1>Page Not Found</h1><p>Sorry, the requested page does not exist.</p>" },
-  { status = 502, body = "<h1>Service Unavailable</h1><p>Our backend service is currently down.</p>" },
+  { status = 404, body = "<h1>Page Not Found</h1><p>Sorry, the requested page does not exist on {{host}}.</p>" },
+  { status = 502, body = "<h1>Service Unavailable</h1><p>Our backend service is currently down. (Trace: {{request_id}})</p>" },
 ]
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
 ```
+
+### Centralized Error Page Themes Hub
+
+Instead of defining custom HTML pages repeatedly per proxy, r3v3rs3 provides a centralized **Error Page Themes** repository managed platform-wide:
+
+- **Built-in Themes**: Ships with ready-to-use modern themes (`Minimalist Dark`, `Modern Glassmorphism`, `Developer Terminal`, `Illustration Card`, `Maintenance Notice`) pre-populated across all standard error status codes (`400`, `401`, `403`, `404`, `405`, `408`, `429`, `500`, `502`, `503`, `504`).
+- **Proxy Theme Association**: Assign an error page theme to any proxy with `error_page_theme = "short_id"` via WebUI, CLI (`r3 proxy update <id> ...`), or REST API.
+- **Granular Per-Proxy Overrides**: Any proxy-specific `error_pages` entry takes precedence over the assigned theme for that specific status code.
+- **Reset to Defaults**: Built-in themes can be restored to default templates anytime via WebUI, CLI (`r3 error-page-theme reset-defaults`), or MCP (`reset_error_page_themes`).
+
+### Dynamic Template Variables
+
+Error page templates support dynamic runtime variable substitution. Before returning an error page to the client, r3v3rs3 replaces the following tokens:
+
+| Variable | Description | Example |
+|---|---|---|
+| `{{status}}` | HTTP status code | `502` |
+| `{{message}}` | Standard status phrase or error description | `Bad Gateway` |
+| `{{request_id}}` | Unique tracing identifier for the request | `184f9a0b123` |
+| `{{host}}` | Requested Host header or server name | `app.example.com` |
+| `{{client_ip}}` | Client remote IP address (or trusted CDN proxy IP) | `203.0.113.195` |
 
 ## UDP Sessions
 

@@ -191,6 +191,7 @@ pub struct ResponseRewriter {
     sticky_cookie: Option<CookieSlot>,
     error_pages: Arc<[CustomErrorPage]>,
     grpc_web: Option<Option<String>>,
+    variables: Option<HeaderVariables>,
 }
 
 impl ResponseRewriter {
@@ -212,7 +213,7 @@ impl ResponseRewriter {
                     .iter()
                     .find(|p| p.status == res.status().as_u16())
                 {
-                    let mut res = custom_response_body(custom, res);
+                    let mut res = custom_response_body(custom, res, self.variables.as_ref());
                     self.apply_post_headers(res.headers_mut());
                     return Ok(res);
                 }
@@ -233,7 +234,12 @@ impl ResponseRewriter {
                     None => res,
                 })
             }
-            Err(err) => error_response(err, self.preferences, &self.error_pages),
+            Err(err) => error_response(
+                err,
+                self.preferences,
+                &self.error_pages,
+                self.variables.as_ref(),
+            ),
         }
     }
 
@@ -279,9 +285,31 @@ fn is_html_body(body: &[u8], body_str: &str) -> bool {
 fn custom_response_body<B>(
     custom: &CustomErrorPage,
     mut res: Response<B>,
+    variables: Option<&HeaderVariables>,
 ) -> Response<BoxBody<Bytes, anyhow::Error>> {
-    let body = custom.body.as_bytes().to_vec();
-    let content_type = if is_html_body(&body, &custom.body) {
+    let status = custom.status;
+    let message = StatusCode::from_u16(status)
+        .ok()
+        .and_then(|c| c.canonical_reason())
+        .unwrap_or("Error");
+    let (req_id, host, client_ip) = match variables {
+        Some(v) => (
+            v.request_id.as_str(),
+            v.host.as_str(),
+            v.client_ip.to_string(),
+        ),
+        None => ("-", "-", "-".to_string()),
+    };
+    let rendered = r3v3rs3_api::error_page_theme::substitute_error_page_variables(
+        &custom.body,
+        status,
+        message,
+        req_id,
+        host,
+        &client_ip,
+    );
+    let body = rendered.as_bytes().to_vec();
+    let content_type = if is_html_body(&body, &rendered) {
         HeaderValue::from_static("text/html; charset=utf-8")
     } else {
         HeaderValue::from_static("text/plain; charset=utf-8")
@@ -297,10 +325,29 @@ fn render_error_body(
     code: StatusCode,
     preferences: PagePreferences,
     error_pages: &[CustomErrorPage],
+    variables: Option<&HeaderVariables>,
 ) -> Result<(Vec<u8>, HeaderValue), anyhow::Error> {
     if let Some(custom) = error_pages.iter().find(|p| p.status == code.as_u16()) {
-        let body = custom.body.as_bytes().to_vec();
-        let content_type = if is_html_body(&body, &custom.body) {
+        let status = custom.status;
+        let message = code.canonical_reason().unwrap_or("Error");
+        let (req_id, host, client_ip) = match variables {
+            Some(v) => (
+                v.request_id.as_str(),
+                v.host.as_str(),
+                v.client_ip.to_string(),
+            ),
+            None => ("-", "-", "-".to_string()),
+        };
+        let rendered = r3v3rs3_api::error_page_theme::substitute_error_page_variables(
+            &custom.body,
+            status,
+            message,
+            req_id,
+            host,
+            &client_ip,
+        );
+        let body = rendered.as_bytes().to_vec();
+        let content_type = if is_html_body(&body, &rendered) {
             HeaderValue::from_static("text/html; charset=utf-8")
         } else {
             HeaderValue::from_static("text/plain; charset=utf-8")
@@ -324,10 +371,11 @@ fn error_response(
     err: anyhow::Error,
     preferences: PagePreferences,
     error_pages: &[CustomErrorPage],
+    variables: Option<&HeaderVariables>,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let headers = error_headers(&err);
     let code = map_error(err);
-    let (body, content_type) = render_error_body(code, preferences, error_pages)?;
+    let (body, content_type) = render_error_body(code, preferences, error_pages, variables)?;
     let mut res = Response::new(BoxBody::new(
         Full::new(Bytes::from(body)).map_err(Into::into),
     ));
@@ -355,11 +403,17 @@ impl ResponseRewriterBuilder {
         self
     }
 
+    pub fn variables(mut self, variables: HeaderVariables) -> Self {
+        self.inner.variables = Some(variables);
+        self
+    }
+
     pub fn header_rules(
         mut self,
         rules: Arc<CompiledHeaderRules>,
         variables: HeaderVariables,
     ) -> Self {
+        self.inner.variables = Some(variables.clone());
         self.inner.header_rules = Some((rules, variables));
         self
     }
@@ -410,7 +464,7 @@ mod test {
     #[test]
     fn the_error_page_is_never_stored() {
         let err = anyhow::Error::new(super::super::error::ProxyError::NoUpstreamServers);
-        let res = error_response(err, PagePreferences::default(), &[]).unwrap();
+        let res = error_response(err, PagePreferences::default(), &[], None).unwrap();
         assert_eq!(res.status(), 502);
         assert_eq!(res.headers()[CACHE_CONTROL], "no-store");
         assert_eq!(res.headers()[CONTENT_TYPE], "text/html; charset=utf-8");
@@ -423,10 +477,37 @@ mod test {
             status: 502,
             body: "<h1>Custom 502 Bad Gateway</h1>".to_string(),
         }];
-        let res = error_response(err, PagePreferences::default(), &pages).unwrap();
+        let res = error_response(err, PagePreferences::default(), &pages, None).unwrap();
         assert_eq!(res.status(), 502);
         assert_eq!(res.headers()[CACHE_CONTROL], "no-store");
         assert_eq!(res.headers()[CONTENT_TYPE], "text/html; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn test_custom_error_page_substitutes_variables() {
+        use http_body_util::BodyExt;
+        let err = anyhow::Error::new(super::super::error::ProxyError::NoUpstreamServers);
+        let pages = [r3v3rs3_api::proxy::CustomErrorPage {
+            status: 502,
+            body: "<title>{{status}} {{message}}</title><p>Req: {{request_id}} Host: {{host}} IP: {{client_ip}}</p>".to_string(),
+        }];
+        let vars = HeaderVariables {
+            client_ip: "203.0.113.19".parse().unwrap(),
+            host: "test.example.com".to_string(),
+            scheme: "https",
+            request_id: "req-abc-xyz".to_string(),
+            route: "/api".to_string(),
+            client_cert_subject: String::new(),
+            client_cert_fingerprint: String::new(),
+        };
+        let res = error_response(err, PagePreferences::default(), &pages, Some(&vars)).unwrap();
+        assert_eq!(res.status(), 502);
+        let body_bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+        assert!(body_str.contains("<title>502 Bad Gateway</title>"));
+        assert!(body_str.contains("Req: req-abc-xyz"));
+        assert!(body_str.contains("Host: test.example.com"));
+        assert!(body_str.contains("IP: 203.0.113.19"));
     }
 
     #[test]

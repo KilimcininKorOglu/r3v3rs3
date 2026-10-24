@@ -65,6 +65,7 @@ mod databases;
 mod disaster_recovery;
 mod discovery;
 mod dns_credentials;
+mod error_page_themes;
 mod geoip;
 mod git;
 mod grpc;
@@ -616,6 +617,7 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
         .nest("/ports", port_routes())
         .nest("/proxies", proxy_routes())
         .nest("/access_lists", access_list_routes())
+        .nest("/error-page-themes", error_page_theme_routes())
         .nest(
             "/traffic",
             OpenApiRouter::new()
@@ -678,6 +680,17 @@ fn access_list_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(access_lists::list, access_lists::add))
         .routes(routes!(access_lists::put, access_lists::delete))
+}
+
+fn error_page_theme_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(error_page_themes::list, error_page_themes::add))
+        .routes(routes!(error_page_themes::reset_defaults))
+        .routes(routes!(
+            error_page_themes::get,
+            error_page_themes::put,
+            error_page_themes::delete
+        ))
 }
 
 /// The certificates, the ACME accounts and the named DNS credentials.

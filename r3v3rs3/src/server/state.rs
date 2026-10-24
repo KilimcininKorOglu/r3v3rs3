@@ -387,6 +387,12 @@ impl ServerState {
         self.registries
             .quarantine
             .update_config(self.config.auto_quarantine.clone());
+        let themes = if self.config.error_page_themes.is_empty() {
+            r3v3rs3_api::error_page_theme::default_builtin_themes()
+        } else {
+            self.config.error_page_themes.clone()
+        };
+        self.registries.error_page_themes.store(Arc::new(themes));
         let (tx, mut rx) =
             tokio::sync::mpsc::unbounded_channel::<r3v3rs3_api::quarantine::QuarantinedIpEntry>();
         self.registries.quarantine.set_notifier(tx);
@@ -1592,6 +1598,36 @@ impl ServerState {
         Ok(())
     }
 
+    async fn apply_config_registries(
+        &mut self,
+        config: &AppConfig,
+        geoip_changed: bool,
+        themes_changed: bool,
+    ) {
+        if geoip_changed {
+            self.registries
+                .geoip
+                .reload_or_fallback(config.geoip.database.as_deref(), &self.config_dir);
+            self.reload_proxies().await;
+        }
+        if themes_changed {
+            let themes = if config.error_page_themes.is_empty() {
+                r3v3rs3_api::error_page_theme::default_builtin_themes()
+            } else {
+                config.error_page_themes.clone()
+            };
+            self.registries.error_page_themes.store(Arc::new(themes));
+            self.reload_proxies().await;
+        }
+        if self
+            .registries
+            .srv
+            .set_nameserver(config.upstream_dns_resolver)
+        {
+            self.reload_proxies().await;
+        }
+    }
+
     /// Applies a config that the storage already keeps.
     async fn apply_config(&mut self, config: AppConfig) {
         let changed = discovery::changed_providers(&self.config.discovery, &config.discovery);
@@ -1607,23 +1643,13 @@ impl ServerState {
         let public_url_changed = previous_public_url != config.public_url;
         let upgrade_changed = self.config.upgrade != config.upgrade;
         let geoip_changed = self.config.geoip != config.geoip;
+        let themes_changed = self.config.error_page_themes != config.error_page_themes;
         self.config.clone_from(&config);
         if upgrade_changed {
             let _ = self.update_interval.send(config.upgrade.check_interval);
         }
-        if geoip_changed {
-            self.registries
-                .geoip
-                .reload_or_fallback(config.geoip.database.as_deref(), &self.config_dir);
-            self.reload_proxies().await;
-        }
-        if self
-            .registries
-            .srv
-            .set_nameserver(config.upstream_dns_resolver)
-        {
-            self.reload_proxies().await;
-        }
+        self.apply_config_registries(&config, geoip_changed, themes_changed)
+            .await;
         if limits_changed {
             self.reload_ports().await;
         }

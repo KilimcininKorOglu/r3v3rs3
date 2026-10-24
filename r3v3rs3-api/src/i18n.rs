@@ -381,6 +381,13 @@ mod tests {
             Error::InvalidGeoIpConfig { reason: text() },
             Error::GeoIpUpdateFailed { reason: text() },
             Error::GeoIpLicenseKeyRequired,
+            Error::ErrorPageThemeNotFound {
+                id: "theme".parse().unwrap(),
+            },
+            Error::InvalidErrorPageTheme { reason: text() },
+            Error::ErrorPageThemeInUse {
+                id: "theme".parse().unwrap(),
+            },
         ]
     }
 
