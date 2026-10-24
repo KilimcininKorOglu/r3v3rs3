@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-10-25
+
+### Added
+- Container Resource Throttling & OOMKill Diagnostic Alert: Built-in kernel cgroup and Docker engine inspection engine diagnosing CPU CFS quota throttling, memory saturation, and OOM termination risk.
+- CFS Quota & Throttling Metrics: Real-time calculation of throttled period ratios (`cpu_throttled_percent`), total periods, and cumulative throttled time in milliseconds (`cpu_throttled_time_ms`).
+- Memory Pressure & Allocation Fail Tracking: Continuous monitoring of container memory usage against configured limits and tracking of memory allocation failure counts (`failcnt` / `oom_kills`).
+- Outbound Webhook Alerts: Added `system.oom_kill` (emergency notification when a container process is terminated by the Linux OOM killer) and `app.cpu_throttled` (early alert when CPU throttling exceeds warning threshold).
+- REST API Endpoint: Added `GET /api/apps/{id}/diagnostics` returning comprehensive container resource diagnostic status, health grades, and actionable recommendations.
+- 100% MCP & CLI Parity: Added `get_app_resource_diagnostics` MCP tool and `r3 app diagnostics <APP_ID>` CLI command.
+- WebUI Diagnostics Section: Integrated resource health badges (Healthy, Throttled Warning, Throttled Critical, OOM Risk, OOM Killed), metric meters, and remediation guidance into the application metrics view.
+- Dual-Language Documentation: Updated `platform.md` and `platform.tr.md` with complete container throttling diagnostic specifications, REST routes, CLI and MCP commands, and webhook events.
+
 ## [2.5.9] - 2026-10-25
 
 ### Added
