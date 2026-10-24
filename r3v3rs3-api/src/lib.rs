@@ -40,6 +40,7 @@ pub mod proxy_protocol;
 pub mod quarantine;
 pub mod redirect;
 pub mod rewrite;
+pub mod security_headers;
 pub mod store;
 pub mod subject_name;
 pub mod tls;

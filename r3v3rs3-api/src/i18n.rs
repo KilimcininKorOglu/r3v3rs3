@@ -242,6 +242,9 @@ mod tests {
             Error::ProxyReadOnly {
                 id: "abc".parse().unwrap(),
             },
+            Error::NotHttpProxy {
+                id: "abc".parse().unwrap(),
+            },
             Error::CertificateReadOnly {
                 id: "abc".parse().unwrap(),
             },

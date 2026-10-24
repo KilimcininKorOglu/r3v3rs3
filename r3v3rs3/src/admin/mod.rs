@@ -80,6 +80,7 @@ mod platform;
 mod ports;
 mod proxies;
 mod quarantine;
+mod security_headers;
 mod static_file;
 mod store;
 pub(crate) mod system_metrics;
@@ -655,6 +656,12 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(geoip::update_config))
                 .routes(routes!(geoip::update_database)),
         )
+        .nest(
+            "/security/headers",
+            OpenApiRouter::new()
+                .routes(routes!(security_headers::list_profiles))
+                .routes(routes!(security_headers::analyze_headers)),
+        )
 }
 
 fn port_routes() -> OpenApiRouter<AppState> {
@@ -673,6 +680,10 @@ fn proxy_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(grpc::reflect_proxy))
         .routes(routes!(grpc::invoke_proxy))
         .routes(routes!(grpc::health_proxy))
+        .routes(routes!(security_headers::get_proxy_security_headers))
+        .routes(routes!(
+            security_headers::apply_proxy_security_header_profile
+        ))
         .routes(routes!(proxies::get, proxies::put, proxies::delete))
         .routes(routes!(proxies::status))
         .routes(routes!(proxies::purge_cache, proxies::purge_cache_post))

@@ -197,10 +197,12 @@ pub enum AuditAction {
     UpdateErrorPageTheme,
     /// An account deleted an error page theme.
     DeleteErrorPageTheme,
+    /// An account applied a predefined security header profile to a proxy.
+    ApplySecurityProfile,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 109] = [
+    pub const ALL: [AuditAction; 110] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -310,6 +312,7 @@ impl AuditAction {
         Self::AddErrorPageTheme,
         Self::UpdateErrorPageTheme,
         Self::DeleteErrorPageTheme,
+        Self::ApplySecurityProfile,
     ];
 }
 

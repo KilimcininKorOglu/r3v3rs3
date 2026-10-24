@@ -391,6 +391,33 @@ pub struct CheckGrpcHealthParams {
     pub service: Option<String>,
 }
 
+/// The arguments of `apply_security_header_profile`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ApplySecurityHeaderProfileParams {
+    /// The id of the proxy.
+    pub proxy_id: String,
+    /// The security profile to apply: `strict`, `balanced`, `api_only`, or `spa_frontend`.
+    pub profile: String,
+}
+
+fn parse_mcp_security_profile(
+    s: &str,
+) -> Result<r3v3rs3_api::security_headers::SecurityProfile, ErrorData> {
+    use r3v3rs3_api::security_headers::SecurityProfile;
+    match s.to_ascii_lowercase().as_str() {
+        "strict" => Ok(SecurityProfile::Strict),
+        "balanced" => Ok(SecurityProfile::Balanced),
+        "api_only" | "api-only" | "api" => Ok(SecurityProfile::ApiOnly),
+        "spa_frontend" | "spa-frontend" | "spa" => Ok(SecurityProfile::SpaFrontend),
+        other => Err(ErrorData::invalid_params(
+            format!(
+                "unknown security profile '{other}'. Expected strict, balanced, api_only, or spa_frontend"
+            ),
+            None,
+        )),
+    }
+}
+
 /// The caller of the request, which the Bearer middleware inserted.
 fn caller_of(parts: &Parts) -> Result<Caller, ErrorData> {
     parts
@@ -1104,6 +1131,94 @@ impl McpServer {
             .map_err(|err| ErrorData::internal_error(err, None))?;
 
         json_result(res)
+    }
+
+    /// List all predefined OWASP security hardening profiles.
+    #[tool(
+        description = "List all available predefined OWASP security hardening profiles (Strict, Balanced, API Only, SPA) and their associated response header rules."
+    )]
+    async fn list_security_header_profiles(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let _ = caller_of(&parts)?;
+        let profiles: Vec<r3v3rs3_api::security_headers::SecurityProfileInfo> =
+            r3v3rs3_api::security_headers::SecurityProfile::all()
+                .iter()
+                .map(r3v3rs3_api::security_headers::SecurityProfile::to_info)
+                .collect();
+        json_result(profiles)
+    }
+
+    /// Analyze the security headers of an HTTP proxy and return a security audit score.
+    #[tool(
+        description = "Analyze the response headers of an HTTP proxy and return a security audit score (A+ to F), grade, and detailed OWASP risk mitigations."
+    )]
+    async fn analyze_proxy_security_headers(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let entry: ProxyEntry = *self
+            .state
+            .call(&caller, GetProxy { id })
+            .await
+            .map_err(tool_error)?;
+
+        match entry.proxy.kind {
+            r3v3rs3_api::proxy::ProxyKind::Http(http) => {
+                let audit =
+                    r3v3rs3_api::security_headers::analyze_response_rules(&http.headers.response);
+                json_result(audit)
+            }
+            _ => Err(ErrorData::invalid_params(
+                format!("proxy {} is not an HTTP proxy", id),
+                None,
+            )),
+        }
+    }
+
+    /// Apply a predefined OWASP security profile to an HTTP proxy.
+    #[tool(
+        description = "Apply a predefined OWASP security hardening profile (strict, balanced, api_only, spa_frontend) to an existing HTTP proxy. Needs the edit scope."
+    )]
+    async fn apply_security_header_profile(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<ApplySecurityHeaderProfileParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let profile = parse_mcp_security_profile(&params.profile)?;
+        let id: ShortId = parse_id(&params.proxy_id)?;
+        let mut entry: ProxyEntry = *self
+            .state
+            .call(&caller, GetProxy { id })
+            .await
+            .map_err(tool_error)?;
+
+        match &mut entry.proxy.kind {
+            r3v3rs3_api::proxy::ProxyKind::Http(http) => {
+                let updated = r3v3rs3_api::security_headers::apply_profile_to_rules(
+                    &http.headers.response,
+                    profile,
+                );
+                http.headers.response = updated;
+                let audit =
+                    r3v3rs3_api::security_headers::analyze_response_rules(&http.headers.response);
+                self.state
+                    .call(&caller, UpdateProxy { entry })
+                    .await
+                    .map_err(tool_error)?;
+                json_result(audit)
+            }
+            _ => Err(ErrorData::invalid_params(
+                format!("proxy {} is not an HTTP proxy", id),
+                None,
+            )),
+        }
     }
 
     /// A new proxy from the JSON form of the admin API.

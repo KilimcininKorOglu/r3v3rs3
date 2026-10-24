@@ -146,6 +146,24 @@ pub enum ProxyCommand {
     /// Manages pre-shared compression dictionaries (RFC 9651 / RFC 9652) of an HTTP proxy.
     #[command(subcommand)]
     Dictionary(ProxyDictionaryCommand),
+    /// Audits and hardens HTTP response security headers (OWASP/HSTS/CSP).
+    #[command(subcommand)]
+    SecurityHeaders(ProxySecurityHeadersCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProxySecurityHeadersCommand {
+    /// Shows the security scorecard and missing headers of an HTTP proxy.
+    Audit { id: String },
+    /// Applies a predefined OWASP security profile (strict, balanced, api-only, spa) to a proxy.
+    Apply {
+        id: String,
+        /// Predefined profile: `strict`, `balanced`, `api-only`, or `spa`.
+        profile: String,
+    },
+    /// Lists all available predefined OWASP security hardening profiles.
+    #[command(alias = "ls")]
+    Profiles,
 }
 
 #[derive(Debug, Subcommand)]
@@ -761,6 +779,20 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
                 .await
         }
         ProxyCommand::Dictionary(dict_cmd) => run_proxy_dictionary(api, dict_cmd).await,
+        ProxyCommand::SecurityHeaders(sec_cmd) => run_proxy_security_headers(api, sec_cmd).await,
+    }
+}
+
+async fn run_proxy_security_headers(
+    api: &api_client::ApiClient,
+    cmd: ProxySecurityHeadersCommand,
+) -> anyhow::Result<()> {
+    match cmd {
+        ProxySecurityHeadersCommand::Audit { id } => api.audit_proxy_security_headers(&id).await,
+        ProxySecurityHeadersCommand::Apply { id, profile } => {
+            api.apply_proxy_security_profile(&id, &profile).await
+        }
+        ProxySecurityHeadersCommand::Profiles => api.list_security_profiles().await,
     }
 }
 

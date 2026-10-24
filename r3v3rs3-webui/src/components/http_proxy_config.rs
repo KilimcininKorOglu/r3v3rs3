@@ -20,7 +20,7 @@ use r3v3rs3_api::compression_dictionary::CompressionDictionary;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::error_page_theme::ErrorPageTheme;
 use r3v3rs3_api::fixed_response::{FIXED_STATUSES, FixedRedirect, FixedResponse, FixedStatus};
-use r3v3rs3_api::header_rules::{HeaderRule, HeaderRules, format_header_rules};
+use r3v3rs3_api::header_rules::{HeaderRule, HeaderRules, format_header_rules, parse_header_rules};
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::mirror::{DEFAULT_MIRROR_BODY_SIZE, Mirror};
@@ -28,6 +28,10 @@ use r3v3rs3_api::policy::{AuthPolicy, ConcurrencyLimit, IpFilter, RateLimit, Rat
 use r3v3rs3_api::proxy::{CustomErrorPage, HttpProxy, MaintenanceConfig, Route, Server, ServerUrl};
 use r3v3rs3_api::redirect::{RedirectRule, RedirectStatus};
 use r3v3rs3_api::rewrite::{PathRegex, PathRewrite};
+use r3v3rs3_api::security_headers::{
+    HeaderAuditItem, HeaderAuditStatus, SecurityGrade, SecurityProfile, analyze_response_rules,
+    apply_profile_to_rules,
+};
 use r3v3rs3_api::upstream::{
     CircuitBreaker, DEFAULT_WEIGHT, HealthCheck, LoadBalancing, MAX_RETRY_ATTEMPTS, RetryOn,
     RetryPolicy, StickyCookie, UpstreamTimeouts,
@@ -745,6 +749,17 @@ pub fn http_proxy_config(props: &Props) -> Html {
     let current_proxy = parsed_proxy.as_ref().ok().cloned();
     let errors = use_entry_errors(parsed_proxy, props.onchanged.clone());
 
+    let on_apply_profile = {
+        let form = form.clone();
+        Callback::from(move |profile: SecurityProfile| {
+            let existing = parse_header_rules(&form.response_headers).unwrap_or_default();
+            let updated = apply_profile_to_rules(&existing, profile);
+            let mut form_data = (*form).clone();
+            form_data.response_headers = format_header_rules(&updated);
+            form.set(form_data);
+        })
+    };
+
     html! {
         <>
             { toggle(state_input(&form, checked, |form, value| form.upgrade_insecure = value), form.upgrade_insecure, locale.t("http_form.upgrade_insecure"), "my-6") }
@@ -840,6 +855,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
                 &form.response_headers,
                 state_input(&form, text_area, |form, value| form.request_headers = value),
                 state_input(&form, text_area, |form, value| form.response_headers = value),
+                on_apply_profile,
             ) }
             { error_view(errors.get("headers")) }
             <p class={HINT_CLASS}>{locale.t("http_form.header_rules_hint")}</p>
@@ -1410,6 +1426,19 @@ fn route_headers_view(
     index: usize,
     route: &RouteForm,
 ) -> Html {
+    let on_apply_route_profile = {
+        let routes = routes.clone();
+        Callback::from(move |profile: SecurityProfile| {
+            let mut routes_data = (*routes).clone();
+            if let Some(r) = routes_data.get_mut(index) {
+                let existing = parse_header_rules(&r.response_headers).unwrap_or_default();
+                let updated = apply_profile_to_rules(&existing, profile);
+                r.response_headers = format_header_rules(&updated);
+                routes.set(routes_data);
+            }
+        })
+    };
+
     route_override_view(
         locale,
         route_input(routes, index, checked, |route, value| {
@@ -1428,6 +1457,7 @@ fn route_headers_view(
             route_input(routes, index, text_area, |route, value| {
                 route.response_headers = value
             }),
+            on_apply_route_profile,
         ),
     )
 }
@@ -1699,22 +1729,140 @@ pub(super) fn seconds_input(
     }
 }
 
+fn security_grade_badge(grade: SecurityGrade, score: u8) -> Html {
+    let (bg, label) = match grade {
+        SecurityGrade::APlus => (
+            "bg-emerald-500/10 border-emerald-500/30 text-emerald-400",
+            "A+",
+        ),
+        SecurityGrade::A => (
+            "bg-emerald-500/10 border-emerald-500/30 text-emerald-400",
+            "A",
+        ),
+        SecurityGrade::B => ("bg-lime-500/10 border-lime-500/30 text-lime-400", "B"),
+        SecurityGrade::C => ("bg-amber-500/10 border-amber-500/30 text-amber-400", "C"),
+        SecurityGrade::D => ("bg-orange-500/10 border-orange-500/30 text-orange-400", "D"),
+        SecurityGrade::F => ("bg-rose-500/10 border-rose-500/30 text-rose-400", "F"),
+    };
+
+    html! {
+        <div class={classes!("flex", "items-center", "gap-2", "px-2.5", "py-1", "rounded-md", "border", bg)}>
+            <span class="font-bold text-sm leading-none">{label}</span>
+            <span class="text-xs opacity-80">{format!("{score}/100")}</span>
+        </div>
+    }
+}
+
+fn security_profile_buttons(locale: Locale, on_apply: Callback<SecurityProfile>) -> Html {
+    let profiles = [
+        (SecurityProfile::Strict, "http_form.profile_strict"),
+        (SecurityProfile::Balanced, "http_form.profile_balanced"),
+        (SecurityProfile::ApiOnly, "http_form.profile_api_only"),
+        (
+            SecurityProfile::SpaFrontend,
+            "http_form.profile_spa_frontend",
+        ),
+    ];
+
+    html! {
+        <div class="flex flex-wrap items-center gap-1.5">
+            <span class="text-xs text-neutral-400 font-medium mr-1">{format!("{}:", locale.t("http_form.security_profiles"))}</span>
+            { for profiles.into_iter().map(|(prof, key)| {
+                let on_click = {
+                    let on_apply = on_apply.clone();
+                    Callback::from(move |_| on_apply.emit(prof))
+                };
+                html! {
+                    <button
+                        type="button"
+                        onclick={on_click}
+                        class="px-2 py-0.5 text-xs font-medium rounded border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 transition-colors cursor-pointer"
+                    >
+                        {locale.t(key)}
+                    </button>
+                }
+            }) }
+        </div>
+    }
+}
+
+fn security_audit_item_badge(locale: Locale, item: &HeaderAuditItem) -> Html {
+    let (color, icon, status_text) = match item.status {
+        HeaderAuditStatus::Present => (
+            "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+            "✓",
+            locale.t("http_form.audit_present"),
+        ),
+        HeaderAuditStatus::Weak => (
+            "text-amber-400 bg-amber-500/10 border-amber-500/20",
+            "⚠",
+            locale.t("http_form.audit_weak"),
+        ),
+        HeaderAuditStatus::Missing => (
+            "text-rose-400 bg-rose-500/10 border-rose-500/20",
+            "✕",
+            locale.t("http_form.audit_missing"),
+        ),
+    };
+
+    html! {
+        <div class={classes!("flex", "items-center", "justify-between", "px-2", "py-1", "rounded", "border", "text-xs", color)} title={format!("{}: {}", locale.t("http_form.audit_risk"), item.risk)}>
+            <div class="flex items-center gap-1.5 truncate">
+                <span class="font-bold shrink-0">{icon}</span>
+                <span class="font-mono text-[11px] truncate">{&item.header_name}</span>
+            </div>
+            <span class="text-[10px] uppercase font-semibold opacity-85 shrink-0 ml-1">{status_text}</span>
+        </div>
+    }
+}
+
+fn security_wizard_panel(
+    locale: Locale,
+    response_rules_text: &str,
+    on_apply: Callback<SecurityProfile>,
+) -> Html {
+    let parsed_rules = parse_header_rules(response_rules_text).unwrap_or_default();
+    let audit = analyze_response_rules(&parsed_rules);
+
+    html! {
+        <div class="mb-3 p-3 rounded-lg border border-neutral-800 bg-neutral-900/60 flex flex-col gap-2.5">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm font-semibold text-neutral-200">
+                        {locale.t("http_form.security_headers_wizard")}
+                    </span>
+                    { security_grade_badge(audit.grade, audit.score) }
+                </div>
+                { security_profile_buttons(locale, on_apply) }
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 mt-1">
+                { for audit.items.iter().map(|item| security_audit_item_badge(locale, item)) }
+            </div>
+        </div>
+    }
+}
+
 fn header_rules_view(
     locale: Locale,
     request: &str,
     response: &str,
     on_request: Callback<Event>,
     on_response: Callback<Event>,
+    on_apply_profile: Callback<SecurityProfile>,
 ) -> Html {
     html! {
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
-            <div>
-                <label class={LABEL_CLASS}>{locale.t("http_form.request_headers")}</label>
-                <textarea rows="4" autocapitalize="off" spellcheck="false" placeholder={"set X-Request-Id: {request_id}\nremove X-Debug"} value={request.to_string()} onchange={on_request} class={classes!(INPUT_CLASS, "font-mono")} />
-            </div>
-            <div>
-                <label class={LABEL_CLASS}>{locale.t("http_form.response_headers")}</label>
-                <textarea rows="4" autocapitalize="off" spellcheck="false" placeholder={"set X-Frame-Options: DENY\nremove Server"} value={response.to_string()} onchange={on_response} class={classes!(INPUT_CLASS, "font-mono")} />
+        <div>
+            { security_wizard_panel(locale, response, on_apply_profile) }
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("http_form.request_headers")}</label>
+                    <textarea rows="4" autocapitalize="off" spellcheck="false" placeholder={"set X-Request-Id: {request_id}\nremove X-Debug"} value={request.to_string()} onchange={on_request} class={classes!(INPUT_CLASS, "font-mono")} />
+                </div>
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("http_form.response_headers")}</label>
+                    <textarea rows="4" autocapitalize="off" spellcheck="false" placeholder={"set X-Frame-Options: DENY\nremove Server"} value={response.to_string()} onchange={on_response} class={classes!(INPUT_CLASS, "font-mono")} />
+                </div>
             </div>
         </div>
     }

@@ -104,6 +104,9 @@ pub enum Error {
     #[error("proxy is managed by service discovery and cannot be changed: {id}")]
     ProxyReadOnly { id: ShortId },
 
+    #[error("the proxy is not an HTTP proxy: {id}")]
+    NotHttpProxy { id: ShortId },
+
     #[error("certificate is managed by service discovery and cannot be deleted: {id}")]
     CertificateReadOnly { id: ShortId },
 

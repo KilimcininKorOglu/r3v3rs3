@@ -1932,6 +1932,109 @@ impl ApiClient {
         println!("Configuration successfully restored.");
         Ok(())
     }
+
+    pub async fn list_security_profiles(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/security/headers/profiles", None)
+            .await?;
+        println!("{:<16} {:<24} DESCRIPTION", "ID", "TITLE");
+        println!("{}", "-".repeat(80));
+        if let Some(list) = res.as_array() {
+            for item in list {
+                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                let desc = item
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                println!("{:<16} {:<24} {}", id, title, desc);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn audit_proxy_security_headers(&self, id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(
+                Method::GET,
+                &format!("/api/proxies/{id}/security-headers"),
+                None,
+            )
+            .await?;
+        let score = res.get("score").and_then(|v| v.as_u64()).unwrap_or(0);
+        let grade = res.get("grade").and_then(|v| v.as_str()).unwrap_or("F");
+        let detected = res
+            .get("detected_profile")
+            .and_then(|v| v.as_str())
+            .unwrap_or("custom");
+
+        let grade_colored = match grade {
+            "a_plus" | "a" => format!(
+                "\x1b[32m{}\x1b[0m",
+                grade.to_ascii_uppercase().replace('_', "+")
+            ),
+            "b" => "\x1b[33mB\x1b[0m".to_string(),
+            "c" | "d" => format!("\x1b[33m{}\x1b[0m", grade.to_ascii_uppercase()),
+            _ => "\x1b[31mF\x1b[0m".to_string(),
+        };
+
+        println!("Proxy Security Audit: {}", id);
+        println!(
+            "Score: {}/100 | Grade: {} | Matching Profile: {}",
+            score, grade_colored, detected
+        );
+        println!("{}", "-".repeat(85));
+        println!(
+            "{:<28} {:<12} {:<6} RISK / CURRENT VALUE",
+            "HEADER", "STATUS", "PTS"
+        );
+        println!("{}", "-".repeat(85));
+
+        if let Some(items) = res.get("items").and_then(|v| v.as_array()) {
+            for item in items {
+                print_security_audit_item(item);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn apply_proxy_security_profile(
+        &self,
+        id: &str,
+        profile_raw: &str,
+    ) -> anyhow::Result<()> {
+        let normalized_profile = match profile_raw.to_ascii_lowercase().as_str() {
+            "strict" => "strict",
+            "balanced" => "balanced",
+            "api-only" | "api_only" | "api" => "api_only",
+            "spa" | "spa-frontend" | "spa_frontend" => "spa_frontend",
+            other => anyhow::bail!(
+                "unknown profile: {other}. Expected strict, balanced, api-only, or spa"
+            ),
+        };
+
+        let body = serde_json::json!({ "profile": normalized_profile });
+        let res = self
+            .request(
+                Method::POST,
+                &format!("/api/proxies/{id}/security-headers/apply-profile"),
+                Some(&body),
+            )
+            .await?;
+
+        let score = res.get("score").and_then(|v| v.as_u64()).unwrap_or(0);
+        let grade = res.get("grade").and_then(|v| v.as_str()).unwrap_or("F");
+        println!(
+            "\x1b[32mSuccessfully applied security profile '{}' to proxy {}.\x1b[0m",
+            normalized_profile, id
+        );
+        println!(
+            "New Score: {}/100 (Grade: {})",
+            score,
+            grade.to_ascii_uppercase().replace('_', "+")
+        );
+        Ok(())
+    }
 }
 
 pub fn parse_manifest(content: &str) -> anyhow::Result<Value> {
@@ -1989,6 +2092,27 @@ fn print_json(val: &Value) -> anyhow::Result<()> {
     let text = serde_json::to_string_pretty(val)?;
     println!("{text}");
     Ok(())
+}
+
+fn print_security_audit_item(item: &Value) {
+    let header = item
+        .get("header_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    let earned = item
+        .get("earned_score")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let risk = item.get("risk").and_then(|v| v.as_str()).unwrap_or("");
+
+    let status_tag = match status {
+        "present" => "\x1b[32m[SECURED]\x1b[0m",
+        "weak" => "\x1b[33m[ WEAK  ]\x1b[0m",
+        _ => "\x1b[31m[MISSING]\x1b[0m",
+    };
+
+    println!("{:<28} {:<21} {:<6} {}", header, status_tag, earned, risk);
 }
 
 #[cfg(test)]

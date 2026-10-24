@@ -1038,6 +1038,32 @@ headers = { request = [{ action = "set", name = "X-Request-Id", value = "{reques
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+### Security Header Hardening Profiles
+
+r3v3rs3 includes built-in OWASP security header profiles and an automated scoring engine (A+ to F) to harden proxy responses with one click, via the WebUI, MCP, or the CLI:
+
+- **Strict (`strict`)**: Full defense-in-depth profile for high-security applications (`max-age=63072000; includeSubDomains; preload`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, restrictive `Permissions-Policy`, strict `Content-Security-Policy`, and isolation headers `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Resource-Policy: same-origin`).
+- **Balanced (`balanced`)**: Recommended profile for typical CMS and multi-page web applications (`max-age=31536000; includeSubDomains`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, permissive CSP supporting inline styles and common CDNs).
+- **API Only (`api_only`)**: Optimized for REST, JSON, and gRPC endpoints (`X-Frame-Options: DENY`, `Cache-Control: no-store, max-age=0`, restrictive CSP, `Referrer-Policy: no-referrer`).
+- **SPA Frontend (`spa_frontend`)**: Tailored for Vite, React, Vue, Svelte, and modern Single Page Applications with worker, blob, and WebSocket support.
+
+#### CLI Commands
+
+```bash
+# List available security profiles
+r3 proxy security-headers profiles
+
+# Audit security headers of a proxy and inspect score and recommendations
+r3 proxy security-headers audit <PROXY_ID>
+
+# Apply an OWASP security hardening profile to a proxy
+r3 proxy security-headers apply <PROXY_ID> strict
+```
+
+#### MCP Tools
+
+AI agents can inspect and apply security profiles using `list_security_header_profiles`, `analyze_proxy_security_headers`, and `apply_security_header_profile`.
+
 ## Compression
 
 You can compress proxied responses in the "Compression" section. Select one or more encodings to enable compression. Select no encoding to disable compression.

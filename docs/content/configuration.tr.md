@@ -1038,6 +1038,32 @@ headers = { request = [{ action = "set", name = "X-Request-Id", value = "{reques
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+### Güvenlik Üstbilgisi Sertleştirme Profilleri
+
+r3v3rs3, WebUI, MCP ve CLI üzerinden tek tıkla uygulanabilen yerleşik OWASP güvenlik üstbilgisi profilleri ve otomatik bir karne denetim motoru (A+'dan F'ye) sunar:
+
+- **Katı (`strict`)**: Yüksek güvenlik gerektiren uygulamalar için derinlemesine savunma profili (`max-age=63072000; includeSubDomains; preload`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, kısıtlayıcı `Permissions-Policy`, katı `Content-Security-Policy` ve yalıtım üstbilgileri `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`).
+- **Dengeli (`balanced`)**: Tipik CMS ve çok sayfalı web uygulamaları için önerilen standart profil (`max-age=31536000; includeSubDomains`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, inline stilleri ve yaygın CDN'leri destekleyen dengeli CSP).
+- **API Uç Noktası (`api_only`)**: Saf REST, JSON ve gRPC endpoint'leri için optimize edilmiş profil (`X-Frame-Options: DENY`, `Cache-Control: no-store, max-age=0`, kısıtlayıcı CSP, `Referrer-Policy: no-referrer`).
+- **SPA Ön Uç (`spa_frontend`)**: Vite, React, Vue, Svelte ve modern Tek Sayfa Uygulamaları için worker, blob ve WebSocket destekli optimize edilmiş profil.
+
+#### CLI Komutları
+
+```bash
+# Mevcut güvenlik profillerini listele
+r3 proxy security-headers profiles
+
+# Proxy güvenlik üstbilgilerini denetle, skoru ve önerileri incele
+r3 proxy security-headers audit <PROXY_ID>
+
+# Bir proxy'ye OWASP güvenlik sertleştirme profili uygula
+r3 proxy security-headers apply <PROXY_ID> strict
+```
+
+#### MCP Araçları
+
+Yapay zeka ajanları `list_security_header_profiles`, `analyze_proxy_security_headers` ve `apply_security_header_profile` araçlarını kullanarak güvenlik profillerini inceleyebilir ve uygulayabilir.
+
 ## Sıkıştırma
 
 Proxy'den geçen yanıtları "Sıkıştırma" bölümünden sıkıştırabilirsiniz. Bir veya daha fazla encoding seçtiğinizde sıkıştırma açılır. Hiçbir encoding seçili değilse sıkıştırma kapalıdır.
