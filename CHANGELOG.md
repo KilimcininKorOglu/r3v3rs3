@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.4] - 2026-10-24
+
+### Added
+- Centralized Error Page Themes Hub: Reusable error page templates (`ErrorPageTheme`) pool with built-in templates (`dark`, `glass`, `term`, `card`, `maint`) covering standard HTTP error status codes (400, 401, 403, 404, 405, 408, 429, 500, 502, 503, 504).
+- Proxy-Level Theme Binding: Added `error_page_theme: Option<ShortId>` to `HttpProxy`, allowing reverse proxies to bind to a centralized theme while preserving granular per-proxy `error_pages` overrides.
+- Dynamic Variable Substitution: Automatic runtime replacement of template tokens (`{{status}}`, `{{message}}`, `{{request_id}}`, `{{host}}`, `{{client_ip}}`) for both upstream error responses and gateway-generated errors in `ResponseRewriter`.
+- 100% MCP & CLI Parity: Added MCP tools (`list_error_page_themes`, `get_error_page_theme`, `add_error_page_theme`, `update_error_page_theme`, `delete_error_page_theme`, `reset_error_page_themes`) and CLI subcommands under `r3 error-page-theme` (`list`, `get`, `add`, `update`, `delete`, `reset-defaults`).
+- WebUI Error Page Themes Management: Dedicated Error Page Themes card on the Settings page with table view, reset defaults, and delete actions; theme selector dropdown and dynamic variable token helper banner in the proxy configuration editor.
+- Dual-Language Documentation: Comprehensive English and Turkish documentation in `configuration.md` and `configuration.tr.md` explaining error page themes, proxy assignment, dynamic variables, MCP tools, and CLI management.
+
 ## [2.5.3] - 2026-10-23
 
 ### Added
