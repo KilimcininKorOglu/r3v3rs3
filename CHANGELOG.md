@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.5] - 2026-10-24
+
+### Added
+- Shared Compression Dictionaries (RFC 9651 / RFC 9652): Support for shared dictionary compression with Brotli (`dcb`) and Zstandard (`dcz`), enabling up to 90%+ payload reduction for repetitive API endpoints, dynamic HTML, and single-page application assets.
+- Dictionary Management & Serving: Proxy-level dictionary definitions (`CompressionDictionary`) with custom matching patterns, internal serving endpoint with RFC-compliant headers (`Use-As-Dictionary`, `Cache-Control: public, max-age=31536000, immutable`, and strong SHA-256 structured field hash).
+- Runtime Content Negotiation & Encoding: Full support for client dictionary advertisements via `Available-Dictionary` and `Sec-Available-Dictionary` request headers, automatic response encoding selection (`dcz` / `dcb`), `Content-Dictionary` response header, and appropriate `Vary` cache keying.
+- 100% MCP & CLI Parity: Added MCP tools (`list_compression_dictionaries`, `get_compression_dictionary`, `add_compression_dictionary`, `delete_compression_dictionary`) and CLI subcommands under `r3 proxy dictionary` (`list`, `get`, `add`, `delete`).
+- WebUI Compression Dictionaries Table: Proxy compression configuration editor extended with shared dictionary management, enabling adding, viewing SHA-256 hashes, and deleting dictionaries.
+- Dual-Language Documentation: Comprehensive English and Turkish documentation in `configuration.md` and `configuration.tr.md` covering shared dictionaries, client negotiation, RFC 9651/9652 headers, and administrative CLI and MCP usage.
+
 ## [2.5.4] - 2026-10-24
 
 ### Added
