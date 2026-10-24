@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.9] - 2026-10-25
+
+### Added
+- Live Long-Lived Connection Inspector & Stream Management Console: Comprehensive real-time tracking, metrics, and administration for active long-lived TCP sessions, WebSocket streams, and Server-Sent Events (SSE) connections.
+- Bidirectional Stream Tracking Engine: Core connection registry tracking client IP, upstream target address, duration/uptime, total bytes sent and received, and instantaneous transfer rate (B/s).
+- Graceful Connection Termination: Safe disconnection with protocol-aware teardown, issuing WebSocket close frames or TCP bidirectional shutdown to prevent data corruption.
+- REST API Endpoints: Added `GET /api/traffic/connections` (active connection listing with protocol and duration metrics) and `DELETE /api/traffic/connections/{id}` (immediate graceful connection termination).
+- 100% MCP & CLI Parity: Added `list_active_connections` and `terminate_active_connection` MCP tools, and `r3 traffic connections list` and `r3 traffic connections close <ID>` CLI subcommands.
+- WebUI Active Connections Panel: Dedicated tab in the Traffic dashboard with real-time connection counters, color-coded protocol badges, live transfer metrics, and SweetAlert2 confirmation dialogs for safe termination.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` with complete connection inspector specifications, REST API routes, MCP tools, and CLI examples.
+
 ## [2.5.8] - 2026-10-24
 
 ### Added
