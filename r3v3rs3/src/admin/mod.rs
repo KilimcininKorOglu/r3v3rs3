@@ -631,7 +631,8 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
             "/grpc",
             OpenApiRouter::new()
                 .routes(routes!(grpc::reflect_standalone))
-                .routes(routes!(grpc::invoke_standalone)),
+                .routes(routes!(grpc::invoke_standalone))
+                .routes(routes!(grpc::health_standalone)),
         )
         .nest(
             "/system/anomalies",
@@ -671,6 +672,7 @@ fn proxy_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(proxies::dry_run))
         .routes(routes!(grpc::reflect_proxy))
         .routes(routes!(grpc::invoke_proxy))
+        .routes(routes!(grpc::health_proxy))
         .routes(routes!(proxies::get, proxies::put, proxies::delete))
         .routes(routes!(proxies::status))
         .routes(routes!(proxies::purge_cache, proxies::purge_cache_post))

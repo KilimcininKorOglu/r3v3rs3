@@ -99,6 +99,65 @@ pub struct GrpcInvokeResponse {
     pub raw_bytes_base64: Option<String>,
 }
 
+/// Serving status per the grpc.health.v1.Health protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum GrpcServingStatus {
+    Unknown = 0,
+    Serving = 1,
+    NotServing = 2,
+    ServiceUnknown = 3,
+}
+
+impl GrpcServingStatus {
+    pub fn from_u64(val: u64) -> Self {
+        match val {
+            1 => Self::Serving,
+            2 => Self::NotServing,
+            3 => Self::ServiceUnknown,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Serving => "SERVING",
+            Self::NotServing => "NOT_SERVING",
+            Self::ServiceUnknown => "SERVICE_UNKNOWN",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+
+    pub fn is_serving(&self) -> bool {
+        matches!(self, Self::Serving)
+    }
+}
+
+/// Request to check gRPC upstream health status (grpc.health.v1.Health/Check).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GrpcHealthCheckRequest {
+    /// Upstream target URL (e.g. `http://127.0.0.1:50051`).
+    /// If omitted on a proxy, the proxy's first upstream server is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_url: Option<String>,
+    /// Optional service name to check. Empty string checks overall server health.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+}
+
+/// Response of a gRPC health check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GrpcHealthCheckResponse {
+    pub healthy: bool,
+    pub status: GrpcServingStatus,
+    pub status_code: u32,
+    pub grpc_status: u32,
+    pub grpc_status_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grpc_message: Option<String>,
+    pub latency_ms: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +211,46 @@ mod tests {
 
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: GrpcInvokeResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp, parsed);
+    }
+
+    #[test]
+    fn test_grpc_serving_status() {
+        assert_eq!(GrpcServingStatus::from_u64(1), GrpcServingStatus::Serving);
+        assert_eq!(
+            GrpcServingStatus::from_u64(2),
+            GrpcServingStatus::NotServing
+        );
+        assert_eq!(
+            GrpcServingStatus::from_u64(3),
+            GrpcServingStatus::ServiceUnknown
+        );
+        assert_eq!(GrpcServingStatus::from_u64(0), GrpcServingStatus::Unknown);
+        assert_eq!(GrpcServingStatus::from_u64(99), GrpcServingStatus::Unknown);
+
+        assert!(GrpcServingStatus::Serving.is_serving());
+        assert!(!GrpcServingStatus::NotServing.is_serving());
+        assert!(!GrpcServingStatus::ServiceUnknown.is_serving());
+        assert!(!GrpcServingStatus::Unknown.is_serving());
+
+        assert_eq!(GrpcServingStatus::Serving.as_str(), "SERVING");
+        assert_eq!(GrpcServingStatus::NotServing.as_str(), "NOT_SERVING");
+    }
+
+    #[test]
+    fn test_grpc_health_check_response_serde() {
+        let resp = GrpcHealthCheckResponse {
+            healthy: true,
+            status: GrpcServingStatus::Serving,
+            status_code: 1,
+            grpc_status: 0,
+            grpc_status_name: "OK".to_string(),
+            grpc_message: None,
+            latency_ms: 5,
+        };
+
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: GrpcHealthCheckResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(resp, parsed);
     }
 }

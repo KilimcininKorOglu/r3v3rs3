@@ -197,6 +197,65 @@ impl ApiClient {
         print_json(&res)
     }
 
+    pub async fn check_proxy_grpc_health(
+        &self,
+        id: &str,
+        service: Option<&str>,
+        target_url: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut map = serde_json::Map::new();
+        if let Some(t) = target_url {
+            map.insert(
+                "target_url".to_string(),
+                serde_json::Value::String(t.to_string()),
+            );
+        }
+        if let Some(s) = service {
+            map.insert(
+                "service".to_string(),
+                serde_json::Value::String(s.to_string()),
+            );
+        }
+        let body = serde_json::Value::Object(map);
+        let res = self
+            .request(
+                Method::POST,
+                &format!("/api/proxies/{id}/grpc/health"),
+                Some(&body),
+            )
+            .await?;
+        let healthy = res
+            .get("healthy")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let status = res
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("UNKNOWN");
+        let status_code = res.get("status_code").and_then(|v| v.as_u64()).unwrap_or(0);
+        let grpc_status = res.get("grpc_status").and_then(|v| v.as_u64()).unwrap_or(0);
+        let grpc_name = res
+            .get("grpc_status_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("UNKNOWN");
+        let latency_ms = res.get("latency_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        let status_colored = if healthy {
+            format!("\x1b[32m{status}\x1b[0m")
+        } else {
+            format!("\x1b[31m{status}\x1b[0m")
+        };
+        println!("Proxy ID:       {id}");
+        println!("Healthy:        {}", if healthy { "yes" } else { "no" });
+        println!("Serving Status: {status_colored} (code {status_code})");
+        println!("gRPC Status:    {grpc_status} ({grpc_name})");
+        if let Some(msg) = res.get("grpc_message").and_then(|v| v.as_str()) {
+            println!("gRPC Message:   {msg}");
+        }
+        println!("Latency:        {latency_ms} ms");
+        Ok(())
+    }
+
     pub async fn delete_proxy(&self, id: &str) -> anyhow::Result<()> {
         self.request(Method::DELETE, &format!("/api/proxies/{id}"), None)
             .await?;

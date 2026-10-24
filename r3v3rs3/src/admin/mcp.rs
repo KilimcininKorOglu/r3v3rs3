@@ -368,6 +368,29 @@ pub struct AddCompressionDictionaryParams {
     pub raw_data: String,
 }
 
+fn resolve_mcp_grpc_target(params_target: Option<String>, proxy: &Proxy) -> Option<String> {
+    params_target.or_else(|| match &proxy.kind {
+        ProxyKind::Http(http) => http
+            .routes
+            .iter()
+            .flat_map(|r| &r.servers)
+            .map(|s| s.url.to_string())
+            .next(),
+        _ => None,
+    })
+}
+
+/// The arguments of `check_grpc_health`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CheckGrpcHealthParams {
+    /// The id of the proxy (optional if target_url is provided).
+    pub proxy_id: Option<String>,
+    /// Direct upstream target URL (e.g. `http://127.0.0.1:50051`, optional if proxy_id is provided).
+    pub target_url: Option<String>,
+    /// Optional gRPC service name to check. Empty string checks overall server health.
+    pub service: Option<String>,
+}
+
 /// The caller of the request, which the Bearer middleware inserted.
 fn caller_of(parts: &Parts) -> Result<Caller, ErrorData> {
     parts
@@ -1037,6 +1060,50 @@ impl McpServer {
             .await
             .map_err(tool_error)?;
         json_result(status)
+    }
+
+    /// Check upstream gRPC health using grpc.health.v1.Health/Check protocol.
+    #[tool(
+        description = "Check the health of a gRPC upstream server using the grpc.health.v1.Health/Check protocol. Specify a proxy_id or a direct target_url, and an optional gRPC service name."
+    )]
+    async fn check_grpc_health(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<CheckGrpcHealthParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let target = if let Some(ref proxy_id) = params.proxy_id {
+            let id: ShortId = parse_id(proxy_id)?;
+            let entry: ProxyEntry = *self
+                .state
+                .call(&caller, GetProxy { id })
+                .await
+                .map_err(tool_error)?;
+            resolve_mcp_grpc_target(params.target_url, &entry.proxy)
+        } else {
+            params.target_url
+        };
+
+        let target_url = target.ok_or_else(|| {
+            ErrorData::invalid_params(
+                "either proxy_id with configured upstream servers or target_url is required",
+                None,
+            )
+        })?;
+
+        let service = params.service.unwrap_or_default();
+        let is_plaintext = !target_url.starts_with("https://");
+        let client = crate::grpc::health::build_grpc_health_client(
+            is_plaintext,
+            std::time::Duration::from_secs(5),
+        )
+        .map_err(|err| ErrorData::internal_error(err, None))?;
+
+        let res = crate::grpc::health::check_grpc_health(&client, &target_url, &service)
+            .await
+            .map_err(|err| ErrorData::internal_error(err, None))?;
+
+        json_result(res)
     }
 
     /// A new proxy from the JSON form of the admin API.

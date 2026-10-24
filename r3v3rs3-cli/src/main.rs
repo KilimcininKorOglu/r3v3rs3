@@ -133,6 +133,16 @@ pub enum ProxyCommand {
         #[arg(short, long)]
         path: Option<String>,
     },
+    /// Checks gRPC upstream health status using grpc.health.v1.Health/Check protocol.
+    GrpcHealth {
+        id: String,
+        /// Optional service name to check. Empty string checks overall server health.
+        #[arg(short, long)]
+        service: Option<String>,
+        /// Optional direct target URL override.
+        #[arg(short, long)]
+        target_url: Option<String>,
+    },
     /// Manages pre-shared compression dictionaries (RFC 9651 / RFC 9652) of an HTTP proxy.
     #[command(subcommand)]
     Dictionary(ProxyDictionaryCommand),
@@ -742,27 +752,40 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
         ProxyCommand::Status { id } => api.proxy_status(&id).await,
         ProxyCommand::Delete { id } => api.delete_proxy(&id).await,
         ProxyCommand::PurgeCache { id, path } => api.purge_cache(&id, path.as_deref()).await,
-        ProxyCommand::Dictionary(dict_cmd) => match dict_cmd {
-            ProxyDictionaryCommand::List { proxy_id } => {
-                api.list_proxy_dictionaries(&proxy_id).await
-            }
-            ProxyDictionaryCommand::Get { proxy_id, dict_id } => {
-                api.get_proxy_dictionary(&proxy_id, &dict_id).await
-            }
-            ProxyDictionaryCommand::Add {
-                proxy_id,
-                name,
-                match_pattern,
-                path,
-                data,
-            } => {
-                api.add_proxy_dictionary(&proxy_id, &name, &match_pattern, &path, &data)
-                    .await
-            }
-            ProxyDictionaryCommand::Delete { proxy_id, dict_id } => {
-                api.delete_proxy_dictionary(&proxy_id, &dict_id).await
-            }
-        },
+        ProxyCommand::GrpcHealth {
+            id,
+            service,
+            target_url,
+        } => {
+            api.check_proxy_grpc_health(&id, service.as_deref(), target_url.as_deref())
+                .await
+        }
+        ProxyCommand::Dictionary(dict_cmd) => run_proxy_dictionary(api, dict_cmd).await,
+    }
+}
+
+async fn run_proxy_dictionary(
+    api: &api_client::ApiClient,
+    dict_cmd: ProxyDictionaryCommand,
+) -> anyhow::Result<()> {
+    match dict_cmd {
+        ProxyDictionaryCommand::List { proxy_id } => api.list_proxy_dictionaries(&proxy_id).await,
+        ProxyDictionaryCommand::Get { proxy_id, dict_id } => {
+            api.get_proxy_dictionary(&proxy_id, &dict_id).await
+        }
+        ProxyDictionaryCommand::Add {
+            proxy_id,
+            name,
+            match_pattern,
+            path,
+            data,
+        } => {
+            api.add_proxy_dictionary(&proxy_id, &name, &match_pattern, &path, &data)
+                .await
+        }
+        ProxyDictionaryCommand::Delete { proxy_id, dict_id } => {
+            api.delete_proxy_dictionary(&proxy_id, &dict_id).await
+        }
     }
 }
 

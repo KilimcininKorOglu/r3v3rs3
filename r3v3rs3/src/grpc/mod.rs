@@ -1,5 +1,6 @@
 //! gRPC Server Reflection and interactive call tester engine.
 
+pub mod health;
 pub mod invoke;
 pub mod proto;
 pub mod reflection;

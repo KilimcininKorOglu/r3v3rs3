@@ -231,6 +231,8 @@ pub(super) struct UpstreamForm {
     interval: String,
     timeout: String,
     path: String,
+    is_grpc: bool,
+    grpc_service: String,
 }
 
 impl UpstreamForm {
@@ -242,6 +244,8 @@ impl UpstreamForm {
             interval: format_seconds(health_check.interval),
             timeout: format_seconds(health_check.timeout),
             path: health_check.path.clone(),
+            is_grpc: health_check.grpc_service.is_some(),
+            grpc_service: health_check.grpc_service.clone().unwrap_or_default(),
         }
     }
 
@@ -262,6 +266,11 @@ impl UpstreamForm {
         let fail_timeout = seconds(&self.fail_timeout, "proxy_form.fail_timeout_name", 1);
         let interval = seconds(&self.interval, "proxy_form.check_interval_name", 0);
         let timeout = seconds(&self.timeout, "proxy_form.check_timeout_name", 1);
+        let grpc_service = if self.is_grpc {
+            Some(self.grpc_service.trim().to_string())
+        } else {
+            None
+        };
         let health_check = HealthCheck {
             max_fails: or_error(
                 parse_count(locale, &self.max_fails, "proxy_form.max_fails"),
@@ -271,7 +280,12 @@ impl UpstreamForm {
             fail_timeout,
             interval,
             timeout,
-            path: self.path.trim().to_string(),
+            path: if self.is_grpc {
+                String::new()
+            } else {
+                self.path.trim().to_string()
+            },
+            grpc_service,
         };
         if let Err(err) = health_check.validate(http) {
             errors
@@ -1099,6 +1113,50 @@ pub(super) fn list_buttons<T: Clone + 'static>(
     }
 }
 
+fn health_check_target_input(locale: Locale, form: &UseStateHandle<UpstreamForm>) -> Html {
+    html! {
+        <>
+            <div class="mt-4">
+                <label class={LABEL_CLASS}>{locale.t("proxy_form.health_check_protocol")}</label>
+                <div class="flex items-center space-x-6 mt-1 mb-2">
+                    <label class="inline-flex items-center text-sm font-medium text-neutral-300 cursor-pointer">
+                        <input
+                            type="radio"
+                            name="health_check_proto"
+                            checked={!form.is_grpc}
+                            onchange={state_input(form, |_| (), |form, _| form.is_grpc = false)}
+                            class="text-blue-500 focus:ring-blue-400 mr-2"
+                        />
+                        {locale.t("proxy_form.protocol_http")}
+                    </label>
+                    <label class="inline-flex items-center text-sm font-medium text-neutral-300 cursor-pointer">
+                        <input
+                            type="radio"
+                            name="health_check_proto"
+                            checked={form.is_grpc}
+                            onchange={state_input(form, |_| (), |form, _| form.is_grpc = true)}
+                            class="text-blue-500 focus:ring-blue-400 mr-2"
+                        />
+                        {locale.t("proxy_form.protocol_grpc")}
+                    </label>
+                </div>
+            </div>
+            if !form.is_grpc {
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("proxy_form.health_check_path")}</label>
+                    <input type="text" autocapitalize="off" placeholder="/health" value={form.path.clone()} onchange={state_input(form, text, |form, value| form.path = value)} class={INPUT_CLASS} />
+                </div>
+            } else {
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("proxy_form.health_check_grpc_service")}</label>
+                    <input type="text" autocapitalize="off" placeholder="helloworld.Greeter" value={form.grpc_service.clone()} onchange={state_input(form, text, |form, value| form.grpc_service = value)} class={INPUT_CLASS} />
+                    <p class={HINT_CLASS}>{locale.t("proxy_form.health_check_grpc_service_hint")}</p>
+                </div>
+            }
+        </>
+    }
+}
+
 /// The load balancing policy select element and the health check inputs of a proxy. `with_path`
 /// shows the health check path input of an HTTP proxy.
 pub(super) fn upstream_form_view(
@@ -1133,8 +1191,7 @@ pub(super) fn upstream_form_view(
                 <div>{ seconds_input(locale.t("proxy_form.check_timeout"), &form.timeout, 1, state_input(form, text, |form, value| form.timeout = value)) }</div>
             </div>
             if with_path {
-                <label class={LABEL_CLASS}>{locale.t("proxy_form.health_check_path")}</label>
-                <input type="text" autocapitalize="off" placeholder="/health" value={form.path.clone()} onchange={state_input(form, text, |form, value| form.path = value)} class={INPUT_CLASS} />
+                { health_check_target_input(locale, form) }
             }
             { error_view(errors.get(UPSTREAM_KEY)) }
             <p class={HINT_CLASS}>{locale.t(if with_path { "proxy_form.active_check_http_hint" } else { "proxy_form.active_check_hint" })}</p>
@@ -3613,12 +3670,29 @@ mod tests {
             interval: Duration::from_secs(15),
             timeout: Duration::from_secs(2),
             path: "/health".into(),
+            grpc_service: None,
         };
         let form = UpstreamForm::new(LoadBalancing::First, &health_check);
         let mut errors = HashMap::new();
         assert_eq!(
             form.parse(Locale::En, true, &mut errors),
             (LoadBalancing::First, health_check)
+        );
+        assert!(errors.is_empty());
+
+        let grpc_health_check = HealthCheck {
+            max_fails: 3,
+            fail_timeout: Duration::from_secs(10),
+            interval: Duration::from_secs(15),
+            timeout: Duration::from_secs(2),
+            path: String::new(),
+            grpc_service: Some("helloworld.Greeter".into()),
+        };
+        let form_grpc = UpstreamForm::new(LoadBalancing::First, &grpc_health_check);
+        let mut errors = HashMap::new();
+        assert_eq!(
+            form_grpc.parse(Locale::En, true, &mut errors),
+            (LoadBalancing::First, grpc_health_check)
         );
         assert!(errors.is_empty());
 

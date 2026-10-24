@@ -503,9 +503,15 @@ The passive health check counts the consecutive failures of each server. A failu
 
 The active health check runs when `health_check.interval` is above `0s` (default `0s`, disabled). Every interval, r3v3rs3 checks each server:
 
+- An HTTP proxy with `health_check.grpc_service` probes upstream servers using the standard gRPC Health Checking Protocol (`grpc.health.v1.Health/Check`) over HTTP/2 (`h2c` prior knowledge or TLS ALPN `h2`). Leave `grpc_service = ""` to verify overall server health, or specify a service name (e.g. `grpc_service = "helloworld.Greeter"`). Only `SERVING` status passes the check; `NOT_SERVING`, `UNKNOWN`, `SERVICE_UNKNOWN`, or any non-zero gRPC error code marks the server unhealthy.
 - An HTTP proxy with `health_check.path` sends `GET` to the path from the root of each server. A 2xx or 3xx status passes the check. The path must start with `/`, and only an HTTP proxy uses it.
-- An HTTP proxy without a path and a TCP proxy open a TCP connection to each server.
+- An HTTP proxy without a path or `grpc_service`, and a TCP proxy, open a TCP connection to each server.
 - A UDP proxy resolves the host name of each server.
+
+You can also run ad-hoc gRPC health checks directly:
+- **CLI**: `r3 proxy grpc-health <PROXY_ID> [--service <SERVICE>]`
+- **MCP Tool**: `check_grpc_health` (parameters: `proxy_id` or `target_url`, `service`)
+- **REST API**: `POST /api/proxies/{id}/grpc/health` or `POST /api/grpc/health`
 
 `health_check.timeout` (default `5s`) limits each check. A server that fails the check is unhealthy until a check passes, also when `max_fails = 0`. A successful request does not end this state.
 

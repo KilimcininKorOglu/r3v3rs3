@@ -116,6 +116,7 @@ fn app_health_check(spec: &AppSpec, host_count: usize) -> HealthCheck {
             interval: Duration::from_secs(10),
             timeout: Duration::from_secs(5),
             path: path.clone(),
+            grpc_service: None,
         }
     } else if host_count > 1 {
         HealthCheck {
@@ -124,6 +125,7 @@ fn app_health_check(spec: &AppSpec, host_count: usize) -> HealthCheck {
             interval: Duration::from_secs(10),
             timeout: Duration::from_secs(5),
             path: String::new(),
+            grpc_service: None,
         }
     } else {
         HealthCheck::default()

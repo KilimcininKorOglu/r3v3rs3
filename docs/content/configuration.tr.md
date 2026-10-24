@@ -503,9 +503,15 @@ Pasif sağlık kontrolü her sunucunun art arda aldığı hataları sayar. Hata,
 
 Aktif sağlık kontrolü, `health_check.interval` değeri `0s`'den büyükse çalışır (varsayılan `0s`, kapalı). r3v3rs3 her aralıkta her sunucuyu kontrol eder:
 
+- `health_check.grpc_service` tanımlanan HTTP proxy, standart gRPC Health Checking Protocol (`grpc.health.v1.Health/Check`) üzerinden HTTP/2 ile (`h2c` prior knowledge veya TLS ALPN `h2`) upstream sunucuları yoklar. `grpc_service = ""` değeri genel sunucu sağlığını sorgular; spesifik bir servis adı da verilebilir (örn. `grpc_service = "helloworld.Greeter"`). Yalnızca `SERVING` durum kodu kontrolü geçer; `NOT_SERVING`, `UNKNOWN`, `SERVICE_UNKNOWN` veya sıfırdan farklı gRPC hata kodları sunucuyu sağlıksız olarak işaretler.
 - `health_check.path` verilen HTTP proxy, her sunucunun kök adresinden bu yola `GET` gönderir. 2xx veya 3xx durum kodu kontrolü geçer. Yol `/` ile başlamalıdır ve yolu yalnız HTTP proxy kullanır.
-- Yolu olmayan HTTP proxy ve TCP proxy her sunucuya TCP bağlantısı açar.
+- Yolu veya `grpc_service` ayarı olmayan HTTP proxy ve TCP proxy her sunucuya TCP bağlantısı açar.
 - UDP proxy her sunucunun host adını çözümler.
+
+Anlık gRPC sağlık kontrolü komutları:
+- **CLI**: `r3 proxy grpc-health <PROXY_ID> [--service <SERVICE>]`
+- **MCP Aracı**: `check_grpc_health` (parametreler: `proxy_id` veya `target_url`, `service`)
+- **REST API**: `POST /api/proxies/{id}/grpc/health` veya `POST /api/grpc/health`
 
 `health_check.timeout` (varsayılan `5s`) her kontrolü sınırlar. Kontrolü geçemeyen sunucu, bir kontrol başarılı olana kadar sağlıksız kalır. Bu kural `max_fails = 0` olduğunda da geçerlidir. Başarılı bir istek bu durumu bitirmez.
 

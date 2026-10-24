@@ -216,6 +216,13 @@ pub struct HealthCheck {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     #[schema(example = "/health")]
     pub path: String,
+
+    /// Optional gRPC service name for the grpc.health.v1.Health/Check protocol.
+    /// When set (`Some(...)`), the active check uses gRPC Health Checking Protocol instead of HTTP GET.
+    /// An empty string checks overall server health.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "helloworld.Greeter")]
+    pub grpc_service: Option<String>,
 }
 
 impl Default for HealthCheck {
@@ -226,6 +233,7 @@ impl Default for HealthCheck {
             interval: Duration::ZERO,
             timeout: DEFAULT_HEALTH_CHECK_TIMEOUT,
             path: String::new(),
+            grpc_service: None,
         }
     }
 }
@@ -240,11 +248,19 @@ impl HealthCheck {
     }
 
     /// Rejects a zero fail timeout or check timeout, and a path that does not start with `/`.
-    /// Only an HTTP proxy can have a path.
+    /// Only an HTTP proxy can have a path or a gRPC health check service.
     pub fn validate(&self, http: bool) -> Result<(), Error> {
         validate_timeout(self.fail_timeout)?;
         validate_timeout(self.timeout)?;
-        if self.path.is_empty() || (http && self.path.starts_with('/')) {
+        if self.grpc_service.is_some() && !http {
+            return Err(Error::InvalidHealthCheckPath {
+                path: "gRPC health check is only supported for HTTP proxies".to_string(),
+            });
+        }
+        if self.grpc_service.is_some()
+            || self.path.is_empty()
+            || (http && self.path.starts_with('/'))
+        {
             return Ok(());
         }
         Err(Error::InvalidHealthCheckPath {

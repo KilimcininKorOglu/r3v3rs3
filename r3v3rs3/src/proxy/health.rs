@@ -356,6 +356,13 @@ pub enum Probe {
         uris: Vec<Option<Uri>>,
         pool: Arc<ConnectionPool>,
     },
+    /// Sends unary `grpc.health.v1.Health/Check` RPC over HTTP/2.
+    Grpc {
+        targets: Vec<Option<String>>,
+        service: String,
+        h2c_client: reqwest::Client,
+        tls_client: reqwest::Client,
+    },
 }
 
 impl Probe {
@@ -396,7 +403,39 @@ impl Probe {
                 let uri = target(uris, index)?;
                 probe_http(pool, uri).await
             }
+            Self::Grpc {
+                targets,
+                service,
+                h2c_client,
+                tls_client,
+            } => {
+                let target_url = target(targets, index)?;
+                probe_grpc(target_url, service, h2c_client, tls_client).await
+            }
         }
+    }
+}
+
+async fn probe_grpc(
+    target_url: &str,
+    service: &str,
+    h2c_client: &reqwest::Client,
+    tls_client: &reqwest::Client,
+) -> Result<(), String> {
+    let client = if target_url.starts_with("https://") {
+        tls_client
+    } else {
+        h2c_client
+    };
+    let res = crate::grpc::health::check_grpc_health(client, target_url, service).await?;
+    if res.healthy {
+        Ok(())
+    } else {
+        Err(format!(
+            "gRPC health check status {} ({})",
+            res.status.as_str(),
+            res.grpc_status_name
+        ))
     }
 }
 

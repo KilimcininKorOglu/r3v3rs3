@@ -238,7 +238,7 @@ impl ProxyUpstream {
                 weight: server.weight,
             })
             .collect();
-        let probe = http_probe(servers, &self.health_check.path, &pool);
+        let probe = http_probe(servers, &self.health_check, &pool);
         let mirror = route
             .mirror
             .as_ref()
@@ -280,9 +280,26 @@ impl ProxyUpstream {
 }
 
 /// The active health check of the servers of a route: `GET` to the path from the root of each
-/// server, or a TCP connection when the path is empty.
-fn http_probe(servers: &[Server], path: &str, pool: &Arc<ConnectionPool>) -> Probe {
-    if path.is_empty() {
+/// server, gRPC unary `Check` when `grpc_service` is set, or a TCP connection when the path is empty.
+fn http_probe(servers: &[Server], health_check: &HealthCheck, pool: &Arc<ConnectionPool>) -> Probe {
+    if let Some(service) = &health_check.grpc_service {
+        let targets = servers
+            .iter()
+            .map(|server| Some(server.url.to_string()))
+            .collect();
+        let timeout = health_check.timeout;
+        let h2c_client = crate::grpc::health::build_grpc_health_client(true, timeout)
+            .unwrap_or_else(|_| reqwest::Client::new());
+        let tls_client = crate::grpc::health::build_grpc_health_client(false, timeout)
+            .unwrap_or_else(|_| reqwest::Client::new());
+        return Probe::Grpc {
+            targets,
+            service: service.clone(),
+            h2c_client,
+            tls_client,
+        };
+    }
+    if health_check.path.is_empty() {
         return Probe::Connect(
             servers
                 .iter()
@@ -293,7 +310,7 @@ fn http_probe(servers: &[Server], path: &str, pool: &Arc<ConnectionPool>) -> Pro
     let uris = servers
         .iter()
         .map(|server| {
-            let url = server.url.0.join(path).ok()?;
+            let url = server.url.0.join(&health_check.path).ok()?;
             Uri::from_str(url.as_str()).ok()
         })
         .collect();
