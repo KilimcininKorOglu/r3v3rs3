@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.7] - 2026-10-24
+
+### Added
+- Upstream gRPC Health Checking Protocol (grpc.health.v1.Health): Native support for probing upstream gRPC servers using standard unary `grpc.health.v1.Health/Check` RPCs over HTTP/2 (`h2c` prior knowledge and TLS ALPN `h2`).
+- Service-Level Health Filtering: Configurable `grpc_service` in `HealthCheck` allowing either overall server health checks (empty service string) or granular per-service health monitoring (e.g. `helloworld.Greeter`).
+- Dynamic Upstream Failover: Automatic pool draining and routing exclusion for upstream servers returning `NOT_SERVING`, `UNKNOWN`, `SERVICE_UNKNOWN`, or non-zero gRPC error codes, seamlessly restoring servers upon `SERVING` status.
+- REST API Endpoints: Added `POST /api/proxies/{id}/grpc/health` (proxy-level upstream check) and `POST /api/grpc/health` (standalone endpoint check).
+- 100% MCP & CLI Parity: Added `check_grpc_health` MCP tool and `r3 proxy grpc-health <PROXY_ID> [--service <SERVICE>]` CLI command with colored serving status output and latency diagnostics.
+- WebUI Upstream Health Check Selector: Proxy configuration form upgraded with protocol selection (HTTP GET vs gRPC Health) and optional gRPC service name input.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` with complete gRPC Health Checking specifications, configuration examples, and CLI/MCP administration commands.
+
 ## [2.5.6] - 2026-10-24
 
 ### Added
