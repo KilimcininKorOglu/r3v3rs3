@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.6] - 2026-10-24
+
+### Added
+- ACME DNS-01 CNAME Delegation & Alias Mode (RFC 8555): Support for automated wildcard and single-domain certificate issuance without requiring clients or third-party domains to share their DNS provider API credentials.
+- Configurable DNS Alias Target: Proxy and ACME-level `dns_alias` target configuration with dynamic pattern substitution (`{domain}` template, FQDN targets, or root alias domain).
+- Automated TXT Placement & Verification: DNS-01 challenge engine publishes validation TXT records under the delegated alias domain using r3v3rs3's configured DNS provider while verifying public CNAME propagation.
+- REST API Endpoint: Added `GET /api/acme/{id}/cname_instructions` returning source FQDN, target alias FQDN, and live public DNS CNAME resolution and verification status.
+- 100% MCP & CLI Parity: Added `get_acme_cname_instructions` MCP tool and `r3 acme cname-instructions <ID>` CLI command for autonomous inspection and administration.
+- WebUI CNAME Delegation Panel: Interactive CNAME record preview in the ACME creation form and dedicated "CNAME Instructions" dialog in the certificates list view.
+- Dual-Language Documentation: Comprehensive English and Turkish documentation in `configuration.md` and `configuration.tr.md` explaining RFC 8555 DNS alias mode, customer DNS setup, and operational CLI/MCP commands.
+
 ## [2.5.5] - 2026-10-24
 
 ### Added
