@@ -31,6 +31,8 @@ pub struct FakeState {
     pub missing_image: Option<String>,
     /// A started container exits at once with code 1.
     pub crash: bool,
+    /// When true, hook containers fail or exit with code 1.
+    pub hook_fail: bool,
     /// The port of 127.0.0.1 that a started container publishes.
     pub host_port: u16,
     /// Every build fails with this error.
@@ -411,11 +413,17 @@ impl ContainerRuntime for FakeRuntime {
     async fn start_container(&self, name: &ContainerName) -> anyhow::Result<()> {
         let mut state = self.check()?;
         let crash = state.crash;
+        let hook_fail = state.hook_fail;
         let Some(info) = state.containers.get_mut(name.as_str()) else {
             bail!("no container is named {name}");
         };
-        info.running = !crash;
-        info.exit_code = i64::from(crash);
+        if name.as_str().contains("-hook-") {
+            info.running = false;
+            info.exit_code = if hook_fail { 1 } else { 0 };
+        } else {
+            info.running = !crash;
+            info.exit_code = i64::from(crash);
+        }
         Ok(())
     }
 
@@ -479,5 +487,21 @@ impl ContainerRuntime for FakeRuntime {
     async fn logs(&self, name: &ContainerName, _: u32) -> anyhow::Result<String> {
         let _state = self.check()?;
         Ok(format!("the log of {name}\n"))
+    }
+
+    async fn exec_capture(
+        &self,
+        name: &ContainerName,
+        _command: Vec<String>,
+        _env: Vec<String>,
+    ) -> anyhow::Result<Vec<u8>> {
+        let state = self.check()?;
+        if !state.containers.contains_key(name.as_str()) {
+            bail!("no container is named {name}");
+        }
+        if state.hook_fail {
+            bail!("post-deploy hook failed with non-zero exit code");
+        }
+        Ok(b"hook output".to_vec())
     }
 }

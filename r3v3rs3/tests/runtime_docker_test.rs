@@ -131,6 +131,7 @@ fn spec(names: &Names, image: ImageRef) -> anyhow::Result<ContainerSpec> {
         extra_hosts: Vec::new(),
         log_max_size: None,
         log_max_file: None,
+        command: None,
     })
 }
 
@@ -373,6 +374,7 @@ async fn an_exec_session_runs_a_command() -> anyhow::Result<()> {
         extra_hosts: Vec::new(),
         log_max_size: None,
         log_max_file: None,
+        command: None,
     };
     runtime.pull_image(&image).await?;
     runtime.create_container(&spec).await?;
@@ -414,6 +416,7 @@ async fn a_file_round_trips_through_the_archive() -> anyhow::Result<()> {
         extra_hosts: Vec::new(),
         log_max_size: None,
         log_max_file: None,
+        command: None,
     };
     runtime.pull_image(&image).await?;
     runtime.create_container(&spec).await?;

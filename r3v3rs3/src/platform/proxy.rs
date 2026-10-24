@@ -211,6 +211,7 @@ mod tests {
             grpc_web: false,
             project_id: None,
             environment_id: None,
+            lifecycle_hooks: None,
         }
     }
 

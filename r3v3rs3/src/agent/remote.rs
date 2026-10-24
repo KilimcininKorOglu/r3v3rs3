@@ -158,7 +158,7 @@ impl ContainerRuntime for RemoteRuntime {
     }
 
     async fn create_container(&self, spec: &ContainerSpec) -> anyhow::Result<String> {
-        let spec = spec.clone();
+        let spec = Box::new(spec.clone());
         self.call_id(AgentRequest::CreateContainer { spec }, None)
             .await
     }
@@ -273,6 +273,7 @@ mod tests {
             extra_hosts: Vec::new(),
             log_max_size: None,
             log_max_file: None,
+            command: None,
         }
     }
 

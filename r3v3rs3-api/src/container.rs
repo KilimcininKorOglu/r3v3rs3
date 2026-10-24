@@ -374,6 +374,9 @@ pub struct ContainerSpec {
     /// Docker log-opt max-file (default: "3").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_max_file: Option<String>,
+    /// Optional command overrides (e.g. for lifecycle hooks).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
 }
 
 impl ContainerSpec {
@@ -637,6 +640,7 @@ mod tests {
             extra_hosts: Vec::new(),
             log_max_size: None,
             log_max_file: None,
+            command: None,
         };
         assert!(spec.validate().is_ok());
         spec.env[0].value = "a\0b".into();

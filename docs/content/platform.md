@@ -572,6 +572,29 @@ To prevent containers from silently crashing due to Out Of Memory (OOM) kills or
   r3 app diagnostics <APP_ID>
   ```
 
+### Deployment Lifecycle Hooks & Migration Runner
+
+r3v3rs3 supports automated lifecycle hooks to execute database migrations, schema verifications, or cache warming routines during deployment transitions:
+
+- **Pre-Deploy Hook** (`lifecycle_hooks.pre_deploy`): Runs inside an ephemeral container created from the newly pulled or built image before existing containers are stopped or traffic is rerouted.
+  - Receives the same environment variables, database connections (`uses_database`), networks, and volume mounts as the application container.
+  - If the hook command fails (non-zero exit code), the deployment immediately aborts, the error output is recorded in the deployment failure logs, and the existing running container continues serving traffic without interruption (zero-downtime rollback protection).
+  - Example commands: `php artisan migrate --force`, `npx prisma migrate deploy`, `alembic upgrade head`.
+- **Post-Deploy Hook** (`lifecycle_hooks.post_deploy`): Executes inside the running container after it passes its readiness and health checks and begins serving traffic.
+  - Ideal for clearing or warming application caches, generating search indexes, or pinging external observability endpoints.
+  - Example commands: `curl -s http://localhost/warmup`, `php artisan config:cache`.
+- **100% MCP & CLI Parity**: Lifecycle hooks can be configured via WebUI ("Deployment Lifecycle Hooks" card in the app form), updated via `PUT /api/apps/{id}`, managed via MCP, or managed via the CLI:
+  ```bash
+  # View current lifecycle hooks
+  r3 app hooks <APP_ID>
+
+  # Configure pre-deploy migration and post-deploy warmup
+  r3 app hooks <APP_ID> --pre-deploy "npx prisma migrate deploy" --post-deploy "curl -s http://localhost/warmup"
+
+  # Clear lifecycle hooks
+  r3 app hooks <APP_ID> --clear
+  ```
+
 ## Outbound Webhooks & Event Notifications
 
 The platform includes a centralized outbound webhook hub to stream real-time events to external monitoring, notification, and automation services (such as Slack, Discord, PagerDuty, n8n, Datadog, or custom web services). Unlike the single notification webhook in Settings, the outbound webhook manager supports multiple endpoints, granular event subscriptions, custom HTTP headers, sealed signing secrets, and instant test delivery.

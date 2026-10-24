@@ -126,6 +126,8 @@ pub struct AppForm {
     pub grpc_web: bool,
     pub project_id: Option<String>,
     pub environment_id: Option<String>,
+    pub pre_deploy: String,
+    pub post_deploy: String,
 }
 
 impl Default for AppForm {
@@ -188,6 +190,8 @@ impl Default for AppForm {
             grpc_web: false,
             project_id: None,
             environment_id: None,
+            pre_deploy: String::new(),
+            post_deploy: String::new(),
         }
     }
 }
@@ -349,6 +353,16 @@ impl AppForm {
             grpc_web: spec.grpc_web,
             project_id: spec.project_id.map(|id| id.to_string()),
             environment_id: spec.environment_id.map(|id| id.to_string()),
+            pre_deploy: spec
+                .lifecycle_hooks
+                .as_ref()
+                .and_then(|h| h.pre_deploy.clone())
+                .unwrap_or_default(),
+            post_deploy: spec
+                .lifecycle_hooks
+                .as_ref()
+                .and_then(|h| h.post_deploy.clone())
+                .unwrap_or_default(),
             ..Self::default()
         };
         form.with_source(&spec.source)
@@ -465,7 +479,21 @@ impl AppForm {
                 .environment_id
                 .as_deref()
                 .and_then(|id| id.parse().ok()),
+            lifecycle_hooks: self.parse_lifecycle_hooks(),
         })
+    }
+
+    fn parse_lifecycle_hooks(&self) -> Option<r3v3rs3_api::platform::DeploymentLifecycleHooks> {
+        let pre = non_empty(&self.pre_deploy).map(str::to_string);
+        let post = non_empty(&self.post_deploy).map(str::to_string);
+        if pre.is_some() || post.is_some() {
+            Some(r3v3rs3_api::platform::DeploymentLifecycleHooks {
+                pre_deploy: pre,
+                post_deploy: post,
+            })
+        } else {
+            None
+        }
     }
 
     fn parse_buildkit(&self) -> Option<BuildKitConfig> {
@@ -850,9 +878,23 @@ pub fn fields_view(
             }
             { git_config_view(locale, form) }
             { approval_view(locale, form) }
+            { lifecycle_hooks_view(locale, form) }
             { bot_blocker_view(locale, form) }
             { grpc_web_view(locale, form) }
         </>
+    }
+}
+
+fn lifecycle_hooks_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    html! {
+        <div class="mt-4 rounded border border-neutral-200 dark:border-neutral-700 p-4 space-y-3">
+            <h4 class="font-medium text-sm text-neutral-800 dark:text-neutral-200">
+                {locale.t("apps.lifecycle_hooks_title")}
+            </h4>
+            <p class={HINT_CLASS}>{locale.t("apps.lifecycle_hooks_hint")}</p>
+            { text_field(locale, form, "apps.pre_deploy_cmd", Some("apps.pre_deploy_hint"), |f| &mut f.pre_deploy) }
+            { text_field(locale, form, "apps.post_deploy_cmd", Some("apps.post_deploy_hint"), |f| &mut f.post_deploy) }
+        </div>
     }
 }
 

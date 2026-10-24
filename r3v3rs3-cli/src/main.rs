@@ -347,6 +347,19 @@ pub enum AppCommand {
     VacuumLogs { id: String },
     /// Shows live container resource throttling, CFS quota, and OOM diagnostic status.
     Diagnostics { id: String },
+    /// Shows or updates lifecycle hooks (pre-deploy, post-deploy) of an application.
+    Hooks {
+        id: String,
+        /// Command to execute before routing traffic (e.g. migrations).
+        #[arg(long)]
+        pre_deploy: Option<String>,
+        /// Command to execute after new version is healthy (e.g. cache warmup).
+        #[arg(long)]
+        post_deploy: Option<String>,
+        /// Clear all lifecycle hooks.
+        #[arg(long)]
+        clear: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -941,6 +954,12 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
         AppCommand::LogSize { id } => api.app_log_size(&id).await,
         AppCommand::VacuumLogs { id } => api.vacuum_app_logs(&id).await,
         AppCommand::Diagnostics { id } => api.app_diagnostics(&id).await,
+        AppCommand::Hooks {
+            id,
+            pre_deploy,
+            post_deploy,
+            clear,
+        } => api.app_hooks(&id, pre_deploy, post_deploy, clear).await,
     }
 }
 

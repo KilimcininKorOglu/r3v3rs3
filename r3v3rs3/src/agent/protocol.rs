@@ -85,7 +85,7 @@ pub enum AgentRequest {
         network: NetworkName,
     },
     CreateContainer {
-        spec: ContainerSpec,
+        spec: Box<ContainerSpec>,
     },
     StartContainer {
         name: ContainerName,

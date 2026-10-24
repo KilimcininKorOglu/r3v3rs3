@@ -1094,6 +1094,25 @@ pub struct AppSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub environment_id: Option<ShortId>,
+
+    /// Optional deployment lifecycle hooks (pre-deploy migration, post-deploy cache warmup, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_hooks: Option<DeploymentLifecycleHooks>,
+}
+
+/// Commands executed before or after a deployment lifecycle stage.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DeploymentLifecycleHooks {
+    /// Command executed in an ephemeral container using the new image before routing traffic.
+    /// If non-zero, deployment fails and previous container remains active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "php artisan migrate --force")]
+    pub pre_deploy: Option<String>,
+
+    /// Command executed inside the new running container after health check succeeds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "curl -s http://localhost/warmup")]
+    pub post_deploy: Option<String>,
 }
 
 /// Configuration for BuildKit remote builders and cache mounts.

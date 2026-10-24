@@ -568,6 +568,7 @@ fn build_store_app_request(
         grpc_web: false,
         project_id: None,
         environment_id: None,
+        lifecycle_hooks: None,
     };
 
     Ok(r3v3rs3_api::platform::AppRequest { name, target, spec })

@@ -572,6 +572,29 @@ Konteynerlerin sessizce bellek yetersizliği (OOM Killer) nedeniyle çökmesini 
   r3 app diagnostics <APP_ID>
   ```
 
+### Dağıtım Yaşam Döngüsü Kancaları & Veritabanı Geçiş Koşucusu (Lifecycle Hooks & Migration Runner)
+
+r3v3rs3, dağıtım aşamalarında veritabanı geçişlerini (migration), şema doğrulamalarını veya önbellek ısıtma rutinlerini otomatik yürütmek için yaşam döngüsü kancalarını destekler:
+
+- **Dağıtım Öncesi Kancası (Pre-Deploy Hook)** (`lifecycle_hooks.pre_deploy`): Eski çalışan container'lar durdurulmadan ve trafik yönlendirilmeden önce, yeni çekilen veya derlenen imajdan oluşturulan geçici bir container içinde çalıştırılır.
+  - Uygulama container'ı ile aynı ortam değişkenlerini, veritabanı bağlantılarını (`uses_database`), ağları ve kalıcı birimleri (volumes) devralır.
+  - Kanca komutu başarısız olursa (sıfır dışı exit code), dağıtım derhal iptal edilir, hata çıktısı dağıtım günlüğüne kaydedilir ve mevcut çalışan sürüm kesintisiz hizmet vermeye devam eder (sıfır kesintili geri alma koruması).
+  - Örnek komutlar: `php artisan migrate --force`, `npx prisma migrate deploy`, `alembic upgrade head`.
+- **Dağıtım Sonrası Kancası (Post-Deploy Hook)** (`lifecycle_hooks.post_deploy`): Yeni servis sağlık kontrollerini geçip trafiğe açıldıktan sonra çalışan container içinde yürütülür.
+  - Önbellek temizleme/ısıtma, arama indeksi güncelleme veya harici bildirim gönderme senaryoları için idealdir.
+  - Örnek komutlar: `curl -s http://localhost/warmup`, `php artisan config:cache`.
+- **%100 MCP & CLI Paritesi**: Yaşam döngüsü kancaları WebUI üzerinden (uygulama formundaki "Dağıtım Yaşam Döngüsü Kancaları" kartı), `PUT /api/apps/{id}` uç noktasıyla, MCP araçlarıyla veya CLI üzerinden yönetilebilir:
+  ```bash
+  # Mevcut yaşam döngüsü kancalarını görüntüleme
+  r3 app hooks <APP_ID>
+
+  # Pre-deploy ve post-deploy kancalarını yapılandırma
+  r3 app hooks <APP_ID> --pre-deploy "npx prisma migrate deploy" --post-deploy "curl -s http://localhost/warmup"
+
+  # Yaşam döngüsü kancalarını temizleme
+  r3 app hooks <APP_ID> --clear
+  ```
+
 ## Giden Webhook'lar & Olay Bildirimleri
 
 Platform, sistemde meydana gelen olayları harici izleme, bildirim ve otomasyon servislerine (Slack, Discord, PagerDuty, n8n, Datadog veya özel web servisleri) gerçek zamanlı olarak iletmek için merkezi bir giden webhook motoru içerir. Ayarlar sayfasındaki tekli bildirim webhook'undan farklı olarak, giden webhook yöneticisi birden fazla uç noktayı, ayrıntılı olay aboneliklerini, özel HTTP başlıklarını, şifreli imzalama anahtarlarını ve anında test gönderimini destekler.

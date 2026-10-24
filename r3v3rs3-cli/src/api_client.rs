@@ -940,6 +940,60 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn app_hooks(
+        &self,
+        id: &str,
+        pre_deploy: Option<String>,
+        post_deploy: Option<String>,
+        clear: bool,
+    ) -> anyhow::Result<()> {
+        let mut app_val = self
+            .request(Method::GET, &format!("/api/apps/{id}"), None)
+            .await?;
+        if clear {
+            app_val["spec"]["lifecycle_hooks"] = serde_json::Value::Null;
+            self.request(
+                Method::PUT,
+                &format!("/api/apps/{id}"),
+                Some(&json!({
+                    "name": app_val["name"],
+                    "target": app_val["target"],
+                    "spec": app_val["spec"],
+                })),
+            )
+            .await?;
+            println!("app/{id} lifecycle hooks cleared");
+            return Ok(());
+        }
+        if pre_deploy.is_some() || post_deploy.is_some() {
+            let mut hooks = app_val["spec"]["lifecycle_hooks"]
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            if let Some(cmd) = pre_deploy {
+                hooks.insert("pre_deploy".to_string(), json!(cmd));
+            }
+            if let Some(cmd) = post_deploy {
+                hooks.insert("post_deploy".to_string(), json!(cmd));
+            }
+            app_val["spec"]["lifecycle_hooks"] = json!(hooks);
+            self.request(
+                Method::PUT,
+                &format!("/api/apps/{id}"),
+                Some(&json!({
+                    "name": app_val["name"],
+                    "target": app_val["target"],
+                    "spec": app_val["spec"],
+                })),
+            )
+            .await?;
+            println!("app/{id} lifecycle hooks updated");
+            return Ok(());
+        }
+        let hooks = &app_val["spec"]["lifecycle_hooks"];
+        print_json(hooks)
+    }
+
     // --- Backup operations ---
 
     pub async fn list_backups(&self, database_id: &str) -> anyhow::Result<()> {

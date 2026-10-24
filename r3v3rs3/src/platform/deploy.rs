@@ -15,6 +15,7 @@ use crate::runtime::ContainerRuntime;
 use anyhow::{Context as _, anyhow, bail};
 use r3v3rs3_api::container::{
     APP_LABEL, AppName, ContainerName, ContainerSpec, EnvVar, ImageInfo, ImageRef, NetworkName,
+    RestartPolicy,
 };
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git::GitRef;
@@ -28,7 +29,7 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// The label that names the deployment of a container.
 pub const DEPLOYMENT_LABEL: &str = "r3v3rs3.deployment";
@@ -430,6 +431,7 @@ impl Platform {
             Err(err) => Err(err),
         };
         let Err(err) = result else {
+            self.run_post_deploy_hook(job).await;
             info!(app = %job.app, deployment = %job.deployment, "deployment finished");
             self.notify_deployment(NotificationEvent::DeploymentRunning, job.notice(), None)
                 .await;
@@ -485,6 +487,7 @@ impl Platform {
     async fn start_container(&self, job: &Job) -> anyhow::Result<ContainerName> {
         let digest = self.prepare_image(job).await?;
         self.store.set_image_digest(job.deployment, &digest).await?;
+        self.run_pre_deploy_hook(job, &digest).await?;
         let name = proxy::container_name(job.app, job.deployment)?;
         let targets = job.spec.targets_or_default(job.app_target);
         let stopped = self.stop_old_on_targets(job, &targets).await;
@@ -722,6 +725,7 @@ impl Platform {
             extra_hosts,
             log_max_size: None,
             log_max_file: None,
+            command: None,
         })
     }
 
@@ -903,6 +907,98 @@ impl Platform {
             }
         }
         ports
+    }
+
+    async fn run_pre_deploy_hook(&self, job: &Job, digest: &str) -> anyhow::Result<()> {
+        let Some(hooks) = &job.spec.lifecycle_hooks else {
+            return Ok(());
+        };
+        let Some(cmd) = hooks.pre_deploy.as_deref().filter(|c| !c.trim().is_empty()) else {
+            return Ok(());
+        };
+        info!(app = %job.app, deployment = %job.deployment, command = %cmd, "running pre-deploy hook");
+        let backend = self.backend(job.app_target);
+        let runtime = &*backend.runtime;
+        let hook_name: ContainerName =
+            format!("r3v3rs3-hook-{}-{}", job.app, job.deployment).parse()?;
+        let app_label = app_label(job.app)?;
+        let network = app_network(job.app)?;
+        runtime.ensure_network(&network, &app_label).await?;
+        let mut spec = self
+            .build_container_spec(job, &hook_name, digest, runtime, &app_label, &network)
+            .await?;
+        spec.publish = None;
+        spec.host_port = None;
+        spec.restart = RestartPolicy::No;
+        spec.command = Some(vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            cmd.to_string(),
+        ]);
+        let _ = runtime.remove_container(&hook_name).await;
+        runtime.create_container(&spec).await?;
+        runtime.start_container(&hook_name).await?;
+        let result = Self::wait_hook_exit(runtime, &hook_name, self.timing.health_timeout).await;
+        let _ = runtime.remove_container(&hook_name).await;
+        result
+    }
+
+    async fn run_post_deploy_hook(&self, job: &Job) {
+        let Some(hooks) = &job.spec.lifecycle_hooks else {
+            return;
+        };
+        let Some(cmd) = hooks
+            .post_deploy
+            .as_deref()
+            .filter(|c| !c.trim().is_empty())
+        else {
+            return;
+        };
+        let Ok(name) = proxy::container_name(job.app, job.deployment) else {
+            return;
+        };
+        let runtime = &*self.backend(job.app_target).runtime;
+        let env = match self.effective_env(job).await {
+            Ok(vars) => vars
+                .iter()
+                .map(|v| format!("{}={}", v.key.as_str(), v.value))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        let command = vec!["/bin/sh".to_string(), "-c".to_string(), cmd.to_string()];
+        info!(app = %job.app, deployment = %job.deployment, command = %cmd, "running post-deploy hook");
+        if let Err(err) = runtime.exec_capture(&name, command, env).await {
+            warn!(app = %job.app, deployment = %job.deployment, "post-deploy hook failed: {err:#}");
+        }
+    }
+
+    async fn wait_hook_exit(
+        runtime: &dyn ContainerRuntime,
+        name: &ContainerName,
+        timeout: Duration,
+    ) -> anyhow::Result<()> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let info = runtime
+                .inspect_container(name)
+                .await?
+                .ok_or_else(|| anyhow!("the hook container {name} disappeared"))?;
+            if !info.running {
+                if info.exit_code != 0 {
+                    let log = log_tail(runtime, name).await;
+                    bail!("pre-deploy hook exited with code {}{log}", info.exit_code);
+                }
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                let log = log_tail(runtime, name).await;
+                bail!(
+                    "pre-deploy hook timed out after {} seconds{log}",
+                    timeout.as_secs()
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
     }
 
     /// Waits until the container passes its health check. A stopped container fails at once.
@@ -2411,5 +2507,53 @@ mod tests {
             .iter()
             .find(|v| v.key.as_str() == key)
             .map(|v| v.value.as_str())
+    }
+
+    #[tokio::test]
+    async fn pre_deploy_hook_success_runs_and_deploys() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let mut app = setup.app.clone();
+        app.spec.lifecycle_hooks = Some(r3v3rs3_api::platform::DeploymentLifecycleHooks {
+            pre_deploy: Some("echo migrate".into()),
+            post_deploy: Some("echo warmup".into()),
+        });
+        let req = AppRequest {
+            name: app.name,
+            target: app.target,
+            spec: app.spec,
+        };
+        setup.platform.update_app(setup.app.id, req, 200).await?;
+        let dep = deploy(&setup).await?;
+        assert_eq!(dep.status, DeploymentStatus::Running);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pre_deploy_hook_failure_aborts_deployment() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let first = deploy(&setup).await?;
+        assert_eq!(first.status, DeploymentStatus::Running);
+
+        setup.runtime.state().hook_fail = true;
+        let mut app = setup.app.clone();
+        app.spec.lifecycle_hooks = Some(r3v3rs3_api::platform::DeploymentLifecycleHooks {
+            pre_deploy: Some("fail migrate".into()),
+            post_deploy: None,
+        });
+        let req = AppRequest {
+            name: app.name,
+            target: app.target,
+            spec: app.spec,
+        };
+        setup.platform.update_app(setup.app.id, req, 300).await?;
+        let second = deploy(&setup).await?;
+        assert_eq!(second.status, DeploymentStatus::Failed);
+        assert!(
+            second
+                .message
+                .unwrap_or_default()
+                .contains("pre-deploy hook")
+        );
+        Ok(())
     }
 }

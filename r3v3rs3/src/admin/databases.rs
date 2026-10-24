@@ -353,6 +353,7 @@ fn replica_app_request(
             buildkit: None,
             project_id: request.project_id,
             environment_id: request.environment_id,
+            lifecycle_hooks: None,
         },
     })
 }
@@ -494,6 +495,7 @@ fn app_request(
             buildkit: None,
             project_id: request.project_id,
             environment_id: request.environment_id,
+            lifecycle_hooks: None,
         },
     })
 }

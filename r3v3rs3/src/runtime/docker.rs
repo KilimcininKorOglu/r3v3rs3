@@ -1294,6 +1294,9 @@ fn create_body(spec: &ContainerSpec) -> Value {
             .collect::<Vec<_>>();
         body["HostConfig"]["ExtraHosts"] = json!(hosts);
     }
+    if let Some(cmd) = &spec.command {
+        body["Cmd"] = json!(cmd);
+    }
     if let Some(port) = spec.publish {
         let key = format!("{port}/tcp");
         body["ExposedPorts"] = json!({ key.as_str(): {} });
@@ -1861,6 +1864,7 @@ mod tests {
             )],
             log_max_size: None,
             log_max_file: None,
+            command: None,
         };
         let expected = json!({
             "Image": "nginx@sha256:abc",

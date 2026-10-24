@@ -707,6 +707,7 @@ fn create_database_spec(
         buildkit: None,
         project_id: None,
         environment_id: None,
+        lifecycle_hooks: None,
     })
 }
 
