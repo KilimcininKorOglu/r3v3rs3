@@ -138,6 +138,19 @@ pub async fn verify_domain_cname(
     }
 }
 
+/// Verifies the CNAME delegation instructions for an ACME entry.
+pub async fn verify_acme_cname_instructions(
+    entry: &crate::certs::acme::AcmeEntry,
+) -> Vec<r3v3rs3_api::acme::AcmeCnameInstruction> {
+    let mut instructions = entry.acme.cname_instructions();
+    for item in &mut instructions {
+        let res = verify_domain_cname(&item.source_fqdn, Some(&item.target_fqdn), "").await;
+        item.cname_verified = res.is_valid;
+        item.message = res.message;
+    }
+    instructions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +207,29 @@ mod tests {
         let res = evaluate_cname("portal.client.com".into(), "app.example.com".into(), None);
         assert!(!res.is_valid);
         assert_eq!(res.resolved_cname, None);
+    }
+
+    #[tokio::test]
+    async fn test_acme_cname_instructions_generation() {
+        use r3v3rs3_api::acme::{Acme, AcmeConfig, DNS_01};
+        let acme = Acme {
+            config: AcmeConfig::default(),
+            identifiers: vec!["shop.client.com".parse().unwrap()],
+            challenge_type: DNS_01.to_string(),
+            dns_provider: None,
+            dns_credential: None,
+            dns_alias: Some("auth.r3v3rs3.com".to_string()),
+        };
+        let instructions = acme.cname_instructions();
+        assert_eq!(instructions.len(), 1);
+        assert_eq!(instructions[0].domain, "shop.client.com");
+        assert_eq!(
+            instructions[0].source_fqdn,
+            "_acme-challenge.shop.client.com"
+        );
+        assert_eq!(
+            instructions[0].target_fqdn,
+            "_acme-challenge.shop.client.com.auth.r3v3rs3.com"
+        );
     }
 }

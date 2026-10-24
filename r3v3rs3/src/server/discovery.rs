@@ -734,6 +734,7 @@ mod tests {
                 challenge_type: challenge_type.into(),
                 dns_provider: None,
                 dns_credential: None,
+                dns_alias: None,
             },
             account: Arc::new(account),
         }

@@ -275,6 +275,9 @@ pub enum Error {
     #[error("the {field} value of the dns provider is invalid")]
     AcmeDnsProviderInvalid { field: String },
 
+    #[error("the ACME DNS alias configuration is invalid: {reason}")]
+    AcmeDnsAliasInvalid { reason: String },
+
     #[error("unauthorized")]
     Unauthorized,
 

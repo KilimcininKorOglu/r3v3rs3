@@ -200,6 +200,8 @@ pub enum AcmeCommand {
     Delete { id: String },
     /// Triggers immediate renewal/issuance order for an ACME entry.
     Order { id: String },
+    /// Shows CNAME delegation instructions and public DNS verification status for an ACME order.
+    CnameInstructions { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -783,6 +785,7 @@ async fn run_acme(api: &api_client::ApiClient, cmd: AcmeCommand) -> anyhow::Resu
         AcmeCommand::Add { payload } => api.add_acme(&payload).await,
         AcmeCommand::Delete { id } => api.delete_acme(&id).await,
         AcmeCommand::Order { id } => api.order_acme(&id).await,
+        AcmeCommand::CnameInstructions { id } => api.get_acme_cname_instructions(&id).await,
     }
 }
 

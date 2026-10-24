@@ -33,6 +33,7 @@ fn request(
             challenge_type: challenge_type.to_string(),
             dns_provider,
             dns_credential: None,
+            dns_alias: None,
         },
     }
 }

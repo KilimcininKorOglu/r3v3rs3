@@ -1342,6 +1342,24 @@ Sistemin çözümleyicisi cache'teki eski yanıtları döndürebilir. Yayılma k
 
 r3v3rs3 bu API'lerin mock sunucularıyla ve [Pebble](https://github.com/letsencrypt/pebble) test sertifika otoritesiyle test edilir. Gerçek sağlayıcı hesaplarıyla test edilmez.
 
+### DNS-01 CNAME Yetkilendirmesi / Alias Modu (RFC 8555)
+
+Harici müşteriler veya üçüncü taraf alan adları için sertifika düzenlerken, müşterilerin ana DNS sağlayıcı API token'larını r3v3rs3'e teslim etmeleri genellikle mümkün veya güvenli değildir. RFC 8555 DNS alias modunda, harici alan adları ACME DNS-01 doğrulamalarını r3v3rs3 tarafından yönetilen bir DNS bölgesine tek seferlik statik bir CNAME kaydı ile devreder.
+
+#### Nasıl çalışır
+
+1. **`dns_alias` yapılandırması:** DNS-01 ile bir ACME siparişi oluştururken `dns_alias` alanını yetki verilen temel zone'a (örn. `auth.example.com`) veya açık şablona (örn. `_acme-challenge.{domain}.auth.example.com`) ayarlayın.
+2. **Müşteri CNAME Kurulumu:** Alan adı sahibi, challenge alt alan adını alias hedefine yönlendiren tek bir CNAME kaydı ekler:
+   - **Kaynak:** `_acme-challenge.client.com`
+   - **Tür:** `CNAME`
+   - **Hedef:** `_acme-challenge.client.com.auth.example.com`
+3. **Otomatik Oluşturma ve Yenileme:** Doğrulama sırasında r3v3rs3, kendi yapılandırılmış DNS sağlayıcısını (örn. Cloudflare veya Route 53) kullanarak TXT doğrulama kaydını `_acme-challenge.client.com.auth.example.com` üzerinde yayınlar. ACME doğrulama otoritesi `client.com` üzerindeki CNAME kaydını takip ederek `auth.example.com` altındaki TXT kaydını okur ve sertifikayı üretir.
+
+CNAME talimatlarını ve doğrulama durumunu CLI veya MCP üzerinden inceleyin:
+```bash
+r3 acme cname-instructions <ACME_ID>
+```
+
 ## DNS webhook
 
 Webhook sağlayıcısı TXT kayıtlarını bir DNS barındırma servisinin API'si yerine kendi servisinize gönderir. r3v3rs3 her challenge adı için webhook URL'ine bu JSON gövdesiyle bir `POST` isteği gönderir:
@@ -1577,7 +1595,7 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 | **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları, fail2ban kaba kuvvet IP engeli, tehdit otomatik karantina yönetimi ve otomatik GeoIP MMDB veritabanı yönetimi. |
 | **Portlar** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Dinleyici port yaşam döngüsü: dinleme adresleri, TLS sonlandırma ayarları, soket yeniden başlatma/yenileme ve sunucu ağ arayüzlerini listeleme. |
 | **Proxy'ler** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | HTTP, WebSocket, TCP, UDP, TLS ve HTTP/3 için ters proxy yapılandırması, upstream sağlık durumu ve yol bazlı önbellek temizleme (purge). |
-| **Sertifikalar ve ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `list_dns_credentials` | TLS sertifikası inceleme, alan adı kapsam kontrolü, otomatik ACME sertifika talepleri (HTTP-01, TLS-ALPN-01, DNS-01), anlık sertifika yenileme ve DNS sağlayıcı kimlik bilgileri yönetimi. |
+| **Sertifikalar ve ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials` | TLS sertifikası inceleme, alan adı kapsam kontrolü, otomatik ACME sertifika talepleri (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegasyonu, anlık sertifika yenileme ve DNS sağlayıcı kimlik bilgileri yönetimi. |
 | **Erişim Listeleri** | `list_access_lists`, `add_access_list`, `update_access_list`, `delete_access_list` | CIDR IP filtreleme, HTTP basic authentication ve özel bearer token'lar içeren erişim kontrol listeleri. |
 | **PaaS Uygulamaları** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update` | Otonom PaaS konteyner yaşam döngüsü: Docker image/git/compose uygulaması dağıtımı, konteyner log akışı, ortam değişkeni yönetimi, önceki dağıtıma geri alma (rollback) ve Docker registry güncelleme kontrolü. |
 | **App Store Kataloğu** | `get_store`, `refresh_store`, `install_store_app` | Küratörlü tek tıkla kurulum şablonlarının (veritabanları, paneller, CMS, analitik) katalogdan doğrudan tam yapılandırılmış ve yönlendirilmiş uygulamalar olarak otonom kurulumu. |

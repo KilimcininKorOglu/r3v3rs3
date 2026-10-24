@@ -1342,6 +1342,24 @@ A system resolver can return cached answers. If the propagation check fails ofte
 
 r3v3rs3 is tested against mock servers of these APIs and against the [Pebble](https://github.com/letsencrypt/pebble) test certificate authority. It is not tested against real provider accounts.
 
+### DNS-01 CNAME Delegation / Alias Mode (RFC 8555)
+
+When issuing certificates for external clients or third-party domains, clients often cannot or should not provide their primary DNS provider API tokens to r3v3rs3. Under RFC 8555 DNS alias mode, external domains delegate their ACME DNS-01 validation to a DNS zone managed by r3v3rs3 through a static one-time CNAME record.
+
+#### How it works
+
+1. **Configure `dns_alias`:** When creating an ACME order with DNS-01, set `dns_alias` to your delegation base zone (e.g. `auth.example.com`) or explicit template (e.g. `_acme-challenge.{domain}.auth.example.com`).
+2. **Client CNAME Setup:** The domain owner adds a single CNAME record pointing their challenge subdomain to the alias target:
+   - **Source:** `_acme-challenge.client.com`
+   - **Type:** `CNAME`
+   - **Target:** `_acme-challenge.client.com.auth.example.com`
+3. **Automated Issuance & Renewal:** During challenge execution, r3v3rs3 publishes the TXT validation record to `_acme-challenge.client.com.auth.example.com` using its own configured DNS provider (e.g. Cloudflare or Route 53). The ACME validation authority follows the CNAME from `client.com` to `auth.example.com` and issues the certificate.
+
+Inspect CNAME instructions and verification status via CLI or MCP:
+```bash
+r3 acme cname-instructions <ACME_ID>
+```
+
 ## DNS webhook
 
 The webhook provider sends the TXT records to a service of your own instead of the API of a DNS hosting service. For each challenge name, r3v3rs3 sends a `POST` request with this JSON body to the webhook URL:
@@ -1577,7 +1595,7 @@ The admin API exposes its complete tool suite over the Model Context Protocol at
 | **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, fail2ban brute-force bans, threat auto-quarantine, and automated GeoIP MMDB database management. |
 | **Ports** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Complete port listener lifecycle: bind addresses, TLS termination options, socket reset/reload, and host interface enumeration. |
 | **Proxies** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | Reverse proxy configuration for HTTP, WebSocket, TCP, UDP, TLS, and HTTP/3, upstream health status, and path-selective cache purging. |
-| **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `list_dns_credentials` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), instant certificate orders/renewals, and DNS credential management. |
+| **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegation, instant certificate orders/renewals, and DNS credential management. |
 | **Access Lists** | `list_access_lists`, `add_access_list`, `update_access_list`, `delete_access_list` | Access control lists with CIDR IP filtering, HTTP basic authentication, and custom bearer tokens. |
 | **PaaS Applications** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update` | Autonomous PaaS container lifecycle: image/git/compose app deployment, container log streaming, environment variable injection, deployment rollbacks, and Docker registry update detection. |
 | **App Store Catalog** | `get_store`, `refresh_store`, `install_store_app` | Instant deployment of curated one-click templates (databases, dashboards, CMS, wikis, analytics) directly from the store into fully configured and routed applications. |

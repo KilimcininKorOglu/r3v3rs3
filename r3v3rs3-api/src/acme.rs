@@ -25,6 +25,10 @@ pub struct Acme {
     /// provider exclude each other.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns_credential: Option<ShortId>,
+    /// Optional CNAME alias target for DNS-01 challenge delegation (RFC 8555 DNS alias mode).
+    /// If provided, TXT records are created on this alias FQDN or template instead of the identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns_alias: Option<String>,
 }
 
 impl Acme {
@@ -41,6 +45,20 @@ impl Acme {
             _ => {
                 return Err(Error::AcmeUnsupportedChallenge {
                     challenge: self.challenge_type.clone(),
+                });
+            }
+        }
+        if let Some(alias) = &self.dns_alias {
+            if self.challenge_type != DNS_01 {
+                return Err(Error::AcmeDnsAliasInvalid {
+                    reason: "DNS alias is only supported with the dns-01 challenge type"
+                        .to_string(),
+                });
+            }
+            let alias = alias.trim();
+            if alias.is_empty() || alias.len() > 253 {
+                return Err(Error::AcmeDnsAliasInvalid {
+                    reason: "DNS alias cannot be empty or exceed 253 characters".to_string(),
                 });
             }
         }
@@ -75,6 +93,57 @@ impl Acme {
             provider.mask();
         }
     }
+
+    /// Derives the target FQDN where TXT records should be placed when using a DNS alias pattern.
+    pub fn compute_dns_alias_target(alias_pattern: &str, domain: &str) -> String {
+        let clean_domain = domain.trim_start_matches("*.").trim_end_matches('.');
+        let pattern = alias_pattern.trim().trim_end_matches('.');
+        if pattern.contains("{domain}") {
+            pattern.replace("{domain}", clean_domain)
+        } else if pattern.starts_with("_acme-challenge.") {
+            pattern.to_string()
+        } else {
+            format!("_acme-challenge.{clean_domain}.{pattern}")
+        }
+    }
+
+    /// Generates CNAME instructions for each identifier based on the configured `dns_alias`.
+    pub fn cname_instructions(&self) -> Vec<AcmeCnameInstruction> {
+        let Some(alias_pattern) = &self.dns_alias else {
+            return Vec::new();
+        };
+        self.identifiers
+            .iter()
+            .map(|id| {
+                let domain = id.to_string();
+                let clean_domain = domain.trim_start_matches("*.").trim_end_matches('.');
+                let source_fqdn = format!("_acme-challenge.{clean_domain}");
+                let target_fqdn = Self::compute_dns_alias_target(alias_pattern, &domain);
+                AcmeCnameInstruction {
+                    domain,
+                    source_fqdn,
+                    target_fqdn,
+                    cname_verified: false,
+                    message: String::new(),
+                }
+            })
+            .collect()
+    }
+}
+
+/// Instructions for setting up and verifying a CNAME delegation record for DNS-01 ACME.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+pub struct AcmeCnameInstruction {
+    /// The subject domain name from the ACME order (e.g. `shop.client.com`).
+    pub domain: String,
+    /// The source FQDN where the customer must add the CNAME record (e.g. `_acme-challenge.shop.client.com`).
+    pub source_fqdn: String,
+    /// The target FQDN where the CNAME points and where TXT records will be published (e.g. `_acme-challenge.shop.client.com.auth.example.com`).
+    pub target_fqdn: String,
+    /// Whether the CNAME delegation has been verified in public DNS.
+    pub cname_verified: bool,
+    /// Diagnostic or verification status message.
+    pub message: String,
 }
 
 /// A DNS provider API that publishes the TXT records of the `dns-01` challenge.
@@ -508,6 +577,9 @@ pub struct AcmeInfo {
     /// The id of the named DNS credential that this entry references.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns_credential: Option<ShortId>,
+    /// Optional CNAME alias target for DNS-01 challenge delegation (RFC 8555 DNS alias mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns_alias: Option<String>,
     pub next_renewal: Option<i64>,
 }
 
@@ -586,6 +658,7 @@ mod test {
             challenge_type: challenge_type.to_string(),
             dns_provider: None,
             dns_credential: None,
+            dns_alias: None,
         }
     }
 
@@ -801,5 +874,57 @@ mod test {
         assert!(output.contains("route53"));
         assert!(!output.contains("AKIDSECRET"));
         assert!(!output.contains("very-secret"));
+    }
+
+    #[test]
+    fn dns_alias_target_computation() {
+        // 1. Static base domain
+        assert_eq!(
+            Acme::compute_dns_alias_target("auth.r3v3rs3.com", "shop.client.com"),
+            "_acme-challenge.shop.client.com.auth.r3v3rs3.com"
+        );
+        // 2. Explicit wildcard domain
+        assert_eq!(
+            Acme::compute_dns_alias_target("auth.r3v3rs3.com", "*.api.client.com"),
+            "_acme-challenge.api.client.com.auth.r3v3rs3.com"
+        );
+        // 3. Template with {domain}
+        assert_eq!(
+            Acme::compute_dns_alias_target(
+                "_acme-challenge.{domain}.auth.r3v3rs3.com",
+                "shop.client.com"
+            ),
+            "_acme-challenge.shop.client.com.auth.r3v3rs3.com"
+        );
+        // 4. Exact FQDN target
+        assert_eq!(
+            Acme::compute_dns_alias_target("_acme-challenge.delegated.auth.com", "shop.client.com"),
+            "_acme-challenge.delegated.auth.com"
+        );
+    }
+
+    #[test]
+    fn dns_alias_validation_and_instructions() {
+        let mut entry = acme(&["shop.client.com"], DNS_01);
+        entry.dns_provider = cloudflare("token");
+        entry.dns_alias = Some("auth.r3v3rs3.com".to_string());
+        assert!(entry.validate().is_ok());
+
+        let instructions = entry.cname_instructions();
+        assert_eq!(instructions.len(), 1);
+        assert_eq!(instructions[0].domain, "shop.client.com");
+        assert_eq!(
+            instructions[0].source_fqdn,
+            "_acme-challenge.shop.client.com"
+        );
+        assert_eq!(
+            instructions[0].target_fqdn,
+            "_acme-challenge.shop.client.com.auth.r3v3rs3.com"
+        );
+
+        // Reject alias with HTTP-01
+        let mut http_entry = acme(&["shop.client.com"], HTTP_01);
+        http_entry.dns_alias = Some("auth.r3v3rs3.com".to_string());
+        assert!(http_entry.validate().is_err());
     }
 }

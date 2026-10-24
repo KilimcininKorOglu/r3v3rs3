@@ -30,7 +30,9 @@ use hickory_resolver::{
     system_conf::read_system_conf,
 };
 use r3v3rs3_api::{
-    acme::{CloudProvider, DnsProvider, KeyedProvider, LocalProvider, TokenApi, TokenProvider},
+    acme::{
+        Acme, CloudProvider, DnsProvider, KeyedProvider, LocalProvider, TokenApi, TokenProvider,
+    },
     app::AcmeExecConfig,
 };
 use std::{future::Future, net::SocketAddr, time::Duration};
@@ -283,11 +285,25 @@ fn keyed_client(http: HttpClient, provider: &KeyedProvider) -> anyhow::Result<Bo
 
 /// Groups the TXT values by challenge name, because a domain and its wildcard share one name.
 pub fn txt_names(values: impl IntoIterator<Item = (String, String)>) -> Vec<TxtName> {
+    txt_names_with_alias(values, None)
+}
+
+/// Groups the TXT values by challenge name or CNAME alias target (RFC 8555 DNS alias mode).
+pub fn txt_names_with_alias(
+    values: impl IntoIterator<Item = (String, String)>,
+    alias_pattern: Option<&str>,
+) -> Vec<TxtName> {
     let mut names: Vec<TxtName> = Vec::new();
     for (domain, value) in values {
-        let domain = domain.trim_start_matches("*.").trim_end_matches('.');
-        let fqdn = format!("_acme-challenge.{}", domain.to_ascii_lowercase());
-        match names.iter_mut().find(|name| name.fqdn == fqdn) {
+        let clean_domain = domain.trim_start_matches("*.").trim_end_matches('.');
+        let fqdn = match alias_pattern {
+            Some(pattern) => Acme::compute_dns_alias_target(pattern, clean_domain),
+            None => format!("_acme-challenge.{}", clean_domain.to_ascii_lowercase()),
+        };
+        match names
+            .iter_mut()
+            .find(|name| name.fqdn.eq_ignore_ascii_case(&fqdn))
+        {
             Some(name) => name.values.push(value),
             None => names.push(TxtName {
                 fqdn,

@@ -252,6 +252,8 @@ pub struct AcmeFields {
     /// The id of the named DNS credential that the entry references. Empty names the provider
     /// of `dns_provider` with the credentials of the form.
     pub dns_credential: String,
+    /// Optional CNAME alias target for DNS-01 challenge delegation (RFC 8555 DNS alias mode).
+    pub dns_alias: String,
     /// The credentials of the DNS providers by their field names in the API.
     pub credentials: HashMap<&'static str, String>,
     /// The error keys of the fields that the user changed.
@@ -268,6 +270,7 @@ impl Default for AcmeFields {
             challenge_type: HTTP_01.to_string(),
             dns_provider: DNS_PROVIDERS[0].name.to_string(),
             dns_credential: String::new(),
+            dns_alias: String::new(),
             credentials: HashMap::new(),
             touched: HashSet::new(),
         }
@@ -459,7 +462,60 @@ fn dns_provider_view(
                 { field_error(fields, errors, show_errors, "dns_provider") }
                 <p class={HINT_CLASS}>{locale.t("acme.dns_credentials_hint")}</p>
             }
+
+            <label class={LABEL_CLASS}>{locale.t("acme.dns_alias")}</label>
+            <input
+                type="text"
+                placeholder={locale.t("acme.dns_alias_placeholder")}
+                value={fields.dns_alias.clone()}
+                onchange={setter(fields, "dns_alias", |f, v| f.dns_alias = v)}
+                class={INPUT_CLASS}
+            />
+            <p class={HINT_CLASS}>{locale.t("acme.dns_alias_hint")}</p>
+            { field_error(fields, errors, show_errors, "dns_alias") }
+
+            if !fields.dns_alias.trim().is_empty() && !fields.domain_names.trim().is_empty() {
+                { cname_preview_view(locale, fields) }
+            }
         </>
+    }
+}
+
+fn cname_preview_view(locale: Locale, fields: &UseReducerHandle<AcmeFields>) -> Html {
+    let alias_pattern = fields.dns_alias.trim();
+    let domains: Vec<&str> = fields
+        .domain_names
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if domains.is_empty() {
+        return html! {};
+    }
+    html! {
+        <div class="mt-3 p-3 bg-slate-900/80 rounded-lg border border-cyan-500/30 text-xs">
+            <div class="font-medium text-cyan-400 mb-1 flex items-center gap-1.5">
+                <span>{"🔀"}</span>
+                <span>{locale.t("acme.cname_preview_title")}</span>
+            </div>
+            <p class="text-slate-400 mb-2">{locale.t("acme.cname_preview_desc")}</p>
+            <div class="space-y-1 font-mono text-slate-300">
+                { domains.into_iter().map(|domain| {
+                    let clean = domain.trim_start_matches("*.").trim_end_matches('.');
+                    let source = format!("_acme-challenge.{clean}");
+                    let target = Acme::compute_dns_alias_target(alias_pattern, clean);
+                    html! {
+                        <div class="bg-black/40 px-2 py-1 rounded flex flex-col md:flex-row md:items-center justify-between gap-1">
+                            <div>
+                                <span class="text-amber-300 font-semibold">{source}</span>
+                                <span class="text-slate-500 mx-1.5">{"CNAME"}</span>
+                                <span class="text-emerald-400 font-semibold">{target}</span>
+                            </div>
+                        </div>
+                    }
+                }).collect::<Html>() }
+            </div>
+        </div>
     }
 }
 
@@ -538,12 +594,23 @@ pub fn build_request(
     } else {
         dns_provider(fields)
     };
+    let dns_alias = if fields.challenge_type == DNS_01 {
+        let alias = fields.dns_alias.trim();
+        if alias.is_empty() {
+            None
+        } else {
+            Some(alias.to_string())
+        }
+    } else {
+        None
+    };
     let acme = Acme {
         config,
         identifiers,
         challenge_type: fields.challenge_type.clone(),
         dns_provider,
         dns_credential,
+        dns_alias,
     };
     if let Err(err) = acme.validate() {
         let key = match err {

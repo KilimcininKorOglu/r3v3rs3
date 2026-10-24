@@ -84,6 +84,21 @@ pub async fn message(locale: Locale, text: &str, icon: Icon) {
     }
 }
 
+/// Shows `html` content in a dialog until the account closes it.
+pub async fn html(locale: Locale, title: &str, html: &str) {
+    let entries = [
+        ("title", JsValue::from_str(title)),
+        ("html", JsValue::from_str(html)),
+        (
+            "confirmButtonText",
+            JsValue::from_str(locale.t("common.ok")),
+        ),
+    ];
+    if let Err(err) = show(&entries).await {
+        report(&err);
+    }
+}
+
 /// Asks the account for a text input.
 pub async fn prompt(locale: Locale, text: &str, placeholder: &str) -> Option<String> {
     let entries = [

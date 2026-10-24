@@ -83,6 +83,7 @@ fn acme_entry(credential: ShortId) -> anyhow::Result<r3v3rs3::certs::acme::AcmeE
             challenge_type: r3v3rs3_api::acme::DNS_01.to_string(),
             dns_provider: None,
             dns_credential: Some(credential),
+            dns_alias: None,
         },
         account: Arc::new(account),
     })

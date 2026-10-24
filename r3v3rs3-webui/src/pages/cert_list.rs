@@ -598,6 +598,23 @@ fn acme_row(
         });
     });
 
+    let has_dns_alias = entry.dns_alias.is_some();
+    let cname_onclick = Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        wasm_bindgen_futures::spawn_local(async move {
+            let fetch = async {
+                let res = Request::get(&format!("{API_ENDPOINT}/acme/{id}/cname_instructions"))
+                    .send()
+                    .await?;
+                res.json::<Vec<r3v3rs3_api::acme::AcmeCnameInstruction>>()
+                    .await
+            };
+            if let Ok(instructions) = fetch.await {
+                show_cname_instructions_dialog(locale, &instructions).await;
+            }
+        });
+    });
+
     let onchange = Callback::from(move |_: Event| {
         wasm_bindgen_futures::spawn_local(async move {
             let _ = toggle_acme(id).await;
@@ -618,6 +635,13 @@ fn acme_row(
         ],
         actions: html! {
             <>
+                if has_dns_alias {
+                    <ActionIconButton
+                        variant={ActionVariant::View}
+                        title={locale.t("certs.cname_instructions_button").to_string()}
+                        onclick={cname_onclick}
+                    />
+                }
                 <ActionIconButton
                     variant={ActionVariant::Logs}
                     title={locale.t("common.log").to_string()}
@@ -638,6 +662,36 @@ fn acme_row(
             </>
         },
     }
+}
+
+async fn show_cname_instructions_dialog(
+    locale: Locale,
+    instructions: &[r3v3rs3_api::acme::AcmeCnameInstruction],
+) {
+    if instructions.is_empty() {
+        return;
+    }
+    let mut html_content =
+        String::from("<div style=\"text-align:left;font-size:12px;font-family:monospace;\">");
+    for item in instructions {
+        let status_color = if item.cname_verified {
+            "#10b981"
+        } else {
+            "#f59e0b"
+        };
+        let status_text = if item.cname_verified {
+            "✓ Verified"
+        } else {
+            "⏳ Pending Verification"
+        };
+        html_content.push_str(&format!(
+            "<div style=\"margin-bottom:12px;padding:8px;background:rgba(15,23,42,0.6);border-radius:6px;border:1px solid rgba(255,255,255,0.1);\"><div><strong style=\"color:#94a3b8;\">Domain:</strong> {}</div><div><strong>Host:</strong> <code style=\"color:#fcd34d;\">{}</code></div><div><strong>Type:</strong> <code>CNAME</code></div><div><strong>Target:</strong> <code style=\"color:#34d399;\">{}</code></div><div style=\"margin-top:4px;color:{status_color};font-weight:600;\">{status_text}</div></div>",
+            item.domain, item.source_fqdn, item.target_fqdn
+        ));
+    }
+    html_content.push_str("</div>");
+    let title = locale.t("certs.cname_instructions_title");
+    crate::dialog::html(locale, title, &html_content).await;
 }
 
 /// The provider with the challenge and the credential, for example
@@ -802,6 +856,7 @@ mod tests {
             challenge_type: "dns-01".into(),
             dns_provider: Some("route53".into()),
             dns_credential: None,
+            dns_alias: None,
             next_renewal: None,
         };
         assert_eq!(
@@ -830,6 +885,7 @@ mod tests {
             challenge_type: "dns-01".into(),
             dns_provider: None,
             dns_credential: Some("cred12".parse().unwrap()),
+            dns_alias: None,
             next_renewal: None,
         };
         let credentials = [DnsCredentialInfo {

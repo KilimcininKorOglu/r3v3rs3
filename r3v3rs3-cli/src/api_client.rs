@@ -494,6 +494,43 @@ impl ApiClient {
         print_json(&res)
     }
 
+    pub async fn get_acme_cname_instructions(&self, id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(
+                Method::GET,
+                &format!("/api/acme/{id}/cname_instructions"),
+                None,
+            )
+            .await?;
+        if let Some(arr) = res.as_array() {
+            println!(
+                "{:<24} {:<40} {:<40} VERIFIED",
+                "DOMAIN", "SOURCE (CUSTOMER CNAME)", "TARGET (ALIAS)"
+            );
+            println!("{:-<24} {:-<40} {:-<40} {:-<8}", "", "", "", "");
+            for item in arr {
+                let domain = item.get("domain").and_then(|v| v.as_str()).unwrap_or("-");
+                let source = item
+                    .get("source_fqdn")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                let target = item
+                    .get("target_fqdn")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                let verified = item
+                    .get("cname_verified")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let mark = if verified { "✓ YES" } else { "✗ NO" };
+                println!("{:<24} {:<40} {:<40} {}", domain, source, target, mark);
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
     // --- Access List operations ---
 
     pub async fn list_acls(&self) -> anyhow::Result<()> {

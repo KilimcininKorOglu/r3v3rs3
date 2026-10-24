@@ -39,6 +39,20 @@ impl RpcMethod for GetAcme {
     }
 }
 
+pub struct GetAcmeCnameInstructions {
+    pub id: ShortId,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for GetAcmeCnameInstructions {
+    type Output = Vec<r3v3rs3_api::acme::AcmeCnameInstruction>;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        let entry = get_entry(state, self.id)?.clone();
+        Ok(crate::certs::cname::verify_acme_cname_instructions(&entry).await)
+    }
+}
+
 fn get_entry(state: &ServerState, id: ShortId) -> Result<&AcmeEntry, Error> {
     state
         .acmes

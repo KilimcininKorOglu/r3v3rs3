@@ -11,7 +11,9 @@ use crate::audit::AuditRecord;
 use crate::server::rpc::access_lists::{
     AddAccessList, DeleteAccessList, GetAccessLists, UpdateAccessList,
 };
-use crate::server::rpc::acme::{AddAcme, DeleteAcme, GetAcme, GetAcmeList, RequestAcme};
+use crate::server::rpc::acme::{
+    AddAcme, DeleteAcme, GetAcme, GetAcmeCnameInstructions, GetAcmeList, RequestAcme,
+};
 use crate::server::rpc::auth::GetAuditLog;
 use crate::server::rpc::certs::{DeleteCert, GetCert, GetCertCoverage, GetCertList};
 use crate::server::rpc::config::GetConfig;
@@ -1431,6 +1433,25 @@ impl McpServer {
             .await
             .map_err(tool_error)?;
         json_result(json!({ "requested": id.to_string() }))
+    }
+
+    /// Get CNAME delegation instructions and verification status for an ACME request.
+    #[tool(
+        description = "Get CNAME delegation instructions and public DNS verification status for an ACME automated certificate request (RFC 8555 DNS alias mode)."
+    )]
+    async fn get_acme_cname_instructions(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let instructions: Vec<r3v3rs3_api::acme::AcmeCnameInstruction> = *self
+            .state
+            .call(&caller, GetAcmeCnameInstructions { id })
+            .await
+            .map_err(tool_error)?;
+        json_result(instructions)
     }
 
     /// List configured DNS provider credentials.

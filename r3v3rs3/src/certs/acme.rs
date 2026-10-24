@@ -215,6 +215,7 @@ impl AcmeEntry {
                 .as_ref()
                 .map(|provider| provider.name().to_string()),
             dns_credential: self.acme.dns_credential,
+            dns_alias: self.acme.dns_alias.clone(),
             next_renewal: self
                 .next_renewal(certs)
                 .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
@@ -362,7 +363,7 @@ impl AcmeOrder {
             (ChallengeType::Dns01, Some(provider)) => Some(DnsChallenge {
                 provider: provider.clone(),
                 resolver: dns_resolver,
-                names: dns::txt_names(challenges.dns),
+                names: dns::txt_names_with_alias(challenges.dns, entry.acme.dns_alias.as_deref()),
                 acme_exec: acme_exec.clone(),
             }),
             _ => None,
@@ -573,6 +574,7 @@ mod tests {
                 challenge_type: DNS_01.to_string(),
                 dns_provider: None,
                 dns_credential: Some("abcdef12".parse().unwrap()),
+                dns_alias: None,
             },
             account,
         };
@@ -613,6 +615,7 @@ mod tests {
                 api_url: None,
             })),
             dns_credential: None,
+            dns_alias: None,
         };
         let text = toml_edit::ser::to_document(&acme).unwrap().to_string();
         assert_eq!(toml::from_str::<Acme>(&text).unwrap(), acme);

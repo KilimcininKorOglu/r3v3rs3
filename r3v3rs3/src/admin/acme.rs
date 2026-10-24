@@ -2,14 +2,14 @@ use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
 use crate::accounts::Caller;
 use crate::server::rpc::acme::{
-    AddAcme, DeleteAcme, GetAcme, GetAcmeList, RequestAcme, UpdateAcme,
+    AddAcme, DeleteAcme, GetAcme, GetAcmeCnameInstructions, GetAcmeList, RequestAcme, UpdateAcme,
 };
 use axum::{
     Extension, Json,
     extract::{Path, State},
 };
 use r3v3rs3_api::{
-    acme::{AcmeConfig, AcmeInfo, AcmeRequest},
+    acme::{AcmeCnameInstruction, AcmeConfig, AcmeInfo, AcmeRequest},
     id::ShortId,
 };
 
@@ -113,4 +113,23 @@ pub async fn order(
     Path(id): Path<ShortId>,
 ) -> Result<Json<Box<()>>, AppError> {
     Ok(Json(state.call(&caller, RequestAcme { id }).await?))
+}
+
+/// Returns CNAME delegation instructions and verification status for an ACME request.
+#[utoipa::path(
+    get,
+    path = "/{id}/cname_instructions",
+    tag = "acme",
+    operation_id = "get_acme_cname_instructions",
+    params(("id" = ShortId, Path, description = "ACME request id.")),
+    responses((status = 200, description = "The ACME CNAME instructions.", body = Vec<AcmeCnameInstruction>), NotFoundResponse, ErrorResponses)
+)]
+pub async fn cname_instructions(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Box<Vec<AcmeCnameInstruction>>>, AppError> {
+    Ok(Json(
+        state.call(&caller, GetAcmeCnameInstructions { id }).await?,
+    ))
 }

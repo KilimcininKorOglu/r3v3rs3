@@ -298,6 +298,7 @@ mod tests {
             Error::NotificationFailed { reason: text() },
             Error::AcmeExecProgramNotAllowed { program: text() },
             Error::AcmeDnsProviderInvalid { field: text() },
+            Error::AcmeDnsAliasInvalid { reason: text() },
             Error::Unauthorized,
             Error::McpDisabled,
             Error::McpClientUnknown { id: text() },
