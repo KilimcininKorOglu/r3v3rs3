@@ -186,6 +186,71 @@ impl AccessLogEntry {
     }
 }
 
+/// The protocol of an active long-lived connection or stream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionProtocol {
+    /// Upgraded WebSocket connection.
+    WebSocket,
+    /// Raw TCP proxy stream.
+    Tcp,
+    /// Server-Sent Events (SSE) stream.
+    Sse,
+    /// Generic HTTP connection upgrade (HTTP/1.1 Upgrade or HTTP/2 CONNECT).
+    HttpUpgrade,
+}
+
+impl ConnectionProtocol {
+    /// Returns a short display label for the protocol.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::WebSocket => "WebSocket",
+            Self::Tcp => "TCP",
+            Self::Sse => "SSE",
+            Self::HttpUpgrade => "Upgrade",
+        }
+    }
+}
+
+/// Information about an active long-lived connection or stream.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ActiveConnectionInfo {
+    /// Unique identifier of the connection.
+    pub id: ShortId,
+    /// Client remote socket address.
+    pub client_addr: String,
+    /// Associated proxy ID if known.
+    pub proxy_id: Option<ShortId>,
+    /// Associated proxy name.
+    pub proxy_name: String,
+    /// Connection protocol.
+    pub protocol: ConnectionProtocol,
+    /// Upstream target socket address or URL.
+    pub upstream_addr: String,
+    /// Timestamp when the connection was accepted.
+    #[serde(
+        serialize_with = "serialize_timestamp_ms",
+        deserialize_with = "deserialize_timestamp_ms"
+    )]
+    #[schema(value_type = u64)]
+    pub started_at: OffsetDateTime,
+    /// Active connection duration in seconds.
+    pub uptime_secs: u64,
+    /// Total bytes sent to the client.
+    pub bytes_sent: u64,
+    /// Total bytes received from the client.
+    pub bytes_received: u64,
+    /// Estimated instantaneous transfer speed in bytes per second.
+    pub current_rate_bps: u64,
+}
+
+/// Request to terminate an active connection.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TerminateConnectionRequest {
+    /// Optional operator comment or reason for termination.
+    pub reason: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +410,26 @@ mod tests {
         let resp_json = serde_json::to_string(&resp).unwrap();
         let resp_decoded: RequestReplayResponse = serde_json::from_str(&resp_json).unwrap();
         assert_eq!(resp, resp_decoded);
+    }
+
+    #[test]
+    fn active_connection_models_serde_roundtrip() {
+        let conn = ActiveConnectionInfo {
+            id: ShortId::new(),
+            client_addr: "192.168.1.100:54321".to_string(),
+            proxy_id: Some(ShortId::new()),
+            proxy_name: "api-gateway".to_string(),
+            protocol: ConnectionProtocol::WebSocket,
+            upstream_addr: "10.0.0.5:8080".to_string(),
+            started_at: OffsetDateTime::UNIX_EPOCH,
+            uptime_secs: 120,
+            bytes_sent: 10240,
+            bytes_received: 2048,
+            current_rate_bps: 512,
+        };
+        let json = serde_json::to_string(&conn).unwrap();
+        let decoded: ActiveConnectionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(conn, decoded);
+        assert_eq!(conn.protocol.as_str(), "WebSocket");
     }
 }

@@ -546,6 +546,12 @@ pub enum Error {
         #[schema(value_type = String)]
         id: ShortId,
     },
+
+    #[error("active connection not found: {id}")]
+    ConnectionNotFound {
+        #[schema(value_type = String)]
+        id: ShortId,
+    },
 }
 
 impl Error {
@@ -560,7 +566,8 @@ impl Error {
             | Self::ScheduledCommandNotFound { .. }
             | Self::WebhookNotFound { .. }
             | Self::ErrorPageThemeNotFound { .. }
-            | Self::CompressionDictionaryNotFound { .. } => 404,
+            | Self::CompressionDictionaryNotFound { .. }
+            | Self::ConnectionNotFound { .. } => 404,
             Self::Unauthorized => 401,
             Self::Forbidden
             | Self::ProxyReadOnly { .. }

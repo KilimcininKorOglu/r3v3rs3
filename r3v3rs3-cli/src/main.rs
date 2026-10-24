@@ -39,6 +39,9 @@ enum Command {
     /// Manage reverse proxies.
     #[command(subcommand)]
     Proxy(ProxyCommand),
+    /// Inspect live HTTP traffic and long-lived connections.
+    #[command(subcommand)]
+    Traffic(TrafficCommand),
     /// Manage TLS/SSL certificates.
     #[command(subcommand)]
     Cert(CertCommand),
@@ -189,6 +192,30 @@ pub enum ProxyDictionaryCommand {
     /// Deletes a compression dictionary from a proxy.
     #[command(alias = "rm")]
     Delete { proxy_id: String, dict_id: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TrafficCommand {
+    /// Manage active long-lived connections and streams.
+    #[command(subcommand)]
+    Connections(ConnectionsCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConnectionsCommand {
+    /// Lists active long-lived connections and streams.
+    #[command(alias = "ls")]
+    List {
+        /// Optional proxy ID filter.
+        #[arg(short, long)]
+        proxy: Option<String>,
+    },
+    /// Terminates an active connection by its unique ID.
+    #[command(alias = "kill", alias = "terminate")]
+    Close {
+        /// Active connection ID.
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -690,12 +717,29 @@ async fn run_api(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()
     match cmd {
         Command::Port(c) => run_port(api, c).await,
         Command::Proxy(c) => run_proxy(api, c).await,
+        Command::Traffic(c) => run_traffic(api, c).await,
         Command::Cert(c) => run_cert(api, c).await,
         Command::Acme(c) => run_acme(api, c).await,
         Command::Acl(c) => run_acl(api, c).await,
         Command::ErrorPageTheme(c) => run_error_page_theme(api, c).await,
         Command::Dns(c) => run_dns(api, c).await,
         other => run_api_platform(api, other).await,
+    }
+}
+
+async fn run_traffic(api: &api_client::ApiClient, cmd: TrafficCommand) -> anyhow::Result<()> {
+    match cmd {
+        TrafficCommand::Connections(conn_cmd) => run_traffic_connections(api, conn_cmd).await,
+    }
+}
+
+async fn run_traffic_connections(
+    api: &api_client::ApiClient,
+    cmd: ConnectionsCommand,
+) -> anyhow::Result<()> {
+    match cmd {
+        ConnectionsCommand::List { proxy } => api.list_active_connections(proxy.as_deref()).await,
+        ConnectionsCommand::Close { id } => api.terminate_active_connection(&id).await,
     }
 }
 

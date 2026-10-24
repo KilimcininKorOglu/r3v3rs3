@@ -1,11 +1,17 @@
 use super::app_log::download_text_file;
+use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::traffic_inspector::TrafficInspector;
-use crate::{API_ENDPOINT, auth::use_ensure_auth, format::format_instant, i18n::use_locale};
+use crate::dialog::confirm;
+use crate::format::{format_bytes, format_instant, format_uptime};
+use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale};
 use gloo_net::eventsource::futures::EventSource;
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::traffic::{AccessLogEntry, CountryTrafficStat, TrafficGeoDistribution};
+use r3v3rs3_api::traffic::{
+    AccessLogEntry, ActiveConnectionInfo, ConnectionProtocol, CountryTrafficStat,
+    TrafficGeoDistribution,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlSelectElement};
@@ -13,6 +19,12 @@ use yew::prelude::*;
 use yew_router::prelude::use_navigator;
 
 const MAX_UI_ENTRIES: usize = 1000;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TrafficTab {
+    AccessLogs,
+    ActiveConnections,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StatusCategory {
@@ -276,25 +288,329 @@ pub static COUNTRY_PATHS: &[CountryMapItem] = &[
     },
 ];
 
+fn tab_bar_view(
+    locale: Locale,
+    active_tab: &UseStateHandle<TrafficTab>,
+    connections_count: usize,
+) -> Html {
+    let on_select_logs = {
+        let active_tab = active_tab.clone();
+        Callback::from(move |_: MouseEvent| active_tab.set(TrafficTab::AccessLogs))
+    };
+    let on_select_conns = {
+        let active_tab = active_tab.clone();
+        Callback::from(move |_: MouseEvent| active_tab.set(TrafficTab::ActiveConnections))
+    };
+
+    let logs_active = **active_tab == TrafficTab::AccessLogs;
+    let conns_active = **active_tab == TrafficTab::ActiveConnections;
+
+    let base_btn =
+        "px-4 py-2 font-medium text-sm rounded-lg transition-colors flex items-center gap-2";
+    let active_style = "bg-primary-600 text-white shadow-sm";
+    let inactive_style =
+        "text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800";
+
+    html! {
+        <div class="flex items-center gap-2 border-b dark:border-neutral-700 pb-3">
+            <button
+                class={classes!(base_btn, if logs_active { active_style } else { inactive_style })}
+                onclick={on_select_logs}
+            >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                </svg>
+                { locale.t("traffic.tab_logs") }
+            </button>
+            <button
+                class={classes!(base_btn, if conns_active { active_style } else { inactive_style })}
+                onclick={on_select_conns}
+            >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                { locale.t("traffic.tab_connections") }
+                if connections_count > 0 {
+                    <span class="ml-1 px-2 py-0.5 text-xs rounded-full bg-white/20 text-current font-bold">
+                        { connections_count }
+                    </span>
+                }
+            </button>
+        </div>
+    }
+}
+
+#[hook]
+fn use_active_connections(
+    connections: &UseStateHandle<Vec<ActiveConnectionInfo>>,
+    trigger: &UseStateHandle<u32>,
+    active_tab: TrafficTab,
+) {
+    let connections = connections.clone();
+    let trigger_val = **trigger;
+    use_effect_with((trigger_val, active_tab), move |_| {
+        if active_tab == TrafficTab::ActiveConnections {
+            spawn_local(async move {
+                let req = Request::get(&format!("{API_ENDPOINT}/traffic/connections"));
+                if let Ok(res) = req.send().await
+                    && let Ok(data) = res.json::<Vec<ActiveConnectionInfo>>().await
+                {
+                    connections.set(data);
+                }
+            });
+        }
+        || ()
+    });
+}
+
+fn terminate_connection_onclick(
+    locale: Locale,
+    id: ShortId,
+    trigger: UseStateHandle<u32>,
+) -> Callback<MouseEvent> {
+    Callback::from(move |e: MouseEvent| {
+        e.stop_propagation();
+        let trigger = trigger.clone();
+        let text = locale.t("traffic.terminate_confirm").to_string();
+        spawn_local(async move {
+            if confirm(locale, &text).await {
+                let _ = Request::delete(&format!("{API_ENDPOINT}/traffic/connections/{id}"))
+                    .send()
+                    .await;
+                trigger.set(*trigger + 1);
+            }
+        });
+    })
+}
+
+fn protocol_badge(proto: ConnectionProtocol) -> Html {
+    let (label, bg, text) = match proto {
+        ConnectionProtocol::WebSocket => (
+            "WebSocket",
+            "bg-purple-100 dark:bg-purple-900/40",
+            "text-purple-800 dark:text-purple-300",
+        ),
+        ConnectionProtocol::Tcp => (
+            "TCP",
+            "bg-blue-100 dark:bg-blue-900/40",
+            "text-blue-800 dark:text-blue-300",
+        ),
+        ConnectionProtocol::Sse => (
+            "SSE",
+            "bg-emerald-100 dark:bg-emerald-900/40",
+            "text-emerald-800 dark:text-emerald-300",
+        ),
+        ConnectionProtocol::HttpUpgrade => (
+            "Upgrade",
+            "bg-indigo-100 dark:bg-indigo-900/40",
+            "text-indigo-800 dark:text-indigo-300",
+        ),
+    };
+    html! {
+        <span class={classes!("px-2", "py-0.5", "text-xs", "font-sans", "font-semibold", "rounded-md", bg, text)}>
+            { label }
+        </span>
+    }
+}
+
+fn connection_row(
+    locale: Locale,
+    conn: &ActiveConnectionInfo,
+    trigger: &UseStateHandle<u32>,
+) -> Html {
+    let speed = format!("{}/s", format_bytes(conn.current_rate_bps));
+    html! {
+        <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/60 transition-colors">
+            <td class="px-4 py-3 font-semibold text-neutral-800 dark:text-neutral-200">
+                { conn.id.to_string() }
+            </td>
+            <td class="px-4 py-3">
+                { protocol_badge(conn.protocol) }
+            </td>
+            <td class="px-4 py-3 font-sans text-neutral-700 dark:text-neutral-300">
+                { &conn.proxy_name }
+            </td>
+            <td class="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                { &conn.client_addr }
+            </td>
+            <td class="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                { &conn.upstream_addr }
+            </td>
+            <td class="px-4 py-3 font-sans text-neutral-700 dark:text-neutral-300">
+                { format_uptime(conn.uptime_secs) }
+            </td>
+            <td class="px-4 py-3 text-right text-neutral-700 dark:text-neutral-300">
+                { format_bytes(conn.bytes_sent) }
+            </td>
+            <td class="px-4 py-3 text-right text-neutral-700 dark:text-neutral-300">
+                { format_bytes(conn.bytes_received) }
+            </td>
+            <td class="px-4 py-3 text-right font-semibold text-primary-600 dark:text-primary-400">
+                { speed }
+            </td>
+            <td class="px-4 py-3 text-center">
+                <ActionIconButton
+                    variant={ActionVariant::Delete}
+                    title={locale.t("traffic.terminate").to_string()}
+                    onclick={terminate_connection_onclick(locale, conn.id, (*trigger).clone())}
+                />
+            </td>
+        </tr>
+    }
+}
+
+fn active_connections_view(
+    locale: Locale,
+    connections: &[ActiveConnectionInfo],
+    trigger: &UseStateHandle<u32>,
+) -> Html {
+    let on_refresh = {
+        let trigger = trigger.clone();
+        Callback::from(move |_: MouseEvent| trigger.set(*trigger + 1))
+    };
+
+    html! {
+        <div class="space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-semibold text-neutral-800 dark:text-neutral-100 flex items-center gap-2">
+                    { locale.t("traffic.tab_connections") }
+                    <span class="text-sm font-normal text-neutral-500">
+                        { format!("({})", connections.len()) }
+                    </span>
+                </h3>
+                <button
+                    class="px-3 py-1.5 text-sm bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-lg transition-colors flex items-center gap-1.5"
+                    onclick={on_refresh}
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    { locale.t("traffic.refresh") }
+                </button>
+            </div>
+
+            if connections.is_empty() {
+                <div class="p-8 text-center text-neutral-500 dark:text-neutral-400 bg-white dark:bg-neutral-800/40 border dark:border-neutral-700 rounded-xl">
+                    <svg class="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <p class="font-medium">{ locale.t("traffic.connections_empty") }</p>
+                </div>
+            } else {
+                <div class="overflow-x-auto bg-white dark:bg-neutral-800/40 border dark:border-neutral-700 rounded-xl shadow-sm">
+                    <table class="min-w-full divide-y divide-neutral-200 dark:divide-neutral-700 text-sm">
+                        <thead class="bg-neutral-50 dark:bg-neutral-800/80 font-medium text-neutral-600 dark:text-neutral-300">
+                            <tr>
+                                <th class="px-4 py-3 text-left">{ locale.t("traffic.connection_id") }</th>
+                                <th class="px-4 py-3 text-left">{ locale.t("traffic.protocol") }</th>
+                                <th class="px-4 py-3 text-left">{ locale.t("traffic.col_proxy") }</th>
+                                <th class="px-4 py-3 text-left">{ locale.t("traffic.client_address") }</th>
+                                <th class="px-4 py-3 text-left">{ locale.t("traffic.target_upstream") }</th>
+                                <th class="px-4 py-3 text-left">{ locale.t("traffic.uptime") }</th>
+                                <th class="px-4 py-3 text-right">{ locale.t("traffic.bytes_sent") }</th>
+                                <th class="px-4 py-3 text-right">{ locale.t("traffic.bytes_received") }</th>
+                                <th class="px-4 py-3 text-right">{ locale.t("traffic.transfer_rate") }</th>
+                                <th class="px-4 py-3 text-center">{ locale.t("common.actions") }</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-neutral-200 dark:divide-neutral-700 font-mono text-xs">
+                            { for connections.iter().map(|c| connection_row(locale, c, trigger)) }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+}
+
+struct LogsTabProps<'a> {
+    locale: Locale,
+    on_back: Callback<MouseEvent>,
+    controls: HeaderControls,
+    stats: &'a TrafficStats,
+    show_geo_map: bool,
+    geo_dist: &'a TrafficGeoDistribution,
+    selected_country: Option<&'a str>,
+    on_select_country: Callback<Option<String>>,
+    search: &'a UseStateHandle<String>,
+    status_filter: &'a UseStateHandle<Option<StatusCategory>>,
+    country_filter: &'a UseStateHandle<Option<String>>,
+    available_countries: &'a [String],
+    table_ref: &'a NodeRef,
+    filtered: &'a [AccessLogEntry],
+    selected_entry_id: Option<u64>,
+    on_select_entry: Callback<AccessLogEntry>,
+    selected_entry: &'a UseStateHandle<Option<AccessLogEntry>>,
+    on_close_inspector: Callback<()>,
+}
+
+fn logs_tab_view(props: LogsTabProps<'_>) -> Html {
+    let LogsTabProps {
+        locale,
+        on_back,
+        controls,
+        stats,
+        show_geo_map,
+        geo_dist,
+        selected_country,
+        on_select_country,
+        search,
+        status_filter,
+        country_filter,
+        available_countries,
+        table_ref,
+        filtered,
+        selected_entry_id,
+        on_select_entry,
+        selected_entry,
+        on_close_inspector,
+    } = props;
+
+    html! {
+        <>
+            { header_view(locale, on_back, controls) }
+            { stats_cards_view(locale, stats) }
+            if show_geo_map {
+                { geo_heatmap_view(locale, geo_dist, selected_country, on_select_country) }
+            }
+            { filters_toolbar_view(locale, search, status_filter, country_filter, available_countries) }
+            { table_view(locale, table_ref, filtered, selected_entry_id, on_select_entry) }
+            { inspector_drawer(selected_entry, on_close_inspector) }
+        </>
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_traffic_tab() -> TrafficTab {
+    TrafficTab::AccessLogs
+}
+
 #[function_component(TrafficView)]
 pub fn traffic_view() -> Html {
     use_ensure_auth();
     let locale = use_locale();
     let navigator = use_navigator();
+    let active_tab = use_state(default_traffic_tab);
+    let connections = use_state(Vec::<ActiveConnectionInfo>::new);
+    let conns_trigger = use_state(u32::default);
     let entries = use_state(Vec::<AccessLogEntry>::new);
-    let live = use_state(|| true);
-    let auto_scroll = use_state(|| true);
-    let show_geo_map = use_state(|| true);
+    let live = use_state(default_true);
+    let auto_scroll = use_state(default_true);
+    let show_geo_map = use_state(default_true);
     let search = use_state(String::new);
-    let status_filter = use_state(|| Option::<StatusCategory>::None);
-    let selected_proxy = use_state(|| Option::<ShortId>::None);
-    let selected_country = use_state(|| Option::<String>::None);
-    let selected_entry = use_state(|| Option::<AccessLogEntry>::None);
+    let status_filter = use_state(Option::<StatusCategory>::default);
+    let selected_proxy = use_state(Option::<ShortId>::default);
+    let selected_country = use_state(Option::<String>::default);
+    let selected_entry = use_state(Option::<AccessLogEntry>::default);
     let table_ref = use_node_ref();
 
     use_initial_traffic_load(&entries);
     use_live_traffic_stream(&entries, &live);
     use_traffic_auto_scroll(&table_ref, &auto_scroll, &entries);
+    use_active_connections(&connections, &conns_trigger, *active_tab);
 
     let stats = calculate_stats(&entries);
     let geo_dist = calculate_geo_distribution(&entries);
@@ -311,17 +627,37 @@ pub fn traffic_view() -> Html {
     let controls = create_header_controls(&live, &auto_scroll, &show_geo_map, &entries);
     let on_select_country = create_country_callback(&selected_country);
     let (on_select_entry, on_close_inspector) = create_inspector_callbacks(&selected_entry);
+    let selected_entry_id = selected_entry.as_ref().map(|e| e.id);
+
+    let logs_view = logs_tab_view(LogsTabProps {
+        locale,
+        on_back,
+        controls,
+        stats: &stats,
+        show_geo_map: *show_geo_map,
+        geo_dist: &geo_dist,
+        selected_country: selected_country.as_deref(),
+        on_select_country,
+        search: &search,
+        status_filter: &status_filter,
+        country_filter: &selected_country,
+        available_countries: &available_countries,
+        table_ref: &table_ref,
+        filtered: &filtered,
+        selected_entry_id,
+        on_select_entry,
+        selected_entry: &selected_entry,
+        on_close_inspector,
+    });
 
     html! {
         <div class="space-y-4">
-            { header_view(locale, on_back, controls) }
-            { stats_cards_view(locale, &stats) }
-            if *show_geo_map {
-                { geo_heatmap_view(locale, &geo_dist, selected_country.as_deref(), on_select_country) }
+            { tab_bar_view(locale, &active_tab, connections.len()) }
+            if *active_tab == TrafficTab::AccessLogs {
+                { logs_view }
+            } else {
+                { active_connections_view(locale, &connections, &conns_trigger) }
             }
-            { filters_toolbar_view(locale, &search, &status_filter, &selected_country, &available_countries) }
-            { table_view(locale, &table_ref, &filtered, selected_entry.as_ref().map(|e| e.id), on_select_entry) }
-            { inspector_drawer(&selected_entry, on_close_inspector) }
         </div>
     }
 }

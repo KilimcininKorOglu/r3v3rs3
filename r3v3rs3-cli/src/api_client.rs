@@ -1445,6 +1445,56 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn list_active_connections(&self, proxy_id: Option<&str>) -> anyhow::Result<()> {
+        let path = match proxy_id {
+            Some(id) => format!("/api/traffic/connections?proxy_id={id}"),
+            None => "/api/traffic/connections".to_string(),
+        };
+        let res = self.request(Method::GET, &path, None).await?;
+        let conns = res.as_array().context("expected connection array")?;
+        if conns.is_empty() {
+            println!("No active long-lived connections found.");
+            return Ok(());
+        }
+
+        println!(
+            "{:<10} {:<12} {:<20} {:<24} {:<12} {:<14} {:<14} SPEED",
+            "ID", "PROTO", "PROXY", "CLIENT", "UPTIME", "SENT", "RECV"
+        );
+        println!(
+            "{:-<10} {:-<12} {:-<20} {:-<24} {:-<12} {:-<14} {:-<14} {:-<12}",
+            "", "", "", "", "", "", "", ""
+        );
+
+        for c in conns {
+            let id = c["id"].as_str().unwrap_or("-");
+            let proto = c["protocol"].as_str().unwrap_or("-");
+            let proxy = c["proxy_name"].as_str().unwrap_or("-");
+            let client = c["client_addr"].as_str().unwrap_or("-");
+            let uptime_secs = c["uptime_secs"].as_u64().unwrap_or(0);
+            let uptime = format_duration_secs(uptime_secs);
+            let sent = format_cli_bytes(c["bytes_sent"].as_u64().unwrap_or(0));
+            let recv = format_cli_bytes(c["bytes_received"].as_u64().unwrap_or(0));
+            let speed = format!(
+                "{}/s",
+                format_cli_bytes(c["current_rate_bps"].as_u64().unwrap_or(0))
+            );
+
+            println!(
+                "{:<10} {:<12} {:<20} {:<24} {:<12} {:<14} {:<14} {}",
+                id, proto, proxy, client, uptime, sent, recv, speed
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn terminate_active_connection(&self, id: &str) -> anyhow::Result<()> {
+        let path = format!("/api/traffic/connections/{id}");
+        self.request(Method::DELETE, &path, None).await?;
+        println!("connection/{id} terminated successfully");
+        Ok(())
+    }
+
     pub async fn get_geoip_status(&self) -> anyhow::Result<()> {
         let res = self
             .request(Method::GET, "/api/security/geoip/status", None)
@@ -2113,6 +2163,30 @@ fn print_security_audit_item(item: &Value) {
     };
 
     println!("{:<28} {:<21} {:<6} {}", header, status_tag, earned, risk);
+}
+
+fn format_cli_bytes(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 * 1024 {
+        format!("{:.2} GiB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    } else if bytes >= 1024 * 1024 {
+        format!("{:.2} MiB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn format_duration_secs(secs: u64) -> String {
+    if secs >= 86400 {
+        format!("{}d {}h", secs / 86400, (secs % 86400) / 3600)
+    } else if secs >= 3600 {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    } else if secs >= 60 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{secs}s")
+    }
 }
 
 #[cfg(test)]

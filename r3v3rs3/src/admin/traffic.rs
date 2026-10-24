@@ -1,15 +1,16 @@
-use super::AppError;
 use super::openapi::ErrorResponses;
+use super::{AppError, AppState};
 use crate::accounts::{Caller, Permission};
 use axum::{
     Extension, Json,
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     response::sse::{Event, KeepAlive, Sse},
 };
 use futures::{Stream, StreamExt};
+use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::traffic::{
-    AccessLogEntry, AccessLogQuery, HeaderEntry, RequestReplayRequest, RequestReplayResponse,
-    TrafficGeoDistribution,
+    AccessLogEntry, AccessLogQuery, ActiveConnectionInfo, HeaderEntry, RequestReplayRequest,
+    RequestReplayResponse, TrafficGeoDistribution,
 };
 use tokio_stream::wrappers::BroadcastStream;
 
@@ -205,4 +206,60 @@ pub async fn replay(
             }))
         }
     }
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+pub struct ConnectionListQuery {
+    pub proxy_id: Option<ShortId>,
+}
+
+/// Lists active long-lived connections and streams.
+#[utoipa::path(
+    get,
+    path = "/connections",
+    tag = "traffic",
+    operation_id = "list_traffic_connections",
+    params(
+        ConnectionListQuery
+    ),
+    responses((status = 200, description = "List of active long-lived connections.", body = Vec<ActiveConnectionInfo>), ErrorResponses)
+)]
+pub async fn list_connections(
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<ConnectionListQuery>,
+) -> Result<Json<Vec<ActiveConnectionInfo>>, AppError> {
+    caller.authorize(Permission::Read)?;
+    let conns = crate::proxy::connection_tracker::list(query.proxy_id.as_ref());
+    let filtered = conns
+        .into_iter()
+        .filter(|c| match c.proxy_id {
+            Some(id) => caller.can_see(id),
+            None => caller.proxies.is_none(),
+        })
+        .collect();
+    Ok(Json(filtered))
+}
+
+/// Terminates an active connection by its unique ID.
+#[utoipa::path(
+    delete,
+    path = "/connections/{id}",
+    tag = "traffic",
+    operation_id = "terminate_traffic_connection",
+    params(("id" = ShortId, Path, description = "Connection ID.")),
+    responses((status = 200, description = "The connection was terminated."), ErrorResponses)
+)]
+pub async fn terminate_connection(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<()>, AppError> {
+    caller.authorize(Permission::Edit)?;
+    crate::proxy::connection_tracker::terminate(id)?;
+    let record =
+        crate::audit::AuditRecord::new(r3v3rs3_api::audit::AuditAction::TerminateConnection);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(()))
 }

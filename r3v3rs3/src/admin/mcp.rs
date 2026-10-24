@@ -71,6 +71,13 @@ pub struct AuditLogParams {
     pub limit: Option<u32>,
 }
 
+/// Arguments for listing active long-lived connections.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ListActiveConnectionsParams {
+    /// Optional proxy ID filter.
+    pub proxy_id: Option<String>,
+}
+
 /// The `{ "port": {...} }` argument of `add_port`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddPortParams {
@@ -2788,6 +2795,62 @@ impl McpServer {
             .record_audit(&caller.username, caller.client, record)
             .await;
         json_result(rules)
+    }
+
+    /// List active long-lived connections and streams.
+    #[tool(
+        description = "List all active long-lived connections and streams (WebSocket, TCP, SSE) with protocol, client IP, target, duration, transferred bytes, and instantaneous throughput."
+    )]
+    async fn list_active_connections(
+        &self,
+        Parameters(params): Parameters<ListActiveConnectionsParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let proxy_id = params
+            .proxy_id
+            .as_deref()
+            .map(|s| s.parse::<ShortId>())
+            .transpose()
+            .map_err(|e| ErrorData::invalid_params(format!("invalid proxy_id: {e}"), None))?;
+        let conns = crate::proxy::connection_tracker::list(proxy_id.as_ref());
+        let filtered: Vec<_> = conns
+            .into_iter()
+            .filter(|c| match c.proxy_id {
+                Some(id) => caller.can_see(id),
+                None => caller.proxies.is_none(),
+            })
+            .collect();
+        json_result(filtered)
+    }
+
+    /// Terminate an active connection or stream by its unique ID.
+    #[tool(
+        description = "Immediately terminate an active long-lived connection or stream by its connection ID. Needs the edit scope."
+    )]
+    async fn terminate_active_connection(
+        &self,
+        Parameters(params): Parameters<IdParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let conn_id = params
+            .id
+            .parse::<ShortId>()
+            .map_err(|e| ErrorData::invalid_params(format!("invalid connection id: {e}"), None))?;
+        crate::proxy::connection_tracker::terminate(conn_id).map_err(|e| {
+            ErrorData::internal_error(format!("failed to terminate connection: {e}"), None)
+        })?;
+        let record = AuditRecord::new(AuditAction::TerminateConnection)
+            .summary(format!("Terminated active connection {} via MCP", conn_id));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(serde_json::json!({
+            "status": "terminated",
+            "id": conn_id.to_string(),
+        }))
     }
 }
 

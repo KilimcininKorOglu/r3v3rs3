@@ -775,11 +775,41 @@ fn full_body(data: Bytes) -> ProxyBody {
 }
 
 async fn upgrade_connection(req: Request<ProxyBody>, res: Response<ProxyBody>) {
+    let is_ws = req
+        .headers()
+        .get(hyper::header::UPGRADE)
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"));
+    let proto = if is_ws {
+        r3v3rs3_api::traffic::ConnectionProtocol::WebSocket
+    } else {
+        r3v3rs3_api::traffic::ConnectionProtocol::HttpUpgrade
+    };
+    let client_addr = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+    let upstream_addr = req.uri().to_string();
+
     match tokio::try_join!(hyper::upgrade::on(req), hyper::upgrade::on(res)) {
         Ok((req, res)) => {
             let mut req = TokioIo::new(req);
             let mut res = TokioIo::new(res);
-            if let Err(err) = tokio::io::copy_bidirectional(&mut req, &mut res).await {
+
+            let (_id, _guard, cancel_rx, sent, recv) = crate::proxy::connection_tracker::register(
+                None,
+                if is_ws { "websocket" } else { "http-upgrade" },
+                proto,
+                client_addr,
+                upstream_addr,
+            );
+
+            if let Err(err) = crate::proxy::connection_tracker::copy_tracked_bidirectional(
+                &mut req, &mut res, sent, recv, cancel_rx,
+            )
+            .await
+            {
                 error!("upgraded io error: {}", err);
             }
         }

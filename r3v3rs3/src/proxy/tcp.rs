@@ -303,8 +303,27 @@ async fn start(
     let (target, mut out, guard) = upstream.connect(&resolver, (remote, local)).await?;
     info!(target: "r3v3rs3::access_log", remote = %remote, %peer, %local, %target);
 
-    match tokio::io::copy_bidirectional(&mut stream, &mut out).await {
-        Ok((rx, tx)) => {
+    let (_conn_id, _stream_guard, cancel_rx, bytes_sent, bytes_received) =
+        super::connection_tracker::register(
+            None,
+            "tcp",
+            r3v3rs3_api::traffic::ConnectionProtocol::Tcp,
+            remote.to_string(),
+            target.to_string(),
+        );
+
+    match super::connection_tracker::copy_tracked_bidirectional(
+        &mut stream,
+        &mut out,
+        bytes_sent.clone(),
+        bytes_received.clone(),
+        cancel_rx,
+    )
+    .await
+    {
+        Ok(_) => {
+            let rx = bytes_received.load(std::sync::atomic::Ordering::Relaxed);
+            let tx = bytes_sent.load(std::sync::atomic::Ordering::Relaxed);
             guard.record_bytes(rx + tx);
             super::stats::record_rx_bytes(rx);
             super::stats::record_tx_bytes(tx);

@@ -199,10 +199,12 @@ pub enum AuditAction {
     DeleteErrorPageTheme,
     /// An account applied a predefined security header profile to a proxy.
     ApplySecurityProfile,
+    /// An operator terminated an active long-lived connection or stream.
+    TerminateConnection,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 110] = [
+    pub const ALL: [AuditAction; 111] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -313,6 +315,7 @@ impl AuditAction {
         Self::UpdateErrorPageTheme,
         Self::DeleteErrorPageTheme,
         Self::ApplySecurityProfile,
+        Self::TerminateConnection,
     ];
 }
 

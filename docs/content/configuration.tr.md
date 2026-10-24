@@ -2050,3 +2050,43 @@ Trafik uç noktaları oturum doğrulaması ile korunur ve çok kiracılı proxy 
 - `GET /api/traffic/geo`: Canlı erişim trafiğinin coğrafi dağılımını toplu olarak döner; toplam çözümlenen istek sayısını, ilk 10 ülkeyi (`country`, `count`, `percentage`) ve tüm ISO ülke kodlarının istek sayılarını içerir.
 - `GET /api/traffic/{id}`: Belirtilen kimliğe (ID) sahip erişim kaydının yakalanan istek/yanıt başlıkları, gövde içeriği, içerik türü ve WebSocket bayrakları dahil tüm detaylarını döner.
 - `POST /api/traffic/replay`: Belirtilen hedef URL'ye özel başlıklar, gövde ve zaman aşımı süresi (500ms ile 30s arasında sınırlandırılmış) ile bir HTTP veya WebSocket el sıkışma isteğini yeniden gönderir; yanıt durumu, gecikme süresi, hata detayı ve yanıt gövdesini döner.
+
+## Canlı Bağlantı İzleyici ve WebSocket/SSE Akış Denetçisi
+
+Kısa ömürlü istek loglarına ek olarak r3v3rs3, reverse proxy'ler üzerindeki aktif uzun ömürlü bağlantıları ve akışları gerçek zamanlı olarak takip eder:
+- **İzlenen Protokoller**: WebSocket bağlantıları, HTTP Upgrades, Server-Sent Events (SSE) ve ham TCP proxy oturumları.
+- **Gerçek Zamanlı Telemetri**: İstemci adresi, hedef upstream, aktif süre, gönderilen bayt, alınan bayt ve anlık aktarım hızı (saniye başına bayt).
+- **Zarif Kapatma**: Güvenliği tehdit eden veya kaynak tüketen bağlantıları WebUI, CLI veya MCP üzerinden derhal sonlandırın. WebSocket akışlarına temiz kapatma frame'leri gönderilir, TCP soketleri iki yönlü kapatılır.
+
+### WebUI
+
+`/traffic` adresindeki Canlı Trafik paneli özel bir **Aktif Bağlantılar** sekmesi sunar:
+- Renkli protokol rozetleriyle (WebSocket için mor, TCP için mavi, SSE için yeşil, HTTP Upgrade için çivit mavisi) aktif akışları listeler.
+- Bağlantı ID, istemci adresi, upstream hedefi, aktif süre, aktarılan bayt ve anlık hız bilgilerini içeren canlı tablo.
+- SweetAlert2 onay penceresiyle kırmızı sonlandırma butonu üzerinden tek tıkla bağlantı sonlandırma.
+
+### CLI
+
+Uzun ömürlü bağlantıları terminalden %100 eşitlikle yönetin:
+
+```bash
+# Tüm aktif uzun ömürlü bağlantıları listele
+r3 traffic connections list
+
+# Aktif bağlantıları proxy ID ile filtrele
+r3 traffic connections list --proxy prx_01j7xyz
+
+# Bir aktif bağlantıyı ID ile sonlandır
+r3 traffic connections close con_01j7xyz
+```
+
+### Model Context Protocol (MCP)
+
+Yapay zeka agent'ları aktif bağlantıları MCP araçlarıyla otonom olarak denetleyebilir ve yönetebilir:
+- `list_active_connections`: Protokol, istemci IP, hedef, süre, aktarılan bayt ve hız metrikleriyle tüm aktif uzun ömürlü bağlantıları listeler. İsteğe bağlı `proxy_id` filtresi destekler.
+- `terminate_active_connection`: Belirtilen ID'ye sahip aktif bağlantıyı derhal sonlandırır. `edit` yetkisi gerektirir.
+
+### Yönetim API'si (Admin API)
+
+- `GET /api/traffic/connections`: Aktif uzun ömürlü bağlantıların listesini döner (isteğe bağlı `proxy_id` sorgu parametresi).
+- `DELETE /api/traffic/connections/{id}`: Belirtilen bağlantıyı sonlandırır ve denetim loguna (audit log) kaydeder.

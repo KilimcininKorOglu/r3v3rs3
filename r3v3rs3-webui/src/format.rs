@@ -183,6 +183,19 @@ pub fn format_latency(ms: f64) -> String {
     }
 }
 
+/// Formats an uptime in seconds into a human-readable duration (e.g. `2d 4h`, `3h 12m`, `45s`).
+pub fn format_uptime(secs: u64) -> String {
+    if secs >= 86400 {
+        format!("{}d {}h", secs / 86400, (secs % 86400) / 3600)
+    } else if secs >= 3600 {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    } else if secs >= 60 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,5 +237,13 @@ mod tests {
         assert_eq!(format_latency(0.42), "0.42 ms");
         assert_eq!(format_latency(15.2), "15.2 ms");
         assert_eq!(format_latency(1500.0), "1.50 s");
+    }
+
+    #[test]
+    fn format_uptime_scales_units() {
+        assert_eq!(format_uptime(45), "45s");
+        assert_eq!(format_uptime(125), "2m 5s");
+        assert_eq!(format_uptime(3665), "1h 1m");
+        assert_eq!(format_uptime(90000), "1d 1h");
     }
 }

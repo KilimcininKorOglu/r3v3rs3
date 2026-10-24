@@ -228,7 +228,88 @@ async fn traffic_api_lists_and_filters_logs() -> anyhow::Result<()> {
         verify_list(&client, addr, &cookie).await?;
         verify_filters_and_sse(&client, addr, &cookie).await?;
         verify_geo(&client, addr, &cookie).await?;
-        verify_get_entry_and_replay(&client, addr, &cookie).await
+        verify_get_entry_and_replay(&client, addr, &cookie).await?;
+        verify_active_connections(&client, addr, &cookie).await
     })
     .await
+}
+
+async fn verify_active_connections(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    use r3v3rs3::proxy::connection_tracker;
+    use r3v3rs3_api::id::ShortId;
+    use r3v3rs3_api::traffic::{ActiveConnectionInfo, ConnectionProtocol};
+
+    let unauth = client
+        .get(format!("http://{addr}/api/traffic/connections"))
+        .send()
+        .await?;
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+
+    let resp = client
+        .get(format!("http://{addr}/api/traffic/connections"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let items: Vec<ActiveConnectionInfo> = resp.json().await?;
+    assert!(items.is_empty());
+
+    let proxy_id = ShortId::new();
+    let (conn_id, guard, cancel_rx, sent, recv) = connection_tracker::register(
+        Some(proxy_id),
+        "test-ws",
+        ConnectionProtocol::WebSocket,
+        "192.168.1.50:54321",
+        "10.0.0.5:8080",
+    );
+    sent.fetch_add(2048, std::sync::atomic::Ordering::Relaxed);
+    recv.fetch_add(1024, std::sync::atomic::Ordering::Relaxed);
+
+    let resp = client
+        .get(format!("http://{addr}/api/traffic/connections"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let items: Vec<ActiveConnectionInfo> = resp.json().await?;
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, conn_id);
+    assert_eq!(items[0].protocol, ConnectionProtocol::WebSocket);
+    assert_eq!(items[0].proxy_name, "test-ws");
+    assert_eq!(items[0].bytes_sent, 2048);
+    assert_eq!(items[0].bytes_received, 1024);
+
+    let resp = client
+        .get(format!(
+            "http://{addr}/api/traffic/connections?proxy_id={proxy_id}"
+        ))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let items: Vec<ActiveConnectionInfo> = resp.json().await?;
+    assert_eq!(items.len(), 1);
+
+    assert!(!*cancel_rx.borrow());
+    let del_resp = client
+        .delete(format!("http://{addr}/api/traffic/connections/{conn_id}"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(del_resp.status(), StatusCode::OK);
+    assert!(*cancel_rx.borrow());
+
+    drop(guard);
+    let not_found_resp = client
+        .delete(format!("http://{addr}/api/traffic/connections/{conn_id}"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(not_found_resp.status(), StatusCode::NOT_FOUND);
+
+    Ok(())
 }

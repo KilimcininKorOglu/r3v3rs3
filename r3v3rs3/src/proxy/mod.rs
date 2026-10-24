@@ -21,6 +21,7 @@ use tokio_rustls::rustls::ServerConfig;
 use tracing::{Instrument, Span, error};
 
 pub mod access_log;
+pub mod connection_tracker;
 pub mod dns;
 pub mod geoip;
 pub mod health;

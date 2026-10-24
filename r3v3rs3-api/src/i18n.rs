@@ -396,6 +396,9 @@ mod tests {
             Error::CompressionDictionaryNotFound {
                 id: "dict".parse().unwrap(),
             },
+            Error::ConnectionNotFound {
+                id: "conn".parse().unwrap(),
+            },
         ]
     }
 

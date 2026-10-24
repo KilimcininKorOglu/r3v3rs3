@@ -2050,3 +2050,43 @@ The traffic endpoints are protected by session authentication and respect multi-
 - `GET /api/traffic/geo`: Aggregates real-time geographic distribution of access traffic, returning the total count of resolved requests, top 10 ranked countries (`country`, `count`, `percentage`), and the full ISO country code count mapping.
 - `GET /api/traffic/{id}`: Retrieves full inspection details for a specific access log entry by ID, including captured request and response headers, payload, content type, and WebSocket flags.
 - `POST /api/traffic/replay`: Replays an HTTP or WebSocket handshake request against a specified target URL with custom headers, body, and timeout (clamped between 500ms and 30s), returning the status code, latency, error details, and response body.
+
+## Live Connection Inspector & Stream Management Console
+
+In addition to short-lived request logs, r3v3rs3 tracks active long-lived connections and streams in real time across reverse proxies:
+- **Protocols Tracked**: WebSocket connections, HTTP Upgrades, Server-Sent Events (SSE), and raw TCP proxy sessions.
+- **Real-Time Telemetry**: Tracks client address, target upstream, active uptime, bytes sent, bytes received, and instantaneous transfer rate (bytes per second).
+- **Graceful Termination**: Terminate runaway or rogue connections immediately via WebUI, CLI, or MCP. WebSocket streams receive clean closure frames and TCP sockets are closed gracefully.
+
+### WebUI
+
+The Live Traffic dashboard at `/traffic` includes a dedicated **Active Connections** tab:
+- Displays active streams with color-coded protocol badges (purple for WebSocket, blue for TCP, emerald for SSE, indigo for HTTP Upgrade).
+- Live metrics table with connection ID, client address, upstream target, uptime, bytes transferred, and speed.
+- Single-click connection termination via the red delete action button with SweetAlert2 confirmation dialog.
+
+### CLI
+
+Manage long-lived connections from the terminal with full parity:
+
+```bash
+# List all active long-lived connections
+r3 traffic connections list
+
+# Filter active connections by proxy ID
+r3 traffic connections list --proxy prx_01j7xyz
+
+# Terminate an active connection by ID
+r3 traffic connections close con_01j7xyz
+```
+
+### Model Context Protocol (MCP)
+
+AI agents can inspect and manage active connections autonomously via MCP tools:
+- `list_active_connections`: Lists all active long-lived connections and streams with protocol, client IP, target, duration, transferred bytes, and throughput rate. Supports optional `proxy_id` filter.
+- `terminate_active_connection`: Immediately terminates an active connection by its unique ID. Requires the `edit` permission.
+
+### Admin API
+
+- `GET /api/traffic/connections`: Returns the list of active long-lived connections (optional query parameter `proxy_id`).
+- `DELETE /api/traffic/connections/{id}`: Terminates an active connection by its unique ID and creates an audit log record.

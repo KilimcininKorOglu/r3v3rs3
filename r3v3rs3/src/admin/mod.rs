@@ -626,7 +626,9 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(traffic::live))
                 .routes(routes!(traffic::geo))
                 .routes(routes!(traffic::replay))
-                .routes(routes!(traffic::get_entry)),
+                .routes(routes!(traffic::get_entry))
+                .routes(routes!(traffic::list_connections))
+                .routes(routes!(traffic::terminate_connection)),
         )
         .nest(
             "/grpc",
