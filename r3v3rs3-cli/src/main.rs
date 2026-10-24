@@ -133,6 +133,34 @@ pub enum ProxyCommand {
         #[arg(short, long)]
         path: Option<String>,
     },
+    /// Manages pre-shared compression dictionaries (RFC 9651 / RFC 9652) of an HTTP proxy.
+    #[command(subcommand)]
+    Dictionary(ProxyDictionaryCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProxyDictionaryCommand {
+    /// Lists all compression dictionaries of a proxy.
+    #[command(alias = "ls")]
+    List { proxy_id: String },
+    /// Shows a compression dictionary by proxy id and dictionary id.
+    Get { proxy_id: String, dict_id: String },
+    /// Adds a compression dictionary to an HTTP proxy.
+    Add {
+        proxy_id: String,
+        #[arg(short, long)]
+        name: String,
+        #[arg(short, long)]
+        match_pattern: String,
+        #[arg(short, long)]
+        path: String,
+        /// Raw dictionary data or @file path.
+        #[arg(short, long)]
+        data: String,
+    },
+    /// Deletes a compression dictionary from a proxy.
+    #[command(alias = "rm")]
+    Delete { proxy_id: String, dict_id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -712,6 +740,27 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
         ProxyCommand::Status { id } => api.proxy_status(&id).await,
         ProxyCommand::Delete { id } => api.delete_proxy(&id).await,
         ProxyCommand::PurgeCache { id, path } => api.purge_cache(&id, path.as_deref()).await,
+        ProxyCommand::Dictionary(dict_cmd) => match dict_cmd {
+            ProxyDictionaryCommand::List { proxy_id } => {
+                api.list_proxy_dictionaries(&proxy_id).await
+            }
+            ProxyDictionaryCommand::Get { proxy_id, dict_id } => {
+                api.get_proxy_dictionary(&proxy_id, &dict_id).await
+            }
+            ProxyDictionaryCommand::Add {
+                proxy_id,
+                name,
+                match_pattern,
+                path,
+                data,
+            } => {
+                api.add_proxy_dictionary(&proxy_id, &name, &match_pattern, &path, &data)
+                    .await
+            }
+            ProxyDictionaryCommand::Delete { proxy_id, dict_id } => {
+                api.delete_proxy_dictionary(&proxy_id, &dict_id).await
+            }
+        },
     }
 }
 

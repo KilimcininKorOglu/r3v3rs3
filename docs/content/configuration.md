@@ -1036,15 +1036,25 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 
 You can compress proxied responses in the "Compression" section. Select one or more encodings to enable compression. Select no encoding to disable compression.
 
-| Encoding  | `Content-Encoding` | Default Level | Adaptive Levels (< 8 KB / 8–64 KB / > 64 KB or Stream) |
-|-----------|--------------------|---------------|--------------------------------------------------------|
-| Brotli    | `br`               | Quality 4     | Quality 5 / Quality 4 / Quality 3                      |
-| Zstandard | `zstd`             | Level 3       | Level 4 / Level 3 / Level 1 (Fastest)                  |
-| Gzip      | `gzip`             | Level 6       | Level 9 (Best) / Level 6 / Level 1 (Fastest)           |
+| Encoding             | `Content-Encoding` | Default Level | Adaptive Levels (< 8 KB / 8–64 KB / > 64 KB or Stream) |
+|----------------------|--------------------|---------------|--------------------------------------------------------|
+| Brotli               | `br`               | Quality 4     | Quality 5 / Quality 4 / Quality 3                      |
+| Zstandard            | `zstd`             | Level 3       | Level 4 / Level 3 / Level 1 (Fastest)                  |
+| Gzip                 | `gzip`             | Level 6       | Level 9 (Best) / Level 6 / Level 1 (Fastest)           |
+| Zstandard Dictionary | `dcz`              | Level 3       | Level 4 / Level 3 / Level 1 (Fastest)                  |
+| Brotli Dictionary    | `dcb`              | Quality 4     | Quality 5 / Quality 4 / Quality 3                      |
 
 r3v3rs3 reads the `Accept-Encoding` header of the request and uses the accepted encoding with the highest `q` value. When the client accepts several encodings with the same `q` value, r3v3rs3 uses the order of `algorithms`. In the panel, the order in which you select the encodings sets this order.
 
 When `adaptive_level` is enabled (default `true`), r3v3rs3 tunes compression quality based on response size: small responses (< 8 KB) receive higher compression ratios where CPU cost is negligible, while large or streamed responses use maximum throughput levels to prevent worker thread saturation. In addition, the minimum size threshold is dynamically lowered to 256 bytes for text, JSON, and SVG payloads.
+
+### Shared Compression Dictionaries (RFC 9651 / RFC 9652)
+
+r3v3rs3 supports Compression Dictionary Transport (RFC 9651 Structured Fields and RFC 9652) for Chromium and compatible modern HTTP clients:
+- **Serving Dictionaries**: Dictionaries configured on an HTTP proxy are directly served by r3v3rs3 at their configured `path` with `Content-Type: application/octet-stream`, `Use-As-Dictionary: match="<match_pattern>", id="<id>"`, `Cache-Control: public, max-age=31536000, immutable`, and `ETag: "<sha256>"`.
+- **Content Negotiation & Encoding**: When an incoming request includes `Available-Dictionary` (or `Sec-Available-Dictionary`) matching a configured dictionary's SHA-256 hash and path, and the client accepts `dcz` or `dcb`, r3v3rs3 compresses the response against the dictionary. The response carries `Content-Encoding: dcz` (or `dcb`), `Content-Dictionary: :<sha256>:`, and `Vary: Available-Dictionary, Accept-Encoding`.
+- **Bandwidth Reduction**: By eliminating static JSON schemas, recurring object keys, and repetitive HTML wrappers, shared dictionary compression delivers 80% to 95% bandwidth savings on recurring API traffic.
+- **Management**: Compression dictionaries can be added, inspected, and removed via the WebUI Proxy Configuration page, MCP tools (`list_compression_dictionaries`, `get_compression_dictionary`, `add_compression_dictionary`, `delete_compression_dictionary`), or the CLI (`r3 proxy dictionary list/get/add/delete`).
 
 r3v3rs3 compresses a response only when all of these conditions are true:
 

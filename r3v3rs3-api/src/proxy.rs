@@ -110,6 +110,7 @@ fn validate_http_upstream(http: &HttpProxy) -> Result<(), Error> {
     http.sticky.validate()?;
     http.redirects.iter().try_for_each(RedirectRule::validate)?;
     http.maintenance.validate()?;
+    http.compression.validate()?;
     http.error_pages
         .iter()
         .try_for_each(CustomErrorPage::validate)?;

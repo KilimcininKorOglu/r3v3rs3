@@ -1,6 +1,7 @@
 use anyhow::{Context, bail};
+use rand::distr::SampleString;
 use reqwest::Method;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub struct ApiClient {
     pub client: reqwest::Client,
@@ -214,6 +215,138 @@ impl ApiClient {
         self.request(Method::DELETE, &url, None).await?;
         println!("proxy/{id} cache purged");
         Ok(())
+    }
+
+    pub async fn list_proxy_dictionaries(&self, proxy_id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, &format!("/api/proxies/{proxy_id}"), None)
+            .await?;
+        let dicts = res
+            .pointer("/proxy/compression/dictionaries")
+            .and_then(|v| v.as_array());
+        let Some(arr) = dicts else {
+            println!("No compression dictionaries found for proxy {proxy_id}");
+            return Ok(());
+        };
+        if arr.is_empty() {
+            println!("No compression dictionaries configured for proxy {proxy_id}");
+            return Ok(());
+        }
+        println!(
+            "{:<26} {:<20} {:<15} {:<30} HASH",
+            "ID", "NAME", "MATCH", "PATH"
+        );
+        println!(
+            "{:-<26} {:-<20} {:-<15} {:-<30} {:-<30}",
+            "", "", "", "", ""
+        );
+        for item in arr {
+            let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+            let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
+            let match_pat = item
+                .get("match_pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let path = item.get("path").and_then(|v| v.as_str()).unwrap_or("-");
+            let hash = item
+                .get("sha256_sf")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            println!(
+                "{:<26} {:<20} {:<15} {:<30} {}",
+                id, name, match_pat, path, hash
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn get_proxy_dictionary(&self, proxy_id: &str, dict_id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, &format!("/api/proxies/{proxy_id}"), None)
+            .await?;
+        let dict = res
+            .pointer("/proxy/compression/dictionaries")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|d| d.get("id").and_then(|id| id.as_str()) == Some(dict_id))
+            });
+        let Some(d) = dict else {
+            bail!("Dictionary {dict_id} not found in proxy {proxy_id}");
+        };
+        print_json(d)
+    }
+
+    pub async fn add_proxy_dictionary(
+        &self,
+        proxy_id: &str,
+        name: &str,
+        match_pattern: &str,
+        path: &str,
+        data: &str,
+    ) -> anyhow::Result<()> {
+        let raw_data = if let Some(file_path) = data.strip_prefix('@') {
+            std::fs::read_to_string(file_path)
+                .with_context(|| format!("failed to read dictionary file from {file_path}"))?
+        } else {
+            data.to_string()
+        };
+        let mut res = self
+            .request(Method::GET, &format!("/api/proxies/{proxy_id}"), None)
+            .await?;
+        let dict_id = rand::distr::Alphanumeric
+            .sample_string(&mut rand::rng(), 24)
+            .to_ascii_lowercase();
+        let dict = json!({
+            "id": dict_id,
+            "name": name,
+            "match_pattern": match_pattern,
+            "path": path,
+            "raw_data": raw_data,
+        });
+        let Some(proxy) = res.get_mut("proxy") else {
+            bail!("Invalid proxy response from server");
+        };
+        if proxy.get("compression").is_none() {
+            proxy["compression"] = json!({});
+        }
+        if proxy["compression"].get("dictionaries").is_none() {
+            proxy["compression"]["dictionaries"] = json!([]);
+        }
+        if let Some(arr) = proxy["compression"]["dictionaries"].as_array_mut() {
+            arr.push(dict);
+        }
+        let updated = self
+            .request(Method::PUT, &format!("/api/proxies/{proxy_id}"), Some(&res))
+            .await?;
+        println!("Compression dictionary added to proxy {proxy_id}");
+        print_json(&updated)
+    }
+
+    pub async fn delete_proxy_dictionary(
+        &self,
+        proxy_id: &str,
+        dict_id: &str,
+    ) -> anyhow::Result<()> {
+        let mut res = self
+            .request(Method::GET, &format!("/api/proxies/{proxy_id}"), None)
+            .await?;
+        let Some(arr) = res
+            .pointer_mut("/proxy/compression/dictionaries")
+            .and_then(|v| v.as_array_mut())
+        else {
+            bail!("No compression dictionaries found in proxy {proxy_id}");
+        };
+        let initial_len = arr.len();
+        arr.retain(|d| d.get("id").and_then(|id| id.as_str()) != Some(dict_id));
+        if arr.len() == initial_len {
+            bail!("Dictionary {dict_id} not found in proxy {proxy_id}");
+        }
+        let updated = self
+            .request(Method::PUT, &format!("/api/proxies/{proxy_id}"), Some(&res))
+            .await?;
+        println!("Compression dictionary {dict_id} deleted from proxy {proxy_id}");
+        print_json(&updated)
     }
 
     // --- Certificate operations ---

@@ -1,3 +1,4 @@
+use crate::compression_dictionary::CompressionDictionary;
 use crate::error::Error;
 use crate::policy::is_header_name;
 use serde_default::DefaultFromSerde;
@@ -26,6 +27,10 @@ pub struct Compression {
     /// Serve pre-compressed static assets (.br, .zst, .gz) directly without CPU overhead.
     #[serde(default = "default_precompressed")]
     pub precompressed: bool,
+
+    /// Pre-shared compression dictionaries (RFC 9651 / RFC 9652) served and used by this proxy.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dictionaries: Vec<CompressionDictionary>,
 }
 
 pub const DEFAULT_MIN_SIZE: u64 = 1024;
@@ -77,6 +82,9 @@ impl Compression {
                 });
             }
         }
+        self.dictionaries
+            .iter()
+            .try_for_each(CompressionDictionary::validate)?;
         match self.mime_types.iter().find(|mime| !is_mime_pattern(mime)) {
             Some(mime) => Err(Error::InvalidMimeType { mime: mime.clone() }),
             None => Ok(()),
@@ -184,10 +192,15 @@ pub enum CompressionAlgorithm {
     Zstd,
     #[serde(rename = "gzip")]
     Gzip,
+    #[serde(rename = "dcb")]
+    Dcb,
+    #[serde(rename = "dcz")]
+    Dcz,
 }
 
 impl CompressionAlgorithm {
-    pub const ALL: [CompressionAlgorithm; 3] = [Self::Brotli, Self::Zstd, Self::Gzip];
+    pub const ALL: [CompressionAlgorithm; 5] =
+        [Self::Brotli, Self::Zstd, Self::Gzip, Self::Dcb, Self::Dcz];
 
     /// The content coding name in `Accept-Encoding` and `Content-Encoding`.
     pub fn as_str(self) -> &'static str {
@@ -195,6 +208,8 @@ impl CompressionAlgorithm {
             Self::Brotli => "br",
             Self::Zstd => "zstd",
             Self::Gzip => "gzip",
+            Self::Dcb => "dcb",
+            Self::Dcz => "dcz",
         }
     }
 
@@ -203,6 +218,8 @@ impl CompressionAlgorithm {
             Self::Brotli => "Brotli",
             Self::Zstd => "Zstandard",
             Self::Gzip => "Gzip",
+            Self::Dcb => "Brotli Dictionary (dcb)",
+            Self::Dcz => "Zstandard Dictionary (dcz)",
         }
     }
 }

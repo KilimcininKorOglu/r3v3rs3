@@ -531,6 +531,15 @@ pub enum Error {
         #[schema(value_type = String)]
         id: ShortId,
     },
+
+    #[error("invalid compression dictionary: {reason}")]
+    InvalidCompressionDictionary { reason: String },
+
+    #[error("compression dictionary not found: {id}")]
+    CompressionDictionaryNotFound {
+        #[schema(value_type = String)]
+        id: ShortId,
+    },
 }
 
 impl Error {
@@ -544,7 +553,8 @@ impl Error {
             | Self::BackupNotFound { .. }
             | Self::ScheduledCommandNotFound { .. }
             | Self::WebhookNotFound { .. }
-            | Self::ErrorPageThemeNotFound { .. } => 404,
+            | Self::ErrorPageThemeNotFound { .. }
+            | Self::CompressionDictionaryNotFound { .. } => 404,
             Self::Unauthorized => 401,
             Self::Forbidden
             | Self::ProxyReadOnly { .. }

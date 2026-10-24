@@ -388,6 +388,10 @@ mod tests {
             Error::ErrorPageThemeInUse {
                 id: "theme".parse().unwrap(),
             },
+            Error::InvalidCompressionDictionary { reason: text() },
+            Error::CompressionDictionaryNotFound {
+                id: "dict".parse().unwrap(),
+            },
         ]
     }
 

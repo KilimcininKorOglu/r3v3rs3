@@ -12,6 +12,7 @@ pub mod cidr;
 pub mod client_ip;
 pub mod compose_graph;
 pub mod compression;
+pub mod compression_dictionary;
 pub mod config_backup;
 pub mod container;
 pub mod dashboard;

@@ -10,11 +10,12 @@ use hyper::{
     body::Frame,
     header::{
         ACCEPT_ENCODING, ACCEPT_RANGES, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH,
-        CONTENT_RANGE, CONTENT_TYPE, ETAG, VARY,
+        CONTENT_RANGE, CONTENT_TYPE, ETAG, HeaderName, VARY,
     },
     http::HeaderValue,
 };
 use r3v3rs3_api::compression::{Compression, CompressionAlgorithm, smart_min_size_for_mime};
+use r3v3rs3_api::compression_dictionary::CompressionDictionary;
 use std::{io, pin::Pin, sync::Arc};
 use tokio::io::AsyncRead;
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -22,20 +23,26 @@ use tokio_util::io::{ReaderStream, StreamReader};
 /// Brotli quality 11, the library default, is too slow for streamed responses.
 const BROTLI_QUALITY: i32 = 4;
 
+const AVAILABLE_DICTIONARY: HeaderName = HeaderName::from_static("available-dictionary");
+const SEC_AVAILABLE_DICTIONARY: HeaderName = HeaderName::from_static("sec-available-dictionary");
+const CONTENT_DICTIONARY: HeaderName = HeaderName::from_static("content-dictionary");
+
 /// The compression settings of a route and the encoding that the client accepts.
 #[derive(Debug)]
 pub struct ResponseCompression {
     config: Arc<Compression>,
     algorithm: Option<CompressionAlgorithm>,
+    matched_dictionary: Option<Arc<CompressionDictionary>>,
     head: bool,
 }
 
 impl ResponseCompression {
-    pub fn new(config: Arc<Compression>, method: &Method, headers: &HeaderMap) -> Self {
-        let algorithm = negotiate(&config.algorithms, headers);
+    pub fn new(config: Arc<Compression>, method: &Method, path: &str, headers: &HeaderMap) -> Self {
+        let (algorithm, matched_dictionary) = match_dictionary_or_standard(&config, path, headers);
         Self {
             config,
             algorithm,
+            matched_dictionary,
             head: method == Method::HEAD,
         }
     }
@@ -47,16 +54,85 @@ impl ResponseCompression {
         if !is_compressible(&self.config, res.status(), res.headers()) {
             return res;
         }
-        append_vary(res.headers_mut());
+        append_vary(res.headers_mut(), self.matched_dictionary.is_some());
         let Some(algorithm) = self.algorithm else {
             return res;
         };
         let level = resolve_level(&self.config, algorithm, res.headers());
-        set_encoded_headers(res.headers_mut(), algorithm);
+        set_encoded_headers(
+            res.headers_mut(),
+            algorithm,
+            self.matched_dictionary.as_deref(),
+        );
         if self.head {
             return res;
         }
-        res.map(|body| encode_body(body, algorithm, level))
+        if let Some(ref dict) = self.matched_dictionary {
+            let is_brotli = algorithm == CompressionAlgorithm::Dcb;
+            let lvl = level_to_i32(level, is_brotli);
+            res.map(|body| encode_dictionary_body(body, algorithm, dict.clone(), lvl))
+        } else {
+            res.map(|body| encode_body(body, algorithm, level))
+        }
+    }
+}
+
+fn match_dictionary_or_standard(
+    config: &Compression,
+    path: &str,
+    headers: &HeaderMap,
+) -> (
+    Option<CompressionAlgorithm>,
+    Option<Arc<CompressionDictionary>>,
+) {
+    if !config.dictionaries.is_empty()
+        && let Some((dict, algo)) = negotiate_dictionary(config, path, headers)
+    {
+        return (Some(algo), Some(dict));
+    }
+    (negotiate(&config.algorithms, headers), None)
+}
+
+fn client_available_dictionary(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(AVAILABLE_DICTIONARY)
+        .or_else(|| headers.get(SEC_AVAILABLE_DICTIONARY))
+        .and_then(|val| val.to_str().ok())
+        .map(str::trim)
+}
+
+fn negotiate_dictionary(
+    config: &Compression,
+    path: &str,
+    headers: &HeaderMap,
+) -> Option<(Arc<CompressionDictionary>, CompressionAlgorithm)> {
+    let client_hash = client_available_dictionary(headers)?;
+    let clean_client_hash = client_hash.trim_matches(':');
+    let dict = config.dictionaries.iter().find(|d| {
+        let dict_hash = if d.sha256_sf.is_empty() {
+            CompressionDictionary::calculate_sha256_sf(d.raw_data.as_bytes())
+        } else {
+            d.sha256_sf.clone()
+        };
+        d.matches_path(path) && dict_hash.trim_matches(':') == clean_client_hash
+    })?;
+
+    let accepted = accepted_codings(headers);
+    let q_dcz = accepted
+        .iter()
+        .find(|(name, _)| name == "dcz")
+        .map_or(0, |(_, q)| *q);
+    let q_dcb = accepted
+        .iter()
+        .find(|(name, _)| name == "dcb")
+        .map_or(0, |(_, q)| *q);
+
+    if q_dcz > 0 && q_dcz >= q_dcb {
+        Some((Arc::new(dict.clone()), CompressionAlgorithm::Dcz))
+    } else if q_dcb > 0 {
+        Some((Arc::new(dict.clone()), CompressionAlgorithm::Dcb))
+    } else {
+        None
     }
 }
 
@@ -217,8 +293,8 @@ fn adaptive_zstd_level(tier: PayloadTier) -> Level {
 fn default_level(algorithm: CompressionAlgorithm) -> Level {
     match algorithm {
         CompressionAlgorithm::Gzip => Level::Default,
-        CompressionAlgorithm::Brotli => Level::Precise(BROTLI_QUALITY),
-        CompressionAlgorithm::Zstd => Level::Default,
+        CompressionAlgorithm::Brotli | CompressionAlgorithm::Dcb => Level::Precise(BROTLI_QUALITY),
+        CompressionAlgorithm::Zstd | CompressionAlgorithm::Dcz => Level::Default,
     }
 }
 
@@ -233,8 +309,26 @@ fn resolve_level(
     let tier = classify_payload(header_number(headers, CONTENT_LENGTH));
     match algorithm {
         CompressionAlgorithm::Gzip => adaptive_gzip_level(tier),
-        CompressionAlgorithm::Brotli => adaptive_brotli_level(tier),
-        CompressionAlgorithm::Zstd => adaptive_zstd_level(tier),
+        CompressionAlgorithm::Brotli | CompressionAlgorithm::Dcb => adaptive_brotli_level(tier),
+        CompressionAlgorithm::Zstd | CompressionAlgorithm::Dcz => adaptive_zstd_level(tier),
+    }
+}
+
+fn level_to_i32(level: Level, is_brotli: bool) -> i32 {
+    match level {
+        Level::Fastest => 1,
+        Level::Default if is_brotli => BROTLI_QUALITY,
+        Level::Default => 3,
+        Level::Best if is_brotli => 6,
+        Level::Best => 7,
+        Level::Precise(p) => p,
+        _ => {
+            if is_brotli {
+                BROTLI_QUALITY
+            } else {
+                3
+            }
+        }
     }
 }
 
@@ -259,21 +353,42 @@ pub(super) fn header_items(
         .map(str::trim)
 }
 
-fn append_vary(headers: &mut HeaderMap) {
-    let listed = header_items(headers, VARY)
+fn append_vary(headers: &mut HeaderMap, has_dictionary: bool) {
+    let vary_accept = header_items(headers, VARY)
         .any(|name| name == "*" || name.eq_ignore_ascii_case("accept-encoding"));
-    if !listed {
+    if !vary_accept {
         headers.append(VARY, HeaderValue::from_static("Accept-Encoding"));
+    }
+    if has_dictionary {
+        let vary_dict = header_items(headers, VARY)
+            .any(|name| name == "*" || name.eq_ignore_ascii_case("available-dictionary"));
+        if !vary_dict {
+            headers.append(VARY, HeaderValue::from_static("Available-Dictionary"));
+        }
     }
 }
 
-fn set_encoded_headers(headers: &mut HeaderMap, algorithm: CompressionAlgorithm) {
+fn set_encoded_headers(
+    headers: &mut HeaderMap,
+    algorithm: CompressionAlgorithm,
+    dict: Option<&CompressionDictionary>,
+) {
     headers.remove(CONTENT_LENGTH);
     headers.remove(ACCEPT_RANGES);
     headers.insert(
         CONTENT_ENCODING,
         HeaderValue::from_static(algorithm.as_str()),
     );
+    if let Some(d) = dict {
+        let hash_sf = if d.sha256_sf.is_empty() {
+            CompressionDictionary::calculate_sha256_sf(d.raw_data.as_bytes())
+        } else {
+            d.sha256_sf.clone()
+        };
+        if let Ok(val) = HeaderValue::from_str(&hash_sf) {
+            headers.insert(CONTENT_DICTIONARY, val);
+        }
+    }
     weaken_etag(headers);
 }
 
@@ -301,11 +416,84 @@ fn encode_body(
         CompressionAlgorithm::Gzip => Box::pin(GzipEncoder::with_quality(reader, level)),
         CompressionAlgorithm::Brotli => Box::pin(BrotliEncoder::with_quality(reader, level)),
         CompressionAlgorithm::Zstd => Box::pin(ZstdEncoder::with_quality(reader, level)),
+        CompressionAlgorithm::Dcb | CompressionAlgorithm::Dcz => {
+            Box::pin(ZstdEncoder::with_quality(reader, level))
+        }
     };
     let frames = ReaderStream::new(encoder)
         .map_ok(Frame::data)
         .map_err(anyhow::Error::from);
     BoxBody::new(StreamBody::new(frames))
+}
+
+fn compress_zstd_with_dict(
+    input: &[u8],
+    dict: &[u8],
+    level: i32,
+) -> Result<Vec<u8>, anyhow::Error> {
+    let mut compressor = zstd::bulk::Compressor::with_dictionary(level, dict)
+        .map_err(|e| anyhow::anyhow!("zstd dict init failed: {e}"))?;
+    compressor
+        .compress(input)
+        .map_err(|e| anyhow::anyhow!("zstd dict compression failed: {e}"))
+}
+
+fn compress_brotli_with_dict(
+    input: &[u8],
+    dict: &[u8],
+    quality: i32,
+) -> Result<Vec<u8>, anyhow::Error> {
+    let mut output = Vec::new();
+    let mut input_slice = input;
+    let mut input_buf = vec![0u8; 4096];
+    let mut output_buf = vec![0u8; 4096];
+    let params = brotli::enc::BrotliEncoderParams {
+        quality,
+        ..Default::default()
+    };
+    let alloc = brotli::enc::StandardAlloc::default();
+    let mut noop = |_context: &mut brotli::enc::interface::PredictionModeContextMap<
+        brotli::enc::interface::InputReferenceMut,
+    >,
+                    _commands: &mut [brotli::enc::interface::StaticCommand],
+                    _input_pair: brotli::enc::interface::InputPair,
+                    _alloc: &mut brotli::enc::StandardAlloc| {};
+    brotli::BrotliCompressCustomIoCustomDict(
+        &mut brotli::IoReaderWrapper(&mut input_slice),
+        &mut brotli::IoWriterWrapper(&mut output),
+        &mut input_buf[..],
+        &mut output_buf[..],
+        &params,
+        alloc,
+        &mut noop,
+        dict,
+        std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Unexpected EOF"),
+    )
+    .map_err(|e| anyhow::anyhow!("brotli dict compression failed: {e:?}"))?;
+    Ok(output)
+}
+
+fn encode_dictionary_body(
+    body: BoxBody<Bytes, anyhow::Error>,
+    algorithm: CompressionAlgorithm,
+    dict: Arc<CompressionDictionary>,
+    level: i32,
+) -> BoxBody<Bytes, anyhow::Error> {
+    let stream = futures::stream::once(async move {
+        let collected = body.collect().await?;
+        let raw_bytes = collected.to_bytes();
+        let compressed = match algorithm {
+            CompressionAlgorithm::Dcz => {
+                compress_zstd_with_dict(&raw_bytes, dict.raw_data.as_bytes(), level)?
+            }
+            CompressionAlgorithm::Dcb => {
+                compress_brotli_with_dict(&raw_bytes, dict.raw_data.as_bytes(), level)?
+            }
+            _ => raw_bytes.to_vec(),
+        };
+        Ok(Frame::data(Bytes::from(compressed)))
+    });
+    BoxBody::new(StreamBody::new(stream))
 }
 
 #[cfg(test)]
@@ -394,6 +582,7 @@ mod tests {
         let compression = ResponseCompression::new(
             config(),
             &Method::GET,
+            "/",
             &headers(&[("accept-encoding", "gzip")]),
         );
         let res = compression.apply(response(
@@ -426,13 +615,73 @@ mod tests {
 
     #[test]
     fn unsupported_client_gets_vary_only() {
-        let compression = ResponseCompression::new(config(), &Method::GET, &HeaderMap::new());
+        let compression = ResponseCompression::new(config(), &Method::GET, "/", &HeaderMap::new());
         let res = compression.apply(response(
             "plain text body",
             &[("content-type", "text/plain")],
         ));
         assert!(!res.headers().contains_key(CONTENT_ENCODING));
         assert_eq!(res.headers()[VARY], "Accept-Encoding");
+    }
+
+    #[tokio::test]
+    async fn dictionary_response_is_encoded_dcz() {
+        let dict_data = "{\"schema\":\"v1\",\"users\":[".to_string();
+        let mut dict = CompressionDictionary {
+            id: r3v3rs3_api::id::ShortId::new(),
+            name: "Users Schema".to_string(),
+            match_pattern: "/api/*".to_string(),
+            path: "/.well-known/dict/users.dict".to_string(),
+            raw_data: dict_data.clone(),
+            sha256_sf: String::new(),
+        };
+        dict.ensure_hash();
+        let dict_hash = dict.sha256_sf.clone();
+
+        let cfg = Arc::new(Compression {
+            algorithms: vec![CompressionAlgorithm::Zstd, CompressionAlgorithm::Gzip],
+            dictionaries: vec![dict],
+            min_size: 10,
+            ..Default::default()
+        });
+
+        let body =
+            format!("{dict_data}{{\"id\":1,\"name\":\"Alice\"}},{{\"id\":2,\"name\":\"Bob\"}}]}}");
+        let compression = ResponseCompression::new(
+            cfg,
+            &Method::GET,
+            "/api/users",
+            &headers(&[
+                ("accept-encoding", "dcz, zstd, gzip"),
+                ("available-dictionary", &dict_hash),
+            ]),
+        );
+        let res = compression.apply(response(
+            &body,
+            &[
+                ("content-type", "application/json"),
+                ("content-length", &body.len().to_string()),
+                ("etag", "\"v1\""),
+            ],
+        ));
+
+        let headers = res.headers();
+        assert_eq!(headers[CONTENT_ENCODING], "dcz");
+        assert_eq!(headers[CONTENT_DICTIONARY], dict_hash);
+        assert_eq!(headers[ETAG], "W/\"v1\"");
+        let vary_items = headers
+            .get_all(VARY)
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(vary_items.contains(&"Accept-Encoding"));
+        assert!(vary_items.contains(&"Available-Dictionary"));
+
+        let encoded = res.into_body().collect().await.unwrap().to_bytes();
+        let mut decompressor =
+            zstd::bulk::Decompressor::with_dictionary(dict_data.as_bytes()).unwrap();
+        let decompressed = decompressor.decompress(&encoded, 10 * 1024).unwrap();
+        assert_eq!(String::from_utf8(decompressed).unwrap(), body);
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use super::action_button::{ActionIconButton, ActionVariant};
 use super::auth_config::{AuthConfig, AuthForm};
 use super::domain_ssl_status::DomainCertCoverage;
 use super::error_pages_editor::ErrorPagesEditor;
@@ -15,6 +16,7 @@ use r3v3rs3_api::client_ip::ClientIpConfig;
 use r3v3rs3_api::compression::{
     Compression, CompressionAlgorithm, format_mime_list, parse_mime_list,
 };
+use r3v3rs3_api::compression_dictionary::CompressionDictionary;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::error_page_theme::ErrorPageTheme;
 use r3v3rs3_api::fixed_response::{FIXED_STATUSES, FixedRedirect, FixedResponse, FixedStatus};
@@ -421,6 +423,12 @@ struct CompressionForm {
     mime_types: String,
     adaptive_level: bool,
     precompressed: bool,
+    dictionaries: Vec<CompressionDictionary>,
+    new_dict_name: String,
+    new_dict_match: String,
+    new_dict_path: String,
+    new_dict_data: String,
+    show_add_dict: bool,
 }
 
 impl CompressionForm {
@@ -431,6 +439,12 @@ impl CompressionForm {
             mime_types: format_mime_list(&compression.mime_types),
             adaptive_level: compression.adaptive_level,
             precompressed: compression.precompressed,
+            dictionaries: compression.dictionaries.clone(),
+            new_dict_name: String::new(),
+            new_dict_match: "/api/*".to_string(),
+            new_dict_path: "/.well-known/dict/api.dict".to_string(),
+            new_dict_data: String::new(),
+            show_add_dict: false,
         }
     }
 }
@@ -1650,6 +1664,7 @@ fn header_rules_view(
 }
 
 fn compression_view(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
+    let dicts = form.compression.dictionaries.clone();
     html! {
         <>
             <div class="flex flex-wrap gap-x-6">
@@ -1684,7 +1699,177 @@ fn compression_view(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
                     <input type="text" autocapitalize="off" placeholder="text/*, application/json" value={form.compression.mime_types.clone()} onchange={state_input(form, text, |form, value| form.compression.mime_types = value)} class={INPUT_CLASS} />
                 </div>
             </div>
+
+            <div class="mt-6 border-t border-neutral-200 dark:border-neutral-700 pt-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h4 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                            {locale.t("http_form.compression_dictionaries")}
+                        </h4>
+                        <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                            {locale.t("http_form.compression_dictionaries_hint")}
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        onclick={
+                            let form = form.clone();
+                            Callback::from(move |_| {
+                                let mut next = (*form).clone();
+                                next.compression.show_add_dict = !next.compression.show_add_dict;
+                                form.set(next);
+                            })
+                        }
+                        class="text-xs px-3 py-1.5 rounded bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-700 dark:hover:bg-neutral-600 text-neutral-800 dark:text-neutral-200 font-medium transition"
+                    >
+                        {if form.compression.show_add_dict {
+                            locale.t("dialog.cancel")
+                        } else {
+                            locale.t("http_form.add_dictionary")
+                        }}
+                    </button>
+                </div>
+
+                if form.compression.show_add_dict {
+                    { add_dictionary_card(locale, form) }
+                }
+
+                if !dicts.is_empty() {
+                    <div class="overflow-x-auto rounded border border-neutral-200 dark:border-neutral-700">
+                        <table class="w-full text-xs text-left">
+                            <thead class="bg-neutral-50 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-700">
+                                <tr>
+                                    <th class="px-3 py-2 font-medium">{locale.t("http_form.dictionary_name")}</th>
+                                    <th class="px-3 py-2 font-medium">{locale.t("http_form.dictionary_match")}</th>
+                                    <th class="px-3 py-2 font-medium">{locale.t("http_form.dictionary_path")}</th>
+                                    <th class="px-3 py-2 font-medium">{"SHA-256"}</th>
+                                    <th class="px-3 py-2 text-right font-medium">{locale.t("common.delete")}</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-neutral-200 dark:divide-neutral-700">
+                                { for dicts.into_iter().enumerate().map(|(idx, dict)| {
+                                    let on_delete = {
+                                        let form = form.clone();
+                                        Callback::from(move |_| {
+                                            let mut next = (*form).clone();
+                                            if idx < next.compression.dictionaries.len() {
+                                                next.compression.dictionaries.remove(idx);
+                                                form.set(next);
+                                            }
+                                        })
+                                    };
+                                    html! {
+                                        <tr class="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/50">
+                                            <td class="px-3 py-2 font-medium text-neutral-900 dark:text-neutral-100">{dict.name}</td>
+                                            <td class="px-3 py-2 font-mono text-neutral-600 dark:text-neutral-300">{dict.match_pattern}</td>
+                                            <td class="px-3 py-2 font-mono text-neutral-600 dark:text-neutral-300">{dict.path}</td>
+                                            <td class="px-3 py-2 font-mono text-neutral-500 text-[10px] truncate max-w-[160px]" title={dict.sha256_sf.clone()}>
+                                                {dict.sha256_sf}
+                                            </td>
+                                            <td class="px-3 py-2 text-right">
+                                                <ActionIconButton
+                                                    variant={ActionVariant::Delete}
+                                                    title={locale.t("common.delete").to_string()}
+                                                    onclick={on_delete}
+                                                />
+                                            </td>
+                                        </tr>
+                                    }
+                                }) }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
         </>
+    }
+}
+
+fn add_dictionary_card(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
+    let on_add = {
+        let form = form.clone();
+        Callback::from(move |_| {
+            let mut next = (*form).clone();
+            let name = next.compression.new_dict_name.trim().to_string();
+            let match_pattern = next.compression.new_dict_match.trim().to_string();
+            let path = next.compression.new_dict_path.trim().to_string();
+            let raw_data = next.compression.new_dict_data.clone();
+            if !name.is_empty()
+                && !match_pattern.is_empty()
+                && !path.is_empty()
+                && !raw_data.is_empty()
+            {
+                let mut dict = CompressionDictionary {
+                    id: ShortId::new(),
+                    name,
+                    match_pattern,
+                    path,
+                    raw_data,
+                    sha256_sf: String::new(),
+                };
+                dict.ensure_hash();
+                next.compression.dictionaries.push(dict);
+                next.compression.new_dict_name.clear();
+                next.compression.new_dict_data.clear();
+                next.compression.show_add_dict = false;
+                form.set(next);
+            }
+        })
+    };
+    html! {
+        <div class="mb-4 p-3 rounded-lg bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-xs space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("http_form.dictionary_name")}</label>
+                    <input
+                        type="text"
+                        placeholder="API Schema v1"
+                        value={form.compression.new_dict_name.clone()}
+                        onchange={state_input(form, text, |form, v| form.compression.new_dict_name = v)}
+                        class={INPUT_CLASS}
+                    />
+                </div>
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("http_form.dictionary_match")}</label>
+                    <input
+                        type="text"
+                        placeholder="/api/*"
+                        value={form.compression.new_dict_match.clone()}
+                        onchange={state_input(form, text, |form, v| form.compression.new_dict_match = v)}
+                        class={INPUT_CLASS}
+                    />
+                </div>
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("http_form.dictionary_path")}</label>
+                    <input
+                        type="text"
+                        placeholder="/.well-known/dict/api.dict"
+                        value={form.compression.new_dict_path.clone()}
+                        onchange={state_input(form, text, |form, v| form.compression.new_dict_path = v)}
+                        class={INPUT_CLASS}
+                    />
+                </div>
+            </div>
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("http_form.dictionary_raw_data")}</label>
+                <textarea
+                    rows="3"
+                    placeholder="{\"status\":200,\"data\":[],\"meta\":{}}"
+                    value={form.compression.new_dict_data.clone()}
+                    onchange={state_input(form, text, |form, v| form.compression.new_dict_data = v)}
+                    class={INPUT_CLASS}
+                />
+            </div>
+            <div class="flex justify-end">
+                <button
+                    type="button"
+                    onclick={on_add}
+                    class="px-3 py-1.5 rounded bg-primary-600 hover:bg-primary-700 text-white font-medium transition"
+                >
+                    {locale.t("http_form.save_dictionary")}
+                </button>
+            </div>
+        </div>
     }
 }
 
@@ -2637,6 +2822,7 @@ fn parse_compression(
         ),
         adaptive_level: form.adaptive_level,
         precompressed: form.precompressed,
+        dictionaries: form.dictionaries.clone(),
     }
 }
 

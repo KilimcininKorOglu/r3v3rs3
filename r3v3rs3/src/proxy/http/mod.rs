@@ -24,9 +24,12 @@ use futures::{Stream, StreamExt};
 use h3::{quic::BidiStream, server::RequestStream};
 use http_body_util::{BodyExt, BodyStream, Full, StreamBody, combinators::BoxBody};
 use hyper::{
-    Request, Response, StatusCode, Uri,
+    Method, Request, Response, StatusCode, Uri,
     body::{Body, Frame, Incoming},
-    header::{AUTHORIZATION, HOST, LOCATION},
+    header::{
+        AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, ETAG, HOST, HeaderName,
+        LOCATION,
+    },
     http::{
         HeaderValue,
         uri::{Parts, Scheme},
@@ -1105,6 +1108,9 @@ fn check_route_access<B>(
         let response = maintenance_response(&route.maintenance);
         return Err(EarlyExit::Respond(Box::new(response)));
     }
+    if let Some(response) = check_dictionary_request(route, req) {
+        return Err(EarlyExit::Respond(Box::new(response)));
+    }
     if route.grpc_web && grpc_web::is_grpc_web_preflight(req) {
         let response = grpc_web::cors_preflight_response(req.headers());
         return Err(EarlyExit::Respond(Box::new(response)));
@@ -1618,12 +1624,9 @@ fn configure_response_rewriter<B>(
         .https_port(route.https_port)
         .quic_port(route.quic_port)
         .error_pages(route.error_pages.clone())
-        .compression(
-            route
-                .compression
-                .clone()
-                .map(|config| ResponseCompression::new(config, req.method(), req.headers())),
-        )
+        .compression(route.compression.clone().map(|config| {
+            ResponseCompression::new(config, req.method(), req.uri().path(), req.headers())
+        }))
 }
 
 const DEFAULT_MAINTENANCE_BODY: &str = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>Under Maintenance</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 1rem; box-sizing: border-box; }\n    .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 2.5rem; max-width: 32rem; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }\n    h1 { font-size: 1.5rem; margin-top: 0; margin-bottom: 0.75rem; color: #f1f5f9; }\n    p { font-size: 0.95rem; line-height: 1.5; color: #94a3b8; margin: 0; }\n  </style>\n</head>\n<body>\n  <div class=\"card\">\n    <h1>Under Maintenance</h1>\n    <p>This service is temporarily undergoing scheduled maintenance. Please check back shortly.</p>\n  </div>\n</body>\n</html>\n";
@@ -1655,6 +1658,53 @@ fn maintenance_response(
         && let Ok(val) = HeaderValue::from_str(&retry_after.to_string())
     {
         res.headers_mut().insert(hyper::header::RETRY_AFTER, val);
+    }
+    res
+}
+
+fn check_dictionary_request<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+) -> Option<Response<Full<Bytes>>> {
+    let compression = route.compression.as_ref()?;
+    if req.method() != Method::GET && req.method() != Method::HEAD {
+        return None;
+    }
+    let path = req.uri().path();
+    let dict = compression.dictionaries.iter().find(|d| d.path == path)?;
+    Some(dictionary_response(dict, req.method()))
+}
+
+fn dictionary_response(
+    dict: &r3v3rs3_api::compression_dictionary::CompressionDictionary,
+    method: &Method,
+) -> Response<Full<Bytes>> {
+    let raw_bytes = dict.raw_data.as_bytes();
+    let body = if method == Method::HEAD {
+        Full::new(Bytes::new())
+    } else {
+        Full::new(Bytes::copy_from_slice(raw_bytes))
+    };
+    let mut res = Response::new(body);
+    *res.status_mut() = StatusCode::OK;
+    let headers = res.headers_mut();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=31536000, immutable"),
+    );
+    headers.insert(CONTENT_LENGTH, HeaderValue::from(raw_bytes.len()));
+    let use_as_dict = format!("match=\"{}\", id=\"{}\"", dict.match_pattern, dict.id);
+    if let Ok(val) = HeaderValue::from_str(&use_as_dict) {
+        headers.insert(HeaderName::from_static("use-as-dictionary"), val);
+    }
+    let clean_hash = dict.sha256_sf.trim_matches(':');
+    let etag_val = format!("\"{clean_hash}\"");
+    if let Ok(val) = HeaderValue::from_str(&etag_val) {
+        headers.insert(ETAG, val);
     }
     res
 }

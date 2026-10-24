@@ -144,3 +144,105 @@ async fn compression_encodes_eligible_responses() -> anyhow::Result<()> {
     })
     .await
 }
+
+#[tokio::test]
+async fn shared_compression_dictionary_serving_and_dcz_encoding() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let mut upstream = mockito::Server::new_async().await;
+    let dict_raw = "{\"schema\":\"v1\",\"users\":[".to_string();
+    let body_payload =
+        format!("{dict_raw}{{\"id\":1,\"name\":\"Alice\"}},{{\"id\":2,\"name\":\"Bob\"}}]}}");
+
+    let _mock_api = upstream
+        .mock("GET", "/api/users")
+        .with_header("content-type", "application/json")
+        .with_header("etag", "\"v1\"")
+        .with_body(&body_payload)
+        .create_async()
+        .await;
+
+    let mut dict = r3v3rs3_api::compression_dictionary::CompressionDictionary {
+        id: r3v3rs3_api::id::ShortId::new(),
+        name: "Users Schema".to_string(),
+        match_pattern: "/api/*".to_string(),
+        path: "/.well-known/dict/users.dict".to_string(),
+        raw_data: dict_raw.clone(),
+        sha256_sf: String::new(),
+    };
+    dict.ensure_hash();
+    let dict_hash = dict.sha256_sf.clone();
+
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![http_route("/", &upstream.url(), None)],
+        upgrade_insecure: false,
+        compression: Compression {
+            algorithms: vec![CompressionAlgorithm::Zstd, CompressionAlgorithm::Gzip],
+            dictionaries: vec![dict.clone()],
+            min_size: 10,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("port1", &port)])
+        .proxies(vec![http_proxy_entry("proxy1", "port1", proxy)])
+        .build();
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::builder().no_gzip().no_brotli().build()?;
+
+        // 1. Verify dictionary serving
+        let dict_resp = client
+            .get(port.http_url("/.well-known/dict/users.dict"))
+            .send()
+            .await?;
+        assert_eq!(dict_resp.status(), 200);
+        let dict_headers = dict_resp.headers();
+        assert_eq!(
+            dict_headers.get("content-type").unwrap().to_str()?,
+            "application/octet-stream"
+        );
+        let use_as_dict = dict_headers.get("use-as-dictionary").unwrap().to_str()?;
+        assert!(use_as_dict.contains("match=\"/api/*\""));
+        assert_eq!(
+            dict_headers.get("cache-control").unwrap().to_str()?,
+            "public, max-age=31536000, immutable"
+        );
+        let served_bytes = dict_resp.text().await?;
+        assert_eq!(served_bytes, dict_raw);
+
+        // 2. Request API endpoint with Available-Dictionary header
+        let api_resp = client
+            .get(port.http_url("/api/users"))
+            .header(ACCEPT_ENCODING, "dcz, zstd, gzip")
+            .header("available-dictionary", &dict_hash)
+            .send()
+            .await?;
+
+        assert_eq!(api_resp.status(), 200);
+        assert_eq!(encoding(&api_resp), Some("dcz"));
+        let api_headers = api_resp.headers();
+        assert_eq!(
+            api_headers.get("content-dictionary").unwrap().to_str()?,
+            dict_hash
+        );
+        assert_eq!(api_headers[ETAG], "W/\"v1\"");
+        let vary_items = api_headers
+            .get_all(VARY)
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(vary_items.contains(&"Available-Dictionary"));
+        assert!(vary_items.contains(&"Accept-Encoding"));
+
+        // 3. Decompress response using dictionary
+        let compressed_bytes = api_resp.bytes().await?;
+        let mut decompressor = zstd::bulk::Decompressor::with_dictionary(dict_raw.as_bytes())?;
+        let decompressed = decompressor.decompress(&compressed_bytes, 10 * 1024)?;
+        assert_eq!(String::from_utf8(decompressed)?, body_payload);
+
+        Ok(())
+    })
+    .await
+}
