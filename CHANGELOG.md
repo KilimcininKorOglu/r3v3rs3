@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-10-25
+
+### Added
+- Pre/Post-Deployment Lifecycle Hooks & Migration Runner: Automated command execution for database migrations and cache warming during deployment workflows.
+- Zero-Downtime Rollback Protection: Pre-deploy hooks run in an isolated ephemeral container using the new image and environment before old containers are stopped. If the hook fails (non-zero exit code), the deployment aborts cleanly and the running service continues uninterrupted.
+- Post-Deploy Cache Warmup: Post-deploy hooks execute inside the healthy container after readiness checks pass and traffic routing begins.
+- 100% MCP & CLI Parity: Added `r3 app hooks <APP_ID>` CLI command (`--pre-deploy`, `--post-deploy`, `--clear`) and full MCP support on app management tools.
+- WebUI Deployment Lifecycle Hooks Section: Interactive form section in application settings allowing operators to configure pre-deploy and post-deploy lifecycle commands.
+- Dual-Language Documentation: Updated `platform.md` and `platform.tr.md` with complete lifecycle hooks usage guides and CLI examples.
+
 ## [2.6.0] - 2026-10-25
 
 ### Added
