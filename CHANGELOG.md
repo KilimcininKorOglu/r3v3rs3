@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.8] - 2026-10-24
+
+### Added
+- Dynamic Response Security Headers Wizard & One-Click OWASP Hardening: Built-in security profile engine providing one-click hardening of HTTP/HTTPS proxy responses according to OWASP standards.
+- Predefined OWASP Profiles: Includes `strict` (preloaded HSTS, strict CSP, deny framing, origin isolation), `balanced` (1-year HSTS, CMS-compatible CSP, sameorigin framing), `api_only` (anti-sniffing, framing denial, cache shields), and `spa_frontend` (Vite, React, Vue, PWA optimized with worker and WebSocket directives).
+- Automated Security Scoring & Grade Diagnostic: Real-time analysis of response header rules calculating security scores (0 to 100) and letter grades (A+, A, B, C, D, F) with risk attribution and remediation recommendations.
+- REST API Endpoints: Added `GET /api/security/headers/profiles` (profile listing), `POST /api/security/headers/analyze` (header rule analysis), `GET /api/proxies/{id}/security-headers` (proxy security audit), and `POST /api/proxies/{id}/security-headers/apply-profile` (profile application).
+- 100% MCP & CLI Parity: Added `list_security_header_profiles`, `analyze_proxy_security_headers`, and `apply_security_header_profile` MCP tools, along with `r3 proxy security-headers audit/apply/profiles` CLI commands.
+- WebUI Security Wizard Panel: Integrated live security grade badge, one-click OWASP preset buttons, and expandable header audit drawer in the proxy configuration form.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` with complete security profiles, CLI and MCP commands, and score diagnostic metrics.
+
 ## [2.5.7] - 2026-10-24
 
 ### Added
