@@ -7,7 +7,7 @@ use r3v3rs3_api::priority::{
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route, Server};
 
 mod common;
-use common::{TestStorage, alloc_tcp_port, with_server};
+use common::{TestStorage, alloc_tcp_port, wait_for_listener, with_server};
 
 #[tokio::test]
 async fn test_rfc9218_spec_compliance() {
@@ -179,6 +179,7 @@ async fn test_proxy_injects_priority_header() -> anyhow::Result<()> {
         .build();
 
     with_server(config, |_| async move {
+        wait_for_listener(proxy_port.socket_addr()).await?;
         let client = reqwest::Client::new();
         let base_url = proxy_port.http_url("");
 
