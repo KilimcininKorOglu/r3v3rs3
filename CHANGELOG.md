@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.2] - 2026-10-25
+
+### Added
+- Multi-Region Load Balancing & Latency-Based Geo-Routing: Dynamic client steering across distributed upstream servers, replica nodes, and multi-region agent targets according to MaxMind GeoIP geographical country/region proximity and measured round-trip response latency.
+- Geo-Proximity Steering Engine: New `geo_proximity` load balancing policy mapping incoming client IP addresses to regional presets (`eu`, `na`, `mena`, `apac`, `turkey`, `dach`, `latam`, `nordic`) and direct ISO country assignments, prioritizing closest nodes while preserving healthy fallback pools.
+- Latency-Based Routing Engine: New `latency` load balancing policy prioritizing healthy upstream servers with the lowest measured round-trip time (`rtt_micros`) using atomic live performance counters.
+- Zero-Downtime Multi-Region Failover: Automated failover protection seamlessly redirecting traffic to healthy nodes in secondary regions if the primary regional replica fails or triggers circuit breakers.
+- Target Node Geographical Region Configuration: Added `region` property to platform target nodes (`TargetEntry`, `TargetRequest`, `SetTargetRegionRequest`) enabling regional grouping of agent targets and automatic inheritance during multi-region app deployments.
+- REST API Endpoint: Added `PUT /api/targets/{id}/region` to set or clear target node geographical regions with full audit logging.
+- 100% MCP & CLI Parity: Added MCP tool `set_target_region` (plus maintenance tools `drain_target` and `undrain_target`) and CLI subcommand `r3 target set-region <ID> [--region <REGION>]`.
+- WebUI Upstream & Target Integration: Added `geo_proximity` and `latency` options to the Proxy Upstream load balancing dropdown and application replica settings, along with visual regional badges on target cards.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` with complete geo-proximity and latency load balancing specifications, failover mechanisms, and multi-region deployment guides.
+
 ## [2.6.1] - 2026-10-25
 
 ### Added
