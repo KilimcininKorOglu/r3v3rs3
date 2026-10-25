@@ -230,12 +230,11 @@ fn generate_secrets_action(
 
 fn apply_generated_entries(current: &mut [EnvRow], entries: Vec<EnvEntry>) {
     for entry in entries {
+        let Some(val) = entry.value else { continue };
         if let Some(row) = current.iter_mut().find(|r| r.key == entry.key.as_str()) {
-            if let Some(val) = entry.value {
-                row.value = val;
-                row.stored_secret = false;
-                row.secret = true;
-            }
+            row.value = val;
+            row.stored_secret = false;
+            row.secret = true;
         }
     }
 }

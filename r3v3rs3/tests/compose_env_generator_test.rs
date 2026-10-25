@@ -7,7 +7,7 @@ use r3v3rs3_api::auth::Role;
 use r3v3rs3_api::compose_env::{
     GenerateAppEnvSecretsRequest, ResolveEnvTemplateRequest, ResolveEnvTemplateResponse,
 };
-use r3v3rs3_api::platform::{AppEntry, AppRequest, AppSource, AppSpec, EnvEntry};
+use r3v3rs3_api::platform::{AppEntry, EnvEntry};
 use reqwest::header::COOKIE;
 use reqwest::{Client, StatusCode};
 use std::net::SocketAddr;
@@ -60,7 +60,7 @@ where
     ));
     wait_for_listener(addr).await?;
     let result = func(addr).await;
-    event.send(r3v3rs3::server::ServerEvent::Shutdown)?;
+    event.send(r3v3rs3_api::event::ServerEvent::Shutdown)?;
     let _ = task.await;
     result
 }
@@ -140,16 +140,17 @@ async fn test_generate_app_env_secrets_endpoint() -> anyhow::Result<()> {
         let cookie = admin_session_cookie(addr).await?;
 
         // 1. Create an app
-        let app_req = AppRequest {
-            name: "test-app".parse()?,
-            spec: AppSpec {
-                port: 8080,
-                source: AppSource::Image {
-                    image: "nginx:alpine".parse()?,
-                },
-                ..Default::default()
-            },
-        };
+        let app_req = serde_json::json!({
+            "name": "test-app",
+            "target": "local",
+            "spec": {
+                "port": 8080,
+                "source": {
+                    "type": "image",
+                    "image": "nginx:alpine"
+                }
+            }
+        });
 
         let res = client
             .post(format!("http://{addr}/api/apps"))

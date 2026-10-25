@@ -130,13 +130,12 @@ fn auto_generate_secrets(
             {
                 let mut updated = (*values_state).clone();
                 for resolved in resp.entries {
+                    let Some(val) = resolved.value else { continue };
                     if let Some(item) = updated
                         .iter_mut()
                         .find(|i| i.env.key == resolved.key.as_str())
                     {
-                        if let Some(val) = resolved.value {
-                            item.value = val;
-                        }
+                        item.value = val;
                     }
                 }
                 values_state.set(updated);

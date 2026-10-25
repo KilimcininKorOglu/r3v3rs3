@@ -972,7 +972,7 @@ impl ApiClient {
         overwrite: bool,
     ) -> anyhow::Result<()> {
         let template_content = if let Some(path) = file {
-            Some(tokio::fs::read_to_string(path).await?)
+            Some(std::fs::read_to_string(path)?)
         } else {
             template.map(|t| t.to_string())
         };
