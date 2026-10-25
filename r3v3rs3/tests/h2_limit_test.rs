@@ -13,7 +13,7 @@ use r3v3rs3_api::proxy::HttpProxy;
 mod common;
 use common::{
     TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, port_entry,
-    with_server,
+    wait_for_listener, with_server,
 };
 
 /// A port whose options override the HTTP/2 limits.
@@ -60,6 +60,7 @@ async fn an_oversized_header_list_resets_the_stream_and_the_port_serves_on() -> 
 
     let app = Router::new().route("/version", get(version));
     tokio::spawn(axum_server::bind(upstream_port.socket_addr()).serve(app.into_make_service()));
+    wait_for_listener(upstream_port.socket_addr()).await?;
 
     let upstream_url = upstream_port.http_url("/");
     let config = TestStorage::builder()
@@ -72,6 +73,7 @@ async fn an_oversized_header_list_resets_the_stream_and_the_port_serves_on() -> 
         .build();
 
     with_server(config, |_| async move {
+        wait_for_listener(proxy_port.socket_addr()).await?;
         let url: hyper::Uri = proxy_port.http_url("/version").as_str().parse()?;
 
         // The hardened builder still serves a normal HTTP/2 request.
@@ -125,6 +127,7 @@ async fn the_global_limits_apply_and_a_port_override_wins() -> anyhow::Result<()
 
     let app = Router::new().route("/version", get(version));
     tokio::spawn(axum_server::bind(upstream_port.socket_addr()).serve(app.into_make_service()));
+    wait_for_listener(upstream_port.socket_addr()).await?;
 
     let upstream_url = upstream_port.http_url("/");
     let config = TestStorage::builder()
@@ -162,6 +165,8 @@ async fn the_global_limits_apply_and_a_port_override_wins() -> anyhow::Result<()
         .build();
 
     with_server(config, |_| async move {
+        wait_for_listener(global_port.socket_addr()).await?;
+        wait_for_listener(override_port.socket_addr()).await?;
         // A request under the reduced global limit is served.
         let url: hyper::Uri = global_port.http_url("/version").as_str().parse()?;
         let response = h2_client()
