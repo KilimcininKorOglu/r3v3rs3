@@ -3015,4 +3015,12 @@ EMPTY_VAL=
         let back: AppDashboardSummary = serde_json::from_value(val).unwrap();
         assert_eq!(back.app.name.as_str(), "web-app");
     }
+
+    #[test]
+    fn test_deserialize_dashboard_summary_from_real_server() {
+        let raw = r#"{"app":{"id":"hrs-tdv","name":"reverse-proxy-deployment-test","target":"local","spec":{"source":{"type":"git","repository":"https://github.com/KilimcininKorOglu/reverse-proxy-deployment-test.git","branch":"main","context":".","dockerfile":"Dockerfile","connection":"wrb-wrv"},"port":3000,"domains":["test-x86.hermestech.uk"],"health_check_path":"/","volumes":[],"restart":"unless-stopped","limits":{},"auto_deploy":false,"require_approval":false},"git_token_set":false,"webhook_secret_set":true,"hook":{"connection":"wrb-wrv","repository":"KilimcininKorOglu/reverse-proxy-deployment-test","installed":true,"updated_at":1792063885616},"created_at":1792006338202,"updated_at":1792064271851},"latest_deployment":{"id":"flr-rnq","app":"hrs-tdv","status":"running","trigger":"webhook","commit_sha":"e03406e9e3ce7a32308617e579b591c3026c17eb","image_digest":"sha256:5325836377a32b8c8c95e5adadd14b97d64d9eb56974ff5de92da2f1f3546140","username":"webhook","started_at":1792089442195,"finished_at":1792089445489},"running_deployment":{"id":"flr-rnq","app":"hrs-tdv","status":"running","trigger":"webhook","commit_sha":"e03406e9e3ce7a32308617e579b591c3026c17eb","image_digest":"sha256:5325836377a32b8c8c95e5adadd14b97d64d9eb56974ff5de92da2f1f3546140","username":"webhook","started_at":1792089442195,"finished_at":1792089445489},"diagnostics":{"app_id":"hrs-tdv","app_name":"reverse-proxy-deployment-test","running":true,"status":"healthy","cpu_percent":0.0036278521208588745,"cpu_throttled_percent":0.0,"cpu_throttled_periods":0,"cpu_total_periods":0,"cpu_throttled_time_ms":0,"memory_bytes":28413952,"memory_limit":1003077632,"memory_percent":2.832677261813371,"memory_fail_count":0,"oom_killed":false,"exit_code":0,"recommendation":null},"metrics":[{"ts":1792952329691,"running":true,"health":"","cpu":0.003603053513290405,"memory":29450240,"rx_bytes":1137,"tx_bytes":4616,"requests":0}],"logs_preview":"listening on 3000\n","log_size_bytes":88,"uptime_seconds":866464}"#;
+        let summary: AppDashboardSummary =
+            serde_json::from_str(raw).expect("failed to deserialize real server payload");
+        assert_eq!(summary.app.id.to_string(), "hrs-tdv");
+    }
 }

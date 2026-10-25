@@ -1,6 +1,7 @@
 //! The dedicated dashboard and unified overview console for an application.
 
 use super::Route;
+use super::app_deployments::back_header;
 use super::app_list::{FAST_REFRESH_MS, SLOW_REFRESH_MS, is_unfinished};
 use super::settings::{failure_box, fetch_json};
 use crate::API_ENDPOINT;
@@ -42,14 +43,16 @@ fn summary_and_error(data: &Loaded) -> (Option<AppDashboardSummary>, Option<Stri
     }
 }
 
-fn setup_dashboard_interval(
+#[hook]
+fn use_dashboard_poll(
+    locale: Locale,
+    id: ShortId,
+    data: &UseStateHandle<Loaded>,
     signed_in: bool,
     busy: bool,
     reload: u32,
-    locale: Locale,
-    id: ShortId,
-    data: UseStateHandle<Loaded>,
 ) {
+    let data = data.clone();
     use_effect_with((signed_in, busy, reload), move |&(signed_in, busy, _)| {
         let interval = signed_in.then(|| {
             let load = move || load_summary(locale, id, data.clone());
@@ -63,6 +66,24 @@ fn setup_dashboard_interval(
         });
         move || drop(interval)
     });
+}
+
+fn render_loading_skeleton(locale: Locale, navigator: &Navigator) -> Html {
+    html! {
+        <div class="space-y-6 animate-pulse">
+            { back_header(locale, navigator, locale.t("apps.dashboard").to_string()) }
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="h-28 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-4"></div>
+                <div class="h-28 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-4"></div>
+                <div class="h-28 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-4"></div>
+                <div class="h-28 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-4"></div>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2 h-72 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-4"></div>
+                <div class="h-72 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-4"></div>
+            </div>
+        </div>
+    }
 }
 
 #[function_component(AppDashboard)]
@@ -81,18 +102,18 @@ pub fn app_dashboard(props: &Props) -> Html {
 
     let busy = is_summary_busy(&data);
     let signed_in = session.info.is_some();
-    setup_dashboard_interval(signed_in, busy, *reload, locale, id, data.clone());
+    use_dashboard_poll(locale, id, &data, signed_in, busy, *reload);
 
     let can_edit = session.can_edit();
     let (summary, error) = summary_and_error(&data);
     let active_error = error.or_else(|| (*failure).clone());
 
-    html! {
-        <div class="space-y-6">
-            if let Some(err) = active_error {
-                { failure_box(&err) }
-            }
-            if let Some(s) = summary {
+    if let Some(s) = summary {
+        html! {
+            <div class="space-y-6">
+                if let Some(err) = active_error {
+                    { failure_box(&err) }
+                }
                 { render_dashboard_content(DashboardParams {
                     id,
                     locale,
@@ -103,8 +124,17 @@ pub fn app_dashboard(props: &Props) -> Html {
                     reload: reload.clone(),
                     navigator: navigator.clone(),
                 }) }
-            }
-        </div>
+            </div>
+        }
+    } else if let Some(err) = active_error {
+        html! {
+            <div class="space-y-6">
+                { back_header(locale, &navigator, locale.t("apps.dashboard").to_string()) }
+                { failure_box(&err) }
+            </div>
+        }
+    } else {
+        render_loading_skeleton(locale, &navigator)
     }
 }
 
