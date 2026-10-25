@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.7] - 2026-10-25
+
+### Added
+- Automated Build Cache GC & Container Layer Retention Policy: Configurable BuildKit build cache retention limit (`build_cache_keep_storage_mb`) passing `keep-storage` parameter to Docker Engine during prune runs to retain hot compilation cache layers while discarding stale intermediates.
+- Application Rollback Protection & Image Tag Retention: Configurable retained build count per application (`kept_builds_count`, default: 5) protecting historical image versions across zero-downtime rollbacks during disk hygiene runs.
+- Dangling Layer Cleanup Filter: Added `dangling_layers_only` toggle restricting image cleanup to untagged intermediate layer artifacts (`<none>:<none>`) while preserving active tagged releases.
+- 100% MCP & CLI Parity: Added MCP tools `get_prune_policy` and `update_prune_policy` to `admin/mcp.rs`, and CLI subcommands `r3 platform prune-policy` and `r3 platform set-prune-policy` with retention controls. Corrected `r3 platform prune` endpoint to `/api/platform/prune/run`.
+- WebUI Disk Hygiene Controls: Added Build Cache Retention Limit, Kept Builds Per Application, and Dangling Layers Only inputs to the Disk Hygiene card on the Targets page with comprehensive localization.
+- Dual-Language Documentation: Updated `platform.md` and `platform.tr.md` in lockstep documenting BuildKit keep-storage, rollback retention, and autonomous CLI/MCP administration.
+
+### Fixed
+- Fixed startup race condition in `stream_priority_test.rs` by adding `wait_for_listener`.
+
 ## [2.6.6] - 2026-10-25
 
 ### Added
