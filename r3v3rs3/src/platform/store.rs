@@ -418,10 +418,9 @@ impl PlatformStore {
             sqlx::query("ALTER TABLE prune_policy ADD COLUMN build_cache_keep_storage_mb INTEGER")
                 .execute(&pool)
                 .await;
-        let _ =
-            sqlx::query("ALTER TABLE prune_policy ADD COLUMN kept_builds_count INTEGER")
-                .execute(&pool)
-                .await;
+        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN kept_builds_count INTEGER")
+            .execute(&pool)
+            .await;
         let _ = sqlx::query(
             "ALTER TABLE prune_policy ADD COLUMN dangling_layers_only INTEGER NOT NULL DEFAULT 1",
         )
