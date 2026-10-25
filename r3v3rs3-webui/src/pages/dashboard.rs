@@ -258,7 +258,7 @@ fn render_deployment_row(locale: Locale, d: &DeploymentSummary) -> Html {
     html! {
         <tr key={d.id.to_string()} class="hover:bg-neutral-50 dark:hover:bg-neutral-700/20">
             <td class="py-3 pr-4 font-medium">
-                <Link<Route> to={Route::AppView { id: d.app_id }} classes="text-blue-600 dark:text-blue-400 hover:underline">
+                <Link<Route> to={Route::AppDashboard { id: d.app_id }} classes="text-blue-600 dark:text-blue-400 hover:underline">
                     {&d.app_name}
                 </Link<Route>>
             </td>

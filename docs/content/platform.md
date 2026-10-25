@@ -823,14 +823,30 @@ The **Projects** page organizes applications and databases under structured proj
 
 ### Apps
 
-The **Apps** page lists every app with its **Source**, its **Domains** and the status of its **Last Deployment**. The row actions of an app are:
+The **Apps** page lists every app with its **Source**, its **Domains** and the status of its **Last Deployment**. Clicking the app name opens its dedicated [App Dashboard](#dedicated-app-dashboard). The row actions of an app are:
 
-- **Edit** opens the app page. An account without the Edit permission sees **View** and a read-only form.
+- **View** opens the dedicated app dashboard console.
+- **Edit** opens the application settings form (`/apps/{id}/settings`).
+- **Terminal** opens the web terminal.
+- **Files** opens the file browser.
 - **Deployments** opens the deployment history.
 - **Log** opens the container log.
 - **Deploy** starts a deployment after a confirmation.
 
 The page reads the apps again every 2 seconds while a deployment is unfinished, and every 10 seconds otherwise.
+
+### Dedicated App Dashboard
+
+Clicking an application in the list opens its dedicated dashboard console at `/apps/{id}`. The dashboard consolidates:
+
+- **Top Navigation Tabs**: Quick switching between **Overview**, **Deployments**, **Logs**, **Terminal**, **Files**, and **Settings**.
+- **Live Status & Telemetry**: Container uptime, CPU usage percentage, memory usage against configured limits, and network throughput (RX/TX).
+- **Resource Diagnostics Alerts**: Instant warnings for CPU CFS quota throttling and memory OOMKill events.
+- **Active Deployment Card**: Current commit hash, branch name, commit message, author, deployment duration, and target node.
+- **Quick Actions Toolbar**: One-click **Deploy**, **Restart** container, **Rollback** to previous deployment, **Terminal**, and **Logs**.
+- **Services & Containers**: Container state, ID, and healthcheck status for Compose services.
+- **Recent Logs Tail**: Direct terminal preview of the latest 15 container log lines.
+- **API, MCP & CLI Management**: Complete parity via `GET /api/apps/{id}/dashboard`, MCP tool `get_app_dashboard`, and CLI command `r3 app dashboard <APP_ID>`.
 
 ### App Store
 

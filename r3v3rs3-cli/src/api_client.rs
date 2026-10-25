@@ -988,6 +988,13 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn app_dashboard(&self, id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, &format!("/api/apps/{id}/dashboard"), None)
+            .await?;
+        print_json(&res)
+    }
+
     pub async fn app_diagnostics(&self, id: &str) -> anyhow::Result<()> {
         let res = self
             .request(Method::GET, &format!("/api/apps/{id}/diagnostics"), None)

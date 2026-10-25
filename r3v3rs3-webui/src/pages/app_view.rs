@@ -119,6 +119,14 @@ pub fn app_view(props: &Props) -> Html {
     };
     html! {
         <>
+            if let Some(entry) = (*app).as_ref() {
+                <crate::components::app_tabs::AppTabs
+                    id={entry.id}
+                    name={entry.name.to_string()}
+                    active={crate::components::app_tabs::AppTab::Settings}
+                    domains={entry.spec.domains.clone()}
+                />
+            }
             if let Some(entry) = (*app).as_ref().filter(|_| can_edit) {
                 { catalog_upgrade_banner(locale, entry, &on_upgrade) }
             }
@@ -264,7 +272,7 @@ fn saved_callback(
         (app.clone(), form.clone(), notice.clone(), navigator.clone());
     Callback::from(move |entry: AppEntry| {
         if app.is_none() {
-            navigator.push(&Route::AppView { id: entry.id });
+            navigator.push(&Route::AppDashboard { id: entry.id });
             return;
         }
         form.set(AppForm::edit(&entry));

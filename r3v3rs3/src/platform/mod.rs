@@ -62,9 +62,9 @@ use r3v3rs3_api::git::GitRef;
 use r3v3rs3_api::git_connection::PublicUrl;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, AppLog, AppRequest, ComposeServiceStatus, ComposeTopology, DeploymentEntry, EnvEntry,
-    EnvGroup, EnvGroupSpec, EnvGroupSummary, FileEntry, ImageUpdateStatus, LOCAL_TARGET,
-    PlatformConfig, parse_compose_topology,
+    AppDashboardSummary, AppEntry, AppLog, AppRequest, ComposeServiceStatus, ComposeTopology,
+    DeploymentEntry, EnvEntry, EnvGroup, EnvGroupSpec, EnvGroupSummary, FileEntry,
+    ImageUpdateStatus, LOCAL_TARGET, PlatformConfig, parse_compose_topology,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -907,6 +907,43 @@ impl Platform {
         }
         services.sort_by(|a, b| a.service.cmp(&b.service));
         Ok(services)
+    }
+
+    /// Returns the aggregated dashboard summary of an app.
+    pub async fn app_dashboard(&self, id: ShortId) -> anyhow::Result<AppDashboardSummary> {
+        let app = self.app(id).await?;
+        let deployments = self.deployments(id).await.unwrap_or_default();
+        let latest_deployment = deployments.first().cloned();
+        let running_id = self.store.running_deployment(id).await.ok().flatten();
+        let running_deployment =
+            running_id.and_then(|rid| deployments.iter().find(|d| d.id == rid).cloned());
+        let services = self.app_services(id).await.unwrap_or_default();
+        let diagnostics = self.app_resource_diagnostics(id).await.ok();
+        let metrics = self.app_metrics(id, 1).await.unwrap_or_default();
+        let log_res = self.app_log(id, 15, None).await.unwrap_or(AppLog {
+            log: String::new(),
+            running: false,
+        });
+        let log_size_bytes = self.app_log_size(id).await.ok().map(|o| o.total_size_bytes);
+        let uptime_seconds = running_deployment.as_ref().map(|d| {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            now_ms.saturating_sub(d.started_at) / 1000
+        });
+
+        Ok(AppDashboardSummary {
+            app,
+            latest_deployment,
+            running_deployment,
+            services,
+            diagnostics,
+            metrics,
+            logs_preview: log_res.log,
+            log_size_bytes,
+            uptime_seconds,
+        })
     }
 
     /// Returns the architecture dependency graph and topology of a Compose app.

@@ -344,7 +344,7 @@ fn db_actions(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
                 {ctx.locale.t("backups.nav")}
             </Link<Route>>
             { render_extra_actions(ctx, app, is_replica) }
-            <Link<Route> to={Route::AppView { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
+            <Link<Route> to={Route::AppDashboard { id: app.id }} classes="text-sm text-neutral-400 hover:text-neutral-200 mr-3">
                 {ctx.locale.t("common.view")}
             </Link<Route>>
             if let Some(delete) = delete {

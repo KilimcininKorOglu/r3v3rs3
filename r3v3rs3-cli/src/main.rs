@@ -395,6 +395,8 @@ pub enum AppCommand {
     List,
     /// Shows configuration of an application.
     Get { id: String },
+    /// Shows unified dashboard summary of an application.
+    Dashboard { id: String },
     /// Adds an application from inline JSON/YAML, a file path, or stdin ('-').
     Add { payload: String },
     /// Triggers a deployment for an application.
@@ -1177,6 +1179,7 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
     match cmd {
         AppCommand::List => api.list_apps().await,
         AppCommand::Get { id } => api.get_app(&id).await,
+        AppCommand::Dashboard { id } => api.app_dashboard(&id).await,
         AppCommand::Add { payload } => api.add_app(&payload).await,
         AppCommand::Deploy { id } => api.deploy_app(&id).await,
         AppCommand::Rollback { id } => api.rollback_app(&id).await,

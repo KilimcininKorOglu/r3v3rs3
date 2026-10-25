@@ -823,14 +823,30 @@ Bir uygulama, aynı anda birden fazla agent hedefi ve yerel hedef üzerinde repl
 
 ### Uygulamalar
 
-**Uygulamalar** sayfası her uygulamayı **Kaynak**, **Alan adları** ve **Son deployment** durumuyla listeler. Bir uygulamanın satır işlemleri şunlardır:
+**Uygulamalar** sayfası her uygulamayı **Kaynak**, **Alan adları** ve **Son deployment** durumuyla listeler. Uygulama adına tıklamak doğrudan [Uygulama Panosu](#uygulama-panosu) ekranını açar. Bir uygulamanın satır işlemleri şunlardır:
 
-- **Düzenle** uygulama sayfasını açar. Edit izni olmayan hesap **Görüntüle** ve salt okunur bir form görür.
+- **Görüntüle** uygulamaya özel yönetim panosunu açar.
+- **Düzenle** uygulama ayar formunu açar (`/apps/{id}/settings`).
+- **Terminal** web terminalini açar.
+- **Dosyalar** dosya yöneticisini açar.
 - **Deployment'lar** deployment geçmişini açar.
 - **Log** container log'unu açar.
 - **Deploy et** onaydan sonra bir deployment başlatır.
 
 Sayfa, bitmemiş bir deployment varken uygulamaları 2 saniyede bir, yoksa 10 saniyede bir yeniden okur.
+
+### Uygulama Panosu
+
+Uygulama listesinden bir uygulamaya tıklandığında `/apps/{id}` adresindeki özel yönetim panosu açılır. Pano şu bileşenleri bir araya getirir:
+
+- **Üst Gezinti Sekmeleri**: **Genel Bakış**, **Dağıtımlar**, **Loglar**, **Terminal**, **Dosyalar** ve **Ayarlar** arasında hızlı geçiş.
+- **Canlı Durum ve Telemetri**: Konteyner çalışma süresi (uptime), CPU kullanım yüzdesi, kota sınırına göre bellek kullanımı ve ağ bant genişliği (RX/TX).
+- **Kaynak Teşhis Alarmları**: CPU CFS kota kısıtlaması (throttling) ve bellek OOMKill olayları için anlık uyarı kartı.
+- **Aktif Dağıtım Kartı**: Çalışan commit hash'i, branch adı, commit mesajı, yazar, dağıtım süresi ve hedef node bilgisi.
+- **Hızlı Aksiyonlar Barı**: Tek tıkla **Deploy**, **Yeniden Başlat** (Restart), önceki sürüme **Geri Al** (Rollback), **Terminal** ve **Loglar** butonları.
+- **Servisler ve Konteynerler**: Compose uygulamaları için servis çalışma durumu, container ID'si ve healthcheck sonuçları.
+- **Son Loglar Önizlemesi**: En son 15 log satırını gösteren terminal önizleme kutusu.
+- **API, MCP ve CLI Eşitliği**: `GET /api/apps/{id}/dashboard`, MCP aracı `get_app_dashboard` ve CLI komutu `r3 app dashboard <APP_ID>` ile tam yönetim eşitliği.
 
 ### App Store
 

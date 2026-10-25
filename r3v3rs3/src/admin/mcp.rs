@@ -2371,6 +2371,26 @@ impl McpServer {
         json_result(diagnostics)
     }
 
+    /// Get unified dashboard summary for an application.
+    #[tool(
+        description = "Get unified dashboard summary for an application including status, telemetry, resource diagnostics, deployments, and services."
+    )]
+    async fn get_app_dashboard(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Read)
+            .await
+            .map_err(any_error)?;
+        let summary = platform.app_dashboard(id).await.map_err(any_error)?;
+        json_result(summary)
+    }
+
     /// Truncate (vacuum) container log files for an application.
     #[tool(
         description = "Truncate (vacuum) container log files for an application to reclaim disk space immediately. Needs the edit scope."

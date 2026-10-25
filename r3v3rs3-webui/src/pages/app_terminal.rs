@@ -361,7 +361,7 @@ fn render_terminal_page(locale: Locale, app_id: ShortId, state: &TerminalState) 
         <>
             <div class="flex items-center justify-between mb-3">
                 <h1 class="text-xl font-semibold">{title}</h1>
-                <Link<Route> to={Route::AppView { id: app_id }} classes="text-sm text-neutral-400 hover:text-neutral-200">
+                <Link<Route> to={Route::AppDashboard { id: app_id }} classes="text-sm text-neutral-400 hover:text-neutral-200">
                     {locale.t("common.back")}
                 </Link<Route>>
             </div>

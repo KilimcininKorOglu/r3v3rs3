@@ -95,7 +95,15 @@ pub fn app_log_view(props: &Props) -> Html {
 
     html! {
         <>
-            { back_header(locale, &navigator, title) }
+            if let Some(Ok(p)) = (*page).as_ref() {
+                <crate::components::app_tabs::AppTabs
+                    id={id}
+                    name={p.name.clone()}
+                    active={crate::components::app_tabs::AppTab::Logs}
+                />
+            } else {
+                { back_header(locale, &navigator, title) }
+            }
             { content_view(content_props) }
         </>
     }

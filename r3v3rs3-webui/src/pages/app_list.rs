@@ -343,7 +343,9 @@ fn add_button(locale: Locale, navigator: &Navigator) -> Html {
 fn name_cell(locale: Locale, app: &AppEntry) -> Html {
     html! {
         <div class="flex items-center gap-2">
-            <span>{app.name.as_str()}</span>
+            <Link<Route> to={Route::AppDashboard { id: app.id }} classes={LINK_CLASS}>
+                {app.name.as_str()}
+            </Link<Route>>
             if let Some(preview) = &app.spec.preview_of {
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">
                     {format!("PR #{}", preview.pr_number)}
@@ -416,20 +418,15 @@ struct AppRowActionParams<'a> {
 fn render_app_row_actions(params: AppRowActionParams) -> Html {
     let busy = params.row.is_busy();
     let upgrade_available = params.row.app.catalog_update.is_some();
-    let view_variant = if params.can_edit {
-        ActionVariant::Edit
-    } else {
-        ActionVariant::View
-    };
-    let view_label = if params.can_edit {
-        "common.edit"
-    } else {
-        "common.view"
-    };
-
     let view_onclick = link(
         params.navigator,
-        Route::AppView {
+        Route::AppDashboard {
+            id: params.row.app.id,
+        },
+    );
+    let settings_onclick = link(
+        params.navigator,
+        Route::AppSettings {
             id: params.row.app.id,
         },
     );
@@ -478,10 +475,17 @@ fn render_app_row_actions(params: AppRowActionParams) -> Html {
     html! {
         <>
             <ActionIconButton
-                variant={view_variant}
-                title={params.locale.t(view_label).to_string()}
+                variant={ActionVariant::View}
+                title={params.locale.t("common.view").to_string()}
                 onclick={view_onclick}
             />
+            if params.can_edit {
+                <ActionIconButton
+                    variant={ActionVariant::Edit}
+                    title={params.locale.t("common.edit").to_string()}
+                    onclick={settings_onclick}
+                />
+            }
             <ActionIconButton
                 variant={ActionVariant::Terminal}
                 title={params.locale.t("apps.terminal").to_string()}

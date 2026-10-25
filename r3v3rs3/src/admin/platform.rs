@@ -26,14 +26,15 @@ use r3v3rs3_api::{
     error::Error,
     id::ShortId,
     platform::{
-        AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest, AppScheduledCommand,
-        ComposeServiceStatus, ComposeTopology, DeploymentEntry, DeploymentTrigger, EnvEntry,
-        EnvGroup, EnvGroupSpec, EnvGroupSummary, EnvironmentDiffReport, EnvironmentEnvSpec,
-        EnvironmentSpec, EnvironmentSyncReport, EnvironmentSyncRequest, GitTokenRequest,
-        ImageUpdateStatus, KeyRotationReport, MetricsQuery, NodeAlertRules, Project,
-        ProjectEnvironment, ProjectSpec, ProjectSummary, PrunePolicy, PruneResult, RegistryEntry,
-        RegistryRequest, ScheduledCommandRequest, ScheduledCommandRunResult,
-        SetTargetRegionRequest, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
+        AppDashboardSummary, AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest,
+        AppScheduledCommand, ComposeServiceStatus, ComposeTopology, DeploymentEntry,
+        DeploymentTrigger, EnvEntry, EnvGroup, EnvGroupSpec, EnvGroupSummary,
+        EnvironmentDiffReport, EnvironmentEnvSpec, EnvironmentSpec, EnvironmentSyncReport,
+        EnvironmentSyncRequest, GitTokenRequest, ImageUpdateStatus, KeyRotationReport,
+        MetricsQuery, NodeAlertRules, Project, ProjectEnvironment, ProjectSpec, ProjectSummary,
+        PrunePolicy, PruneResult, RegistryEntry, RegistryRequest, ScheduledCommandRequest,
+        ScheduledCommandRunResult, SetTargetRegionRequest, TargetEntry, TargetRequest, TargetToken,
+        WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -1080,6 +1081,26 @@ pub async fn get_app_resource_diagnostics(
             .app_resource_diagnostics(id)
             .await
             .map_err(platform_error)?,
+    ))
+}
+
+/// Shows the unified dashboard summary of an app.
+#[utoipa::path(
+    get,
+    path = "/{id}/dashboard",
+    tag = "platform",
+    operation_id = "get_app_dashboard",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The app dashboard summary.", body = AppDashboardSummary), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_app_dashboard(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AppDashboardSummary>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    Ok(Json(
+        platform.app_dashboard(id).await.map_err(platform_error)?,
     ))
 }
 

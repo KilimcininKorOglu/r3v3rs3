@@ -6,8 +6,8 @@ pub use crate::compose_graph::{
     parse_compose_topology,
 };
 use crate::container::{
-    AppName, ContainerHealth, EnvKey, ImageRef, ResourceLimits, RestartPolicy, ServiceName,
-    VolumeMount,
+    AppName, AppResourceDiagnostics, ContainerHealth, EnvKey, ImageRef, ResourceLimits,
+    RestartPolicy, ServiceName, VolumeMount,
 };
 use crate::error::Error;
 use crate::git::{GitRef, RelPath, RepoUrl};
@@ -2325,6 +2325,27 @@ pub struct ScheduledCommandRunResult {
     pub duration_ms: u64,
 }
 
+/// Unified dashboard summary of an application.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct AppDashboardSummary {
+    pub app: AppEntry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_deployment: Option<DeploymentEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub running_deployment: Option<DeploymentEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub services: Vec<ComposeServiceStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<AppResourceDiagnostics>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metrics: Vec<AppMetricsPoint>,
+    pub logs_preview: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uptime_seconds: Option<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2955,5 +2976,43 @@ EMPTY_VAL=
             keys: vec!["DB_HOST".parse().unwrap()],
         };
         assert!(valid_selected.validate().is_ok());
+    }
+
+    #[test]
+    fn app_dashboard_summary_serde() {
+        let entry = AppEntry {
+            id: "app-123".parse().unwrap(),
+            name: "web-app".parse().unwrap(),
+            target: "local".parse().unwrap(),
+            spec: spec(json!({
+                "source": {"type": "image", "image": "nginx:alpine"},
+                "port": 80,
+                "domains": ["example.com"],
+            }))
+            .unwrap(),
+            git_token_set: false,
+            webhook_secret_set: false,
+            hook: None,
+            update: None,
+            catalog_update: None,
+            created_at: 1000,
+            updated_at: 1000,
+        };
+        let summary = AppDashboardSummary {
+            app: entry,
+            latest_deployment: None,
+            running_deployment: None,
+            services: Vec::new(),
+            diagnostics: None,
+            metrics: Vec::new(),
+            logs_preview: "ready to serve\n".to_string(),
+            log_size_bytes: Some(1024),
+            uptime_seconds: Some(3600),
+        };
+        let val = serde_json::to_value(&summary).unwrap();
+        assert_eq!(val["logs_preview"], "ready to serve\n");
+        assert_eq!(val["uptime_seconds"], 3600);
+        let back: AppDashboardSummary = serde_json::from_value(val).unwrap();
+        assert_eq!(back.app.name.as_str(), "web-app");
     }
 }

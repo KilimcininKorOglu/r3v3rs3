@@ -6,6 +6,7 @@ use yew_router::prelude::*;
 mod access_lists;
 mod accounts;
 mod app_commands;
+mod app_dashboard;
 mod app_deployments;
 mod app_env;
 mod app_files;
@@ -111,7 +112,9 @@ pub enum Route {
     #[at("/apps/store/:store")]
     NewStoreApp { store: String },
     #[at("/apps/:id")]
-    AppView { id: ShortId },
+    AppDashboard { id: ShortId },
+    #[at("/apps/:id/settings")]
+    AppSettings { id: ShortId },
     #[at("/apps/:id/deployments")]
     AppDeployments { id: ShortId },
     #[at("/apps/:id/log")]
@@ -172,7 +175,8 @@ impl Route {
             | Route::ProxyLogView { .. } => Some(Route::Proxies),
             Route::Apps
             | Route::NewApp
-            | Route::AppView { .. }
+            | Route::AppDashboard { .. }
+            | Route::AppSettings { .. }
             | Route::AppDeployments { .. }
             | Route::AppLog { .. }
             | Route::AppTerminal { .. }
@@ -222,7 +226,8 @@ pub fn switch(routes: Route) -> Html {
             html! { <app_view::AppView store={Some(store)} /> }
         }
         Route::NewApp => html! { <app_view::AppView /> },
-        Route::AppView { id } => html! { <app_view::AppView id={Some(id)} /> },
+        Route::AppDashboard { id } => html! { <app_dashboard::AppDashboard {id} /> },
+        Route::AppSettings { id } => html! { <app_view::AppView id={Some(id)} /> },
         Route::AppDeployments { id } => html! { <app_deployments::AppDeployments {id} /> },
         Route::AppLog { id } => html! { <app_log::AppLogView {id} /> },
         Route::AppTerminal { id } => html! { <app_terminal::AppTerminal {id} /> },

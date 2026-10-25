@@ -105,7 +105,16 @@ pub fn app_deployments(props: &Props) -> Html {
     let (title, rows, error) = page_parts(locale, &history, &callbacks);
     html! {
         <>
-            { back_header(locale, &navigator, title) }
+            if let Some(Ok(h)) = (*history).as_ref() {
+                <crate::components::app_tabs::AppTabs
+                    id={h.app.id}
+                    name={h.app.name.to_string()}
+                    active={crate::components::app_tabs::AppTab::Deployments}
+                    domains={h.app.spec.domains.clone()}
+                />
+            } else {
+                { back_header(locale, &navigator, title) }
+            }
             if let Some(err) = error.as_ref().or(failure.as_ref()) {
                 { failure_box(err) }
             }
