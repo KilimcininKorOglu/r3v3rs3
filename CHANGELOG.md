@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.8] - 2026-10-25
+
+### Added
+- Dedicated Application Dashboard & Unified Overview Console: Full-featured application management console at `/apps/{id}` providing single-pane-of-glass operational visibility and control.
+- Application Navigation Tabs: Standardized tabbed navigation header across application views (Overview, Deployments, Logs, Terminal, Files, Settings) with live status badge and quick domain links.
+- Real-time Application Telemetry & Health Monitoring: Live CPU utilization progress bar, memory usage versus configured limits, network I/O throughput (RX/TX), application uptime duration, and proactive CFS throttle / OOM-kill warning alerts with automated recommendations.
+- Active Deployment Context Card: Highlighting active commit SHA, trigger source, author, commit message, target cluster node, and started timestamp with one-click quick actions for Deploy, Restart, Rollback, Terminal, and Live Logs.
+- Multi-Service Container Topology: Live status, container names, states, and health check indications for Compose multi-service applications directly within the application dashboard.
+- Live Log Preview & Log Sizing: Inline preview of recent container standard output/error with total on-disk log volume tracking and quick navigation to full logs.
+- REST API Endpoint: Added `GET /api/apps/{id}/dashboard` returning comprehensive aggregated `AppDashboardSummary`.
+- 100% MCP & CLI Parity: Added `get_app_dashboard` Model Context Protocol tool to `admin/mcp.rs` and `r3 app dashboard <APP_ID>` CLI command to `r3v3rs3-cli`.
+- Dual-Language Documentation: Updated `platform.md` and `platform.tr.md` in lockstep documenting dedicated application dashboard capabilities, live telemetry, and CLI/MCP administration.
+
+### Changed
+- Documentation Service Alignment: Updated all documentation files and tutorials to reference the unified `r3-server` service name and `r3` CLI command syntax.
+
 ## [2.6.7] - 2026-10-25
 
 ### Added
