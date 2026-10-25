@@ -925,21 +925,79 @@ impl ApiClient {
     }
 
     pub async fn set_app_env(&self, id: &str, pairs: &[String]) -> anyhow::Result<()> {
-        let mut map = serde_json::Map::new();
+        let mut entries = Vec::new();
         for pair in pairs {
             if let Some((k, v)) = pair.split_once('=') {
-                map.insert(k.to_string(), Value::String(v.to_string()));
+                let is_secret = is_likely_secret_key(k);
+                entries.push(json!({
+                    "key": k,
+                    "value": v,
+                    "secret": is_secret,
+                }));
             } else {
                 bail!("invalid env pair '{pair}', expected KEY=VALUE format");
             }
         }
-        let body = Value::Object(map);
+        let body = Value::Array(entries);
         self.request(Method::PUT, &format!("/api/apps/{id}/env"), Some(&body))
             .await?;
         println!("app/{id} environment variables updated");
         Ok(())
     }
 
+    pub async fn generate_app_env(
+        &self,
+        id: &str,
+        save: bool,
+        overwrite: bool,
+    ) -> anyhow::Result<()> {
+        let body = json!({
+            "save": save,
+            "overwrite": overwrite,
+        });
+        let res = self
+            .request(
+                Method::POST,
+                &format!("/api/apps/{id}/env/generate"),
+                Some(&body),
+            )
+            .await?;
+        print_json(&res)
+    }
+
+    pub async fn resolve_env_template(
+        &self,
+        template: Option<&str>,
+        file: Option<&std::path::Path>,
+        overwrite: bool,
+    ) -> anyhow::Result<()> {
+        let template_content = if let Some(path) = file {
+            Some(tokio::fs::read_to_string(path).await?)
+        } else {
+            template.map(|t| t.to_string())
+        };
+        let body = json!({
+            "template": template_content,
+            "overwrite": overwrite,
+        });
+        let res = self
+            .request(Method::POST, "/api/compose/env/generate", Some(&body))
+            .await?;
+        print_json(&res)
+    }
+}
+
+fn is_likely_secret_key(key: &str) -> bool {
+    let upper = key.to_ascii_uppercase();
+    upper.ends_with("_PASSWORD")
+        || upper.ends_with("_SECRET")
+        || upper.ends_with("_KEY")
+        || upper.ends_with("_TOKEN")
+        || upper.contains("PASSWORD")
+        || upper.contains("SECRET")
+}
+
+impl ApiClient {
     pub async fn app_hooks(
         &self,
         id: &str,

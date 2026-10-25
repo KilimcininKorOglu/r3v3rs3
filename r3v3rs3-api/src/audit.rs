@@ -203,10 +203,12 @@ pub enum AuditAction {
     ApplySecurityProfile,
     /// An operator terminated an active long-lived connection or stream.
     TerminateConnection,
+    /// An account generated secrets for an app's environment variables.
+    GenerateAppEnvSecrets,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 112] = [
+    pub const ALL: [AuditAction; 113] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -319,6 +321,7 @@ impl AuditAction {
         Self::DeleteErrorPageTheme,
         Self::ApplySecurityProfile,
         Self::TerminateConnection,
+        Self::GenerateAppEnvSecrets,
     ];
 }
 

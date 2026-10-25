@@ -396,6 +396,10 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 )),
         )
         .nest(
+            "/compose",
+            OpenApiRouter::new().routes(routes!(platform::resolve_compose_env)),
+        )
+        .nest(
             "/targets",
             OpenApiRouter::new()
                 .routes(routes!(platform::list_targets, platform::add_target))
@@ -471,7 +475,11 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     platform::update_app,
                     platform::delete_app
                 ))
-                .routes(routes!(platform::get_env, platform::put_env))
+                .routes(routes!(
+                    platform::get_env,
+                    platform::put_env,
+                    platform::generate_app_env
+                ))
                 .routes(routes!(platform::put_git_token, platform::delete_git_token))
                 .routes(routes!(
                     platform::new_webhook_secret,

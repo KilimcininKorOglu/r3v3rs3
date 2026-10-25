@@ -341,6 +341,28 @@ pub enum AppCommand {
         #[arg(required = true)]
         pairs: Vec<String>,
     },
+    /// Generates cryptographically secure secrets for missing or placeholder environment variables of an application.
+    GenerateEnv {
+        id: String,
+        /// Save the generated secrets directly to the application.
+        #[arg(long, default_value_t = true)]
+        save: bool,
+        /// Overwrite existing non-empty values.
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Resolves an environment variable template (.env text or file) and generates cryptographically secure secrets.
+    ResolveTemplate {
+        /// Raw template string to resolve.
+        #[arg(long)]
+        template: Option<String>,
+        /// Path to a .env template file to resolve.
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+        /// Overwrite existing non-empty values.
+        #[arg(long)]
+        overwrite: bool,
+    },
     /// Shows container log file sizes of an application.
     LogSize { id: String },
     /// Truncates (vacuums) container log files of an application.
@@ -957,6 +979,19 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
         AppCommand::Logs { id, tail } => api.app_logs(&id, tail).await,
         AppCommand::Env { id } => api.get_app_env(&id).await,
         AppCommand::SetEnv { id, pairs } => api.set_app_env(&id, &pairs).await,
+        AppCommand::GenerateEnv {
+            id,
+            save,
+            overwrite,
+        } => api.generate_app_env(&id, save, overwrite).await,
+        AppCommand::ResolveTemplate {
+            template,
+            file,
+            overwrite,
+        } => {
+            api.resolve_env_template(template.as_deref(), file.as_deref(), overwrite)
+                .await
+        }
         AppCommand::LogSize { id } => api.app_log_size(&id).await,
         AppCommand::VacuumLogs { id } => api.vacuum_app_logs(&id).await,
         AppCommand::Diagnostics { id } => api.app_diagnostics(&id).await,

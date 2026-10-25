@@ -1,6 +1,7 @@
 //! The variables of an app store entry that the user fills before the first deployment.
 
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
+use crate::API_ENDPOINT;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::store::StoreEnv;
 use web_sys::HtmlInputElement;
@@ -41,6 +42,7 @@ pub fn parse(
 /// The fields of the variables section of a catalog entry.
 pub fn fields_view(locale: Locale, values: &UseStateHandle<Vec<StoreEnvValue>>) -> Html {
     let tr = locale == Locale::Tr;
+    let on_auto_generate = auto_generate_secrets(locale, values);
     let rows = (**values)
         .iter()
         .enumerate()
@@ -70,11 +72,77 @@ pub fn fields_view(locale: Locale, values: &UseStateHandle<Vec<StoreEnvValue>>) 
         .collect::<Html>();
     html! {
         <>
-            <label class={LABEL_CLASS}>{locale.t("apps.store_env")}</label>
+            <div class="flex items-center justify-between mb-1 mt-4">
+                <label class={LABEL_CLASS}>{locale.t("apps.store_env")}</label>
+                <button
+                    type="button"
+                    class="px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:text-emerald-300 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 rounded border border-emerald-300 dark:border-emerald-800 transition-colors"
+                    onclick={on_auto_generate}
+                >
+                    {locale.t("apps.store_env_generate_secrets")}
+                </button>
+            </div>
             {rows}
             <p class={HINT_CLASS}>{locale.t("apps.store_env_hint")}</p>
         </>
     }
+}
+
+fn auto_generate_secrets(
+    locale: Locale,
+    values: &UseStateHandle<Vec<StoreEnvValue>>,
+) -> Callback<MouseEvent> {
+    let values_state = values.clone();
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let current = (*values_state).clone();
+        let entries_req: Vec<r3v3rs3_api::platform::EnvEntry> = current
+            .iter()
+            .filter_map(|item| {
+                item.env
+                    .key
+                    .parse()
+                    .ok()
+                    .map(|k| r3v3rs3_api::platform::EnvEntry {
+                        key: k,
+                        value: if item.value.trim().is_empty() {
+                            None
+                        } else {
+                            Some(item.value.clone())
+                        },
+                        secret: item.env.secret,
+                    })
+            })
+            .collect();
+
+        let values_state = values_state.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let req_body = r3v3rs3_api::compose_env::ResolveEnvTemplateRequest {
+                template: None,
+                entries: Some(entries_req),
+                overwrite: false,
+            };
+            let path = format!("{API_ENDPOINT}/compose/env/generate");
+            if let Ok(resp) = crate::pages::settings::post_json::<
+                r3v3rs3_api::compose_env::ResolveEnvTemplateResponse,
+            >(locale, gloo_net::http::Request::post(&path), &req_body)
+            .await
+            {
+                let mut updated = (*values_state).clone();
+                for resolved in resp.entries {
+                    if let Some(item) = updated
+                        .iter_mut()
+                        .find(|i| i.env.key == resolved.key.as_str())
+                    {
+                        if let Some(val) = resolved.value {
+                            item.value = val;
+                        }
+                    }
+                }
+                values_state.set(updated);
+            }
+        });
+    })
 }
 
 #[cfg(test)]

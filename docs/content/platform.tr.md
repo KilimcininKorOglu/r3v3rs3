@@ -294,6 +294,21 @@ Bir uygulama ayrıca deployment sırasında ortam değişkenlerini doğrudan bir
 - Çevre değişkeni gruplarındaki gizli değişkenler platform anahtarlarıyla şifrelenir ve anahtar rotasyonu (`POST /api/platform/key/rotate`) sırasında otomatik olarak yeniden mühürlenir.
 - Aktif bir uygulamaya bağlı olan bir çevre değişkeni grubu silinemez.
 
+#### Compose .env Şablon Çözümleyici & Otomatik Secret Üretici
+
+App Store kataloğundan veya harici Git repolarından Compose uygulamaları dağıtırken ilk secret ve veritabanı kimlik bilgilerini (`POSTGRES_PASSWORD`, `APP_KEY`, `JWT_SECRET`, `ADMIN_PASSWORD`) ayarlamak gerekir. r3v3rs3 otomatik bir şablon çözümleyici ve kriptografik rastgele secret üretici motoru sunar:
+
+- **Kalıp Eşleştirme**: `_PASSWORD`, `_SECRET`, `_KEY`, `_TOKEN`, `_SALT`, `_HASH`, `_PASSPHRASE` ile biten veya bilinen kimlik bilgisi adları (`JWT_SECRET`, `ROOT_PASSWORD`, `ADMIN_PASSWORD`) içeren değişken adları otomatik olarak secret kabul edilir.
+- **Akıllı Yer Tutucu Algılama**: Boş bırakılan veya yaygın şablon yer tutucuları (`changeme`, `replace_me`, `your_secret_here`, `<secret>`, `TODO`, `""`) içeren değerler tespit edilerek üretilir; önceden girilmiş geçerli değerler korunur.
+- **Kriptografik Güvenlik**: Parolalar için shell ve YAML karakter kaçırma sorunlarına yol açmayan 32 karakterlik alfasayısal dizgiler (~190 bit entropi) üretilir. Anahtarlar, token'lar ve hash'ler için 64 karakterlik küçük harfli hex dizgileri (256 bit entropi) oluşturulur.
+- **WebUI Tek Tıkla Otomatik Doldurma**:
+  - App Store kurulum formunda, ilk dağıtıma başlamadan önce boş secret alanlarını tek tıkla doldurmak için **Eksik Gizli Değerleri Otomatik Doldur** (`apps.store_env_generate_secrets`) butonuna tıklanabilir.
+  - Uygulama detay sayfasındaki **Ortam değişkenleri** sekmesinde (`/apps/{id}/env`), eksik secret değerlerini kaydedilmeden önce form alanlarına yerleştirmek için **Eksik Gizli Değerleri Otomatik Doldur** (`apps.env_generate_secrets`) butonu kullanılır.
+- **CLI ve MCP Yönetimi**:
+  - CLI: `r3 app generate-env <APP_ID> [--save] [--overwrite]` ve `r3 app resolve-template [--template <STR>] [--file <PATH>] [--overwrite]`.
+  - MCP: `generate_app_env_secrets` ve `resolve_compose_env_template`.
+  - REST API: `POST /api/apps/{id}/env/generate` ve `POST /api/compose/env/generate`.
+
 ## Veritabanları
 
 **Veritabanları** sayfası bir motorun veritabanını tek tıkla kurar. Motorlar PostgreSQL 17 ve 18, MariaDB 11 ve 12, MySQL 9, MongoDB 8 ve Redis 8'dir; her birinin image tag'i bir sürüme sabitlenmiştir. Engine kataloğu, [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) deposunun `engines.json` dosyasıdır; binary ayrıca gömülü bir kopya taşır ve günde bir kez depodan yenilenir. Sayfadaki **Kataloğu yenile** butonu güncel kataloğu hemen indirir; API ise `POST /api/databases/engines/refresh` ile yeniler.
@@ -992,6 +1007,8 @@ Yönetim altındaki **Webhook'lar** sayfası, giden olay bildirim hedeflerini y�
 | `DELETE /api/apps/{id}`                                        | Edit  | Bir uygulamayı container'larıyla birlikte siler.                                                                                                                                                                                                    |
 | `GET /api/apps/{id}/env`                                       | Edit  | Secret değerleri olmadan ortam değişkenleri.                                                                                                                                                                                                        |
 | `PUT /api/apps/{id}/env`                                       | Edit  | Ortam değişkenlerini değiştirir.                                                                                                                                                                                                                    |
+| `POST /api/apps/{id}/env/generate`                             | Edit  | Eksik veya yer tutucu ortam değişkenleri için kriptografik güvenli secret değerleri üretir.                                                                                                                                                        |
+| `POST /api/compose/env/generate`                               | Edit  | Ortam değişkeni şablonunu (.env metni veya girdiler) çözümler ve secret değerleri üretir.                                                                                                                                                           |
 | `PUT /api/apps/{id}/git_token`                                 | Edit  | Private bir reponun token'ını ayarlar.                                                                                                                                                                                                              |
 | `DELETE /api/apps/{id}/git_token`                              | Edit  | Token'ı siler.                                                                                                                                                                                                                                      |
 | `POST /api/apps/{id}/webhook_secret`                           | Edit  | Yeni bir webhook secret'ı oluşturur ve onu bir kez döndürür.                                                                                                                                                                                        |

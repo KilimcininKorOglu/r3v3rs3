@@ -10,6 +10,7 @@ pub mod cert;
 pub mod cert_coverage;
 pub mod cidr;
 pub mod client_ip;
+pub mod compose_env;
 pub mod compose_graph;
 pub mod compression;
 pub mod compression_dictionary;

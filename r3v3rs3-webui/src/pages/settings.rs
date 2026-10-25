@@ -1429,6 +1429,20 @@ pub async fn send_json(
     send_request(locale, request).await.map(|_| ())
 }
 
+/// Sends `body` as JSON and reads the JSON of the response.
+pub async fn post_json<T: serde::de::DeserializeOwned>(
+    locale: Locale,
+    builder: RequestBuilder,
+    body: &impl Serialize,
+) -> Result<T, String> {
+    let request = builder.json(body).map_err(|err| err.to_string())?;
+    send_request(locale, request)
+        .await?
+        .json()
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Sends the request and returns a successful response. The error is the message of the failure
 /// in the selected language.
 pub async fn send_request(locale: Locale, request: Request) -> Result<Response, String> {

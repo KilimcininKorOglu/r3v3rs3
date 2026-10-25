@@ -294,6 +294,21 @@ Environment variable groups allow managing reusable collections of configuration
 - Secret variables stored in environment variable groups are sealed with cluster/platform keys and are resealed during key rotation (`POST /api/platform/key/rotate`).
 - A group cannot be deleted while it is currently linked to any active application.
 
+#### Compose .env Template Resolver & Auto-Secret Generator
+
+Deploying Compose applications from the App Store catalog or external Git repositories frequently requires setting initial secrets and database credentials (such as `POSTGRES_PASSWORD`, `APP_KEY`, `JWT_SECRET`, `ADMIN_PASSWORD`). r3v3rs3 provides an automated template resolver and cryptographically secure secret generator:
+
+- **Heuristic Pattern Matching**: Variable names containing or ending with `_PASSWORD`, `_SECRET`, `_KEY`, `_TOKEN`, `_SALT`, `_HASH`, `_PASSPHRASE`, or known credentials (`JWT_SECRET`, `ROOT_PASSWORD`, `ADMIN_PASSWORD`) are automatically recognized as sensitive secrets.
+- **Smart Placeholder Detection**: Values that are empty or set to common template placeholders (`changeme`, `replace_me`, `your_secret_here`, `<secret>`, `TODO`, `""`) are detected for generation while preserving explicit production values.
+- **Cryptographic High Entropy**: Passwords are generated as 32-character alphanumeric strings (~190 bits entropy) that are 100% safe from shell expansion and YAML syntax issues. Keys, tokens, and hashes are generated as 64-character lowercase hex strings (256 bits entropy).
+- **WebUI One-Click Auto-Fill**:
+  - In the App Store pre-deployment form, click **Auto-generate Missing Secrets** (`apps.store_env_generate_secrets`) to immediately populate empty secret inputs with secure random tokens before starting the first deployment.
+  - In the **Environment Variables** tab of an application (`/apps/{id}/env`), click **Auto-generate Missing Secrets** (`apps.env_generate_secrets`) to fill missing secret values into the form for inspection before saving.
+- **CLI & MCP Management**:
+  - CLI: `r3 app generate-env <APP_ID> [--save] [--overwrite]` and `r3 app resolve-template [--template <STR>] [--file <PATH>] [--overwrite]`.
+  - MCP: `generate_app_env_secrets` and `resolve_compose_env_template`.
+  - REST API: `POST /api/apps/{id}/env/generate` and `POST /api/compose/env/generate`.
+
 ## Databases
 
 The **Databases** page installs a database of one engine in one click. The engines are PostgreSQL 17 and 18, MariaDB 11 and 12, MySQL 9, MongoDB 8 and Redis 8, each with its image tag pinned to a version. The engine catalog is the `engines.json` file of the [r3v3rs3-apps](https://github.com/KilimcininKorOglu/r3v3rs3-apps) repository; the binary also ships an embedded copy and refreshes from the repository once a day. The **Refresh catalog** button of the page downloads the current catalog at once; the API refreshes it with `POST /api/databases/engines/refresh`.
@@ -994,6 +1009,8 @@ The **Backups** page (`/backups`) provides a centralized management console for 
 | `DELETE /api/apps/{id}`                                        | Edit          | Deletes an app with its containers.                                                                                                                                                                                                       |
 | `GET /api/apps/{id}/env`                                       | Edit          | The environment variables, without secret values.                                                                                                                                                                                         |
 | `PUT /api/apps/{id}/env`                                       | Edit          | Replaces the environment variables.                                                                                                                                                                                                       |
+| `POST /api/apps/{id}/env/generate`                             | Edit          | Generates cryptographically secure secrets for missing or placeholder environment variables.                                                                                                                                              |
+| `POST /api/compose/env/generate`                               | Edit          | Resolves an environment variable template (.env text or entries) and generates secrets.                                                                                                                                                   |
 | `PUT /api/apps/{id}/git_token`                                 | Edit          | Sets the token of a private repository.                                                                                                                                                                                                   |
 | `DELETE /api/apps/{id}/git_token`                              | Edit          | Deletes the token.                                                                                                                                                                                                                        |
 | `POST /api/apps/{id}/webhook_secret`                           | Edit          | Creates a new webhook secret and returns it once.                                                                                                                                                                                         |

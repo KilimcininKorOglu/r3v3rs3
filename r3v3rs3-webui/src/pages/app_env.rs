@@ -95,8 +95,15 @@ pub fn app_env(props: &Props) -> Html {
         <>
             <p class={HINT_CLASS}>{locale.t("apps.env_hint")}</p>
             { for (0..current.len()).map(|index| row_view(locale, &rows, &current, index)) }
-            <div class="mt-4">
+            <div class="mt-4 flex items-center justify-between">
                 <a class={LINK_CLASS} onclick={add_row(&rows)}>{locale.t("apps.env_add")}</a>
+                <button
+                    type="button"
+                    class="px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:text-emerald-300 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 rounded border border-emerald-300 dark:border-emerald-800 transition-colors"
+                    onclick={generate_secrets_action(locale, id, &rows, &notice)}
+                >
+                    {locale.t("apps.env_generate_secrets")}
+                </button>
             </div>
         </>
     };
@@ -185,6 +192,52 @@ fn add_row(rows: &Rows) -> Callback<MouseEvent> {
         updated.push(EnvRow::default());
         rows.set(Some(updated));
     })
+}
+
+fn generate_secrets_action(
+    locale: Locale,
+    id: ShortId,
+    rows: &Rows,
+    notice: &UseStateHandle<Option<Notice<()>>>,
+) -> Callback<MouseEvent> {
+    let (rows, notice) = (rows.clone(), notice.clone());
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let (rows, notice) = (rows.clone(), notice.clone());
+        spawn_local(async move {
+            let path = format!("{API_ENDPOINT}/apps/{id}/env/generate");
+            let req_body = r3v3rs3_api::compose_env::GenerateAppEnvSecretsRequest {
+                save: false,
+                overwrite: false,
+            };
+            match super::settings::post_json::<r3v3rs3_api::compose_env::ResolveEnvTemplateResponse>(
+                locale,
+                Request::post(&path),
+                &req_body,
+            )
+            .await
+            {
+                Ok(resp) => {
+                    let mut current = (*rows).clone().unwrap_or_default();
+                    apply_generated_entries(&mut current, resp.entries);
+                    rows.set(Some(current));
+                }
+                Err(message) => notice.set(Some(Notice::Failed(message))),
+            }
+        });
+    })
+}
+
+fn apply_generated_entries(current: &mut [EnvRow], entries: Vec<EnvEntry>) {
+    for entry in entries {
+        if let Some(row) = current.iter_mut().find(|r| r.key == entry.key.as_str()) {
+            if let Some(val) = entry.value {
+                row.value = val;
+                row.stored_secret = false;
+                row.secret = true;
+            }
+        }
+    }
 }
 
 fn submit(

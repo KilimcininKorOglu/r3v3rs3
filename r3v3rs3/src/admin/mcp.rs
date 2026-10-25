@@ -180,6 +180,28 @@ pub struct UpdateAppEnvParams {
     pub entries: Vec<serde_json::Value>,
 }
 
+/// The arguments of `generate_app_env_secrets`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GenerateAppEnvSecretsParams {
+    /// The id of the application.
+    pub id: String,
+    /// Whether to save the generated secrets to the application (default: true).
+    pub save: Option<bool>,
+    /// Whether to overwrite existing non-empty values (default: false).
+    pub overwrite: Option<bool>,
+}
+
+/// The arguments of `resolve_compose_env_template`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ResolveComposeEnvParams {
+    /// Optional raw .env template string.
+    pub template: Option<String>,
+    /// Optional list of environment entries (`[{"key": "FOO", "value": "bar", "secret": true}]`).
+    pub entries: Option<Vec<serde_json::Value>>,
+    /// Whether to overwrite existing non-empty values (default: false).
+    pub overwrite: Option<bool>,
+}
+
 /// The `{ "deployment_id": "..." }` argument of `rollback_deployment`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RollbackParams {
@@ -2169,6 +2191,94 @@ impl McpServer {
             .map_err(any_error)?;
         platform.set_env(id, entries).await.map_err(any_error)?;
         json_result(json!({ "updated": true }))
+    }
+
+    /// Generate cryptographically secure secrets for missing or placeholder environment variables of an application.
+    #[tool(
+        description = "Generate cryptographically secure secrets for missing or placeholder environment variables of an application. Needs the edit scope."
+    )]
+    async fn generate_app_env_secrets(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<GenerateAppEnvSecretsParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let mut entries = platform.env(id).await.map_err(any_error)?;
+        let overwrite = params.overwrite.unwrap_or(false);
+        let save = params.save.unwrap_or(true);
+        let generated_keys = r3v3rs3_api::compose_env::resolve_env_entries(
+            &mut entries,
+            overwrite,
+            super::platform::generate_secret_for_key,
+        );
+        if save && !generated_keys.is_empty() {
+            platform
+                .set_env(id, entries.clone())
+                .await
+                .map_err(any_error)?;
+        }
+        json_result(r3v3rs3_api::compose_env::ResolveEnvTemplateResponse {
+            template: String::new(),
+            generated_count: generated_keys.len(),
+            generated_keys,
+            entries,
+        })
+    }
+
+    /// Resolve an environment variable template (.env text or entries) and generate cryptographically secure secrets.
+    #[tool(
+        description = "Resolve a Compose or .env template and generate cryptographically secure secrets for missing or placeholder values. Needs the edit scope."
+    )]
+    async fn resolve_compose_env_template(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<ResolveComposeEnvParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let _ = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let overwrite = params.overwrite.unwrap_or(false);
+        if let Some(template) = params.template {
+            let (resolved, entries, generated_keys) =
+                r3v3rs3_api::compose_env::resolve_env_template(
+                    &template,
+                    overwrite,
+                    super::platform::generate_secret_for_key,
+                );
+            return json_result(r3v3rs3_api::compose_env::ResolveEnvTemplateResponse {
+                template: resolved,
+                generated_count: generated_keys.len(),
+                generated_keys,
+                entries,
+            });
+        }
+        let mut entries: Vec<r3v3rs3_api::platform::EnvEntry> = match params.entries {
+            Some(list) => serde_json::from_value(serde_json::Value::Array(list))
+                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?,
+            None => Vec::new(),
+        };
+        let generated_keys = r3v3rs3_api::compose_env::resolve_env_entries(
+            &mut entries,
+            overwrite,
+            super::platform::generate_secret_for_key,
+        );
+        json_result(r3v3rs3_api::compose_env::ResolveEnvTemplateResponse {
+            template: String::new(),
+            generated_count: generated_keys.len(),
+            generated_keys,
+            entries,
+        })
     }
 
     /// List deployment history of an application.

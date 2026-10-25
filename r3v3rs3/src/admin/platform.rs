@@ -19,6 +19,9 @@ use futures::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use r3v3rs3_api::{
     audit::AuditAction,
+    compose_env::{
+        GenerateAppEnvSecretsRequest, ResolveEnvTemplateRequest, ResolveEnvTemplateResponse,
+    },
     container::{AppLogsOverview, AppResourceDiagnostics, LogVacuumResult},
     error::Error,
     id::ShortId,
@@ -479,6 +482,108 @@ pub async fn put_env(
         .record_audit(&caller.username, caller.client, record)
         .await;
     Ok(Json(()))
+}
+
+/// Generates a cryptographically secure secret formatted according to the variable name.
+pub(crate) fn generate_secret_for_key(key: &str) -> String {
+    use rand::distr::{Alphanumeric, SampleString};
+    let upper = key.to_ascii_uppercase();
+    if upper.contains("KEY")
+        || upper.contains("SECRET")
+        || upper.contains("TOKEN")
+        || upper.contains("SALT")
+        || upper.contains("HASH")
+    {
+        hex::encode(rand::random::<[u8; 32]>())
+    } else {
+        Alphanumeric.sample_string(&mut rand::rng(), 32)
+    }
+}
+
+/// Generates cryptographically secure secrets for missing or placeholder environment variables of an app.
+#[utoipa::path(
+    post,
+    path = "/{id}/env/generate",
+    tag = "platform",
+    operation_id = "generate_app_env_secrets",
+    params(("id" = ShortId, Path, description = "App id.")),
+    request_body = GenerateAppEnvSecretsRequest,
+    responses((status = 200, description = "The generated environment variables.", body = ResolveEnvTemplateResponse), NotFoundResponse, ErrorResponses)
+)]
+pub async fn generate_app_env(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<GenerateAppEnvSecretsRequest>,
+) -> Result<Json<ResolveEnvTemplateResponse>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let mut entries = platform.env(id).await.map_err(platform_error)?;
+    let generated_keys = r3v3rs3_api::compose_env::resolve_env_entries(
+        &mut entries,
+        request.overwrite,
+        generate_secret_for_key,
+    );
+    if request.save && !generated_keys.is_empty() {
+        platform
+            .set_env(id, entries.clone())
+            .await
+            .map_err(platform_error)?;
+        let summary = format!("Generated secrets for {}", generated_keys.join(", "));
+        let record = AuditRecord::new(AuditAction::GenerateAppEnvSecrets)
+            .id(id)
+            .summary(summary);
+        state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+    }
+    Ok(Json(ResolveEnvTemplateResponse {
+        template: String::new(),
+        generated_count: generated_keys.len(),
+        generated_keys,
+        entries,
+    }))
+}
+
+/// Resolves an environment variable template (.env text or entries) and generates cryptographically secure secrets.
+#[utoipa::path(
+    post,
+    path = "/env/generate",
+    tag = "platform",
+    operation_id = "resolve_compose_env_template",
+    request_body = ResolveEnvTemplateRequest,
+    responses((status = 200, description = "The resolved template and entries.", body = ResolveEnvTemplateResponse), ErrorResponses)
+)]
+pub async fn resolve_compose_env(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<ResolveEnvTemplateRequest>,
+) -> Result<Json<ResolveEnvTemplateResponse>, AppError> {
+    let _ = state.platform(&caller, Permission::Edit).await?;
+    if let Some(template) = request.template {
+        let (resolved, entries, generated_keys) = r3v3rs3_api::compose_env::resolve_env_template(
+            &template,
+            request.overwrite,
+            generate_secret_for_key,
+        );
+        return Ok(Json(ResolveEnvTemplateResponse {
+            template: resolved,
+            generated_count: generated_keys.len(),
+            generated_keys,
+            entries,
+        }));
+    }
+    let mut entries = request.entries.unwrap_or_default();
+    let generated_keys = r3v3rs3_api::compose_env::resolve_env_entries(
+        &mut entries,
+        request.overwrite,
+        generate_secret_for_key,
+    );
+    Ok(Json(ResolveEnvTemplateResponse {
+        template: String::new(),
+        generated_count: generated_keys.len(),
+        generated_keys,
+        entries,
+    }))
 }
 
 /// Sets the token that clones the private repository of a Git app. The admin API never returns
