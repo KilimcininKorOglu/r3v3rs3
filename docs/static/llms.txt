@@ -37,7 +37,5 @@ The documentation is published in English at the root and in Turkish under `/tr/
 ## Source and packages
 
 - [GitHub repository](https://github.com/KilimcininKorOglu/r3v3rs3)
-- [crates.io: r3v3rs3](https://crates.io/crates/r3v3rs3): the server binary
-- [crates.io: r3v3rs3-api](https://crates.io/crates/r3v3rs3-api): the shared API types
-- [docs.rs: r3v3rs3-api](https://docs.rs/r3v3rs3-api): the API type reference
+- [GitHub Releases](https://github.com/KilimcininKorOglu/r3v3rs3/releases): pre-built server and CLI binary archives
 - [Changelog](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/CHANGELOG.md)

@@ -37,7 +37,5 @@ The documentation is published in English at the root and in Turkish under `/tr/
 ## Source and packages
 
 - [GitHub repository](https://github.com/KilimcininKorOglu/r3v3rs3): the source, the issue tracker and the release archives.
-- [crates.io: r3v3rs3](https://crates.io/crates/r3v3rs3): the server binary package; it ships the built WebUI.
-- [crates.io: r3v3rs3-api](https://crates.io/crates/r3v3rs3-api): the shared API types and validation.
-- [docs.rs: r3v3rs3-api](https://docs.rs/r3v3rs3-api): the rustdoc reference of the API types.
+- [GitHub Releases](https://github.com/KilimcininKorOglu/r3v3rs3/releases): pre-built release archives for server and CLI binaries.
 - [Changelog](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/CHANGELOG.md): the notable changes of every release in Keep a Changelog format.

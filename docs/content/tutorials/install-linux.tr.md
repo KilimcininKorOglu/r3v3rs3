@@ -29,14 +29,16 @@ Script bir soru sorar:
 Kurulumun son adımı `admin` hesabını oluşturur. `--password` verilmezse script güçlü rastgele bir parola üretir ve bir kez basar:
 
 ```
-r3v3rs3 v2.0.0 is running.
+r3-server v2.6.7 is running.
 
   WebUI:    http://127.0.0.1:46492/
-  Binary:   /usr/local/bin/r3v3rs3
+  Server:   /usr/local/bin/r3-server
+  Agent:    /usr/local/bin/r3-agent
+  CLI:      /usr/local/bin/r3
   Config:   /etc/r3v3rs3
-  Logs:     /var/log/r3v3rs3 and journalctl -u r3v3rs3
-  Service:  systemctl status|restart|stop r3v3rs3
-  Add user: /usr/local/bin/r3v3rs3 add-user --config-dir /etc/r3v3rs3 <name>
+  Logs:     /var/log/r3v3rs3 and journalctl -u r3-server
+  Service:  systemctl status|restart|stop r3-server
+  Add user: /usr/local/bin/r3-server add-user --config-dir /etc/r3v3rs3 <name>
 
   Admin:    admin
   Password: C579ts1HwZwMB2DpbtvhDTMk
@@ -57,21 +59,21 @@ Tüm seçenekler soru sormadan kurmak için de çalışır:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
-    | sudo bash -s -- --version 2.0.0 --webui 0.0.0.0:46492
+    | sudo bash -s -- --version 2.6.7 --webui 0.0.0.0:46492
 ```
 
 ## Adım 2: Servisi kontrol edin
 
 ```bash
-$ systemctl is-enabled r3v3rs3
+$ systemctl is-enabled r3-server
 enabled
-$ systemctl is-active r3v3rs3
+$ systemctl is-active r3-server
 active
 $ curl -o /dev/null -w '%{http_code}\n' http://127.0.0.1:46492/
 200
 ```
 
-Script `/etc/systemd/system/r3v3rs3.service` dosyasını yazar:
+Script `/etc/systemd/system/r3-server.service` dosyasını yazar:
 
 ```ini
 [Service]
@@ -79,16 +81,16 @@ Type=simple
 Environment=R3V3RS3_CONFIG_DIR=/etc/r3v3rs3
 Environment=R3V3RS3_LOG_DIR=/var/log/r3v3rs3
 Environment=R3V3RS3_WEBUI=127.0.0.1:46492
-ExecStart=/usr/local/bin/r3v3rs3 start
+ExecStart=/usr/local/bin/r3-server start
 KillSignal=SIGINT
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=1048576
 ```
 
-`KillSignal=SIGINT` satırı önemlidir: r3v3rs3 SIGINT ile düzgün kapanır. `LimitNOFILE=1048576` file descriptor limitini yükseltir, çünkü her bağlantı bir tane ister.
+`KillSignal=SIGINT` satırı önemlidir: r3-server SIGINT ile düzgün kapanır. `LimitNOFILE=1048576` file descriptor limitini yükseltir, çünkü her bağlantı bir tane ister.
 
-Servis root olarak çalışır, bu yüzden r3v3rs3 1024 altındaki bir portu ek ayar olmadan bağlar.
+Servis root olarak çalışır, bu yüzden r3-server 1024 altındaki bir portu ek ayar olmadan bağlar.
 
 ## Adım 3: Paneli açın
 
@@ -102,13 +104,15 @@ $ ssh -L 46492:127.0.0.1:46492 kullanici@sunucunuz
 
 ## Dosyalar nerede
 
-| Yol                      | İçerik                                                                                                                 |
-|--------------------------|------------------------------------------------------------------------------------------------------------------------|
-| `/usr/local/bin/r3v3rs3` | Binary.                                                                                                                |
-| `/etc/r3v3rs3`           | `r3v3rs3.db` (birleşik veritabanı), `r3v3rs3.key` (ana şifreleme anahtarı) ve `certs/`. Dizinin modu `0700` değeridir. |
-| `/var/log/r3v3rs3`       | Denetim kaydını tutan `log.db`. Dizinin modu `0750` değeridir.                                                         |
+| Yol                        | İçerik                                                                                                                 |
+|----------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `/usr/local/bin/r3-server` | Sunucu binary'si.                                                                                                      |
+| `/usr/local/bin/r3-agent`  | Agent binary'si (`r3-server` sembolik linki).                                                                         |
+| `/usr/local/bin/r3`        | CLI istemci binary'si.                                                                                                 |
+| `/etc/r3v3rs3`             | `r3v3rs3.db` (birleşik veritabanı), `r3v3rs3.key` (ana şifreleme anahtarı) ve `certs/`. Dizinin modu `0700` değeridir. |
+| `/var/log/r3v3rs3`         | Denetim kaydını tutan `log.db`. Dizinin modu `0750` değeridir.                                                         |
 
-Sunucu log'unu `journalctl -u r3v3rs3` gösterir. `/etc/r3v3rs3/r3v3rs3.db` tüm yapılandırma ve durum verilerini, `r3v3rs3.key` ise ana şifreleme anahtarını tutar; bu yüzden bütün dizini yedekleyin ve yedeği koruyun.
+Sunucu log'unu `journalctl -u r3-server` gösterir. `/etc/r3v3rs3/r3v3rs3.db` tüm yapılandırma ve durum verilerini, `r3v3rs3.key` ise ana şifreleme anahtarını tutar; bu yüzden bütün dizini yedekleyin ve yedeği koruyun.
 
 ## Yükseltme
 
@@ -123,13 +127,13 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
 - WebUI sorusunda varsayılan olarak kurulu servisin adresini sunar, yani Enter adresi korur.
 - Servisi yeniden başlatır ve WebUI yanıt verene kadar bekler. WebUI 30 saniye sessiz kalırsa `systemctl status` çıktısını ve son 50 journal satırını yazar, sonra durur.
 
-Bir filoyu adım adım yükseltirken sürümü `--version 2.0.0` ile sabitleyin.
+Bir filoyu adım adım yükseltirken sürümü `--version 2.6.7` ile sabitleyin.
 
 ## Kaldırma
 
 ```bash
-$ sudo systemctl disable --now r3v3rs3
-$ sudo rm /etc/systemd/system/r3v3rs3.service /usr/local/bin/r3v3rs3
+$ sudo systemctl disable --now r3-server
+$ sudo rm /etc/systemd/system/r3-server.service /usr/local/bin/r3-server /usr/local/bin/r3-agent /usr/local/bin/r3
 $ sudo systemctl daemon-reload
 ```
 
@@ -144,7 +148,7 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
     | sudo bash -s -- --agent --master master.example.com:9443 --token <token>
 ```
 
-Script aynı binary'yi kurar ve `r3v3rs3 agent` komutunu `r3v3rs3-agent` systemd servisi olarak çalıştırır:
+Script aynı binary'yi kurar ve `r3-agent` komutunu `r3-agent` systemd servisi olarak çalıştırır:
 
 ```ini
 [Service]
@@ -152,7 +156,7 @@ Type=simple
 Environment=R3V3RS3_AGENT_MASTER=master.example.com:9443
 Environment=R3V3RS3_AGENT_DATA_DIR=/var/lib/r3v3rs3-agent
 EnvironmentFile=-/var/lib/r3v3rs3-agent/token.env
-ExecStart=/usr/local/bin/r3v3rs3 agent
+ExecStart=/usr/local/bin/r3-agent
 KillSignal=SIGINT
 Restart=always
 RestartSec=5
@@ -163,8 +167,8 @@ Token yalnız agent kaydolana kadar `token.env` dosyasında (mod `0600`) kalır.
 Agent'ı güncellemek için script'i token vermeden `--agent` ile yeniden çalıştırın. Sunucuyu yeniden kaydetmek için **Hedefler** sayfasında **Yeni token** oluşturun ve onu `--token` ile verin. Agent'ı kaldırmak için:
 
 ```bash
-$ sudo systemctl disable --now r3v3rs3-agent
-$ sudo rm /etc/systemd/system/r3v3rs3-agent.service
+$ sudo systemctl disable --now r3-agent
+$ sudo rm /etc/systemd/system/r3-agent.service
 $ sudo systemctl daemon-reload
 ```
 
@@ -172,8 +176,7 @@ $ sudo systemctl daemon-reload
 
 ## Diğer kurulum yolları
 
-- `cargo binstall r3v3rs3` veya `cargo install r3v3rs3`: crates.io paketi WebUI'yi içinde taşır, bu yüzden trunk istemez.
-- [Releases sayfası](https://github.com/KilimcininKorOglu/r3v3rs3/releases): elle kurulum için arşiv. Binary'yi `PATH` içine koyun ve kendi unit dosyanızı yazın.
+- [Releases sayfası](https://github.com/KilimcininKorOglu/r3v3rs3/releases): elle kurulum için derlenmiş binary arşivleri. Binary'yi `PATH` içine koyun ve kendi unit dosyanızı yazın.
 
 ## Sonraki adımlar
 

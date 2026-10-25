@@ -29,14 +29,16 @@ The script asks one question:
 The last step of an install creates the admin account `admin`. Without a `--password` option the script generates a strong random password and prints it once:
 
 ```
-r3v3rs3 v2.0.0 is running.
+r3-server v2.6.7 is running.
 
   WebUI:    http://127.0.0.1:46492/
-  Binary:   /usr/local/bin/r3v3rs3
+  Server:   /usr/local/bin/r3-server
+  Agent:    /usr/local/bin/r3-agent
+  CLI:      /usr/local/bin/r3
   Config:   /etc/r3v3rs3
-  Logs:     /var/log/r3v3rs3 and journalctl -u r3v3rs3
-  Service:  systemctl status|restart|stop r3v3rs3
-  Add user: /usr/local/bin/r3v3rs3 add-user --config-dir /etc/r3v3rs3 <name>
+  Logs:     /var/log/r3v3rs3 and journalctl -u r3-server
+  Service:  systemctl status|restart|stop r3-server
+  Add user: /usr/local/bin/r3-server add-user --config-dir /etc/r3v3rs3 <name>
 
   Admin:    admin
   Password: C579ts1HwZwMB2DpbtvhDTMk
@@ -57,21 +59,21 @@ All options also work without a question, for an unattended install:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
-    | sudo bash -s -- --version 2.0.0 --webui 0.0.0.0:46492
+    | sudo bash -s -- --version 2.6.7 --webui 0.0.0.0:46492
 ```
 
 ## Step 2: Check the Service
 
 ```bash
-$ systemctl is-enabled r3v3rs3
+$ systemctl is-enabled r3-server
 enabled
-$ systemctl is-active r3v3rs3
+$ systemctl is-active r3-server
 active
 $ curl -o /dev/null -w '%{http_code}\n' http://127.0.0.1:46492/
 200
 ```
 
-The script writes `/etc/systemd/system/r3v3rs3.service`:
+The script writes `/etc/systemd/system/r3-server.service`:
 
 ```ini
 [Service]
@@ -79,16 +81,16 @@ Type=simple
 Environment=R3V3RS3_CONFIG_DIR=/etc/r3v3rs3
 Environment=R3V3RS3_LOG_DIR=/var/log/r3v3rs3
 Environment=R3V3RS3_WEBUI=127.0.0.1:46492
-ExecStart=/usr/local/bin/r3v3rs3 start
+ExecStart=/usr/local/bin/r3-server start
 KillSignal=SIGINT
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=1048576
 ```
 
-`KillSignal=SIGINT` matters: r3v3rs3 shuts down gracefully on SIGINT. `LimitNOFILE=1048576` raises the file descriptor limit, because each connection needs one.
+`KillSignal=SIGINT` matters: r3-server shuts down gracefully on SIGINT. `LimitNOFILE=1048576` raises the file descriptor limit, because each connection needs one.
 
-The service runs as root, so r3v3rs3 binds a port below 1024 without another setting.
+The service runs as root, so r3-server binds a port below 1024 without another setting.
 
 ## Step 3: Open the Panel
 
@@ -102,13 +104,15 @@ Open [http://localhost:46492/](http://localhost:46492/) and sign in with the acc
 
 ## Where the Files Are
 
-| Path                     | Content                                                                                                                 |
-|--------------------------|-------------------------------------------------------------------------------------------------------------------------|
-| `/usr/local/bin/r3v3rs3` | The binary.                                                                                                             |
-| `/etc/r3v3rs3`           | `r3v3rs3.db` (unified database), `r3v3rs3.key` (master encryption key) and `certs/`. The directory has the mode `0700`. |
-| `/var/log/r3v3rs3`       | `log.db`, which holds the audit log. The directory has the mode `0750`.                                                 |
+| Path                       | Content                                                                                                                 |
+|----------------------------|-------------------------------------------------------------------------------------------------------------------------|
+| `/usr/local/bin/r3-server` | The server binary.                                                                                                      |
+| `/usr/local/bin/r3-agent`  | The agent binary (symlink to `r3-server`).                                                                              |
+| `/usr/local/bin/r3`        | The CLI client binary.                                                                                                  |
+| `/etc/r3v3rs3`             | `r3v3rs3.db` (unified database), `r3v3rs3.key` (master encryption key) and `certs/`. The directory has the mode `0700`. |
+| `/var/log/r3v3rs3`         | `log.db`, which holds the audit log. The directory has the mode `0750`.                                                 |
 
-`journalctl -u r3v3rs3` shows the server log. `/etc/r3v3rs3/r3v3rs3.db` holds configuration and operational state, and `r3v3rs3.key` holds the master encryption key, so back up the whole directory and protect the backup.
+`journalctl -u r3-server` shows the server log. `/etc/r3v3rs3/r3v3rs3.db` holds configuration and operational state, and `r3v3rs3.key` holds the master encryption key, so back up the whole directory and protect the backup.
 
 ## Upgrade
 
@@ -123,13 +127,13 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
 - The WebUI question offers the address of the installed service as its default, so pressing Enter keeps it.
 - It restarts the service and waits until the WebUI answers. When the WebUI stays silent for 30 seconds, it prints `systemctl status` and the last 50 journal lines, then stops.
 
-Pin a release with `--version 2.0.0` when you upgrade a fleet in steps.
+Pin a release with `--version 2.6.7` when you upgrade a fleet in steps.
 
 ## Remove
 
 ```bash
-$ sudo systemctl disable --now r3v3rs3
-$ sudo rm /etc/systemd/system/r3v3rs3.service /usr/local/bin/r3v3rs3
+$ sudo systemctl disable --now r3-server
+$ sudo rm /etc/systemd/system/r3-server.service /usr/local/bin/r3-server /usr/local/bin/r3-agent /usr/local/bin/r3
 $ sudo systemctl daemon-reload
 ```
 
@@ -144,7 +148,7 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
     | sudo bash -s -- --agent --master master.example.com:9443 --token <token>
 ```
 
-The script installs the same binary and runs `r3v3rs3 agent` as the systemd service `r3v3rs3-agent`:
+The script installs the same binary and runs `r3-agent` as the systemd service `r3-agent`:
 
 ```ini
 [Service]
@@ -152,7 +156,7 @@ Type=simple
 Environment=R3V3RS3_AGENT_MASTER=master.example.com:9443
 Environment=R3V3RS3_AGENT_DATA_DIR=/var/lib/r3v3rs3-agent
 EnvironmentFile=-/var/lib/r3v3rs3-agent/token.env
-ExecStart=/usr/local/bin/r3v3rs3 agent
+ExecStart=/usr/local/bin/r3-agent
 KillSignal=SIGINT
 Restart=always
 RestartSec=5
@@ -163,8 +167,8 @@ The token stays in `token.env` (mode `0600`) only until the agent enrolls. The s
 To upgrade the agent, run the script again with `--agent` and without a token. To enroll the server again, create a **New token** on the **Targets** page and pass it with `--token`. To remove the agent:
 
 ```bash
-$ sudo systemctl disable --now r3v3rs3-agent
-$ sudo rm /etc/systemd/system/r3v3rs3-agent.service
+$ sudo systemctl disable --now r3-agent
+$ sudo rm /etc/systemd/system/r3-agent.service
 $ sudo systemctl daemon-reload
 ```
 
@@ -172,8 +176,7 @@ $ sudo systemctl daemon-reload
 
 ## Other Install Methods
 
-- `cargo binstall r3v3rs3` or `cargo install r3v3rs3`: the crates.io package ships the WebUI, so it needs no trunk.
-- The [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases): the archive for a manual install. Put the binary in your `PATH` and write your own unit file.
+- The [releases page](https://github.com/KilimcininKorOglu/r3v3rs3/releases): pre-built release archives for a manual install. Put the binary in your `PATH` and write your own unit file.
 
 ## Next Steps
 

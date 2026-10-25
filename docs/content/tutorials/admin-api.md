@@ -77,8 +77,8 @@ Both need the session cookie. Open them in the browser where you signed in to th
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/openapi.json | jq '.info.version, (.paths | length)'
-"2.0.0"
-58
+"2.6.7"
+201
 ```
 
 Use the document to generate a client, or to see the exact body of an endpoint instead of guessing it.

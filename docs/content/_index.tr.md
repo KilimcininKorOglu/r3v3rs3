@@ -3,10 +3,9 @@ title = "r3v3rs3"
 sort_by = "weight"
 +++
 
-[![Crates.io](https://img.shields.io/crates/v/r3v3rs3.svg)](https://crates.io/crates/r3v3rs3)
+[![GitHub release](https://img.shields.io/github/v/release/KilimcininKorOglu/r3v3rs3)](https://github.com/KilimcininKorOglu/r3v3rs3/releases)
 [![GitHub license](https://img.shields.io/github/license/KilimcininKorOglu/r3v3rs3.svg)](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/LICENSE)
 [![Rust](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml/badge.svg)](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml)
-[![dependency status](https://deps.rs/crate/r3v3rs3/latest/status.svg)](https://deps.rs/crate/r3v3rs3)
 
 r3v3rs3, Rust ile yazılmış bir reverse proxy sunucusudur. TCP, UDP, TLS, HTTP ve WebSocket bağlantılarını proxy'ler, gelen HTTP/3 bağlantılarını da kabul eder. Uygulamaları container olarak deploy eder ve alan adlarını kendi proxy'leri üzerinden yönlendirir. [Taxy](https://github.com/picoHz/taxy) projesinin bir fork'udur.
 
@@ -22,11 +21,15 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - Yol yeniden yazma (prefix silme, regex değiştirme, prefix ekleme), yönlendirme kuralları ve sabit yanıtlar: yönlendirme host'u, durum kodu host'u ve 404 host'u şablonları.
 - Bir route, proxy'sinin ayarlarının yerine kendi ayarını koyabilir: timeout'lar, yeniden deneme, rate limit, IP filtresi, kimlik doğrulama, header kuralları ve gövde boyutu.
 - Round robin (smooth weighted), rastgele, ilk sağlıklı sunucu ve istemci IP hash'i ile yük dengeleme. Sunucuyu devre dışı bırakmak için 0 ile 65535 arası ağırlık.
-- Yeniden deneme: aktif ve pasif sağlık kontrolü, half-open denemesiyle circuit breaker, idempotent method kuralları ve gövde replay limiti. HMAC imzalı cookie ile sticky session ve yüzde ile istek yansıtma.
+- Yeniden deneme: aktif ve pasif sağlık kontrolü, `grpc.health.v1.Health` protokolü ile gRPC sağlık kontrolü, half-open denemesiyle circuit breaker, idempotent method kuralları ve gövde replay limiti. HMAC imzalı cookie ile sticky session ve yüzde ile istek yansıtma.
 - Proxy ve route başına upstream connect ve request timeout'ları. TTL bitince yenilenen DNS SRV kayıtlarından gelen upstream sunucuları (`http+srv://` URL'leri).
 - İstemci başına UDP oturumları: boşta kalma timeout'u ve port başına en çok 10.000 oturum.
 - Düz HTTP sunuculara gRPC için h2c ile HTTP/2. Bir HTTP/2 upstream bağlantısını çok sayıda istemciye taşıyan paylaşılan upstream bağlantı havuzları.
 - Genel ve port başına ayarlanabilir HTTP/2 ve HTTP/3 flood limitleri.
+- HTTP/2 ve HTTP/3 için akıllı akış önceliklendirme (RFC 9218): genişletilebilir aciliyet planlaması (u=0..7), otomatik MIME ve yol sezgiselleri, özel kalıp kuralları ve tampon şişkinliğini önleyen uyarlamalı eşzamanlılık kontrolü.
+- TLS 1.3 0-RTT erken veri desteği: RFC 8470 güvenli yöntem denetimi, otomatik `Early-Data` header yönetimi ve bellek içi anti-replay arabelleği.
+- Coğrafi gecikme tabanlı yönlendirme ve çoklu bölge yönetimi: istemci GeoIP yakınlığına ve canlı RTT ölçümlerine göre trafiği en yakın coğrafi hedefe veya upstream kopyasına yönlendirme.
+- Canlı bağlantı denetçisi: aktif TCP ve HTTP bağlantılarını gerçek zamanlı izleme ve güvenli sonlandırma.
 - Güvenilen yük dengeleyicilerden kabul edilen ve upstream sunuculara gönderilen PROXY protocol v1 ve v2.
 
 ## Güvenlik ve istek kontrolü
@@ -43,23 +46,30 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 
 - Yüklenen veya kendinden imzalı sunucu, istemci ve kök sertifikaları.
 - HTTP-01, TLS-ALPN-01 ve DNS-01 challenge'larıyla ACME v2 (örneğin Let's Encrypt). DNS-01 wildcard sertifikaları da alır. DNS-01 üç yolla çalışır: 12 DNS sağlayıcısının API'si, program allowlist'i olan bir exec komutu veya TSIG'li RFC 2136.
+- Sertifika Şeffaflığı (CT) günlük izleme ve sahte sertifika alarmı: yönetilen alan adları için genel CT günlüklerini periyodik denetleme, yetkisiz CA sertifikalarını erken algılama ve webhook güvenlik bildirimleri.
 - Sertifika süresi uyarıları ve webhook bildirimleri. Webhook'lar bearer token taşır, yeniden dener ve sertifika, deployment ile agent olaylarını bildirir.
 
 ## Yönetim
 
 - WebUI'ı içinde taşıyan tek bir binary. WebUI İngilizce ve Türkçedir ve açık, koyu ve sistem temaları vardır. Ayar değişiklikleri yeniden başlatmadan uygulanır.
+- Birleşik SQLite veritabanı mimarisi (`r3v3rs3.db`): tüm yapılandırma ve operasyonel durumu ACID uyumlu SQLite veritabanında saklama ve eski dosyalardan sıfır kayıpla otomatik migrasyon.
 - OpenAPI dokümanı ve Swagger UI sunan yönetim API'si ([Yönetim API'si](@/configuration.tr.md#yonetim-api-si)).
 - İstek, cache ve bağlantı sayaçlarıyla Prometheus metrics endpoint'i: `GET /api/metrics` ([Metrics](@/configuration.tr.md#metrics)).
 - OAuth 2.1 ve PKCE ile `read` ve `edit` scope'lu `/api/mcp` üzerindeki MCP sunucusu; adresi doğrudan bağlanan Claude Code gibi AI host'ları için, ayrıca script'ler ve terminal için `r3` komut satırı istemcisi ([MCP sunucusu](@/configuration.tr.md#mcp-sunucusu)).
+- Düğüm eşik alarmları ve sistem anomali algılama: düşük disk alanı, bant genişliği sıçraması, dosya tanımlayıcı (fd) tükenmesi ve TCP TIME_WAIT soket tükenmesi için sürekli izleme ve webhook bildirimleri.
 - `admin`, `editor` ve `viewer` rolleri olan hesaplar, hesap başına proxy listesi, TOTP ve saklama süreli denetim kaydı ([Hesaplar](@/accounts.tr.md)).
 - Saatlik dosya döndürmesi, text veya JSON biçimi olan erişim ve sunucu log'ları. Log ve denetim sayfalarının arkasındaki `log.db` veritabanı ([Loglama](@/configuration.tr.md#log)).
 - Portları sunan, master admin API'sini tutan isteğe bağlı worker süreci. Worker çökmesi paneli düşürmez ([Worker süreçleri](@/configuration.tr.md#worker-surecleri)).
-- SIGUSR2 ile kesintisiz yükseltme (`systemctl reload r3v3rs3`), sha256 özetini doğrulayan panel içi yükseltme butonu ve panelin her sayfasında banner'la saat başı daha yeni bir release kontrolü ([Kesintisiz yükseltme](@/configuration.tr.md#kesintisiz-yukseltme), [Panelden yükseltme](@/configuration.tr.md#panelden-yukseltme)).
+- SIGUSR2 ile kesintisiz yükseltme (`systemctl reload r3-server`), sha256 özetini doğrulayan panel içi yükseltme butonu ve panelin her sayfasında banner'la saat başı daha yeni bir release kontrolü ([Kesintisiz yükseltme](@/configuration.tr.md#kesintisiz-yukseltme), [Panelden yükseltme](@/configuration.tr.md#panelden-yukseltme)).
 - Docker etiketleri ve etcd ile servis keşfi. Keşfedilen proxy'ler salt okunurdur ve proxy olamayan bir tanım, proxy listesinde sorun olarak raporlanır ([Servis keşfi](@/discovery.tr.md)).
 
 ## Deploy platformu
 
 - Registry image'ından, Dockerfile'ı olan bir Git repository'sinden veya bir Git repository'sindeki Docker Compose dosyasından uygulamalar.
+- Dağıtım öncesi ve sonrası yaşam döngüsü kancaları: otomatik migration çalıştırma ve sıfır kesintili geri alma koruması.
+- Otomatik Docker BuildKit derleme önbelleği temizliği: yapılandırılabilir önbellek saklama sınırı (`build_cache_keep_storage_mb`), geri alma imaj koruma sayısı (`kept_builds_count`) ve artık katman temizliği.
+- Konteyner kaynak kısıtlama ve OOMKill erken teşhis alarmları: cgroup CPU CFS kota ve bellek fail sayaçlarını izleme.
+- Compose `.env` şablon çözümleyici ve tek tıkla kurulum ile Git uygulamaları için otomatik kriptografik gizli değer üretici.
 - Katalogdaki bir uygulamayı, image veya Compose, tek tıkla kuran ve günde bir kez depodan yenilenen App Store.
 - PostgreSQL, MariaDB, MySQL, MongoDB veya Redis'i tek tıkla kuran; `127.0.0.1` üzerinde sabit port ve üretilmiş paroyla bir Veritabanları bölümü; bağlantıyı kullanan uygulamaların ortamına otomatik ekler; isteğe bağlı S3 hedefiyle zamanlanmış yedekler alır.
 - Proxy'yi ancak yeni container sağlık kontrolünden geçince değiştiren blue-green deployment'lar ve önceki bir deployment'a geri alma.
@@ -77,7 +87,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-[Linux sunucuya kurulum](@/tutorials/install-linux.tr.md) rehberi seçenekleri, yolları, yükseltmeyi, kaldırmayı ve diğer kurulum yollarını anlatır: cargo-binstall, `cargo install` ve release arşivleri.
+[Linux sunucuya kurulum](@/tutorials/install-linux.tr.md) rehberi seçenekleri, yolları, yükseltmeyi, kaldırmayı ve release arşivleriyle kurulumu anlatır.
 
 # Geliştirme
 

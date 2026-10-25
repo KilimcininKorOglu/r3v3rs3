@@ -3,10 +3,9 @@ title = "r3v3rs3"
 sort_by = "weight"
 +++
 
-[![Crates.io](https://img.shields.io/crates/v/r3v3rs3.svg)](https://crates.io/crates/r3v3rs3)
+[![GitHub release](https://img.shields.io/github/v/release/KilimcininKorOglu/r3v3rs3)](https://github.com/KilimcininKorOglu/r3v3rs3/releases)
 [![GitHub license](https://img.shields.io/github/license/KilimcininKorOglu/r3v3rs3.svg)](https://github.com/KilimcininKorOglu/r3v3rs3/blob/main/LICENSE)
 [![Rust](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml/badge.svg)](https://github.com/KilimcininKorOglu/r3v3rs3/actions/workflows/rust.yml)
-[![dependency status](https://deps.rs/crate/r3v3rs3/latest/status.svg)](https://deps.rs/crate/r3v3rs3)
 
 r3v3rs3 is a reverse proxy server written in Rust. It proxies TCP, UDP, TLS, HTTP and WebSocket traffic, and it accepts incoming HTTP/3 connections. It also deploys apps as containers and routes their domains through its own proxies. It is a fork of [Taxy](https://github.com/picoHz/taxy).
 
@@ -22,11 +21,15 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 - Path rewrite (strip prefix, regex replacement, add prefix), redirect rules and fixed responses: a redirection host, a status host and 404 host templates
 - A route can replace the settings of its proxy: timeouts, retries, rate limit, IP filter, authentication, header rules and body size
 - Load balancing with round robin (smooth weighted), random, first healthy server and client IP hash, and weights from 0 to 65535 for draining a server
-- Active and passive health checks, a circuit breaker with a half-open trial, sticky sessions with an HMAC-signed cookie, retries with idempotent-method rules and a body replay limit, and traffic mirroring with a percentage
+- Active and passive health checks, gRPC health checks via `grpc.health.v1.Health`, a circuit breaker with a half-open trial, sticky sessions with an HMAC-signed cookie, retries with idempotent-method rules and a body replay limit, and traffic mirroring with a percentage
 - Upstream connect and request timeouts per proxy and per route, and upstream servers from DNS SRV records (`http+srv://` URLs), refreshed when the TTL expires
 - UDP client sessions with an idle timeout and at most 10,000 sessions per port
 - HTTP/2 toward plain HTTP servers with h2c for gRPC, and shared upstream connection pools that carry many clients over one HTTP/2 connection
 - Configurable HTTP/2 and HTTP/3 flood limits, globally and per port
+- Adaptive stream priority (RFC 9218) for HTTP/2 and HTTP/3: extensible urgency scheduling (u=0 to u=7), automatic MIME and path heuristics, custom pattern rules, and adaptive concurrency control to prevent bufferbloat
+- TLS 1.3 0-RTT early data support with RFC 8470 safe method enforcement, automatic `Early-Data` header management, and an in-memory anti-replay buffer
+- Latency-based geo-routing and multi-region steering, routing traffic to the nearest geographic target or upstream replica based on client GeoIP proximity and live RTT measurements
+- Live connections inspector: real-time monitoring and graceful termination of active TCP and HTTP connections
 - The PROXY protocol v1 and v2, received from trusted load balancers and sent to upstream servers
 
 ## Security and traffic control
@@ -43,23 +46,30 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 
 - Server, client and root certificates, uploaded or self-signed
 - ACME v2 (for example Let's Encrypt) with the HTTP-01, TLS-ALPN-01 and DNS-01 challenges. DNS-01 issues wildcard certificates through 12 DNS provider APIs, a webhook, an exec command with a program allowlist, or RFC 2136 with TSIG
+- Certificate Transparency (CT) log monitor and rogue certificate detection: background monitoring of public CT logs to detect unauthorized or rogue certificates for managed domains with webhook security alerts
 - Certificate expiry warnings, and webhook notifications for certificate, deployment and agent events with a bearer token and retries
 
 ## Operations
 
 - A single binary with a built-in WebUI in English and Turkish, with light, dark and system themes. Configuration changes apply without a restart
+- Unified SQLite database architecture (`r3v3rs3.db`) persisting all configuration and operational state with ACID transactions and automatic migration from legacy flat files
 - An admin API with an OpenAPI document and a Swagger UI ([Admin API](@/configuration.md#admin-api))
 - A Prometheus metrics endpoint at `GET /api/metrics` with request, cache and connection counters ([Metrics](@/configuration.md#metrics))
 - An MCP server at `/api/mcp` over OAuth 2.1 with PKCE and `read` and `edit` scopes, for AI hosts such as Claude Code that connect to the address directly, plus the `r3` command line client for scripts and terminals ([MCP Server](@/configuration.md#mcp-server))
+- Host node threshold alerts and anomaly detection: continuous monitoring of free disk space, bandwidth spikes, file descriptor exhaustion, and TCP TIME_WAIT socket exhaustion with webhook notifications
 - Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists, TOTP and an audit log with retention ([Accounts](@/accounts.md))
 - Access and server logs with hourly file rotation, a text or JSON format, and the `log.db` database behind the log and audit pages ([Logging](@/configuration.md#logging))
 - An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down ([Worker Processes](@/configuration.md#worker-processes))
-- A zero-downtime upgrade over SIGUSR2 (`systemctl reload r3v3rs3`), an in-panel upgrade button that verifies the sha256 digest, and an hourly check for a newer release with a banner on every page of the panel ([Zero-Downtime Upgrade](@/configuration.md#zero-downtime-upgrade), [In-Panel Upgrade](@/configuration.md#in-panel-upgrade))
+- A zero-downtime upgrade over SIGUSR2 (`systemctl reload r3-server`), an in-panel upgrade button that verifies the sha256 digest, and an hourly check for a newer release with a banner on every page of the panel ([Zero-Downtime Upgrade](@/configuration.md#zero-downtime-upgrade), [In-Panel Upgrade](@/configuration.md#in-panel-upgrade))
 - Service discovery from Docker labels and etcd. Discovered proxies are read-only, and a definition that fails to become a proxy is reported as an issue in the proxy list ([Service Discovery](@/discovery.md))
 
 ## Deployment platform
 
 - Apps from a registry image, from a Git repository with its Dockerfile, or from the Docker Compose file of a Git repository
+- Pre-deployment and post-deployment lifecycle hooks with automated migration execution and zero-downtime rollback protection
+- Automated Docker BuildKit build cache garbage collection with configurable retention limits (`build_cache_keep_storage_mb`), rollback image tag preservation (`kept_builds_count`), and dangling layer cleanup
+- Container resource throttling and OOMKill early diagnostic alerts monitoring cgroup CPU CFS quotas and memory fail counters
+- Compose `.env` template resolver and automatic cryptographic secret generator for one-click catalog and Git applications
 - An App Store that installs a catalog app, image or Compose, in one click, refreshed daily from the repository
 - A Databases section that installs PostgreSQL, MariaDB, MySQL, MongoDB or Redis in one click, on a fixed port of `127.0.0.1` with a generated password, injects the connection into the apps that use it, and takes scheduled backups with an optional S3 target
 - Blue-green deployments that switch the proxy only after the new container passes its health check, and rollback to an earlier deployment
@@ -77,7 +87,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
 ```
 
-[Installing on a Linux Server](@/tutorials/install-linux.md) covers the options, the paths, the upgrade, the removal and the other install methods: cargo-binstall, `cargo install` and the release archives.
+[Installing on a Linux Server](@/tutorials/install-linux.md) covers the options, the paths, the upgrade, the removal and manual installation via release archives.
 
 # Development
 

@@ -1549,7 +1549,7 @@ The master sends the current configuration and the descriptors of the listening 
 
 The new process reads the configuration from the same directory, so the upgrade takes effect for every setting that `config.toml` holds. With `worker_mode = "workers"` the workers keep the ports, so an upgrade hands over nothing and a rolling restart of the master happens without touching the open connections of the worker.
 
-With systemd, `install.sh` writes the service as `Type=notify` with `ExecReload=/bin/kill -USR2 $MAINPID`, so `systemctl reload r3v3rs3` upgrades without a restart. The server tells systemd when it is ready, and the handover moves the main process to the new one, so systemd keeps tracking the service while the old process drains.
+With systemd, `install.sh` writes the service as `Type=notify` with `ExecReload=/bin/kill -USR2 $MAINPID`, so `systemctl reload r3-server` upgrades without a restart. The server tells systemd when it is ready, and the handover moves the main process to the new one, so systemd keeps tracking the service while the old process drains.
 
 The handover works only inside one installation: the old process starts the new binary from the same machine and passes the descriptors to it. A Docker upgrade replaces the whole container with a new image, so it cannot hand anything over and always restarts the connections. For a restart-free upgrade in Docker, run two r3v3rs3 containers behind a load balancer and roll them one at a time. A container restart still closes the open connections gracefully, up to `shutdown_graceful_timeout`.
 
