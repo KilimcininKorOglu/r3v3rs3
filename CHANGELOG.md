@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.4] - 2026-10-25
+
+### Added
+- TLS 1.3 0-RTT Early Data: Zero-round-trip connection latency for returning TLS 1.3 clients on TLS-terminated ports (`early_data: bool`).
+- RFC 8470 Safe Method Enforcement: Strict validation restricting 0-RTT early data execution to safe HTTP methods (`GET`, `HEAD`, `OPTIONS`, `TRACE`), rejecting state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`) with HTTP `425 Too Early` and `Retry-After: 0` to prevent replay attacks.
+- In-Memory Anti-Replay Mitigation: Sliding-window anti-replay buffer tracking 0-RTT request identifiers to immediately reject replayed early data packets with `425 Too Early`.
+- RFC 8470 Header Management: Automatic injection of `Early-Data: 1` header on proxied requests originating from 0-RTT early data and stripping of untrusted client `Early-Data` headers on standard connections.
+- 100% MCP & CLI Parity: Added MCP tool `set_port_early_data` and CLI subcommand `r3 port set-early-data <PORT_ID> [--enable]`.
+- WebUI TLS Configuration: Added "TLS 1.3 0-RTT Early Data" toggle switch with localized descriptions and validation to the port configuration form.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` with TLS 1.3 0-RTT Early Data specifications, anti-replay mechanics, and administration guides.
+
 ## [2.6.3] - 2026-10-25
 
 ### Added
