@@ -300,6 +300,15 @@ async fn send_login(username: String, method: LoginMethod) -> ApiResult<LoginRes
             });
         }
     };
+    if !response.ok() {
+        return match response.json::<ErrorMessage>().await {
+            Ok(err) => ApiResult::Err(err),
+            Err(err) => ApiResult::Err(ErrorMessage {
+                message: err.to_string(),
+                error: None,
+            }),
+        };
+    }
     match response.json::<LoginResponse>().await {
         Ok(response) => ApiResult::Ok(response),
         Err(err) => ApiResult::Err(ErrorMessage {
