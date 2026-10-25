@@ -183,8 +183,9 @@ impl DockerRuntime {
         Ok((count, space))
     }
 
-    async fn prune_docker_images(&self) -> anyhow::Result<(u64, u64)> {
-        let filters = json!({ "dangling": ["false"] }).to_string();
+    async fn prune_docker_images(&self, dangling_only: bool) -> anyhow::Result<(u64, u64)> {
+        let dangling_str = if dangling_only { "true" } else { "false" };
+        let filters = json!({ "dangling": [dangling_str] }).to_string();
         let path = format!("/images/prune?filters={}", encode(&filters));
         let allowed = [StatusCode::CONFLICT];
         let res = self
@@ -225,16 +226,20 @@ impl DockerRuntime {
         Ok((count, space))
     }
 
-    async fn prune_docker_build_cache(&self) -> anyhow::Result<(u64, u64)> {
+    async fn prune_docker_build_cache(
+        &self,
+        keep_storage_mb: Option<u64>,
+    ) -> anyhow::Result<(u64, u64)> {
         let allowed = [StatusCode::CONFLICT];
+        let path = match keep_storage_mb {
+            Some(mb) => format!(
+                "/build/prune?keep-storage={}",
+                mb.saturating_mul(1024 * 1024)
+            ),
+            None => "/build/prune".to_string(),
+        };
         let res = self
-            .send(
-                Method::POST,
-                "/build/prune",
-                None,
-                &allowed,
-                RESPONSE_TIMEOUT,
-            )
+            .send(Method::POST, &path, None, &allowed, RESPONSE_TIMEOUT)
             .await?;
         let val: Value = read_json(res).await.unwrap_or_default();
         let count = val
@@ -762,7 +767,10 @@ impl ContainerRuntime for DockerRuntime {
             result.space_reclaimed_bytes += space;
         }
         if policy.prune_images {
-            let (count, space) = self.prune_docker_images().await.unwrap_or_default();
+            let (count, space) = self
+                .prune_docker_images(policy.dangling_layers_only)
+                .await
+                .unwrap_or_default();
             result.images_deleted += count;
             result.space_reclaimed_bytes += space;
         }
@@ -772,7 +780,10 @@ impl ContainerRuntime for DockerRuntime {
             result.space_reclaimed_bytes += space;
         }
         if policy.prune_build_cache {
-            let (count, space) = self.prune_docker_build_cache().await.unwrap_or_default();
+            let (count, space) = self
+                .prune_docker_build_cache(policy.build_cache_keep_storage_mb)
+                .await
+                .unwrap_or_default();
             result.build_cache_deleted += count;
             result.space_reclaimed_bytes += space;
         }

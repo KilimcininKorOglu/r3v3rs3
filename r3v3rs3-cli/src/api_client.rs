@@ -26,6 +26,69 @@ pub struct SetCtConfigArgs<'a> {
     pub api_url: Option<&'a str>,
 }
 
+#[derive(Default)]
+pub struct SetPrunePolicyArgs {
+    pub enabled: Option<bool>,
+    pub interval: Option<String>,
+    pub disk_pressure: Option<u8>,
+    pub prune_images: Option<bool>,
+    pub prune_volumes: Option<bool>,
+    pub prune_build_cache: Option<bool>,
+    pub prune_containers: Option<bool>,
+    pub prune_logs: Option<bool>,
+    pub log_threshold_mb: Option<u64>,
+    pub keep_cache_mb: Option<u64>,
+    pub kept_builds: Option<u32>,
+    pub dangling_layers_only: Option<bool>,
+}
+
+fn apply_prune_args(cur: &mut Value, args: &SetPrunePolicyArgs) {
+    if let Some(en) = args.enabled {
+        cur["enabled"] = json!(en);
+    }
+    if let Some(ref intv) = args.interval {
+        cur["interval"] = json!(intv);
+    }
+    if let Some(dp) = args.disk_pressure {
+        cur["disk_pressure_threshold"] = json!(dp);
+    }
+    apply_prune_flags(cur, args);
+    apply_prune_limits(cur, args);
+}
+
+fn apply_prune_flags(cur: &mut Value, args: &SetPrunePolicyArgs) {
+    if let Some(pi) = args.prune_images {
+        cur["prune_images"] = json!(pi);
+    }
+    if let Some(pv) = args.prune_volumes {
+        cur["prune_volumes"] = json!(pv);
+    }
+    if let Some(pb) = args.prune_build_cache {
+        cur["prune_build_cache"] = json!(pb);
+    }
+    if let Some(pc) = args.prune_containers {
+        cur["prune_containers"] = json!(pc);
+    }
+    if let Some(pl) = args.prune_logs {
+        cur["prune_logs"] = json!(pl);
+    }
+}
+
+fn apply_prune_limits(cur: &mut Value, args: &SetPrunePolicyArgs) {
+    if let Some(lt) = args.log_threshold_mb {
+        cur["log_vacuum_threshold_mb"] = json!(lt);
+    }
+    if let Some(kc) = args.keep_cache_mb {
+        cur["build_cache_keep_storage_mb"] = json!(kc);
+    }
+    if let Some(kb) = args.kept_builds {
+        cur["kept_builds_count"] = json!(kb);
+    }
+    if let Some(dl) = args.dangling_layers_only {
+        cur["dangling_layers_only"] = json!(dl);
+    }
+}
+
 pub fn load_payload(input: &str) -> anyhow::Result<Value> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -1913,9 +1976,29 @@ impl ApiClient {
 
     pub async fn platform_prune(&self) -> anyhow::Result<()> {
         let res = self
-            .request(Method::POST, "/api/platform/prune", None)
+            .request(Method::POST, "/api/platform/prune/run", None)
             .await?;
         println!("platform disk hygiene prune completed");
+        print_json(&res)
+    }
+
+    pub async fn get_prune_policy(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/platform/prune", None)
+            .await?;
+        print_json(&res)
+    }
+
+    pub async fn set_prune_policy(&self, args: &SetPrunePolicyArgs) -> anyhow::Result<()> {
+        let mut cur = self
+            .request(Method::GET, "/api/platform/prune", None)
+            .await
+            .unwrap_or(serde_json::json!({}));
+        apply_prune_args(&mut cur, args);
+        let res = self
+            .request(Method::PUT, "/api/platform/prune", Some(&cur))
+            .await?;
+        println!("Platform prune policy updated successfully.");
         print_json(&res)
     }
 
@@ -1967,6 +2050,8 @@ impl ApiClient {
         println!("Node threshold alert rules updated successfully.");
         print_json(&res)
     }
+
+    // --- Apply operation ---
 
     // --- Apply operation ---
 

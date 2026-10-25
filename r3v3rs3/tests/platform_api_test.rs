@@ -919,6 +919,7 @@ async fn prune_policy_get_and_update() -> anyhow::Result<()> {
         assert_eq!(policy["enabled"], false);
         assert_eq!(policy["interval"], "24h");
         assert_eq!(policy["prune_images"], true);
+        assert_eq!(policy["dangling_layers_only"], true);
 
         let update = json!({
             "enabled": true,
@@ -927,6 +928,9 @@ async fn prune_policy_get_and_update() -> anyhow::Result<()> {
             "prune_volumes": true,
             "prune_build_cache": false,
             "prune_containers": true,
+            "build_cache_keep_storage_mb": 5120,
+            "kept_builds_count": 3,
+            "dangling_layers_only": false,
         });
         let (status, body) = send(
             addr,
@@ -943,6 +947,9 @@ async fn prune_policy_get_and_update() -> anyhow::Result<()> {
         assert_eq!(updated["interval"], "12h");
         assert_eq!(updated["prune_volumes"], true);
         assert_eq!(updated["prune_build_cache"], false);
+        assert_eq!(updated["build_cache_keep_storage_mb"], 5120);
+        assert_eq!(updated["kept_builds_count"], 3);
+        assert_eq!(updated["dangling_layers_only"], false);
         Ok(())
     })
     .await

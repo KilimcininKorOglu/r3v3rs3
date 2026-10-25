@@ -702,25 +702,123 @@ fn prune_toggles_view(locale: Locale, policy: &UseStateHandle<PrunePolicy>) -> H
                     {locale.t("targets.prune_logs")}
                 </label>
             </div>
-            if policy.prune_logs {
-                <div>
-                    <label class={LABEL_CLASS}>{locale.t("targets.prune_log_threshold")}</label>
-                    <div class="flex items-center gap-2">
-                        <input
-                            type="number"
-                            min="1"
-                            placeholder="50"
-                            value={log_threshold_val}
-                            oninput={log_threshold_input}
-                            class={INPUT_CLASS}
-                        />
-                        <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{"MB"}</span>
-                    </div>
-                    <p class={HINT_CLASS}>{locale.t("targets.prune_log_threshold_hint")}</p>
-                </div>
-            }
+            { prune_image_options_view(locale, policy) }
+            { prune_cache_options_view(locale, policy) }
+            { prune_logs_options_view(locale, policy, log_threshold_val, log_threshold_input) }
         </div>
     }
+}
+
+fn prune_image_options_view(locale: Locale, policy: &UseStateHandle<PrunePolicy>) -> Html {
+    if !policy.prune_images {
+        return html! {};
+    }
+    let toggle_dangling = checkbox_toggle(policy, |p| &mut p.dangling_layers_only);
+    let kept_builds_val = policy
+        .kept_builds_count
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let kept_builds_input = kept_builds_input_callback(policy);
+    html! {
+        <div class="space-y-3 pl-4 border-l-2 border-neutral-200 dark:border-neutral-700">
+            <label class="flex items-center text-sm font-medium text-neutral-800 dark:text-neutral-200 cursor-pointer">
+                <input type="checkbox" checked={policy.dangling_layers_only} onchange={toggle_dangling} class="w-4 h-4 mr-2 rounded" />
+                {locale.t("targets.prune_dangling_only")}
+            </label>
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("targets.prune_kept_builds")}</label>
+                <div class="flex items-center gap-2">
+                    <input
+                        type="number"
+                        min="1"
+                        placeholder="5"
+                        value={kept_builds_val}
+                        oninput={kept_builds_input}
+                        class={INPUT_CLASS}
+                    />
+                </div>
+                <p class={HINT_CLASS}>{locale.t("targets.prune_kept_builds_hint")}</p>
+            </div>
+        </div>
+    }
+}
+
+fn prune_cache_options_view(locale: Locale, policy: &UseStateHandle<PrunePolicy>) -> Html {
+    if !policy.prune_build_cache {
+        return html! {};
+    }
+    let cache_retention_val = policy
+        .build_cache_keep_storage_mb
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let cache_retention_input = cache_retention_input_callback(policy);
+    html! {
+        <div class="pl-4 border-l-2 border-neutral-200 dark:border-neutral-700">
+            <label class={LABEL_CLASS}>{locale.t("targets.prune_build_cache_retention")}</label>
+            <div class="flex items-center gap-2">
+                <input
+                    type="number"
+                    min="0"
+                    placeholder="5120"
+                    value={cache_retention_val}
+                    oninput={cache_retention_input}
+                    class={INPUT_CLASS}
+                />
+                <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{"MB"}</span>
+            </div>
+            <p class={HINT_CLASS}>{locale.t("targets.prune_build_cache_retention_hint")}</p>
+        </div>
+    }
+}
+
+fn prune_logs_options_view(
+    locale: Locale,
+    policy: &UseStateHandle<PrunePolicy>,
+    log_threshold_val: String,
+    log_threshold_input: Callback<InputEvent>,
+) -> Html {
+    if !policy.prune_logs {
+        return html! {};
+    }
+    html! {
+        <div class="pl-4 border-l-2 border-neutral-200 dark:border-neutral-700">
+            <label class={LABEL_CLASS}>{locale.t("targets.prune_log_threshold")}</label>
+            <div class="flex items-center gap-2">
+                <input
+                    type="number"
+                    min="1"
+                    placeholder="50"
+                    value={log_threshold_val}
+                    oninput={log_threshold_input}
+                    class={INPUT_CLASS}
+                />
+                <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{"MB"}</span>
+            </div>
+            <p class={HINT_CLASS}>{locale.t("targets.prune_log_threshold_hint")}</p>
+        </div>
+    }
+}
+
+fn kept_builds_input_callback(policy: &UseStateHandle<PrunePolicy>) -> Callback<InputEvent> {
+    let policy = policy.clone();
+    Callback::from(move |event: InputEvent| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let val = input.value().trim().parse::<u32>().ok();
+        let mut updated = (*policy).clone();
+        updated.kept_builds_count = val;
+        policy.set(updated);
+    })
+}
+
+fn cache_retention_input_callback(policy: &UseStateHandle<PrunePolicy>) -> Callback<InputEvent> {
+    let policy = policy.clone();
+    Callback::from(move |event: InputEvent| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let val = input.value().trim().parse::<u64>().ok();
+        let mut updated = (*policy).clone();
+        updated.build_cache_keep_storage_mb = val;
+        policy.set(updated);
+    })
 }
 
 fn threshold_input_callback(policy: &UseStateHandle<PrunePolicy>) -> Callback<InputEvent> {

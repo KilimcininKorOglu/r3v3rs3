@@ -614,6 +614,18 @@ pub struct PrunePolicy {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container_log_max_file: Option<String>,
 
+    /// Amount of BuildKit build cache storage to retain in MB (e.g. 2048 MB). Older cache is pruned first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_cache_keep_storage_mb: Option<u64>,
+
+    /// Number of newest deployment build images kept per application for rollback protection (default: 5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_builds_count: Option<u32>,
+
+    /// Whether to prune only dangling images/layers or all unused images during prune.
+    #[serde(default = "default_true")]
+    pub dangling_layers_only: bool,
+
     /// The timestamp of the last prune run in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_pruned_at: Option<u64>,
@@ -645,6 +657,9 @@ impl Default for PrunePolicy {
             log_vacuum_threshold_mb: Some(50),
             container_log_max_size: Some("50m".to_string()),
             container_log_max_file: Some("3".to_string()),
+            build_cache_keep_storage_mb: Some(2048),
+            kept_builds_count: Some(5),
+            dangling_layers_only: true,
             last_pruned_at: None,
             last_pressure_pruned_at: None,
             last_reclaimed_bytes: None,

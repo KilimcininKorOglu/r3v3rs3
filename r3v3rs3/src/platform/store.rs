@@ -154,6 +154,9 @@ const SCHEMA: &[&str] = &[
         log_vacuum_threshold_mb INTEGER,
         container_log_max_size  TEXT,
         container_log_max_file  TEXT,
+        build_cache_keep_storage_mb INTEGER,
+        kept_builds_count           INTEGER,
+        dangling_layers_only        INTEGER NOT NULL DEFAULT 1,
         last_pruned_at          INTEGER,
         last_pressure_pruned_at INTEGER,
         last_reclaimed_bytes    INTEGER
@@ -411,6 +414,19 @@ impl PlatformStore {
         let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN container_log_max_file TEXT")
             .execute(&pool)
             .await;
+        let _ =
+            sqlx::query("ALTER TABLE prune_policy ADD COLUMN build_cache_keep_storage_mb INTEGER")
+                .execute(&pool)
+                .await;
+        let _ =
+            sqlx::query("ALTER TABLE prune_policy ADD COLUMN kept_builds_count INTEGER")
+                .execute(&pool)
+                .await;
+        let _ = sqlx::query(
+            "ALTER TABLE prune_policy ADD COLUMN dangling_layers_only INTEGER NOT NULL DEFAULT 1",
+        )
+        .execute(&pool)
+        .await;
         let _ = sqlx::query("ALTER TABLE node_alert_rules ADD COLUMN max_fd_ratio_percent INTEGER")
             .execute(&pool)
             .await;

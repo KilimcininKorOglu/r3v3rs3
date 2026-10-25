@@ -750,6 +750,47 @@ pub enum PlatformCommand {
     Metrics,
     /// Runs disk hygiene pruning (containers, unused images, build cache).
     Prune,
+    /// Shows the Docker disk hygiene and garbage collector prune policy.
+    PrunePolicy,
+    /// Updates the Docker disk hygiene and garbage collector prune policy.
+    SetPrunePolicy {
+        /// Enable or disable automated scheduled pruning.
+        #[arg(long)]
+        enable: Option<bool>,
+        /// Prune interval expression (e.g. 24h, 7days).
+        #[arg(long)]
+        interval: Option<String>,
+        /// Emergency disk pressure threshold percentage (10-99).
+        #[arg(long)]
+        disk_pressure: Option<u8>,
+        /// Prune unused/dangling container images.
+        #[arg(long)]
+        prune_images: Option<bool>,
+        /// Prune unreferenced/anonymous volumes.
+        #[arg(long)]
+        prune_volumes: Option<bool>,
+        /// Prune BuildKit build cache stages.
+        #[arg(long)]
+        prune_build_cache: Option<bool>,
+        /// Prune stopped containers.
+        #[arg(long)]
+        prune_containers: Option<bool>,
+        /// Auto-vacuum container log files.
+        #[arg(long)]
+        prune_logs: Option<bool>,
+        /// Log file size threshold in MB before vacuuming.
+        #[arg(long)]
+        log_threshold_mb: Option<u64>,
+        /// Build cache retention limit in MB.
+        #[arg(long)]
+        keep_cache_mb: Option<u64>,
+        /// Number of newest built images kept per app for rollback protection.
+        #[arg(long)]
+        kept_builds: Option<u32>,
+        /// Prune dangling image layers only without untagging active versions.
+        #[arg(long)]
+        dangling_layers_only: Option<bool>,
+    },
     /// Rotates the platform encryption key and re-encrypts all stored secrets.
     RotateKey,
     /// Truncates (vacuums) container log files across the platform.
@@ -900,6 +941,37 @@ async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyh
         PlatformCommand::Status => api.platform_status().await,
         PlatformCommand::Metrics => api.platform_metrics().await,
         PlatformCommand::Prune => api.platform_prune().await,
+        PlatformCommand::PrunePolicy => api.get_prune_policy().await,
+        PlatformCommand::SetPrunePolicy {
+            enable,
+            interval,
+            disk_pressure,
+            prune_images,
+            prune_volumes,
+            prune_build_cache,
+            prune_containers,
+            prune_logs,
+            log_threshold_mb,
+            keep_cache_mb,
+            kept_builds,
+            dangling_layers_only,
+        } => {
+            let args = api_client::SetPrunePolicyArgs {
+                enabled: enable,
+                interval,
+                disk_pressure,
+                prune_images,
+                prune_volumes,
+                prune_build_cache,
+                prune_containers,
+                prune_logs,
+                log_threshold_mb,
+                keep_cache_mb,
+                kept_builds,
+                dangling_layers_only,
+            };
+            api.set_prune_policy(&args).await
+        }
         PlatformCommand::VacuumLogs { threshold_mb } => {
             api.vacuum_platform_logs(threshold_mb).await
         }

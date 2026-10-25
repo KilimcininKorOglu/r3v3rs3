@@ -524,6 +524,78 @@ fn parse_mcp_security_profile(
     }
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdatePrunePolicyParams {
+    pub enabled: Option<bool>,
+    pub interval: Option<String>,
+    pub disk_pressure_threshold: Option<u8>,
+    pub prune_images: Option<bool>,
+    pub prune_volumes: Option<bool>,
+    pub prune_build_cache: Option<bool>,
+    pub prune_containers: Option<bool>,
+    pub prune_logs: Option<bool>,
+    pub log_vacuum_threshold_mb: Option<u64>,
+    pub build_cache_keep_storage_mb: Option<u64>,
+    pub kept_builds_count: Option<u32>,
+    pub dangling_layers_only: Option<bool>,
+}
+
+fn apply_prune_policy_overrides(
+    policy: &mut r3v3rs3_api::platform::PrunePolicy,
+    params: &UpdatePrunePolicyParams,
+) {
+    if let Some(en) = params.enabled {
+        policy.enabled = en;
+    }
+    if let Some(ref iv) = params.interval {
+        policy.interval = iv.clone();
+    }
+    if let Some(dp) = params.disk_pressure_threshold {
+        policy.disk_pressure_threshold = Some(dp);
+    }
+    apply_prune_flags(policy, params);
+}
+
+fn apply_prune_flags(
+    policy: &mut r3v3rs3_api::platform::PrunePolicy,
+    params: &UpdatePrunePolicyParams,
+) {
+    if let Some(img) = params.prune_images {
+        policy.prune_images = img;
+    }
+    if let Some(vol) = params.prune_volumes {
+        policy.prune_volumes = vol;
+    }
+    if let Some(bc) = params.prune_build_cache {
+        policy.prune_build_cache = bc;
+    }
+    if let Some(cnt) = params.prune_containers {
+        policy.prune_containers = cnt;
+    }
+    if let Some(logs) = params.prune_logs {
+        policy.prune_logs = logs;
+    }
+    apply_prune_retention(policy, params);
+}
+
+fn apply_prune_retention(
+    policy: &mut r3v3rs3_api::platform::PrunePolicy,
+    params: &UpdatePrunePolicyParams,
+) {
+    if let Some(th) = params.log_vacuum_threshold_mb {
+        policy.log_vacuum_threshold_mb = Some(th);
+    }
+    if let Some(mb) = params.build_cache_keep_storage_mb {
+        policy.build_cache_keep_storage_mb = Some(mb);
+    }
+    if let Some(kb) = params.kept_builds_count {
+        policy.kept_builds_count = Some(kb);
+    }
+    if let Some(dangling) = params.dangling_layers_only {
+        policy.dangling_layers_only = dangling;
+    }
+}
+
 /// The caller of the request, which the Bearer middleware inserted.
 fn caller_of(parts: &Parts) -> Result<Caller, ErrorData> {
     parts
@@ -3128,6 +3200,56 @@ impl McpServer {
             .record_audit(&caller.username, caller.client, record)
             .await;
         json_result(res)
+    }
+
+    /// Read the Docker disk hygiene and garbage collector prune policy.
+    #[tool(
+        description = "Get the Docker disk hygiene and garbage collector prune policy including interval, disk pressure threshold, build cache retention, and image cleanup settings. Needs the read scope."
+    )]
+    async fn get_prune_policy(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Read)
+            .await
+            .map_err(any_error)?;
+        let policy = platform.prune_policy().await.map_err(any_error)?;
+        json_result(policy)
+    }
+
+    /// Update the Docker disk hygiene and garbage collector prune policy.
+    #[tool(
+        description = "Update the Docker disk hygiene and garbage collector prune policy: enabled, interval, disk_pressure_threshold, build_cache_keep_storage_mb, kept_builds_count, etc. Needs the edit scope."
+    )]
+    async fn update_prune_policy(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdatePrunePolicyParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let mut policy = platform.prune_policy().await.map_err(any_error)?;
+        apply_prune_policy_overrides(&mut policy, &params);
+        platform
+            .update_prune_policy(policy.clone())
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(format!(
+            "Updated prune policy via MCP (enabled: {})",
+            policy.enabled
+        ));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(policy)
     }
 
     /// Read the host node resource threshold alert rules.

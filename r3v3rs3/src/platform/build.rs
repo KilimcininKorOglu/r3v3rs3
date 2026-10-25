@@ -98,11 +98,17 @@ impl Platform {
         runtime: &dyn ContainerRuntime,
         app: ShortId,
     ) -> anyhow::Result<()> {
-        let window = u32::try_from(KEPT_BUILDS * 2)?;
+        let kept = self
+            .prune_policy()
+            .await
+            .ok()
+            .and_then(|p| p.kept_builds_count)
+            .unwrap_or(KEPT_BUILDS as u32) as usize;
+        let window = u32::try_from(kept.saturating_mul(2))?;
         let deployments = self.store.deployments(app, window).await?;
         let old = deployments
             .iter()
-            .skip(KEPT_BUILDS)
+            .skip(kept)
             .filter(|deployment| deployment.status != DeploymentStatus::Running);
         for deployment in old {
             runtime
