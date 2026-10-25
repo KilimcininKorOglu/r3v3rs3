@@ -232,6 +232,15 @@ pub struct AddTargetParams {
     pub request: serde_json::Value,
 }
 
+/// The arguments of `set_target_region`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SetTargetRegionParams {
+    /// Target node ID.
+    pub id: String,
+    /// Geographical region identifier (e.g. "eu", "na", "tr", "apac") or null to clear.
+    pub region: Option<String>,
+}
+
 /// The `{ "spec": {...} }` argument of `create_project`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateProjectParams {
@@ -2542,6 +2551,76 @@ impl McpServer {
             .map_err(any_error)?;
         let entry = platform.delete_target(id).await.map_err(any_error)?;
         json_result(json!({ "deleted": entry.name }))
+    }
+
+    /// Set or clear the geographical region of a target node.
+    #[tool(
+        description = "Set or clear the geographical region of a target node. Needs the edit scope."
+    )]
+    async fn set_target_region(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<SetTargetRegionParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let updated = platform
+            .set_target_region(id, params.region)
+            .await
+            .map_err(any_error)?;
+        json_result(updated)
+    }
+
+    /// Drain a target node for maintenance.
+    #[tool(description = "Drain a target node for maintenance. Needs the edit scope.")]
+    async fn drain_target(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let updated = platform
+            .set_target_drained(id, true)
+            .await
+            .map_err(any_error)?;
+        json_result(updated)
+    }
+
+    /// Undrain a target node, restoring it to the active traffic pool.
+    #[tool(
+        description = "Undrain a target node, restoring it to the active traffic pool. Needs the edit scope."
+    )]
+    async fn undrain_target(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let updated = platform
+            .set_target_drained(id, false)
+            .await
+            .map_err(any_error)?;
+        json_result(updated)
     }
 
     // ==========================================

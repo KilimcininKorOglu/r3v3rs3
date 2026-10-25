@@ -132,6 +132,28 @@ impl Platform {
         self.target(id).await
     }
 
+    /// Sets or clears the geographical region of a target and updates the proxy routes.
+    pub async fn set_target_region(
+        &self,
+        id: ShortId,
+        region: Option<String>,
+    ) -> anyhow::Result<TargetEntry> {
+        let clean_region = region
+            .as_deref()
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+            .map(str::to_lowercase);
+        if !self
+            .store
+            .set_target_region(id, clean_region.as_deref())
+            .await?
+        {
+            return Err(not_found(id));
+        }
+        self.publish().await;
+        self.target(id).await
+    }
+
     /// Deletes an agent target without apps and closes the connection of its agent.
     pub async fn delete_target(&self, id: ShortId) -> anyhow::Result<TargetEntry> {
         let target = self.agent_target(id).await?;
@@ -359,6 +381,7 @@ mod tests {
     fn target_request(name: &str) -> TargetRequest {
         TargetRequest {
             name: name.parse().unwrap(),
+            region: None,
         }
     }
 

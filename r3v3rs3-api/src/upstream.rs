@@ -154,15 +154,22 @@ pub enum LoadBalancing {
     /// Uses the same server for each client IP address while the servers stay healthy. The share
     /// of the client addresses of a server is proportional to its weight.
     ClientIpHash,
+    /// Routes requests to the server closest to the client's GeoIP country or region, falling
+    /// back to other healthy servers if the closest server is unavailable.
+    GeoProximity,
+    /// Routes requests to the healthy server with the lowest measured round-trip response latency.
+    Latency,
 }
 
 impl LoadBalancing {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::RoundRobin,
         Self::LeastConn,
         Self::Random,
         Self::First,
         Self::ClientIpHash,
+        Self::GeoProximity,
+        Self::Latency,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -172,6 +179,8 @@ impl LoadBalancing {
             Self::Random => "random",
             Self::First => "first",
             Self::ClientIpHash => "client_ip_hash",
+            Self::GeoProximity => "geo_proximity",
+            Self::Latency => "latency",
         }
     }
 

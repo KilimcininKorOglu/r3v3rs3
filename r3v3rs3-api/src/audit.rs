@@ -177,6 +177,8 @@ pub enum AuditAction {
     DrainTarget,
     /// An account undrained a target, restoring it to traffic.
     UndrainTarget,
+    /// An account set the geographical region of a target.
+    SetTargetRegion,
     /// An account updated the node-level threshold alert rules.
     UpdateNodeAlertRules,
     /// An account truncated or vacuumed container log files.
@@ -204,7 +206,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 111] = [
+    pub const ALL: [AuditAction; 112] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -304,6 +306,7 @@ impl AuditAction {
         Self::TestOutboundWebhook,
         Self::DrainTarget,
         Self::UndrainTarget,
+        Self::SetTargetRegion,
         Self::UpdateNodeAlertRules,
         Self::VacuumLogs,
         Self::QuarantineIp,

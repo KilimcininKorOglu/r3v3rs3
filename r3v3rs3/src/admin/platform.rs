@@ -29,8 +29,8 @@ use r3v3rs3_api::{
         EnvironmentSpec, EnvironmentSyncReport, EnvironmentSyncRequest, GitTokenRequest,
         ImageUpdateStatus, KeyRotationReport, MetricsQuery, NodeAlertRules, Project,
         ProjectEnvironment, ProjectSpec, ProjectSummary, PrunePolicy, PruneResult, RegistryEntry,
-        RegistryRequest, ScheduledCommandRequest, ScheduledCommandRunResult, TargetEntry,
-        TargetRequest, TargetToken, WebhookSecret,
+        RegistryRequest, ScheduledCommandRequest, ScheduledCommandRunResult,
+        SetTargetRegionRequest, TargetEntry, TargetRequest, TargetToken, WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -242,6 +242,36 @@ pub async fn undrain_target(
         .await
         .map_err(platform_error)?;
     let record = AuditRecord::new(AuditAction::UndrainTarget)
+        .id(id)
+        .summary(updated.name.clone());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(updated))
+}
+
+/// Sets or clears the geographical region of a target node.
+#[utoipa::path(
+    put,
+    path = "/{id}/region",
+    tag = "platform",
+    operation_id = "set_target_region",
+    params(("id" = ShortId, Path, description = "Target id.")),
+    request_body = SetTargetRegionRequest,
+    responses((status = 200, description = "The target with its updated region.", body = TargetEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn set_target_region(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<SetTargetRegionRequest>,
+) -> Result<Json<TargetEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let updated = platform
+        .set_target_region(id, request.region)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::SetTargetRegion)
         .id(id)
         .summary(updated.name.clone());
     state

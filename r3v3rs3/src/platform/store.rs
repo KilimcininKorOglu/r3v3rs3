@@ -388,6 +388,9 @@ impl PlatformStore {
         let _ = sqlx::query("ALTER TABLE targets ADD COLUMN drained INTEGER NOT NULL DEFAULT 0")
             .execute(&pool)
             .await;
+        let _ = sqlx::query("ALTER TABLE targets ADD COLUMN region TEXT")
+            .execute(&pool)
+            .await;
         let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN disk_pressure_threshold INTEGER")
             .execute(&pool)
             .await;
@@ -438,12 +441,26 @@ impl PlatformStore {
 
     pub async fn targets(&self) -> anyhow::Result<Vec<TargetEntry>> {
         let rows = sqlx::query(
-            "SELECT id, name, kind, last_seen_at, cert_fingerprint IS NOT NULL AS enrolled, drained
+            "SELECT id, name, kind, last_seen_at, cert_fingerprint IS NOT NULL AS enrolled, drained, region
             FROM targets ORDER BY name",
         )
         .fetch_all(&self.pool)
         .await?;
         rows.iter().map(target_of).collect()
+    }
+
+    /// Sets or clears the geographical region of a target.
+    pub async fn set_target_region(
+        &self,
+        id: ShortId,
+        region: Option<&str>,
+    ) -> anyhow::Result<bool> {
+        let result = sqlx::query("UPDATE targets SET region = ? WHERE id = ?")
+            .bind(region)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     /// Adds an agent target that waits for its enrollment with the token of `token_hash`.
@@ -1016,6 +1033,7 @@ fn target_of(row: &SqliteRow) -> anyhow::Result<TargetEntry> {
         .try_get::<i64, _>("drained")
         .map(|v| v != 0)
         .unwrap_or(false);
+    let region = row.try_get::<Option<String>, _>("region").ok().flatten();
     Ok(TargetEntry {
         id: id_of(row, "id")?,
         name: row.try_get("name")?,
@@ -1030,6 +1048,7 @@ fn target_of(row: &SqliteRow) -> anyhow::Result<TargetEntry> {
         packet_loss_percent: None,
         quality: None,
         latency_samples: Vec::new(),
+        region,
     })
 }
 

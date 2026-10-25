@@ -17,22 +17,39 @@ pub fn container_name(app: ShortId, deployment: ShortId) -> anyhow::Result<Conta
     Ok(format!("r3v3rs3-{app}-{deployment}").parse()?)
 }
 
-/// A host server endpoint with its port on 127.0.0.1 and its load balancing weight.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A host server endpoint with its port on 127.0.0.1, its load balancing weight, and optional region.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostServer {
     pub port: u16,
     pub weight: u16,
+    pub region: Option<String>,
 }
 
 impl HostServer {
     pub const fn new(port: u16, weight: u16) -> Self {
-        Self { port, weight }
+        Self {
+            port,
+            weight,
+            region: None,
+        }
+    }
+
+    pub fn with_region(port: u16, weight: u16, region: Option<String>) -> Self {
+        Self {
+            port,
+            weight,
+            region,
+        }
     }
 }
 
 impl From<u16> for HostServer {
     fn from(port: u16) -> Self {
-        Self { port, weight: 1 }
+        Self {
+            port,
+            weight: 1,
+            region: None,
+        }
     }
 }
 
@@ -61,6 +78,8 @@ pub fn app_proxy(
             Ok(Server {
                 url,
                 weight: host.weight,
+                region: host.region.clone(),
+                countries: Vec::new(),
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;

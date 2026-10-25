@@ -1229,6 +1229,22 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn set_target_region(&self, id: &str, region: Option<&str>) -> anyhow::Result<()> {
+        let payload = serde_json::json!({ "region": region });
+        let updated: serde_json::Value = self
+            .request(
+                Method::PUT,
+                &format!("/api/targets/{id}/region"),
+                Some(&payload),
+            )
+            .await?;
+        println!(
+            "target/{id} region set to {}",
+            region.unwrap_or("none (global fallback)")
+        );
+        print_json(&updated)
+    }
+
     pub async fn new_target_token(&self) -> anyhow::Result<()> {
         let res = self
             .request(Method::POST, "/api/targets/token", None)

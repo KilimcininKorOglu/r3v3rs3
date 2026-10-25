@@ -163,7 +163,22 @@ fn target_row(
     Row {
         key: target.id.to_string(),
         cells: vec![
-            html! { <>{target.name.clone()}</> },
+            html! {
+                <span class="inline-flex items-center gap-1.5">
+                    <span>{&target.name}</span>
+                    {
+                        if let Some(reg) = &target.region {
+                            html! {
+                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60">
+                                    {reg}
+                                </span>
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
+                </span>
+            },
             html! { <>{locale.t(kind)}</> },
             status_badge(locale.t(status), color),
             link_quality,
@@ -509,7 +524,7 @@ fn form_view(
 
 async fn add(locale: Locale, name: AppName) -> Result<TargetToken, String> {
     let request = Request::post(&format!("{API_ENDPOINT}{PATH}"))
-        .json(&TargetRequest { name })
+        .json(&TargetRequest { name, region: None })
         .map_err(|err| err.to_string())?;
     send_request(locale, request)
         .await?
@@ -1129,6 +1144,7 @@ mod tests {
             packet_loss_percent: None,
             quality: None,
             latency_samples: Vec::new(),
+            region: None,
         }
     }
 

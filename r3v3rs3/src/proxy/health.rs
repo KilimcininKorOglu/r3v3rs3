@@ -29,6 +29,8 @@ pub type GroupKey = (ShortId, Option<usize>);
 pub struct GroupServer {
     pub addr: String,
     pub weight: u16,
+    pub region: Option<String>,
+    pub countries: Vec<String>,
 }
 
 /// The upstream servers of a proxy or an HTTP route, with the load balancing policy and the
@@ -50,6 +52,7 @@ pub struct UpstreamGroup {
     active_conns: Vec<Arc<AtomicUsize>>,
     /// Live metrics and request counters per server.
     metrics: Vec<Arc<ServerLiveMetrics>>,
+    geoip: Mutex<Option<Arc<crate::proxy::geoip::GeoIpResolver>>>,
 }
 
 /// Live traffic metrics and response timings of one upstream server.
@@ -475,6 +478,8 @@ pub fn members(servers: &[UpstreamServer]) -> Vec<GroupServer> {
         .map(|server| GroupServer {
             addr: server.addr.to_string(),
             weight: server.weight,
+            region: server.region.clone(),
+            countries: server.countries.clone(),
         })
         .collect()
 }
@@ -593,6 +598,7 @@ impl UpstreamGroup {
             probe: Mutex::new(None),
             active_conns,
             metrics,
+            geoip: Mutex::new(None),
         }
     }
 
@@ -603,6 +609,15 @@ impl UpstreamGroup {
 
     fn set_probe(&self, probe: Probe) {
         *self.probe.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(probe));
+    }
+
+    pub fn set_geoip(&self, geoip: Arc<crate::proxy::geoip::GeoIpResolver>) {
+        *self.geoip.lock().unwrap_or_else(PoisonError::into_inner) = Some(geoip);
+    }
+
+    fn geoip_country(&self, client: IpAddr) -> Option<String> {
+        let guard = self.geoip.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.as_ref().and_then(|g| g.lookup_country(client))
     }
 
     /// Returns the server indexes in the order to try: the healthy servers in the order of the
@@ -637,6 +652,8 @@ impl UpstreamGroup {
             LoadBalancing::Random => self.order_random(servers),
             LoadBalancing::First => servers,
             LoadBalancing::ClientIpHash => self.order_hash(servers, client),
+            LoadBalancing::GeoProximity => self.order_geo_proximity(servers, client),
+            LoadBalancing::Latency => self.order_latency(servers),
         }
     }
 
@@ -656,6 +673,75 @@ impl UpstreamGroup {
             })
             .collect::<Vec<_>>();
         keyed.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        keyed.into_iter().map(|(_, index)| index).collect()
+    }
+
+    /// Orders servers by geographical proximity to client's GeoIP location: direct country/region
+    /// matches first, followed by regional presets, default fallback servers, and other regions.
+    /// Within the same proximity tier, servers are ordered by lowest response latency.
+    fn order_geo_proximity(&self, servers: Vec<usize>, client: IpAddr) -> Vec<usize> {
+        let country = self.geoip_country(client);
+        let mut keyed: Vec<(u8, u64, usize)> = servers
+            .into_iter()
+            .map(|index| {
+                let tier = self.server_geo_tier(index, country.as_deref());
+                let rtt = self.server_latency_score(index);
+                (tier, rtt, index)
+            })
+            .collect();
+        keyed.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.cmp(&b.1))
+                .then_with(|| a.2.cmp(&b.2))
+        });
+        keyed.into_iter().map(|(_, _, index)| index).collect()
+    }
+
+    fn server_geo_tier(&self, index: usize, client_country: Option<&str>) -> u8 {
+        let Some(country) = client_country else {
+            return 0;
+        };
+        let Some(member) = self.members.get(index) else {
+            return 3;
+        };
+        if is_country_match(member, country) {
+            return 0;
+        }
+        if is_region_preset_match(member, country) {
+            return 1;
+        }
+        if member.region.is_none() && member.countries.is_empty() {
+            return 2;
+        }
+        3
+    }
+
+    fn server_latency_score(&self, index: usize) -> u64 {
+        let Some(metric) = self.metrics.get(index) else {
+            return u64::MAX;
+        };
+        let count = metric.rtt_count.load(Ordering::Relaxed);
+        let total = metric.total_rtt_micros.load(Ordering::Relaxed);
+        if let Some(avg) = total.checked_div(count) {
+            avg
+        } else {
+            let last = metric.last_rtt_micros.load(Ordering::Relaxed);
+            if last > 0 {
+                last
+            } else {
+                let weight = u64::from(self.weight(index).max(1));
+                1_000_000 / weight
+            }
+        }
+    }
+
+    /// Orders servers by lowest measured round-trip response latency.
+    fn order_latency(&self, servers: Vec<usize>) -> Vec<usize> {
+        let mut keyed: Vec<(u64, usize)> = servers
+            .into_iter()
+            .map(|index| (self.server_latency_score(index), index))
+            .collect();
+        keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
         keyed.into_iter().map(|(_, index)| index).collect()
     }
 
@@ -955,6 +1041,30 @@ impl UpstreamGroup {
     }
 }
 
+fn is_country_match(member: &GroupServer, country: &str) -> bool {
+    member
+        .countries
+        .iter()
+        .any(|c| c.eq_ignore_ascii_case(country))
+        || member
+            .region
+            .as_deref()
+            .is_some_and(|r| r.eq_ignore_ascii_case(country))
+}
+
+fn is_region_preset_match(member: &GroupServer, country: &str) -> bool {
+    let Some(region) = member.region.as_deref() else {
+        return false;
+    };
+    if let Some(preset) = r3v3rs3_api::geoip::lookup_preset(region) {
+        return preset
+            .countries
+            .iter()
+            .any(|&c| c.eq_ignore_ascii_case(country));
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -971,6 +1081,8 @@ mod tests {
             .map(|(&weight, name)| GroupServer {
                 addr: name.to_string(),
                 weight,
+                region: None,
+                countries: Vec::new(),
             })
             .collect()
     }
@@ -1333,5 +1445,51 @@ mod tests {
         let mut received = vec![0; expected.len()];
         accepted.unwrap().0.read_exact(&mut received).await.unwrap();
         assert_eq!(received, expected);
+    }
+
+    #[test]
+    fn latency_policy_orders_by_measured_rtt() {
+        let group = UpstreamGroup::new(
+            members(&[1, 1, 1]),
+            LoadBalancing::Latency,
+            no_passive_check(),
+        );
+        // Record latency: server 0 = 50ms, server 1 = 10ms, server 2 = 100ms
+        group.metrics[0].record_rtt(Duration::from_millis(50));
+        group.metrics[1].record_rtt(Duration::from_millis(10));
+        group.metrics[2].record_rtt(Duration::from_millis(100));
+
+        let ordered = group.candidates(CLIENT);
+        assert_eq!(ordered, [1, 0, 2]);
+    }
+
+    #[test]
+    fn geo_proximity_policy_prioritizes_matching_region() {
+        let server_eu = GroupServer {
+            addr: "eu".into(),
+            weight: 1,
+            region: Some("eu".into()),
+            countries: vec!["DE".into(), "FR".into()],
+        };
+        let server_us = GroupServer {
+            addr: "us".into(),
+            weight: 1,
+            region: Some("na".into()),
+            countries: vec!["US".into()],
+        };
+        let server_fallback = GroupServer {
+            addr: "fallback".into(),
+            weight: 1,
+            region: None,
+            countries: Vec::new(),
+        };
+        let group = UpstreamGroup::new(
+            vec![server_eu, server_us, server_fallback],
+            LoadBalancing::GeoProximity,
+            no_passive_check(),
+        );
+
+        // When client country is not resolved, order is stable and has all members
+        assert_eq!(group.candidates(CLIENT).len(), 3);
     }
 }

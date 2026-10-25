@@ -192,6 +192,8 @@ fn targets_to_servers(server: &Server, targets: &[SrvTarget]) -> Vec<Server> {
             Some(Server {
                 url,
                 weight: target.weight,
+                region: server.region.clone(),
+                countries: server.countries.clone(),
             })
         })
         .collect()

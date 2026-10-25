@@ -255,7 +255,12 @@ fn parse_server(
         .addr(protocol)
         .ok_or_else(|| locale.t("proxy_form.invalid_server").to_string())?;
     let weight = parse_weight(locale, &server.weight)?;
-    Ok(UpstreamServer { addr, weight })
+    Ok(UpstreamServer {
+        addr,
+        weight,
+        region: None,
+        countries: Vec::new(),
+    })
 }
 
 fn get_proxy(

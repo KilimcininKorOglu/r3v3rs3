@@ -1050,11 +1050,18 @@ fn code_option(code: u16, selected: u16) -> Html {
 
 /// Writes a server as its URL, followed by its weight when the weight is not the default.
 fn format_server_line(server: &Server) -> String {
-    if server.weight == DEFAULT_WEIGHT {
+    let mut line = if server.weight == DEFAULT_WEIGHT {
         server.url.to_string()
     } else {
         format!("{} {}", server.url, server.weight)
+    };
+    if let Some(region) = &server.region {
+        line.push_str(&format!(" region:{region}"));
     }
+    if !server.countries.is_empty() {
+        line.push_str(&format!(" countries:{}", server.countries.join(",")));
+    }
+    line
 }
 
 /// Reads a server line: the URL, and an optional weight after a space. An SRV URL has no
@@ -1064,13 +1071,31 @@ fn parse_server_line(locale: Locale, line: &str) -> Result<Server, String> {
     let url = ServerUrl::from_str(parts.next().unwrap_or_default())
         .map_err(|err| locale.error_message(&err))?;
     let rest = parts.collect::<Vec<_>>();
-    let weight = match (url.srv_name().is_some(), rest.as_slice()) {
-        (_, []) => DEFAULT_WEIGHT,
-        (true, _) => return Err(locale.t("proxy_form.srv_weight").into()),
-        (false, [value]) => parse_weight(locale, value)?,
-        (false, _) => parse_weight(locale, &rest.join(" "))?,
-    };
-    Ok(Server { url, weight })
+    if url.srv_name().is_some() && !rest.is_empty() {
+        return Err(locale.t("proxy_form.srv_weight").into());
+    }
+    let mut weight = DEFAULT_WEIGHT;
+    let mut weight_set = false;
+    let mut region = None;
+    let mut countries = Vec::new();
+    for part in &rest {
+        if let Some(r) = part.strip_prefix("region:") {
+            region = Some(r.to_lowercase());
+        } else if let Some(c) = part.strip_prefix("countries:") {
+            countries = r3v3rs3_api::geoip::parse_countries(c);
+        } else if !weight_set {
+            weight = parse_weight(locale, part)?;
+            weight_set = true;
+        } else {
+            return Err(locale.tf("proxy_form.invalid_weight", &[("value", *part)]));
+        }
+    }
+    Ok(Server {
+        url,
+        weight,
+        region,
+        countries,
+    })
 }
 
 /// Reads a server weight from 0 to 65535.

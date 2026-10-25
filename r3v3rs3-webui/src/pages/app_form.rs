@@ -638,6 +638,8 @@ impl AppForm {
             "random" => Some(r3v3rs3_api::upstream::LoadBalancing::Random),
             "first" => Some(r3v3rs3_api::upstream::LoadBalancing::First),
             "client_ip_hash" => Some(r3v3rs3_api::upstream::LoadBalancing::ClientIpHash),
+            "geo_proximity" => Some(r3v3rs3_api::upstream::LoadBalancing::GeoProximity),
+            "latency" => Some(r3v3rs3_api::upstream::LoadBalancing::Latency),
             _ => None,
         };
         Ok((targets, load_balancing))

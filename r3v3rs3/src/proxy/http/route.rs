@@ -50,7 +50,7 @@ impl Router {
                 })
         {
             let (tls_client_config, _) = upstream.get(http.client_cert, http.timeouts.connect);
-            let proxy_upstream = ProxyUpstream::new(&http);
+            let proxy_upstream = ProxyUpstream::new(&http, registries.geoip.clone());
             let client_ip = Arc::new(ClientIpResolver::new(&http.client_ip));
             let proxy_ip_filter = Arc::new(http.ip_filter);
             let proxy_rate_limiter = registries.limiters.limiter((id, None), http.rate_limit);
@@ -199,10 +199,11 @@ struct ProxyUpstream {
     retry: RetryPolicy,
     sticky: StickyCookie,
     max_body_size: u64,
+    geoip: Arc<crate::proxy::geoip::GeoIpResolver>,
 }
 
 impl ProxyUpstream {
-    fn new(http: &HttpProxy) -> Self {
+    fn new(http: &HttpProxy, geoip: Arc<crate::proxy::geoip::GeoIpResolver>) -> Self {
         Self {
             client_cert: http.client_cert,
             timeouts: http.timeouts,
@@ -212,6 +213,7 @@ impl ProxyUpstream {
             retry: http.retry.clone(),
             sticky: http.sticky.clone(),
             max_body_size: http.max_body_size,
+            geoip,
         }
     }
 
@@ -236,6 +238,8 @@ impl ProxyUpstream {
             .map(|server| health::GroupServer {
                 addr: server.url.to_string(),
                 weight: server.weight,
+                region: server.region.clone(),
+                countries: server.countries.clone(),
             })
             .collect();
         let probe = http_probe(servers, &self.health_check, &pool);
@@ -251,6 +255,7 @@ impl ProxyUpstream {
             self.circuit_breaker,
             probe,
         );
+        group.set_geoip(self.geoip.clone());
         Some(Upstream {
             pool,
             request_timeout: timeouts.request,

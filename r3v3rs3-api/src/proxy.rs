@@ -544,6 +544,12 @@ pub struct Server {
     #[serde(default = "default_weight", skip_serializing_if = "is_default_weight")]
     #[schema(example = 1)]
     pub weight: u16,
+    /// Optional geographical region or preset (e.g. "eu", "na", "tr", "apac") for geo-steering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// Optional ISO 3166-1 alpha-2 country codes assigned to this server for geo-steering.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub countries: Vec<String>,
 }
 
 impl Server {
@@ -551,6 +557,8 @@ impl Server {
         Self {
             url,
             weight: DEFAULT_WEIGHT,
+            region: None,
+            countries: Vec::new(),
         }
     }
 }

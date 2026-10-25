@@ -71,18 +71,20 @@ impl Platform {
         let mut host_ports = Vec::new();
         let mut issues = Vec::new();
         let targets = self.store.targets().await.unwrap_or_default();
-        let drained: std::collections::HashSet<_> = targets
-            .into_iter()
-            .filter(|t| t.drained)
-            .map(|t| t.id)
+        let drained: std::collections::HashSet<_> =
+            targets.iter().filter(|t| t.drained).map(|t| t.id).collect();
+        let regions: std::collections::HashMap<_, _> = targets
+            .iter()
+            .filter_map(|t| t.region.as_ref().map(|r| (t.id, r.clone())))
             .collect();
         for target in deployment.spec.targets_or_default(deployment.target) {
             if drained.contains(&target) {
                 continue;
             }
             let weight = self.target_weight(target);
+            let region = regions.get(&target).cloned();
             match self.published_port(deployment, target).await? {
-                Ok(port) => host_ports.push(HostServer { port, weight }),
+                Ok(port) => host_ports.push(HostServer::with_region(port, weight, region)),
                 Err(message) => issues.push(DiscoveryIssue {
                     resource: deployment.app_name.to_string(),
                     message,

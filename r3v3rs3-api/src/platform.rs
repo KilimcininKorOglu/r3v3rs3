@@ -742,6 +742,9 @@ pub struct TargetEntry {
     /// Recent latency samples in milliseconds (most recent last, up to 15 samples).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub latency_samples: Vec<f64>,
+    /// The geographical region or location identifier of the target (e.g. "eu", "na", "tr", "apac").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
 }
 
 /// A new agent target.
@@ -749,6 +752,17 @@ pub struct TargetEntry {
 pub struct TargetRequest {
     #[schema(value_type = String, example = "edge-1")]
     pub name: AppName,
+    /// Optional geographical region or location identifier (e.g. "eu", "na", "tr", "apac").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+}
+
+/// Request to update the geographical region of a target node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SetTargetRegionRequest {
+    /// Geographical region identifier (e.g. "eu", "na", "tr", "apac") or null to clear.
+    #[serde(default)]
+    pub region: Option<String>,
 }
 
 /// An agent target with its new enrollment token. The token is shown only once.

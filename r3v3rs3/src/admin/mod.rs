@@ -404,7 +404,8 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(platform::new_target_token))
                 .routes(routes!(platform::upgrade_target))
                 .routes(routes!(platform::drain_target))
-                .routes(routes!(platform::undrain_target)),
+                .routes(routes!(platform::undrain_target))
+                .routes(routes!(platform::set_target_region)),
         )
         .nest(
             "/registries",

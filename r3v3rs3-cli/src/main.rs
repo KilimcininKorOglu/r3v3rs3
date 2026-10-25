@@ -448,6 +448,12 @@ pub enum TargetCommand {
     Drain { id: String },
     /// Undrains a target node, restoring it to traffic.
     Undrain { id: String },
+    /// Sets or clears the geographical region of a target node (e.g. "eu", "na", "tr", "apac").
+    SetRegion {
+        id: String,
+        #[arg(long)]
+        region: Option<String>,
+    },
     /// Generates a new target node enrollment token.
     Token,
 }
@@ -1007,6 +1013,9 @@ async fn run_target(api: &api_client::ApiClient, cmd: TargetCommand) -> anyhow::
         TargetCommand::Delete { id } => api.delete_target(&id).await,
         TargetCommand::Drain { id } => api.drain_target(&id).await,
         TargetCommand::Undrain { id } => api.undrain_target(&id).await,
+        TargetCommand::SetRegion { id, region } => {
+            api.set_target_region(&id, region.as_deref()).await
+        }
         TargetCommand::Token => api.new_target_token().await,
     }
 }
