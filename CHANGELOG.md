@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-10-25
+
+### Fixed
+- WebUI Application Dashboard Hook Lifecycle: Converted polling effect runner in `r3v3rs3-webui/src/pages/app_dashboard.rs` into a properly annotated `#[hook]` function (`use_dashboard_poll`), ensuring Yew correctly registers the effect context and initiates live telemetry polling.
+- Application Dashboard Loading Skeleton: Rendered a responsive placeholder skeleton with Back button navigation while application overview data is loading, preventing empty white view containers.
+
 ## [2.6.9] - 2026-10-25
 
 ### Fixed
