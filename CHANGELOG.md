@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.3] - 2026-10-25
+
+### Added
+- Compose .env Template Resolver & Auto-Secret Generator: Automated template resolution and cryptographic secret generation engine for Docker Compose applications and App Store one-click deployments.
+- Cryptographic Random Secret Generator: Generates high-entropy passwords (32-character alphanumeric) and secure keys/salts (64-character hex tokens) for empty or placeholder environment variables (`_PASSWORD`, `_SECRET`, `_KEY`, `_TOKEN`, `_HASH`, `_SALT`, `_PASSPHRASE`).
+- REST API Endpoints: Added `POST /api/apps/{id}/env/generate` to inspect and automatically populate missing secrets for existing applications, and `POST /api/compose/env/generate` to resolve raw Compose `.env` templates before deployment.
+- 100% MCP & CLI Parity: Added MCP tools `generate_app_env_secrets` and `resolve_compose_env_template`, and CLI subcommands `r3 app generate-env <APP_ID> [--save] [--overwrite]` and `r3 app resolve-template [--template <STR>] [--file <PATH>] [--overwrite]`.
+- WebUI One-Click Secret Generation: Integrated "Auto-Generate Missing Secrets" action buttons into both the App Store installation wizard (`store_env.rs`) and application environment variables editor (`app_env.rs`).
+- Dual-Language Documentation: Updated `platform.md` and `platform.tr.md` with complete Compose environment resolution specifications, placeholder patterns, REST routes, and CLI/MCP examples.
+
 ## [2.6.2] - 2026-10-25
 
 ### Added
