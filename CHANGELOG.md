@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.5] - 2026-10-25
+
+### Added
+- HTTP/2 & HTTP/3 Adaptive Stream Priority (RFC 9218): Extensible Prioritization Scheme for HTTP supporting the `Priority: u=urgency, i=?incremental` header across multiplexed HTTP/2 and HTTP/3 streams.
+- Urgency Scheduling & Weight Mapping: Standardized 8-tier urgency hierarchy (u=0 critical to u=7 background) mapped to relative scheduling weights (256 down to 2) prioritizing critical rendering paths (HTML, CSS, JS, interactive APIs) over bulk background downloads.
+- Automatic MIME & Path Heuristics: Intelligent resource prioritization engine inspecting request paths and Content-Type headers to automatically apply optimal urgency and incremental streaming flags without manual configuration.
+- Custom Pattern Rules: Configurable `custom_rules` allowing administrators to override urgency and incremental flags using glob path patterns and MIME types.
+- Adaptive Concurrency & Backpressure: Real-time stream controller monitoring multiplexed concurrent streams to throttle and pace background streams (`u >= 5`) during high server congestion, preventing bufferbloat.
+- REST API Endpoints: Added `GET /api/proxies/{id}/priority`, `PUT /api/proxies/{id}/priority`, and `GET /api/traffic/priority` for stream priority configuration and global multiplexing metrics.
+- 100% MCP & CLI Parity: Added MCP tools `get_stream_priority`, `set_stream_priority`, and `get_stream_priority_stats`, and CLI subcommands `r3 proxy priority <ID> [--enable] [--inject-header] [--adaptive-concurrency]` and `r3 traffic priority`.
+- WebUI Stream Priority Management: Added "Stream Priority (RFC 9218)" configuration cards with toggles and hints to the proxy and port forms, plus global stream priority statistics.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` with RFC 9218 stream priority specifications, urgency class reference tables, and CLI/MCP administration commands.
+
 ## [2.6.4] - 2026-10-25
 
 ### Added
