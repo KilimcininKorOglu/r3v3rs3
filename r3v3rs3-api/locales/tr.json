@@ -903,6 +903,8 @@
   "ports.client_ca_certs_hint": "İstemci sertifikalarını yalnız bu kök sertifikalar doğrular. Sistemin kök sertifikaları kullanılmaz.",
   "ports.confirm_reset": "{id} sıfırlansın mı?\nBütün açık bağlantılar kapanır.",
   "ports.bulk_confirm_delete": "Seçilen {count} port silinsin mi?",
+  "ports.early_data": "TLS 1.3 0-RTT Erken Veri",
+  "ports.early_data_hint": "TLS 1.3 istemcilerinin istekleri 0-RTT ile göndermesine izin verir. Güvenli HTTP metodlarına (GET/HEAD) RFC 8470 anti-replay korumasıyla izin verilirken durum değiştiren istekler 425 Too Early ile reddedilir.",
   "ports.empty": "Henüz port yok.",
   "ports.interface": "Ağ Arayüzü",
   "ports.interface_required": "Bir ağ arayüzü seçin.",

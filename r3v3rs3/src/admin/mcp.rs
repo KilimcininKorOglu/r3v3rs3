@@ -92,6 +92,15 @@ pub struct UpdatePortParams {
     pub entry: serde_json::Value,
 }
 
+/// The argument of `set_port_early_data`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SetPortEarlyDataParams {
+    /// The id of the port.
+    pub id: String,
+    /// Whether TLS 1.3 0-RTT early data should be enabled.
+    pub enabled: bool,
+}
+
 /// The `{ "proxy": {...} }` argument of `add_proxy`, in the form of the admin API.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddProxyParams {
@@ -1058,6 +1067,38 @@ impl McpServer {
             .await
             .map_err(tool_error)?;
         json_result(json!({ "reset": id.to_string() }))
+    }
+
+    /// Enable or disable TLS 1.3 0-RTT early data on a port.
+    #[tool(
+        description = "Enable or disable TLS 1.3 0-RTT early data with anti-replay protection on a port. Needs the edit scope."
+    )]
+    async fn set_port_early_data(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<SetPortEarlyDataParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let mut entry: r3v3rs3_api::port::PortEntry = *self
+            .state
+            .call(&caller, GetPort { id })
+            .await
+            .map_err(tool_error)?;
+        if let Some(tls) = entry.port.opts.tls_termination.as_mut() {
+            tls.early_data = params.enabled;
+        } else if params.enabled {
+            return Err(ErrorData::invalid_params(
+                "Port does not have TLS termination configured",
+                None,
+            ));
+        }
+        self.state
+            .call(&caller, UpdatePort { entry })
+            .await
+            .map_err(tool_error)?;
+        json_result(json!({ "id": id.to_string(), "early_data": params.enabled }))
     }
 
     /// List host network interfaces.

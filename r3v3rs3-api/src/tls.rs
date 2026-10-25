@@ -44,6 +44,10 @@ pub struct TlsTermination {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schema(value_type = Vec<String>)]
     pub client_ca_certs: Vec<ShortId>,
+
+    /// Whether TLS 1.3 0-RTT early data is enabled on this port.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub early_data: bool,
 }
 
 #[cfg(test)]
@@ -65,5 +69,14 @@ mod tests {
                 .unwrap();
         assert_eq!(tls.client_auth, ClientAuthMode::Required);
         assert_eq!(tls.client_ca_certs, vec!["abc".parse().unwrap()]);
+        assert!(!tls.early_data);
+
+        let tls: TlsTermination =
+            serde_json::from_str(r#"{"server_names":["b.com"],"early_data":true}"#).unwrap();
+        assert!(tls.early_data);
+        assert_eq!(
+            serde_json::to_string(&tls).unwrap(),
+            r#"{"server_names":["b.com"],"early_data":true}"#
+        );
     }
 }

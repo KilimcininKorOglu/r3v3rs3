@@ -486,6 +486,7 @@ async fn start(
         http2: server_http2,
         sni,
         client_cert,
+        early_data,
     } = tls_info;
 
     let span_cloned = span.clone();
@@ -507,6 +508,7 @@ async fn start(
                 sni: sni.as_deref(),
                 proto: forwarded_proto,
                 client_cert: client_cert.as_deref(),
+                early_data,
             };
             let fronting = is_domain_fronting(&req, sni.as_deref());
             proxied_response(&shared, req, &info, fronting).await
@@ -803,6 +805,7 @@ struct TlsInfo {
     http2: bool,
     sni: Option<String>,
     client_cert: Option<Arc<ClientCertInfo>>,
+    early_data: bool,
 }
 
 /// Runs the TLS handshake when the port terminates TLS. `None` when the connection served a
@@ -817,7 +820,7 @@ async fn handshake(
     };
     debug!(%remote, "server: tls handshake");
     let start = std::time::Instant::now();
-    let accepted = match tls.accept(stream).await {
+    let mut accepted = match tls.accept(stream).await {
         Ok(Handshake::Established(accepted)) => {
             super::stats::record_tls_handshake(start.elapsed());
             accepted
@@ -828,11 +831,13 @@ async fn handshake(
             return Err(err.into());
         }
     };
+    let early_data = accepted.get_mut().1.early_data().is_some();
     let conn = &accepted.get_ref().1;
     let info = TlsInfo {
         http2: conn.alpn_protocol() == Some(b"h2"),
         sni: conn.server_name().map(str::to_string),
         client_cert: ClientCertInfo::from_chain(conn.peer_certificates()).map(Arc::new),
+        early_data,
     };
     Ok(Some((accepted, info)))
 }
@@ -910,6 +915,7 @@ struct RequestInfo<'a> {
     proto: &'static str,
     /// The verified client certificate of the TLS connection.
     client_cert: Option<&'a ClientCertInfo>,
+    early_data: bool,
 }
 
 fn header_host<B>(req: &Request<B>) -> Option<&str> {
@@ -926,11 +932,94 @@ fn is_domain_fronting<B>(req: &Request<B>, sni: Option<&str>) -> bool {
     }
 }
 
+fn validate_early_data<B>(
+    req: &mut Request<B>,
+    info: &RequestInfo<'_>,
+) -> Option<Response<Full<Bytes>>> {
+    if !info.early_data {
+        req.headers_mut()
+            .remove(r3v3rs3_api::early_data::EARLY_DATA_HEADER);
+        return None;
+    }
+
+    let path_and_query = req
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or("");
+    if !r3v3rs3_api::early_data::GLOBAL_ANTI_REPLAY.check_and_record(
+        info.remote.ip(),
+        req.method().as_str(),
+        path_and_query,
+    ) {
+        return Some(too_early_response("425 Too Early (Replay Detected)\n"));
+    }
+
+    if !r3v3rs3_api::early_data::is_safe_http_method(req.method().as_str()) {
+        return Some(too_early_response(
+            "425 Too Early (Unsafe Method in Early Data)\n",
+        ));
+    }
+
+    if let (Ok(hname), Ok(hval)) = (
+        HeaderName::from_bytes(r3v3rs3_api::early_data::EARLY_DATA_HEADER.as_bytes()),
+        HeaderValue::from_str(r3v3rs3_api::early_data::EARLY_DATA_VALUE),
+    ) {
+        req.headers_mut().insert(hname, hval);
+    }
+
+    None
+}
+
+fn too_early_response(body: &'static str) -> Response<Full<Bytes>> {
+    Response::builder()
+        .status(StatusCode::TOO_EARLY)
+        .header(hyper::header::RETRY_AFTER, "0")
+        .body(Full::new(Bytes::from(body)))
+        .unwrap_or_default()
+}
+
+fn no_route_fallback<B>(
+    shared: &SharedContext,
+    info: &RequestInfo<'_>,
+    request_host: Option<String>,
+    response_rewriter: ResponseRewriterBuilder,
+) -> (
+    ProxiedRequest<Request<B>>,
+    ResponseRewriterBuilder,
+    Option<ShortId>,
+    std::net::IpAddr,
+) {
+    let error_pages = shared.router.find_error_pages(request_host.as_deref());
+    let client_cert = info.client_cert.cloned().unwrap_or_default();
+    let fallback_vars = header_rules::HeaderVariables {
+        client_ip: info.remote.ip(),
+        host: request_host.unwrap_or_default(),
+        scheme: if info.proto == "http" {
+            "http"
+        } else {
+            "https"
+        },
+        request_id: header_rules::new_request_id(),
+        route: String::new(),
+        client_cert_subject: client_cert.subject,
+        client_cert_fingerprint: client_cert.fingerprint,
+    };
+    (
+        ProxiedRequest::Err(ProxyError::NoRouteFound),
+        response_rewriter
+            .error_pages(error_pages)
+            .variables(fallback_vars),
+        None,
+        info.remote.ip(),
+    )
+}
+
 /// Matches the request to a route, applies the route policies and prepares
 /// the request for the upstream server.
 async fn route_request<B>(
     shared: &SharedContext,
-    req: Request<B>,
+    mut req: Request<B>,
     info: &RequestInfo<'_>,
 ) -> (
     ProxiedRequest<Request<B>>,
@@ -942,34 +1031,21 @@ where
     B: Body<Data = Bytes>,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
+    if let Some(early_resp) = validate_early_data(&mut req, info) {
+        return (
+            ProxiedRequest::Respond(early_resp),
+            ResponseRewriter::builder(),
+            None,
+            info.remote.ip(),
+        );
+    }
+
     let preferences = PagePreferences::from_headers(req.headers());
     let response_rewriter = ResponseRewriter::builder().preferences(preferences);
     let header_host = header_host(&req).map(str::to_string);
     let request_host = request_host(&req, header_host.clone(), info.sni);
     let Some((res, route)) = shared.router.get_route(&req, request_host.as_deref()) else {
-        let error_pages = shared.router.find_error_pages(request_host.as_deref());
-        let client_cert = info.client_cert.cloned().unwrap_or_default();
-        let fallback_vars = header_rules::HeaderVariables {
-            client_ip: info.remote.ip(),
-            host: request_host.clone().unwrap_or_default(),
-            scheme: if info.proto == "http" {
-                "http"
-            } else {
-                "https"
-            },
-            request_id: header_rules::new_request_id(),
-            route: String::new(),
-            client_cert_subject: client_cert.subject,
-            client_cert_fingerprint: client_cert.fingerprint,
-        };
-        return (
-            ProxiedRequest::Err(ProxyError::NoRouteFound),
-            response_rewriter
-                .error_pages(error_pages)
-                .variables(fallback_vars),
-            None,
-            info.remote.ip(),
-        );
+        return no_route_fallback(shared, info, request_host, response_rewriter);
     };
     let response_rewriter = configure_response_rewriter(response_rewriter, route, &req);
 
@@ -1451,6 +1527,7 @@ where
         sni: None,
         proto: "h3",
         client_cert: ctx.client_cert.as_deref(),
+        early_data: false,
     };
     let start = std::time::Instant::now();
     let method = req.method().to_string();

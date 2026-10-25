@@ -28,6 +28,7 @@ pub struct TlsTermination {
     pub server_names: Vec<SubjectName>,
     pub acceptor: Option<TlsAcceptor>,
     pub alpn_protocols: Vec<Vec<u8>>,
+    pub early_data: bool,
     client_auth: ClientAuthMode,
     client_ca_certs: Vec<ShortId>,
 }
@@ -36,6 +37,7 @@ impl fmt::Debug for TlsTermination {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TlsTermination")
             .field("server_names", &self.server_names)
+            .field("early_data", &self.early_data)
             .field("client_auth", &self.client_auth)
             .field("client_ca_certs", &self.client_ca_certs)
             .finish()
@@ -56,6 +58,7 @@ impl TlsTermination {
             server_names,
             acceptor: None,
             alpn_protocols,
+            early_data: config.early_data,
             client_auth: config.client_auth,
             client_ca_certs: config.client_ca_certs.clone(),
         })
@@ -79,6 +82,9 @@ impl TlsTermination {
         server_config
             .alpn_protocols
             .clone_from(&self.alpn_protocols);
+        if self.early_data {
+            server_config.max_early_data_size = 16384;
+        }
 
         self.acceptor = Some(TlsAcceptor::from(Arc::new(server_config)));
         TlsState::Active

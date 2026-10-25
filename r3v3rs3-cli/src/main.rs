@@ -114,6 +114,12 @@ pub enum PortCommand {
     Delete { id: String },
     /// Resets a port listener.
     Reset { id: String },
+    /// Enables or disables TLS 1.3 0-RTT early data on a port.
+    SetEarlyData {
+        id: String,
+        #[arg(long, default_value_t = true)]
+        enable: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -846,6 +852,7 @@ async fn run_port(api: &api_client::ApiClient, cmd: PortCommand) -> anyhow::Resu
         PortCommand::Add { payload } => api.add_port(&payload).await,
         PortCommand::Delete { id } => api.delete_port(&id).await,
         PortCommand::Reset { id } => api.reset_port(&id).await,
+        PortCommand::SetEarlyData { id, enable } => api.set_port_early_data(&id, enable).await,
     }
 }
 

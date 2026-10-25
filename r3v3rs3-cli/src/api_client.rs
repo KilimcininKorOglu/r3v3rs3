@@ -142,6 +142,25 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn set_port_early_data(&self, id: &str, enable: bool) -> anyhow::Result<()> {
+        let entry = self
+            .request(Method::GET, &format!("/api/ports/{id}"), None)
+            .await?;
+        let mut port = entry.get("port").cloned().unwrap_or(entry);
+        if let Some(opts) = port.get_mut("opts") {
+            if let Some(tls) = opts.get_mut("tls_termination") {
+                tls["early_data"] = serde_json::json!(enable);
+            } else if enable {
+                anyhow::bail!("port/{id} does not have TLS termination configured");
+            }
+        }
+        let res = self
+            .request(Method::PUT, &format!("/api/ports/{id}"), Some(&port))
+            .await?;
+        println!("port/{id} early_data set to {enable}");
+        print_json(&res)
+    }
+
     // --- Proxy operations ---
 
     pub async fn list_proxies(&self) -> anyhow::Result<()> {

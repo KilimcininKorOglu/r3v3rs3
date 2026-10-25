@@ -111,6 +111,7 @@ struct PortForm {
     server_names: String,
     client_auth: ClientAuthMode,
     client_ca_certs: Vec<ShortId>,
+    early_data: bool,
     proxy_protocol: ProxyProtocolForm,
     http2_limits: Http2LimitsForm,
     http3_limits: Http3LimitsForm,
@@ -180,6 +181,7 @@ struct TlsFields {
     server_names: UseStateHandle<String>,
     client_auth: UseStateHandle<ClientAuthMode>,
     client_ca_certs: UseStateHandle<Vec<ShortId>>,
+    early_data: UseStateHandle<bool>,
     root_certs: UseStateHandle<Vec<CertInfo>>,
 }
 
@@ -272,6 +274,7 @@ pub fn port_config(props: &Props) -> Html {
         server_names: tls_fields.server_names.to_string(),
         client_auth: *tls_fields.client_auth,
         client_ca_certs: (*tls_fields.client_ca_certs).clone(),
+        early_data: *tls_fields.early_data,
         proxy_protocol: (*proxy_protocol).clone(),
         http2_limits: (*http2_limits).clone(),
         http3_limits: (*http3_limits).clone(),
@@ -404,6 +407,7 @@ fn use_tls_fields(tls_termination: &TlsTermination) -> TlsFields {
         server_names: use_state(|| tls_termination.server_names.join(", ")),
         client_auth: use_state(|| tls_termination.client_auth),
         client_ca_certs: use_state(|| tls_termination.client_ca_certs.clone()),
+        early_data: use_state(|| tls_termination.early_data),
         root_certs: use_state(Vec::<CertInfo>::new),
     };
     use_effect_with((), {
@@ -432,12 +436,28 @@ fn tls_view(locale: Locale, fields: &TlsFields, errors: &HashMap<String, String>
             server_names.set(target.value());
         }
     });
+    let early_data_onchange = Callback::from({
+        let early_data = fields.early_data.clone();
+        move |event: Event| {
+            let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
+            early_data.set(target.checked());
+        }
+    });
     html! {
         <>
             <label class={LABEL_CLASS}>{locale.t("ports.server_names")}</label>
             <input type="text" autocapitalize="off" value={fields.server_names.to_string()} onchange={server_names_onchange} class={INPUT_CLASS} placeholder="example.com, *.example.com" />
             { error_view(errors.get("server_names")) }
             <p class={HINT_CLASS}>{locale.t("ports.server_names_hint")}</p>
+
+            <div class="mt-4 pt-3 border-t border-neutral-200 dark:border-neutral-700">
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input onchange={early_data_onchange} type="checkbox" checked={*fields.early_data} class="sr-only peer" />
+                    <div class="shrink-0 w-9 h-5 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                    <span class="ml-3 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("ports.early_data")}</span>
+                </label>
+                <p class={HINT_CLASS}>{locale.t("ports.early_data_hint")}</p>
+            </div>
 
             { client_auth_view(locale, &fields.client_auth) }
             if !fields.client_auth.is_off() {
@@ -524,6 +544,7 @@ fn get_port(
     );
     tls_termination.client_auth = form.client_auth;
     tls_termination.client_ca_certs = client_ca_certs(locale, form, &mut errors);
+    tls_termination.early_data = form.early_data;
     let proxy_protocol = proxy_protocol(locale, form, &mut errors);
     let http2_limits = http2_limits(locale, form, &mut errors);
     let http3_limits = http3_limits(locale, form, &mut errors);
@@ -909,6 +930,7 @@ mod tests {
             server_names: server_names.into(),
             client_auth: ClientAuthMode::Off,
             client_ca_certs: Vec::new(),
+            early_data: false,
             proxy_protocol: ProxyProtocolForm::new(None),
             http2_limits: Http2LimitsForm::new(None),
             http3_limits: Http3LimitsForm::new(None),
@@ -928,6 +950,14 @@ mod tests {
             port.opts.tls_termination.unwrap().server_names,
             vec!["example.com".to_string(), "*.example.com".to_string()]
         );
+    }
+
+    #[test]
+    fn tls_port_early_data_toggle() {
+        let mut f = form("https", "example.com");
+        f.early_data = true;
+        let port = build(&f).unwrap();
+        assert!(port.opts.tls_termination.unwrap().early_data);
     }
 
     #[test]

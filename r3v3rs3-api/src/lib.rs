@@ -18,6 +18,7 @@ pub mod config_backup;
 pub mod container;
 pub mod dashboard;
 pub mod discovery;
+pub mod early_data;
 pub mod error;
 pub mod error_page_templates;
 pub mod error_page_theme;

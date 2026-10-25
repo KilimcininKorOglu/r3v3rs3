@@ -158,6 +158,25 @@ routes = [
 ]
 ```
 
+### TLS 1.3 0-RTT Erken Veri & Anti-Replay Koruması
+
+Mobil ve yüksek gecikmeli istemcilerde bağlantı gecikmesini en aza indirmek için r3v3rs3, TLS termination portlarında TLS 1.3 0-RTT Early Data desteği sunar (`early_data = true`). Etkinleştirildiğinde, geçerli bir oturum bileti (session resumption ticket) taşıyan istemciler ilk el sıkışma paketinde (ClientHello) veri gönderebilir ve el sıkışma gecikmesi sıfır tura (0-RTT) iner:
+
+- **RFC 8470 Yalnızca Güvenli Metodlar**: RFC 8470 standardına uygun olarak yalnızca güvenli HTTP metodlarına (`GET`, `HEAD`, `OPTIONS`, `TRACE`) early data içinde izin verilir. Early data ile gönderilen durum değiştiren istekler (`POST`, `PUT`, `DELETE`, `PATCH`), replay saldırılarına karşı `425 Too Early` durum kodu ve `Retry-After: 0` başlığıyla reddedilir.
+- **Bellek İçi Anti-Replay Arabelleği**: 60 saniyelik kayan zaman penceresinde 0-RTT istek özetleri takip edilir. Tekrar yakalanan paketler anında `425 Too Early` ile durdurulur.
+- **Upstream İletimi**: 0-RTT üzerinden gelen isteklere `Early-Data: 1` başlığı eklenerek upstream sunucuya iletilir. Standart bağlantılarda istemciden gelen sahte `Early-Data` başlıkları silinir.
+
+```toml
+[my-port]
+listen = "/ip4/0.0.0.0/tcp/443/https"
+tls_termination = { server_names = ["example.com"], early_data = true }
+```
+
+CLI veya MCP üzerinden:
+```bash
+r3 port set-early-data <PORT_ID> --enable
+```
+
 ## PROXY protocol
 
 r3v3rs3 önündeki bir yük dengeleyici, istemci adresini PROXY protocol header'ı (sürüm 1 veya 2) ile gönderebilir. TCP, TLS üzerinden TCP, HTTP ve HTTPS portları bu header'ı okuyabilir. UDP ve QUIC üzerinden HTTP portları okuyamaz.

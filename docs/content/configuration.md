@@ -158,6 +158,25 @@ routes = [
 ]
 ```
 
+### TLS 1.3 0-RTT Early Data & Anti-Replay Mitigation
+
+For mobile and high-latency clients, r3v3rs3 supports TLS 1.3 0-RTT Early Data on TLS-terminated ports (`early_data = true`). When enabled, returning clients with a valid session resumption ticket can send application data in their initial ClientHello flight, reducing round-trip connection latency to zero:
+
+- **RFC 8470 Safe Methods Only**: Per RFC 8470 Section 5.2, safe HTTP methods (`GET`, `HEAD`, `OPTIONS`, `TRACE`) are allowed in early data. State-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`) sent in early data are rejected with HTTP `425 Too Early` and include a `Retry-After: 0` header, instructing clients to retry once the TLS handshake finishes.
+- **In-Memory Anti-Replay Buffer**: Sliding-window anti-replay cache records 0-RTT request identifiers within a 60-second window. Any detected replay attempt is rejected with `425 Too Early`.
+- **Upstream Forwarding**: Upstream requests arriving via 0-RTT carry an injected `Early-Data: 1` header. Any client-sent `Early-Data` header on standard connections is stripped to prevent spoofing.
+
+```toml
+[my-port]
+listen = "/ip4/0.0.0.0/tcp/443/https"
+tls_termination = { server_names = ["example.com"], early_data = true }
+```
+
+Via CLI or MCP:
+```bash
+r3 port set-early-data <PORT_ID> --enable
+```
+
 ## PROXY Protocol
 
 A load balancer in front of r3v3rs3 can send the client address in a PROXY protocol header (version 1 or 2). TCP, TCP over TLS, HTTP and HTTPS ports can read this header. UDP and HTTP over QUIC ports cannot.

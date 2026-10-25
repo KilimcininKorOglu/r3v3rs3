@@ -89,6 +89,7 @@ pub fn tls_port(
             server_names: vec!["localhost".into()],
             client_auth: mode,
             client_ca_certs: roots,
+            early_data: false,
         }),
         proxy_protocol: None,
         http2_limits: None,
