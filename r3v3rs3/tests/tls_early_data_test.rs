@@ -80,6 +80,7 @@ async fn test_port_options_with_early_data() -> anyhow::Result<()> {
                     proxy_protocol: None,
                     http2_limits: None,
                     http3_limits: None,
+                    stream_priority: None,
                 },
             },
         }])

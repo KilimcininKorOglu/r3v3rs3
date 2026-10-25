@@ -2239,6 +2239,53 @@ impl ApiClient {
         );
         Ok(())
     }
+
+    pub async fn get_stream_priority(&self, id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, &format!("/api/proxies/{id}/priority"), None)
+            .await?;
+        println!("{}", serde_json::to_string_pretty(&res)?);
+        Ok(())
+    }
+
+    pub async fn set_stream_priority(
+        &self,
+        id: &str,
+        enable: bool,
+        inject_header: Option<bool>,
+        adaptive_concurrency: Option<bool>,
+    ) -> anyhow::Result<()> {
+        let mut cur = self
+            .request(Method::GET, &format!("/api/proxies/{id}/priority"), None)
+            .await
+            .unwrap_or(serde_json::json!({}));
+
+        cur["enabled"] = serde_json::json!(enable);
+        if let Some(inject) = inject_header {
+            cur["inject_header"] = serde_json::json!(inject);
+        }
+        if let Some(adaptive) = adaptive_concurrency {
+            cur["adaptive_concurrency"] = serde_json::json!(adaptive);
+        }
+
+        let body = serde_json::json!({ "config": cur });
+        self.request(
+            Method::PUT,
+            &format!("/api/proxies/{id}/priority"),
+            Some(&body),
+        )
+        .await?;
+        println!("proxy/{id} stream_priority enabled set to {enable}");
+        Ok(())
+    }
+
+    pub async fn get_traffic_priority_stats(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/traffic/priority", None)
+            .await?;
+        println!("{}", serde_json::to_string_pretty(&res)?);
+        Ok(())
+    }
 }
 
 pub fn parse_manifest(content: &str) -> anyhow::Result<Value> {

@@ -50,6 +50,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                     proxy_protocol: None,
                     http2_limits: None,
                     http3_limits: None,
+                    stream_priority: None,
                 },
             },
         }])
@@ -91,6 +92,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                     error_pages: Vec::new(),
                     bot_blocker: false,
                     grpc_web: false,
+                    stream_priority: Default::default(),
                 })),
                 ..Default::default()
             },
@@ -182,6 +184,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                     proxy_protocol: None,
                     http2_limits: None,
                     http3_limits: None,
+                    stream_priority: None,
                 },
             },
         }])
@@ -223,6 +226,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                     error_pages: Vec::new(),
                     bot_blocker: false,
                     grpc_web: false,
+                    stream_priority: Default::default(),
                 })),
                 ..Default::default()
             },
@@ -295,6 +299,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                     proxy_protocol: None,
                     http2_limits: None,
                     http3_limits: None,
+                    stream_priority: None,
                 },
             },
         }])
@@ -336,6 +341,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                     error_pages: Vec::new(),
                     bot_blocker: false,
                     grpc_web: false,
+                    stream_priority: Default::default(),
                 })),
                 ..Default::default()
             },
@@ -423,6 +429,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                     proxy_protocol: None,
                     http2_limits: None,
                     http3_limits: None,
+                    stream_priority: None,
                 },
             },
         }])
@@ -464,6 +471,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                     error_pages: Vec::new(),
                     bot_blocker: false,
                     grpc_web: false,
+                    stream_priority: Default::default(),
                 })),
                 ..Default::default()
             },

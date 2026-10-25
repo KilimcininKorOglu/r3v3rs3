@@ -156,6 +156,9 @@ pub struct PortOptions {
     /// Overrides the global HTTP/3 stream limits of the config for this port.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http3_limits: Option<crate::app::Http3Limits>,
+    /// Enables adaptive stream priority optimization for HTTP/2 and HTTP/3 on this port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_priority: Option<crate::priority::StreamPriorityConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

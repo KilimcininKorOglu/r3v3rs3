@@ -638,7 +638,8 @@ fn traffic_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(traffic::replay))
                 .routes(routes!(traffic::get_entry))
                 .routes(routes!(traffic::list_connections))
-                .routes(routes!(traffic::terminate_connection)),
+                .routes(routes!(traffic::terminate_connection))
+                .routes(routes!(traffic::priority_stats)),
         )
         .nest(
             "/grpc",
@@ -697,6 +698,7 @@ fn proxy_routes() -> OpenApiRouter<AppState> {
             security_headers::apply_proxy_security_header_profile
         ))
         .routes(routes!(proxies::get, proxies::put, proxies::delete))
+        .routes(routes!(proxies::get_priority, proxies::put_priority))
         .routes(routes!(proxies::status))
         .routes(routes!(proxies::purge_cache, proxies::purge_cache_post))
 }

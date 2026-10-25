@@ -54,6 +54,7 @@ async fn wss_proxy() -> anyhow::Result<()> {
                     proxy_protocol: None,
                     http2_limits: None,
                     http3_limits: None,
+                    stream_priority: None,
                 },
             },
         }])
@@ -95,6 +96,7 @@ async fn wss_proxy() -> anyhow::Result<()> {
                     error_pages: Vec::new(),
                     bot_blocker: false,
                     grpc_web: false,
+                    stream_priority: Default::default(),
                 })),
                 ..Default::default()
             },

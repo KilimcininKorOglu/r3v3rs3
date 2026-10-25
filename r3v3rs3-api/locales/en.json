@@ -2212,5 +2212,19 @@
   "diagnostics.fail_count": "Memory Failures (failcnt)",
   "diagnostics.exit_code": "Exit Code",
   "diagnostics.recommendation": "Recommendation",
-  "diagnostics.not_running": "Container is not running; diagnostics inactive."
+  "diagnostics.not_running": "Container is not running; diagnostics inactive.",
+  "proxies.stream_priority": "Stream Priority (RFC 9218)",
+  "proxies.stream_priority_hint": "Optimize HTTP/2 & HTTP/3 multiplexed streams based on resource urgency and MIME types.",
+  "proxies.stream_priority_inject_header": "Inject Priority Header",
+  "proxies.stream_priority_inject_header_hint": "Forward RFC 9218 Priority header to upstreams.",
+  "proxies.stream_priority_adaptive_concurrency": "Adaptive Concurrency",
+  "proxies.stream_priority_adaptive_concurrency_hint": "Prevent bufferbloat by pacing background streams under load.",
+  "ports.stream_priority": "Stream Priority Optimization",
+  "ports.stream_priority_hint": "Enable RFC 9218 stream priority optimization for HTTP/2 and HTTP/3 on this port.",
+  "traffic.stream_priority": "Stream Priority",
+  "traffic.priority_total": "Total Prioritized",
+  "traffic.priority_critical": "Critical (u=0..2)",
+  "traffic.priority_normal": "Normal (u=3..4)",
+  "traffic.priority_background": "Background (u=5..7)",
+  "traffic.priority_throttled": "Throttled / Paced"
 }

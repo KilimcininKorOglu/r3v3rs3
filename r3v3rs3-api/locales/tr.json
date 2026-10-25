@@ -2212,5 +2212,19 @@
   "diagnostics.fail_count": "Bellek Hata Sayısı (failcnt)",
   "diagnostics.exit_code": "Çıkış Kodu",
   "diagnostics.recommendation": "Öneri",
-  "diagnostics.not_running": "Konteyner çalışmıyor; tanılamalar etkin değil."
+  "diagnostics.not_running": "Konteyner çalışmıyor; tanılamalar etkin değil.",
+  "proxies.stream_priority": "Akış Önceliklendirme (RFC 9218)",
+  "proxies.stream_priority_hint": "Kaynak aciliyetine ve MIME türlerine göre HTTP/2 ve HTTP/3 çoklu akışlarını optimize edin.",
+  "proxies.stream_priority_inject_header": "Priority Başlığı Ekle",
+  "proxies.stream_priority_inject_header_hint": "Upstream sunuculara RFC 9218 Priority başlığını iletin.",
+  "proxies.stream_priority_adaptive_concurrency": "Uyarlamalı Eşzamanlılık",
+  "proxies.stream_priority_adaptive_concurrency_hint": "Yük altında arka plan akışlarını hız sınırlayarak tampon şişkinliğini önleyin.",
+  "ports.stream_priority": "Akış Önceliklendirme Optimizasyonu",
+  "ports.stream_priority_hint": "Bu portta HTTP/2 ve HTTP/3 için RFC 9218 akış önceliklendirme optimizasyonunu etkinleştirin.",
+  "traffic.stream_priority": "Akış Önceliklendirmesi",
+  "traffic.priority_total": "Toplam Önceliklendirilen",
+  "traffic.priority_critical": "Kritik (u=0..2)",
+  "traffic.priority_normal": "Normal (u=3..4)",
+  "traffic.priority_background": "Arka Plan (u=5..7)",
+  "traffic.priority_throttled": "Hız Sınırlanan / Bekletilen"
 }

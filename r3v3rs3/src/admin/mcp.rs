@@ -125,6 +125,19 @@ pub struct PurgeProxyCacheParams {
     pub path: Option<String>,
 }
 
+/// The argument of `set_stream_priority`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SetStreamPriorityParams {
+    /// The id of the proxy.
+    pub id: String,
+    /// Whether adaptive stream priority should be enabled.
+    pub enabled: bool,
+    /// Whether to inject RFC 9218 Priority headers upstream.
+    pub inject_header: Option<bool>,
+    /// Whether to apply adaptive concurrency backpressure.
+    pub adaptive_concurrency: Option<bool>,
+}
+
 /// The argument of `check_cert_coverage`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CertCoverageParams {
@@ -1299,6 +1312,82 @@ impl McpServer {
                 None,
             )),
         }
+    }
+
+    /// Returns the HTTP/2 and HTTP/3 stream priority configuration of a proxy.
+    #[tool(description = "Get the RFC 9218 stream priority configuration of an HTTP proxy.")]
+    async fn get_stream_priority(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let entry: ProxyEntry = *self
+            .state
+            .call(&caller, GetProxy { id })
+            .await
+            .map_err(tool_error)?;
+        match entry.proxy.kind {
+            r3v3rs3_api::proxy::ProxyKind::Http(http) => json_result(http.stream_priority),
+            _ => Err(ErrorData::invalid_params(
+                format!("proxy {} is not an HTTP proxy", id),
+                None,
+            )),
+        }
+    }
+
+    /// Update the stream priority configuration of an HTTP proxy.
+    #[tool(
+        description = "Configure RFC 9218 adaptive stream priority on an HTTP proxy. Needs the edit scope."
+    )]
+    async fn set_stream_priority(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<SetStreamPriorityParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let mut entry: ProxyEntry = *self
+            .state
+            .call(&caller, GetProxy { id })
+            .await
+            .map_err(tool_error)?;
+        match &mut entry.proxy.kind {
+            r3v3rs3_api::proxy::ProxyKind::Http(http) => {
+                http.stream_priority.enabled = params.enabled;
+                if let Some(inject) = params.inject_header {
+                    http.stream_priority.inject_header = inject;
+                }
+                if let Some(adaptive) = params.adaptive_concurrency {
+                    http.stream_priority.adaptive_concurrency = adaptive;
+                }
+            }
+            _ => {
+                return Err(ErrorData::invalid_params(
+                    format!("proxy {} is not an HTTP proxy", id),
+                    None,
+                ));
+            }
+        }
+        self.state
+            .call(&caller, UpdateProxy { entry })
+            .await
+            .map_err(tool_error)?;
+        json_result(json!({ "id": id.to_string(), "stream_priority_enabled": params.enabled }))
+    }
+
+    /// Get HTTP stream priority and adaptive concurrency statistics.
+    #[tool(
+        description = "Get global statistics on RFC 9218 stream priority, multiplexed urgency classes, and adaptive backpressure throttling."
+    )]
+    async fn get_stream_priority_stats(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let _ = caller_of(&parts)?;
+        json_result(r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER.stats())
     }
 
     /// A new proxy from the JSON form of the admin API.

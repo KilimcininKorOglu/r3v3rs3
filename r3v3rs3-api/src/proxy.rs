@@ -308,6 +308,12 @@ pub struct HttpProxy {
     /// When true, translates gRPC-Web browser client requests and trailers for upstream gRPC servers.
     #[serde(default, skip_serializing_if = "is_false")]
     pub grpc_web: bool,
+    /// HTTP/2 and HTTP/3 adaptive stream prioritization and RFC 9218 priority header handling.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::priority::StreamPriorityConfig::is_disabled"
+    )]
+    pub stream_priority: crate::priority::StreamPriorityConfig,
 }
 
 /// The default status code of a maintenance response (503 Service Unavailable).
@@ -529,6 +535,9 @@ pub struct Route {
     /// Overrides the proxy gRPC-Web setting for this route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grpc_web: Option<bool>,
+    /// Overrides the proxy stream priority setting for this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_priority: Option<crate::priority::StreamPriorityConfig>,
 }
 
 fn default_route_path() -> String {

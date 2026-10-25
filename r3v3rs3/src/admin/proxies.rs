@@ -187,6 +187,54 @@ pub async fn put(
     Ok(Json(state.call(&caller, UpdateProxy { entry }).await?))
 }
 
+/// Returns the stream priority configuration of an HTTP proxy.
+#[utoipa::path(
+    get,
+    path = "/{id}/priority",
+    tag = "proxies",
+    operation_id = "get_proxy_stream_priority",
+    params(("id" = ShortId, Path, description = "Proxy id.")),
+    responses((status = 200, description = "The stream priority configuration.", body = r3v3rs3_api::priority::StreamPriorityConfig), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_priority(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<r3v3rs3_api::priority::StreamPriorityConfig>, AppError> {
+    let entry: ProxyEntry = *state.call(&caller, GetProxy { id }).await?;
+    match entry.proxy.kind {
+        r3v3rs3_api::proxy::ProxyKind::Http(http) => Ok(Json(http.stream_priority)),
+        _ => Err(r3v3rs3_api::error::Error::NotHttpProxy { id }.into()),
+    }
+}
+
+/// Updates the stream priority configuration of an HTTP proxy.
+#[utoipa::path(
+    put,
+    path = "/{id}/priority",
+    tag = "proxies",
+    operation_id = "set_proxy_stream_priority",
+    params(("id" = ShortId, Path, description = "Proxy id.")),
+    request_body = r3v3rs3_api::priority::SetStreamPriorityRequest,
+    responses((status = 200, description = "Stream priority updated."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn put_priority(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(payload): Json<r3v3rs3_api::priority::SetStreamPriorityRequest>,
+) -> Result<Json<()>, AppError> {
+    let mut entry: ProxyEntry = *state.call(&caller, GetProxy { id }).await?;
+    match &mut entry.proxy.kind {
+        r3v3rs3_api::proxy::ProxyKind::Http(http) => {
+            http.stream_priority = payload.config;
+        }
+        _ => return Err(r3v3rs3_api::error::Error::NotHttpProxy { id }.into()),
+    }
+    state.call(&caller, UpdateProxy { entry }).await?;
+    Ok(Json(()))
+}
+
 /// Simulates route matching and rewriting against unsaved proxy rules.
 #[utoipa::path(
     post,

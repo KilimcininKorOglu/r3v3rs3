@@ -91,6 +91,7 @@ struct ProxyForm {
     error_pages: Vec<ErrorPageForm>,
     bot_blocker: bool,
     pub grpc_web: bool,
+    pub stream_priority: r3v3rs3_api::priority::StreamPriorityConfig,
 }
 
 #[derive(Clone, PartialEq, Default)]
@@ -169,6 +170,7 @@ impl ProxyForm {
                 .collect(),
             bot_blocker: proxy.bot_blocker,
             grpc_web: proxy.grpc_web,
+            stream_priority: proxy.stream_priority.clone(),
         }
     }
 }
@@ -769,6 +771,9 @@ pub fn http_proxy_config(props: &Props) -> Html {
 
             { toggle(state_input(&form, checked, |form, value| form.grpc_web = value), form.grpc_web, locale.t("http_form.grpc_web"), "my-6") }
             <p class={HINT_CLASS}>{locale.t("http_form.grpc_web_hint")}</p>
+
+            { toggle(state_input(&form, checked, |form, value| form.stream_priority.enabled = value), form.stream_priority.enabled, locale.t("proxies.stream_priority"), "my-6") }
+            <p class={HINT_CLASS}>{locale.t("proxies.stream_priority_hint")}</p>
 
             <label class={LABEL_CLASS}>{locale.t("http_form.vhosts")}</label>
             <input type="text" autocapitalize="off" value={form.vhosts.clone()} onchange={state_input(&form, text, |form, value| form.vhosts = value)} class={INPUT_CLASS} placeholder="example.com" />
@@ -2772,6 +2777,7 @@ fn get_proxy(
         error_pages,
         bot_blocker: form.bot_blocker,
         grpc_web: form.grpc_web,
+        stream_priority: form.stream_priority.clone(),
     })
 }
 

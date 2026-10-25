@@ -263,3 +263,20 @@ pub async fn terminate_connection(
         .await;
     Ok(Json(()))
 }
+
+/// Returns HTTP stream priority metrics and adaptive backpressure counters.
+#[utoipa::path(
+    get,
+    path = "/priority",
+    tag = "traffic",
+    operation_id = "get_traffic_priority_stats",
+    responses((status = 200, description = "Stream priority statistics.", body = r3v3rs3_api::priority::StreamPriorityStats), ErrorResponses)
+)]
+pub async fn priority_stats(
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<r3v3rs3_api::priority::StreamPriorityStats>, AppError> {
+    caller.authorize(Permission::Read)?;
+    Ok(Json(
+        r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER.stats(),
+    ))
+}

@@ -158,6 +158,19 @@ pub enum ProxyCommand {
     /// Audits and hardens HTTP response security headers (OWASP/HSTS/CSP).
     #[command(subcommand)]
     SecurityHeaders(ProxySecurityHeadersCommand),
+    /// Manages RFC 9218 HTTP/2 & HTTP/3 stream priority and adaptive concurrency.
+    Priority {
+        id: String,
+        /// Enable or disable stream priority optimization.
+        #[arg(long)]
+        enable: Option<bool>,
+        /// Forward RFC 9218 Priority header upstream.
+        #[arg(long)]
+        inject_header: Option<bool>,
+        /// Apply adaptive concurrency backpressure.
+        #[arg(long)]
+        adaptive_concurrency: Option<bool>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -205,6 +218,8 @@ pub enum TrafficCommand {
     /// Manage active long-lived connections and streams.
     #[command(subcommand)]
     Connections(ConnectionsCommand),
+    /// Shows HTTP/2 & HTTP/3 stream priority and adaptive concurrency statistics.
+    Priority,
 }
 
 #[derive(Debug, Subcommand)]
@@ -779,6 +794,7 @@ async fn run_api(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()
 async fn run_traffic(api: &api_client::ApiClient, cmd: TrafficCommand) -> anyhow::Result<()> {
     match cmd {
         TrafficCommand::Connections(conn_cmd) => run_traffic_connections(api, conn_cmd).await,
+        TrafficCommand::Priority => api.get_traffic_priority_stats().await,
     }
 }
 
@@ -874,6 +890,19 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
         }
         ProxyCommand::Dictionary(dict_cmd) => run_proxy_dictionary(api, dict_cmd).await,
         ProxyCommand::SecurityHeaders(sec_cmd) => run_proxy_security_headers(api, sec_cmd).await,
+        ProxyCommand::Priority {
+            id,
+            enable,
+            inject_header,
+            adaptive_concurrency,
+        } => {
+            if let Some(enable) = enable {
+                api.set_stream_priority(&id, enable, inject_header, adaptive_concurrency)
+                    .await
+            } else {
+                api.get_stream_priority(&id).await
+            }
+        }
     }
 }
 

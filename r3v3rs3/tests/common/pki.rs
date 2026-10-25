@@ -94,6 +94,7 @@ pub fn tls_port(
         proxy_protocol: None,
         http2_limits: None,
         http3_limits: None,
+        stream_priority: None,
     };
     entry
 }

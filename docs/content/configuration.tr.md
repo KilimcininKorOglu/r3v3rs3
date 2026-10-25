@@ -1539,6 +1539,47 @@ max_concurrent_uni_streams = 10
 
 Varsayılanlarda yapılan bir değişiklik her portu yeniden kurar, yani restart olmadan geçerli olur. Bir yükseltmenin başka bir süreçten devraldığı QUIC endpoint'leri global varsayılanları kullanır.
 
+## Uyarlamalı Akış Önceliklendirme (RFC 9218)
+
+r3v3rs3, çoklu çoğullanan (multiplexed) HTTP/2 ve HTTP/3 bağlantılarını optimize etmek için RFC 9218 Genişletilebilir Öncelikler (Extensible Prioritization Scheme for HTTP) standardını uygular. Yüksek eşzamanlılığa sahip ortamlarda, kritik sayfa işleme kaynakları (HTML belgeleri, CSS, çekirdek JavaScript ve etkileşimli API'ler), toplu arka plan indirmeleri, resimler veya medya akışlarına göre önceliklendirilir.
+
+### Öncelik Kademeleri ve Yapılandırılmış Alanlar
+
+RFC 9218, önceliği `Priority` HTTP header'ı ile aciliyet (`u=0..7`) ve artımlı bayrak (`i`) kullanarak iletir:
+
+| Aciliyet (`u`) | Sınıf | Kaynak Türleri | Ağırlık | İletim Davranışı |
+|---|---|---|---|---|
+| `0` | Kritik | HTML başlangıç noktaları, kritik güvenlik/ödeme API'leri | 256 | Tam bant genişliğiyle derhal iletilir |
+| `1` | Yüksek | CSS stilleri, kritik JS, REST API | 128 | Yüksek eşzamanlılık, medyadan önce işlenir |
+| `2` | Orta-Yüksek | Web fontları (`woff2`), kritik veri çekme | 64 | Görsel medyadan önce teslim edilir |
+| `3` | Normal | Varsayılan HTTP istekleri, genel API | 32 | Standart eşit paylaşımlı çoğullama |
+| `4` | Orta-Düşük | Favicon'lar, kritik olmayan alt kaynaklar | 16 | Kapasite elverdikçe iletilir |
+| `5` | Düşük | Resimler (`png`, `webp`, `avif`, `jpg`) | 8 | Artımlı parçalama (`i=?1`) |
+| `6` | Arka Plan | Video ve ses akışları (`mp4`, `webm`) | 4 | Hız ayarlı akış parçaları |
+| `7` | En Düşük | Telemetri, arşivler, arka plan indirmeleri | 2 | Sistem sıkışıklığında hız kısıtlanır |
+
+### Öncelik Yapılandırması
+
+Akış önceliklendirmesi her HTTP proxy'sinde etkinleştirilebilir ve port başına geçersiz kılınabilir:
+
+- **Priority Header Enjeksiyonu (`inject_header`)**: Upstream HTTP/2 ve HTTP/3 sunucularının multiplexed çerçeveleri verimli bir şekilde zamanlayabilmesi için normalize edilmiş `Priority: u=..., i` header'larını iletir.
+- **Uyarlamalı Eşzamanlılık (`adaptive_concurrency`)**: Aktif akışları izler ve tampon şişkinliğini (bufferbloat) önlemek için yüksek bağlantı yükünde arka plan akışlarını (`u >= 5`) hız sınırlar.
+- **Özel MIME ve Yol Kuralları (`custom_rules`)**: Belirli route'ları belirlenmiş aciliyet seviyelerine eşleyen özel kalıp kuralları (örn. `/api/critical/*`, `image/svg+xml`).
+
+CLI komutları:
+```sh
+# Proxy akış önceliklendirme yapılandırmasını görüntüleme
+r3 proxy priority <PROXY_ID>
+
+# Header iletimiyle birlikte uyarlamalı önceliklendirmeyi etkinleştirme
+r3 proxy priority <PROXY_ID> --enable --inject-header --adaptive-concurrency
+
+# Genel akış öncelik ve geri basınç istatistiklerini görüntüleme
+r3 traffic priority
+```
+
+MCP araçları: `get_stream_priority`, `set_stream_priority`, `get_stream_priority_stats`.
+
 ## Metrics
 
 `GET /api/metrics` çalışan sürecin sayaçlarını Prometheus text formatında (`text/plain; version=0.0.4`) döndürür:

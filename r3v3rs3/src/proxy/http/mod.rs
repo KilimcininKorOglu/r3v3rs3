@@ -1341,6 +1341,8 @@ where
     info!(target: "r3v3rs3::access_log", remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
     let span: Span = span!(Level::INFO, "http", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
 
+    apply_stream_priority(route, &mut req);
+
     shared
         .header_rewriter
         .pre_process(req.headers_mut(), client, header_host, info.proto);
@@ -1366,6 +1368,33 @@ where
         Some(resource_id),
         client.ip,
     )
+}
+
+fn apply_stream_priority<B>(route: &FilteredRoute, req: &mut Request<B>) {
+    if !route.stream_priority.enabled {
+        return;
+    }
+    let client_priority = req.headers().get("priority").and_then(|v| v.to_str().ok());
+    let path_and_query = req.uri().path_and_query().map_or("/", |p| p.as_str());
+    let content_type = req
+        .headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok());
+    let priority = r3v3rs3_api::priority::resolve_stream_priority(
+        client_priority,
+        path_and_query,
+        content_type,
+        &route.stream_priority,
+    );
+    r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER.record_request(&priority);
+    if route.stream_priority.inject_header
+        && let (Ok(hname), Ok(hval)) = (
+            hyper::header::HeaderName::from_bytes(b"priority"),
+            hyper::header::HeaderValue::from_str(&priority.to_header_value()),
+        )
+    {
+        req.headers_mut().insert(hname, hval);
+    }
 }
 
 /// Applies the request header rules of the route and hands the response header rules to the

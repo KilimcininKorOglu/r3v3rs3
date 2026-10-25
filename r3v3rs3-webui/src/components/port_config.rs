@@ -559,6 +559,7 @@ fn get_port(
                 proxy_protocol,
                 http2_limits,
                 http3_limits,
+                stream_priority: None,
             },
         }),
         _ => Err(errors),

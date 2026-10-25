@@ -1539,6 +1539,47 @@ max_concurrent_uni_streams = 10
 
 A change of the defaults rebuilds every port, so it takes effect without a restart. The QUIC endpoints that an upgrade adopts from another process keep the global defaults.
 
+## Adaptive Stream Priority (RFC 9218)
+
+r3v3rs3 implements the RFC 9218 Extensible Prioritization Scheme for HTTP to optimize multiplexed HTTP/2 and HTTP/3 connections. In high-concurrency environments, critical rendering resources (HTML documents, CSS, core JavaScript, and interactive APIs) are prioritized over bulk background downloads, images, or media streams.
+
+### Priority Levels and Structured Fields
+
+RFC 9218 signals priority using the `Priority` HTTP header with urgency (`u=0..7`) and an incremental flag (`i`):
+
+| Urgency (`u`) | Class | Resource Types | Weight | Delivery Behavior |
+|---|---|---|---|---|
+| `0` | Critical | HTML entrypoints, critical security/checkout APIs | 256 | Delivered immediately with full bandwidth |
+| `1` | High | CSS style bundles, critical JS, REST API | 128 | High concurrency, prioritized over media |
+| `2` | Medium-High | Web fonts (`woff2`), critical fetches | 64 | Prioritized before visual media |
+| `3` | Normal | Default HTTP requests, general API | 32 | Standard fair-share multiplexing |
+| `4` | Medium-Low | Favicons, non-critical sub-resources | 16 | Delivered as capacity allows |
+| `5` | Low | Images (`png`, `webp`, `avif`, `jpg`) | 8 | Incremental chunking (`i=?1`) |
+| `6` | Background | Video and audio streaming (`mp4`, `webm`) | 4 | Bandwidth-paced streaming chunks |
+| `7` | Lowest | Telemetry, archives, background downloads | 2 | Throttled under system congestion |
+
+### Priority Configuration
+
+Stream prioritization can be toggled on each HTTP proxy and overridden per port:
+
+- **Inject Priority Header (`inject_header`)**: Forwards normalized `Priority: u=..., i` headers to upstream HTTP/2 & HTTP/3 servers so upstream schedulers can schedule multiplexed frames efficiently.
+- **Adaptive Concurrency (`adaptive_concurrency`)**: Automatically tracks active streams and paces background streams (`u >= 5`) during high connection congestion to prevent bufferbloat.
+- **Custom MIME and Path Rules (`custom_rules`)**: Custom glob patterns (e.g. `/api/critical/*`, `image/svg+xml`) that map specific endpoints to designated urgency levels.
+
+CLI commands:
+```sh
+# View proxy stream priority configuration
+r3 proxy priority <PROXY_ID>
+
+# Enable adaptive priority with header injection
+r3 proxy priority <PROXY_ID> --enable --inject-header --adaptive-concurrency
+
+# View global stream priority and backpressure statistics
+r3 traffic priority
+```
+
+MCP tools: `get_stream_priority`, `set_stream_priority`, `get_stream_priority_stats`.
+
 ## Metrics
 
 `GET /api/metrics` returns the counters of the running process in the Prometheus text format (`text/plain; version=0.0.4`):

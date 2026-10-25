@@ -148,6 +148,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                     error_pages: Vec::new(),
                     bot_blocker: false,
                     grpc_web: false,
+                    stream_priority: Default::default(),
                 })),
                 ..Default::default()
             },
@@ -278,6 +279,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                         proxy_protocol: None,
                         http2_limits: None,
                         http3_limits: None,
+                        stream_priority: None,
                     },
                 },
             },
@@ -323,6 +325,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     error_pages: Vec::new(),
                     bot_blocker: false,
                     grpc_web: false,
+                    stream_priority: Default::default(),
                 })),
                 ..Default::default()
             },
@@ -417,6 +420,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     error_pages: Vec::new(),
                     bot_blocker: false,
                     grpc_web: false,
+                    stream_priority: Default::default(),
                 })),
                 ..Default::default()
             },

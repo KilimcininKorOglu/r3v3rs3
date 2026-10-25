@@ -37,6 +37,7 @@ pub mod multiaddr;
 pub mod platform;
 pub mod policy;
 pub mod port;
+pub mod priority;
 pub mod proxy;
 pub mod proxy_protocol;
 pub mod quarantine;

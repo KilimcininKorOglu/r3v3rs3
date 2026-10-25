@@ -105,6 +105,10 @@ impl Router {
                     || proxy_header_rules.clone(),
                     |rules| Arc::new(CompiledHeaderRules::new(rules)),
                 );
+                let stream_priority = route
+                    .stream_priority
+                    .map(Arc::new)
+                    .unwrap_or_else(|| Arc::new(http.stream_priority.clone()));
                 routes.push(FilteredRoute {
                     resource_id: id,
                     metric_key: entry_source.as_ref().map(|source| source.resource.clone()),
@@ -131,6 +135,7 @@ impl Router {
                     geoip: registries.geoip.clone(),
                     bot_blocker: route.bot_blocker.unwrap_or(http.bot_blocker),
                     grpc_web: route.grpc_web.unwrap_or(http.grpc_web),
+                    stream_priority,
                 });
             }
         }
@@ -375,6 +380,7 @@ pub struct FilteredRoute {
     pub geoip: Arc<crate::proxy::geoip::GeoIpResolver>,
     pub bot_blocker: bool,
     pub grpc_web: bool,
+    pub stream_priority: Arc<r3v3rs3_api::priority::StreamPriorityConfig>,
 }
 
 fn resolve_effective_error_pages(
