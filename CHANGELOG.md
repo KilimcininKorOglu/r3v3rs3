@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.6] - 2026-10-25
+
+### Added
+- Certificate Transparency (CT) Log Monitor & Rogue Certificate Detection Engine: Background monitoring daemon periodically querying public CT logs (crt.sh and custom log endpoints) to track newly issued SSL/TLS certificates for managed domains.
+- Rogue & Unauthorized Certificate Detection: Automated verification against trusted CA issuer lists (`allowed_issuers`), immediately detecting rogue, spoofed, or unexpected certificates and generating real-time security alerts.
+- Automatic Domain Discovery: Dynamic discovery of active domain names and SANs from local server certificates and ACME orders alongside user-defined custom domains.
+- Webhook Security Alerts: Integration with platform notification subsystem dispatching `cert.rogue_detected` and `cert.ct_check_failed` webhook events for immediate operational response.
+- REST API Endpoints: Added `/api/certs/ct/config`, `/api/certs/ct/status`, `/api/certs/ct/entries`, `/api/certs/ct/check`, and `/api/certs/ct/dismiss` for full lifecycle CT monitoring.
+- 100% MCP & CLI Parity: Added MCP tools (`get_ct_monitor_config`, `update_ct_monitor_config`, `get_ct_monitor_status`, `list_ct_log_entries`, `check_ct_logs_now`, `dismiss_ct_alert`) and CLI subcommands (`r3 cert ct status`, `config`, `set-config`, `check`, `list`, `dismiss`).
+- WebUI Certificate Transparency Tab: Comprehensive dashboard under Certificates (`/certs/ct`) with status metric cards, configurable interval/trusted CA drawer, search and rogue filter bar, and alert resolution workflow.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` with CT architecture, rogue detection rules, webhook schemas, and CLI/MCP administration commands.
+
 ## [2.6.5] - 2026-10-25
 
 ### Added
