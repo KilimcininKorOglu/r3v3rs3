@@ -205,10 +205,16 @@ pub enum AuditAction {
     TerminateConnection,
     /// An account generated secrets for an app's environment variables.
     GenerateAppEnvSecrets,
+    /// An account updated the Certificate Transparency monitor configuration.
+    UpdateCtMonitorConfig,
+    /// An account triggered an on-demand Certificate Transparency log check.
+    CheckCtLogs,
+    /// An account dismissed or updated a Certificate Transparency rogue certificate alert.
+    DismissCtAlert,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 113] = [
+    pub const ALL: [AuditAction; 116] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -322,6 +328,9 @@ impl AuditAction {
         Self::ApplySecurityProfile,
         Self::TerminateConnection,
         Self::GenerateAppEnvSecrets,
+        Self::UpdateCtMonitorConfig,
+        Self::CheckCtLogs,
+        Self::DismissCtAlert,
     ];
 }
 

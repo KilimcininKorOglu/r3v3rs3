@@ -62,6 +62,8 @@ pub enum WebhookEvent {
     CertExpiring,
     CertRenewed,
     CertRenewalFailed,
+    CertRogueDetected,
+    CertCtCheckFailed,
     SecurityIpBanned,
     SecurityThreatDetected,
 
@@ -86,7 +88,7 @@ pub enum WebhookEvent {
 }
 
 impl WebhookEvent {
-    pub const ALL: [WebhookEvent; 29] = [
+    pub const ALL: [WebhookEvent; 31] = [
         Self::DeploySuccess,
         Self::DeployFailure,
         Self::DeployPendingApproval,
@@ -99,6 +101,8 @@ impl WebhookEvent {
         Self::CertExpiring,
         Self::CertRenewed,
         Self::CertRenewalFailed,
+        Self::CertRogueDetected,
+        Self::CertCtCheckFailed,
         Self::SecurityIpBanned,
         Self::SecurityThreatDetected,
         Self::TargetOffline,
@@ -132,6 +136,8 @@ impl WebhookEvent {
             Self::CertExpiring => "cert.expiring",
             Self::CertRenewed => "cert.renewed",
             Self::CertRenewalFailed => "cert.renewal_failed",
+            Self::CertRogueDetected => "cert.rogue_detected",
+            Self::CertCtCheckFailed => "cert.ct_check_failed",
             Self::SecurityIpBanned => "security.ip_banned",
             Self::SecurityThreatDetected => "security.threat_detected",
             Self::TargetOffline => "target.offline",
@@ -167,6 +173,8 @@ impl WebhookEvent {
             Self::CertExpiring
             | Self::CertRenewed
             | Self::CertRenewalFailed
+            | Self::CertRogueDetected
+            | Self::CertCtCheckFailed
             | Self::SecurityIpBanned
             | Self::SecurityThreatDetected => WebhookEventCategory::Security,
             Self::TargetOffline
@@ -210,6 +218,8 @@ impl FromStr for WebhookEvent {
             "cert.expiring" => Ok(Self::CertExpiring),
             "cert.renewed" => Ok(Self::CertRenewed),
             "cert.renewal_failed" => Ok(Self::CertRenewalFailed),
+            "cert.rogue_detected" => Ok(Self::CertRogueDetected),
+            "cert.ct_check_failed" => Ok(Self::CertCtCheckFailed),
             "security.ip_banned" => Ok(Self::SecurityIpBanned),
             "security.threat_detected" => Ok(Self::SecurityThreatDetected),
             "target.offline" => Ok(Self::TargetOffline),

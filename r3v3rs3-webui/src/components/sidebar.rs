@@ -63,6 +63,10 @@ const CERT_SUBS: &[MenuSubItem] = &[
         name: "certs.tab_dns_credentials",
         route: Route::DnsCredentials,
     },
+    MenuSubItem {
+        name: "certs.tab_ct_logs",
+        route: Route::CtLogs,
+    },
 ];
 
 const NO_SUBS: &[MenuSubItem] = &[];

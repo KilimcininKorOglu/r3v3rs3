@@ -1,7 +1,7 @@
 use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
 use crate::{
-    accounts::Caller,
+    accounts::{Caller, Permission},
     certs::Cert,
     server::rpc::certs::{
         AddCert, DeleteCert, DeleteCerts, DownloadCert, GetCert, GetCertCoverage, GetCertList,
@@ -14,11 +14,16 @@ use axum::{
     response::IntoResponse,
 };
 use r3v3rs3_api::{
+    audit::AuditAction,
     cert::{
         CertInfo, CertPostBody, DeleteCertResult, DeleteCertsRequest, SelfSignedCertKind,
         SelfSignedCertRequest, UploadQuery,
     },
     cert_coverage::{CnameVerifyResult, DomainCoverageInfo},
+    ct::{
+        CheckCtQuery, CtEntriesQuery, CtLogEntry, CtMonitorConfig, CtMonitorStatus,
+        DismissCtAlertRequest, UpdateCtConfigRequest,
+    },
     error::Error,
     id::ShortId,
 };
@@ -242,4 +247,142 @@ pub async fn download(
         ),
     ];
     Ok((headers, file.deref().clone()))
+}
+
+/// Returns the Certificate Transparency monitor configuration.
+#[utoipa::path(
+    get,
+    path = "/ct/config",
+    tag = "certs",
+    operation_id = "get_ct_config",
+    responses((status = 200, description = "The CT monitor configuration.", body = CtMonitorConfig), ErrorResponses)
+)]
+pub async fn get_ct_config(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<CtMonitorConfig>, AppError> {
+    caller.authorize(Permission::Read)?;
+    let config_dir = state.data.lock().await.app_info.config_path.clone();
+    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    Ok(Json(monitor.get_config()))
+}
+
+/// Updates the Certificate Transparency monitor configuration.
+#[utoipa::path(
+    put,
+    path = "/ct/config",
+    tag = "certs",
+    operation_id = "update_ct_config",
+    request_body = UpdateCtConfigRequest,
+    responses((status = 200, description = "The updated configuration.", body = CtMonitorConfig), ErrorResponses)
+)]
+pub async fn put_ct_config(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<UpdateCtConfigRequest>,
+) -> Result<Json<CtMonitorConfig>, AppError> {
+    caller.authorize(Permission::Edit)?;
+    let config_dir = state.data.lock().await.app_info.config_path.clone();
+    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    monitor.save_config(body.config.clone())?;
+    let record = crate::audit::AuditRecord::new(AuditAction::UpdateCtMonitorConfig)
+        .summary("Updated Certificate Transparency monitor configuration");
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(monitor.get_config()))
+}
+
+/// Returns the runtime status of the Certificate Transparency monitor.
+#[utoipa::path(
+    get,
+    path = "/ct/status",
+    tag = "certs",
+    operation_id = "get_ct_status",
+    responses((status = 200, description = "The CT monitor status.", body = CtMonitorStatus), ErrorResponses)
+)]
+pub async fn get_ct_status(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<CtMonitorStatus>, AppError> {
+    caller.authorize(Permission::Read)?;
+    let config_dir = state.data.lock().await.app_info.config_path.clone();
+    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    Ok(Json(monitor.get_status()))
+}
+
+/// Lists Certificate Transparency log records discovered for monitored domains.
+#[utoipa::path(
+    get,
+    path = "/ct/entries",
+    tag = "certs",
+    operation_id = "list_ct_entries",
+    params(CtEntriesQuery),
+    responses((status = 200, description = "List of CT log entries.", body = Vec<CtLogEntry>), ErrorResponses)
+)]
+pub async fn list_ct_entries(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<CtEntriesQuery>,
+) -> Result<Json<Vec<CtLogEntry>>, AppError> {
+    caller.authorize(Permission::Read)?;
+    let config_dir = state.data.lock().await.app_info.config_path.clone();
+    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    Ok(Json(monitor.list_entries(query)))
+}
+
+/// Triggers an immediate Certificate Transparency log check.
+#[utoipa::path(
+    post,
+    path = "/ct/check",
+    tag = "certs",
+    operation_id = "check_ct_now",
+    params(CheckCtQuery),
+    responses((status = 200, description = "Number of new rogue certificates found.", body = usize), ErrorResponses)
+)]
+pub async fn check_ct_now(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<CheckCtQuery>,
+) -> Result<Json<usize>, AppError> {
+    caller.authorize(Permission::Edit)?;
+    let config_dir = state.data.lock().await.app_info.config_path.clone();
+    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    let count = monitor.run_check(&state, query.domain.as_deref()).await?;
+    let record = crate::audit::AuditRecord::new(AuditAction::CheckCtLogs).summary(format!(
+        "Triggered Certificate Transparency check, {} new rogue certs found",
+        count
+    ));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(count))
+}
+
+/// Dismisses or updates the status of a Certificate Transparency alert.
+#[utoipa::path(
+    post,
+    path = "/ct/dismiss",
+    tag = "certs",
+    operation_id = "dismiss_ct_alert",
+    request_body = DismissCtAlertRequest,
+    responses((status = 200, description = "Alert dismissed successfully.", body = bool), ErrorResponses)
+)]
+pub async fn dismiss_ct_alert(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<DismissCtAlertRequest>,
+) -> Result<Json<bool>, AppError> {
+    caller.authorize(Permission::Edit)?;
+    let config_dir = state.data.lock().await.app_info.config_path.clone();
+    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    monitor.dismiss_alert(&body.id, body.status)?;
+    let record = crate::audit::AuditRecord::new(AuditAction::DismissCtAlert).summary(format!(
+        "Dismissed Certificate Transparency alert for entry {}",
+        body.id
+    ));
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(true))
 }

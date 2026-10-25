@@ -1486,6 +1486,53 @@ zone "example.com" {
 
 Her challenge adı için bir `grant` kuralı ekleyin. `*.example.com` sertifikası da `_acme-challenge.example.com` adını kullanır.
 
+# Sertifika Şeffaflığı (CT) İzleme
+
+r3v3rs3, alan adlarınız için genel Sertifika Şeffaflığı (Certificate Transparency) günlüklerini tarayan ve sahte, yetkisiz veya güvenliği ihlal edilmiş SSL sertifikalarını gerçek zamanlı olarak tespit eden bir arka plan izleme motoru içerir.
+
+## Arka Plan İzleme ve Tespit
+
+İzleme motoru yapılandırılabilir bir zamanlamayla (varsayılan: 6 saatte bir) çalışır ve aktif sunucu sertifikaları ile ACME konfigürasyonlarından alan adlarını otomatik olarak keşfeder veya yönetici tarafından belirlenen özel alan adlarını izler:
+
+- **Otomatik Keşif**: Yüklenen tüm sertifikalardan ve ACME taleplerinden kök alan adlarını ve SAN değerlerini otomatik olarak toplar.
+- **İzin Verilen Sertifika Otoriteleri**: Önceden tanımlanmış güvenilir genel CA sağlayıcıları (Let's Encrypt, Google Trust Services, DigiCert, Sectigo, ZeroSSL, Cloudflare) veya özel güvenilir sağlayıcı listeleri.
+- **Sahte Sertifika Tespiti**: Genel CT günlüklerinde keşfedilen ve tanınmayan veya yetkisiz bir CA tarafından düzenlenen tüm sertifikalar anında `investigating` durumuyla sahte (`is_rogue: true`) olarak işaretlenir.
+- **Alarmlar ve Webhook Bildirimleri**: Sertifika metadata bilgileriyle (sağlayıcı, seri numarası, common name, SAN listesi, kayıt zamanı) birlikte `cert.rogue_detected` webhook olayını tetikler.
+
+## CLI Yönetimi
+
+CT günlüklerini `r3 cert ct` komut satırı aracı ile doğrudan yönetin:
+
+```bash
+# İzleme durumunu ve aktif alarm sayısını görüntüleme
+r3 cert ct status
+
+# Güncel konfigürasyonu görüntüleme
+r3 cert ct config
+
+# Konfigürasyonu güncelleme
+r3 cert ct set-config --enable true --domains "example.com,api.example.com" --interval 7200
+
+# İsteğe bağlı anlık tarama başlatma
+r3 cert ct check --domain example.com
+
+# Keşfedilen CT kayıtlarını ve sahte sertifikaları listeleme
+r3 cert ct list --rogue-only
+
+# Bir alarmı kapatma
+r3 cert ct dismiss <ENTRY_ID>
+```
+
+## Model Context Protocol (MCP)
+
+Yapay zeka agent'ları CT günlüklerini MCP araçları üzerinden otonom olarak denetleyebilir ve yönetebilir:
+- `get_ct_monitor_config`: Güncel izleme konfigürasyonunu alır.
+- `update_ct_monitor_config`: Tarama aralığını, alan adlarını ve izin verilen CA listesini günceller.
+- `get_ct_monitor_status`: Gerçek zamanlı durumu, aktif alarmları ve son tarama zamanını getirir.
+- `list_ct_log_entries`: Keşfedilen kayıtları filtrelerle listeler.
+- `check_ct_logs_now`: Anlık bir günlük sorgusu başlatır.
+- `dismiss_ct_alert`: Bir sahte sertifika alarmını onaylar veya kapatır.
+
 ## Worker Süreçleri
 
 Varsayılan olarak admin API'yi çalıştıran aynı süreç her portu da servis eder. `config.toml` içinde `worker_mode = "workers"` ayarıyla r3v3rs3 portları sunan bir worker süreci başlatır. Master süreç durumu, admin API'yi, WebUI'yi ve deployment platformunu tutar. Worker'ın çökmesi admin API'yi düşürmez ve master worker'ı bir backoff ile yeniden başlatır.
@@ -1689,7 +1736,7 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 | **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları, fail2ban kaba kuvvet IP engeli, tehdit otomatik karantina yönetimi ve otomatik GeoIP MMDB veritabanı yönetimi. |
 | **Portlar** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Dinleyici port yaşam döngüsü: dinleme adresleri, TLS sonlandırma ayarları, soket yeniden başlatma/yenileme ve sunucu ağ arayüzlerini listeleme. |
 | **Proxy'ler** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | HTTP, WebSocket, TCP, UDP, TLS ve HTTP/3 için ters proxy yapılandırması, upstream sağlık durumu ve yol bazlı önbellek temizleme (purge). |
-| **Sertifikalar ve ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials` | TLS sertifikası inceleme, alan adı kapsam kontrolü, otomatik ACME sertifika talepleri (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegasyonu, anlık sertifika yenileme ve DNS sağlayıcı kimlik bilgileri yönetimi. |
+| **Sertifikalar ve ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials`, `get_ct_monitor_config`, `update_ct_monitor_config`, `get_ct_monitor_status`, `list_ct_log_entries`, `check_ct_logs_now`, `dismiss_ct_alert` | TLS sertifikası inceleme, alan adı kapsam kontrolü, otomatik ACME sertifika talepleri (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegasyonu, anlık sertifika yenileme, DNS sağlayıcı kimlik bilgileri yönetimi ve Sertifika Şeffaflığı sahte sertifika denetimi. |
 | **Erişim Listeleri** | `list_access_lists`, `add_access_list`, `update_access_list`, `delete_access_list` | CIDR IP filtreleme, HTTP basic authentication ve özel bearer token'lar içeren erişim kontrol listeleri. |
 | **PaaS Uygulamaları** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update` | Otonom PaaS konteyner yaşam döngüsü: Docker image/git/compose uygulaması dağıtımı, konteyner log akışı, ortam değişkeni yönetimi, önceki dağıtıma geri alma (rollback) ve Docker registry güncelleme kontrolü. |
 | **App Store Kataloğu** | `get_store`, `refresh_store`, `install_store_app` | Küratörlü tek tıkla kurulum şablonlarının (veritabanları, paneller, CMS, analitik) katalogdan doğrudan tam yapılandırılmış ve yönlendirilmiş uygulamalar olarak otonom kurulumu. |

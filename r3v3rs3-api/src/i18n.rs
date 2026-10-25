@@ -399,6 +399,8 @@ mod tests {
             Error::ConnectionNotFound {
                 id: "conn".parse().unwrap(),
             },
+            Error::CtCheckFailed { reason: text() },
+            Error::CtEntryNotFound { id: text() },
         ]
     }
 

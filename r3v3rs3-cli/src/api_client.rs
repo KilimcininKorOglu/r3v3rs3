@@ -15,6 +15,17 @@ pub struct ManifestItems {
     pub apps: Vec<Value>,
 }
 
+#[derive(Default)]
+pub struct SetCtConfigArgs<'a> {
+    pub enable: Option<bool>,
+    pub domains: Option<&'a str>,
+    pub auto_discover: Option<bool>,
+    pub allowed_issuers: Option<&'a str>,
+    pub alert_unknown: Option<bool>,
+    pub interval: Option<u64>,
+    pub api_url: Option<&'a str>,
+}
+
 pub fn load_payload(input: &str) -> anyhow::Result<Value> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -2284,6 +2295,117 @@ impl ApiClient {
             .request(Method::GET, "/api/traffic/priority", None)
             .await?;
         println!("{}", serde_json::to_string_pretty(&res)?);
+        Ok(())
+    }
+
+    pub async fn get_ct_status(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/certs/ct/status", None)
+            .await?;
+        println!("{}", serde_json::to_string_pretty(&res)?);
+        Ok(())
+    }
+
+    pub async fn get_ct_config(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/certs/ct/config", None)
+            .await?;
+        println!("{}", serde_json::to_string_pretty(&res)?);
+        Ok(())
+    }
+
+    pub async fn set_ct_config(&self, args: SetCtConfigArgs<'_>) -> anyhow::Result<()> {
+        let mut cur = self
+            .request(Method::GET, "/api/certs/ct/config", None)
+            .await
+            .unwrap_or(serde_json::json!({}));
+
+        if let Some(en) = args.enable {
+            cur["enabled"] = serde_json::json!(en);
+        }
+        if let Some(doms) = args.domains {
+            let list: Vec<&str> = doms
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            cur["monitored_domains"] = serde_json::json!(list);
+        }
+        if let Some(auto) = args.auto_discover {
+            cur["auto_discover_domains"] = serde_json::json!(auto);
+        }
+        if let Some(issuers) = args.allowed_issuers {
+            let list: Vec<&str> = issuers
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            cur["allowed_issuers"] = serde_json::json!(list);
+        }
+        if let Some(alert) = args.alert_unknown {
+            cur["alert_on_unknown_issuer"] = serde_json::json!(alert);
+        }
+        if let Some(int) = args.interval {
+            cur["check_interval_secs"] = serde_json::json!(int);
+        }
+        if let Some(url) = args.api_url {
+            cur["ct_api_url"] = serde_json::json!(url);
+        }
+
+        let body = serde_json::json!({ "config": cur });
+        let res = self
+            .request(Method::PUT, "/api/certs/ct/config", Some(&body))
+            .await?;
+        println!("{}", serde_json::to_string_pretty(&res)?);
+        Ok(())
+    }
+
+    pub async fn check_ct_logs(&self, domain: Option<&str>) -> anyhow::Result<()> {
+        let path = match domain {
+            Some(d) => format!("/api/certs/ct/check?domain={d}"),
+            None => "/api/certs/ct/check".to_string(),
+        };
+        let res = self.request(Method::POST, &path, None).await?;
+        println!("Certificate Transparency check completed. New rogue certificates: {res}");
+        Ok(())
+    }
+
+    pub async fn list_ct_entries(
+        &self,
+        domain: Option<&str>,
+        rogue_only: bool,
+        limit: Option<usize>,
+    ) -> anyhow::Result<()> {
+        let mut params = Vec::new();
+        if let Some(d) = domain {
+            params.push(format!("domain={d}"));
+        }
+        if rogue_only {
+            params.push("rogue_only=true".to_string());
+        }
+        if let Some(l) = limit {
+            params.push(format!("limit={l}"));
+        }
+        let query = if params.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", params.join("&"))
+        };
+        let res = self
+            .request(Method::GET, &format!("/api/certs/ct/entries{query}"), None)
+            .await?;
+        println!("{}", serde_json::to_string_pretty(&res)?);
+        Ok(())
+    }
+
+    pub async fn dismiss_ct_alert(&self, id: &str, status: Option<&str>) -> anyhow::Result<()> {
+        let body = serde_json::json!({
+            "id": id,
+            "status": status,
+        });
+        self.request(Method::POST, "/api/certs/ct/dismiss", Some(&body))
+            .await?;
+        println!("Certificate Transparency alert {id} dismissed.");
         Ok(())
     }
 }

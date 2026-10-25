@@ -101,6 +101,52 @@ pub struct SetPortEarlyDataParams {
     pub enabled: bool,
 }
 
+/// The argument of `update_ct_monitor_config`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateCtConfigParams {
+    /// Whether CT monitoring is enabled.
+    pub enabled: Option<bool>,
+    /// Check interval in seconds (default: 21600).
+    pub check_interval_secs: Option<u64>,
+    /// Additional domains to monitor.
+    pub monitored_domains: Option<Vec<String>>,
+    /// Auto-discover domains from server certs and ACME orders.
+    pub auto_discover_domains: Option<bool>,
+    /// List of trusted CA issuer substrings.
+    pub allowed_issuers: Option<Vec<String>>,
+    /// Whether to flag unauthorized issuers as rogue.
+    pub alert_on_unknown_issuer: Option<bool>,
+    /// Custom CT API template URL.
+    pub ct_api_url: Option<String>,
+}
+
+/// The argument of `list_ct_log_entries`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ListCtEntriesParams {
+    /// Optional domain filter.
+    pub domain: Option<String>,
+    /// Only return rogue or suspicious entries.
+    pub rogue_only: Option<bool>,
+    /// Maximum number of records (default: 50).
+    pub limit: Option<usize>,
+}
+
+/// The argument of `check_ct_logs_now`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CheckCtParams {
+    /// Specific domain to check. If omitted, checks all configured and discovered domains.
+    pub domain: Option<String>,
+}
+
+/// The argument of `dismiss_ct_alert`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DismissCtAlertParams {
+    /// Unique entry ID.
+    pub id: String,
+    /// Optional status: "investigating", "dismissed", or "confirmed_rogue" (default: "dismissed").
+    pub status: Option<String>,
+}
+
 /// The `{ "proxy": {...} }` argument of `add_proxy`, in the form of the admin API.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddProxyParams {
@@ -3195,6 +3241,144 @@ impl McpServer {
             "id": conn_id.to_string(),
         }))
     }
+
+    /// Get the Certificate Transparency (CT) monitor configuration.
+    #[tool(
+        description = "Get the Certificate Transparency (CT) log monitor configuration, including monitored domains, check interval, allowed CAs, and rogue alert settings."
+    )]
+    async fn get_ct_monitor_config(
+        &self,
+        Extension(_parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let config_dir = self.state.data.lock().await.app_info.config_path.clone();
+        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        json_result(monitor.get_config())
+    }
+
+    /// Update the Certificate Transparency (CT) monitor configuration.
+    #[tool(
+        description = "Update the Certificate Transparency (CT) log monitor configuration. Needs the edit scope."
+    )]
+    async fn update_ct_monitor_config(
+        &self,
+        Parameters(params): Parameters<UpdateCtConfigParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let config_dir = self.state.data.lock().await.app_info.config_path.clone();
+        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        let mut config = monitor.get_config();
+        apply_ct_config_overrides(&mut config, params);
+
+        monitor
+            .save_config(config.clone())
+            .map_err(|e| ErrorData::internal_error(format!("failed to save config: {e}"), None))?;
+
+        let record = AuditRecord::new(AuditAction::UpdateCtMonitorConfig)
+            .summary("Updated Certificate Transparency monitor configuration via MCP");
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(config)
+    }
+
+    /// Get the Certificate Transparency (CT) monitor runtime status.
+    #[tool(
+        description = "Get the runtime status of the Certificate Transparency monitor: last check time, next scheduled run, active rogue alerts count, and total entries tracked."
+    )]
+    async fn get_ct_monitor_status(
+        &self,
+        Extension(_parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let config_dir = self.state.data.lock().await.app_info.config_path.clone();
+        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        json_result(monitor.get_status())
+    }
+
+    /// List Certificate Transparency log entries and rogue certificate alerts.
+    #[tool(
+        description = "List discovered Certificate Transparency log entries and rogue certificate alerts for monitored domains, with optional domain filter and rogue-only filter."
+    )]
+    async fn list_ct_log_entries(
+        &self,
+        Parameters(params): Parameters<ListCtEntriesParams>,
+        Extension(_parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let config_dir = self.state.data.lock().await.app_info.config_path.clone();
+        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        let query = r3v3rs3_api::ct::CtEntriesQuery {
+            domain: params.domain,
+            rogue_only: params.rogue_only,
+            limit: params.limit,
+        };
+        json_result(monitor.list_entries(query))
+    }
+
+    /// Trigger an immediate on-demand check of Certificate Transparency logs.
+    #[tool(
+        description = "Trigger an immediate on-demand query of public Certificate Transparency logs for a specific domain or all monitored domains. Needs the edit scope."
+    )]
+    async fn check_ct_logs_now(
+        &self,
+        Parameters(params): Parameters<CheckCtParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let config_dir = self.state.data.lock().await.app_info.config_path.clone();
+        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        let count = monitor
+            .run_check(&self.state, params.domain.as_deref())
+            .await
+            .map_err(|e| ErrorData::internal_error(format!("CT log check failed: {e}"), None))?;
+
+        let record = AuditRecord::new(AuditAction::CheckCtLogs).summary(format!(
+            "Triggered Certificate Transparency check via MCP, {count} new rogue certs found"
+        ));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(serde_json::json!({
+            "status": "completed",
+            "new_rogue_certificates_count": count,
+        }))
+    }
+
+    /// Dismiss or resolve a Certificate Transparency rogue certificate alert.
+    #[tool(
+        description = "Dismiss or acknowledge a Certificate Transparency rogue certificate alert by its ID. Needs the edit scope."
+    )]
+    async fn dismiss_ct_alert(
+        &self,
+        Parameters(params): Parameters<DismissCtAlertParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        require_edit(&parts)?;
+        let caller = caller_of(&parts)?;
+        let config_dir = self.state.data.lock().await.app_info.config_path.clone();
+        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        let status = match params.status.as_deref() {
+            Some("investigating") => Some(r3v3rs3_api::ct::CtAlertStatus::Investigating),
+            Some("confirmed_rogue") => Some(r3v3rs3_api::ct::CtAlertStatus::ConfirmedRogue),
+            _ => Some(r3v3rs3_api::ct::CtAlertStatus::Dismissed),
+        };
+        monitor.dismiss_alert(&params.id, status).map_err(|e| {
+            ErrorData::invalid_params(format!("failed to dismiss alert: {e}"), None)
+        })?;
+
+        let record = AuditRecord::new(AuditAction::DismissCtAlert).summary(format!(
+            "Dismissed Certificate Transparency alert {} via MCP",
+            params.id
+        ));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(serde_json::json!({
+            "status": "dismissed",
+            "id": params.id,
+        }))
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -3249,5 +3433,32 @@ fn parse_theme_pages(
         Some(val) => serde_json::from_value(val)
             .map_err(|e| ErrorData::invalid_params(format!("invalid pages array: {e}"), None)),
         None => Ok(Vec::new()),
+    }
+}
+
+fn apply_ct_config_overrides(
+    config: &mut r3v3rs3_api::ct::CtMonitorConfig,
+    params: UpdateCtConfigParams,
+) {
+    if let Some(enabled) = params.enabled {
+        config.enabled = enabled;
+    }
+    if let Some(interval) = params.check_interval_secs {
+        config.check_interval_secs = interval;
+    }
+    if let Some(domains) = params.monitored_domains {
+        config.monitored_domains = domains;
+    }
+    if let Some(auto_discover) = params.auto_discover_domains {
+        config.auto_discover_domains = auto_discover;
+    }
+    if let Some(allowed) = params.allowed_issuers {
+        config.allowed_issuers = allowed;
+    }
+    if let Some(alert_unknown) = params.alert_on_unknown_issuer {
+        config.alert_on_unknown_issuer = alert_unknown;
+    }
+    if params.ct_api_url.is_some() {
+        config.ct_api_url = params.ct_api_url;
     }
 }

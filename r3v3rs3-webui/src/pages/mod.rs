@@ -24,6 +24,7 @@ mod app_webhook;
 mod audit;
 pub mod backups;
 pub mod cert_list;
+pub mod ct_logs;
 mod dashboard;
 mod database_backups;
 mod databases;
@@ -91,6 +92,8 @@ pub enum Route {
     NewAcme,
     #[at("/certs/dns_credentials")]
     DnsCredentials,
+    #[at("/certs/ct")]
+    CtLogs,
     #[at("/certs/:id/log")]
     CertLogView { id: String },
     #[at("/proxies/new")]
@@ -161,6 +164,7 @@ impl Route {
             | Route::Upload
             | Route::NewAcme
             | Route::DnsCredentials
+            | Route::CtLogs
             | Route::CertLogView { .. } => Some(Route::Certs),
             Route::Proxies
             | Route::NewProxy
@@ -241,6 +245,7 @@ pub fn switch(routes: Route) -> Html {
         Route::SelfSign => html! { <self_sign::SelfSign /> },
         Route::NewAcme => html! { <new_acme::NewAcme /> },
         Route::DnsCredentials => html! { <dns_credentials::DnsCredentials /> },
+        Route::CtLogs => html! { <ct_logs::CtLogs /> },
         Route::CertLogView { id } => html! { <log_view::LogView {id} /> },
         Route::Upload => html! { <upload::Upload /> },
         Route::Settings => html! { <settings::Settings /> },

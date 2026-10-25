@@ -552,6 +552,12 @@ pub enum Error {
         #[schema(value_type = String)]
         id: ShortId,
     },
+
+    #[error("certificate transparency check failed: {reason}")]
+    CtCheckFailed { reason: String },
+
+    #[error("certificate transparency entry not found: {id}")]
+    CtEntryNotFound { id: String },
 }
 
 impl Error {
@@ -567,7 +573,8 @@ impl Error {
             | Self::WebhookNotFound { .. }
             | Self::ErrorPageThemeNotFound { .. }
             | Self::CompressionDictionaryNotFound { .. }
-            | Self::ConnectionNotFound { .. } => 404,
+            | Self::ConnectionNotFound { .. }
+            | Self::CtEntryNotFound { .. } => 404,
             Self::Unauthorized => 401,
             Self::Forbidden
             | Self::ProxyReadOnly { .. }
@@ -595,7 +602,8 @@ impl Error {
             | Self::FailedToRefreshEngines
             | Self::GrpcError { .. }
             | Self::GeoIpUpdateFailed { .. }
-            | Self::WebhookDeliveryFailed { .. } => 502,
+            | Self::WebhookDeliveryFailed { .. }
+            | Self::CtCheckFailed { .. } => 502,
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig
             | Self::FailedToInvokeRpc

@@ -140,7 +140,8 @@ pub async fn start_admin_on(
 
     let mut event_recv = event.subscribe();
     let config_dir = app_state.data.lock().await.app_info.config_path.clone();
-    anomaly::ensure_anomaly_monitor_running(app_state.clone(), config_dir);
+    anomaly::ensure_anomaly_monitor_running(app_state.clone(), config_dir.clone());
+    crate::certs::ct::ensure_ct_monitor_running(app_state.clone(), config_dir);
     let app = admin_router(app_state)?;
 
     axum::serve(
@@ -747,6 +748,11 @@ fn cert_file_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(certs::delete_many))
         .routes(routes!(certs::check_coverage))
         .routes(routes!(certs::verify_cname))
+        .routes(routes!(certs::get_ct_config, certs::put_ct_config))
+        .routes(routes!(certs::get_ct_status))
+        .routes(routes!(certs::list_ct_entries))
+        .routes(routes!(certs::check_ct_now))
+        .routes(routes!(certs::dismiss_ct_alert))
         .routes(routes!(certs::get, certs::delete))
         .routes(routes!(certs::download))
 }

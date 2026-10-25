@@ -260,6 +260,68 @@ pub enum CertCommand {
     Delete { id: String },
     /// Checks domain certificate coverage.
     Coverage,
+    /// Certificate Transparency log monitor commands.
+    #[command(subcommand)]
+    Ct(CtCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CtCommand {
+    /// Shows Certificate Transparency monitor status.
+    Status,
+    /// Shows Certificate Transparency monitor configuration.
+    Config,
+    /// Updates Certificate Transparency monitor configuration.
+    SetConfig {
+        /// Enable or disable CT monitoring.
+        #[arg(long)]
+        enable: Option<bool>,
+        /// Comma-separated list of additional domains to monitor.
+        #[arg(long)]
+        domains: Option<String>,
+        /// Enable or disable auto-discovering domains from certs and ACME.
+        #[arg(long)]
+        auto_discover: Option<bool>,
+        /// Comma-separated list of allowed/trusted CA issuer substrings.
+        #[arg(long)]
+        allowed_issuers: Option<String>,
+        /// Alert on unknown/unauthorized CA issuers.
+        #[arg(long)]
+        alert_unknown: Option<bool>,
+        /// Check interval in seconds.
+        #[arg(long)]
+        interval: Option<u64>,
+        /// Custom CT API URL template.
+        #[arg(long)]
+        api_url: Option<String>,
+    },
+    /// Triggers an immediate check of Certificate Transparency logs.
+    Check {
+        /// Optional specific domain to check.
+        #[arg(long)]
+        domain: Option<String>,
+    },
+    /// Lists discovered Certificate Transparency log entries and rogue certificate alerts.
+    #[command(alias = "ls")]
+    List {
+        /// Optional domain filter.
+        #[arg(long)]
+        domain: Option<String>,
+        /// Show only rogue or suspicious certificates.
+        #[arg(long)]
+        rogue_only: bool,
+        /// Maximum number of records to return.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Dismisses or resolves a Certificate Transparency alert.
+    Dismiss {
+        /// Unique entry ID to dismiss.
+        id: String,
+        /// Optional status (investigating, dismissed, confirmed_rogue).
+        #[arg(long)]
+        status: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -953,6 +1015,44 @@ async fn run_cert(api: &api_client::ApiClient, cmd: CertCommand) -> anyhow::Resu
         }
         CertCommand::Delete { id } => api.delete_cert(&id).await,
         CertCommand::Coverage => api.cert_coverage().await,
+        CertCommand::Ct(ct_cmd) => run_ct(api, ct_cmd).await,
+    }
+}
+
+async fn run_ct(api: &api_client::ApiClient, cmd: CtCommand) -> anyhow::Result<()> {
+    match cmd {
+        CtCommand::Status => api.get_ct_status().await,
+        CtCommand::Config => api.get_ct_config().await,
+        CtCommand::SetConfig {
+            enable,
+            domains,
+            auto_discover,
+            allowed_issuers,
+            alert_unknown,
+            interval,
+            api_url,
+        } => {
+            api.set_ct_config(api_client::SetCtConfigArgs {
+                enable,
+                domains: domains.as_deref(),
+                auto_discover,
+                allowed_issuers: allowed_issuers.as_deref(),
+                alert_unknown,
+                interval,
+                api_url: api_url.as_deref(),
+            })
+            .await
+        }
+        CtCommand::Check { domain } => api.check_ct_logs(domain.as_deref()).await,
+        CtCommand::List {
+            domain,
+            rogue_only,
+            limit,
+        } => {
+            api.list_ct_entries(domain.as_deref(), rogue_only, limit)
+                .await
+        }
+        CtCommand::Dismiss { id, status } => api.dismiss_ct_alert(&id, status.as_deref()).await,
     }
 }
 

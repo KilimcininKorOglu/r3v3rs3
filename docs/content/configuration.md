@@ -1486,6 +1486,53 @@ zone "example.com" {
 
 Add a `grant` rule for each challenge name. A certificate for `*.example.com` uses the `_acme-challenge.example.com` name too.
 
+# Certificate Transparency (CT) Monitor
+
+r3v3rs3 includes a background Certificate Transparency log monitor that inspects public CT logs for your domains to detect rogue, unauthorized, or compromised SSL certificates in real time.
+
+## Background Monitoring & Detection
+
+The monitor runs on a configurable schedule (default: every 6 hours) and automatically discovers domains from active server certificates and ACME configurations, or monitors custom domains configured by the administrator:
+
+- **Auto-Discovery**: Identifies root domains and SANs from all loaded certificates and ACME orders.
+- **Allowed Certificate Authorities**: Predefined trusted public CAs (Let's Encrypt, Google Trust Services, DigiCert, Sectigo, ZeroSSL, Cloudflare) or customized trusted issuer lists.
+- **Rogue Detection**: Any certificate discovered in public CT logs issued by an unrecognized or unauthorized CA is immediately flagged as rogue (`is_rogue: true`) with status `investigating`.
+- **Alerting & Webhooks**: Triggers the `cert.rogue_detected` webhook event with complete certificate metadata (issuer, serial number, common name, SANs, logged timestamp).
+
+## CLI Management
+
+Manage CT logs directly using the `r3 cert ct` command line tool:
+
+```bash
+# View monitor status and active alerts count
+r3 cert ct status
+
+# View current configuration
+r3 cert ct config
+
+# Update configuration
+r3 cert ct set-config --enable true --domains "example.com,api.example.com" --interval 7200
+
+# Trigger an immediate on-demand check
+r3 cert ct check --domain example.com
+
+# List discovered CT log records and rogue certificates
+r3 cert ct list --rogue-only
+
+# Dismiss an alert
+r3 cert ct dismiss <ENTRY_ID>
+```
+
+## Model Context Protocol (MCP)
+
+AI agents can inspect and manage CT logs autonomously via MCP tools:
+- `get_ct_monitor_config`: Retrieve current monitoring configuration.
+- `update_ct_monitor_config`: Update check intervals, domains, and allowed CAs.
+- `get_ct_monitor_status`: Get real-time status, active alerts, and last check time.
+- `list_ct_log_entries`: Query discovered records with filtering.
+- `check_ct_logs_now`: Trigger an immediate log query.
+- `dismiss_ct_alert`: Acknowledge or resolve an alert.
+
 ## Worker Processes
 
 By default the same process that runs the admin API also serves every port. With `worker_mode = "workers"` in `config.toml`, r3v3rs3 starts one worker process that serves the ports while the master process keeps the storage, the admin API, the WebUI and the deployment platform. A crash of the worker does not take the admin API down, and the master restarts the worker with a backoff.
@@ -1689,7 +1736,7 @@ The admin API exposes its complete tool suite over the Model Context Protocol at
 | **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, fail2ban brute-force bans, threat auto-quarantine, and automated GeoIP MMDB database management. |
 | **Ports** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Complete port listener lifecycle: bind addresses, TLS termination options, socket reset/reload, and host interface enumeration. |
 | **Proxies** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | Reverse proxy configuration for HTTP, WebSocket, TCP, UDP, TLS, and HTTP/3, upstream health status, and path-selective cache purging. |
-| **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegation, instant certificate orders/renewals, and DNS credential management. |
+| **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials`, `get_ct_monitor_config`, `update_ct_monitor_config`, `get_ct_monitor_status`, `list_ct_log_entries`, `check_ct_logs_now`, `dismiss_ct_alert` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegation, instant certificate orders/renewals, DNS credential management, and Certificate Transparency rogue detection. |
 | **Access Lists** | `list_access_lists`, `add_access_list`, `update_access_list`, `delete_access_list` | Access control lists with CIDR IP filtering, HTTP basic authentication, and custom bearer tokens. |
 | **PaaS Applications** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update` | Autonomous PaaS container lifecycle: image/git/compose app deployment, container log streaming, environment variable injection, deployment rollbacks, and Docker registry update detection. |
 | **App Store Catalog** | `get_store`, `refresh_store`, `install_store_app` | Instant deployment of curated one-click templates (databases, dashboards, CMS, wikis, analytics) directly from the store into fully configured and routed applications. |

@@ -16,6 +16,7 @@ pub mod compression;
 pub mod compression_dictionary;
 pub mod config_backup;
 pub mod container;
+pub mod ct;
 pub mod dashboard;
 pub mod discovery;
 pub mod early_data;
