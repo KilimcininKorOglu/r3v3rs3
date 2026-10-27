@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.7] - 2026-10-27
+
+### Changed
+- Centralized Error Page Themes Relocation: Relocated `ErrorPageThemesCard` out of global Settings into the Proxies hub (`/proxies`) under a dedicated "Error Page Themes" tab with tabbed URL routing (`/proxies?tab=themes`), consolidating proxy-level error templates directly inside the proxy management interface.
+- Streamlined Global Settings: Replaced the Error Page Themes configuration card in `/settings` with a direct shortcut banner pointing to the Proxies hub, further decluttering the settings view.
+- Dual-Language Documentation: Synchronized `configuration.md` and `configuration.tr.md` in lockstep documenting the relocated Error Page Themes hub under Proxies.
+
 ## [2.7.6] - 2026-10-27
 
 ### Added
