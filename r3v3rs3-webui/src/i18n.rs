@@ -131,12 +131,15 @@ mod tests {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut sources = Vec::new();
         read_sources(&manifest_dir.join("src"), &mut sources);
+        if let Ok(index_html) = std::fs::read_to_string(manifest_dir.join("index.html")) {
+            sources.push(index_html);
+        }
         let assets = sources
             .iter()
             .flat_map(|source| string_literals(source))
-            .filter(|text| text.starts_with("/assets/") && text.ends_with(".svg"))
+            .filter(|text| is_known_asset_path(text))
             .collect::<std::collections::HashSet<_>>();
-        assert!(assets.len() >= 20, "found only {} assets", assets.len());
+        assert!(assets.len() >= 25, "found only {} assets", assets.len());
         for asset in assets {
             let rel = asset.trim_start_matches('/');
             let path = manifest_dir.join(rel);
@@ -146,5 +149,36 @@ mod tests {
                 path.display()
             );
         }
+    }
+
+    fn is_known_asset_path(text: &str) -> bool {
+        const EXTENSIONS: &[&str] = &[".svg", ".png", ".ico", ".xml", ".js", ".css"];
+        text.starts_with("/assets/") && EXTENSIONS.iter().any(|ext| text.ends_with(ext))
+    }
+
+    #[test]
+    fn every_icon_in_assets_is_valid() {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let icons_dir = manifest_dir.join("assets").join("icons");
+        let entries = std::fs::read_dir(&icons_dir).expect("read icons dir");
+        let mut count = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "svg") {
+                count += 1;
+                let content = std::fs::read_to_string(&path).expect("read svg");
+                assert!(
+                    content.contains("<svg"),
+                    "missing <svg tag in {}",
+                    path.display()
+                );
+                assert!(
+                    content.contains("</svg>"),
+                    "missing </svg> in {}",
+                    path.display()
+                );
+            }
+        }
+        assert!(count >= 20, "found only {count} icons in assets/icons");
     }
 }
