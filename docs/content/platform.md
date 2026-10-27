@@ -976,19 +976,30 @@ The **Webhooks** page under Administration provides a centralized dashboard for 
 
 ### Backups
 
-The **Backups** page (`/backups`) provides a centralized management console for database and volume backups, automated schedules, disaster recovery, and health monitoring across the entire platform:
+The **Backups** page (`/backups`) provides a centralized management console for database and volume backups, automated schedules, disaster recovery, and configuration management across the entire platform through three unified tabs:
 
+#### 1. Database Backups
 - **KPI Cards**: Real-time overview metrics displaying total backup archives, cumulative disk space consumed, timestamp of the most recent backup, configured cron schedule, Dead Man's Snitch / Heartbeat monitor status, and remote S3 backup sync status.
 - **Unified Backups Table**: Displays all backups across all database engines (PostgreSQL, MySQL, MariaDB, MongoDB, Redis) and volumes with engine tags, database name, backup identifier, size, creation date, and automated restore verification status badge.
 - **Search & Engine Filters**: Instant search filter by database name or backup ID, plus engine dropdown filtering.
-- **Row Actions**:
-  - **Download**: Direct `.dump.gz` download link.
-  - **Verify**: On-demand integrity test decompressing the dump and validating magic bytes/SQL headers without modifying the database.
+- **Action Buttons**:
+  - **Download**: Direct `.dump.gz` download.
+  - **Verify / Drill**: Interactive restore drill dry-run report validating decompression, magic bytes, structure, and discovered table counts.
   - **Restore**: In-place container restore replacing active database data with the selected dump after confirmation.
   - **Delete**: Deletes the local backup file and metadata.
 - **Take Backup Now Modal**: Quick one-click execution modal to trigger an immediate backup for any selected database on the system.
-- **Disaster Recovery Drawer**: Inspect and restore snapshots stored in remote S3-compatible cloud storage.
-- **Settings Modal**: Configure automated UTC daily backup schedules, retention counts, remote storage targets (S3, SFTP, rsync), and Dead Man's Snitch / Heartbeat ping URL.
+- **S3 Snapshots Drawer**: Inspect and restore database snapshots stored in remote S3-compatible cloud storage.
+- **Settings Modal**: Configure automated UTC daily backup schedules, retention counts, remote storage targets (S3, SFTP, rsync), restore testing toggle, and Dead Man's Snitch / Heartbeat ping URL.
+
+#### 2. Platform Disaster Recovery (.r3bundle)
+- **Encrypted Platform Snapshots**: Create single-bundle encrypted snapshots (`.r3bundle`) containing `r3v3rs3.db`, master encryption keys (`r3v3rs3.key`), cluster sealing keys, TLS certificates, accounts, and application manifests with AES-256-GCM.
+- **Remote S3 Replication**: Automatically upload disaster recovery snapshots to remote S3 cloud storage configured in backup settings.
+- **Snapshot Management Table**: View snapshot ID, timestamp, size, included file count, S3 replication status badge, and execute download, in-place restore, or deletion using standard action icons.
+- **Upload & Restore**: Restore a complete platform state by uploading an `.r3bundle` archive with optional decryption passphrase.
+
+#### 3. Configuration Backup
+- **JSON Configuration Export**: Export entire reverse proxy and platform routing configuration to a sanitized JSON backup file (secrets masked, accounts excluded).
+- **Configuration Restore**: Upload and hot-reload a JSON configuration backup file with full atomic confirmation.
 
 ## Admin API
 

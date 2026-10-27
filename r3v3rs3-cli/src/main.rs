@@ -66,6 +66,9 @@ enum Command {
     /// Manage database backups.
     #[command(subcommand)]
     Backup(BackupCommand),
+    /// Manage platform disaster recovery snapshots (.r3bundle).
+    #[command(subcommand)]
+    Dr(DrCommand),
     /// Manage multi-node agent targets.
     #[command(subcommand)]
     Target(TargetCommand),
@@ -530,6 +533,51 @@ pub enum BackupCommand {
     },
     /// Shows backup configuration.
     Config,
+    /// Manages full platform disaster recovery (.r3bundle) snapshots.
+    #[command(subcommand)]
+    Dr(DrCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DrCommand {
+    /// Lists all full platform disaster recovery backup snapshots (.r3bundle).
+    #[command(alias = "ls")]
+    List,
+    /// Creates an encrypted full platform disaster recovery snapshot (.r3bundle).
+    Create {
+        /// Optional passphrase to encrypt the disaster recovery bundle.
+        #[arg(long)]
+        passphrase: Option<String>,
+        /// Do not replicate the snapshot to remote S3 storage.
+        #[arg(long)]
+        no_s3: bool,
+    },
+    /// Restores a full disaster recovery snapshot by backup ID.
+    Restore {
+        backup_id: String,
+        /// Optional passphrase to decrypt the disaster recovery bundle.
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Deletes a disaster recovery backup snapshot by ID.
+    #[command(alias = "rm")]
+    Delete { backup_id: String },
+    /// Downloads a disaster recovery backup snapshot (.r3bundle) to disk.
+    Download {
+        backup_id: String,
+        /// Path to save the downloaded bundle file.
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Restores a disaster recovery bundle (.r3bundle) from a local file.
+    RestoreFile {
+        /// Path to the .r3bundle file to restore.
+        #[arg(short, long)]
+        file: String,
+        /// Optional passphrase to decrypt the disaster recovery bundle.
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -918,6 +966,7 @@ async fn run_api_platform(api: &api_client::ApiClient, cmd: Command) -> anyhow::
         Command::App(c) => run_app(api, c).await,
         Command::Db(c) => run_db(api, c).await,
         Command::Backup(c) => run_backup(api, c).await,
+        Command::Dr(c) => run_dr(api, c).await,
         Command::Cron(c) => run_cron(api, c).await,
         Command::Target(c) => run_target(api, c).await,
         other => run_api_system(api, other).await,
@@ -1248,6 +1297,30 @@ async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::
             backup_id,
         } => api.delete_backup(&database_id, &backup_id).await,
         BackupCommand::Config => api.backup_config().await,
+        BackupCommand::Dr(c) => run_dr(api, c).await,
+    }
+}
+
+async fn run_dr(api: &api_client::ApiClient, cmd: DrCommand) -> anyhow::Result<()> {
+    match cmd {
+        DrCommand::List => api.list_dr_backups().await,
+        DrCommand::Create { passphrase, no_s3 } => {
+            api.create_dr_backup(passphrase.as_deref(), !no_s3).await
+        }
+        DrCommand::Restore {
+            backup_id,
+            passphrase,
+        } => {
+            api.restore_dr_backup(&backup_id, passphrase.as_deref())
+                .await
+        }
+        DrCommand::Delete { backup_id } => api.delete_dr_backup(&backup_id).await,
+        DrCommand::Download { backup_id, output } => {
+            api.download_dr_backup(&backup_id, output.as_deref()).await
+        }
+        DrCommand::RestoreFile { file, passphrase } => {
+            api.restore_dr_file(&file, passphrase.as_deref()).await
+        }
     }
 }
 

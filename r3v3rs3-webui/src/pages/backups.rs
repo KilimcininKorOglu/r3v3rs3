@@ -15,10 +15,12 @@ use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppEntry, BackupConfig, BackupEntry, BackupsOverview, RunBackupRequest, S3BackupSnapshot,
-    S3Config,
+    AppEntry, BackupConfig, BackupEntry, BackupsOverview, CreateDisasterRecoveryRequest,
+    DisasterRecoveryBackupEntry, RestoreDisasterRecoveryRequest, RunBackupRequest,
+    S3BackupSnapshot, S3Config,
 };
 use wasm_bindgen_futures::spawn_local;
+use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yewdux::prelude::*;
 
@@ -121,11 +123,21 @@ fn default_engine() -> String {
     "all".to_string()
 }
 
+/// The selected backup section tab.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum BackupTab {
+    #[default]
+    Databases,
+    DisasterRecovery,
+    Configuration,
+}
+
 #[function_component(Backups)]
 pub fn backups() -> Html {
     use_ensure_auth();
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
+    let active_tab = use_state(BackupTab::default);
     let overview = use_state(Option::<BackupsOverview>::default);
     let backups = use_state(Vec::<BackupEntry>::new);
     let databases = use_state(Vec::<AppEntry>::new);
@@ -217,25 +229,70 @@ pub fn backups() -> Html {
 
     html! {
         <div class="space-y-6">
-            { render_header(locale, can_edit, &show_s3, &show_settings, &show_take) }
+            { render_header(locale, can_edit, *active_tab, &show_s3, &show_settings, &show_take) }
 
-            { notice_view(&notice, |key| html! { {locale.t(key)} }) }
+            { render_tabs(locale, &active_tab) }
 
-            { render_kpi_cards(overview.as_ref(), locale) }
+            { match *active_tab {
+                BackupTab::Databases => html! {
+                    <>
+                        { notice_view(&notice, |key| html! { {locale.t(key)} }) }
 
-            if *show_s3 {
-                { render_s3_drawer(locale, &s3_snapshots, can_edit, reload_cb.clone()) }
-            }
+                        { render_kpi_cards(overview.as_ref(), locale) }
 
-            { render_filter_bar(locale, &search, &engine) }
+                        if *show_s3 {
+                            { render_s3_drawer(locale, &s3_snapshots, can_edit, reload_cb.clone()) }
+                        }
 
-            <div class="rounded-lg border border-neutral-800 bg-neutral-900/60 overflow-hidden">
-                { render_backups_table(locale, &filtered, can_edit, reload_cb.clone(), on_select_drill) }
-            </div>
+                        { render_filter_bar(locale, &search, &engine) }
 
-            { drill_modal }
+                        <div class="rounded-lg border border-neutral-800 bg-neutral-900/60 overflow-hidden">
+                            { render_backups_table(locale, &filtered, can_edit, reload_cb.clone(), on_select_drill) }
+                        </div>
 
-            { render_modals(locale, &show_take, &show_settings, &databases, &selected_db, &config, &form, &notice, reload_cb) }
+                        { drill_modal }
+
+                        { render_modals(locale, &show_take, &show_settings, &databases, &selected_db, &config, &form, &notice, reload_cb) }
+                    </>
+                },
+                BackupTab::DisasterRecovery => html! {
+                    <DisasterRecoveryTab can_edit={can_edit} />
+                },
+                BackupTab::Configuration => html! {
+                    <ConfigurationBackupTab can_edit={can_edit} />
+                },
+            } }
+        </div>
+    }
+}
+
+fn render_tabs(locale: Locale, active_tab: &UseStateHandle<BackupTab>) -> Html {
+    let tabs = [
+        (BackupTab::Databases, "backups.tab_databases"),
+        (BackupTab::DisasterRecovery, "backups.tab_disaster_recovery"),
+        (BackupTab::Configuration, "backups.tab_configuration"),
+    ];
+    html! {
+        <div class="border-b border-neutral-800">
+            <nav class="flex space-x-6">
+                { for tabs.into_iter().map(|(tab, label)| {
+                    let is_active = **active_tab == tab;
+                    let active_cls = if is_active {
+                        "border-blue-500 text-blue-400 font-semibold border-b-2"
+                    } else {
+                        "border-transparent text-neutral-400 hover:text-neutral-200"
+                    };
+                    let onclick = {
+                        let active_tab = active_tab.clone();
+                        Callback::from(move |_| active_tab.set(tab))
+                    };
+                    html! {
+                        <button type="button" {onclick} class={classes!("py-3", "px-1", "text-sm", "transition-colors", active_cls)}>
+                            { locale.t(label) }
+                        </button>
+                    }
+                }) }
+            </nav>
         </div>
     }
 }
@@ -267,6 +324,7 @@ fn render_modals(
 fn render_header(
     locale: Locale,
     can_edit: bool,
+    active_tab: BackupTab,
     show_s3: &UseStateHandle<bool>,
     show_settings: &UseStateHandle<bool>,
     show_take: &UseStateHandle<bool>,
@@ -290,13 +348,13 @@ fn render_header(
                 <h1 class="text-2xl font-semibold tracking-tight">{locale.t("backups.title")}</h1>
                 <p class="text-sm text-neutral-400 mt-1">{locale.t("backups.subtitle")}</p>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
-                if can_edit {
+            if can_edit && active_tab == BackupTab::Databases {
+                <div class="flex flex-wrap items-center gap-2">
                     <button type="button" class={BUTTON_SECONDARY} onclick={s3_btn}>
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 00-9.78 2.096A4.001 4.001 0 003 15z" />
                         </svg>
-                        {locale.t("backups.disaster_recovery")}
+                        {locale.t("backups.s3_snapshots")}
                     </button>
                     <button type="button" class={BUTTON_SECONDARY} onclick={settings_btn}>
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -311,8 +369,8 @@ fn render_header(
                         </svg>
                         {locale.t("backups.action_backup_now")}
                     </button>
-                }
-            </div>
+                </div>
+            }
         </div>
     }
 }
@@ -1104,6 +1162,527 @@ fn load_data(
             cfg.set(loaded);
         }
     });
+}
+
+#[derive(Properties, PartialEq, Clone)]
+struct SubTabProps {
+    can_edit: bool,
+}
+
+#[function_component(DisasterRecoveryTab)]
+fn disaster_recovery_tab(props: &SubTabProps) -> Html {
+    let locale = use_locale();
+    let backups = use_state(Vec::<DisasterRecoveryBackupEntry>::new);
+    let passphrase = use_state(String::new);
+    let upload_s3 = use_state(|| true);
+    let is_creating = use_state(|| false);
+    let is_restoring = use_state(|| false);
+    let can_edit = props.can_edit;
+
+    let load_backups = {
+        let backups = backups.clone();
+        Callback::from(move |()| {
+            let backups = backups.clone();
+            spawn_local(fetch_dr_backups(locale, backups));
+        })
+    };
+
+    {
+        let load_backups = load_backups.clone();
+        use_effect_with((), move |_| {
+            load_backups.emit(());
+            || ()
+        });
+    }
+
+    let on_create = {
+        let is_creating = is_creating.clone();
+        let passphrase = passphrase.clone();
+        let upload_s3 = upload_s3.clone();
+        let load_backups = load_backups.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *is_creating {
+                return;
+            }
+            is_creating.set(true);
+            let is_creating = is_creating.clone();
+            let load_backups = load_backups.clone();
+            let pass = (*passphrase).clone();
+            let body = CreateDisasterRecoveryRequest {
+                passphrase: if pass.is_empty() { None } else { Some(pass) },
+                upload_s3: *upload_s3,
+            };
+            spawn_local(async move {
+                execute_dr_create(locale, body, load_backups).await;
+                is_creating.set(false);
+            });
+        })
+    };
+
+    let on_upload_file = {
+        let is_restoring = is_restoring.clone();
+        let passphrase = passphrase.clone();
+        let load_backups = load_backups.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlInputElement = event.target_unchecked_into();
+            let Some(file) = input.files().and_then(|files| files.get(0)) else {
+                return;
+            };
+            let is_restoring = is_restoring.clone();
+            let pass = (*passphrase).clone();
+            let load_backups = load_backups.clone();
+            let question = locale.t("settings.dr_restore_confirm").to_string();
+            dialog::confirm_then(locale, question, async move {
+                is_restoring.set(true);
+                handle_dr_file_upload(file, pass, locale, load_backups).await;
+                is_restoring.set(false);
+            });
+        })
+    };
+
+    html! {
+        <div class="space-y-6">
+            <div class="rounded-lg border border-neutral-800 bg-neutral-900/60 p-5 space-y-4">
+                <div>
+                    <h2 class="text-base font-semibold text-neutral-200">
+                        {locale.t("settings.disaster_recovery_title")}
+                    </h2>
+                    <p class="mt-1 text-sm text-neutral-400">
+                        {locale.t("settings.disaster_recovery_hint")}
+                    </p>
+                </div>
+                if can_edit {
+                    { render_dr_controls(locale, &passphrase, &upload_s3, &is_creating, &is_restoring, on_create, on_upload_file) }
+                }
+                { render_dr_table(locale, &backups, &passphrase, can_edit, &load_backups) }
+            </div>
+        </div>
+    }
+}
+
+async fn fetch_dr_backups(
+    locale: Locale,
+    backups: UseStateHandle<Vec<DisasterRecoveryBackupEntry>>,
+) {
+    let req = Request::get(&format!("{API_ENDPOINT}/disaster-recovery/backups"));
+    if let Ok(built) = req.build()
+        && let Ok(res) = send_request(locale, built).await
+        && let Ok(list) = res.json::<Vec<DisasterRecoveryBackupEntry>>().await
+    {
+        backups.set(list);
+    }
+}
+
+async fn execute_dr_create(
+    locale: Locale,
+    body: CreateDisasterRecoveryRequest,
+    load_backups: Callback<()>,
+) {
+    let req = Request::post(&format!("{API_ENDPOINT}/disaster-recovery/backups"))
+        .header("content-type", "application/json")
+        .json(&body);
+    match req {
+        Ok(built) => match send_request(locale, built).await {
+            Ok(_) => {
+                dialog::message(locale, locale.t("backups.taken"), Icon::Success).await;
+                load_backups.emit(());
+            }
+            Err(err) => dialog::message(locale, &err, Icon::Error).await,
+        },
+        Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
+    }
+}
+
+async fn handle_dr_file_upload(
+    file: web_sys::File,
+    pass: String,
+    locale: Locale,
+    load_backups: Callback<()>,
+) {
+    match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
+        Ok(js_buf) => {
+            let uint8_array = js_sys::Uint8Array::new(&js_buf);
+            let bytes = uint8_array.to_vec();
+            handle_dr_restore_upload(locale, bytes, pass, load_backups).await;
+        }
+        Err(err) => {
+            dialog::message(locale, &format!("{err:?}"), Icon::Error).await;
+        }
+    }
+}
+
+async fn handle_dr_restore_upload(
+    locale: Locale,
+    bytes: Vec<u8>,
+    passphrase: String,
+    load_backups: Callback<()>,
+) {
+    let mut builder = Request::post(&format!("{API_ENDPOINT}/disaster-recovery/restore-upload"))
+        .header("content-type", "application/octet-stream");
+    if !passphrase.is_empty() {
+        builder = builder.header("x-passphrase", &passphrase);
+    }
+    let req = builder.body(wasm_bindgen::JsValue::from(js_sys::Uint8Array::from(
+        bytes.as_slice(),
+    )));
+    match req {
+        Ok(built) => match send_request(locale, built).await {
+            Ok(_) => {
+                dialog::message(
+                    locale,
+                    locale.t("settings.dr_restore_success"),
+                    Icon::Success,
+                )
+                .await;
+                load_backups.emit(());
+            }
+            Err(err) => dialog::message(locale, &err, Icon::Error).await,
+        },
+        Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
+    }
+}
+
+fn render_dr_controls(
+    locale: Locale,
+    passphrase: &UseStateHandle<String>,
+    upload_s3: &UseStateHandle<bool>,
+    is_creating: &UseStateHandle<bool>,
+    is_restoring: &UseStateHandle<bool>,
+    on_create: Callback<MouseEvent>,
+    on_upload_file: Callback<Event>,
+) -> Html {
+    let on_pass_change = {
+        let passphrase = passphrase.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            passphrase.set(input.value());
+        })
+    };
+    let on_s3_change = {
+        let upload_s3 = upload_s3.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            upload_s3.set(input.checked());
+        })
+    };
+
+    html! {
+        <div class="flex flex-col sm:flex-row flex-wrap items-center gap-3">
+            <div class="w-full sm:w-64">
+                <input
+                    type="password"
+                    placeholder={locale.t("settings.dr_passphrase_placeholder")}
+                    value={(**passphrase).clone()}
+                    onchange={on_pass_change}
+                    class={INPUT_CLASS}
+                />
+            </div>
+            <label class="inline-flex items-center gap-2 text-sm text-neutral-300 cursor-pointer">
+                <input
+                    type="checkbox"
+                    checked={**upload_s3}
+                    onchange={on_s3_change}
+                    class="rounded border-neutral-700 bg-neutral-800 text-blue-600 focus:ring-blue-500"
+                />
+                {locale.t("settings.dr_upload_s3")}
+            </label>
+            <button
+                type="button"
+                onclick={on_create}
+                disabled={**is_creating}
+                class={BUTTON_PRIMARY}
+            >
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                {locale.t("settings.create_dr_backup")}
+            </button>
+            <label class={classes!(BUTTON_SECONDARY, "cursor-pointer")}>
+                <svg class="w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
+                </svg>
+                {locale.t("settings.upload_restore_dr")}
+                <input
+                    type="file"
+                    accept=".r3bundle"
+                    class="hidden"
+                    onchange={on_upload_file}
+                    disabled={**is_restoring}
+                />
+            </label>
+        </div>
+    }
+}
+
+fn render_dr_table(
+    locale: Locale,
+    backups: &UseStateHandle<Vec<DisasterRecoveryBackupEntry>>,
+    passphrase: &UseStateHandle<String>,
+    can_edit: bool,
+    load_backups: &Callback<()>,
+) -> Html {
+    if backups.is_empty() {
+        return html! {
+            <div class="p-6 text-center text-sm text-neutral-400">
+                {locale.t("backups.empty")}
+            </div>
+        };
+    }
+    html! {
+        <div class="overflow-x-auto rounded border border-neutral-800">
+            <table class="w-full text-sm text-left text-neutral-400">
+                <thead class="text-xs uppercase bg-neutral-800/60 text-neutral-400 border-b border-neutral-800">
+                    <tr>
+                        <th class="px-4 py-2.5">{"ID"}</th>
+                        <th class="px-4 py-2.5">{locale.t("backups.time")}</th>
+                        <th class="px-4 py-2.5 text-right">{locale.t("backups.size")}</th>
+                        <th class="px-4 py-2.5 text-center">{locale.t("settings.dr_files_count")}</th>
+                        <th class="px-4 py-2.5 text-center">{"Status"}</th>
+                        <th class="px-4 py-2.5 text-right">{locale.t("common.actions")}</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-neutral-800/50">
+                    { for backups.iter().map(|entry| render_dr_row(locale, entry, passphrase, can_edit, load_backups)) }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+fn render_dr_row(
+    locale: Locale,
+    entry: &DisasterRecoveryBackupEntry,
+    passphrase: &UseStateHandle<String>,
+    can_edit: bool,
+    load_backups: &Callback<()>,
+) -> Html {
+    let date_str = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+        (entry.created_at * 1000) as f64,
+    ))
+    .to_locale_string("en-US", &wasm_bindgen::JsValue::UNDEFINED)
+    .as_string()
+    .unwrap_or_default();
+    let download_url = format!(
+        "{API_ENDPOINT}/disaster-recovery/backups/{}/download",
+        entry.id
+    );
+
+    let on_restore = {
+        let id = entry.id.clone();
+        let pass = (**passphrase).clone();
+        let load_backups = load_backups.clone();
+        Callback::from(move |_: MouseEvent| {
+            let id = id.clone();
+            let pass = pass.clone();
+            let load_backups = load_backups.clone();
+            let question = locale.t("settings.dr_restore_confirm").to_string();
+            dialog::confirm_then(locale, question, async move {
+                let body = RestoreDisasterRecoveryRequest {
+                    passphrase: if pass.is_empty() { None } else { Some(pass) },
+                };
+                let req = Request::post(&format!(
+                    "{API_ENDPOINT}/disaster-recovery/backups/{id}/restore"
+                ))
+                .header("content-type", "application/json")
+                .json(&body);
+                if let Ok(built) = req {
+                    match send_request(locale, built).await {
+                        Ok(_) => {
+                            dialog::message(
+                                locale,
+                                locale.t("settings.dr_restore_success"),
+                                Icon::Success,
+                            )
+                            .await;
+                            load_backups.emit(());
+                        }
+                        Err(err) => dialog::message(locale, &err, Icon::Error).await,
+                    }
+                }
+            });
+        })
+    };
+
+    let on_delete = {
+        let id = entry.id.clone();
+        let load_backups = load_backups.clone();
+        Callback::from(move |_: MouseEvent| {
+            let id = id.clone();
+            let load_backups = load_backups.clone();
+            let question = locale.tf("backups.delete_question", &[("name", &id)]);
+            dialog::confirm_then(locale, question, async move {
+                let req =
+                    Request::delete(&format!("{API_ENDPOINT}/disaster-recovery/backups/{id}"));
+                if let Ok(built) = req.build()
+                    && send_request(locale, built).await.is_ok()
+                {
+                    load_backups.emit(());
+                }
+            });
+        })
+    };
+
+    let status_badge = if entry.s3_replicated {
+        html! {
+            <span class="bg-green-900/50 text-green-300 border border-green-800 text-xs px-2 py-0.5 rounded font-medium">
+                {locale.t("settings.dr_s3_badge")}
+            </span>
+        }
+    } else {
+        html! {
+            <span class="bg-neutral-800 text-neutral-400 border border-neutral-700 text-xs px-2 py-0.5 rounded font-medium">
+                {locale.t("settings.dr_local_only")}
+            </span>
+        }
+    };
+
+    html! {
+        <tr class="hover:bg-neutral-800/30 transition-colors border-b border-neutral-800">
+            <td class="px-4 py-3 font-mono text-xs text-neutral-300">{&entry.id}</td>
+            <td class="px-4 py-3 text-xs text-neutral-400">{date_str}</td>
+            <td class="px-4 py-3 text-right text-xs font-mono text-neutral-300">{format_bytes(entry.size)}</td>
+            <td class="px-4 py-3 text-center text-xs text-neutral-400">{entry.files_count}</td>
+            <td class="px-4 py-3 text-center text-xs">{status_badge}</td>
+            <td class="px-4 py-3 text-right">
+                <div class="flex items-center justify-end gap-1.5">
+                    <ActionIconButton
+                        variant={ActionVariant::Download}
+                        title={locale.t("backups.download").to_string()}
+                        href={download_url}
+                        download={format!("{}.r3bundle", entry.id)}
+                    />
+                    if can_edit {
+                        <ActionIconButton
+                            variant={ActionVariant::Restore}
+                            title={locale.t("backups.restore").to_string()}
+                            onclick={on_restore}
+                        />
+                        <ActionIconButton
+                            variant={ActionVariant::Delete}
+                            title={locale.t("common.delete").to_string()}
+                            onclick={on_delete}
+                        />
+                    }
+                </div>
+            </td>
+        </tr>
+    }
+}
+
+#[function_component(ConfigurationBackupTab)]
+fn configuration_backup_tab(props: &SubTabProps) -> Html {
+    let locale = use_locale();
+    let is_exporting = use_state(|| false);
+    let is_restoring = use_state(|| false);
+    let can_edit = props.can_edit;
+
+    let on_export = {
+        let is_exporting = is_exporting.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *is_exporting {
+                return;
+            }
+            is_exporting.set(true);
+            let is_exporting = is_exporting.clone();
+            spawn_local(async move {
+                let req = Request::get(&format!("{API_ENDPOINT}/config/backup"));
+                if let Ok(built) = req.build()
+                    && let Ok(response) = send_request(locale, built).await
+                    && let Ok(text) = response.text().await
+                {
+                    let now = js_sys::Date::now() as u64 / 1000;
+                    crate::pages::app_log::download_text_file(
+                        &format!("r3v3rs3-config-backup-{now}.json"),
+                        &text,
+                    );
+                }
+                is_exporting.set(false);
+            });
+        })
+    };
+
+    let on_file_change = {
+        let is_restoring = is_restoring.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlInputElement = event.target_unchecked_into();
+            let Some(file) = input.files().and_then(|files| files.get(0)) else {
+                return;
+            };
+            let is_restoring = is_restoring.clone();
+            let question = locale.t("settings.restore_confirm").to_string();
+            dialog::confirm_then(locale, question, async move {
+                is_restoring.set(true);
+                if let Ok(js_val) = wasm_bindgen_futures::JsFuture::from(file.text()).await {
+                    let text = js_val.as_string().unwrap_or_default();
+                    handle_config_restore_payload(locale, &text).await;
+                }
+                is_restoring.set(false);
+            });
+        })
+    };
+
+    html! {
+        <div class="space-y-6">
+            <div class="rounded-lg border border-neutral-800 bg-neutral-900/60 p-5 space-y-4">
+                <div>
+                    <h2 class="text-base font-semibold text-neutral-200">{locale.t("settings.backup_restore_title")}</h2>
+                    <p class="mt-1 text-sm text-neutral-400">{locale.t("settings.backup_restore_hint")}</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-4 pt-2">
+                    <button
+                        type="button"
+                        onclick={on_export}
+                        disabled={*is_exporting}
+                        class={BUTTON_SECONDARY}
+                    >
+                        <svg class="w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        {locale.t("settings.export_backup")}
+                    </button>
+                    if can_edit {
+                        <label class={classes!(BUTTON_PRIMARY, "cursor-pointer")}>
+                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
+                            </svg>
+                            {locale.t("settings.restore_backup")}
+                            <input
+                                type="file"
+                                accept=".json"
+                                class="hidden"
+                                onchange={on_file_change}
+                                disabled={*is_restoring}
+                            />
+                        </label>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+}
+
+async fn handle_config_restore_payload(locale: Locale, text: &str) {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(text) else {
+        dialog::message(
+            locale,
+            locale.t("settings.restore_invalid_file"),
+            Icon::Error,
+        )
+        .await;
+        return;
+    };
+    let req = Request::post(&format!("{API_ENDPOINT}/config/restore"))
+        .header("content-type", "application/json")
+        .json(&val);
+    match req {
+        Ok(built) => match send_request(locale, built).await {
+            Ok(_) => {
+                dialog::message(locale, locale.t("settings.restore_success"), Icon::Success).await
+            }
+            Err(err) => dialog::message(locale, &err, Icon::Error).await,
+        },
+        Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
+    }
 }
 
 #[cfg(test)]

@@ -25,7 +25,7 @@ r3v3rs3 can export its entire configuration (settings, ports, proxies, access li
 
 ### WebUI
 
-Open the **Settings** page and scroll to **Configuration Backup & Restore**:
+Open the **Backups** page (`/backups`) and select the **Configuration Backup** tab:
 - Click **Export Backup** to download the `r3v3rs3-config-backup-<timestamp>.json` file.
 - Click **Restore Backup** and select a valid backup JSON file. A confirmation dialog will summarize the action before applying the configuration.
 
@@ -63,11 +63,32 @@ Unlike standard JSON configuration backups, **Disaster Recovery Snapshots** (`.r
 
 ### WebUI
 
-Open the **Settings** page and navigate to **Disaster Recovery & Encrypted Snapshots (S3)**:
+Open the **Backups** page (`/backups`) and select the **Platform Disaster Recovery** tab:
 - Enter an optional encryption **Passphrase** and check **Upload to remote S3 storage**.
 - Click **Create Encrypted Snapshot** to create a point-in-time `.r3bundle`.
-- Download, restore, or delete existing snapshots from the table.
+- Download, restore, or delete existing snapshots from the table using action icon buttons.
 - Click **Upload & Restore .r3bundle** to upload an existing bundle file and restore the entire server state with confirmation.
+
+### Remote Administration CLI
+
+The `r3` CLI provides full remote management parity for disaster recovery:
+
+```bash
+# List all full disaster recovery snapshots
+$ r3 backup dr list
+
+# Create an encrypted snapshot and replicate to remote S3
+$ r3 backup dr create --passphrase "my-secret-passphrase"
+
+# Restore platform state from a snapshot ID
+$ r3 backup dr restore <id> --passphrase "my-secret-passphrase"
+
+# Download a snapshot (.r3bundle)
+$ r3 backup dr download <id> -o backup.r3bundle
+
+# Restore directly from a local bundle file
+$ r3 backup dr restore-file -f backup.r3bundle --passphrase "my-secret-passphrase"
+```
 
 ### CLI (Single-Command Restoration on a New Server)
 

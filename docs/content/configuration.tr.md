@@ -25,7 +25,7 @@ r3v3rs3 tüm yapılandırmasını (ayarlar, portlar, proxy'ler, erişim listeler
 
 ### WebUI
 
-**Ayarlar** sayfasını açın ve **Yapılandırma Yedeği ve Geri Yükleme** kartına gidin:
+**Yedekler** sayfasını (`/backups`) açın ve **Yapılandırma Yedeği** sekmesine gidin:
 - `r3v3rs3-config-backup-<zaman_damgası>.json` dosyasını indirmek için **Yedeği İndir** düğmesine tıklayın.
 - **Yedeği Geri Yükle** seçeneğine tıklayarak geçerli bir JSON yedek dosyası seçin. Yapılandırma uygulanmadan önce bir onay iletişim kutusu gösterilir.
 
@@ -63,11 +63,32 @@ Standart JSON yapılandırma yedeklerinden farklı olarak, **Felaket Kurtarma Pa
 
 ### WebUI
 
-**Ayarlar** sayfasını açın ve **Felaket Kurtarma & Şifreli Platform Yedekleri (S3)** kartına gidin:
+**Yedekler** sayfasını (`/backups`) açın ve **Platform Felaket Kurtarma** sekmesine gidin:
 - İsteğe bağlı bir şifreleme **Parolası** girin ve **Uzak S3 depolamasına yükle** seçeneğini işaretleyin.
 - **Şifreli Yedek Oluştur** düğmesine tıklayarak anlık bir `.r3bundle` paketi oluşturun.
-- Tablo üzerinden mevcut yedekleri indirin, geri yükleyin veya silin.
-- **.r3bundle Yükle ve Geri Yükle** seçeneğiyle harici bir yedek dosyasını yükleyip tüm platform durumunu onay kutusu ile geri yükleyin.
+- Tablo üzerinden standart eylem simgeleriyle mevcut yedekleri indirin, geri yükleyin veya silin.
+- **.r3bundle Yükle ve Geri Yükle** seçeneğiyle harici bir yedek dosyasını yükleyip tüm platform durumunu onay iletişim kutusuyla geri yükleyin.
+
+### Uzaktan Yönetim CLI Komutları
+
+`r3` CLI istemcisi felaket kurtarma için tam uzaktan yönetim imkanı sunar:
+
+```bash
+# Tüm felaket kurtarma snapshot paketlerini listele
+$ r3 backup dr list
+
+# Şifreli snapshot paketi oluştur ve uzak S3 depolamasına eşitle
+$ r3 backup dr create --passphrase "gizli-parolam"
+
+# Bir snapshot ID'sinden platform durumunu geri yükle
+$ r3 backup dr restore <id> --passphrase "gizli-parolam"
+
+# Snapshot paketini (.r3bundle) yerel diske indir
+$ r3 backup dr download <id> -o backup.r3bundle
+
+# Yerel bir paket dosyasından doğrudan geri yükle
+$ r3 backup dr restore-file -f backup.r3bundle --passphrase "gizli-parolam"
+```
 
 ### CLI (Yeni Sunucuda Tek Komutla Geri Yükleme)
 

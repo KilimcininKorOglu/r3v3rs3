@@ -1227,6 +1227,165 @@ impl ApiClient {
         Ok(())
     }
 
+    // --- Disaster Recovery operations ---
+
+    pub async fn list_dr_backups(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/disaster-recovery/backups", None)
+            .await?;
+        if let Some(arr) = res.as_array() {
+            println!(
+                "{:<26} {:<10} {:<8} {:<15} CREATED",
+                "SNAPSHOT ID", "SIZE", "FILES", "S3 REPLICATED"
+            );
+            println!("{:-<26} {:-<10} {:-<8} {:-<15} {:-<20}", "", "", "", "", "");
+            for item in arr {
+                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+                let size = item.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                let files = item
+                    .get("files_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let s3 = item
+                    .get("s3_replicated")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let time = item.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
+                println!(
+                    "{:<26} {:<10} {:<8} {:<15} {}",
+                    id,
+                    format!("{size}B"),
+                    files,
+                    if s3 { "yes" } else { "no" },
+                    time
+                );
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
+    pub async fn create_dr_backup(
+        &self,
+        passphrase: Option<&str>,
+        upload_s3: bool,
+    ) -> anyhow::Result<()> {
+        let payload = json!({
+            "passphrase": passphrase,
+            "upload_s3": upload_s3
+        });
+        let res = self
+            .request(
+                Method::POST,
+                "/api/disaster-recovery/backups",
+                Some(&payload),
+            )
+            .await?;
+        println!("Disaster recovery snapshot created successfully:");
+        print_json(&res)
+    }
+
+    pub async fn restore_dr_backup(
+        &self,
+        backup_id: &str,
+        passphrase: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let payload = json!({
+            "passphrase": passphrase
+        });
+        self.request(
+            Method::POST,
+            &format!("/api/disaster-recovery/backups/{backup_id}/restore"),
+            Some(&payload),
+        )
+        .await?;
+        println!(
+            "Disaster recovery snapshot {backup_id} restored successfully. Restart r3v3rs3 to apply changes."
+        );
+        Ok(())
+    }
+
+    pub async fn delete_dr_backup(&self, backup_id: &str) -> anyhow::Result<()> {
+        self.request(
+            Method::DELETE,
+            &format!("/api/disaster-recovery/backups/{backup_id}"),
+            None,
+        )
+        .await?;
+        println!("Disaster recovery snapshot {backup_id} deleted.");
+        Ok(())
+    }
+
+    pub async fn download_dr_backup(
+        &self,
+        backup_id: &str,
+        output: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let target_path = output
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("{backup_id}.r3bundle"));
+        let url = format!(
+            "{}/api/disaster-recovery/backups/{backup_id}/download",
+            self.server
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .await
+            .context("failed to request disaster recovery bundle download")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            bail!("download failed ({status}): {text}");
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .context("failed to read response bytes")?;
+        std::fs::write(&target_path, &bytes)
+            .with_context(|| format!("failed to write bundle to {target_path}"))?;
+        println!(
+            "Disaster recovery bundle saved to {target_path} ({} bytes)",
+            bytes.len()
+        );
+        Ok(())
+    }
+
+    pub async fn restore_dr_file(
+        &self,
+        file: &str,
+        passphrase: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let bytes =
+            std::fs::read(file).with_context(|| format!("failed to read bundle file: {file}"))?;
+        let url = format!("{}/api/disaster-recovery/restore-upload", self.server);
+        let mut req = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("content-type", "application/octet-stream");
+        if let Some(pass) = passphrase {
+            req = req.header("x-passphrase", pass);
+        }
+        let resp = req
+            .body(bytes)
+            .send()
+            .await
+            .context("failed to upload disaster recovery bundle")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            bail!("restore-upload failed ({status}): {text}");
+        }
+        println!(
+            "Disaster recovery bundle restored successfully from {file}. Restart r3v3rs3 to apply changes."
+        );
+        Ok(())
+    }
+
     // --- Database operations ---
 
     pub async fn list_dbs(&self) -> anyhow::Result<()> {

@@ -354,6 +354,22 @@ pub struct CreateDrBackupParams {
     pub upload_s3: Option<bool>,
 }
 
+/// The arguments of `restore_dr_backup`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RestoreDrBackupParams {
+    /// Identifier of the disaster recovery backup snapshot to restore.
+    pub backup_id: String,
+    /// Optional passphrase to decrypt the backup bundle.
+    pub passphrase: Option<String>,
+}
+
+/// The arguments of `delete_dr_backup`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DeleteDrBackupParams {
+    /// Identifier of the disaster recovery backup snapshot to delete.
+    pub backup_id: String,
+}
+
 /// The arguments of `vacuum_all_logs`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct VacuumLogsParams {
@@ -3164,6 +3180,58 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(backup.0)
+    }
+
+    /// Restore a full system disaster recovery backup snapshot by ID.
+    #[tool(
+        description = "Restore a full system disaster recovery backup snapshot by ID. Needs the edit scope."
+    )]
+    async fn restore_dr_backup(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<RestoreDrBackupParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request = r3v3rs3_api::platform::RestoreDisasterRecoveryRequest {
+            passphrase: params.passphrase,
+        };
+        let restored = super::disaster_recovery::restore(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(params.backup_id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(serde_json::json!({
+            "status": "restored",
+            "files_restored": restored.0,
+            "message": "Disaster recovery snapshot restored successfully. Please restart r3v3rs3 to apply changes."
+        }))
+    }
+
+    /// Delete a full system disaster recovery backup snapshot by ID.
+    #[tool(
+        description = "Delete a full system disaster recovery backup snapshot by ID. Needs the edit scope."
+    )]
+    async fn delete_dr_backup(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<DeleteDrBackupParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let _ = super::disaster_recovery::delete(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(params.backup_id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(serde_json::json!({
+            "status": "deleted"
+        }))
     }
 
     /// Truncate (vacuum) container logs across the platform.

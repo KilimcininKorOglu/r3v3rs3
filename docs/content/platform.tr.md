@@ -976,19 +976,30 @@ Yönetim altındaki **Webhook'lar** sayfası, giden olay bildirim hedeflerini y�
 
 ### Yedekler
 
-**Yedekler** sayfası (`/backups`), tüm platformdaki veritabanı ve volume yedeklerini, otomatik zamanlamaları, olağanüstü durum kurtarmayı (disaster recovery) ve sistem sağlığı izlemesini tek bir noktadan yönetir:
+**Yedekler** sayfası (`/backups`), tüm platformdaki veritabanı ve volume yedeklerini, otomatik zamanlamaları, olağanüstü durum kurtarmayı (disaster recovery) ve yapılandırma yönetimini üç birleşik sekme altında tek bir noktadan yönetir:
 
+#### 1. Veritabanı Yedekleri
 - **Durum Kartları**: Toplam alınan yedek sayısı, tüketilen birikimli disk alanı, en son alınan yedeğin zaman damgası, yapılandırılan cron takvimi, Dead Man's Snitch / Heartbeat izleme durumu ve uzak S3 eşitleme durumunu gösteren gerçek zamanlı göstergeler.
 - **Birleşik Yedekler Tablosu**: Tüm veritabanı motorlarındaki (PostgreSQL, MySQL, MariaDB, MongoDB, Redis) yedekleri motor etiketleri, veritabanı adı, yedek kimliği, boyutu, oluşturulma tarihi ve otomatik geri yükleme doğrulama durum rozeti ile listeler.
 - **Arama ve Motor Filtreleri**: Veritabanı adı veya yedek kimliğine göre anında arama, ayrıca motor seçimine göre filtreleme.
-- **Satır İşlemleri**:
+- **Eylem Düğmeleri**:
   - **İndir**: Sıkıştırılmış `.dump.gz` dosyasını doğrudan indirme.
-  - **Doğrula**: Canlı veritabanını değiştirmeden yedeğin açılabilirliğini ve sihirli bayt / SQL başlık bütünlüğünü anında test etme.
+  - **Doğrula / Tatbikat**: Canlı veritabanını değiştirmeden yedeğin açılabilirliğini, sihirli baytları, şema bütünlüğünü ve keşfedilen tablo sayısını test eden etkileşimli tatbikat raporu.
   - **Geri Yükle**: Onay sonrasında aktif veritabanı verisinin yerine seçilen yedeği canlı container'a yazma.
   - **Sil**: Yerel yedek dosyasını ve manifest verisini silme.
 - **Şimdi Yedek Al Modalı**: Sistemde yapılandırılmış herhangi bir veritabanını açılır listeden seçerek anında yedekleme tetikleme.
-- **Olağanüstü Durum Kurtarma Çekmecesi**: Uzak S3 uyumlu bulut depolamada saklanan snapshot'ları inceleme ve geri yükleme.
-- **Ayarlar Modalı**: Otomatik UTC günlük yedekleme saatini, saklanacak yedek limitini, uzak depolama hedeflerini (S3, SFTP, rsync) ve Dead Man's Snitch / Heartbeat ping URL'sini yapılandırma.
+- **S3 Yedekleri Çekmecesi**: Uzak S3 uyumlu bulut depolamada saklanan veritabanı snapshot'larını inceleme ve geri yükleme.
+- **Ayarlar Modalı**: Otomatik UTC günlük yedekleme saatini, saklanacak yedek limitini, uzak depolama hedeflerini (S3, SFTP, rsync), periyodik geri yükleme testini ve Dead Man's Snitch / Heartbeat ping URL'sini yapılandırma.
+
+#### 2. Platform Felaket Kurtarma (.r3bundle)
+- **Şifreli Platform Yedekleri**: `r3v3rs3.db` veritabanı, ana şifreleme anahtarları (`r3v3rs3.key`), küme mühür anahtarları, TLS sertifikaları, hesaplar ve uygulama tanımlarını içeren tek paketli, AES-256-GCM ile şifrelenmiş `.r3bundle` snapshot'ları oluşturma.
+- **Uzak S3 Replikasyonu**: Yedek ayarlarında yapılandırılan uzak S3 bulut depolamasına felaket kurtarma paketlerini otomatik olarak yükleme.
+- **Snapshot Yönetim Tablosu**: Snapshot ID'si, zaman damgası, boyutu, arşivlenen dosya sayısı ve S3 yükleme rozetini inceleme; standart eylem simgeleriyle indirme, geri yükleme veya silme işlemlerini yürütme.
+- **Yükle ve Geri Yükle**: Bir `.r3bundle` paket dosyasını yükleyip isteğe bağlı parola ile tüm platform durumunu tek adımda geri yükleme.
+
+#### 3. Yapılandırma Yedeği
+- **JSON Yapılandırma İndirme**: Bütün ters proxy ve yönlendirme yapılandırmasını hassas anahtarlar maskelenmiş ve hesaplar hariç tutulmuş biçimde tek bir JSON dosyası olarak dışa aktarma.
+- **Yapılandırma Geri Yükleme**: JSON yapılandırma dosyasını yükleyip onay iletişim kutusuyla anında kesintisiz geri yükleme.
 
 ## Yönetim API'si
 
