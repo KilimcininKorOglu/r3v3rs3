@@ -7,8 +7,6 @@ use super::app_env::AppEnv;
 use super::app_form::{AppForm, FormOptions, fields_view};
 use super::app_git_token::AppGitToken;
 use super::app_image_update::AppImageUpdate;
-use super::app_metrics::AppMetrics;
-use super::app_services::AppServices;
 use super::app_webhook::AppWebhook;
 use super::resource_page::{FormCard, Notice, delete_on_click, form_card, notice_view};
 use super::settings::{fetch_json, send_request};
@@ -215,7 +213,7 @@ fn form_view(
     form_card(locale, card, onsubmit)
 }
 
-/// The Git token, the webhook, the environment variables and the delete link of an existing app.
+/// The Git token, the webhook, the scheduled commands, the environment variables and the delete link of an existing app.
 fn edit_extras(
     locale: Locale,
     entry: AppEntry,
@@ -225,7 +223,6 @@ fn edit_extras(
     // The saved source decides the token section, not the unsaved input of the form.
     let uses_git = AppForm::edit(&entry).uses_git();
     let is_image = matches!(entry.spec.source, AppSource::Image { .. });
-    let is_compose = matches!(entry.spec.source, AppSource::Compose { .. });
     let app = app.clone();
     let onchanged = Callback::from(move |updated: AppEntry| app.set(Some(updated)));
     let navigator = navigator.clone();
@@ -241,19 +238,9 @@ fn edit_extras(
                 <AppGitToken app={entry.clone()} {locale} onchanged={onchanged.clone()} />
             }
             <AppWebhook app={entry.clone()} {locale} {onchanged} />
-            if is_compose {
-                <AppServices id={entry.id} {locale} />
-            }
             <AppCommands id={entry.id} {locale} />
-            <AppMetrics id={entry.id} />
             <AppEnv id={entry.id} {locale} />
-            <div class="flex justify-end mt-4 gap-4 items-center">
-                <Link<Route> to={Route::AppTerminal { id: entry.id }} classes="text-sm text-neutral-400 hover:text-neutral-200">
-                    {locale.t("apps.terminal")}
-                </Link<Route>>
-                <Link<Route> to={Route::AppFiles { id: entry.id }} classes="text-sm text-neutral-400 hover:text-neutral-200">
-                    {locale.t("apps.files")}
-                </Link<Route>>
+            <div class="mt-8 pt-4 border-t border-neutral-200 dark:border-neutral-700 flex justify-end">
                 <a class={DANGER_LINK_CLASS} onclick={delete}>{locale.t("apps.delete")}</a>
             </div>
         </>

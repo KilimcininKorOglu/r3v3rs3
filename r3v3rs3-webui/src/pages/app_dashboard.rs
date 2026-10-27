@@ -3,6 +3,8 @@
 use super::Route;
 use super::app_deployments::back_header;
 use super::app_list::{FAST_REFRESH_MS, SLOW_REFRESH_MS, is_unfinished};
+use super::app_metrics::AppMetrics;
+use super::app_services::AppServices;
 use super::settings::{failure_box, fetch_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
@@ -13,12 +15,9 @@ use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
-use r3v3rs3_api::container::ContainerHealth;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{
-    AppDashboardSummary, ComposeServiceStatus, DeploymentEntry, DeploymentStatus,
-};
+use r3v3rs3_api::platform::{AppDashboardSummary, DeploymentEntry, DeploymentStatus};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -191,8 +190,10 @@ fn render_dashboard_content(p: DashboardParams) -> Html {
                 { render_deployment_card(p.locale, &p.summary) }
             </div>
 
+            <AppMetrics id={p.id} />
+
             if !p.summary.services.is_empty() {
-                { render_services_card(p.locale, &p.summary.services) }
+                <AppServices id={p.id} locale={p.locale} />
             }
 
             { render_logs_preview(p.locale, p.id, &p.summary.logs_preview, p.summary.log_size_bytes, &p.navigator) }
@@ -503,51 +504,6 @@ fn render_deployment_card(locale: Locale, summary: &AppDashboardSummary) -> Html
                         <span>{format!("Started: {}", format_time(d.started_at))}</span>
                     </div>
                 }
-            </div>
-        </div>
-    }
-}
-
-fn render_services_card(locale: Locale, services: &[ComposeServiceStatus]) -> Html {
-    let count = services.len().to_string();
-    html! {
-        <div class="p-5 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm space-y-3">
-            <h3 class="font-semibold text-neutral-900 dark:text-neutral-100">
-                {locale.tf("apps.services_count", &[("count", &count)])}
-            </h3>
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-xs">
-                    <thead class="bg-neutral-50 dark:bg-neutral-700/50 text-neutral-500 uppercase">
-                        <tr>
-                            <th class="py-2 px-3">{"Service"}</th>
-                            <th class="py-2 px-3">{"Container"}</th>
-                            <th class="py-2 px-3">{"State"}</th>
-                            <th class="py-2 px-3">{"Health"}</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-neutral-100 dark:divide-neutral-700">
-                        { for services.iter().map(|s| {
-                            let health_str = match s.health {
-                                Some(ContainerHealth::Healthy) => "healthy",
-                                Some(ContainerHealth::Unhealthy) => "unhealthy",
-                                Some(ContainerHealth::Starting) => "starting",
-                                None => "-",
-                            };
-                            html! {
-                                <tr key={s.service.clone()}>
-                                    <td class="py-2 px-3 font-medium text-neutral-900 dark:text-neutral-100">{&s.service}</td>
-                                    <td class="py-2 px-3 font-mono text-neutral-600 dark:text-neutral-300">{&s.container}</td>
-                                    <td class="py-2 px-3">
-                                        <span class="px-1.5 py-0.5 rounded text-xs bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-medium">
-                                            {&s.state}
-                                        </span>
-                                    </td>
-                                    <td class="py-2 px-3 text-neutral-500">{health_str}</td>
-                                </tr>
-                            }
-                        }) }
-                    </tbody>
-                </table>
             </div>
         </div>
     }

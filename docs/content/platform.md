@@ -841,10 +841,11 @@ Clicking an application in the list opens its dedicated dashboard console at `/a
 
 - **Top Navigation Tabs**: Quick switching between **Overview**, **Deployments**, **Logs**, **Terminal**, **Files**, and **Settings**.
 - **Live Status & Telemetry**: Container uptime, CPU usage percentage, memory usage against configured limits, and network throughput (RX/TX).
-- **Resource Diagnostics Alerts**: Instant warnings for CPU CFS quota throttling and memory OOMKill events.
+- **Historical Metrics & Trends**: Sparkline graphs and periodic telemetry samples tracking CPU %, memory consumption, aggregate network traffic, request counts, and saturation counters.
+- **Resource Diagnostics Alerts**: Instant warnings for CPU CFS quota throttling and memory OOMKill events with actionable remediation hints.
 - **Active Deployment Card**: Current commit hash, branch name, commit message, author, deployment duration, and target node.
 - **Quick Actions Toolbar**: One-click **Deploy**, **Restart** container, **Rollback** to previous deployment, **Terminal**, and **Logs**.
-- **Services & Containers**: Container state, ID, and healthcheck status for Compose services.
+- **Compose Topology & Container Management**: Interactive visual architecture topology graph and service container inspection table for multi-service Compose applications.
 - **Recent Logs Tail**: Direct terminal preview of the latest 15 container log lines.
 - **API, MCP & CLI Management**: Complete parity via `GET /api/apps/{id}/dashboard`, MCP tool `get_app_dashboard`, and CLI command `r3 app dashboard <APP_ID>`.
 
