@@ -6,6 +6,7 @@ use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::anomaly_rules::AnomalyRulesCard;
+use crate::components::geoip_card::GeoIpCard;
 use crate::dialog;
 use crate::i18n::use_locale;
 use gloo_net::http::Request;
@@ -24,6 +25,7 @@ pub enum SecurityTab {
     BannedIps,
     QuarantinedIps,
     AnomalyRules,
+    GeoIp,
 }
 
 #[function_component(Security)]
@@ -50,6 +52,9 @@ pub fn security() -> Html {
                 SecurityTab::AnomalyRules => html! {
                     <AnomalyRulesCard />
                 },
+                SecurityTab::GeoIp => html! {
+                    <GeoIpCard />
+                },
             } }
         </div>
     }
@@ -74,6 +79,7 @@ fn render_tabs(locale: Locale, active_tab: &UseStateHandle<SecurityTab>) -> Html
         (SecurityTab::BannedIps, "security.tab_banned_ips"),
         (SecurityTab::QuarantinedIps, "security.tab_quarantined_ips"),
         (SecurityTab::AnomalyRules, "security.tab_anomaly_rules"),
+        (SecurityTab::GeoIp, "security.tab_geoip"),
     ];
     html! {
         <div class="border-b border-neutral-300 dark:border-neutral-800">

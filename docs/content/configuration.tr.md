@@ -671,7 +671,7 @@ Her HTTP / HTTPS proxy'sinde istemcileri IP adresine göre engelleyebilir veya y
 
 - **Engellenen IP Adresleri**: Bu IP adreslerinden veya CIDR bloklarından gelen istemciler `403 Forbidden` alır.
 - **İzin Verilen IP Adresleri**: Liste boş değilse proxy'ye yalnız bu IP adreslerinden veya CIDR bloklarından gelen istemciler erişebilir. Diğer istemciler `403 Forbidden` alır.
-- **İzin Verilen Ülkeler**: Virgülle ayrılmış ISO 3166-1 alpha-2 ülke kodları (ör. `TR`, `US`, `DE`). Ayarlar sayfasında veya `config.toml` içinde bir MaxMind GeoIP veritabanı tanımlanmış olmalıdır (`[geoip] database = "/path/to/GeoLite2-Country.mmdb"`).
+- **İzin Verilen Ülkeler**: Virgülle ayrılmış ISO 3166-1 alpha-2 ülke kodları (ör. `TR`, `US`, `DE`). Güvenlik sayfasında (`/security`) veya `config.toml` içinde bir MaxMind GeoIP veritabanı tanımlanmış olmalıdır (`[geoip] database = "/path/to/GeoLite2-Country.mmdb"`).
 - **Engellenen Ülkeler**: Virgülle ayrılmış ISO ülke kodları. Engellenen ülkeler izin verilenlerin önündedir.
 
 Engellenen bir adres veya ülke, izin verilenin önüne geçer. İzin verilen CIDR blokları (ör. yerel ağ veya VPN), ülke filtresinden önce değerlendirilerek erişimin kesilmesini önler.
@@ -716,7 +716,7 @@ r3v3rs3; MaxMind GeoLite2-Country veritabanları için SHA256 bütünlük doğru
   - `system.geoip_updated`: Yeni bir veritabanı indirilip doğrulandığında ve belleğe hot-swap yapıldığında tetiklenir.
   - `system.geoip_update_failed`: İndirme, checksum doğrulaması veya arşiv açma başarısız olduğunda hata detaylarıyla tetiklenir.
 - **WebUI, CLI ve MCP Arasında %100 Eşitlik**:
-  - **WebUI**: Ayarlar sayfasında yüklü durumunu, veritabanı dosya yolunu, boyutunu, derleme tarihini, lisans durumunu gösteren canlı durum kartı ve tek tıkla "Update Database Now" butonu.
+  - **WebUI**: Güvenlik sayfasında (`/security`) "GeoIP" sekmesinde yüklü durumunu, veritabanı dosya yolunu, boyutunu, derleme tarihini, lisans durumunu gösteren canlı durum kartı ve tek tıkla "Update Database Now" butonu.
   - **CLI**:
     - `r3 security geoip status`: Yüklü veritabanı durumunu, derleme zamanını, boyutunu ve otomatik güncelleme takvimini gösterir.
     - `r3 security geoip update`: En güncel GeoLite2-Country MMDB dosyasını indirir ve anında hot-reload eder.

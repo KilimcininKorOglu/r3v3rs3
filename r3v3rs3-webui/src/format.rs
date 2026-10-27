@@ -48,6 +48,17 @@ pub fn format_time(ms: u64) -> String {
     }
 }
 
+/// Formats a Unix timestamp in seconds as RFC 3339 in the display time zone, or "never" if non-positive.
+pub fn format_unix_time(locale: Locale, unix_time: i64) -> String {
+    if unix_time <= 0 {
+        return locale.t("settings.never").to_string();
+    }
+    match u64::try_from(unix_time) {
+        Ok(time) => format_time(time * 1000),
+        Err(_) => unix_time.to_string(),
+    }
+}
+
 /// An instant in the same form as `format_time`, in the display time zone when it is set and
 /// in UTC otherwise. The server sends log timestamps as instants, not as Unix times.
 pub fn format_instant(time: &OffsetDateTime) -> String {
@@ -245,5 +256,12 @@ mod tests {
         assert_eq!(format_uptime(125), "2m 5s");
         assert_eq!(format_uptime(3665), "1h 1m");
         assert_eq!(format_uptime(90000), "1d 1h");
+    }
+
+    #[test]
+    fn format_unix_time_formats_seconds() {
+        assert_eq!(format_unix_time(Locale::En, 100), "1970-01-01T00:01:40Z");
+        assert_eq!(format_unix_time(Locale::En, 0), "never");
+        assert_eq!(format_unix_time(Locale::Tr, 0), "henüz yok");
     }
 }
