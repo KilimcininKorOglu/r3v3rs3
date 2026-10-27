@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.4] - 2026-10-27
+
+### Changed
+- Centralized Backups & Disaster Recovery Center: Relocated platform Disaster Recovery (`.r3bundle` encrypted full-platform backups) and Configuration Backup (`ConfigBackup` JSON export/import) from the global Settings page into a tabbed console on the Backups page (`/backups`), unifying database backups, S3 snapshots, system disaster recovery, and configuration management under one interface.
+- Streamlined Global Settings: Cleaned up `/settings` by removing disaster recovery and configuration backup cards, refocusing the settings view strictly on core server parameters, runtime daemons, MCP sessions, GeoIP, CDN, and system upgrade.
+- Standardized WebUI Action Controls: Converted Disaster Recovery table actions to standardized `ActionIconButton` components with localized tooltips and aria-labels for download, in-place restore, and deletion.
+
+### Added
+- Disaster Recovery Remote CLI Commands: Added `r3 backup dr` and `r3 dr` subcommands (`list`, `create`, `restore`, `delete`, `download`, `restore-file`) in `r3v3rs3-cli` providing 100% remote management parity for platform disaster recovery archives.
+- Model Context Protocol (MCP) DR Parity: Implemented `restore_dr_backup` and `delete_dr_backup` MCP tools in Group 11, giving automated AI agents autonomous lifecycle control over platform disaster recovery snapshots.
+- Dual-Language Documentation: Synchronized `platform.md`, `platform.tr.md`, `configuration.md`, and `configuration.tr.md` in lockstep documenting the centralized Backups center and CLI management workflows.
+
 ## [2.7.3] - 2026-10-27
 
 ### Changed
