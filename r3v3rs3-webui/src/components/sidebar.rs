@@ -104,9 +104,9 @@ const GROUPS: &[MenuGroup] = &[
                 subs: NO_SUBS,
             },
             MenuItem {
-                name: "nav.access_lists",
+                name: "nav.security",
                 icon: "/assets/icons/shield-checkmark.svg",
-                route: Route::AccessLists,
+                route: Route::Security,
                 access: Access::All,
                 subs: NO_SUBS,
             },

@@ -46,6 +46,7 @@ mod proxy_list;
 mod proxy_view;
 mod registries;
 mod resource_page;
+pub mod security;
 mod self_sign;
 mod settings;
 mod store_env;
@@ -101,6 +102,8 @@ pub enum Route {
     NewProxy,
     #[at("/proxies/:id")]
     ProxyView { id: ShortId },
+    #[at("/security")]
+    Security,
     #[at("/access_lists")]
     AccessLists,
     #[at("/apps")]
@@ -183,8 +186,8 @@ impl Route {
             | Route::AppFiles { .. } => Some(Route::Apps),
             Route::AppStore | Route::NewStoreApp { .. } => Some(Route::AppStore),
             Route::Databases | Route::DatabaseBackups { .. } => Some(Route::Databases),
-            Route::AccessLists
-            | Route::Traffic
+            Route::AccessLists | Route::Security => Some(Route::Security),
+            Route::Traffic
             | Route::Targets
             | Route::GitConnections
             | Route::Registries
@@ -214,7 +217,7 @@ pub fn switch(routes: Route) -> Html {
         Route::ProxyView { id } => html! { <proxy_view::ProxyView {id} /> },
         Route::NewProxy => html! { <new_proxy::NewProxy /> },
         Route::Traffic => html! { <traffic::TrafficView /> },
-        Route::AccessLists => html! { <access_lists::AccessLists /> },
+        Route::Security | Route::AccessLists => html! { <security::Security /> },
         Route::Apps => html! { <app_list::AppList /> },
         Route::Databases => html! { <databases::Databases /> },
         Route::DatabaseBackups { id } => {

@@ -1735,7 +1735,7 @@ r3v3rs3, gelen canlı HTTP ve TCP trafiğini izleyerek dış tehdit istihbaratı
 - **Webhook Bildirimi**:
   - Bir IP karantinaya alındığında otomatik olarak `security.threat_detected` webhook olayı tetiklenir.
 - **Yönetim ve WebUI Kontrolleri**:
-  - Karantinadaki IP'leri, ihlal sayılarını ve kalan karantina sürelerini **Ayarlar > Karantinaya Alınan IP Adresleri** kartında görüntüleyin.
+  - Karantinadaki IP'leri, ihlal sayılarını ve kalan karantina sürelerini **Güvenlik > Karantinadaki IP'ler** sekmesinde görüntüleyin.
   - WebUI üzerinden tek tıkla herhangi bir IP adresini manuel karantinaya alın veya serbest bırakın.
 
 #### Admin API

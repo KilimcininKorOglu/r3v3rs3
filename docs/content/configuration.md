@@ -1735,7 +1735,7 @@ r3v3rs3 monitors incoming live HTTP and TCP traffic to detect scanner probes, pa
 - **Webhook Alerting**:
   - Automatically triggers `security.threat_detected` webhook notifications upon IP quarantine.
 - **Management & WebUI Controls**:
-  - View all quarantined IPs, violation counts, and remaining quarantine times in the **Settings > Quarantined IP Addresses** card.
+  - View all quarantined IPs, violation counts, and remaining quarantine times in the **Security > Quarantined IPs** tab.
   - Manually quarantine or release any IP address with a single click.
 
 #### Admin API
