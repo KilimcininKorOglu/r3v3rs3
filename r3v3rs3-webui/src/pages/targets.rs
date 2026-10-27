@@ -19,11 +19,11 @@ use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
-use r3v3rs3_api::container::AppName;
+use r3v3rs3_api::container::{AppName, LogVacuumResult};
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::platform::{
-    AgentLinkQuality, NodeAlertRules, PrunePolicy, PruneResult, TargetEntry, TargetKind,
-    TargetRequest, TargetToken,
+    AgentLinkQuality, NodeAlertRules, PrunePolicy, PruneResult, SetTargetRegionRequest,
+    TargetEntry, TargetKind, TargetRequest, TargetToken,
 };
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlTextAreaElement};
@@ -72,6 +72,7 @@ type TokenNotice = UseStateHandle<Option<Notice<TargetToken>>>;
 #[derive(Clone, PartialEq, Default)]
 struct Form {
     name: String,
+    region: String,
 }
 
 #[function_component(Targets)]
@@ -82,6 +83,7 @@ pub fn targets() -> Html {
     let targets = use_state(|| Option::<Vec<TargetEntry>>::None);
     let form = use_state(Form::default);
     let notice = use_state(|| Option::<Notice<TargetToken>>::None);
+    let editing_region = use_state(|| Option::<TargetEntry>::None);
 
     // The admin API answers 401 until the session loads, so the list waits for it.
     let signed_in = session.info.is_some();
@@ -103,9 +105,28 @@ pub fn targets() -> Html {
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(|target| target_row(locale, target, admin, &targets, &notice))
+        .map(|target| target_row(locale, target, admin, &targets, &notice, &editing_region))
         .collect::<Vec<_>>();
     let token = notice_view(&notice, |token: &TargetToken| token_view(locale, token));
+    let modal = editing_region.as_ref().map(|target| {
+        let target = target.clone();
+        let editing_region_close = editing_region.clone();
+        let on_close = Callback::from(move |()| editing_region_close.set(None));
+        let editing_region_saved = editing_region.clone();
+        let reload = reload_callback(&targets, PATH);
+        let on_saved = Callback::from(move |()| {
+            editing_region_saved.set(None);
+            reload.emit(());
+        });
+        html! {
+            <EditRegionModal
+                {locale}
+                {target}
+                {on_close}
+                {on_saved}
+            />
+        }
+    });
     html! {
         <>
             { token }
@@ -116,6 +137,7 @@ pub fn targets() -> Html {
                 <PruneSettings />
                 <NodeAlertSettings />
             }
+            { modal }
         </>
     }
 }
@@ -146,6 +168,7 @@ fn target_row(
     admin: bool,
     targets: &TargetList,
     notice: &TokenNotice,
+    editing_region: &UseStateHandle<Option<TargetEntry>>,
 ) -> Row {
     let (status, color) = target_status(target);
     let kind = match target.kind {
@@ -156,7 +179,7 @@ fn target_row(
     let last_seen = target.last_seen_at.map(format_time).unwrap_or_default();
     let version = target.version.clone().unwrap_or_default();
     let actions = if admin {
-        target_actions(locale, target, targets, notice)
+        target_actions(locale, target, targets, notice, editing_region)
     } else {
         html! {}
     };
@@ -342,6 +365,7 @@ fn target_actions(
     target: &TargetEntry,
     targets: &TargetList,
     notice: &TokenNotice,
+    editing_region: &UseStateHandle<Option<TargetEntry>>,
 ) -> Html {
     let name = target.name.as_str();
     let path = format!("{PATH}/{}", target.id);
@@ -367,8 +391,26 @@ fn target_actions(
         }
     };
 
+    let on_edit_region = {
+        let editing_region = editing_region.clone();
+        let target = target.clone();
+        Callback::from(move |_: MouseEvent| editing_region.set(Some(target.clone())))
+    };
+    let region_button = html! {
+        <ActionIconButton
+            variant={ActionVariant::Edit}
+            title={locale.t("targets.edit_region").to_string()}
+            onclick={on_edit_region}
+        />
+    };
+
     if target.kind == TargetKind::Local {
-        return drain_button;
+        return html! {
+            <>
+                { drain_button }
+                { region_button }
+            </>
+        };
     }
 
     let question = locale.tf("targets.confirm_delete", &[("name", name)]);
@@ -394,9 +436,10 @@ fn target_actions(
     html! {
         <>
             { drain_button }
+            { region_button }
             { upgrade }
             <ActionIconButton
-                variant={ActionVariant::Edit}
+                variant={ActionVariant::Terminal}
                 title={locale.t("targets.new_token").to_string()}
                 onclick={renew}
             />
@@ -495,8 +538,12 @@ fn form_view(
     let done = save_result(form, notice, reload_callback(targets, PATH));
     let state = form.clone();
     let onsubmit = submit_callback(
-        move || state.name.parse::<AppName>().ok(),
-        move |name| add(locale, name),
+        move || {
+            let name = state.name.parse::<AppName>().ok()?;
+            let region = parse_optional_string(&state.region);
+            Some((name, region))
+        },
+        move |(name, region)| add(locale, name, region),
         done,
     );
     let fields = html! {
@@ -504,6 +551,9 @@ fn form_view(
             <label class={LABEL_CLASS}>{locale.t("common.name")}</label>
             <input type="text" autocapitalize="off" autocomplete="off" value={form.name.clone()} oninput={text_input(form, |f| &mut f.name)} class={INPUT_CLASS} />
             <p class={HINT_CLASS}>{locale.t("targets.name_hint")}</p>
+            <label class={LABEL_CLASS}>{locale.t("targets.region")}</label>
+            <input type="text" autocapitalize="off" autocomplete="off" placeholder="eu, na, tr, apac..." value={form.region.clone()} oninput={text_input(form, |f| &mut f.region)} class={INPUT_CLASS} />
+            <p class={HINT_CLASS}>{locale.t("targets.region_hint")}</p>
         </>
     };
     let card = FormCard {
@@ -522,9 +572,9 @@ fn form_view(
     form_card(locale, card, onsubmit)
 }
 
-async fn add(locale: Locale, name: AppName) -> Result<TargetToken, String> {
+async fn add(locale: Locale, name: AppName, region: Option<String>) -> Result<TargetToken, String> {
     let request = Request::post(&format!("{API_ENDPOINT}{PATH}"))
-        .json(&TargetRequest { name, region: None })
+        .json(&TargetRequest { name, region })
         .map_err(|err| err.to_string())?;
     send_request(locale, request)
         .await?
@@ -592,6 +642,131 @@ fn shell_word(value: &str) -> String {
     }
 }
 
+#[derive(Properties, PartialEq, Clone)]
+struct EditRegionModalProps {
+    locale: Locale,
+    target: TargetEntry,
+    on_close: Callback<()>,
+    on_saved: Callback<()>,
+}
+
+#[function_component(EditRegionModal)]
+fn edit_region_modal(props: &EditRegionModalProps) -> Html {
+    let locale = props.locale;
+    let target = &props.target;
+    let region = use_state(|| target.region.clone().unwrap_or_default());
+    let saving = use_state(|| false);
+
+    let on_region = input_handler(&region);
+    let on_close_click = {
+        let on_close = props.on_close.clone();
+        Callback::from(move |_: MouseEvent| on_close.emit(()))
+    };
+    let on_submit = submit_region_callback(props, &region, &saving);
+
+    html! {
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div class="bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg max-w-md w-full p-4 sm:p-6 shadow-xl space-y-4">
+                <div class="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-700 pb-3">
+                    <h4 class="font-semibold text-neutral-900 dark:text-neutral-100">
+                        {locale.tf("targets.edit_region_title", &[("name", &target.name)])}
+                    </h4>
+                    <button onclick={on_close_click.clone()} type="button" class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 text-lg">
+                        {"✕"}
+                    </button>
+                </div>
+                <form onsubmit={on_submit} class="space-y-3">
+                    <div>
+                        <label class={LABEL_CLASS}>
+                            {locale.t("targets.region")}
+                        </label>
+                        <input
+                            type="text"
+                            placeholder="eu, na, tr, apac..."
+                            value={(*region).clone()}
+                            oninput={on_region}
+                            class={INPUT_CLASS}
+                        />
+                        <p class={HINT_CLASS}>{locale.t("targets.region_hint")}</p>
+                        <p class={HINT_CLASS}>{locale.t("targets.region_clear")}</p>
+                    </div>
+                    <div class="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-700">
+                        <button
+                            onclick={on_close_click}
+                            type="button"
+                            class="text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700"
+                        >
+                            {locale.t("common.cancel")}
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={*saving}
+                            class="text-xs sm:text-sm px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-50"
+                        >
+                            {if *saving { locale.t("common.loading") } else { locale.t("settings.save") }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    }
+}
+
+fn submit_region_callback(
+    props: &EditRegionModalProps,
+    region: &UseStateHandle<String>,
+    saving: &UseStateHandle<bool>,
+) -> Callback<SubmitEvent> {
+    let locale = props.locale;
+    let target_id = props.target.id;
+    let (region, saving) = (region.clone(), saving.clone());
+    let (on_saved, on_close) = (props.on_saved.clone(), props.on_close.clone());
+    Callback::from(move |event: SubmitEvent| {
+        event.prevent_default();
+        if *saving {
+            return;
+        }
+        saving.set(true);
+        let clean_region = parse_optional_string(&region);
+        let path = format!("{API_ENDPOINT}{PATH}/{target_id}/region");
+        let body = SetTargetRegionRequest {
+            region: clean_region,
+        };
+        let (saving, on_saved, on_close) = (saving.clone(), on_saved.clone(), on_close.clone());
+        spawn_local(async move {
+            let Ok(req) = Request::put(&path).json(&body) else {
+                saving.set(false);
+                return;
+            };
+            match send_request(locale, req).await {
+                Ok(_) => {
+                    dialog::message(locale, locale.t("targets.region_updated"), Icon::Success)
+                        .await;
+                    on_saved.emit(());
+                    on_close.emit(());
+                }
+                Err(err) => {
+                    dialog::message(locale, &err, Icon::Error).await;
+                    saving.set(false);
+                }
+            }
+        });
+    })
+}
+
+fn parse_optional_string(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_lowercase())
+}
+
+fn input_handler(state: &UseStateHandle<String>) -> Callback<InputEvent> {
+    let state = state.clone();
+    Callback::from(move |e: InputEvent| {
+        let input: HtmlInputElement = e.target_unchecked_into();
+        state.set(input.value());
+    })
+}
+
 #[function_component(PruneSettings)]
 fn prune_settings() -> Html {
     let locale = use_locale();
@@ -618,6 +793,7 @@ fn prune_settings() -> Html {
     });
 
     let run_prune = run_prune_callback(locale, &busy, &policy);
+    let vacuum_logs = vacuum_logs_callback(locale, &busy, &policy);
     let save_policy = save_policy_callback(locale, &busy, &policy, &notice);
 
     html! {
@@ -630,7 +806,7 @@ fn prune_settings() -> Html {
             </p>
             { notice_view(&notice, |key| html! { {locale.t(key)} }) }
             { prune_toggles_view(locale, &policy) }
-            { prune_stats_and_actions(locale, &policy, *busy, run_prune, save_policy) }
+            { prune_stats_and_actions(locale, &policy, *busy, run_prune, vacuum_logs, save_policy) }
         </div>
     }
 }
@@ -848,6 +1024,7 @@ fn prune_stats_and_actions(
     policy: &PrunePolicy,
     busy: bool,
     run_prune: Callback<MouseEvent>,
+    vacuum_logs: Callback<MouseEvent>,
     save_policy: Callback<MouseEvent>,
 ) -> Html {
     let last_run = match policy.last_pruned_at {
@@ -871,9 +1048,12 @@ fn prune_stats_and_actions(
                 }
                 <div>{locale.tf("targets.prune_last_reclaimed", &[("size", &reclaimed)])}</div>
             </div>
-            <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2">
                 <button type="button" class={BUTTON_CLASS} disabled={busy} onclick={run_prune}>
                     if busy { {locale.t("targets.prune_running")} } else { {locale.t("targets.prune_run_now")} }
+                </button>
+                <button type="button" class={BUTTON_CLASS} disabled={busy} onclick={vacuum_logs}>
+                    {locale.t("targets.vacuum_logs_now")}
                 </button>
                 <button type="button" class={BUTTON_CLASS} disabled={busy} onclick={save_policy}>
                     {locale.t("targets.prune_save")}
@@ -881,6 +1061,46 @@ fn prune_stats_and_actions(
             </div>
         </div>
     }
+}
+
+fn vacuum_logs_callback(
+    locale: Locale,
+    busy: &UseStateHandle<bool>,
+    policy: &UseStateHandle<PrunePolicy>,
+) -> Callback<MouseEvent> {
+    let (busy, policy) = (busy.clone(), policy.clone());
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        let (busy, policy) = (busy.clone(), policy.clone());
+        dialog::confirm_then(
+            locale,
+            locale.t("targets.vacuum_logs_confirm").to_string(),
+            async move {
+                busy.set(true);
+                let request = Request::post(&format!("{API_ENDPOINT}/platform/logs/vacuum"));
+                match fetch_json::<LogVacuumResult>(locale, request).await {
+                    Ok(result) => {
+                        let freed = format_disk_bytes(result.freed_bytes);
+                        let files = result.truncated_files.to_string();
+                        dialog::message(
+                            locale,
+                            &locale.tf(
+                                "targets.vacuum_logs_success",
+                                &[("files", &files), ("freed", &freed)],
+                            ),
+                            Icon::Success,
+                        )
+                        .await;
+                        refresh_prune_policy(locale, policy).await;
+                    }
+                    Err(err) => {
+                        dialog::message(locale, &err, Icon::Error).await;
+                    }
+                }
+                busy.set(false);
+            },
+        );
+    })
 }
 
 fn run_prune_callback(
@@ -1296,5 +1516,13 @@ mod tests {
 
         entry.packet_loss_percent = Some(6.7);
         assert_eq!(format_quality_stats(&entry), "14.2ms ±1.5ms (%7 kayıp)");
+    }
+
+    #[test]
+    fn parse_optional_string_trims_and_lowercases() {
+        assert_eq!(parse_optional_string("  EU  "), Some("eu".to_string()));
+        assert_eq!(parse_optional_string("TR"), Some("tr".to_string()));
+        assert_eq!(parse_optional_string("   "), None);
+        assert_eq!(parse_optional_string(""), None);
     }
 }
