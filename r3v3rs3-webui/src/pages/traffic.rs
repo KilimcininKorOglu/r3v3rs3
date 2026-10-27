@@ -622,12 +622,12 @@ fn priority_card_item(
 fn priority_kpi_cards(locale: Locale, stats: &StreamPriorityStats) -> Html {
     html! {
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            { priority_card_item(&locale.t("traffic.priority_active"), &stats.active_streams.to_string(), "In-flight HTTP/2 & 3", "text-neutral-900 dark:text-neutral-100") }
-            { priority_card_item(&locale.t("traffic.priority_total"), &stats.total_requests.to_string(), "RFC 9218 processed", "text-blue-600 dark:text-blue-400") }
-            { priority_card_item(&locale.t("traffic.priority_critical"), &stats.critical_requests.to_string(), "HTML, CSS, JS, fonts", "text-rose-600 dark:text-rose-400") }
-            { priority_card_item(&locale.t("traffic.priority_normal"), &stats.normal_requests.to_string(), "APIs & subresources", "text-cyan-600 dark:text-cyan-400") }
-            { priority_card_item(&locale.t("traffic.priority_background"), &stats.background_requests.to_string(), "Images & streaming", "text-amber-600 dark:text-amber-400") }
-            { priority_card_item(&locale.t("traffic.priority_throttled"), &stats.throttled_background.to_string(), "Backpressure paced", "text-purple-600 dark:text-purple-400") }
+            { priority_card_item(locale.t("traffic.priority_active"), &stats.active_streams.to_string(), "In-flight HTTP/2 & 3", "text-neutral-900 dark:text-neutral-100") }
+            { priority_card_item(locale.t("traffic.priority_total"), &stats.total_requests.to_string(), "RFC 9218 processed", "text-blue-600 dark:text-blue-400") }
+            { priority_card_item(locale.t("traffic.priority_critical"), &stats.critical_requests.to_string(), "HTML, CSS, JS, fonts", "text-rose-600 dark:text-rose-400") }
+            { priority_card_item(locale.t("traffic.priority_normal"), &stats.normal_requests.to_string(), "APIs & subresources", "text-cyan-600 dark:text-cyan-400") }
+            { priority_card_item(locale.t("traffic.priority_background"), &stats.background_requests.to_string(), "Images & streaming", "text-amber-600 dark:text-amber-400") }
+            { priority_card_item(locale.t("traffic.priority_throttled"), &stats.throttled_background.to_string(), "Backpressure paced", "text-purple-600 dark:text-purple-400") }
         </div>
     }
 }

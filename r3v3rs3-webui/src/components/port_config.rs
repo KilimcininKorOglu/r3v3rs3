@@ -239,20 +239,25 @@ fn initial_stream_priority_opts(opts: &PortOptions) -> bool {
         .unwrap_or_default()
 }
 
+struct PortLimitsHandles {
+    proxy_protocol: UseStateHandle<ProxyProtocolForm>,
+    http2_limits: UseStateHandle<Http2LimitsForm>,
+    http3_limits: UseStateHandle<Http3LimitsForm>,
+    stream_priority: UseStateHandle<bool>,
+}
+
 #[hook]
-fn use_port_limits(
-    opts: &PortOptions,
-) -> (
-    UseStateHandle<ProxyProtocolForm>,
-    UseStateHandle<Http2LimitsForm>,
-    UseStateHandle<Http3LimitsForm>,
-    UseStateHandle<bool>,
-) {
+fn use_port_limits(opts: &PortOptions) -> PortLimitsHandles {
     let proxy_protocol = use_state(|| ProxyProtocolForm::new(opts.proxy_protocol.as_ref()));
     let http2_limits = use_state(|| Http2LimitsForm::new(opts.http2_limits.as_ref()));
     let http3_limits = use_state(|| Http3LimitsForm::new(opts.http3_limits.as_ref()));
     let stream_priority = use_state(|| initial_stream_priority_opts(opts));
-    (proxy_protocol, http2_limits, http3_limits, stream_priority)
+    PortLimitsHandles {
+        proxy_protocol,
+        http2_limits,
+        http3_limits,
+        stream_priority,
+    }
 }
 
 #[function_component(PortConfig)]
@@ -287,8 +292,7 @@ pub fn port_config(props: &Props) -> Html {
 
     let tls_termination = props.port.opts.tls_termination.clone().unwrap_or_default();
     let tls_fields = use_tls_fields(&tls_termination);
-    let (proxy_protocol, http2_limits, http3_limits, stream_priority) =
-        use_port_limits(&props.port.opts);
+    let limits = use_port_limits(&props.port.opts);
 
     let form = PortForm {
         active: *active,
@@ -300,10 +304,10 @@ pub fn port_config(props: &Props) -> Html {
         client_auth: *tls_fields.client_auth,
         client_ca_certs: (*tls_fields.client_ca_certs).clone(),
         early_data: *tls_fields.early_data,
-        proxy_protocol: (*proxy_protocol).clone(),
-        http2_limits: (*http2_limits).clone(),
-        http3_limits: (*http3_limits).clone(),
-        stream_priority: *stream_priority,
+        proxy_protocol: (*limits.proxy_protocol).clone(),
+        http2_limits: (*limits.http2_limits).clone(),
+        http3_limits: (*limits.http3_limits).clone(),
+        stream_priority: *limits.stream_priority,
     };
     let prev_entry =
         use_state::<Result<Port, HashMap<String, String>>, _>(|| Err(Default::default()));
@@ -340,10 +344,7 @@ pub fn port_config(props: &Props) -> Html {
                 locale,
                 &protocol,
                 &tls_fields,
-                &proxy_protocol,
-                &http2_limits,
-                &http3_limits,
-                &stream_priority,
+                &limits,
                 &errors,
             ) }
         </>
@@ -836,10 +837,7 @@ fn protocol_view(
     locale: Locale,
     protocol: &str,
     tls_fields: &TlsFields,
-    proxy_protocol: &UseStateHandle<ProxyProtocolForm>,
-    http2_limits: &UseStateHandle<Http2LimitsForm>,
-    http3_limits: &UseStateHandle<Http3LimitsForm>,
-    stream_priority: &UseStateHandle<bool>,
+    limits: &PortLimitsHandles,
     errors: &HashMap<String, String>,
 ) -> Html {
     html! {
@@ -848,16 +846,16 @@ fn protocol_view(
                 { tls_view(locale, tls_fields, errors) }
             }
             if supports_proxy_protocol(protocol) {
-                { proxy_protocol_view(locale, proxy_protocol, errors) }
+                { proxy_protocol_view(locale, &limits.proxy_protocol, errors) }
             }
             if supports_http2(protocol) {
-                { http2_limits_view(locale, http2_limits, errors) }
+                { http2_limits_view(locale, &limits.http2_limits, errors) }
             }
             if supports_http3(protocol) {
-                { http3_limits_view(locale, http3_limits, errors) }
+                { http3_limits_view(locale, &limits.http3_limits, errors) }
             }
             if supports_http2(protocol) || supports_http3(protocol) {
-                { stream_priority_view(locale, stream_priority) }
+                { stream_priority_view(locale, &limits.stream_priority) }
             }
         </>
     }
