@@ -8,6 +8,7 @@ use crate::components::data_list::{
     Column, LINK_CLASS, Row, SelectionProps, active_toggle, selectable_list_card, status_badge,
 };
 use crate::components::discovery_status::DiscoveryStatusCard;
+use crate::components::error_page_themes::ErrorPageThemesCard;
 use crate::i18n::use_locale;
 use crate::pages::Route;
 use crate::store::{PortStore, ProxyStore, SessionStore};
@@ -18,6 +19,7 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::{ProxyEntry, ProxyKind, ProxyState, ProxyStatus};
 use r3v3rs3_api::upstream::{CircuitState, SrvStatus, UpstreamHealth};
+use serde_derive::Deserialize;
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
@@ -48,10 +50,62 @@ const COLUMNS: [Column; 5] = [
     },
 ];
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProxyTab {
+    #[default]
+    Proxies,
+    ErrorPageThemes,
+}
+
+#[derive(Deserialize, Default)]
+struct ProxyQuery {
+    tab: Option<String>,
+}
+
+fn render_tabs(locale: Locale, active_tab: &UseStateHandle<ProxyTab>) -> Html {
+    let tabs = [
+        (ProxyTab::Proxies, "proxies.tab_proxies"),
+        (ProxyTab::ErrorPageThemes, "proxies.tab_error_page_themes"),
+    ];
+    html! {
+        <div class="border-b border-neutral-200 dark:border-neutral-700">
+            <nav class="flex space-x-6">
+                { for tabs.into_iter().map(|(tab, label)| {
+                    let is_active = **active_tab == tab;
+                    let active_cls = if is_active {
+                        "border-blue-500 text-blue-500 dark:text-blue-400 font-semibold border-b-2"
+                    } else {
+                        "border-transparent text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
+                    };
+                    let onclick = {
+                        let active_tab = active_tab.clone();
+                        Callback::from(move |_| active_tab.set(tab))
+                    };
+                    html! {
+                        <button type="button" {onclick} class={classes!("py-3", "px-1", "text-sm", "transition-colors", active_cls)}>
+                            { locale.t(label) }
+                        </button>
+                    }
+                }) }
+            </nav>
+        </div>
+    }
+}
+
 #[function_component(ProxyList)]
 pub fn proxy_list() -> Html {
     use_ensure_auth();
     let locale = use_locale();
+    let location = use_location();
+    let initial_tab = location
+        .and_then(|loc| loc.query::<ProxyQuery>().ok())
+        .and_then(|q| q.tab)
+        .map(|t| match t.as_str() {
+            "themes" | "error_page_themes" => ProxyTab::ErrorPageThemes,
+            _ => ProxyTab::Proxies,
+        })
+        .unwrap_or_default();
+    let active_tab = use_state(|| initial_tab);
 
     let (ports, ports_dispatcher) = use_store::<PortStore>();
     let (proxies, proxies_dispatcher) = use_store::<ProxyStore>();
@@ -106,31 +160,42 @@ pub fn proxy_list() -> Html {
         .collect::<Vec<_>>();
     let selection = build_selection(locale, can_edit, &proxies, &selected, &proxies_dispatcher);
     html! {
-        <>
-            <DiscoveryStatusCard />
-            { selectable_list_card(locale, proxies.loaded, "proxies.empty", &COLUMNS, &rows, selection.as_ref()) }
-            if let Some((proxy_name, upstreams)) = (*active_distribution).clone() {
-                <crate::components::upstream_distribution_modal::UpstreamDistributionModal
-                    {locale}
-                    {proxy_name}
-                    {upstreams}
-                    onclose={{
-                        let active = active_distribution.clone();
-                        Callback::from(move |()| active.set(None))
-                    }}
-                />
-            }
-            if can_edit {
-                <div class="flex items-center justify-end my-4">
-                    <div>
-                        <button onclick={new_proxy_onclick} class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2" type="button">
-                            <img src="/assets/icons/add.svg" class="w-4 h-4 mr-1" />
-                            {locale.t("common.add")}
-                        </button>
-                    </div>
-                </div>
-            }
-        </>
+        <div class="space-y-6">
+            { render_tabs(locale, &active_tab) }
+
+            { match *active_tab {
+                ProxyTab::Proxies => html! {
+                    <>
+                        <DiscoveryStatusCard />
+                        { selectable_list_card(locale, proxies.loaded, "proxies.empty", &COLUMNS, &rows, selection.as_ref()) }
+                        if let Some((proxy_name, upstreams)) = (*active_distribution).clone() {
+                            <crate::components::upstream_distribution_modal::UpstreamDistributionModal
+                                {locale}
+                                {proxy_name}
+                                {upstreams}
+                                onclose={{
+                                    let active = active_distribution.clone();
+                                    Callback::from(move |()| active.set(None))
+                                }}
+                            />
+                        }
+                        if can_edit {
+                            <div class="flex items-center justify-end my-4">
+                                <div>
+                                    <button onclick={new_proxy_onclick} class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2" type="button">
+                                        <img src="/assets/icons/add.svg" class="w-4 h-4 mr-1" />
+                                        {locale.t("common.add")}
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </>
+                },
+                ProxyTab::ErrorPageThemes => html! {
+                    <ErrorPageThemesCard />
+                },
+            } }
+        </div>
     }
 }
 

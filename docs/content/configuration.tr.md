@@ -423,7 +423,7 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
 
 ### Merkezi Hata Sayfası Temaları Havuzu
 
-Proxy düzeyinde her seferinde ayrı ayrı HTML sayfaları girmek yerine r3v3rs3, platform genelinde yönetilen merkezi bir **Hata Sayfası Temaları (Error Page Themes)** havuzu sunar:
+Proxy düzeyinde her seferinde ayrı ayrı HTML sayfaları girmek yerine r3v3rs3, WebUI üzerinde **Proxies > Hata Sayfası Temaları** altında platform genelinde yönetilen merkezi bir **Hata Sayfası Temaları (Error Page Themes)** havuzu sunar:
 
 - **Yerleşik Temalar**: Tüm standart hata durum kodları (`400`, `401`, `403`, `404`, `405`, `408`, `429`, `500`, `502`, `503`, `504`) için hazır modern temalarla (`Minimalist Dark`, `Modern Glassmorphism`, `Developer Terminal`, `Illustration Card`, `Maintenance Notice`) birlikte gelir.
 - **Proxy Tema Ataması**: `error_page_theme = "short_id"` ile herhangi bir proxy'ye WebUI, CLI (`r3 proxy update <id> ...`) veya REST API üzerinden tek tıkla hata sayfası teması bağlanabilir.

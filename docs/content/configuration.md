@@ -423,7 +423,7 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
 
 ### Centralized Error Page Themes Hub
 
-Instead of defining custom HTML pages repeatedly per proxy, r3v3rs3 provides a centralized **Error Page Themes** repository managed platform-wide:
+Instead of defining custom HTML pages repeatedly per proxy, r3v3rs3 provides a centralized **Error Page Themes** repository managed platform-wide under **Proxies > Error Page Themes** in the WebUI:
 
 - **Built-in Themes**: Ships with ready-to-use modern themes (`Minimalist Dark`, `Modern Glassmorphism`, `Developer Terminal`, `Illustration Card`, `Maintenance Notice`) pre-populated across all standard error status codes (`400`, `401`, `403`, `404`, `405`, `408`, `429`, `500`, `502`, `503`, `504`).
 - **Proxy Theme Association**: Assign an error page theme to any proxy with `error_page_theme = "short_id"` via WebUI, CLI (`r3 proxy update <id> ...`), or REST API.

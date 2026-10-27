@@ -48,7 +48,7 @@ mod registries;
 mod resource_page;
 pub mod security;
 mod self_sign;
-mod settings;
+pub mod settings;
 mod store_env;
 mod targets;
 pub mod traffic;

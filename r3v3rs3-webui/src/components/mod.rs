@@ -12,6 +12,7 @@ pub mod data_list;
 pub mod discovery_status;
 pub mod domain_ssl_status;
 pub mod dropdown;
+pub mod error_page_themes;
 pub mod error_pages_editor;
 pub mod footer;
 pub mod geoip_wizard;
