@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.5] - 2026-10-28
+
+### Fixed
+- Webhook Deployment Test Synchronization: Fixed a race condition in `wait_deployments` test helper by ensuring it waits for both deployment finalization and app lock release (`!platform.busy_apps().contains(&id)`), preventing premature subsequent webhook invocations from returning `AppBusy`.
+
 ## [2.8.4] - 2026-10-28
 
 ### Added
