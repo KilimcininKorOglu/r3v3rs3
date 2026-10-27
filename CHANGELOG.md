@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-10-28
+
+### Added
+- Target Region Assignment: Added geographical `Region` configuration input in the Add Agent Target form and an interactive `EditRegionModal` calling `PUT /api/targets/{id}/region` on both local and agent target rows to assign, update, or clear node regions for geo-proximity traffic steering.
+- Platform Container Log Vacuum: Added an on-demand "Vacuum Logs" action button in the Disk Hygiene & Prune Policy card on the Targets page invoking `POST /api/platform/logs/vacuum` to immediately truncate active container logs across the entire platform.
+- Dual-Language Documentation: Updated `platform.md` and `platform.tr.md` documenting target region management and platform-wide container log vacuum.
+
+### Changed
+- Target Actions Standardization: Standardized target row action buttons by assigning `ActionVariant::Edit` to Edit Region and `ActionVariant::Terminal` to New Token generation, maintaining unique and semantic iconography across all target actions.
+
 ## [2.7.9] - 2026-10-27
 
 ### Added
