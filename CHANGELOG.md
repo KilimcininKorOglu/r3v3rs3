@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.1] - 2026-10-28
+
+### Added
+- Stream Priority Sub-Toggles: Exposed nested `Inject Priority Header` (`inject_header`) and `Adaptive Concurrency` (`adaptive_concurrency`) controls in HTTP proxy configuration when RFC 9218 stream prioritization is enabled.
+- Port-Level Stream Priority: Enabled stream priority toggle in port configuration for HTTP/2 and HTTP/3 ports, preserving options across edits.
+- Live Traffic Stream Priority Telemetry: Added a dedicated `Stream Priority` tab in `/traffic` visualizing real-time RFC 9218 metrics, active in-flight multiplexed streams, urgency distribution (Critical, Normal, Background), and adaptive backpressure counters.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` documenting WebUI stream priority management and telemetry.
+
 ## [2.8.0] - 2026-10-28
 
 ### Added
