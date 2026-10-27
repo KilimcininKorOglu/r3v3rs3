@@ -9,7 +9,8 @@ use super::resource_page::{
 use super::settings::send_json;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
-use crate::components::data_list::{Column, LINK_CLASS, Row, list_card};
+use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::data_list::{Column, Row, list_card};
 use crate::dialog::{self, Icon};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
@@ -210,9 +211,11 @@ fn list_row(
     let edit_cb = set_on_click(form, Form::edit(entry));
     let actions = html! {
         <div class="flex items-center space-x-2">
-            <button type="button" onclick={test_cb} class={LINK_CLASS}>
-                {locale.t("webhooks.test_button")}
-            </button>
+            <ActionIconButton
+                variant={ActionVariant::Play}
+                title={locale.t("webhooks.test_button").to_string()}
+                onclick={test_cb}
+            />
             { row_actions(locale, edit_cb, Some(delete)) }
         </div>
     };

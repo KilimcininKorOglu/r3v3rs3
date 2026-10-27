@@ -4,7 +4,7 @@
 use super::accounts::{HINT_CLASS, INPUT_CLASS};
 use super::settings::{fetch_json, send_request};
 use crate::API_ENDPOINT;
-use crate::components::data_list::DANGER_LINK_CLASS;
+use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::dialog::{self, Icon};
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
@@ -54,6 +54,7 @@ pub fn app_commands(props: &Props) -> Html {
     };
     let running_id = use_state(|| Option::<ShortId>::None);
     let active_output = use_state(|| Option::<(String, String)>::None);
+    let editing_cmd = use_state(|| Option::<AppScheduledCommand>::None);
 
     {
         let commands = commands.clone();
@@ -69,42 +70,80 @@ pub fn app_commands(props: &Props) -> Html {
 
     let on_submit = add_command_submit(locale, id, &form, &commands);
 
+    let on_close_edit = {
+        let editing_cmd = editing_cmd.clone();
+        Callback::from(move |()| editing_cmd.set(None))
+    };
+
+    let on_saved_edit = {
+        let commands = commands.clone();
+        Callback::from(move |()| load_commands(locale, id, commands.clone()))
+    };
+
     html! {
         <div class="mt-8 bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 rounded-md p-4 sm:p-6">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-                <div>
-                    <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                        {locale.t("apps.commands_title")}
-                    </h3>
-                    <p class={HINT_CLASS}>{locale.t("apps.commands_desc")}</p>
-                </div>
-                <button
-                    onclick={toggle_adding}
-                    type="button"
-                    class="self-start sm:self-auto inline-flex items-center text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 font-medium"
-                >
-                    if *form.adding {
-                        {locale.t("common.cancel")}
-                    } else {
-                        {locale.t("apps.commands_add")}
-                    }
-                </button>
-            </div>
-
+            { render_commands_header(locale, &form, toggle_adding) }
             if *form.adding {
-                { render_add_form(
-                    locale,
-                    &form,
-                    on_submit,
-                ) }
+                { render_add_form(locale, &form, on_submit) }
             }
-
-            { render_commands_list(locale, id, &commands, &running_id, &active_output) }
-
-            if let Some((name, output)) = (*active_output).clone() {
-                { render_output_modal(locale, &name, &output, &active_output) }
-            }
+            { render_commands_list(locale, id, &commands, &running_id, &active_output, &editing_cmd) }
+            { render_active_modals(locale, id, &active_output, &editing_cmd, on_close_edit, on_saved_edit) }
         </div>
+    }
+}
+
+fn render_commands_header(
+    locale: Locale,
+    form: &CommandFormState,
+    toggle_adding: Callback<MouseEvent>,
+) -> Html {
+    let button_label = if *form.adding {
+        locale.t("common.cancel")
+    } else {
+        locale.t("apps.commands_add")
+    };
+    html! {
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+            <div>
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                    {locale.t("apps.commands_title")}
+                </h3>
+                <p class={HINT_CLASS}>{locale.t("apps.commands_desc")}</p>
+            </div>
+            <button
+                onclick={toggle_adding}
+                type="button"
+                class="self-start sm:self-auto inline-flex items-center text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 font-medium"
+            >
+                {button_label}
+            </button>
+        </div>
+    }
+}
+
+fn render_active_modals(
+    locale: Locale,
+    id: ShortId,
+    active_output: &UseStateHandle<Option<(String, String)>>,
+    editing_cmd: &UseStateHandle<Option<AppScheduledCommand>>,
+    on_close_edit: Callback<()>,
+    on_saved_edit: Callback<()>,
+) -> Html {
+    html! {
+        <>
+            if let Some((name, output)) = (**active_output).clone() {
+                { render_output_modal(locale, &name, &output, active_output) }
+            }
+            if let Some(cmd) = (**editing_cmd).clone() {
+                <EditCommandModal
+                    app_id={id}
+                    locale={locale}
+                    cmd={cmd}
+                    on_close={on_close_edit}
+                    on_saved={on_saved_edit}
+                />
+            }
+        </>
     }
 }
 
@@ -190,6 +229,7 @@ fn render_commands_list(
     commands: &UseStateHandle<Option<Vec<AppScheduledCommand>>>,
     running_id: &UseStateHandle<Option<ShortId>>,
     active_output: &UseStateHandle<Option<(String, String)>>,
+    editing_cmd: &UseStateHandle<Option<AppScheduledCommand>>,
 ) -> Html {
     let Some(list) = (**commands).as_ref() else {
         return html! {};
@@ -216,11 +256,33 @@ fn render_commands_list(
                 </thead>
                 <tbody class="divide-y divide-neutral-200 dark:divide-neutral-700">
                     { list.iter().map(|cmd| {
-                        render_command_row(locale, app_id, cmd, commands, running_id, active_output)
+                        render_command_row(locale, app_id, cmd, commands, running_id, active_output, editing_cmd)
                     }).collect::<Html>() }
                 </tbody>
             </table>
         </div>
+    }
+}
+
+fn render_command_status_badge(locale: Locale, last_status: Option<&String>) -> Html {
+    let Some(status) = last_status else {
+        return html! {};
+    };
+    let is_ok = status == "ok";
+    let color = if is_ok {
+        "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+    } else {
+        "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
+    };
+    let label = if is_ok {
+        locale.t("apps.command_status_success")
+    } else {
+        locale.t("apps.command_status_failed")
+    };
+    html! {
+        <span class={classes!("px-1.5", "py-0.5", "rounded", "text-xs", "font-medium", color)}>
+            {label}
+        </span>
     }
 }
 
@@ -231,6 +293,7 @@ fn render_command_row(
     commands: &UseStateHandle<Option<Vec<AppScheduledCommand>>>,
     running_id: &UseStateHandle<Option<ShortId>>,
     active_output: &UseStateHandle<Option<(String, String)>>,
+    editing_cmd: &UseStateHandle<Option<AppScheduledCommand>>,
 ) -> Html {
     let is_running = **running_id == Some(cmd.id);
     let run_onclick = run_command_callback(locale, app_id, cmd.id, running_id, commands);
@@ -245,26 +308,15 @@ fn render_command_row(
         })
     };
 
-    let status_badge = if let Some(status) = &cmd.last_status {
-        let is_ok = status == "ok";
-        let color = if is_ok {
-            "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
-        } else {
-            "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
-        };
-        let label = if is_ok {
-            locale.t("apps.command_status_success")
-        } else {
-            locale.t("apps.command_status_failed")
-        };
-        html! {
-            <span class={classes!("px-1.5", "py-0.5", "rounded", "text-xs", "font-medium", color)}>
-                {label}
-            </span>
-        }
-    } else {
-        html! {}
+    let edit_onclick = {
+        let editing = editing_cmd.clone();
+        let cmd = cmd.clone();
+        Callback::from(move |_: MouseEvent| {
+            editing.set(Some(cmd.clone()));
+        })
     };
+
+    let status_badge = render_command_status_badge(locale, cmd.last_status.as_ref());
 
     html! {
         <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-700/30">
@@ -289,34 +341,198 @@ fn render_command_row(
                 </div>
             </td>
             <td class="py-2.5 px-3 text-right">
-                <div class="inline-flex items-center gap-2">
+                <div class="inline-flex items-center gap-1 justify-end">
                     if cmd.last_output.is_some() {
-                        <button
+                        <ActionIconButton
+                            variant={ActionVariant::Terminal}
+                            title={locale.t("apps.command_output").to_string()}
                             onclick={view_output}
-                            type="button"
-                            class="text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
-                        >
-                            {locale.t("apps.command_output")}
-                        </button>
+                        />
                     }
-                    <button
-                        onclick={run_onclick}
+                    <ActionIconButton
+                        variant={ActionVariant::Play}
+                        title={locale.t("apps.command_run_now").to_string()}
                         disabled={is_running}
-                        type="button"
-                        class="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium disabled:opacity-50"
-                    >
-                        if is_running {
-                            {locale.t("apps.command_running")}
-                        } else {
-                            {locale.t("apps.command_run_now")}
-                        }
-                    </button>
-                    <a class={DANGER_LINK_CLASS} onclick={delete_onclick}>
-                        {locale.t("common.delete")}
-                    </a>
+                        onclick={run_onclick}
+                    />
+                    <ActionIconButton
+                        variant={ActionVariant::Edit}
+                        title={locale.t("apps.command_edit").to_string()}
+                        onclick={edit_onclick}
+                    />
+                    <ActionIconButton
+                        variant={ActionVariant::Delete}
+                        title={locale.t("common.delete").to_string()}
+                        onclick={delete_onclick}
+                    />
                 </div>
             </td>
         </tr>
+    }
+}
+
+#[derive(Properties, PartialEq, Clone)]
+struct EditModalProps {
+    app_id: ShortId,
+    locale: Locale,
+    cmd: AppScheduledCommand,
+    on_close: Callback<()>,
+    on_saved: Callback<()>,
+}
+
+#[function_component(EditCommandModal)]
+fn edit_command_modal(props: &EditModalProps) -> Html {
+    let locale = props.locale;
+    let app_id = props.app_id;
+    let cmd = &props.cmd;
+    let cmd_id = cmd.id;
+
+    let name = use_state(|| cmd.name.clone());
+    let schedule = use_state(|| cmd.schedule.clone());
+    let command = use_state(|| cmd.command.clone());
+    let enabled = use_state(|| cmd.enabled);
+    let saving = use_state(|| false);
+
+    let on_name = input_handler(&name);
+    let on_schedule = input_handler(&schedule);
+    let on_command = input_handler(&command);
+    let on_toggle_enabled = {
+        let enabled = enabled.clone();
+        Callback::from(move |_: Event| enabled.set(!*enabled))
+    };
+
+    let on_close_click = {
+        let on_close = props.on_close.clone();
+        Callback::from(move |_: MouseEvent| on_close.emit(()))
+    };
+
+    let on_submit = {
+        let (name, schedule, command, enabled, saving) = (
+            name.clone(),
+            schedule.clone(),
+            command.clone(),
+            enabled.clone(),
+            saving.clone(),
+        );
+        let (on_saved, on_close) = (props.on_saved.clone(), props.on_close.clone());
+        Callback::from(move |event: SubmitEvent| {
+            event.prevent_default();
+            let body = ScheduledCommandRequest {
+                name: (*name).clone(),
+                schedule: (*schedule).clone(),
+                command: (*command).clone(),
+                enabled: *enabled,
+            };
+            saving.set(true);
+            let (saving, on_saved, on_close) = (saving.clone(), on_saved.clone(), on_close.clone());
+            spawn_local(async move {
+                let path = format!("{API_ENDPOINT}/apps/{app_id}/commands/{cmd_id}");
+                let Ok(req) = Request::put(&path).json(&body) else {
+                    saving.set(false);
+                    return;
+                };
+                match send_request(locale, req).await {
+                    Ok(_) => {
+                        dialog::message(locale, locale.t("apps.command_updated"), Icon::Success)
+                            .await;
+                        on_saved.emit(());
+                        on_close.emit(());
+                    }
+                    Err(err) => {
+                        dialog::message(locale, &err, Icon::Error).await;
+                        saving.set(false);
+                    }
+                }
+            });
+        })
+    };
+
+    html! {
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div class="bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg max-w-xl w-full p-4 sm:p-6 shadow-xl space-y-4">
+                <div class="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-700 pb-3">
+                    <h4 class="font-semibold text-neutral-900 dark:text-neutral-100">
+                        {locale.t("apps.command_edit")}
+                    </h4>
+                    <button onclick={on_close_click.clone()} type="button" class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 text-lg">
+                        {"✕"}
+                    </button>
+                </div>
+                <form onsubmit={on_submit} class="space-y-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                                {locale.t("apps.command_name")}
+                            </label>
+                            <input
+                                type="text"
+                                required=true
+                                value={(*name).clone()}
+                                oninput={on_name}
+                                class={INPUT_CLASS}
+                            />
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                                {locale.t("apps.command_schedule")}
+                            </label>
+                            <input
+                                type="text"
+                                required=true
+                                placeholder={locale.t("apps.command_schedule_hint")}
+                                value={(*schedule).clone()}
+                                oninput={on_schedule}
+                                class={INPUT_CLASS}
+                            />
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                            {locale.t("apps.command_cmd")}
+                        </label>
+                        <input
+                            type="text"
+                            required=true
+                            placeholder={locale.t("apps.command_cmd_placeholder")}
+                            value={(*command).clone()}
+                            oninput={on_command}
+                            class={INPUT_CLASS}
+                        />
+                    </div>
+                    <div class="flex items-center justify-between pt-2 border-t border-neutral-100 dark:border-neutral-700">
+                        <label class="inline-flex items-center gap-2 text-xs text-neutral-700 dark:text-neutral-300 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={*enabled}
+                                onchange={on_toggle_enabled}
+                                class="rounded border-neutral-300 dark:border-neutral-700 text-blue-600 focus:ring-blue-500"
+                            />
+                            {locale.t("apps.command_enabled")}
+                        </label>
+                        <div class="flex items-center gap-2">
+                            <button
+                                onclick={on_close_click}
+                                type="button"
+                                class="text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700"
+                            >
+                                {locale.t("common.cancel")}
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={*saving}
+                                class="text-xs sm:text-sm px-4 py-1.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50"
+                            >
+                                if *saving {
+                                    {locale.t("common.loading")}
+                                } else {
+                                    {locale.t("apps.command_save")}
+                                }
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
     }
 }
 
@@ -356,10 +572,9 @@ fn render_output_modal(
 
 fn input_handler(state: &UseStateHandle<String>) -> Callback<InputEvent> {
     let state = state.clone();
-    Callback::from(move |e: InputEvent| {
-        if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
-            state.set(input.value());
-        }
+    Callback::from(move |event: InputEvent| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        state.set(input.value());
     })
 }
 
@@ -448,20 +663,23 @@ fn delete_command_callback(
 ) -> Callback<MouseEvent> {
     let (cmd_id, cmd_name) = (cmd.id, cmd.name.clone());
     let commands = commands.clone();
-    Callback::from(move |event: MouseEvent| {
-        event.prevent_default();
+    Callback::from(move |_: MouseEvent| {
+        let (commands, cmd_name) = (commands.clone(), cmd_name.clone());
         let question = locale.tf("apps.command_delete_confirm", &[("name", &cmd_name)]);
-        let commands = commands.clone();
         dialog::confirm_then(locale, question, async move {
             let path = format!("{API_ENDPOINT}/apps/{app_id}/commands/{cmd_id}");
-            let _ = fetch_json::<()>(locale, Request::delete(&path)).await;
-            load_commands(locale, app_id, commands);
+            let Ok(req) = Request::delete(&path).build() else {
+                return;
+            };
+            if send_request(locale, req).await.is_ok() {
+                load_commands(locale, app_id, commands);
+            }
         });
     })
 }
 
-pub fn format_command_last_run(locale: Locale, last_run_at: Option<i64>) -> String {
-    let Some(ts) = last_run_at else {
+fn format_command_last_run(locale: Locale, ts: Option<i64>) -> String {
+    let Some(ts) = ts else {
         return locale.t("apps.command_never").to_string();
     };
     crate::format::format_time(ts as u64)

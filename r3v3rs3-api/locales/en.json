@@ -1913,6 +1913,8 @@
   "apps.command_status_success": "Success",
   "apps.command_status_failed": "Failed",
   "apps.command_save": "Save",
+  "apps.command_edit": "Edit Command",
+  "apps.command_updated": "Scheduled command updated successfully.",
   "apps.command_close": "Close",
   "apps.require_approval": "Require approval before deployment",
   "apps.require_approval_hint": "When enabled, deployments wait for manual approval before proceeding.",

@@ -1913,6 +1913,8 @@
   "apps.command_status_success": "Başarılı",
   "apps.command_status_failed": "Başarısız",
   "apps.command_save": "Kaydet",
+  "apps.command_edit": "Komutu Düzenle",
+  "apps.command_updated": "Zamanlanmış komut başarıyla güncellendi.",
   "apps.command_close": "Kapat",
   "apps.require_approval": "Deployment öncesi onay zorunlu",
   "apps.require_approval_hint": "Etkinleştirildiğinde, deployment'lar başlamadan önce manuel onay bekler.",

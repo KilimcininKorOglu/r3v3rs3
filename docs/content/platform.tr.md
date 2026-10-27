@@ -917,7 +917,7 @@ Her komut tanımı şunları içerir:
 - **Komut**: Container içinde `sh -c` ile çalıştırılacak komut.
 - **Etkin**: Arka plan zamanlayıcısının süresi gelen görevi otomatik olarak çalıştırıp çalıştırmayacağı.
 
-Sunucu, süresi gelen komutları kontrol edip çalıştırmak için her 30 saniyede bir arka plan döngüsü yürütür. Bir komut ayrıca **Şimdi çalıştır** butonu ile anında elle de çalıştırılabilir. Her satırda son çalıştırma durumu, çıkış kodu ve süresi kaydedilir; **Çıktı** butonu ise en son çalıştırmanın stdout ve stderr çıktısını gösteren bir modal açar.
+Sunucu, süresi gelen komutları kontrol edip çalıştırmak için her 30 saniyede bir arka plan döngüsü yürütür. Mevcut bir komut **Düzenle** modal'ı üzerinden güncellenebilir (`PUT /api/apps/{id}/commands/{cmd_id}`) veya **Şimdi çalıştır** butonu ile anında elle de çalıştırılabilir. Her satırda son çalıştırma durumu, çıkış kodu ve süresi kaydedilir; **Çıktı** butonu ise en son çalıştırmanın stdout ve stderr çıktısını gösteren bir modal açar.
 
 ### Hedefler
 
