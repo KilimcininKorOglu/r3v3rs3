@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.6] - 2026-10-27
+
+### Added
+- Centralized Security Hub Console: Introduced a unified 4-tab Security Hub at `/security` (with backward-compatible `/access_lists` routing) consolidating Access Lists, Banned IPs, Quarantined IPs, and Anomaly Detection Rules into a dedicated operational interface.
+- Standardized Security Action Controls: Converted Banned IPs and Quarantined IPs list controls to standardized `ActionIconButton` components with localized tooltips and aria-labels.
+
+### Changed
+- Streamlined Global Settings: Relocated Banned IPs, Quarantined IPs, and Anomaly Rules cards from `/settings` to the Centralized Security Hub, replacing them with a direct shortcut banner and keeping the global settings page focused on core server parameters.
+- Sidebar Navigation: Renamed the sidebar navigation item from "Access Lists" to "Security" (`nav.security`) with shield-checkmark iconography reflecting the expanded multi-tab security capabilities.
+- Dual-Language Documentation: Synchronized `configuration.md` and `configuration.tr.md` in lockstep documenting the centralized Security Hub and tabbed quarantine controls.
+
 ## [2.7.5] - 2026-10-27
 
 ### Changed
