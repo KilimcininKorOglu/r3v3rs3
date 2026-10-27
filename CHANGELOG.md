@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.1] - 2026-10-27
+
+### Fixed
+- Missing WebUI SVG Icons: Added missing vector icon assets in `r3v3rs3-webui/assets/icons/` (`refresh.svg`, `reload.svg`, `terminal.svg`, `description.svg`, `play.svg`, `pause.svg`, `trash.svg`, `eye.svg`), resolving 404 Not Found asset errors on CT logs, application dashboard, and control actions.
+- Automated Asset Presence Verification: Added automated regression test `every_referenced_asset_exists` in `r3v3rs3-webui` verifying that all SVG icons referenced across WebUI sources exist on disk before compilation.
+
 ## [2.7.0] - 2026-10-25
 
 ### Fixed
