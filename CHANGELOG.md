@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.4] - 2026-10-28
+
+### Added
+- GeoIP Database Security Hub Integration: Consolidated GeoIP database management into a dedicated "GeoIP" tab within the Security Center (`/security`), providing status inspection (`GET /api/security/geoip/status`), configuration updates (`PUT /api/security/geoip/config`), and on-demand database refresh (`POST /api/security/geoip/update`).
+- Centralized Unix Timestamp Formatting: Introduced `format_unix_time` in `r3v3rs3-webui/src/format.rs` for unified date-time formatting with localized fallback across settings and security cards.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` documenting GeoIP management within the Security Center.
+
+### Changed
+- Global Settings De-cluttering: Removed fragmented GeoIP status card and fields from the general settings page in favor of the consolidated Security Center tab.
+
 ## [2.8.3] - 2026-10-28
 
 ### Added
