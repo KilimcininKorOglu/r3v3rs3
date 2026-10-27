@@ -1,6 +1,6 @@
-//! The backups of one managed database: take, download, restore and delete, plus the backup
-//! settings of the server.
+//! The backups of one managed database: take, download, restore, test and delete.
 
+use super::Route;
 use super::app_deployments::back_header;
 use super::resource_page::{Notice, delete_on_click, notice_view};
 use super::settings::{fetch_json, send_request};
@@ -16,138 +16,14 @@ use gloo_net::http::Request;
 use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{
-    BackupConfig, BackupEntry, PitrRange, PitrRestoreRequest, RsyncConfig, S3BackupSnapshot,
-    S3Config, SftpConfig,
-};
+use r3v3rs3_api::platform::{BackupEntry, PitrRange, PitrRestoreRequest};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
 
-const INPUT_CLASS: &str =
-    "w-full rounded bg-neutral-800 text-neutral-100 border border-neutral-700 px-2 py-1.5 text-sm";
 const BUTTON_CLASS: &str =
     "px-3 py-1.5 rounded bg-neutral-100 text-neutral-900 font-medium disabled:opacity-50";
-
-/// The backup settings form state holding S3, SFTP, rsync and restore test fields.
-#[derive(Clone, PartialEq)]
-struct FormState {
-    schedule: String,
-    keep: String,
-    heartbeat_url: String,
-    endpoint: String,
-    region: String,
-    prefix: String,
-    access_key: String,
-    secret_key: String,
-    sftp_host: String,
-    sftp_port: String,
-    sftp_user: String,
-    sftp_path: String,
-    sftp_password: String,
-    sftp_key: String,
-    rsync_dest: String,
-    rsync_ssh_options: String,
-    rsync_password: String,
-    restore_test_enabled: bool,
-}
-
-impl Default for FormState {
-    fn default() -> Self {
-        Self {
-            schedule: String::new(),
-            keep: "7".into(),
-            heartbeat_url: String::new(),
-            endpoint: String::new(),
-            region: String::new(),
-            prefix: String::new(),
-            access_key: String::new(),
-            secret_key: String::new(),
-            sftp_host: String::new(),
-            sftp_port: "22".into(),
-            sftp_user: String::new(),
-            sftp_path: String::new(),
-            sftp_password: String::new(),
-            sftp_key: String::new(),
-            rsync_dest: String::new(),
-            rsync_ssh_options: String::new(),
-            rsync_password: String::new(),
-            restore_test_enabled: true,
-        }
-    }
-}
-
-impl FormState {
-    fn from_config(config: &BackupConfig) -> Self {
-        let s3 = config.s3.clone().unwrap_or_default();
-        let sftp = config.sftp.clone().unwrap_or_default();
-        let rsync = config.rsync.clone().unwrap_or_default();
-        Self {
-            schedule: config.schedule.clone(),
-            keep: config.keep.to_string(),
-            heartbeat_url: config.heartbeat_url.clone().unwrap_or_default(),
-            endpoint: s3.endpoint,
-            region: s3.region,
-            prefix: s3.prefix,
-            access_key: s3.access_key,
-            secret_key: String::new(),
-            sftp_host: sftp.host,
-            sftp_port: if sftp.port > 0 {
-                sftp.port.to_string()
-            } else {
-                "22".to_string()
-            },
-            sftp_user: sftp.user,
-            sftp_path: sftp.path,
-            sftp_password: String::new(),
-            sftp_key: String::new(),
-            rsync_dest: rsync.destination,
-            rsync_ssh_options: rsync.ssh_options,
-            rsync_password: String::new(),
-            restore_test_enabled: config.restore_test_enabled,
-        }
-    }
-
-    fn to_config(&self) -> BackupConfig {
-        let s3 = (!self.endpoint.trim().is_empty()).then(|| S3Config {
-            endpoint: self.endpoint.trim().to_string(),
-            region: self.region.trim().to_string(),
-            prefix: self.prefix.trim().to_string(),
-            access_key: self.access_key.trim().to_string(),
-            secret_key: self.secret_key.clone(),
-        });
-        let sftp = (!self.sftp_host.trim().is_empty()).then(|| SftpConfig {
-            host: self.sftp_host.trim().to_string(),
-            port: self.sftp_port.trim().parse().unwrap_or(22),
-            user: self.sftp_user.trim().to_string(),
-            path: self.sftp_path.trim().to_string(),
-            password: self.sftp_password.clone(),
-            key: self.sftp_key.clone(),
-        });
-        let rsync = (!self.rsync_dest.trim().is_empty()).then(|| RsyncConfig {
-            destination: self.rsync_dest.trim().to_string(),
-            ssh_options: self.rsync_ssh_options.trim().to_string(),
-            password: self.rsync_password.clone(),
-        });
-        BackupConfig {
-            schedule: self.schedule.trim().to_string(),
-            keep: self.keep.trim().parse().unwrap_or(7),
-            s3,
-            sftp,
-            rsync,
-            restore_test_enabled: self.restore_test_enabled,
-            heartbeat_url: {
-                let trimmed = self.heartbeat_url.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                }
-            },
-        }
-    }
-}
 
 #[function_component(DatabaseBackups)]
 pub fn database_backups(props: &Props) -> Html {
@@ -155,31 +31,20 @@ pub fn database_backups(props: &Props) -> Html {
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
     let backups = use_state(Vec::<BackupEntry>::new);
-    let s3_snapshots = use_state(Vec::<S3BackupSnapshot>::new);
-    let config = use_state(Option::<BackupConfig>::default);
     let pitr_range = use_state(Option::<PitrRange>::default);
     let notice = use_state(Option::<Notice<&'static str>>::default);
     let selected_drill_backup = use_state(Option::<BackupEntry>::default);
     let drill_running = use_state(bool::default);
-    let form = use_state(FormState::default);
     let busy = use_state(bool::default);
     let id = props.id;
 
     let signed_in = session.info.is_some();
     let can_edit = session.can_edit();
     {
-        let (backups, s3_snapshots, config, form, notice, pitr_range) = (
-            backups.clone(),
-            s3_snapshots.clone(),
-            config.clone(),
-            form.clone(),
-            notice.clone(),
-            pitr_range.clone(),
-        );
+        let (backups, notice, pitr_range) = (backups.clone(), notice.clone(), pitr_range.clone());
         use_effect_with((signed_in, id), move |&(signed_in, id)| {
             if signed_in {
-                reload(locale, &backups, &config, &form, &notice, &pitr_range, id);
-                fetch_s3_snapshots(locale, &s3_snapshots);
+                reload(locale, &backups, &notice, &pitr_range, id);
             }
         });
     }
@@ -191,9 +56,6 @@ pub fn database_backups(props: &Props) -> Html {
     let reload = make_reload_cb(
         locale,
         backups.clone(),
-        s3_snapshots.clone(),
-        config.clone(),
-        form.clone(),
         notice.clone(),
         pitr_range.clone(),
         id,
@@ -216,10 +78,7 @@ pub fn database_backups(props: &Props) -> Html {
             }
             { list_view(locale, id, &backups, can_edit, reload.clone(), selected_drill_backup.clone()) }
             { drill_modal }
-            { s3_list_view(locale, id, &s3_snapshots, can_edit, reload.clone()) }
-            if can_edit {
-                { settings_view(locale, &config, &form, &notice) }
-            }
+            { storage_settings_redirect(locale) }
         </>
     }
 }
@@ -229,44 +88,22 @@ pub struct Props {
     pub id: ShortId,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn make_reload_cb(
     locale: Locale,
     backups: UseStateHandle<Vec<BackupEntry>>,
-    s3_snapshots: UseStateHandle<Vec<S3BackupSnapshot>>,
-    config: UseStateHandle<Option<BackupConfig>>,
-    form: UseStateHandle<FormState>,
     notice: UseStateHandle<Option<Notice<&'static str>>>,
     pitr_range: UseStateHandle<Option<PitrRange>>,
     id: ShortId,
 ) -> Callback<()> {
     Callback::from(move |()| {
-        reload(locale, &backups, &config, &form, &notice, &pitr_range, id);
-        fetch_s3_snapshots(locale, &s3_snapshots);
+        reload(locale, &backups, &notice, &pitr_range, id);
     })
 }
 
-fn fetch_s3_snapshots(locale: Locale, s3_snapshots: &UseStateHandle<Vec<S3BackupSnapshot>>) {
-    let s3_state = s3_snapshots.clone();
-    spawn_local(async move {
-        if let Ok(loaded) = fetch_json::<Vec<S3BackupSnapshot>>(
-            locale,
-            Request::get(&format!("{API_ENDPOINT}/databases/s3/backups")),
-        )
-        .await
-        {
-            s3_state.set(loaded);
-        }
-    });
-}
-
-/// Reads the backups and the settings again, and fills the form from the settings when it is
-/// still empty.
+/// Reads the backups and the PITR range of the database.
 fn reload(
     locale: Locale,
     backups: &UseStateHandle<Vec<BackupEntry>>,
-    config: &UseStateHandle<Option<BackupConfig>>,
-    form: &UseStateHandle<FormState>,
     notice: &UseStateHandle<Option<Notice<&'static str>>>,
     pitr_range: &UseStateHandle<Option<PitrRange>>,
     id: ShortId,
@@ -281,20 +118,6 @@ fn reload(
         {
             Ok(list) => backups.set(list),
             Err(message) => notice.set(Some(Notice::Failed(message))),
-        }
-    });
-    let (config, form) = (config.clone(), form.clone());
-    spawn_local(async move {
-        if let Ok(loaded) = fetch_json::<BackupConfig>(
-            locale,
-            Request::get(&format!("{API_ENDPOINT}/backup-config")),
-        )
-        .await
-        {
-            if form.is_empty() {
-                form.set(FormState::from_config(&loaded));
-            }
-            config.set(Some(loaded));
         }
     });
     let pitr_state = pitr_range.clone();
@@ -475,13 +298,6 @@ fn pitr_banner_view(
                 { wal_btn }
             </div>
         </div>
-    }
-}
-
-impl FormState {
-    /// Whether the settings have never been loaded, so the form keeps its defaults.
-    fn is_empty(&self) -> bool {
-        *self == Self::default()
     }
 }
 
@@ -714,309 +530,19 @@ fn format_size(size: u64) -> String {
     }
 }
 
-fn restore_s3_on_click(
-    locale: Locale,
-    id: ShortId,
-    snap: &S3BackupSnapshot,
-    reload: Callback<()>,
-) -> Callback<MouseEvent> {
-    let snap = snap.clone();
-    Callback::from(move |event: MouseEvent| {
-        event.prevent_default();
-        let question = locale.tf("databases.s3_restore_question", &[("key", &snap.key)]);
-        let reload = reload.clone();
-        let key = snap.key.clone();
-        dialog::confirm_then(locale, question, async move {
-            let req_body = serde_json::json!({
-                "key": key,
-                "target_db_id": id,
-            });
-            let sent = Request::post(&format!("{API_ENDPOINT}/databases/s3/restore"))
-                .header("Content-Type", "application/json")
-                .body(req_body.to_string());
-            match sent {
-                Ok(req) => match send_request(locale, req).await {
-                    Ok(_) => {
-                        dialog::message(locale, locale.t("databases.s3_restored"), Icon::Success)
-                            .await;
-                        reload.emit(());
-                    }
-                    Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
-                },
-                Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
-            }
-        });
-    })
-}
-
-fn s3_list_view(
-    locale: Locale,
-    id: ShortId,
-    s3_snapshots: &[S3BackupSnapshot],
-    can_edit: bool,
-    reload: Callback<()>,
-) -> Html {
-    if s3_snapshots.is_empty() {
-        return html!();
-    }
-    let rows = s3_snapshots.iter().map(|snap| {
-        let download = format!("{API_ENDPOINT}/databases/s3/download?key={}", snap.key);
-        let restore = can_edit.then(|| restore_s3_on_click(locale, id, snap, reload.clone()));
-        html! {
-            <tr class="border-b border-neutral-700">
-                <td class="py-1.5 font-mono text-sm text-neutral-300">{&snap.database_name}{"/"}{&snap.backup_id}</td>
-                <td class="py-1.5 font-mono text-neutral-400">{format_size(snap.size)}</td>
-                <td class="py-1.5 text-neutral-400">{&snap.last_modified}</td>
-                <td class="py-1.5 text-right">
-                    <a class="text-sm text-neutral-400 hover:text-neutral-200 mr-3" href={download} download={format!("{}.dump.gz", snap.backup_id)}>
-                        {locale.t("backups.download")}
-                    </a>
-                    if let Some(restore) = restore {
-                        <a class="text-sm text-blue-400 hover:text-blue-300 cursor-pointer" onclick={restore}>
-                            {locale.t("databases.s3_restore")}
-                        </a>
-                    }
-                </td>
-            </tr>
-        }
-    });
+fn storage_settings_redirect(locale: Locale) -> Html {
     html! {
-        <div class="mt-6 rounded border border-neutral-700 p-4">
-            <p class="font-medium mb-2 text-neutral-200">{locale.t("databases.s3_browser")}</p>
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="text-left text-neutral-400">
-                        <th class="py-1.5 font-medium">{locale.t("databases.engine")}</th>
-                        <th class="py-1.5 font-medium">{locale.t("backups.size")}</th>
-                        <th class="py-1.5 font-medium">{locale.t("backups.time")}</th>
-                        <th />
-                    </tr>
-                </thead>
-                <tbody>{ for rows }</tbody>
-            </table>
+        <div class="mt-6 rounded border border-neutral-700 p-4 bg-neutral-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+                <p class="font-medium text-neutral-200">{locale.t("backups.storage_settings_title")}</p>
+                <p class="text-xs text-neutral-400 mt-1">{locale.t("backups.storage_settings_hint")}</p>
+            </div>
+            <Link<Route>
+                to={Route::Backups}
+                classes="px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-500 text-sm font-medium shrink-0 inline-flex items-center gap-1.5 justify-center"
+            >
+                {locale.t("backups.manage_storage")}
+            </Link<Route>>
         </div>
     }
-}
-
-/// The settings form of the schedule and the S3 target.
-fn settings_view(
-    locale: Locale,
-    config: &UseStateHandle<Option<BackupConfig>>,
-    form: &UseStateHandle<FormState>,
-    notice: &UseStateHandle<Option<Notice<&'static str>>>,
-) -> Html {
-    let submit = {
-        let (form, notice, config) = (form.clone(), notice.clone(), config.clone());
-        Callback::from(move |event: SubmitEvent| {
-            event.prevent_default();
-            let value = form.to_config();
-            let (notice, config) = (notice.clone(), config.clone());
-            spawn_local(async move {
-                let sent = Request::put(&format!("{API_ENDPOINT}/backup-config"))
-                    .json(&value)
-                    .map(|request| request.send());
-                match sent {
-                    Ok(sent) => match sent.await {
-                        Ok(response) if response.ok() => {
-                            config.set(Some(value));
-                            notice.set(Some(Notice::Saved("backups.saved")));
-                        }
-                        Ok(response) => notice.set(Some(Notice::Failed(response.status_text()))),
-                        Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
-                    },
-                    Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
-                }
-            });
-        })
-    };
-    let s3 = form.endpoint.trim().is_empty();
-    html! {
-        <form onsubmit={submit} class="rounded border border-neutral-700 p-4 mt-5">
-            <p class="font-medium mb-3">{locale.t("backups.settings")}</p>
-            <div class="grid gap-3 md:grid-cols-2">
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.schedule")}</span>
-                    <input type="text" class={INPUT_CLASS} placeholder="03:00"
-                        value={form.schedule.clone()}
-                        onchange={text_input(form, |state| &mut state.schedule)}
-                    />
-                    <span class="text-xs text-neutral-500">{locale.t("backups.schedule_hint")}</span>
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.keep")}</span>
-                    <input type="text" class={INPUT_CLASS} value={form.keep.clone()}
-                        onchange={text_input(form, |state| &mut state.keep)}
-                    />
-                </label>
-                <label class="flex items-center space-x-2 md:col-span-2">
-                    <input type="checkbox" checked={form.restore_test_enabled}
-                        onchange={checkbox_input(form, |state| &mut state.restore_test_enabled)}
-                    />
-                    <span class="text-sm text-neutral-300">{locale.t("backups.restore_test_enabled")}</span>
-                </label>
-                <label class="block md:col-span-2">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.heartbeat_url")}</span>
-                    <input type="text" class={INPUT_CLASS} placeholder="https://hc-ping.com/..."
-                        value={form.heartbeat_url.clone()}
-                        onchange={text_input(form, |state| &mut state.heartbeat_url)}
-                    />
-                    <span class="text-xs text-neutral-500">{locale.t("backups.heartbeat_url_hint")}</span>
-                </label>
-            </div>
-            <p class="font-medium mt-4 mb-2">{locale.t("backups.s3")}</p>
-            <div class="grid gap-3 md:grid-cols-2">
-                <label class="block md:col-span-2">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.endpoint")}</span>
-                    <input type="text" class={INPUT_CLASS} placeholder="https://s3.example.com/bucket"
-                        value={form.endpoint.clone()}
-                        onchange={text_input(form, |state| &mut state.endpoint)}
-                    />
-                    if s3 {
-                        <span class="text-xs text-neutral-500">{locale.t("backups.s3_empty")}</span>
-                    }
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.region")}</span>
-                    <input type="text" class={INPUT_CLASS} value={form.region.clone()}
-                        onchange={text_input(form, |state| &mut state.region)}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.prefix")}</span>
-                    <input type="text" class={INPUT_CLASS} value={form.prefix.clone()}
-                        onchange={text_input(form, |state| &mut state.prefix)}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.access_key")}</span>
-                    <input type="text" class={INPUT_CLASS} value={form.access_key.clone()}
-                        onchange={text_input(form, |state| &mut state.access_key)}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.secret_key")}</span>
-                    <input type="password" class={INPUT_CLASS} value={form.secret_key.clone()}
-                        onchange={text_input(form, |state| &mut state.secret_key)}
-                    />
-                    <span class="text-xs text-neutral-500">{locale.t("backups.secret_key_hint")}</span>
-                </label>
-            </div>
-            <p class="font-medium mt-4 mb-2">{locale.t("backups.sftp")}</p>
-            <div class="grid gap-3 md:grid-cols-2">
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_host")}</span>
-                    <input type="text" class={INPUT_CLASS} placeholder="sftp.example.com"
-                        value={form.sftp_host.clone()}
-                        onchange={text_input(form, |state| &mut state.sftp_host)}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_port")}</span>
-                    <input type="text" class={INPUT_CLASS} placeholder="22"
-                        value={form.sftp_port.clone()}
-                        onchange={text_input(form, |state| &mut state.sftp_port)}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_user")}</span>
-                    <input type="text" class={INPUT_CLASS}
-                        value={form.sftp_user.clone()}
-                        onchange={text_input(form, |state| &mut state.sftp_user)}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_path")}</span>
-                    <input type="text" class={INPUT_CLASS} placeholder="/backups"
-                        value={form.sftp_path.clone()}
-                        onchange={text_input(form, |state| &mut state.sftp_path)}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_password")}</span>
-                    <input type="password" class={INPUT_CLASS}
-                        value={form.sftp_password.clone()}
-                        onchange={text_input(form, |state| &mut state.sftp_password)}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.sftp_key")}</span>
-                    <textarea rows="2" class={INPUT_CLASS}
-                        value={form.sftp_key.clone()}
-                        onchange={textarea_input(form, |state| &mut state.sftp_key)}
-                    />
-                </label>
-            </div>
-            <p class="font-medium mt-4 mb-2">{locale.t("backups.rsync")}</p>
-            <div class="grid gap-3 md:grid-cols-2">
-                <label class="block md:col-span-2">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.rsync_destination")}</span>
-                    <input type="text" class={INPUT_CLASS} placeholder="user@remote.example.com:/backups"
-                        value={form.rsync_dest.clone()}
-                        onchange={text_input(form, |state| &mut state.rsync_dest)}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.rsync_ssh_options")}</span>
-                    <input type="text" class={INPUT_CLASS} placeholder="-p 22 -i /path/key"
-                        value={form.rsync_ssh_options.clone()}
-                        onchange={text_input(form, |state| &mut state.rsync_ssh_options)}
-                    />
-                </label>
-                <label class="block">
-                    <span class="text-sm text-neutral-400">{locale.t("backups.rsync_password")}</span>
-                    <input type="password" class={INPUT_CLASS}
-                        value={form.rsync_password.clone()}
-                        onchange={text_input(form, |state| &mut state.rsync_password)}
-                    />
-                </label>
-            </div>
-            <div class="flex justify-end mt-3">
-                <button type="submit" class={BUTTON_CLASS}>
-                    {locale.t("common.update")}
-                </button>
-            </div>
-        </form>
-    }
-}
-
-/// Returns a callback that writes the value of a text input to a field of the form.
-fn text_input(
-    form: &UseStateHandle<FormState>,
-    select: fn(&mut FormState) -> &mut String,
-) -> Callback<Event> {
-    let form = form.clone();
-    Callback::from(move |event: Event| {
-        let input: web_sys::HtmlInputElement = event.target_unchecked_into();
-        let mut updated = (*form).clone();
-        *select(&mut updated) = input.value();
-        form.set(updated);
-    })
-}
-
-/// Returns a callback that writes the checked state of a checkbox to a field of the form.
-fn checkbox_input(
-    form: &UseStateHandle<FormState>,
-    select: fn(&mut FormState) -> &mut bool,
-) -> Callback<Event> {
-    let form = form.clone();
-    Callback::from(move |event: Event| {
-        let input: web_sys::HtmlInputElement = event.target_unchecked_into();
-        let mut updated = (*form).clone();
-        *select(&mut updated) = input.checked();
-        form.set(updated);
-    })
-}
-
-/// Returns a callback that writes the value of a textarea to a field of the form.
-fn textarea_input(
-    form: &UseStateHandle<FormState>,
-    select: fn(&mut FormState) -> &mut String,
-) -> Callback<Event> {
-    let form = form.clone();
-    Callback::from(move |event: Event| {
-        let input: web_sys::HtmlTextAreaElement = event.target_unchecked_into();
-        let mut updated = (*form).clone();
-        *select(&mut updated) = input.value();
-        form.set(updated);
-    })
 }

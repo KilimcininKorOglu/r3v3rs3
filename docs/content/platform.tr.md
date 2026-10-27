@@ -361,9 +361,9 @@ Görsel veri inceleme, sorgulama ve şema yönetimi için r3v3rs3, **App Store**
 
 ### Yedekler
 
-Veritabanı satırındaki **Yedekler** bağlantısı o veritabanının yedeklerini açar. **Şimdi yedekle**, engine'in dump'ını container'ın içinde çalıştırır (`pg_dump`, `mariadb-dump`, `mysqldump` veya `mongodump`; Redis `SAVE` çalıştırır ve dump dosyasını alır), gzip'ler ve config dizinindeki `backups` dizinine kaydeder; veritabanı başına bir klasör, dosyanın SHA-256'sını taşıyan bir JSON manifest ile birlikte. Bir yedek parola içermez. Agent target üzerindeki bir veritabanı yedek alamaz; çünkü dump container'ın içinde çalışır.
+Veritabanı satırındaki **Yedekler** eylem butonu o veritabanının yedeklerini açar. **Şimdi yedekle**, engine'in dump'ını container'ın içinde çalıştırır (`pg_dump`, `mariadb-dump`, `mysqldump` veya `mongodump`; Redis `SAVE` çalıştırır ve dump dosyasını alır), gzip'ler ve config dizinindeki `backups` dizinine kaydeder; veritabanı başına bir klasör, dosyanın SHA-256'sını taşıyan bir JSON manifest ile birlikte. Bir yedek parola içermez. Agent target üzerindeki bir veritabanı yedek alamaz; çünkü dump container'ın içinde çalışır.
 
-Aynı sayfadaki yedekleme ayarları, her veritabanının yedeklendiği UTC'deki günlük saati, veritabanı başına kalacak yedek sayısını (en eskiler önce gider), uzak depolama hedeflerini ve nabız (heartbeat) izleme kontrolünü yapılandırır:
+Merkezi yedekleme ayarları (**Yedekler** konsolunda veya doğrudan depolama bağlantısıyla yönetilir), her veritabanının yedeklendiği UTC'deki günlük saati, veritabanı başına kalacak yedek sayısını (en eskiler önce gider), uzak depolama hedeflerini ve nabız (heartbeat) izleme kontrolünü yapılandırır:
 
 - **S3**: Bucket'ı yolunda taşıyan bir `http` veya `https` endpoint, bir region, bir key prefix, bir access key ve secret key.
 - **SFTP**: `host`, `port` (varsayılan 22), `user`, hedef `path` ve isteğe bağlı SSH private key (veya parola) ile aktarım.

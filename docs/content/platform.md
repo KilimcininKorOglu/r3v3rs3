@@ -361,9 +361,9 @@ On the **Databases** page, each database row includes a direct **Web UI** action
 
 ### Backups
 
-The **Backups** link on a database row opens its backups. **Back up now** runs the dump of the engine inside the container (`pg_dump`, `mariadb-dump`, `mysqldump` or `mongodump`; Redis runs `SAVE` and takes its dump file), gzips it and stores it in the `backups` directory of the config directory, one folder per database, with a JSON manifest that carries the SHA-256 of the file. A backup holds no password. A database on an agent target takes no backup, because the dump runs in the container itself.
+The **Backups** action button on a database row opens its backups. **Back up now** runs the dump of the engine inside the container (`pg_dump`, `mariadb-dump`, `mysqldump` or `mongodump`; Redis runs `SAVE` and takes its dump file), gzips it and stores it in the `backups` directory of the config directory, one folder per database, with a JSON manifest that carries the SHA-256 of the file. A backup holds no password. A database on an agent target takes no backup, because the dump runs in the container itself.
 
-The backup settings configure the daily time in UTC that every database is backed up at, the number of backups per database that survive (the oldest go first), remote upload destinations, and heartbeat health checks:
+Centralized backup settings (managed under the **Backups** console or via the direct storage settings link) configure the daily time in UTC that every database is backed up at, the number of backups per database that survive (the oldest go first), remote upload destinations, and heartbeat health checks:
 
 - **S3**: An S3-compatible bucket endpoint with region, path prefix, access key, and secret key.
 - **SFTP**: Uploads dumps via SSH/SFTP specifying `host`, `port` (default 22), `user`, target `path`, and an optional private key or password.
