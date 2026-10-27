@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.9] - 2026-10-27
+
+### Added
+- Scheduled Command Edit Modal: Added a dedicated `EditCommandModal` in `app_commands.rs` calling `PUT /api/apps/{id}/commands/{cmd_id}` to modify task name, timing expression, shell command, and active state without recreating commands.
+- Dual-Language Documentation: Synchronized `platform.md` and `platform.tr.md` documenting scheduled commands editing.
+
+### Changed
+- Action Button Standardization: Refactored scheduled commands table actions ("Output", "Run now", "Edit", "Delete") and outbound webhooks test trigger into standardized `ActionIconButton` components with localized tooltips and consistent iconography.
+
 ## [2.7.8] - 2026-10-27
 
 ### Added
